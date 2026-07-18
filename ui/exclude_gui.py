@@ -82,7 +82,7 @@ def reapply_excludes(repo_root, items):
 def load_exclude_state():
 
     state_file = get_state_file()
-    if not STATE_FILE.exists():
+    if not state_file.exists():
 
         return []
 
@@ -108,7 +108,7 @@ def load_exclude_state():
 
 
 def save_exclude_state(items):
-
+    state_file = get_state_file()
     with open(
         state_file,
         "w",
