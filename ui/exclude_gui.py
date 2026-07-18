@@ -287,11 +287,24 @@ def run_exclude_window():
             tk.END
         )
 
+        repo = find_repo_root()
+
         for item in items:
+
+            original = repo / item
+
+            if original.exists():
+
+                status = "[ACTIVE]"
+
+            else:
+
+                status = "[EXCLUDED]"
+
 
             listbox.insert(
                 tk.END,
-                item
+                f"{status} {item}"
             )
 
 
@@ -419,6 +432,8 @@ def run_exclude_window():
 
         repo = find_repo_root()
 
+        moved = []
+
 
         for index in reversed(
             listbox.curselection()
@@ -435,6 +450,10 @@ def run_exclude_window():
                     source
                 )
 
+                moved.append(
+                    rel
+                )
+
 
         save_manifest(
             repo,
@@ -443,6 +462,18 @@ def run_exclude_window():
 
 
         refresh()
+
+
+        if moved:
+
+            messagebox.showinfo(
+                "Wykluczono",
+                "Przeniesiono do temporary:\n\n"
+                +
+                "\n".join(
+                    moved
+                )
+            )
 
 
 
@@ -455,13 +486,23 @@ def run_exclude_window():
         )
 
 
+        restored = []
+
+
         for index in selected:
 
             rel = items[index]
 
+
             restore_from_temporary(
                 Path(rel)
             )
+
+
+            restored.append(
+                rel
+            )
+
 
             items.pop(
                 index
@@ -472,7 +513,20 @@ def run_exclude_window():
             items
         )
 
+
         refresh()
+
+
+        if restored:
+
+            messagebox.showinfo(
+                "Przywrócono",
+                "Przywrócono z temporary:\n\n"
+                +
+                "\n".join(
+                    restored
+                )
+            )
 
 
 
