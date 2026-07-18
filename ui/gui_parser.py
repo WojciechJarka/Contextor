@@ -1,0 +1,262 @@
+import tkinter as tk
+from tkinter import filedialog, messagebox
+import json
+import os
+import re
+from repo_guardian.ui.path_memory import load_state, save_state
+
+def matches_term(data, search_term, is_py_query):
+    """
+    Rekurencyjne przeszukiwanie struktury.
+    is_py_query = True: szukamy ".nazwa" (dopasowanie ścieżki pliku)
+    is_py_query = False: szukamy "nazwa" (dopasowanie artefaktu/funkcji)
+    """
+    if isinstance(data, dict):
+        return any(matches_term(v, search_term, is_py_query) for v in data.values())
+    elif isinstance(data, list):
+        return any(matches_term(i, search_term, is_py_query) for i in data)
+    elif isinstance(data, str):
+        if is_py_query:
+            # Szukamy ".main" (kropka na początku, koniec ciągu lub kolejna kropka)
+            return bool(re.search(rf"\.{re.escape(search_term)}(\.|$)", data))
+        else:
+            # Szukamy "main" jako samodzielnego słowa, unikając .main
+            # Używamy lookbehind/lookahead by nie złapać kropki przed słowem
+            return bool(re.search(rf"(?<!\.)\b{re.escape(search_term)}\b", data))
+    return False
+
+def parse_and_filter_json(json_path, search_term, output_dir="output"):
+
+    if not os.path.exists(json_path):
+        raise FileNotFoundError(
+            f"Plik {json_path} nie istnieje."
+        )
+
+    with open(
+        json_path,
+        "r",
+        encoding="utf-8"
+    ) as f:
+        data = json.load(f)
+
+
+    artifacts = data.get(
+        "artifacts",
+        {}
+    )
+
+
+    if not artifacts:
+
+        raise Exception(
+            "Raport nie zawiera sekcji artifacts"
+        )
+
+
+    is_py_query = search_term.lower().endswith(".py")
+
+    term = (
+        search_term[:-3]
+        if is_py_query
+        else search_term
+    )
+
+
+    filtered_artifacts = {}
+
+
+    for key, value in artifacts.items():
+
+
+        key_lower = key.lower()
+
+
+        match = False
+
+
+        # ==========================
+        # szukanie pliku python
+        # ==========================
+
+        if is_py_query:
+
+            if (
+                f"{term.lower()}::" in key_lower
+                or
+                key_lower.startswith(term.lower())
+                or
+                f".{term.lower()}" in key_lower
+            ):
+                match = True
+
+
+        # ==========================
+        # szukanie symbolu
+        # ==========================
+
+        else:
+
+            if (
+                key_lower.startswith(
+                    term.lower() + "::"
+                )
+                or
+                f".{term.lower()}::" in key_lower
+                or
+                f"::{term.lower()}" in key_lower
+                or
+                key_lower == term.lower()
+            ):
+                match = True
+
+
+        if matches_term(
+            value,
+            term,
+            is_py_query
+        ):
+            match = True
+
+
+        if match:
+
+            filtered_artifacts[key] = value
+
+
+
+    parsed_data = {
+
+        "runtime": data.get(
+            "runtime",
+            {}
+        ),
+
+        "module_count": data.get(
+            "module_count",
+            0
+        ),
+
+        "artifact_count": len(
+            filtered_artifacts
+        ),
+
+        "shared_artifact_count": data.get(
+            "shared_artifact_count",
+            0
+        ),
+
+        "artifacts": filtered_artifacts
+    }
+
+
+    sanitized_name = (
+        search_term
+        .replace(".", "_")
+        .replace("/", "_")
+    )
+
+
+    output_filename = (
+        f"parsed_{sanitized_name}.json"
+    )
+
+
+    os.makedirs(
+        output_dir,
+        exist_ok=True
+    )
+
+
+    output_path = os.path.join(
+        output_dir,
+        output_filename
+    )
+
+
+    with open(
+        output_path,
+        "w",
+        encoding="utf-8"
+    ) as f:
+
+        json.dump(
+            parsed_data,
+            f,
+            indent=2,
+            ensure_ascii=False
+        )
+
+
+    return output_path
+
+
+def run_parser_window():
+    parser_win = tk.Toplevel()
+    parser_win.title("Parser JSON")
+    parser_win.geometry("500x250")
+
+    tk.Label(parser_win, text="Wybierz plik JSON:").pack(pady=5)
+    json_path_var = tk.StringVar()
+    state = load_state()
+    json_path_var.set(state["json_file"])
+    frame_file = tk.Frame(parser_win)
+    frame_file.pack(pady=5)
+    tk.Entry(frame_file, textvariable=json_path_var, width=40).pack(side=tk.LEFT, padx=5)
+    
+    def browse_json():
+
+        output_dir = os.path.abspath(
+            "output"
+        )
+
+        if not os.path.exists(output_dir):
+            output_dir = os.getcwd()
+
+        path = filedialog.askopenfilename(
+            initialdir=output_dir,
+            filetypes=[
+                ("JSON files", "*.json")
+            ]
+        )
+
+        if path:
+
+            json_path_var.set(path)
+
+            save_state(
+                json_file=path
+            )
+    tk.Button(
+        frame_file,
+        text="Browse",
+        command=browse_json
+    ).pack(
+        side=tk.LEFT
+    )
+    tk.Label(parser_win, text="Wpisz nazwę (np. main.py lub main):").pack(pady=5)
+    name_entry = tk.Entry(parser_win, width=50)
+
+    name_entry.insert(
+        0,
+        state["search_term"]
+    )
+
+    name_entry.pack(pady=5)
+
+    def execute_parsing():
+        json_path = json_path_var.get()
+        term = name_entry.get()
+        save_state(
+            search_term=term
+        )
+        if not json_path or not term:
+            messagebox.showwarning("Błąd", "Wypełnij obie ścieżki")
+            return
+        try:
+            out = parse_and_filter_json(json_path, term)
+            messagebox.showinfo("Sukces", f"Plik wyjściowy:\n{out}")
+            parser_win.destroy()
+        except Exception as e:
+            messagebox.showerror("Błąd", str(e))
+
+    tk.Button(parser_win, text="Parsuj JSON", command=execute_parsing).pack(pady=20)
