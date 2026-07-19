@@ -838,6 +838,9 @@ def generate_single_file_report(
         public_api,
         symbol_activity,
         activity_summary,
+        modules,
+        root_path,
+        tree,
     )
 
     return {
