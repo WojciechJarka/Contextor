@@ -13,20 +13,24 @@ Odpowiedzialność:
 - złożenie w jednym miejscu tego, kto i jak konsumuje
   artefakty (symbole) zdefiniowane w module
 - rozróżnienie kanałów: direct / import / runtime / transitive
+  / reflection / serialization / cli_exposure / api_exposure
 - policzenie risk_score (per symbol i per moduł), żeby
-  LLM/człowiek nie musiał rekonstruować tego z 5 sekcji
+  LLM/człowiek nie musiał rekonstruować tego z 5+ sekcji
 
 Nie robi:
 
-- parsowania AST
+- parsowania AST samodzielnie (deleguje do symbol_analysis /
+  symbol_reference / exposure_analysis)
 - klasyfikacji aktywności (deleguje do activity.py)
 - walidacji architektury
 
 Źródła prawdy (tylko re-pakuje, nic nie duplikuje):
 
-    api_consumers.py      -> consumers[symbol]["usage"]
-    architecture_context   -> imported_by (proxy dla "transitive")
-    activity.py            -> status + confidence -> risk_score
+    api_consumers.py       -> consumers[symbol]["usage"]
+    architecture_context    -> imported_by (proxy dla "transitive")
+    activity.py             -> status + confidence -> risk_score
+    exposure_analysis.py    -> reflection / serialization /
+                                cli_exposure / api_exposure
 
 Kontrakt wyjściowy build_artifact_consumption():
 
@@ -43,7 +47,8 @@ Kontrakt wyjściowy build_artifact_consumption():
         "fan_out": int,
         "api_surface": int,
         "live_symbols": int,
-        "unused_symbols": int
+        "unused_symbols": int,
+        "exposed_symbols": int
     },
     "risk_score": float,
     "symbols": {
@@ -52,19 +57,31 @@ Kontrakt wyjściowy build_artifact_consumption():
             "import": [...],
             "runtime": [...],
             "transitive": [],
+            "reflection": [...],
+            "serialization": [...],
+            "cli_exposure": bool,
+            "api_exposure": bool,
             "risk_score": float
         }
     }
 }
 
-UWAGA:
-
 Kanały reflection / serialization / cli_exposure / api_exposure
-NIE są tu wypełniane - repo_guardian nie ma dziś analizatora,
-który by je faktycznie wykrywał (byłoby to zgadywanie, nie
-fakt). Jeśli taki analizator powstanie, jego wynik dokłada się
-do "symbols"."<symbol>" jako kolejny klucz, obok
-"direct"/"import"/"runtime"/"transitive".
+pochodzą z exposure_analysis.py:
+
+    reflection / serialization: skan CAŁEGO projektu - nazwa
+        symbolu jako literał stringowy w wywołaniu
+        getattr/setattr/hasattr/delattr (reflection) albo
+        json.dumps/yaml.dump/pickle.dumps/asdict/model_dump
+        (serialization)
+
+    cli_exposure / api_exposure: skan WŁASNEGO modułu symbolu -
+        dekorator @command/@group (cli) albo @get/@post/@route
+        lub baza klasy typu View/Resource/Controller (api)
+
+To sygnały tekstowe (dopasowanie po nazwie), nie dowód
+wykonania - tak samo jak reszta repo_guardiana dopasowuje
+symbole po identyczności nazwy, nie po typach.
 """
 
 
@@ -73,6 +90,9 @@ from repo_guardian.core.activity import (
     STATUS_LIVE_CALLBACK,
     STATUS_UNUSED_PUBLIC,
     STATUS_UNUSED_INTERNAL,
+)
+from repo_guardian.core.exposure_analysis import (
+    analyze_symbol_exposure,
 )
 
 
@@ -86,8 +106,9 @@ from repo_guardian.core.activity import (
 # (status live, wysoka confidence) = NISKIE ryzyko, bo jego
 # użycie jest w pełni zrozumiane. Symbol publiczny bez
 # wykrytych konsumentów = WYSOKIE ryzyko - albo jest martwy,
-# albo używany w sposób, którego repo_guardian dziś nie widzi
-# (reflection, config, serializacja...).
+# albo używany w sposób, którego repo_guardian domyślnie nie
+# widzi (reflection, config, serializacja...) - stąd exposure
+# jako osobny sygnał obniżający niepewność.
 #
 
 _RISK_BY_STATUS_CONFIDENCE = {
@@ -136,6 +157,38 @@ def _module_risk_score(symbol_scores: list) -> float:
     )
 
 
+def _has_exposure_evidence(exposure_entry: dict) -> bool:
+
+    if not exposure_entry:
+        return False
+
+    return bool(
+        exposure_entry.get("reflection")
+        or exposure_entry.get("serialization")
+        or exposure_entry.get("cli_exposure")
+        or exposure_entry.get("api_exposure")
+    )
+
+
+def _apply_exposure_discount(
+    risk_score: float,
+    exposure_entry: dict,
+) -> float:
+    """
+    Konkretny tekstowy trop (reflection/serialization/cli/api)
+    tłumaczy status "unused" - to nie dowód wykonania, ale
+    redukuje niepewność względem "zero wyjaśnienia".
+    """
+
+    if not _has_exposure_evidence(exposure_entry):
+        return risk_score
+
+    return round(
+        min(risk_score, 0.35),
+        2,
+    )
+
+
 # ==========================================================
 # PER-SYMBOL VIEW
 # ==========================================================
@@ -145,6 +198,7 @@ def build_symbol_consumption(
     all_symbols: list,
     consumers: dict,
     symbol_activity: dict,
+    exposure: dict,
 ) -> dict:
     """
     Dla każdego symbolu modułu: kto go konsumuje, jakim
@@ -152,6 +206,7 @@ def build_symbol_consumption(
 
     consumers: wynik extract_api_consumers() (api_consumers.py)
     symbol_activity: wynik classify_symbol_activity() (activity.py)
+    exposure: wynik analyze_symbol_exposure() (exposure_analysis.py)
     """
 
     result = {}
@@ -162,6 +217,9 @@ def build_symbol_consumption(
         usage = consumer_data.get("usage", {})
 
         activity_entry = symbol_activity.get(symbol, {})
+        exposure_entry = exposure.get(symbol, {})
+
+        base_risk = _symbol_risk_score(activity_entry)
 
         result[symbol] = {
 
@@ -177,8 +235,23 @@ def build_symbol_consumption(
             "transitive":
                 [],  # brak dziś źródła prawdy na poziomie symbolu
 
+            "reflection":
+                exposure_entry.get("reflection", []),
+
+            "serialization":
+                exposure_entry.get("serialization", []),
+
+            "cli_exposure":
+                exposure_entry.get("cli_exposure", False),
+
+            "api_exposure":
+                exposure_entry.get("api_exposure", False),
+
             "risk_score":
-                _symbol_risk_score(activity_entry),
+                _apply_exposure_discount(
+                    base_risk,
+                    exposure_entry,
+                ),
         }
 
     return result
@@ -195,6 +268,7 @@ def build_module_consumption(
     imported_by: list,
     public_api: list,
     activity_summary: dict,
+    exposure: dict,
 ):
     """
     "Executive summary" dla całego modułu: agreguje kanały
@@ -244,6 +318,11 @@ def build_module_consumption(
             activity_summary.get("unused_public_api", 0)
             + activity_summary.get("unused_internal_candidates", 0)
         ),
+        "exposed_symbols": sum(
+            1
+            for entry in exposure.values()
+            if _has_exposure_evidence(entry)
+        ),
     }
 
     return module_consumers, coupling
@@ -263,13 +342,27 @@ def build_artifact_consumption(
     public_api: list,
     symbol_activity: dict,
     activity_summary: dict,
+    modules: dict,
+    root_path: str,
+    tree,
 ) -> dict:
     """
     Warstwa "executive summary" dla LLM/człowieka - NIE
     zastępuje symbol_references / api_consumers / imports /
     architecture.imported_by / symbol_activity, tylko składa
     je w jeden widok konsumpcji artefaktów tego modułu.
+
+    modules/root_path: potrzebne do project-wide skanu
+    reflection/serialization (exposure_analysis.py).
+    tree: AST tego modułu, do lokalnego skanu cli/api exposure.
     """
+
+    exposure = analyze_symbol_exposure(
+        modules,
+        all_symbols,
+        root_path,
+        tree,
+    )
 
     module_consumers, coupling = build_module_consumption(
         consumers,
@@ -277,12 +370,14 @@ def build_artifact_consumption(
         imported_by,
         public_api,
         activity_summary,
+        exposure,
     )
 
     symbols = build_symbol_consumption(
         all_symbols,
         consumers,
         symbol_activity,
+        exposure,
     )
 
     risk_score = _module_risk_score(
