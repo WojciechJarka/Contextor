@@ -100,8 +100,6 @@ from repo_guardian.core.semantic_analysis import (
     analyze_module_semantics,
 )
 
-
-
 from repo_guardian.core.risk_analysis import (
     analyze_effects,
 )
@@ -109,6 +107,9 @@ from repo_guardian.core.activity import (
     classify_symbol_activity,
     summarize_activity,
     STATUS_UNUSED_PUBLIC,
+)
+from repo_guardian.core.artifact_consumption import (
+    build_artifact_consumption,
 )
 
 
@@ -827,6 +828,18 @@ def generate_single_file_report(
     activity_summary = summarize_activity(
         symbol_activity
     )
+
+    artifact_consumption = build_artifact_consumption(
+        module_id,
+        symbol_context["all_symbols"],
+        symbol_context["consumers"],
+        import_context["imports"],
+        architecture["imported_by"],
+        public_api,
+        symbol_activity,
+        activity_summary,
+    )
+
     return {
 
 
@@ -941,6 +954,16 @@ def generate_single_file_report(
                 "unused_candidates"
             ],
 
+
+        # --------------------------------------------------
+        # ARTIFACT CONSUMPTION
+        # Warstwa agregacyjna "executive summary" dla LLM/człowieka.
+        # NIE zastępuje symbol_references / api_consumers / imports /
+        # architecture.imported_by / symbol_activity - tylko
+        # składa je w jeden widok konsumpcji artefaktów modułu.
+        # --------------------------------------------------
+        "artifact_consumption":
+            artifact_consumption,
 
 
         "api_surface":
