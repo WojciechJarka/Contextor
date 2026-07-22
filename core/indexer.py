@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 """
 repo_guardian/core/indexer.py
 
