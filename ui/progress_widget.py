@@ -2,28 +2,18 @@
 """
 repo_guardian/ui/progress_widget.py
 
-Prosty, wielokrotnego użytku pasek postępu (ttk.Progressbar)
-do wpięcia u dołu dowolnego okna GUI.
-
-Core (build_index, build_graph, validate, itd.) nie raportuje
-postępu krok po kroku, więc pasek pracuje w trybie "indeterminate"
-(animacja przesuwającego się bloku) i jest uruchamiany na czas
-wykonania operacji w osobnym wątku, żeby nie blokować pętli
-zdarzeń tkintera (root.mainloop()).
+Pasek postępu oraz konsola logów do wpięcia u dołu okna GUI.
 """
 
 import threading
 import tkinter as tk
-from tkinter import ttk
+from tkinter import ttk, scrolledtext
 
 
 def create_progress_bar(parent, **pack_kwargs):
     """
     Tworzy pasek postępu (indeterminate) i pakuje go w podanym
-    rodzicu (np. root albo Toplevel). Zwraca obiekt ttk.Progressbar.
-
-    Domyślne pakowanie: side="bottom", fill="x", padx=10, pady=(0, 10)
-    Można nadpisać dowolny z tych parametrów przez pack_kwargs.
+    rodziku (np. root albo Toplevel). Zwraca obiekt ttk.Progressbar.
     """
 
     options = {
@@ -45,42 +35,74 @@ def create_progress_bar(parent, **pack_kwargs):
     return bar
 
 
-def run_with_progress(root, progressbar, task, on_success=None, on_error=None, buttons=None):
+def create_log_box(parent, height=5, **pack_kwargs):
     """
-    Uruchamia `task` (funkcja bezargumentowa) w osobnym wątku,
-    animując pasek postępu przez cały czas jej trwania.
+    Tworzy ukryte domyślnie lub widoczne pole tekstowe na logi (ScrolledText)
+    nad paskiem postępu. Zwraca widget tekstowy.
+    """
+    options = {
+        "side": "bottom",
+        "fill": "x",
+        "padx": 10,
+        "pady": (0, 5),
+    }
+    options.update(pack_kwargs)
 
-    root         - okno (root albo Toplevel) potrzebne do bezpiecznego
-                   powrotu na wątek GUI przez root.after(...)
-    progressbar  - obiekt zwrócony przez create_progress_bar()
-    task         - funkcja wykonywana w tle (bez argumentów),
-                   powinna zwrócić wynik albo rzucić wyjątek
-    on_success   - callback(result) wywoływany w wątku GUI po sukcesie
-    on_error     - callback(exception) wywoływany w wątku GUI po błędzie
-    buttons      - lista widgetów (np. tk.Button) blokowanych
-                   (state="disabled") na czas operacji, żeby
-                   nie dało się odpalić dwóch operacji naraz
+    log_box = scrolledtext.ScrolledText(
+        parent,
+        height=height,
+        state="disabled",
+        bg="#1e1e1e",
+        fg="#d4d4d4",
+        font=("Consolas", 9)
+    )
+    
+    return log_box
+
+
+def run_with_progress(root, progressbar, task, on_success=None, on_error=None, buttons=None, log_box=None):
+    """
+    Uruchamia `task` w osobnym wątku, animując pasek postępu
+    oraz opcjonalnie obsługując logowanie przez funkcję log(msg).
+    
+    Funkcja task może przyjmować argument log_callback (opcjonalnie),
+    np. def task(log=None): ... log("robę coś...")
     """
 
     def set_buttons_state(state):
         for btn in (buttons or []):
             btn.config(state=state)
 
+    def write_log(msg):
+        if log_box:
+            log_box.config(state="normal")
+            log_box.insert(tk.END, msg + "\n")
+            log_box.see(tk.END)
+            log_box.config(state="disabled")
+
     def finish_success(result):
         progressbar.stop()
         set_buttons_state("normal")
+        write_log("[SUKCES] Operacja zakończona pomyślnie.")
         if on_success:
             on_success(result)
 
     def finish_error(exc):
         progressbar.stop()
         set_buttons_state("normal")
+        write_log(f"[BŁĄD] {exc}")
         if on_error:
             on_error(exc)
 
     def worker():
         try:
-            result = task()
+            # Sprawdzamy czy task przyjmuje argument logujący, czy nie
+            import inspect
+            sig = inspect.signature(task)
+            if len(sig.parameters) > 0:
+                result = task(log=lambda msg: root.after(0, write_log, msg))
+            else:
+                result = task()
         except Exception as exc:
             root.after(0, finish_error, exc)
         else:
@@ -88,6 +110,12 @@ def run_with_progress(root, progressbar, task, on_success=None, on_error=None, b
 
     set_buttons_state("disabled")
     progressbar.start(10)
+    
+    if log_box:
+        log_box.config(state="normal")
+        log_box.delete("1.0", tk.END)
+        log_box.config(state="disabled")
+        log_box.pack(before=progressbar, fill="x", padx=10, pady=(0, 5))
 
     thread = threading.Thread(target=worker, daemon=True)
     thread.start()
