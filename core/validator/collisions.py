@@ -120,9 +120,32 @@ class PublicSymbolCollector(ast.NodeVisitor):
                 "type": kind,
                 "file": self.module_path,
                 "code": code,
+
+                "line_start": getattr(
+                    node,
+                    "lineno",
+                    None,
+                ),
+
+                "line_end": getattr(
+                    node,
+                    "end_lineno",
+                    None,
+                ),
+
+                "col_start": getattr(
+                    node,
+                    "col_offset",
+                    None,
+                ),
+
+                "col_end": getattr(
+                    node,
+                    "end_col_offset",
+                    None,
+                ),
             }
         )
-
 
     def visit_ClassDef(
         self,
@@ -329,7 +352,33 @@ def validate_name_collisions(
             for item in occurrences
         }
 
+        symbol_details = []
 
+        for item in occurrences:
+            symbol_details.append(
+                {
+                    "module": item["file"],
+                    "name": item["name"],
+                    "artifact_type": item["type"],
+
+                    "location": {
+                        "line_start": item.get(
+                            "line_start"
+                        ),
+                        "line_end": item.get(
+                            "line_end"
+                        ),
+                        "column_start": item.get(
+                            "col_start"
+                        ),
+                        "column_end": item.get(
+                            "col_end"
+                        ),
+                    },
+
+                    "source": item["code"],
+                }
+            )
 
         if len(normalized_codes) > 1:
 
@@ -345,6 +394,7 @@ def validate_name_collisions(
             )
 
             error.code_snippets = code_snippets
+            error.symbol_details = symbol_details
             error.artifact_type = artifact_type
             error.is_identical = False
 
@@ -366,6 +416,7 @@ def validate_name_collisions(
             )
 
             error.code_snippets = code_snippets
+            error.symbol_details = symbol_details
             error.artifact_type = artifact_type
             error.is_identical = True
 
