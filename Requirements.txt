@@ -1,0 +1,8 @@
+The program requires the orjson library for fast data processing.
+
+Installation instructions via command line (cmd):
+Open your terminal and run the installation, specifying the full path to the Python interpreter on your system.
+
+Example:
+C:\Users\YourUsername\AppData\Local\Programs\Python\Python311\python.exe -m pip install orjson
+(Your path to the python.exe interpreter may vary depending on your Python installation folder)
