@@ -60,7 +60,9 @@ class AdvancedImportVisitor(
     def __init__(self):
 
         self.found_imports: list[ImportRef] = []
-
+        self.classes: list[str] = []
+        self.functions: list[str] = []
+        self.variables: list[str] = []
         self._in_function_depth = 0
 
 
@@ -69,6 +71,9 @@ class AdvancedImportVisitor(
         self,
         node
     ):
+
+        if self._in_function_depth == 0:
+            self.functions.append(node.name)
 
         self._in_function_depth += 1
 
@@ -88,6 +93,28 @@ class AdvancedImportVisitor(
         self.visit_FunctionDef(
             node
         )
+
+
+
+    def visit_ClassDef(
+        self,
+        node
+    ):
+        if self._in_function_depth == 0:
+            self.classes.append(node.name)
+        self.generic_visit(node)
+
+
+
+    def visit_Assign(
+        self,
+        node
+    ):
+        if self._in_function_depth == 0:
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    self.variables.append(target.id)
+        self.generic_visit(node)
 
 
 
@@ -166,9 +193,9 @@ class AdvancedImportVisitor(
 
 def extract_imports(
     file_path: Path
-) -> list[ImportRef]:
+) -> tuple[list[ImportRef], list[str], list[str], list[str]]:
     """
-    Ekstrakcja surowych importów AST.
+    Ekstrakcja surowych importów oraz definicji z AST.
     """
 
     try:
@@ -185,7 +212,7 @@ def extract_imports(
 
     except Exception:
 
-        return []
+        return [], [], [], []
 
 
 
@@ -197,7 +224,7 @@ def extract_imports(
     )
 
 
-    return visitor.found_imports
+    return visitor.found_imports, visitor.classes, visitor.functions, visitor.variables
 
 
 
@@ -311,7 +338,7 @@ def build_index(
 
 
 
-        imports = extract_imports(
+        imports, classes, functions, variables = extract_imports(
             path
         )
 
@@ -328,6 +355,12 @@ def build_index(
             ),
 
             imports=imports,
+
+            classes=classes,
+
+            functions=functions,
+
+            variables=variables,
 
         )
         print(
