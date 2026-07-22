@@ -24,11 +24,11 @@ from pathlib import Path
 
 
 from repo_guardian.core.domain.module import (
-    Module,
+    Module,
 )
 
 from repo_guardian.core.domain.imports import (
-    ImportRef,
+    ImportRef,
 )
 
 
@@ -39,192 +39,165 @@ from repo_guardian.core.domain.imports import (
 
 
 class AdvancedImportVisitor(
-    ast.NodeVisitor
+    ast.NodeVisitor
 ):
-    """
-    Przechodzi AST zachowując informację
-    o głębokości funkcji.
+    """
+    Przechodzi AST zachowując informację
+    o głębokości funkcji.
 
-    Pozwala rozróżnić:
+    Pozwala rozróżnić:
 
-    import x
+    import x
 
-    oraz:
+    oraz:
 
-    def f():
-        import x
-    """
-
-
-
-    def __init__(self):
-
-        self.found_imports: list[ImportRef] = []
-        self.classes: list[str] = []
-        self.functions: list[str] = []
-        self.variables: list[str] = []
-        self._in_function_depth = 0
+    def f():
+        import x
+    """
 
 
 
-    def visit_FunctionDef(
-        self,
-        node
-    ):
+    def __init__(self):
 
-        if self._in_function_depth == 0:
-            self.functions.append(node.name)
+        self.found_imports: list[ImportRef] = []
 
-        self._in_function_depth += 1
-
-        self.generic_visit(
-            node
-        )
-
-        self._in_function_depth -= 1
+        self._in_function_depth = 0
 
 
 
-    def visit_AsyncFunctionDef(
-        self,
-        node
-    ):
+    def visit_FunctionDef(
+        self,
+        node
+    ):
 
-        self.visit_FunctionDef(
-            node
-        )
+        self._in_function_depth += 1
 
+        self.generic_visit(
+            node
+        )
 
-
-    def visit_ClassDef(
-        self,
-        node
-    ):
-        if self._in_function_depth == 0:
-            self.classes.append(node.name)
-        self.generic_visit(node)
+        self._in_function_depth -= 1
 
 
 
-    def visit_Assign(
-        self,
-        node
-    ):
-        if self._in_function_depth == 0:
-            for target in node.targets:
-                if isinstance(target, ast.Name):
-                    self.variables.append(target.id)
-        self.generic_visit(node)
+    def visit_AsyncFunctionDef(
+        self,
+        node
+    ):
+
+        self.visit_FunctionDef(
+            node
+        )
 
 
 
-    def visit_Import(
-        self,
-        node
-    ):
+    def visit_Import(
+        self,
+        node
+    ):
 
-        is_local = (
-            self._in_function_depth > 0
-        )
-
-
-        for item in node.names:
+        is_local = (
+            self._in_function_depth > 0
+        )
 
 
-            self.found_imports.append(
-
-                ImportRef(
-
-                    module=item.name,
-
-                    level=0,
-
-                    names=[],
-
-                    is_from_import=False,
-
-                    is_local=is_local,
-
-                )
-
-            )
+        for item in node.names:
 
 
+            self.found_imports.append(
 
-    def visit_ImportFrom(
-        self,
-        node
-    ):
+                ImportRef(
 
-        is_local = (
-            self._in_function_depth > 0
-        )
+                    module=item.name,
 
+                    level=0,
 
-        names = [
+                    names=[],
 
-            item.name
+                    is_from_import=False,
 
-            for item in node.names
+                    is_local=is_local,
 
-        ]
+                )
+
+            )
 
 
 
-        self.found_imports.append(
+    def visit_ImportFrom(
+        self,
+        node
+    ):
 
-            ImportRef(
+        is_local = (
+            self._in_function_depth > 0
+        )
 
-                module=node.module,
 
-                level=node.level or 0,
+        names = [
 
-                names=names,
+            item.name
 
-                is_from_import=True,
+            for item in node.names
 
-                is_local=is_local,
+        ]
 
-            )
 
-        )
+
+        self.found_imports.append(
+
+            ImportRef(
+
+                module=node.module,
+
+                level=node.level or 0,
+
+                names=names,
+
+                is_from_import=True,
+
+                is_local=is_local,
+
+            )
+
+        )
 
 
 
 def extract_imports(
-    file_path: Path
-) -> tuple[list[ImportRef], list[str], list[str], list[str]]:
-    """
-    Ekstrakcja surowych importów oraz definicji z AST.
-    """
+    file_path: Path
+) -> list[ImportRef]:
+    """
+    Ekstrakcja surowych importów AST.
+    """
 
-    try:
+    try:
 
-        source = file_path.read_text(
-            encoding="utf-8"
-        )
-
-
-        tree = ast.parse(
-            source
-        )
+        source = file_path.read_text(
+            encoding="utf-8"
+        )
 
 
-    except Exception:
-
-        return [], [], [], []
-
-
-
-    visitor = AdvancedImportVisitor()
+        tree = ast.parse(
+            source
+        )
 
 
-    visitor.visit(
-        tree
-    )
+    except Exception:
+
+        return []
 
 
-    return visitor.found_imports, visitor.classes, visitor.functions, visitor.variables
+
+    visitor = AdvancedImportVisitor()
+
+
+    visitor.visit(
+        tree
+    )
+
+
+    return visitor.found_imports
 
 
 
@@ -234,147 +207,141 @@ def extract_imports(
 
 
 def build_index(
-    root: str
+    root: str
 ) -> dict[str, Module]:
-    print("BUILD_INDEX ROOT:", root)
-    """
-    Buduje indeks modułów projektu.
+    print("BUILD_INDEX ROOT:", root)
+    """
+    Buduje indeks modułów projektu.
 
-    Klucz:
-        module_id
+    Klucz:
+        module_id
 
-    Wartość:
-        Module
-    """
+    Wartość:
+        Module
+    """
 
 
 
-    root_path = Path(
-        root
-    ).resolve()
+    root_path = Path(
+        root
+    ).resolve()
 
-    print("RESOLVED ROOT:", root_path)
+    print("RESOLVED ROOT:", root_path)
 
-    if not root_path.exists():
+    if not root_path.exists():
 
-        raise ValueError(
+        raise ValueError(
 
-            f"Repository root does not exist: {root_path}"
+            f"Repository root does not exist: {root_path}"
 
-        )
+        )
 
 
 
-    if not root_path.is_dir():
+    if not root_path.is_dir():
 
-        raise ValueError(
+        raise ValueError(
 
-            f"Repository root is not directory: {root_path}"
+            f"Repository root is not directory: {root_path}"
 
-        )
+        )
 
 
 
-    modules: dict[str, Module] = {}
+    modules: dict[str, Module] = {}
 
 
 
-    ignored_dirs = {
+    ignored_dirs = {
 
-        "venv",
+        "venv",
 
-        ".venv",
+        ".venv",
 
-        "python",
+        "python",
 
-        "Python",
+        "Python",
 
-        "__pycache__",
+        "__pycache__",
 
-        ".git",
+        ".git",
 
-        ".tox",
+        ".tox",
 
-        ".pytest_cache",
+        ".pytest_cache",
 
-        "node_modules",
+        "node_modules",
 
-    }
+    }
 
 
 
-    for path in root_path.rglob(
-        "*.py"
-    ):
+    for path in root_path.rglob(
+        "*.py"
+    ):
 
 
 
-        rel = path.relative_to(
-            root_path
-        )
+        rel = path.relative_to(
+            root_path
+        )
 
 
 
-        # ignorowanie katalogów
-        # względem repo root
+        # ignorowanie katalogów
+        # względem repo root
 
-        if any(
+        if any(
 
-            part in ignored_dirs
+            part in ignored_dirs
 
-            for part in rel.parts
+            for part in rel.parts
 
-        ):
+        ):
 
-            continue
+            continue
 
 
 
-        module_id = ".".join(
+        module_id = ".".join(
 
-            rel.with_suffix("").parts
+            rel.with_suffix("").parts
 
-        )
+        )
 
 
 
-        imports, classes, functions, variables = extract_imports(
-            path
-        )
+        imports = extract_imports(
+            path
+        )
 
 
 
-        modules[module_id] = Module(
+        modules[module_id] = Module(
 
-            module_id=module_id,
+            module_id=module_id,
 
-            path=str(path.resolve()),
+            path=str(path.resolve()),
 
-            absolute_path=str(
-                path.resolve()
-            ),
+            absolute_path=str(
+                path.resolve()
+            ),
 
-            imports=imports,
+            imports=imports,
 
-            classes=classes,
+        )
+        print(
+            "INDEX RESULT ROOT:",
+            root_path
+        )
 
-            functions=functions,
+        for k, v in modules.items():
+            print(
+            "INDEX MODULE:",
+            k,
+            "PATH:",
+            v.absolute_path
+        )
 
-            variables=variables,
 
-        )
-        print(
-            "INDEX RESULT ROOT:",
-            root_path
-        )
-
-        for k, v in modules.items():
-            print(
-            "INDEX MODULE:",
-            k,
-            "PATH:",
-            v.absolute_path
-        )
-
-
-    return modules
+    return modules
