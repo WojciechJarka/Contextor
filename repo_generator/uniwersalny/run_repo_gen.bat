@@ -18,7 +18,7 @@ if not exist "%PYTHON_CMD%" (
     exit /b 1
 )
 
-echo Uruchamianie Repo Guardian przy użyciu WinPython...
+echo Uruchamianie Repo Generator przy użyciu WinPython...
 "%PYTHON_CMD%" repo_gui.py
 
 pause
