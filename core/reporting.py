@@ -712,7 +712,18 @@ def save_all_reports(
         label="raport struktury grafu"
     )
     
-    # 3. Raport użycia artefaktów
+    # 3. Raport kolizji nazw (duplikatów)
+    if log:
+        log("Generowanie raportu kolizji nazw...")
+    collisions_data = generate_collisions_report(modules)
+    save_json(
+        collisions_data,
+        f"output/{repo_name}_name_collisions.json",
+        log=log,
+        label="raport kolizji nazw"
+    )
+
+    # 4. Raport użycia artefaktów
     if log:
         log("Generowanie raportu użycia artefaktów...")
     artifact_data = generate_artifact_usage_report(modules, root_path, runtime)
@@ -728,17 +739,6 @@ def save_all_reports(
         f"output/{repo_name}_artifacts.json",
         log=log,
         label="raport artefaktów"
-    )
-
-    # 4. Raport kolizji nazw (wraz z kodem)
-    if log:
-        log("Generowanie raportu kolizji nazw...")
-    collisions_data = generate_collisions_report(modules)
-    save_json(
-        collisions_data,
-        f"output/{repo_name}_name_collisions.json",
-        log=log,
-        label="raport kolizji nazw"
     )
 
     if log:
