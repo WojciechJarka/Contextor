@@ -33,7 +33,48 @@ from .layers import (
     validate_forbidden_dependencies,
 )
 
+from .collisions import (
+    validate_name_collisions,
+)
 
+def validate(
+    modules: dict[str, Module],
+    graph: ProjectGraph,
+) -> list[ValidationError]:
+    """
+    Validate project architecture.
+    """
+
+    errors: list[ValidationError] = []
+
+    errors.extend(
+        validate_cycles(
+            graph
+        )
+    )
+
+    errors.extend(
+        validate_layer_rules(
+            modules,
+            graph,
+        )
+    )
+
+    errors.extend(
+        validate_forbidden_dependencies(
+            modules,
+            graph,
+        )
+    )
+
+    # Dodane sprawdzenie kolizji nazw semantycznych
+    errors.extend(
+        validate_name_collisions(
+            modules,
+        )
+    )
+
+    return errors
 def validate(
     modules: dict[str, Module],
     graph: ProjectGraph,
