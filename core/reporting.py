@@ -482,7 +482,7 @@ def generate_report(
         "hard_edges":
             {
                 k:
-                    sorted(list(v))
+                    sorted(list(set(v)))
                 for k, v in hard_edges.items()
             },
 
@@ -490,7 +490,7 @@ def generate_report(
         "soft_edges":
             {
                 k:
-                    sorted(list(v))
+                    sorted(list(set(v)))
                 for k, v in soft_edges.items()
             },
     }
@@ -646,10 +646,10 @@ def generate_summary_report(metrics: dict, cycles: list, debt: dict) -> dict:
     }
 
 def generate_structure_report(hard_edges: dict, soft_edges: dict) -> dict:
-    """Generuje czysty graf zależności."""
+    """Generuje czysty graf zależności z deduplikacją krawędzi."""
     return {
-        "hard_edges": {k: sorted(list(v)) for k, v in hard_edges.items()},
-        "soft_edges": {k: sorted(list(v)) for k, v in soft_edges.items()}
+        "hard_edges": {k: sorted(list(set(v))) for k, v in hard_edges.items()},
+        "soft_edges": {k: sorted(list(set(v))) for k, v in soft_edges.items()}
     }
 
 def save_all_reports(
