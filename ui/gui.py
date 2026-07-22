@@ -201,7 +201,7 @@ def run():
                 cycles=cycles,
                 debt=debt,
                 runtime={"cache_hit": cache_hit},
-                root_path=path
+                root_path=path,
                 log=log
             )
 
