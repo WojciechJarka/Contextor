@@ -3,7 +3,7 @@
 """
 repo_guardian/core/reporting.py
 
-LLM REFACTOR SIGNAL ENGINE v3
+REFACTOR SIGNAL ENGINE v3
 
 Rozszerza klasyczny raport o:
 - hotspot ranking
