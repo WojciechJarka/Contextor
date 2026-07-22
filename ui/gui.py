@@ -17,6 +17,7 @@ from tkinter import filedialog, messagebox
 
 from pathlib import Path
 import os
+import shutil
 import subprocess
 import sys
 
@@ -43,6 +44,7 @@ from repo_guardian.ui.gui_parser import run_parser_window
 from repo_guardian.ui.path_memory import load_state, save_state
 from repo_guardian.ui.exclude_check import check_stale_excludes
 from repo_guardian.ui.exclude_gui import run_exclude_window
+from repo_guardian.ui.progress_widget import create_progress_bar, run_with_progress
 
 def run():
 
@@ -165,77 +167,86 @@ def run():
 
             return
 
+        def task():
 
-
-        modules = build_index(
-            path
-        )
-
-
-        graph, cache_hit = get_cached_graph(
-            modules,
-            build_graph
-        )
-
-
-        errors = validate(
-            modules,
-            graph
-        )
-
-
-        # Pobranie nazwy repozytorium na podstawie ścieżki
-        repo_name = Path(path).name
-
-        # Obliczenie metryk, cykli oraz długu
-        metrics = compute_graph_metrics(graph.hard_edges, graph.soft_edges)
-        cycles = detect_cycles(graph.hard_edges)
-        debt = compute_debt(graph.hard_edges, graph.soft_edges, cycles, metrics)
-
-        # Delegacja zapisu wszystkich raportów do funkcji fasadowej w reporting.py
-        save_all_reports(
-            repo_name=repo_name,
-            modules=modules,
-            graph=graph,
-            metrics=metrics,
-            cycles=cycles,
-            debt=debt,
-            runtime={"cache_hit": cache_hit},
-            root_path=path
-        )
-
-
-        if not errors:
-
-            messagebox.showinfo(
-                "OK",
-                "No issues found. Repository is healthy!"
+            modules = build_index(
+                path
             )
 
-            return
+
+            graph, cache_hit = get_cached_graph(
+                modules,
+                build_graph
+            )
 
 
+            errors = validate(
+                modules,
+                graph
+            )
 
-        msg = "\n".join(
-            [
-                f"{e.kind}: {e.message}"
-                for e in errors
-            ]
+
+            repo_name = Path(path).name
+
+            metrics = compute_graph_metrics(graph.hard_edges, graph.soft_edges)
+            cycles = detect_cycles(graph.hard_edges)
+            debt = compute_debt(graph.hard_edges, graph.soft_edges, cycles, metrics)
+
+            save_all_reports(
+                repo_name=repo_name,
+                modules=modules,
+                graph=graph,
+                metrics=metrics,
+                cycles=cycles,
+                debt=debt,
+                runtime={"cache_hit": cache_hit},
+                root_path=path
+            )
+
+            return errors
+
+        def on_success(errors):
+
+            if not errors:
+
+                messagebox.showinfo(
+                    "OK",
+                    "No issues found. Repository is healthy!"
+                )
+
+                return
+
+            msg = "\n".join(
+                [
+                    f"{e.kind}: {e.message}"
+                    for e in errors
+                ]
+            )
+
+            messagebox.showwarning(
+                "Issues Detected",
+                msg
+            )
+
+        def on_error(exc):
+
+            messagebox.showerror(
+                "error",
+                str(exc)
+            )
+
+        run_with_progress(
+            root,
+            progress_bar,
+            task,
+            on_success=on_success,
+            on_error=on_error,
+            buttons=[analyze_btn, analyze_single_btn]
         )
-
-
-        messagebox.showwarning(
-            "Issues Detected",
-            msg
-        )
-
-
 
     def analyze_single():
 
-
         file_path = file_path_var.get()
-
 
         if not file_path.endswith(".py"):
 
@@ -260,61 +271,75 @@ def run():
 
             return
 
+        def task():
+
+            file = Path(
+                file_path
+            )
+
+            modules = build_index(
+                repo_root
+            )
+
+            graph, cache_hit = get_cached_graph(
+                modules,
+                build_graph
+            )
+
+            global_report = generate_report(
+                graph,
+                modules=modules,
+                runtime={
+                    "cache_hit": cache_hit
+                }
+            )
 
 
-        file = Path(
-            file_path
+            report = generate_single_file_report(
+                file_path,
+                modules,
+                graph,
+                global_report,
+                repo_root
+            )
+
+
+            output = (
+                "output/"
+                +
+                f"single_{file.stem}.json"
+            )
+
+
+            save_single_file_report(
+                report,
+                output
+            )
+
+            return output
+
+        def on_success(output):
+
+            messagebox.showinfo(
+                "Done",
+                f"Single file report created:\n{output}"
+            )
+
+        def on_error(exc):
+
+            messagebox.showerror(
+                "Error",
+                str(exc)
+            )
+
+        run_with_progress(
+            root,
+            progress_bar,
+            task,
+            on_success=on_success,
+            on_error=on_error,
+            buttons=[analyze_btn, analyze_single_btn]
         )
-
-
-        modules = build_index(
-            repo_root
-        )
-
-
-        graph, cache_hit = get_cached_graph(
-            modules,
-            build_graph
-        )
-
-
-        global_report = generate_report(
-            graph,
-            modules=modules,
-            runtime={
-                "cache_hit": cache_hit
-            }
-        )
-
-
-        report = generate_single_file_report(
-            file_path,
-            modules,
-            graph,
-            global_report,
-            repo_root
-        )
-
-
-        output = (
-            "output/"
-            +
-            f"single_{file.stem}.json"
-        )
-
-
-        save_single_file_report(
-            report,
-            output
-        )
-
-
-        messagebox.showinfo(
-            "Done",
-            f"Single file report created:\n{output}"
-        )
-
-
 
     # ======================================================
     # TOOLTIP
@@ -436,19 +461,23 @@ def run():
     # Actions
     # -------------------------
 
-    tk.Button(
+    analyze_btn = tk.Button(
         root,
         text="Analyze Repository",
         command=analyze
-    ).pack(
+    )
+
+    analyze_btn.pack(
         pady=15
     )
 
-    tk.Button(
+    analyze_single_btn = tk.Button(
         root,
         text="Analyze Single File",
         command=analyze_single
-    ).pack(
+    )
+
+    analyze_single_btn.pack(
         pady=5
     )
 
@@ -484,10 +513,72 @@ def run():
                 ["xdg-open", str(output_dir)]
             )
 
+    def empty_output_folder():
+
+        project_root = Path(__file__).resolve().parent.parent
+
+        output_dir = project_root / "output"
+
+        if not output_dir.exists():
+
+            messagebox.showinfo(
+                "Output folder",
+                "Folder 'output' nie istnieje. Nie ma czego czyścić."
+            )
+
+            return
+
+        confirm = messagebox.askyesno(
+            "Opróżnij output",
+            f"Na pewno usunąć całą zawartość folderu:\n{output_dir}\n\n"
+            "Tej operacji nie można cofnąć."
+        )
+
+        if not confirm:
+
+            return
+
+        errors = []
+
+        for entry in output_dir.iterdir():
+
+            try:
+
+                if entry.is_dir():
+
+                    shutil.rmtree(entry)
+
+                else:
+
+                    entry.unlink()
+
+            except Exception as exc:
+
+                errors.append(f"{entry.name}: {exc}")
+
+        if errors:
+
+            messagebox.showwarning(
+                "Częściowy błąd",
+                "Nie udało się usunąć niektórych elementów:\n"
+                +
+                "\n".join(errors)
+            )
+
+        else:
+
+            messagebox.showinfo(
+                "Gotowe",
+                "Zawartość folderu 'output' została usunięta."
+            )
+
 
     # -------------------------
     # Bottom Action
     # -------------------------
+
+    # Pasek postępu spakowany jako pierwszy na dole
+    progress_bar = create_progress_bar(root)
 
     bottom_frame = tk.Frame(root)
 
@@ -504,6 +595,16 @@ def run():
         command=open_output_folder
     ).pack(
         side="left"
+    )
+
+
+    tk.Button(
+        bottom_frame,
+        text="Opróżnij output",
+        command=empty_output_folder
+    ).pack(
+        side="left",
+        padx=20
     )
 
 
