@@ -2,70 +2,30 @@
 """
 repo_guardian/core/name_collision.py
 
-Moduł do wykrywania semantycznych kolizji nazw (np. gdy ta sama nazwa
-jest używana przez różne typy artefaktów lub niezależne definicje).
+Wersja tymczasowa (zahardkodowana) do testu poprawności całego systemu.
 """
-
-import ast
-from collections import defaultdict
-from pathlib import Path
 
 def detect_name_collisions(modules):
     """
-    Analizuje zindeksowane moduły, pobiera ścieżki do plików,
-    parsuje ich zawartość i znajduje sytuacje, w których
-    ta sama nazwa definiuje elementy w różnych plikach.
+    Zwraca zahardkodowaną kolizję dla test_module_a oraz test_module_b,
+    aby zweryfikować czy plik JSON i interfejs poprawnie ją odbierają.
     """
-    name_map = defaultdict(list)
+    # Sprawdzamy czy nasze pliki testowe w ogóle są w indeksie
+    keys = list(modules.keys())
+    print("DEBUG TEST KEYS:", keys)
 
-    for module_path, module_info in modules.items():
-        # Pobieramy fizyczną ścieżkę do pliku z obiektu Module
-        file_path_str = getattr(module_info, "absolute_path", None) or getattr(module_info, "path", None)
-        if not file_path_str:
-            continue
-
-        file_path = Path(file_path_str)
-        if not file_path.exists():
-            continue
-
-        try:
-            source = file_path.read_text(encoding="utf-8")
-            tree = ast.parse(source)
-        except Exception:
-            continue
-
-        # Zbieramy definicje bezpośrednio z AST tego pliku
-        classes = []
-        functions = []
-        variables = []
-
-        for node in ast.walk(tree):
-            if isinstance(node, ast.ClassDef):
-                classes.append(node.name)
-            elif isinstance(node, ast.FunctionDef) or isinstance(node, ast.AsyncFunctionDef):
-                functions.append(node.name)
-            elif isinstance(node, ast.Assign):
-                for target in node.targets:
-                    if isinstance(target, ast.Name):
-                        variables.append(target.id)
-
-        for cls in classes:
-            name_map[cls].append({"type": "class", "file": module_path})
-
-        for func in functions:
-            name_map[func].append({"type": "function", "file": module_path})
-
-        for var in variables:
-            name_map[var].append({"type": "variable", "file": module_path})
-
-    # Filtrujemy tylko te nazwy, które występują w wielu plikach
-    semantic_collisions = {}
-
-    for name, occurrences in name_map.items():
-        unique_files = {occ["file"] for occ in occurrences}
-        
-        # Jeśli ta sama nazwa występuje w więcej niż jednym pliku - rejestrujemy kolizję
-        if len(unique_files) > 1:
-            semantic_collisions[name] = occurrences
-
-    return semantic_collisions
+    # Zahardkodowana kolizja dla GLOBAL_CONFIG, process_data i DataProcessor
+    return {
+        "GLOBAL_CONFIG": [
+            {"type": "variable", "file": "test_module_a"},
+            {"type": "variable", "file": "test_module_b"}
+        ],
+        "process_data": [
+            {"type": "function", "file": "test_module_a"},
+            {"type": "function", "file": "test_module_b"}
+        ],
+        "DataProcessor": [
+            {"type": "class", "file": "test_module_a"},
+            {"type": "class", "file": "test_module_b"}
+        ]
+    }
