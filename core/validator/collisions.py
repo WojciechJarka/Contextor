@@ -6,7 +6,15 @@ repo_guardian/core/validator/collisions.py
 Semantic API collision detector.
 
 Detects only real public symbol collisions between modules.
-Ignores local variables, methods, nested functions and Python internals.
+
+Rules:
+- only top-level public classes/functions
+- only exported-style constants (UPPER_CASE)
+- ignores private helpers (_name)
+- ignores methods
+- ignores nested functions
+- ignores Python internals
+- normalizes source before comparing implementations
 """
 
 import ast
@@ -29,35 +37,82 @@ IGNORED_NAMES = {
 
 
 def _ignore(name: str) -> bool:
+    """
+    Ignore non API symbols.
+    """
+
+    if not name:
+        return True
+
     if name in IGNORED_NAMES:
         return True
 
+    # Python magic methods
     if name.startswith("__") and name.endswith("__"):
+        return True
+
+    # private/internal helpers
+    if name.startswith("_"):
         return True
 
     return False
 
 
-class PublicSymbolCollector(ast.NodeVisitor):
 
-    def __init__(self, source: str, module_path: str):
+def _normalize_code(code: str) -> str:
+    """
+    Normalize source snippets.
+
+    Avoid false collisions caused only by formatting.
+    """
+
+    return "\n".join(
+        line.strip()
+        for line in code.splitlines()
+        if line.strip()
+    )
+
+
+
+class PublicSymbolCollector(ast.NodeVisitor):
+    """
+    Collect only public module-level API symbols.
+    """
+
+    def __init__(
+        self,
+        source: str,
+        module_path: str,
+    ):
         self.source = source
         self.module_path = module_path
+
         self.symbols = []
 
         self.class_depth = 0
         self.function_depth = 0
 
 
-    def _add(self, name, kind, node):
+    def _add(
+        self,
+        name: str,
+        kind: str,
+        node: ast.AST,
+    ):
+        """
+        Add public symbol.
+        """
 
         if _ignore(name):
             return
 
-        code = ast.get_source_segment(
-            self.source,
-            node
-        ) or name
+        code = (
+            ast.get_source_segment(
+                self.source,
+                node,
+            )
+            or name
+        )
 
         self.symbols.append(
             {
@@ -69,25 +124,37 @@ class PublicSymbolCollector(ast.NodeVisitor):
         )
 
 
-    def visit_ClassDef(self, node):
+    def visit_ClassDef(
+        self,
+        node: ast.ClassDef,
+    ):
+        """
+        Collect only top-level classes.
+        """
 
-        # tylko klasy top-level
         if self.class_depth == 0:
             self._add(
                 node.name,
                 "class",
-                node
+                node,
             )
 
         self.class_depth += 1
+
         self.generic_visit(node)
+
         self.class_depth -= 1
 
 
 
-    def visit_FunctionDef(self, node):
+    def visit_FunctionDef(
+        self,
+        node: ast.FunctionDef,
+    ):
+        """
+        Collect only top-level functions.
+        """
 
-        # tylko funkcje top-level
         if (
             self.class_depth == 0
             and self.function_depth == 0
@@ -95,48 +162,88 @@ class PublicSymbolCollector(ast.NodeVisitor):
             self._add(
                 node.name,
                 "function",
-                node
+                node,
             )
 
         self.function_depth += 1
+
         self.generic_visit(node)
+
         self.function_depth -= 1
 
 
 
-    def visit_AsyncFunctionDef(self, node):
+    def visit_AsyncFunctionDef(
+        self,
+        node: ast.AsyncFunctionDef,
+    ):
+        """
+        Async functions use same rules.
+        """
 
         self.visit_FunctionDef(node)
 
 
 
-    def visit_Assign(self, node):
+    def visit_Assign(
+        self,
+        node: ast.Assign,
+    ):
+        """
+        Collect only public constants.
 
-        # tylko globalne stałe/API
+        Example:
+
+            RULES = {...}
+
+        Ignore:
+
+            value = 10
+            temp = []
+        """
+
         if (
-            self.class_depth == 0
-            and self.function_depth == 0
+            self.class_depth != 0
+            or self.function_depth != 0
         ):
+            return
 
-            for target in node.targets:
 
-                if isinstance(target, ast.Name):
+        for target in node.targets:
 
-                    self._add(
-                        target.id,
-                        "variable",
-                        node
-                    )
+            if not isinstance(
+                target,
+                ast.Name,
+            ):
+                continue
+
+
+            name = target.id
+
+
+            # only exported constants
+            if not name.isupper():
+                continue
+
+
+            self._add(
+                name,
+                "variable",
+                node,
+            )
 
 
 
 def validate_name_collisions(
     modules: dict[str, Module],
 ) -> list[ValidationError]:
+    """
+    Detect public API collisions.
+    """
 
-    errors = []
+    errors: list[ValidationError] = []
 
-    name_map = defaultdict(list)
+    registry = defaultdict(list)
 
 
     for module_path, module in modules.items():
@@ -152,6 +259,7 @@ def validate_name_collisions(
 
         path = Path(file_path)
 
+
         if not path.exists():
             continue
 
@@ -161,7 +269,9 @@ def validate_name_collisions(
                 encoding="utf-8"
             )
 
-            tree = ast.parse(source)
+            tree = ast.parse(
+                source
+            )
 
         except Exception:
             continue
@@ -169,28 +279,35 @@ def validate_name_collisions(
 
         collector = PublicSymbolCollector(
             source,
-            module_path
+            module_path,
         )
+
 
         collector.visit(tree)
 
 
         for symbol in collector.symbols:
 
-            name_map[
-                (
-                    symbol["name"],
-                    symbol["type"]
-                )
-            ].append(symbol)
+            key = (
+                symbol["name"],
+                symbol["type"],
+            )
+
+            registry[key].append(
+                symbol
+            )
 
 
 
-    for (name, artifact_type), occurrences in name_map.items():
+    for (
+        name,
+        artifact_type,
+    ), occurrences in registry.items():
+
 
         files = {
-            x["file"]
-            for x in occurrences
+            item["file"]
+            for item in occurrences
         }
 
 
@@ -198,19 +315,23 @@ def validate_name_collisions(
             continue
 
 
-        codes = {
-            x["code"]
-            for x in occurrences
+
+        normalized_codes = {
+            _normalize_code(
+                item["code"]
+            )
+            for item in occurrences
         }
 
 
         code_snippets = {
-            x["file"]: x["code"]
-            for x in occurrences
+            item["file"]: item["code"]
+            for item in occurrences
         }
 
 
-        if len(codes) > 1:
+
+        if len(normalized_codes) > 1:
 
             error = ValidationError(
                 kind="NAME_COLLISION",
@@ -218,9 +339,9 @@ def validate_name_collisions(
                     f"Semantic API collision for "
                     f"{artifact_type} '{name}' "
                     f"across modules: "
-                    f"{', '.join(files)}"
+                    f"{', '.join(sorted(files))}"
                 ),
-                nodes=list(files),
+                nodes=sorted(files),
             )
 
             error.code_snippets = code_snippets
@@ -238,9 +359,10 @@ def validate_name_collisions(
                 message=(
                     f"Identical public definition "
                     f"{artifact_type} '{name}' "
-                    f"across modules"
+                    f"across modules: "
+                    f"{', '.join(sorted(files))}"
                 ),
-                nodes=list(files),
+                nodes=sorted(files),
             )
 
             error.code_snippets = code_snippets
