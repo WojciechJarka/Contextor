@@ -32,7 +32,7 @@ class CollisionReport:
     artifact_type: str = "unknown"
     conflicting_code: Dict[str, str] = field(default_factory=dict)
 
-# Globalna lista idiomów oraz lokalnych zmiennych pomocniczych do całkowitego pominięcia
+# Globalna lista idiomów oraz zmiennych lokalnych/globalnych pomocniczych do całkowitego pominięcia
 IGNORED_ARTIFACTS = {
     "__init__",
     "__all__",
@@ -48,14 +48,11 @@ IGNORED_ARTIFACTS = {
 
 def validate_name_collisions(symbol_registry_or_modules) -> List[CollisionReport]:
     """
-    Analizuje pliki projektu za pomocą AST w poszukiwaniu kolizji nazw
-    (klasy, funkcje, stałe/zmienne globalne) pomiędzy różnymi modułami,
-    skutecznie odrzucając zmienne lokalne i idiomy z listy IGNORED_ARTIFACTS.
-    Nie zawiera żadnych zahardkodowanych ścieżek.
+    Analizuje pliki projektu za pomocą AST w poszukiwaniu kolizji nazw,
+    ignorując metody klas, zmienne lokalne oraz standardowe idiomy Pythona.
     """
     name_map = defaultdict(list)
 
-    # Uniwersalne pobranie modułów/ścieżek do plików z przekazanego rejestru lub kolekcji
     modules_iter = []
     if hasattr(symbol_registry_or_modules, "modules"):
         modules_iter = symbol_registry_or_modules.modules.values()
@@ -81,12 +78,11 @@ def validate_name_collisions(symbol_registry_or_modules) -> List[CollisionReport
         except Exception:
             continue
 
-        # Przechodzimy przez drzewo AST w poszukiwaniu klas, funkcji i zmiennych
-        for node in ast.walk(tree):
+        # Przechodzimy przez dzieci głównego poziomu modułu (Body), 
+        # żeby nie analizować zmiennych lokalnych i metod zdefiniowanych wewnątrz funkcji lub klas.
+        for node in tree.body:
             if isinstance(node, ast.ClassDef):
                 name = node.name
-                
-                # BEZWZGLĘDNY FILTR: Ignorujemy idiomy i metody/klasy specjalne
                 if name in IGNORED_ARTIFACTS or name.startswith("__"):
                     continue
                 
@@ -98,9 +94,6 @@ def validate_name_collisions(symbol_registry_or_modules) -> List[CollisionReport
                 
             elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 name = node.name
-                
-                # Ignorujemy idiomy oraz funkcje pomocnicze typu main/run, jeśli występują masowo,
-                # chyba że chcesz je śledzić (tutaj odrzucamy tylko standardowe dundersy i czarną listę)
                 if name in IGNORED_ARTIFACTS or name.startswith("__"):
                     continue
                 
@@ -114,13 +107,9 @@ def validate_name_collisions(symbol_registry_or_modules) -> List[CollisionReport
                 for target in node.targets:
                     if isinstance(target, ast.Name):
                         name = target.id
-                        
-                        # Ignorujemy zmienne z czarnej listy oraz dundersy
                         if name in IGNORED_ARTIFACTS or name.startswith("__"):
                             continue
                             
-                        # Interesują nas głównie stałe globalne (UPPER_CASE) lub konkretne przypisania,
-                        # zwykłe małe zmienne lokalne wewnątrz funkcji i tak są węższe, ale tu filtrujemy po nazwie.
                         name_map[(name, "variable")].append({
                             "type": "variable",
                             "file": module_id,
@@ -129,7 +118,6 @@ def validate_name_collisions(symbol_registry_or_modules) -> List[CollisionReport
 
     reports: List[CollisionReport] = []
 
-    # Filtrujemy pary (nazwa, typ), które występują w więcej niż jednym module
     for (name, art_type), occurrences in name_map.items():
         unique_nodes = {occ["file"] for occ in occurrences}
         if len(unique_nodes) > 1:
