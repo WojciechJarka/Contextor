@@ -55,7 +55,7 @@ def run():
     )
 
     root.geometry(
-        "600x260"
+        "600x320"
     )
 
 
