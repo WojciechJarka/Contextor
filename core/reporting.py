@@ -17,7 +17,7 @@ Rozszerza klasyczny raport o:
 """
 
 import os
-import json
+import orjson
 
 from datetime import datetime
 from collections import defaultdict, deque
@@ -608,36 +608,27 @@ def generate_report(
 
 def save_json(
     report: dict,
-    path: str
+    path: str,
+    log=None,
+    label: str = ""
 ) -> None:
-
-
-    directory = os.path.dirname(
-        path
-    )
-
-
+    directory = os.path.dirname(path)
     if directory:
+        os.makedirs(directory, exist_ok=True)
 
-        os.makedirs(
-            directory,
-            exist_ok=True
-        )
+    if log and label:
+        log(f"Serializowanie i zapisywanie: {label} ({path})...")
 
+    serialized = orjson.dumps(
+        report,
+        option=orjson.OPT_INDENT_2 | orjson.OPT_NON_STR_KEYS
+    )
+    with open(path, "wb") as f:
+        f.write(serialized)
 
-    with open(
-        path,
-        "w",
-        encoding="utf-8"
-    ) as f:
+    if log and label:
+        log(f"Zapisano pomyślnie: {label}")
 
-
-        json.dump(
-            report,
-            f,
-            indent=2,
-            ensure_ascii=False
-        )
 # ==========================================================
 # EXPORT HELPERS FOR SPLIT REPORTS
 # ==========================================================
@@ -661,23 +652,57 @@ def generate_structure_report(hard_edges: dict, soft_edges: dict) -> dict:
         "soft_edges": {k: sorted(list(v)) for k, v in soft_edges.items()}
     }
 
-def save_all_reports(repo_name: str, modules: dict, graph: object, metrics: dict, cycles: list, debt: dict, runtime: dict, root_path: str):
-    """Fasada: zapisuje 3 oddzielne pliki w katalogu output."""
+def save_all_reports(
+    repo_name: str,
+    modules: dict,
+    graph: object,
+    metrics: dict,
+    cycles: list,
+    debt: dict,
+    runtime: dict,
+    root_path: str,
+    log=None
+):
+    """Fasada: zapisuje 3 oddzielne pliki w katalogu output sekwencyjnie z orjson."""
     
+    if log:
+        log("Rozpoczynanie sekwencyjnego zapisu raportów...")
+
     # 1. Raport podsumowujący
-    save_json(generate_summary_report(metrics, cycles, debt), f"output/{repo_name}_summary.json")
+    summary_data = generate_summary_report(metrics, cycles, debt)
+    save_json(
+        summary_data,
+        f"output/{repo_name}_summary.json",
+        log=log,
+        label="raport podsumowujący"
+    )
     
     # 2. Raport struktury grafu
-    save_json(generate_structure_report(graph.hard_edges, graph.soft_edges), f"output/{repo_name}_structure.json")
+    structure_data = generate_structure_report(graph.hard_edges, graph.soft_edges)
+    save_json(
+        structure_data,
+        f"output/{repo_name}_structure.json",
+        log=log,
+        label="raport struktury grafu"
+    )
     
-   # 3. Raport użycia artefaktów
+    # 3. Raport użycia artefaktów
+    if log:
+        log("Generowanie raportu użycia artefaktów...")
     artifact_data = generate_artifact_usage_report(modules, root_path, runtime)
     
-    # Zapisz, nawet jeśli puste, dodając pole "debug_info"
     artifact_data["debug_info"] = {
         "module_count": len(modules),
         "root_path": root_path,
         "timestamp": datetime.now().isoformat()
     }
     
-    save_json(artifact_data, f"output/{repo_name}_artifacts.json")
+    save_json(
+        artifact_data,
+        f"output/{repo_name}_artifacts.json",
+        log=log,
+        label="raport artefaktów"
+    )
+
+    if log:
+        log("Wszystkie raporty zostały pomyślnie zapisane.")
