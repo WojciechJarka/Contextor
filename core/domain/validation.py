@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 
-@dataclass(frozen=True)
+@dataclass
 class ValidationError:
     kind: str
     message: str
