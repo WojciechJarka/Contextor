@@ -44,7 +44,7 @@ from repo_guardian.ui.gui_parser import run_parser_window
 from repo_guardian.ui.path_memory import load_state, save_state
 from repo_guardian.ui.exclude_check import check_stale_excludes
 from repo_guardian.ui.exclude_gui import run_exclude_window
-from repo_guardian.ui.progress_widget import create_progress_bar, run_with_progress
+from repo_guardian.ui.progress_widget import create_progress_bar, create_log_box, run_with_progress
 
 def run():
 
@@ -55,7 +55,7 @@ def run():
     )
 
     root.geometry(
-        "600x320"
+        "600x440"
     )
 
 
@@ -167,19 +167,19 @@ def run():
 
             return
 
-        def task():
-
+        def task(log=None):
+            if log: log("Rozpoczynanie indeksowania katalogu...")
             modules = build_index(
                 path
             )
 
-
+            if log: log(f"Znaleziono {len(modules)} modułów. Pobieranie grafu...")
             graph, cache_hit = get_cached_graph(
                 modules,
                 build_graph
             )
 
-
+            if log: log(f"Walidacja grafu (cache_hit={cache_hit})...")
             errors = validate(
                 modules,
                 graph
@@ -188,10 +188,12 @@ def run():
 
             repo_name = Path(path).name
 
+            if log: log("Obliczanie metryk, wykrywanie cykli i długu technicznego...")
             metrics = compute_graph_metrics(graph.hard_edges, graph.soft_edges)
             cycles = detect_cycles(graph.hard_edges)
             debt = compute_debt(graph.hard_edges, graph.soft_edges, cycles, metrics)
 
+            if log: log("Zapisywanie raportów w folderze output...")
             save_all_reports(
                 repo_name=repo_name,
                 modules=modules,
@@ -203,6 +205,7 @@ def run():
                 root_path=path
             )
 
+            if log: log("Analiza repozytorium zakończona pomyślnie.")
             return errors
 
         def on_success(errors):
@@ -241,7 +244,8 @@ def run():
             task,
             on_success=on_success,
             on_error=on_error,
-            buttons=[analyze_btn, analyze_single_btn]
+            buttons=[analyze_btn, analyze_single_btn],
+            log_box=log_box
         )
 
     def analyze_single():
@@ -271,12 +275,13 @@ def run():
 
             return
 
-        def task():
-
+        def task(log=None):
+            if log: log(f"Analiza pojedynczego pliku: {Path(file_path).name}")
             file = Path(
                 file_path
             )
 
+            if log: log("Indeksowanie i budowanie grafu projektu...")
             modules = build_index(
                 repo_root
             )
@@ -286,6 +291,7 @@ def run():
                 build_graph
             )
 
+            if log: log("Generowanie globalnego raportu...")
             global_report = generate_report(
                 graph,
                 modules=modules,
@@ -295,6 +301,7 @@ def run():
             )
 
 
+            if log: log("Tworzenie raportu dla pliku...")
             report = generate_single_file_report(
                 file_path,
                 modules,
@@ -316,6 +323,7 @@ def run():
                 output
             )
 
+            if log: log("Raport pojedynczego pliku zapisany pomyślnie.")
             return output
 
         def on_success(output):
@@ -338,7 +346,8 @@ def run():
             task,
             on_success=on_success,
             on_error=on_error,
-            buttons=[analyze_btn, analyze_single_btn]
+            buttons=[analyze_btn, analyze_single_btn],
+            log_box=log_box
         )
 
     # ======================================================
@@ -577,8 +586,8 @@ def run():
     # Bottom Action
     # -------------------------
 
-    # Pasek postępu spakowany jako pierwszy na dole
     progress_bar = create_progress_bar(root)
+    log_box = create_log_box(root, height=5)
 
     bottom_frame = tk.Frame(root)
 
