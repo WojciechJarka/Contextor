@@ -38,7 +38,7 @@ architecture_context
 
 
 import ast
-import json
+import orjson
 import os
 
 
@@ -153,37 +153,27 @@ def save_single_file_report(
     path
 ):
     """
-    Zapis raportu JSON.
+    Zapis raportu JSON przy użyciu orjson.
     """
-
-
     directory = os.path.dirname(
         path
     )
 
-
     if directory:
-
         os.makedirs(
             directory,
             exist_ok=True
         )
 
-
-
+    serialized = orjson.dumps(
+        report,
+        option=orjson.OPT_INDENT_2 | orjson.OPT_NON_STR_KEYS
+    )
     with open(
         path,
-        "w",
-        encoding="utf-8"
+        "wb"
     ) as file:
-
-
-        json.dump(
-            report,
-            file,
-            indent=2,
-            ensure_ascii=False
-        )
+        file.write(serialized)
 
 
 
