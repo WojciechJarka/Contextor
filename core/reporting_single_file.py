@@ -139,7 +139,9 @@ from repo_guardian.core.architecture_context import (
     architecture_signals,
 )
 
-
+from repo_guardian.core.validator.collisions import (
+    validate_name_collisions,
+)
 
 # ==========================================================
 # IO
@@ -495,32 +497,32 @@ def _collect_semantic_context(
 def _collect_architecture_context(
     module_id,
     project_graph,
-    global_report=None
+    global_report=None,
+    modules=None,  # <-- Dodany argument modules
 ):
-
-
     hard_edges = project_graph.hard_edges
-
     soft_edges = project_graph.soft_edges
-
-
 
     cycles = detect_cycles(
         hard_edges
     )
-
-
-
+    
     metrics = compute_graph_metrics(
         hard_edges
     )
-
 
     thresholds = get_thresholds(
         metrics["nodes"]
     )
 
-
+    # Pobieramy kolizje nazw i filtrujemy te, które dotyczą bieżącego modułu (file_path / module_id)
+    name_collisions = []
+    if modules:
+        all_collisions = validate_name_collisions(modules)
+        for error in all_collisions:
+            # Jeśli ścieżka modułu znajduje się w węzłach kolizji
+            if any(module_id in node or node.endswith(module_id.replace(".", "/")) for node in error.nodes):
+                name_collisions.append(error.message)
 
     hotspots = []
 
@@ -599,45 +601,22 @@ def _collect_architecture_context(
 
 
 
-        "signals":
-
-            architecture_signals(
-                module_id,
-                hard_edges,
-                soft_edges,
-                hotspots,
-                cycles,
-                metrics["nodes"]
-            ),
-
-
-
-        "thresholds":
-
-            thresholds,
-
-
-
-        "cycles":
-
-            [
-
-                cycle
-
-                for cycle in cycles
-
-                if module_id in cycle
-
-            ],
-
-
-
-        "graph_metrics":
-
-            metrics,
-
+        "signals": architecture_signals(
+            module_id,
+            hard_edges,
+            soft_edges,
+            hotspots,
+            cycles,
+            metrics["nodes"]
+        ),
+        "thresholds": thresholds,
+        "cycles": [
+            cycle for cycle in cycles
+            if module_id in cycle
+        ],
+        "name_collisions": name_collisions,  # <-- Tutaj trafiają kolizje dla tego pliku
+        "graph_metrics": metrics,
     }
-
 
 
 # ==========================================================
@@ -788,7 +767,9 @@ def generate_single_file_report(
 
         project_graph,
 
-        global_report
+        global_report,
+
+        modules=modules,  # <-- Przekazanie modules do funkcji
 
     )
 
@@ -1066,4 +1047,4 @@ def generate_single_file_report(
 
             _build_llm_context(),
 
-    }    
+    }
