@@ -665,12 +665,48 @@ def generate_collisions_report(modules: dict) -> dict:
     collisions_data = []
 
     for error in all_collisions:
-        collisions_data.append({
-            "message": error.message,
-            "nodes": error.nodes,
-            "artifact_type": getattr(error, "artifact_type", "unknown"),
-            "conflicting_code": getattr(error, "code_snippets", getattr(error, "snippets", {})),
-        })
+
+        collisions_data.append(
+            {
+                "message": error.message,
+
+                "nodes": error.nodes,
+
+                "artifact_type":
+                    getattr(
+                        error,
+                        "artifact_type",
+                        "unknown"
+                    ),
+
+                "is_identical":
+                    getattr(
+                        error,
+                        "is_identical",
+                        False
+                    ),
+
+                #
+                # pełny kod konfliktujących artefaktów
+                #
+                "conflicting_code":
+                    getattr(
+                        error,
+                        "code_snippets",
+                        {}
+                    ),
+
+                #
+                # rozszerzone dane AST
+                #
+                "symbol_details":
+                    getattr(
+                        error,
+                        "symbol_details",
+                        []
+                    ),
+            }
+        )
 
     return {
         "generated_at": datetime.now().isoformat(),
