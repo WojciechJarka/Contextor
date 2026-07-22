@@ -14,6 +14,7 @@ Rules:
 - ignores methods
 - ignores nested functions
 - ignores Python internals
+- ignores conventional per-module entrypoints (main, run)
 - normalizes source before comparing implementations
 """
 
@@ -33,6 +34,12 @@ IGNORED_NAMES = {
     "__new__",
     "__repr__",
     "__str__",
+
+    # conventional per-module entrypoints: every module is allowed
+    # to define its own main()/run() without that being a real
+    # semantic API collision (e.g. cli.main vs main.main).
+    "main",
+    "run",
 }
 
 
