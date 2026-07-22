@@ -193,7 +193,6 @@ def run():
             cycles = detect_cycles(graph.hard_edges)
             debt = compute_debt(graph.hard_edges, graph.soft_edges, cycles, metrics)
 
-            if log: log("Zapisywanie raportów w folderze output...")
             save_all_reports(
                 repo_name=repo_name,
                 modules=modules,
@@ -203,6 +202,7 @@ def run():
                 debt=debt,
                 runtime={"cache_hit": cache_hit},
                 root_path=path
+                log=log
             )
 
             if log: log("Analiza repozytorium zakończona pomyślnie.")
