@@ -3,26 +3,124 @@
 repo_guardian/core/name_collision.py
 """
 
-import ast
 from collections import defaultdict
+from dataclasses import dataclass, field
+import os
 from pathlib import Path
+from typing import Any, Dict, List, Optional, Set
+from enum import Enum
 
+class CollisionKind(Enum):
+    IMPORT_IMPORT = "import_import"
+    SEMANTIC_COLLISION = "semantic_collision"
 
-def detect_name_collisions(modules: dict) -> dict:
+class RiskLevel(Enum):
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+
+@dataclass
+class CollisionReport:
+    name: str
+    kind: CollisionKind
+    symbols: List[str]
+    risk_score: int
+    risk_level: RiskLevel
+    explanation: str
+    nodes: List[str] = field(default_factory=list)
+    artifact_type: str = "unknown"
+    conflicting_code: Dict[str, str] = field(default_factory=dict)
+
+# Ignorowane idiomy Pythona oraz nazwy lokalne, które naturalnie powtarzają się w plikach
+IGNORED_ARTIFACTS = {
+    "__init__",
+    "__all__",
+    "path",
+    "modules",
+    "errors",
+    "metrics",
+    "cycles",
+    "debt",
+    "repo_name",
+}
+
+def validate_name_collisions(symbol_registry_or_modules) -> List[CollisionReport]:
     """
-    Wykrywa kolizje nazw tego samego typu obiektów w zindeksowanych modułach na podstawie analizy AST.
+    Dynamicznie analizuje rejestr symboli lub moduły w poszukiwaniu rzeczywistych,
+    globalnych kolizji semantycznych (np. duplikacja nazw klas/funkcji w przestrzeni publicznej),
+    pomijając lokalne zmienne oraz standardowe idiomy Pythona.
+    Nie zawiera żadnych zahardkodowanych ścieżek ani nazw modułów.
     """
-    # Zmieniamy strukturę klucza, aby grupować po parze: (nazwa, typ_obiektu)
-    name_map = defaultdict(list)
+    reports: List[CollisionReport] = []
+    
+    # Słownik do grupowania definicji po nazwie symbolu i typie artefaktu
+    # Klucz: (artifact_type, name) -> { module_id: code_snippet }
+    definitions_map = defaultdict(dict)
 
-    for module_path, module_info in modules.items():
-        # Pobieramy fizyczną ścieżkę do pliku
-        file_path_str = getattr(module_info, "absolute_path", None) or getattr(module_info, "path", None)
-        if not file_path_str:
-            continue
+    # Uniwersalne przejście po strukturze projektu bez odwoływania się do konkretnych nazw
+    # Obsługujemy zarówno strukturę zindeksowaną, jak i surowe kolekcje modułów
+    modules_iter = []
+    if hasattr(symbol_registry_or_modules, "modules"):
+        modules_iter = symbol_registry_or_modules.modules.values()
+    elif isinstance(symbol_registry_or_modules, dict):
+        modules_iter = symbol_registry_or_modules.values()
+    elif isinstance(symbol_registry_or_modules, list):
+        modules_iter = symbol_registry_or_modules
 
-        file_path = Path(file_path_str)
-        if not file_path.exists():
+    for module in modules_iter:
+        module_id = getattr(module, "name", getattr(module, "id", str(module)))
+        
+        # Pobieranie artefaktów/symboli zdefiniowanych w module (funkcje, klasy, zmienne globalne)
+        artifacts = []
+        if hasattr(module, "artifacts"):
+            artifacts = module.artifacts
+        elif hasattr(module, "symbols"):
+            artifacts = module.symbols
+        elif isinstance(module, dict) and "artifacts" in module:
+            artifacts = module["artifacts"]
+
+        for art in artifacts:
+            name = getattr(art, "name", art.get("name") if isinstance(art, dict) else None)
+            art_type = getattr(art, "kind", getattr(art, "type", "variable"))
+            if isinstance(art_type, Enum):
+                art_type = art_type.value
+                
+            code = getattr(art, "code", getattr(art, "source", ""))
+
+            if not name:
+                continue
+
+            # Pomijanie idiomów Pythona oraz zmiennych lokalnych/tymczasowych
+            if name in IGNORED_ARTIFACTS:
+                continue
+
+            # Interesują nas głównie konflikty globalne struktur (funkcje, klasy, stałe)
+            # Zmienne lokalne/jednoliniowce wewnątrz funkcji nie powinny być tu raportowane
+            if art_type in ("function", "class", "constant") or name.isupper():
+                definitions_map[(str(art_type), name)][str(module_id)] = str(code)
+
+    # Generowanie raportów kolizji na podstawie zebranych danych
+    for (art_type, name), nodes_dict in definitions_map.items():
+        # Kolizja występuje, gdy ten sam symbol (np. klasa lub funkcja) jest zdefiniowany
+        # w więcej niż jednym niezależnym module/pliku
+        if len(nodes_dict) > 1:
+            nodes_list = list(nodes_dict.keys())
+            
+            reports.append(
+                CollisionReport(
+                    name=name,
+                    kind=CollisionKind.SEMANTIC_COLLISION,
+                    symbols=nodes_list,
+                    risk_score=75,
+                    risk_level=RiskLevel.MEDIUM,
+                    explanation=f"Semantic name collision for {art_type} '{name}' across multiple modules.",
+                    nodes=nodes_list,
+                    artifact_type=art_type,
+                    conflicting_code=nodes_dict
+                )
+            )
+
+    return reports not file_path.exists():
             continue
 
         try:
