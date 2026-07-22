@@ -1,3 +1,4 @@
+#~~~~~~[START PLIKU: symbol_reference.py ]~~~~~~#
 # -*- coding: utf-8 -*-
 
 """
@@ -189,6 +190,13 @@ class SymbolReferenceVisitor(
 
 
         self.called = set()
+
+        # Dopasowania trafione WYŁĄCZNIE przez fallback po
+        # krótkiej nazwie (_match_symbol), bez potwierdzenia
+        # instancją ani dokładnym dopasowaniem. To są zgadywanki
+        # - "coś.add(...)" może być set.add(), nie ModuleSymbols.add().
+        # Nigdy nie mieszamy ich z self.called.
+        self.called_ambiguous = set()
 
         self.event_bound = set()
 
@@ -470,6 +478,45 @@ class SymbolReferenceVisitor(
         )
 
 
+        # 1) Dopasowanie dokładne (pełna kwalifikowana nazwa
+        #    zgadza się 1:1 z symbolem docelowym) - najbardziej
+        #    wiarygodne, priorytet najwyższy.
+        if resolved in self.target_symbols:
+
+            self.called.add(
+                resolved
+            )
+
+            self.generic_visit(
+                node
+            )
+
+            return
+
+
+        # 2) Rozwiązanie przez instancję (var = Class(); var.method())
+        #    - potwierdzone konstruktorem, więc dużo bardziej
+        #    wiarygodne niż zgadywanie po samej końcówce nazwy.
+        #    MUSI iść przed fallbackiem po krótkiej nazwie, bo
+        #    inaczej fallback (patrz niżej) prawie zawsze "wygra"
+        #    jako pierwszy trafiony kandydat i zamaskuje brak
+        #    faktycznego dopasowania typu.
+        if self._resolve_instance_method(
+            resolved
+        ):
+
+            self.generic_visit(
+                node
+            )
+
+            return
+
+
+        # 3) Fallback po krótkiej nazwie - tylko gdy nic powyżej
+        #    nie trafiło. To zgadywanka (np. "x.add(...)" może
+        #    być set.add(), nie metodą śledzonej klasy), więc
+        #    ląduje w osobnej, oznaczonej jako niepewna puli,
+        #    NIGDY w self.called.
         match = _match_symbol(
             resolved,
             self.target_symbols
@@ -478,17 +525,9 @@ class SymbolReferenceVisitor(
 
         if match:
 
-            self.called.add(
+            self.called_ambiguous.add(
                 match
             )
-
-
-        else:
-
-            self._resolve_instance_method(
-                resolved
-            )
-
 
 
         self.generic_visit(
@@ -509,12 +548,17 @@ class SymbolReferenceVisitor(
         na podstawie:
 
             instance = Class()
+
+        Zwraca True i dopisuje do self.called tylko wtedy,
+        gdy udało się potwierdzić klasę instancji. W przeciwnym
+        razie zwraca False, żeby wywołujący mógł spróbować
+        fallbacku po krótkiej nazwie.
         """
 
 
         if not resolved:
 
-            return
+            return False
 
 
 
@@ -525,7 +569,7 @@ class SymbolReferenceVisitor(
 
         if len(parts) != 2:
 
-            return
+            return False
 
 
 
@@ -540,7 +584,7 @@ class SymbolReferenceVisitor(
 
         if not constructor:
 
-            return
+            return False
 
 
 
@@ -549,17 +593,16 @@ class SymbolReferenceVisitor(
         )
 
 
-        match = _match_symbol(
-            candidate,
-            self.target_symbols
-        )
-
-
-        if match:
+        if candidate in self.target_symbols:
 
             self.called.add(
-                match
+                candidate
             )
+
+            return True
+
+
+        return False
 
 
 
@@ -621,6 +664,13 @@ def _empty_reference():
     return {
 
         "called_by": [],
+
+        # Moduły, w których znaleziono wywołanie pasujące
+        # TYLKO przez zgadywanie po krótkiej nazwie (np.
+        # x.add(...) bez potwierdzenia, że x to instancja
+        # śledzonej klasy). Nie liczy się do konsumentów -
+        # to sygnał "może", nie "na pewno".
+        "called_by_ambiguous": [],
 
         "event_bound_by": [],
 
@@ -731,6 +781,21 @@ def build_symbol_references(
                 ].append(
                     module_id
                 )
+
+        # --------------------------------------------------
+        # CALLS (AMBIGUOUS - short-name fallback only)
+        # --------------------------------------------------
+
+        for symbol in visitor.called_ambiguous:
+
+            if symbol in references:
+
+                references[symbol][
+                    "called_by_ambiguous"
+                ].append(
+                    module_id
+                )
+
         # --------------------------------------------------
         # EVENT CALLBACKS
         # --------------------------------------------------
@@ -971,3 +1036,5 @@ __all__ = [
     "SymbolReferenceVisitor",
 
 ]
+
+
