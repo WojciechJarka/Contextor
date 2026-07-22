@@ -1,31 +1,61 @@
 # -*- coding: utf-8 -*-
 """
 repo_guardian/core/name_collision.py
-
-Wersja tymczasowa (zahardkodowana) do testu poprawności całego systemu.
 """
 
-def detect_name_collisions(modules):
-    """
-    Zwraca zahardkodowaną kolizję dla test_module_a oraz test_module_b,
-    aby zweryfikować czy plik JSON i interfejs poprawnie ją odbierają.
-    """
-    # Sprawdzamy czy nasze pliki testowe w ogóle są w indeksie
-    keys = list(modules.keys())
-    print("DEBUG TEST KEYS:", keys)
+import ast
+from collections import defaultdict
+from pathlib import Path
 
-    # Zahardkodowana kolizja dla GLOBAL_CONFIG, process_data i DataProcessor
-    return {
-        "GLOBAL_CONFIG": [
-            {"type": "variable", "file": "test_module_a"},
-            {"type": "variable", "file": "test_module_b"}
-        ],
-        "process_data": [
-            {"type": "function", "file": "test_module_a"},
-            {"type": "function", "file": "test_module_b"}
-        ],
-        "DataProcessor": [
-            {"type": "class", "file": "test_module_a"},
-            {"type": "class", "file": "test_module_b"}
-        ]
-    }
+
+def detect_name_collisions(modules: dict) -> dict:
+    """
+    Wykrywa kolizje nazw w zindeksowanych modułach na podstawie analizy AST.
+    """
+    name_map = defaultdict(list)
+
+    for module_path, module_info in modules.items():
+        # Pobieramy fizyczną ścieżkę do pliku
+        file_path_str = getattr(module_info, "absolute_path", None) or getattr(module_info, "path", None)
+        if not file_path_str:
+            continue
+
+        file_path = Path(file_path_str)
+        if not file_path.exists():
+            continue
+
+        try:
+            source = file_path.read_text(encoding="utf-8")
+            tree = ast.parse(source)
+        except Exception:
+            continue
+
+        # Przechodzimy przez drzewo AST w poszukiwaniu klas, funkcji i zmiennych
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ClassDef):
+                name_map[node.name].append({
+                    "type": "class",
+                    "file": module_path
+                })
+            elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                name_map[node.name].append({
+                    "type": "function",
+                    "file": module_path
+                })
+            elif isinstance(node, ast.Assign):
+                for target in node.targets:
+                    if isinstance(target, ast.Name):
+                        name_map[target.id].append({
+                            "type": "variable",
+                            "file": module_path
+                        })
+
+    collisions = {}
+    
+    # Filtrujemy nazwy, które występują w więcej niż jednym pliku
+    for name, occurrences in name_map.items():
+        unique_files = {occ["file"] for occ in occurrences}
+        if len(unique_files) > 1:
+            collisions[name] = occurrences
+
+    return collisions
