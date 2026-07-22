@@ -25,7 +25,7 @@ from repo_guardian.core.domain.module import (
     Module),
 
 from repo_guardian.core.domain.imports import (
-    ImportRef,
+    ImportRef,
 )
 
 
