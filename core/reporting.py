@@ -14,6 +14,7 @@ Rozszerza klasyczny raport o:
 - architectural debt signals
 - soft dependency explanations
 - inspection targets
+- name collisions report (with conflicting code snippets)
 """
 
 import os
@@ -28,6 +29,7 @@ from repo_guardian.core.debt import compute_debt
 from repo_guardian.core.hotspots import detect_hotspots
 from repo_guardian.core.thresholds import get_thresholds
 from repo_guardian.core.artifact_usage_report import generate_artifact_usage_report
+from repo_guardian.core.validator.collisions import validate_name_collisions
 
 # ==========================================================
 # GRAPH HELPERS
@@ -583,6 +585,7 @@ def generate_report(
 
     if modules is not None:
         llm_signals["module_import_profile"] = _compute_import_profile(modules)
+        llm_signals["name_collisions"] = generate_collisions_report(modules)
 
     return {
         "status": (
@@ -652,6 +655,29 @@ def generate_structure_report(hard_edges: dict, soft_edges: dict) -> dict:
         "soft_edges": {k: sorted(list(set(v))) for k, v in soft_edges.items()}
     }
 
+def generate_collisions_report(modules: dict) -> dict:
+    """
+    Generuje dedykowany raport kolizji nazw dla artefaktów tego samego typu 
+    (klasa z klasą, funkcja z funkcją itp.), które posiadają inny kod,
+    zawierający również szczegóły kodu skoligaconych elementów.
+    """
+    all_collisions = validate_name_collisions(modules)
+    collisions_data = []
+
+    for error in all_collisions:
+        collisions_data.append({
+            "message": error.message,
+            "nodes": error.nodes,
+            "artifact_type": getattr(error, "artifact_type", "unknown"),
+            "conflicting_code": getattr(error, "code_snippets", getattr(error, "snippets", {})),
+        })
+
+    return {
+        "generated_at": datetime.now().isoformat(),
+        "total_collisions": len(collisions_data),
+        "collisions": collisions_data,
+    }
+
 def save_all_reports(
     repo_name: str,
     modules: dict,
@@ -663,7 +689,7 @@ def save_all_reports(
     root_path: str,
     log=None
 ):
-    """Fasada: zapisuje 3 oddzielne pliki w katalogu output sekwencyjnie z orjson."""
+    """Fasada: zapisuje oddzielne pliki w katalogu output sekwencyjnie z orjson."""
     
     if log:
         log("Rozpoczynanie sekwencyjnego zapisu raportów...")
@@ -702,6 +728,17 @@ def save_all_reports(
         f"output/{repo_name}_artifacts.json",
         log=log,
         label="raport artefaktów"
+    )
+
+    # 4. Raport kolizji nazw (wraz z kodem)
+    if log:
+        log("Generowanie raportu kolizji nazw...")
+    collisions_data = generate_collisions_report(modules)
+    save_json(
+        collisions_data,
+        f"output/{repo_name}_name_collisions.json",
+        log=log,
+        label="raport kolizji nazw"
     )
 
     if log:
