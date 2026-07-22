@@ -14,7 +14,7 @@ def detect_name_collisions(modules):
     """
     Analizuje zindeksowane moduły, pobiera ścieżki do plików,
     parsuje ich zawartość i znajduje sytuacje, w których
-    ta sama nazwa definiuje różne elementy w różnych plikach.
+    ta sama nazwa definiuje elementy w różnych plikach.
     """
     name_map = defaultdict(list)
 
@@ -64,11 +64,8 @@ def detect_name_collisions(modules):
     for name, occurrences in name_map.items():
         unique_files = {occ["file"] for occ in occurrences}
         
-        # Jeśli nazwa występuje w więcej niż jednym pliku...
+        # Jeśli ta sama nazwa występuje w więcej niż jednym pliku - rejestrujemy kolizję
         if len(unique_files) > 1:
-            types_found = {occ["type"] for occ in occurrences}
-            
-            if len(types_found) > 1 or len(occurrences) > len(unique_files):
-                semantic_collisions[name] = occurrences
+            semantic_collisions[name] = occurrences
 
     return semantic_collisions
