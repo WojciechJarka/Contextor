@@ -1,5 +1,4 @@
 # -*- coding: utf-8 -*-
-
 """
 repo_guardian/core/validator/collisions.py
 
@@ -7,7 +6,9 @@ Semantic name collision validation handling both identical and differing code im
 attaching code snippets for JSON reporting.
 """
 
+import ast
 from collections import defaultdict
+from pathlib import Path
 from ..domain.module import Module
 from ..domain.validation import ValidationError
 
@@ -24,35 +25,61 @@ def validate_name_collisions(
     name_map = defaultdict(list)
 
     for module_path, module in modules.items():
-        classes = getattr(module, "class_definitions", {})
-        functions = getattr(module, "function_definitions", {})
-        variables = getattr(module, "variable_definitions", {})
+        # Pobieramy fizyczną ścieżkę do pliku tak samo jak w działającym detektorze
+        file_path_str = getattr(module, "absolute_path", None) or getattr(module, "path", None)
+        if not file_path_str:
+            continue
 
-        if isinstance(classes, list):
-            classes = {c: getattr(module, f"get_class_code", lambda x: "")(c) for c in classes}
-        if isinstance(functions, list):
-            functions = {f: "" for f in functions}
+        file_path = Path(file_path_str)
+        if not file_path.exists():
+            continue
 
-        for cls_name, cls_code in classes.items():
-            name_map[cls_name].append({
-                "type": "class", 
-                "file": module_path, 
-                "code": cls_code
-            })
+        try:
+            source = file_path.read_text(encoding="utf-8")
+            tree = ast.parse(source)
+        except Exception:
+            continue
 
-        for func_name, func_code in functions.items():
-            name_map[func_name].append({
-                "type": "function", 
-                "file": module_path, 
-                "code": func_code
-            })
+        # Zbieramy definicje oraz ich wycinek kodu źródłowego za pomocą AST
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ClassDef):
+                # Wyciągamy surowy kod węzła klasy lub jego treść
+                try:
+                    code_snippet = ast.get_source_segment(source, node) or ""
+                except Exception:
+                    code_snippet = node.name
+                
+                name_map[node.name].append({
+                    "type": "class",
+                    "file": module_path,
+                    "code": code_snippet
+                })
 
-        for var_name, var_code in variables.items():
-            name_map[var_name].append({
-                "type": "variable", 
-                "file": module_path, 
-                "code": var_code
-            })
+            elif isinstance(node, ast.FunctionDef) or isinstance(node, ast.AsyncFunctionDef):
+                try:
+                    code_snippet = ast.get_source_segment(source, node) or ""
+                except Exception:
+                    code_snippet = node.name
+
+                name_map[node.name].append({
+                    "type": "function",
+                    "file": module_path,
+                    "code": code_snippet
+                })
+
+            elif isinstance(node, ast.Assign):
+                for target in node.targets:
+                    if isinstance(target, ast.Name):
+                        try:
+                            code_snippet = ast.get_source_segment(source, node) or ""
+                        except Exception:
+                            code_snippet = target.id
+
+                        name_map[target.id].append({
+                            "type": "variable",
+                            "file": module_path,
+                            "code": code_snippet
+                        })
 
     for name, occurrences in name_map.items():
         unique_files = {occ["file"] for occ in occurrences}
