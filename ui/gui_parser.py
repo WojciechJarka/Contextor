@@ -7,6 +7,7 @@ import os
 import re
 
 from repo_guardian.ui.path_memory import load_state, save_state
+from repo_guardian.ui.progress_widget import create_progress_bar, run_with_progress
 
 
 def matches_term(data, search_term, is_py_query):
@@ -449,7 +450,6 @@ def run_parser_window():
     )
 
 
-
     def execute_parsing():
 
         json_path = json_path_var.get()
@@ -472,36 +472,51 @@ def run_parser_window():
             return
 
 
-        try:
+        def task():
 
-            out = parse_and_filter_json(
+            return parse_and_filter_json(
                 json_path,
                 term
             )
 
+
+        def on_success(out):
 
             messagebox.showinfo(
                 "Sukces",
                 f"Plik wyjściowy:\n{out}"
             )
 
-
             parser_win.destroy()
 
 
-        except Exception as e:
+        def on_error(exc):
 
             messagebox.showerror(
                 "Błąd",
-                str(e)
+                str(exc)
             )
 
 
+        run_with_progress(
+            parser_win,
+            progress_bar,
+            task,
+            on_success=on_success,
+            on_error=on_error,
+            buttons=[parse_btn]
+        )
 
-    tk.Button(
+
+
+    parse_btn = tk.Button(
         parser_win,
         text="Parsuj JSON",
         command=execute_parsing
-    ).pack(
+    )
+
+    parse_btn.pack(
         pady=20
     )
+
+    progress_bar = create_progress_bar(parser_win)
