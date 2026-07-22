@@ -1,7 +1,26 @@
 # -*- coding: utf-8 -*-
 """
 repo_guardian/core/name_collision.py
+
+Semantic Name Collision Detector
+
+Detects:
+- duplicate public classes
+- duplicate public functions
+- conflicting exported constants
+
+Ignores:
+- locals
+- arguments
+- methods
+- AST visitors
+- __init__
+- __all__
+- temporary variables
+- implementation details
 """
+
+from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass, field
@@ -9,10 +28,16 @@ from enum import Enum
 from pathlib import Path
 from typing import Dict, List
 import ast
+import hashlib
+
+
+# ============================================================
+# ENUMS
+# ============================================================
 
 
 class CollisionKind(Enum):
-    IMPORT_IMPORT = "import_import"
+    DUPLICATE_PUBLIC_SYMBOL = "duplicate_public_symbol"
     SEMANTIC_COLLISION = "semantic_collision"
 
 
@@ -20,247 +45,372 @@ class RiskLevel(Enum):
     LOW = "low"
     MEDIUM = "medium"
     HIGH = "high"
+    CRITICAL = "critical"
+
+
+# ============================================================
+# REPORT
+# ============================================================
 
 
 @dataclass
 class CollisionReport:
+
     name: str
+
     kind: CollisionKind
+
     symbols: List[str]
+
     risk_score: int
+
     risk_level: RiskLevel
+
     explanation: str
+
     nodes: List[str] = field(default_factory=list)
+
     artifact_type: str = "unknown"
+
     conflicting_code: Dict[str, str] = field(default_factory=dict)
 
+    confidence: float = 0.0
+
+
 
 # ============================================================
-# FILTERS
+# IGNORE RULES
 # ============================================================
+
 
 IGNORED_NAMES = {
+
     "__init__",
-    "__new__",
-    "__repr__",
-    "__str__",
-    "__eq__",
-    "__hash__",
     "__all__",
-}
 
+    "main",
 
-IGNORED_AST_VISITORS = {
-    "visit_ClassDef",
-    "visit_FunctionDef",
-    "visit_Name",
-    "visit_Call",
-    "visit_Assign",
-    "generic_visit",
-}
+    "run",
 
-
-COMMON_LOCAL_NAMES = {
     "path",
     "name",
     "result",
-    "raw",
-    "tree",
-    "node",
-    "value",
+    "results",
+
     "data",
     "item",
+    "value",
+
+    "tree",
+    "visitor",
+
     "args",
     "kwargs",
-    "status",
-    "total",
-    "used",
-    "symbols",
+
+    "self",
+
+    "modules",
+    "metrics",
+    "cycles",
+    "debt",
+
+    "errors",
     "references",
+    "symbols",
+
 }
 
 
+IGNORED_PREFIXES = (
+    "_",
+)
+
+
+
+IGNORED_FUNCTION_PATTERNS = {
+
+    "visit_ClassDef",
+    "visit_FunctionDef",
+    "visit_Assign",
+    "generic_visit",
+
+}
+
+
+
 # ============================================================
-# SCOPE TRACKER
+# HELPERS
 # ============================================================
 
-class ScopeCollector(ast.NodeVisitor):
 
-    def __init__(self, module_id):
-        self.module_id = module_id
-        self.scope = []
-        self.symbols = []
+def _is_public(name: str) -> bool:
 
+    if name in IGNORED_NAMES:
+        return False
 
-    def current_scope(self):
-        if not self.scope:
-            return self.module_id
+    if name.startswith(IGNORED_PREFIXES):
+        return False
 
-        return ".".join(
-            [self.module_id] + self.scope
-        )
+    return True
 
 
-    def add_symbol(self, node, name, kind):
 
-        if name in IGNORED_NAMES:
-            return
+def _fingerprint(node: ast.AST) -> str:
 
-        if name.startswith("__"):
-            return
+    """
+    Creates structural fingerprint.
 
-        if name in IGNORED_AST_VISITORS:
-            return
+    Different formatting
+    != different implementation.
+    """
 
+    try:
 
-        self.symbols.append(
-            {
-                "name": name,
-                "kind": kind,
-                "qualified": (
-                    f"{self.current_scope()}.{name}"
-                ),
-                "scope": self.current_scope(),
-                "file": self.module_id,
-                "source": (
-                    ast.unparse(node)
-                    if hasattr(ast, "unparse")
-                    else str(node)
-                ),
-            }
-        )
-
-
-    def visit_ClassDef(self, node):
-
-        self.add_symbol(
+        dump = ast.dump(
             node,
-            node.name,
-            "class"
+            annotate_fields=False,
+            include_attributes=False
         )
 
-        self.scope.append(node.name)
+    except Exception:
 
-        self.generic_visit(node)
-
-        self.scope.pop()
+        dump = str(node)
 
 
+    return hashlib.sha1(
+        dump.encode("utf-8")
+    ).hexdigest()
 
-    def visit_FunctionDef(self, node):
 
-        self.add_symbol(
+
+def _source(node):
+
+    try:
+
+        return ast.unparse(node)
+
+    except Exception:
+
+        return str(node)
+
+
+
+# ============================================================
+# SYMBOL EXTRACTION
+# ============================================================
+
+
+def _extract_public_symbols(
+    tree,
+    module_id
+):
+
+    symbols = []
+
+
+    for node in tree.body:
+
+
+        # -------------------------
+        # Classes
+        # -------------------------
+
+        if isinstance(node, ast.ClassDef):
+
+            if not _is_public(node.name):
+                continue
+
+
+            symbols.append(
+                {
+                    "name": node.name,
+                    "type": "class",
+                    "module": module_id,
+                    "node": node,
+                    "fingerprint": _fingerprint(node),
+                    "source": _source(node),
+                }
+            )
+
+
+        # -------------------------
+        # Functions
+        # -------------------------
+
+        elif isinstance(
             node,
-            node.name,
-            "function"
-        )
+            (
+                ast.FunctionDef,
+                ast.AsyncFunctionDef
+            )
+        ):
 
-        self.scope.append(node.name)
-
-        self.generic_visit(node)
-
-        self.scope.pop()
-
+            if not _is_public(node.name):
+                continue
 
 
-    def visit_AsyncFunctionDef(self, node):
-
-        self.visit_FunctionDef(node)
-
+            if node.name in IGNORED_FUNCTION_PATTERNS:
+                continue
 
 
-    def visit_Assign(self, node):
+            symbols.append(
+                {
+                    "name": node.name,
+                    "type": "function",
+                    "module": module_id,
+                    "node": node,
+                    "fingerprint": _fingerprint(node),
+                    "source": _source(node),
+                }
+            )
 
-        # tylko modułowe zmienne
-        if len(self.scope) == 0:
+
+        # -------------------------
+        # Constants only
+        # -------------------------
+
+        elif isinstance(
+            node,
+            ast.Assign
+        ):
 
             for target in node.targets:
 
-                if isinstance(target, ast.Name):
 
-                    self.add_symbol(
-                        node,
-                        target.id,
-                        "variable"
+                if not isinstance(
+                    target,
+                    ast.Name
+                ):
+                    continue
+
+
+                name = target.id
+
+
+                # only uppercase constants
+
+                if (
+                    name.isupper()
+                    and _is_public(name)
+                ):
+
+                    symbols.append(
+                        {
+                            "name": name,
+                            "type": "constant",
+                            "module": module_id,
+                            "node": node,
+                            "fingerprint": _fingerprint(node),
+                            "source": _source(node),
+                        }
                     )
 
-        # lokalne zmienne ignorujemy
 
-        self.generic_visit(node)
+    return symbols
 
 
 
 # ============================================================
-# VALIDATOR
+# MAIN VALIDATOR
 # ============================================================
 
-def validate_name_collisions(symbol_registry_or_modules):
+
+def validate_name_collisions(
+    registry
+) -> List[CollisionReport]:
+
+
+    modules = []
+
+
+    if hasattr(
+        registry,
+        "modules"
+    ):
+
+        modules = registry.modules.values()
+
+
+    elif isinstance(
+        registry,
+        dict
+    ):
+
+        modules = registry.values()
+
+
+    elif isinstance(
+        registry,
+        list
+    ):
+
+        modules = registry
+
+
 
     symbol_map = defaultdict(list)
 
 
-    modules_iter = []
 
-    if hasattr(symbol_registry_or_modules, "modules"):
-        modules_iter = (
-            symbol_registry_or_modules.modules.values()
-        )
-
-    elif isinstance(symbol_registry_or_modules, dict):
-        modules_iter = symbol_registry_or_modules.values()
-
-    elif isinstance(symbol_registry_or_modules, list):
-        modules_iter = symbol_registry_or_modules
+    for module in modules:
 
 
-    for module in modules_iter:
-
-        module_path = getattr(
+        path = getattr(
             module,
             "file_path",
-            getattr(module, "path", None)
+            getattr(
+                module,
+                "path",
+                None
+            )
         )
+
 
         module_id = getattr(
             module,
             "name",
-            getattr(module, "id", str(module))
+            getattr(
+                module,
+                "id",
+                str(module)
+            )
         )
 
 
-        if not module_path:
+        if not path:
             continue
 
 
-        path = Path(module_path)
+        file = Path(path)
 
-        if not path.exists():
+
+        if not file.exists():
             continue
 
 
         try:
+
             tree = ast.parse(
-                path.read_text(
+                file.read_text(
                     encoding="utf-8"
                 )
             )
 
+
         except Exception:
+
             continue
 
 
-        collector = ScopeCollector(
+
+        for symbol in _extract_public_symbols(
+            tree,
             module_id
-        )
-
-        collector.visit(tree)
-
-
-        for symbol in collector.symbols:
+        ):
 
             key = (
                 symbol["name"],
-                symbol["kind"]
+                symbol["type"]
             )
 
             symbol_map[key].append(
@@ -268,79 +418,97 @@ def validate_name_collisions(symbol_registry_or_modules):
             )
 
 
+
     reports = []
 
 
-    for (name, kind), occurrences in symbol_map.items():
+
+    for (
+        name,
+        artifact_type
+    ), occurrences in symbol_map.items():
 
 
-        # dokładnie ten sam qualified symbol
-        # nie jest problemem
-
-        scopes = {
-            x["qualified"]
+        modules = {
+            x["module"]
             for x in occurrences
         }
 
 
-        if len(scopes) <= 1:
-            continue
-
-
-        # ignorowanie typowych nazw lokalnych
-
-        if name in COMMON_LOCAL_NAMES:
+        if len(modules) < 2:
             continue
 
 
 
-        files = {
-            x["file"]
+        fingerprints = {
+            x["fingerprint"]
             for x in occurrences
         }
 
 
-        if len(files) <= 1:
+        # same implementation
+        # probably harmless
+
+        if len(fingerprints) == 1:
+
             continue
 
 
 
-        conflicting_code = {
-            x["qualified"]:
-            x["source"]
-            for x in occurrences
-        }
+        risk = 80
 
 
+        if artifact_type == "class":
 
-        nodes = list(files)
+            risk = 90
+
+        elif artifact_type == "function":
+
+            risk = 85
+
+        elif artifact_type == "constant":
+
+            risk = 60
 
 
 
         reports.append(
+
             CollisionReport(
 
                 name=name,
 
                 kind=CollisionKind.SEMANTIC_COLLISION,
 
-                symbols=list(scopes),
+                symbols=list(modules),
 
-                risk_score=65,
+                risk_score=risk,
 
-                risk_level=RiskLevel.MEDIUM,
-
-                explanation=(
-                    f"Possible semantic collision for "
-                    f"{kind} '{name}' "
-                    f"between different scopes."
+                risk_level=(
+                    RiskLevel.HIGH
+                    if risk >= 80
+                    else RiskLevel.MEDIUM
                 ),
 
-                nodes=nodes,
+                explanation=(
+                    f"Public {artifact_type} "
+                    f"'{name}' has different "
+                    f"implementations across modules."
+                ),
 
-                artifact_type=kind,
+                nodes=list(modules),
 
-                conflicting_code=conflicting_code
+                artifact_type=artifact_type,
+
+                conflicting_code={
+                    x["module"]:
+                    x["source"]
+
+                    for x in occurrences
+                },
+
+                confidence=0.9,
+
             )
         )
 
