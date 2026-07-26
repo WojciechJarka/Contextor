@@ -289,7 +289,8 @@ def _collect_symbol_context(
     references = build_symbol_references(
         modules,
         all_symbols,
-        root_path
+        root_path,
+        definer_module=module_id,
     )
 
 
