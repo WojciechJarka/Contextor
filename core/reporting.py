@@ -763,15 +763,22 @@ def save_all_reports(
     debt: dict,
     runtime: dict,
     root_path: str,
-    log=None
+    log=None,
+    collisions: list | None = None,
 ):
     """Fasada: zapisuje oddzielne pliki w katalogu output sekwencyjnie z orjson."""
     
     if log:
         log("Rozpoczynanie sekwencyjnego zapisu raportów...")
 
+    all_collisions = (
+        collisions
+        if collisions is not None
+        else validate_name_collisions(modules)
+    )
+
     # 1. Raport podsumowujący
-    summary_data = generate_summary_report(metrics, cycles, debt)
+    summary_data = generate_summary_report(metrics, cycles, debt, collisions=all_collisions)
     save_json(
         summary_data,
         f"output/{repo_name}_summary.json",
@@ -791,7 +798,7 @@ def save_all_reports(
     # 3. Raport kolizji nazw (duplikatów)
     if log:
         log("Generowanie raportu kolizji nazw...")
-    collisions_data = generate_collisions_report(modules)
+    collisions_data = generate_collisions_report(modules, precomputed=all_collisions)
     save_json(
         collisions_data,
         f"output/{repo_name}_name_collisions.json",
