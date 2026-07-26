@@ -179,16 +179,33 @@ def compact_artifact_report(report: dict) -> dict:
             "consumers": _idx_list(consumers, index_of),
         }
 
-        # Pomijamy usage/consumer_count całkowicie, gdy nie ma
-        # konsumentów - to zawsze same puste listy i zera.
-        if consumers:
+        # Pomijamy usage TYLKO gdy WSZYSTKIE kategorie usage są
+        # puste - nie wystarczy patrzeć na "consumers", bo
+        # ambiguous_calls z definicji nigdy tam nie wchodzi
+        # (to zgadywanka, nie potwierdzony fakt), a event_bindings
+        # bywa odfiltrowane z consumers (wykluczenie
+        # core.api_consumers) mimo że samo w sobie ma dane.
+        compacted_usage = _compact_usage(
+            artifact.get("usage", {}),
+            index_of,
+        )
 
-            entry["usage"] = _compact_usage(
-                artifact.get("usage", {}),
-                index_of,
-            )
+        if compacted_usage:
+            entry["usage"] = compacted_usage
 
         compact_artifacts[key] = entry
+
+    compact_shared_artifacts = [
+        {
+            "key": a.get("key"),
+            "artifact": a.get("artifact"),
+            "kind": a.get("kind"),
+            "definer_module": _idx(a.get("definer_module"), index_of),
+            "consumers": _idx_list(a.get("consumers", []), index_of),
+            "consumer_count": a.get("consumer_count"),
+        }
+        for a in report.get("shared_artifacts", []) or []
+    ]
 
     compact_clusters = []
 
@@ -262,6 +279,7 @@ def compact_artifact_report(report: dict) -> dict:
         "modules": module_ids,
 
         "artifacts": compact_artifacts,
+        "shared_artifacts": compact_shared_artifacts,
         "shared_usage_clusters": compact_clusters,
         "core_extraction_candidates": compact_candidates,
     }
