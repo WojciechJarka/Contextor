@@ -29,6 +29,7 @@ from repo_guardian.core.debt import compute_debt
 from repo_guardian.core.hotspots import detect_hotspots
 from repo_guardian.core.thresholds import get_thresholds
 from repo_guardian.core.artifact_usage_report import generate_artifact_usage_report
+from repo_guardian.core.artifact_usage_report_compact import compact_artifact_report
 from repo_guardian.core.validator.collisions import validate_name_collisions
 
 # ==========================================================
@@ -822,6 +823,23 @@ def save_all_reports(
         f"output/{repo_name}_artifacts.json",
         log=log,
         label="raport artefaktów",
+        compact=True,
+    )
+
+    # 5. Zwarta wersja raportu artefaktów (DODATKOWY plik,
+    # obok - nie zamiast - _artifacts.json). Eksperymentalna,
+    # do testów parsera; jeśli się nie sprawdzi, wystarczy
+    # usunąć te kilka linii, reszta pipeline'u jest nietknięta.
+    if log:
+        log("Generowanie zwartej wersji raportu artefaktów...")
+
+    compact_artifact_data = compact_artifact_report(artifact_data)
+
+    save_json(
+        compact_artifact_data,
+        f"output/{repo_name}_artifacts_compact.json",
+        log=log,
+        label="raport artefaktów (zwarty)",
         compact=True,
     )
 
