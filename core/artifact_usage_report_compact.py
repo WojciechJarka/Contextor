@@ -275,6 +275,20 @@ def compact_artifact_report(report: dict) -> dict:
         )
 
     compact_report = {
+        "_format_note": (
+            "This is a compacted artifact-usage report. Numbers inside "
+            "'definer_module', 'consumers', and the categories under "
+            "'usage' (direct_calls, callback_calls, event_bindings, "
+            "runtime_calls, api_imports, inheritance, ambiguous_calls) "
+            "are INDEXES into the 'modules' array below (e.g. index 13 "
+            "means modules[13]), not counts, ranks, or priorities. "
+            "If an artifact entry has no 'usage' key, it means it has "
+            "zero consumers - not missing data. 'ambiguous_calls' are "
+            "low-confidence guesses (short-name matches with no import "
+            "confirming the source module) and should be treated as "
+            "'maybe', never as confirmed usage."
+        ),
+
         "runtime": report.get("runtime", {}),
         "module_count": report.get("module_count"),
         "artifact_count": report.get("artifact_count"),
