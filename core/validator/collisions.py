@@ -382,8 +382,10 @@ def validate_name_collisions(
                             "col_end"
                         ),
                     },
-
-                    "source": item["code"],
+                    # "source" celowo usunięte - identyczne z
+                    # conflicting_code[symbol_details.module],
+                    # dublowanie samego tekstu kodu bez nowej
+                    # informacji.
                 }
             )
 
