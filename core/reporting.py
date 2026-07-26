@@ -479,6 +479,11 @@ def generate_report(
     )
 
 
+    collisions_list = []
+    if modules is not None:
+        collisions_list = validate_name_collisions(modules)
+
+
     graph_dict = {
 
         "hard_edges":
@@ -584,9 +589,7 @@ def generate_report(
     }
 
 
-    collisions_list = []
     if modules is not None:
-        collisions_list = validate_name_collisions(modules)
         llm_signals["module_import_profile"] = _compute_import_profile(modules)
         llm_signals["name_collisions"] = generate_collisions_report(
             modules, precomputed=collisions_list
