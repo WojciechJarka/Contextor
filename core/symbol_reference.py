@@ -917,18 +917,37 @@ def build_symbol_references(
         # --------------------------------------------------
         # IMPORTS
         # --------------------------------------------------
-
+        #
+        # UWAGA: ta pętla korzysta z ODDZIELNEGO źródła faktów
+        # (module.imports, warstwa facts/domain), nie z aliasów
+        # AST budowanych przez SymbolReferenceVisitor. imp.names
+        # to gołe nazwy zaimportowanych symboli, BEZ informacji
+        # z jakiego modułu pochodzą - samo dopasowanie po nazwie
+        # myliłoby więc symbole o tej samej krótkiej nazwie
+        # zdefiniowane w różnych modułach (dokładnie ten sam
+        # problem co w visit_Call, tylko na innym źródle danych).
+        # Jeśli znamy definer_module, wymagamy DODATKOWO, żeby
+        # import faktycznie pochodził z tego konkretnego modułu
+        # (imp.module), zanim policzymy go jako imported_from.
+        #
 
         for imp in module.imports:
+
+            imp_module = getattr(imp, "module", None)
+
+            if definer_module and not _import_matches_symbol(
+                imp_module or "",
+                definer_module,
+            ):
+                continue
 
             for imported_name in imp.names:
 
                 for symbol in target_symbols:
 
-                    if _import_matches_symbol(
-                        imported_name,
-                        symbol
-                    ):
+                    bare_symbol = qualified_map[symbol]
+
+                    if imported_name == bare_symbol:
 
                         references[symbol][
                             "imported_from"
