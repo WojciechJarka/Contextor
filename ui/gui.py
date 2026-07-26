@@ -40,6 +40,11 @@ from repo_guardian.core.reporting_single_file import (
     save_single_file_report,
 )
 
+from repo_guardian.core.reporting_layer import (
+    generate_layer_report,
+    save_layer_report,
+)
+
 from repo_guardian.ui.gui_parser import run_parser_window
 from repo_guardian.ui.path_memory import load_state, save_state
 from repo_guardian.ui.exclude_check import check_stale_excludes
@@ -61,6 +66,8 @@ def run():
 
 
     repo_path_var = tk.StringVar()
+
+    layer_path_var = tk.StringVar()
 
     file_path_var = tk.StringVar()
 
@@ -128,7 +135,71 @@ def run():
                 directory
             )
 
+            # nowy root unieważnia poprzedni wybór warstwy -
+            # mogła należeć do zupełnie innego repo
+            layer_path_var.set("")
+
             save_state(repository=directory)
+
+    def browse_layer():
+
+        root_dir = repo_path_var.get()
+
+        if not root_dir:
+
+            messagebox.showwarning(
+                "Missing repository",
+                "Select Repository (root) first, before choosing a layer."
+            )
+
+            return
+
+        directory = filedialog.askdirectory(
+            initialdir=root_dir
+        )
+
+        if not directory:
+
+            return
+
+        try:
+
+            root_resolved = Path(root_dir).resolve()
+            layer_resolved = Path(directory).resolve()
+
+        except Exception:
+
+            messagebox.showerror(
+                "Invalid path",
+                "Could not resolve selected paths."
+            )
+
+            return
+
+        if layer_resolved == root_resolved:
+
+            messagebox.showwarning(
+                "Invalid layer",
+                "Layer cannot be the same directory as the repository root.\n"
+                "Select a subdirectory instead."
+            )
+
+            return
+
+        if root_resolved not in layer_resolved.parents:
+
+            messagebox.showwarning(
+                "Invalid layer",
+                "Selected directory is outside the repository root.\n"
+                "Layer must be a subdirectory of:\n"
+                f"{root_resolved}"
+            )
+
+            return
+
+        layer_path_var.set(
+            str(layer_resolved)
+        )
 
     def browse_file():
 
@@ -253,7 +324,118 @@ def run():
             task,
             on_success=on_success,
             on_error=on_error,
-            buttons=[analyze_btn, analyze_single_btn],
+            buttons=[analyze_btn, analyze_layer_btn, analyze_single_btn],
+            log_box=log_box
+        )
+
+    def analyze_layer():
+
+        root_dir = repo_path_var.get()
+
+        layer_dir = layer_path_var.get()
+
+        if not root_dir:
+
+            messagebox.showwarning(
+                "Missing repository",
+                "Please select ROOT directory of scanned project"
+            )
+
+            return
+
+        if not layer_dir:
+
+            messagebox.showwarning(
+                "Missing layer",
+                "Please select a layer (subdirectory) to analyze."
+            )
+
+            return
+
+        try:
+
+            root_resolved = Path(root_dir).resolve()
+            layer_resolved = Path(layer_dir).resolve()
+
+        except Exception:
+
+            messagebox.showerror(
+                "Invalid path",
+                "Could not resolve selected paths."
+            )
+
+            return
+
+        if (
+            layer_resolved == root_resolved
+            or root_resolved not in layer_resolved.parents
+        ):
+
+            messagebox.showwarning(
+                "Invalid layer",
+                "Layer must be a subdirectory of the selected repository "
+                "root - not the root itself, and not outside of it."
+            )
+
+            return
+
+        def task(log=None):
+
+            if log: log(f"Analiza warstwy: {layer_resolved.name}")
+
+            modules = build_index(
+                root_dir
+            )
+
+            graph, cache_hit = get_cached_graph(
+                modules,
+                build_graph
+            )
+
+            if log: log("Generowanie raportu warstwy...")
+
+            report = generate_layer_report(
+                str(layer_resolved),
+                modules,
+                graph,
+                root_dir,
+            )
+
+            output = (
+                "output/"
+                +
+                f"layer_{layer_resolved.name}.json"
+            )
+
+            save_layer_report(
+                report,
+                output
+            )
+
+            if log: log("Raport warstwy zapisany pomyślnie.")
+            return output
+
+        def on_success(output):
+
+            messagebox.showinfo(
+                "Done",
+                f"Layer report created:\n{output}"
+            )
+
+        def on_error(exc):
+
+            messagebox.showerror(
+                "Error",
+                str(exc)
+            )
+
+        run_with_progress(
+            root,
+            progress_bar,
+            task,
+            on_success=on_success,
+            on_error=on_error,
+            buttons=[analyze_btn, analyze_layer_btn, analyze_single_btn],
             log_box=log_box
         )
 
@@ -355,7 +537,7 @@ def run():
             task,
             on_success=on_success,
             on_error=on_error,
-            buttons=[analyze_btn, analyze_single_btn],
+            buttons=[analyze_btn, analyze_layer_btn, analyze_single_btn],
             log_box=log_box
         )
 
@@ -441,6 +623,39 @@ def run():
     )
 
     # -------------------------
+    # Layer (subdirectory within ROOT)
+    # -------------------------
+
+
+    layer_frame = tk.Frame(
+        root
+    )
+
+    layer_frame.pack(
+        pady=5
+    )
+
+
+    tk.Entry(
+        layer_frame,
+        textvariable=layer_path_var,
+        width=50
+    ).pack(
+        side=tk.LEFT,
+        padx=5
+    )
+
+
+    tk.Button(
+        layer_frame,
+        text="Browse Layer",
+        command=browse_layer
+    ).pack(
+        side=tk.LEFT,
+        padx=5
+    )
+
+    # -------------------------
     # Single File
     # -------------------------
 
@@ -487,6 +702,16 @@ def run():
 
     analyze_btn.pack(
         pady=15
+    )
+
+    analyze_layer_btn = tk.Button(
+        root,
+        text="Analyze Layer",
+        command=analyze_layer
+    )
+
+    analyze_layer_btn.pack(
+        pady=5
     )
 
     analyze_single_btn = tk.Button(
