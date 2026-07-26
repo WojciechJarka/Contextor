@@ -45,6 +45,7 @@ from repo_guardian.ui.path_memory import load_state, save_state
 from repo_guardian.ui.exclude_check import check_stale_excludes
 from repo_guardian.ui.exclude_gui import run_exclude_window
 from repo_guardian.ui.progress_widget import create_progress_bar, create_log_box, run_with_progress
+from repo_guardian.core.validator.collisions import validate_name_collisions
 
 def run():
 
@@ -191,7 +192,14 @@ def run():
             if log: log("Obliczanie metryk, wykrywanie cykli i długu technicznego...")
             metrics = compute_graph_metrics(graph.hard_edges, graph.soft_edges)
             cycles = detect_cycles(graph.hard_edges)
-            debt = compute_debt(graph.hard_edges, graph.soft_edges, cycles, metrics)
+            all_collisions = validate_name_collisions(modules)
+            debt = compute_debt(
+                graph.hard_edges,
+                graph.soft_edges,
+                cycles,
+                metrics,
+                collisions=all_collisions,
+            )
 
             save_all_reports(
                 repo_name=repo_name,
@@ -202,7 +210,8 @@ def run():
                 debt=debt,
                 runtime={"cache_hit": cache_hit},
                 root_path=path,
-                log=log
+                log=log,
+                collisions=all_collisions,
             )
 
             if log: log("Analiza repozytorium zakończona pomyślnie.")
