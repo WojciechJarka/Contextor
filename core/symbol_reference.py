@@ -1,5 +1,3 @@
-#~~~~~~[START PLIKU: symbol_reference.py ]~~~~~~#
-# -*- coding: utf-8 -*-
 
 """
 repo_guardian/core/symbol_reference.py
@@ -168,6 +166,51 @@ def _match_symbol(
     return None
 
 
+def _classify_match(name, resolved, target_symbols, aliases):
+    """
+    Klasyfikuje potencjalne dopasowanie wywołania/referencji.
+
+    Zwraca (bucket, symbol):
+
+        ("confirmed", symbol)
+            Jednoznaczne trafienie w w pełni zakwalifikowany
+            symbol z target_symbols (np. import jawnie na
+            niego wskazuje).
+
+        ("ambiguous", symbol)
+            Dopasowanie WYŁĄCZNIE po krótkiej nazwie, i TYLKO
+            gdy `name` nie zostało jawnie rozwiązane przez
+            żaden import/alias. To zgadywanka (np. lokalna
+            klasa w tym samym pliku), nie fakt.
+
+        (None, None)
+            Brak dopasowania. W szczególności: gdy `name` BYŁO
+            rozwiązane przez import na coś innego niż nasz cel
+            — wtedy WIEMY że to nie nasz symbol i celowo NIE
+            zgadujemy po krótkiej nazwie (to właśnie ten
+            fallback powodował fałszywe przypisania między
+            modułami definiującymi symbol o tej samej krótkiej
+            nazwie — patrz raport kolizji nazw).
+    """
+
+    if not resolved:
+        return None, None
+
+    if resolved in target_symbols:
+        return "confirmed", resolved
+
+    if name in aliases:
+        # Import jawnie mówi, że to coś innego. Nie zgadujemy.
+        return None, None
+
+    match = _match_symbol(resolved, target_symbols)
+
+    if match:
+        return "ambiguous", match
+
+    return None, None
+
+
 
 # ==========================================================
 # VISITOR
@@ -253,9 +296,11 @@ class SymbolReferenceVisitor(
                     name,
                     self.aliases
                 )
-                match = _match_symbol(
+                _, match = _classify_match(
+                    name,
                     resolved,
-                    self.target_symbols
+                    self.target_symbols,
+                    self.aliases,
                 )
                 if match:
                     self.event_bound.add(
@@ -270,9 +315,11 @@ class SymbolReferenceVisitor(
                     name,
                     self.aliases
                 )
-                match = _match_symbol(
+                _, match = _classify_match(
+                    name,
                     resolved,
-                    self.target_symbols
+                    self.target_symbols,
+                    self.aliases,
                 )
                 if match:
                     self.event_bound.add(
@@ -313,9 +360,11 @@ class SymbolReferenceVisitor(
             )
 
 
-            match = _match_symbol(
+            _, match = _classify_match(
+                name,
                 resolved,
-                self.target_symbols
+                self.target_symbols,
+                self.aliases,
             )
 
 
@@ -512,14 +561,19 @@ class SymbolReferenceVisitor(
             return
 
 
-        # 3) Fallback po krótkiej nazwie - tylko gdy nic powyżej
-        #    nie trafiło. To zgadywanka (np. "x.add(...)" może
-        #    być set.add(), nie metodą śledzonej klasy), więc
-        #    ląduje w osobnej, oznaczonej jako niepewna puli,
-        #    NIGDY w self.called.
-        match = _match_symbol(
+         # 3) Fallback po krótkiej nazwie - tylko gdy nic powyżej
+        #    nie trafiło ORAZ import jawnie nie wskazał na inny
+        #    symbol. To zgadywanka (np. "x.add(...)" może być
+        #    set.add(), nie metodą śledzonej klasy), więc ląduje
+        #    w osobnej, oznaczonej jako niepewna puli, NIGDY w
+        #    self.called. Jeśli `called_name` był w aliasach i
+        #    wskazywał na coś innego, WIEMY że to nie nasz symbol
+        #    - nie zgadujemy (patrz _classify_match).
+        _, match = _classify_match(
+            called_name,
             resolved,
-            self.target_symbols
+            self.target_symbols,
+            self.aliases,
         )
 
 
@@ -631,9 +685,11 @@ class SymbolReferenceVisitor(
             )
 
 
-            match = _match_symbol(
+            _, match = _classify_match(
+                base_name,
                 resolved,
-                self.target_symbols
+                self.target_symbols,
+                self.aliases,
             )
 
 
@@ -714,18 +770,46 @@ def _load_tree(
 def build_symbol_references(
     modules,
     target_symbols,
-    root_path
+    root_path,
+    definer_module=None
 ):
     """
     Buduje referencje symboli.
 
 
     Facts only.
+
+    definer_module:
+        Moduł, w którym zdefiniowane są `target_symbols` (bare
+        names, np. "Module"). Gdy podany, dopasowanie wewnątrz
+        wykonywane jest po W PEŁNI zakwalifikowanej nazwie
+        (`{definer_module}.{symbol}`), żeby nie mylić symboli
+        o tej samej krótkiej nazwie zdefiniowanych w różnych
+        modułach (patrz raport kolizji nazw). Zwracany słownik
+        jest z powrotem kluczowany po bare name — kontrakt
+        funkcji się nie zmienia.
     """
 
 
-    target_symbols = set(
+    bare_symbols = set(
         target_symbols
+    )
+
+
+    if definer_module:
+        qualified_map = {
+            f"{definer_module}.{symbol}": symbol
+            for symbol in bare_symbols
+        }
+    else:
+        qualified_map = {
+            symbol: symbol
+            for symbol in bare_symbols
+        }
+
+
+    target_symbols = set(
+        qualified_map.keys()
     )
 
 
@@ -854,12 +938,18 @@ def build_symbol_references(
                         )
 
 
-    return _normalize_references(
+    references = _normalize_references(
         references
     )
+
+    # Mapujemy z powrotem na bare names - kontrakt funkcji
+    # (co zwraca) zostaje identyczny jak przed patchem.
+    return {
+        qualified_map[qualified]: data
+        for qualified, data in references.items()
+    }
 # ==========================================================
 # IMPORT MATCHING
-# ==========================================================
 
 
 def _import_matches_symbol(
