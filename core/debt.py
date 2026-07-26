@@ -44,6 +44,7 @@ def compute_debt(
     metrics: Dict,
     clusters: Optional[List[List[str]]] = None,
     hotspots: Optional[List[Dict]] = None,
+    collisions: Optional[List] = None,
 ) -> Dict:
     """
     Oblicza heurystyczną presję architektoniczną.
@@ -61,6 +62,12 @@ def compute_debt(
 
     hotspot_penalty:
         moduły przekraczające próg krytyczny
+
+    collision_penalty:
+        realne (nie identyczne) kolizje nazw API między modułami -
+        dwie różne definicje pod tą samą nazwą to duże ryzyko
+        pomyłki dla kogokolwiek (człowieka albo LLM-a) edytującego
+        repo bez świadomości duplikatu.
     """
 
 
@@ -190,6 +197,23 @@ def compute_debt(
 
 
     # ======================================================
+    # NAME COLLISIONS
+    # ======================================================
+
+
+    real_collisions = [
+        c for c in (collisions or [])
+        if not getattr(c, "is_identical", False)
+    ]
+
+
+    collision_penalty = round(
+        len(real_collisions) * 1.5,
+        4
+    )
+
+
+    # ======================================================
     # FINAL SCORE
     # ======================================================
 
@@ -210,8 +234,11 @@ def compute_debt(
 
         hotspot_penalty
 
-    )
+        +
 
+        collision_penalty
+
+    )
 
 
     edge_count = metrics.get(
@@ -253,6 +280,14 @@ def compute_debt(
 
         "hotspot_penalty":
             hotspot_penalty,
+
+
+        "collision_penalty":
+            collision_penalty,
+
+
+        "collision_count":
+            len(real_collisions),
 
 
         "normalized":
