@@ -211,7 +211,6 @@ def _classify_match(name, resolved, target_symbols, aliases):
     return None, None
 
 
-
 # ==========================================================
 # VISITOR
 # ==========================================================
