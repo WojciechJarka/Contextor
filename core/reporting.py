@@ -531,6 +531,7 @@ def generate_report(
         metrics,
         clusters=clusters,
         hotspots=hotspots,
+        collisions=collisions_list,
     )
 
 
@@ -583,14 +584,23 @@ def generate_report(
     }
 
 
+    collisions_list = []
     if modules is not None:
+        collisions_list = validate_name_collisions(modules)
         llm_signals["module_import_profile"] = _compute_import_profile(modules)
-        llm_signals["name_collisions"] = generate_collisions_report(modules)
+        llm_signals["name_collisions"] = generate_collisions_report(
+            modules, precomputed=collisions_list
+        )
+
+    real_collisions = [
+        c for c in collisions_list
+        if not getattr(c, "is_identical", False)
+    ]
 
     return {
         "status": (
             "HEALTHY"
-            if not cycles
+            if not cycles and not real_collisions
             else "BROKEN"
         ),
 
@@ -636,12 +646,28 @@ def save_json(
 # EXPORT HELPERS FOR SPLIT REPORTS
 # ==========================================================
 
-def generate_summary_report(metrics: dict, cycles: list, debt: dict) -> dict:
+def generate_summary_report(
+    metrics: dict,
+    cycles: list,
+    debt: dict,
+    collisions: list | None = None,
+) -> dict:
     """Generuje skondensowany raport stanu projektu."""
+    collisions = collisions or []
+
+    # is_identical=True to nieszkodliwy duplikat (np. re-export) —
+    # nie psuje statusu. Liczy się tylko realny konflikt API:
+    # ta sama nazwa, różny kod.
+    real_collisions = [
+        c for c in collisions
+        if not getattr(c, "is_identical", False)
+    ]
+
     return {
-        "status": "HEALTHY" if not cycles else "BROKEN",
+        "status": "HEALTHY" if not cycles and not real_collisions else "BROKEN",
         "metrics": metrics,
         "cycle_count": len(cycles),
+        "collision_count": len(real_collisions),
         "debt_summary": {
             "total_score": debt.get("score", 0),
             "hotspot_count": len(debt.get("hotspots", [])),
@@ -655,13 +681,17 @@ def generate_structure_report(hard_edges: dict, soft_edges: dict) -> dict:
         "soft_edges": {k: sorted(list(set(v))) for k, v in soft_edges.items()}
     }
 
-def generate_collisions_report(modules: dict) -> dict:
+def generate_collisions_report(modules: dict, precomputed: list | None = None) -> dict:
     """
     Generuje dedykowany raport kolizji nazw dla artefaktów tego samego typu 
     (klasa z klasą, funkcja z funkcją itp.), które posiadają inny kod,
     zawierający również szczegóły kodu skoligaconych elementów.
     """
-    all_collisions = validate_name_collisions(modules)
+    all_collisions = (
+        precomputed
+        if precomputed is not None
+        else validate_name_collisions(modules)
+    )
     collisions_data = []
 
     for error in all_collisions:
