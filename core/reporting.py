@@ -823,7 +823,6 @@ def save_all_reports(
         f"output/{repo_name}_artifacts.json",
         log=log,
         label="raport artefaktów",
-        compact=True,
     )
 
     # 5. Zwarta wersja raportu artefaktów (DODATKOWY plik,
