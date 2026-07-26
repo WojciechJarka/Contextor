@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 repo_guardian/cli.py
 
@@ -26,6 +25,7 @@ from repo_guardian.core.artifact_usage_report import generate_artifact_usage_rep
 from repo_guardian.core.metrics import compute_graph_metrics
 from repo_guardian.core.cycles import detect_cycles
 from repo_guardian.core.debt import compute_debt
+from repo_guardian.core.validator.collisions import validate_name_collisions
 
 def main(root_path: str = ".") -> int:
     modules = build_index(root_path)
@@ -46,13 +46,25 @@ def main(root_path: str = ".") -> int:
     # 1. Summary
     metrics = compute_graph_metrics(graph.hard_edges, graph.soft_edges)
     cycles = detect_cycles(graph.hard_edges)
-    debt = compute_debt(graph.hard_edges, graph.soft_edges, cycles, metrics)
-    
-    summary = generate_summary_report(graph, metrics, cycles, debt)
+    all_collisions = validate_name_collisions(modules)
+    debt = compute_debt(
+        graph.hard_edges,
+        graph.soft_edges,
+        cycles,
+        metrics,
+        collisions=all_collisions,
+    )
+
+    # UWAGA: oryginalne wywołania niżej miały niezgodną liczbę
+    # argumentów z definicjami w core/reporting.py
+    # (generate_summary_report przyjmuje metrics/cycles/debt,
+    # nie graph; generate_structure_report przyjmuje
+    # hard_edges/soft_edges, nie graph) - poprawione tutaj.
+    summary = generate_summary_report(metrics, cycles, debt, collisions=all_collisions)
     save_json(summary, f"output/{repo_name}_summary.json")
 
     # 2. Structure
-    structure = generate_structure_report(graph)
+    structure = generate_structure_report(graph.hard_edges, graph.soft_edges)
     save_json(structure, f"output/{repo_name}_structure.json")
 
     # 3. Artifacts
