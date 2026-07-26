@@ -626,7 +626,8 @@ def save_json(
     report: dict,
     path: str,
     log=None,
-    label: str = ""
+    label: str = "",
+    compact: bool = False,
 ) -> None:
     directory = os.path.dirname(path)
     if directory:
@@ -635,16 +636,22 @@ def save_json(
     if log and label:
         log(f"Serializowanie i zapisywanie: {label} ({path})...")
 
+    # compact=True usuwa wcięcia/nowe linie (czysto kosmetyczne w
+    # JSON) - dla dużych raportów (artifacts.json) to realny zysk
+    # rozmiaru bez żadnej zmiany struktury/kluczy/wartości.
+    option = orjson.OPT_NON_STR_KEYS
+    if not compact:
+        option |= orjson.OPT_INDENT_2
+
     serialized = orjson.dumps(
         report,
-        option=orjson.OPT_INDENT_2 | orjson.OPT_NON_STR_KEYS
+        option=option
     )
     with open(path, "wb") as f:
         f.write(serialized)
 
     if log and label:
         log(f"Zapisano pomyślnie: {label}")
-
 # ==========================================================
 # EXPORT HELPERS FOR SPLIT REPORTS
 # ==========================================================
@@ -807,7 +814,8 @@ def save_all_reports(
         artifact_data,
         f"output/{repo_name}_artifacts.json",
         log=log,
-        label="raport artefaktów"
+        label="raport artefaktów",
+        compact=True,
     )
 
     if log:
