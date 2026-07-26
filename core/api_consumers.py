@@ -154,6 +154,17 @@ def extract_api_consumers(
         )
 
 
+        # Dopasowania trafione WYŁĄCZNIE przez fallback po krótkiej
+        # nazwie (patrz symbol_reference.py::_classify_match) -
+        # zgadywanki, nigdy nie liczą się do consumers/consumer_count,
+        # ale warto je pokazać LLM-owi zamiast po cichu gubić sygnał.
+        ambiguous_calls = _normalize_list(
+            reference.get(
+                "called_by_ambiguous"
+            )
+        )
+
+
         consumers = sorted(
             set(
                 runtime_calls
@@ -204,6 +215,10 @@ def extract_api_consumers(
 
                 "inheritance":
                     inheritance,
+
+
+                "ambiguous_calls":
+                    ambiguous_calls,
             },
 
 
