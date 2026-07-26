@@ -62,6 +62,12 @@ def _collect_module_ids(report: dict) -> set:
             for v in category_values or []:
                 ids.add(v)
 
+    for a in report.get("shared_artifacts", []) or []:
+        if a.get("definer_module"):
+            ids.add(a["definer_module"])
+        for c in a.get("consumers", []) or []:
+            ids.add(c)
+
     for cluster in report.get("shared_usage_clusters", []) or []:
 
         for m in cluster.get("modules", []) or []:
@@ -295,6 +301,113 @@ def compact_artifact_report(report: dict) -> dict:
 
 
 # ==========================================================
+# BLOCK-PER-LINE WRITER
+# ==========================================================
+#
+# compact_artifact_report() powyżej to TRANSFORMACJA DANYCH
+# (indeksy modułów, pomijanie pustych usage) - nie mówi nic
+# o formatowaniu zapisu. Ta funkcja to osobna sprawa: SPOSÓB
+# ZAPISU już przekształconego raportu na dysk.
+#
+# Standardowy json.dump(..., indent=2) daje ~15 linii na jeden
+# artefakt (czytelne, ale duże). json.dumps(..., separators=(",",":"))
+# na całości daje 1 linię na CAŁY plik (małe, ale nieparsowalne
+# liniowo/blokowo). Tu jest kompromis: każdy artefakt i każdy
+# shared_artifact to DOKŁADNIE jeden wiersz (bez wcięć w środku),
+# a reszta pól (moduły, klastry, liczniki) też po jednym wierszu.
+#
+# Wynik to dalej jeden, w pełni poprawny dokument JSON - json.load()
+# wczyta go tak samo jak każdy inny - ale można go też przeglądać/
+# grepować/parsować liniowo, bo granica bloku == granica wiersza,
+# dokładnie tak jak w pełnym _artifacts.json z wcięciami, tylko że
+# blok mieści się w jednej linii zamiast kilkunastu.
+#
+
+
+import os
+import json
+
+
+def _line(obj) -> str:
+    """Serializuje pojedynczy obiekt w jednej linii, bez zbędnych spacji."""
+
+    return json.dumps(
+        obj,
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+
+
+def save_compact_artifact_report(report: dict, path: str) -> None:
+    """
+    Zapisuje ZWARTY raport artefaktów (wynik compact_artifact_report)
+    w formacie "jeden blok = jeden wiersz".
+
+    Zakłada dokładnie kształt zwracany przez compact_artifact_report:
+    klucze "artifacts" i "shared_artifacts" to te, które rozbijamy
+    na wiele wierszy (po jednym elemencie); wszystkie pozostałe
+    klucze najwyższego poziomu (runtime, module_count, modules,
+    shared_usage_clusters, core_extraction_candidates, debug_info...)
+    zapisujemy jako pojedyncze, jednowierszowe pola - to i tak małe
+    struktury w porównaniu do "artifacts".
+    """
+
+    directory = os.path.dirname(path)
+    if directory:
+        os.makedirs(directory, exist_ok=True)
+
+    artifacts = report.get("artifacts", {})
+    shared_artifacts = report.get("shared_artifacts", [])
+
+    other_fields = {
+        key: value
+        for key, value in report.items()
+        if key not in ("artifacts", "shared_artifacts")
+    }
+
+    with open(path, "w", encoding="utf-8") as f:
+
+        f.write("{\n")
+
+        for key, value in other_fields.items():
+
+            f.write(
+                f"  {_line(key)}: {_line(value)},\n"
+            )
+
+        # --- artifacts: jeden artefakt = jeden wiersz ---
+
+        f.write('  "artifacts": {\n')
+
+        items = list(artifacts.items())
+
+        for i, (key, value) in enumerate(items):
+
+            comma = "," if i < len(items) - 1 else ""
+
+            f.write(
+                f"    {_line(key)}: {_line(value)}{comma}\n"
+            )
+
+        f.write("  },\n")
+
+        # --- shared_artifacts: jeden wpis = jeden wiersz ---
+
+        f.write('  "shared_artifacts": [\n')
+
+        for i, item in enumerate(shared_artifacts):
+
+            comma = "," if i < len(shared_artifacts) - 1 else ""
+
+            f.write(
+                f"    {_line(item)}{comma}\n"
+            )
+
+        f.write("  ]\n")
+        f.write("}\n")
+
+
+# ==========================================================
 # EXPORTS
 # ==========================================================
 
@@ -302,4 +415,5 @@ def compact_artifact_report(report: dict) -> dict:
 __all__ = [
     "compact_artifact_report",
     "build_module_index",
+    "save_compact_artifact_report",
 ]
