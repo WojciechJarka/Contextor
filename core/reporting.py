@@ -29,7 +29,10 @@ from repo_guardian.core.debt import compute_debt
 from repo_guardian.core.hotspots import detect_hotspots
 from repo_guardian.core.thresholds import get_thresholds
 from repo_guardian.core.artifact_usage_report import generate_artifact_usage_report
-from repo_guardian.core.artifact_usage_report_compact import compact_artifact_report
+from repo_guardian.core.artifact_usage_report_compact import (
+    compact_artifact_report,
+    save_compact_artifact_report,
+)
 from repo_guardian.core.validator.collisions import validate_name_collisions
 
 # ==========================================================
@@ -834,12 +837,9 @@ def save_all_reports(
 
     compact_artifact_data = compact_artifact_report(artifact_data)
 
-    save_json(
+    save_compact_artifact_report(
         compact_artifact_data,
         f"output/{repo_name}_artifacts_compact.json",
-        log=log,
-        label="raport artefaktów (zwarty)",
-        compact=True,
     )
 
     if log:
