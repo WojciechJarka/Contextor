@@ -174,6 +174,7 @@ def collect_module_artifacts(
             modules,
             own_symbols,
             root_path,
+            definer_module=module_id,
         )
 
         consumers = extract_api_consumers(
