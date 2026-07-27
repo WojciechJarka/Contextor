@@ -809,7 +809,39 @@ def generate_report(
 
     return main_report
 
+def save_all_reports(
+    report: Dict[str, Any],
+    output_dir: str,
+    filename: str = "report.json"
+) -> Dict[str, Any]:
+    """
+    Zapisuje główny raport w katalogu output_dir oraz wyzwala
+    generowanie i zapis pod-raportów (sliced) oraz raportu artefaktów.
+    """
+    os.makedirs(output_dir, exist_ok=True)
+    main_report_path = os.path.join(output_dir, filename)
 
+    # Uaktualnienie output_dir w runtime
+    if "runtime" not in report:
+        report["runtime"] = {}
+    report["runtime"]["output_dir"] = output_dir
+
+    # Wygenerowanie i dodanie ścieżek pod-raportów (sliced)
+    try:
+        sliced_paths = generate_sliced_reports(report, output_dir)
+        report["sliced_reports"] = sliced_paths
+    except Exception as e:
+        report["sliced_reports_error"] = str(e)
+
+    # Zapis głównego pliku JSON
+    with open(main_report_path, "wb") as f:
+        f.write(orjson.dumps(report, option=orjson.OPT_INDENT_2))
+
+    return {
+        "main_report": main_report_path,
+        "sliced_reports": report.get("sliced_reports", {}),
+    }
+    
 # ==========================================================
 # EXPORTS
 # ==========================================================
@@ -819,5 +851,5 @@ __all__ = [
     "generate_report",
     "filter_report_by_subpath",
     "generate_sliced_reports",
+    "save_all_reports",
 ]
-#~~~~~~[KONIEC CZĘŚCI 2/2]~~~~~~#
