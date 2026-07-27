@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """
 repo_guardian/cli.py
 
@@ -6,7 +7,7 @@ Warstwa CLI:
 - generuje graf zależności
 - wykorzystuje incremental cache
 - waliduje architekturę
-- zapisuje raport JSON
+- zapisuje raporty JSON (summary, structure, artifacts oraz per-layer)
 """
 
 import sys
@@ -21,11 +22,15 @@ from repo_guardian.core.reporting import (
     generate_structure_report,
     save_json
 )
+from repo_guardian.core.reporting_layer import generate_layer_report
 from repo_guardian.core.artifact_usage_report import generate_artifact_usage_report
 from repo_guardian.core.metrics import compute_graph_metrics
 from repo_guardian.core.cycles import detect_cycles
 from repo_guardian.core.debt import compute_debt
 from repo_guardian.core.validator.collisions import validate_name_collisions
+
+# Wykryte/zdefiniowane warstwy w projekcie
+PROJECT_LAYERS = ["core", "ui", "cli", "domain", "facts"]
 
 def main(root_path: str = ".") -> int:
     modules = build_index(root_path)
@@ -55,11 +60,6 @@ def main(root_path: str = ".") -> int:
         collisions=all_collisions,
     )
 
-    # UWAGA: oryginalne wywołania niżej miały niezgodną liczbę
-    # argumentów z definicjami w core/reporting.py
-    # (generate_summary_report przyjmuje metrics/cycles/debt,
-    # nie graph; generate_structure_report przyjmuje
-    # hard_edges/soft_edges, nie graph) - poprawione tutaj.
     summary = generate_summary_report(metrics, cycles, debt, collisions=all_collisions)
     save_json(summary, f"output/{repo_name}_summary.json")
 
@@ -70,6 +70,11 @@ def main(root_path: str = ".") -> int:
     # 3. Artifacts
     artifact_report = generate_artifact_usage_report(modules, root_path=root_path, runtime={"cache_hit": cache_hit})
     save_json(artifact_report, f"output/{repo_name}_artifacts.json")
+
+    # 4. Layer Reports (Pętla po wszystkich 5 warstwach)
+    for layer in PROJECT_LAYERS:
+        layer_rep = generate_layer_report(graph, layer_path=layer, root_path=root_path)
+        save_json(layer_rep, f"output/layer_{layer}.json")
     
     for e in errors:
         print(f"[{e.kind}] {e.message}")
