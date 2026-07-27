@@ -1,79 +1,1324 @@
+
+
+# Repo_Guardian/repo_generator/repo_gui.py
+
+# ============================================================
+# Repo Guardian - Repo Builder GUI
+# ============================================================
+
 import tkinter as tk
 from tkinter import filedialog, messagebox
-import os
 
-# --- KONFIGURACJA ---
-# Rozszerzenia, które mają być dodawane do repozytorium
-FILE_EXTENSIONS = {".py", ".bat", ".vbs", ".js", ".sh", ".md", ".txt", ".json"}
-# Katalogi/pliki, które zawsze pomijamy
-SKIP_DIRS = {".git", "venv", "__pycache__"}
+import os
+import subprocess
+import shutil
+
+
+# ============================================================
+# KONFIGURACJA
+# ============================================================
+
+DEFAULT_EXTENSIONS = {
+    ".py",
+    ".json",
+    ".parquet",
+    ".txt",
+    ".md",
+    ".bat",
+    ".vbs",
+    ".js",
+    ".sh",
+    ".xml",
+    ".yaml",
+    ".yml",
+    ".csv",
+    ".ini",
+    ".toml",
+    ".doc",
+    ".docx",
+    ".xls",
+    ".xlsx",
+    ".ppt",
+    ".pptx"
+}
+
+
+DEFAULT_SKIP_DIRS = {
+    ".git",
+    "__pycache__",
+    "venv",
+    ".venv",
+    ".idea",
+    ".vscode",
+    "node_modules",
+    "dist",
+    "build",
+
+    # środowiska Python
+    "winpython",
+    "python",
+    "Python",
+    "python310",
+    "python311",
+    "Lib",
+    "Scripts",
+    "Include",
+
+    # cache
+    ".pytest_cache",
+    ".mypy_cache",
+    ".ruff_cache",
+    ".tox"
+}
+
+
+# ============================================================
+# IKONY
+# ============================================================
+
+def draw_icon(canvas, icon_type):
+
+    canvas.delete("all")
+
+
+    if icon_type == "big_plus":
+
+        canvas.create_line(
+            17, 5,
+            17, 30,
+            fill="green",
+            width=5
+        )
+
+        canvas.create_line(
+            5, 17,
+            30, 17,
+            fill="green",
+            width=5
+        )
+
+
+    elif icon_type == "small_plus":
+
+        for x in (8, 17, 26):
+
+            canvas.create_line(
+                x,
+                12,
+                x,
+                22,
+                fill="green",
+                width=2
+            )
+
+            canvas.create_line(
+                x - 5,
+                17,
+                x + 5,
+                17,
+                fill="green",
+                width=2
+            )
+
+
+    elif icon_type == "big_minus":
+
+        canvas.create_line(
+            5,
+            17,
+            30,
+            17,
+            fill="red",
+            width=5
+        )
+
+
+    elif icon_type == "small_minus":
+
+        for x in (8, 17, 26):
+
+            canvas.create_line(
+                x - 5,
+                17,
+                x + 5,
+                17,
+                fill="red",
+                width=3
+            )
+
+
+
+def create_icon_button(
+        parent,
+        text,
+        command,
+        icon_type
+):
+
+    frame = tk.Frame(parent)
+
+    frame.pack(
+        side=tk.LEFT,
+        padx=5
+    )
+
+
+    canvas = tk.Canvas(
+        frame,
+        width=35,
+        height=35,
+        highlightthickness=0
+    )
+
+    canvas.pack(
+        side=tk.LEFT
+    )
+
+
+    draw_icon(
+        canvas,
+        icon_type
+    )
+
+
+    tk.Button(
+        frame,
+        text=text,
+        command=command,
+        height=2
+    ).pack(
+        side=tk.LEFT
+    )
+
+
+# ============================================================
+# KLASA GŁÓWNA
+# ============================================================
 
 class RepoGenerator:
+
+
     def __init__(self, root):
+
         self.root = root
-        self.root.title("Generator Repozytorium")
-        self.root.geometry("400x250")
-        
-        self.path_var = tk.StringVar()
-        self.filter_md = tk.BooleanVar(value=True)
 
-        tk.Label(root, text="Wybierz katalog do zindeksowania:").pack(pady=10)
-        
-        frame = tk.Frame(root)
-        frame.pack(pady=5)
-        tk.Entry(frame, textvariable=self.path_var, width=40).pack(side=tk.LEFT, padx=5)
-        tk.Button(frame, text="...", command=self.browse).pack(side=tk.LEFT)
-        
-        tk.Checkbutton(root, text="Filtruj (usuń) pliki .md", variable=self.filter_md).pack(pady=10)
-        tk.Button(root, text="GENERUJ REPOZYTORIUM", command=self.generate, 
-                  bg="green", fg="white", height=2).pack(pady=10)
 
-    def browse(self):
-        path = filedialog.askdirectory()
-        if path: self.path_var.set(path)
+        self.root.title(
+            "Repo Builder - Context Generator"
+        )
 
-    def generate(self):
-        repo_folder = self.path_var.get()
-        if not os.path.exists(repo_folder):
-            messagebox.showerror("Błąd", "Nieprawidłowa ścieżka!")
+
+        self.root.geometry(
+            "1100x700"
+        )
+
+
+        self.files = []
+
+
+        self.extensions = set(
+            DEFAULT_EXTENSIONS
+        )
+
+
+        # aktywne filtry katalogów
+        # STARTOWO pełna lista aktywna
+        self.skip_dirs = set(
+            DEFAULT_SKIP_DIRS
+        )
+
+
+        self.output_dir = os.path.join(
+            os.path.dirname(
+                os.path.abspath(__file__)
+            ),
+            "OUTPUT"
+        )
+
+
+        os.makedirs(
+            self.output_dir,
+            exist_ok=True
+        )
+
+
+        self.build_gui()
+
+
+
+    # ========================================================
+    # GUI
+    # ========================================================
+
+    def build_gui(self):
+
+        tk.Label(
+            self.root,
+            text="Repo Builder - wybór kontekstu",
+            font=("Arial", 14)
+        ).pack(
+            pady=10
+        )
+
+
+        toolbar = tk.Frame(
+            self.root
+        )
+
+        toolbar.pack()
+
+
+
+        create_icon_button(
+            toolbar,
+            "WYBIERZ REPO",
+            self.add_repository,
+            "big_plus"
+        )
+
+
+        create_icon_button(
+            toolbar,
+            "DODAJ PLIKI",
+            self.add_files,
+            "small_plus"
+        )
+
+
+        create_icon_button(
+            toolbar,
+            "USUŃ ZAZNACZONE",
+            self.remove_selected,
+            "big_minus"
+        )
+
+
+        create_icon_button(
+            toolbar,
+            "USUŃ WSZYSTKIE",
+            self.remove_all,
+            "small_minus"
+        )
+
+
+        # ====================================================
+        # LISTA PLIKÓW
+        # ====================================================
+
+        frame = tk.Frame(
+            self.root,
+            relief=tk.GROOVE,
+            borderwidth=2
+        )
+
+
+        frame.pack(
+            fill=tk.BOTH,
+            expand=True,
+            padx=10,
+            pady=10
+        )
+
+
+        scrollbar = tk.Scrollbar(
+            frame
+        )
+
+
+        scrollbar.pack(
+            side=tk.RIGHT,
+            fill=tk.Y
+        )
+
+
+        self.listbox = tk.Listbox(
+            frame,
+            selectmode=tk.MULTIPLE,
+            exportselection=False,
+            yscrollcommand=scrollbar.set
+        )
+
+
+        self.listbox.pack(
+            fill=tk.BOTH,
+            expand=True
+        )
+
+
+        scrollbar.config(
+            command=self.listbox.yview
+        )
+
+
+    # ========================================================
+    # GUI
+    # ========================================================
+
+    def build_gui(self):
+
+        tk.Label(
+            self.root,
+            text="Repo Builder - wybór kontekstu",
+            font=("Arial",14)
+        ).pack(
+            pady=10
+        )
+
+
+        toolbar=tk.Frame(
+            self.root
+        )
+
+        toolbar.pack()
+
+
+        create_icon_button(
+            toolbar,
+            "WYBIERZ REPO",
+            self.add_repository,
+            "big_plus"
+        )
+
+
+        create_icon_button(
+            toolbar,
+            "DODAJ PLIKI",
+            self.add_files,
+            "small_plus"
+        )
+
+
+        create_icon_button(
+            toolbar,
+            "USUŃ ZAZNACZONE",
+            self.remove_selected,
+            "big_minus"
+        )
+
+
+        create_icon_button(
+            toolbar,
+            "USUŃ WSZYSTKIE",
+            self.remove_all,
+            "small_minus"
+        )
+
+
+        # ====================================================
+        # LISTA PLIKÓW
+        # ====================================================
+
+        frame=tk.Frame(
+            self.root,
+            relief=tk.GROOVE,
+            borderwidth=2
+        )
+
+        frame.pack(
+            fill=tk.BOTH,
+            expand=True,
+            padx=10,
+            pady=10
+        )
+
+
+        scrollbar=tk.Scrollbar(
+            frame
+        )
+
+        scrollbar.pack(
+            side=tk.RIGHT,
+            fill=tk.Y
+        )
+
+
+        self.listbox=tk.Listbox(
+            frame,
+            selectmode=tk.MULTIPLE,
+            exportselection=False,
+            yscrollcommand=scrollbar.set
+        )
+
+        self.listbox.pack(
+            fill=tk.BOTH,
+            expand=True
+        )
+
+
+        scrollbar.config(
+            command=self.listbox.yview
+        )
+
+
+        controls=tk.Frame(
+            frame
+        )
+
+        controls.pack(
+            side=tk.BOTTOM,
+            fill=tk.X,
+            pady=5
+        )
+
+
+        tk.Button(
+            controls,
+            text="ZAZNACZ WSZYSTKIE",
+            command=self.select_all,
+            width=20
+        ).pack(
+            side=tk.LEFT,
+            padx=5
+        )
+
+
+        tk.Button(
+            controls,
+            text="ODZNACZ WSZYSTKIE",
+            command=self.unselect_all,
+            width=20
+        ).pack(
+            side=tk.LEFT,
+            padx=5
+        )
+
+
+        # ====================================================
+        # DOLNY PANEL
+        # ====================================================
+
+        bottom=tk.Frame(
+            self.root
+        )
+
+        bottom.pack(
+            pady=10
+        )
+
+
+        tk.Button(
+            bottom,
+            text="FILTRY PLIKÓW",
+            command=self.open_filters,
+            width=20
+        ).pack(
+            side=tk.LEFT,
+            padx=5
+        )
+
+
+        tk.Button(
+            bottom,
+            text="OUTPUT FOLDER",
+            command=self.open_output_folder,
+            width=20
+        ).pack(
+            side=tk.LEFT,
+            padx=5
+        )
+
+
+        tk.Button(
+            bottom,
+            text="OPRÓŻNIJ OUTPUT",
+            command=self.clear_output,
+            width=20
+        ).pack(
+            side=tk.LEFT,
+            padx=5
+        )
+
+
+        tk.Button(
+            self.root,
+            text="GENERUJ REPOZYTORIUM",
+            command=self.generate,
+            bg="green",
+            fg="white",
+            height=2
+        ).pack(
+            pady=10
+        )
+
+
+
+    # ========================================================
+    # FILTRY
+    # ========================================================
+
+    def is_directory_blocked(self,path):
+
+        parts=path.replace(
+            "\\",
+            "/"
+        ).split("/")
+
+
+        for part in parts:
+
+            for skip in self.skip_dirs:
+
+                if part.lower()==skip.lower():
+
+                    return True
+
+
+        return False
+
+
+
+    def is_filename_blocked(self,filename):
+
+        filename_lower=filename.lower()
+
+
+        for skip in self.skip_dirs:
+
+            if skip.lower() in filename_lower:
+
+                return True
+
+
+        return False
+
+
+
+    def is_extension_allowed(self,path):
+
+        ext=os.path.splitext(
+            path
+        )[1].lower()
+
+
+        return ext in self.extensions
+
+    # ========================================================
+    # DODAWANIE REPOZYTORIUM
+    # ========================================================
+
+    def add_repository(self):
+
+        folder=filedialog.askdirectory()
+
+
+        if not folder:
             return
 
-        folder_name = os.path.basename(repo_folder)
-        output_filename = f"repozytorium_{folder_name}.txt"
-        output_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), output_filename)
 
-        try:
-            with open(output_file, "w", encoding="utf-8") as out:
-                for root, dirs, files in os.walk(repo_folder):
-                    # Filtrowanie folderów (usuwanie z listy dirs modyfikuje zachowanie os.walk)
-                    dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
-                    
-                    for file in files:
-                        # Pomijanie samego pliku wynikowego
-                        if file == output_filename: continue
-                        
-                        ext = os.path.splitext(file)[1].lower()
-                        if ext not in FILE_EXTENSIONS: continue
-                        
-                        # Filtrowanie plików .md
-                        if self.filter_md.get() and ext == ".md": continue
-                        
-                        full_path = os.path.join(root, file)
-                        rel_path = os.path.relpath(full_path, repo_folder)
 
-                        out.write(f"#~~~~~~[START PLIKU: {rel_path} ]~~~~~~#\n")
-                        try:
-                            with open(full_path, 'r', encoding='utf-8', errors='ignore') as f:
-                                out.write(f.read())
-                        except Exception as e:
-                            out.write(f"BŁĄD ODCZYTU: {e}")
-                        out.write(f"\n#~~~~~~[KONIEC PLIKU: {rel_path} ]~~~~~~#\n\n")
-            
-            messagebox.showinfo("Sukces", f"Gotowe! Plik zapisano:\n{output_file}")
-        except Exception as e:
-            messagebox.showerror("Błąd", f"Wystąpił błąd: {e}")
+        added=0
+        blocked=0
 
-if __name__ == "__main__":
-    root = tk.Tk()
-    app = RepoGenerator(root)
+        new_files=[]
+
+
+
+        for root,dirs,files in os.walk(folder):
+
+
+            # filtr katalogów zanim os.walk wejdzie dalej
+
+            dirs[:]=[
+                d
+                for d in dirs
+                if not any(
+                    d.lower()==skip.lower()
+                    for skip in self.skip_dirs
+                )
+            ]
+
+
+
+            for filename in files:
+
+
+                full_path=os.path.join(
+                    root,
+                    filename
+                )
+
+
+                if self.is_directory_blocked(
+                    full_path
+                ):
+
+                    blocked+=1
+                    continue
+
+
+
+                if self.is_filename_blocked(
+                    filename
+                ):
+
+                    blocked+=1
+                    continue
+
+
+
+                if not self.is_extension_allowed(
+                    full_path
+                ):
+
+                    blocked+=1
+                    continue
+
+
+
+                if full_path in self.files:
+
+                    continue
+
+
+
+                self.files.append(
+                    full_path
+                )
+
+
+                new_files.append(
+                    full_path
+                )
+
+
+                added+=1
+
+
+
+        # jeden refresh GUI
+
+        for path in new_files:
+
+            self.listbox.insert(
+                tk.END,
+                path
+            )
+
+
+
+        if new_files:
+
+            self.select_all()
+
+
+
+        messagebox.showinfo(
+            "Repo dodane",
+            f"Dodano plików: {added}\n"
+            f"Pominięto: {blocked}"
+        )
+
+
+
+    # ========================================================
+    # DODAWANIE POJEDYNCZYCH PLIKÓW
+    # ========================================================
+
+    def add_files(self):
+
+        selected=filedialog.askopenfilenames(
+            title="Wybierz pliki"
+        )
+
+
+        if not selected:
+            return
+
+
+
+        added=0
+        blocked=[]
+
+
+
+        for path in selected:
+
+
+            filename=os.path.basename(
+                path
+            )
+
+
+            if self.is_directory_blocked(
+                path
+            ):
+
+
+                blocked.append(
+                    path
+                )
+
+                continue
+
+
+
+            if self.is_filename_blocked(
+                filename
+            ):
+
+
+                blocked.append(
+                    path
+                )
+
+                continue
+
+
+
+            if not self.is_extension_allowed(
+                path
+            ):
+
+
+                blocked.append(
+                    path
+                )
+
+                continue
+
+
+
+            if path in self.files:
+
+                continue
+
+
+
+            self.files.append(
+                path
+            )
+
+
+            self.listbox.insert(
+                tk.END,
+                path
+            )
+
+
+            added+=1
+
+
+
+        if added:
+
+            self.select_all()
+
+
+
+        if blocked:
+
+
+            messagebox.showwarning(
+                "Pliki pominięte",
+                "Elementy są na liście wykluczonych:\n\n"
+                +
+                "\n".join(
+                    blocked[:10]
+                )
+                +
+                (
+                    "\n..."
+                    if len(blocked)>10
+                    else ""
+                )
+            )
+
+
+        elif added:
+
+
+            messagebox.showinfo(
+                "Pliki dodane",
+                f"Dodano: {added}"
+            )
+
+
+
+    # ========================================================
+    # USUWANIE
+    # ========================================================
+
+    def remove_selected(self):
+
+        selected=list(
+            self.listbox.curselection()
+        )
+
+
+        selected.reverse()
+
+
+
+        for index in selected:
+
+            self.listbox.delete(
+                index
+            )
+
+            del self.files[index]
+
+
+
+    def remove_all(self):
+
+        if not self.files:
+
+            return
+
+
+
+        if messagebox.askyesno(
+            "Potwierdzenie",
+            "Usunąć wszystkie pliki?"
+        ):
+
+            self.files.clear()
+
+            self.listbox.delete(
+                0,
+                tk.END
+            )
+
+
+
+    # ========================================================
+    # ZAZNACZANIE
+    # ========================================================
+
+    def select_all(self):
+
+        if self.listbox.size()==0:
+
+            return
+
+
+        self.listbox.selection_clear(
+            0,
+            tk.END
+        )
+
+
+        self.listbox.selection_set(
+            0,
+            tk.END
+        )
+
+
+        self.listbox.activate(
+            0
+        )
+
+
+
+    def unselect_all(self):
+
+        self.listbox.selection_clear(
+            0,
+            tk.END
+        )
+
+    # ========================================================
+    # OKNO FILTRÓW
+    # ========================================================
+
+    def open_filters(self):
+
+        window=tk.Toplevel(
+            self.root
+        )
+
+        window.title(
+            "Filtry plików"
+        )
+
+        window.geometry(
+            "750x650"
+        )
+
+
+        # wymuszenie właściciela zmiennych Tk
+        window.transient(
+            self.root
+        )
+
+
+        # ====================================================
+        # ROZSZERZENIA
+        # ====================================================
+
+        tk.Label(
+            window,
+            text="ROZSZERZENIA PLIKÓW",
+            font=("Arial",12)
+        ).pack(
+            pady=5
+        )
+
+
+        ext_vars={}
+
+
+        ext_frame=tk.Frame(
+            window
+        )
+
+        ext_frame.pack(
+            fill=tk.X,
+            padx=20
+        )
+
+
+        for index,ext in enumerate(
+            sorted(DEFAULT_EXTENSIONS)
+        ):
+
+            var=tk.BooleanVar(
+                master=window,
+                value=True
+            )
+
+            ext_vars[ext]=var
+
+
+            tk.Checkbutton(
+                ext_frame,
+                text=ext,
+                variable=var
+            ).grid(
+                row=index//5,
+                column=index%5,
+                sticky="w",
+                padx=10,
+                pady=2
+            )
+
+
+
+        # ====================================================
+        # KATALOGI
+        # ====================================================
+
+        tk.Label(
+            window,
+            text="POMIJANE KATALOGI",
+            font=("Arial",12)
+        ).pack(
+            pady=10
+        )
+
+
+        dir_vars={}
+
+
+        dir_frame=tk.Frame(
+            window
+        )
+
+        dir_frame.pack(
+            fill=tk.X,
+            padx=20
+        )
+
+
+        for index,directory in enumerate(
+            sorted(DEFAULT_SKIP_DIRS)
+        ):
+
+
+            # KLUCZOWA POPRAWKA:
+            # katalogi startują ZAZNACZONE
+
+            var=tk.BooleanVar(
+                master=window,
+                value=True
+            )
+
+
+            dir_vars[directory]=var
+
+
+
+            tk.Checkbutton(
+                dir_frame,
+                text=directory,
+                variable=var
+            ).grid(
+                row=index//5,
+                column=index%5,
+                sticky="w",
+                padx=10,
+                pady=2
+            )
+
+
+
+        # ====================================================
+        # STEROWANIE FILTRAMI
+        # ====================================================
+
+        buttons=tk.Frame(
+            window
+        )
+
+        buttons.pack(
+            pady=15
+        )
+
+
+
+        def select_all_filters():
+
+            for var in ext_vars.values():
+
+                var.set(True)
+
+
+            for var in dir_vars.values():
+
+                var.set(True)
+
+
+
+        def clear_filters():
+
+            for var in ext_vars.values():
+
+                var.set(False)
+
+
+            for var in dir_vars.values():
+
+                var.set(False)
+
+
+
+        def save_filters():
+
+
+            self.extensions={
+                ext
+                for ext,var in ext_vars.items()
+                if var.get()
+            }
+
+
+            self.skip_dirs={
+                d
+                for d,var in dir_vars.items()
+                if var.get()
+            }
+
+
+            window.destroy()
+
+
+
+        tk.Button(
+            buttons,
+            text="ZAZNACZ WSZYSTKIE",
+            command=select_all_filters,
+            width=18
+        ).pack(
+            side=tk.LEFT,
+            padx=5
+        )
+
+
+        tk.Button(
+            buttons,
+            text="ODZNACZ WSZYSTKIE",
+            command=clear_filters,
+            width=18
+        ).pack(
+            side=tk.LEFT,
+            padx=5
+        )
+
+
+        tk.Button(
+            buttons,
+            text="ZAPISZ",
+            command=save_filters,
+            width=12
+        ).pack(
+            side=tk.LEFT,
+            padx=5
+        )
+
+
+
+    # ========================================================
+    # OUTPUT
+    # ========================================================
+
+    def open_output_folder(self):
+
+        os.makedirs(
+            self.output_dir,
+            exist_ok=True
+        )
+
+        subprocess.Popen(
+            [
+                "explorer",
+                self.output_dir
+            ]
+        )
+
+
+
+    def clear_output(self):
+
+        if not os.path.exists(
+            self.output_dir
+        ):
+            return
+
+
+        for item in os.listdir(
+            self.output_dir
+        ):
+
+            path=os.path.join(
+                self.output_dir,
+                item
+            )
+
+            try:
+
+                if os.path.isdir(path):
+
+                    shutil.rmtree(path)
+
+                else:
+
+                    os.remove(path)
+
+            except Exception as e:
+
+                messagebox.showerror(
+                    "Błąd",
+                    str(e)
+                )
+
+
+
+    # ========================================================
+    # GENEROWANIE TXT
+    # ========================================================
+
+    def generate(self):
+
+        selected_indexes=self.listbox.curselection()
+
+
+        if not selected_indexes:
+
+            messagebox.showwarning(
+                "Brak zaznaczenia",
+                "Zaznacz pliki do wygenerowania."
+            )
+
+            return
+
+
+
+        files_to_generate=[
+            self.files[i]
+            for i in selected_indexes
+        ]
+
+
+
+        output_file=os.path.join(
+            self.output_dir,
+            "repozytorium_custom.txt"
+        )
+
+
+
+        with open(
+            output_file,
+            "w",
+            encoding="utf-8"
+        ) as out:
+
+
+            for full_path in files_to_generate:
+
+
+                if not self.is_extension_allowed(
+                    full_path
+                ):
+                    continue
+
+
+                relative=os.path.basename(
+                    full_path
+                )
+
+
+                out.write(
+                    f"#~~~~~~[START PLIKU: {relative} ]~~~~~~#\n"
+                )
+
+
+                try:
+
+                    with open(
+                        full_path,
+                        "r",
+                        encoding="utf-8",
+                        errors="ignore"
+                    ) as source:
+
+                        out.write(
+                            source.read()
+                        )
+
+
+                except Exception as e:
+
+                    out.write(
+                        "\nBŁĄD ODCZYTU:\n"
+                    )
+
+                    out.write(
+                        str(e)
+                    )
+
+
+
+                out.write(
+                    f"\n#~~~~~~[KONIEC PLIKU: {relative} ]~~~~~~#\n\n"
+                )
+
+
+
+        messagebox.showinfo(
+            "Gotowe",
+            "Repozytorium wygenerowane:\n\n"
+            + output_file
+        )
+
+
+
+# ============================================================
+# START
+# ============================================================
+
+def run_repo_generator():
+
+    root=tk.Tk()
+
+    app=RepoGenerator(
+        root
+    )
+
     root.mainloop()
+
+
+
+if __name__=="__main__":
+
+    run_repo_generator()
