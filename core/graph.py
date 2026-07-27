@@ -37,17 +37,13 @@ Nie:
 from __future__ import annotations
 
 
-from repo_guardian.core.domain.graph import (
-    EdgeInfo,
-)
-
-
 from .domain.module import (
     Module,
 )
 
 
 from .domain.graph import (
+    EdgeInfo,
     ProjectGraph,
 )
 
