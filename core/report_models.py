@@ -24,6 +24,28 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from typing import List
+
+@dataclass(frozen=True)
+class CallResolution:
+    """
+    Ambiguous symbol call resolution.
+
+    Represents unresolved call candidates.
+    """
+
+    call_site: str
+
+    symbol: str
+
+    possible_targets: List[str]
+
+    confidence: float
+
+    resolution: str
+
+    reason: str
+
 
 @dataclass(frozen=True)
 class EdgeInfo:
