@@ -44,7 +44,16 @@ from typing import (
     List,
 )
 
+def _edge_target(edge):
+    """
+    Normalize EdgeInfo -> target string.
+    """
 
+    return (
+        edge.target
+        if hasattr(edge, "target")
+        else edge
+    )
 
 # ==========================================================
 # NORMALIZATION
@@ -160,9 +169,12 @@ def detect_cycles(
 
 
         for target in sorted(
-            edges.get(
-                node,
-                set()
+            (
+                _edge_target(edge)
+                for edge in edges.get(
+                    node,
+                    set()
+                )
             )
         ):
 
@@ -237,7 +249,8 @@ def detect_cycles(
     for targets in edges.values():
 
         nodes.update(
-            targets
+            _edge_target(edge)
+            for edge in targets
         )
 
 
