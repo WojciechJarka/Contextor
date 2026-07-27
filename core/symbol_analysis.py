@@ -1,32 +1,77 @@
-# -*- coding: utf-8 -*-
-
 """
 repo_guardian/core/symbol_analysis.py
 
-SYMBOL FACT EXTRACTION ENGINE
+SYMBOL FACT EXTRACTION ENGINE v2.0
+
+
+WARSTWA:
+
+    FACT EXTRACTION
+
 
 Odpowiedzialność:
 
 - ekstrakcja deklaracji symboli
-- ekstrakcja wywołań
+- ekstrakcja wywołań AST
 - ekstrakcja global assignments
-- ekstrakcja nazw AST
+- ekstrakcja kwalifikowanych nazw
+- ekstrakcja lokalizacji wywołań
+
 
 Nie:
+
 - analizuje architektury
 - nie zna grafu
 - nie liczy ryzyka
-- nie interpretuje API
+- nie generuje raportów
 
 
 Output:
+
 SymbolFacts
+
+
 """
 
+from __future__ import annotations
 
-from dataclasses import dataclass, field
+
+from dataclasses import (
+    dataclass,
+    field,
+)
+
 from pathlib import Path
+
 import ast
+
+
+
+# ==========================================================
+# CALL FACT
+# ==========================================================
+
+
+@dataclass(
+    frozen=True
+)
+class CallFact:
+    """
+    Raw AST call information.
+
+    Jest źródłem dla późniejszego
+    CallResolution.
+    """
+
+    caller: str
+
+    callee: str
+
+    line: int
+
+    scope: str
+
+    kind: str = "call"
 
 
 
@@ -38,82 +83,155 @@ import ast
 @dataclass
 class SymbolFacts:
 
+
     classes: set[str] = field(
         default_factory=set
     )
+
 
     functions: set[str] = field(
         default_factory=set
     )
 
+
     methods: set[str] = field(
         default_factory=set
     )
+
 
     globals: set[str] = field(
         default_factory=set
     )
 
-    calls: set[str] = field(
-        default_factory=set
+
+    calls: list[CallFact] = field(
+        default_factory=list
     )
+
 
     assignments: set[str] = field(
         default_factory=set
     )
+
 
     errors: list[str] = field(
         default_factory=list
     )
 
 
-    def all_symbols(self) -> set[str]:
+
+    def all_symbols(
+        self
+    ) -> set[str]:
 
         return (
+
             self.classes
+
             |
+
             self.functions
+
             |
+
             self.methods
+
             |
+
             self.globals
+
         )
 
 
-    def to_dict(self):
+
+    def to_dict(
+        self
+    ):
 
         return {
 
+
             "classes":
-                sorted(self.classes),
+
+                sorted(
+                    self.classes
+                ),
+
 
             "functions":
-                sorted(self.functions),
+
+                sorted(
+                    self.functions
+                ),
+
 
             "methods":
-                sorted(self.methods),
+
+                sorted(
+                    self.methods
+                ),
+
 
             "globals":
-                sorted(self.globals),
+
+                sorted(
+                    self.globals
+                ),
+
 
             "calls":
-                sorted(self.calls),
+
+                [
+
+                    {
+
+                        "caller":
+                            call.caller,
+
+                        "callee":
+                            call.callee,
+
+                        "line":
+                            call.line,
+
+                        "scope":
+                            call.scope,
+
+                        "kind":
+                            call.kind,
+
+                    }
+
+                    for call
+                    in self.calls
+
+                ],
+
 
             "assignments":
-                sorted(self.assignments),
+
+                sorted(
+                    self.assignments
+                ),
+
 
             "errors":
+
                 self.errors,
+
         }
 
 
 
 # ==========================================================
-# AST HELPERS
+# AST NAME HELPERS
 # ==========================================================
 
 
-def _call_name(node):
+def _call_name(
+    node
+):
+
 
     if isinstance(
         node,
@@ -123,14 +241,17 @@ def _call_name(node):
         return node.id
 
 
+
     if isinstance(
         node,
         ast.Attribute
     ):
 
+
         parent = _call_name(
             node.value
         )
+
 
         if parent:
 
@@ -138,7 +259,9 @@ def _call_name(node):
                 f"{parent}.{node.attr}"
             )
 
+
         return node.attr
+
 
 
     return None
@@ -146,7 +269,7 @@ def _call_name(node):
 
 
 # ==========================================================
-# VISITOR
+# SYMBOL VISITOR
 # ==========================================================
 
 
@@ -155,20 +278,68 @@ class SymbolVisitor(
 ):
 
 
-    def __init__(self):
+    def __init__(
+        self
+    ):
 
         self.facts = SymbolFacts()
 
         self.class_stack = []
 
-        self.function_depth = 0
+        self.function_stack = []
 
 
+
+    def _current_scope(
+        self
+    ) -> str:
+
+
+        if self.function_stack:
+
+            return ".".join(
+                self.function_stack
+            )
+
+
+        return "<module>"
+
+
+
+    def _current_caller(
+        self
+    ) -> str:
+
+
+        if self.class_stack and self.function_stack:
+
+
+            return (
+
+                f"{self.class_stack[-1]}."
+
+                f"{self.function_stack[-1]}"
+
+            )
+
+
+        if self.function_stack:
+
+            return self.function_stack[-1]
+
+
+        return "<module>"
+
+
+    # ------------------------------------------------------
+    # CLASS EXTRACTION
+    # ------------------------------------------------------
 
     def visit_ClassDef(
         self,
         node
     ):
+
 
         self.facts.classes.add(
             node.name
@@ -189,25 +360,40 @@ class SymbolVisitor(
 
 
 
+    # ------------------------------------------------------
+    # FUNCTION / METHOD EXTRACTION
+    # ------------------------------------------------------
+
     def visit_FunctionDef(
         self,
         node
     ):
 
+
         if self.class_stack:
 
+
             self.facts.methods.add(
-                f"{self.class_stack[-1]}.{node.name}"
+
+                f"{self.class_stack[-1]}."
+
+                f"{node.name}"
+
             )
 
+
         else:
+
 
             self.facts.functions.add(
                 node.name
             )
 
 
-        self.function_depth += 1
+
+        self.function_stack.append(
+            node.name
+        )
 
 
         self.generic_visit(
@@ -215,7 +401,7 @@ class SymbolVisitor(
         )
 
 
-        self.function_depth -= 1
+        self.function_stack.pop()
 
 
 
@@ -224,11 +410,16 @@ class SymbolVisitor(
         node
     ):
 
+
         self.visit_FunctionDef(
             node
         )
 
 
+
+    # ------------------------------------------------------
+    # GLOBAL ASSIGNMENTS
+    # ------------------------------------------------------
 
     def visit_Assign(
         self,
@@ -236,7 +427,7 @@ class SymbolVisitor(
     ):
 
 
-        if self.function_depth == 0:
+        if not self.function_stack:
 
 
             for target in node.targets:
@@ -273,7 +464,7 @@ class SymbolVisitor(
 
         if (
 
-            self.function_depth == 0
+            not self.function_stack
 
             and
 
@@ -302,6 +493,10 @@ class SymbolVisitor(
 
 
 
+    # ------------------------------------------------------
+    # CALL EXTRACTION
+    # ------------------------------------------------------
+
     def visit_Call(
         self,
         node
@@ -315,9 +510,27 @@ class SymbolVisitor(
 
         if name:
 
-            self.facts.calls.add(
-                name
+
+            self.facts.calls.append(
+
+                CallFact(
+
+                    caller=self._current_caller(),
+
+                    callee=name,
+
+                    line=getattr(
+                        node,
+                        "lineno",
+                        0
+                    ),
+
+                    scope=self._current_scope(),
+
+                )
+
             )
+
 
 
         self.generic_visit(
@@ -335,7 +548,7 @@ def extract_symbol_facts(
     file_path: Path | str
 ) -> SymbolFacts:
     """
-    Główny extractor facts.
+    Main AST facts extractor.
     """
 
 
@@ -347,20 +560,25 @@ def extract_symbol_facts(
     facts = SymbolFacts()
 
 
+
     try:
 
         tree = ast.parse(
+
             path.read_text(
                 encoding="utf-8"
             )
+
         )
 
 
     except Exception as exc:
 
+
         facts.errors.append(
             str(exc)
         )
+
 
         return facts
 
@@ -387,11 +605,11 @@ def extract_file_symbols(
     file_path: Path | str
 ) -> dict:
     """
-    Kompatybilny adapter.
+    Compatibility adapter.
 
-    Stare warstwy nadal dostają dict.
+    Old consumers receive dict.
 
-    Nowe warstwy powinny używać
+    New layers should use
     extract_symbol_facts().
     """
 
@@ -403,33 +621,25 @@ def extract_file_symbols(
 
     return facts.to_dict()
 
+
+
 # ==========================================================
-# IMPORT FACTS
+# IMPORT CLASSIFICATION
 # ==========================================================
 
 
 def _module_candidates(
     name: str
 ) -> set[str]:
-
     """
-    Tworzy możliwe prefiksy modułu.
-
-    np.
-
-    repo_guardian.core.foo.bar
-
-    =>
-    repo_guardian
-    repo_guardian.core
-    repo_guardian.core.foo
-    repo_guardian.core.foo.bar
-
+    Creates possible module prefixes.
     """
+
 
     if not name:
 
         return set()
+
 
 
     parts = name.split(".")
@@ -443,7 +653,7 @@ def _module_candidates(
 
         for index in range(
             1,
-            len(parts) + 1
+            len(parts)+1
         )
 
     }
@@ -486,10 +696,9 @@ def classify_imports(
     known_modules: set
 ) -> dict:
     """
-    Klasyfikuje import facts.
+    Classifies imports.
 
-    Nie rozwiązuje importów.
-    Nie ocenia jakości.
+    Facts only.
     """
 
 
@@ -539,7 +748,6 @@ def classify_imports(
 
         else:
 
-
             external.add(
                 name
             )
@@ -553,28 +761,19 @@ def classify_imports(
     return {
 
         "internal":
-            sorted(
-                internal
-            ),
-
+            sorted(internal),
 
         "external":
-            sorted(
-                external
-            ),
-
+            sorted(external),
 
         "local":
-            sorted(
-                local
-            ),
-
+            sorted(local),
 
         "global":
-            sorted(
-                global_imports
-            ),
+            sorted(global_imports),
+
     }
+
 
 # ==========================================================
 # SYMBOL USAGE FACTS
@@ -584,6 +783,12 @@ def classify_imports(
 class UsageVisitor(
     ast.NodeVisitor
 ):
+    """
+    Finds symbol usage.
+
+    Works on raw facts.
+    Does not resolve architecture.
+    """
 
 
     def __init__(
@@ -595,7 +800,57 @@ class UsageVisitor(
             wanted_symbols
         )
 
+
         self.used = set()
+
+
+        self.calls: list[CallFact] = []
+
+        self.scope_stack = []
+
+
+
+    def _scope(
+        self
+    ):
+
+        if self.scope_stack:
+
+            return ".".join(
+                self.scope_stack
+            )
+
+        return "<module>"
+
+
+
+    def visit_FunctionDef(
+        self,
+        node
+    ):
+
+        self.scope_stack.append(
+            node.name
+        )
+
+
+        self.generic_visit(
+            node
+        )
+
+
+        self.scope_stack.pop()
+
+
+
+    def visit_AsyncFunctionDef(
+        self,
+        node
+    ):
+
+        self.visit_FunctionDef(
+            node
+        )
 
 
 
@@ -643,6 +898,7 @@ class UsageVisitor(
             if name
 
             else None
+
         )
 
 
@@ -659,25 +915,71 @@ class UsageVisitor(
 
 
 
+    def visit_Call(
+        self,
+        node
+    ):
+
+
+        name = _call_name(
+            node.func
+        )
+
+
+        if name:
+
+
+            self.calls.append(
+
+                CallFact(
+
+                    caller="<usage>",
+
+                    callee=name,
+
+                    line=getattr(
+                        node,
+                        "lineno",
+                        0
+                    ),
+
+                    scope=self._scope(),
+
+                )
+
+            )
+
+
+        self.generic_visit(
+            node
+        )
+
+
+
 def _read_module_tree(
     root_path,
     module
 ):
 
-
     try:
 
         path = (
+
             Path(root_path)
+
             /
+
             module.path
+
         )
 
 
         return ast.parse(
+
             path.read_text(
                 encoding="utf-8"
             )
+
         )
 
 
@@ -693,13 +995,15 @@ def find_symbol_usage(
     symbols,
     root_path
 ):
+    """
+    Finds modules using symbols.
+
+    Returns:
+
+        symbol:
+            modules
 
     """
-    Facts:
-
-    symbol -> modules using it
-    """
-
 
     usage = {}
 
@@ -746,6 +1050,7 @@ def find_symbol_usage(
         )
 
 
+
         for symbol in visitor.used:
 
 
@@ -761,11 +1066,14 @@ def find_symbol_usage(
     return {
 
         key:
+
             sorted(
                 set(value)
             )
 
-        for key, value in usage.items()
+        for key, value
+
+        in usage.items()
 
     }
 
@@ -780,13 +1088,12 @@ def build_symbol_index(
     modules,
     root_path=None
 ):
-
     """
-    Buduje globalny indeks:
+    Builds:
 
-    symbol
-        ->
-    moduły posiadające symbol
+        symbol
+            ->
+        defining modules
     """
 
 
@@ -839,10 +1146,18 @@ def build_symbol_index(
 
 
     return {
-    symbol: sorted(modules)
-    for symbol, modules in index.items()
-}
 
+        symbol:
+
+            sorted(
+                modules
+            )
+
+        for symbol, modules
+
+        in index.items()
+
+    }
 
 
 
@@ -852,6 +1167,8 @@ def build_symbol_index(
 
 
 __all__ = [
+
+    "CallFact",
 
     "SymbolFacts",
 
