@@ -499,23 +499,39 @@ def filter_report_by_subpath(
     subpath: str
 ) -> Dict[str, Any]:
     """
-    Generuje wycinek (slice) pełnego raportu zarezerwowany dla modułów,
-    których nazwa zaczyna się od `subpath`.
+    Generuje wycinek (slice) raportu dla modułów, których nazwa zaczyna się od `subpath`.
+    Bezpiecznie obsługuje obiekty krawędzi (EdgeInfo / Edge).
     """
     prefix = subpath if subpath.endswith(".") else f"{subpath}."
 
-    def is_match(mod_name: str) -> bool:
-        return mod_name == subpath or mod_name.startswith(prefix)
+    def is_match(mod: Any) -> bool:
+        if isinstance(mod, str):
+            val = mod
+        elif hasattr(mod, "target"):
+            val = mod.target
+        else:
+            val = str(mod)
+        return val == subpath or val.startswith(prefix)
+
+    def get_target_name(edge: Any) -> str:
+        if isinstance(edge, str):
+            return edge
+        if hasattr(edge, "target"):
+            return edge.target
+        return str(edge)
+
+    raw_hard = report.get("graph", {}).get("hard_edges", {})
+    raw_soft = report.get("graph", {}).get("soft_edges", {})
 
     sliced_hard = {
-        k: [target for target in v if is_match(target)]
-        for k, v in report.get("graph", {}).get("hard_edges", {}).items()
+        k: [get_target_name(target) for target in v if is_match(target)]
+        for k, v in raw_hard.items()
         if is_match(k)
     }
 
     sliced_soft = {
-        k: [target for target in v if is_match(target)]
-        for k, v in report.get("graph", {}).get("soft_edges", {}).items()
+        k: [get_target_name(target) for target in v if is_match(target)]
+        for k, v in raw_soft.items()
         if is_match(k)
     }
 
