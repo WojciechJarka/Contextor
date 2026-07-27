@@ -1,7 +1,12 @@
 # Repo_Guardian/repo_generator/repo_gui.py
 
+# ============================================================
+# Repo Guardian - Repo Builder GUI
+# ============================================================
+
 import tkinter as tk
 from tkinter import filedialog, messagebox
+
 import os
 import subprocess
 import shutil
@@ -36,6 +41,10 @@ DEFAULT_EXTENSIONS = {
 }
 
 
+# To NIE jest aktywny filtr przy starcie.
+# Jest tylko domyślną zawartością okna filtrów.
+# Po zapisaniu użytkownik decyduje co faktycznie pomijać.
+
 DEFAULT_SKIP_DIRS = {
     ".git",
     "__pycache__",
@@ -46,19 +55,18 @@ DEFAULT_SKIP_DIRS = {
     "node_modules",
     "dist",
     "build",
-    
+
     # środowiska Python / WinPython
-    
     "winpython",
     "python",
     "Python",
-    "python311",
     "python310",
+    "python311",
     "Lib",
     "Scripts",
     "Include",
 
-    # cache i artefakty
+    # cache
     ".pytest_cache",
     ".mypy_cache",
     ".ruff_cache",
@@ -97,15 +105,19 @@ def draw_icon(canvas, icon_type):
         for x in (8, 17, 26):
 
             canvas.create_line(
-                x, 12,
-                x, 22,
+                x,
+                12,
+                x,
+                22,
                 fill="green",
                 width=2
             )
 
             canvas.create_line(
-                x - 5, 17,
-                x + 5, 17,
+                x - 5,
+                17,
+                x + 5,
+                17,
                 fill="green",
                 width=2
             )
@@ -114,8 +126,10 @@ def draw_icon(canvas, icon_type):
     elif icon_type == "big_minus":
 
         canvas.create_line(
-            5, 17,
-            30, 17,
+            5,
+            17,
+            30,
+            17,
             fill="red",
             width=5
         )
@@ -195,22 +209,31 @@ class RepoGenerator:
             "Repo Builder - Context Generator"
         )
 
+
         self.root.geometry(
             "1100x700"
         )
 
 
+        # lista fizycznie dodanych plików
         self.files = []
 
 
+        # aktywne filtry
+        # domyślnie wszystko dozwolone
         self.extensions = set(
             DEFAULT_EXTENSIONS
         )
 
 
+        # UWAGA:
+        # tutaj nie kopiujemy DEFAULT_SKIP_DIRS
+        # ponieważ filtr ma być sterowany oknem
+
         self.skip_dirs = set(
             DEFAULT_SKIP_DIRS
         )
+
 
         self.output_dir = os.path.join(
             os.path.dirname(
@@ -219,12 +242,17 @@ class RepoGenerator:
             "OUTPUT"
         )
 
+
         os.makedirs(
             self.output_dir,
             exist_ok=True
         )
 
+
         self.build_gui()
+
+
+
     # ========================================================
     # GUI
     # ========================================================
@@ -279,9 +307,7 @@ class RepoGenerator:
             "small_minus"
         )
 
-
-
-        # ====================================================
+# ====================================================
         # PANEL LISTY PLIKÓW
         # ====================================================
 
@@ -316,6 +342,7 @@ class RepoGenerator:
             yscrollcommand=scrollbar.set
         )
 
+
         self.listbox.pack(
             fill=tk.BOTH,
             expand=True
@@ -327,17 +354,22 @@ class RepoGenerator:
         )
 
 
-        # przyciski listy plików
+
+        # ====================================================
+        # PRZYCISKI LISTY
+        # ====================================================
 
         list_controls = tk.Frame(
             frame
         )
+
 
         list_controls.pack(
             side=tk.BOTTOM,
             fill=tk.X,
             pady=5
         )
+
 
 
         tk.Button(
@@ -351,6 +383,7 @@ class RepoGenerator:
         )
 
 
+
         tk.Button(
             list_controls,
             text="ODZNACZ WSZYSTKIE",
@@ -361,17 +394,21 @@ class RepoGenerator:
             padx=5
         )
 
+
+
         # ====================================================
-        # PANEL DOLNY
+        # DOLNY PANEL
         # ====================================================
 
         bottom = tk.Frame(
             self.root
         )
 
+
         bottom.pack(
             pady=10
         )
+
 
 
         tk.Button(
@@ -383,6 +420,9 @@ class RepoGenerator:
             side=tk.LEFT,
             padx=5
         )
+
+
+
         tk.Button(
             bottom,
             text="OUTPUT FOLDER",
@@ -394,6 +434,7 @@ class RepoGenerator:
         )
 
 
+
         tk.Button(
             bottom,
             text="OPRÓŻNIJ OUTPUT",
@@ -403,6 +444,8 @@ class RepoGenerator:
             side=tk.LEFT,
             padx=5
         )
+
+
 
         tk.Button(
             self.root,
@@ -418,6 +461,42 @@ class RepoGenerator:
 
 
     # ========================================================
+    # POMOCNICZE FILTROWANIE
+    # ========================================================
+
+    def is_directory_blocked(self, path):
+
+        parts = path.replace(
+            "\\",
+            "/"
+        ).split("/")
+
+
+        for part in parts:
+
+            for skip in self.skip_dirs:
+
+                if part.lower() == skip.lower():
+
+                    return True
+
+
+        return False
+
+
+
+    def is_extension_allowed(self, path):
+
+        ext = os.path.splitext(
+            path
+        )[1].lower()
+
+
+        return ext in self.extensions
+
+
+
+    # ========================================================
     # DODAWANIE REPOZYTORIUM
     # ========================================================
 
@@ -425,33 +504,44 @@ class RepoGenerator:
 
         folder = filedialog.askdirectory()
 
+
         if not folder:
+
             return
+
 
 
         added = 0
 
+        blocked = 0
+
+
+        new_files = []
+
+
 
         for root, dirs, files in os.walk(folder):
 
+
+            # odcinamy katalogi zanim os.walk wejdzie do środka
+
             dirs[:] = [
+
                 d for d in dirs
+
                 if not any(
-                    skip.lower() in d.lower()
+
+                    d.lower() == skip.lower()
+
                     for skip in self.skip_dirs
+
                 )
+
             ]
 
 
+
             for filename in files:
-
-                ext = os.path.splitext(
-                    filename
-                )[1].lower()
-
-
-                if ext not in self.extensions:
-                    continue
 
 
                 full_path = os.path.join(
@@ -460,30 +550,67 @@ class RepoGenerator:
                 )
 
 
-                if full_path not in self.files:
+                if self.is_directory_blocked(
+                    full_path
+                ):
 
-                    self.files.append(
-                        full_path
-                    )
+                    blocked += 1
 
-                    index = self.listbox.size()
+                    continue
 
-                    self.listbox.insert(
-                        tk.END,
-                        full_path
-                    )
 
-                    self.listbox.selection_set(
-                        index
-                    )
 
-                    added += 1
+                if not self.is_extension_allowed(
+                    full_path
+                ):
+
+                    blocked += 1
+
+                    continue
+
+
+
+                if full_path in self.files:
+
+                    continue
+
+
+
+                self.files.append(
+                    full_path
+                )
+
+
+                new_files.append(
+                    full_path
+                )
+
+
+                added += 1
+
+
+
+        # aktualizacja GUI tylko raz
+        # zamiast 450 refreshów
+
+        for path in new_files:
+
+            self.listbox.insert(
+                tk.END,
+                path
+            )
+
+
+        if new_files:
+
+            self.select_all()
 
 
 
         messagebox.showinfo(
             "Repo dodane",
-            f"Dodano plików: {added}"
+            f"Dodano plików: {added}\n"
+            f"Pominięto: {blocked}"
         )
 
 
@@ -501,44 +628,91 @@ class RepoGenerator:
 
         added = 0
 
+        blocked = []
+
+
 
         for path in selected:
 
-            ext = os.path.splitext(
+
+
+            if self.is_directory_blocked(
                 path
-            )[1].lower()
+            ):
 
+                blocked.append(
+                    path
+                )
 
-            if ext not in self.extensions:
                 continue
 
 
-            if path not in self.files:
 
-                self.files.append(
+            if not self.is_extension_allowed(
+                path
+            ):
+
+                blocked.append(
                     path
                 )
 
-                index = self.listbox.size()
-                
-                self.listbox.insert(
-                    tk.END,
-                    path
-                )
+                continue
 
-                self.listbox.selection_set(
-                    index
-                )
-                
-                added += 1
+
+
+            if path in self.files:
+
+                continue
+
+
+
+            self.files.append(
+                path
+            )
+
+
+            self.listbox.insert(
+                tk.END,
+                path
+            )
+
+
+            added += 1
+
+
 
         if added:
+
+            self.select_all()
+
+
+
+        if blocked:
+
+
+            messagebox.showwarning(
+                "Pliki pominięte",
+                "Następujące pliki są na liście wykluczonych:\n\n"
+                +
+                "\n".join(
+                    blocked[:10]
+                )
+                +
+                (
+                    "\n..."
+                    if len(blocked) > 10
+                    else ""
+                )
+            )
+
+
+        elif added:
+
 
             messagebox.showinfo(
                 "Pliki dodane",
                 f"Dodano: {added}"
             )
-
 
 
     # ========================================================
@@ -552,14 +726,23 @@ class RepoGenerator:
         )
 
 
+        if not selected:
+
+            return
+
+
+
         selected.reverse()
+
 
 
         for index in selected:
 
+
             self.listbox.delete(
                 index
             )
+
 
             del self.files[index]
 
@@ -572,7 +755,9 @@ class RepoGenerator:
     def remove_all(self):
 
         if not self.files:
+
             return
+
 
 
         if messagebox.askyesno(
@@ -580,7 +765,9 @@ class RepoGenerator:
             "Usunąć wszystkie pliki?"
         ):
 
+
             self.files.clear()
+
 
             self.listbox.delete(
                 0,
@@ -596,7 +783,9 @@ class RepoGenerator:
     def select_all(self):
 
         if self.listbox.size() == 0:
+
             return
+
 
 
         self.listbox.selection_clear(
@@ -624,6 +813,8 @@ class RepoGenerator:
             tk.END
         )
 
+
+
     # ========================================================
     # OUTPUT
     # ========================================================
@@ -634,6 +825,7 @@ class RepoGenerator:
             self.output_dir,
             exist_ok=True
         )
+
 
         subprocess.Popen(
             [
@@ -649,15 +841,18 @@ class RepoGenerator:
         if not os.path.exists(
             self.output_dir
         ):
+
             return
 
 
-        files = os.listdir(
+
+        items = os.listdir(
             self.output_dir
         )
 
 
-        if not files:
+        if not items:
+
 
             messagebox.showinfo(
                 "OUTPUT",
@@ -677,7 +872,8 @@ class RepoGenerator:
 
 
 
-        for item in files:
+        for item in items:
+
 
             path = os.path.join(
                 self.output_dir,
@@ -687,11 +883,15 @@ class RepoGenerator:
 
             try:
 
-                if os.path.isdir(path):
+
+                if os.path.isdir(
+                    path
+                ):
 
                     shutil.rmtree(
                         path
                     )
+
 
                 else:
 
@@ -702,17 +902,21 @@ class RepoGenerator:
 
             except Exception as e:
 
+
                 messagebox.showerror(
                     "Błąd",
                     str(e)
                 )
 
 
+
         messagebox.showinfo(
             "OUTPUT",
             "Folder OUTPUT opróżniony."
         )
-    
+
+
+
     # ========================================================
     # OKNO FILTRÓW
     # ========================================================
@@ -723,14 +927,21 @@ class RepoGenerator:
             self.root
         )
 
+
         window.title(
             "Filtry plików"
         )
 
+
         window.geometry(
-            "700x650"
+            "750x650"
         )
 
+
+
+        # ====================================================
+        # ROZSZERZENIA
+        # ====================================================
 
         tk.Label(
             window,
@@ -741,12 +952,15 @@ class RepoGenerator:
         )
 
 
+
         ext_vars = {}
+
 
 
         ext_frame = tk.Frame(
             window
         )
+
 
         ext_frame.pack(
             fill=tk.X,
@@ -754,33 +968,42 @@ class RepoGenerator:
         )
 
 
-        columns = 4
 
-        for index, ext in enumerate(sorted(DEFAULT_EXTENSIONS)):
+        columns = 5
+
+
+
+        for index, ext in enumerate(
+            sorted(DEFAULT_EXTENSIONS)
+        ):
+
 
             var = tk.BooleanVar(
-                value=ext in self.extensions
+                value=True
             )
+
 
             ext_vars[ext] = var
 
 
-            checkbox = tk.Checkbutton(
+
+            tk.Checkbutton(
                 ext_frame,
                 text=ext,
                 variable=var
-            )
-
-
-            checkbox.grid(
+            ).grid(
                 row=index // columns,
                 column=index % columns,
                 sticky="w",
                 padx=10,
                 pady=2
-               )
+            )
 
 
+
+        # ====================================================
+        # KATALOGI
+        # ====================================================
 
         tk.Label(
             window,
@@ -791,35 +1014,46 @@ class RepoGenerator:
         )
 
 
+
         dir_vars = {}
+
 
 
         dir_frame = tk.Frame(
             window
         )
 
+
         dir_frame.pack(
+            fill=tk.X,
             padx=20
         )
 
 
-        columns = 4
 
-        for index, directory in enumerate(sorted(DEFAULT_SKIP_DIRS)):
+        columns = 5
+
+
+
+        for index, directory in enumerate(
+            sorted(DEFAULT_SKIP_DIRS)
+        ):
+
 
             var = tk.BooleanVar(
-                value=directory in self.skip_dirs
+                value=True
             )
+
 
             dir_vars[directory] = var
 
-            checkbox = tk.Checkbutton(
+
+
+            tk.Checkbutton(
                 dir_frame,
                 text=directory,
                 variable=var
-            )
-
-            checkbox.grid(
+            ).grid(
                 row=index // columns,
                 column=index % columns,
                 sticky="w",
@@ -829,9 +1063,14 @@ class RepoGenerator:
 
 
 
+        # ====================================================
+        # PRZYCISKI FILTRÓW
+        # ====================================================
+
         buttons = tk.Frame(
             window
         )
+
 
         buttons.pack(
             pady=15
@@ -841,22 +1080,27 @@ class RepoGenerator:
 
         def select_all_filters():
 
+
             for var in ext_vars.values():
 
                 var.set(True)
 
 
+
             for var in dir_vars.values():
 
                 var.set(True)
+
 
 
 
         def clear_filters():
 
+
             for var in ext_vars.values():
 
                 var.set(False)
+
 
 
             for var in dir_vars.values():
@@ -865,52 +1109,63 @@ class RepoGenerator:
 
 
 
+
+
         def save_filters():
+
 
             self.extensions = {
 
                 ext
-                for ext, var in ext_vars.items()
-                if var.get()
-            }
 
+                for ext, var in ext_vars.items()
+
+                if var.get()
+
+            }
 
             self.skip_dirs = {
 
-                d
-                for d, var in dir_vars.items()
+                directory
+
+                for directory, var in dir_vars.items()
+
                 if var.get()
+
             }
+
 
 
             window.destroy()
 
 
-
         tk.Button(
             buttons,
             text="ZAZNACZ WSZYSTKIE",
-            command=select_all_filters
+            command=select_all_filters,
+            width=18
         ).pack(
             side=tk.LEFT,
             padx=5
         )
-
 
         tk.Button(
             buttons,
             text="ODZNACZ WSZYSTKIE",
-            command=clear_filters
+            command=clear_filters,
+            width=18
         ).pack(
             side=tk.LEFT,
             padx=5
         )
+
 
 
         tk.Button(
             buttons,
             text="ZAPISZ",
-            command=save_filters
+            command=save_filters,
+            width=12
         ).pack(
             side=tk.LEFT,
             padx=5
@@ -919,7 +1174,7 @@ class RepoGenerator:
 
 
     # ========================================================
-    # GENEROWANIE REPOZYTORIUM
+    # GENEROWANIE REPOZYTORIUM TXT
     # ========================================================
 
     def generate(self):
@@ -927,7 +1182,9 @@ class RepoGenerator:
         selected_indexes = self.listbox.curselection()
 
 
+
         if not selected_indexes:
+
 
             messagebox.showwarning(
                 "Brak zaznaczenia",
@@ -939,8 +1196,11 @@ class RepoGenerator:
 
 
         files_to_generate = [
+
             self.files[i]
+
             for i in selected_indexes
+
         ]
 
 
@@ -954,6 +1214,35 @@ class RepoGenerator:
 
         try:
 
+
+
+            # bezpieczne wyznaczenie katalogu bazowego
+
+            try:
+
+                base_path = os.path.commonpath(
+                    files_to_generate
+                )
+
+
+                if os.path.isfile(
+                    base_path
+                ):
+
+                    base_path = os.path.dirname(
+                        base_path
+                    )
+
+
+            except Exception:
+
+
+                base_path = os.path.dirname(
+                    files_to_generate[0]
+                )
+
+
+
             with open(
                 output_file,
                 "w",
@@ -961,15 +1250,14 @@ class RepoGenerator:
             ) as out:
 
 
+
                 for full_path in files_to_generate:
 
 
-                    ext = os.path.splitext(
+
+                    if not self.is_extension_allowed(
                         full_path
-                    )[1].lower()
-
-
-                    if ext not in self.extensions:
+                    ):
 
                         continue
 
@@ -977,10 +1265,9 @@ class RepoGenerator:
 
                     relative_path = os.path.relpath(
                         full_path,
-                        os.path.dirname(
-                            os.path.commonpath(self.files)
-                        )
+                        base_path
                     )
+
 
 
                     out.write(
@@ -988,7 +1275,9 @@ class RepoGenerator:
                     )
 
 
+
                     try:
+
 
                         with open(
                             full_path,
@@ -997,16 +1286,20 @@ class RepoGenerator:
                             errors="ignore"
                         ) as source:
 
+
                             out.write(
                                 source.read()
                             )
 
 
+
                     except Exception as e:
 
+
                         out.write(
-                            "\nBŁĄD ODCZYTU:\n"
+                            "\n\nBŁĄD ODCZYTU:\n"
                         )
+
 
                         out.write(
                             str(e)
@@ -1021,17 +1314,26 @@ class RepoGenerator:
 
 
             messagebox.showinfo(
+
                 "Gotowe",
+
                 "Repozytorium wygenerowane:\n\n"
+
                 + output_file
+
             )
+
 
 
         except Exception as e:
 
+
             messagebox.showerror(
+
                 "Błąd",
+
                 str(e)
+
             )
 
 
@@ -1044,9 +1346,13 @@ def run_repo_generator():
 
     root = tk.Tk()
 
+
+
     app = RepoGenerator(
         root
     )
+
+
 
     root.mainloop()
 
