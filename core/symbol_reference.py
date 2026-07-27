@@ -53,7 +53,7 @@ from pathlib import Path
 import ast
 
 
-from repo_guardian.core.domain.symbol import (
+from repo_guardian.core.domain.symbols import (
     CallResolution,
 )
 
