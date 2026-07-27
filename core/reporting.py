@@ -871,6 +871,40 @@ def generate_summary_report(report: Dict[str, Any]) -> Dict[str, Any]:
 # EXPORTS
 # ==========================================================
 
+def generate_structure_report(
+    modules: dict,
+    project_graph: Any = None
+) -> Dict[str, Any]:
+    """
+    Generuje raport struktury katalogów i modułów dla UI.
+    """
+    tree: Dict[str, Any] = {}
+
+    if not modules:
+        return {"structure": tree, "total_modules": 0}
+
+    for module_id in sorted(modules.keys()):
+        parts = module_id.split(".")
+        current = tree
+        for part in parts[:-1]:
+            if part not in current or not isinstance(current[part], dict):
+                current[part] = {}
+            current = current[part]
+
+        leaf_name = parts[-1]
+        mod_obj = modules[module_id]
+        file_path = getattr(mod_obj, "path", getattr(mod_obj, "file_path", ""))
+
+        current[leaf_name] = {
+            "id": module_id,
+            "path": file_path,
+            "imports_count": len(getattr(mod_obj, "imports", [])),
+        }
+
+    return {
+        "structure": tree,
+        "total_modules": len(modules),
+    }
 
 __all__ = [
     "generate_report",
@@ -878,4 +912,5 @@ __all__ = [
     "generate_sliced_reports",
     "save_all_reports",
     "generate_summary_report",
+    "generate_structure_report",
 ]
