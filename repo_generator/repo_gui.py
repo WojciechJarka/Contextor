@@ -7,11 +7,13 @@
 # ============================================================
 
 import tkinter as tk
-from tkinter import filedialog, messagebox
+from tkinter import filedialog, messagebox, ttk
 
 import os
 import subprocess
 import shutil
+
+from repo_guardian.ui.theme import apply_theme, BG, SURFACE, BORDER, TEXT, PRIMARY, PAD_SM, PAD_MD, PAD_LG
 
 
 # ============================================================
@@ -155,11 +157,11 @@ def create_icon_button(
         icon_type
 ):
 
-    frame = tk.Frame(parent)
+    frame = ttk.Frame(parent)
 
     frame.pack(
         side=tk.LEFT,
-        padx=5
+        padx=(0, PAD_SM)
     )
 
 
@@ -167,7 +169,8 @@ def create_icon_button(
         frame,
         width=35,
         height=35,
-        highlightthickness=0
+        highlightthickness=0,
+        bg=BG,
     )
 
     canvas.pack(
@@ -181,11 +184,11 @@ def create_icon_button(
     )
 
 
-    tk.Button(
+    ttk.Button(
         frame,
         text=text,
         command=command,
-        height=2
+        style="Secondary.TButton",
     ).pack(
         side=tk.LEFT
     )
@@ -252,21 +255,34 @@ class RepoGenerator:
 
     def build_gui(self):
 
-        tk.Label(
+        ttk.Label(
             self.root,
-            text="Repo Builder - wybór kontekstu",
-            font=("Arial", 14)
+            text="Repo Builder",
+            style="Header.TLabel",
         ).pack(
-            pady=10
+            anchor="w",
+            padx=PAD_LG,
+            pady=(PAD_LG, 0)
         )
 
+        ttk.Label(
+            self.root,
+            text="Wybierz pliki, które trafią do wygenerowanego kontekstu",
+            style="Sub.TLabel",
+        ).pack(
+            anchor="w",
+            padx=PAD_LG,
+            pady=(2, PAD_MD)
+        )
 
-        toolbar = tk.Frame(
+        toolbar=ttk.Frame(
             self.root
         )
 
-        toolbar.pack()
-
+        toolbar.pack(
+            padx=PAD_LG,
+            fill=tk.X
+        )
 
 
         create_icon_button(
@@ -305,124 +321,20 @@ class RepoGenerator:
         # LISTA PLIKÓW
         # ====================================================
 
-        frame = tk.Frame(
+        frame=ttk.Frame(
             self.root,
-            relief=tk.GROOVE,
-            borderwidth=2
-        )
-
-
-        frame.pack(
-            fill=tk.BOTH,
-            expand=True,
-            padx=10,
-            pady=10
-        )
-
-
-        scrollbar = tk.Scrollbar(
-            frame
-        )
-
-
-        scrollbar.pack(
-            side=tk.RIGHT,
-            fill=tk.Y
-        )
-
-
-        self.listbox = tk.Listbox(
-            frame,
-            selectmode=tk.MULTIPLE,
-            exportselection=False,
-            yscrollcommand=scrollbar.set
-        )
-
-
-        self.listbox.pack(
-            fill=tk.BOTH,
-            expand=True
-        )
-
-
-        scrollbar.config(
-            command=self.listbox.yview
-        )
-
-
-    # ========================================================
-    # GUI
-    # ========================================================
-
-    def build_gui(self):
-
-        tk.Label(
-            self.root,
-            text="Repo Builder - wybór kontekstu",
-            font=("Arial",14)
-        ).pack(
-            pady=10
-        )
-
-
-        toolbar=tk.Frame(
-            self.root
-        )
-
-        toolbar.pack()
-
-
-        create_icon_button(
-            toolbar,
-            "WYBIERZ REPO",
-            self.add_repository,
-            "big_plus"
-        )
-
-
-        create_icon_button(
-            toolbar,
-            "DODAJ PLIKI",
-            self.add_files,
-            "small_plus"
-        )
-
-
-        create_icon_button(
-            toolbar,
-            "USUŃ ZAZNACZONE",
-            self.remove_selected,
-            "big_minus"
-        )
-
-
-        create_icon_button(
-            toolbar,
-            "USUŃ WSZYSTKIE",
-            self.remove_all,
-            "small_minus"
-        )
-
-
-        # ====================================================
-        # LISTA PLIKÓW
-        # ====================================================
-
-        frame=tk.Frame(
-            self.root,
-            relief=tk.GROOVE,
-            borderwidth=2
+            style="Card.TFrame",
         )
 
         frame.pack(
             fill=tk.BOTH,
             expand=True,
-            padx=10,
-            pady=10
+            padx=PAD_LG,
+            pady=PAD_MD
         )
 
 
-        scrollbar=tk.Scrollbar(
+        scrollbar=ttk.Scrollbar(
             frame
         )
 
@@ -436,7 +348,17 @@ class RepoGenerator:
             frame,
             selectmode=tk.MULTIPLE,
             exportselection=False,
-            yscrollcommand=scrollbar.set
+            yscrollcommand=scrollbar.set,
+            bg=SURFACE,
+            fg=TEXT,
+            selectbackground=PRIMARY,
+            selectforeground="#ffffff",
+            highlightthickness=1,
+            highlightbackground=BORDER,
+            highlightcolor=BORDER,
+            relief="flat",
+            borderwidth=0,
+            font=("Segoe UI", 10),
         )
 
         self.listbox.pack(
@@ -450,36 +372,35 @@ class RepoGenerator:
         )
 
 
-        controls=tk.Frame(
+        controls=ttk.Frame(
             frame
         )
 
         controls.pack(
             side=tk.BOTTOM,
             fill=tk.X,
-            pady=5
+            pady=(PAD_SM, 0)
         )
 
 
-        tk.Button(
+        ttk.Button(
             controls,
-            text="ZAZNACZ WSZYSTKIE",
+            text="Zaznacz wszystkie",
             command=self.select_all,
-            width=20
+            style="Ghost.TButton",
         ).pack(
             side=tk.LEFT,
-            padx=5
+            padx=(0, PAD_SM)
         )
 
 
-        tk.Button(
+        ttk.Button(
             controls,
-            text="ODZNACZ WSZYSTKIE",
+            text="Odznacz wszystkie",
             command=self.unselect_all,
-            width=20
+            style="Ghost.TButton",
         ).pack(
-            side=tk.LEFT,
-            padx=5
+            side=tk.LEFT
         )
 
 
@@ -487,57 +408,58 @@ class RepoGenerator:
         # DOLNY PANEL
         # ====================================================
 
-        bottom=tk.Frame(
+        bottom=ttk.Frame(
             self.root
         )
 
         bottom.pack(
-            pady=10
+            padx=PAD_LG,
+            pady=(0, PAD_SM),
+            fill=tk.X
         )
 
 
-        tk.Button(
+        ttk.Button(
             bottom,
-            text="FILTRY PLIKÓW",
+            text="Filtry plików",
             command=self.open_filters,
-            width=20
+            style="Secondary.TButton",
         ).pack(
             side=tk.LEFT,
-            padx=5
+            padx=(0, PAD_SM)
         )
 
 
-        tk.Button(
+        ttk.Button(
             bottom,
-            text="OUTPUT FOLDER",
+            text="Output Folder",
             command=self.open_output_folder,
-            width=20
+            style="Secondary.TButton",
         ).pack(
             side=tk.LEFT,
-            padx=5
+            padx=(0, PAD_SM)
         )
 
 
-        tk.Button(
+        ttk.Button(
             bottom,
-            text="OPRÓŻNIJ OUTPUT",
+            text="Opróżnij output",
             command=self.clear_output,
-            width=20
+            style="Danger.Ghost.TButton",
         ).pack(
-            side=tk.LEFT,
-            padx=5
+            side=tk.LEFT
         )
 
 
-        tk.Button(
+        ttk.Button(
             self.root,
-            text="GENERUJ REPOZYTORIUM",
+            text="Generuj repozytorium",
             command=self.generate,
-            bg="green",
-            fg="white",
-            height=2
+            style="Primary.TButton",
         ).pack(
-            pady=10
+            padx=PAD_LG,
+            pady=(0, PAD_LG),
+            fill=tk.X
         )
 
 
@@ -934,6 +856,7 @@ class RepoGenerator:
         window.geometry(
             "750x650"
         )
+        window.configure(bg=BG)
 
 
         # wymuszenie właściciela zmiennych Tk
@@ -946,25 +869,27 @@ class RepoGenerator:
         # ROZSZERZENIA
         # ====================================================
 
-        tk.Label(
+        ttk.Label(
             window,
-            text="ROZSZERZENIA PLIKÓW",
-            font=("Arial",12)
+            text="Rozszerzenia plików",
+            font=("Segoe UI", 11, "bold"),
         ).pack(
-            pady=5
+            anchor="w",
+            padx=PAD_LG,
+            pady=(PAD_LG, PAD_SM)
         )
 
 
         ext_vars={}
 
 
-        ext_frame=tk.Frame(
+        ext_frame=ttk.Frame(
             window
         )
 
         ext_frame.pack(
             fill=tk.X,
-            padx=20
+            padx=PAD_LG
         )
 
 
@@ -980,7 +905,7 @@ class RepoGenerator:
             ext_vars[ext]=var
 
 
-            tk.Checkbutton(
+            ttk.Checkbutton(
                 ext_frame,
                 text=ext,
                 variable=var
@@ -998,25 +923,27 @@ class RepoGenerator:
         # KATALOGI
         # ====================================================
 
-        tk.Label(
+        ttk.Label(
             window,
-            text="POMIJANE KATALOGI",
-            font=("Arial",12)
+            text="Pomijane katalogi",
+            font=("Segoe UI", 11, "bold"),
         ).pack(
-            pady=10
+            anchor="w",
+            padx=PAD_LG,
+            pady=(PAD_MD, PAD_SM)
         )
 
 
         dir_vars={}
 
 
-        dir_frame=tk.Frame(
+        dir_frame=ttk.Frame(
             window
         )
 
         dir_frame.pack(
             fill=tk.X,
-            padx=20
+            padx=PAD_LG
         )
 
 
@@ -1038,7 +965,7 @@ class RepoGenerator:
 
 
 
-            tk.Checkbutton(
+            ttk.Checkbutton(
                 dir_frame,
                 text=directory,
                 variable=var
@@ -1056,12 +983,16 @@ class RepoGenerator:
         # STEROWANIE FILTRAMI
         # ====================================================
 
-        buttons=tk.Frame(
+        ttk.Separator(window).pack(fill=tk.X, padx=PAD_LG, pady=PAD_MD)
+
+        buttons=ttk.Frame(
             window
         )
 
         buttons.pack(
-            pady=15
+            padx=PAD_LG,
+            pady=(0, PAD_LG),
+            fill=tk.X
         )
 
 
@@ -1113,36 +1044,34 @@ class RepoGenerator:
 
 
 
-        tk.Button(
+        ttk.Button(
             buttons,
-            text="ZAZNACZ WSZYSTKIE",
+            text="Zaznacz wszystkie",
             command=select_all_filters,
-            width=18
+            style="Ghost.TButton",
         ).pack(
             side=tk.LEFT,
-            padx=5
+            padx=(0, PAD_SM)
         )
 
 
-        tk.Button(
+        ttk.Button(
             buttons,
-            text="ODZNACZ WSZYSTKIE",
+            text="Odznacz wszystkie",
             command=clear_filters,
-            width=18
+            style="Ghost.TButton",
         ).pack(
-            side=tk.LEFT,
-            padx=5
+            side=tk.LEFT
         )
 
 
-        tk.Button(
+        ttk.Button(
             buttons,
-            text="ZAPISZ",
+            text="Zapisz",
             command=save_filters,
-            width=12
+            style="Primary.TButton",
         ).pack(
-            side=tk.LEFT,
-            padx=5
+            side=tk.RIGHT
         )
 
 
@@ -1310,6 +1239,8 @@ class RepoGenerator:
 def run_repo_generator():
 
     root=tk.Tk()
+
+    apply_theme(root)
 
     app=RepoGenerator(
         root

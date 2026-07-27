@@ -139,6 +139,7 @@ def collect_module_artifacts(
     }
     """
     result = {}
+    tree_cache = {}
 
     for module_id, module in modules.items():
         abs_path = getattr(module, "absolute_path", getattr(module, "path", module_id))
@@ -159,6 +160,7 @@ def collect_module_artifacts(
             own_symbols,
             root_path,
             definer_module=module_id,
+            tree_cache=tree_cache,
         )
 
         consumers = extract_api_consumers(

@@ -1,13 +1,14 @@
 # repo_guardian/ui/gui_parser.py
 
 import tkinter as tk
-from tkinter import filedialog, messagebox
+from tkinter import filedialog, messagebox, ttk
 import json
 import os
 import re
 
 from repo_guardian.ui.path_memory import load_state, save_state
 from repo_guardian.ui.progress_widget import create_progress_bar, run_with_progress
+from repo_guardian.ui.theme import BG, PAD_SM, PAD_MD, PAD_LG
 
 
 def matches_term(data, search_term, is_py_query):
@@ -338,15 +339,26 @@ def run_parser_window():
     )
 
     parser_win.geometry(
-        "500x250"
+        "540x300"
     )
+    parser_win.configure(bg=BG)
 
-
-    tk.Label(
+    ttk.Label(parser_win, text="Parsuj JSON", style="Header.TLabel").pack(
+        anchor="w", padx=PAD_LG, pady=(PAD_LG, 0)
+    )
+    ttk.Label(
         parser_win,
-        text="Wybierz plik JSON:"
+        text="Przefiltruj raport artefaktów po nazwie pliku lub symbolu",
+        style="Sub.TLabel",
+    ).pack(anchor="w", padx=PAD_LG, pady=(2, PAD_MD))
+
+    ttk.Label(
+        parser_win,
+        text="Plik JSON",
+        style="Field.TLabel",
     ).pack(
-        pady=5
+        anchor="w",
+        padx=PAD_LG,
     )
 
 
@@ -359,22 +371,23 @@ def run_parser_window():
     )
 
 
-    frame_file = tk.Frame(
+    frame_file = ttk.Frame(
         parser_win
     )
 
     frame_file.pack(
-        pady=5
+        fill="x",
+        padx=PAD_LG,
+        pady=(2, PAD_MD)
     )
+    frame_file.columnconfigure(0, weight=1)
 
 
-    tk.Entry(
+    ttk.Entry(
         frame_file,
         textvariable=json_path_var,
-        width=40
-    ).pack(
-        side=tk.LEFT,
-        padx=5
+    ).grid(
+        row=0, column=0, sticky="ew", padx=(0, PAD_SM)
     )
 
 
@@ -414,28 +427,30 @@ def run_parser_window():
 
 
 
-    tk.Button(
+    ttk.Button(
         frame_file,
-        text="Browse",
+        text="Browse…",
+        style="Secondary.TButton",
         command=browse_json
-    ).pack(
-        side=tk.LEFT
+    ).grid(
+        row=0, column=1
     )
 
 
 
-    tk.Label(
+    ttk.Label(
         parser_win,
-        text="Wpisz nazwę (np. main.py lub main):"
+        text="Nazwa pliku lub symbolu (np. main.py lub main)",
+        style="Field.TLabel",
     ).pack(
-        pady=5
+        anchor="w",
+        padx=PAD_LG,
     )
 
 
 
-    name_entry = tk.Entry(
+    name_entry = ttk.Entry(
         parser_win,
-        width=50
     )
 
 
@@ -446,7 +461,9 @@ def run_parser_window():
 
 
     name_entry.pack(
-        pady=5
+        fill="x",
+        padx=PAD_LG,
+        pady=(2, PAD_LG)
     )
 
 
@@ -509,14 +526,17 @@ def run_parser_window():
 
 
 
-    parse_btn = tk.Button(
+    parse_btn = ttk.Button(
         parser_win,
         text="Parsuj JSON",
+        style="Primary.TButton",
         command=execute_parsing
     )
 
     parse_btn.pack(
-        pady=20
+        padx=PAD_LG,
+        pady=(0, PAD_MD),
+        fill="x"
     )
 
     progress_bar = create_progress_bar(parser_win)

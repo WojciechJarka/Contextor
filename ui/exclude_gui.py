@@ -1,12 +1,14 @@
 # -*- coding: utf-8 -*-
 
 import tkinter as tk
-from tkinter import filedialog, messagebox
+from tkinter import filedialog, messagebox, ttk
 
 from pathlib import Path
 import json
 import shutil
 import os
+
+from repo_guardian.ui.theme import BG, SURFACE, BORDER, TEXT, PRIMARY, PAD_SM, PAD_MD, PAD_LG
 
 
 MANIFEST_NAME = "manifest.json"
@@ -261,23 +263,48 @@ def run_exclude_window():
     )
 
     win.geometry(
-        "600x500"
+        "620x520"
     )
+    win.configure(bg=BG)
 
+    ttk.Label(win, text="Exclude Manager", style="Header.TLabel").pack(
+        anchor="w", padx=PAD_LG, pady=(PAD_LG, 0)
+    )
+    ttk.Label(
+        win,
+        text="Pliki i katalogi tymczasowo wyłączone z analizy",
+        style="Sub.TLabel",
+    ).pack(anchor="w", padx=PAD_LG, pady=(2, PAD_MD))
 
     items = load_exclude_state()
 
+    list_frame = ttk.Frame(win, style="Card.TFrame")
+    list_frame.pack(fill="both", expand=True, padx=PAD_LG)
+
+    scrollbar = ttk.Scrollbar(list_frame)
+    scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
     listbox = tk.Listbox(
-        win,
+        list_frame,
         selectmode=tk.MULTIPLE,
-        width=70,
-        height=18
+        yscrollcommand=scrollbar.set,
+        bg=SURFACE,
+        fg=TEXT,
+        selectbackground=PRIMARY,
+        selectforeground="#ffffff",
+        highlightthickness=1,
+        highlightbackground=BORDER,
+        highlightcolor=BORDER,
+        relief="flat",
+        borderwidth=0,
+        font=("Segoe UI", 10),
     )
 
     listbox.pack(
-        pady=10
+        fill="both",
+        expand=True,
     )
+    scrollbar.config(command=listbox.yview)
 
 
     def refresh():
@@ -329,8 +356,9 @@ def run_exclude_window():
         )
 
         choice_win.geometry(
-            "250x120"
+            "260x150"
         )
+        choice_win.configure(bg=BG)
 
 
         def add_directory():
@@ -365,23 +393,27 @@ def run_exclude_window():
             choice_win.destroy()
 
 
-        tk.Button(
+        ttk.Button(
             choice_win,
             text="Dodaj katalog",
-            width=20,
+            style="Secondary.TButton",
             command=add_directory
         ).pack(
-            pady=10
+            padx=PAD_MD,
+            pady=(PAD_MD, PAD_SM),
+            fill="x"
         )
 
 
-        tk.Button(
+        ttk.Button(
             choice_win,
             text="Dodaj plik",
-            width=20,
+            style="Secondary.TButton",
             command=add_file
         ).pack(
-            pady=5
+            padx=PAD_MD,
+            pady=(0, PAD_MD),
+            fill="x"
         )
 
 
@@ -559,40 +591,35 @@ def run_exclude_window():
 
 
 
-    tk.Button(
-        win,
+    actions = ttk.Frame(win)
+    actions.pack(fill="x", padx=PAD_LG, pady=PAD_MD)
+
+    ttk.Button(
+        actions,
         text="+ Dodaj",
+        style="Secondary.TButton",
         command=add_item
-    ).pack(
-        pady=5
-    )
+    ).pack(side="left", padx=(0, PAD_SM))
 
-
-    tk.Button(
-        win,
+    ttk.Button(
+        actions,
         text="Wyklucz zaznaczone",
+        style="Secondary.TButton",
         command=exclude_selected
-    ).pack(
-        pady=5
-    )
+    ).pack(side="left", padx=(0, PAD_SM))
 
-
-    tk.Button(
-        win,
-        text="Usuń zaznaczone / Przywróć",
+    ttk.Button(
+        actions,
+        text="Przywróć zaznaczone",
+        style="Secondary.TButton",
         command=restore_selected
-    ).pack(
-        pady=5
-    )
+    ).pack(side="left", padx=(0, PAD_SM))
 
-
-    tk.Button(
-        win,
+    ttk.Button(
+        actions,
         text="Przywróć wszystko",
+        style="Danger.Ghost.TButton",
         command=restore_all
-    ).pack(
-        pady=5
-    )
-
+    ).pack(side="left")
 
     refresh()

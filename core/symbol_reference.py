@@ -740,9 +740,14 @@ def _empty_reference():
 
 def _load_tree(
     root_path,
-    module
+    module,
+    tree_cache=None
 ):
 
+    cache_key = getattr(module, "module_id", None) or module.path
+
+    if tree_cache is not None and cache_key in tree_cache:
+        return tree_cache[cache_key]
 
     try:
 
@@ -753,7 +758,7 @@ def _load_tree(
         )
 
 
-        return ast.parse(
+        tree = ast.parse(
             path.read_text(
                 encoding="utf-8"
             )
@@ -762,7 +767,12 @@ def _load_tree(
 
     except Exception:
 
-        return None
+        tree = None
+
+    if tree_cache is not None:
+        tree_cache[cache_key] = tree
+
+    return tree
 
 
 
@@ -770,7 +780,8 @@ def build_symbol_references(
     modules,
     target_symbols,
     root_path,
-    definer_module=None
+    definer_module=None,
+    tree_cache=None
 ):
     """
     Buduje referencje symboli.
@@ -828,7 +839,8 @@ def build_symbol_references(
 
         tree = _load_tree(
             root_path,
-            module
+            module,
+            tree_cache
         )
 
 

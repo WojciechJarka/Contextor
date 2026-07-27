@@ -207,7 +207,6 @@ def extract_imports(
 def build_index(
     root: str
 ) -> dict[str, Module]:
-    print("BUILD_INDEX ROOT:", root)
     """
     Buduje indeks modułów projektu.
 
@@ -223,8 +222,6 @@ def build_index(
     root_path = Path(
         root
     ).resolve()
-
-    print("RESOLVED ROOT:", root_path)
 
     if not root_path.exists():
 
@@ -327,18 +324,6 @@ def build_index(
 
             imports=imports,
 
-        )
-        print(
-            "INDEX RESULT ROOT:",
-            root_path
-        )
-
-        for k, v in modules.items():
-            print(
-            "INDEX MODULE:",
-            k,
-            "PATH:",
-            v.absolute_path
         )
 
 

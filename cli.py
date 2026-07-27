@@ -73,7 +73,15 @@ def main(root_path: str = ".") -> int:
 
     # 4. Layer Reports (Pętla po wszystkich 5 warstwach)
     for layer in PROJECT_LAYERS:
-        layer_rep = generate_layer_report(graph, layer_path=layer, root_path=root_path)
+        layer_full_path = os.path.join(root_path, layer)
+        if not os.path.isdir(layer_full_path):
+            continue
+        layer_rep = generate_layer_report(
+            layer_path=layer_full_path,
+            modules=modules,
+            graph=graph,
+            root_path=root_path,
+        )
         save_json(layer_rep, f"output/layer_{layer}.json")
     
     for e in errors:

@@ -13,7 +13,7 @@ Wykorzystuje incremental cache dla grafów.
 """
 
 import tkinter as tk
-from tkinter import filedialog, messagebox
+from tkinter import filedialog, messagebox, ttk
 
 from pathlib import Path
 import os
@@ -57,18 +57,22 @@ from repo_guardian.ui.exclude_check import check_stale_excludes
 from repo_guardian.ui.exclude_gui import run_exclude_window
 from repo_guardian.ui.progress_widget import create_progress_bar, create_log_box, run_with_progress
 from repo_guardian.core.validator.collisions import validate_name_collisions
+from repo_guardian.ui.theme import apply_theme, Tooltip, PAD_SM, PAD_MD, PAD_LG
 from repo_generator.repo_gui import run_repo_generator
 
 def run():
     root = tk.Tk()
 
     root.title(
-        "Repo Guardian v1"
+        "Repo Guardian"
     )
 
     root.geometry(
-        "600x440"
+        "760x640"
     )
+    root.minsize(680, 560)
+
+    apply_theme(root)
 
     repo_path_var = tk.StringVar()
     layer_path_var = tk.StringVar()
@@ -494,165 +498,130 @@ def run():
         )
 
     # ======================================================
-    # TOOLTIP
-    # ======================================================
-
-    def show_root_tooltip(event):
-        root.title(
-            "Repo Guardian v1 - It must be ROOT directory of scanned project"
-        )
-
-    def hide_root_tooltip(event):
-        root.title(
-            "Repo Guardian v1"
-        )
-
-    # ======================================================
     # UI
     # ======================================================
 
-    tk.Label(
-        root,
-        text="Repo Guardian v1 (Read-Only Mode)"
-    ).pack(
-        pady=10
-    )
+    container = ttk.Frame(root, padding=(PAD_LG, PAD_MD, PAD_LG, PAD_MD))
+    container.pack(fill="both", expand=True)
+    container.columnconfigure(0, weight=1)
 
     # -------------------------
-    # Repository ROOT
+    # Header
     # -------------------------
 
-    repo_frame = tk.Frame(
-        root
-    )
+    header = ttk.Frame(container)
+    header.grid(row=0, column=0, sticky="ew", pady=(0, PAD_LG))
+    header.columnconfigure(0, weight=1)
 
-    repo_frame.pack(
-        pady=5
+    ttk.Label(header, text="Repo Guardian", style="Header.TLabel").grid(
+        row=0, column=0, sticky="w"
     )
-
-    tk.Entry(
-        repo_frame,
-        textvariable=repo_path_var,
-        width=50
-    ).pack(
-        side=tk.LEFT,
-        padx=5
-    )
-
-    repo_button = tk.Button(
-        repo_frame,
-        text="Browse Repository",
-        command=browse_repository
-    )
-
-    repo_button.pack(
-        side=tk.LEFT,
-        padx=5
-    )
-
-    repo_button.bind(
-        "<Enter>",
-        show_root_tooltip
-    )
-
-    repo_button.bind(
-        "<Leave>",
-        hide_root_tooltip
-    )
+    ttk.Label(
+        header,
+        text="Static architecture analysis · Read-only mode",
+        style="Sub.TLabel",
+    ).grid(row=1, column=0, sticky="w", pady=(2, 0))
 
     # -------------------------
-    # Layer (subdirectory within ROOT)
+    # Project section (root / layer / single file)
     # -------------------------
 
-    layer_frame = tk.Frame(
-        root
+    project_section = ttk.Labelframe(
+        container, text="Project", padding=(PAD_MD, PAD_SM, PAD_MD, PAD_MD)
+    )
+    project_section.grid(row=1, column=0, sticky="ew")
+    project_section.columnconfigure(1, weight=1)
+
+    def add_path_row(parent, row, label_text, var, command, tooltip_text=None):
+        ttk.Label(parent, text=label_text, style="Field.TLabel").grid(
+            row=row, column=0, sticky="w", pady=(PAD_SM, 2), columnspan=2
+        )
+        entry = ttk.Entry(parent, textvariable=var)
+        entry.grid(row=row + 1, column=0, sticky="ew", padx=(0, PAD_SM))
+        button = ttk.Button(parent, text="Browse…", style="Secondary.TButton", command=command)
+        button.grid(row=row + 1, column=1, sticky="e")
+        if tooltip_text:
+            Tooltip(entry, tooltip_text)
+            Tooltip(button, tooltip_text)
+        return entry, button
+
+    add_path_row(
+        project_section,
+        0,
+        "Repository root",
+        repo_path_var,
+        browse_repository,
+        "Musi to być katalog GŁÓWNY (root) analizowanego projektu.",
     )
 
-    layer_frame.pack(
-        pady=5
+    ttk.Separator(project_section).grid(
+        row=2, column=0, columnspan=2, sticky="ew", pady=PAD_MD
     )
 
-    tk.Entry(
-        layer_frame,
-        textvariable=layer_path_var,
-        width=50
-    ).pack(
-        side=tk.LEFT,
-        padx=5
+    add_path_row(
+        project_section,
+        3,
+        "Layer — optional subdirectory of the root",
+        layer_path_var,
+        browse_layer,
+        "Podkatalog analizowanego repo, dla którego chcesz osobny raport warstwy.",
     )
 
-    tk.Button(
-        layer_frame,
-        text="Browse Layer",
-        command=browse_layer
-    ).pack(
-        side=tk.LEFT,
-        padx=5
+    ttk.Separator(project_section).grid(
+        row=5, column=0, columnspan=2, sticky="ew", pady=PAD_MD
     )
 
-    # -------------------------
-    # Single File
-    # -------------------------
-
-    file_frame = tk.Frame(
-        root
-    )
-
-    file_frame.pack(
-        pady=5
-    )
-
-    tk.Entry(
-        file_frame,
-        textvariable=file_path_var,
-        width=50
-    ).pack(
-        side=tk.LEFT,
-        padx=5
-    )
-
-    tk.Button(
-        file_frame,
-        text="Browse File",
-        command=browse_file
-    ).pack(
-        side=tk.LEFT,
-        padx=5
+    add_path_row(
+        project_section,
+        6,
+        "Single file — optional .py file to analyze",
+        file_path_var,
+        browse_file,
+        "Pojedynczy plik .py, dla którego chcesz raport w kontekście całego repo.",
     )
 
     # -------------------------
     # Actions
     # -------------------------
 
-    analyze_btn = tk.Button(
-        root,
+    actions_section = ttk.Frame(container)
+    actions_section.grid(row=2, column=0, sticky="ew", pady=(PAD_LG, 0))
+    actions_section.columnconfigure(0, weight=1)
+    actions_section.columnconfigure(1, weight=1)
+    actions_section.columnconfigure(2, weight=1)
+
+    analyze_btn = ttk.Button(
+        actions_section,
         text="Analyze Repository",
-        command=analyze
+        style="Primary.TButton",
+        command=analyze,
     )
+    analyze_btn.grid(row=0, column=0, sticky="ew", padx=(0, PAD_SM))
 
-    analyze_btn.pack(
-        pady=15
-    )
-
-    analyze_layer_btn = tk.Button(
-        root,
+    analyze_layer_btn = ttk.Button(
+        actions_section,
         text="Analyze Layer",
-        command=analyze_layer
+        style="Secondary.TButton",
+        command=analyze_layer,
     )
+    analyze_layer_btn.grid(row=0, column=1, sticky="ew", padx=PAD_SM)
 
-    analyze_layer_btn.pack(
-        pady=5
-    )
-
-    analyze_single_btn = tk.Button(
-        root,
+    analyze_single_btn = ttk.Button(
+        actions_section,
         text="Analyze Single File",
-        command=analyze_single
+        style="Secondary.TButton",
+        command=analyze_single,
     )
+    analyze_single_btn.grid(row=0, column=2, sticky="ew", padx=(PAD_SM, 0))
 
-    analyze_single_btn.pack(
-        pady=5
-    )
+    # -------------------------
+    # Progress + log (fills remaining space)
+    # -------------------------
+
+    progress_section = ttk.Frame(container)
+    progress_section.grid(row=3, column=0, sticky="nsew", pady=(PAD_LG, 0))
+    progress_section.columnconfigure(0, weight=1)
+    container.rowconfigure(3, weight=1)
 
     def open_output_folder():
         project_root = Path(__file__).resolve().parent.parent
@@ -727,70 +696,55 @@ def run():
             )
 
     # -------------------------
-    # Bottom Action
+    # Progress bar + log console
     # -------------------------
 
-    progress_bar = create_progress_bar(root)
-    log_box = create_log_box(root, height=5)
+    progress_bar = create_progress_bar(progress_section)
+    log_box = create_log_box(progress_section, height=8)
+    log_box.configure(relief="flat", borderwidth=0)
 
-    bottom_frame = tk.Frame(root)
+    # -------------------------
+    # Bottom toolbar (utility actions)
+    # -------------------------
 
-    bottom_frame.pack(
-        side="bottom",
-        fill="x",
-        padx=10,
-        pady=10
-    )
+    ttk.Separator(container).grid(row=4, column=0, sticky="ew", pady=(PAD_MD, PAD_SM))
 
-    tk.Button(
+    bottom_frame = ttk.Frame(container)
+    bottom_frame.grid(row=5, column=0, sticky="ew")
+
+    ttk.Button(
         bottom_frame,
         text="Output Folder",
-        command=open_output_folder
-    ).pack(
-        side="left"
-    )
+        style="Ghost.TButton",
+        command=open_output_folder,
+    ).pack(side="left")
 
-    tk.Button(
+    ttk.Button(
         bottom_frame,
-        text="Opróżnij output",
-        command=empty_output_folder
-    ).pack(
-        side="left",
-        padx=20
-    )
+        text="Empty Output",
+        style="Danger.Ghost.TButton",
+        command=empty_output_folder,
+    ).pack(side="left", padx=(PAD_SM, 0))
 
-    tk.Button(
+    ttk.Button(
         bottom_frame,
         text="Exclude",
-        command=run_exclude_window
-    ).pack(
-        side="left",
-        padx=20
-    )
+        style="Ghost.TButton",
+        command=run_exclude_window,
+    ).pack(side="left", padx=(PAD_SM, 0))
 
-    tk.Button(
+    ttk.Button(
         bottom_frame,
         text="Repo Builder",
-        command=run_repo_generator
-    ).pack(
-        side="left",
-        padx=20
-    )
+        style="Ghost.TButton",
+        command=run_repo_generator,
+    ).pack(side="left", padx=(PAD_SM, 0))
 
-    tk.Button(
+    ttk.Button(
         bottom_frame,
         text="Parsuj JSON",
-        command=run_parser_window
-    ).pack(
-        side="right"
-    )
-    
-    tk.Button(
-        bottom_frame,
-        text="Parsuj JSON",
-        command=run_parser_window
-    ).pack(
-        side="right"
-    )
+        style="Ghost.TButton",
+        command=run_parser_window,
+    ).pack(side="right")
 
     root.mainloop()

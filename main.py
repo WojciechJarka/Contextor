@@ -23,7 +23,8 @@ def main():
 
     # CLI mode (default)
     from repo_guardian.cli import main as cli_main
-    sys.exit(cli_main())
+    path = sys.argv[1] if len(sys.argv) > 1 else "."
+    sys.exit(cli_main(path))
 
 
 if __name__ == "__main__":
