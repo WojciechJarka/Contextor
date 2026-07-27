@@ -841,7 +841,32 @@ def save_all_reports(
         "main_report": main_report_path,
         "sliced_reports": report.get("sliced_reports", {}),
     }
-    
+
+def generate_summary_report(report: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Tworzy skrócony raport podsumowujący (summary) przeznaczony dla UI / GUI.
+    """
+    metrics = report.get("metrics", {})
+    debt = report.get("debt", {})
+    llm = report.get("llm_signals", {})
+    cycles = report.get("cycles", [])
+    collisions = report.get("collisions", [])
+
+    return {
+        "summary": {
+            "total_nodes": metrics.get("nodes", 0),
+            "total_edges": metrics.get("edges", 0),
+            "cycles_count": len(cycles),
+            "collisions_count": len(collisions),
+            "debt_score": debt.get("total_debt_score", 0) if isinstance(debt, dict) else debt,
+            "hotspots_count": len(llm.get("hotspots", [])),
+            "critical_risk_modules": len(llm.get("risk_summary", {}).get("critical", [])),
+        },
+        "top_hotspots": llm.get("hotspots", [])[:5],
+        "top_inspection_targets": llm.get("inspection_targets", [])[:5],
+        "refactor_suggestions_count": len(llm.get("refactor_plan", [])),
+    }
+
 # ==========================================================
 # EXPORTS
 # ==========================================================
@@ -852,4 +877,5 @@ __all__ = [
     "filter_report_by_subpath",
     "generate_sliced_reports",
     "save_all_reports",
+    "generate_summary_report",
 ]
