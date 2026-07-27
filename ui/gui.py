@@ -277,36 +277,54 @@ def run():
                 collisions=all_collisions,
             )
 
-            # 2. Dynamiczne wyciąganie WSZYSTKICH głównych pakietów / warstw
-            if log: log("Wykrywanie top-level warstw i modułów...")
+            # 2. Wykrywanie top-level warstw/komponentów
+            if log: log("Wykrywanie top-level warstw...")
+            root_p = Path(path).resolve()
             
             top_layers = set()
-            for mod in modules:
-                # Moduły mają postać 'core.domain.graph', 'ui.gui', 'cli' itp.
-                mod_name = mod.name if hasattr(mod, 'name') else str(mod)
-                top_name = mod_name.split('.')[0]
+            for mod_id in modules.keys():
+                # Wyciągamy główny pakiet (np. 'core' z 'core.domain', 'ui' z 'ui.gui')
+                top_name = mod_id.split('.')[0]
                 top_layers.add(top_name)
 
-            if log: log(f"Wykryte główne komponenty/warstwy: {sorted(list(top_layers))}")
+            if log: log(f"Wykryte warstwy do przetworzenia: {sorted(list(top_layers))}")
 
-            # 3. Generowanie raportu dla każdego komponentu
+            # Upewniamy się, że katalog output istnieje
+            out_dir = Path("output")
+            out_dir.mkdir(parents=True, exist_ok=True)
+
+            # 3. Generowanie raportów per-warstwa z pełnymi ścieżkami bezwzględnymi
             for layer_name in sorted(top_layers):
-                if log: log(f"Generowanie raportu warstwy: layer_{layer_name}.json ...")
+                # Budujemy PEŁNĄ BEZWZGLĘDNĄ ścieżkę do warstwy w skanowanym projekcie
+                full_layer_path = root_p / layer_name
+                
+                # Jeśli to plik (np. cli.py), sprawdzamy czy istnieje plik z rozszerzeniem .py
+                if not full_layer_path.exists() and (root_p / f"{layer_name}.py").exists():
+                    full_layer_path = root_p / f"{layer_name}.py"
+
+                if log: log(f"---> Generowanie raportu dla: {layer_name} (ścieżka: {full_layer_path})")
+
                 try:
                     report = generate_layer_report(
-                        layer_path=layer_name,
+                        layer_path=str(full_layer_path), # PEŁNA ŚCIEŻKA rozwiąże błąd resolves
                         modules=modules,
                         graph=graph,
-                        root_path=path,
+                        root_path=str(root_p),
                     )
                     
-                    out_file = Path("output") / f"layer_{layer_name}.json"
-                    save_layer_report(report, str(out_file))
-                    if log: log(f"[SUKCES] Utworzono: {out_file}")
-                except Exception as exc:
-                    if log: log(f"[BŁĄD dla {layer_name}]: {exc}")
+                    # Zapisujemy raport tylko jeśli znaleziono w nim moduły
+                    mod_count = report.get("layer_module_count", 0)
+                    if mod_count > 0:
+                        out_file = out_dir / f"layer_{layer_name}.json"
+                        save_layer_report(report, str(out_file))
+                        if log: log(f"[OK] Sukces! Zapisano {out_file} (modułów w warstwie: {mod_count})")
+                    else:
+                        if log: log(f"[OSTRZEŻENIE] Brak modułów dla warstwy {layer_name}")
 
-            if log: log("Analiza ukończona. Wszystkie pliki layer_*.json zostały wygenerowane.")
+                except Exception as exc:
+                    if log: log(f"[BŁĄD] Wystąpił wyjątek dla {layer_name}: {exc}")
+
+            if log: log("Proces generowania raportów warstw został ukończony!")
             return errors
 
         def on_success(errors):
