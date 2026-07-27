@@ -1,3 +1,4 @@
+#repo_generator/uniwersalny/repo_gui.py
 import tkinter as tk
 from tkinter import filedialog, messagebox
 import os
