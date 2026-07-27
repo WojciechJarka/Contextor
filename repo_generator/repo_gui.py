@@ -1,5 +1,5 @@
 # Repo_Guardian/repo_generator/repo_gui.py
-repo_gui.py
+
 import tkinter as tk
 from tkinter import filedialog, messagebox
 import os
