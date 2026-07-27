@@ -444,9 +444,15 @@ class RepoGenerator:
                         full_path
                     )
 
+                    index = self.listbox.size()
+
                     self.listbox.insert(
                         tk.END,
                         full_path
+                    )
+
+                    self.listbox.selection_set(
+                        index
                     )
 
                     added += 1
@@ -491,14 +497,18 @@ class RepoGenerator:
                     path
                 )
 
+                index = self.listbox.size()
+                
                 self.listbox.insert(
                     tk.END,
                     path
                 )
 
+                self.listbox.selection_set(
+                    index
+                )
+                
                 added += 1
-
-
 
         if added:
 
