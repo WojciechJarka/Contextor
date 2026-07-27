@@ -692,19 +692,37 @@ def slice_report_for_layer(
     Prawidłowo obsługuje dopasowanie prefiksów ścieżek modułów oraz krawędzie
     wewnętrzne (internal) i brzegowe (inbound / outbound).
     """
-    norm_layer = os.path.normpath(layer_path).replace("\\", "/").strip("/")
+    # 1. Zamiana ścieżki katalogu na prefiks pakietu Pythonowego (np. 'C:\repo_guardian\core' -> 'core')
+    abs_layer = os.path.abspath(layer_path)
+    abs_root = os.path.abspath(root_path)
+
+    try:
+        rel_path = os.path.relpath(abs_layer, abs_root)
+    except ValueError:
+        rel_path = os.path.basename(abs_layer)
+
+    if rel_path == ".":
+        layer_prefix = ""
+    else:
+        layer_prefix = rel_path.replace("\\", "/").strip("/").replace("/", ".")
 
     def is_in_layer(mod_id: str) -> bool:
         if not mod_id:
             return False
-        norm_mod = os.path.normpath(mod_id).replace("\\", "/").strip("/")
-        return norm_mod == norm_layer or norm_mod.startswith(norm_layer + "/")
+        # Normalizacja identyfikatora modułu (zamiana slaszy na kropki, jeśli przyszły jako ścieżki)
+        norm_mod = mod_id.replace("\\", "/").strip("/").replace("/", ".")
+        if not layer_prefix:
+            return True
+        return norm_mod == layer_prefix or norm_mod.startswith(layer_prefix + ".")
 
     # Extract all modules present in structure
     structure_map = global_structure.get("hard_edges", {})
     all_known_modules = set(structure_map.keys())
     for targets in structure_map.values():
         all_known_modules.update(targets)
+
+    # Dołącz również moduły z listy w compact_artifacts, jeśli istnieją
+    all_known_modules.update(global_compact_artifacts.get("modules", []))
 
     layer_modules = sorted([m for m in all_known_modules if is_in_layer(m)])
 
