@@ -1064,9 +1064,9 @@ class RepoGenerator:
             sorted(DEFAULT_SKIP_DIRS)
         ):
 
-
             var = tk.BooleanVar(
-                value=True
+                master=window,
+                value=directory in self.skip_dirs
             )
 
 
@@ -1105,34 +1105,27 @@ class RepoGenerator:
 
         def select_all_filters():
 
-
             for var in ext_vars.values():
 
                 var.set(True)
 
 
-
             for var in dir_vars.values():
 
                 var.set(True)
-
 
 
 
         def clear_filters():
 
-
             for var in ext_vars.values():
 
                 var.set(False)
 
 
-
             for var in dir_vars.values():
 
                 var.set(False)
-
-
 
 
 
