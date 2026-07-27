@@ -277,44 +277,36 @@ def run():
                 collisions=all_collisions,
             )
 
-            # 2. Wykrywanie wszystkich warstw
-            if log: log("Wykrywanie warstw w projekcie...")
-            root_p = Path(path).resolve()
+            # 2. Dynamiczne wyciąganie WSZYSTKICH głównych pakietów / warstw
+            if log: log("Wykrywanie top-level warstw i modułów...")
+            
+            top_layers = set()
+            for mod in modules:
+                # Moduły mają postać 'core.domain.graph', 'ui.gui', 'cli' itp.
+                mod_name = mod.name if hasattr(mod, 'name') else str(mod)
+                top_name = mod_name.split('.')[0]
+                top_layers.add(top_name)
 
-            ignored_dirs = {".git", ".idea", "__pycache__", "venv", ".venv", "output", "build", "dist"}
-            discovered_layers = [
-                item for item in root_p.iterdir()
-                if item.is_dir() and item.name not in ignored_dirs and any(item.rglob("*.py"))
-            ]
+            if log: log(f"Wykryte główne komponenty/warstwy: {sorted(list(top_layers))}")
 
-            if log: log(f"Wykryte katalogi warstw ({len(discovered_layers)}): {[l.name for l in discovered_layers]}")
-
-            # 3. Generowanie raportu per-warstwa
-            import traceback
-
-            for layer_dir in discovered_layers:
-                layer_name = layer_dir.name
-                if log: log(f"---> Przetwarzanie warstwy: {layer_name}")
-                
+            # 3. Generowanie raportu dla każdego komponentu
+            for layer_name in sorted(top_layers):
+                if log: log(f"Generowanie raportu warstwy: layer_{layer_name}.json ...")
                 try:
-                    # Sprawdzamy czy funkcja przyjmuje layer_path jako nazwę względną czy pełną ścieżkę
-                    # W większości implementacji repo_guardian wystarczy nazwa warstwy (np. "core", "ui")
                     report = generate_layer_report(
-                        layer_path=layer_name, # lub str(layer_dir) zależnie od sygnatury w core/reporting_layer.py
+                        layer_path=layer_name,
                         modules=modules,
                         graph=graph,
-                        root_path=str(root_p),
+                        root_path=path,
                     )
                     
-                    out_path = Path("output") / f"layer_{layer_name}.json"
-                    save_layer_report(report, str(out_path))
-                    if log: log(f"[OK] Zapisano: {out_path}")
-                    
+                    out_file = Path("output") / f"layer_{layer_name}.json"
+                    save_layer_report(report, str(out_file))
+                    if log: log(f"[SUKCES] Utworzono: {out_file}")
                 except Exception as exc:
-                    err_msg = traceback.format_exc()
-                    if log: log(f"[BŁĄD dla {layer_name}]: {exc}\n{err_msg}")
+                    if log: log(f"[BŁĄD dla {layer_name}]: {exc}")
 
-            if log: log("Proces generowania warstw zakończony.")
+            if log: log("Analiza ukończona. Wszystkie pliki layer_*.json zostały wygenerowane.")
             return errors
 
         def on_success(errors):
