@@ -1,1461 +1,1381 @@
-"""
-repo_guardian/core/symbol_reference.py
+# Repo_Guardian/repo_generator/repo_gui.py
 
-SYMBOL REFERENCE ENGINE v2.0
+# ============================================================
+# Repo Guardian - Repo Builder GUI
+# ============================================================
 
-Warstwa:
+import tkinter as tk
+from tkinter import filedialog, messagebox
 
-    FACT EXTRACTION
-
-
-Odpowiedzialność:
-
-- wykrywanie użycia symboli
-- wykrywanie wywołań metod/funkcji
-- wykrywanie dziedziczenia
-- wykrywanie importów symboli
-- budowanie relacji symbol -> konsumenci
-- generowanie CallResolution dla niejednoznacznych wywołań
+import os
+import subprocess
+import shutil
 
 
-Nie robi:
+# ============================================================
+# KONFIGURACJA
+# ============================================================
 
-- scoringu
-- ryzyka
-- architektury
-- raportowania
-
-
-Nowy model:
-
-confirmed_call
-    |
-    v
-    EdgeInfo
-
-
-ambiguous_call
-    |
-    v
-    CallResolution
-        - call_site
-        - possible_targets
-        - confidence
-        - reason
-
-
-"""
-
-from __future__ import annotations
+DEFAULT_EXTENSIONS = {
+    ".py",
+    ".json",
+    ".parquet",
+    ".txt",
+    ".md",
+    ".bat",
+    ".vbs",
+    ".js",
+    ".sh",
+    ".xml",
+    ".yaml",
+    ".yml",
+    ".csv",
+    ".ini",
+    ".toml",
+    ".doc",
+    ".docx",
+    ".xls",
+    ".xlsx",
+    ".ppt",
+    ".pptx"
+}
 
 
-from pathlib import Path
-import ast
+# To NIE jest aktywny filtr przy starcie.
+# Jest tylko domyślną zawartością okna filtrów.
+# Po zapisaniu użytkownik decyduje co faktycznie pomijać.
+
+DEFAULT_SKIP_DIRS = {
+    ".git",
+    "__pycache__",
+    "venv",
+    ".venv",
+    ".idea",
+    ".vscode",
+    "node_modules",
+    "dist",
+    "build",
+
+    # środowiska Python / WinPython
+    "winpython",
+    "python",
+    "Python",
+    "python310",
+    "python311",
+    "Lib",
+    "Scripts",
+    "Include",
+
+    # cache
+    ".pytest_cache",
+    ".mypy_cache",
+    ".ruff_cache",
+    ".tox"
+}
 
 
-from repo_guardian.core.report_models import (
-    CallResolution,
-)
+# ============================================================
+# IKONY CANVAS
+# ============================================================
+
+def draw_icon(canvas, icon_type):
+
+    canvas.delete("all")
 
 
+    if icon_type == "big_plus":
 
-# ==========================================================
-# CONSTANTS
-# ==========================================================
+        canvas.create_line(
+            17, 5,
+            17, 30,
+            fill="green",
+            width=5
+        )
 
-
-CONFIDENCE_EXACT = 1.0
-
-CONFIDENCE_INSTANCE = 0.95
-
-CONFIDENCE_ALIAS = 0.90
-
-CONFIDENCE_CALLBACK = 0.75
-
-CONFIDENCE_HEURISTIC = 0.31
-
-
-
-# ==========================================================
-# NAME RESOLUTION
-# ==========================================================
-
-
-def _attribute_name(
-    node
-):
-    """
-    AST Name/Attribute -> dotted name.
-
-    Example:
-
-        client.run()
-
-    becomes:
-
-        client.run
-    """
-
-    if isinstance(
-        node,
-        ast.Name
-    ):
-
-        return node.id
-
-
-
-    if isinstance(
-        node,
-        ast.Attribute
-    ):
-
-        parent = _attribute_name(
-            node.value
+        canvas.create_line(
+            5, 17,
+            30, 17,
+            fill="green",
+            width=5
         )
 
 
-        if parent:
+    elif icon_type == "small_plus":
 
-            return (
-                f"{parent}.{node.attr}"
+        for x in (8, 17, 26):
+
+            canvas.create_line(
+                x,
+                12,
+                x,
+                22,
+                fill="green",
+                width=2
+            )
+
+            canvas.create_line(
+                x - 5,
+                17,
+                x + 5,
+                17,
+                fill="green",
+                width=2
             )
 
 
-        return node.attr
+    elif icon_type == "big_minus":
+
+        canvas.create_line(
+            5,
+            17,
+            30,
+            17,
+            fill="red",
+            width=5
+        )
+
+
+    elif icon_type == "small_minus":
+
+        for x in (8, 17, 26):
+
+            canvas.create_line(
+                x - 5,
+                17,
+                x + 5,
+                17,
+                fill="red",
+                width=3
+            )
 
 
 
-    return None
-
-
-
-
-def _resolve_alias(
-    name,
-    aliases
+def create_icon_button(
+        parent,
+        text,
+        command,
+        icon_type
 ):
-    """
-    Resolve local import aliases.
-    """
 
-    if not name:
+    frame = tk.Frame(parent)
 
-        return None
+    frame.pack(
+        side=tk.LEFT,
+        padx=5
+    )
 
 
-    return aliases.get(
-        name,
-        name
+    canvas = tk.Canvas(
+        frame,
+        width=35,
+        height=35,
+        highlightthickness=0
+    )
+
+    canvas.pack(
+        side=tk.LEFT
+    )
+
+
+    draw_icon(
+        canvas,
+        icon_type
+    )
+
+
+    tk.Button(
+        frame,
+        text=text,
+        command=command,
+        height=2
+    ).pack(
+        side=tk.LEFT
     )
 
 
 
+# ============================================================
+# GŁÓWNA KLASA
+# ============================================================
 
-def _short_name(
-    value
-):
-    if not value:
-        return None
-
-    return value.split(".")[-1]
+class RepoGenerator:
 
 
+    def __init__(self, root):
+
+        self.root = root
+
+        self.root.title(
+            "Repo Builder - Context Generator"
+        )
 
 
-# ==========================================================
-# SYMBOL MATCHING
-# ==========================================================
+        self.root.geometry(
+            "1100x700"
+        )
 
 
-def _possible_targets(
-    value,
-    symbols
-):
-    """
-    Returns all possible symbol targets.
-
-    Unlike old implementation:
-
-        short name -> one guess
-
-    this keeps all candidates.
-    """
+        # lista fizycznie dodanych plików
+        self.files = []
 
 
-    if not value:
-
-        return []
-
-
-
-    if value in symbols:
-
-        return [
-            value
-        ]
+        # aktywne filtry
+        # domyślnie wszystko dozwolone
+        self.extensions = set(
+            DEFAULT_EXTENSIONS
+        )
 
 
+        # UWAGA:
+        # tutaj nie kopiujemy DEFAULT_SKIP_DIRS
+        # ponieważ filtr ma być sterowany oknem
 
-    short = _short_name(
-        value
-    )
+        # aktywne pomijanie katalogów
+        # startowo NIC nie jest filtrowane
+        # użytkownik aktywuje filtr przez okno filtrów
+
+        self.skip_dirs = set(DEFAULT_SKIP_DIRS)
 
 
-    return sorted(
+        self.output_dir = os.path.join(
+            os.path.dirname(
+                os.path.abspath(__file__)
+            ),
+            "OUTPUT"
+        )
 
-        symbol
 
-        for symbol in symbols
+        os.makedirs(
+            self.output_dir,
+            exist_ok=True
+        )
 
-        if _short_name(symbol) == short
 
-    )
+        self.build_gui()
 
 
 
+    # ========================================================
+    # GUI
+    # ========================================================
 
-def _resolve_match(
-    name,
-    resolved,
-    target_symbols,
-    aliases,
-):
-    """
-    Returns:
+    def build_gui(self):
 
-    (
-        resolution_type,
-        targets,
-        confidence,
-        reason
-    )
-    """
+        tk.Label(
+            self.root,
+            text="Repo Builder - wybór kontekstu",
+            font=("Arial", 14)
+        ).pack(
+            pady=10
+        )
 
 
-    if not resolved:
+        toolbar = tk.Frame(
+            self.root
+        )
 
-        return (
-            None,
-            [],
-            0.0,
-            None,
+        toolbar.pack()
+
+
+
+        create_icon_button(
+            toolbar,
+            "WYBIERZ REPO",
+            self.add_repository,
+            "big_plus"
+        )
+
+
+        create_icon_button(
+            toolbar,
+            "DODAJ PLIKI",
+            self.add_files,
+            "small_plus"
+        )
+
+
+        create_icon_button(
+            toolbar,
+            "USUŃ ZAZNACZONE",
+            self.remove_selected,
+            "big_minus"
+        )
+
+
+        create_icon_button(
+            toolbar,
+            "USUŃ WSZYSTKIE",
+            self.remove_all,
+            "small_minus"
+        )
+
+# ====================================================
+        # PANEL LISTY PLIKÓW
+        # ====================================================
+
+        frame = tk.Frame(
+            self.root,
+            relief=tk.GROOVE,
+            borderwidth=2
+        )
+
+        frame.pack(
+            fill=tk.BOTH,
+            expand=True,
+            padx=10,
+            pady=10
+        )
+
+
+        scrollbar = tk.Scrollbar(
+            frame
+        )
+
+        scrollbar.pack(
+            side=tk.RIGHT,
+            fill=tk.Y
+        )
+
+
+        self.listbox = tk.Listbox(
+            frame,
+            selectmode=tk.MULTIPLE,
+            exportselection=False,
+            yscrollcommand=scrollbar.set
+        )
+
+
+        self.listbox.pack(
+            fill=tk.BOTH,
+            expand=True
+        )
+
+
+        scrollbar.config(
+            command=self.listbox.yview
         )
 
 
 
-    # ------------------------------------------------------
-    # exact qualified match
-    # ------------------------------------------------------
+        # ====================================================
+        # PRZYCISKI LISTY
+        # ====================================================
 
-    if resolved in target_symbols:
+        list_controls = tk.Frame(
+            frame
+        )
 
-        return (
-            "confirmed",
-            [resolved],
-            CONFIDENCE_EXACT,
-            "exact_match",
+
+        list_controls.pack(
+            side=tk.BOTTOM,
+            fill=tk.X,
+            pady=5
         )
 
 
 
-    # ------------------------------------------------------
-    # imported alias pointing elsewhere
-    # ------------------------------------------------------
-
-    if name in aliases:
-
-        return (
-            None,
-            [],
-            0.0,
-            None,
+        tk.Button(
+            list_controls,
+            text="ZAZNACZ WSZYSTKIE",
+            command=self.select_all,
+            width=20
+        ).pack(
+            side=tk.LEFT,
+            padx=5
         )
 
 
 
-    # ------------------------------------------------------
-    # possible short-name matches
-    # ------------------------------------------------------
-
-    candidates = _possible_targets(
-        resolved,
-        target_symbols,
-    )
-
-
-    if candidates:
-
-        return (
-            "ambiguous",
-            candidates,
-            CONFIDENCE_HEURISTIC,
-            "short_name_fallback",
+        tk.Button(
+            list_controls,
+            text="ODZNACZ WSZYSTKIE",
+            command=self.unselect_all,
+            width=20
+        ).pack(
+            side=tk.LEFT,
+            padx=5
         )
 
 
 
-    return (
-        None,
-        [],
-        0.0,
-        None,
-    )
+        # ====================================================
+        # DOLNY PANEL
+        # ====================================================
 
-
-
-# ==========================================================
-# VISITOR
-# ==========================================================
-
-
-class SymbolReferenceVisitor(
-    ast.NodeVisitor
-):
-
-
-    def __init__(
-        self,
-        target_symbols
-    ):
-
-        self.target_symbols = set(
-            target_symbols
+        bottom = tk.Frame(
+            self.root
         )
 
 
-        self.called = set()
-
-
-        self.call_resolutions = []
-
-
-        self.event_bound = set()
-
-
-        self.inherited = []
-
-
-        self.aliases = {}
-
-
-        self.instances = {}
-
-
-
-        self.current_scope = None
-
-
-
-    # ------------------------------------------------------
-    # HELPERS
-    # ------------------------------------------------------
-
-
-    def _record_resolution(
-        self,
-        node,
-        symbol,
-        targets,
-        confidence,
-        reason,
-    ):
-
-        self.call_resolutions.append(
-
-            CallResolution(
-
-                call_site=(
-                    f"{self.current_scope or '<module>'}:"
-                    f"{getattr(node, 'lineno', 0)}"
-                ),
-
-                symbol=symbol,
-
-                possible_targets=list(
-                    targets
-                ),
-
-                confidence=confidence,
-
-                resolution="ambiguous",
-
-                reason=reason,
-
-            )
-
+        bottom.pack(
+            pady=10
         )
 
 
 
-    # ------------------------------------------------------
-    # IMPORTS
-    # ------------------------------------------------------
-
-
-    def visit_ImportFrom(
-        self,
-        node
-    ):
-
-        for item in node.names:
-
-            local_name = (
-                item.asname
-                or
-                item.name
-            )
-
-
-            imported = (
-
-                f"{node.module}.{item.name}"
-
-                if node.module
-
-                else item.name
-
-            )
-
-
-            self.aliases[
-                local_name
-            ] = imported
-
-
-
-        self.generic_visit(
-            node
+        tk.Button(
+            bottom,
+            text="FILTRY PLIKÓW",
+            command=self.open_filters,
+            width=20
+        ).pack(
+            side=tk.LEFT,
+            padx=5
         )
 
 
 
-    def visit_Import(
-        self,
-        node
-    ):
-
-
-        for item in node.names:
-
-
-            local_name = (
-
-                item.asname
-
-                or
-
-                item.name.split(".")[-1]
-
-            )
-
-
-            self.aliases[
-                local_name
-            ] = item.name
-
-
-
-        self.generic_visit(
-            node
-        )
-
-
-    # ------------------------------------------------------
-    # SCOPE TRACKING
-    # ------------------------------------------------------
-
-    def visit_FunctionDef(
-        self,
-        node
-    ):
-
-        previous = self.current_scope
-
-        self.current_scope = node.name
-
-
-        self.generic_visit(
-            node
-        )
-
-
-        self.current_scope = previous
-
-
-
-    def visit_AsyncFunctionDef(
-        self,
-        node
-    ):
-
-        self.visit_FunctionDef(
-            node
+        tk.Button(
+            bottom,
+            text="OUTPUT FOLDER",
+            command=self.open_output_folder,
+            width=20
+        ).pack(
+            side=tk.LEFT,
+            padx=5
         )
 
 
 
-    # ------------------------------------------------------
-    # INSTANCE TRACKING
-    # ------------------------------------------------------
-
-    def visit_Assign(
-        self,
-        node
-    ):
-
-
-        if isinstance(
-            node.value,
-            ast.Call
-        ):
-
-            constructor = _attribute_name(
-                node.value.func
-            )
-
-
-            constructor = _resolve_alias(
-                constructor,
-                self.aliases
-            )
-
-
-            if constructor:
-
-
-                for target in node.targets:
-
-
-                    if isinstance(
-                        target,
-                        ast.Name
-                    ):
-
-
-                        self.instances[
-                            target.id
-                        ] = constructor
-
-
-
-        self.generic_visit(
-            node
+        tk.Button(
+            bottom,
+            text="OPRÓŻNIJ OUTPUT",
+            command=self.clear_output,
+            width=20
+        ).pack(
+            side=tk.LEFT,
+            padx=5
         )
 
 
 
-    # ------------------------------------------------------
-    # INSTANCE METHOD RESOLUTION
-    # ------------------------------------------------------
-
-    def _resolve_instance_method(
-        self,
-        resolved
-    ):
-
-        if not resolved:
-
-            return False
-
-
-
-        parts = resolved.split(
-            "."
-        )
-
-
-        if len(parts) != 2:
-
-            return False
-
-
-
-        instance_name, method = parts
-
-
-        constructor = self.instances.get(
-            instance_name
-        )
-
-
-        if not constructor:
-
-            return False
-
-
-
-        candidate = (
-            f"{constructor}.{method}"
+        tk.Button(
+            self.root,
+            text="GENERUJ REPOZYTORIUM",
+            command=self.generate,
+            bg="green",
+            fg="white",
+            height=2
+        ).pack(
+            pady=10
         )
 
 
 
-        if candidate in self.target_symbols:
+    # ========================================================
+    # POMOCNICZE FILTROWANIE
+    # ========================================================
 
-            self.called.add(
-                candidate
-            )
+    def is_directory_blocked(self, path):
+
+        parts = path.replace(
+            "\\",
+            "/"
+        ).split("/")
 
 
-            return True
+        for part in parts:
 
+            for skip in self.skip_dirs:
+
+                if part.lower() == skip.lower():
+
+                    return True
 
 
         return False
 
 
 
-    # ------------------------------------------------------
-    # CALL DETECTION
-    # ------------------------------------------------------
+    def is_extension_allowed(self, path):
 
-    def visit_Call(
-        self,
-        node
-    ):
+        ext = os.path.splitext(
+            path
+        )[1].lower()
 
 
-        called_name = _attribute_name(
-            node.func
-        )
+        return ext in self.extensions
+
+    def is_filename_blocked(self, filename):
+
+        filename_lower = filename.lower()
+
+        for skip in self.skip_dirs:
+
+            if skip.lower() in filename_lower:
+
+                return True
+
+        return False
+
+    # ========================================================
+    # DODAWANIE REPOZYTORIUM
+    # ========================================================
+
+    def add_repository(self):
+
+        folder = filedialog.askdirectory()
 
 
-        resolved = _resolve_alias(
-            called_name,
-            self.aliases
-        )
-
-
-        # --------------------------------------------------
-        # Exact qualified call
-        # --------------------------------------------------
-
-        if resolved in self.target_symbols:
-
-
-            self.called.add(
-                resolved
-            )
-
-
-            self.generic_visit(
-                node
-            )
-
+        if not folder:
 
             return
 
 
 
-        # --------------------------------------------------
-        # Instance method
-        # --------------------------------------------------
+        added = 0
 
-        if self._resolve_instance_method(
-            resolved
-        ):
+        blocked = 0
 
 
-            self.generic_visit(
-                node
+        new_files = []
+
+
+
+        for root, dirs, files in os.walk(folder):
+
+
+            # odcinamy katalogi zanim os.walk wejdzie do środka
+
+            dirs[:] = [
+
+                d for d in dirs
+
+                if not any(
+
+                    d.lower() == skip.lower()
+
+                    for skip in self.skip_dirs
+
+                )
+
+            ]
+
+
+
+            for filename in files:
+
+
+                full_path = os.path.join(
+                    root,
+                    filename
+                )
+
+
+                if self.is_filename_blocked(filename):
+
+                    blocked += 1
+                    continue
+
+
+                if self.is_directory_blocked(
+                    full_path
+                ):
+
+                    blocked += 1
+
+                    continue
+
+
+
+                if not self.is_extension_allowed(
+                    full_path
+                ):
+
+                    blocked += 1
+
+                    continue
+
+
+
+                if full_path in self.files:
+
+                    continue
+
+
+
+                self.files.append(
+                    full_path
+                )
+
+
+                new_files.append(
+                    full_path
+                )
+
+
+                added += 1
+
+
+
+        # aktualizacja GUI tylko raz
+        # zamiast 450 refreshów
+
+        for path in new_files:
+
+            self.listbox.insert(
+                tk.END,
+                path
             )
 
 
-            return
+        if new_files:
+
+            self.select_all()
 
 
 
-        # --------------------------------------------------
-        # Ambiguous resolution
-        # --------------------------------------------------
-
-        kind, targets, confidence, reason = (
-            _resolve_match(
-                called_name,
-                resolved,
-                self.target_symbols,
-                self.aliases,
-            )
+        messagebox.showinfo(
+            "Repo dodane",
+            f"Dodano plików: {added}\n"
+            f"Pominięto: {blocked}"
         )
 
 
-        if kind == "ambiguous":
 
+    # ========================================================
+    # DODAWANIE POJEDYNCZYCH PLIKÓW
+    # ========================================================
 
-            self._record_resolution(
+    def add_files(self):
 
-                node,
-
-                called_name,
-
-                targets,
-
-                confidence,
-
-                reason,
-
-            )
-
-
-
-        self.generic_visit(
-            node
+        selected = filedialog.askopenfilenames(
+            title="Wybierz pliki"
         )
 
 
+        added = 0
 
-    # ------------------------------------------------------
-    # CALLBACK DETECTION
-    # ------------------------------------------------------
-
-    def _detect_callback(
-        self,
-        node
-    ):
-
-
-        callback_keys = {
-
-            "callback",
-            "handler",
-            "func",
-            "command",
-            "on_click",
-            "on_change",
-            "on_submit",
-
-        }
+        blocked = []
 
 
 
-        for keyword in node.keywords:
+        for path in selected:
+                    
+            filename = os.path.basename(path)
 
+            if self.is_filename_blocked(filename):
 
-            if keyword.arg not in callback_keys:
+                blocked.append(path)
+
+                continue
+
+            if self.is_directory_blocked(
+                path
+            ):
+
+                blocked.append(
+                    path
+                )
 
                 continue
 
 
 
-            name = _attribute_name(
-                keyword.value
+            if not self.is_extension_allowed(
+                path
+            ):
+
+                blocked.append(
+                    path
+                )
+
+                continue
+
+
+
+            if path in self.files:
+
+                continue
+
+
+
+            self.files.append(
+                path
             )
 
 
-            resolved = _resolve_alias(
-                name,
-                self.aliases
+            self.listbox.insert(
+                tk.END,
+                path
             )
 
 
-            _, targets, _, _ = (
-                _resolve_match(
-                    name,
-                    resolved,
-                    self.target_symbols,
-                    self.aliases,
+            added += 1
+
+
+
+        if added:
+
+            self.select_all()
+
+
+
+        if blocked:
+
+
+            messagebox.showwarning(
+                "Pliki pominięte",
+                "Następujące pliki są na liście wykluczonych:\n\n"
+                +
+                "\n".join(
+                    blocked[:10]
+                )
+                +
+                (
+                    "\n..."
+                    if len(blocked) > 10
+                    else ""
                 )
             )
 
 
-            if len(targets) == 1:
-
-                self.event_bound.add(
-                    targets[0]
-                )
+        elif added:
 
 
+            messagebox.showinfo(
+                "Pliki dodane",
+                f"Dodano: {added}"
+            )
 
-    def _detect_positional_callback(
-        self,
-        node
-    ):
 
+    # ========================================================
+    # USUWANIE ZAZNACZONYCH
+    # ========================================================
 
-        name = _attribute_name(
-            node.func
+    def remove_selected(self):
+
+        selected = list(
+            self.listbox.curselection()
         )
 
 
-        if not name:
+        if not selected:
 
             return
 
 
 
-        method = name.split(".")[-1]
-
-
-        callback_methods = {
-
-            "bind": 1,
-
-            "subscribe": 1,
-
-            "on": 0,
-
-        }
+        selected.reverse()
 
 
 
-        if method not in callback_methods:
+        for index in selected:
+
+
+            self.listbox.delete(
+                index
+            )
+
+
+            del self.files[index]
+
+
+
+    # ========================================================
+    # USUWANIE WSZYSTKICH
+    # ========================================================
+
+    def remove_all(self):
+
+        if not self.files:
 
             return
 
 
 
-        index = callback_methods[
-            method
+        if messagebox.askyesno(
+            "Potwierdzenie",
+            "Usunąć wszystkie pliki?"
+        ):
+
+
+            self.files.clear()
+
+
+            self.listbox.delete(
+                0,
+                tk.END
+            )
+
+
+
+    # ========================================================
+    # OPERACJE NA LIŚCIE
+    # ========================================================
+
+    def select_all(self):
+
+        if self.listbox.size() == 0:
+
+            return
+
+
+
+        self.listbox.selection_clear(
+            0,
+            tk.END
+        )
+
+
+        self.listbox.selection_set(
+            0,
+            tk.END
+        )
+
+
+        self.listbox.activate(
+            0
+        )
+
+
+
+    def unselect_all(self):
+
+        self.listbox.selection_clear(
+            0,
+            tk.END
+        )
+
+
+
+    # ========================================================
+    # OUTPUT
+    # ========================================================
+
+    def open_output_folder(self):
+
+        os.makedirs(
+            self.output_dir,
+            exist_ok=True
+        )
+
+
+        subprocess.Popen(
+            [
+                "explorer",
+                self.output_dir
+            ]
+        )
+
+
+
+    def clear_output(self):
+
+        if not os.path.exists(
+            self.output_dir
+        ):
+
+            return
+
+
+
+        items = os.listdir(
+            self.output_dir
+        )
+
+
+        if not items:
+
+
+            messagebox.showinfo(
+                "OUTPUT",
+                "Folder OUTPUT jest pusty."
+            )
+
+            return
+
+
+
+        if not messagebox.askyesno(
+            "Potwierdzenie",
+            "Usunąć zawartość OUTPUT?"
+        ):
+
+            return
+
+
+
+        for item in items:
+
+
+            path = os.path.join(
+                self.output_dir,
+                item
+            )
+
+
+            try:
+
+
+                if os.path.isdir(
+                    path
+                ):
+
+                    shutil.rmtree(
+                        path
+                    )
+
+
+                else:
+
+                    os.remove(
+                        path
+                    )
+
+
+            except Exception as e:
+
+
+                messagebox.showerror(
+                    "Błąd",
+                    str(e)
+                )
+
+
+
+        messagebox.showinfo(
+            "OUTPUT",
+            "Folder OUTPUT opróżniony."
+        )
+
+
+
+    # ========================================================
+    # OKNO FILTRÓW
+    # ========================================================
+
+    def open_filters(self):
+
+        window = tk.Toplevel(
+            self.root
+        )
+
+
+        window.title(
+            "Filtry plików"
+        )
+
+
+        window.geometry(
+            "900x650"
+        )
+
+
+
+        # ====================================================
+        # ROZSZERZENIA
+        # ====================================================
+
+        tk.Label(
+            window,
+            text="ROZSZERZENIA PLIKÓW",
+            font=("Arial", 12)
+        ).pack(
+            pady=5
+        )
+
+
+
+        ext_vars = {}
+
+
+
+        ext_frame = tk.Frame(
+            window
+        )
+
+
+        ext_frame.pack(
+            fill=tk.X,
+            padx=20
+        )
+
+
+
+        columns = 5
+
+
+
+        for index, ext in enumerate(
+            sorted(DEFAULT_EXTENSIONS)
+        ):
+
+
+            var = tk.BooleanVar(
+            master=window,
+            value=ext in self.extensions
+        )
+
+
+            ext_vars[ext] = var
+
+
+
+            tk.Checkbutton(
+                ext_frame,
+                text=ext,
+                variable=var
+            ).grid(
+                row=index // columns,
+                column=index % columns,
+                sticky="w",
+                padx=10,
+                pady=2
+            )
+
+
+
+        # ====================================================
+        # KATALOGI
+        # ====================================================
+
+        tk.Label(
+            window,
+            text="POMIJANE KATALOGI",
+            font=("Arial", 12)
+        ).pack(
+            pady=10
+        )
+
+
+
+        dir_vars = {}
+
+
+
+        dir_frame = tk.Frame(
+            window
+        )
+
+
+        dir_frame.pack(
+            fill=tk.X,
+            padx=20
+        )
+
+
+
+        columns = 5
+
+
+
+        for index, directory in enumerate(
+            sorted(DEFAULT_SKIP_DIRS)
+        ):
+
+            var = tk.BooleanVar(
+                master=window,
+                value=directory in self.skip_dirs
+            )
+
+
+            dir_vars[directory] = var
+
+
+
+            tk.Checkbutton(
+                dir_frame,
+                text=directory,
+                variable=var
+            ).grid(
+                row=index // columns,
+                column=index % columns,
+                sticky="w",
+                padx=10,
+                pady=2
+            )
+
+
+
+        # ====================================================
+        # PRZYCISKI FILTRÓW
+        # ====================================================
+
+        buttons = tk.Frame(
+            window
+        )
+
+
+        buttons.pack(
+            pady=15
+        )
+
+
+
+        def select_all_filters():
+
+            for var in ext_vars.values():
+
+                var.set(True)
+
+
+            for var in dir_vars.values():
+
+                var.set(True)
+
+
+
+        def clear_filters():
+
+            for var in ext_vars.values():
+
+                var.set(False)
+
+
+            for var in dir_vars.values():
+
+                var.set(False)
+
+
+
+        def save_filters():
+
+
+            self.extensions = {
+
+                ext
+
+                for ext, var in ext_vars.items()
+
+                if var.get()
+
+            }
+
+            self.skip_dirs = {
+
+                directory
+
+                for directory, var in dir_vars.items()
+
+                if var.get()
+
+            }
+
+
+
+            window.destroy()
+
+
+        tk.Button(
+            buttons,
+            text="ZAZNACZ WSZYSTKIE",
+            command=select_all_filters,
+            width=18
+        ).pack(
+            side=tk.LEFT,
+            padx=5
+        )
+
+        tk.Button(
+            buttons,
+            text="ODZNACZ WSZYSTKIE",
+            command=clear_filters,
+            width=18
+        ).pack(
+            side=tk.LEFT,
+            padx=5
+        )
+
+
+
+        tk.Button(
+            buttons,
+            text="ZAPISZ",
+            command=save_filters,
+            width=12
+        ).pack(
+            side=tk.LEFT,
+            padx=5
+        )
+
+
+
+    # ========================================================
+    # GENEROWANIE REPOZYTORIUM TXT
+    # ========================================================
+
+    def generate(self):
+
+        selected_indexes = self.listbox.curselection()
+
+
+
+        if not selected_indexes:
+
+
+            messagebox.showwarning(
+                "Brak zaznaczenia",
+                "Zaznacz pliki do wygenerowania."
+            )
+
+            return
+
+
+
+        files_to_generate = [
+
+            self.files[i]
+
+            for i in selected_indexes
+
         ]
 
 
 
-        if len(node.args) <= index:
-
-            return
-
-
-
-        callback = _attribute_name(
-            node.args[index]
-        )
-
-
-        resolved = _resolve_alias(
-            callback,
-            self.aliases
-        )
-
-
-        _, targets, _, _ = (
-            _resolve_match(
-                callback,
-                resolved,
-                self.target_symbols,
-                self.aliases,
-            )
-        )
-
-
-        if len(targets) == 1:
-
-            self.event_bound.add(
-                targets[0]
-            )
-
-
-
-    # ------------------------------------------------------
-    # CALLBACK WRAPPER
-    # ------------------------------------------------------
-
-    def visit_Call(
-        self,
-        node
-    ):
-
-        self._detect_callback(
-            node
-        )
-
-        self._detect_positional_callback(
-            node
-        )
-
-
-        called_name = _attribute_name(
-            node.func
-        )
-
-
-        resolved = _resolve_alias(
-            called_name,
-            self.aliases
+        output_file = os.path.join(
+            self.output_dir,
+            "repozytorium_custom.txt"
         )
 
 
 
-        if resolved in self.target_symbols:
-
-            self.called.add(
-                resolved
-            )
-
-
-            self.generic_visit(
-                node
-            )
-
-            return
+        try:
 
 
 
-        if self._resolve_instance_method(
-            resolved
-        ):
+            # bezpieczne wyznaczenie katalogu bazowego
 
-            self.generic_visit(
-                node
-            )
+            try:
 
-            return
-
-
-
-        kind, targets, confidence, reason = (
-            _resolve_match(
-                called_name,
-                resolved,
-                self.target_symbols,
-                self.aliases,
-            )
-        )
-
-
-
-        if kind == "ambiguous":
-
-            self._record_resolution(
-                node,
-                called_name,
-                targets,
-                confidence,
-                reason,
-            )
-
-
-        self.generic_visit(
-            node
-        )
-
-
-
-    # ------------------------------------------------------
-    # INHERITANCE
-    # ------------------------------------------------------
-
-    def visit_ClassDef(
-        self,
-        node
-    ):
-
-
-        for base in node.bases:
-
-
-            name = _attribute_name(
-                base
-            )
-
-
-            resolved = _resolve_alias(
-                name,
-                self.aliases
-            )
-
-
-            _, targets, _, _ = (
-                _resolve_match(
-                    name,
-                    resolved,
-                    self.target_symbols,
-                    self.aliases,
-                )
-            )
-
-
-            for target in targets:
-
-
-                self.inherited.append(
-
-                    (
-                        node.name,
-                        target
-                    )
-
+                base_path = os.path.commonpath(
+                    files_to_generate
                 )
 
 
-
-        self.generic_visit(
-            node
-        )
-
-# ==========================================================
-# REFERENCE BUILDING
-# ==========================================================
-
-
-def _empty_reference():
-    """
-    Initial reference container.
-
-    Legacy fields are preserved where possible,
-    but ambiguous calls are now represented
-    through CallResolution objects.
-    """
-
-    return {
-
-        "called_by": [],
-
-        "event_bound_by": [],
-
-        "imported_from": [],
-
-        "inherited_by": [],
-
-        "call_resolutions": [],
-
-    }
-
-
-
-def _load_tree(
-    root_path,
-    module
-):
-    """
-    Load module AST tree.
-    """
-
-    try:
-
-        path = (
-            Path(root_path)
-            /
-            module.path
-        )
-
-
-        return ast.parse(
-            path.read_text(
-                encoding="utf-8"
-            )
-        )
-
-
-    except Exception:
-
-        return None
-
-
-
-def _import_matches_symbol(
-    imported,
-    symbol
-):
-    """
-    Checks whether import points
-    to requested symbol.
-    """
-
-    if not imported:
-
-        return False
-
-
-    if imported == symbol:
-
-        return True
-
-
-    if imported.endswith(
-        "." + symbol
-    ):
-
-        return True
-
-
-    if symbol.endswith(
-        "." + imported
-    ):
-
-        return True
-
-
-    return False
-
-
-
-def _normalize_references(
-    references
-):
-    """
-    Deterministic output ordering.
-    """
-
-    for symbol, data in references.items():
-
-        for key, value in data.items():
-
-            if isinstance(
-                value,
-                list
-            ):
-
-                if key == "call_resolutions":
-
-                    continue
-
-
-                data[key] = sorted(
-                    set(value)
-                )
-
-
-    return references
-
-
-
-def build_symbol_references(
-    modules,
-    target_symbols,
-    root_path,
-    definer_module=None
-):
-    """
-    Builds symbol references.
-
-    Output:
-
-    symbol:
-        called_by
-        event_bound_by
-        imported_from
-        inherited_by
-        call_resolutions
-
-
-    New behaviour:
-
-    ambiguous calls are no longer
-    stored as a guessed consumer.
-
-    They become:
-
-        CallResolution
-
-    containing:
-
-        call_site
-        possible_targets
-        confidence
-        reason
-    """
-
-
-    bare_symbols = set(
-        target_symbols
-    )
-
-
-    if definer_module:
-
-        qualified_map = {
-
-            f"{definer_module}.{symbol}":
-                symbol
-
-            for symbol in bare_symbols
-
-        }
-
-
-    else:
-
-        qualified_map = {
-
-            symbol:
-                symbol
-
-            for symbol in bare_symbols
-
-        }
-
-
-
-    qualified_symbols = set(
-        qualified_map.keys()
-    )
-
-
-
-    references = {
-
-        symbol:
-            _empty_reference()
-
-        for symbol in qualified_symbols
-
-    }
-
-
-
-    for module_id, module in modules.items():
-
-
-        tree = _load_tree(
-            root_path,
-            module
-        )
-
-
-        if tree is None:
-
-            continue
-
-
-
-        visitor = SymbolReferenceVisitor(
-            qualified_symbols
-        )
-
-
-        visitor.visit(
-            tree
-        )
-
-
-
-        # --------------------------------------------------
-        # Confirmed calls
-        # --------------------------------------------------
-
-        for symbol in visitor.called:
-
-
-            if symbol in references:
-
-
-                references[symbol][
-                    "called_by"
-                ].append(
-                    module_id
-                )
-
-
-
-        # --------------------------------------------------
-        # Ambiguous calls
-        # --------------------------------------------------
-
-        for resolution in visitor.call_resolutions:
-
-
-            for target in resolution.possible_targets:
-
-
-                if target in references:
-
-
-                    references[target][
-                        "call_resolutions"
-                    ].append(
-                        resolution
-                    )
-
-
-
-        # --------------------------------------------------
-        # Events
-        # --------------------------------------------------
-
-        for symbol in visitor.event_bound:
-
-
-            if symbol in references:
-
-
-                references[symbol][
-                    "event_bound_by"
-                ].append(
-                    module_id
-                )
-
-
-
-        # --------------------------------------------------
-        # Inheritance
-        # --------------------------------------------------
-
-        for child_name, symbol in visitor.inherited:
-
-
-            if symbol in references:
-
-
-                references[symbol][
-                    "inherited_by"
-                ].append(
-                    module_id
-                )
-
-
-
-        # --------------------------------------------------
-        # Imports
-        # --------------------------------------------------
-
-        for imp in module.imports:
-
-
-            imported_module = getattr(
-                imp,
-                "module",
-                None
-            )
-
-
-            if definer_module:
-
-                if not _import_matches_symbol(
-                    imported_module or "",
-                    definer_module,
+                if os.path.isfile(
+                    base_path
                 ):
 
-                    continue
+                    base_path = os.path.dirname(
+                        base_path
+                    )
+
+
+            except Exception:
+
+
+                base_path = os.path.dirname(
+                    files_to_generate[0]
+                )
 
 
 
-            for imported_name in imp.names:
+            with open(
+                output_file,
+                "w",
+                encoding="utf-8"
+            ) as out:
 
 
-                for qualified in qualified_symbols:
+
+                for full_path in files_to_generate:
 
 
-                    bare = qualified_map[
-                        qualified
-                    ]
+
+                    if not self.is_extension_allowed(
+                        full_path
+                    ):
+
+                        continue
 
 
-                    if imported_name == bare:
+
+                    relative_path = os.path.relpath(
+                        full_path,
+                        base_path
+                    )
 
 
-                        references[qualified][
-                            "imported_from"
-                        ].append(
-                            module_id
+
+                    out.write(
+                        f"#~~~~~~[START PLIKU: {relative_path} ]~~~~~~#\n"
+                    )
+
+
+
+                    try:
+
+
+                        with open(
+                            full_path,
+                            "r",
+                            encoding="utf-8",
+                            errors="ignore"
+                        ) as source:
+
+
+                            out.write(
+                                source.read()
+                            )
+
+
+
+                    except Exception as e:
+
+
+                        out.write(
+                            "\n\nBŁĄD ODCZYTU:\n"
+                        )
+
+
+                        out.write(
+                            str(e)
                         )
 
 
 
-    references = _normalize_references(
-        references
+                    out.write(
+                        f"\n#~~~~~~[KONIEC PLIKU: {relative_path} ]~~~~~~#\n\n"
+                    )
+
+
+
+            messagebox.showinfo(
+
+                "Gotowe",
+
+                "Repozytorium wygenerowane:\n\n"
+
+                + output_file
+
+            )
+
+
+
+        except Exception as e:
+
+
+            messagebox.showerror(
+
+                "Błąd",
+
+                str(e)
+
+            )
+
+
+
+# ============================================================
+# START PROGRAMU
+# ============================================================
+
+def run_repo_generator():
+
+    root = tk.Tk()
+
+    root.withdraw()
+
+    app = RepoGenerator(
+        root
     )
 
+    root.deiconify()
 
-
-    # Restore old API:
-    # qualified symbol -> bare symbol
-
-    return {
-
-        qualified_map[key]:
-            value
-
-        for key, value
-        in references.items()
-
-    }
+    root.mainloop()
 
 
 
-# ==========================================================
-# MODULE IMPORT USERS
-# ==========================================================
+if __name__ == "__main__":
 
-
-def find_import_users(
-    target_module_id,
-    modules
-):
-    """
-    Finds modules importing target module.
-    """
-
-    users = []
-
-
-    short_name = (
-        target_module_id
-        .split(".")[-1]
-    )
-
-
-    for module_id, module in modules.items():
-
-
-        if module_id == target_module_id:
-
-            continue
-
-
-
-        for imp in module.imports:
-
-
-            imported = imp.module
-
-
-            if not imported:
-
-                continue
-
-
-
-            if (
-
-                imported == target_module_id
-
-                or
-
-                imported.endswith(
-                    "." + short_name
-                )
-
-            ):
-
-                users.append(
-                    module_id
-                )
-
-                break
-
-
-
-    return sorted(
-        set(users)
-    )
-
-
-
-# ==========================================================
-# COMPATIBILITY
-# ==========================================================
-
-
-build_references = (
-    build_symbol_references
-)
-
-
-
-# ==========================================================
-# EXPORTS
-# ==========================================================
-
-
-__all__ = [
-
-    "build_symbol_references",
-
-    "build_references",
-
-    "find_import_users",
-
-    "SymbolReferenceVisitor",
-
-]
+    run_repo_generator()
