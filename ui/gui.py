@@ -52,6 +52,7 @@ from repo_guardian.core.reporting_layer import (
 )
 
 from repo_guardian.ui.gui_parser import run_parser_window
+from repo_guardian.repo_generator import run_repo_generator
 from repo_guardian.ui.path_memory import load_state, save_state
 from repo_guardian.ui.exclude_check import check_stale_excludes
 from repo_guardian.ui.exclude_gui import run_exclude_window
@@ -787,6 +788,15 @@ def run():
         pady=10
     )
 
+    tk.Button(
+        bottom_frame,
+        text="Repo Generator",
+        command=run_repo_generator
+    ).pack(
+        side="left",
+        padx=20
+    )
+    
     tk.Button(
         bottom_frame,
         text="Output Folder",
