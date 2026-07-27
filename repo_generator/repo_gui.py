@@ -45,7 +45,24 @@ DEFAULT_SKIP_DIRS = {
     ".vscode",
     "node_modules",
     "dist",
-    "build"
+    "build",
+    
+    # środowiska Python / WinPython
+    
+    "winpython",
+    "python",
+    "Python",
+    "python311",
+    "python310",
+    "Lib",
+    "Scripts",
+    "Include",
+
+    # cache i artefakty
+    ".pytest_cache",
+    ".mypy_cache",
+    ".ruff_cache",
+    ".tox"
 }
 
 
@@ -419,7 +436,10 @@ class RepoGenerator:
 
             dirs[:] = [
                 d for d in dirs
-                if d not in self.skip_dirs
+                if not any(
+                    skip.lower() in d.lower()
+                    for skip in self.skip_dirs
+                )
             ]
 
 
