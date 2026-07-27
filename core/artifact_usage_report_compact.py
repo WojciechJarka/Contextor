@@ -30,6 +30,9 @@ Nie robi:
 - zapisu do pliku (to save_json w reporting.py)
 """
 
+import os
+import json
+
 
 # ==========================================================
 # MODULE INDEX
@@ -298,7 +301,7 @@ def compact_artifact_report(report: dict) -> dict:
         # identyfikatory modułów to liczby wskazujące na tę listę.
         "modules": module_ids,
 
-        "artifacts": compact_artifacts,
+        "artifacts": dict(sorted(compact_artifacts.items())),
         "shared_artifacts": compact_shared_artifacts,
         "shared_usage_clusters": compact_clusters,
         "core_extraction_candidates": compact_candidates,
@@ -313,33 +316,9 @@ def compact_artifact_report(report: dict) -> dict:
 
     return compact_report
 
-
 # ==========================================================
 # BLOCK-PER-LINE WRITER
 # ==========================================================
-#
-# compact_artifact_report() powyżej to TRANSFORMACJA DANYCH
-# (indeksy modułów, pomijanie pustych usage) - nie mówi nic
-# o formatowaniu zapisu. Ta funkcja to osobna sprawa: SPOSÓB
-# ZAPISU już przekształconego raportu na dysk.
-#
-# Standardowy json.dump(..., indent=2) daje ~15 linii na jeden
-# artefakt (czytelne, ale duże). json.dumps(..., separators=(",",":"))
-# na całości daje 1 linię na CAŁY plik (małe, ale nieparsowalne
-# liniowo/blokowo). Tu jest kompromis: każdy artefakt i każdy
-# shared_artifact to DOKŁADNIE jeden wiersz (bez wcięć w środku),
-# a reszta pól (moduły, klastry, liczniki) też po jednym wierszu.
-#
-# Wynik to dalej jeden, w pełni poprawny dokument JSON - json.load()
-# wczyta go tak samo jak każdy inny - ale można go też przeglądać/
-# grepować/parsować liniowo, bo granica bloku == granica wiersza,
-# dokładnie tak jak w pełnym _artifacts.json z wcięciami, tylko że
-# blok mieści się w jednej linii zamiast kilkunastu.
-#
-
-
-import os
-import json
 
 
 def _line(obj) -> str:
@@ -386,7 +365,7 @@ def save_compact_artifact_report(report: dict, path: str) -> None:
         for key, value in other_fields.items():
 
             f.write(
-                f"  {_line(key)}: {_line(value)},\n"
+                f'  {_line(key)}: {_line(value)},\n'
             )
 
         # --- artifacts: jeden artefakt = jeden wiersz ---
@@ -400,7 +379,7 @@ def save_compact_artifact_report(report: dict, path: str) -> None:
             comma = "," if i < len(items) - 1 else ""
 
             f.write(
-                f"    {_line(key)}: {_line(value)}{comma}\n"
+                f'    {_line(key)}: {_line(value)}{comma}\n'
             )
 
         f.write("  },\n")
@@ -414,7 +393,7 @@ def save_compact_artifact_report(report: dict, path: str) -> None:
             comma = "," if i < len(shared_artifacts) - 1 else ""
 
             f.write(
-                f"    {_line(item)}{comma}\n"
+                f'    {_line(item)}{comma}\n'
             )
 
         f.write("  ]\n")
