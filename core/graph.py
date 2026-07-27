@@ -37,7 +37,7 @@ Nie:
 from __future__ import annotations
 
 
-from repo_guardian.core.report_models import (
+from repo_guardian.core.domain.graph import (
     EdgeInfo,
 )
 
