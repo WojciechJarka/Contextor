@@ -1,0 +1,945 @@
+# -*- coding: utf-8 -*-
+
+"""
+repo_guardian/core/reporting.py
+
+REFACTOR SIGNAL ENGINE v3 + LAYER SLICING EXTENSION
+
+Rozszerza klasyczny raport o:
+- hotspot ranking
+- module risk score
+- dependency clusters
+- refactor suggestions
+- import profile
+- architectural debt signals
+- soft dependency explanations
+- inspection targets
+- name collisions report (with conflicting code snippets)
+- layer/subpath slicing engine (generating 5 scoped sub-reports)
+"""
+
+import os
+import orjson
+
+from datetime import datetime
+from collections import defaultdict, deque
+from typing import Dict, Any, List
+
+from repo_guardian.core.cycles import detect_cycles
+from repo_guardian.core.metrics import compute_graph_metrics
+from repo_guardian.core.debt import compute_debt
+from repo_guardian.core.hotspots import detect_hotspots
+from repo_guardian.core.thresholds import get_thresholds
+from repo_guardian.core.artifact_usage_report import generate_artifact_usage_report
+from repo_guardian.core.artifact_usage_report_compact import (
+    compact_artifact_report,
+    save_compact_artifact_report,
+)
+from repo_guardian.core.validator.collisions import validate_name_collisions
+
+# ==========================================================
+# GRAPH HELPERS
+# ==========================================================
+
+
+def _build_undirected_graph(
+    hard_edges: dict
+) -> dict:
+
+    graph = defaultdict(set)
+
+    for src, targets in hard_edges.items():
+
+        for tgt in targets:
+
+            graph[src].add(tgt)
+            graph[tgt].add(src)
+
+    return graph
+
+
+def _connected_components(
+    graph: dict
+) -> list[list[str]]:
+
+    visited = set()
+    clusters = []
+
+    for node in graph:
+
+        if node in visited:
+            continue
+
+        queue = deque([node])
+        component = []
+
+        while queue:
+
+            current = queue.popleft()
+
+            if current in visited:
+                continue
+
+            visited.add(current)
+            component.append(current)
+
+            for neigh in graph[current]:
+
+                if neigh not in visited:
+                    queue.append(neigh)
+
+        clusters.append(
+            sorted(component)
+        )
+
+    return sorted(
+        clusters,
+        key=len,
+        reverse=True
+    )
+
+
+# ==========================================================
+# SIGNAL LAYERS
+# ==========================================================
+
+
+def _compute_soft_dependencies(
+    graph: dict
+) -> list[dict]:
+
+    dependencies = []
+
+    for source, targets in graph["soft_edges"].items():
+
+        for target in targets:
+
+            dependencies.append(
+                {
+                    "from": source,
+                    "to": target,
+                    "reason": "resolver_fallback",
+                }
+            )
+
+    return sorted(
+        dependencies,
+        key=lambda x: (
+            x["from"],
+            x["to"]
+        )
+    )
+
+
+def _compute_module_risk(
+    metrics: dict,
+    graph: dict
+) -> dict:
+
+    max_in = max(
+        metrics.get(
+            "max_in_degree",
+            1
+        ),
+        1
+    )
+
+    max_out = max(
+        metrics.get(
+            "max_out_degree",
+            1
+        ),
+        1
+    )
+
+    risks = {}
+
+    for node, deps in graph["hard_edges"].items():
+
+        in_deg = sum(
+            node in targets
+            for targets in graph["hard_edges"].values()
+        )
+
+        out_deg = len(deps)
+
+        soft = len(
+            graph["soft_edges"].get(
+                node,
+                []
+            )
+        )
+
+        score = (
+            (in_deg / max_in) * 0.5
+            +
+            (out_deg / max_out) * 0.3
+            +
+            soft * 0.2
+        )
+
+        # konfiguracja jest centralna,
+        # ale nie powinna być traktowana
+        # jak ryzykowny moduł
+
+        if (
+            node.startswith("config.")
+        ):
+            score *= 0.25
+
+        risks[node] = round(
+            score,
+            4
+        )
+
+    return risks
+
+
+def _compute_inspection_targets(
+    hotspots: list[dict]
+) -> list[dict]:
+
+    targets = []
+
+    for priority, item in enumerate(
+        hotspots[:10],
+        start=1
+    ):
+
+        signals = []
+
+        if item.get("type") == "CONFIG_HUB":
+
+            signals.append(
+                "shared_configuration_dependency"
+            )
+
+        if item.get("type") == "HOTSPOT":
+
+            signals.append(
+                "high_coupling"
+            )
+
+        if item.get("type") == "OUTBOUND_HOTSPOT":
+
+            signals.append(
+                "high_out_degree"
+            )
+
+        if item.get("type") == "HUB":
+
+            signals.append(
+                "high_dependency_centrality"
+            )
+
+        if item.get(
+            "out_degree",
+            0
+        ) >= 10:
+
+            signals.append(
+                "high_out_degree"
+            )
+
+        if item.get(
+            "in_degree",
+            0
+        ) >= 10:
+
+            signals.append(
+                "high_in_degree"
+            )
+
+        if item.get(
+            "in_degree",
+            0
+        ) >= 20:
+
+            signals.append(
+                "many_dependents"
+            )
+
+        if signals:
+
+            targets.append(
+                {
+                    "module": item["module"],
+                    "priority": priority,
+                    "signals": sorted(
+                        set(signals)
+                    ),
+                }
+            )
+
+    return targets
+
+# ==========================================================
+# REFACTOR PLAN
+# ==========================================================
+
+
+def _compute_refactor_plan(
+    hotspots: list,
+    clusters: list,
+    total_modules: int,
+    thresholds: dict,
+) -> list[dict]:
+
+    plan = []
+
+    for h in hotspots[:10]:
+
+        hotspot_type = h.get(
+            "type",
+            ""
+        )
+
+        score = h.get(
+            "score",
+            0
+        )
+
+        if hotspot_type == "CONFIG_HUB":
+
+            plan.append(
+                {
+                    "type":
+                        "KEEP_AS_SHARED_CONFIG",
+
+                    "target":
+                        h["module"],
+
+                    "priority":
+                        "INFO",
+
+                    "reason":
+                        "central configuration module"
+                }
+            )
+
+            continue
+
+        if hotspot_type in (
+            "HOTSPOT",
+            "OUTBOUND_HOTSPOT",
+            "HUB",
+        ):
+
+            plan.append(
+                {
+                    "type":
+                        (
+                            "EXTRACT_INTERFACE"
+                            if hotspot_type == "HUB"
+                            else "SPLIT_MODULE"
+                        ),
+
+                    "target":
+                        h["module"],
+
+                    "priority":
+                        (
+                            "HIGH"
+                            if score >= thresholds.get("critical_score", 0.85)
+                            else "MEDIUM"
+                        ),
+
+                    "reason":
+                        {
+                            "HOTSPOT":
+                                "high coupling detected",
+
+                            "HUB":
+                                "high dependency centrality",
+
+                            "OUTBOUND_HOTSPOT":
+                                "too many outgoing dependencies",
+
+                        }.get(
+                            hotspot_type,
+                            "architectural hotspot"
+                        )
+                }
+            )
+
+    #
+    # Connected component całego projektu
+    # nie jest kandydatem do splitu.
+    #
+
+    for cluster in clusters:
+
+        if (
+            len(cluster) >= thresholds["refactor_cluster_size"]
+            and
+            len(cluster) < total_modules * 0.6
+        ):
+
+            plan.append(
+                {
+                    "type":
+                        "SPLIT_PACKAGE",
+
+                    "target_modules":
+                        cluster,
+
+                    "priority":
+                        "MEDIUM",
+
+                    "reason":
+                        "large isolated dependency cluster detected"
+                }
+            )
+
+    return plan
+
+
+def _compute_import_profile(
+    modules: dict
+) -> dict:
+
+    profile = {}
+
+    for module_id, module in modules.items():
+
+        total = len(
+            module.imports
+        )
+
+        local = sum(
+            1
+            for imp in module.imports
+            if imp.is_local
+        )
+
+        profile[module_id] = {
+            "global_imports":
+                total - local,
+
+            "local_imports":
+                local,
+        }
+
+    return profile
+
+
+# ==========================================================
+# MAIN REPORT
+# ==========================================================
+
+
+def generate_report(
+    project_graph,
+    modules: dict | None = None,
+    root_path: str = ".",
+    runtime: dict | None = None
+) -> dict:
+
+    hard_edges = project_graph.hard_edges
+    soft_edges = project_graph.soft_edges
+
+    metrics = compute_graph_metrics(
+        hard_edges,
+        soft_edges
+    )
+    
+    thresholds = get_thresholds(
+        metrics["nodes"]
+    )
+
+    cycles = detect_cycles(
+        hard_edges
+    )
+
+    collisions_list = []
+    if modules is not None:
+        collisions_list = validate_name_collisions(modules)
+
+    graph_dict = {
+        "hard_edges":
+            {
+                k:
+                    sorted(list(set(v)))
+                for k, v in hard_edges.items()
+            },
+
+        "soft_edges":
+            {
+                k:
+                    sorted(list(set(v)))
+                for k, v in soft_edges.items()
+            },
+    }
+
+    risk_map = _compute_module_risk(
+        metrics,
+        graph_dict
+    )
+
+    hotspots = detect_hotspots(
+        graph_dict["hard_edges"]
+    )
+
+    inspection_targets = _compute_inspection_targets(
+        hotspots
+    )
+
+    undirected = _build_undirected_graph(
+        graph_dict["hard_edges"]
+    )
+
+    clusters = _connected_components(
+        undirected
+    )
+
+    debt = compute_debt(
+        hard_edges,
+        soft_edges,
+        cycles,
+        metrics,
+        clusters=clusters,
+        hotspots=hotspots,
+        collisions=collisions_list,
+    )
+
+    refactor_plan = _compute_refactor_plan(
+        hotspots,
+        clusters,
+        len(graph_dict["hard_edges"]),
+        thresholds,
+    )
+
+    runtime_info = (
+        runtime.copy()
+        if runtime
+        else {}
+    )
+
+    runtime_info["generated_at"] = (
+        datetime.now().isoformat()
+    )
+
+    llm_signals = {
+        "module_risk":
+            risk_map,
+
+        "hotspots":
+            hotspots,
+
+        "inspection_targets":
+            inspection_targets,
+
+        "dependency_clusters":
+            clusters,
+
+        "refactor_plan":
+            refactor_plan,
+
+        "soft_dependencies":
+            _compute_soft_dependencies(
+                graph_dict
+            ),
+    }
+
+    if modules is not None:
+        llm_signals["module_import_profile"] = _compute_import_profile(modules)
+        llm_signals["name_collisions"] = generate_collisions_report(
+            modules, precomputed=collisions_list
+        )
+
+    real_collisions = [
+        c for c in collisions_list
+        if not getattr(c, "is_identical", False)
+    ]
+
+    return {
+        "status": (
+            "HEALTHY"
+            if not cycles and not real_collisions
+            else "BROKEN"
+        ),
+
+        "runtime": runtime_info,
+
+        "metrics": metrics,
+
+        "cycles": cycles,
+
+        "cycle_count": len(cycles),
+
+        "debt": debt,
+
+        "graph": graph_dict,
+
+        "llm_signals": llm_signals,
+    }
+
+
+def save_json(
+    report: dict,
+    path: str,
+    log=None,
+    label: str = "",
+    compact: bool = False,
+) -> None:
+    directory = os.path.dirname(path)
+    if directory:
+        os.makedirs(directory, exist_ok=True)
+
+    if log and label:
+        log(f"Serializowanie i zapisywanie: {label} ({path})...")
+
+    option = orjson.OPT_NON_STR_KEYS
+    if not compact:
+        option |= orjson.OPT_INDENT_2
+
+    serialized = orjson.dumps(
+        report,
+        option=option
+    )
+    with open(path, "wb") as f:
+        f.write(serialized)
+
+    if log and label:
+        log(f"Zapisano pomyślnie: {label}")
+
+
+# ==========================================================
+# EXPORT HELPERS FOR SPLIT REPORTS
+# ==========================================================
+
+def generate_summary_report(
+    metrics: dict,
+    cycles: list,
+    debt: dict,
+    collisions: list | None = None,
+) -> dict:
+    """Generuje skondensowany raport stanu projektu."""
+    collisions = collisions or []
+
+    real_collisions = [
+        c for c in collisions
+        if not getattr(c, "is_identical", False)
+    ]
+
+    return {
+        "status": "HEALTHY" if not cycles and not real_collisions else "BROKEN",
+        "metrics": metrics,
+        "cycle_count": len(cycles),
+        "collision_count": len(real_collisions),
+        "debt_summary": {
+            "total_score": debt.get("score", 0),
+            "hotspot_count": len(debt.get("hotspots", [])),
+        }
+    }
+
+
+def generate_structure_report(hard_edges: dict, soft_edges: dict) -> dict:
+    """Generuje czysty graf zależności z deduplikacją krawędzi."""
+    return {
+        "hard_edges": {k: sorted(list(set(v))) for k, v in hard_edges.items()},
+        "soft_edges": {k: sorted(list(set(v))) for k, v in soft_edges.items()}
+    }
+
+
+def generate_collisions_report(modules: dict, precomputed: list | None = None) -> dict:
+    """
+    Generuje dedykowany raport kolizji nazw dla artefaktów tego samego typu 
+    (klasa z klasą, funkcja z funkcją itp.), które posiadają inny kod.
+    """
+    all_collisions = (
+        precomputed
+        if precomputed is not None
+        else validate_name_collisions(modules)
+    )
+    collisions_data = []
+
+    for error in all_collisions:
+        collisions_data.append(
+            {
+                "message": error.message,
+                "nodes": error.nodes,
+                "artifact_type": getattr(error, "artifact_type", "unknown"),
+                "is_identical": getattr(error, "is_identical", False),
+                "conflicting_code": getattr(error, "code_snippets", {}),
+                "symbol_details": getattr(error, "symbol_details", []),
+            }
+        )
+
+    return {
+        "generated_at": datetime.now().isoformat(),
+        "total_collisions": len(collisions_data),
+        "collisions": collisions_data,
+    }
+
+
+# ==========================================================
+# LAYER / SUBPATH SLICING ENGINE
+# ==========================================================
+
+def slice_report_for_layer(
+    layer_path: str,
+    root_path: str,
+    global_metrics: Dict[str, Any],
+    global_structure: Dict[str, Any],
+    global_summary: Dict[str, Any],
+    global_artifacts: Dict[str, Any],
+    global_compact_artifacts: Dict[str, Any]
+) -> Dict[str, Dict[str, Any]]:
+    """
+    Redukuje globalne raporty do dedykowanych raportów dla wybranej warstwy/katalogu.
+    
+    Prawidłowo obsługuje dopasowanie prefiksów ścieżek modułów oraz krawędzie
+    wewnętrzne (internal) i brzegowe (inbound / outbound).
+    """
+    # 1. Zamiana ścieżki katalogu na prefiks pakietu Pythonowego (np. 'C:\repo_guardian\core' -> 'core')
+    abs_layer = os.path.abspath(layer_path)
+    abs_root = os.path.abspath(root_path)
+
+    try:
+        rel_path = os.path.relpath(abs_layer, abs_root)
+    except ValueError:
+        rel_path = os.path.basename(abs_layer)
+
+    if rel_path == ".":
+        layer_prefix = ""
+    else:
+        layer_prefix = rel_path.replace("\\", "/").strip("/").replace("/", ".")
+
+    def is_in_layer(mod_id: str) -> bool:
+        if not mod_id:
+            return False
+        # Normalizacja identyfikatora modułu (zamiana slaszy na kropki, jeśli przyszły jako ścieżki)
+        norm_mod = mod_id.replace("\\", "/").strip("/").replace("/", ".")
+        if not layer_prefix:
+            return True
+        return norm_mod == layer_prefix or norm_mod.startswith(layer_prefix + ".")
+
+    # Extract all modules present in structure
+    structure_map = global_structure.get("hard_edges", {})
+    all_known_modules = set(structure_map.keys())
+    for targets in structure_map.values():
+        all_known_modules.update(targets)
+
+    # Dołącz również moduły z listy w compact_artifacts, jeśli istnieją
+    all_known_modules.update(global_compact_artifacts.get("modules", []))
+
+    layer_modules = sorted([m for m in all_known_modules if is_in_layer(m)])
+
+    hard_edges = global_structure.get("hard_edges", {})
+    soft_edges = global_structure.get("soft_edges", {})
+
+    internal_hard = {}
+    internal_soft = {}
+    inbound_hard = []
+    outbound_hard = []
+
+    # Map edges and boundaries
+    for src, targets in hard_edges.items():
+        src_in = is_in_layer(src)
+        for tgt in targets:
+            tgt_in = is_in_layer(tgt)
+            if src_in and tgt_in:
+                internal_hard.setdefault(src, []).append(tgt)
+            elif src_in and not tgt_in:
+                outbound_hard.append({"source": src, "target": tgt})
+            elif not src_in and tgt_in:
+                inbound_hard.append({"source": src, "target": tgt})
+
+    for src, targets in soft_edges.items():
+        src_in = is_in_layer(src)
+        for tgt in targets:
+            tgt_in = is_in_layer(tgt)
+            if src_in and tgt_in:
+                internal_soft.setdefault(src, []).append(tgt)
+
+    # 1. Layer Summary Report
+    layer_summary_report = {
+        "layer": {
+            "path": layer_path,
+            "root": os.path.abspath(root_path)
+        },
+        "layer_modules": layer_modules,
+        "layer_module_count": len(layer_modules),
+        "total_module_count": len(all_known_modules),
+        "internal_edges": {
+            "hard": internal_hard,
+            "soft": internal_soft
+        },
+        "boundary": {
+            "inbound_hard": inbound_hard,
+            "outbound_hard": outbound_hard,
+            "depended_on_by": sorted(list({e["source"] for e in inbound_hard})),
+            "depends_on": sorted(list({e["target"] for e in outbound_hard}))
+        },
+        "summary": {
+            "internal_edge_count": sum(len(v) for v in internal_hard.values()),
+            "inbound_edge_count": len(inbound_hard),
+            "outbound_edge_count": len(outbound_hard),
+            "external_dependents_count": len({e["source"] for e in inbound_hard}),
+            "external_dependencies_count": len({e["target"] for e in outbound_hard})
+        },
+        "generated_at": global_summary.get("generated_at", datetime.now().isoformat())
+    }
+
+    # 2. Layer Structure Report
+    layer_structure_report = {
+        "hard_edges": internal_hard,
+        "soft_edges": internal_soft
+    }
+
+    # 3. Layer Metrics Report
+    layer_metrics_report = {
+        "nodes": len(layer_modules),
+        "edges": sum(len(v) for v in internal_hard.values()),
+        "density": global_metrics.get("density", 0),
+        "layer_scope": layer_path
+    }
+
+    # 4. Layer Artifacts Usage Report
+    layer_artifacts = {
+        k: v for k, v in global_artifacts.get("artifacts", {}).items()
+        if is_in_layer(v.get("definer_module", ""))
+    }
+
+    layer_artifacts_report = {
+        "runtime": global_artifacts.get("runtime", {}),
+        "module_count": len(layer_modules),
+        "artifact_count": len(layer_artifacts),
+        "artifacts": layer_artifacts,
+        "shared_artifacts": [
+            a for a in global_artifacts.get("shared_artifacts", [])
+            if is_in_layer(a.get("definer_module", ""))
+        ]
+    }
+
+    # 5. Layer Compact Artifacts Report
+    compact_modules = global_compact_artifacts.get("modules", [])
+    layer_compact_indices = {
+        idx for idx, mod in enumerate(compact_modules) if is_in_layer(mod)
+    }
+
+    layer_compact_artifacts_report = {
+        "_format_note": global_compact_artifacts.get("_format_note", ""),
+        "runtime": global_compact_artifacts.get("runtime", {}),
+        "module_count": len(layer_modules),
+        "modules": compact_modules,
+        "artifacts": {
+            k: v for k, v in global_compact_artifacts.get("artifacts", {}).items()
+            if v.get("definer_module") in layer_compact_indices
+        }
+    }
+
+    return {
+        "summary": layer_summary_report,
+        "structure": layer_structure_report,
+        "metrics": layer_metrics_report,
+        "artifacts": layer_artifacts_report,
+        "artifacts_compact": layer_compact_artifacts_report
+    }
+
+
+def save_layer_reports(
+    repo_name: str,
+    layer_name: str,
+    layer_reports: Dict[str, Dict[str, Any]],
+    log=None
+) -> None:
+    """Zapisuje wygenerowane raporty warstwy do katalogu output/."""
+    prefix = f"output/{repo_name}_{layer_name}"
+
+    save_json(layer_reports["summary"], f"{prefix}_summary.json", log=log, label=f"raport warstwy [{layer_name}] - podsumowanie")
+    save_json(layer_reports["structure"], f"{prefix}_structure.json", log=log, label=f"raport warstwy [{layer_name}] - struktura")
+    save_json(layer_reports["metrics"], f"{prefix}_metrics.json", log=log, label=f"raport warstwy [{layer_name}] - metryki")
+    save_json(layer_reports["artifacts"], f"{prefix}_artifacts.json", log=log, label=f"raport warstwy [{layer_name}] - artefakty")
+    save_json(layer_reports["artifacts_compact"], f"{prefix}_artifacts_compact.json", log=log, label=f"raport warstwy [{layer_name}] - artefakty (compact)")
+
+
+# ==========================================================
+# SAVE ALL GLOBAL REPORTS
+# ==========================================================
+
+def save_all_reports(
+    repo_name: str,
+    modules: dict,
+    graph: object,
+    metrics: dict,
+    cycles: list,
+    debt: dict,
+    runtime: dict,
+    root_path: str,
+    log=None,
+    collisions: list | None = None,
+):
+    """Fasada: zapisuje oddzielne pliki w katalogu output sekwencyjnie z orjson."""
+    
+    if log:
+        log("Rozpoczynanie sekwencyjnego zapisu raportów...")
+
+    all_collisions = (
+        collisions
+        if collisions is not None
+        else validate_name_collisions(modules)
+    )
+
+    # 1. Raport podsumowujący
+    summary_data = generate_summary_report(metrics, cycles, debt, collisions=all_collisions)
+    summary_data["generated_at"] = datetime.now().isoformat()
+    save_json(
+        summary_data,
+        f"output/{repo_name}_summary.json",
+        log=log,
+        label="raport podsumowujący"
+    )
+    
+    # 2. Raport struktury grafu
+    structure_data = generate_structure_report(graph.hard_edges, graph.soft_edges)
+    save_json(
+        structure_data,
+        f"output/{repo_name}_structure.json",
+        log=log,
+        label="raport struktury grafu"
+    )
+    
+    # 3. Raport kolizji nazw (duplikatów)
+    if log:
+        log("Generowanie raportu kolizji nazw...")
+    collisions_data = generate_collisions_report(modules, precomputed=all_collisions)
+    save_json(
+        collisions_data,
+        f"output/{repo_name}_name_collisions.json",
+        log=log,
+        label="raport kolizji nazw"
+    )
+
+    # 4. Raport użycia artefaktów
+    if log:
+        log("Generowanie raportu użycia artefaktów...")
+    artifact_data = generate_artifact_usage_report(modules, root_path, runtime)
+    
+    artifact_data["debug_info"] = {
+        "module_count": len(modules),
+        "root_path": root_path,
+        "timestamp": datetime.now().isoformat()
+    }
+    
+    save_json(
+        artifact_data,
+        f"output/{repo_name}_artifacts.json",
+        log=log,
+        label="raport artefaktów",
+    )
+
+    # 5. Zwarta wersja raportu artefaktów
+    if log:
+        log("Generowanie zwartej wersji raportu artefaktów...")
+
+    compact_artifact_data = compact_artifact_report(artifact_data)
+
+    save_compact_artifact_report(
+        compact_artifact_data,
+        f"output/{repo_name}_artifacts_compact.json",
+    )
+
+    if log:
+        log("Wszystkie raporty zostały pomyślnie zapisane.")
