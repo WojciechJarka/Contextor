@@ -877,18 +877,74 @@ def generate_summary_report(report: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 # ==========================================================
-# EXPORTS
+# GUI COMPATIBILITY WRAPPERS & EXPORTS
 # ==========================================================
 
-def generate_structure_report(
-    modules: dict,
-    project_graph: Any = None
+def save_all_reports(
+    report: Dict[str, Any],
+    output_dir: str,
+    filename: str = "report.json"
 ) -> Dict[str, Any]:
-    """
-    Generuje raport struktury katalogów i modułów dla UI.
-    """
-    tree: Dict[str, Any] = {}
+    """Zapisuje główny raport oraz wyzwala generowanie pod-raportów."""
+    os.makedirs(output_dir, exist_ok=True)
+    main_report_path = os.path.join(output_dir, filename)
 
+    if "runtime" not in report:
+        report["runtime"] = {}
+    report["runtime"]["output_dir"] = output_dir
+
+    try:
+        sliced_paths = generate_sliced_reports(report, output_dir)
+        report["sliced_reports"] = sliced_paths
+    except Exception as e:
+        report["sliced_reports_error"] = str(e)
+
+    with open(main_report_path, "wb") as f:
+        f.write(orjson.dumps(report, option=orjson.OPT_INDENT_2))
+
+    return {
+        "main_report": main_report_path,
+        "sliced_reports": report.get("sliced_reports", {}),
+    }
+
+
+def save_layer_reports(report: Dict[str, Any], output_dir: str) -> Dict[str, str]:
+    """Alias dla gui.py wywołujący zapis raportów warstwowych."""
+    return generate_sliced_reports(report, output_dir)
+
+
+def slice_report_for_layer(report: Dict[str, Any], layer_name: str) -> Dict[str, Any]:
+    """Alias dla gui.py wywołujący filtrowanie po podścieżce."""
+    return filter_report_by_subpath(report, layer_name)
+
+
+def generate_summary_report(report: Dict[str, Any]) -> Dict[str, Any]:
+    """Generuje skrócone podsumowanie dla interfejsu."""
+    metrics = report.get("metrics", {})
+    debt = report.get("debt", {})
+    llm = report.get("llm_signals", {})
+    cycles = report.get("cycles", [])
+    collisions = report.get("collisions", [])
+
+    return {
+        "summary": {
+            "total_nodes": metrics.get("nodes", 0),
+            "total_edges": metrics.get("edges", 0),
+            "cycles_count": len(cycles),
+            "collisions_count": len(collisions),
+            "debt_score": debt.get("total_debt_score", 0) if isinstance(debt, dict) else debt,
+            "hotspots_count": len(llm.get("hotspots", [])),
+            "critical_risk_modules": len(llm.get("risk_summary", {}).get("critical", [])),
+        },
+        "top_hotspots": llm.get("hotspots", [])[:5],
+        "top_inspection_targets": llm.get("inspection_targets", [])[:5],
+        "refactor_suggestions_count": len(llm.get("refactor_plan", [])),
+    }
+
+
+def generate_structure_report(modules: dict, project_graph: Any = None) -> Dict[str, Any]:
+    """Generuje raport struktury drzewa modułów dla UI."""
+    tree: Dict[str, Any] = {}
     if not modules:
         return {"structure": tree, "total_modules": 0}
 
@@ -915,11 +971,13 @@ def generate_structure_report(
         "total_modules": len(modules),
     }
 
+
 __all__ = [
     "generate_report",
     "filter_report_by_subpath",
     "slice_report_for_layer",
     "generate_sliced_reports",
+    "save_layer_reports",
     "save_all_reports",
     "generate_summary_report",
     "generate_structure_report",
