@@ -221,33 +221,35 @@ def compute_graph_metrics(
 
 
 
-    # in_degree/out_degree muszą liczyć się z tej samej bazy co
-    # "edges" i "average_degree" wyżej (hard + soft), inaczej
-    # metryki w tym samym raporcie są ze sobą niespójne.
+       # in_degree/out_degree muszą liczyć się z tej samej bazy co
+    # "edges" i "average_degree" wyżej (hard + soft)
+
     combined_edges = {
 
-        node:
-        {
-            edge.target
-            if hasattr(edge, "target")
-            else edge
+        node: {
+
+            (
+                edge.target
+                if hasattr(edge, "target")
+                else edge
+            )
 
             for edge in (
                 set(hard_edges.get(node, []))
                 |
                 set((soft_edges or {}).get(node, []))
             )
+
         }
 
-    for node in (
-        set(hard_edges)
-        |
-        set(soft_edges or {})
-    )
+        for node in (
+            set(hard_edges)
+            |
+            set(soft_edges or {})
+        )
 
-}
-        for node in set(hard_edges) | set(soft_edges or {})
     }
+
 
     degrees = compute_degrees(
         combined_edges
