@@ -65,6 +65,36 @@ def _is_inside(path: Path, parent: Path) -> bool:
         return False
 
 
+def _module_absolute_path(module, root_resolved: Path) -> Path:
+    """
+    Zwraca bezwzględną, rozwiniętą ścieżkę modułu - niezależnie
+    od tego, czy module.path jest zapisane względem root, czy
+    już jest ścieżką bezwzględną (obie konwencje spotykane w
+    tym kodzie - Path(root) / module.path po cichu ignoruje
+    lewą stronę, gdy module.path jest już absolutne, więc samo
+    to wyrażenie nie rozstrzyga, które to jest).
+
+    Porównywanie WSZYSTKIEGO po normalizacji do bezwzględnych,
+    rozwiniętych ścieżek eliminuje tę niejednoznaczność - działa
+    poprawnie niezależnie od konwencji, zamiast zakładać jedną
+    z nich i cicho zwracać 0 dopasowań, gdy założenie jest błędne.
+    """
+
+    module_path = Path(module.path)
+
+    if not module_path.is_absolute():
+
+        module_path = root_resolved / module_path
+
+    try:
+
+        return module_path.resolve()
+
+    except OSError:
+
+        return module_path
+
+
 # ==========================================================
 # LAYER MEMBERSHIP
 # ==========================================================
