@@ -29,6 +29,12 @@ from repo_guardian.core.validator import validate
 from repo_guardian.core.reporting import (
     generate_report,
     save_all_reports,
+    generate_summary_report,
+    generate_structure_report,
+    generate_artifact_usage_report,
+    compact_artifact_report,
+    slice_report_for_layer,
+    save_layer_reports,
 )
 
 from repo_guardian.core.metrics import compute_graph_metrics
@@ -53,7 +59,6 @@ from repo_guardian.ui.progress_widget import create_progress_bar, create_log_box
 from repo_guardian.core.validator.collisions import validate_name_collisions
 
 def run():
-
     root = tk.Tk()
 
     root.title(
@@ -64,11 +69,8 @@ def run():
         "600x440"
     )
 
-
     repo_path_var = tk.StringVar()
-
     layer_path_var = tk.StringVar()
-
     file_path_var = tk.StringVar()
 
     state = load_state()
@@ -77,16 +79,12 @@ def run():
         ""
     )
 
-
     if repo_saved:
-
         conflicts = check_stale_excludes(
             repo_saved
         )
 
-
         if conflicts:
-
             answer = messagebox.askyesno(
                 "Nieaktualne wyjątki",
                 "Wykryto pliki/katalogi, które wróciły do repo.\n\n"
@@ -97,15 +95,14 @@ def run():
                 )
             )
 
-
             if answer:
-
                 from repo_guardian.ui.exclude_gui import reapply_excludes
 
                 reapply_excludes(
                     repo_saved,
                     conflicts
                 )
+
     repo_path_var.set(
         state.get(
             "repository",
@@ -124,13 +121,10 @@ def run():
     # FILE PICKERS
     # ======================================================
 
-
     def browse_repository():
-
         directory = filedialog.askdirectory()
 
         if directory:
-
             repo_path_var.set(
                 directory
             )
@@ -142,16 +136,13 @@ def run():
             save_state(repository=directory)
 
     def browse_layer():
-
         root_dir = repo_path_var.get()
 
         if not root_dir:
-
             messagebox.showwarning(
                 "Missing repository",
                 "Select Repository (root) first, before choosing a layer."
             )
-
             return
 
         directory = filedialog.askdirectory(
@@ -159,42 +150,33 @@ def run():
         )
 
         if not directory:
-
             return
 
         try:
-
             root_resolved = Path(root_dir).resolve()
             layer_resolved = Path(directory).resolve()
-
         except Exception:
-
             messagebox.showerror(
                 "Invalid path",
                 "Could not resolve selected paths."
             )
-
             return
 
         if layer_resolved == root_resolved:
-
             messagebox.showwarning(
                 "Invalid layer",
                 "Layer cannot be the same directory as the repository root.\n"
                 "Select a subdirectory instead."
             )
-
             return
 
         if root_resolved not in layer_resolved.parents:
-
             messagebox.showwarning(
                 "Invalid layer",
                 "Selected directory is outside the repository root.\n"
                 "Layer must be a subdirectory of:\n"
                 f"{root_resolved}"
             )
-
             return
 
         layer_path_var.set(
@@ -202,7 +184,6 @@ def run():
         )
 
     def browse_file():
-
         file_path = filedialog.askopenfilename(
             filetypes=[
                 (
@@ -213,7 +194,6 @@ def run():
         )
 
         if file_path:
-
             file_path_var.set(
                 file_path
             )
@@ -224,9 +204,7 @@ def run():
     # ANALYSIS
     # ======================================================
 
-
     def analyze():
-
         path = repo_path_var.get()
 
         if not path:
@@ -287,7 +265,6 @@ def run():
 
             top_layers = set()
             for key in module_keys:
-                # Wyciągamy pierwszy człony przed kropką (np. 'core' z 'core.indexer', 'cli' z 'cli')
                 top_name = str(key).split('.')[0]
                 top_layers.add(top_name)
 
@@ -298,7 +275,6 @@ def run():
 
             # 3. Generowanie raportów
             for layer_name in sorted(top_layers):
-                # Sprawdzamy czy istnieje folder LUB plik .py dla danej warstwy
                 target_path = root_p / layer_name
                 if not target_path.exists():
                     target_path = root_p / f"{layer_name}.py"
@@ -316,7 +292,6 @@ def run():
                     mod_count = report.get("layer_module_count", 0)
                     if log: log(f"-> Wynik dla '{layer_name}': znaleziono {mod_count} modułów w warstwie.")
 
-                    # Zapisujemy plik ZAWSZE (nawet jak mod_count == 0, żeby zobaczyć czy skrypt się w ogóle wykonuje)
                     out_file = out_dir / f"layer_{layer_name}.json"
                     save_layer_report(report, str(out_file))
                     if log: log(f"[ZAPISANO] {out_file}")
@@ -327,14 +302,11 @@ def run():
             if log: log("=== KONIEC DIAGNOSTYKI WARSTW ===")
 
         def on_success(errors):
-
             if not errors:
-
                 messagebox.showinfo(
                     "OK",
                     "No issues found. Repository is healthy!"
                 )
-
                 return
 
             msg = "\n".join(
@@ -350,7 +322,6 @@ def run():
             )
 
         def on_error(exc):
-
             messagebox.showerror(
                 "error",
                 str(exc)
@@ -366,7 +337,7 @@ def run():
             log_box=log_box
         )
 
-   def analyze_layer():
+    def analyze_layer():
         root_dir = repo_path_var.get()
         layer_dir = layer_path_var.get()
 
@@ -477,31 +448,24 @@ def run():
             buttons=[analyze_btn, analyze_layer_btn, analyze_single_btn],
             log_box=log_box
         )
-    def analyze_single():
 
+    def analyze_single():
         file_path = file_path_var.get()
 
         if not file_path.endswith(".py"):
-
             messagebox.showwarning(
                 "Invalid file",
                 "Select Python file first."
             )
-
             return
-
-
 
         repo_root = repo_path_var.get()
 
-
         if not repo_root:
-
             messagebox.showwarning(
                 "Missing repository root",
                 "Please select ROOT directory of scanned project"
             )
-
             return
 
         def task(log=None):
@@ -529,7 +493,6 @@ def run():
                 }
             )
 
-
             if log: log("Tworzenie raportu dla pliku...")
             report = generate_single_file_report(
                 file_path,
@@ -539,13 +502,11 @@ def run():
                 repo_root
             )
 
-
             output = (
                 "output/"
                 +
                 f"single_{file.stem}.json"
             )
-
 
             save_single_file_report(
                 report,
@@ -556,14 +517,12 @@ def run():
             return output
 
         def on_success(output):
-
             messagebox.showinfo(
                 "Done",
                 f"Single file report created:\n{output}"
             )
 
         def on_error(exc):
-
             messagebox.showerror(
                 "Error",
                 str(exc)
@@ -583,26 +542,19 @@ def run():
     # TOOLTIP
     # ======================================================
 
-
     def show_root_tooltip(event):
-
         root.title(
             "Repo Guardian v1 - It must be ROOT directory of scanned project"
         )
 
-
     def hide_root_tooltip(event):
-
         root.title(
             "Repo Guardian v1"
         )
 
-
-
     # ======================================================
     # UI
     # ======================================================
-
 
     tk.Label(
         root,
@@ -611,12 +563,9 @@ def run():
         pady=10
     )
 
-
-
     # -------------------------
     # Repository ROOT
     # -------------------------
-
 
     repo_frame = tk.Frame(
         root
@@ -625,7 +574,6 @@ def run():
     repo_frame.pack(
         pady=5
     )
-
 
     tk.Entry(
         repo_frame,
@@ -636,19 +584,16 @@ def run():
         padx=5
     )
 
-
     repo_button = tk.Button(
         repo_frame,
         text="Browse Repository",
         command=browse_repository
     )
 
-
     repo_button.pack(
         side=tk.LEFT,
         padx=5
     )
-
 
     repo_button.bind(
         "<Enter>",
@@ -664,7 +609,6 @@ def run():
     # Layer (subdirectory within ROOT)
     # -------------------------
 
-
     layer_frame = tk.Frame(
         root
     )
@@ -672,7 +616,6 @@ def run():
     layer_frame.pack(
         pady=5
     )
-
 
     tk.Entry(
         layer_frame,
@@ -682,7 +625,6 @@ def run():
         side=tk.LEFT,
         padx=5
     )
-
 
     tk.Button(
         layer_frame,
@@ -697,7 +639,6 @@ def run():
     # Single File
     # -------------------------
 
-
     file_frame = tk.Frame(
         root
     )
@@ -705,7 +646,6 @@ def run():
     file_frame.pack(
         pady=5
     )
-
 
     tk.Entry(
         file_frame,
@@ -716,7 +656,6 @@ def run():
         padx=5
     )
 
-
     tk.Button(
         file_frame,
         text="Browse File",
@@ -725,8 +664,6 @@ def run():
         side=tk.LEFT,
         padx=5
     )
-
-
 
     # -------------------------
     # Actions
@@ -763,50 +700,41 @@ def run():
     )
 
     def open_output_folder():
-
         project_root = Path(__file__).resolve().parent.parent
 
         output_dir = project_root / "output"
 
         if not output_dir.exists():
-
             messagebox.showinfo(
                 "Output folder",
                 "Folder 'output' nie istnieje.\n"
                 "Uruchom analizę repozytorium, aby został utworzony."
             )
-
             return
 
         if sys.platform.startswith("win"):
-
             os.startfile(output_dir)
 
         elif sys.platform == "darwin":
-
             subprocess.run(
                 ["open", str(output_dir)]
             )
 
         else:
-
             subprocess.run(
                 ["xdg-open", str(output_dir)]
             )
 
     def empty_output_folder():
-
         project_root = Path(__file__).resolve().parent.parent
 
         output_dir = project_root / "output"
 
         if not output_dir.exists():
-
             messagebox.showinfo(
                 "Output folder",
                 "Folder 'output' nie istnieje. Nie ma czego czyścić."
             )
-
             return
 
         confirm = messagebox.askyesno(
@@ -816,29 +744,20 @@ def run():
         )
 
         if not confirm:
-
             return
 
         errors = []
 
         for entry in output_dir.iterdir():
-
             try:
-
                 if entry.is_dir():
-
                     shutil.rmtree(entry)
-
                 else:
-
                     entry.unlink()
-
             except Exception as exc:
-
                 errors.append(f"{entry.name}: {exc}")
 
         if errors:
-
             messagebox.showwarning(
                 "Częściowy błąd",
                 "Nie udało się usunąć niektórych elementów:\n"
@@ -847,12 +766,10 @@ def run():
             )
 
         else:
-
             messagebox.showinfo(
                 "Gotowe",
                 "Zawartość folderu 'output' została usunięta."
             )
-
 
     # -------------------------
     # Bottom Action
@@ -878,7 +795,6 @@ def run():
         side="left"
     )
 
-
     tk.Button(
         bottom_frame,
         text="Opróżnij output",
@@ -887,7 +803,6 @@ def run():
         side="left",
         padx=20
     )
-
 
     tk.Button(
         bottom_frame,
