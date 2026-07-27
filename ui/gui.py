@@ -229,21 +229,16 @@ def run():
 
         path = repo_path_var.get()
 
-
         if not path:
-
             messagebox.showwarning(
                 "Missing repository",
                 "Please select ROOT directory of scanned project"
             )
-
             return
 
         def task(log=None):
             if log: log("Rozpoczynanie indeksowania katalogu...")
-            modules = build_index(
-                path
-            )
+            modules = build_index(path)
 
             if log: log(f"Znaleziono {len(modules)} modułów. Pobieranie grafu...")
             graph, cache_hit = get_cached_graph(
@@ -252,11 +247,7 @@ def run():
             )
 
             if log: log(f"Walidacja grafu (cache_hit={cache_hit})...")
-            errors = validate(
-                modules,
-                graph
-            )
-
+            errors = validate(modules, graph)
 
             repo_name = Path(path).name
 
@@ -272,6 +263,7 @@ def run():
                 collisions=all_collisions,
             )
 
+            # 1. Zapis zbiorczych raportów głównych
             save_all_reports(
                 repo_name=repo_name,
                 modules=modules,
@@ -285,7 +277,37 @@ def run():
                 collisions=all_collisions,
             )
 
-            if log: log("Analiza repozytorium zakończona pomyślnie.")
+            # 2. Generowanie raportów per warstwa dla wszystkich podkatalogów (warstw)
+            if log: log("Generowanie raportów dla wszystkich warstw...")
+            
+            # Pobieramy unikalne bezpośrednie katalogi/warstwy z wykrytych modułów
+            layers = set()
+            root_p = Path(path).resolve()
+            for mod in modules:
+                mod_path = Path(mod.path if hasattr(mod, 'path') else mod).resolve()
+                try:
+                    rel = mod_path.relative_to(root_p)
+                    if len(rel.parts) > 1:
+                        layers.add(rel.parts[0])
+                except ValueError:
+                    continue
+
+            for layer_name in layers:
+                layer_dir = root_p / layer_name
+                if layer_dir.is_dir():
+                    if log: log(f"Generowanie layer_{layer_name}.json...")
+                    layer_rep = generate_layer_report(
+                        str(layer_dir),
+                        modules,
+                        graph,
+                        path,
+                    )
+                    save_layer_report(
+                        layer_rep,
+                        f"output/layer_{layer_name}.json"
+                    )
+
+            if log: log("Analiza repozytorium i generowanie wszystkich raportów zakończone pomyślnie.")
             return errors
 
         def on_success(errors):
