@@ -256,52 +256,6 @@ def run():
                 collisions=all_collisions,
             )
 
-            # 2. Wykrywanie top-level warstw/komponentów
-            if log: log("=== ROZPOCZĘCIE DIAGNOSTYKI WARSTW ===")
-            root_p = Path(path).resolve()
-            
-            # Pobieramy klucze z modules
-            module_keys = list(modules.keys()) if isinstance(modules, dict) else [getattr(m, 'id', str(m)) for m in modules]
-            if log: log(f"Wszystkie znalezione klucze modułów ({len(module_keys)}): {module_keys}")
-
-            top_layers = set()
-            for key in module_keys:
-                top_name = str(key).split('.')[0]
-                top_layers.add(top_name)
-
-            if log: log(f"Wykryte unikalne warstwy: {sorted(list(top_layers))}")
-
-            out_dir = Path("output")
-            out_dir.mkdir(parents=True, exist_ok=True)
-
-            # 3. Generowanie raportów
-            for layer_name in sorted(top_layers):
-                target_path = root_p / layer_name
-                if not target_path.exists():
-                    target_path = root_p / f"{layer_name}.py"
-
-                if log: log(f"Próba generowania dla '{layer_name}' na podstawie ścieżki: {target_path}")
-
-                try:
-                    report = generate_layer_report(
-                        layer_path=str(target_path),
-                        modules=modules,
-                        graph=graph,
-                        root_path=str(root_p),
-                    )
-                    
-                    mod_count = report.get("layer_module_count", 0)
-                    if log: log(f"-> Wynik dla '{layer_name}': znaleziono {mod_count} modułów w warstwie.")
-
-                    out_file = out_dir / f"layer_{layer_name}.json"
-                    save_layer_report(report, str(out_file))
-                    if log: log(f"[ZAPISANO] {out_file}")
-
-                except Exception as exc:
-                    if log: log(f"[BŁĄD SPADKOWY] Dla {layer_name}: {exc}")
-
-            if log: log("=== KONIEC DIAGNOSTYKI WARSTW ===")
-
         def on_success(errors):
             if not errors:
                 messagebox.showinfo(
