@@ -608,6 +608,15 @@ def filter_report_by_subpath(
         },
     }
 
+def slice_report_for_layer(
+    report: Dict[str, Any],
+    layer_name: str
+) -> Dict[str, Any]:
+    """
+    Alias / wrapper dla GUI wywołujący filtrowanie raportu dla konkretnej warstwy.
+    """
+    return filter_report_by_subpath(report, layer_name)
+
 
 def generate_sliced_reports(
     report: Dict[str, Any],
@@ -909,6 +918,7 @@ def generate_structure_report(
 __all__ = [
     "generate_report",
     "filter_report_by_subpath",
+    "slice_report_for_layer",
     "generate_sliced_reports",
     "save_all_reports",
     "generate_summary_report",
