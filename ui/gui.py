@@ -263,7 +263,7 @@ def run():
                 collisions=all_collisions,
             )
 
-            # 1. Zapis zbiorczych raportów głównych
+            # 1. Zapis głównych raportów zbiorczych
             save_all_reports(
                 repo_name=repo_name,
                 modules=modules,
@@ -277,25 +277,26 @@ def run():
                 collisions=all_collisions,
             )
 
-            # 2. Generowanie raportów per warstwa dla wszystkich podkatalogów (warstw)
-            if log: log("Generowanie raportów dla wszystkich warstw...")
-            
-            # Pobieramy unikalne bezpośrednie katalogi/warstwy z wykrytych modułów
-            layers = set()
+            # 2. Wykrywanie wszystkich warstw (podkatalogów w root_path)
+            if log: log("Wykrywanie warstw w projekcie...")
             root_p = Path(path).resolve()
-            for mod in modules:
-                mod_path = Path(mod.path if hasattr(mod, 'path') else mod).resolve()
-                try:
-                    rel = mod_path.relative_to(root_p)
-                    if len(rel.parts) > 1:
-                        layers.add(rel.parts[0])
-                except ValueError:
-                    continue
 
-            for layer_name in layers:
-                layer_dir = root_p / layer_name
-                if layer_dir.is_dir():
-                    if log: log(f"Generowanie layer_{layer_name}.json...")
+            # Szukamy podkatalogów bezpośrednio w root, które zawierają pliki .py
+            ignored_dirs = {".git", ".idea", "__pycache__", "venv", ".venv", "output", "build", "dist"}
+            discovered_layers = []
+
+            for item in root_p.iterdir():
+                if item.is_dir() and item.name not in ignored_dirs:
+                    # Sprawdzamy czy w katalogu jest jakikolwiek kod pythonowy
+                    if any(item.rglob("*.py")):
+                        discovered_layers.append(item)
+
+            if log: log(f"Znaleziono warstwy: {[l.name for l in discovered_layers]}")
+
+            # 3. Generowanie raportu per-warstwa
+            for layer_dir in discovered_layers:
+                if log: log(f"Generowanie layer_{layer_dir.name}.json...")
+                try:
                     layer_rep = generate_layer_report(
                         str(layer_dir),
                         modules,
@@ -304,10 +305,12 @@ def run():
                     )
                     save_layer_report(
                         layer_rep,
-                        f"output/layer_{layer_name}.json"
+                        f"output/layer_{layer_dir.name}.json"
                     )
+                except Exception as exc:
+                    if log: log(f"[BŁĄD] Nie udało się wygenerować raportu dla {layer_dir.name}: {exc}")
 
-            if log: log("Analiza repozytorium i generowanie wszystkich raportów zakończone pomyślnie.")
+            if log: log("Analiza zakończona! Wygenerowano wszystkie raporty warstw.")
             return errors
 
         def on_success(errors):
