@@ -1011,7 +1011,7 @@ class RepoGenerator:
 # START PROGRAMU
 # ============================================================
 
-if __name__ == "__main__":
+def run_repo_generator():
 
     root = tk.Tk()
 
@@ -1020,3 +1020,9 @@ if __name__ == "__main__":
     )
 
     root.mainloop()
+
+
+
+if __name__ == "__main__":
+
+    run_repo_generator()
