@@ -949,13 +949,16 @@ class RepoGenerator:
 
 
 
-                    filename = os.path.basename(
-                        full_path
+                    relative_path = os.path.relpath(
+                        full_path,
+                        os.path.dirname(
+                            os.path.commonpath(self.files)
+                        )
                     )
 
 
                     out.write(
-                        f"#~~~~~~[START PLIKU: {filename} ]~~~~~~#\n"
+                        f"#~~~~~~[START PLIKU: {relative_path} ]~~~~~~#\n"
                     )
 
 
@@ -986,7 +989,7 @@ class RepoGenerator:
 
 
                     out.write(
-                        f"\n#~~~~~~[KONIEC PLIKU: {filename} ]~~~~~~#\n\n"
+                        f"\n#~~~~~~[KONIEC PLIKU: {relative_path} ]~~~~~~#\n\n"
                     )
 
 
