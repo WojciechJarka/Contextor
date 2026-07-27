@@ -278,54 +278,53 @@ def run():
             )
 
             # 2. Wykrywanie top-level warstw/komponentów
-            if log: log("Wykrywanie top-level warstw...")
+            if log: log("=== ROZPOCZĘCIE DIAGNOSTYKI WARSTW ===")
             root_p = Path(path).resolve()
             
+            # Pobieramy klucze z modules
+            module_keys = list(modules.keys()) if isinstance(modules, dict) else [getattr(m, 'id', str(m)) for m in modules]
+            if log: log(f"Wszystkie znalezione klucze modułów ({len(module_keys)}): {module_keys}")
+
             top_layers = set()
-            for mod_id in modules.keys():
-                # Wyciągamy główny pakiet (np. 'core' z 'core.domain', 'ui' z 'ui.gui')
-                top_name = mod_id.split('.')[0]
+            for key in module_keys:
+                # Wyciągamy pierwszy człony przed kropką (np. 'core' z 'core.indexer', 'cli' z 'cli')
+                top_name = str(key).split('.')[0]
                 top_layers.add(top_name)
 
-            if log: log(f"Wykryte warstwy do przetworzenia: {sorted(list(top_layers))}")
+            if log: log(f"Wykryte unikalne warstwy: {sorted(list(top_layers))}")
 
-            # Upewniamy się, że katalog output istnieje
             out_dir = Path("output")
             out_dir.mkdir(parents=True, exist_ok=True)
 
-            # 3. Generowanie raportów per-warstwa z pełnymi ścieżkami bezwzględnymi
+            # 3. Generowanie raportów
             for layer_name in sorted(top_layers):
-                # Budujemy PEŁNĄ BEZWZGLĘDNĄ ścieżkę do warstwy w skanowanym projekcie
-                full_layer_path = root_p / layer_name
-                
-                # Jeśli to plik (np. cli.py), sprawdzamy czy istnieje plik z rozszerzeniem .py
-                if not full_layer_path.exists() and (root_p / f"{layer_name}.py").exists():
-                    full_layer_path = root_p / f"{layer_name}.py"
+                # Sprawdzamy czy istnieje folder LUB plik .py dla danej warstwy
+                target_path = root_p / layer_name
+                if not target_path.exists():
+                    target_path = root_p / f"{layer_name}.py"
 
-                if log: log(f"---> Generowanie raportu dla: {layer_name} (ścieżka: {full_layer_path})")
+                if log: log(f"Próba generowania dla '{layer_name}' na podstawie ścieżki: {target_path}")
 
                 try:
                     report = generate_layer_report(
-                        layer_path=str(full_layer_path), # PEŁNA ŚCIEŻKA rozwiąże błąd resolves
+                        layer_path=str(target_path),
                         modules=modules,
                         graph=graph,
                         root_path=str(root_p),
                     )
                     
-                    # Zapisujemy raport tylko jeśli znaleziono w nim moduły
                     mod_count = report.get("layer_module_count", 0)
-                    if mod_count > 0:
-                        out_file = out_dir / f"layer_{layer_name}.json"
-                        save_layer_report(report, str(out_file))
-                        if log: log(f"[OK] Sukces! Zapisano {out_file} (modułów w warstwie: {mod_count})")
-                    else:
-                        if log: log(f"[OSTRZEŻENIE] Brak modułów dla warstwy {layer_name}")
+                    if log: log(f"-> Wynik dla '{layer_name}': znaleziono {mod_count} modułów w warstwie.")
+
+                    # Zapisujemy plik ZAWSZE (nawet jak mod_count == 0, żeby zobaczyć czy skrypt się w ogóle wykonuje)
+                    out_file = out_dir / f"layer_{layer_name}.json"
+                    save_layer_report(report, str(out_file))
+                    if log: log(f"[ZAPISANO] {out_file}")
 
                 except Exception as exc:
-                    if log: log(f"[BŁĄD] Wystąpił wyjątek dla {layer_name}: {exc}")
+                    if log: log(f"[BŁĄD SPADKOWY] Dla {layer_name}: {exc}")
 
-            if log: log("Proces generowania raportów warstw został ukończony!")
-            return errors
+            if log: log("=== KONIEC DIAGNOSTYKI WARSTW ===")
 
         def on_success(errors):
 
