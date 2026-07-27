@@ -9,38 +9,29 @@ repozytorium, w odniesieniu do CAŁEJ struktury zależności.
 Warstwa: REPORT ASSEMBLY (pomocniczy, wywoływany przez ui/gui.py)
 
 Odpowiedzialność:
-
-- ustalenie, które moduły należą do wybranej warstwy (podkatalogu)
-- rozdzielenie krawędzi grafu na:
-    * wewnętrzne (oba końce w warstwie)
-    * wejściowe / inbound (z zewnątrz DO warstwy - kto zależy
-      od tej warstwy)
-    * wyjściowe / outbound (z warstwy NA ZEWNĄTRZ - od czego
-      ta warstwa zależy)
-- policzenie prostych metryk granicznych (ile modułów zewnętrznych
-  zależy od warstwy, od ilu modułów zewnętrznych zależy warstwa)
+- Precyzyjne ustalenie, które moduły należą do wybranej warstwy (podkatalogu).
+- Rozdzielenie krawędzi grafu na:
+    * wewnętrzne / internal (oba końce w warstwie)
+    * wejściowe / inbound (z zewnątrz DO warstwy – kto zależy od tej warstwy)
+    * wyjściowe / outbound (z warstwy NA ZEWNĄTRZ – od czego ta warstwa zależy)
+- Wyliczenie metryk granicznych i agregacji dla ułatwienia analizy architektonicznej.
 
 Nie robi:
-
-- indeksowania / budowania grafu (to core/indexer.py, core/graph.py)
-- walidacji, długu technicznego, kolizji nazw (to osobne moduły)
+- Indeksowania / budowania grafu (odpowiadają za to core/indexer.py, core/graph.py).
+- Walidacji długu technicznego czy kolizji nazw (odrębne moduły domenowe).
 
 Kontrakt wejściowy generate_layer_report():
-
-    layer_path  - ścieżka absolutna do wybranego podkatalogu
-                  (MUSI być podkatalogiem root_path, nie samym
-                  root_path - tę walidację robi wywołujący,
-                  ui/gui.py, PRZED wywołaniem tej funkcji)
-    modules     - dict module_id -> Module (z build_index)
-    graph       - obiekt z .hard_edges / .soft_edges (z build_graph)
-    root_path   - ścieżka absolutna do ROOT repozytorium
+    layer_path  - ścieżka bezwzględna lub względna do wybranego podkatalogu.
+    modules     - słownik module_id -> Module (z build_index).
+    graph       - obiekt z polami .hard_edges / .soft_edges (lub odpowiedni dict).
+    root_path   - ścieżka do ROOT repozytorium.
 """
 
 import os
 import json
-
 from datetime import datetime
 from pathlib import Path
+from typing import Dict, Any, List, Tuple, Set
 
 
 # ==========================================================
@@ -50,49 +41,30 @@ from pathlib import Path
 
 def _is_inside(path: Path, parent: Path) -> bool:
     """
-    True, jeśli `path` jest wewnątrz `parent` (na dowolnej
-    głębokości), włącznie z bezpośrednimi dziećmi.
+    Zwraca True, jeśli `path` znajduje się wewnątrz katalogu `parent` 
+    (na dowolnej głębokości) lub jest z nim tożsamy.
     """
-
     try:
-
         path.relative_to(parent)
-
         return True
-
     except ValueError:
-
         return False
 
 
-def _module_absolute_path(module, root_resolved: Path) -> Path:
+def _module_absolute_path(module_raw_path: str, root_resolved: Path) -> Path:
     """
-    Zwraca bezwzględną, rozwiniętą ścieżkę modułu - niezależnie
-    od tego, czy module.path jest zapisane względem root, czy
-    już jest ścieżką bezwzględną (obie konwencje spotykane w
-    tym kodzie - Path(root) / module.path po cichu ignoruje
-    lewą stronę, gdy module.path jest już absolutne, więc samo
-    to wyrażenie nie rozstrzyga, które to jest).
-
-    Porównywanie WSZYSTKIEGO po normalizacji do bezwzględnych,
-    rozwiniętych ścieżek eliminuje tę niejednoznaczność - działa
-    poprawnie niezależnie od konwencji, zamiast zakładać jedną
-    z nich i cicho zwracać 0 dopasowań, gdy założenie jest błędne.
+    Sprowadza ścieżkę modułu do postaci bezwzględnej i rozwiniętej.
+    Obsługuje zarówno ścieżki względne wobec root_path, jak i już bezwzględne.
     """
+    mod_path = Path(module_raw_path)
 
-    module_path = Path(module.path)
-
-    if not module_path.is_absolute():
-
-        module_path = root_resolved / module_path
+    if not mod_path.is_absolute():
+        mod_path = root_resolved / mod_path
 
     try:
-
-        return module_path.resolve()
-
+        return mod_path.resolve()
     except OSError:
-
-        return module_path
+        return mod_path
 
 
 # ==========================================================
@@ -101,29 +73,26 @@ def _module_absolute_path(module, root_resolved: Path) -> Path:
 
 
 def _split_layer_modules(
-    modules: dict,
-    layer_relative: Path,
-) -> tuple[list, list]:
+    modules: Dict[str, Any],
+    layer_resolved: Path,
+    root_resolved: Path,
+) -> Tuple[List[str], List[str]]:
     """
-    Dzieli moduły na te WEWNĄTRZ wybranej warstwy i te POZA nią,
-    na podstawie module.path (ścieżka względem root, ustawiana
-    przez indexer - to samo pole, którego używa _load_tree
-    w symbol_reference.py).
+    Dzieli moduły repozytorium na dwie grupy:
+    1. layer_modules   - identyfikatory modułów wewnątrz wybranej warstwy.
+    2. outside_modules - identyfikatory modułów poza tą warstwą.
     """
+    layer_modules: List[str] = []
+    outside_modules: List[str] = []
 
-    layer_modules = []
-    outside_modules = []
+    for module_id, module_obj in modules.items():
+        # Bezpiecznie pobieramy ścieżkę z obiektu lub traktujemy ID jako ścieżkę
+        raw_path = getattr(module_obj, "path", module_id)
+        abs_path = _module_absolute_path(str(raw_path), root_resolved)
 
-    for module_id, module in modules.items():
-
-        module_path = Path(module.path)
-
-        if _is_inside(module_path, layer_relative):
-
+        if _is_inside(abs_path, layer_resolved):
             layer_modules.append(module_id)
-
         else:
-
             outside_modules.append(module_id)
 
     return layer_modules, outside_modules
@@ -135,44 +104,31 @@ def _split_layer_modules(
 
 
 def _partition_edges(
-    edges: dict,
-    layer_set: set,
-) -> tuple[list, list, list]:
+    edges: Dict[str, List[str]],
+    layer_set: Set[str],
+) -> Tuple[List[List[str]], List[List[str]], List[List[str]]]:
     """
-    Dzieli krawędzie grafu (hard albo soft, ten sam kształt) na:
+    Klasyfikuje krawędzie grafu zależności względem zbioru modułów warstwy:
 
-        internal  - oba końce w warstwie
-        inbound   - src POZA warstwą, tgt W warstwie
-                    (kto z zewnątrz zależy od warstwy)
-        outbound  - src W warstwie, tgt POZA warstwą
-                    (od czego warstwa zależy na zewnątrz)
-
-    Krawędzie, gdzie ŻADEN koniec nie jest w warstwie, są
-    pomijane - nie dotyczą tej warstwy w ogóle.
+    - internal : źródło I cel znajdują się w warstwie
+    - inbound  : źródło POZA warstwą, cel W warstwie (zależności do warstwy)
+    - outbound : źródło W warstwie, cel POZA warstwą (zależności wychodzące)
     """
-
-    internal = []
-    inbound = []
-    outbound = []
+    internal: List[List[str]] = []
+    inbound: List[List[str]] = []
+    outbound: List[List[str]] = []
 
     for src, targets in edges.items():
-
         src_in = src in layer_set
 
         for tgt in targets:
-
             tgt_in = tgt in layer_set
 
             if src_in and tgt_in:
-
                 internal.append([src, tgt])
-
             elif src_in and not tgt_in:
-
                 outbound.append([src, tgt])
-
             elif not src_in and tgt_in:
-
                 inbound.append([src, tgt])
 
     return (
@@ -189,84 +145,75 @@ def _partition_edges(
 
 def generate_layer_report(
     layer_path: str,
-    modules: dict,
-    graph,
+    modules: Dict[str, Any],
+    graph: Any,
     root_path: str,
-) -> dict:
+) -> Dict[str, Any]:
     """
-    Generuje raport strukturalny dla wybranej warstwy (podkatalogu)
-    w odniesieniu do CAŁEJ struktury zależności repozytorium.
-
-    UWAGA: ta funkcja ZAKŁADA, że layer_path jest już zwalidowany
-    jako podkatalog root_path (różny od samego root_path) - tę
-    walidację robi wywołujący (ui/gui.py::analyze_layer), PRZED
-    wywołaniem tej funkcji. Tutaj już tylko liczymy.
+    Generuje kompletny raport strukturalny dla wybranej warstwy (podkatalogu).
     """
-
     root_resolved = Path(root_path).resolve()
     layer_resolved = Path(layer_path).resolve()
 
-    layer_relative = layer_resolved.relative_to(root_resolved)
+    # Wyznaczenie ścieżki względnej do zapisu w metadanych raportu
+    try:
+        layer_relative_str = layer_resolved.relative_to(root_resolved).as_posix()
+    except ValueError:
+        layer_relative_str = layer_resolved.as_posix()
 
-    layer_modules, outside_modules = _split_layer_modules(
+    # 1. Podział modułów
+    layer_modules, _ = _split_layer_modules(
         modules,
-        layer_relative,
+        layer_resolved,
+        root_resolved,
     )
-
     layer_set = set(layer_modules)
 
+    # 2. Pobranie słowników krawędzi (odporne na obiekty klasowe i słowniki)
+    hard_edges = getattr(
+        graph, "hard_edges", 
+        graph.get("hard_edges", {}) if isinstance(graph, dict) else {}
+    )
+    soft_edges = getattr(
+        graph, "soft_edges", 
+        graph.get("soft_edges", {}) if isinstance(graph, dict) else {}
+    )
+
+    # 3. Kategoryzacja krawędzi
     internal_hard, inbound_hard, outbound_hard = _partition_edges(
-        graph.hard_edges,
+        hard_edges,
         layer_set,
     )
-
     internal_soft, inbound_soft, outbound_soft = _partition_edges(
-        graph.soft_edges,
+        soft_edges,
         layer_set,
     )
 
-    # Moduły zewnętrzne, które faktycznie zależą od warstwy
-    # (konsumenci warstwy) i moduły zewnętrzne, od których
-    # warstwa faktycznie zależy (zależności warstwy).
-    depended_on_by = sorted(
-        {src for src, tgt in inbound_hard}
-    )
+    # 4. Wyznaczenie unikalnych modułów brzegowych
+    depended_on_by = sorted({src for src, _ in inbound_hard})
+    depends_on = sorted({tgt for _, tgt in outbound_hard})
 
-    depends_on = sorted(
-        {tgt for src, tgt in outbound_hard}
-    )
-
+    # 5. Konstrukcja raportu
     return {
-
         "layer": {
-            "path": layer_relative.as_posix(),
+            "path": layer_relative_str,
             "root": str(root_resolved),
         },
-
         "layer_modules": sorted(layer_modules),
-
         "layer_module_count": len(layer_modules),
-
         "total_module_count": len(modules),
-
         "internal_edges": {
             "hard": internal_hard,
             "soft": internal_soft,
         },
-
         "boundary": {
             "inbound_hard": inbound_hard,
             "outbound_hard": outbound_hard,
             "inbound_soft": inbound_soft,
             "outbound_soft": outbound_soft,
-
-            # Skróty - same nazwy modułów, bez powtórzeń,
-            # wygodne do szybkiego spojrzenia bez liczenia
-            # krawędzi ręcznie.
             "depended_on_by": depended_on_by,
             "depends_on": depends_on,
         },
-
         "summary": {
             "internal_edge_count": len(internal_hard),
             "inbound_edge_count": len(inbound_hard),
@@ -274,37 +221,176 @@ def generate_layer_report(
             "external_dependents_count": len(depended_on_by),
             "external_dependencies_count": len(depends_on),
         },
-
         "generated_at": datetime.now().isoformat(),
     }
 
 
 def save_layer_report(
-    report: dict,
+    report: Dict[str, Any],
     path: str,
 ) -> None:
-
+    """
+    Zapisuje raport warstwy do pliku JSON w podanej ścieżce, 
+    tworząc automatycznie brakujące katalogi nadrzędne.
+    """
     directory = os.path.dirname(path)
-
     if directory:
+        os.makedirs(directory, exist_ok=True)
 
-        os.makedirs(
-            directory,
-            exist_ok=True,
-        )
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(report, f, indent=2, ensure_ascii=False)
 
-    with open(
-        path,
-        "w",
-        encoding="utf-8",
-    ) as f:
 
-        json.dump(
-            report,
-            f,
-            indent=2,
-            ensure_ascii=False,
-        )
+# ==========================================================
+# EXPORTS
+# ==========================================================
+
+
+__all__ = [
+    "generate_layer_report",
+    "save_layer_report",
+]
+# ==========================================================
+# EDGE PARTITIONING
+# ==========================================================
+
+
+def _partition_edges(
+    edges: Dict[str, List[str]],
+    layer_set: Set[str],
+) -> Tuple[List[List[str]], List[List[str]], List[List[str]]]:
+    """
+    Klasyfikuje krawędzie grafu zależności względem zbioru modułów warstwy:
+
+    - internal : źródło I cel znajdują się w warstwie
+    - inbound  : źródło POZA warstwą, cel W warstwie (zależności do warstwy)
+    - outbound : źródło W warstwie, cel POZA warstwą (zależności wychodzące)
+    """
+    internal: List[List[str]] = []
+    inbound: List[List[str]] = []
+    outbound: List[List[str]] = []
+
+    for src, targets in edges.items():
+        src_in = src in layer_set
+
+        for tgt in targets:
+            tgt_in = tgt in layer_set
+
+            if src_in and tgt_in:
+                internal.append([src, tgt])
+            elif src_in and not tgt_in:
+                outbound.append([src, tgt])
+            elif not src_in and tgt_in:
+                inbound.append([src, tgt])
+
+    return (
+        sorted(internal),
+        sorted(inbound),
+        sorted(outbound),
+    )
+
+
+# ==========================================================
+# MAIN ENTRY POINT
+# ==========================================================
+
+
+def generate_layer_report(
+    layer_path: str,
+    modules: Dict[str, Any],
+    graph: Any,
+    root_path: str,
+) -> Dict[str, Any]:
+    """
+    Generuje kompletny raport strukturalny dla wybranej warstwy (podkatalogu).
+    """
+    root_resolved = Path(root_path).resolve()
+    layer_resolved = Path(layer_path).resolve()
+
+    # Wyznaczenie ścieżki względnej do zapisu w metadanych raportu
+    try:
+        layer_relative_str = layer_resolved.relative_to(root_resolved).as_posix()
+    except ValueError:
+        layer_relative_str = layer_resolved.as_posix()
+
+    # 1. Podział modułów
+    layer_modules, _ = _split_layer_modules(
+        modules,
+        layer_resolved,
+        root_resolved,
+    )
+    layer_set = set(layer_modules)
+
+    # 2. Pobranie słowników krawędzi (odporne na obiekty klasowe i słowniki)
+    hard_edges = getattr(
+        graph, "hard_edges", 
+        graph.get("hard_edges", {}) if isinstance(graph, dict) else {}
+    )
+    soft_edges = getattr(
+        graph, "soft_edges", 
+        graph.get("soft_edges", {}) if isinstance(graph, dict) else {}
+    )
+
+    # 3. Kategoryzacja krawędzi
+    internal_hard, inbound_hard, outbound_hard = _partition_edges(
+        hard_edges,
+        layer_set,
+    )
+    internal_soft, inbound_soft, outbound_soft = _partition_edges(
+        soft_edges,
+        layer_set,
+    )
+
+    # 4. Wyznaczenie unikalnych modułów brzegowych
+    depended_on_by = sorted({src for src, _ in inbound_hard})
+    depends_on = sorted({tgt for _, tgt in outbound_hard})
+
+    # 5. Konstrukcja raportu
+    return {
+        "layer": {
+            "path": layer_relative_str,
+            "root": str(root_resolved),
+        },
+        "layer_modules": sorted(layer_modules),
+        "layer_module_count": len(layer_modules),
+        "total_module_count": len(modules),
+        "internal_edges": {
+            "hard": internal_hard,
+            "soft": internal_soft,
+        },
+        "boundary": {
+            "inbound_hard": inbound_hard,
+            "outbound_hard": outbound_hard,
+            "inbound_soft": inbound_soft,
+            "outbound_soft": outbound_soft,
+            "depended_on_by": depended_on_by,
+            "depends_on": depends_on,
+        },
+        "summary": {
+            "internal_edge_count": len(internal_hard),
+            "inbound_edge_count": len(inbound_hard),
+            "outbound_edge_count": len(outbound_hard),
+            "external_dependents_count": len(depended_on_by),
+            "external_dependencies_count": len(depends_on),
+        },
+        "generated_at": datetime.now().isoformat(),
+    }
+
+
+def save_layer_report(
+    report: Dict[str, Any],
+    path: str,
+) -> None:
+    """
+    Zapisuje raport warstwy do pliku JSON w podanej ścieżce, 
+    tworząc automatycznie brakujące katalogi nadrzędne.
+    """
+    directory = os.path.dirname(path)
+    if directory:
+        os.makedirs(directory, exist_ok=True)
+
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(report, f, indent=2, ensure_ascii=False)
 
 
 # ==========================================================
