@@ -1,51 +1,74 @@
-# -*- coding: utf-8 -*-
-
 """
 repo_guardian/core/graph.py
 
-WARSTWA: GRAPH BUILDER
-
-Buduje czysty graf zależności projektu
-na podstawie wyników resolvera.
-
-Typy krawędzi:
-
-hard_edges:
-    realne zależności runtime
-
-soft_edges:
-    zależności niepewne:
-    - FALLBACK resolvera
-    - type-only imports
-    - potencjalnie dynamiczne zależności
+GRAPH BUILDER v2.0
 
 
-UNKNOWN:
-    ignorowane.
-    Nie trafiają do grafu.
+WARSTWA:
 
-GRAPH BUILDER:
-    - nie interpretuje architektury
-    - nie liczy ryzyka
-    - nie analizuje AST
+    GRAPH BUILDER
+
+
+Odpowiedzialność:
+
+- budowa grafu zależności projektu
+- konwersja resolver facts -> EdgeInfo
+- zachowanie confidence
+- zachowanie typu zależności
+
+
+Nie:
+
+- nie interpretuje architektury
+- nie liczy ryzyka
+- nie analizuje AST
+- nie wykonuje scoringu
+
 
 Źródło prawdy:
-    resolver + ImportRef
+
+    resolver
+    ImportRef
+    EdgeInfo
+
+
 """
+
+from __future__ import annotations
+
+
+from repo_guardian.core.report_models import (
+    EdgeInfo,
+)
 
 
 from .domain.module import (
     Module,
 )
 
+
 from .domain.graph import (
     ProjectGraph,
 )
+
 
 from .resolver import (
     build_trie,
     resolve_internal,
 )
+
+
+
+# ==========================================================
+# CONFIDENCE
+# ==========================================================
+
+
+CONFIDENCE_MODULE = 1.0
+
+CONFIDENCE_TYPE_ONLY = 0.65
+
+CONFIDENCE_FALLBACK = 0.45
 
 
 
@@ -58,16 +81,7 @@ def _is_type_only_import(
     import_ref
 ) -> bool:
     """
-    Type-only imports traktujemy
-    jako soft dependency.
-
-    ImportRef nie posiada jeszcze
-    pełnego AST contextu,
-    dlatego bazujemy na istniejącym
-    polu lokalnym.
-
-    Docelowo może zostać rozszerzone
-    o import_usage analyzer.
+    Detect type-only imports.
     """
 
     return getattr(
@@ -78,29 +92,92 @@ def _is_type_only_import(
 
 
 
-def _add_edge(
-    graph: dict[str, set[str]],
-    source: str,
-    target: str,
+def _edge_exists(
+    edges,
+    target
 ):
     """
-    Centralny zapis krawędzi.
-
-    Zapewnia:
-    - brak duplikatów
-    - deterministyczność
+    Prevent duplicate edges.
     """
 
-    if source == target:
+    return any(
 
-        return
+        edge.target == target
+
+        for edge in edges
+
+    )
+
+
+
+def _add_edge(
+    graph,
+    source,
+    edge
+):
+    """
+    Central edge insertion.
+
+    Keeps deterministic ordering.
+    """
 
 
     graph.setdefault(
         source,
-        set()
-    ).add(
-        target
+        []
+    )
+
+
+    existing = graph[source]
+
+
+    for item in existing:
+
+
+        if (
+
+            item.target == edge.target
+
+            and
+
+            item.edge_type == edge.edge_type
+
+        ):
+
+            return
+
+
+
+    existing.append(
+        edge
+    )
+
+
+
+# ==========================================================
+# EDGE FACTORY
+# ==========================================================
+
+
+def _create_edge(
+    target,
+    edge_type,
+    confidence,
+    reason
+):
+
+    return EdgeInfo(
+
+        target=target,
+
+        edge_type=edge_type,
+
+        confidence=confidence,
+
+        reason=reason,
+
+        count=1,
+
     )
 
 
@@ -114,52 +191,52 @@ def build_graph(
     modules: dict[str, Module]
 ) -> ProjectGraph:
     """
-    Buduje ProjectGraph.
+    Builds project dependency graph.
+
 
     Pipeline:
 
+
         Module
+
           |
+
           v
+
+
        resolver
+
+
           |
+
           v
-     MODULE/FALLBACK
+
+
+       EdgeInfo
+
+
           |
+
           v
-     ProjectGraph
 
 
-    Returns:
+       ProjectGraph
 
-        ProjectGraph(
-            hard_edges,
-            soft_edges
-        )
+
     """
 
 
 
-    hard_edges: dict[str, set[str]] = {}
+    hard_edges = {}
 
-    soft_edges: dict[str, set[str]] = {}
+    soft_edges = {}
 
-
-
-    # ======================================================
-    # Resolver index
-    # ======================================================
 
 
     trie = build_trie(
         modules.keys()
     )
 
-
-
-    # ======================================================
-    # Deterministic traversal
-    # ======================================================
 
 
     for module_id in sorted(
@@ -170,39 +247,44 @@ def build_graph(
         module = modules[module_id]
 
 
+
         hard_edges.setdefault(
             module_id,
-            set()
+            []
         )
 
 
         soft_edges.setdefault(
             module_id,
-            set()
+            []
         )
 
 
-
-        # --------------------------------------------------
-        # Import order does not affect graph
-        # --------------------------------------------------
 
         imports = sorted(
 
             module.imports,
 
             key=lambda imp:
+
             (
+
                 imp.module or "",
+
                 imp.level,
+
                 tuple(
                     sorted(
                         imp.names
                     )
                 ),
+
                 imp.is_from_import,
+
                 imp.is_local,
+
             )
+
         )
 
 
@@ -213,28 +295,32 @@ def build_graph(
             try:
 
                 result = resolve_internal(
+
                     imp,
+
                     trie,
+
                     current_module_id=module_id,
+
                 )
+
 
             except Exception:
 
-                # resolver failure
-                # must not destroy repository analysis
-
                 continue
-
-
 
             # ==================================================
             # UNKNOWN
             # ==================================================
 
             if (
+
                 result.kind == "UNKNOWN"
+
                 or
+
                 not result.target_module
+
             ):
 
                 continue
@@ -263,59 +349,159 @@ def build_graph(
                 imp
             ):
 
+
                 _add_edge(
+
                     soft_edges,
+
                     module_id,
-                    target,
+
+                    _create_edge(
+
+                        target,
+
+                        edge_type="type_only_import",
+
+                        confidence=CONFIDENCE_TYPE_ONLY,
+
+                        reason="type_only",
+
+                    )
+
                 )
+
 
                 continue
 
 
 
             # ==================================================
-            # HARD DEPENDENCY
+            # MODULE
             # ==================================================
 
             if result.kind == "MODULE":
 
+
                 _add_edge(
+
                     hard_edges,
+
                     module_id,
-                    target,
+
+                    _create_edge(
+
+                        target,
+
+                        edge_type="import",
+
+                        confidence=CONFIDENCE_MODULE,
+
+                        reason="resolved_module",
+
+                    )
+
                 )
 
 
             # ==================================================
-            # SOFT DEPENDENCY
+            # FALLBACK
             # ==================================================
 
             elif result.kind == "FALLBACK":
 
+
                 _add_edge(
+
                     soft_edges,
+
                     module_id,
-                    target,
+
+                    _create_edge(
+
+                        target,
+
+                        edge_type="fallback_import",
+
+                        confidence=CONFIDENCE_FALLBACK,
+
+                        reason="resolver_fallback",
+
+                    )
+
                 )
+
+
+
+    # ======================================================
+    # DETERMINISTIC SORTING
+    # ======================================================
+
+
+    for graph in (
+        hard_edges,
+        soft_edges,
+    ):
+
+
+        for module_id in graph:
+
+
+            graph[module_id] = sorted(
+
+                graph[module_id],
+
+                key=lambda edge:
+
+                (
+
+                    edge.target,
+
+                    edge.edge_type,
+
+                )
+
+            )
 
 
 
     return ProjectGraph(
 
         hard_edges={
+
             key: value
+
             for key, value
+
             in sorted(
                 hard_edges.items()
             )
+
         },
 
+
         soft_edges={
+
             key: value
+
             for key, value
+
             in sorted(
                 soft_edges.items()
             )
+
         },
 
     )
+
+
+
+# ==========================================================
+# EXPORTS
+# ==========================================================
+
+
+__all__ = [
+
+    "build_graph",
+
+]
