@@ -585,25 +585,29 @@ def generate_report(
         collisions_list = validate_name_collisions(modules)
 
     graph_dict = {
-        "hard_edges": {
-            k: sorted(
-                [
-                    edge.target
-                    for edge in hard_edges[k]
-                ]
-            )
-            for k in sorted(hard_edges)
-        },
+        "hard_edges":
+            {
+                k:
+                    sorted(
+                        [
+                            edge.target
+                            for edge in hard_edges[k]
+                        ]
+                    )
+                for k in sorted(hard_edges)
+            },
 
-        "soft_edges": {
-            k: sorted(
-                [
-                    edge.target
-                    for edge in soft_edges[k]
-                ]
-            )
-            for k in sorted(soft_edges)
-        },
+        "soft_edges":
+            {
+                k:
+                    sorted(
+                        [
+                            edge.target
+                            for edge in soft_edges[k]
+                        ]
+                    )
+                for k in sorted(soft_edges)
+            },
     }
 
     risk_map = _compute_module_risk(
