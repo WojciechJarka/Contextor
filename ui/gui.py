@@ -57,6 +57,7 @@ from repo_guardian.ui.exclude_check import check_stale_excludes
 from repo_guardian.ui.exclude_gui import run_exclude_window
 from repo_guardian.ui.progress_widget import create_progress_bar, create_log_box, run_with_progress
 from repo_guardian.core.validator.collisions import validate_name_collisions
+from repo_generator.repo_gui import run_repo_generator
 
 def run():
     root = tk.Tk()
@@ -813,6 +814,23 @@ def run():
         padx=20
     )
 
+    tk.Button(
+        bottom_frame,
+        text="Repo Builder",
+        command=run_repo_generator
+    ).pack(
+        side="left",
+        padx=20
+    )
+
+    tk.Button(
+        bottom_frame,
+        text="Parsuj JSON",
+        command=run_parser_window
+    ).pack(
+        side="right"
+    )
+    
     tk.Button(
         bottom_frame,
         text="Parsuj JSON",
