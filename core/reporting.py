@@ -23,7 +23,7 @@ import orjson
 
 from datetime import datetime
 from collections import defaultdict, deque
-from typing import Dict, Any, List
+from typing import Dict, Any
 
 from repo_guardian.core.cycles import detect_cycles
 from repo_guardian.core.metrics import compute_graph_metrics
@@ -48,9 +48,9 @@ def _build_undirected_graph(
 
     graph = defaultdict(set)
 
-    for src, targets in hard_edges.items():
+    for src, targets in sorted(hard_edges.items()):
 
-        for tgt in targets:
+        for tgt in sorted(targets):
 
             graph[src].add(tgt)
             graph[tgt].add(src)
@@ -65,7 +65,7 @@ def _connected_components(
     visited = set()
     clusters = []
 
-    for node in graph:
+    for node in sorted(graph):
 
         if node in visited:
             continue
@@ -83,7 +83,7 @@ def _connected_components(
             visited.add(current)
             component.append(current)
 
-            for neigh in graph[current]:
+            for neigh in sorted(graph[current]):
 
                 if neigh not in visited:
                     queue.append(neigh)
@@ -110,9 +110,9 @@ def _compute_soft_dependencies(
 
     dependencies = []
 
-    for source, targets in graph["soft_edges"].items():
+    for source, targets in sorted(graph["soft_edges"].items()):
 
-        for target in targets:
+        for target in sorted(targets):
 
             dependencies.append(
                 {
@@ -152,9 +152,22 @@ def _compute_module_risk(
         1
     )
 
+    # Zbieramy WSZYSTKIE węzły - także te, które występują
+    # WYŁĄCZNIE jako cel krawędzi (in-degree > 0, out-degree 0).
+    # Iterowanie tylko po graph["hard_edges"].items() pomijało
+    # takie moduły całkowicie - miały in-degree > 0 (są używane),
+    # ale nie dostawały żadnego risk score, bo nigdy nie były
+    # kluczem w słowniku.
+    nodes = set(graph["hard_edges"])
+
+    for targets in graph["hard_edges"].values():
+        nodes.update(targets)
+
     risks = {}
 
-    for node, deps in graph["hard_edges"].items():
+    for node in sorted(nodes):
+
+        deps = graph["hard_edges"].get(node, [])
 
         in_deg = sum(
             node in targets
@@ -170,12 +183,24 @@ def _compute_module_risk(
             )
         )
 
+        # Bez normalizacji "soft" był surową liczbą (np. 5 miękkich
+        # zależności = +1.0), podczas gdy in_deg/out_deg są znormalizowane
+        # do [0,1] przez max_in/max_out - hard dependency dawał maksymalnie
+        # 0.5+0.3=0.8, więc soft mógł całkowicie zdominować wynik. Brak
+        # osobnej metryki "max_soft" w `metrics`, więc normalizujemy przez
+        # max_out (ta sama skala co out-degree - też liczba wychodzących
+        # zależności modułu).
+        soft_score = min(
+            soft / max_out,
+            1
+        )
+
         score = (
             (in_deg / max_in) * 0.5
             +
             (out_deg / max_out) * 0.3
             +
-            soft * 0.2
+            soft_score * 0.2
         )
 
         # konfiguracja jest centralna,
@@ -193,6 +218,41 @@ def _compute_module_risk(
         )
 
     return risks
+
+
+def _compute_risk_summary(
+    risk_map: dict,
+    critical_score: float,
+) -> dict:
+    """
+    Agregat mapy ryzyka dla LLM - surowa mapa module -> score jest
+    dobra do szczegółowego wglądu, ale odpowiedź na pytanie "co jest
+    najbardziej ryzykowne w tym repo" wymaga przejrzenia WSZYSTKICH
+    wpisów. To robi to za LLM: lista modułów przekraczających próg
+    krytyczny, oraz średnia/maksimum do szybkiej orientacji o skali.
+    """
+
+    if not risk_map:
+
+        return {
+            "critical": [],
+            "average": 0,
+            "max": 0,
+        }
+
+    values = list(risk_map.values())
+
+    critical = sorted(
+        module
+        for module, score in risk_map.items()
+        if score >= critical_score
+    )
+
+    return {
+        "critical": critical,
+        "average": round(sum(values) / len(values), 4),
+        "max": round(max(values), 4),
+    }
 
 
 def _compute_inspection_targets(
@@ -283,7 +343,16 @@ def _compute_refactor_plan(
     clusters: list,
     total_modules: int,
     thresholds: dict,
+    risk_map: dict | None = None,
 ) -> list[dict]:
+
+    # Hotspot score mierzy TYLKO sprzężenie w grafie zależności
+    # (in/out-degree, soft-deps) - nie uwzględnia np. tego, że
+    # moduł ma mały hotspot score, ale ogromną liczbę faktycznych
+    # użytkowników. risk_map (z _compute_module_risk) to dodatkowy,
+    # częściowo niezależny sygnał - łączymy oba przy ustalaniu
+    # priorytetu, zamiast patrzeć wyłącznie na hotspot score.
+    risk_map = risk_map or {}
 
     plan = []
 
@@ -298,6 +367,13 @@ def _compute_refactor_plan(
             "score",
             0
         )
+
+        module_risk = risk_map.get(
+            h.get("module", ""),
+            0
+        )
+
+        combined_score = score + module_risk
 
         if hotspot_type == "CONFIG_HUB":
 
@@ -337,10 +413,16 @@ def _compute_refactor_plan(
                     "target":
                         h["module"],
 
+                    "hotspot_score":
+                        score,
+
+                    "module_risk":
+                        module_risk,
+
                     "priority":
                         (
                             "HIGH"
-                            if score >= thresholds.get("critical_score", 0.85)
+                            if combined_score >= thresholds.get("critical_score", 0.85)
                             else "MEDIUM"
                         ),
 
@@ -435,16 +517,21 @@ def generate_report(
     runtime: dict | None = None
 ) -> dict:
 
-    hard_edges = project_graph.hard_edges
-    soft_edges = project_graph.soft_edges
+    hard_edges = project_graph.hard_edges or {}
+    soft_edges = project_graph.soft_edges or {}
 
+    # "or {}" - zabezpieczenie na wypadek pustego/None wyniku
+    # (np. pusty projekt, zero plików .py) - bez tego kolejna
+    # linia (metrics.get("nodes", 0)) i tak by nie wybuchła
+    # dzięki .get(), ale wolimy nie polegać na tym, że
+    # compute_graph_metrics zawsze zwraca dict.
     metrics = compute_graph_metrics(
         hard_edges,
         soft_edges
-    )
-    
+    ) or {}
+
     thresholds = get_thresholds(
-        metrics["nodes"]
+        metrics.get("nodes", 0)
     )
 
     cycles = detect_cycles(
@@ -459,15 +546,15 @@ def generate_report(
         "hard_edges":
             {
                 k:
-                    sorted(list(set(v)))
-                for k, v in hard_edges.items()
+                    sorted(set(hard_edges[k]))
+                for k in sorted(hard_edges)
             },
 
         "soft_edges":
             {
                 k:
-                    sorted(list(set(v)))
-                for k, v in soft_edges.items()
+                    sorted(set(soft_edges[k]))
+                for k in sorted(soft_edges)
             },
     }
 
@@ -507,6 +594,12 @@ def generate_report(
         clusters,
         len(graph_dict["hard_edges"]),
         thresholds,
+        risk_map=risk_map,
+    )
+
+    risk_summary = _compute_risk_summary(
+        risk_map,
+        thresholds.get("critical_score", 0.85),
     )
 
     runtime_info = (
@@ -522,6 +615,9 @@ def generate_report(
     llm_signals = {
         "module_risk":
             risk_map,
+
+        "risk_summary":
+            risk_summary,
 
         "hotspots":
             hotspots,
@@ -589,7 +685,19 @@ def save_json(
     if log and label:
         log(f"Serializowanie i zapisywanie: {label} ({path})...")
 
-    option = orjson.OPT_NON_STR_KEYS
+    # OPT_SORT_KEYS: klucze obiektów JSON zawsze w tej samej
+    # kolejności (alfabetycznej), niezależnie od kolejności
+    # wstawiania w Pythonie - ten sam raport zawsze wygląda
+    # identycznie bajt w bajt. UWAGA: to sortuje tylko KLUCZE
+    # obiektów, NIE kolejność elementów w listach/tablicach -
+    # za to nadal odpowiada ręczne sortowanie w kodzie generującym
+    # dane (patrz _build_undirected_graph, _connected_components,
+    # generate_structure_report, slice_report_for_layer itd.).
+    option = (
+        orjson.OPT_NON_STR_KEYS
+        |
+        orjson.OPT_SORT_KEYS
+    )
     if not compact:
         option |= orjson.OPT_INDENT_2
 
@@ -623,6 +731,7 @@ def generate_summary_report(
     ]
 
     return {
+        "generated_at": datetime.now().isoformat(),
         "status": "HEALTHY" if not cycles and not real_collisions else "BROKEN",
         "metrics": metrics,
         "cycle_count": len(cycles),
@@ -637,8 +746,8 @@ def generate_summary_report(
 def generate_structure_report(hard_edges: dict, soft_edges: dict) -> dict:
     """Generuje czysty graf zależności z deduplikacją krawędzi."""
     return {
-        "hard_edges": {k: sorted(list(set(v))) for k, v in hard_edges.items()},
-        "soft_edges": {k: sorted(list(set(v))) for k, v in soft_edges.items()}
+        "hard_edges": {k: sorted(set(v)) for k, v in sorted(hard_edges.items())},
+        "soft_edges": {k: sorted(set(v)) for k, v in sorted(soft_edges.items())}
     }
 
 
@@ -666,9 +775,23 @@ def generate_collisions_report(modules: dict, precomputed: list | None = None) -
             }
         )
 
+    # Rozbicie liczby kolizji na nieszkodliwe duplikaty (ten sam
+    # kod pod tą samą nazwą, np. re-export) i realne konflikty
+    # (różny kod pod tą samą nazwą - to one psują status/debt,
+    # patrz generate_summary_report / compute_debt).
+    identical_count = sum(
+        1 for c in collisions_data if c["is_identical"]
+    )
+    conflicting_count = len(collisions_data) - identical_count
+
     return {
         "generated_at": datetime.now().isoformat(),
         "total_collisions": len(collisions_data),
+        "collision_summary": {
+            "total": len(collisions_data),
+            "identical": identical_count,
+            "conflicting": conflicting_count,
+        },
         "collisions": collisions_data,
     }
 
@@ -688,11 +811,14 @@ def slice_report_for_layer(
 ) -> Dict[str, Dict[str, Any]]:
     """
     Redukuje globalne raporty do dedykowanych raportów dla wybranej warstwy/katalogu.
-    
+
     Prawidłowo obsługuje dopasowanie prefiksów ścieżek modułów oraz krawędzie
     wewnętrzne (internal) i brzegowe (inbound / outbound).
+
+    Deterministyczne: wszystkie iteracje po strukturach opartych na dict/set
+    są sortowane przed użyciem, żeby ten sam graf wejściowy zawsze dawał
+    identyczny wynik JSON, niezależnie od kolejności wstawiania kluczy.
     """
-    # 1. Zamiana ścieżki katalogu na prefiks pakietu Pythonowego (np. 'C:\repo_guardian\core' -> 'core')
     abs_layer = os.path.abspath(layer_path)
     abs_root = os.path.abspath(root_path)
 
@@ -709,22 +835,18 @@ def slice_report_for_layer(
     def is_in_layer(mod_id: str) -> bool:
         if not mod_id:
             return False
-        # Normalizacja identyfikatora modułu (zamiana slaszy na kropki, jeśli przyszły jako ścieżki)
         norm_mod = mod_id.replace("\\", "/").strip("/").replace("/", ".")
         if not layer_prefix:
             return True
         return norm_mod == layer_prefix or norm_mod.startswith(layer_prefix + ".")
 
-    # Extract all modules present in structure
     structure_map = global_structure.get("hard_edges", {})
     all_known_modules = set(structure_map.keys())
     for targets in structure_map.values():
         all_known_modules.update(targets)
-
-    # Dołącz również moduły z listy w compact_artifacts, jeśli istnieją
     all_known_modules.update(global_compact_artifacts.get("modules", []))
 
-    layer_modules = sorted([m for m in all_known_modules if is_in_layer(m)])
+    layer_modules = sorted(m for m in all_known_modules if is_in_layer(m))
 
     hard_edges = global_structure.get("hard_edges", {})
     soft_edges = global_structure.get("soft_edges", {})
@@ -734,10 +856,9 @@ def slice_report_for_layer(
     inbound_hard = []
     outbound_hard = []
 
-    # Map edges and boundaries
-    for src, targets in hard_edges.items():
+    for src, targets in sorted(hard_edges.items()):
         src_in = is_in_layer(src)
-        for tgt in targets:
+        for tgt in sorted(targets):
             tgt_in = is_in_layer(tgt)
             if src_in and tgt_in:
                 internal_hard.setdefault(src, []).append(tgt)
@@ -746,12 +867,28 @@ def slice_report_for_layer(
             elif not src_in and tgt_in:
                 inbound_hard.append({"source": src, "target": tgt})
 
-    for src, targets in soft_edges.items():
+    for src, targets in sorted(soft_edges.items()):
         src_in = is_in_layer(src)
-        for tgt in targets:
+        for tgt in sorted(targets):
             tgt_in = is_in_layer(tgt)
             if src_in and tgt_in:
                 internal_soft.setdefault(src, []).append(tgt)
+
+    # Deduplikacja i sortowanie list docelowych w wewnętrznych
+    # krawędziach - setdefault().append() mogło dodać duplikat,
+    # gdyby ta sama krawędź wystąpiła dwukrotnie w źródle, i nie
+    # gwarantowało deterministycznej kolejności.
+    internal_hard = {
+        src: sorted(set(targets))
+        for src, targets in sorted(internal_hard.items())
+    }
+    internal_soft = {
+        src: sorted(set(targets))
+        for src, targets in sorted(internal_soft.items())
+    }
+
+    inbound_hard = sorted(inbound_hard, key=lambda e: (e["source"], e["target"]))
+    outbound_hard = sorted(outbound_hard, key=lambda e: (e["source"], e["target"]))
 
     # 1. Layer Summary Report
     layer_summary_report = {
@@ -769,8 +906,8 @@ def slice_report_for_layer(
         "boundary": {
             "inbound_hard": inbound_hard,
             "outbound_hard": outbound_hard,
-            "depended_on_by": sorted(list({e["source"] for e in inbound_hard})),
-            "depends_on": sorted(list({e["target"] for e in outbound_hard}))
+            "depended_on_by": sorted({e["source"] for e in inbound_hard}),
+            "depends_on": sorted({e["target"] for e in outbound_hard})
         },
         "summary": {
             "internal_edge_count": sum(len(v) for v in internal_hard.values()),
@@ -789,14 +926,36 @@ def slice_report_for_layer(
     }
 
     # 3. Layer Metrics Report
+    #
+    # Gęstość liczona LOKALNIE dla warstwy (nie globalnie -
+    # global_metrics.get("density") to gęstość CAŁEGO repo i
+    # pokazywanie jej pod kluczem "density" tutaj było mylące,
+    # sugerowało że to właściwość warstwy). Przy 0 lub 1 module
+    # w warstwie gęstość nie jest zdefiniowana (dzielenie przez
+    # zero) - zwracamy 0. Globalna wartość zostaje dostępna
+    # osobno, pod jawną nazwą, dla porównania.
+    layer_node_count = len(layer_modules)
+    layer_edge_count = sum(len(v) for v in internal_hard.values())
+
+    if layer_node_count > 1:
+        layer_density = round(
+            layer_edge_count / (layer_node_count * (layer_node_count - 1)),
+            4,
+        )
+    else:
+        layer_density = 0
+
     layer_metrics_report = {
-        "nodes": len(layer_modules),
-        "edges": sum(len(v) for v in internal_hard.values()),
-        "density": global_metrics.get("density", 0),
+        "nodes": layer_node_count,
+        "edges": layer_edge_count,
+        "density": layer_density,
+        "global_density": global_metrics.get("density", 0),
         "layer_scope": layer_path
     }
 
-    # 4. Layer Artifacts Usage Report
+    # 4. Layer Artifacts Usage Report (pełny, nie-skompaktowany -
+    # tu nie ma indeksów, więc samo filtrowanie jest bezpieczne,
+    # nic nie trzeba przemapowywać).
     layer_artifacts = {
         k: v for k, v in global_artifacts.get("artifacts", {}).items()
         if is_in_layer(v.get("definer_module", ""))
@@ -814,20 +973,104 @@ def slice_report_for_layer(
     }
 
     # 5. Layer Compact Artifacts Report
+    #
+    # compact_artifacts używa LICZB (indeksów do "modules")
+    # zamiast nazw modułów w definer_module/consumers/usage.
+    # Samo przefiltrowanie listy "modules" do modułów warstwy
+    # BEZ przeliczenia indeksów przesunęłoby wszystkie indeksy
+    # i wskazywałoby na ZŁE moduły (albo wyleciałoby poza zakres
+    # listy) - to byłby gorszy błąd niż trzymanie pełnej,
+    # niepotrzebnie dużej listy z poprawnymi indeksami.
+    #
+    # Poprawne podejście: zbudować NOWĄ, lokalną tabelę indeksów
+    # obejmującą moduły z warstwy ORAZ każdy moduł spoza niej,
+    # który faktycznie występuje jako definer/consumer/usage w
+    # przefiltrowanych artefaktach (domknięcie, nie tylko
+    # fizyczna zawartość katalogu), i przemapować każdy indeks
+    # na nowy - dopiero wtedy da się bezpiecznie skrócić listę.
     compact_modules = global_compact_artifacts.get("modules", [])
-    layer_compact_indices = {
+
+    layer_global_indices = {
         idx for idx, mod in enumerate(compact_modules) if is_in_layer(mod)
     }
+
+    def _resolve(idx):
+        return compact_modules[idx] if idx is not None and 0 <= idx < len(compact_modules) else None
+
+    raw_layer_artifacts = {
+        k: v for k, v in global_compact_artifacts.get("artifacts", {}).items()
+        if v.get("definer_module") in layer_global_indices
+    }
+
+    referenced_modules = set()
+
+    for artifact in raw_layer_artifacts.values():
+
+        definer = _resolve(artifact.get("definer_module"))
+        if definer:
+            referenced_modules.add(definer)
+
+        for c in artifact.get("consumers", []) or []:
+            mod = _resolve(c)
+            if mod:
+                referenced_modules.add(mod)
+
+        for values in (artifact.get("usage", {}) or {}).values():
+            for v in values or []:
+                mod = _resolve(v)
+                if mod:
+                    referenced_modules.add(mod)
+
+    layer_compact_modules = sorted(referenced_modules)
+    new_index_of = {mod: i for i, mod in enumerate(layer_compact_modules)}
+
+    def _remap(idx):
+        mod = _resolve(idx)
+        return new_index_of.get(mod) if mod else None
+
+    layer_compact_artifacts = {}
+
+    for key, artifact in sorted(raw_layer_artifacts.items()):
+
+        remapped = {
+            "artifact": artifact.get("artifact"),
+            "kind": artifact.get("kind"),
+            "definer_module": _remap(artifact.get("definer_module")),
+            "consumers": sorted(
+                v for v in (
+                    _remap(c) for c in artifact.get("consumers", []) or []
+                )
+                if v is not None
+            ),
+        }
+
+        usage = artifact.get("usage")
+        if usage:
+            remapped["usage"] = {
+                category: sorted(
+                    v for v in (_remap(x) for x in values) if v is not None
+                )
+                for category, values in sorted(usage.items())
+            }
+
+        layer_compact_artifacts[key] = remapped
 
     layer_compact_artifacts_report = {
         "_format_note": global_compact_artifacts.get("_format_note", ""),
         "runtime": global_compact_artifacts.get("runtime", {}),
-        "module_count": len(layer_modules),
-        "modules": compact_modules,
-        "artifacts": {
-            k: v for k, v in global_compact_artifacts.get("artifacts", {}).items()
-            if v.get("definer_module") in layer_compact_indices
-        }
+
+        # Rozdzielone celowo - to DWIE różne liczby. layer_module_count
+        # to fizyczna zawartość katalogu warstwy (== len(layer_modules)
+        # wszędzie indziej w tym raporcie). compact_module_count to
+        # rozmiar tabeli "modules" niżej, która jest DOMKNIĘCIEM: zawiera
+        # też moduły spoza warstwy, jeśli są konsumentami/zależnościami
+        # artefaktów zdefiniowanych w warstwie. Jeden klucz "module_count"
+        # dla obu byłby niejednoznaczny - który z nich by opisywał?
+        "layer_module_count": len(layer_modules),
+        "compact_module_count": len(layer_compact_modules),
+
+        "modules": layer_compact_modules,
+        "artifacts": layer_compact_artifacts,
     }
 
     return {
@@ -882,12 +1125,23 @@ def save_all_reports(
         else validate_name_collisions(modules)
     )
 
-    # 1. Raport podsumowujący
+    # Ścieżki zbierane w trakcie zapisu - zwracane na końcu, żeby
+    # wywołujący (np. GUI) mógł od razu pokazać konkretne pliki,
+    # zamiast na nowo je sobie odtwarzać ze wzorca nazw.
+    summary_path = f"output/{repo_name}_summary.json"
+    structure_path = f"output/{repo_name}_structure.json"
+    collisions_path = f"output/{repo_name}_name_collisions.json"
+    artifacts_path = f"output/{repo_name}_artifacts.json"
+    artifacts_compact_path = f"output/{repo_name}_artifacts_compact.json"
+
+    # 1. Raport podsumowujący (generate_summary_report ustawia
+    # "generated_at" samodzielnie - jest teraz samowystarczalna,
+    # więc bezpośrednie wywołanie tej funkcji gdziekolwiek indziej
+    # da dokładnie taki sam kształt jak zapisany raport)
     summary_data = generate_summary_report(metrics, cycles, debt, collisions=all_collisions)
-    summary_data["generated_at"] = datetime.now().isoformat()
     save_json(
         summary_data,
-        f"output/{repo_name}_summary.json",
+        summary_path,
         log=log,
         label="raport podsumowujący"
     )
@@ -896,7 +1150,7 @@ def save_all_reports(
     structure_data = generate_structure_report(graph.hard_edges, graph.soft_edges)
     save_json(
         structure_data,
-        f"output/{repo_name}_structure.json",
+        structure_path,
         log=log,
         label="raport struktury grafu"
     )
@@ -907,7 +1161,7 @@ def save_all_reports(
     collisions_data = generate_collisions_report(modules, precomputed=all_collisions)
     save_json(
         collisions_data,
-        f"output/{repo_name}_name_collisions.json",
+        collisions_path,
         log=log,
         label="raport kolizji nazw"
     )
@@ -925,7 +1179,7 @@ def save_all_reports(
     
     save_json(
         artifact_data,
-        f"output/{repo_name}_artifacts.json",
+        artifacts_path,
         log=log,
         label="raport artefaktów",
     )
@@ -938,8 +1192,27 @@ def save_all_reports(
 
     save_compact_artifact_report(
         compact_artifact_data,
-        f"output/{repo_name}_artifacts_compact.json",
+        artifacts_compact_path,
     )
 
     if log:
         log("Wszystkie raporty zostały pomyślnie zapisane.")
+
+    return {
+        "saved": True,
+        "repo": repo_name,
+        "files": [
+            summary_path,
+            structure_path,
+            collisions_path,
+            artifacts_path,
+            artifacts_compact_path,
+        ],
+        "reports": [
+            "summary",
+            "structure",
+            "collisions",
+            "artifacts",
+            "artifacts_compact",
+        ],
+    }
