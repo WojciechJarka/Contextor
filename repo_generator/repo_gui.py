@@ -728,7 +728,7 @@ class RepoGenerator:
         )
 
         window.geometry(
-            "500x650"
+            "700x650"
         )
 
 
@@ -803,22 +803,28 @@ class RepoGenerator:
         )
 
 
-        for directory in sorted(DEFAULT_SKIP_DIRS):
+        columns = 4
+
+        for index, directory in enumerate(sorted(DEFAULT_SKIP_DIRS)):
 
             var = tk.BooleanVar(
                 value=directory in self.skip_dirs
             )
 
-
             dir_vars[directory] = var
 
-
-            tk.Checkbutton(
+            checkbox = tk.Checkbutton(
                 dir_frame,
                 text=directory,
                 variable=var
-            ).pack(
-                anchor="w"
+            )
+
+            checkbox.grid(
+                row=index // columns,
+                column=index % columns,
+                sticky="w",
+                padx=10,
+                pady=2
             )
 
 
