@@ -96,8 +96,16 @@ qualified_name:
 
 from dataclasses import dataclass, field
 from typing import Literal
+from dataclasses import dataclass
 
-
+@dataclass(frozen=True)
+class CallResolution:
+    call_site: str
+    symbol: str
+    possible_targets: list[str]
+    confidence: float
+    resolution: str
+    reason: str
 
 # ==========================================================
 # SYMBOL TYPES
