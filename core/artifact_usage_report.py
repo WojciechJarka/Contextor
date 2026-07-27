@@ -9,25 +9,17 @@ Warstwa:
     REPORT ASSEMBLY (pomocniczy, wywoływany przez reporting.py)
 
 Odpowiedzialność:
-
-- zebranie symboli (funkcje / klasy / metody / globale)
-  zdefiniowanych w każdym module
-- ustalenie, które moduły faktycznie korzystają
-  z tych samych artefaktów
-- pogrupowanie modułów-konsumentów w klastry
-  współdzielonego użycia
-- przygotowanie listy kandydatów do wydzielenia
-  wspólnej logiki core, w formacie wygodnym dla LLM
+- zebranie symboli (funkcje / klasy / metody / globale) zdefiniowanych w każdym module
+- ustalenie, które moduły faktycznie korzystają z tych samych artefaktów
+- pogrupowanie modułów-konsumentów w klastry współdzielonego użycia
+- przygotowanie listy kandydatów do wydzielenia wspólnej logiki core, w formacie wygodnym dla LLM
 
 Nie robi:
-
 - parsowania AST (deleguje do symbol_analysis / symbol_reference)
 - liczenia ryzyka / metryk grafu (to reporting.py)
 - walidacji architektury
 
-
 Źródła prawdy:
-
     symbol_analysis.py      -> lokalne symbole modułu
     symbol_reference.py     -> kto używa danego symbolu
     api_consumers.py        -> normalizacja konsumentów
@@ -71,12 +63,11 @@ Kontrakt wyjściowy generate_artifact_usage_report():
 }
 """
 
-
 import os
 import json
-
 from datetime import datetime
 from collections import defaultdict, deque
+from itertools import combinations
 
 from repo_guardian.core.symbol_analysis import extract_file_symbols
 from repo_guardian.core.symbol_reference import build_symbol_references
@@ -102,7 +93,6 @@ MIN_CLUSTER_SIZE = 2
 
 
 def _module_own_symbols(symbols: dict) -> list[str]:
-
     return (
         symbols.get("classes", [])
         + symbols.get("functions", [])
@@ -112,7 +102,6 @@ def _module_own_symbols(symbols: dict) -> list[str]:
 
 
 def _symbol_kind(symbol: str, symbols: dict) -> str:
-
     if symbol in symbols.get("classes", []):
         return "class"
 
@@ -149,25 +138,20 @@ def collect_module_artifacts(
         }
     }
     """
-
     result = {}
 
     for module_id, module in modules.items():
+        abs_path = getattr(module, "absolute_path", getattr(module, "path", module_id))
 
-        symbols = extract_file_symbols(
-            module.absolute_path
-        )
-
+        symbols = extract_file_symbols(str(abs_path))
         own_symbols = _module_own_symbols(symbols)
 
         if not own_symbols:
-
             result[module_id] = {
                 "symbols": symbols,
                 "own_symbols": own_symbols,
                 "consumers": {},
             }
-
             continue
 
         references = build_symbol_references(
@@ -208,16 +192,13 @@ def build_artifact_index(module_artifacts: dict) -> dict:
     mieć symbole o identycznej lokalnej nazwie
     (np. dwie klasy "Config" w różnych plikach).
     """
-
     artifacts = {}
 
     for module_id, data in module_artifacts.items():
-
         symbols = data["symbols"]
         consumers = data["consumers"]
 
         for symbol in data["own_symbols"]:
-
             consumer_data = consumers.get(symbol, {})
 
             consumer_modules = sorted(
@@ -239,7 +220,7 @@ def build_artifact_index(module_artifacts: dict) -> dict:
                 "usage": consumer_data.get("usage", {}),
             }
 
-    return artifacts
+    return dict(sorted(artifacts.items()))
 
 
 def filter_shared_artifacts(
@@ -250,7 +231,6 @@ def filter_shared_artifacts(
     Zwraca artefakty współdzielone przez wielu konsumentów,
     posortowane malejąco wg liczby konsumentów.
     """
-
     shared = [
         {"key": key, **data}
         for key, data in artifacts.items()
@@ -270,38 +250,26 @@ def filter_shared_artifacts(
 # ==========================================================
 # CONSUMER CLUSTERING
 # ==========================================================
-#
-# Ten sam wzorzec grafowy co reporting._connected_components,
-# ale krawędzią grafu jest "wspólne korzystanie z artefaktu",
-# a nie zależność modułowa z grafu importów.
-#
 
 
 def _build_consumer_graph(shared_artifacts: list[dict]) -> dict:
-
     graph = defaultdict(set)
 
     for artifact in shared_artifacts:
-
         consumers = artifact["consumers"]
 
-        for i, a in enumerate(consumers):
-
-            for b in consumers[i + 1:]:
-
-                graph[a].add(b)
-                graph[b].add(a)
+        for a, b in combinations(consumers, 2):
+            graph[a].add(b)
+            graph[b].add(a)
 
     return graph
 
 
 def _connected_components(graph: dict) -> list[list[str]]:
-
     visited = set()
     clusters = []
 
     for node in graph:
-
         if node in visited:
             continue
 
@@ -309,7 +277,6 @@ def _connected_components(graph: dict) -> list[list[str]]:
         component = []
 
         while queue:
-
             current = queue.popleft()
 
             if current in visited:
@@ -319,7 +286,6 @@ def _connected_components(graph: dict) -> list[list[str]]:
             component.append(current)
 
             for neigh in graph[current]:
-
                 if neigh not in visited:
                     queue.append(neigh)
 
@@ -339,15 +305,11 @@ def build_shared_usage_clusters(
     Klaster = kandydat do przeglądu pod kątem wydzielenia
     wspólnej logiki core.
     """
-
     graph = _build_consumer_graph(shared_artifacts)
-
     components = _connected_components(graph)
-
     clusters = []
 
     for component in components:
-
         if len(component) < min_cluster_size:
             continue
 
@@ -398,11 +360,9 @@ def _dominant_definers(cluster: dict) -> list[str]:
     prawdopodobni kandydaci na "core" albo miejsce,
     do którego warto wydzielić wspólną logikę.
     """
-
     counts = defaultdict(int)
 
     for artifact in cluster["shared_artifacts"]:
-
         counts[artifact["definer_module"]] += 1
 
     return sorted(
@@ -419,11 +379,9 @@ def build_core_extraction_candidates(
     "te moduły współdzielą tyle a tyle artefaktów -
     rozważ wydzielenie wspólnego core".
     """
-
     candidates = []
 
     for cluster in clusters:
-
         definers = _dominant_definers(cluster)
 
         top_artifacts = sorted(
@@ -434,13 +392,10 @@ def build_core_extraction_candidates(
         candidates.append(
             {
                 "consumer_modules": cluster["modules"],
-
                 "likely_core_modules": definers,
-
                 "shared_artifact_count": cluster[
                     "shared_artifact_count"
                 ],
-
                 "top_shared_artifacts": [
                     {
                         "artifact": a["artifact"],
@@ -450,7 +405,6 @@ def build_core_extraction_candidates(
                     }
                     for a in top_artifacts
                 ],
-
                 "reason": (
                     "moduły współdzielą użycie tych samych "
                     "artefaktów (funkcji/klas/metod/pól) - "
@@ -484,7 +438,6 @@ def generate_artifact_usage_report(
       z czyjego kodu na poziomie symboli, i gdzie widać
       kandydatów do wydzielenia wspólnej logiki core
     """
-
     module_artifacts = collect_module_artifacts(
         modules,
         root_path,
@@ -515,30 +468,14 @@ def generate_artifact_usage_report(
     )
 
     return {
-
-        "runtime":
-            runtime_info,
-
-        "module_count":
-            len(modules),
-
-        "artifact_count":
-            len(artifact_index),
-
-        "shared_artifact_count":
-            len(shared_artifacts),
-
-        "artifacts":
-            artifact_index,
-
-        "shared_artifacts":
-            shared_artifacts,
-
-        "shared_usage_clusters":
-            clusters,
-
-        "core_extraction_candidates":
-            core_candidates,
+        "runtime": runtime_info,
+        "module_count": len(modules),
+        "artifact_count": len(artifact_index),
+        "shared_artifact_count": len(shared_artifacts),
+        "artifacts": artifact_index,
+        "shared_artifacts": shared_artifacts,
+        "shared_usage_clusters": clusters,
+        "core_extraction_candidates": core_candidates,
     }
 
 
@@ -546,11 +483,9 @@ def save_artifact_usage_report(
     report: dict,
     path: str,
 ) -> None:
-
     directory = os.path.dirname(path)
 
     if directory:
-
         os.makedirs(
             directory,
             exist_ok=True,
@@ -561,7 +496,6 @@ def save_artifact_usage_report(
         "w",
         encoding="utf-8",
     ) as f:
-
         json.dump(
             report,
             f,
