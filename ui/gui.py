@@ -366,106 +366,107 @@ def run():
             log_box=log_box
         )
 
-    def analyze_layer():
-
+   def analyze_layer():
         root_dir = repo_path_var.get()
-
         layer_dir = layer_path_var.get()
 
         if not root_dir:
-
             messagebox.showwarning(
                 "Missing repository",
                 "Please select ROOT directory of scanned project"
             )
-
             return
 
         if not layer_dir:
-
             messagebox.showwarning(
                 "Missing layer",
                 "Please select a layer (subdirectory) to analyze."
             )
-
             return
 
         try:
-
             root_resolved = Path(root_dir).resolve()
             layer_resolved = Path(layer_dir).resolve()
-
         except Exception:
-
             messagebox.showerror(
                 "Invalid path",
                 "Could not resolve selected paths."
             )
-
             return
 
         if (
             layer_resolved == root_resolved
             or root_resolved not in layer_resolved.parents
         ):
-
             messagebox.showwarning(
                 "Invalid layer",
-                "Layer must be a subdirectory of the selected repository "
-                "root - not the root itself, and not outside of it."
+                "Layer must be a subdirectory of the selected repository root."
             )
-
             return
 
         def task(log=None):
+            repo_name = root_resolved.name
+            layer_name = layer_resolved.name
 
-            if log: log(f"Analiza warstwy: {layer_resolved.name}")
+            if log: log(f"Przetwarzanie warstwy '{layer_name}' w projekcie '{repo_name}'...")
 
-            modules = build_index(
-                root_dir
+            # 1. Indeksowanie i budowa pełnego grafu
+            modules = build_index(str(root_resolved))
+            graph, cache_hit = get_cached_graph(modules, build_graph)
+
+            if log: log("Obliczanie metryk i kolizji dla pełnego projektu...")
+            metrics = compute_graph_metrics(graph.hard_edges, graph.soft_edges)
+            cycles = detect_cycles(graph.hard_edges)
+            all_collisions = validate_name_collisions(modules)
+            debt = compute_debt(
+                graph.hard_edges,
+                graph.soft_edges,
+                cycles,
+                metrics,
+                collisions=all_collisions,
             )
 
-            graph, cache_hit = get_cached_graph(
-                modules,
-                build_graph
+            runtime = {"cache_hit": cache_hit}
+
+            # 2. Przygotowanie wsadowe globalnych raportów w pamięci
+            if log: log("Przygotowywanie struktur danych do 'slicingu'...")
+            global_summary = generate_summary_report(metrics, cycles, debt, collisions=all_collisions)
+            global_structure = generate_structure_report(graph.hard_edges, graph.soft_edges)
+            global_artifacts = generate_artifact_usage_report(modules, str(root_resolved), runtime)
+            global_compact_artifacts = compact_artifact_report(global_artifacts)
+
+            # 3. Wycięcie slice'a warstwy za pomocą dedykowanego silnika
+            if log: log(f"Slicing raportów dla warstwy: {layer_name}...")
+            layer_sliced_reports = slice_report_for_layer(
+                layer_path=str(layer_resolved),
+                root_path=str(root_resolved),
+                global_metrics=metrics,
+                global_structure=global_structure,
+                global_summary=global_summary,
+                global_artifacts=global_artifacts,
+                global_compact_artifacts=global_compact_artifacts
             )
 
-            if log: log("Generowanie raportu warstwy...")
-
-            report = generate_layer_report(
-                str(layer_resolved),
-                modules,
-                graph,
-                root_dir,
+            # 4. Zapis 5 skrojonych plików za pomocą save_layer_reports
+            if log: log(f"Zapisywanie 5 raportów warstwy dla '{layer_name}'...")
+            save_layer_reports(
+                repo_name=repo_name,
+                layer_name=layer_name,
+                layer_reports=layer_sliced_reports,
+                log=log
             )
 
-            output = (
-                "output/"
-                +
-                f"layer_{layer_resolved.name}.json"
-            )
+            if log: log(f"Zakończono! Zapisano pakiet raportów: output/{repo_name}_{layer_name}_*.json")
+            return f"output/{repo_name}_{layer_name}_*.json"
 
-            save_layer_report(
-                report,
-                output
-            )
-
-            if log: log("Raport warstwy zapisany pomyślnie.")
-            return output
-
-        def on_success(output):
-
+        def on_success(output_pattern):
             messagebox.showinfo(
                 "Done",
-                f"Layer report created:\n{output}"
+                f"Wygenerowano 5 raportów warstwy:\n{output_pattern}"
             )
 
         def on_error(exc):
-
-            messagebox.showerror(
-                "Error",
-                str(exc)
-            )
+            messagebox.showerror("Error", str(exc))
 
         run_with_progress(
             root,
@@ -476,7 +477,6 @@ def run():
             buttons=[analyze_btn, analyze_layer_btn, analyze_single_btn],
             log_box=log_box
         )
-
     def analyze_single():
 
         file_path = file_path_var.get()
