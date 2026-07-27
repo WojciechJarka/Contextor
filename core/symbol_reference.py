@@ -1,10 +1,7 @@
-
 """
 repo_guardian/core/symbol_reference.py
 
-
-SYMBOL REFERENCE ENGINE
-
+SYMBOL REFERENCE ENGINE v2.0
 
 Warstwa:
 
@@ -17,7 +14,8 @@ Odpowiedzialność:
 - wykrywanie wywołań metod/funkcji
 - wykrywanie dziedziczenia
 - wykrywanie importów symboli
-- budowanie referencji symbol -> konsumenci
+- budowanie relacji symbol -> konsumenci
+- generowanie CallResolution dla niejednoznacznych wywołań
 
 
 Nie robi:
@@ -25,27 +23,56 @@ Nie robi:
 - scoringu
 - ryzyka
 - architektury
-- dead code
 - raportowania
 
 
-Kontrakt:
+Nowy model:
+
+confirmed_call
+    |
+    v
+    EdgeInfo
 
 
-{
-    "Symbol":
-    {
-        "called_by": [],
-        "imported_from": [],
-        "inherited_by": []
-    }
-}
+ambiguous_call
+    |
+    v
+    CallResolution
+        - call_site
+        - possible_targets
+        - confidence
+        - reason
+
 
 """
+
+from __future__ import annotations
 
 
 from pathlib import Path
 import ast
+
+
+from repo_guardian.core.report_models import (
+    CallResolution,
+)
+
+
+
+# ==========================================================
+# CONSTANTS
+# ==========================================================
+
+
+CONFIDENCE_EXACT = 1.0
+
+CONFIDENCE_INSTANCE = 0.95
+
+CONFIDENCE_ALIAS = 0.90
+
+CONFIDENCE_CALLBACK = 0.75
+
+CONFIDENCE_HEURISTIC = 0.31
 
 
 
@@ -58,9 +85,7 @@ def _attribute_name(
     node
 ):
     """
-    Zamienia AST Name/Attribute
-    na pełną nazwę.
-
+    AST Name/Attribute -> dotted name.
 
     Example:
 
@@ -70,7 +95,6 @@ def _attribute_name(
 
         client.run
     """
-
 
     if isinstance(
         node,
@@ -112,9 +136,8 @@ def _resolve_alias(
     aliases
 ):
     """
-    Rozwiązuje lokalny alias importu.
+    Resolve local import aliases.
     """
-
 
     if not name:
 
@@ -129,86 +152,156 @@ def _resolve_alias(
 
 
 
-def _match_symbol(
+def _short_name(
+    value
+):
+    if not value:
+        return None
+
+    return value.split(".")[-1]
+
+
+
+
+# ==========================================================
+# SYMBOL MATCHING
+# ==========================================================
+
+
+def _possible_targets(
     value,
     symbols
 ):
     """
-    Dopasowanie symbolu.
+    Returns all possible symbol targets.
 
-    Fallback po nazwie końcowej jest
-    akceptowany tylko gdy istnieje
-    dokładnie jeden kandydat.
+    Unlike old implementation:
+
+        short name -> one guess
+
+    this keeps all candidates.
     """
 
+
     if not value:
-        return None
+
+        return []
+
 
 
     if value in symbols:
-        return value
+
+        return [
+            value
+        ]
 
 
-    short = value.split(".")[-1]
+
+    short = _short_name(
+        value
+    )
 
 
-    candidates = [
+    return sorted(
+
         symbol
+
         for symbol in symbols
-        if symbol.split(".")[-1] == short
-    ]
+
+        if _short_name(symbol) == short
+
+    )
 
 
-    if len(candidates) == 1:
-        return candidates[0]
 
 
-    return None
-
-
-def _classify_match(name, resolved, target_symbols, aliases):
+def _resolve_match(
+    name,
+    resolved,
+    target_symbols,
+    aliases,
+):
     """
-    Klasyfikuje potencjalne dopasowanie wywołania/referencji.
+    Returns:
 
-    Zwraca (bucket, symbol):
-
-        ("confirmed", symbol)
-            Jednoznaczne trafienie w w pełni zakwalifikowany
-            symbol z target_symbols (np. import jawnie na
-            niego wskazuje).
-
-        ("ambiguous", symbol)
-            Dopasowanie WYŁĄCZNIE po krótkiej nazwie, i TYLKO
-            gdy `name` nie zostało jawnie rozwiązane przez
-            żaden import/alias. To zgadywanka (np. lokalna
-            klasa w tym samym pliku), nie fakt.
-
-        (None, None)
-            Brak dopasowania. W szczególności: gdy `name` BYŁO
-            rozwiązane przez import na coś innego niż nasz cel
-            — wtedy WIEMY że to nie nasz symbol i celowo NIE
-            zgadujemy po krótkiej nazwie (to właśnie ten
-            fallback powodował fałszywe przypisania między
-            modułami definiującymi symbol o tej samej krótkiej
-            nazwie — patrz raport kolizji nazw).
+    (
+        resolution_type,
+        targets,
+        confidence,
+        reason
+    )
     """
+
 
     if not resolved:
-        return None, None
+
+        return (
+            None,
+            [],
+            0.0,
+            None,
+        )
+
+
+
+    # ------------------------------------------------------
+    # exact qualified match
+    # ------------------------------------------------------
 
     if resolved in target_symbols:
-        return "confirmed", resolved
+
+        return (
+            "confirmed",
+            [resolved],
+            CONFIDENCE_EXACT,
+            "exact_match",
+        )
+
+
+
+    # ------------------------------------------------------
+    # imported alias pointing elsewhere
+    # ------------------------------------------------------
 
     if name in aliases:
-        # Import jawnie mówi, że to coś innego. Nie zgadujemy.
-        return None, None
 
-    match = _match_symbol(resolved, target_symbols)
+        return (
+            None,
+            [],
+            0.0,
+            None,
+        )
 
-    if match:
-        return "ambiguous", match
 
-    return None, None
+
+    # ------------------------------------------------------
+    # possible short-name matches
+    # ------------------------------------------------------
+
+    candidates = _possible_targets(
+        resolved,
+        target_symbols,
+    )
+
+
+    if candidates:
+
+        return (
+            "ambiguous",
+            candidates,
+            CONFIDENCE_HEURISTIC,
+            "short_name_fallback",
+        )
+
+
+
+    return (
+        None,
+        [],
+        0.0,
+        None,
+    )
+
 
 
 # ==========================================================
@@ -219,7 +312,7 @@ def _classify_match(name, resolved, target_symbols, aliases):
 class SymbolReferenceVisitor(
     ast.NodeVisitor
 ):
-    
+
 
     def __init__(
         self,
@@ -233,145 +326,67 @@ class SymbolReferenceVisitor(
 
         self.called = set()
 
-        # Dopasowania trafione WYŁĄCZNIE przez fallback po
-        # krótkiej nazwie (_match_symbol), bez potwierdzenia
-        # instancją ani dokładnym dopasowaniem. To są zgadywanki
-        # - "coś.add(...)" może być set.add(), nie ModuleSymbols.add().
-        # Nigdy nie mieszamy ich z self.called.
-        self.called_ambiguous = set()
+
+        self.call_resolutions = []
+
 
         self.event_bound = set()
+
 
         self.inherited = []
 
 
         self.aliases = {}
 
+
         self.instances = {}
 
-    def _detect_positional_callbacks(
+
+
+        self.current_scope = None
+
+
+
+    # ------------------------------------------------------
+    # HELPERS
+    # ------------------------------------------------------
+
+
+    def _record_resolution(
         self,
-        node
+        node,
+        symbol,
+        targets,
+        confidence,
+        reason,
     ):
-        """
-        Wykrywa callbacki przekazywane pozycyjnie.
-        Obsługiwane wzorce:
-            widget.bind(event, handler)      <- tkinter
-            signal.subscribe(event, handler)
-            emitter.on(handler)
-        Nie obsługuje (poza zakresem):
-            widget.bind(event, lambda e: handler())
-        Uwaga:
-            "connect" celowo pominięte —
-            db.connect() ma inną semantykę.
-        """
-        func_name = _attribute_name(
-            node.func
+
+        self.call_resolutions.append(
+
+            CallResolution(
+
+                call_site=(
+                    f"{self.current_scope or '<module>'}:"
+                    f"{getattr(node, 'lineno', 0)}"
+                ),
+
+                symbol=symbol,
+
+                possible_targets=list(
+                    targets
+                ),
+
+                confidence=confidence,
+
+                resolution="ambiguous",
+
+                reason=reason,
+
+            )
+
         )
-        if not func_name:
-            return
-        method = func_name.split(".")[-1]
-        #
-        # Callbacki na pozycji args[1]
-        # (drugi argument pozycyjny)
-        #
-        EVENT_CALLBACK_METHODS = {
-            "bind",
-            "subscribe",
-        }
-        #
-        # Callbacki na pozycji args[0]
-        # (pierwszy argument pozycyjny)
-        #
-        SINGLE_ARG_CALLBACK_METHODS = {
-            "on",
-        }
-        if method in EVENT_CALLBACK_METHODS:
-            if len(node.args) >= 2:
-                name = _attribute_name(
-                    node.args[1]
-                )
-                resolved = _resolve_alias(
-                    name,
-                    self.aliases
-                )
-                _, match = _classify_match(
-                    name,
-                    resolved,
-                    self.target_symbols,
-                    self.aliases,
-                )
-                if match:
-                    self.event_bound.add(
-                        match
-                    )
-        elif method in SINGLE_ARG_CALLBACK_METHODS:
-            if len(node.args) >= 1:
-                name = _attribute_name(
-                    node.args[0]
-                )
-                resolved = _resolve_alias(
-                    name,
-                    self.aliases
-                )
-                _, match = _classify_match(
-                    name,
-                    resolved,
-                    self.target_symbols,
-                    self.aliases,
-                )
-                if match:
-                    self.event_bound.add(
-                        match
-                    )
-    def _detect_callback_arguments(
-        self,
-        node
-    ):
-        callback_keys = {
-            "command",
-            "callback",
-            "handler",
-            "func",
-            "on_click",
-            "on_change",
-            "on_submit"
-        }
 
 
-        for keyword in node.keywords:
-
-            if keyword.arg not in callback_keys:
-                continue
-
-
-            value = keyword.value
-
-
-            name = _attribute_name(
-                value
-            )
-
-
-            resolved = _resolve_alias(
-                name,
-                self.aliases
-            )
-
-
-            _, match = _classify_match(
-                name,
-                resolved,
-                self.target_symbols,
-                self.aliases,
-            )
-
-
-            if match:
-
-                self.event_bound.add(
-                    match
-                )
 
     # ------------------------------------------------------
     # IMPORTS
@@ -383,9 +398,7 @@ class SymbolReferenceVisitor(
         node
     ):
 
-
         for item in node.names:
-
 
             local_name = (
                 item.asname
@@ -394,7 +407,7 @@ class SymbolReferenceVisitor(
             )
 
 
-            imported_name = (
+            imported = (
 
                 f"{node.module}.{item.name}"
 
@@ -407,7 +420,7 @@ class SymbolReferenceVisitor(
 
             self.aliases[
                 local_name
-            ] = imported_name
+            ] = imported
 
 
 
@@ -432,9 +445,7 @@ class SymbolReferenceVisitor(
 
                 or
 
-                item.name.split(
-                    "."
-                )[-1]
+                item.name.split(".")[-1]
 
             )
 
@@ -450,11 +461,43 @@ class SymbolReferenceVisitor(
         )
 
 
+    # ------------------------------------------------------
+    # SCOPE TRACKING
+    # ------------------------------------------------------
+
+    def visit_FunctionDef(
+        self,
+        node
+    ):
+
+        previous = self.current_scope
+
+        self.current_scope = node.name
+
+
+        self.generic_visit(
+            node
+        )
+
+
+        self.current_scope = previous
+
+
+
+    def visit_AsyncFunctionDef(
+        self,
+        node
+    ):
+
+        self.visit_FunctionDef(
+            node
+        )
+
+
 
     # ------------------------------------------------------
     # INSTANCE TRACKING
     # ------------------------------------------------------
-
 
     def visit_Assign(
         self,
@@ -466,7 +509,6 @@ class SymbolReferenceVisitor(
             node.value,
             ast.Call
         ):
-
 
             constructor = _attribute_name(
                 node.value.func
@@ -500,114 +542,17 @@ class SymbolReferenceVisitor(
         self.generic_visit(
             node
         )
+
+
+
     # ------------------------------------------------------
-    # CALL DETECTION
+    # INSTANCE METHOD RESOLUTION
     # ------------------------------------------------------
-
-
-    def visit_Call(
-        self,
-        node
-    ):
-        self._detect_callback_arguments(
-            node
-        )
-        self._detect_positional_callbacks(
-            node
-        )
-        called_name = _attribute_name(
-            node.func
-        )
-
-
-        resolved = _resolve_alias(
-            called_name,
-            self.aliases
-        )
-
-
-        # 1) Dopasowanie dokładne (pełna kwalifikowana nazwa
-        #    zgadza się 1:1 z symbolem docelowym) - najbardziej
-        #    wiarygodne, priorytet najwyższy.
-        if resolved in self.target_symbols:
-
-            self.called.add(
-                resolved
-            )
-
-            self.generic_visit(
-                node
-            )
-
-            return
-
-
-        # 2) Rozwiązanie przez instancję (var = Class(); var.method())
-        #    - potwierdzone konstruktorem, więc dużo bardziej
-        #    wiarygodne niż zgadywanie po samej końcówce nazwy.
-        #    MUSI iść przed fallbackiem po krótkiej nazwie, bo
-        #    inaczej fallback (patrz niżej) prawie zawsze "wygra"
-        #    jako pierwszy trafiony kandydat i zamaskuje brak
-        #    faktycznego dopasowania typu.
-        if self._resolve_instance_method(
-            resolved
-        ):
-
-            self.generic_visit(
-                node
-            )
-
-            return
-
-
-         # 3) Fallback po krótkiej nazwie - tylko gdy nic powyżej
-        #    nie trafiło ORAZ import jawnie nie wskazał na inny
-        #    symbol. To zgadywanka (np. "x.add(...)" może być
-        #    set.add(), nie metodą śledzonej klasy), więc ląduje
-        #    w osobnej, oznaczonej jako niepewna puli, NIGDY w
-        #    self.called. Jeśli `called_name` był w aliasach i
-        #    wskazywał na coś innego, WIEMY że to nie nasz symbol
-        #    - nie zgadujemy (patrz _classify_match).
-        _, match = _classify_match(
-            called_name,
-            resolved,
-            self.target_symbols,
-            self.aliases,
-        )
-
-
-        if match:
-
-            self.called_ambiguous.add(
-                match
-            )
-
-
-        self.generic_visit(
-            node
-        )
-
-
 
     def _resolve_instance_method(
         self,
         resolved
     ):
-        """
-        Rozwiązuje:
-
-            instance.method()
-
-        na podstawie:
-
-            instance = Class()
-
-        Zwraca True i dopisuje do self.called tylko wtedy,
-        gdy udało się potwierdzić klasę instancji. W przeciwnym
-        razie zwraca False, żeby wywołujący mógł spróbować
-        fallbacku po krótkiej nazwie.
-        """
-
 
         if not resolved:
 
@@ -629,7 +574,6 @@ class SymbolReferenceVisitor(
         instance_name, method = parts
 
 
-
         constructor = self.instances.get(
             instance_name
         )
@@ -646,13 +590,16 @@ class SymbolReferenceVisitor(
         )
 
 
+
         if candidate in self.target_symbols:
 
             self.called.add(
                 candidate
             )
 
+
             return True
+
 
 
         return False
@@ -660,9 +607,333 @@ class SymbolReferenceVisitor(
 
 
     # ------------------------------------------------------
-    # INHERITANCE
+    # CALL DETECTION
     # ------------------------------------------------------
 
+    def visit_Call(
+        self,
+        node
+    ):
+
+
+        called_name = _attribute_name(
+            node.func
+        )
+
+
+        resolved = _resolve_alias(
+            called_name,
+            self.aliases
+        )
+
+
+        # --------------------------------------------------
+        # Exact qualified call
+        # --------------------------------------------------
+
+        if resolved in self.target_symbols:
+
+
+            self.called.add(
+                resolved
+            )
+
+
+            self.generic_visit(
+                node
+            )
+
+
+            return
+
+
+
+        # --------------------------------------------------
+        # Instance method
+        # --------------------------------------------------
+
+        if self._resolve_instance_method(
+            resolved
+        ):
+
+
+            self.generic_visit(
+                node
+            )
+
+
+            return
+
+
+
+        # --------------------------------------------------
+        # Ambiguous resolution
+        # --------------------------------------------------
+
+        kind, targets, confidence, reason = (
+            _resolve_match(
+                called_name,
+                resolved,
+                self.target_symbols,
+                self.aliases,
+            )
+        )
+
+
+        if kind == "ambiguous":
+
+
+            self._record_resolution(
+
+                node,
+
+                called_name,
+
+                targets,
+
+                confidence,
+
+                reason,
+
+            )
+
+
+
+        self.generic_visit(
+            node
+        )
+
+
+
+    # ------------------------------------------------------
+    # CALLBACK DETECTION
+    # ------------------------------------------------------
+
+    def _detect_callback(
+        self,
+        node
+    ):
+
+
+        callback_keys = {
+
+            "callback",
+            "handler",
+            "func",
+            "command",
+            "on_click",
+            "on_change",
+            "on_submit",
+
+        }
+
+
+
+        for keyword in node.keywords:
+
+
+            if keyword.arg not in callback_keys:
+
+                continue
+
+
+
+            name = _attribute_name(
+                keyword.value
+            )
+
+
+            resolved = _resolve_alias(
+                name,
+                self.aliases
+            )
+
+
+            _, targets, _, _ = (
+                _resolve_match(
+                    name,
+                    resolved,
+                    self.target_symbols,
+                    self.aliases,
+                )
+            )
+
+
+            if len(targets) == 1:
+
+                self.event_bound.add(
+                    targets[0]
+                )
+
+
+
+    def _detect_positional_callback(
+        self,
+        node
+    ):
+
+
+        name = _attribute_name(
+            node.func
+        )
+
+
+        if not name:
+
+            return
+
+
+
+        method = name.split(".")[-1]
+
+
+        callback_methods = {
+
+            "bind": 1,
+
+            "subscribe": 1,
+
+            "on": 0,
+
+        }
+
+
+
+        if method not in callback_methods:
+
+            return
+
+
+
+        index = callback_methods[
+            method
+        ]
+
+
+
+        if len(node.args) <= index:
+
+            return
+
+
+
+        callback = _attribute_name(
+            node.args[index]
+        )
+
+
+        resolved = _resolve_alias(
+            callback,
+            self.aliases
+        )
+
+
+        _, targets, _, _ = (
+            _resolve_match(
+                callback,
+                resolved,
+                self.target_symbols,
+                self.aliases,
+            )
+        )
+
+
+        if len(targets) == 1:
+
+            self.event_bound.add(
+                targets[0]
+            )
+
+
+
+    # ------------------------------------------------------
+    # CALLBACK WRAPPER
+    # ------------------------------------------------------
+
+    def visit_Call(
+        self,
+        node
+    ):
+
+        self._detect_callback(
+            node
+        )
+
+        self._detect_positional_callback(
+            node
+        )
+
+
+        called_name = _attribute_name(
+            node.func
+        )
+
+
+        resolved = _resolve_alias(
+            called_name,
+            self.aliases
+        )
+
+
+
+        if resolved in self.target_symbols:
+
+            self.called.add(
+                resolved
+            )
+
+
+            self.generic_visit(
+                node
+            )
+
+            return
+
+
+
+        if self._resolve_instance_method(
+            resolved
+        ):
+
+            self.generic_visit(
+                node
+            )
+
+            return
+
+
+
+        kind, targets, confidence, reason = (
+            _resolve_match(
+                called_name,
+                resolved,
+                self.target_symbols,
+                self.aliases,
+            )
+        )
+
+
+
+        if kind == "ambiguous":
+
+            self._record_resolution(
+                node,
+                called_name,
+                targets,
+                confidence,
+                reason,
+            )
+
+
+        self.generic_visit(
+            node
+        )
+
+
+
+    # ------------------------------------------------------
+    # INHERITANCE
+    # ------------------------------------------------------
 
     def visit_ClassDef(
         self,
@@ -673,32 +944,37 @@ class SymbolReferenceVisitor(
         for base in node.bases:
 
 
-            base_name = _attribute_name(
+            name = _attribute_name(
                 base
             )
 
 
             resolved = _resolve_alias(
-                base_name,
+                name,
                 self.aliases
             )
 
 
-            _, match = _classify_match(
-                base_name,
-                resolved,
-                self.target_symbols,
-                self.aliases,
+            _, targets, _, _ = (
+                _resolve_match(
+                    name,
+                    resolved,
+                    self.target_symbols,
+                    self.aliases,
+                )
             )
 
 
-            if match:
+            for target in targets:
+
 
                 self.inherited.append(
+
                     (
                         node.name,
-                        match
+                        target
                     )
+
                 )
 
 
@@ -707,25 +983,23 @@ class SymbolReferenceVisitor(
             node
         )
 
-
-
 # ==========================================================
 # REFERENCE BUILDING
 # ==========================================================
 
 
 def _empty_reference():
+    """
+    Initial reference container.
+
+    Legacy fields are preserved where possible,
+    but ambiguous calls are now represented
+    through CallResolution objects.
+    """
 
     return {
 
         "called_by": [],
-
-        # Moduły, w których znaleziono wywołanie pasujące
-        # TYLKO przez zgadywanie po krótkiej nazwie (np.
-        # x.add(...) bez potwierdzenia, że x to instancja
-        # śledzonej klasy). Nie liczy się do konsumentów -
-        # to sygnał "może", nie "na pewno".
-        "called_by_ambiguous": [],
 
         "event_bound_by": [],
 
@@ -733,8 +1007,9 @@ def _empty_reference():
 
         "inherited_by": [],
 
-    }
+        "call_resolutions": [],
 
+    }
 
 
 
@@ -742,7 +1017,9 @@ def _load_tree(
     root_path,
     module
 ):
-
+    """
+    Load module AST tree.
+    """
 
     try:
 
@@ -766,6 +1043,73 @@ def _load_tree(
 
 
 
+def _import_matches_symbol(
+    imported,
+    symbol
+):
+    """
+    Checks whether import points
+    to requested symbol.
+    """
+
+    if not imported:
+
+        return False
+
+
+    if imported == symbol:
+
+        return True
+
+
+    if imported.endswith(
+        "." + symbol
+    ):
+
+        return True
+
+
+    if symbol.endswith(
+        "." + imported
+    ):
+
+        return True
+
+
+    return False
+
+
+
+def _normalize_references(
+    references
+):
+    """
+    Deterministic output ordering.
+    """
+
+    for symbol, data in references.items():
+
+        for key, value in data.items():
+
+            if isinstance(
+                value,
+                list
+            ):
+
+                if key == "call_resolutions":
+
+                    continue
+
+
+                data[key] = sorted(
+                    set(value)
+                )
+
+
+    return references
+
+
+
 def build_symbol_references(
     modules,
     target_symbols,
@@ -773,20 +1117,33 @@ def build_symbol_references(
     definer_module=None
 ):
     """
-    Buduje referencje symboli.
+    Builds symbol references.
+
+    Output:
+
+    symbol:
+        called_by
+        event_bound_by
+        imported_from
+        inherited_by
+        call_resolutions
 
 
-    Facts only.
+    New behaviour:
 
-    definer_module:
-        Moduł, w którym zdefiniowane są `target_symbols` (bare
-        names, np. "Module"). Gdy podany, dopasowanie wewnątrz
-        wykonywane jest po W PEŁNI zakwalifikowanej nazwie
-        (`{definer_module}.{symbol}`), żeby nie mylić symboli
-        o tej samej krótkiej nazwie zdefiniowanych w różnych
-        modułach (patrz raport kolizji nazw). Zwracany słownik
-        jest z powrotem kluczowany po bare name — kontrakt
-        funkcji się nie zmienia.
+    ambiguous calls are no longer
+    stored as a guessed consumer.
+
+    They become:
+
+        CallResolution
+
+    containing:
+
+        call_site
+        possible_targets
+        confidence
+        reason
     """
 
 
@@ -796,20 +1153,34 @@ def build_symbol_references(
 
 
     if definer_module:
+
         qualified_map = {
-            f"{definer_module}.{symbol}": symbol
+
+            f"{definer_module}.{symbol}":
+                symbol
+
             for symbol in bare_symbols
+
         }
+
+
     else:
+
         qualified_map = {
-            symbol: symbol
+
+            symbol:
+                symbol
+
             for symbol in bare_symbols
+
         }
 
 
-    target_symbols = set(
+
+    qualified_symbols = set(
         qualified_map.keys()
     )
+
 
 
     references = {
@@ -817,7 +1188,7 @@ def build_symbol_references(
         symbol:
             _empty_reference()
 
-        for symbol in target_symbols
+        for symbol in qualified_symbols
 
     }
 
@@ -839,7 +1210,7 @@ def build_symbol_references(
 
 
         visitor = SymbolReferenceVisitor(
-            target_symbols
+            qualified_symbols
         )
 
 
@@ -850,14 +1221,14 @@ def build_symbol_references(
 
 
         # --------------------------------------------------
-        # CALLS
+        # Confirmed calls
         # --------------------------------------------------
-
 
         for symbol in visitor.called:
 
 
             if symbol in references:
+
 
                 references[symbol][
                     "called_by"
@@ -865,27 +1236,38 @@ def build_symbol_references(
                     module_id
                 )
 
-        # --------------------------------------------------
-        # CALLS (AMBIGUOUS - short-name fallback only)
-        # --------------------------------------------------
 
-        for symbol in visitor.called_ambiguous:
-
-            if symbol in references:
-
-                references[symbol][
-                    "called_by_ambiguous"
-                ].append(
-                    module_id
-                )
 
         # --------------------------------------------------
-        # EVENT CALLBACKS
+        # Ambiguous calls
+        # --------------------------------------------------
+
+        for resolution in visitor.call_resolutions:
+
+
+            for target in resolution.possible_targets:
+
+
+                if target in references:
+
+
+                    references[target][
+                        "call_resolutions"
+                    ].append(
+                        resolution
+                    )
+
+
+
+        # --------------------------------------------------
+        # Events
         # --------------------------------------------------
 
         for symbol in visitor.event_bound:
 
+
             if symbol in references:
+
 
                 references[symbol][
                     "event_bound_by"
@@ -894,152 +1276,90 @@ def build_symbol_references(
                 )
 
 
-        # --------------------------------------------------
-        # INHERITANCE
-        # --------------------------------------------------
-
-
-        for child in visitor.inherited:
-
-
-            for child_name, symbol in visitor.inherited:
-
-                if symbol in references:
-
-                    references[symbol][
-                        "inherited_by"
-                    ].append(
-                        module_id
-                    )
-
-
 
         # --------------------------------------------------
-        # IMPORTS
+        # Inheritance
         # --------------------------------------------------
-        #
-        # UWAGA: ta pętla korzysta z ODDZIELNEGO źródła faktów
-        # (module.imports, warstwa facts/domain), nie z aliasów
-        # AST budowanych przez SymbolReferenceVisitor. imp.names
-        # to gołe nazwy zaimportowanych symboli, BEZ informacji
-        # z jakiego modułu pochodzą - samo dopasowanie po nazwie
-        # myliłoby więc symbole o tej samej krótkiej nazwie
-        # zdefiniowane w różnych modułach (dokładnie ten sam
-        # problem co w visit_Call, tylko na innym źródle danych).
-        # Jeśli znamy definer_module, wymagamy DODATKOWO, żeby
-        # import faktycznie pochodził z tego konkretnego modułu
-        # (imp.module), zanim policzymy go jako imported_from.
-        #
+
+        for child_name, symbol in visitor.inherited:
+
+
+            if symbol in references:
+
+
+                references[symbol][
+                    "inherited_by"
+                ].append(
+                    module_id
+                )
+
+
+
+        # --------------------------------------------------
+        # Imports
+        # --------------------------------------------------
 
         for imp in module.imports:
 
-            imp_module = getattr(imp, "module", None)
 
-            if definer_module and not _import_matches_symbol(
-                imp_module or "",
-                definer_module,
-            ):
-                continue
+            imported_module = getattr(
+                imp,
+                "module",
+                None
+            )
+
+
+            if definer_module:
+
+                if not _import_matches_symbol(
+                    imported_module or "",
+                    definer_module,
+                ):
+
+                    continue
+
+
 
             for imported_name in imp.names:
 
-                for symbol in target_symbols:
 
-                    bare_symbol = qualified_map[symbol]
+                for qualified in qualified_symbols:
 
-                    if imported_name == bare_symbol:
 
-                        references[symbol][
+                    bare = qualified_map[
+                        qualified
+                    ]
+
+
+                    if imported_name == bare:
+
+
+                        references[qualified][
                             "imported_from"
                         ].append(
                             module_id
                         )
 
 
+
     references = _normalize_references(
         references
     )
 
-    # Mapujemy z powrotem na bare names - kontrakt funkcji
-    # (co zwraca) zostaje identyczny jak przed patchem.
+
+
+    # Restore old API:
+    # qualified symbol -> bare symbol
+
     return {
-        qualified_map[qualified]: data
-        for qualified, data in references.items()
+
+        qualified_map[key]:
+            value
+
+        for key, value
+        in references.items()
+
     }
-# ==========================================================
-# IMPORT MATCHING
-
-
-def _import_matches_symbol(
-    imported,
-    symbol
-):
-    """
-    Sprawdza czy import wskazuje na symbol.
-    """
-
-
-    if not imported:
-
-        return False
-
-
-
-    if imported == symbol:
-
-        return True
-
-
-
-    if imported.endswith(
-        "." + symbol
-    ):
-
-        return True
-
-
-
-    if symbol.endswith(
-        "." + imported
-    ):
-
-        return True
-
-
-
-    return False
-
-
-
-# ==========================================================
-# NORMALIZATION
-# ==========================================================
-
-
-def _normalize_references(
-    references
-):
-    """
-    Stabilizuje wynik.
-
-    Każdy consumer występuje
-    tylko raz i jest sortowany.
-    """
-
-
-    for symbol, data in references.items():
-
-
-        for key, values in data.items():
-
-
-            data[key] = sorted(
-                set(values)
-            )
-
-
-
-    return references
 
 
 
@@ -1053,23 +1373,16 @@ def find_import_users(
     modules
 ):
     """
-    Znajduje moduły importujące
-    dany moduł.
-
-
-    Facts only.
+    Finds modules importing target module.
     """
 
-
     users = []
-
 
 
     short_name = (
         target_module_id
         .split(".")[-1]
     )
-
 
 
     for module_id, module in modules.items():
@@ -1087,7 +1400,6 @@ def find_import_users(
             imported = imp.module
 
 
-
             if not imported:
 
                 continue
@@ -1095,17 +1407,20 @@ def find_import_users(
 
 
             if (
+
                 imported == target_module_id
+
                 or
+
                 imported.endswith(
                     "." + short_name
                 )
+
             ):
 
                 users.append(
                     module_id
                 )
-
 
                 break
 
@@ -1118,7 +1433,7 @@ def find_import_users(
 
 
 # ==========================================================
-# COMPATIBILITY ALIASES
+# COMPATIBILITY
 # ==========================================================
 
 
@@ -1144,5 +1459,3 @@ __all__ = [
     "SymbolReferenceVisitor",
 
 ]
-
-
