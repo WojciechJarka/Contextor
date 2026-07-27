@@ -48,12 +48,21 @@ def _build_undirected_graph(
 
     graph = defaultdict(set)
 
-    for src, targets in sorted(hard_edges.items()):
+    for src, edges in sorted(hard_edges.items()):
 
-        for tgt in sorted(targets):
+        for edge in sorted(
+            edges,
+            key=lambda e: e.target
+        ):
 
-            graph[src].add(tgt)
-            graph[tgt].add(src)
+            target = (
+                edge.target
+                if hasattr(edge, "target")
+                else edge
+            )
+
+            graph[src].add(target)
+            graph[target].add(src)
 
     return graph
 
