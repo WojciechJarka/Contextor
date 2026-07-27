@@ -230,9 +230,11 @@ class RepoGenerator:
         # tutaj nie kopiujemy DEFAULT_SKIP_DIRS
         # ponieważ filtr ma być sterowany oknem
 
-        self.skip_dirs = set(
-            DEFAULT_SKIP_DIRS
-        )
+        # aktywne pomijanie katalogów
+        # startowo NIC nie jest filtrowane
+        # użytkownik aktywuje filtr przez okno filtrów
+
+        self.skip_dirs = set(DEFAULT_SKIP_DIRS)
 
 
         self.output_dir = os.path.join(
@@ -494,7 +496,17 @@ class RepoGenerator:
 
         return ext in self.extensions
 
+    def is_filename_blocked(self, filename):
 
+        filename_lower = filename.lower()
+
+        for skip in self.skip_dirs:
+
+            if skip.lower() in filename_lower:
+
+                return True
+
+        return False
 
     # ========================================================
     # DODAWANIE REPOZYTORIUM
@@ -548,6 +560,12 @@ class RepoGenerator:
                     root,
                     filename
                 )
+
+
+                if self.is_filename_blocked(filename):
+
+                    blocked += 1
+                    continue
 
 
                 if self.is_directory_blocked(
@@ -633,8 +651,14 @@ class RepoGenerator:
 
 
         for path in selected:
+                    
+            filename = os.path.basename(path)
 
+            if self.is_filename_blocked(filename):
 
+                blocked.append(path)
+
+                continue
 
             if self.is_directory_blocked(
                 path
@@ -934,7 +958,7 @@ class RepoGenerator:
 
 
         window.geometry(
-            "750x650"
+            "900x650"
         )
 
 
@@ -979,8 +1003,9 @@ class RepoGenerator:
 
 
             var = tk.BooleanVar(
-                value=True
-            )
+            master=window,
+            value=ext in self.extensions
+        )
 
 
             ext_vars[ext] = var
@@ -1346,13 +1371,13 @@ def run_repo_generator():
 
     root = tk.Tk()
 
-
+    root.withdraw()
 
     app = RepoGenerator(
         root
     )
 
-
+    root.deiconify()
 
     root.mainloop()
 
