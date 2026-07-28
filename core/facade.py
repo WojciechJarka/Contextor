@@ -57,23 +57,37 @@ def _compute_metrics_and_debt(modules, graph):
     )
     return metrics, cycles, all_collisions, debt
 
-def _load_excludes_for_repo(repo_path: str) -> list:
-    """Helper to read soft excludes defined in GUI for a given repo."""
+def _load_excludes_for_repo(repo_path: str) -> tuple[list, set]:
+    """Helper to read soft excludes and auto-exclude dir names for a given repo.
+    Returns (excluded_paths, extra_ignored_dirs).
+    """
     repo_name = Path(repo_path).name
     safe_name = repo_name.replace(" ", "_").replace("/", "_").replace("\\", "_")
     ui_dir = Path(__file__).resolve().parent.parent / "ui"
     state_file = ui_dir / f"exclude_state_{safe_name}.json"
-    
+
     if not state_file.exists():
         state_file = ui_dir / "exclude_state.json"
-        
+
     if state_file.exists():
         try:
             with open(state_file, "r", encoding="utf-8") as f:
-                return json.load(f).get("excluded", [])
+                data = json.load(f)
+            excluded = data.get("excluded", [])
+            # Auto-exclude dir names stored by exclude_gui (pre-computed list)
+            extra_dirs = set(data.get("auto_exclude_dirs", [
+                "__pycache__", ".git", "venv", ".venv", "dist", "build",
+                ".idea", ".vscode", "node_modules", "scratch",
+            ]))
+            return excluded, extra_dirs
         except Exception:
             pass
-    return []
+    # Sensible defaults when no state file exists
+    default_dirs = {
+        "__pycache__", ".git", "venv", ".venv", "dist", "build",
+        ".idea", ".vscode", "node_modules", "scratch",
+    }
+    return [], default_dirs
 
 class GuardianFacade:
     """
@@ -96,8 +110,8 @@ class GuardianFacade:
             list: List of architectural validation errors, if any.
         """
         if log: log("Starting directory indexing...")
-        excludes = _load_excludes_for_repo(path)
-        modules = build_index(path, excludes=excludes)
+        excludes, extra_dirs = _load_excludes_for_repo(path)
+        modules = build_index(path, excludes=excludes, extra_ignored_dirs=extra_dirs)
 
         if log: log(f"Found {len(modules)} modules. Fetching graph...")
         graph, cache_hit = get_cached_graph(modules, build_graph)
@@ -134,8 +148,8 @@ class GuardianFacade:
         layer_name = layer_resolved.name
 
         if log: log(f"Processing layer '{layer_name}' in project '{repo_name}'...")
-        excludes = _load_excludes_for_repo(str(root_resolved))
-        modules = build_index(str(root_resolved), excludes=excludes)
+        excludes, extra_dirs = _load_excludes_for_repo(str(root_resolved))
+        modules = build_index(str(root_resolved), excludes=excludes, extra_ignored_dirs=extra_dirs)
         graph, cache_hit = get_cached_graph(modules, build_graph)
 
         if log: log("Calculating metrics and collisions for the full project...")
@@ -183,8 +197,8 @@ class GuardianFacade:
         if log: log(f"Single file analysis: {file.name}")
 
         if log: log("Indexing and building project graph...")
-        excludes = _load_excludes_for_repo(repo_root)
-        modules = build_index(repo_root, excludes=excludes)
+        excludes, extra_dirs = _load_excludes_for_repo(repo_root)
+        modules = build_index(repo_root, excludes=excludes, extra_ignored_dirs=extra_dirs)
         graph, cache_hit = get_cached_graph(modules, build_graph)
 
         if log: log("Generating global report (hotspots)...")

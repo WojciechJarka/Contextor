@@ -16,7 +16,7 @@ from repo_guardian.ui.exclude_check import check_stale_excludes
 from repo_guardian.ui.exclude_gui import run_exclude_window
 from repo_guardian.ui.system_actions import handle_open_output_folder, handle_empty_output_folder
 from repo_guardian.ui.progress_widget import create_progress_bar, create_log_box, run_with_progress
-from repo_guardian.ui.theme import apply_theme, HeaderTooltipManager, PAD_SM, PAD_MD, PAD_LG
+from repo_guardian.ui.theme import apply_theme, HeaderTooltipManager, BG, PAD_SM, PAD_MD, PAD_LG
 from repo_generator.repo_gui import run_repo_generator
 
 class GuardianGUI:
@@ -37,9 +37,9 @@ class GuardianGUI:
         
         apply_theme(self.root)
         
-        self.repo_path_var = tk.StringVar(value=self.state.get("repository", ""))
-        self.layer_path_var = tk.StringVar(value=self.state.get("layer", ""))
-        self.file_path_var = tk.StringVar(value=self.state.get("python_file", ""))
+        self.repo_path_var = tk.StringVar(value=self.state.get("repository", "").replace("\\", "/"))
+        self.layer_path_var = tk.StringVar(value=self.state.get("layer", "").replace("\\", "/"))
+        self.file_path_var = tk.StringVar(value=self.state.get("python_file", "").replace("\\", "/"))
         
         self._check_stale_excludes()
         self._build_ui()
@@ -88,6 +88,17 @@ class GuardianGUI:
         sub_label = ttk.Label(header, text="Static architecture analysis · Read-only mode", style="Sub.TLabel")
         sub_label.grid(row=1, column=0, sticky="w", pady=(2, 0))
         self.tooltip = HeaderTooltipManager(sub_label, "Static architecture analysis · Read-only mode")
+        
+        warn_label = tk.Label(
+            header,
+            text="⚠  WARNING: ADD ALL NON-PYTHON STRUCTURES TO THE EXCLUDE LIST BEFORE RUNNING ANY ANALYSIS — OTHERWISE ERRORS WILL OCCUR.",
+            fg="#ff4040",
+            bg=BG,
+            font=("Segoe UI", 9, "bold"),
+            wraplength=680,
+            justify="left",
+        )
+        warn_label.grid(row=2, column=0, sticky="w", pady=(6, 0))
 
     def _add_path_row(self, parent, row, label_text, var, command, tooltip_text=None):
         ttk.Label(parent, text=label_text, style="Field.TLabel").grid(
@@ -187,7 +198,7 @@ class GuardianGUI:
         self.tooltip.bind_tooltip(emp_btn, "Permanently delete all contents in the Output Folder.")
         self.tooltip.bind_tooltip(exc_btn, "Manage ignored files/directories for the repository.")
         self.tooltip.bind_tooltip(rb_btn, "Open tool to bundle source code into a text file for LLMs.")
-        self.tooltip.bind_tooltip(p_btn, "Utility tool to read analysis JSON outputs.")
+        self.tooltip.bind_tooltip(p_btn, "Utility tool to read analysis JSON outputs (it must be a full artifact JSON report).")
 
     # ======================================================
     # CALLBACKS
@@ -196,6 +207,7 @@ class GuardianGUI:
     def browse_repository(self):
         directory = filedialog.askdirectory()
         if directory:
+            directory = directory.replace("\\", "/")
             self.repo_path_var.set(directory)
             self.layer_path_var.set("")
             save_state(repository=directory)
@@ -225,12 +237,13 @@ class GuardianGUI:
             messagebox.showwarning("Invalid layer", f"Selected directory is outside the repository root.\nLayer must be a subdirectory of:\n{root_resolved}")
             return
             
-        self.layer_path_var.set(str(layer_resolved))
-        save_state(layer=str(layer_resolved))
+        self.layer_path_var.set(str(layer_resolved).replace("\\", "/"))
+        save_state(layer=str(layer_resolved).replace("\\", "/"))
 
     def browse_file(self):
         file_path = filedialog.askopenfilename(filetypes=[("Python files", "*.py")])
         if file_path:
+            file_path = file_path.replace("\\", "/")
             self.file_path_var.set(file_path)
             save_state(python_file=file_path)
 

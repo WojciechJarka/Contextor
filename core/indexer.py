@@ -201,7 +201,8 @@ def extract_imports(
 
 def build_index(
     root: str,
-    excludes: list[str] = None
+    excludes: list[str] = None,
+    extra_ignored_dirs: set = None,
 ) -> dict[str, Module]:
     """
     Buduje indeks modułów projektu.
@@ -264,6 +265,9 @@ def build_index(
         "node_modules",
 
     }
+
+    if extra_ignored_dirs:
+        ignored_dirs.update(extra_ignored_dirs)
 
 
 

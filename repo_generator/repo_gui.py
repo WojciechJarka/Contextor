@@ -228,6 +228,7 @@ class RepoGenerator:
 
         skips = state.get("repo_gui_skip_dirs")
         self.skip_dirs = set(skips) if skips is not None else set(DEFAULT_SKIP_DIRS)
+        self.current_preset = state.get("repo_gui_current_preset", None)
 
 
         self.output_dir = os.path.join(
@@ -499,7 +500,7 @@ class RepoGenerator:
 
         for skip in self.skip_dirs:
 
-            if skip.lower() in filename_lower:
+            if skip.lower() == filename_lower:
 
                 return True
 
@@ -509,6 +510,10 @@ class RepoGenerator:
 
 
     def is_extension_allowed(self,path):
+
+        # Empty set means no filter active → allow everything
+        if not self.extensions:
+            return True
 
         ext=os.path.splitext(
             path
@@ -872,6 +877,16 @@ class RepoGenerator:
         # ROZSZERZENIA
         # ====================================================
 
+        st_test = load_state()
+        presets_test = st_test.get("repo_gui_presets", {})
+        if self.current_preset and self.current_preset not in presets_test:
+            self.current_preset = None
+
+        preset_label_var = tk.StringVar(value=f"Active Preset: {self.current_preset}" if self.current_preset else "Active Preset: None")
+        ttk.Label(window, textvariable=preset_label_var, style="Sub.TLabel", foreground=PRIMARY).pack(
+            anchor="w", padx=PAD_LG, pady=(PAD_MD, 0)
+        )
+
         filter_sub = ttk.Label(
             window,
             text="Configure extensions and directories to ignore",
@@ -996,17 +1011,71 @@ class RepoGenerator:
         preset_buttons.pack(padx=PAD_LG, pady=(0, PAD_SM), fill=tk.X)
         
         def save_preset():
-            name = simpledialog.askstring("Save Preset", "Enter preset name:", parent=window)
-            if not name: return
-            
-            ext_list = [ext for ext,var in ext_vars.items() if var.get()]
-            skip_list = [d for d,var in dir_vars.items() if var.get()]
-            
             st = load_state()
             presets = st.get("repo_gui_presets", {})
-            presets[name] = {"ext": ext_list, "skip": skip_list}
-            save_state(repo_gui_presets=presets)
-            messagebox.showinfo("Saved", f"Preset '{name}' saved.")
+
+            dlg = tk.Toplevel(window)
+            dlg.title("Save Preset")
+            dlg.geometry("340x360")
+            dlg.configure(bg=BG)
+            dlg.transient(window)
+            dlg.grab_set()
+
+            ttk.Label(dlg, text="Existing presets:", style="Sub.TLabel").pack(
+                anchor="w", padx=PAD_MD, pady=(PAD_MD, PAD_SM)
+            )
+
+            listb = tk.Listbox(
+                dlg, bg=SURFACE, fg=TEXT, selectbackground=PRIMARY,
+                selectforeground="#ffffff", borderwidth=0, highlightthickness=1,
+                highlightbackground=BORDER, font=("Segoe UI", 10), height=8
+            )
+            listb.pack(fill=tk.BOTH, expand=True, padx=PAD_MD)
+            for p in sorted(presets.keys()):
+                listb.insert(tk.END, p)
+
+            ttk.Label(dlg, text="Preset name:", style="Sub.TLabel").pack(
+                anchor="w", padx=PAD_MD, pady=(PAD_SM, 2)
+            )
+            name_entry = ttk.Entry(dlg, font=("Segoe UI", 10))
+            name_entry.pack(fill=tk.X, padx=PAD_MD)
+            name_entry.focus_set()
+
+            def on_listbox_select(event):
+                sel = listb.curselection()
+                if sel:
+                    name_entry.delete(0, tk.END)
+                    name_entry.insert(0, listb.get(sel[0]))
+
+            listb.bind("<<ListboxSelect>>", on_listbox_select)
+
+            def do_save():
+                name = name_entry.get().strip()
+                if not name:
+                    messagebox.showwarning("Error", "Please enter a preset name.", parent=dlg)
+                    return
+                if name in presets:
+                    if not messagebox.askyesno(
+                        "Overwrite?",
+                        f"Preset '{name}' already exists.\nDo you want to overwrite it?",
+                        parent=dlg
+                    ):
+                        return
+
+                ext_list = [ext for ext, var in ext_vars.items() if var.get()]
+                skip_list = [d for d, var in dir_vars.items() if var.get()]
+                presets[name] = {"ext": ext_list, "skip": skip_list}
+                save_state(repo_gui_presets=presets)
+                self.current_preset = name
+                preset_label_var.set(f"Active Preset: {name}")
+                messagebox.showinfo("Saved", f"Preset '{name}' saved.", parent=dlg)
+                dlg.destroy()
+
+            btn_row = ttk.Frame(dlg)
+            btn_row.pack(fill=tk.X, padx=PAD_MD, pady=PAD_MD)
+            ttk.Button(btn_row, text="Save", command=do_save, style="Primary.TButton").pack(side=tk.RIGHT)
+            ttk.Button(btn_row, text="Cancel", command=dlg.destroy, style="Ghost.TButton").pack(side=tk.RIGHT, padx=(0, PAD_SM))
+            dlg.bind("<Return>", lambda e: do_save())
 
         def load_preset():
             st = load_state()
@@ -1021,6 +1090,8 @@ class RepoGenerator:
                     var.set(ext in preset.get("ext", []))
                 for d, var in dir_vars.items():
                     var.set(d in preset.get("skip", []))
+                self.current_preset = name
+                preset_label_var.set(f"Active Preset: {name}")
                 sel_win.destroy()
 
             sel_win = tk.Toplevel(window)
@@ -1051,6 +1122,9 @@ class RepoGenerator:
                 if confirm:
                     del presets[name]
                     save_state(repo_gui_presets=presets)
+                    if self.current_preset == name:
+                        self.current_preset = None
+                        preset_label_var.set("Active Preset: None")
                     messagebox.showinfo("Deleted", f"Preset '{name}' deleted.")
                 sel_win.destroy()
 
@@ -1113,6 +1187,20 @@ class RepoGenerator:
 
         def save_filters():
 
+            if self.current_preset:
+                st = load_state()
+                presets = st.get("repo_gui_presets", {})
+                if self.current_preset in presets:
+                    p = presets[self.current_preset]
+                    changed = False
+                    current_exts = {ext for ext,var in ext_vars.items() if var.get()}
+                    current_skips = {d for d,var in dir_vars.items() if var.get()}
+                    if sorted(list(current_exts)) != sorted(p.get("ext", [])): changed = True
+                    if sorted(list(current_skips)) != sorted(p.get("skip", [])): changed = True
+                    if changed:
+                        if messagebox.askyesno("Update Preset?", f"Preset '{self.current_preset}' has unsaved changes.\nDo you want to update it before closing?", parent=window):
+                            presets[self.current_preset] = {"ext": list(current_exts), "skip": list(current_skips)}
+                            save_state(repo_gui_presets=presets)
 
             self.extensions={
                 ext
@@ -1152,12 +1240,12 @@ class RepoGenerator:
 
         btn_sv_f = ttk.Button(
             buttons,
-            text="Save",
+            text="Confirm",
             command=save_filters,
             style="Primary.TButton",
         )
         btn_sv_f.pack(side=tk.RIGHT)
-        f_tooltip.bind_tooltip(btn_sv_f, "Save changes and close the filter manager.")
+        f_tooltip.bind_tooltip(btn_sv_f, "Confirm changes and close the filter manager.")
 
 
 
@@ -1341,7 +1429,8 @@ def run_repo_generator():
             repo_gui_files=app.files,
             repo_gui_selected=selections,
             repo_gui_extensions=list(app.extensions),
-            repo_gui_skip_dirs=list(app.skip_dirs)
+            repo_gui_skip_dirs=list(app.skip_dirs),
+            repo_gui_current_preset=app.current_preset
         )
         root.destroy()
         

@@ -115,10 +115,10 @@ def run_parser_window():
     parser_win.configure(bg=BG)
 
     ttk.Label(parser_win, text="Parse JSON", style="Header.TLabel").pack(anchor="w", padx=PAD_LG, pady=(PAD_LG, 0))
-    sub_label = ttk.Label(parser_win, text="Filter artifact report by file name or symbol", style="Sub.TLabel")
+    sub_label = ttk.Label(parser_win, text="Filter artifact report by file name or symbol (it must be a full artifact JSON report)", style="Sub.TLabel")
     sub_label.pack(anchor="w", padx=PAD_LG, pady=(2, PAD_MD))
     
-    p_tooltip = HeaderTooltipManager(sub_label, "Filter artifact report by file name or symbol")
+    p_tooltip = HeaderTooltipManager(sub_label, "Filter artifact report by file name or symbol (it must be a full artifact JSON report)")
 
     ttk.Label(parser_win, text="JSON File", style="Field.TLabel").pack(anchor="w", padx=PAD_LG)
 
