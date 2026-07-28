@@ -213,9 +213,18 @@ def build_artifact_index(module_artifacts: dict) -> dict:
 
             key = f"{module_id}::{symbol}"
 
+            # Significance Threshold filter
+            # Ignorujemy stałe (global) oraz prywatne zmienne i metody (_) 
+            # które nie są przez nikogo używane (szum w raportach)
+            is_private = symbol.startswith("_") or "." + "_" in symbol
+            kind = _symbol_kind(symbol, symbols)
+            
+            if len(consumer_modules) == 0 and (kind == "global" or is_private):
+                continue
+                
             artifacts[key] = {
                 "artifact": symbol,
-                "kind": _symbol_kind(symbol, symbols),
+                "kind": kind,
                 "definer_module": module_id,
                 "consumers": consumer_modules,
                 "consumer_count": len(consumer_modules),

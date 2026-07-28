@@ -26,123 +26,7 @@ import ast
 import math
 
 
-# ==========================================================
-# SIDE EFFECT RULES
-# ==========================================================
-
-
-SIDE_EFFECT_RULES = {
-
-    "filesystem_access":
-        {
-            "open",
-        },
-
-    "filesystem_write":
-        {
-            "write",
-            "remove",
-            "unlink",
-            "mkdir",
-            "makedirs",
-        },
-
-    "network":
-        {
-            "requests",
-            "urlopen",
-            "socket",
-        },
-
-    "process":
-        {
-            "Popen",
-            "run",
-            "call",
-            "system",
-        },
-
-    "environment":
-        {
-            "getenv",
-            "environ",
-        },
-
-    "logging":
-        {
-            "debug",
-            "info",
-            "warning",
-            "error",
-            "critical",
-        },
-
-    "random":
-        {
-            "random",
-            "randint",
-            "choice",
-        },
-
-    "time":
-        {
-            "sleep",
-            "time",
-        },
-}
-
-
-# ==========================================================
-# RISK RULES
-# ==========================================================
-
-
-RISK_RULES = {
-
-    "exec":
-        {
-            "exec",
-        },
-
-    "eval":
-        {
-            "eval",
-        },
-
-    "subprocess":
-        {
-            "Popen",
-            "run",
-            "call",
-        },
-
-    "reflection":
-        {
-            "getattr",
-            "setattr",
-            "inspect",
-        },
-
-    "filesystem_write":
-        {
-            "remove",
-            "unlink",
-            "write",
-            "mkdir",
-            "makedirs",
-        },
-
-    "global_state":
-        {
-            "global",
-        },
-
-    "threading":
-        {
-            "Thread",
-            "Process",
-        },
-}
+from repo_guardian.core.domain.rules import SIDE_EFFECT_RULES, RISK_RULES
 
 
 # ==========================================================
@@ -275,62 +159,28 @@ def analyze_effects(
 
 
 
-    for effect, names in SIDE_EFFECT_RULES.items():
+    effect_hits = {}
+    for name, count in visitor.calls.items():
+        if name in SIDE_EFFECT_RULES:
+            effect = SIDE_EFFECT_RULES[name]
+            effect_hits[effect] = effect_hits.get(effect, 0) + count
 
-        hits = sum(
-            visitor.calls.get(
-                name,
-                0
-            )
-            for name in names
-        )
+    for effect, hits in effect_hits.items():
+        effects.add(effect)
+        effect_scores[effect] = _intensity_score(hits, saturation=3)
 
+    risk_hits = {}
+    for name, count in visitor.calls.items():
+        if name in RISK_RULES:
+            risk = RISK_RULES[name]
+            risk_hits[risk] = risk_hits.get(risk, 0) + count
 
-        if hits:
+    if "global" in visitor.statements:
+        risk_hits["global_state"] = risk_hits.get("global_state", 0) + 1
 
-            effects.add(
-                effect
-            )
-
-            effect_scores[effect] = (
-                _intensity_score(
-                    hits,
-                    saturation=3
-                )
-            )
-
-
-
-    for risk, names in RISK_RULES.items():
-
-        hits = sum(
-            visitor.calls.get(
-                name,
-                0
-            )
-            for name in names
-        )
-
-
-        if "global" in names:
-
-            if "global" in visitor.statements:
-
-                hits += 1
-
-
-        if hits:
-
-            risks.add(
-                risk
-            )
-
-            risk_scores[risk] = (
-                _intensity_score(
-                    hits,
-                    saturation=2
-                )
-            )
+    for risk, hits in risk_hits.items():
+        risks.add(risk)
+        risk_scores[risk] = _intensity_score(hits, saturation=2)
 
 
 

@@ -30,6 +30,12 @@ from repo_guardian.core.risk_analysis import (
     analyze_effects,
 )
 
+MUTATING_METHODS = {
+    "append", "extend", "insert", "remove", 
+    "pop", "clear", "update", "setdefault", 
+    "add", "discard"
+}
+
 
 
 # ==========================================================
@@ -435,10 +441,10 @@ class FunctionMutationVisitor(
                     node.func.value.id
                     in self.args
                 ):
-
-                    self.modified.add(
-                        node.func.value.id
-                    )
+                    if node.func.attr in MUTATING_METHODS:
+                        self.modified.add(
+                            node.func.value.id
+                        )
 
 
         self.generic_visit(
@@ -480,6 +486,17 @@ class FunctionMutationVisitor(
                 self.modified.add(
                     target.id
                 )
+
+        elif isinstance(
+            target,
+            ast.Subscript
+        ):
+            if isinstance(target.value, ast.Name):
+                if target.value.id in self.args:
+                    self.modified.add(target.value.id)
+            elif isinstance(target.value, ast.Attribute) and isinstance(target.value.value, ast.Name):
+                if target.value.value.id in self.args:
+                    self.modified.add(target.value.value.id)
 
 
 

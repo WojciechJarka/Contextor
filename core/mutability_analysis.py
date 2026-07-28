@@ -12,6 +12,11 @@ Facts only.
 
 import ast
 
+MUTATING_METHODS = {
+    "append", "extend", "insert", "remove", 
+    "pop", "clear", "update", "setdefault", 
+    "add", "discard"
+}
 
 class MutabilityVisitor(ast.NodeVisitor):
 
@@ -53,7 +58,8 @@ class MutabilityVisitor(ast.NodeVisitor):
                 name = node.func.value.id
 
                 if name in self.arguments:
-                    self.mutated.add(name)
+                    if node.func.attr in MUTATING_METHODS:
+                        self.mutated.add(name)
 
         self.generic_visit(node)
 
@@ -83,6 +89,17 @@ class MutabilityVisitor(ast.NodeVisitor):
                     self.mutated.add(
                         target.value.id
                     )
+
+        elif isinstance(
+            target,
+            ast.Subscript
+        ):
+            if isinstance(target.value, ast.Name):
+                if target.value.id in self.arguments:
+                    self.mutated.add(target.value.id)
+            elif isinstance(target.value, ast.Attribute) and isinstance(target.value.value, ast.Name):
+                if target.value.value.id in self.arguments:
+                    self.mutated.add(target.value.value.id)
 
 
 def _extract_arguments(node):

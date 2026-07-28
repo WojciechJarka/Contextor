@@ -267,86 +267,6 @@ def extract_api_consumers(
 # ==========================================================
 
 
-def get_runtime_consumers(
-    consumer_data
-):
-    """
-    Zwraca moduły używające symbolu
-    poprzez wywołanie runtime.
-    """
-
-    if not consumer_data:
-        return []
-
-
-    return sorted(
-        set(
-            consumer_data
-            .get(
-                "usage",
-                {}
-            )
-            .get(
-                "runtime_calls",
-                []
-            )
-        )
-    )
-
-
-
-def get_import_consumers(
-    consumer_data
-):
-    """
-    Zwraca moduły importujące API.
-    """
-
-    if not consumer_data:
-        return []
-
-
-    return sorted(
-        set(
-            consumer_data
-            .get(
-                "usage",
-                {}
-            )
-            .get(
-                "api_imports",
-                []
-            )
-        )
-    )
-
-
-
-def get_inheritance_consumers(
-    consumer_data
-):
-    """
-    Zwraca moduły dziedziczące
-    po symbolu.
-    """
-
-    if not consumer_data:
-        return []
-
-
-    return sorted(
-        set(
-            consumer_data
-            .get(
-                "usage",
-                {}
-            )
-            .get(
-                "inheritance",
-                []
-            )
-        )
-    )
 # ==========================================================
 # API SURFACE SUMMARY
 # ==========================================================
@@ -450,22 +370,7 @@ def summarize_api_consumers(
 
 
 
-# ==========================================================
-# COMPATIBILITY ALIAS
-# ==========================================================
-
-
-def build_api_consumers(
-    symbols,
-    references
-):
-
-    return extract_api_consumers(
-        symbols,
-        references
-    )
-
-
+# Removed build_api_consumers
 
 # ==========================================================
 # PUBLIC EXPORTS
@@ -475,14 +380,6 @@ def build_api_consumers(
 __all__ = [
 
     "extract_api_consumers",
-
-    "build_api_consumers",
-
-    "get_runtime_consumers",
-
-    "get_import_consumers",
-
-    "get_inheritance_consumers",
 
     "summarize_api_consumers",
 

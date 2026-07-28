@@ -319,7 +319,7 @@ class SymbolIndexVisitor(
 # ==========================================================
 
 
-def build_symbol_index(
+def build_facts_symbol_index(
     modules: dict,
     root_path: str,
 ) -> SymbolRegistry:

@@ -238,6 +238,14 @@ def compute_graph_metrics(
 
 
 
+    max_soft_out_degree = 0
+
+    if soft_edges:
+        max_soft_out_degree = max(
+            (len(targets) for targets in soft_edges.values()),
+            default=0
+        )
+
     return {
 
         "nodes":
@@ -258,6 +266,18 @@ def compute_graph_metrics(
 
         "average_degree":
             average_degree,
+
+
+        "max_in_degree":
+            max(degrees["in_degree"].values(), default=0) if degrees["in_degree"] else 0,
+
+
+        "max_out_degree":
+            max(degrees["out_degree"].values(), default=0) if degrees["out_degree"] else 0,
+
+
+        "max_soft_out_degree":
+            max_soft_out_degree,
 
 
         "in_degree":

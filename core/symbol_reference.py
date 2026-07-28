@@ -53,6 +53,13 @@ import ast
 # NAME RESOLUTION
 # ==========================================================
 
+IGNORED_AMBIGUOUS_METHODS = {
+    "visit", "get", "add", "update", "append", "extend",
+    "insert", "pop", "remove", "clear", "copy", "items", "keys", "values",
+    "visit_FunctionDef", "visit_ClassDef", "visit_AsyncFunctionDef",
+    "visit_Call", "visit_Import", "visit_Assign", "visit_Name", "visit_Attribute"
+}
+
 
 def _attribute_name(
     node
@@ -206,6 +213,16 @@ def _classify_match(name, resolved, target_symbols, aliases):
     match = _match_symbol(resolved, target_symbols)
 
     if match:
+        short = match.split(".")[-1]
+        
+        # Ignorujemy popularne nazwy wywołań w trybie ambiguous
+        if short in IGNORED_AMBIGUOUS_METHODS:
+            return None, None
+            
+        # Ignorujemy metody magiczne w trybie ambiguous
+        if short.startswith("__") and short.endswith("__"):
+            return None, None
+
         return "ambiguous", match
 
     return None, None

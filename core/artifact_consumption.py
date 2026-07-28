@@ -91,9 +91,7 @@ from repo_guardian.core.activity import (
     STATUS_UNUSED_PUBLIC,
     STATUS_UNUSED_INTERNAL,
 )
-from repo_guardian.core.exposure_analysis import (
-    analyze_symbol_exposure,
-)
+# Removed exposure_analysis import
 
 
 # ==========================================================
@@ -357,12 +355,7 @@ def build_artifact_consumption(
     tree: AST tego modułu, do lokalnego skanu cli/api exposure.
     """
 
-    exposure = analyze_symbol_exposure(
-        modules,
-        all_symbols,
-        root_path,
-        tree,
-    )
+    exposure = {}
 
     module_consumers, coupling = build_module_consumption(
         consumers,

@@ -152,6 +152,14 @@ def _compute_module_risk(
         1
     )
 
+    max_soft = max(
+        metrics.get(
+            "max_soft_out_degree",
+            1
+        ),
+        1
+    )
+
     # Zbieramy WSZYSTKIE węzły - także te, które występują
     # WYŁĄCZNIE jako cel krawędzi (in-degree > 0, out-degree 0).
     # Iterowanie tylko po graph["hard_edges"].items() pomijało
@@ -183,15 +191,8 @@ def _compute_module_risk(
             )
         )
 
-        # Bez normalizacji "soft" był surową liczbą (np. 5 miękkich
-        # zależności = +1.0), podczas gdy in_deg/out_deg są znormalizowane
-        # do [0,1] przez max_in/max_out - hard dependency dawał maksymalnie
-        # 0.5+0.3=0.8, więc soft mógł całkowicie zdominować wynik. Brak
-        # osobnej metryki "max_soft" w `metrics`, więc normalizujemy przez
-        # max_out (ta sama skala co out-degree - też liczba wychodzących
-        # zależności modułu).
         soft_score = min(
-            soft / max_out,
+            soft / max_soft,
             1
         )
 

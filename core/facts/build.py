@@ -46,7 +46,7 @@ from repo_guardian.core.graph import (
 
 
 from .symbol_index import (
-    build_symbol_index,
+    build_facts_symbol_index,
 )
 
 
@@ -99,7 +99,7 @@ def build_repository_context(
     # SYMBOL INDEX
     # ------------------------------------------------------
 
-    symbols = build_symbol_index(
+    symbols = build_facts_symbol_index(
         modules,
         root_path,
     )

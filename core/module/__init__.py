@@ -1,8 +1,8 @@
-from .contracts import Module
-from .imports import ImportRef
-from .graph import ProjectGraph
-from .resolution import ResolutionResult
-from .errors import ValidationError
+from ..domain.module import Module
+from ..domain.imports import ImportRef
+from ..domain.graph import ProjectGraph
+from ..domain.resolution import ResolutionResult
+from ..domain.validation import ValidationError
 
 
 __all__ = [

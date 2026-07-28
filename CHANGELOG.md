@@ -1,3 +1,46 @@
+# Changelog — sesja analizy funkcji, metryk i usuwania martwego kodu
+
+Dokument opisuje zmiany wprowadzone w kodzie `repo_guardian` podczas najnowszej iteracji, skupionej na rozszerzeniu analityki, poprawie trafności metryk oraz czyszczeniu architektury.
+
+---
+
+## 1. Integracja metryk funkcji (Function Analysis)
+
+**Pliki:** `core/function_analysis.py`, `core/single_file_analysis.py`, `core/reporting_single_file.py`
+**Zmiana:** Zintegrowano moduł `function_analysis` z głównym procesem analizy pojedynczych plików. Raport `single_function_analysis.json` zawiera teraz dedykowaną sekcję `"functions"`, opisującą każdą funkcję w pliku (sygnatura, Cyclomatic Complexity, głębokość zagnieżdżeń IF/FOR/WHILE, ilość linii kodu).
+
+## 2. Usunięcie martwego kodu (Dead Code Removal)
+
+**Pliki:** `core/semantic_detectors.py`, `core/exposure_analysis.py`, `core/artifact_consumption.py`
+**Zmiana:** Usunięto nieużywane, zduplikowane detektory semantyczne oraz moduł analizy ekspozycji. Aby zapobiec `ImportError`, usunięto z `artifact_consumption.py` wadliwy import z `exposure_analysis`, symulując jego logikę pustym słownikiem (zgodnie z zachowaniem usuniętego, martwego kodu).
+
+## 3. Poprawa normalizacji Risk Score (Soft Edges)
+
+**Pliki:** `core/metrics.py`, `core/reporting.py`
+**Problem:** Normalizacja "miękkich powiązań" (soft edges) używała zmiennej `max_out` (pochodzącej z twardych importów). Skutkowało to ekstremalnym (ok. 17-krotnym) zaniżaniem i tłumieniem wkładu punktowego dla zależności miękkich, przez co ich waga w Risk Score była praktycznie ignorowana.
+**Zmiana:** Wprowadzono nową metrykę `max_soft_out_degree` dedykowaną specjalnie powiązaniom typu soft. Metryka ta została wpięta do procesu normalizacji w `reporting.py`, dzięki czemu moduły z silnymi ukrytymi powiązaniami (np. `cli`) otrzymują prawidłowy, zasłużony rygor w raporcie globalnym.
+
+## 4. Naprawa błędu KeyError w metrykach
+
+**Plik:** `core/metrics.py`
+**Problem:** Podczas składania słownika metryk, funkcja próbowała odczytać `degrees["max_in_degree"]` z obiektu niezawierającego tego klucza, powodując awarię parsera grafu.
+**Zmiana:** Zastąpiono sztywne zapytanie o klucz obliczaniem maksimów na żywo: `max(degrees["in_degree"].values())` (oraz dla `out_degree`), gwarantując pełną stabilność silnika metryk.
+
+## 5. Zwiększenie trafności Mutability Analysis (Redukcja FP/FN)
+
+**Pliki:** `core/mutability_analysis.py`, `core/function_analysis.py`
+**Problem:** Wizytatorzy oznaczali czyste metody odczytowe (`.get()`, `.copy()`) jako mutacje stanu (False Positives) oraz byli ślepi na standardowe modyfikatory list i słowników poprzez operator `[]` (False Negatives).
+**Zmiana:** 
+- Dodano rygorystyczny zbiór `MUTATING_METHODS` (`append`, `update`, `clear`, itp.) używany podczas wizytowania `visit_Call`.
+- Rozszerzono `_check_target` o węzeł `ast.Subscript`, dzięki czemu modyfikatory `args[0] = ...` są natychmiast rejestrowane jako faktyczne zmiany stanu argumentu.
+
+## 6. Kompletność kontekstu architektury
+
+**Plik:** `core/single_file_analysis.py`
+**Zmiana:** Zaktualizowano sygnaturę funkcji w `collect_architecture_context`, by poprawnie przekazywała obiekt `soft_edges` do wywołania `compute_graph_metrics`.
+
+---
+
 # Changelog — sesja napraw i redesignu GUI
 
 Dokument opisuje zmiany wprowadzone w kodzie `repo_guardian` w ramach tej sesji:
