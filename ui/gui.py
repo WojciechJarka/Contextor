@@ -39,6 +39,7 @@ from repo_guardian.core.reporting import (
 
 from repo_guardian.core.metrics import compute_graph_metrics
 from repo_guardian.core.cycles import detect_cycles
+from repo_guardian.core.hotspots import detect_hotspots
 from repo_guardian.core.debt import compute_debt
 
 from repo_guardian.core.reporting_single_file import (
@@ -360,7 +361,12 @@ def run():
 
             # 2. Przygotowanie wsadowe globalnych raportów w pamięci
             if log: log("Przygotowywanie struktur danych do 'slicingu'...")
-            global_summary = generate_summary_report(metrics, cycles, debt, collisions=all_collisions)
+            hotspots = detect_hotspots(graph.hard_edges)
+            global_summary = generate_summary_report(
+                metrics, cycles, debt,
+                collisions=all_collisions,
+                hotspots=hotspots,
+            )
             global_structure = generate_structure_report(graph.hard_edges, graph.soft_edges)
             global_artifacts = generate_artifact_usage_report(modules, str(root_resolved), runtime)
             global_compact_artifacts = compact_artifact_report(global_artifacts)

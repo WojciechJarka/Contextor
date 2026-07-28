@@ -716,30 +716,208 @@ def save_json(
 # EXPORT HELPERS FOR SPLIT REPORTS
 # ==========================================================
 
+
+def _collision_severity(
+    artifact_type: str,
+    symbol_details: list,
+    code_snippets: dict,
+) -> str:
+    """
+    Klasyfikuje powagę kolizji nazw:
+
+    critical  — klasy z różną liczbą pól lub całkowicie inną strukturą
+                (ValidationError z 6 polami vs 2 polami = krytyczne)
+    warning   — ta sama nazwa i typ, różna implementacja logiki
+                (dwie funkcje robiące podobne, ale nie identyczne rzeczy)
+    info      — prawie identyczne (triplicacja dataclassy, minimalne różnice
+                jak brakujące pole opcjonalne albo komentarz)
+    """
+    if artifact_type == "class":
+        # Wykryj poważną rozbieżność struktury pól przez porównanie
+        # liczby linii kodu — klasy z bardzo różną liczbą linii
+        # prawie na pewno mają inną strukturę (pola, metody).
+        if code_snippets:
+            lengths = [len(code.splitlines()) for code in code_snippets.values()]
+            if lengths:
+                min_len = min(lengths)
+                max_len = max(lengths)
+                # Ponad 2x różnica w rozmiarze → structural divergence
+                if min_len > 0 and max_len / min_len >= 2.0:
+                    return "critical"
+                # Umiarkowana różnica → warning
+                if max_len - min_len > 5:
+                    return "warning"
+        return "info"
+
+    if artifact_type == "function":
+        # Funkcja z delegacją (wrapper) vs pełna implementacja
+        # → rozpoznaj przez małą vs dużą liczbę linii
+        if code_snippets:
+            lengths = [len(code.splitlines()) for code in code_snippets.values()]
+            if lengths and max(lengths) > 0:
+                if min(lengths) / max(lengths) < 0.4:
+                    return "warning"
+        return "warning"
+
+    if artifact_type == "variable":
+        # Dwa słowniki reguł z innym schematem kluczy → warning
+        return "warning"
+
+    return "info"
+
+
+def _compute_status(
+    cycles: list,
+    real_collisions: list,
+    hotspots: list | None = None,
+) -> str:
+    """
+    Czterostopniowy status projektu:
+
+    HEALTHY   — 0 kolizji, 0 cykli, 0 hotspotów
+    WARNING   — outbound hotspoty lub kolizje info/warning
+                ale bez cykli i kolizji krytycznych
+    BROKEN    — realne (nie-identyczne) kolizje nazw lub cykle
+    CRITICAL  — cykle + realne kolizje jednocześnie
+    """
+    has_cycles = bool(cycles)
+    has_collisions = bool(real_collisions)
+    has_hotspots = any(
+        h.get("type") in ("HUB", "HOTSPOT", "OUTBOUND_HOTSPOT")
+        for h in (hotspots or [])
+    )
+
+    if has_cycles and has_collisions:
+        return "CRITICAL"
+
+    if has_cycles or has_collisions:
+        return "BROKEN"
+
+    if has_hotspots:
+        return "WARNING"
+
+    return "HEALTHY"
+
+
+def _compute_action_items(
+    cycles: list,
+    real_collisions: list,
+    hotspots: list | None = None,
+    isolated_modules: list | None = None,
+) -> list[str]:
+    """
+    Lista max 5 priorytetowych akcji do naprawy,
+    posortowana od najważniejszej.
+    """
+    items = []
+
+    if cycles:
+        worst = cycles[0]
+        items.append(
+            f"CRITICAL: Eliminate import cycle "
+            f"{' -> '.join(worst)} ({len(worst)} modules)"
+        )
+
+    critical_collisions = [
+        c for c in real_collisions
+        if getattr(c, "severity", "warning") == "critical"
+    ]
+    if critical_collisions:
+        c = critical_collisions[0]
+        name = getattr(c, "message", "").split("'")[1] if "'" in getattr(c, "message", "") else "?"
+        items.append(
+            f"BROKEN: Fix structural collision '{name}' "
+            f"({len(critical_collisions)} critical collision(s) total)"
+        )
+    elif real_collisions:
+        total = len(real_collisions)
+        items.append(
+            f"BROKEN: Resolve {total} name collision(s) "
+            f"(duplicate public API across modules)"
+        )
+
+    if hotspots:
+        outbound = [
+            h for h in hotspots
+            if h.get("type") == "OUTBOUND_HOTSPOT"
+        ]
+        if outbound:
+            top = outbound[0]
+            items.append(
+                f"WARNING: Refactor '{top['module']}' "
+                f"(out_degree={top.get('out_degree', '?')}, "
+                f"type=OUTBOUND_HOTSPOT)"
+            )
+
+    if isolated_modules:
+        items.append(
+            f"INFO: {len(isolated_modules)} isolated module(s) with no connections "
+            f"— remove or integrate: {', '.join(isolated_modules[:3])}"
+        )
+
+    return items[:5]
+
+
 def generate_summary_report(
     metrics: dict,
     cycles: list,
     debt: dict,
     collisions: list | None = None,
+    hotspots: list | None = None,
 ) -> dict:
     """Generuje skondensowany raport stanu projektu."""
     collisions = collisions or []
+    hotspots = hotspots or []
 
     real_collisions = [
         c for c in collisions
         if not getattr(c, "is_identical", False)
     ]
 
+    # Hotspoty nieizolowane (HUB, HOTSPOT, OUTBOUND_HOTSPOT)
+    active_hotspots = [
+        h for h in hotspots
+        if h.get("type") not in ("ISOLATED", "NORMAL")
+    ]
+
+    isolated_modules = [
+        h["module"] for h in hotspots
+        if h.get("type") == "ISOLATED"
+    ]
+
+    top_hotspots = [
+        {
+            "module": h["module"],
+            "type": h["type"],
+            "out_degree": h.get("out_degree", 0),
+            "in_degree": h.get("in_degree", 0),
+            "score": h.get("score", 0.0),
+        }
+        for h in active_hotspots[:5]
+    ]
+
+    status = _compute_status(cycles, real_collisions, active_hotspots)
+
+    action_items = _compute_action_items(
+        cycles,
+        real_collisions,
+        hotspots=active_hotspots,
+        isolated_modules=isolated_modules,
+    )
+
     return {
         "generated_at": datetime.now().isoformat(),
-        "status": "HEALTHY" if not cycles and not real_collisions else "BROKEN",
+        "status": status,
         "metrics": metrics,
         "cycle_count": len(cycles),
         "collision_count": len(real_collisions),
         "debt_summary": {
             "total_score": debt.get("score", 0),
-            "hotspot_count": len(debt.get("hotspots", [])),
-        }
+            "hotspot_count": len(active_hotspots),
+            "isolated_count": len(isolated_modules),
+        },
+        "top_hotspots": top_hotspots,
+        "action_items": action_items,
     }
 
 
@@ -753,8 +931,13 @@ def generate_structure_report(hard_edges: dict, soft_edges: dict) -> dict:
 
 def generate_collisions_report(modules: dict, precomputed: list | None = None) -> dict:
     """
-    Generuje dedykowany raport kolizji nazw dla artefaktów tego samego typu 
+    Generuje dedykowany raport kolizji nazw dla artefaktów tego samego typu
     (klasa z klasą, funkcja z funkcją itp.), które posiadają inny kod.
+
+    severity:
+        critical  — klasy z różną liczbą pól lub całkowicie inną strukturą
+        warning   — ta sama nazwa/typ ale różna implementacja (logika zduplikowana)
+        info      — prawie identyczne (np. triplicacja dataclassy, minimalne różnice)
     """
     all_collisions = (
         precomputed
@@ -764,12 +947,20 @@ def generate_collisions_report(modules: dict, precomputed: list | None = None) -
     collisions_data = []
 
     for error in all_collisions:
+        severity = getattr(error, "severity", None)
+        if severity is None:
+            severity = _collision_severity(
+                artifact_type=getattr(error, "artifact_type", "unknown"),
+                symbol_details=getattr(error, "symbol_details", []),
+                code_snippets=getattr(error, "code_snippets", {}),
+            )
         collisions_data.append(
             {
                 "message": error.message,
                 "nodes": error.nodes,
                 "artifact_type": getattr(error, "artifact_type", "unknown"),
                 "is_identical": getattr(error, "is_identical", False),
+                "severity": severity,
                 "conflicting_code": getattr(error, "code_snippets", {}),
                 "symbol_details": getattr(error, "symbol_details", []),
             }
@@ -784,6 +975,18 @@ def generate_collisions_report(modules: dict, precomputed: list | None = None) -
     )
     conflicting_count = len(collisions_data) - identical_count
 
+    severity_counts = {
+        "critical": sum(1 for c in collisions_data if c.get("severity") == "critical"),
+        "warning": sum(1 for c in collisions_data if c.get("severity") == "warning"),
+        "info": sum(1 for c in collisions_data if c.get("severity") == "info"),
+    }
+
+    # Sortuj: critical pierwsze, potem warning, potem info
+    severity_order = {"critical": 0, "warning": 1, "info": 2}
+    collisions_data.sort(
+        key=lambda c: severity_order.get(c.get("severity", "warning"), 1)
+    )
+
     return {
         "generated_at": datetime.now().isoformat(),
         "total_collisions": len(collisions_data),
@@ -791,6 +994,7 @@ def generate_collisions_report(modules: dict, precomputed: list | None = None) -
             "total": len(collisions_data),
             "identical": identical_count,
             "conflicting": conflicting_count,
+            "by_severity": severity_counts,
         },
         "collisions": collisions_data,
     }
@@ -1125,6 +1329,11 @@ def save_all_reports(
         else validate_name_collisions(modules)
     )
 
+    # Hotspoty obliczamy wewnątrz save_all_reports żeby summary
+    # zawierało top_hotspots i poprawny hotspot_count bez potrzeby
+    # przekazywania dodatkowego argumentu przez wszystkich wywołujących.
+    hotspots = detect_hotspots(graph.hard_edges)
+
     # Ścieżki zbierane w trakcie zapisu - zwracane na końcu, żeby
     # wywołujący (np. GUI) mógł od razu pokazać konkretne pliki,
     # zamiast na nowo je sobie odtwarzać ze wzorca nazw.
@@ -1138,7 +1347,11 @@ def save_all_reports(
     # "generated_at" samodzielnie - jest teraz samowystarczalna,
     # więc bezpośrednie wywołanie tej funkcji gdziekolwiek indziej
     # da dokładnie taki sam kształt jak zapisany raport)
-    summary_data = generate_summary_report(metrics, cycles, debt, collisions=all_collisions)
+    summary_data = generate_summary_report(
+        metrics, cycles, debt,
+        collisions=all_collisions,
+        hotspots=hotspots,
+    )
     save_json(
         summary_data,
         summary_path,

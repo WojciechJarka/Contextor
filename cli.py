@@ -26,6 +26,7 @@ from repo_guardian.core.reporting_layer import generate_layer_report
 from repo_guardian.core.artifact_usage_report import generate_artifact_usage_report
 from repo_guardian.core.metrics import compute_graph_metrics
 from repo_guardian.core.cycles import detect_cycles
+from repo_guardian.core.hotspots import detect_hotspots
 from repo_guardian.core.debt import compute_debt
 from repo_guardian.core.validator.collisions import validate_name_collisions
 
@@ -59,8 +60,13 @@ def main(root_path: str = ".") -> int:
         metrics,
         collisions=all_collisions,
     )
+    hotspots = detect_hotspots(graph.hard_edges)
 
-    summary = generate_summary_report(metrics, cycles, debt, collisions=all_collisions)
+    summary = generate_summary_report(
+        metrics, cycles, debt,
+        collisions=all_collisions,
+        hotspots=hotspots,
+    )
     save_json(summary, f"output/{repo_name}_summary.json")
 
     # 2. Structure

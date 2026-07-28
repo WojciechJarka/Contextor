@@ -105,7 +105,8 @@ def consumer_only_match(value, term):
 def parse_and_filter_json(
     json_path,
     search_term,
-    output_dir="output"
+    output_dir="output",
+    public_api_only=False,
 ):
 
     if not os.path.exists(json_path):
@@ -159,7 +160,15 @@ def parse_and_filter_json(
 
 
     for key, value in artifacts.items():
-
+        if public_api_only and isinstance(value, dict):
+            c_count = value.get("consumer_count", 0)
+            art_name = str(value.get("artifact", ""))
+            
+            if c_count == 0:
+                continue
+                
+            if art_name.startswith("_") and not (art_name.startswith("__") and art_name.endswith("__")):
+                continue
 
         key_lower = key.lower()
 
@@ -339,7 +348,7 @@ def run_parser_window():
     )
 
     parser_win.geometry(
-        "540x300"
+        "540x350"
     )
     parser_win.configure(bg=BG)
 
@@ -466,16 +475,25 @@ def run_parser_window():
         pady=(2, PAD_LG)
     )
 
+    public_api_only_var = tk.BooleanVar(value=state.get("public_api_only", False))
+    ttk.Checkbutton(
+        parser_win,
+        text="Tylko Public API (ukryj elementy z consumer_count=0 i prywatne)",
+        variable=public_api_only_var,
+        style="TCheckbutton"
+    ).pack(anchor="w", padx=PAD_LG, pady=(0, PAD_LG))
+
 
     def execute_parsing():
 
         json_path = json_path_var.get()
 
         term = name_entry.get()
-
+        public_api = public_api_only_var.get()
 
         save_state(
-            search_term=term
+            search_term=term,
+            public_api_only=public_api
         )
 
 
@@ -490,10 +508,10 @@ def run_parser_window():
 
 
         def task():
-
             return parse_and_filter_json(
                 json_path,
-                term
+                term,
+                public_api_only=public_api
             )
 
 

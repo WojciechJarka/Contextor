@@ -253,6 +253,27 @@ def compute_debt(
 
 
 
+    normalized_score = round(score / edge_count, 4)
+
+    if normalized_score < 0.05:
+        label = "low"
+    elif normalized_score < 0.15:
+        label = "moderate"
+    elif normalized_score < 0.30:
+        label = "high"
+    else:
+        label = "critical"
+
+    interpretation = {
+        "label": label,
+        "breakdown": {
+            "collisions": f"{len(real_collisions)} real collisions (+{collision_penalty})" if real_collisions else "none",
+            "soft_edges": f"{soft_edges_count} soft edges (+{soft_edge_penalty})" if soft_edges_count else "none",
+            "cycles": f"{cycle_penalty} nodes in cycles (+{cycle_penalty * 2})" if cycle_penalty else "none",
+            "hotspots": f"{hotspot_penalty} above critical threshold (+{hotspot_penalty})" if hotspot_penalty else "none above critical threshold"
+        }
+    }
+
     return {
 
         "score":
@@ -291,10 +312,11 @@ def compute_debt(
 
 
         "normalized":
-            round(
-                score / edge_count,
-                4
-            ),
+            normalized_score,
+
+
+        "interpretation":
+            interpretation,
 
 
         "model":

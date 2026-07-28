@@ -62,6 +62,10 @@ def _ignore(name: str) -> bool:
     if name.startswith("_"):
         return True
 
+    # Visitor patterns and extremely generic names
+    if name.startswith("visit_") or name in {"get", "add", "build"}:
+        return True
+
     return False
 
 
