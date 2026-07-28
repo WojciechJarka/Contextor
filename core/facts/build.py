@@ -5,7 +5,7 @@ repo_guardian/core/facts/build.py
 
 REPOSITORY FACT BUILDER
 
-Buduje pełny kontekst faktów repozytorium.
+Builds the full repository facts context.
 
 Pipeline:
 
@@ -27,11 +27,11 @@ Pipeline:
     RepositoryContext
 
 
-Nie zawiera:
-- scoringu
-- hotspotów
+Does not include:
+- scoring
+- hotspots
 - debt
-- raportowania
+- reporting
 """
 
 
@@ -40,7 +40,7 @@ from repo_guardian.core.indexer import (
 )
 
 
-from repo_guardian.core.graph import (
+from repo_guardian.core.graph.graph import (
     build_graph,
 )
 
@@ -70,10 +70,10 @@ def build_repository_context(
     root_path: str,
 ) -> RepositoryContext:
     """
-    Buduje kompletny stan faktów repozytorium.
+    Builds the complete repository facts state.
 
-    Jedyny zalecany entrypoint
-    dla warstw wyżej.
+    The only recommended entrypoint
+    for higher layers.
     """
 
 

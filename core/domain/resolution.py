@@ -14,7 +14,7 @@ from typing import Optional, Literal
 @dataclass(frozen=True)
 class ResolutionResult:
     """
-    Wynik resolvera importów.
+    Import resolver result.
     """
 
     target_module: Optional[str]

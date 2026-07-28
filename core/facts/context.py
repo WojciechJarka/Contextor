@@ -5,9 +5,9 @@ repo_guardian/core/facts/context.py
 
 REPOSITORY FACT CONTEXT
 
-Centralny kontener faktów projektu.
+Central container of project facts.
 
-Łączy:
+Combines:
 
 - Module index
 - Dependency graph
@@ -15,12 +15,12 @@ Centralny kontener faktów projektu.
 - Symbol reference graph
 
 
-Nie zawiera:
+Does not include:
 
-- scoringu
-- hotspotów
+- scoring
+- hotspots
 - debt
-- rekomendacji
+- recommendations
 """
 
 
@@ -46,10 +46,10 @@ from .references import (
 @dataclass(frozen=True)
 class RepositoryContext:
     """
-    Pełny stan analizy repozytorium.
+    Full state of repository analysis.
 
-    Wszystkie warstwy raportujące
-    powinny korzystać z tego obiektu.
+    All reporting layers
+    should use this object.
     """
 
     modules: dict

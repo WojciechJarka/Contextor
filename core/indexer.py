@@ -1,18 +1,13 @@
 """
-repo_guardian/core/indexer.py
+core/indexer.py
 
-AST → RAW IMPORTS z obsługą zasięgu importów.
+AST → RAW IMPORTS with depth-scope support.
 
-Rozróżnia:
-- import globalny
-- import lokalny wewnątrz funkcji
+Differentiates between:
+- global imports
+- local imports (inside functions/closures)
 
-Buduje stabilne module_id względem ROOT katalogu
-podanego przez użytkownika.
-
-Źródło prawdy:
-- Module
-- ImportRef
+Builds stable module_id against project root.
 """
 
 
@@ -205,7 +200,8 @@ def extract_imports(
 
 
 def build_index(
-    root: str
+    root: str,
+    excludes: list[str] = None
 ) -> dict[str, Module]:
     """
     Buduje indeks modułów projektu.
@@ -287,14 +283,21 @@ def build_index(
         # względem repo root
 
         if any(
-
             part in ignored_dirs
-
             for part in rel.parts
-
         ):
-
             continue
+
+        if excludes:
+            rel_str = rel.as_posix()
+            is_excluded = False
+            for ex in excludes:
+                ex_norm = ex.replace("\\", "/")
+                if rel_str == ex_norm or rel_str.startswith(ex_norm + "/"):
+                    is_excluded = True
+                    break
+            if is_excluded:
+                continue
 
 
 

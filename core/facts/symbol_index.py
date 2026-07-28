@@ -7,18 +7,18 @@ CANONICAL SYMBOL INDEX BUILDER
 
 AST -> SymbolRegistry
 
-Odpowiedzialność:
-- znalezienie deklaracji symboli
-- nadanie stabilnych ID
-- zapis lokalizacji
-- zapis hierarchii symboli
+Responsibility:
+- finding symbol declarations
+- assigning stable IDs
+- saving locations
+- saving symbol hierarchy
 
-Nie analizuje:
-- użycia
-- importów
-- referencji
+Does not analyze:
+- usage
+- imports
+- references
 - dead code
-- jakości
+- quality
 """
 
 
@@ -46,9 +46,9 @@ def _symbol_id(
     parent: str | None = None,
 ) -> str:
     """
-    Buduje stabilny identyfikator.
+    Builds a stable identifier.
 
-    Przykłady:
+    Examples:
 
     module.Class
 
@@ -324,14 +324,14 @@ def build_facts_symbol_index(
     root_path: str,
 ) -> SymbolRegistry:
     """
-    Buduje globalny indeks symboli projektu.
+    Builds a global project symbol index.
 
-    Źródła:
+    Sources:
         Module index
         AST
 
 
-    Wynik:
+    Result:
 
         SymbolRegistry
     """
@@ -345,34 +345,13 @@ def build_facts_symbol_index(
         modules.items()
     ):
 
-
-        file_path = (
-            Path(root_path)
-            /
-            module.path
-        )
-
-
-        try:
-
-            tree = ast.parse(
-                file_path.read_text(
-                    encoding="utf-8"
-                )
-            )
-
-        except Exception:
-
+        tree = module.ast_tree
+        if tree is None:
             continue
 
-
-
         visitor = SymbolIndexVisitor(
-
             module_id,
-
-            str(file_path),
-
+            module.absolute_path,
         )
 
 

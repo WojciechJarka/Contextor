@@ -15,7 +15,7 @@ from .indexer import (
     build_index,
 )
 
-from .graph import (
+from repo_guardian.core.graph.graph import (
     build_graph,
 )
 
@@ -25,7 +25,7 @@ from .validator import validate
 # REPORTING
 # ==========================================================
 
-from .reporting_single_file import (
+from repo_guardian.core.reporting_layer.reporting_single_file import (
     generate_single_file_report,
     save_single_file_report,
 )
@@ -39,13 +39,6 @@ from .api_surface import (
     extract_api_surface,
 )
 
-from .import_analysis import (
-    extract_import_usage,
-)
-
-from .semantic_analysis import (
-    analyze_module_semantics,
-)
 
 
 # ==========================================================

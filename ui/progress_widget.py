@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
 """
-repo_guardian/ui/progress_widget.py
+ui/progress_widget.py
 
-Pasek postępu oraz konsola logów do wpięcia u dołu okna GUI.
+UI components for tracking long-running analysis tasks.
+Contains indeterminate progress bars and log consoles.
 """
 
 import threading
@@ -12,8 +13,8 @@ from tkinter import ttk, scrolledtext
 
 def create_progress_bar(parent, **pack_kwargs):
     """
-    Tworzy pasek postępu (indeterminate) i pakuje go w podanym
-    rodziku (np. root albo Toplevel). Zwraca obiekt ttk.Progressbar.
+    Creates an indeterminate progress bar and packs it in the given
+    parent (e.g. root or Toplevel). Returns a ttk.Progressbar object.
     """
 
     options = {
@@ -37,8 +38,8 @@ def create_progress_bar(parent, **pack_kwargs):
 
 def create_log_box(parent, height=5, **pack_kwargs):
     """
-    Tworzy ukryte domyślnie lub widoczne pole tekstowe na logi (ScrolledText)
-    nad paskiem postępu. Zwraca widget tekstowy.
+    Creates a default hidden or visible text field for logs (ScrolledText)
+    above the progress bar. Returns a text widget.
     """
     options = {
         "side": "bottom",
@@ -62,11 +63,11 @@ def create_log_box(parent, height=5, **pack_kwargs):
 
 def run_with_progress(root, progressbar, task, on_success=None, on_error=None, buttons=None, log_box=None):
     """
-    Uruchamia `task` w osobnym wątku, animując pasek postępu
-    oraz opcjonalnie obsługując logowanie przez funkcję log(msg).
+    Runs `task` in a separate thread, animating the progress bar
+    and optionally handling logging via log(msg) function.
     
-    Funkcja task może przyjmować argument log_callback (opcjonalnie),
-    np. def task(log=None): ... log("robę coś...")
+    The task function can take a log_callback argument (optional),
+    e.g. def task(log=None): ... log("doing something...")
     """
 
     def set_buttons_state(state):
@@ -83,20 +84,20 @@ def run_with_progress(root, progressbar, task, on_success=None, on_error=None, b
     def finish_success(result):
         progressbar.stop()
         set_buttons_state("normal")
-        write_log("[SUKCES] Operacja zakończona pomyślnie.")
+        write_log("[SUCCESS] Operation completed successfully.")
         if on_success:
             on_success(result)
 
     def finish_error(exc):
         progressbar.stop()
         set_buttons_state("normal")
-        write_log(f"[BŁĄD] {exc}")
+        write_log(f"[ERROR] {exc}")
         if on_error:
             on_error(exc)
 
     def worker():
         try:
-            # Sprawdzamy czy task przyjmuje argument logujący, czy nie
+            # Check if the task accepts a logging argument or not
             import inspect
             sig = inspect.signature(task)
             if len(sig.parameters) > 0:

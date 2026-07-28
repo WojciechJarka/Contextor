@@ -2,13 +2,13 @@
 """
 repo_guardian/main.py
 
-Entry point aplikacji Repo Guardian.
+Entry point of the Repo Guardian application.
 
-Odpowiada wyłącznie za routing uruchomienia:
-- CLI (domyślnie)
+Responsible exclusively for startup routing:
+- CLI (default)
 - GUI (--gui)
 
-Nie zawiera logiki analitycznej.
+Does not contain analytical logic.
 """
 
 import os
@@ -23,6 +23,23 @@ PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
+
+# HACK/FIX: Map the virtual 'repo_guardian' package directly to the repository root,
+# which allows running the code smoothly even when the repository folder has a different name
+# (e.g. Repo_Guardian_Repo) and it was not installed via pip install -e .
+import importlib.machinery
+import importlib.abc
+
+class RepoGuardianAliaser(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path, target=None):
+        if fullname == "repo_guardian":
+            spec = importlib.machinery.ModuleSpec("repo_guardian", None, is_package=True)
+            spec.submodule_search_locations = [PROJECT_ROOT]
+            return spec
+        return None
+
+if not any(isinstance(f, RepoGuardianAliaser) for f in sys.meta_path):
+    sys.meta_path.insert(0, RepoGuardianAliaser())
 
 
 # ============================================================

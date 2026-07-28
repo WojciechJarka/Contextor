@@ -2,35 +2,35 @@
 """
 repo_guardian/cli.py
 
-Warstwa CLI:
-- buduje model projektu
-- generuje graf zależności
-- wykorzystuje incremental cache
-- waliduje architekturę
-- zapisuje raporty JSON (summary, structure, artifacts oraz per-layer)
+CLI Layer:
+- builds project model
+- generates dependency graph
+- uses incremental cache
+- validates architecture
+- saves JSON reports (summary, structure, artifacts and per-layer)
 """
 
 import sys
 import os
 
 from repo_guardian.core.indexer import build_index
-from repo_guardian.core.graph import build_graph
-from repo_guardian.core.incremental import get_cached_graph
+from repo_guardian.core.graph.graph import build_graph
+from repo_guardian.core.graph.incremental import get_cached_graph
 from repo_guardian.core.validator import validate
 from repo_guardian.core.reporting import (
     generate_summary_report,
     generate_structure_report,
     save_json
 )
-from repo_guardian.core.reporting_layer import generate_layer_report
-from repo_guardian.core.artifact_usage_report import generate_artifact_usage_report
-from repo_guardian.core.metrics import compute_graph_metrics
-from repo_guardian.core.cycles import detect_cycles
+from repo_guardian.core.reporting_layer.reporting_layer import generate_layer_report
+from repo_guardian.core.reporting_layer.artifact_usage_report import generate_artifact_usage_report
+from repo_guardian.core.graph.metrics import compute_graph_metrics
+from repo_guardian.core.graph.cycles import detect_cycles
 from repo_guardian.core.hotspots import detect_hotspots
 from repo_guardian.core.debt import compute_debt
 from repo_guardian.core.validator.collisions import validate_name_collisions
 
-# Wykryte/zdefiniowane warstwy w projekcie
+# Detected/defined layers in the project
 PROJECT_LAYERS = ["core", "ui", "cli", "domain", "facts"]
 
 def main(root_path: str = ".") -> int:
@@ -46,7 +46,7 @@ def main(root_path: str = ".") -> int:
 
     errors = validate(modules, graph)
 
-    # Pobranie nazwy repo dla plików
+    # Get repo name for files
     repo_name = os.path.basename(os.path.abspath(root_path))
     
     # 1. Summary
@@ -77,7 +77,7 @@ def main(root_path: str = ".") -> int:
     artifact_report = generate_artifact_usage_report(modules, root_path=root_path, runtime={"cache_hit": cache_hit})
     save_json(artifact_report, f"output/{repo_name}_artifacts.json")
 
-    # 4. Layer Reports (Pętla po wszystkich 5 warstwach)
+    # 4. Layer Reports (Loop over all 5 layers)
     for layer in PROJECT_LAYERS:
         layer_full_path = os.path.join(root_path, layer)
         if not os.path.isdir(layer_full_path):

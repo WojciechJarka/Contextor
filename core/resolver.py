@@ -5,31 +5,31 @@ repo_guardian/core/resolver.py
 
 IMPORT RESOLUTION ENGINE
 
-Odpowiedzialność:
+Responsibilities:
 
-- mapowanie ImportRef → moduł projektu
+- mapping ImportRef → project module
 - absolute imports
 - relative imports
 - fallback symbol resolution
 
-Klasyfikacja:
+Classification:
 
 MODULE:
-    istniejący moduł
+    existing module
 
 FALLBACK:
-    moduł nie istnieje bezpośrednio,
-    ale znaleziono możliwy target
+    module does not exist directly,
+    but possible target found
 
 UNKNOWN:
-    brak dopasowania
+    no match
 
 
-Nie analizuje:
+Does not analyze:
 - AST
-- jakości
-- ryzyka
-- architektury
+- quality
+- risk
+- architecture
 """
 
 
@@ -199,7 +199,7 @@ def _resolve_relative_base(
     parts = current_module_id.split(".")
 
 
-    # level=1 oznacza katalog bieżącego modułu
+    # level=1 means the directory of the current module
 
     remove = level
 

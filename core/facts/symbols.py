@@ -5,20 +5,20 @@ repo_guardian/core/facts/symbols.py
 
 CANONICAL SYMBOL MODEL
 
-Jedno źródło prawdy dla symboli projektu.
+Single source of truth for project symbols.
 
-Odpowiada za:
-- identyfikację symbolu
-- lokalizację
-- typ symbolu
-- publiczność
-- relacje modułowe
+Responsible for:
+- symbol identification
+- location
+- symbol kind
+- public visibility
+- module relations
 
-Nie analizuje:
-- użycia
-- scoringu
-- ryzyka
-- refaktoryzacji
+Does not analyze:
+- usage
+- scoring
+- risk
+- refactoring
 """
 
 
@@ -37,7 +37,7 @@ SymbolKind = Literal[
 @dataclass(frozen=True)
 class SymbolLocation:
     """
-    Lokalizacja symbolu w kodzie.
+    Symbol location in code.
     """
 
     file: str
@@ -49,10 +49,10 @@ class SymbolLocation:
 @dataclass(frozen=True)
 class SymbolRecord:
     """
-    Kanoniczny rekord symbolu.
+    Canonical symbol record.
 
-    Każdy symbol w systemie
-    musi mieć jeden identyfikator.
+    Each symbol in the system
+    must have a single identifier.
     """
 
     id: str
@@ -73,15 +73,15 @@ class SymbolRecord:
 
     def short_name(self) -> str:
         """
-        Nazwa lokalna.
+        Local name.
 
-        np.
+    e.g.
 
-        repo.auth.AuthManager
+    repo.auth.AuthManager
 
-        ->
+    ->
 
-        AuthManager
+    AuthManager
         """
 
         return self.name
@@ -90,7 +90,7 @@ class SymbolRecord:
 
     def qualified_name(self) -> str:
         """
-        Pełna nazwa symbolu.
+        Fully qualified symbol name.
         """
 
         return self.id
@@ -100,9 +100,9 @@ class SymbolRecord:
 @dataclass
 class SymbolRegistry:
     """
-    Kontener wszystkich symboli projektu.
+    Container for all project symbols.
 
-    Źródło prawdy dla:
+    Source of truth for:
     - export analysis
     - reference engine
     - API consumers
@@ -119,11 +119,11 @@ class SymbolRegistry:
         symbol: SymbolRecord
     ):
         """
-        Dodaje symbol.
+        Adds a symbol.
 
-        Nadpisanie tego samego ID
-        jest niedozwolone logicznie,
-        ale ostatnia wersja wygrywa.
+        Overwriting the same ID
+        is logically not allowed,
+        but the last version wins.
         """
 
         self.symbols[

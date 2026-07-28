@@ -18,7 +18,7 @@ from .resolution import (
     ResolutionResult,
 )
 
-from .graph import (
+from repo_guardian.core.graph.graph import (
     ProjectGraph,
 )
 

@@ -2,14 +2,14 @@
 """
 repo_guardian/ui/theme.py
 
-Wspólna warstwa wizualna dla okien Tk/ttk aplikacji.
+Common visual layer for the Tk/ttk windows of the application.
 
-Zero zewnętrznych zależności - czysty ttk.Style z własnym
-motywem (paleta, typografia, spacing, stany hover/pressed/disabled).
+Zero external dependencies - pure ttk.Style with a custom
+theme (palette, typography, spacing, hover/pressed/disabled states).
 
-Style są rejestrowane na poziomie interpretera Tcl, więc
-`apply_theme(root)` wywołane raz na oknie głównym obowiązuje
-też we wszystkich Toplevel-ach otwartych z tego samego roota.
+Styles are registered at the Tcl interpreter level, so
+`apply_theme(root)` called once on the main window also applies
+to all Toplevels opened from the same root.
 """
 
 import tkinter as tk
@@ -20,12 +20,12 @@ from tkinter import ttk
 # PALETTE
 # ==========================================================
 
-BG = "#f5f6fa"          # tło okna
-SURFACE = "#ffffff"      # tło kart / pól
-BORDER = "#dfe3ea"       # linie podziału, obwódki
-TEXT = "#1f2430"         # tekst główny
-MUTED = "#6b7280"        # tekst drugorzędny / podpisy
-PRIMARY = "#2f6fed"      # akcent (główna akcja)
+BG = "#f5f6fa"          # window background
+SURFACE = "#ffffff"      # card / field background
+BORDER = "#dfe3ea"       # dividers, borders
+TEXT = "#1f2430"         # main text
+MUTED = "#6b7280"        # secondary text / captions
+PRIMARY = "#2f6fed"      # accent (main action)
 PRIMARY_HOVER = "#255ed1"
 PRIMARY_PRESSED = "#1e4dae"
 DANGER = "#e5484d"
@@ -49,13 +49,13 @@ PAD_LG = 18
 
 def apply_theme(root: tk.Misc) -> ttk.Style:
     """
-    Konfiguruje ttk.Style pod spójny, nowoczesny wygląd aplikacji.
-    Wywołać raz, na oknie głównym (root = tk.Tk()).
+    Configures ttk.Style for a consistent, modern application look.
+    Call once, on the main window (root = tk.Tk()).
     """
     style = ttk.Style(root)
 
-    # 'clam' to jedyny wbudowany motyw, który w pełni respektuje
-    # niestandardowe kolory tła/obwódki na Windows.
+    # 'clam' is the only built-in theme that fully respects
+    # custom background/border colors on Windows.
     style.theme_use("clam")
 
     root.configure(bg=BG)
@@ -267,61 +267,28 @@ def apply_theme(root: tk.Misc) -> ttk.Style:
 # ==========================================================
 
 
-class Tooltip:
+class HeaderTooltipManager:
     """
-    Lekki, prawdziwy tooltip (Toplevel bez ramki) pokazywany
-    po zatrzymaniu kursora na widgecie - zamiast nadpisywania
-    tytułu okna.
+    Lightweight tooltip manager that changes the text of a designated target label
+    (usually the window sub-header) when hovering over interactive widgets,
+    instead of displaying intrusive popup windows.
     """
+    def __init__(self, target_label: ttk.Label, default_text: str):
+        self.target_label = target_label
+        self.default_text = default_text
 
-    _DELAY_MS = 400
+    def bind_tooltip(self, widget: tk.Widget, text: str):
+        def _on_enter(event):
+            try:
+                self.target_label.configure(text=text)
+            except Exception:
+                pass
 
-    def __init__(self, widget: tk.Widget, text: str):
-        self.widget = widget
-        self.text = text
-        self._after_id = None
-        self._tip = None
+        def _on_leave(event):
+            try:
+                self.target_label.configure(text=self.default_text)
+            except Exception:
+                pass
 
-        widget.bind("<Enter>", self._schedule, add="+")
-        widget.bind("<Leave>", self._hide, add="+")
-        widget.bind("<ButtonPress>", self._hide, add="+")
-
-    def _schedule(self, _event=None):
-        self._cancel()
-        self._after_id = self.widget.after(self._DELAY_MS, self._show)
-
-    def _cancel(self):
-        if self._after_id is not None:
-            self.widget.after_cancel(self._after_id)
-            self._after_id = None
-
-    def _show(self):
-        if self._tip is not None:
-            return
-
-        x = self.widget.winfo_rootx() + 12
-        y = self.widget.winfo_rooty() + self.widget.winfo_height() + 8
-
-        self._tip = tk.Toplevel(self.widget)
-        self._tip.wm_overrideredirect(True)
-        self._tip.wm_geometry(f"+{x}+{y}")
-        self._tip.configure(bg=TEXT)
-
-        label = tk.Label(
-            self._tip,
-            text=self.text,
-            justify="left",
-            bg=TEXT,
-            fg="#ffffff",
-            font=FONT_MUTED,
-            padx=8,
-            pady=5,
-            wraplength=320,
-        )
-        label.pack()
-
-    def _hide(self, _event=None):
-        self._cancel()
-        if self._tip is not None:
-            self._tip.destroy()
-            self._tip = None
+        widget.bind("<Enter>", _on_enter, add="+")
+        widget.bind("<Leave>", _on_leave, add="+")

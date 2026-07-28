@@ -5,20 +5,20 @@ repo_guardian/core/facts/references.py
 
 CANONICAL SYMBOL REFERENCE GRAPH
 
-Źródło prawdy relacji symbolicznych.
+Source of truth for symbolic relations.
 
-Buduje fakty:
+Builds facts:
 
 - imported_by
 - called_by
 - inherited_by
 - instantiated_by
 
-Nie robi:
+Does not do:
 
-- scoringu
+- scoring
 - dead code
-- ryzyka
+- risk
 - refactoring advice
 
 """
@@ -104,15 +104,15 @@ def _resolve_name(
     registry: SymbolRegistry,
 ) -> list[str]:
     """
-    Rozwiązuje nazwę AST
-    do kanonicznych symboli.
+    Resolves AST name
+    to canonical symbols.
 
 
-    Przykład:
+    Example:
 
     AuthManager
 
-    może wskazać:
+    can point to:
 
     core.auth.AuthManager
     """
@@ -393,9 +393,9 @@ def build_reference_graph(
     root_path,
 ):
     """
-    Buduje globalny graf referencji.
+    Builds a global reference graph.
 
-    Jedno źródło prawdy dla użycia symboli.
+    Single source of truth for symbol usage.
     """
 
     graph = ReferenceGraph()
@@ -406,36 +406,14 @@ def build_reference_graph(
         modules.items()
     ):
 
-
-        file_path = (
-            Path(root_path)
-            /
-            module.path
-        )
-
-
-        try:
-
-            tree = ast.parse(
-                file_path.read_text(
-                    encoding="utf-8"
-                )
-            )
-
-        except Exception:
-
+        tree = module.ast_tree
+        if tree is None:
             continue
 
-
-
         visitor = ReferenceVisitor(
-
             module_id,
-
             registry,
-
             graph,
-
         )
 
 

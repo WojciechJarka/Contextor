@@ -7,13 +7,14 @@
 # ============================================================
 
 import tkinter as tk
-from tkinter import filedialog, messagebox, ttk
+from tkinter import filedialog, messagebox, ttk, simpledialog
 
 import os
 import subprocess
 import shutil
 
-from repo_guardian.ui.theme import apply_theme, BG, SURFACE, BORDER, TEXT, PRIMARY, PAD_SM, PAD_MD, PAD_LG
+from repo_guardian.ui.theme import apply_theme, HeaderTooltipManager, BG, SURFACE, BORDER, TEXT, PRIMARY, PAD_SM, PAD_MD, PAD_LG
+from repo_guardian.ui.path_memory import load_state, save_state
 
 
 # ============================================================
@@ -184,15 +185,14 @@ def create_icon_button(
     )
 
 
-    ttk.Button(
+    btn = ttk.Button(
         frame,
         text=text,
         command=command,
         style="Secondary.TButton",
-    ).pack(
-        side=tk.LEFT
     )
-
+    btn.pack(side=tk.LEFT)
+    return btn
 
 # ============================================================
 # KLASA GŁÓWNA
@@ -216,19 +216,18 @@ class RepoGenerator:
         )
 
 
-        self.files = []
+        state = load_state()
 
+        # Files memory
+        self.files = state.get("repo_gui_files", [])
+        saved_selections = state.get("repo_gui_selected", [])
 
-        self.extensions = set(
-            DEFAULT_EXTENSIONS
-        )
+        # Filters memory
+        exts = state.get("repo_gui_extensions")
+        self.extensions = set(exts) if exts is not None else set(DEFAULT_EXTENSIONS)
 
-
-        # aktywne filtry katalogów
-        # STARTOWO pełna lista aktywna
-        self.skip_dirs = set(
-            DEFAULT_SKIP_DIRS
-        )
+        skips = state.get("repo_gui_skip_dirs")
+        self.skip_dirs = set(skips) if skips is not None else set(DEFAULT_SKIP_DIRS)
 
 
         self.output_dir = os.path.join(
@@ -246,6 +245,16 @@ class RepoGenerator:
 
 
         self.build_gui()
+        
+        # Populate file list and selections
+        for path in self.files:
+            self.listbox.insert(tk.END, path)
+            
+        for idx in saved_selections:
+            try:
+                self.listbox.selection_set(idx)
+            except Exception:
+                pass
 
 
 
@@ -265,15 +274,17 @@ class RepoGenerator:
             pady=(PAD_LG, 0)
         )
 
-        ttk.Label(
+        sub_label = ttk.Label(
             self.root,
-            text="Wybierz pliki, które trafią do wygenerowanego kontekstu",
+            text="Select files to include in generated context",
             style="Sub.TLabel",
-        ).pack(
+        )
+        sub_label.pack(
             anchor="w",
             padx=PAD_LG,
             pady=(2, PAD_MD)
         )
+        self.tooltip = HeaderTooltipManager(sub_label, "Select files to include in generated context")
 
         toolbar=ttk.Frame(
             self.root
@@ -285,40 +296,41 @@ class RepoGenerator:
         )
 
 
-        create_icon_button(
+        btn_repo = create_icon_button(
             toolbar,
-            "WYBIERZ REPO",
+            "SELECT REPO",
             self.add_repository,
             "big_plus"
         )
+        self.tooltip.bind_tooltip(btn_repo, "Add a full repository folder. Automatically filters out skipped directories/extensions.")
 
-
-        create_icon_button(
+        btn_files = create_icon_button(
             toolbar,
-            "DODAJ PLIKI",
+            "ADD FILES",
             self.add_files,
             "small_plus"
         )
+        self.tooltip.bind_tooltip(btn_files, "Manually add specific files to the generation list.")
 
-
-        create_icon_button(
+        btn_rem = create_icon_button(
             toolbar,
-            "USUŃ ZAZNACZONE",
+            "REMOVE SELECTED",
             self.remove_selected,
             "big_minus"
         )
+        self.tooltip.bind_tooltip(btn_rem, "Remove selected files from the generation list.")
 
-
-        create_icon_button(
+        btn_clear = create_icon_button(
             toolbar,
-            "USUŃ WSZYSTKIE",
+            "REMOVE ALL",
             self.remove_all,
             "small_minus"
         )
+        self.tooltip.bind_tooltip(btn_clear, "Clear the entire generation list.")
 
 
         # ====================================================
-        # LISTA PLIKÓW
+        # FILE LIST
         # ====================================================
 
         frame=ttk.Frame(
@@ -383,25 +395,23 @@ class RepoGenerator:
         )
 
 
-        ttk.Button(
+        btn_sa = ttk.Button(
             controls,
-            text="Zaznacz wszystkie",
+            text="Select all",
             command=self.select_all,
             style="Ghost.TButton",
-        ).pack(
-            side=tk.LEFT,
-            padx=(0, PAD_SM)
         )
+        btn_sa.pack(side=tk.LEFT, padx=(0, PAD_SM))
+        self.tooltip.bind_tooltip(btn_sa, "Select all files in the list for generation.")
 
-
-        ttk.Button(
+        btn_ua = ttk.Button(
             controls,
-            text="Odznacz wszystkie",
+            text="Unselect all",
             command=self.unselect_all,
             style="Ghost.TButton",
-        ).pack(
-            side=tk.LEFT
         )
+        btn_ua.pack(side=tk.LEFT)
+        self.tooltip.bind_tooltip(btn_ua, "Deselect all files.")
 
 
         # ====================================================
@@ -419,48 +429,41 @@ class RepoGenerator:
         )
 
 
-        ttk.Button(
+        btn_ff = ttk.Button(
             bottom,
-            text="Filtry plików",
+            text="File filters",
             command=self.open_filters,
             style="Secondary.TButton",
-        ).pack(
-            side=tk.LEFT,
-            padx=(0, PAD_SM)
         )
+        btn_ff.pack(side=tk.LEFT, padx=(0, PAD_SM))
+        self.tooltip.bind_tooltip(btn_ff, "Configure extensions and directories to ignore when adding a repository.")
 
-
-        ttk.Button(
+        btn_of = ttk.Button(
             bottom,
             text="Output Folder",
             command=self.open_output_folder,
             style="Secondary.TButton",
-        ).pack(
-            side=tk.LEFT,
-            padx=(0, PAD_SM)
         )
+        btn_of.pack(side=tk.LEFT, padx=(0, PAD_SM))
+        self.tooltip.bind_tooltip(btn_of, "Open folder where the generated repository text files are saved.")
 
-
-        ttk.Button(
+        btn_eo = ttk.Button(
             bottom,
-            text="Opróżnij output",
+            text="Empty output",
             command=self.clear_output,
             style="Danger.Ghost.TButton",
-        ).pack(
-            side=tk.LEFT
         )
+        btn_eo.pack(side=tk.LEFT)
+        self.tooltip.bind_tooltip(btn_eo, "Delete all previously generated text files.")
 
-
-        ttk.Button(
+        btn_gen = ttk.Button(
             self.root,
-            text="Generuj repozytorium",
+            text="Generate repository",
             command=self.generate,
             style="Primary.TButton",
-        ).pack(
-            padx=PAD_LG,
-            pady=(0, PAD_LG),
-            fill=tk.X
         )
+        btn_gen.pack(padx=PAD_LG, pady=(0, PAD_LG), fill=tk.X)
+        self.tooltip.bind_tooltip(btn_gen, "Bundle all selected files into a single text file (LLM Context).")
 
 
 
@@ -625,9 +628,9 @@ class RepoGenerator:
 
 
         messagebox.showinfo(
-            "Repo dodane",
-            f"Dodano plików: {added}\n"
-            f"Pominięto: {blocked}"
+            "Repo added",
+            f"Files added: {added}\n"
+            f"Skipped: {blocked}"
         )
 
 
@@ -639,7 +642,7 @@ class RepoGenerator:
     def add_files(self):
 
         selected=filedialog.askopenfilenames(
-            title="Wybierz pliki"
+            title="Select files"
         )
 
 
@@ -731,8 +734,8 @@ class RepoGenerator:
 
 
             messagebox.showwarning(
-                "Pliki pominięte",
-                "Elementy są na liście wykluczonych:\n\n"
+                "Skipped files",
+                "Elements are on the excluded list:\n\n"
                 +
                 "\n".join(
                     blocked[:10]
@@ -750,8 +753,8 @@ class RepoGenerator:
 
 
             messagebox.showinfo(
-                "Pliki dodane",
-                f"Dodano: {added}"
+                "Files added",
+                f"Added: {added}"
             )
 
 
@@ -790,8 +793,8 @@ class RepoGenerator:
 
 
         if messagebox.askyesno(
-            "Potwierdzenie",
-            "Usunąć wszystkie pliki?"
+            "Confirmation",
+            "Remove all files?"
         ):
 
             self.files.clear()
@@ -850,7 +853,7 @@ class RepoGenerator:
         )
 
         window.title(
-            "Filtry plików"
+            "File filters"
         )
 
         window.geometry(
@@ -869,14 +872,22 @@ class RepoGenerator:
         # ROZSZERZENIA
         # ====================================================
 
+        filter_sub = ttk.Label(
+            window,
+            text="Configure extensions and directories to ignore",
+            style="Sub.TLabel"
+        )
+        filter_sub.pack(anchor="w", padx=PAD_LG, pady=(0, PAD_SM))
+        f_tooltip = HeaderTooltipManager(filter_sub, "Configure extensions and directories to ignore")
+
         ttk.Label(
             window,
-            text="Rozszerzenia plików",
+            text="File extensions",
             font=("Segoe UI", 11, "bold"),
         ).pack(
             anchor="w",
             padx=PAD_LG,
-            pady=(PAD_LG, PAD_SM)
+            pady=(PAD_MD, PAD_SM)
         )
 
 
@@ -899,7 +910,7 @@ class RepoGenerator:
 
             var=tk.BooleanVar(
                 master=window,
-                value=True
+                value=(ext in self.extensions)
             )
 
             ext_vars[ext]=var
@@ -925,7 +936,7 @@ class RepoGenerator:
 
         ttk.Label(
             window,
-            text="Pomijane katalogi",
+            text="Skipped directories",
             font=("Segoe UI", 11, "bold"),
         ).pack(
             anchor="w",
@@ -952,14 +963,10 @@ class RepoGenerator:
         ):
 
 
-            # KLUCZOWA POPRAWKA:
-            # katalogi startują ZAZNACZONE
-
             var=tk.BooleanVar(
                 master=window,
-                value=True
+                value=(directory in self.skip_dirs)
             )
-
 
             dir_vars[directory]=var
 
@@ -985,17 +992,98 @@ class RepoGenerator:
 
         ttk.Separator(window).pack(fill=tk.X, padx=PAD_LG, pady=PAD_MD)
 
-        buttons=ttk.Frame(
-            window
-        )
+        preset_buttons=ttk.Frame(window)
+        preset_buttons.pack(padx=PAD_LG, pady=(0, PAD_SM), fill=tk.X)
+        
+        def save_preset():
+            name = simpledialog.askstring("Save Preset", "Enter preset name:", parent=window)
+            if not name: return
+            
+            ext_list = [ext for ext,var in ext_vars.items() if var.get()]
+            skip_list = [d for d,var in dir_vars.items() if var.get()]
+            
+            st = load_state()
+            presets = st.get("repo_gui_presets", {})
+            presets[name] = {"ext": ext_list, "skip": skip_list}
+            save_state(repo_gui_presets=presets)
+            messagebox.showinfo("Saved", f"Preset '{name}' saved.")
 
-        buttons.pack(
-            padx=PAD_LG,
-            pady=(0, PAD_LG),
-            fill=tk.X
-        )
+        def load_preset():
+            st = load_state()
+            presets = st.get("repo_gui_presets", {})
+            if not presets:
+                messagebox.showinfo("Presets", "No saved presets found.")
+                return
+            
+            def on_select(name):
+                preset = presets[name]
+                for ext, var in ext_vars.items():
+                    var.set(ext in preset.get("ext", []))
+                for d, var in dir_vars.items():
+                    var.set(d in preset.get("skip", []))
+                sel_win.destroy()
 
+            sel_win = tk.Toplevel(window)
+            sel_win.title("Load Preset")
+            sel_win.geometry("300x300")
+            sel_win.configure(bg=BG)
+            sel_win.transient(window)
+            
+            listb = tk.Listbox(sel_win, bg=SURFACE, fg=TEXT, selectbackground=PRIMARY, selectforeground="#ffffff", borderwidth=0, highlightthickness=1)
+            listb.pack(fill=tk.BOTH, expand=True, padx=PAD_SM, pady=PAD_SM)
+            for p in presets.keys():
+                listb.insert(tk.END, p)
+            
+            def load_btn():
+                sel = listb.curselection()
+                if sel: on_select(listb.get(sel[0]))
+            ttk.Button(sel_win, text="Load", command=load_btn, style="Primary.TButton").pack(pady=PAD_SM)
 
+        def delete_preset():
+            st = load_state()
+            presets = st.get("repo_gui_presets", {})
+            if not presets:
+                messagebox.showinfo("Presets", "No saved presets found.")
+                return
+            
+            def on_select(name):
+                confirm = messagebox.askyesno("Confirm Delete", f"Delete preset '{name}'?", parent=sel_win)
+                if confirm:
+                    del presets[name]
+                    save_state(repo_gui_presets=presets)
+                    messagebox.showinfo("Deleted", f"Preset '{name}' deleted.")
+                sel_win.destroy()
+
+            sel_win = tk.Toplevel(window)
+            sel_win.title("Delete Preset")
+            sel_win.geometry("300x300")
+            sel_win.configure(bg=BG)
+            sel_win.transient(window)
+            
+            listb = tk.Listbox(sel_win, bg=SURFACE, fg=TEXT, selectbackground=PRIMARY, selectforeground="#ffffff", borderwidth=0, highlightthickness=1)
+            listb.pack(fill=tk.BOTH, expand=True, padx=PAD_SM, pady=PAD_SM)
+            for p in presets.keys():
+                listb.insert(tk.END, p)
+            
+            def del_btn():
+                sel = listb.curselection()
+                if sel: on_select(listb.get(sel[0]))
+            ttk.Button(sel_win, text="Delete", command=del_btn, style="Danger.Ghost.TButton").pack(pady=PAD_SM)
+
+        b_save_pre = ttk.Button(preset_buttons, text="Save Preset", command=save_preset, style="Secondary.TButton")
+        b_save_pre.pack(side=tk.LEFT, padx=(0, PAD_SM))
+        f_tooltip.bind_tooltip(b_save_pre, "Save the current filter configuration as a reusable preset.")
+        
+        b_load_pre = ttk.Button(preset_buttons, text="Load Preset", command=load_preset, style="Secondary.TButton")
+        b_load_pre.pack(side=tk.LEFT, padx=(0, PAD_SM))
+        f_tooltip.bind_tooltip(b_load_pre, "Load a previously saved filter configuration.")
+        
+        b_del_pre = ttk.Button(preset_buttons, text="Delete Preset", command=delete_preset, style="Danger.Ghost.TButton")
+        b_del_pre.pack(side=tk.LEFT)
+        f_tooltip.bind_tooltip(b_del_pre, "Delete a saved filter preset.")
+
+        buttons=ttk.Frame(window)
+        buttons.pack(padx=PAD_LG, pady=(0, PAD_LG), fill=tk.X)
 
         def select_all_filters():
 
@@ -1044,35 +1132,32 @@ class RepoGenerator:
 
 
 
-        ttk.Button(
+        btn_sa_f = ttk.Button(
             buttons,
-            text="Zaznacz wszystkie",
+            text="Select all",
             command=select_all_filters,
             style="Ghost.TButton",
-        ).pack(
-            side=tk.LEFT,
-            padx=(0, PAD_SM)
         )
+        btn_sa_f.pack(side=tk.LEFT, padx=(0, PAD_SM))
+        f_tooltip.bind_tooltip(btn_sa_f, "Check all extensions and directories.")
 
-
-        ttk.Button(
+        btn_ua_f = ttk.Button(
             buttons,
-            text="Odznacz wszystkie",
+            text="Unselect all",
             command=clear_filters,
             style="Ghost.TButton",
-        ).pack(
-            side=tk.LEFT
         )
+        btn_ua_f.pack(side=tk.LEFT)
+        f_tooltip.bind_tooltip(btn_ua_f, "Uncheck all extensions and directories.")
 
-
-        ttk.Button(
+        btn_sv_f = ttk.Button(
             buttons,
-            text="Zapisz",
+            text="Save",
             command=save_filters,
             style="Primary.TButton",
-        ).pack(
-            side=tk.RIGHT
         )
+        btn_sv_f.pack(side=tk.RIGHT)
+        f_tooltip.bind_tooltip(btn_sv_f, "Save changes and close the filter manager.")
 
 
 
@@ -1126,7 +1211,7 @@ class RepoGenerator:
             except Exception as e:
 
                 messagebox.showerror(
-                    "Błąd",
+                    "Error",
                     str(e)
                 )
 
@@ -1144,8 +1229,8 @@ class RepoGenerator:
         if not selected_indexes:
 
             messagebox.showwarning(
-                "Brak zaznaczenia",
-                "Zaznacz pliki do wygenerowania."
+                "No selection",
+                "Select files to generate."
             )
 
             return
@@ -1188,7 +1273,7 @@ class RepoGenerator:
 
 
                 out.write(
-                    f"#~~~~~~[START PLIKU: {relative} ]~~~~~~#\n"
+                    f"#~~~~~~[FILE START: {relative} ]~~~~~~#\n"
                 )
 
 
@@ -1209,7 +1294,7 @@ class RepoGenerator:
                 except Exception as e:
 
                     out.write(
-                        "\nBŁĄD ODCZYTU:\n"
+                        "\nREAD ERROR:\n"
                     )
 
                     out.write(
@@ -1219,14 +1304,14 @@ class RepoGenerator:
 
 
                 out.write(
-                    f"\n#~~~~~~[KONIEC PLIKU: {relative} ]~~~~~~#\n\n"
+                    f"\n#~~~~~~[FILE END: {relative} ]~~~~~~#\n\n"
                 )
 
 
 
         messagebox.showinfo(
-            "Gotowe",
-            "Repozytorium wygenerowane:\n\n"
+            "Done",
+            "Repository generated:\n\n"
             + output_file
         )
 
@@ -1240,12 +1325,27 @@ def run_repo_generator():
 
     root=tk.Tk()
 
+    from repo_guardian.ui.path_memory import load_state, save_state
+    state = load_state()
+    geom = state.get("repo_gui_geometry", "800x600")
+    root.geometry(geom)
+
     apply_theme(root)
 
-    app=RepoGenerator(
-        root
-    )
+    app=RepoGenerator(root)
 
+    def on_closing():
+        selections = list(app.listbox.curselection())
+        save_state(
+            repo_gui_geometry=root.geometry(),
+            repo_gui_files=app.files,
+            repo_gui_selected=selections,
+            repo_gui_extensions=list(app.extensions),
+            repo_gui_skip_dirs=list(app.skip_dirs)
+        )
+        root.destroy()
+        
+    root.protocol("WM_DELETE_WINDOW", on_closing)
     root.mainloop()
 
 

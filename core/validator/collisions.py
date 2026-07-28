@@ -94,9 +94,11 @@ class PublicSymbolCollector(ast.NodeVisitor):
         self,
         source: str,
         module_path: str,
+        absolute_path: str = "",
     ):
         self.source = source
         self.module_path = module_path
+        self.absolute_path = absolute_path
 
         self.symbols = []
 
@@ -117,19 +119,20 @@ class PublicSymbolCollector(ast.NodeVisitor):
         if _ignore(name):
             return
 
-        code = (
-            ast.get_source_segment(
-                self.source,
-                node,
-            )
-            or name
-        )
+        code = ""
+        try:
+            # Semantic extraction (Python 3.9+)
+            code = ast.unparse(node)
+        except Exception:
+            # Fallback to pure string match if unparse fails
+            code = name
 
         self.symbols.append(
             {
                 "name": name,
                 "type": kind,
                 "file": self.module_path,
+                "file_path": self.absolute_path,
                 "code": code,
 
                 "line_start": getattr(
@@ -289,31 +292,25 @@ def validate_name_collisions(
 
         if not file_path:
             continue
-
-
-        path = Path(file_path)
-
-
-        if not path.exists():
-            continue
-
-
-        try:
-            source = path.read_text(
-                encoding="utf-8"
-            )
-
-            tree = ast.parse(
-                source
-            )
-
-        except Exception:
-            continue
-
+            
+        tree = getattr(module, "ast_tree", None)
+        
+        if tree is None:
+            path = Path(file_path)
+            if not path.exists():
+                continue
+            try:
+                source = path.read_text(encoding="utf-8")
+                tree = ast.parse(source)
+            except Exception:
+                continue
+        else:
+            source = "" # Unnecessary since we use unparse() now
 
         collector = PublicSymbolCollector(
             source,
             module_path,
+            absolute_path=str(file_path),
         )
 
 
@@ -371,6 +368,7 @@ def validate_name_collisions(
                     "module": item["file"],
                     "name": item["name"],
                     "artifact_type": item["type"],
+                    "file_path": item.get("file_path", ""),
 
                     "location": {
                         "line_start": item.get(
@@ -386,10 +384,10 @@ def validate_name_collisions(
                             "col_end"
                         ),
                     },
-                    # "source" celowo usunięte - identyczne z
+                    # "source" deliberately removed - identical to
                     # conflicting_code[symbol_details.module],
-                    # dublowanie samego tekstu kodu bez nowej
-                    # informacji.
+                    # duplicating just the code text without new
+                    # information.
                 }
             )
 

@@ -7,15 +7,17 @@ STATE_FILE = Path(__file__).resolve().parent / "ui_state.json"
 
 DEFAULT_STATE = {
     "repository": "",
+    "layer": "",
     "python_file": "",
     "json_file": "",
-    "search_term": ""
+    "search_term": "",
+    "public_api_only": False
 }
 
 
 def load_state():
     """
-    Wczytuje ostatnio używane ścieżki.
+    Loads recently used paths.
     """
     if not STATE_FILE.exists():
         return DEFAULT_STATE.copy()
@@ -35,7 +37,7 @@ def load_state():
 
 def save_state(**kwargs):
     """
-    Aktualizuje wybrane pola i zapisuje plik.
+    Updates selected fields and saves the file.
     """
 
     state = load_state()
