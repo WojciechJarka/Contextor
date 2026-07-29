@@ -10,30 +10,41 @@ cd /d "%~dp0"
 
 set PYTHONPATH=%~dp0
 
-:: 1. Detect Python interpreter
+:: Detect Python interpreter
+set PY=
+
 where python >nul 2>&1
-
-if errorlevel 1 (
-    where py >nul 2>&1
-
-    if errorlevel 1 (
-        echo [ERROR] Python was not found.
-        echo Install Python 3.9+ and enable PATH support.
-        pause
-        exit /b 1
-    )
-
-    set PY=py
-) else (
+if not errorlevel 1 (
     set PY=python
 )
 
-echo [INFO] Using Python:
+if "%PY%"=="" (
+    where py >nul 2>&1
+    if not errorlevel 1 (
+        set PY=py
+    )
+)
+
+:: Check common local Python locations
+if "%PY%"=="" (
+    if exist "%~dp0python.exe" (
+        set PY=%~dp0python.exe
+    )
+)
+
+if "%PY%"=="" (
+    echo [ERROR] Python was not found.
+    echo Install Python 3.9+ or add Python to PATH.
+    pause
+    exit /b 1
+)
+
+echo [INFO] Using:
 %PY% --version
 
 echo.
 
-:: 2. Create virtual environment
+:: Create virtual environment
 if not exist "venv" (
     echo [INFO] Creating virtual environment...
 
@@ -44,39 +55,21 @@ if not exist "venv" (
         pause
         exit /b 1
     )
-
-    echo [SUCCESS] Virtual environment created.
 )
 
-:: 3. Activate virtual environment
 call venv\Scripts\activate.bat
 
-if errorlevel 1 (
-    echo [ERROR] Failed to activate virtual environment.
-    pause
-    exit /b 1
-)
-
-:: 4. Install dependencies once
+:: Install dependencies
 if exist requirements.txt (
-
     if not exist "venv\.installed" (
 
-        echo.
         echo [INFO] Installing dependencies...
 
         python -m pip install --upgrade pip
-
-        if errorlevel 1 (
-            echo [ERROR] Failed to upgrade pip.
-            pause
-            exit /b 1
-        )
-
         python -m pip install -r requirements.txt
 
         if errorlevel 1 (
-            echo [ERROR] Failed to install dependencies.
+            echo [ERROR] Dependency installation failed.
             pause
             exit /b 1
         )
@@ -87,7 +80,6 @@ if exist requirements.txt (
     )
 )
 
-:: 5. Start Contextor GUI
 echo.
 echo Starting Contextor GUI...
 echo.
