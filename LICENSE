@@ -5,30 +5,34 @@ Copyright (c) 2026 Wojciech Jarka
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to use,
 copy, modify, merge, publish, distribute, and sublicense the Software for
-non-commercial purposes only, subject to the following conditions:
+non-commercial purposes only, subject to the following terms and conditions.
 
 Definitions
 
-"Software" means this software and all associated documentation
-distributed under this License.
+"Software" means this software and all associated documentation distributed
+under this License.
 
 "Derivative Works" means any modification, adaptation, translation,
-enhancement, or other work based upon the Software.
+enhancement, extension, or other work based upon the Software.
+
+"Commercial Entity" means any individual, company, organization, or other
+legal entity acting for commercial advantage or private monetary compensation.
 
 Conditions
 
 1. The above copyright notice and this permission notice shall be included in
    all copies or substantial portions of the Software.
 
-2. The Software may be used, copied, modified, published, distributed, and
-   sublicensed only for non-commercial purposes.
+2. The Software may be used, copied, modified, merged, published,
+   distributed, and sublicensed only for non-commercial purposes and in
+   accordance with this License.
 
-3. "Commercial purposes" include, but are not limited to:
+3. Commercial purposes include, but are not limited to:
 
    a) selling the Software or any Derivative Works;
 
    b) licensing, sublicensing, renting, leasing, or otherwise monetizing the
-      Software;
+      Software or any Derivative Works;
 
    c) offering the Software as part of a commercial product or service,
       including Software-as-a-Service (SaaS);
@@ -36,42 +40,61 @@ Conditions
    d) integrating the Software into products or services that are sold,
       licensed, or otherwise provided for commercial advantage;
 
-   e) using the Software by or on behalf of any commercial entity,
-      except solely for evaluation purposes.
+   e) using the Software by or on behalf of a Commercial Entity,
+      except solely for internal evaluation of the Software and not for
+      production use or revenue-generating activities.
 
-4. The following uses are permitted without charge:
+4. The following uses are expressly permitted without charge:
 
-   - personal use;
-   - educational use;
-   - academic research;
-   - scientific research;
-   - non-commercial research projects;
-   - hobby projects;
-   - evaluation and testing.
+   • personal use;
+   • educational use;
+   • academic use;
+   • scientific research;
+   • non-commercial research projects;
+   • hobby projects;
+   • evaluation and testing.
 
-5. Commercial use of the Software requires prior written permission
-   from the copyright holder and may require the purchase of a
-   separate commercial license.
+5. Any commercial use of the Software requires prior written permission from
+   the copyright holder and may require the purchase of a separate commercial
+   license.
 
    Commercial licensing inquiries:
+
    wojciech.jarka77@gmail.com
 
-6. This license and all copyright notices must remain intact in all
-   copies or substantial portions of the Software.
+6. This License and all copyright notices must remain intact in all copies or
+   substantial portions of the Software and any Derivative Works.
 
-7. This License does not grant permission to use the name "Reposter",
-   its logos, or branding, except as necessary to identify the
-   original Software.
+7. This License does not grant permission to use the name "Reposter", its
+   logos, branding, or other identifying marks, except as reasonably
+   necessary to identify the original Software.
+
+8. This License does not grant any patent rights or patent licenses related
+   to the Software.
+
+DISCLAIMER OF WARRANTY
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE, AND NONINFRINGEMENT.
+FITNESS FOR A PARTICULAR PURPOSE, TITLE, AND NON-INFRINGEMENT.
+
+LIMITATION OF LIABILITY
 
 IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
-DAMAGES, OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT, OR
+DAMAGES, OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT,
 OTHERWISE, ARISING FROM, OUT OF, OR IN CONNECTION WITH THE SOFTWARE OR THE
 USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+--------------------------------------------------------------------
 
 Reposter Community License
 Version 1.0
 Effective Date: 29 July 2026
+
+This is a source-available license.
+
+The Software is publicly available for personal, educational,
+academic, research, hobby, evaluation, and other non-commercial use.
+
+Commercial use requires a separate commercial license from the
+copyright holder.
