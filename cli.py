@@ -13,21 +13,21 @@ CLI Layer:
 import sys
 import os
 
-from repo_guardian.core.indexer import build_index
+from repo_guardian.core.symbol_engine.indexer import build_index
 from repo_guardian.core.graph.graph import build_graph
 from repo_guardian.core.graph.incremental import get_cached_graph
 from repo_guardian.core.validator import validate
-from repo_guardian.core.reporting import (
+from repo_guardian.core.reporting_engine.engine import (
     generate_summary_report,
-    generate_structure_report,
-    save_json
+    generate_structure_report
 )
+from repo_guardian.core.reporting_engine.formatting import save_json
 from repo_guardian.core.reporting_layer.reporting_layer import generate_layer_report
 from repo_guardian.core.reporting_layer.artifact_usage_report import generate_artifact_usage_report
 from repo_guardian.core.graph.metrics import compute_graph_metrics
 from repo_guardian.core.graph.cycles import detect_cycles
 from repo_guardian.core.hotspots import detect_hotspots
-from repo_guardian.core.debt import compute_debt
+from repo_guardian.core.reporting_engine.debt import compute_debt
 from repo_guardian.core.validator.collisions import validate_name_collisions
 
 # Detected/defined layers in the project

@@ -9,7 +9,7 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 from pathlib import Path
 
-from repo_guardian.core.facade import GuardianFacade
+from repo_guardian.core.api.facade import GuardianFacade
 from repo_guardian.ui.path_memory import load_state, save_state
 from repo_guardian.ui.gui_parser import run_parser_window
 from repo_guardian.ui.exclude_check import check_stale_excludes
@@ -28,7 +28,7 @@ class GuardianGUI:
     """
     def __init__(self, root):
         self.root = root
-        self.root.title("Repo Guardian")
+        self.root.title("Reposter")
         
         self.state = load_state()
         gui_geom = self.state.get("gui_geometry", "760x640")
@@ -109,7 +109,7 @@ class GuardianGUI:
         header.grid(row=0, column=0, sticky="ew", pady=(0, PAD_LG))
         header.columnconfigure(0, weight=1)
         
-        ttk.Label(header, text="Repo Guardian", style="Header.TLabel").grid(row=0, column=0, sticky="w")
+        ttk.Label(header, text="Reposter", style="Header.TLabel").grid(row=0, column=0, sticky="w")
         sub_label = ttk.Label(header, text="Static architecture analysis · Read-only mode", style="Sub.TLabel")
         sub_label.grid(row=1, column=0, sticky="w", pady=(2, 0))
         self.tooltip = HeaderTooltipManager(sub_label, "Static architecture analysis · Read-only mode")

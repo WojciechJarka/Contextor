@@ -69,8 +69,8 @@ from datetime import datetime
 from collections import defaultdict, deque
 from itertools import combinations
 
-from repo_guardian.core.symbol_analysis import extract_file_symbols
-from repo_guardian.core.symbol_reference import build_symbol_references
+from repo_guardian.core.symbol_engine import extract_file_symbols
+from repo_guardian.core.reference.engine import build_symbol_references
 from repo_guardian.core.api.api_consumers import extract_api_consumers
 from repo_guardian.core.analysis.test_context import build_test_context
 

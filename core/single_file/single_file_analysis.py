@@ -19,13 +19,13 @@ from repo_guardian.core.single_file.context_builders import (
     collect_architecture_context,
 )
 from repo_guardian.core.context.locator import find_module_id
-from repo_guardian.core.module_intent import extract_module_intent
+from repo_guardian.core.analysis.module_intent import extract_module_intent
 from repo_guardian.core.analysis.function_analysis import analyze_functions
 from repo_guardian.core.api_surface.engine import extract_api_surface
 from repo_guardian.core.api_surface.metadata import extract_api_metadata
 from repo_guardian.core.api.public_api import extract_public_api
 from repo_guardian.core.analysis.activity import classify_symbol_activity, summarize_activity
-from repo_guardian.core.artifact_consumption import build_artifact_consumption
+from repo_guardian.core.reporting_layer.artifact_consumption import build_artifact_consumption
 from repo_guardian.core.reference.engine import find_import_users
 from repo_guardian.core.analysis.test_context import build_test_context
 from repo_guardian.core.analysis.git_context import collect_git_context

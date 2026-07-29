@@ -35,7 +35,7 @@ Does not include:
 """
 
 
-from repo_guardian.core.indexer import (
+from repo_guardian.core.symbol_engine.indexer import (
     build_index,
 )
 

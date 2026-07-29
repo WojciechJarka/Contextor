@@ -11,7 +11,7 @@ Core pipeline API
 # PIPELINE
 # ==========================================================
 
-from .indexer import (
+from .symbol_engine.indexer import (
     build_index,
 )
 

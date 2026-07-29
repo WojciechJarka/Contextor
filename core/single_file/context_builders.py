@@ -6,13 +6,13 @@ Auxiliary module offloading the main single analysis file.
 Contains builders for individual report contexts (symbols, imports, architecture).
 """
 
-from repo_guardian.core.symbol_analysis import (
+from repo_guardian.core.symbol_engine import (
     extract_file_symbols,
     classify_imports,
     find_symbol_usage,
     build_symbol_index,
 )
-from repo_guardian.core.symbol_reference import build_symbol_references
+from repo_guardian.core.reference.engine import build_symbol_references
 from repo_guardian.core.analysis.export_analysis import extract_exports, find_unused_public_api, summarize_exports
 from repo_guardian.core.api.api_consumers import extract_api_consumers, summarize_api_consumers
 from repo_guardian.core.analysis.import_analysis import extract_import_usage
@@ -21,7 +21,7 @@ from repo_guardian.core.analysis.risk_analysis import analyze_effects
 from repo_guardian.core.graph.cycles import detect_cycles
 from repo_guardian.core.graph.metrics import compute_graph_metrics
 from repo_guardian.core.graph.thresholds import get_thresholds
-from repo_guardian.core.architecture_context import (
+from repo_guardian.core.context import (
     find_dependents,
     find_soft_dependents,
     find_cluster,

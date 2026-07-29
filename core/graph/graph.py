@@ -42,7 +42,7 @@ from repo_guardian.core.domain.graph import (
     ProjectGraph,
 )
 
-from repo_guardian.core.resolver import (
+from repo_guardian.core.graph.resolver import (
     build_trie,
     resolve_internal,
 )

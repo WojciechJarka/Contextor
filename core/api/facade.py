@@ -10,7 +10,7 @@ so they don't have to couple with internal analyzers.
 from pathlib import Path
 import json
 
-from repo_guardian.core.indexer import build_index
+from repo_guardian.core.symbol_engine.indexer import build_index
 from repo_guardian.core.graph.graph import build_graph
 from repo_guardian.core.graph.incremental import get_cached_graph
 from repo_guardian.core.validator import validate
@@ -19,9 +19,9 @@ from repo_guardian.core.validator.collisions import validate_name_collisions
 from repo_guardian.core.graph.metrics import compute_graph_metrics
 from repo_guardian.core.graph.cycles import detect_cycles
 from repo_guardian.core.hotspots import detect_hotspots
-from repo_guardian.core.debt import compute_debt
+from repo_guardian.core.reporting_engine.debt import compute_debt
 
-from repo_guardian.core.reporting import (
+from repo_guardian.core.reporting_engine.engine import (
     generate_report,
     save_all_reports,
     generate_summary_report,
@@ -38,7 +38,7 @@ from repo_guardian.core.reporting_layer.reporting_single_file import (
 )
 from repo_guardian.core.reporting_layer.reporting_llm import generate_llm_markdown
 
-from repo_guardian.core.single_file_analysis import collect_all_contexts
+from repo_guardian.core.single_file.single_file_analysis import collect_all_contexts
 
 
 def _compute_metrics_and_debt(modules, graph):
@@ -63,7 +63,7 @@ def _load_excludes_for_repo(repo_path: str) -> tuple[list, set]:
     """
     repo_name = Path(repo_path).name
     safe_name = repo_name.replace(" ", "_").replace("/", "_").replace("\\", "_")
-    ui_dir = Path(__file__).resolve().parent.parent / "ui"
+    ui_dir = Path(__file__).resolve().parent.parent.parent / "ui"
     state_file = ui_dir / f"exclude_state_{safe_name}.json"
 
     if not state_file.exists():
@@ -218,6 +218,7 @@ class GuardianFacade:
         )
 
         if log: log("Creating report for file...")
+            
         report = generate_single_file_report(ctx, len(modules))
 
         output = f"output/single_{file.stem}.json"

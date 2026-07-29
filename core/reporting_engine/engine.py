@@ -13,7 +13,7 @@ from typing import Dict, Any
 
 from repo_guardian.core.graph.cycles import detect_cycles
 from repo_guardian.core.graph.metrics import compute_graph_metrics
-from repo_guardian.core.debt import compute_debt
+from repo_guardian.core.reporting_engine.debt import compute_debt
 from repo_guardian.core.hotspots import detect_hotspots
 from repo_guardian.core.graph.thresholds import get_thresholds
 from repo_guardian.core.reporting_layer.artifact_usage_report import generate_artifact_usage_report
