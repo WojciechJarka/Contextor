@@ -1,5 +1,5 @@
 @echo off
-setlocal enabledelayedexpansion
+setlocal
 
 echo ==========================================
 echo     Contextor - GUI Launcher
@@ -9,38 +9,50 @@ echo.
 cd /d "%~dp0"
 set PYTHONPATH=%~dp0
 
-:: 1. Detect Python interpreter
+:: Check Python
 python --version >nul 2>&1
 if errorlevel 1 (
-    echo [ERROR] Python is not recognized as an internal or external command.
-    echo Make sure Python is installed and added to your system PATH.
+    echo [ERROR] Python is not installed or not available in PATH.
     pause
     exit /b 1
 )
 
-:: 2. Install requirements
-if exist requirements.txt (
-    echo.
-    echo Checking and installing dependencies...
-    
-    python -m pip install -r requirements.txt
+:: Create virtual environment
+if not exist "venv" (
+    echo [INFO] Creating virtual environment...
+
+    python -m venv venv
 
     if errorlevel 1 (
-        echo.
-        echo [ERROR] Failed to install dependencies.
-        echo Please check your pip configuration or internet connection.
+        echo [ERROR] Failed to create virtual environment.
         pause
         exit /b 1
     )
-
-    echo [SUCCESS] Dependencies are ready.
-) else (
-    echo.
-    echo [WARNING] requirements.txt not found.
-    echo Continuing without dependency installation...
 )
 
-:: 3. Start Contextor GUI
+call venv\Scripts\activate.bat
+
+:: Install dependencies once
+if exist requirements.txt (
+    if not exist "venv\.installed" (
+        echo [INFO] Installing dependencies...
+
+        python -m pip install --upgrade pip
+        python -m pip install -r requirements.txt
+
+        if errorlevel 1 (
+            echo [ERROR] Failed to install dependencies.
+            pause
+            exit /b 1
+        )
+
+        type nul > "venv\.installed"
+
+        echo [SUCCESS] Dependencies installed.
+    )
+)
+
+:: Start application
 echo.
 echo Starting Contextor GUI...
 echo.
