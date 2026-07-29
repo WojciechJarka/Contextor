@@ -1,52 +1,215 @@
 # Contextor
 
-Contextor is an advanced static analysis and context extraction tool designed to analyze Python repositories. It acts as a bridge between complex codebases and Large Language Models (LLMs) or developers, building a comprehensive understanding of the project's architecture, dependencies, and technical debt without ever executing the code.
+Contextor transforms complex Python repositories into structured architectural context that both developers and Large Language Models (LLMs) can understand.
+
+It builds a comprehensive representation of a project's architecture, dependencies, relationships, symbol usage, and technical debt through static analysis — without ever executing the analyzed code.
+
+Contextor acts as an intelligence layer between software repositories and AI systems, providing the architectural awareness required to reason about large and complex codebases.
+
+---
 
 ## What Contextor Does
-- **Dependency Graph Building:** Extracts module dependencies (both hard imports and soft textual references) to construct a complete project architecture graph.
-- **Architectural Debt Calculation:** Heuristically calculates technical debt by detecting circular dependencies, isolated modules, namespace collisions, and architectural hotspots.
-- **Artifact Consumption Tracking:** Analyzes which symbols (classes, functions, methods) are actively used across the project and how they are consumed (e.g., direct calls, API imports, reflection, CLI/API exposure).
-- **Context Generation:** Generates highly structured, 100% context-rich JSON and Markdown reports tailored for LLMs to understand the architecture, intent, and blast radius of any file or architectural layer.
-- **Single-File Deep Dives:** Provides granular insights into individual files, including their semantic intent, exports, and relationships with the rest of the project.
+
+- **Dependency Graph Building:**  
+  Extracts module dependencies, including hard imports and soft textual references, to construct a complete architectural graph of the project.
+
+- **Architectural Debt Calculation:**  
+  Calculates structural risk indicators by detecting circular dependencies, isolated modules, namespace collisions, dependency hotspots, and architectural inconsistencies.
+
+- **Artifact Consumption Tracking:**  
+  Analyzes how symbols (classes, functions, and methods) are defined, consumed, and exposed throughout the repository, including direct calls, API imports, reflection patterns, and CLI/API entry points.
+
+- **Context Generation:**  
+  Generates highly structured JSON and Markdown reports designed for Large Language Models (LLMs) and developers, providing architectural understanding, intent, ownership, dependencies, and change impact analysis.
+
+- **Single-File Architectural Deep Dives:**  
+  Provides detailed analysis of individual files, including semantic purpose, exported symbols, dependencies, consumers, and relationships with the wider system.
+
+---
 
 ## What Contextor Does NOT Do
-- **Dynamic Analysis:** It does not execute your code. All analysis is purely static and safe.
-- **Deep Runtime Type-Inference:** It relies heavily on AST parsing and exact symbol name matching rather than executing complex generic inference or runtime type checking.
-- **Automated Code Modification:** It will not rewrite your code, fix bugs, or format files. It is strictly an observability and reporting tool.
-- **Security Audits:** While it detects structural risks and technical debt, it is not a dedicated SAST tool for discovering security vulnerabilities.
 
-## Prerequisites
+- **Dynamic Analysis:**  
+  Contextor does not execute analyzed code. All analysis is performed through static repository inspection.
+
+- **Deep Runtime Type Inference:**  
+  Contextor relies on AST parsing and deterministic symbol analysis rather than runtime execution, dynamic inference, or complex type checking.
+
+- **Automated Code Modification:**  
+  Contextor does not rewrite code, fix bugs, or format files. It is designed for architectural visibility, analysis, and decision support.
+
+- **Security Auditing:**  
+  Contextor identifies structural risks and technical debt, but it is not a dedicated SAST security vulnerability scanner.
+
+---
+
+# Features
+
+- Static Python repository analysis
+- AST-based source inspection
+- Dependency graph generation
+- Hard import and soft reference analysis
+- Symbol ownership tracking
+- Artifact consumption mapping
+- Circular dependency detection
+- Namespace collision detection
+- Architectural hotspot identification
+- Technical debt scoring
+- LLM-ready context generation
+- JSON and Markdown reporting
+- Single-file architectural analysis
+
+---
+
+# Prerequisites
+
 - Python 3.9+ (or newer)
-- **Git Context:** The module `core/analysis/git_context.py` requires `git` to be installed and available in your system's `PATH`.
+- Git (optional, required for repository context information)
+- Git must be installed and available in your system's `PATH`
 
-## How to Use
+---
 
-Contextor offers both a Command-Line Interface (CLI) and a Graphical User Interface (GUI).
+# Installation
 
-### Using the GUI
-The most convenient way to interact with Contextor is through its GUI.
-1. Run the interface:
-   ```bash
-   python ui/gui.py
-   ```
-2. Select your target project directory.
-3. Manage exclusion rules for directories or specific files.
-4. Generate comprehensive LLM context reports or inspect architectural layers directly in the UI.
+Clone the repository:
 
-### Using the CLI
-To run an automated analysis from the terminal:
 ```bash
-python cli.py /path/to/your/project
+git clone https://github.com/YOUR_USERNAME/Contextor.git
+cd Contextor
 ```
-The CLI will build the index, detect cycles, calculate debt, and save the JSON/Markdown reports into the `output/` directory.
 
-## License
-This project is distributed under the **Contextor Community License v1.0**. 
+Install dependencies:
 
-**Note:** This is a "source-available" license with a strict non-commercial restriction, not an OSI-approved "Open Source" license. You are free to use, modify, and distribute this software for personal, educational, and non-commercial research purposes. Any commercial use (including internal use by commercial entities) requires a separate commercial license. For the exact terms, please see the `LICENSE` file.
+```bash
+python -m pip install -r requirements.txt
+```
 
-## Disclaimer
-**No Warranty / Liability:** This software is provided "as is", without warranty of any kind, express or implied. The author(s) are not responsible for any consequences, data loss, or damages resulting from the use of this tool. Always review generated reports and double-check architectural recommendations before making sweeping changes to your codebase.
+---
 
-## Contact
-For commercial licensing or other inquiries, please contact: [wojciech.jarka77@gmail.com](mailto:wojciech.jarka77@gmail.com)
+# How to Use
+
+Contextor provides both a Command-Line Interface (CLI) and a Graphical User Interface (GUI).
+
+## Using the GUI
+
+The easiest way to start Contextor is:
+
+```bash
+python main.py --gui
+```
+
+On Windows, you can also use:
+
+```bash
+run_contextor.bat
+```
+
+The launcher will:
+- Detect the Python installation.
+- Verify required dependencies.
+- Install missing requirements when necessary.
+- Start the Contextor graphical interface.
+
+Then:
+- Select the target repository.
+- Configure exclusion rules for directories or specific files.
+- Generate architectural reports.
+- Inspect project layers, dependencies, and relationships.
+
+## Using the CLI
+
+Run an automated repository analysis:
+
+```bash
+python main.py --cli /path/to/your/project
+```
+
+Contextor will:
+- build the repository index;
+- analyze dependencies;
+- resolve symbol relationships;
+- detect architectural cycles;
+- calculate technical debt indicators;
+- generate JSON and Markdown reports.
+
+Generated reports are saved into:
+
+```
+output/
+```
+
+---
+
+# Generated Output
+
+Contextor generates structured architectural reports designed for both developers and AI systems.
+
+Generated reports include:
+- repository architecture overview;
+- dependency relationships;
+- symbol ownership and usage information;
+- artifact consumption data;
+- architectural hotspots;
+- technical debt indicators;
+- cycle detection results;
+- LLM-ready context snapshots.
+
+The generated context allows Large Language Models to reason about complex repositories with architectural awareness instead of relying only on raw source files.
+
+---
+
+# How Contextor Works
+
+Contextor uses static analysis techniques:
+- Python AST parsing;
+- deterministic symbol extraction;
+- dependency graph construction;
+- relationship mapping;
+- architectural heuristics.
+
+The analyzed code is never executed.
+
+---
+
+# License
+
+This project is distributed under the:
+
+**Contextor Community License v1.0**
+
+Contextor is released under a source-available license with a non-commercial restriction.
+
+**This license is not an OSI-approved Open Source license.**
+
+The software may be used, modified, and distributed for:
+- personal use;
+- educational purposes;
+- academic research;
+- scientific research;
+- non-commercial research projects;
+- hobby projects;
+- evaluation and testing.
+
+Commercial use, including use by commercial organizations or integration into commercial products and services, requires a separate commercial license.
+
+For complete licensing terms, please see the `LICENSE` file.
+
+---
+
+# Disclaimer
+
+## No Warranty / Liability
+
+This software is provided "as is", without warranty of any kind, express or implied.
+
+The authors are not responsible for any consequences, data loss, architectural decisions, or damages resulting from the use of this tool.
+
+Generated reports represent static architectural analysis and should be reviewed before making significant changes to production systems.
+
+---
+
+# Contact
+
+For commercial licensing inquiries or other questions:
+
+[wojciech.jarka77@gmail.com](mailto:wojciech.jarka77@gmail.com)
