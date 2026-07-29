@@ -7,7 +7,7 @@ echo ==========================================
 echo.
 
 cd /d "%~dp0"
-set PYTHONPATH=%~dp0..
+set PYTHONPATH=%~dp0
 
 :: 1. Detect Python interpreter
 python --version >nul 2>&1
@@ -18,34 +18,40 @@ if errorlevel 1 (
     exit /b 1
 )
 
-:: 2. Detect if orjson is installed
-python -c "import orjson" >nul 2>&1
-if errorlevel 1 (
-    echo [WARNING] The required Python package 'orjson' is not installed.
-    echo This package is strictly necessary for Contextor to operate.
+:: 2. Install requirements
+if exist requirements.txt (
     echo.
-    set /p choice="Would you like to install 'orjson' now using pip? (Y/N): "
-    if /i "!choice!"=="Y" (
+    echo Checking and installing dependencies...
+    
+    python -m pip install -r requirements.txt
+
+    if errorlevel 1 (
         echo.
-        echo Installing orjson...
-        python -m pip install orjson
-        if errorlevel 1 (
-            echo.
-            echo [ERROR] Failed to install orjson. Please check your internet connection or pip configuration.
-            pause
-            exit /b 1
-        )
-        echo [SUCCESS] orjson installed successfully!
-    ) else (
-        echo.
-        echo [ABORT] Cannot proceed without orjson. Exiting...
+        echo [ERROR] Failed to install dependencies.
+        echo Please check your pip configuration or internet connection.
         pause
         exit /b 1
     )
+
+    echo [SUCCESS] Dependencies are ready.
+) else (
+    echo.
+    echo [WARNING] requirements.txt not found.
+    echo Continuing without dependency installation...
 )
 
+:: 3. Start Contextor GUI
 echo.
 echo Starting Contextor GUI...
+echo.
+
 python main.py --gui
+
+if errorlevel 1 (
+    echo.
+    echo [ERROR] Contextor failed to start.
+    pause
+    exit /b 1
+)
 
 pause
