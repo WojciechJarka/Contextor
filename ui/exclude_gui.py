@@ -20,69 +20,7 @@ from repo_guardian.ui.theme import BG, SURFACE, BORDER, TEXT, PRIMARY, PAD_SM, P
 MANIFEST_NAME = "manifest.json"
 
 
-# ──────────────────────────────────────────────────────────────
-# AUTO-EXCLUDE CATEGORIES
-# Each item: key, display label, dir_names to block, file exts to block, tooltip
-# Default: all enabled (True). State persisted per-repo in state file.
-# ──────────────────────────────────────────────────────────────
-AUTO_EXCLUDE_ITEMS = [
-    {"key": "ae_pycache",  "label": "__pycache__",       "dir_names": ["__pycache__"],               "ext": [],
-     "tip": "[✓ = silently excluded during analysis]\nExcludes all __pycache__ bytecode cache directories."},
-    {"key": "ae_git",      "label": ".git",              "dir_names": [".git"],                     "ext": [],
-     "tip": "[✓ = silently excluded during analysis]\nExcludes the .git repository data directory."},
-    {"key": "ae_venv",     "label": "venv / .venv",      "dir_names": ["venv", ".venv"],            "ext": [],
-     "tip": "[✓ = silently excluded during analysis]\nExcludes Python virtual environment directories."},
-    {"key": "ae_dist",     "label": "dist / build",      "dir_names": ["dist", "build"],            "ext": [],
-     "tip": "[✓ = silently excluded during analysis]\nExcludes build and distribution artifact directories."},
-    {"key": "ae_ide",      "label": ".idea / .vscode",   "dir_names": [".idea", ".vscode"],        "ext": [],
-     "tip": "[✓ = silently excluded during analysis]\nExcludes IDE configuration folders."},
-    {"key": "ae_node",     "label": "node_modules",      "dir_names": ["node_modules"],             "ext": [],
-     "tip": "[✓ = silently excluded during analysis]\nExcludes the node_modules directory."},
-    {"key": "ae_scratch",  "label": "scratch",           "dir_names": ["scratch"],                  "ext": [],
-     "tip": "[✓ = silently excluded during analysis]\nExcludes scratch / temp directories."},
-    {"key": "ae_json",     "label": ".json",             "dir_names": [],                           "ext": [".json"],
-     "tip": "[✓ = silently excluded during analysis]\nExcludes all .json data files."},
-    {"key": "ae_md",       "label": ".md",               "dir_names": [],                           "ext": [".md"],
-     "tip": "[✓ = silently excluded during analysis]\nExcludes all Markdown documentation files."},
-    {"key": "ae_txt",      "label": ".txt / .csv",       "dir_names": [],                           "ext": [".txt", ".csv"],
-     "tip": "[✓ = silently excluded during analysis]\nExcludes plain text and CSV data files."},
-    {"key": "ae_scripts",  "label": ".bat / .sh / .vbs", "dir_names": [],                           "ext": [".bat", ".sh", ".vbs"],
-     "tip": "[✓ = silently excluded during analysis]\nExcludes shell and batch script files."},
-    {"key": "ae_yaml",     "label": ".yaml / .xml",      "dir_names": [],                           "ext": [".yaml", ".yml", ".xml", ".ini", ".toml"],
-     "tip": "[✓ = silently excluded during analysis]\nExcludes YAML, XML, INI and TOML config files."},
-]
-
-
-def _get_active_ae_dirs(ae_vars: dict) -> set:
-    """Returns set of dir names from currently checked auto-exclude items."""
-    result = set()
-    for item in AUTO_EXCLUDE_ITEMS:
-        var = ae_vars.get(item["key"])
-        if var is not None and var.get():
-            result.update(item["dir_names"])
-    return result
-
-
-def _get_active_ae_exts(ae_vars: dict) -> set:
-    """Returns set of file extensions from currently checked auto-exclude items."""
-    result = set()
-    for item in AUTO_EXCLUDE_ITEMS:
-        var = ae_vars.get(item["key"])
-        if var is not None and var.get():
-            result.update(item["ext"])
-    return result
-
-
-def get_auto_exclude_from_state() -> tuple[set, set]:
-    """Public helper: read auto-exclude dirs and exts from saved state (for facade)."""
-    data = _load_exclude_state_raw()
-    ae = data.get("auto_exclude", {})
-    dirs, exts = set(), set()
-    for item in AUTO_EXCLUDE_ITEMS:
-        if ae.get(item["key"], True):   # default True = enabled
-            dirs.update(item["dir_names"])
-            exts.update(item["ext"])
-    return dirs, exts
+# Auto-exclude categories have been removed in favor of hardcoded logic in the backend.
 
 
 def get_state_file():
@@ -209,16 +147,16 @@ def find_repo_root():
 
 
 
-def run_exclude_window():
+def run_exclude_window(parent=None):
 
-    win = tk.Toplevel()
+    win = tk.Toplevel(parent) if parent else tk.Toplevel()
 
     win.title(
         "Exclude Manager"
     )
 
     win.geometry(
-        "700x720"
+        "900x720"
     )
     win.configure(bg=BG)
 
@@ -242,23 +180,19 @@ def run_exclude_window():
 
     candidates: list = _state.get("candidates", [])
     excluded_set: set = set(_state.get("excluded", []))
-    ae_loaded = _state.get("auto_exclude", {})
+    
+    original_candidates = list(candidates)
+    original_excluded_set = set(excluded_set)
 
     presets = load_presets_dict()
     if current_preset_name and current_preset_name not in presets:
         current_preset_name = None
 
-    ae_vars: dict = {}  # populated when checkboxes are built below
-
     def _persist():
         """Save current in-memory state to disk."""
-        ae_state = {k: v.get() for k, v in ae_vars.items()}
         _save_exclude_state_raw({
             "candidates": candidates,
             "excluded": list(excluded_set),
-            "auto_exclude": ae_state,
-            "auto_exclude_dirs": list(_get_active_ae_dirs(ae_vars)),
-            "auto_exclude_exts": list(_get_active_ae_exts(ae_vars)),
             "current_preset": current_preset_name,
         })
 
@@ -472,39 +406,47 @@ def run_exclude_window():
             )
 
 
+    def remove_selected():
+        selected = list(reversed(listbox.curselection()))
+        if not selected:
+            messagebox.showinfo("Delete", "Please select at least one item.", parent=win)
+            return
+
+        removed_entirely = []
+        for index in selected:
+            rel = candidates[index]
+            if rel in excluded_set:
+                excluded_set.remove(rel)
+            candidates.pop(index)
+            removed_entirely.append(rel)
+
+        _persist()
+        refresh()
+        messagebox.showinfo("Deleted", "Removed from manager entirely:\n\n" + "\n".join(removed_entirely), parent=win)
+
     def restore_selected():
         """
         For [Excluded] items  -> removes them from excluded_set (back to Active).
-        For [Active] items    -> removes them entirely from candidates list.
         """
-        selected = list(reversed(listbox.curselection()))
+        selected = list(listbox.curselection())
         if not selected:
             messagebox.showinfo("Restore", "Please select at least one item.", parent=win)
             return
 
         restored_to_active = []
-        removed_entirely = []
-
         for index in selected:
             rel = candidates[index]
             if rel in excluded_set:
                 excluded_set.remove(rel)
                 restored_to_active.append(rel)
-            else:
-                candidates.pop(index)
-                removed_entirely.append(rel)
 
         _persist()
-        refresh()
+        refresh(keep_selection=selected)
 
-        parts = []
         if restored_to_active:
-            parts.append("Restored to Active:\n" + "\n".join(restored_to_active))
-        if removed_entirely:
-            parts.append("Removed from manager:\n" + "\n".join(removed_entirely))
-
-        if parts:
-            messagebox.showinfo("Restored", "\n\n".join(parts), parent=win)
+            messagebox.showinfo("Restored", "Restored to Active:\n\n" + "\n".join(restored_to_active), parent=win)
+        else:
+            messagebox.showinfo("Restored", "Selected items were already Active.", parent=win)
 
 
     def restore_all():
@@ -559,6 +501,9 @@ def run_exclude_window():
             if not name:
                 messagebox.showwarning("Error", "Please enter a preset name.", parent=dlg)
                 return
+            if name.lower() == "default":
+                messagebox.showwarning("Error", "The name 'default' is reserved and read-only.", parent=dlg)
+                return
             if name in presets:
                 if not messagebox.askyesno(
                     "Overwrite?",
@@ -570,7 +515,6 @@ def run_exclude_window():
             presets[name] = {
                 "candidates": list(candidates),
                 "excluded": list(excluded_set),
-                "auto_exclude": {k: v.get() for k, v in ae_vars.items()},
             }
             save_presets_dict(presets)
             nonlocal current_preset_name
@@ -592,11 +536,19 @@ def run_exclude_window():
             messagebox.showwarning("Error", "No selected repo", parent=win)
             return
         presets = load_presets_dict()
-        if not presets:
-            messagebox.showinfo("Presets", "No saved presets found for this repository.", parent=win)
-            return
 
         def on_select(name):
+            nonlocal current_preset_name
+            if name == "default":
+                candidates.clear()
+                excluded_set.clear()
+                current_preset_name = None
+                preset_label_var.set("Active Preset: None")
+                _persist()
+                refresh()
+                sel_win.destroy()
+                return
+
             preset_data = presets[name]
             candidates.clear()
             excluded_set.clear()
@@ -610,14 +562,7 @@ def run_exclude_window():
                 candidates.extend(preset_data.get("candidates", []))
                 for x in preset_data.get("excluded", []):
                     excluded_set.add(x)
-                # Restore auto-exclude checkbox states if present in preset
-                ae_preset = preset_data.get("auto_exclude", {})
-                for item in AUTO_EXCLUDE_ITEMS:
-                    var = ae_vars.get(item["key"])
-                    if var is not None:
-                        var.set(ae_preset.get(item["key"], True))
 
-            nonlocal current_preset_name
             current_preset_name = name
             preset_label_var.set(f"Active Preset: {name}")
             _persist()
@@ -633,7 +578,8 @@ def run_exclude_window():
 
         listb = tk.Listbox(sel_win, bg=SURFACE, fg=TEXT, selectbackground=PRIMARY, selectforeground="#ffffff", borderwidth=0, highlightthickness=1)
         listb.pack(fill=tk.BOTH, expand=True, padx=PAD_SM, pady=PAD_SM)
-        for p in presets.keys():
+        listb.insert(tk.END, "default")
+        for p in sorted(presets.keys()):
             listb.insert(tk.END, p)
 
         def load_btn():
@@ -668,7 +614,7 @@ def run_exclude_window():
 
         listb = tk.Listbox(sel_win, bg=SURFACE, fg=TEXT, selectbackground=PRIMARY, selectforeground="#ffffff", borderwidth=0, highlightthickness=1)
         listb.pack(fill=tk.BOTH, expand=True, padx=PAD_SM, pady=PAD_SM)
-        for p in presets.keys():
+        for p in sorted(presets.keys()):
             listb.insert(tk.END, p)
 
         def del_btn():
@@ -719,28 +665,51 @@ def run_exclude_window():
     actions = ttk.Frame(win)
     actions.pack(fill="x", padx=PAD_LG, pady=PAD_MD)
 
-    b_add = ttk.Button(actions, text="+ Add", style="Secondary.TButton", command=add_item)
+    list_frame = ttk.LabelFrame(actions, text="List Management", padding=PAD_SM)
+    list_frame.pack(side="left", fill="y", padx=(0, PAD_MD))
+
+    b_add = ttk.Button(list_frame, text="+ Add", style="Secondary.TButton", command=add_item)
     b_add.pack(side="left", padx=(0, PAD_SM))
-    e_tooltip.bind_tooltip(b_add, "Add new files or directories to the exclusion list.")
+    e_tooltip.bind_tooltip(b_add, "Add new files or directories to the list.")
 
-    b_exc = ttk.Button(actions, text="Exclude selected", style="Secondary.TButton", command=exclude_selected)
+    b_rem = ttk.Button(list_frame, text="- Del", style="Danger.Ghost.TButton", command=remove_selected)
+    b_rem.pack(side="left")
+    e_tooltip.bind_tooltip(b_rem, "Delete selected items from the list entirely.")
+
+    state_frame = ttk.LabelFrame(actions, text="Exclusion State", padding=PAD_SM)
+    state_frame.pack(side="left", fill="both", expand=True)
+
+    b_exc = ttk.Button(state_frame, text="Exclude", style="Secondary.TButton", command=exclude_selected)
     b_exc.pack(side="left", padx=(0, PAD_SM))
-    e_tooltip.bind_tooltip(b_exc, "Mark selected Active items as Excluded (soft-filter).")
+    e_tooltip.bind_tooltip(b_exc, "Mark selected items as Excluded (soft-filter).")
 
-    b_res = ttk.Button(actions, text="Restore selected", style="Secondary.TButton", command=restore_selected)
+    b_res = ttk.Button(state_frame, text="Restore", style="Secondary.TButton", command=restore_selected)
     b_res.pack(side="left", padx=(0, PAD_SM))
-    e_tooltip.bind_tooltip(b_res, "Restore Excluded items to Active, or remove Active items from the list.")
+    e_tooltip.bind_tooltip(b_res, "Restore Excluded items to Active.")
 
-    b_res_all = ttk.Button(actions, text="Restore all", style="Danger.Ghost.TButton", command=restore_all)
-    b_res_all.pack(side="left")
-    e_tooltip.bind_tooltip(b_res_all, "Clear the entire exclusion list for this repository.")
+    b_res_all = ttk.Button(state_frame, text="Restore all", style="Danger.Ghost.TButton", command=restore_all)
+    b_res_all.pack(side="left", padx=(0, PAD_SM))
+    e_tooltip.bind_tooltip(b_res_all, "Clear the entire exclusion list.")
 
-    b_auto = ttk.Button(actions, text="Exclude non-Python structures", style="Secondary.TButton", command=auto_exclude_non_python)
+    b_auto = ttk.Button(state_frame, text="Auto-exclude non-Python", style="Secondary.TButton", command=auto_exclude_non_python)
     b_auto.pack(side="right")
-    e_tooltip.bind_tooltip(b_auto, "Auto-exclude all top-level directories with no .py files and all non-.py files in the repo root.")
+    e_tooltip.bind_tooltip(b_auto, "Auto-exclude all top-level non-Python structures in the root.")
 
     preset_actions = ttk.Frame(win)
     preset_actions.pack(fill="x", padx=PAD_LG, pady=(0, PAD_MD))
+
+    def load_default_preset():
+        nonlocal current_preset_name
+        current_preset_name = None
+        preset_label_var.set("Active Preset: None")
+        candidates.clear()
+        excluded_set.clear()
+        _persist()
+        refresh()
+
+    b_def = ttk.Button(preset_actions, text="Default", command=load_default_preset, style="Secondary.TButton")
+    b_def.pack(side="left", padx=(0, PAD_SM))
+    e_tooltip.bind_tooltip(b_def, "Restore to default (no active preset, clear exclusions).")
 
     b_sv = ttk.Button(preset_actions, text="Save Preset", command=save_preset, style="Secondary.TButton")
     b_sv.pack(side="left", padx=(0, PAD_SM))
@@ -755,58 +724,84 @@ def run_exclude_window():
     e_tooltip.bind_tooltip(b_dl, "Delete a saved exclusion preset.")
 
     # --------------------------------------------------------
-    # AUTO-EXCLUDE CHECKBOXES
+    # INFO SECTION
     # --------------------------------------------------------
-    ae_outer = ttk.LabelFrame(
-        win,
-        text="Auto-exclude (silently applied during analysis — \u2713 checked = excluded, not shown in list above)"
+    info_frame = ttk.LabelFrame(win, text="How filtering works under the hood")
+    info_frame.pack(fill="x", padx=PAD_LG, pady=(0, PAD_MD))
+
+    info_text_1 = (
+        "• Auto-ignored by engine (always): All non-Python files (.json, .md, etc.),\n"
+        "  as well as heavy structures like __pycache__, .git, venv, node_modules, dist, .idea."
     )
-    ae_outer.pack(fill="x", padx=PAD_LG, pady=(0, PAD_MD))
+    ttk.Label(info_frame, text=info_text_1, foreground=TEXT).pack(anchor="w", padx=PAD_SM, pady=(PAD_SM, 2))
+    
+    info_text_2 = (
+        "• Exclude non-Python structures: Adds top-level non-Python directories to the list above,\n"
+        "  preventing the engine from even attempting to traverse them. Strictly a performance optimization."
+    )
+    ttk.Label(info_frame, text=info_text_2, foreground=TEXT).pack(anchor="w", padx=PAD_SM, pady=(0, PAD_SM))
 
-    for i, item in enumerate(AUTO_EXCLUDE_ITEMS):
-        var = tk.BooleanVar(master=win, value=ae_loaded.get(item["key"], True))
-        ae_vars[item["key"]] = var
-        cb = ttk.Checkbutton(
-            ae_outer,
-            text=item["label"],
-            variable=var,
-            command=_persist,
-        )
-        cb.grid(row=i // 4, column=i % 4, sticky="w", padx=PAD_SM, pady=2)
-        e_tooltip.bind_tooltip(cb, item["tip"])
-
-    def confirm_and_close():
+    def handle_close(is_confirm=False):
+        changed_from_start = (set(candidates) != set(original_candidates) or excluded_set != original_excluded_set)
+        
+        nonlocal current_preset_name
         if current_preset_name:
             presets = load_presets_dict()
-            if current_preset_name in presets:
-                p_data = presets[current_preset_name]
-                changed = False
-                if sorted(candidates) != sorted(p_data.get("candidates", [])):
-                    changed = True
-                if sorted(list(excluded_set)) != sorted(p_data.get("excluded", [])):
-                    changed = True
-                ae_state = {k: v.get() for k, v in ae_vars.items()}
-                ae_preset = p_data.get("auto_exclude", {})
-                for k, v in ae_state.items():
-                    if v != ae_preset.get(k, True):
-                        changed = True
-                
-                if changed:
-                    if messagebox.askyesno(
-                        "Update Preset?",
-                        f"Preset '{current_preset_name}' has unsaved changes.\nDo you want to update it before closing?",
-                        parent=win
-                    ):
-                        presets[current_preset_name] = {
-                            "candidates": list(candidates),
-                            "excluded": list(excluded_set),
-                            "auto_exclude": ae_state,
-                        }
-                        save_presets_dict(presets)
-        win.destroy()
+            p_data = presets.get(current_preset_name, {})
+            preset_changed = (sorted(candidates) != sorted(p_data.get("candidates", []))) or (sorted(list(excluded_set)) != sorted(p_data.get("excluded", [])))
+            
+            if preset_changed:
+                ans = messagebox.askyesnocancel(
+                    "Update Preset?",
+                    f"Preset '{current_preset_name}' has unsaved changes.\n\nYES = Update preset and apply changes.\nNO = Discard changes and close.\nCANCEL = Return to window.",
+                    parent=win
+                )
+                if ans is None:
+                    return
+                if ans is True:
+                    presets[current_preset_name] = {
+                        "candidates": list(candidates),
+                        "excluded": list(excluded_set),
+                    }
+                    save_presets_dict(presets)
+                    _persist()
+                else:
+                    _save_exclude_state_raw({
+                        "candidates": original_candidates,
+                        "excluded": list(original_excluded_set),
+                        "current_preset": current_preset_name,
+                    })
+                win.destroy()
+                return
+
+        if is_confirm:
+            _persist()
+            win.destroy()
+        else:
+            if changed_from_start:
+                ans = messagebox.askyesnocancel(
+                    "Unsaved changes",
+                    "You have unsaved changes.\n\nYES = Apply changes.\nNO = Discard changes and close.\nCANCEL = Return to window.",
+                    parent=win
+                )
+                if ans is None:
+                    return
+                if ans is True:
+                    _persist()
+                else:
+                    _save_exclude_state_raw({
+                        "candidates": original_candidates,
+                        "excluded": list(original_excluded_set),
+                        "current_preset": current_preset_name,
+                    })
+                win.destroy()
+            else:
+                win.destroy()
 
     bottom_frame = ttk.Frame(win)
     bottom_frame.pack(fill="x", padx=PAD_LG, pady=(0, PAD_LG))
-    ttk.Button(bottom_frame, text="Confirm", style="Primary.TButton", command=confirm_and_close).pack(side="right")
+    ttk.Button(bottom_frame, text="Confirm", style="Primary.TButton", command=lambda: handle_close(is_confirm=True)).pack(side="right")
 
+    win.protocol("WM_DELETE_WINDOW", lambda: handle_close(is_confirm=False))
     refresh()
+    return win

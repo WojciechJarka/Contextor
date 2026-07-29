@@ -96,7 +96,8 @@ def parse_and_filter_json(json_path, search_term, output_dir="output", public_ap
     }
 
     sanitized_name = search_term.replace(".", "_").replace("/", "_")
-    output_filename = f"parsed_{sanitized_name}.json"
+    prefix = "parsed_api" if public_api_only else "parsed"
+    output_filename = f"{prefix}_{sanitized_name}.json"
     os.makedirs(output_dir, exist_ok=True)
     output_path = os.path.join(output_dir, output_filename)
 
@@ -105,8 +106,8 @@ def parse_and_filter_json(json_path, search_term, output_dir="output", public_ap
 
     return output_path
 
-def run_parser_window():
-    parser_win = tk.Toplevel()
+def run_parser_window(parent=None):
+    parser_win = tk.Toplevel(parent) if parent else tk.Toplevel()
     parser_win.title("Parser JSON")
 
     state = load_state()
@@ -172,18 +173,22 @@ def run_parser_window():
         public_api = public_api_only_var.get()
 
         if not json_path or not term:
-            messagebox.showwarning("Error", "Fill in both paths")
+            messagebox.showwarning("Error", "Fill in both paths", parent=parser_win)
             return
 
         def task():
             return parse_and_filter_json(json_path, term, public_api_only=public_api)
 
         def on_success(out):
-            messagebox.showinfo("Success", f"Output file:\n{out}")
-            on_closing()
+            messagebox.showinfo("Success", f"Output file:\n{out}", parent=parser_win)
+            save_state(
+                parser_geometry=parser_win.geometry(),
+                search_term=name_entry.get(),
+                public_api_only=public_api_only_var.get()
+            )
 
         def on_error(exc):
-            messagebox.showerror("Error", str(exc))
+            messagebox.showerror("Error", str(exc), parent=parser_win)
 
         run_with_progress(
             parser_win, progress_bar, task,
@@ -197,3 +202,4 @@ def run_parser_window():
     progress_bar = create_progress_bar(parser_win)
 
     parser_win.protocol("WM_DELETE_WINDOW", on_closing)
+    return parser_win

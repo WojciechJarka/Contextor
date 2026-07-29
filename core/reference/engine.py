@@ -15,11 +15,14 @@ from .visitor import SymbolReferenceVisitor
 def _empty_reference():
     return {
         "called_by": [],
+        "called_by_detail": [],
         "called_by_ambiguous": [],
         "called_by_ambiguous_detail": [],
         "event_bound_by": [],
+        "event_bound_by_detail": [],
         "imported_from": [],
         "inherited_by": [],
+        "inherited_by_detail": [],
     }
 
 def _load_tree(root_path, module, tree_cache=None):
@@ -77,25 +80,38 @@ def build_symbol_references(modules, target_symbols, root_path, definer_module=N
         visitor = SymbolReferenceVisitor(target_symbols)
         visitor.visit(tree)
 
-        for symbol in visitor.called:
+        for item in visitor.called:
+            symbol, lineno, context = item if isinstance(item, tuple) else (item, None, None)
             if symbol in references:
                 references[symbol]["called_by"].append(module_id)
+                references[symbol]["called_by_detail"].append({"module": module_id, "line": lineno, "context": context})
 
-        for symbol in visitor.called_ambiguous:
+        for item in visitor.called_ambiguous:
+            symbol, lineno, context = item if isinstance(item, tuple) else (item, None, None)
             if symbol in references:
                 references[symbol]["called_by_ambiguous"].append(module_id)
                 references[symbol]["called_by_ambiguous_detail"].append({
                     "module": module_id,
                     "reason": "short_name_match_no_confirmed_import",
+                    "line": lineno,
+                    "context": context
                 })
 
-        for symbol in visitor.event_bound:
+        for item in visitor.event_bound:
+            symbol, lineno, context = item if isinstance(item, tuple) else (item, None, None)
             if symbol in references:
                 references[symbol]["event_bound_by"].append(module_id)
+                references[symbol]["event_bound_by_detail"].append({"module": module_id, "line": lineno, "context": context})
 
-        for child_name, symbol in visitor.inherited:
+        for item in visitor.inherited:
+            if len(item) == 3:
+                child_name, symbol, lineno = item
+            else:
+                child_name, symbol = item
+                lineno = None
             if symbol in references:
                 references[symbol]["inherited_by"].append(module_id)
+                references[symbol]["inherited_by_detail"].append({"module": module_id, "child": child_name, "line": lineno})
 
         for imp in module.imports:
             imp_module = getattr(imp, "module", None)

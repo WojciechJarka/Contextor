@@ -156,8 +156,8 @@ def _compact_usage(usage: dict, index_of: dict) -> dict:
         if not values:
             continue
 
-        if category == "ambiguous_calls":
-            # Values are dicts like {"module": "mod_id", "reason": "...", "confidence": 0.3}
+        if category == "ambiguous_calls" or category.endswith("_detail"):
+            # Values are dicts like {"module": "mod_id", "reason": "...", "line": 42}
             compacted_values = []
             for item in values:
                 if isinstance(item, dict):
@@ -200,6 +200,7 @@ def compact_artifact_report(report: dict) -> dict:
         entry = {
             "artifact": artifact.get("artifact"),
             "kind": artifact.get("kind"),
+            "signature": artifact.get("signature"),
             "definer_module": _idx(definer, index_of),
             "consumers": _idx_list(consumers, index_of),
         }

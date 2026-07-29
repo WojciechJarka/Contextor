@@ -164,9 +164,12 @@ def collect_module_artifacts(
             tree_cache=tree_cache,
         )
 
+        signatures = symbols.get("signatures", {})
+
         consumers = extract_api_consumers(
             own_symbols,
             references,
+            signatures=signatures
         )
 
         result[module_id] = {
@@ -231,6 +234,7 @@ def build_artifact_index(module_artifacts: dict) -> dict:
             artifacts[key] = {
                 "artifact": symbol,
                 "kind": kind,
+                "signature": consumer_data.get("signature", ""),
                 "definer_module": module_id,
                 "consumers": consumer_modules,
                 "consumer_count": len(consumer_modules),

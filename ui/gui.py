@@ -41,10 +41,35 @@ class GuardianGUI:
         self.layer_path_var = tk.StringVar(value=self.state.get("layer", "").replace("\\", "/"))
         self.file_path_var = tk.StringVar(value=self.state.get("python_file", "").replace("\\", "/"))
         
+        self.exclude_win = None
+        self.repo_builder_win = None
+        self.parser_win = None
+        
         self._check_stale_excludes()
         self._build_ui()
         
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
+
+    def open_exclude_window(self):
+        if self.exclude_win and self.exclude_win.winfo_exists():
+            self.exclude_win.lift()
+            self.exclude_win.focus_force()
+        else:
+            self.exclude_win = run_exclude_window(parent=self.root)
+
+    def open_repo_builder(self):
+        if self.repo_builder_win and self.repo_builder_win.winfo_exists():
+            self.repo_builder_win.lift()
+            self.repo_builder_win.focus_force()
+        else:
+            self.repo_builder_win = run_repo_generator(parent=self.root)
+
+    def open_parser_window(self):
+        if self.parser_win and self.parser_win.winfo_exists():
+            self.parser_win.lift()
+            self.parser_win.focus_force()
+        else:
+            self.parser_win = run_parser_window(parent=self.root)
 
     def _check_stale_excludes(self):
         """
@@ -185,13 +210,13 @@ class GuardianGUI:
         emp_btn = ttk.Button(bottom_frame, text="Empty Output", style="Danger.Ghost.TButton", command=self.empty_output_folder)
         emp_btn.pack(side="left", padx=(PAD_SM, 0))
         
-        exc_btn = ttk.Button(bottom_frame, text="Exclude", style="Ghost.TButton", command=run_exclude_window)
+        exc_btn = ttk.Button(bottom_frame, text="Exclude", style="Ghost.TButton", command=self.open_exclude_window)
         exc_btn.pack(side="left", padx=(PAD_SM, 0))
         
-        rb_btn = ttk.Button(bottom_frame, text="Repo Builder", style="Ghost.TButton", command=run_repo_generator)
+        rb_btn = ttk.Button(bottom_frame, text="Repo Builder", style="Ghost.TButton", command=self.open_repo_builder)
         rb_btn.pack(side="left", padx=(PAD_SM, 0))
         
-        p_btn = ttk.Button(bottom_frame, text="Parse JSON", style="Ghost.TButton", command=run_parser_window)
+        p_btn = ttk.Button(bottom_frame, text="Parse JSON", style="Ghost.TButton", command=self.open_parser_window)
         p_btn.pack(side="right")
 
         self.tooltip.bind_tooltip(out_btn, "Open directory containing all analysis reports.")

@@ -54,7 +54,11 @@ def collect_symbol_context(file_path, modules, module_id, root_path):
         modules, all_symbols, root_path, definer_module=module_id
     )
 
-    consumers = extract_api_consumers(all_symbols, references)
+    consumers = extract_api_consumers(
+        all_symbols, 
+        references,
+        signatures=symbols.get("signatures", {})
+    )
 
     return {
         "symbols": symbols,

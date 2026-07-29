@@ -61,7 +61,8 @@ def _normalize_list(
 
 def extract_api_consumers(
     symbols,
-    references
+    references,
+    signatures=None
 ):
     """
     Builds an API symbol consumers map.
@@ -166,7 +167,8 @@ def extract_api_consumers(
                 # Dopisujemy confidence, zgodnie z wytycznymi Phase 7.1
                 item_copy = dict(item)
                 item_copy["confidence"] = 0.3
-                ambiguous_calls.append(item_copy)
+                if item_copy["confidence"] >= 0.5:
+                    ambiguous_calls.append(item_copy)
         
         ambiguous_calls = sorted(ambiguous_calls, key=lambda x: x["module"])
 
@@ -193,6 +195,8 @@ def extract_api_consumers(
 
         result[symbol] = {
 
+            "signature": signatures.get(symbol, "") if signatures else "",
+
             "consumers":
                 consumers,
 
@@ -202,26 +206,29 @@ def extract_api_consumers(
                 "direct_calls":
                     direct_calls,
 
+                "direct_calls_detail":
+                    reference.get("called_by_detail", []),
 
                 "callback_calls":
                     callback_calls,
 
-
                 "event_bindings":
                     event_bindings,
 
+                "event_bindings_detail":
+                    reference.get("event_bound_by_detail", []),
 
                 "runtime_calls":
                     runtime_calls,
 
-
                 "api_imports":
                     api_imports,
-
 
                 "inheritance":
                     inheritance,
 
+                "inheritance_detail":
+                    reference.get("inherited_by_detail", []),
 
                 "ambiguous_calls":
                     ambiguous_calls,

@@ -121,7 +121,7 @@ def generate_summary_report(
     ]
     isolated_modules = [
         h["module"] for h in hotspots
-        if h.get("type") == "ISOLATED"
+        if h.get("type") == "ISOLATED" and not h["module"].endswith("__init__")
     ]
 
     top_hotspots = [
@@ -450,9 +450,12 @@ def slice_report_for_layer(
             mod = _resolve(c)
             if mod:
                 referenced_modules.add(mod)
-        for values in (artifact.get("usage", {}) or {}).values():
+        for category, values in (artifact.get("usage", {}) or {}).items():
             for v in values or []:
-                mod = _resolve(v)
+                if isinstance(v, dict):
+                    mod = _resolve(v.get("module"))
+                else:
+                    mod = _resolve(v)
                 if mod:
                     referenced_modules.add(mod)
 
@@ -468,6 +471,7 @@ def slice_report_for_layer(
         remapped = {
             "artifact": artifact.get("artifact"),
             "kind": artifact.get("kind"),
+            "signature": artifact.get("signature"),
             "definer_module": _remap(artifact.get("definer_module")),
             "consumers": sorted(
                 v for v in (_remap(c) for c in artifact.get("consumers", []) or []) if v is not None
@@ -475,10 +479,34 @@ def slice_report_for_layer(
         }
         usage = artifact.get("usage")
         if usage:
-            remapped["usage"] = {
-                category: sorted(v for v in (_remap(x) for x in values) if v is not None)
-                for category, values in sorted(usage.items())
-            }
+            remapped_usage = {}
+            for category, values in sorted(usage.items()):
+                if category == "ambiguous_calls" or category.endswith("_detail"):
+                    new_vals = []
+                    for v in values:
+                        if isinstance(v, dict):
+                            new_mod = _remap(v.get("module"))
+                            if new_mod is not None:
+                                new_val = dict(v)
+                                new_val["module"] = new_mod
+                                new_vals.append(new_val)
+                        else:
+                            new_mod = _remap(v)
+                            if new_mod is not None:
+                                new_vals.append(new_mod)
+                    if new_vals:
+                        if all(isinstance(x, dict) for x in new_vals):
+                            remapped_usage[category] = sorted(new_vals, key=lambda x: x.get("module", 0))
+                        else:
+                            remapped_usage[category] = new_vals # skip sorting if mixed
+                else:
+                    # Flat arrays of indices
+                    new_vals = sorted(m for m in (_remap(x) for x in values) if m is not None)
+                    if new_vals:
+                        remapped_usage[category] = new_vals
+            
+            if remapped_usage:
+                remapped["usage"] = remapped_usage
         layer_compact_artifacts[key] = remapped
 
     layer_compact_artifacts_report = {

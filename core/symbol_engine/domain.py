@@ -8,6 +8,7 @@ class SymbolFacts:
     globals: set[str] = field(default_factory=set)
     calls: set[str] = field(default_factory=set)
     assignments: set[str] = field(default_factory=set)
+    signatures: dict[str, str] = field(default_factory=dict)
     errors: list[str] = field(default_factory=list)
 
     def all_symbols(self) -> set[str]:
@@ -21,5 +22,6 @@ class SymbolFacts:
             "globals": sorted(self.globals),
             "calls": sorted(self.calls),
             "assignments": sorted(self.assignments),
+            "signatures": self.signatures,
             "errors": self.errors,
         }

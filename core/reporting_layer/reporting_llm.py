@@ -15,15 +15,20 @@ def _format_api_surface(surface: dict) -> str:
         return "No public API detected."
 
     lines = [
-        "| Symbol | Type | Line | Consumers |",
-        "|---|---|---|---|"
+        "| Symbol | Type | Line | Signature | Consumers |",
+        "|---|---|---|---|---|"
     ]
     for name, data in surface.items():
         kind = data.get("kind", "unknown")
         line_start = data.get("line_start", "?")
+        signature = data.get("signature") or data.get("detailed_signature") or ""
+        if signature:
+            signature = f"`{signature}`"
+        else:
+            signature = "-"
         # In this simplified bundle, we skip consumer calculation details for brevity
         # but the symbol is listed clearly.
-        lines.append(f"| `{name}` | {kind} | {line_start} | _see single file JSON_ |")
+        lines.append(f"| `{name}` | {kind} | {line_start} | {signature} | _see single file JSON_ |")
     return "\n".join(lines)
 
 def _format_git_context(git_ctx: dict) -> str:
