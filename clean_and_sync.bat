@@ -1,6 +1,6 @@
 @echo off
 echo ========================================================
-echo     Repo Guardian - Clean and Sync Script
+echo     Contextor - Clean and Sync Script
 echo ========================================================
 echo.
 

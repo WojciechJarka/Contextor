@@ -28,7 +28,7 @@ class GuardianGUI:
     """
     def __init__(self, root):
         self.root = root
-        self.root.title("Reposter")
+        self.root.title("Contextor")
         
         self.state = load_state()
         gui_geom = self.state.get("gui_geometry", "760x640")
@@ -109,7 +109,7 @@ class GuardianGUI:
         header.grid(row=0, column=0, sticky="ew", pady=(0, PAD_LG))
         header.columnconfigure(0, weight=1)
         
-        ttk.Label(header, text="Reposter", style="Header.TLabel").grid(row=0, column=0, sticky="w")
+        ttk.Label(header, text="Contextor", style="Header.TLabel").grid(row=0, column=0, sticky="w")
         sub_label = ttk.Label(header, text="Static architecture analysis · Read-only mode", style="Sub.TLabel")
         sub_label.grid(row=1, column=0, sticky="w", pady=(2, 0))
         self.tooltip = HeaderTooltipManager(sub_label, "Static architecture analysis · Read-only mode")
