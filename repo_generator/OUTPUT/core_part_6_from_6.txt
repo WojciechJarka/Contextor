@@ -1,0 +1,2437 @@
+# Layer:
+#   CORE / GOVERNANCE
+#
+# Role:
+#   Registry governance orchestration facade.
+#
+# Responsibility:
+#   Coordinates registry lifecycle operations.
+#
+# Provides:
+#
+#   - registry initialization
+#   - immutable snapshot creation
+#   - governance projection access
+#   - registry audit execution
+#
+# MUST NOT:
+#
+#   - contain component logic
+#   - execute registry entries
+#   - mutate contracts
+#   - resolve dependencies
+#
+# Ownership:
+#
+#   Registry:
+#       storage
+#
+#   Auditor:
+#       comparison
+#
+#   Service:
+#       orchestration only
+#
+# Status:
+#   GK STRICT / GOVERNANCE FACADE
+# ============================================================
+
+
+from __future__ import annotations
+
+
+from typing import Final
+
+
+from ..registry.registry import (
+    Registry,
+)
+
+
+from ..registry.bootstrap import (
+    RegistryBootstrap,
+)
+
+
+from .default_projection import (
+    DefaultRegistryProjection,
+)
+
+
+from .registry_auditor import (
+    RegistryAuditor,
+)
+
+
+from ..contracts.registry_state import (
+    RegistryState,
+)
+
+
+from ..contracts.registry_projection import (
+    RegistryProjection,
+)
+
+
+from ..contracts.governance.registry_audit import (
+    RegistryAuditReport,
+)
+
+
+
+__all__ = [
+    "VERSION",
+    "RegistryService",
+]
+
+
+
+VERSION: Final[str] = (
+    "RegistryService v5.0.2"
+)
+
+
+
+# ============================================================
+# SERVICE
+# ============================================================
+
+
+class RegistryService:
+    """
+    Governance registry facade.
+
+    Coordinates existing boundaries.
+
+    Does not own registry data.
+    """
+
+
+
+    def __init__(
+        self,
+    ) -> None:
+
+
+        self._bootstrap = RegistryBootstrap()
+
+        self._projection_builder = (
+            DefaultRegistryProjection()
+        )
+
+        self._auditor = RegistryAuditor()
+
+
+        self._registry: Registry | None = None
+
+
+
+    # ========================================================
+    # INITIALIZATION
+    # ========================================================
+
+
+    def initialize(
+        self,
+    ) -> Registry:
+        """
+        Create runtime registry.
+        """
+
+
+        self._registry = (
+            self._bootstrap.build()
+        )
+
+
+        return self._registry
+
+
+
+    # ========================================================
+    # STATE
+    # ========================================================
+
+
+    def snapshot(
+        self,
+    ) -> RegistryState:
+        """
+        Return immutable registry state.
+        """
+
+
+        registry = self._require_registry()
+
+
+        return registry.snapshot()
+
+
+
+    # ========================================================
+    # PROJECTION
+    # ========================================================
+
+
+    def projection(
+        self,
+    ) -> RegistryProjection:
+        """
+        Return expected governance model.
+        """
+
+
+        return (
+            self._projection_builder.build()
+        )
+
+
+
+    # ========================================================
+    # AUDIT
+    # ========================================================
+
+
+    def audit(
+        self,
+    ) -> RegistryAuditReport:
+        """
+        Compare expected and actual state.
+        """
+
+
+        state = self.snapshot()
+
+        projection = self.projection()
+
+
+        return self._auditor.compare(
+            projection=projection,
+            state=state,
+        )
+
+
+
+    # ========================================================
+    # INTERNAL
+    # ========================================================
+
+
+    def _require_registry(
+        self,
+    ) -> Registry:
+
+        if self._registry is None:
+
+            raise RuntimeError(
+                "REGISTRY_NOT_INITIALIZED"
+            )
+
+
+        return self._registry
+
+#~~~~~~[FILE END: registry_service.py ]~~~~~~#
+
+#~~~~~~[FILE START: __init__.py ]~~~~~~#
+# ============================================================
+# Proper File Protocol (PFP) v5.0.2 — GK GOVERNANCE API
+#
+# File:
+#   data_preprocessing/core/governance/__init__.py
+#
+# Layer:
+#   CORE / GOVERNANCE
+#
+# Role:
+#   Public governance boundary.
+#
+# Status:
+#   GK STRICT
+# ============================================================
+
+
+from __future__ import annotations
+
+
+from .registry_auditor import (
+    RegistryAuditor,
+)
+
+
+from .default_projection import (
+    DefaultRegistryProjection,
+)
+
+
+from .registry_service import (
+    RegistryService,
+)
+
+
+
+__all__ = [
+
+    "RegistryAuditor",
+
+    "DefaultRegistryProjection",
+
+    "RegistryService",
+
+]
+
+#~~~~~~[FILE END: __init__.py ]~~~~~~#
+
+#~~~~~~[FILE START: date_normalizer.py ]~~~~~~#
+# ============================================================
+#  Proper File Protocol (PFP) v4.1.4 — CORE UTILITY (GK)
+#  File: data_preprocessing/core/normalizers/date_normalizer_gk.py
+#  Layer: CORE UTILITY — Canonical Temporal Formatter
+#  Role: Deterministic ISO-8601 formatter (GK-compliant)
+#  Status: HQ2 STRICT, ZERO-SEMANTICS
+# ============================================================
+
+from __future__ import annotations
+
+import datetime
+from typing import Optional, Union
+
+
+# ============================================================
+# CONTROLLED FAILURES
+# ============================================================
+
+class HQ2NormalizationError(Exception):
+    """Base controlled failure."""
+    pass
+
+
+class HQ2UnsupportedTemporalType(HQ2NormalizationError):
+    """Input is not a supported temporal object."""
+    pass
+
+
+class HQ2TimezoneInvariantError(HQ2NormalizationError):
+    """Datetime violates timezone invariants."""
+    pass
+
+
+# ============================================================
+# ENGINE
+# ============================================================
+
+class DateNormalizerGK:
+    """
+    GK-compliant canonical temporal formatter.
+
+    Input:
+        datetime.date
+        datetime.datetime (UTC-naive or UTC-aware)
+
+    Output:
+        canonical ISO-8601 string
+
+    Invariants:
+        - no parsing
+        - no inference
+        - no timezone conversion except UTC normalization
+        - no semantic branching
+        - deterministic formatting
+    """
+
+    DATETIME_TIMESPEC = "milliseconds"
+    TIMEZONE_OUTPUT = "Z"
+
+    def normalize(
+        self,
+        value: Union[datetime.date, datetime.datetime],
+    ) -> str:
+
+        if value is None:
+            raise HQ2UnsupportedTemporalType("NONE_VALUE")
+
+        # ----------------------------------------------------
+        # Pure date
+        # ----------------------------------------------------
+        if isinstance(value, datetime.date) and not isinstance(value, datetime.datetime):
+            return value.isoformat()
+
+        # ----------------------------------------------------
+        # Datetime
+        # ----------------------------------------------------
+        if isinstance(value, datetime.datetime):
+
+            # UTC-aware → normalize to UTC-naive
+            if value.tzinfo is not None:
+                value = (
+                    value.astimezone(datetime.timezone.utc)
+                    .replace(tzinfo=None)
+                )
+
+            # must be UTC-naive at this point
+            if value.tzinfo is not None:
+                raise HQ2TimezoneInvariantError("NON_UTC_DATETIME")
+
+            return self._format_datetime(value)
+
+        # ----------------------------------------------------
+        # Unsupported type
+        # ----------------------------------------------------
+        raise HQ2UnsupportedTemporalType(type(value).__name__)
+
+    # ========================================================
+    # INTERNAL FORMATTER
+    # ========================================================
+
+    def _format_datetime(
+        self,
+        dt: datetime.datetime,
+    ) -> str:
+
+        # truncate microseconds → milliseconds
+        ms = (dt.microsecond // 1000) * 1000
+
+        normalized = dt.replace(microsecond=ms)
+
+        return (
+            normalized.isoformat(timespec=self.DATETIME_TIMESPEC)
+            + self.TIMEZONE_OUTPUT
+        )
+
+#~~~~~~[FILE END: date_normalizer.py ]~~~~~~#
+
+#~~~~~~[FILE START: refactoring_guide.md ]~~~~~~#
+# DateNormalizer — Refactoring Guide (Future Evolution)
+
+## Status
+
+This document describes **future refactoring directions** for the DateNormalizer
+module within the jsonxml NORMALIZER LAYER.
+
+It does NOT require immediate changes.
+
+The current implementation is considered:
+- production-safe
+- stable
+- enterprise-aligned
+
+---
+
+## 1. Current Architectural State
+
+DateNormalizer currently operates as:
+
+- PURE formatting layer
+- Stateless transformation component
+- ISO-8601 output generator
+- Post-CORE / Post-DETECTOR stage processor
+
+Pipeline position:
+
+RAW INPUT → PARSER → ADAPTER → CORE → DETECTOR → NORMALIZER
+
+---
+
+## 2. Known Architectural Limitations (Non-Critical)
+
+These are not bugs — only design observations at scale:
+
+### 2.1 Semantic coupling via `date_type`
+
+The `date_type` parameter introduces light semantic dependency
+between DETECTOR and NORMALIZER.
+
+Current effect:
+- NORMALIZER behaves differently based on upstream classification
+
+Risk:
+- mild coupling between semantic and formatting layers
+
+---
+
+### 2.2 Type branching inside NORMALIZER
+
+Current logic differentiates:
+- datetime
+- date
+
+This assumes upstream correctness of type classification.
+
+Risk:
+- NORMALIZER is partially aware of semantic classification boundaries
+
+---
+
+### 2.3 Implicit CORE assumptions in formatting
+
+The module assumes:
+- datetime input is already UTC-normalized
+- no timezone inference is required
+
+This is not enforced in code, only by contract.
+
+---
+
+## 3. Recommended Future Refactoring Direction (Post-Stabilization)
+
+These changes should ONLY be considered when:
+
+- DETECTOR layer is fully stabilized
+- DTO/contract system is introduced
+- cross-module interfaces are frozen
+
+---
+
+### 3.1 Introduce typed DTO instead of primitive branching
+
+Instead of:
+
+```python
+value: datetime | date
+date_type: str
+
+Move toward:
+
+DateValueDTO:
+    type: "date" | "datetime"
+    value: datetime
+
+Benefit:
+
+removes conditional logic from NORMALIZER
+enforces strict contract boundary
+eliminates semantic branching
+3.2 Remove date_type from NORMALIZER API
+
+Goal:
+
+NORMALIZER becomes purely mechanical formatter
+no semantic awareness
+3.3 Strict separation of concerns
+
+Future state:
+
+DETECTOR → classification only
+CORE → invariants only (UTC, type safety)
+NORMALIZER → formatting only (no branching)
+3.4 Centralize ISO policy (optional future enhancement)
+
+Potential improvement:
+
+ISO formatting rules extracted into shared policy layer
+
+Example:
+
+precision rules (microseconds vs milliseconds)
+timezone suffix handling ("Z")
+4. Non-Goals
+
+This document explicitly does NOT propose:
+
+immediate refactoring
+API breaking changes
+removal of backward compatibility
+changes to CORE or DETECTOR
+5. Refactoring Triggers
+
+Refactor ONLY if:
+
+NORMALIZER grows additional semantic branches
+DETECTOR introduces more classification flags
+multiple normalizers diverge in behavior
+contract drift appears between CORE and NORMALIZER
+6. Design Principle Reminder
+
+NORMALIZER must remain the "dumbest possible layer":
+it formats, it does not decide.
+
+7. Summary
+
+Current implementation is correct and production-ready.
+
+Future improvements aim to:
+
+reduce semantic coupling
+enforce stricter contracts
+eliminate branching logic in formatting layer
+
+No action required until system reaches higher scale stability threshold.
+
+#~~~~~~[FILE END: refactoring_guide.md ]~~~~~~#
+
+#~~~~~~[FILE START: date_string_parser.py ]~~~~~~#
+# ============================================================================
+# Proper File Protocol (PFP) v3.2 — HARDENED PARSER LAYER
+#
+# Project:
+# HQ2 Data Ingestion & Normalization Stack
+#
+# Layer:
+# PARSER LAYER (String → Datetime Transformation ONLY)
+#
+# File:
+# data_preprocessing/core/parsers/date_string_parser.py
+#
+# Status:
+# STABLE
+#
+# Contract:
+# String input → datetime.datetime | None
+#
+# Responsibilities:
+# - syntactic parsing only
+# - deterministic conversion
+# - no semantic interpretation
+#
+# MUST NOT:
+# - resolve ambiguity
+# - score candidates
+# - infer locale
+# - normalize timezone
+# - perform detection
+#
+# Semantic ownership:
+# DETECTOR
+#
+# Time normalization ownership:
+# CORE
+# ============================================================================
+
+from __future__ import annotations
+
+from datetime import datetime
+from typing import Optional, Tuple, Union
+
+from data_preprocessing.core.contracts.ambiguity_contract import (
+    AmbiguousDateTime,
+    DateCandidate,
+)
+
+
+ParserResult = Union[
+    datetime,
+    AmbiguousDateTime,
+    None,
+]
+
+
+class DateStringParser:
+    """
+    Stateless deterministic string parser.
+
+    It produces:
+        - one datetime
+        - unresolved ambiguity
+        - None
+
+    It never decides meaning.
+    """
+
+    # ------------------------------------------------------------------ #
+    # ISO8601
+    # ------------------------------------------------------------------ #
+
+    def parse_iso(self, value: str) -> Optional[DateCandidate]:
+
+        if not isinstance(value, str):
+            return None
+
+        text = value.strip()
+
+        if not text:
+            return None
+
+        try:
+            normalized = (
+                text[:-1] + "+00:00"
+                if text.endswith("Z")
+                else text
+            )
+
+            dt = datetime.fromisoformat(
+                normalized
+            )
+
+            return DateCandidate(
+                value=dt,
+                parser_id="iso8601_parser",
+            )
+
+        except ValueError:
+            return None
+
+    # ------------------------------------------------------------------ #
+    # EU
+    # ------------------------------------------------------------------ #
+
+    def parse_eu_date(self, value: str) -> Optional[DateCandidate]:
+
+        if not isinstance(value, str):
+            return None
+
+        text = value.strip()
+
+        if text.count("/") != 2:
+            return None
+
+        try:
+            day, month, year = (
+                int(x)
+                for x in text.split("/")
+            )
+
+            dt = datetime(
+                year,
+                month,
+                day,
+            )
+
+            return DateCandidate(
+                value=dt,
+                parser_id="eu_date_parser",
+            )
+
+        except ValueError:
+            return None
+
+    # ------------------------------------------------------------------ #
+    # US
+    # ------------------------------------------------------------------ #
+
+    def parse_us_date(self, value: str) -> Optional[DateCandidate]:
+
+        if not isinstance(value, str):
+            return None
+
+        text = value.strip()
+
+        if text.count("/") != 2:
+            return None
+
+        try:
+            month, day, year = (
+                int(x)
+                for x in text.split("/")
+            )
+
+            dt = datetime(
+                year,
+                month,
+                day,
+            )
+
+            return DateCandidate(
+                value=dt,
+                parser_id="us_date_parser",
+            )
+
+        except ValueError:
+            return None
+
+    # ------------------------------------------------------------------ #
+    # MAIN ENTRY
+    # ------------------------------------------------------------------ #
+
+    def parse(self, value: str) -> ParserResult:
+
+        if not isinstance(value, str):
+            return None
+
+        candidates = []
+
+        iso = self.parse_iso(value)
+        if iso:
+            candidates.append(iso)
+
+        eu = self.parse_eu_date(value)
+        if eu:
+            candidates.append(eu)
+
+        us = self.parse_us_date(value)
+        if us:
+            candidates.append(us)
+
+        if len(candidates) == 0:
+            return None
+
+        if len(candidates) == 1:
+            return candidates[0].value
+
+        return AmbiguousDateTime(
+            raw=value,
+            candidates=tuple(candidates),
+        )
+
+#~~~~~~[FILE END: date_string_parser.py ]~~~~~~#
+
+#~~~~~~[FILE START: Parser Contract Specification v1.0.md ]~~~~~~#
+============================================================================
+Parser Contract Specification v1.0
+HQ2 Data Ingestion & Normalization Stack
+============================================================================
+
+Layer:
+INGESTION-CORE / PARSER
+
+Purpose:
+
+Parser layer performs deterministic syntactic transformation only.
+
+Pipeline:
+
+RAW INPUT
+   |
+   v
+PARSER
+   |
+   v
+ADAPTER
+   |
+   v
+CORE
+   |
+   v
+DETECTOR
+   |
+   v
+NORMALIZER
+
+
+Parser responsibilities:
+
+- syntax recognition
+- deterministic conversion
+- explicit format handling
+
+
+Parser MUST NOT:
+
+- resolve semantic ambiguity
+- infer locale
+- perform scoring
+- normalize timezone
+- inspect external context
+- execute business logic
+
+
+Allowed output:
+
+- datetime.datetime
+- parser-defined contract object
+- None
+
+
+Ambiguity:
+
+AmbiguousDateTime is a transport contract only.
+
+Parser MAY emit it.
+
+Detector owns resolution.
+
+Core remains semantically unaware.
+
+
+Versioning:
+
+Breaking:
+- output contract changes
+- accepted input domain changes
+
+Non-breaking:
+- additional parser metadata
+- governance metadata additions
+
+
+Summary:
+
+Parser = syntax.
+
+Detector = meaning.
+
+Core = invariants.
+
+Normalizer = final representation.
+
+============================================================================
+
+#~~~~~~[FILE END: Parser Contract Specification v1.0.md ]~~~~~~#
+
+#~~~~~~[FILE START: unix_timestamp_parser.py ]~~~~~~#
+# ============================================================
+#  Proper File Protocol (PFP) v5.0.1 — GK UNIX TIMESTAMP PARSER
+#
+#  File:
+#    data_preprocessing/core/parsers/unix_timestamp_parser_gk.py
+#
+#  Layer:
+#    PARSER — Numeric Timestamp → UTC Datetime Transformation
+#
+#  Role:
+#    Deterministic UNIX timestamp parser with explicit unit.
+#
+#  Contract:
+#
+#    NORMALIZED TIMESTAMP VALUE
+#              +
+#        EXPLICIT TIMESTAMP UNIT
+#              |
+#              v
+#        UTC DATETIME
+#
+#  Responsibilities:
+#    - numeric validation
+#    - timestamp conversion
+#    - UTC datetime generation
+#
+#  MUST NOT:
+#    - detect timestamp unit
+#    - guess timestamp format
+#    - apply heuristics
+#    - infer meaning
+#    - normalize business data
+#
+#  Ownership:
+#
+#    DETECTOR:
+#        timestamp candidate detection
+#
+#    PARSER:
+#        deterministic conversion
+#
+#    NORMALIZER:
+#        representation policy
+#
+#  Status:
+#    HQ2 STRICT / GK COMPLIANT / ZERO-HEURISTICS
+# ============================================================
+
+
+from __future__ import annotations
+
+import datetime
+from enum import StrEnum
+from typing import Any
+
+
+__all__ = [
+    "VERSION",
+    "TimestampUnit",
+    "UnixTimestampParserGK",
+    "HQ2TimestampError",
+    "HQ2InvalidType",
+    "HQ2NegativeTimestamp",
+    "HQ2OverflowTimestamp",
+]
+
+
+VERSION: str = "UnixTimestampParserGK v5.0.1"
+
+
+# ============================================================
+# CONTROLLED FAILURES
+# ============================================================
+
+
+class HQ2TimestampError(Exception):
+    """
+    Base timestamp parser failure.
+    """
+
+    pass
+
+
+class HQ2InvalidType(HQ2TimestampError):
+    """
+    Unsupported input type.
+    """
+
+    pass
+
+
+class HQ2NegativeTimestamp(HQ2TimestampError):
+    """
+    Timestamp value is negative.
+    """
+
+    pass
+
+
+class HQ2OverflowTimestamp(HQ2TimestampError):
+    """
+    Timestamp exceeds datetime range.
+    """
+
+    pass
+
+
+# ============================================================
+# CONSTANTS
+# ============================================================
+
+
+MAX_TIMESTAMP_SECONDS: int = 253402300799
+
+
+class TimestampUnit(StrEnum):
+    """
+    Explicit UNIX timestamp unit.
+    """
+
+    SECOND = "s"
+    MILLISECOND = "ms"
+    MICROSECOND = "us"
+
+
+# ============================================================
+# ENGINE
+# ============================================================
+
+
+class UnixTimestampParserGK:
+    """
+    Deterministic UNIX timestamp parser.
+
+    Guarantees:
+
+    - stateless
+    - deterministic
+    - explicit unit only
+    - no heuristics
+    - UTC aware output
+    - no semantic interpretation
+    """
+
+    __slots__ = ()
+
+
+    # ========================================================
+    # PUBLIC API
+    # ========================================================
+
+
+    def parse_unix(
+        self,
+        value: Any,
+        unit: TimestampUnit,
+    ) -> datetime.datetime:
+        """
+        Converts UNIX timestamp into UTC datetime.
+
+        Unit must be explicitly provided.
+        """
+
+        timestamp = self._normalize_input(
+            value
+        )
+
+        seconds = self._convert_to_seconds(
+            timestamp,
+            unit,
+        )
+
+        self._validate_range(
+            seconds
+        )
+
+        return datetime.datetime.fromtimestamp(
+            seconds,
+            tz=datetime.timezone.utc,
+        )
+
+
+    # ========================================================
+    # INPUT VALIDATION
+    # ========================================================
+
+
+    def _normalize_input(
+        self,
+        value: Any,
+    ) -> int:
+
+        if isinstance(value, bool):
+
+            raise HQ2InvalidType(
+                "BOOL_NOT_ALLOWED"
+            )
+
+
+        if isinstance(value, int):
+
+            timestamp = value
+
+
+        elif isinstance(value, str):
+
+            if not value.isascii():
+
+                raise HQ2InvalidType(
+                    "NON_ASCII_STRING"
+                )
+
+            if not value.isdigit():
+
+                raise HQ2InvalidType(
+                    "NON_DIGIT_STRING"
+                )
+
+            timestamp = int(value)
+
+
+        else:
+
+            raise HQ2InvalidType(
+                type(value).__name__
+            )
+
+
+        if timestamp < 0:
+
+            raise HQ2NegativeTimestamp(
+                "NEGATIVE_TIMESTAMP"
+            )
+
+
+        return timestamp
+
+
+    # ========================================================
+    # UNIT CONVERSION
+    # ========================================================
+
+
+    def _convert_to_seconds(
+        self,
+        timestamp: int,
+        unit: TimestampUnit,
+    ) -> int:
+
+        if unit == TimestampUnit.SECOND:
+
+            return timestamp
+
+
+        if unit == TimestampUnit.MILLISECOND:
+
+            return timestamp // 1000
+
+
+        if unit == TimestampUnit.MICROSECOND:
+
+            return timestamp // 1_000_000
+
+
+        raise HQ2InvalidType(
+            "UNSUPPORTED_TIMESTAMP_UNIT"
+        )
+
+
+    # ========================================================
+    # RANGE VALIDATION
+    # ========================================================
+
+
+    def _validate_range(
+        self,
+        seconds: int,
+    ) -> None:
+
+        if seconds > MAX_TIMESTAMP_SECONDS:
+
+            raise HQ2OverflowTimestamp(
+                "TIMESTAMP_OUT_OF_RANGE"
+            )
+
+#~~~~~~[FILE END: unix_timestamp_parser.py ]~~~~~~#
+
+#~~~~~~[FILE START: date_perf.py ]~~~~~~#
+# ============================================================
+#  Proper File Protocol (PFP) v5.0.1 — GK PERFORMANCE PRIMITIVES
+#
+#  File:
+#    data_preprocessing/core/performance/date_perf_gk.py
+#
+#  Layer:
+#    CORE UTILITY — PERFORMANCE PRIMITIVES (GK)
+#
+#  Role:
+#    Deterministic low-level performance utilities.
+#
+#  Contract:
+#
+#    INPUT
+#       |
+#       v
+#    PERFORMANCE OPERATION
+#       |
+#       v
+#    DETERMINISTIC OUTPUT
+#
+#  Responsibilities:
+#    - deterministic memory operations
+#    - deterministic sequence operations
+#    - stateless execution helpers
+#    - controlled invariant validation
+#
+#  MUST NOT:
+#    - detect meaning
+#    - classify data
+#    - handle dates
+#    - handle null semantics
+#    - parse values
+#    - normalize values
+#    - apply business rules
+#
+#  Ownership:
+#
+#    PERFORMANCE LAYER:
+#        execution efficiency
+#
+#    ROUTER:
+#        structural signals
+#
+#    DETECTOR:
+#        semantic interpretation
+#
+#    PARSER:
+#        syntax conversion
+#
+#    NORMALIZER:
+#        representation changes
+#
+#  Status:
+#    HQ2 STRICT / GK COMPLIANT / ZERO-SEMANTICS
+# ============================================================
+
+
+from __future__ import annotations
+
+from typing import Any, Callable, Generator, Iterable, Sequence
+
+
+__all__ = [
+    "VERSION",
+    "HQ2PerformanceError",
+    "HQ2PerformanceInputError",
+    "HQ2PerformanceInvariantError",
+    "PerformancePrimitivesGK",
+]
+
+
+VERSION: str = "PerformancePrimitivesGK v5.0.1"
+
+
+# ============================================================
+# CONTROLLED FAILURES
+# ============================================================
+
+
+class HQ2PerformanceError(Exception):
+    """
+    Base controlled performance failure.
+    """
+
+    pass
+
+
+class HQ2PerformanceInputError(HQ2PerformanceError):
+    """
+    Input violates performance primitive contract.
+    """
+
+    pass
+
+
+class HQ2PerformanceInvariantError(HQ2PerformanceError):
+    """
+    Internal execution invariant violated.
+    """
+
+    pass
+
+
+# ============================================================
+# ENGINE
+# ============================================================
+
+
+class PerformancePrimitivesGK:
+    """
+    GK deterministic performance primitives.
+
+    Guarantees:
+
+    - stateless
+    - deterministic
+    - zero semantics
+    - zero parsing
+    - zero normalization
+    - zero domain knowledge
+    """
+
+    __slots__ = ()
+
+    MAX_BUFFER_SIZE: int = 10_000_000
+
+
+    # ========================================================
+    # PREFIX EXTRACTION
+    # ========================================================
+
+    @staticmethod
+    def take_prefix(
+        values: Sequence[Any] | None,
+        size: int,
+    ) -> list[Any]:
+        """
+        Returns deterministic first N elements.
+
+        No sampling.
+        No randomization.
+        No mutation.
+        """
+
+        if values is None:
+            raise HQ2PerformanceInputError(
+                "VALUES_NONE"
+            )
+
+        if not isinstance(size, int):
+            raise HQ2PerformanceInputError(
+                "SIZE_NOT_INT"
+            )
+
+        if size < 0:
+            raise HQ2PerformanceInvariantError(
+                "SIZE_NEGATIVE"
+            )
+
+        return list(
+            values[:size]
+        )
+
+
+    # ========================================================
+    # STREAM FILTER
+    # ========================================================
+
+    @staticmethod
+    def stream_filter(
+        values: Iterable[Any],
+        predicate: Callable[[Any], bool],
+    ) -> Generator[Any, None, None]:
+        """
+        Lazy deterministic filtering.
+
+        Predicate ownership remains external.
+        No semantic interpretation.
+        """
+
+        if values is None:
+            raise HQ2PerformanceInputError(
+                "VALUES_NONE"
+            )
+
+        if not callable(predicate):
+            raise HQ2PerformanceInputError(
+                "PREDICATE_NOT_CALLABLE"
+            )
+
+        for value in values:
+
+            if predicate(value):
+                yield value
+
+
+    # ========================================================
+    # BUFFER ALLOCATION
+    # ========================================================
+
+    @staticmethod
+    def allocate_buffer(
+        size: int,
+        *,
+        factory: Callable[[], Any] | None = None,
+        fill: Any = None,
+    ) -> list[Any]:
+        """
+        Deterministic buffer allocation.
+
+        Factory creates independent objects.
+
+        Without factory:
+        references identical immutable/object values.
+        """
+
+        if not isinstance(size, int):
+            raise HQ2PerformanceInputError(
+                "SIZE_NOT_INT"
+            )
+
+        if size < 0:
+            raise HQ2PerformanceInvariantError(
+                "SIZE_NEGATIVE"
+            )
+
+        if size > PerformancePrimitivesGK.MAX_BUFFER_SIZE:
+            raise HQ2PerformanceInvariantError(
+                "SIZE_EXCEEDS_LIMIT"
+            )
+
+        if factory is not None:
+
+            if not callable(factory):
+                raise HQ2PerformanceInputError(
+                    "FACTORY_NOT_CALLABLE"
+                )
+
+            return [
+                factory()
+                for _ in range(size)
+            ]
+
+        return [
+            fill
+            for _ in range(size)
+        ]
+```
+
+#~~~~~~[FILE END: date_perf.py ]~~~~~~#
+
+#~~~~~~[FILE START: bootstrap.py ]~~~~~~#
+# ============================================================
+# Proper File Protocol (PFP) v5.0.2 — GK REGISTRY BOOTSTRAP
+#
+# File:
+#   data_preprocessing/core/registry/bootstrap.py
+#
+# Layer:
+#   CORE / REGISTRY
+#
+# Role:
+#   Deterministic registry initialization.
+#
+# Responsibility:
+#   Creates initial governed registry state.
+#
+# MUST NOT:
+#
+#   - execute components
+#   - import implementations
+#   - resolve dependencies
+#   - modify contract definitions
+#   - contain runtime logic
+#
+# Ownership:
+#
+#   Bootstrap:
+#       initial composition
+#
+#   Registry:
+#       runtime storage
+#
+#   RegistryEntry:
+#       immutable descriptor
+#
+# Status:
+#   GK STRICT / GOVERNANCE INITIALIZATION
+# ============================================================
+
+
+from __future__ import annotations
+
+
+from typing import Final
+
+
+from .registry import (
+    Registry,
+)
+
+
+from ..contracts.registry_entry import (
+    RegistryEntry,
+)
+
+
+from ..contracts.registry_entry_builder import (
+    RegistryEntryBuilder,
+)
+
+
+
+__all__ = [
+    "VERSION",
+    "RegistryBootstrap",
+]
+
+
+
+VERSION: Final[str] = (
+    "RegistryBootstrap v5.0.2"
+)
+
+
+
+# ============================================================
+# BOOTSTRAP
+# ============================================================
+
+
+class RegistryBootstrap:
+    """
+    Deterministic registry initializer.
+
+    Provides only registry composition.
+
+    No runtime execution.
+    """
+
+
+
+    def build(
+        self,
+    ) -> Registry:
+        """
+        Create default CORE registry.
+        """
+
+
+        registry = Registry(
+            name="CORE_REGISTRY"
+        )
+
+
+        entries = self.default_entries()
+
+
+
+        for entry in entries:
+
+            registry.add(
+                entry
+            )
+
+
+        return registry
+
+
+
+    # ========================================================
+    # DEFAULT MODEL
+    # ========================================================
+
+
+    def default_entries(
+        self,
+    ) -> tuple[RegistryEntry, ...]:
+        """
+        Returns default governance entries.
+
+        Metadata only.
+        """
+
+
+        return (
+
+            RegistryEntryBuilder.build(
+                name="registry_entry",
+                kind="contract",
+                version="v5.0.2",
+                owner="core.contracts",
+                metadata={
+                    "role": "registry_identity"
+                },
+            ),
+
+
+            RegistryEntryBuilder.build(
+                name="registry_state",
+                kind="contract",
+                version="v5.0.2",
+                owner="core.contracts",
+                metadata={
+                    "role": "immutable_snapshot"
+                },
+            ),
+
+
+            RegistryEntryBuilder.build(
+                name="registry_projection",
+                kind="contract",
+                version="v5.0.2",
+                owner="core.contracts",
+                metadata={
+                    "role": "expected_governance_model"
+                },
+            ),
+
+
+            RegistryEntryBuilder.build(
+                name="registry_audit",
+                kind="contract",
+                version="v5.0.1",
+                owner="core.contracts.governance",
+                metadata={
+                    "role": "audit_result"
+                },
+            ),
+
+        )
+
+#~~~~~~[FILE END: bootstrap.py ]~~~~~~#
+
+#~~~~~~[FILE START: registry.py ]~~~~~~#
+# ============================================================
+# Proper File Protocol (PFP) v5.0.2 — GK RUNTIME REGISTRY
+#
+# File:
+#   data_preprocessing/core/registry/registry.py
+#
+# Layer:
+#   CORE / REGISTRY
+#
+# Role:
+#   Runtime registry storage boundary.
+#
+# Responsibility:
+#   Stores active registry entries and exposes
+#   immutable state snapshots.
+#
+# Guarantees:
+#
+#   - deterministic storage
+#   - controlled mutation boundary
+#   - immutable state export
+#
+# Registry MAY:
+#
+#   - add entries
+#   - expose snapshots
+#   - provide lookup
+#
+# Registry MUST NOT:
+#
+#   - execute components
+#   - import implementations
+#   - resolve dependencies
+#   - contain business logic
+#
+# Ownership:
+#
+#   Registry:
+#       runtime container
+#
+#   RegistryState:
+#       immutable observation
+#
+#   RegistryAudit:
+#       verification
+#
+# Status:
+#   GK STRICT / GOVERNANCE BOUNDARY
+# ============================================================
+
+
+from __future__ import annotations
+
+
+from typing import Final
+
+
+from ..contracts.registry_entry import (
+    RegistryEntry,
+    validate_registry_entry,
+)
+
+
+from ..contracts.registry_state import (
+    RegistryState,
+)
+
+
+
+__all__ = [
+    "VERSION",
+    "RegistryError",
+    "Registry",
+]
+
+
+
+VERSION: Final[str] = (
+    "GKRegistry v5.0.2"
+)
+
+
+
+# ============================================================
+# CONTROLLED FAILURES
+# ============================================================
+
+
+class RegistryError(Exception):
+    """
+    Runtime registry violation.
+    """
+
+    pass
+
+
+
+# ============================================================
+# REGISTRY
+# ============================================================
+
+
+class Registry:
+    """
+    Runtime registry storage.
+
+    Stores RegistryEntry objects only.
+
+    No execution.
+    No dependency resolution.
+    No component loading.
+    """
+
+
+
+    def __init__(
+        self,
+        *,
+        name: str = "CORE_REGISTRY",
+    ) -> None:
+
+
+        if not isinstance(
+            name,
+            str,
+        ):
+
+            raise RegistryError(
+                "REGISTRY_NAME_MUST_BE_STRING"
+            )
+
+
+        if not name.strip():
+
+            raise RegistryError(
+                "REGISTRY_NAME_EMPTY"
+            )
+
+
+        self._name = name
+
+        self._entries: dict[str, RegistryEntry] = {}
+
+
+
+    # ========================================================
+    # REGISTRATION
+    # ========================================================
+
+
+    def add(
+        self,
+        entry: RegistryEntry,
+    ) -> None:
+        """
+        Store registry entry.
+        """
+
+
+        validate_registry_entry(
+            entry
+        )
+
+
+        if entry.name in self._entries:
+
+            raise RegistryError(
+                f"DUPLICATE_ENTRY:{entry.name}"
+            )
+
+
+        self._entries[
+            entry.name
+        ] = entry
+
+
+
+    # ========================================================
+    # ACCESS
+    # ========================================================
+
+
+    def get(
+        self,
+        name: str,
+    ) -> RegistryEntry | None:
+        """
+        Lookup registry descriptor.
+
+        Returns metadata only.
+        """
+
+
+        return self._entries.get(
+            name
+        )
+
+
+
+    def contains(
+        self,
+        name: str,
+    ) -> bool:
+        """
+        Deterministic presence check.
+        """
+
+
+        return name in self._entries
+
+
+
+    # ========================================================
+    # SNAPSHOT
+    # ========================================================
+
+
+    def snapshot(
+        self,
+    ) -> RegistryState:
+        """
+        Create immutable registry state.
+        """
+
+
+        return RegistryState(
+            entries=tuple(
+                self._entries.values()
+            ),
+            version=VERSION,
+            source=self._name,
+        )
+
+
+
+    # ========================================================
+    # INFO
+    # ========================================================
+
+
+    @property
+    def name(
+        self,
+    ) -> str:
+
+        return self._name
+
+
+
+    @property
+    def size(
+        self,
+    ) -> int:
+
+        return len(
+            self._entries
+        )
+
+#~~~~~~[FILE END: registry.py ]~~~~~~#
+
+#~~~~~~[FILE START: __init__.py ]~~~~~~#
+# ============================================================
+# Proper File Protocol (PFP) v5.0.2 — GK REGISTRY API
+#
+# File:
+#   data_preprocessing/core/registry/__init__.py
+#
+# Layer:
+#   CORE / REGISTRY
+#
+# Role:
+#   Public runtime registry boundary.
+#
+# Status:
+#   GK STRICT
+# ============================================================
+
+
+from __future__ import annotations
+
+
+
+from .registry import (
+    Registry,
+    RegistryError,
+)
+
+
+
+from .bootstrap import (
+    RegistryBootstrap,
+)
+
+
+
+__all__ = [
+
+    "Registry",
+
+    "RegistryError",
+
+    "RegistryBootstrap",
+
+]
+
+#~~~~~~[FILE END: __init__.py ]~~~~~~#
+
+#~~~~~~[FILE START: shape_router.py ]~~~~~~#
+# ============================================================
+#  Proper File Protocol (PFP) v5.0.1 — GK SHAPE ROUTER LAYER
+#
+#  Project:
+#    HQ2 Data Ingestion & Normalization Stack
+#
+#  Layer:
+#    INGESTION-CORE / ROUTER (GK)
+#
+#  File:
+#    data_preprocessing/core/router/shape_router_gk.py
+#
+#  Role:
+#    Pure syntactic classifier for raw values.
+#
+#  Contract:
+#    RAW VALUE
+#        |
+#        v
+#    SHAPE SIGNAL
+#
+#  Responsibilities:
+#    - structural inspection only
+#    - deterministic hint generation
+#    - syntactic classification
+#
+#  MUST NOT:
+#    - parse values
+#    - infer meaning
+#    - detect dates
+#    - normalize
+#    - apply business rules
+#
+#  Ownership:
+#    ROUTER = structure
+#    PARSER = syntax conversion
+#    DETECTOR = semantic meaning
+#    CORE = invariants
+#
+#  Status:
+#    HQ2 STRICT / GK COMPLIANT
+# ============================================================
+
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import ClassVar, Final
+
+
+__all__ = [
+    "VERSION",
+    "ShapeSignal",
+    "ShapeRouterGK",
+]
+
+
+VERSION: Final[str] = "ShapeRouterGK v5.0.1"
+
+
+# ============================================================
+# OUTPUT CONTRACT
+# ============================================================
+
+
+@dataclass(frozen=True)
+class ShapeSignal:
+    """
+    Immutable structural signal.
+
+    kind:
+        Broad syntactic category only.
+
+    hints:
+        Stable ordered structural markers.
+    """
+
+    kind: str
+    hints: tuple[str, ...]
+
+
+# ============================================================
+# ROUTER IMPLEMENTATION
+# ============================================================
+
+
+class ShapeRouterGK:
+    """
+    Pure syntactic router.
+
+    Guarantees:
+
+    - deterministic
+    - stateless
+    - single pass
+    - immutable output
+    - zero semantic interpretation
+    - zero parsing
+    - zero normalization
+    """
+
+    __slots__ = ()
+
+
+    SHORT_LIMIT: Final[int] = 4
+    MEDIUM_LIMIT: Final[int] = 12
+
+
+    SEPARATOR_ORDER: ClassVar[tuple[str, ...]] = (
+        "-",
+        "/",
+        ".",
+        ":",
+        "+",
+        " ",
+    )
+
+
+    SEPARATOR_HINTS: ClassVar[dict[str, str]] = {
+        "-": "HAS_DASH",
+        "/": "HAS_SLASH",
+        ".": "HAS_DOT",
+        ":": "HAS_COLON",
+        "+": "HAS_PLUS",
+        " ": "HAS_WHITESPACE",
+    }
+
+
+    # ========================================================
+    # PUBLIC API
+    # ========================================================
+
+
+    def classify(
+        self,
+        value: object,
+    ) -> ShapeSignal:
+
+        if value is None:
+
+            return ShapeSignal(
+                kind="EMPTY",
+                hints=(),
+            )
+
+
+        if not isinstance(value, str):
+
+            return ShapeSignal(
+                kind="OTHER",
+                hints=("NON_STRING",),
+            )
+
+
+        if value == "":
+
+            return ShapeSignal(
+                kind="EMPTY",
+                hints=("EMPTY_STRING",),
+            )
+
+
+        hints: list[str] = []
+
+
+        has_digit = False
+        has_alpha = False
+        has_symbol = False
+        has_unicode = False
+        has_control = False
+
+
+        separators_found: set[str] = set()
+
+
+        token_count = 0
+        inside_token = False
+
+
+        # ====================================================
+        # SINGLE PASS CHARACTER SCAN
+        # ====================================================
+
+        for ch in value:
+
+            if ch in self.SEPARATOR_HINTS:
+
+                separators_found.add(ch)
+
+                if inside_token:
+                    token_count += 1
+                    inside_token = False
+
+                continue
+
+
+            inside_token = True
+
+
+            code = ord(ch)
+
+
+            if "0" <= ch <= "9":
+
+                has_digit = True
+
+
+            elif (
+                "A" <= ch <= "Z"
+                or "a" <= ch <= "z"
+            ):
+
+                has_alpha = True
+
+
+            elif code < 32:
+
+                has_control = True
+
+
+            elif code > 127:
+
+                has_unicode = True
+
+
+            else:
+
+                has_symbol = True
+
+
+        if inside_token:
+            token_count += 1
+
+
+        # ====================================================
+        # HINTS
+        # ====================================================
+
+
+        if has_digit:
+            hints.append("HAS_DIGIT")
+
+        if has_alpha:
+            hints.append("HAS_ALPHA")
+
+        if has_symbol:
+            hints.append("HAS_SYMBOL")
+
+        if has_unicode:
+            hints.append("HAS_UNICODE")
+
+        if has_control:
+            hints.append("HAS_CONTROL")
+
+
+        for separator in self.SEPARATOR_ORDER:
+
+            if separator in separators_found:
+
+                hints.append(
+                    self.SEPARATOR_HINTS[separator]
+                )
+
+
+        length = len(value)
+
+
+        if length <= self.SHORT_LIMIT:
+
+            hints.append("LEN_SHORT")
+
+        elif length <= self.MEDIUM_LIMIT:
+
+            hints.append("LEN_MEDIUM")
+
+        else:
+
+            hints.append("LEN_LONG")
+
+
+        if token_count == 1:
+
+            hints.append("TOKEN_SEGMENTS_1")
+
+        elif token_count == 2:
+
+            hints.append("TOKEN_SEGMENTS_2")
+
+        elif token_count == 3:
+
+            hints.append("TOKEN_SEGMENTS_3")
+
+        else:
+
+            hints.append("TOKEN_SEGMENTS_GT3")
+
+
+        # ====================================================
+        # BROAD STRUCTURAL KIND
+        # ====================================================
+
+
+        if has_control:
+
+            kind = "CONTROL"
+
+        elif has_digit and not has_alpha and not has_symbol:
+
+            kind = "DIGIT"
+
+        elif has_alpha and not has_digit and not has_symbol:
+
+            kind = "STRING"
+
+        elif has_alpha and has_digit and not has_symbol:
+
+            kind = "ALPHANUMERIC"
+
+        elif has_symbol:
+
+            kind = "MIXED"
+
+        else:
+
+            kind = "OTHER"
+
+
+        return ShapeSignal(
+            kind=kind,
+            hints=tuple(hints),
+        )
+
+#~~~~~~[FILE END: shape_router.py ]~~~~~~#
+
+#~~~~~~[FILE START: event_contract.py ]~~~~~~#
+# ============================================================================
+#  Proper File Protocol (PFP) v5.0.2
+#
+#  Event Contract Layer (ECL) v3.0.0
+#
+#  File:
+#    data_preprocessing/core/transport/event_contract.py
+#
+#  Layer:
+#    TRANSPORT
+#
+#  Classification:
+#    IMMUTABLE EVENT TRANSPORT CONTRACT
+#
+#  Purpose:
+#    Deterministic event envelope exchanged between bounded contexts.
+#
+#  Responsibilities:
+#    - preserve event identity
+#    - preserve trace ordering
+#    - transport audit facts
+#    - carry opaque metadata
+#
+#  Forbidden:
+#    - business rules
+#    - inference
+#    - normalization
+#    - repair
+#    - projection
+#    - mutation
+#
+#  Governance:
+#    GK-TRANSPORT-001
+#    ECL-3.0.0
+#
+#  Compatibility:
+#    Pydantic 1.x
+#
+#  Protocol:
+#    Proper File Protocol v5.0.2
+# ============================================================================
+
+from __future__ import annotations
+
+from enum import Enum
+from typing import Any, Optional
+
+from pydantic import BaseModel, Field
+
+
+# ============================================================================
+# ENUMS
+# ============================================================================
+
+
+class AuditSeverity(str, Enum):
+    """
+    Transport severity classification.
+
+    This enum has no domain meaning.
+    It only describes event transport importance.
+    """
+
+    INFO = "info"
+    WARNING = "warning"
+    ERROR = "error"
+    CRITICAL = "critical"
+
+
+# ============================================================================
+# EVENT TRANSPORT CONTRACT
+# ============================================================================
+
+
+class EventContract(BaseModel):
+    """
+    Immutable transport envelope.
+
+    Boundary:
+
+        Producer
+            |
+            v
+        ECL Transport
+            |
+            v
+        Consumer
+
+
+    The contract transports facts only.
+
+    It MUST NOT:
+
+        - mutate data
+        - normalize values
+        - infer missing information
+        - execute business logic
+        - create projections
+    """
+
+
+    # ------------------------------------------------------------------------
+    # Contract identity
+    # ------------------------------------------------------------------------
+
+    contract_version: str = Field(
+        default="ECL-3.0.0",
+        description="Transport contract version identifier."
+    )
+
+
+    # ------------------------------------------------------------------------
+    # Trace identity
+    # ------------------------------------------------------------------------
+
+    trace_id: str = Field(
+        ...,
+        min_length=1,
+        description="Global execution trace identifier."
+    )
+
+    sequence_id: int = Field(
+        ...,
+        ge=0,
+        description="Ordered event sequence inside trace."
+    )
+
+
+    # ------------------------------------------------------------------------
+    # Event classification
+    # ------------------------------------------------------------------------
+
+    event_type: str = Field(
+        ...,
+        min_length=1,
+        description="Canonical event type identifier."
+    )
+
+    severity: AuditSeverity = Field(
+        default=AuditSeverity.INFO,
+        description="Transport severity level."
+    )
+
+
+    # ------------------------------------------------------------------------
+    # Human-readable information
+    # ------------------------------------------------------------------------
+
+    message: str = Field(
+        ...,
+        min_length=1,
+        description="Human-readable event description."
+    )
+
+
+    # ------------------------------------------------------------------------
+    # Optional opaque context
+    # ------------------------------------------------------------------------
+
+    field: Optional[str] = Field(
+        default=None,
+        description="Optional affected field name."
+    )
+
+    value: Optional[Any] = Field(
+        default=None,
+        description="Opaque transport payload."
+    )
+
+
+    # ------------------------------------------------------------------------
+    # Temporal provenance
+    # ------------------------------------------------------------------------
+
+    timestamp: str = Field(
+        ...,
+        description="Event emission timestamp ISO-8601."
+    )
+
+    source_timestamp: Optional[str] = Field(
+        default=None,
+        description="Original upstream timestamp if provided."
+    )
+
+
+    # ------------------------------------------------------------------------
+    # PFP immutable transport rules
+    # ------------------------------------------------------------------------
+
+    class Config:
+        """
+        PFP v5.0.2 transport enforcement.
+
+        Rules:
+
+            frozen:
+                enabled
+
+            extra fields:
+                forbidden
+
+            mutation:
+                forbidden
+        """
+
+        frozen = True
+        extra = "forbid"
+
+#~~~~~~[FILE END: event_contract.py ]~~~~~~#
+

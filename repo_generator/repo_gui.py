@@ -230,6 +230,11 @@ class RepoGenerator:
         self.skip_dirs = set(skips) if skips is not None else set(DEFAULT_SKIP_DIRS)
         self.current_preset = state.get("repo_gui_current_preset", None)
 
+        # Split memory
+        self.split_enabled_val = state.get("repo_gui_split_enabled", False)
+        self.split_size_val = state.get("repo_gui_split_size", 200)
+
+
 
         self.output_dir = os.path.join(
             os.path.dirname(
@@ -456,6 +461,32 @@ class RepoGenerator:
         )
         btn_eo.pack(side=tk.LEFT)
         self.tooltip.bind_tooltip(btn_eo, "Delete all previously generated text files.")
+
+        # ========================================================
+        # SPLIT CONTROLS
+        # ========================================================
+        split_frame = ttk.Frame(bottom)
+        split_frame.pack(side=tk.RIGHT, padx=PAD_SM)
+
+        self.split_enabled = tk.BooleanVar(value=self.split_enabled_val)
+        chk_split = ttk.Checkbutton(
+            split_frame,
+            text="File split",
+            variable=self.split_enabled
+        )
+        chk_split.pack(side=tk.LEFT, padx=(0, PAD_SM))
+        self.tooltip.bind_tooltip(chk_split, "Automatic file split into fragments of defined size")
+
+        self.split_size = tk.IntVar(value=self.split_size_val)
+        entry_split = ttk.Entry(
+            split_frame,
+            textvariable=self.split_size,
+            width=5
+        )
+        entry_split.pack(side=tk.LEFT)
+        self.tooltip.bind_tooltip(entry_split, "Result file split size")
+        
+        ttk.Label(split_frame, text="KB").pack(side=tk.LEFT, padx=(PAD_SM, 0))
 
         btn_gen = ttk.Button(
             self.root,
@@ -1406,11 +1437,27 @@ class RepoGenerator:
             for i in selected_indexes
         ]
 
-
+        if files_to_generate:
+            try:
+                cpath = os.path.commonpath(files_to_generate)
+                if os.path.isfile(cpath):
+                    prefix = os.path.basename(os.path.dirname(cpath))
+                    if not prefix:
+                        prefix = os.path.basename(cpath).split('.')[0]
+                else:
+                    prefix = os.path.basename(cpath)
+            except ValueError:
+                prefix = "repo"
+                
+            prefix = "".join(c for c in prefix if c.isalnum() or c in ('_', '-')).strip()
+            if not prefix:
+                prefix = "repo"
+        else:
+            prefix = "repo"
 
         output_file=os.path.join(
             self.output_dir,
-            "repozytorium_custom.txt"
+            f"{prefix}_full_repo.py"
         )
 
 
@@ -1471,6 +1518,39 @@ class RepoGenerator:
                     f"\n#~~~~~~[FILE END: {relative} ]~~~~~~#\n\n"
                 )
 
+        if self.split_enabled.get():
+            try:
+                limit_bytes = self.split_size.get() * 1024
+                
+                if os.path.getsize(output_file) > limit_bytes:
+                    with open(output_file, "r", encoding="utf-8") as source:
+                        lines = source.readlines()
+                        
+                    chunks = []
+                    current_chunk = []
+                    current_size = 0
+                    for line in lines:
+                        encoded = line.encode("utf-8")
+                        line_len = len(encoded)
+                        
+                        if current_size + line_len > limit_bytes and current_chunk:
+                            chunks.append(current_chunk)
+                            current_chunk = [line]
+                            current_size = line_len
+                        else:
+                            current_chunk.append(line)
+                            current_size += line_len
+                    
+                    if current_chunk:
+                        chunks.append(current_chunk)
+                        
+                    total_chunks = len(chunks)
+                    for idx, chunk_lines in enumerate(chunks, 1):
+                        part_file = os.path.join(self.output_dir, f"{prefix}_part_{idx}_from_{total_chunks}.txt")
+                        with open(part_file, "w", encoding="utf-8") as pf:
+                            pf.writelines(chunk_lines)
+            except Exception as e:
+                pass
 
 
         messagebox.showinfo(
@@ -1479,6 +1559,7 @@ class RepoGenerator:
             + output_file,
             parent=self.root
         )
+
 
 
 
@@ -1510,8 +1591,11 @@ def run_repo_generator(parent=None):
             repo_gui_selected=selections,
             repo_gui_skip_exts=list(app.skip_exts),
             repo_gui_skip_dirs=list(app.skip_dirs),
-            repo_gui_current_preset=app.current_preset
+            repo_gui_current_preset=app.current_preset,
+            repo_gui_split_enabled=app.split_enabled.get(),
+            repo_gui_split_size=app.split_size.get()
         )
+
         root.destroy()
         
     root.protocol("WM_DELETE_WINDOW", on_closing)
