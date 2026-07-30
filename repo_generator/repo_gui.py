@@ -1365,13 +1365,13 @@ class RepoGenerator:
             exist_ok=True
         )
 
-        subprocess.Popen(
-            [
-                "explorer",
-                self.output_dir
-            ]
-        )
-
+        import sys
+        if sys.platform.startswith("win"):
+            os.startfile(self.output_dir)
+        elif sys.platform == "darwin":
+            subprocess.run(["open", self.output_dir])
+        else:
+            subprocess.run(["xdg-open", self.output_dir])
 
 
     def clear_output(self):
@@ -1381,6 +1381,13 @@ class RepoGenerator:
         ):
             return
 
+        confirm = messagebox.askyesno(
+            "Empty output",
+            "Are you sure you want to clear output?\nThis operation cannot be undone.",
+            parent=self.root
+        )
+        if not confirm:
+            return
 
         for item in os.listdir(
             self.output_dir
@@ -1457,7 +1464,7 @@ class RepoGenerator:
 
         output_file=os.path.join(
             self.output_dir,
-            f"{prefix}_full_repo.py"
+            f"{prefix}_full_repo.txt"
         )
 
 
