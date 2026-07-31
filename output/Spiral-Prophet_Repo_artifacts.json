@@ -1,0 +1,5395 @@
+{
+  "artifact_count": 0,
+  "artifacts": {},
+  "core_extraction_candidates": [],
+  "debug_info": {
+    "module_count": 1075,
+    "root_path": "C:/Temp/Spiral-Prophet_Repo",
+    "timestamp": "2026-07-31T15:23:09.823057"
+  },
+  "module_count": 1075,
+  "runtime": {
+    "cache_hit": false,
+    "generated_at": "2026-07-31T15:18:09.727954"
+  },
+  "shared_artifact_count": 0,
+  "shared_artifacts": [],
+  "shared_usage_clusters": [],
+  "test_traceability": {
+    "__init__": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "agents.__init__": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "agents.agent": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "agents.app": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "agents.data_agent": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "agents.data_processing_states": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "agents.data_quality_analyzer": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "agents.data_validation_agent": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "agents.feature_agent": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "agents.model_agent": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "agents.optimized_predictor": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "agents.prediction_agent": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "agents.processing_context": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "agents.quantum_fourier_extractor": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "agents.quantum_pattern_agent": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "agents.quantum_resonator_agent": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "agents.report_processor": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "agents.seasonal_decomposition_agent": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "agents.serialization_agent": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "agents.strategy_agent": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "agents.strategy_learning_agent": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "agents.training_agent": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "app": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "archetypes.__init__": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "archetypes.archetype": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "architecture.__init__": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "chains.__init__": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "chains.chain": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "config.__init__": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "config.config_loader": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "config.ontology.__init__": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "config.ontology._ontology_registry": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "config.ontology.validate_ontology": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "config.ontology_manager": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "conftest": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.__init__": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.bifurcation_explorer": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.bifurcation_simulator": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.bootstrap.validator_registry": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.__init__": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.artifacts.__init__": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.artifacts.artifact_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.artifacts.artifacts_manifest_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.audit.audit_event": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.audit.audit_issue": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.audit.audit_report": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.audit.audit_result": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.audit.audit_severity": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.audit.audit_status": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.base.__init__": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.base.base_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.base.base_manifest_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.canonical.__init__": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.canonical.canonical_manifest_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.canonical.canonical_record_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.contracts_manifest_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.detector.__init__": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.detector.detector_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.detector.detector_manifest_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.diagnostics.__init__": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.diagnostics.diagnostics_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.diagnostics.diagnostics_manifest_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.event.__init__": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.event.event_actor_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.event.event_chain_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.event.event_commit_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.event.event_compatibility_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.event.event_correlation_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.event.event_envelope_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.event.event_identity_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.event.event_link_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.event.event_manifest_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.event.event_metadata_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.event.event_origin_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.event.event_payload_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.event.event_payload_reference_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.event.event_schema_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.event.event_trace_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.event.event_transaction_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.event.event_transport_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.event.event_version_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.event.transport.__init__": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.event.transport.event_acknowledgement_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.event.transport.event_acknowledgement_receipt_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.event.transport.event_batch_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.event.transport.event_bus_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.event.transport.event_channel_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.event.transport.event_consumer_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.event.transport.event_consumer_position_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.event.transport.event_dead_letter_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.event.transport.event_dead_letter_queue_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.event.transport.event_delivery_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.event.transport.event_delivery_receipt_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.event.transport.event_dispatch_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.event.transport.event_exchange_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.event.transport.event_flow_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.event.transport.event_listener_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.event.transport.event_partition_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.event.transport.event_partition_key_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.event.transport.event_producer_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.event.transport.event_queue_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.event.transport.event_route_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.event.transport.event_routing_key_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.event.transport.event_subscription_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.event.transport.transport_manifest_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.governance.__init__": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.governance.contract_alignment": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.governance.drift_report": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.governance.expected_registry_projection": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.governance.expected_registry_state": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.governance.governance_manifest_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.governance.governance_policy_model": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.governance.registry_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.governance.registry_entry": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.governance.registry_graph": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.governance.registry_projection": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.governance.validation_closure": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.identifiers.acknowledgement_identifier_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.identifiers.batch_identifier_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.identifiers.channel_identifier_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.identifiers.consumer_identifier_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.identifiers.dead_letter_queue_identifier_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.identifiers.delivery_identifier_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.identifiers.dispatch_identifier_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.identifiers.event_identifier_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.identifiers.event_type_identifier_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.identifiers.exchange_identifier_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.identifiers.execution_identifier_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.identifiers.filter_identifier_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.identifiers.flow_identifier_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.identifiers.identifier_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.identifiers.listener_identifier_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.identifiers.partition_identifier_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.identifiers.producer_identifier_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.identifiers.queue_identifier_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.identifiers.registry_identifier_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.identifiers.route_identifier_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.identifiers.routing_identifier_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.identifiers.runtime_identifier_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.identifiers.subscriber_identifier_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.identifiers.subscription_identifier_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.identifiers.trace_identifier_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.identity.__init__": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.identity.fingerprint_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.identity.identity_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.identity.identity_manifest_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.identity.provenance_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.identity.version_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.normalization.__init__": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.normalization.normalization_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.normalization.normalization_manifest_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.normalization.normalized_value_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.normalization.normalizer_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.ontology.ontology_report_audit": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.ontology.ontology_report_core": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.primitives.timestamp_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.projection.audit_fact_projector": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.projection.audit_fact_set": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.registry.registry_state": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.schema.unified_schema": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.shared.identifier_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.structure.__init__": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.structure.shape_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.structure.structure_manifest_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.system.__init__": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.system.error_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.system.system_manifest_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.training.__init__": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.training.training_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.training.training_manifest_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.transport.__init__": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.transport.record_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.transport.result_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.transport.transformation_result_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.transport.transport_manifest_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.transport.value_envelope": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.validation.__init__": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.validation.validation_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.validation.validation_manifest_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.value.__init__": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.value.value_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.contracts.value.value_manifest_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.core_config": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.core_controller": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.errors.contracts.event.event_contract_errors": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.errors.event.transport_errors": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.errors.validator_registry_errors": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.exceptions": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.gate_maps": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.gk.dsl.parser": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.gk.ir.compiler": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.gk.runtime.engine": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.gk.runtime.projection.engine": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.gk.validation.engine": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.gk.vm.bytecode_vm": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.governance.registry_auditor": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.governance.registry_entry_builder": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.kernel.errors.registry_errors": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.kernel.registry.registry_snapshot": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.logic_gates": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.prediction_chain": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.synchronization_controller": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.validators.bootstrap": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.validators.event.event_actor_validator": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.validators.event.event_chain_validator": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.validators.event.event_commit_validator": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.validators.event.event_compatibility_validator": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.validators.event.event_correlation_validator": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.validators.event.event_envelope_validator": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.validators.event.event_identity_validator": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.validators.event.event_link_validator": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.validators.event.event_metadata_validator": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.validators.event.event_origin_validator": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.validators.event.event_payload_reference_validator": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.validators.event.event_payload_validator": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.validators.event.event_schema_validator": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.validators.event.event_trace_validator": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.validators.event.event_transaction_validator": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.validators.event.event_transport_validator": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.validators.event.event_version_validator": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.validators.event.transport.acknowledgement_validator": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.validators.event.transport.batch_validator": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.validators.event.transport.bus_validator": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.validators.event.transport.channel_validator": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.validators.event.transport.consumer_validator": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.validators.event.transport.dead_letter_validator": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.validators.event.transport.delivery_validator": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.validators.event.transport.dispatch_validator": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.validators.event.transport.exchange_validator": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.validators.event.transport.flow_validator": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.validators.event.transport.listener_validator": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.validators.event.transport.partition_validator": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.validators.event.transport.producer_validator": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.validators.event.transport.queue_validator": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.validators.event.transport.route_validator": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.validators.event.transport.subscription_validator": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.validators.primitives.fields": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.validators.primitives.schema_validator": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.validators.primitives.structural_checks": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.validators.registry": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "core.validators.shared.identifier_validator": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data.__init__": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data.bifurcation_data_generator": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data.data_generator": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data.dataset_loader": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data.spiral_data_generator": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data.spiral_data_loader": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data.spiral_data_saver": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data.synthetic_data_generator": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data.training_data_generator": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.__init__": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.advanced_imputer": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.autoencoder_imputer": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.binary_file_parser": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.column_shift_corrector": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.adapters.datetime_adapter": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.__init__": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.audit.__init__": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.audit.adapter_report_audit": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.audit.ambiguity_report_audit": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.audit.audit_access_attempt_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.audit.audit_backup_creation_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.audit.audit_blockchain_anchor_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.audit.audit_brute_force_attempt_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.audit.audit_certificate_revocation_event_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.audit.audit_data_exfiltration_alert_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.audit.audit_data_provenance_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.audit.audit_dataset_cloning_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.audit.audit_diagnostic_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.audit.audit_digital_signature_verification_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.audit.audit_export_event_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.audit.audit_forensic_log_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.audit.audit_gdpr_right_to_be_forgotten_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.audit.audit_hipaa_access_log_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.audit.audit_iso27001_control_validation_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.audit.audit_key_rotation_event_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.audit.audit_log_archival_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.audit.audit_malicious_payload_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.audit.audit_manifest_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.audit.audit_merkle_tree_hash_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.audit.audit_pci_dss_environment_scan_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.audit.audit_privilege_escalation_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.audit.audit_query_execution_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.audit.audit_regulatory_report_generation_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.audit.audit_restore_operation_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.audit.audit_result_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.audit.audit_retention_purge_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.audit.audit_session_end_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.audit.audit_session_start_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.audit.audit_soc2_compliance_check_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.audit.audit_sql_injection_attempt_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.audit.audit_system_configuration_change_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.audit.audit_tamper_evident_seal_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.audit.audit_transformation_signature_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.audit.audit_unauthorized_geo_access_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.audit.audit_vulnerability_scan_result_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.audit.date_parser_report_audit": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.audit.ingestion_batch_audit_summary": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.audit.ingestion_quarantine_audit": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.audit.ingestion_structure_report_audit": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.audit.normalization_report_audit": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.audit.ontology_report_audit": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.audit.schema_inference_audit_report": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.audit.transformation_report_audit": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.audit.validation_closure": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.canonical.__init__": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.canonical.canonical_adjacency_list_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.canonical.canonical_aggregate_root_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.canonical.canonical_cell_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.canonical.canonical_column_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.canonical.canonical_context_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.canonical.canonical_data_point_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.canonical.canonical_diagnostic_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.canonical.canonical_document_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.canonical.canonical_edge_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.canonical.canonical_entity_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.canonical.canonical_event_stream_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.canonical.canonical_foreign_key_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.canonical.canonical_graph_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.canonical.canonical_header_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.canonical.canonical_identity_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.canonical.canonical_key_value_pair_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.canonical.canonical_lifecycle_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.canonical.canonical_manifest_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.canonical.canonical_matrix_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.canonical.canonical_node_array_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.canonical.canonical_node_object_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.canonical.canonical_null_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.canonical.canonical_partition_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.canonical.canonical_path_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.canonical.canonical_provenance_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.canonical.canonical_relationship_business_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.canonical.canonical_result_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.canonical.canonical_row_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.canonical.canonical_sparse_matrix_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.canonical.canonical_table_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.canonical.canonical_tensor_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.canonical.canonical_time_series_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.canonical.canonical_value_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.canonical.canonical_vector_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.canonical.canonical_vertex_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.canonical.canonical_view_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.canonical.canonical_window_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.contracts_manifest_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.detection.__init__": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.detection.detection_cardinality_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.detection.detection_class_imbalance_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.detection.detection_concept_drift_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.detection.detection_context_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.detection.detection_correlation_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.detection.detection_dataset_profile_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.detection.detection_distribution_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.detection.detection_distribution_drift_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.detection.detection_encoding_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.detection.detection_field_profile_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.detection.detection_frequency_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.detection.detection_functional_dependency_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.detection.detection_inclusion_dependency_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.detection.detection_manifest_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.detection.detection_multivariate_anomaly_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.detection.detection_outlier_bound_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.detection.detection_pattern_signature_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.detection.detection_pii_credit_card_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.detection.detection_pii_email_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.detection.detection_pii_ssn_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.detection.detection_result_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.detection.detection_semantic_currency_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.detection.detection_semantic_domain_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.detection.detection_semantic_ip_address_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.detection.detection_semantic_mac_address_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.detection.detection_semantic_url_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.detection.detection_semantic_uuid_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.detection.detection_sensitive_geo_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.detection.detection_sparsity_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.detection.detection_syntactic_type_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.detection.detection_ts_level_shift_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.detection.detection_ts_seasonality_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.detection.detection_ts_spike_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.event.event_core.__init__": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.event.event_core.event_actor_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.event.event_core.event_chain_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.event.event_core.event_commit_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.event.event_core.event_compatibility_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.event.event_core.event_core_manifest_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.event.event_core.event_correlation_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.event.event_core.event_envelope_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.event.event_core.event_identity_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.event.event_core.event_link_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.event.event_core.event_metadata_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.event.event_core.event_origin_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.event.event_core.event_payload_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.event.event_core.event_payload_reference_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.event.event_core.event_schema_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.event.event_core.event_trace_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.event.event_core.event_transaction_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.event.event_core.event_transport_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.event.event_core.event_version_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.event.event_execution.__init__": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.event.event_execution.event_compensation_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.event.event_execution.event_execution_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.event.event_execution.event_execution_manifest_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.event.event_execution.event_lifecycle_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.event.event_execution.event_result_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.event.event_execution.event_rollback_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.event.event_execution.event_state_change_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.event.event_execution.event_state_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.event.event_execution.event_transition_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.event.event_governance.__init__": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.event.event_governance.event_audit_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.event.event_governance.event_governance_manifest_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.event.event_governance.event_permission_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.event.event_governance.event_policy_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.event.event_governance.event_registration_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.event.event_governance.event_retention_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.event.event_governance.event_retry_policy_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.event.event_governance.event_type_definition_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.event.event_observability.__init__": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.event.event_observability.event_alert_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.event.event_observability.event_error_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.event.event_observability.event_metric_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.event.event_observability.event_notification_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.event.event_observability.event_observability_manifest_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.event.event_policy_runtime.__init__": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.event.event_policy_runtime.event_circuit_breaker_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.event.event_policy_runtime.event_context_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.event.event_policy_runtime.event_deduplication_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.event.event_policy_runtime.event_failure_receipt_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.event.event_policy_runtime.event_filter_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.event.event_policy_runtime.event_order_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.event.event_policy_runtime.event_policy_runtime_manifest_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.event.event_policy_runtime.event_priority_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.event.event_policy_runtime.event_rate_limit_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.event.event_policy_runtime.event_schedule_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.event.event_policy_runtime.event_throttling_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.event.event_policy_runtime.event_trigger_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.event.event_security.__init__": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.event.event_security.event_encryption_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.event.event_security.event_integrity_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.event.event_security.event_security_manifest_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.event.event_security.event_signature_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.event.event_security.event_validation_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.event.event_storage.__init__": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.event.event_storage.event_archive_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.event.event_storage.event_attachment_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.event.event_storage.event_dependency_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.event.event_storage.event_history_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.event.event_storage.event_projection_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.event.event_storage.event_reference_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.event.event_storage.event_replication_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.event.event_storage.event_snapshot_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.event.event_storage.event_storage_manifest_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.ingestion.__init__": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.ingestion.ingestion_api_webhook_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.ingestion.ingestion_auth_context_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.ingestion.ingestion_backpressure_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.ingestion.ingestion_cdc_delete_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.ingestion.ingestion_cdc_insert_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.ingestion.ingestion_cdc_tombstone_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.ingestion.ingestion_cdc_update_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.ingestion.ingestion_connection_pool_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.ingestion.ingestion_context_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.ingestion.ingestion_diagnostic_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.ingestion.ingestion_dlq_routing_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.ingestion.ingestion_fragmentation_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.ingestion.ingestion_graphql_query_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.ingestion.ingestion_grpc_stream_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.ingestion.ingestion_idempotency_key_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.ingestion.ingestion_landing_reference_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.ingestion.ingestion_manifest_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.ingestion.ingestion_oauth_token_rotation_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.ingestion.ingestion_odata_feed_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.ingestion.ingestion_pagination_cursor_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.ingestion.ingestion_partition_routing_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.ingestion.ingestion_payload_signature_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.ingestion.ingestion_rate_limit_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.ingestion.ingestion_raw_payload_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.ingestion.ingestion_result_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.ingestion.ingestion_retry_state_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.ingestion.ingestion_source_connection_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.ingestion.ingestion_source_schema_drift_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.ingestion.ingestion_strategy_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.ingestion.ingestion_stream_checkpoint_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.ingestion.ingestion_telemetry_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.ingestion.ingestion_watermark_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.ingestion.ingestion_window_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.iot.__init__": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.iot.iot_actuator_state_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.iot.iot_battery_profile_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.iot.iot_command_acknowledgement_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.iot.iot_command_timeout_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.iot.iot_connection_drop_event_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.iot.iot_device_certificate_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.iot.iot_device_command_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.iot.iot_device_lifecycle_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.iot.iot_device_policy_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.iot.iot_device_registry_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.iot.iot_diagnostic_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.iot.iot_digital_twin_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.iot.iot_downsampling_policy_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.iot.iot_edge_compute_task_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.iot.iot_edge_gateway_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.iot.iot_firmware_version_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.iot.iot_gateway_sync_session_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.iot.iot_hardware_calibration_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.iot.iot_heartbeat_signal_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.iot.iot_last_will_and_testament_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.iot.iot_late_arrival_telemetry_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.iot.iot_local_buffer_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.iot.iot_manifest_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.iot.iot_mqtt_qos_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.iot.iot_ota_update_campaign_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.iot.iot_out_of_order_telemetry_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.iot.iot_provisioning_claim_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.iot.iot_remote_diagnostic_request_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.iot.iot_result_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.iot.iot_rogue_device_alert_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.iot.iot_sensor_reading_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.iot.iot_telemetry_payload_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.iot.iot_twin_attribute_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.iot.iot_twin_desired_state_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.iot.iot_twin_feature_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.iot.iot_twin_reported_state_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.iot.iot_twin_state_delta_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.normalization.__init__": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.normalization.normalization_boolean_resolution_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.normalization.normalization_categorical_map_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.normalization.normalization_context_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.normalization.normalization_currency_exchange_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.normalization.normalization_datetime_resolution_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.normalization.normalization_diagnostic_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.normalization.normalization_e164_phone_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.normalization.normalization_email_alias_strip_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.normalization.normalization_fuzzy_match_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.normalization.normalization_geospatial_crs_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.normalization.normalization_imputation_constant_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.normalization.normalization_imputation_interpolation_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.normalization.normalization_imputation_mean_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.normalization.normalization_imputation_median_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.normalization.normalization_imputation_mode_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.normalization.normalization_lineage_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.normalization.normalization_log_transform_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.normalization.normalization_manifest_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.normalization.normalization_min_max_scale_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.normalization.normalization_numeric_resolution_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.normalization.normalization_phonetic_encode_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.normalization.normalization_regex_replacement_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.normalization.normalization_result_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.normalization.normalization_robust_scale_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.normalization.normalization_string_case_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.normalization.normalization_timezone_utc_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.normalization.normalization_type_cast_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.normalization.normalization_unicode_fold_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.normalization.normalization_url_canonicalization_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.normalization.normalization_whitespace_strip_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.normalization.normalization_z_score_standardization_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.parsing.__init__": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.parsing.parsing_ast_node_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.parsing.parsing_audio_id3_metadata_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.parsing.parsing_avro_schema_resolution_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.parsing.parsing_binary_protobuf_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.parsing.parsing_byte_buffer_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.parsing.parsing_character_decoding_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.parsing.parsing_collection_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.parsing.parsing_columnar_parquet_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.parsing.parsing_context_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.parsing.parsing_dead_letter_queue_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.parsing.parsing_decompression_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.parsing.parsing_diagnostic_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.parsing.parsing_dom_element_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.parsing.parsing_edifact_finance_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.parsing.parsing_error_recovery_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.parsing.parsing_field_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.parsing.parsing_hierarchical_json_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.parsing.parsing_hl7_healthcare_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.parsing.parsing_image_exif_metadata_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.parsing.parsing_lexer_token_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.parsing.parsing_malformed_record_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.parsing.parsing_manifest_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.parsing.parsing_markup_xml_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.parsing.parsing_protobuf_descriptor_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.parsing.parsing_record_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.parsing.parsing_result_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.parsing.parsing_scalar_value_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.parsing.parsing_tabular_csv_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.parsing.parsing_telemetry_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.parsing.parsing_tokenizer_state_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.parsing.parsing_unstructured_grok_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.parsing.parsing_video_frame_metadata_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.pipeline.__init__": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.pipeline.pipeline_alert_subscription_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.pipeline.pipeline_backfill_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.pipeline.pipeline_bash_command_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.pipeline.pipeline_checkpoint_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.pipeline.pipeline_circuit_breaker_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.pipeline.pipeline_container_execution_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.pipeline.pipeline_context_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.pipeline.pipeline_dag_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.pipeline.pipeline_dag_edge_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.pipeline.pipeline_dag_node_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.pipeline.pipeline_data_lineage_edge_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.pipeline.pipeline_dataset_input_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.pipeline.pipeline_dataset_output_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.pipeline.pipeline_diagnostic_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.pipeline.pipeline_execution_date_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.pipeline.pipeline_fallback_strategy_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.pipeline.pipeline_http_request_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.pipeline.pipeline_manifest_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.pipeline.pipeline_operator_config_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.pipeline.pipeline_pool_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.pipeline.pipeline_priority_weight_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.pipeline.pipeline_queue_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.pipeline.pipeline_resource_request_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.pipeline.pipeline_result_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.pipeline.pipeline_resume_point_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.pipeline.pipeline_retry_policy_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.pipeline.pipeline_run_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.pipeline.pipeline_schedule_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.pipeline.pipeline_sensor_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.pipeline.pipeline_state_transition_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.pipeline.pipeline_subdag_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.pipeline.pipeline_task_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.pipeline.pipeline_task_group_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.pipeline.pipeline_task_instance_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.pipeline.pipeline_timeout_strategy_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.pipeline.pipeline_trigger_rule_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.pipeline.pipeline_xcom_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.quality.__init__": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.quality.quality_accuracy_score_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.quality.quality_anomaly_detection_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.quality.quality_circuit_breaker_trigger_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.quality.quality_completeness_score_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.quality.quality_consistency_score_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.quality.quality_context_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.quality.quality_cross_dataset_row_count_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.quality.quality_diagnostic_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.quality.quality_expectation_cross_column_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.quality.quality_expectation_custom_sql_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.quality.quality_expectation_in_set_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.quality.quality_expectation_numeric_bounds_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.quality.quality_expectation_regex_match_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.quality.quality_expectation_row_count_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.quality.quality_freshness_sla_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.quality.quality_hard_fatal_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.quality.quality_manifest_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.quality.quality_metric_calculation_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.quality.quality_overall_scorecard_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.quality.quality_profiling_baseline_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.quality.quality_referential_integrity_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.quality.quality_remediation_flag_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.quality.quality_remediation_halt_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.quality.quality_remediation_quarantine_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.quality.quality_result_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.quality.quality_rule_definition_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.quality.quality_rule_evaluation_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.quality.quality_soft_warning_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.quality.quality_telemetry_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.quality.quality_timeliness_score_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.quality.quality_uniqueness_score_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.quality.quality_validity_score_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.quality.quality_volume_anomaly_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.registry.__init__": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.registry.registry_aggregate_snapshot_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.registry.registry_avro_serialization_rule_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.registry.registry_binary_payload_compression_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.registry.registry_catalog_search_index_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.registry.registry_cloud_event_metadata_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.registry.registry_data_steward_assignment_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.registry.registry_dataset_ownership_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.registry.registry_dead_letter_envelope_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.registry.registry_deprecated_asset_warning_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.registry.registry_discovery_query_log_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.registry.registry_entity_glossary_term_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.registry.registry_entity_relationship_edge_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.registry.registry_entry_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.registry.registry_event_causation_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.registry.registry_event_correlation_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.registry.registry_event_envelope_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.registry.registry_event_store_append_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.registry.registry_event_upcasting_rule_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.registry.registry_field_semantic_tag_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.registry.registry_json_schema_validation_rule_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.registry.registry_lineage_dataset_facet_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.registry.registry_lineage_input_mapping_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.registry.registry_lineage_job_facet_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.registry.registry_lineage_output_mapping_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.registry.registry_lineage_run_state_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.registry.registry_manifest_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.registry.registry_metadata_sync_event_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.registry.registry_payload_encryption_envelope_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.registry.registry_protobuf_serialization_rule_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.registry.registry_retention_policy_enforcement_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.registry.registry_schema_compatibility_check_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.registry.registry_schema_evolution_rejection_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.registry.registry_schema_subject_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.registry.registry_schema_tombstone_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.registry.registry_schema_version_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.registry.registry_state_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.registry.registry_stream_compaction_marker_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.runtime.__init__": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.runtime.execution_context_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.runtime.runtime_artifact_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.runtime.runtime_manifest_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.schema.__init__": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.schema.schema_business_glossary_link_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.schema.schema_column_deprecation_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.schema.schema_compatibility_check_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.schema.schema_complex_array_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.schema.schema_complex_enum_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.schema.schema_complex_map_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.schema.schema_complex_struct_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.schema.schema_complex_union_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.schema.schema_data_steward_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.schema.schema_diagnostic_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.schema.schema_evolution_addition_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.schema.schema_evolution_deletion_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.schema.schema_evolution_lineage_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.schema.schema_evolution_promotion_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.schema.schema_field_default_value_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.schema.schema_field_definition_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.schema.schema_field_metadata_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.schema.schema_field_nullability_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.schema.schema_inference_conflict_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.schema.schema_inference_engine_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.schema.schema_inference_sampling_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.schema.schema_manifest_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.schema.schema_pii_masking_rule_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.schema.schema_primitive_type_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.schema.schema_registry_context_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.schema.schema_result_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.schema.schema_semantic_annotation_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.schema.schema_semantic_domain_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.schema.schema_semantic_pii_tag_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.schema.schema_version_pointer_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.security.__init__": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.security.security_attribute_based_access_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.security.security_column_level_security_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.security.security_compliance_audit_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.security.security_cross_border_transfer_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.security.security_data_poisoning_defense_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.security.security_data_sovereignty_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.security.security_diagnostic_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.security.security_differential_privacy_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.security.security_encryption_at_rest_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.security.security_envelope_encryption_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.security.security_hashing_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.security.security_k_anonymity_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.security.security_key_rotation_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.security.security_manifest_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.security.security_masking_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.security.security_model_inversion_defense_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.security.security_pii_leakage_guardrail_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.security.security_policy_context_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.security.security_purpose_based_access_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.security.security_result_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.security.security_retention_ttl_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.security.security_right_to_be_forgotten_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.security.security_row_level_security_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.security.security_synthetic_substitution_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.security.security_telemetry_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.security.security_tokenization_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.security.security_user_consent_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.shared.__init__": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.shared.shared_batch_envelope_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.shared.shared_circuit_breaker_state_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.shared.shared_correlation_id_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.shared.shared_duration_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.shared.shared_email_address_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.shared.shared_error_evidence_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.shared.shared_execution_status_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.shared.shared_geolocation_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.shared.shared_idempotency_key_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.shared.shared_identifier_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.shared.shared_locale_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.shared.shared_manifest_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.shared.shared_mime_type_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.shared.shared_money_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.shared.shared_network_address_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.shared.shared_pagination_request_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.shared.shared_pagination_response_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.shared.shared_path_reference_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.shared.shared_problem_details_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.shared.shared_raw_value_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.shared.shared_retry_policy_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.shared.shared_severity_level_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.shared.shared_timeout_policy_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.shared.shared_timestamp_utc_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.shared.shared_trace_context_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.shared.shared_uuid_v4_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.system.__init__": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.system.actual_registry_state": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.system.architecture_model_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.system.system_backpressure_threshold_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.system.system_cache_invalidation_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.system.system_cache_miss_stampede_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.system.system_checkpoint_timeout_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.system.system_cloud_api_rate_limit_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.system.system_cluster_scaling_event_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.system.system_connection_pool_exhaustion_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.system.system_cpu_saturation_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.system.system_cron_job_trigger_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.system.system_dag_dependency_unmet_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.system.system_data_locality_downgrade_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.system.system_dependency_resolution_failure_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.system.system_disk_io_bottleneck_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.system.system_distributed_lock_acquisition_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.system.system_distributed_lock_timeout_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.system.system_dns_resolution_failure_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.system.system_event_loop_lag_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.system.system_garbage_collection_pause_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.system.system_gpu_memory_fragmentation_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.system.system_gpu_thermal_throttling_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.system.system_gpu_utilization_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.system.system_graceful_shutdown_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.system.system_heap_out_of_memory_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.system.system_leader_election_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.system.system_manifest_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.system.system_memory_pressure_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.system.system_model_weights_swapping_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.system.system_nccl_communication_timeout_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.system.system_network_throughput_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.system.system_node_eviction_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.system.system_node_heartbeat_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.system.system_packet_drop_rate_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.system.system_partition_skew_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.system.system_pod_lifecycle_event_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.system.system_process_crash_dump_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.system.system_quorum_loss_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.system.system_resource_quota_breach_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.system.system_rpc_timeout_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.system.system_runtime_version_mismatch_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.system.system_serverless_cold_start_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.system.system_service_mesh_route_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.system.system_shuffle_spill_to_disk_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.system.system_spot_instance_preemption_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.system.system_state_backend_compaction_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.system.system_state_machine_transition_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.system.system_storage_iops_throttling_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.system.system_straggler_task_detected_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.system.system_task_starvation_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.system.system_tcp_connection_reset_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.system.system_tensor_core_utilization_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.system.system_thread_deadlock_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.system.system_tls_handshake_failure_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.system.system_transaction_deadlock_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.system.system_vectorized_simd_fallback_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.system.system_watermark_delay_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.contracts.system.system_zombie_process_reaper_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.date_detector.date_detector": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.date_detector.date_detector_core": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.detectors.alphanumeric_pattern_detector_gk": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.detectors.base_detector_gk": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.detectors.digit_pattern_detector_gk": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.detectors.pattern_detector_gk": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.diagnostics.date_observability": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.diagnostics.diagnostic_event": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.diagnostics.metrics_exporter": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.errors.contracts.identifier_errors": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.fingerprint.fingerprint_sha256": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.flattening.dict_flattener": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.governance.__init__": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.governance.default_projection": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.governance.governance_catalog": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.governance.registry_service": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.normalizers.date_normalizer": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.parsers.date_string_parser": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.parsers.unix_timestamp_parser": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.performance.date_perf": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.registry.__init__": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.registry.bootstrap": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.registry.normalization.normalization_boolean_resolution_descriptor": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.registry.registry": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.router.shape_router": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.runtime.atomic_operators.normalization.normalization_boolean_resolution_runtime": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.core.transport.event_contract": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.data_profiler": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.date_parser": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.decomposition_engine": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.detector_runtime.detector_registry_gk": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.final_artifact_builder": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.imputation_engine": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.intelligent_parser": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.json_xml_parser": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.jsonxml.__init__": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.jsonxml.audit.pipeline_audit": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.jsonxml.jsonxml_parser_orchestrator": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.jsonxml.jsonxml_paths": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.jsonxml.list_expander": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.jsonxml.ontology_bridge": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.jsonxml.schema_adjustment_plan": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.jsonxml.schema_inferencer": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.jsonxml.structure_analyzer": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.jsonxml.type_coercion": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.jsonxml.variant_reporter": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.knowledge_updater": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.nlp_analyzer": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.outlier.__init__": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.outlier.outlier_cache": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.outlier.outlier_correction_engine": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.outlier.outlier_engine": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.outlier.outlier_report": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.outlier.outlier_validator": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.outlier_detector": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.parsing_state": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.semantic_profiler": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.serialization_state": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.strategy_distribution": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.target_unification_engine": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.transformation_engine": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.transformer": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.unify_target": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.validation.__init__": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.validation.imputation_correction_engine": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.validation.imputation_validation_report": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "data_preprocessing.validation.imputation_validator": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "docs.conf": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "features.__init__": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "features.complex_dynamics_extractor": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "features.core_feature_functions": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "features.feature_engineering": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "features.feature_selector": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "features.mandelbrot_spiral_extractor": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "features.peak_analyzer": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "features.prediction_selector": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "features.quantum_feature_extractor": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "features.spiral_feature_extractor": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "features.structural_similarity_agent": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "features.time_series_analyzer": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "features.transformer": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "governance.adapters_registry": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "governance.contracts_registry": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "governance.core_registry": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "governance.parser_contracts_registry": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "governance.unified_schema": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "gui.__init__": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "gui.app": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "gui.data_artifacts_handler": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "gui.data_filter_dialog": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "gui.data_loader": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "gui.data_preview": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "gui.data_preview_window": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "gui.data_previewer": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "gui.drop_columns_dialog": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "gui.forecast_visualizer": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "gui.gui_controller": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "gui.gui_state_manager": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "gui.imputation_selector_dialog": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "gui.init": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "gui.interactive_parser": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "gui.main_window": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "gui.multi_column_parser": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "gui.outlier_handler": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "gui.outlier_handler_dialog": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "gui.parser_mode_selector": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "gui.parsing_summary_dialog": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "gui.paths_config": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "gui.quantum_model_config_dialog": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "gui.results_window": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "gui.scenario_dialog": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "gui.shift_corrector_dialog": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "gui.target_selector_dialog": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "gui.test_executor": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "gui.test_runner": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "gui.variability_dialog": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "hooks.__init__": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "hooks.system_hooks": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "integration.__init__": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "integration.dual_pipeline_controller": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "integration.gui_orchestrator": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "integration.model_deployer": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "integration.system_initializer": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "integration.system_orchestrator": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "logging_config": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "main": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "memory.__init__": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "memory.advanced_memory_manager": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "memory.echo_memory_advanced": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "memory.echo_memory_quantum": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "memory.echo_memory_simulator": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "memory.memory_bank": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "memory.memory_cleaner": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "memory.memory_echo_advanced": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "memory.memory_persistence_manager": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "memory.quantum_memory_simulator": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "memory.session_memory": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "models.__init__": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "models.quantum_bifurcation_classifier": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "models.quantum_bifurcation_regressor": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "models.quantum_regressor": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "models.quantum_spiral_ensemble": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "models.quantum_svm_classifier": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "models.report_schemas": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "models.spiral_regression_model": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "models.variational_quantum_classifier": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "optimizer.__init__": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "optimizer.advanced_optimizer": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "optimizer.bayesian_optimizer": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "optimizer.genetic_optimizer": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "optimizer.hybrid_optimizer": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "optimizer.hybrid_quantum_optimizer": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "optimizer.hyperparameter_optimizer": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "optimizer.hyperparameter_tuner": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "optimizer.learning_rate_scheduler": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "optimizer.optimizer_engine": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "optimizer.quantum_evolutionary_optimizer": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "optimizer.quantum_inspired_evolutionary_optimizer": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "optimizer.quantum_optimizer": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "optimizer.random_search_optimizer": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "optimizer.spiralmind_optimizer": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "pipeline.__init__": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "pipeline.synchronization_controller": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "processors.__init__": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "processors.report_processor": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "pytest_full_log_plugin": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "quantum.__init__": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "quantum.quantum_collapse_simulator": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "quantum.quantum_data_augmentor": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "quantum.quantum_distance_calculator": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "quantum.quantum_feature_projector": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "quantum.quantum_fourier_transform": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "quantum.quantum_gate_controller": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "quantum.quantum_gate_simulator": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "quantum.quantum_inspired_evolutionary_optimizer": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "quantum.quantum_interference_simulator": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "quantum.quantum_metrics": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "quantum.quantum_probability_distribution": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "quantum.quantum_random_generator": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "quantum.quantum_spiral_pipeline": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "quantum.quantum_state_analyzer": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "quantum.quantum_state_preparator": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "reporting.__init__": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "reporting.context_aware_report_assembler": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "reporting.html_report_generator": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "reporting.performance_auditor": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "reporting.report_generator": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "run_spiral_model": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "sanitization.__init__": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "sanitization.sanitizer": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "tests.jsonxml.test_dict_flattener": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "tests.jsonxml.test_jsonxml_paths": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "tests.jsonxml.test_jsonxml_variants_integrated": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "tests.jsonxml.test_schema_inferencer": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "utils.__init__": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "utils.circuit_breaker": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "utils.data_fingerprint_engine": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "utils.data_lineage": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "utils.data_registry": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "utils.file_utils": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "utils.fitness_metric": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "utils.logger_utility": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "utils.memory_optimizer": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "utils.performance_logger": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "utils.progress_manager": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "utils.state_manager": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "utils.tests_coverage": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "utils.timer": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "validator.__init__": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "validator.advanced_validator": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "validator.cross_validator": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "validator.data_validator": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "validator.hyperparameter_loader": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "validator.model_evaluator": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "validator.robust_cross_validator": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "verify_flow": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "verify_system": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "visualization.__init__": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "visualization.base_visualizer": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "visualization.bifurcation_visualizer": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "visualization.correlation_plotter": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "visualization.data_quality_visualizer": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "visualization.data_visualizer": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "visualization.forecast_visualizer": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "visualization.model_visualizer": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "visualization.quantum_state_visualizer": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "visualization.spiral_visualizer": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    },
+    "visualization.system_structure_plotter": {
+      "test_files": [],
+      "tested_symbols": [],
+      "untested_public_symbols": []
+    }
+  }
+}
