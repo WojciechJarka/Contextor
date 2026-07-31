@@ -1,6 +1,6 @@
 # Contextor
 
-Contextor transforms complex Python repositories into structured architectural context that both developers and Large Language Models (LLMs) can understand. It generates JSON reports - you can give access of Output json reports folder to LLM working directly in your repo. This way you spare tokens needed by LLM for full structural analysis of the code base.
+Contextor transforms complex Python repositories into structured architectural context that both developers and Large Language Models (LLMs) can understand. It generates JSON reports - you can give access of Output json reports folder to LLM working directly in your repo. This way you spare tokens required by LLM for full structural analysis of the code base.
 
 It builds a comprehensive representation of a project's architecture, dependencies, relationships, symbol usage, and technical debt through static analysis — without ever executing the analyzed code.
 
