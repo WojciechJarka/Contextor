@@ -17,7 +17,7 @@ from repo_guardian.ui.exclude_gui import run_exclude_window
 from repo_guardian.ui.system_actions import handle_open_output_folder, handle_empty_output_folder
 from repo_guardian.ui.progress_widget import create_progress_bar, create_log_box, run_with_progress
 from repo_guardian.ui.theme import apply_theme, HeaderTooltipManager, BG, PAD_SM, PAD_MD, PAD_LG
-from repo_generator.repo_gui import run_repo_generator
+from repo_generator import run_repo_generator
 
 class GuardianGUI:
     """

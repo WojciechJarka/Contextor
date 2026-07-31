@@ -14,7 +14,19 @@ echo Done.
 echo.
 
 echo =========================================
-echo 2/3: Delete JSON files prompt
+echo 2/4: Cleaning repo_generator OUTPUT...
+echo =========================================
+if exist "repo_generator\OUTPUT" (
+    echo Removing repo_generator\OUTPUT...
+    rd /s /q "repo_generator\OUTPUT"
+    echo Done.
+) else (
+    echo OUTPUT folder not found, skipping.
+)
+echo.
+
+echo =========================================
+echo 3/4: Delete JSON files prompt
 echo =========================================
 set /p del_json="Do you want to delete all .json files in the project? (Y/N): "
 if /i "%del_json%"=="Y" (
@@ -27,7 +39,7 @@ if /i "%del_json%"=="Y" (
 echo.
 
 echo =========================================
-echo 3/3: Force push to GitHub
+echo 4/4: Force push to GitHub
 echo =========================================
 echo Staging all files...
 git -c core.safecrlf=false add .

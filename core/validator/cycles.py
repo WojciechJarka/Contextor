@@ -11,9 +11,8 @@ def validate_cycles(graph: ProjectGraph) -> list[ValidationError]:
         chain = " -> ".join(cycle)
         errors.append(
             ValidationError(
-                type="ArchitectureCycle",
+                kind="ArchitectureCycle",
                 message=f"Cyclic dependency detected in architecture: {chain}",
-                severity="critical",
                 nodes=cycle,
             )
         )
