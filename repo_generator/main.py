@@ -462,8 +462,13 @@ def run_repo_generator(parent=None):
     def on_closing():
         import re
         geom = root.geometry()
-        m = re.search(r"(?:[+-]\d+){2}$", geom)
-        pos = m.group(0) if m else ""
+        m = re.match(r"^(\d+x\d+)([+-]?\d+)([+-]?\d+)$", geom.replace("+-", "-"))
+        if m:
+            size = m.group(1)
+            x, y = max(0, int(m.group(2))), max(0, int(m.group(3)))
+            pos = f"{size}+{x}+{y}"
+        else:
+            pos = ""
         
         save_state(
             generator_pos=pos,

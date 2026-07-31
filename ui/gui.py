@@ -110,7 +110,18 @@ class GuardianGUI:
         header.grid(row=0, column=0, sticky="ew", pady=(0, PAD_LG))
         header.columnconfigure(0, weight=1)
         
-        ttk.Label(header, text="Contextor", style="Header.TLabel").grid(row=0, column=0, sticky="w")
+        title_frame = ttk.Frame(header)
+        title_frame.grid(row=0, column=0, sticky="w")
+        ttk.Label(title_frame, text="Contextor", style="Header.TLabel").pack(side="left")
+        
+        self.cmd_var = tk.BooleanVar(value=False)
+        def toggle_cmd():
+            import ctypes, sys
+            if sys.platform == "win32":
+                hwnd = ctypes.windll.kernel32.GetConsoleWindow()
+                if hwnd:
+                    ctypes.windll.user32.ShowWindow(hwnd, 5 if self.cmd_var.get() else 0)
+        ttk.Checkbutton(title_frame, text="Open CMD log", variable=self.cmd_var, command=toggle_cmd).pack(side="left", padx=(20, 0))
         sub_label = ttk.Label(header, text="Static architecture analysis · Read-only mode", style="Sub.TLabel")
         sub_label.grid(row=1, column=0, sticky="w", pady=(2, 0))
         self.tooltip = HeaderTooltipManager(sub_label, "Static architecture analysis · Read-only mode")
@@ -390,8 +401,13 @@ class GuardianGUI:
     def on_closing(self):
         import re
         geom = self.root.geometry()
-        m = re.search(r"(?:[+-]\d+){2}$", geom)
-        pos = m.group(0) if m else ""
+        m = re.match(r"^(\d+x\d+)([+-]?\d+)([+-]?\d+)$", geom.replace("+-", "-"))
+        if m:
+            size = m.group(1)
+            x, y = max(0, int(m.group(2))), max(0, int(m.group(3)))
+            pos = f"{size}+{x}+{y}"
+        else:
+            pos = ""
         
         save_state(
             gui_pos=pos,

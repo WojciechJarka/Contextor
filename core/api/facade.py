@@ -125,7 +125,7 @@ class GuardianFacade:
         graph, cache_hit = get_cached_graph(modules, build_graph)
 
         if log: log(f"Graph validation (cache_hit={cache_hit})...")
-        errors = validate(modules, graph)
+        errors = validate(modules, graph, progress_callback=progress_callback)
 
         repo_name = Path(path).name
 

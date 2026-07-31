@@ -165,8 +165,13 @@ def run_parser_window(parent=None):
     def on_closing():
         import re
         geom = parser_win.geometry()
-        m = re.search(r"(?:[+-]\d+){2}$", geom)
-        pos = m.group(0) if m else ""
+        m = re.match(r"^(\d+x\d+)([+-]?\d+)([+-]?\d+)$", geom.replace("+-", "-"))
+        if m:
+            size = m.group(1)
+            x, y = max(0, int(m.group(2))), max(0, int(m.group(3)))
+            pos = f"{size}+{x}+{y}"
+        else:
+            pos = ""
         
         save_state(
             parser_pos=pos,
@@ -189,11 +194,6 @@ def run_parser_window(parent=None):
 
         def on_success(out):
             messagebox.showinfo("Success", f"Output file:\n{out}", parent=parser_win)
-            save_state(
-                parser_geometry=parser_win.geometry(),
-                search_term=name_entry.get(),
-                public_api_only=public_api_only_var.get()
-            )
 
         def on_error(exc):
             messagebox.showerror("Error", str(exc), parent=parser_win)

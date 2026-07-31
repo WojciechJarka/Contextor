@@ -151,11 +151,19 @@ def main() -> None:
         except Exception:
             pass
 
+    import sys
     if "--gui" in sys.argv:
+        if sys.platform == "win32":
+            import ctypes
+            hwnd = ctypes.windll.kernel32.GetConsoleWindow()
+            if hwnd:
+                ctypes.windll.user32.ShowWindow(hwnd, 0)
         from repo_guardian.ui.gui import run
 
         run()
-        return
+        
+        import os
+        os._exit(0)
 
     from repo_guardian.cli import main as cli_main
 

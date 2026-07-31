@@ -11,7 +11,7 @@ import tkinter as tk
 from tkinter import ttk, scrolledtext
 import os
 
-def truncate_path(path_str, max_len=70):
+def truncate_path(path_str, max_len=55):
     if not path_str or len(path_str) <= max_len:
         return path_str
     
@@ -46,10 +46,10 @@ def create_progress_bar(parent, **pack_kwargs):
     text_frame = ttk.Frame(container)
     text_frame.pack(side="top", fill="x")
     
-    time_label = ttk.Label(text_frame, text="", font=("Consolas", 9, "bold"), foreground="#005cc5")
+    time_label = ttk.Label(text_frame, text="", font=("Consolas", 9, "bold"), foreground="#005cc5", width=25)
     time_label.pack(side="left")
 
-    flicker_label = ttk.Label(text_frame, text="", font=("Consolas", 9, "bold"), foreground="#1f2430")
+    flicker_label = ttk.Label(text_frame, text="", font=("Consolas", 9, "bold"), foreground="#1f2430", width=55, anchor="e")
     flicker_label.pack(side="right")
     
     # Indeterminate bar
@@ -160,7 +160,7 @@ def run_with_progress(root, progress_container, task, on_success=None, on_error=
         if total > 0:
             perc = (completed / total) * 100
             progress_container.det["value"] = perc
-            progress_container.flicker_label.config(text=f"{short_filename} [{perc:.1f}%]", anchor="w", justify="left")
+            progress_container.flicker_label.config(text=short_filename, anchor="e", justify="right")
             
             elapsed = time.time() - start_time
             if completed > 0:
@@ -168,9 +168,9 @@ def run_with_progress(root, progress_container, task, on_success=None, on_error=
                 remaining = (total - completed) / speed if speed > 0 else 0
                 mins = int(remaining // 60)
                 secs = int(remaining % 60)
-                progress_container.time_label.config(text=f"ETA: {mins}m {secs}s")
+                progress_container.time_label.config(text=f"[{perc:5.1f}%] ETA: {mins}m {secs}s")
         else:
-            progress_container.flicker_label.config(text=short_filename, anchor="w", justify="left")
+            progress_container.flicker_label.config(text=short_filename, anchor="e", justify="right")
 
     def finish_success(result):
         progress_container.indet.stop()
@@ -198,8 +198,12 @@ def run_with_progress(root, progress_container, task, on_success=None, on_error=
             if 'log' in sig.parameters:
                 kwargs['log'] = lambda msg: root.after(0, write_log, msg)
             if 'progress_callback' in sig.parameters:
+                last_call = [0]
                 def p_callback(completed, total, filename):
-                    root.after(0, update_progress, completed, total, filename)
+                    now = time.time()
+                    if now - last_call[0] > 0.1:
+                        root.after(0, update_progress, completed, total, filename)
+                        last_call[0] = now
                     return not getattr(progress_container, 'is_cancelled', False)
                 kwargs['progress_callback'] = p_callback
                 

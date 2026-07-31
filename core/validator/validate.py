@@ -22,6 +22,7 @@ from .collisions import validate_name_collisions
 def validate(
     modules: dict[str, Module],
     graph: ProjectGraph,
+    progress_callback=None
 ) -> list[ValidationError]:
     """
     Validate project architecture.
@@ -29,14 +30,15 @@ def validate(
 
     errors: list[ValidationError] = []
 
-
+    if progress_callback and not progress_callback(0, 0, "Validating cycles..."): return errors
     errors.extend(
         validate_cycles(
-            graph
+            graph,
+            progress_callback=progress_callback
         )
     )
 
-
+    if progress_callback and not progress_callback(0, 0, "Validating layer rules..."): return errors
     errors.extend(
         validate_layer_rules(
             modules,
@@ -44,7 +46,7 @@ def validate(
         )
     )
 
-
+    if progress_callback and not progress_callback(0, 0, "Validating forbidden dependencies..."): return errors
     errors.extend(
         validate_forbidden_dependencies(
             modules,
@@ -52,7 +54,7 @@ def validate(
         )
     )
 
-
+    if progress_callback and not progress_callback(0, 0, "Validating name collisions..."): return errors
     errors.extend(
         validate_name_collisions(
             modules,

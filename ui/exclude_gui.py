@@ -805,8 +805,13 @@ def run_exclude_window(parent=None):
     def _on_close(is_confirm):
         import re
         geom = win.geometry()
-        m = re.search(r"(?:[+-]\d+){2}$", geom)
-        pos = m.group(0) if m else ""
+        m = re.match(r"^(\d+x\d+)([+-]?\d+)([+-]?\d+)$", geom.replace("+-", "-"))
+        if m:
+            size = m.group(1)
+            x, y = max(0, int(m.group(2))), max(0, int(m.group(3)))
+            pos = f"{size}+{x}+{y}"
+        else:
+            pos = ""
         from repo_guardian.ui.path_memory import save_state
         save_state(exclude_pos=pos)
         handle_close(is_confirm=is_confirm)
