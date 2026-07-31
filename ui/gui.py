@@ -31,8 +31,9 @@ class GuardianGUI:
         self.root.title("Contextor")
         
         self.state = load_state()
-        gui_geom = self.state.get("gui_geometry", "900x640")
-        self.root.geometry(gui_geom)
+        gui_pos = self.state.get("gui_pos", "")
+        if gui_pos:
+            self.root.geometry(gui_pos)
         self.root.minsize(680, 560)
         
         apply_theme(self.root)
@@ -387,8 +388,13 @@ class GuardianGUI:
         handle_empty_output_folder(project_root)
 
     def on_closing(self):
+        import re
+        geom = self.root.geometry()
+        m = re.search(r"(?:[+-]\d+){2}$", geom)
+        pos = m.group(0) if m else ""
+        
         save_state(
-            gui_geometry=self.root.geometry(),
+            gui_pos=pos,
             repository=self.repo_path_var.get(),
             layer=self.layer_path_var.get(),
             python_file=self.file_path_var.get()

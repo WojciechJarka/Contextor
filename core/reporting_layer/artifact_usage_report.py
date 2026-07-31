@@ -118,73 +118,101 @@ def _symbol_kind(symbol: str, symbols: dict) -> str:
     return "unknown"
 
 
+def _process_single_artifact_module(args):
+    module_id, module_dict, all_modules, root_path = args
+    
+    # Przechowujemy lokalny tree_cache w obrębie procesu
+    tree_cache = {}
+    
+    abs_path = module_dict.get("absolute_path", module_dict.get("path", module_id))
+    
+    from repo_guardian.core.symbol_engine import extract_file_symbols
+    from repo_guardian.core.reference.engine import build_symbol_references
+    from repo_guardian.core.api.api_consumers import extract_api_consumers
+
+    symbols = extract_file_symbols(str(abs_path))
+    own_symbols = _module_own_symbols(symbols)
+
+    if not own_symbols:
+        return module_id, {
+            "symbols": symbols,
+            "own_symbols": own_symbols,
+            "consumers": {},
+        }
+
+    # Zastąpienie all_modules pseudo-obiektami dla zachowania kompatybilności 
+    # z build_symbol_references (które spodziewa się obiektu z atrybutem path)
+    class DummyModule:
+        def __init__(self, d):
+            self.path = d.get("path")
+            self.absolute_path = d.get("absolute_path")
+            self.module_id = d.get("module_id")
+
+    modules_objs = {k: DummyModule(v) for k, v in all_modules.items()}
+
+    references = build_symbol_references(
+        modules_objs,
+        own_symbols,
+        root_path,
+        definer_module=module_id,
+        tree_cache=tree_cache,
+    )
+
+    signatures = symbols.get("signatures", {})
+    consumers = extract_api_consumers(
+        own_symbols,
+        references,
+        signatures=signatures
+    )
+
+    return module_id, {
+        "symbols": symbols,
+        "own_symbols": own_symbols,
+        "consumers": consumers,
+    }
+
+
 def collect_module_artifacts(
     modules: dict,
     root_path: str,
     progress_callback=None
 ) -> dict:
-    """
-    Builds the following for each module:
+    import dataclasses
+    from concurrent.futures import ProcessPoolExecutor, as_completed
 
-    - local symbols (facts from symbol_analysis)
-    - consumers of these symbols (api_consumers, based
-      on symbol_reference)
-
-    Returns:
-
-    {
-        module_id: {
-            "symbols": {...extract_file_symbols...},
-            "own_symbols": [...],
-            "consumers": {...extract_api_consumers...},
-        }
-    }
-    """
     result = {}
-    tree_cache = {}
     total = len(modules)
     completed = 0
+    
+    # Serialize modules to dictionaries for IPC
+    all_modules_dict = {
+        k: dataclasses.asdict(v) if dataclasses.is_dataclass(v) else v 
+        for k, v in modules.items()
+    }
 
-    for module_id, module in modules.items():
-        if progress_callback:
-            if not progress_callback(completed, total, f"JSON: {module_id}"):
-                raise Exception("Analysis cancelled by user")
+    # Przygotowanie argumentów dla puli procesów
+    tasks = [
+        (mod_id, mod_dict, all_modules_dict, root_path)
+        for mod_id, mod_dict in all_modules_dict.items()
+    ]
+
+    with ProcessPoolExecutor() as executor:
+        futures = {executor.submit(_process_single_artifact_module, task): task[0] for task in tasks}
+        
+        for future in as_completed(futures):
+            mod_id = futures[future]
+            try:
+                ret_mod_id, data = future.result()
+                result[ret_mod_id] = data
+            except Exception as e:
+                # W razie błędu parsowania pojedynczego pliku w procesie, próbujemy kontynuować
+                pass
                 
-        abs_path = getattr(module, "absolute_path", getattr(module, "path", module_id))
-
-        symbols = extract_file_symbols(str(abs_path))
-        own_symbols = _module_own_symbols(symbols)
-
-        if not own_symbols:
-            result[module_id] = {
-                "symbols": symbols,
-                "own_symbols": own_symbols,
-                "consumers": {},
-            }
-            continue
-
-        references = build_symbol_references(
-            modules,
-            own_symbols,
-            root_path,
-            definer_module=module_id,
-            tree_cache=tree_cache,
-        )
-
-        signatures = symbols.get("signatures", {})
-
-        consumers = extract_api_consumers(
-            own_symbols,
-            references,
-            signatures=signatures
-        )
-
-        result[module_id] = {
-            "symbols": symbols,
-            "own_symbols": own_symbols,
-            "consumers": consumers,
-        }
-        completed += 1
+            completed += 1
+            if progress_callback:
+                if not progress_callback(completed, total, f"JSON: {mod_id}"):
+                    executor.shutdown(wait=False, cancel_futures=True)
+                    raise Exception("Analysis cancelled by user")
 
     return result
 
@@ -499,13 +527,20 @@ def generate_artifact_usage_report(
 
     # TEST TRACEABILITY MAPPING
     test_coverage_mapping = {}
+    total_test = len(modules)
+    completed_test = 0
+
     for module_id in modules:
+        if progress_callback:
+            if not progress_callback(completed_test, total_test, f"TESTS: {module_id}"):
+                raise Exception("Analysis cancelled by user")
         try:
             pub_sym = [s["artifact"] for s in artifact_index.values() if s["definer_module"] == module_id]
             test_ctx = build_test_context(module_id, root_path, pub_sym)
             test_coverage_mapping[module_id] = test_ctx
         except Exception:
             pass
+        completed_test += 1
 
     return {
         "runtime": runtime_info,

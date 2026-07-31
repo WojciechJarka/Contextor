@@ -14,9 +14,13 @@ class RepoGenerator:
     def __init__(self, root):
         self.root = root
         self.root.title("Repo Builder - Context Generator")
-        self.root.geometry("1100x750")
+        self.root.minsize(800, 600)
 
         state = load_state()
+        
+        generator_pos = state.get("generator_pos", "")
+        if generator_pos:
+            self.root.geometry(generator_pos)
 
         self.files = state.get("repo_gui_files", [])
         saved_selections = state.get("repo_gui_selected", [])
@@ -446,19 +450,25 @@ def run_repo_generator(parent=None):
         root = tk.Tk()
 
     state = load_state()
-    geom = state.get("repo_gui_geometry", "800x600")
-    root.geometry(geom)
+    generator_pos = state.get("generator_pos", "")
+    if generator_pos:
+        root.geometry(generator_pos)
+    root.minsize(800, 600)
 
     apply_theme(root)
 
     app = RepoGenerator(root)
 
     def on_closing():
-        selections = list(app.listbox.curselection())
+        import re
+        geom = root.geometry()
+        m = re.search(r"(?:[+-]\d+){2}$", geom)
+        pos = m.group(0) if m else ""
+        
         save_state(
-            repo_gui_geometry=root.geometry(),
+            generator_pos=pos,
             repo_gui_files=app.files,
-            repo_gui_selected=selections,
+            repo_gui_selected=list(app.listbox.curselection()),
             repo_gui_skip_exts=list(app.skip_exts),
             repo_gui_skip_dirs=list(app.skip_dirs),
             repo_gui_current_preset=app.current_preset,

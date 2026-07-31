@@ -9,6 +9,20 @@ Contains indeterminate progress bars, determinate progress bars, and log console
 import threading
 import tkinter as tk
 from tkinter import ttk, scrolledtext
+import os
+
+def truncate_path(path_str, max_len=70):
+    if not path_str or len(path_str) <= max_len:
+        return path_str
+    
+    path_str = path_str.replace("\\", "/")
+    parts = path_str.split("/")
+    filename = parts[-1]
+    
+    if len(filename) >= max_len - 4:
+        return "..." + filename[-(max_len-4):]
+    
+    return "..." + path_str[-(max_len-3):]
 
 
 def create_progress_bar(parent, **pack_kwargs):
@@ -142,10 +156,11 @@ def run_with_progress(root, progress_container, task, on_success=None, on_error=
     start_time = time.time()
 
     def update_progress(completed, total, filename):
+        short_filename = truncate_path(str(filename))
         if total > 0:
             perc = (completed / total) * 100
             progress_container.det["value"] = perc
-            progress_container.flicker_label.config(text=f"[{perc:.1f}%] {filename}")
+            progress_container.flicker_label.config(text=f"{short_filename} [{perc:.1f}%]", anchor="w", justify="left")
             
             elapsed = time.time() - start_time
             if completed > 0:
@@ -155,7 +170,7 @@ def run_with_progress(root, progress_container, task, on_success=None, on_error=
                 secs = int(remaining % 60)
                 progress_container.time_label.config(text=f"ETA: {mins}m {secs}s")
         else:
-            progress_container.flicker_label.config(text=filename)
+            progress_container.flicker_label.config(text=short_filename, anchor="w", justify="left")
 
     def finish_success(result):
         progress_container.indet.stop()

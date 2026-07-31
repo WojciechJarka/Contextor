@@ -151,13 +151,15 @@ def run_exclude_window(parent=None):
 
     win = tk.Toplevel(parent) if parent else tk.Toplevel()
 
-    win.title(
-        "Exclude Manager"
-    )
+    win.title("Exclude Manager")
+    
+    from repo_guardian.ui.path_memory import load_state, save_state
+    state = load_state()
+    exclude_pos = state.get("exclude_pos", "")
+    if exclude_pos:
+        win.geometry(exclude_pos)
 
-    win.geometry(
-        "900x720"
-    )
+    win.minsize(800, 600)
     win.configure(bg=BG)
 
     ttk.Label(win, text="Exclude Manager", style="Header.TLabel").pack(
@@ -734,7 +736,6 @@ def run_exclude_window(parent=None):
         "  as well as heavy structures like __pycache__, .git, venv, node_modules, dist, .idea."
     )
     ttk.Label(info_frame, text=info_text_1, foreground=TEXT).pack(anchor="w", padx=PAD_SM, pady=(PAD_SM, 2))
-    
     info_text_2 = (
         "• Exclude non-Python structures: Adds top-level non-Python directories to the list above,\n"
         "  preventing the engine from even attempting to traverse them. Strictly a performance optimization."
@@ -800,8 +801,23 @@ def run_exclude_window(parent=None):
 
     bottom_frame = ttk.Frame(win)
     bottom_frame.pack(fill="x", padx=PAD_LG, pady=(0, PAD_LG))
-    ttk.Button(bottom_frame, text="Confirm", style="Primary.TButton", command=lambda: handle_close(is_confirm=True)).pack(side="right")
+    
+    def _on_close(is_confirm):
+        import re
+        geom = win.geometry()
+        m = re.search(r"(?:[+-]\d+){2}$", geom)
+        pos = m.group(0) if m else ""
+        from repo_guardian.ui.path_memory import save_state
+        save_state(exclude_pos=pos)
+        handle_close(is_confirm=is_confirm)
 
-    win.protocol("WM_DELETE_WINDOW", lambda: handle_close(is_confirm=False))
+    ttk.Button(bottom_frame, text="Confirm", style="Primary.TButton", command=lambda: _on_close(is_confirm=True)).pack(side="right")
+    win.protocol("WM_DELETE_WINDOW", lambda: _on_close(is_confirm=False))
+    
+    from repo_guardian.ui.path_memory import load_state
+    saved = load_state()
+    if "exclude_pos" in saved:
+        win.geometry(f"+{saved['exclude_pos']}")
+
     refresh()
     return win

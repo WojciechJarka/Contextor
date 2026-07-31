@@ -119,7 +119,8 @@ def _canonical_cycle(
 
 
 def detect_cycles(
-    edges: Dict[str, Set[str]]
+    edges: Dict[str, Set[str]],
+    progress_callback=None
 ) -> List[List[str]]:
     """
     Detects directed cycles (with disk Cache support for performance).
@@ -251,6 +252,9 @@ def detect_cycles(
     for node in sorted(
         nodes
     ):
+        if progress_callback and not progress_callback(0, 0, "Detecting cycles..."):
+            return []
+
 
         if state.get(
             node,

@@ -41,13 +41,20 @@ from repo_guardian.core.reporting_layer.reporting_llm import generate_llm_markdo
 from repo_guardian.core.single_file.single_file_analysis import collect_all_contexts
 
 
-def _compute_metrics_and_debt(modules, graph):
+def _compute_metrics_and_debt(modules, graph, progress_callback=None):
     """
     Shared analytical pipeline extracting graph metrics and tech debt scores.
     """
+    if progress_callback and not progress_callback(0, 0, "Computing graph metrics..."): return {}, [], [], {}
     metrics = compute_graph_metrics(graph.hard_edges, graph.soft_edges)
-    cycles = detect_cycles(graph.hard_edges)
+    
+    if progress_callback and not progress_callback(0, 0, "Detecting cycles..."): return metrics, [], [], {}
+    cycles = detect_cycles(graph.hard_edges, progress_callback=progress_callback)
+    
+    if progress_callback and not progress_callback(0, 0, "Validating collisions..."): return metrics, cycles, [], {}
     all_collisions = validate_name_collisions(modules)
+    
+    if progress_callback and not progress_callback(0, 0, "Computing tech debt..."): return metrics, cycles, all_collisions, {}
     debt = compute_debt(
         graph.hard_edges,
         graph.soft_edges,
@@ -123,7 +130,7 @@ class GuardianFacade:
         repo_name = Path(path).name
 
         if log: log("Calculating metrics, detecting cycles and tech debt...")
-        metrics, cycles, all_collisions, debt = _compute_metrics_and_debt(modules, graph)
+        metrics, cycles, all_collisions, debt = _compute_metrics_and_debt(modules, graph, progress_callback=progress_callback)
 
         save_all_reports(
             repo_name=repo_name,
@@ -155,7 +162,7 @@ class GuardianFacade:
         graph, cache_hit = get_cached_graph(modules, build_graph)
 
         if log: log("Calculating metrics and collisions for the full project...")
-        metrics, cycles, all_collisions, debt = _compute_metrics_and_debt(modules, graph)
+        metrics, cycles, all_collisions, debt = _compute_metrics_and_debt(modules, graph, progress_callback=progress_callback)
 
         runtime = {"cache_hit": cache_hit}
 

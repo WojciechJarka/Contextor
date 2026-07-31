@@ -111,8 +111,11 @@ def run_parser_window(parent=None):
     parser_win.title("Parser JSON")
 
     state = load_state()
-    parser_geom = state.get("parser_geometry", "540x350")
-    parser_win.geometry(parser_geom)
+    parser_pos = state.get("parser_pos", "")
+    if parser_pos:
+        parser_win.geometry(parser_pos)
+        
+    parser_win.minsize(700, 250)
     parser_win.configure(bg=BG)
 
     ttk.Label(parser_win, text="Parse JSON", style="Header.TLabel").pack(anchor="w", padx=PAD_LG, pady=(PAD_LG, 0))
@@ -145,32 +148,37 @@ def run_parser_window(parent=None):
 
     ttk.Label(parser_win, text="File name or symbol (e.g. main.py or main)", style="Field.TLabel").pack(anchor="w", padx=PAD_LG)
 
-    name_entry = ttk.Entry(parser_win)
-    name_entry.insert(0, state.get("search_term", ""))
+    search_var = tk.StringVar(value=state.get("search_term", ""))
+    name_entry = ttk.Entry(parser_win, textvariable=search_var)
     name_entry.pack(fill="x", padx=PAD_LG, pady=(2, PAD_LG))
 
-    public_api_only_var = tk.BooleanVar(value=state.get("public_api_only", False))
+    public_api_var = tk.BooleanVar(value=state.get("public_api_only", False))
     cb_api = ttk.Checkbutton(
         parser_win,
         text="Public API Only (hide elements with consumer_count=0 and private)",
-        variable=public_api_only_var,
+        variable=public_api_var,
         style="TCheckbutton"
     )
     cb_api.pack(anchor="w", padx=PAD_LG, pady=(0, PAD_LG))
     p_tooltip.bind_tooltip(cb_api, "Filter out private and unused artifacts from the parsed report.")
 
     def on_closing():
+        import re
+        geom = parser_win.geometry()
+        m = re.search(r"(?:[+-]\d+){2}$", geom)
+        pos = m.group(0) if m else ""
+        
         save_state(
-            parser_geometry=parser_win.geometry(),
-            search_term=name_entry.get(),
-            public_api_only=public_api_only_var.get()
+            parser_pos=pos,
+            search_term=search_var.get(),
+            public_api_only=public_api_var.get()
         )
         parser_win.destroy()
 
     def execute_parsing():
         json_path = json_path_var.get()
-        term = name_entry.get()
-        public_api = public_api_only_var.get()
+        term = search_var.get()
+        public_api = public_api_var.get()
 
         if not json_path or not term:
             messagebox.showwarning("Error", "Fill in both paths", parent=parser_win)
