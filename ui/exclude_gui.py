@@ -818,11 +818,6 @@ def run_exclude_window(parent=None):
 
     ttk.Button(bottom_frame, text="Confirm", style="Primary.TButton", command=lambda: _on_close(is_confirm=True)).pack(side="right")
     win.protocol("WM_DELETE_WINDOW", lambda: _on_close(is_confirm=False))
-    
-    from repo_guardian.ui.path_memory import load_state
-    saved = load_state()
-    if "exclude_pos" in saved:
-        win.geometry(f"+{saved['exclude_pos']}")
 
     refresh()
     return win
