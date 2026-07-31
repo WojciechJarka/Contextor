@@ -23,6 +23,9 @@ from repo_guardian.core.domain.module import (
 from repo_guardian.core.domain.imports import (
     ImportRef,
 )
+from repo_guardian.core.analysis.cache_manager import CacheManager
+import dataclasses
+from concurrent.futures import ProcessPoolExecutor, as_completed
 
 
 
@@ -194,6 +197,31 @@ def extract_imports(
 
 
 
+def _process_single_file(path_str: str, root_str: str) -> dict:
+    """Funkcja pomocnicza dla wieloprocesowości."""
+    path = Path(path_str)
+    
+    # Próba odczytu z cache
+    cache = CacheManager(root_str)
+    cached_data = cache.get(path)
+    
+    if cached_data:
+        imports = [ImportRef(**imp) for imp in cached_data.get("imports", [])]
+    else:
+        imports = extract_imports(path)
+        cache.set(path, {"imports": [dataclasses.asdict(imp) for imp in imports]})
+        
+    rel = path.relative_to(Path(root_str))
+    module_id = ".".join(rel.with_suffix("").parts)
+    
+    return {
+        "module_id": module_id,
+        "path": str(path.resolve()),
+        "imports": imports,
+        "filename": path.name
+    }
+
+
 # ==========================================================
 # INDEX BUILDER
 # ==========================================================
@@ -203,6 +231,7 @@ def build_index(
     root: str,
     excludes: list[str] = None,
     extra_ignored_dirs: set = None,
+    progress_callback = None
 ) -> dict[str, Module]:
     """
     Buduje indeks modułów projektu.
@@ -271,27 +300,11 @@ def build_index(
 
 
 
-    for path in root_path.rglob(
-        "*.py"
-    ):
-
-
-
-        rel = path.relative_to(
-            root_path
-        )
-
-
-
-        # ignorowanie katalogów
-        # względem repo root
-
-        if any(
-            part in ignored_dirs
-            for part in rel.parts
-        ):
+    files_to_process = []
+    for path in root_path.rglob("*.py"):
+        rel = path.relative_to(root_path)
+        if any(part in ignored_dirs for part in rel.parts):
             continue
-
         if excludes:
             rel_str = rel.as_posix()
             is_excluded = False
@@ -302,36 +315,32 @@ def build_index(
                     break
             if is_excluded:
                 continue
+        files_to_process.append(path)
 
+    total_files = len(files_to_process)
+    if progress_callback:
+        progress_callback(0, total_files, "Start...")
 
-
-        module_id = ".".join(
-
-            rel.with_suffix("").parts
-
-        )
-
-
-
-        imports = extract_imports(
-            path
-        )
-
-
-
-        modules[module_id] = Module(
-
-            module_id=module_id,
-
-            path=str(path.resolve()),
-
-            absolute_path=str(
-                path.resolve()
-            ),
-
-            imports=imports,
-
-        )
-
+    completed = 0
+    with ProcessPoolExecutor() as executor:
+        futures = {
+            executor.submit(_process_single_file, str(p), str(root_path)): p
+            for p in files_to_process
+        }
+        
+        for future in as_completed(futures):
+            res = future.result()
+            modules[res["module_id"]] = Module(
+                module_id=res["module_id"],
+                path=res["path"],
+                absolute_path=res["path"],
+                imports=res["imports"],
+            )
+            
+            completed += 1
+            if progress_callback:
+                if not progress_callback(completed, total_files, res["filename"]):
+                    executor.shutdown(wait=False, cancel_futures=True)
+                    raise Exception("Analysis cancelled by user")
 
     return modules

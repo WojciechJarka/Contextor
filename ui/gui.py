@@ -15,7 +15,7 @@ from repo_guardian.ui.gui_parser import run_parser_window
 from repo_guardian.ui.exclude_check import check_stale_excludes
 from repo_guardian.ui.exclude_gui import run_exclude_window
 from repo_guardian.ui.system_actions import handle_open_output_folder, handle_empty_output_folder
-from repo_guardian.ui.progress_widget import create_progress_bar, create_log_box, run_with_progress
+from repo_guardian.ui.progress_widget import create_progress_bar, create_log_box, run_with_progress, create_cpu_indicator
 from repo_guardian.ui.theme import apply_theme, HeaderTooltipManager, BG, PAD_SM, PAD_MD, PAD_LG
 from repo_generator import run_repo_generator
 
@@ -31,7 +31,7 @@ class GuardianGUI:
         self.root.title("Contextor")
         
         self.state = load_state()
-        gui_geom = self.state.get("gui_geometry", "760x640")
+        gui_geom = self.state.get("gui_geometry", "900x640")
         self.root.geometry(gui_geom)
         self.root.minsize(680, 560)
         
@@ -166,21 +166,25 @@ class GuardianGUI:
         """
         actions_section = ttk.Frame(self.container)
         actions_section.grid(row=2, column=0, sticky="ew", pady=(PAD_LG, 0))
-        for i in range(3):
+        for i in range(4):
             actions_section.columnconfigure(i, weight=1)
             
         self.analyze_btn = ttk.Button(actions_section, text="Analyze Repository", style="Primary.TButton", command=self.analyze)
         self.analyze_btn.grid(row=0, column=0, sticky="ew", padx=(0, PAD_SM))
         
-        self.analyze_layer_btn = ttk.Button(actions_section, text="Analyze Layer", style="Secondary.TButton", command=self.analyze_layer)
+        self.analyze_layer_btn = ttk.Button(actions_section, text="Analyze Layer", style="Primary.TButton", command=self.analyze_layer)
         self.analyze_layer_btn.grid(row=0, column=1, sticky="ew", padx=PAD_SM)
         
-        self.analyze_single_btn = ttk.Button(actions_section, text="Analyze Single File", style="Secondary.TButton", command=self.analyze_single)
+        self.analyze_single_btn = ttk.Button(actions_section, text="Analyze Single File", style="Primary.TButton", command=self.analyze_single)
         self.analyze_single_btn.grid(row=0, column=2, sticky="ew", padx=(PAD_SM, 0))
+
+        self.stop_btn = ttk.Button(actions_section, text="Stop analyze", command=self.stop_analysis, style="Danger.TButton", state="disabled")
+        self.stop_btn.grid(row=0, column=3, sticky="ew", padx=(PAD_LG, 0))
 
         self.tooltip.bind_tooltip(self.analyze_btn, "Run full analysis of the entire repository and produce global metrics.")
         self.tooltip.bind_tooltip(self.analyze_layer_btn, "Run scoped analysis on a specific folder (layer) within the repository.")
         self.tooltip.bind_tooltip(self.analyze_single_btn, "Run analysis for a single file, assessing its context within the full repository.")
+        self.tooltip.bind_tooltip(self.stop_btn, "Abort ongoing analysis.")
 
     def _setup_progress(self):
         """
@@ -192,6 +196,7 @@ class GuardianGUI:
         progress_section.columnconfigure(0, weight=1)
         
         self.progress_bar = create_progress_bar(progress_section)
+        self.cpu_indicator = create_cpu_indicator(progress_section)
         self.log_box = create_log_box(progress_section, height=8)
         self.log_box.configure(relief="flat", borderwidth=0)
 
@@ -228,6 +233,10 @@ class GuardianGUI:
     # ======================================================
     # CALLBACKS
     # ======================================================
+
+    def stop_analysis(self):
+        if hasattr(self, 'progress_bar'):
+            self.progress_bar.is_cancelled = True
 
     def browse_repository(self):
         directory = filedialog.askdirectory()
@@ -278,8 +287,8 @@ class GuardianGUI:
             messagebox.showwarning("Missing repository", "Please select ROOT directory of scanned project")
             return
 
-        def task(log=None):
-            return GuardianFacade.analyze_project(path, log=log)
+        def task(log=None, progress_callback=None):
+            return GuardianFacade.analyze_project(path, log=log, progress_callback=progress_callback)
 
         def on_success(errors):
             if not errors:
@@ -291,11 +300,13 @@ class GuardianGUI:
         def on_error(exc):
             messagebox.showerror("error", str(exc))
 
+        self.progress_bar.is_cancelled = False
+        
         run_with_progress(
             self.root, self.progress_bar, task,
             on_success=on_success, on_error=on_error,
             buttons=[self.analyze_btn, self.analyze_layer_btn, self.analyze_single_btn],
-            log_box=self.log_box
+            log_box=self.log_box, cpu_indicator=self.cpu_indicator, stop_button=self.stop_btn
         )
 
     def analyze_layer(self):
@@ -320,8 +331,8 @@ class GuardianGUI:
             messagebox.showwarning("Invalid layer", "Layer must be a subdirectory of the selected repository root.")
             return
 
-        def task(log=None):
-            return GuardianFacade.analyze_layer(str(root_resolved), str(layer_resolved), log=log)
+        def task(log=None, progress_callback=None):
+            return GuardianFacade.analyze_layer(str(root_resolved), str(layer_resolved), log=log, progress_callback=progress_callback)
 
         def on_success(output_pattern):
             messagebox.showinfo("Done", f"Generated 5 layer reports:\n{output_pattern}")
@@ -329,11 +340,13 @@ class GuardianGUI:
         def on_error(exc):
             messagebox.showerror("Error", str(exc))
 
+        self.progress_bar.is_cancelled = False
+
         run_with_progress(
             self.root, self.progress_bar, task,
             on_success=on_success, on_error=on_error,
             buttons=[self.analyze_btn, self.analyze_layer_btn, self.analyze_single_btn],
-            log_box=self.log_box
+            log_box=self.log_box, cpu_indicator=self.cpu_indicator, stop_button=self.stop_btn
         )
 
     def analyze_single(self):
@@ -347,8 +360,8 @@ class GuardianGUI:
             messagebox.showwarning("Missing repository root", "Please select ROOT directory of scanned project")
             return
 
-        def task(log=None):
-            return GuardianFacade.analyze_single_file(file_path, repo_root, log=log)
+        def task(log=None, progress_callback=None):
+            return GuardianFacade.analyze_single_file(file_path, repo_root, log=log, progress_callback=progress_callback)
 
         def on_success(output):
             messagebox.showinfo("Done", f"Single file report created:\n{output}")
@@ -356,11 +369,13 @@ class GuardianGUI:
         def on_error(exc):
             messagebox.showerror("Error", str(exc))
 
+        self.progress_bar.is_cancelled = False
+
         run_with_progress(
             self.root, self.progress_bar, task,
             on_success=on_success, on_error=on_error,
             buttons=[self.analyze_btn, self.analyze_layer_btn, self.analyze_single_btn],
-            log_box=self.log_box
+            log_box=self.log_box, cpu_indicator=self.cpu_indicator, stop_button=self.stop_btn
         )
 
     def open_output_folder(self):

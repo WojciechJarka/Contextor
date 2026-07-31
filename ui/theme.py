@@ -138,6 +138,31 @@ def apply_theme(root: tk.Misc) -> ttk.Style:
     # ------------------------------------------------------
 
     style.configure(
+        "Danger.TButton",
+        font=(FONT_FAMILY, 10, "bold"),
+        padding=(12, 7),
+        borderwidth=0,
+        relief="flat",
+        background=DANGER,
+        foreground="#ffffff",
+    )
+    style.map(
+        "Danger.TButton",
+        background=[
+            ("disabled", DISABLED_BG),
+            ("pressed", DANGER_HOVER),
+            ("active", DANGER_HOVER),
+        ],
+        foreground=[
+            ("disabled", DISABLED_FG),
+        ],
+    )
+
+    # ------------------------------------------------------
+    # Buttons
+    # ------------------------------------------------------
+
+    style.configure(
         "TButton",
         font=FONT_BUTTON,
         padding=(12, 7),

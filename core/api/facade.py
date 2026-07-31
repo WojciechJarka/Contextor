@@ -97,7 +97,7 @@ class GuardianFacade:
     """
 
     @staticmethod
-    def analyze_project(path: str, log=None) -> list:
+    def analyze_project(path: str, log=None, progress_callback=None) -> list:
         """
         Analyzes full project hierarchy, builds dependency graph, evaluates
         technical debt, detects cycles and saves all generated artifacts.
@@ -105,13 +105,14 @@ class GuardianFacade:
         Args:
             path: Absolute string path to the project root directory.
             log: Optional callback function for streaming stdout progress.
+            progress_callback: Optional callback for progress percentage (completed, total, filename).
             
         Returns:
             list: List of architectural validation errors, if any.
         """
         if log: log("Starting directory indexing...")
         excludes, extra_dirs = _load_excludes_for_repo(path)
-        modules = build_index(path, excludes=excludes, extra_ignored_dirs=extra_dirs)
+        modules = build_index(path, excludes=excludes, extra_ignored_dirs=extra_dirs, progress_callback=progress_callback)
 
         if log: log(f"Found {len(modules)} modules. Fetching graph...")
         graph, cache_hit = get_cached_graph(modules, build_graph)
@@ -135,12 +136,13 @@ class GuardianFacade:
             root_path=path,
             log=log,
             collisions=all_collisions,
+            progress_callback=progress_callback,
         )
 
         return errors
 
     @staticmethod
-    def analyze_layer(root_dir: str, layer_dir: str, log=None) -> str:
+    def analyze_layer(root_dir: str, layer_dir: str, log=None, progress_callback=None) -> str:
         """Analyzes a specific layer. Returns output pattern."""
         root_resolved = Path(root_dir).resolve()
         layer_resolved = Path(layer_dir).resolve()
@@ -149,7 +151,7 @@ class GuardianFacade:
 
         if log: log(f"Processing layer '{layer_name}' in project '{repo_name}'...")
         excludes, extra_dirs = _load_excludes_for_repo(str(root_resolved))
-        modules = build_index(str(root_resolved), excludes=excludes, extra_ignored_dirs=extra_dirs)
+        modules = build_index(str(root_resolved), excludes=excludes, extra_ignored_dirs=extra_dirs, progress_callback=progress_callback)
         graph, cache_hit = get_cached_graph(modules, build_graph)
 
         if log: log("Calculating metrics and collisions for the full project...")
@@ -165,7 +167,7 @@ class GuardianFacade:
             hotspots=hotspots,
         )
         global_structure = generate_structure_report(graph.hard_edges, graph.soft_edges)
-        global_artifacts = generate_artifact_usage_report(modules, str(root_resolved), runtime)
+        global_artifacts = generate_artifact_usage_report(modules, str(root_resolved), runtime, progress_callback=progress_callback)
         global_compact_artifacts = compact_artifact_report(global_artifacts)
 
         if log: log(f"Slicing reports for layer: {layer_name}...")
@@ -191,14 +193,14 @@ class GuardianFacade:
         return f"output/{repo_name}_{layer_name}_*.json"
 
     @staticmethod
-    def analyze_single_file(file_path: str, repo_root: str, log=None) -> str:
+    def analyze_single_file(file_path: str, repo_root: str, log=None, progress_callback=None) -> str:
         """Analyzes a single file within the context of a project. Returns report output path."""
         file = Path(file_path)
         if log: log(f"Single file analysis: {file.name}")
 
         if log: log("Indexing and building project graph...")
         excludes, extra_dirs = _load_excludes_for_repo(repo_root)
-        modules = build_index(repo_root, excludes=excludes, extra_ignored_dirs=extra_dirs)
+        modules = build_index(repo_root, excludes=excludes, extra_ignored_dirs=extra_dirs, progress_callback=progress_callback)
         graph, cache_hit = get_cached_graph(modules, build_graph)
 
         if log: log("Generating global report (hotspots)...")

@@ -545,6 +545,7 @@ def save_all_reports(
     root_path: str,
     log=None,
     collisions: list | None = None,
+    progress_callback=None
 ):
     if log:
         log("Starting sequential report saving...")
@@ -569,7 +570,7 @@ def save_all_reports(
     save_json(collisions_data, collisions_path, log=log, label="name collisions report")
 
     if log: log("Generating artifact usage report...")
-    artifact_data = generate_artifact_usage_report(modules, root_path, runtime)
+    artifact_data = generate_artifact_usage_report(modules, root_path, runtime, progress_callback=progress_callback)
     artifact_data["debug_info"] = {
         "module_count": len(modules),
         "root_path": root_path,

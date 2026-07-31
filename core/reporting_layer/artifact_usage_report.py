@@ -121,6 +121,7 @@ def _symbol_kind(symbol: str, symbols: dict) -> str:
 def collect_module_artifacts(
     modules: dict,
     root_path: str,
+    progress_callback=None
 ) -> dict:
     """
     Builds the following for each module:
@@ -141,8 +142,14 @@ def collect_module_artifacts(
     """
     result = {}
     tree_cache = {}
+    total = len(modules)
+    completed = 0
 
     for module_id, module in modules.items():
+        if progress_callback:
+            if not progress_callback(completed, total, f"JSON: {module_id}"):
+                raise Exception("Analysis cancelled by user")
+                
         abs_path = getattr(module, "absolute_path", getattr(module, "path", module_id))
 
         symbols = extract_file_symbols(str(abs_path))
@@ -177,6 +184,7 @@ def collect_module_artifacts(
             "own_symbols": own_symbols,
             "consumers": consumers,
         }
+        completed += 1
 
     return result
 
@@ -445,6 +453,7 @@ def generate_artifact_usage_report(
     modules: dict,
     root_path: str,
     runtime: dict | None = None,
+    progress_callback=None
 ) -> dict:
     """
     Generates a global artifact usage report (functions,
@@ -461,6 +470,7 @@ def generate_artifact_usage_report(
     module_artifacts = collect_module_artifacts(
         modules,
         root_path,
+        progress_callback=progress_callback
     )
 
     artifact_index = build_artifact_index(
