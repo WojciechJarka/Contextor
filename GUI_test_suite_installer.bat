@@ -9,7 +9,6 @@ echo =======================================================
 echo.
 
 set "TARGET_SETUPTOOLS=69.5.1"
-set "TARGET_PYTEST=9.1.1"
 
 cd /d "%~dp0"
 echo [INFO] Working directory set to: %CD%
@@ -111,54 +110,37 @@ if "!INSTALLED_VER!"=="" (
 echo.
 
 :: =======================================================
-:: 3/5: Checking pytest version
+:: 3/5: Checking pytest
 :: =======================================================
-echo [3/5] Checking pytest version...
+echo [3/5] Checking pytest installation...
 
-set "PYTEST_INSTALLED_VER="
-"%PYTHON_EXE%" -c "import importlib.metadata; print(importlib.metadata.version('pytest'))" > "%TEMP%\pytest_ver.tmp" 2>nul
+set "PYTEST_INSTALLED="
+"%PYTHON_EXE%" -c "import importlib.util; print('YES') if importlib.util.find_spec('pytest') else print('')" > "%TEMP%\pytest_check.tmp" 2>nul
 
-if exist "%TEMP%\pytest_ver.tmp" (
-    set /p PYTEST_INSTALLED_VER=<"%TEMP%\pytest_ver.tmp"
-    del "%TEMP%\pytest_ver.tmp" 2>nul
+if exist "%TEMP%\pytest_check.tmp" (
+    set /p PYTEST_INSTALLED=<"%TEMP%\pytest_check.tmp"
+    del "%TEMP%\pytest_check.tmp" 2>nul
 )
 
-if "!PYTEST_INSTALLED_VER!"=="" (
+if "!PYTEST_INSTALLED!"=="" (
     powershell -Command "Write-Host '[WARNING] pytest is NOT installed in this Python environment.' -ForegroundColor Red"
-    echo pytest==%TARGET_PYTEST% is required for running the test suite.
+    echo pytest is required for running the test suite.
     echo.
-    set /p "install_choice=Do you want to install pytest==%TARGET_PYTEST% now? (Y/N): "
+    set /p "install_choice=Do you want to install pytest now? (Y/N): "
     if /i "!install_choice!"=="Y" (
-        echo [INFO] Installing pytest==%TARGET_PYTEST%...
-        "%PYTHON_EXE%" -m pip install pytest==%TARGET_PYTEST%
+        echo [INFO] Installing pytest...
+        "%PYTHON_EXE%" -m pip install pytest
         if errorlevel 1 (
             echo [ERROR] Failed to install pytest.
             pause
             exit /b 1
         )
-        echo [SUCCESS] pytest==%TARGET_PYTEST% installed.
+        echo [SUCCESS] pytest installed.
     ) else (
         echo [INFO] Skipping pytest installation.
     )
-) else if not "!PYTEST_INSTALLED_VER!"=="%TARGET_PYTEST%" (
-    powershell -Command "Write-Host '[WARNING] Detected pytest version !PYTEST_INSTALLED_VER!.' -ForegroundColor Red"
-    powershell -Command "Write-Host 'Version %TARGET_PYTEST% is required for running the test suite to ensure compatibility.' -ForegroundColor Red"
-    echo.
-    set /p "downgrade_choice=Do you want to change pytest from !PYTEST_INSTALLED_VER! to %TARGET_PYTEST%? (Y/N): "
-    if /i "!downgrade_choice!"=="Y" (
-        echo [INFO] Installing pytest==%TARGET_PYTEST%...
-        "%PYTHON_EXE%" -m pip install pytest==%TARGET_PYTEST% --force-reinstall
-        if errorlevel 1 (
-            echo [ERROR] Failed to change pytest version.
-            pause
-            exit /b 1
-        )
-        echo [SUCCESS] pytest successfully set to %TARGET_PYTEST%.
-    ) else (
-        echo [INFO] Keeping current pytest version !PYTEST_INSTALLED_VER!.
-    )
 ) else (
-    echo [OK] Correct pytest version !PYTEST_INSTALLED_VER! is already installed.
+    echo [OK] pytest is already installed.
 )
 echo.
 

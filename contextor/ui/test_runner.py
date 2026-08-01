@@ -47,12 +47,10 @@ def tests_dir():
 
 def _ensure_runnable() -> None:
     import importlib.metadata
+    import importlib.util
     
     missing_deps = False
-    try:
-        if importlib.metadata.version("pytest") != "9.1.1":
-            missing_deps = True
-    except importlib.metadata.PackageNotFoundError:
+    if importlib.util.find_spec("pytest") is None:
         missing_deps = True
 
     try:
@@ -63,7 +61,7 @@ def _ensure_runnable() -> None:
 
     if missing_deps:
         raise TestSuiteUnavailable(
-            "Libraries setuptools==69.5.1, pytest==9.1.1 and editable install (pip install -e .) "
+            "Libraries setuptools==69.5.1, pytest and editable install (pip install -e .) "
             "with dev dependencies are required for full test suite, "
             "please install them running GUI_test_suite_installer.bat file "
             "from root folder of this application."
