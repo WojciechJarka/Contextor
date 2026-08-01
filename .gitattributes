@@ -1,0 +1,5 @@
+.gitignore export-ignore
+.github/ export-ignore
+.gitattributes export-ignore
+run_gui.bat export-ignore
+PUSH.bat export-ignore

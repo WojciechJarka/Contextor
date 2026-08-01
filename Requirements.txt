@@ -1,8 +1,13 @@
-The program requires the orjson library for fast data processing.
+# Contextor runtime dependencies.
+#
+# Install with:  python -m pip install -r requirements.txt
+#
+# This is the complete runtime set. Everything else Contextor uses
+# (ast, tkinter, concurrent.futures, ...) ships with Python itself.
+# Requires Python 3.10 or newer.
+#
+# Test tooling is a separate, optional extra:
+#     python -m pip install -e ".[dev]"
 
-Installation instructions via command line (cmd):
-Open your terminal and run the installation, specifying the full path to the Python interpreter on your system.
-
-Example:
-C:\Users\YourUsername\AppData\Local\Programs\Python\Python311\python.exe -m pip install orjson
-(Your path to the python.exe interpreter may vary depending on your Python installation folder)
+# Fast JSON serialization for report output.
+orjson>=3.9

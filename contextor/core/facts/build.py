@@ -1,0 +1,108 @@
+"""
+contextor/core/facts/build.py
+
+REPOSITORY FACT BUILDER
+
+Builds the full repository facts context.
+
+Pipeline:
+
+    repository
+        |
+        v
+    modules index
+        |
+        v
+    dependency graph
+        |
+        v
+    symbol registry
+        |
+        v
+    reference graph
+        |
+        v
+    RepositoryContext
+
+
+Does not include:
+- scoring
+- hotspots
+- debt
+- reporting
+"""
+
+from contextor.core.graph.graph import (
+    build_graph,
+)
+from contextor.core.symbol_engine.indexer import (
+    build_index,
+)
+
+from .context import (
+    RepositoryContext,
+)
+from .references import (
+    build_reference_graph,
+)
+from .symbol_index import (
+    build_facts_symbol_index,
+)
+
+# ==========================================================
+# PUBLIC BUILDER
+# ==========================================================
+
+
+def build_repository_context(
+    root_path: str,
+) -> RepositoryContext:
+    """
+    Builds the complete repository facts state.
+
+    The only recommended entrypoint
+    for higher layers.
+    """
+
+    # ------------------------------------------------------
+    # MODULE INDEX
+    # ------------------------------------------------------
+
+    modules = build_index(root_path)
+
+    # ------------------------------------------------------
+    # DEPENDENCY GRAPH
+    # ------------------------------------------------------
+
+    graph = build_graph(modules)
+
+    # ------------------------------------------------------
+    # SYMBOL INDEX
+    # ------------------------------------------------------
+
+    symbols = build_facts_symbol_index(
+        modules,
+        root_path,
+    )
+
+    # ------------------------------------------------------
+    # SYMBOL REFERENCES
+    # ------------------------------------------------------
+
+    references = build_reference_graph(
+        modules,
+        symbols,
+        root_path,
+    )
+
+    # ------------------------------------------------------
+    # CONTEXT
+    # ------------------------------------------------------
+
+    return RepositoryContext(
+        modules=modules,
+        graph=graph,
+        symbols=symbols,
+        references=references,
+        root_path=root_path,
+    )

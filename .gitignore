@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+
+# Virtual environments
+.venv/
+venv/
+
+# Contextor generated output
+output/
+*.tmp
+
+# Contextor local state (legacy in-tree locations; current state lives
+# in the user config directory - see contextor/core/paths.py)
+contextor/ui/ui_state.json
+contextor/ui/exclude_state*.json
+contextor/ui/exclude_presets*.json
+
+# Editors
+.idea/
+.vscode/
+
+# OS
+Thumbs.db
+.DS_Store
+
+#GUI test suite folders
+.hypothesis/
+.benchmarks/
+.pytest_cache/
+.coverage
+htmlcov/

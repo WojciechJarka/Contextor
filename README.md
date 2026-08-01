@@ -1,6 +1,6 @@
 # Contextor
 
-Contextor transforms complex Python repositories into structured architectural context that both developers and Large Language Models (LLMs) can understand.
+Contextor transforms complex Python repositories into structured architectural context that both developers and Large Language Models (LLMs) can understand. It generates JSON reports - you can give access of Output json reports folder to LLM working directly in your repo. This way you spare tokens required by LLM for full structural analysis of the code base.
 
 It builds a comprehensive representation of a project's architecture, dependencies, relationships, symbol usage, and technical debt through static analysis — without ever executing the analyzed code.
 
@@ -63,9 +63,15 @@ Contextor acts as an intelligence layer between software repositories and AI sys
 
 # Prerequisites
 
-- Python 3.9+ (or newer)
-- Git (optional, required for repository context information)
-- Git must be installed and available in your system's `PATH`
+- **Python 3.10 or newer.** Contextor uses `X | Y` type annotations,
+  which are evaluated at import time and are a syntax error on 3.9.
+- **Tkinter**, for the graphical interface. Bundled with Python on
+  Windows and macOS; on Debian/Ubuntu install `python3-tk`. Not needed
+  for the CLI.
+- Git (optional, required for repository context information). Must be
+  installed and available in your system's `PATH`.
+
+The only third-party runtime dependency is `orjson`.
 
 ---
 
@@ -84,6 +90,35 @@ Install dependencies:
 python -m pip install -r requirements.txt
 ```
 
+Or install Contextor as a package, which also provides a `contextor`
+command usable from any directory:
+
+```bash
+python -m pip install -e .
+```
+
+To also install the test tooling — required by the **Test suite** button
+in the GUI and by `pytest` on the command line:
+
+```bash
+python -m pip install -e ".[dev]"
+```
+
+---
+
+# Project Layout
+
+```
+contextor/              the installable package
+    __main__.py         entry point (python -m contextor)
+    cli.py              command-line interface
+    core/               analysis engine
+    ui/                 Tkinter interface
+    repo_generator/     source bundling tool
+main.py                 launcher for running from a source checkout
+tests/                  test suite
+```
+
 ---
 
 # How to Use
@@ -96,6 +131,12 @@ The easiest way to start Contextor is:
 
 ```bash
 python main.py --gui
+```
+
+Or, once installed:
+
+```bash
+python -m contextor --gui
 ```
 
 On Windows, you can also use:
@@ -121,7 +162,7 @@ Then:
 Run an automated repository analysis:
 
 ```bash
-python main.py --cli /path/to/your/project
+python main.py /path/to/your/project
 ```
 
 Contextor will:
@@ -132,11 +173,41 @@ Contextor will:
 - calculate technical debt indicators;
 - generate JSON and Markdown reports.
 
-Generated reports are saved into:
+Or, once installed, from any directory:
 
+```bash
+contextor /path/to/your/project
 ```
-output/
+
+Additional options:
+
+```bash
+contextor --help                       # full option list
+contextor PROJECT --layer PROJECT/core # add a per-layer report
+contextor PROJECT --file PROJECT/x.py  # add a single-file deep dive
+contextor PROJECT --output ./reports   # choose the output directory
+contextor PROJECT --quiet              # suppress progress logging
 ```
+
+Exit codes: `0` no issues, `1` validation errors reported,
+`2` invalid arguments, `130` cancelled.
+
+Generated reports are saved into the `output/` directory next to the
+Contextor installation, regardless of the directory you launch from.
+Override the location with `--output` or the `CONTEXTOR_OUTPUT_DIR`
+environment variable.
+
+---
+
+# Files Contextor Writes
+
+Contextor never writes into the repository it analyzes. It writes only to:
+
+| Location | Contents | Override |
+|---|---|---|
+| `output/` next to the installation | Generated reports | `CONTEXTOR_OUTPUT_DIR` |
+| User cache directory | Parse and graph caches, keyed per repository | `CONTEXTOR_CACHE_DIR` |
+| User config directory | GUI state, exclude configuration | `CONTEXTOR_STATE_DIR` |
 
 ---
 

@@ -1,0 +1,47 @@
+[project]
+name = "contextor"
+version = "1.0.4"
+description = "Static architectural analysis turning Python repositories into LLM-ready context."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+dependencies = [
+    "orjson>=3.9",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4",
+    "ruff>=0.5",
+]
+
+[project.scripts]
+contextor = "contextor.__main__:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["contextor*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# The analyzer module contextor/core/analysis/test_context.py is
+# production code, not a test suite; restricting discovery to tests/
+# keeps pytest from collecting it.
+python_files = ["test_*.py"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+ignore = [
+    "E501",  # long lines are reformatted, not failed
+    "B008",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["F401"]

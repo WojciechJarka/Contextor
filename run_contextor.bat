@@ -1,5 +1,13 @@
 @echo off
-setlocal enabledelayedexpansion
+setlocal
+
+rem Delayed expansion is deliberately NOT enabled.
+rem
+rem It would treat "!" as a variable delimiter and silently strip it from
+rem every path, so a project stored under e.g. C:\!Projects\... became
+rem C:\Projects\... - the directory change failed, the virtual
+rem environment was never activated, and Contextor ran on whatever Python
+rem happened to be on PATH instead.
 
 echo ==========================================
 echo        Contextor Launcher
@@ -7,66 +15,101 @@ echo ==========================================
 echo.
 
 cd /d "%~dp0"
-set PYTHONPATH=%~dp0
+if errorlevel 1 goto no_project_dir
 
-:: Detect Python
+set "PROJECT_DIR=%CD%"
+set "VENV_DIR=%PROJECT_DIR%\.venv"
+set "VENV_PY=%VENV_DIR%\Scripts\python.exe"
+
+if not exist "%VENV_PY%" goto create_venv
+goto check_deps
+
+
+:create_venv
+echo [INFO] Creating virtual environment ^(.venv^)...
+
 python --version >nul 2>&1
-if errorlevel 1 (
-    echo [ERROR] Python was not found.
-    echo Install Python 3.9+ and add it to your system PATH.
-    pause
-    exit /b 1
-)
+if errorlevel 1 goto no_python
 
-:: Virtual Environment setup
-if not exist ".venv" (
-    echo [INFO] Creating virtual environment ^(.venv^)...
-    python -m venv .venv
-    if errorlevel 1 (
-        echo [ERROR] Failed to create virtual environment.
-        pause
-        exit /b 1
-    )
-    echo [SUCCESS] Virtual environment created.
-    echo.
-)
+python -m venv "%VENV_DIR%"
+if errorlevel 1 goto venv_failed
 
-:: Activate Virtual Environment
-call ".venv\Scripts\activate.bat"
+if not exist "%VENV_PY%" goto venv_failed
 
-:: Detect and install requirements
-if exist "Requirements.txt" set REQ_FILE=Requirements.txt
-if exist "requirements.txt" set REQ_FILE=requirements.txt
+echo [SUCCESS] Virtual environment created.
+echo.
 
-if defined REQ_FILE (
-    echo Checking dependencies...
-    python -m pip show orjson >nul 2>&1
-    if errorlevel 1 (
-        echo [WARNING] Required dependencies may be missing.
-        echo Installing project requirements from %REQ_FILE%...
-        
-        :: Optional: Upgrade pip silently
-        python -m pip install --upgrade pip >nul 2>&1
-        
-        python -m pip install -r "%REQ_FILE%"
-        if errorlevel 1 (
-            echo.
-            echo [ERROR] Dependency installation failed.
-            pause
-            exit /b 1
-        )
-        echo [SUCCESS] Dependencies installed.
-    ) else (
-        echo [OK] Dependencies are already installed.
-    )
-) else (
-    echo [WARNING] No requirements.txt found. Skipping dependency installation.
-)
 
+:check_deps
+echo Checking dependencies...
+
+"%VENV_PY%" -c "import orjson" >nul 2>&1
+if errorlevel 1 goto install_deps
+
+echo [OK] Dependencies are already installed.
+goto start_gui
+
+
+:install_deps
+echo [WARNING] Required dependencies are missing.
+echo Installing project requirements...
+
+"%VENV_PY%" -m pip install --upgrade pip >nul 2>&1
+
+if not exist "%PROJECT_DIR%\requirements.txt" goto no_requirements
+
+"%VENV_PY%" -m pip install -r "%PROJECT_DIR%\requirements.txt"
+if errorlevel 1 goto install_failed
+
+echo [SUCCESS] Dependencies installed.
+
+
+:start_gui
 echo.
 echo Starting Contextor GUI...
 echo.
 
-python main.py --gui
+rem The virtual environment interpreter is invoked directly rather than
+rem through activate.bat, so a failed activation can never silently fall
+rem back to the system Python.
+"%VENV_PY%" "%PROJECT_DIR%\main.py" --gui
+if errorlevel 1 goto gui_failed
 
+exit /b 0
+
+
+:no_project_dir
+echo [ERROR] Could not enter the project directory:
+echo         %~dp0
 pause
+exit /b 1
+
+:no_python
+echo [ERROR] Python was not found.
+echo Install Python 3.10+ and add it to your system PATH.
+pause
+exit /b 1
+
+:venv_failed
+echo [ERROR] Failed to create the virtual environment at:
+echo         %VENV_DIR%
+pause
+exit /b 1
+
+:no_requirements
+echo [ERROR] requirements.txt not found in:
+echo         %PROJECT_DIR%
+pause
+exit /b 1
+
+:install_failed
+echo.
+echo [ERROR] Dependency installation failed.
+pause
+exit /b 1
+
+:gui_failed
+echo.
+echo [ERROR] Contextor exited with an error.
+pause
+exit /b 1
