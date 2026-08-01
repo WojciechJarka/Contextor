@@ -22,6 +22,10 @@ Implemented a robust text parser for the builder window. Users can now paste uns
 
 Added a safety check before generating the repository. If there are files present in the list that have not been explicitly selected (highlighted), a prompt will now appear. It lists the unselected files and asks the user whether to include them, skip them, or cancel the generation, preventing accidental omissions.
 
+#### Enhanced GUI Test Suite Installer & Fallback Messaging
+
+Upgraded the `GUI_test_suite_installer.bat` to properly detect its own location, automatically install the editable development environment (`pip install -e .[dev]`), and safely check for `pytest` presence without forcing specific versions. This installer script serves as a dedicated rescue/fallback option if the automatic installation of test suite packages via a virtual environment (venv) fails for any reason. The GUI test runner now provides a descriptive fallback error log advising the user exactly which dependencies are missing and pointing them to the installer script, instead of throwing raw Python tracebacks.
+
 ### Fixed
 
 #### Artifact consumption report produced no data at all

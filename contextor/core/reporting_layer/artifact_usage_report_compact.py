@@ -115,6 +115,27 @@ def build_module_index(report: dict):
 # COMPACTION HELPERS
 # ==========================================================
 
+# Keys whose values are lists of module-table indices (rather than counts,
+# ranks, or raw module-id strings) get an explicit "_module_indices" suffix
+# so the key name alone disambiguates them - no need to rely on a reader
+# noticing _format_note before interpreting e.g. "consumers": [61].
+_INDEX_KEY_RENAMES = {
+    "consumers": "consumer_module_indices",
+    "direct_calls": "direct_calls_module_indices",
+    "callback_calls": "callback_calls_module_indices",
+    "event_bindings": "event_bindings_module_indices",
+    "runtime_calls": "runtime_calls_module_indices",
+    "api_imports": "api_imports_module_indices",
+    "inheritance": "inheritance_module_indices",
+    "ambiguous_calls": "ambiguous_calls_module_indices",
+}
+
+
+def _renamed(key: str) -> str:
+    """Applies the index-key rename if this key holds module indices."""
+
+    return _INDEX_KEY_RENAMES.get(key, key)
+
 
 def _idx(module_id, index_of):
     """Safe mapping string -> index (None if missing)."""
@@ -153,9 +174,9 @@ def _compact_usage(usage: dict, index_of: dict) -> dict:
                     compacted_values.append(compact_item)
                 else:
                     compacted_values.append(_idx(item, index_of))
-            compact[category] = compacted_values
+            compact[_renamed(category)] = compacted_values
         else:
-            compact[category] = _idx_list(values, index_of)
+            compact[_renamed(category)] = _idx_list(values, index_of)
 
     return compact
 
@@ -188,7 +209,7 @@ def compact_artifact_report(report: dict) -> dict:
             "kind": artifact.get("kind"),
             "signature": artifact.get("signature"),
             "definer_module": _idx(definer, index_of),
-            "consumers": _idx_list(consumers, index_of),
+            "consumer_module_indices": _idx_list(consumers, index_of),
         }
 
         # Skip usage ONLY if ALL usage categories are
@@ -213,7 +234,7 @@ def compact_artifact_report(report: dict) -> dict:
             "artifact": a.get("artifact"),
             "kind": a.get("kind"),
             "definer_module": _idx(a.get("definer_module"), index_of),
-            "consumers": _idx_list(a.get("consumers", []), index_of),
+            "consumer_module_indices": _idx_list(a.get("consumers", []), index_of),
             "consumer_count": a.get("consumer_count"),
         }
         for a in report.get("shared_artifacts", []) or []
@@ -232,7 +253,7 @@ def compact_artifact_report(report: dict) -> dict:
                         "artifact": a.get("artifact"),
                         "definer_module": _idx(a.get("definer_module"), index_of),
                         "kind": a.get("kind"),
-                        "consumers": _idx_list(a.get("consumers", []), index_of),
+                        "consumer_module_indices": _idx_list(a.get("consumers", []), index_of),
                     }
                     for a in cluster.get("shared_artifacts", []) or []
                 ],
@@ -265,16 +286,21 @@ def compact_artifact_report(report: dict) -> dict:
     compact_report = {
         "_format_note": (
             "This is a compacted artifact-usage report. Numbers inside "
-            "'definer_module', 'consumers', and the categories under "
-            "'usage' (direct_calls, callback_calls, event_bindings, "
-            "runtime_calls, api_imports, inheritance, ambiguous_calls) "
+            "'definer_module' and any key ending in '_module_indices' "
+            "(consumer_module_indices, direct_calls_module_indices, "
+            "callback_calls_module_indices, event_bindings_module_indices, "
+            "runtime_calls_module_indices, api_imports_module_indices, "
+            "inheritance_module_indices, ambiguous_calls_module_indices) "
             "are INDEXES into the 'modules' array below (e.g. index 13 "
-            "means modules[13]), not counts, ranks, or priorities. "
-            "If an artifact entry has no 'usage' key, it means it has "
-            "zero consumers - not missing data. 'ambiguous_calls' are "
-            "low-confidence guesses (short-name matches with no import "
-            "confirming the source module) and should be treated as "
-            "'maybe', never as confirmed usage."
+            "means modules[13]), not counts, ranks, or priorities - the "
+            "'_module_indices' suffix is the signal, so e.g. "
+            "consumer_module_indices: [61] means 'module at index 61', "
+            "not '61 consumers'. If an artifact entry has no 'usage' key, "
+            "it means it has zero consumers - not missing data. "
+            "'ambiguous_calls_module_indices' entries are low-confidence "
+            "guesses (short-name matches with no import confirming the "
+            "source module) and should be treated as 'maybe', never as "
+            "confirmed usage."
         ),
         "runtime": report.get("runtime", {}),
         "module_count": report.get("module_count"),
@@ -381,3 +407,4 @@ __all__ = [
     "build_module_index",
     "save_compact_artifact_report",
 ]
+
