@@ -7,6 +7,7 @@ from tkinter import filedialog, messagebox, ttk
 from contextor.repo_generator.config import DEFAULT_EXTENSIONS, DEFAULT_SKIP_DIRS
 from contextor.repo_generator.filters import FilterWindow
 from contextor.repo_generator.icons import create_icon_button
+from contextor.repo_generator.path_parser import parse_paths_from_text
 from contextor.ui import theme
 from contextor.ui.path_memory import load_state, save_state
 from contextor.ui.theme import PAD_LG, PAD_MD, PAD_SM, HeaderTooltipManager, apply_theme
@@ -196,17 +197,14 @@ class RepoGenerator:
         except tk.TclError:
             return  # Empty clipboard
 
-        lines = clipboard_text.splitlines()
+        valid_paths = parse_paths_from_text(clipboard_text)
+
         added = 0
-        for line in lines:
-            path = line.strip().strip('"').strip("'")
-            if not path:
-                continue
-            if os.path.exists(path) and os.path.isfile(path):
-                if path not in self.files:
-                    self.files.append(path)
-                    self.listbox.insert(tk.END, path)
-                    added += 1
+        for path in valid_paths:
+            if path not in self.files:
+                self.files.append(path)
+                self.listbox.insert(tk.END, path)
+                added += 1
 
         if added > 0:
             self.select_all()
@@ -431,6 +429,26 @@ class RepoGenerator:
         if not selected_indexes:
             messagebox.showwarning("No selection", "Select files to generate.", parent=self.root)
             return
+
+        all_indexes = set(range(self.listbox.size()))
+        selected_set = set(selected_indexes)
+        unselected_indexes = sorted(list(all_indexes - selected_set))
+
+        if unselected_indexes:
+            unselected_files = [self.files[i] for i in unselected_indexes]
+            files_list_str = "\n".join(unselected_files[:10])
+            if len(unselected_files) > 10:
+                files_list_str += f"\n... and {len(unselected_files) - 10} more"
+
+            msg = f"The file(s):\n\n{files_list_str}\n\nare not marked as selected for inclusion in the repository.\n\nDo you want to add them to the repo?"
+            
+            response = messagebox.askyesnocancel("Unselected files", msg, parent=self.root)
+            
+            if response is None:
+                return
+            elif response is True:
+                self.select_all()
+                selected_indexes = list(all_indexes)
 
         files_to_generate = [self.files[i] for i in selected_indexes]
 

@@ -9,14 +9,16 @@ echo =======================================================
 echo.
 
 set "TARGET_SETUPTOOLS=69.5.1"
+set "TARGET_PYTEST=9.1.1"
 
+cd /d "%~dp0"
 echo [INFO] Working directory set to: %CD%
 echo.
 
 :: =======================================================
-:: 1/3: Searching for Python interpreter
+:: 1/5: Searching for Python interpreter
 :: =======================================================
-echo [1/3] Searching for Python interpreter...
+echo [1/5] Searching for Python interpreter...
 
 set "PYTHON_EXE="
 
@@ -57,9 +59,9 @@ echo [INFO] Python interpreter found: "%PYTHON_EXE%"
 echo.
 
 :: =======================================================
-:: 2/3: Checking setuptools version
+:: 2/5: Checking setuptools version
 :: =======================================================
-echo [2/3] Checking setuptools version...
+echo [2/5] Checking setuptools version...
 
 set "INSTALLED_VER="
 "%PYTHON_EXE%" -c "import importlib.metadata; print(importlib.metadata.version('setuptools'))" > "%TEMP%\st_ver.tmp" 2>nul
@@ -109,9 +111,61 @@ if "!INSTALLED_VER!"=="" (
 echo.
 
 :: =======================================================
-:: 3/3: Checking dependencies (requirements.txt / orjson)
+:: 3/5: Checking pytest version
 :: =======================================================
-echo [3/3] Checking project dependencies...
+echo [3/5] Checking pytest version...
+
+set "PYTEST_INSTALLED_VER="
+"%PYTHON_EXE%" -c "import importlib.metadata; print(importlib.metadata.version('pytest'))" > "%TEMP%\pytest_ver.tmp" 2>nul
+
+if exist "%TEMP%\pytest_ver.tmp" (
+    set /p PYTEST_INSTALLED_VER=<"%TEMP%\pytest_ver.tmp"
+    del "%TEMP%\pytest_ver.tmp" 2>nul
+)
+
+if "!PYTEST_INSTALLED_VER!"=="" (
+    powershell -Command "Write-Host '[WARNING] pytest is NOT installed in this Python environment.' -ForegroundColor Red"
+    echo pytest==%TARGET_PYTEST% is required for running the test suite.
+    echo.
+    set /p "install_choice=Do you want to install pytest==%TARGET_PYTEST% now? (Y/N): "
+    if /i "!install_choice!"=="Y" (
+        echo [INFO] Installing pytest==%TARGET_PYTEST%...
+        "%PYTHON_EXE%" -m pip install pytest==%TARGET_PYTEST%
+        if errorlevel 1 (
+            echo [ERROR] Failed to install pytest.
+            pause
+            exit /b 1
+        )
+        echo [SUCCESS] pytest==%TARGET_PYTEST% installed.
+    ) else (
+        echo [INFO] Skipping pytest installation.
+    )
+) else if not "!PYTEST_INSTALLED_VER!"=="%TARGET_PYTEST%" (
+    powershell -Command "Write-Host '[WARNING] Detected pytest version !PYTEST_INSTALLED_VER!.' -ForegroundColor Red"
+    powershell -Command "Write-Host 'Version %TARGET_PYTEST% is required for running the test suite to ensure compatibility.' -ForegroundColor Red"
+    echo.
+    set /p "downgrade_choice=Do you want to change pytest from !PYTEST_INSTALLED_VER! to %TARGET_PYTEST%? (Y/N): "
+    if /i "!downgrade_choice!"=="Y" (
+        echo [INFO] Installing pytest==%TARGET_PYTEST%...
+        "%PYTHON_EXE%" -m pip install pytest==%TARGET_PYTEST% --force-reinstall
+        if errorlevel 1 (
+            echo [ERROR] Failed to change pytest version.
+            pause
+            exit /b 1
+        )
+        echo [SUCCESS] pytest successfully set to %TARGET_PYTEST%.
+    ) else (
+        echo [INFO] Keeping current pytest version !PYTEST_INSTALLED_VER!.
+    )
+) else (
+    echo [OK] Correct pytest version !PYTEST_INSTALLED_VER! is already installed.
+)
+echo.
+
+:: =======================================================
+:: 4/5: Checking project dependencies (requirements.txt / orjson)
+:: =======================================================
+echo [4/5] Checking project dependencies...
 
 if exist "Requirements.txt" set "REQ_FILE=Requirements.txt"
 if exist "requirements.txt" set "REQ_FILE=requirements.txt"
@@ -134,6 +188,22 @@ if defined REQ_FILE (
 ) else (
     echo [WARNING] No requirements.txt found. Skipping requirements check.
 )
+
+echo.
+
+:: =======================================================
+:: 5/5: Installing editable dev environment (e DEV)
+:: =======================================================
+echo [5/5] Installing editable dev environment...
+
+echo [INFO] Running pip install -e .[dev] in the script directory...
+"%PYTHON_EXE%" -m pip install -e ".[dev]"
+if errorlevel 1 (
+    echo [ERROR] Failed to install editable dev environment.
+    pause
+    exit /b 1
+)
+echo [SUCCESS] Editable dev environment installed.
 
 echo.
 echo =======================================================

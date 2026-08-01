@@ -46,13 +46,27 @@ def tests_dir():
 
 
 def _ensure_runnable() -> None:
-    if importlib.util.find_spec("pytest") is None:
+    import importlib.metadata
+    
+    missing_deps = False
+    try:
+        if importlib.metadata.version("pytest") != "9.1.1":
+            missing_deps = True
+    except importlib.metadata.PackageNotFoundError:
+        missing_deps = True
+
+    try:
+        if importlib.metadata.version("setuptools") != "69.5.1":
+            missing_deps = True
+    except importlib.metadata.PackageNotFoundError:
+        missing_deps = True
+
+    if missing_deps:
         raise TestSuiteUnavailable(
-            "pytest is not installed in the interpreter running Contextor.\n\n"
-            f"Interpreter:\n    {sys.executable}\n\n"
-            "Tests are a development dependency. Install them with:\n"
-            f'    "{sys.executable}" -m pip install -e ".[dev]"\n\n'
-            "Then restart Contextor."
+            "Libraries setuptools==69.5.1, pytest==9.1.1 and editable install (pip install -e .) "
+            "with dev dependencies are required for full test suite, "
+            "please install them running GUI_test_suite_installer.bat file "
+            "from root folder of this application."
         )
 
     if not tests_dir().is_dir():
@@ -75,7 +89,7 @@ def _popen(arguments: list[str]) -> subprocess.Popen:
         creation_flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
     return subprocess.Popen(
-        [sys.executable, "-m", "pytest", *arguments],
+        [sys.executable, "-m", "pytest", "-p", "no:nbval", *arguments],
         cwd=str(package_root()),
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
