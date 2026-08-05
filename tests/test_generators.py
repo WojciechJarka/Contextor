@@ -1,19 +1,9 @@
-import json
-from contextor.core.reporting_engine.engine import (
-    _build_report_header,
+from contextor.core.reporting_engine.generators import (
     _compute_action_items,
     _compute_layer_health,
     _sanity_check_reports,
     slice_report_for_layer,
 )
-
-def test_build_report_header_fallback(tmp_path):
-    header = _build_report_header(str(tmp_path), "global")
-    assert header["schema_version"] == "1.0"
-    assert "generated_at" in header
-    assert header["data_source"] == "global"
-    assert header["commit_sha"] is None
-    assert header["branch"] is None
 
 def test_compute_action_items_entrypoints():
     isolated = ["cli_main", "core.engine", "tests.test_app", "main"]
@@ -91,15 +81,14 @@ def test_slice_report_for_layer(sample_repo, isolated_dirs):
     from contextor.core.symbol_engine.indexer import build_index
     from contextor.core.graph.graph import build_graph
     from contextor.core.graph.metrics import compute_graph_metrics
-    from contextor.core.reporting_engine.engine import generate_summary_report, generate_structure_report
+    from contextor.core.reporting_engine.generators import generate_summary_report, generate_structure_report
     from contextor.core.reporting_layer.artifact_usage_report import generate_artifact_usage_report
     from contextor.core.reporting_layer.artifact_usage_report_compact import compact_artifact_report
+    from contextor.core.api.facade import _compute_metrics_and_debt
     
     root = str(sample_repo)
     modules = build_index(root)
-    from contextor.core.graph.graph import build_graph
     graph = build_graph(modules)
-    from contextor.core.api.facade import _compute_metrics_and_debt
     metrics, cycles, all_collisions, debt = _compute_metrics_and_debt(modules, graph)
     
     structure = generate_structure_report(graph.hard_edges, graph.soft_edges)

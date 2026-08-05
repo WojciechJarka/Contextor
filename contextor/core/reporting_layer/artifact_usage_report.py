@@ -23,6 +23,10 @@ Sources of truth:
     api_consumers.py        -> consumer normalization
 
 
+NOTE: 
+To prevent I/O bloat, `shared_usage_clusters` is limited to `MAX_CLUSTERS` (top 30), 
+and internal cluster artifacts store only `artifact_id` to avoid huge JSON strings duplication.
+
 Output contract for generate_artifact_usage_report():
 
 {
@@ -387,6 +391,8 @@ def _connected_components(graph: dict) -> list[list[str]]:
     return sorted(clusters, key=len, reverse=True)
 
 
+MAX_CLUSTERS = 30
+
 def build_shared_usage_clusters(
     shared_artifacts: list[dict],
     min_cluster_size: int = MIN_CLUSTER_SIZE,
@@ -409,9 +415,7 @@ def build_shared_usage_clusters(
 
         cluster_artifacts = [
             {
-                "artifact": a["artifact"],
-                "definer_module": a["definer_module"],
-                "kind": a["kind"],
+                "artifact_id": a.get("artifact_id", a.get("key")),
                 "consumers": [c for c in a["consumers"] if c in component_set],
             }
             for a in shared_artifacts
@@ -427,13 +431,14 @@ def build_shared_usage_clusters(
             }
         )
 
-    return sorted(
+    sorted_clusters = sorted(
         clusters,
         key=lambda c: (
             -c["shared_artifact_count"],
             -c["size"],
         ),
     )
+    return sorted_clusters[:MAX_CLUSTERS]
 
 
 # ==========================================================
@@ -441,7 +446,7 @@ def build_shared_usage_clusters(
 # ==========================================================
 
 
-def _dominant_definers(cluster: dict) -> list[str]:
+def _dominant_definers(cluster: dict, artifacts: dict) -> list[str]:
     """
     Modules that most frequently define artifacts
     shared in a given cluster - the most likely
@@ -450,8 +455,10 @@ def _dominant_definers(cluster: dict) -> list[str]:
     """
     counts = defaultdict(int)
 
-    for artifact in cluster["shared_artifacts"]:
-        counts[artifact["definer_module"]] += 1
+    for ca in cluster["shared_artifacts"]:
+        a = artifacts.get(ca["artifact_id"])
+        if a:
+            counts[a["definer_module"]] += 1
 
     return sorted(
         counts.keys(),
@@ -461,6 +468,7 @@ def _dominant_definers(cluster: dict) -> list[str]:
 
 def build_core_extraction_candidates(
     clusters: list[dict],
+    artifacts: dict,
 ) -> list[dict]:
     """
     Format optimized for LLM refactoring decisions:
@@ -470,7 +478,7 @@ def build_core_extraction_candidates(
     candidates = []
 
     for cluster in clusters:
-        definers = _dominant_definers(cluster)
+        definers = _dominant_definers(cluster, artifacts)
 
         top_artifacts = sorted(
             cluster["shared_artifacts"],
@@ -484,12 +492,10 @@ def build_core_extraction_candidates(
                 "shared_artifact_count": cluster["shared_artifact_count"],
                 "top_shared_artifacts": [
                     {
-                        "artifact": a["artifact"],
-                        "defined_in": a["definer_module"],
-                        "kind": a["kind"],
-                        "used_by": a["consumers"],
+                        "artifact_id": ca["artifact_id"],
+                        "used_by": ca["consumers"],
                     }
-                    for a in top_artifacts
+                    for ca in top_artifacts
                 ],
                 "reason": (
                     "modules share the usage of the same "
@@ -551,7 +557,7 @@ def generate_artifact_usage_report(
     # so we derive it temporarily from the index.
     shared_artifacts_full = filter_shared_artifacts(artifact_index)
     clusters = build_shared_usage_clusters(shared_artifacts_full)
-    core_candidates = build_core_extraction_candidates(clusters)
+    core_candidates = build_core_extraction_candidates(clusters, artifact_index)
 
     runtime_info = runtime.copy() if runtime else {}
 

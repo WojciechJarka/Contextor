@@ -31,6 +31,11 @@ Layer: REPORT ASSEMBLY (auxiliary, invoked by reporting.py)
 Does not do:
 - artifact gathering (handled by artifact_usage_report.py)
 - file saving (handled by save_json in reporting.py)
+
+NOTE: 
+To prevent I/O bloat, `shared_usage_clusters` processing assumes the upstream 
+report has already capped clusters to a reasonable limit (e.g., 30) and that 
+inner artifacts are stored by `artifact_id` rather than duplicating their full definitions.
 """
 
 import json
@@ -237,9 +242,7 @@ def compact_artifact_report(report: dict) -> dict:
                 "shared_artifact_count": cluster.get("shared_artifact_count"),
                 "shared_artifacts": [
                     {
-                        "artifact": a.get("artifact"),
-                        "definer_module": _idx(a.get("definer_module"), index_of),
-                        "kind": a.get("kind"),
+                        "artifact_id": a.get("artifact_id"),
                         "consumer_module_indices": _idx_list(a.get("consumers", []), index_of),
                     }
                     for a in cluster.get("shared_artifacts", []) or []
@@ -259,9 +262,7 @@ def compact_artifact_report(report: dict) -> dict:
                 "shared_artifact_count": candidate.get("shared_artifact_count"),
                 "top_shared_artifacts": [
                     {
-                        "artifact": a.get("artifact"),
-                        "defined_in": _idx(a.get("defined_in"), index_of),
-                        "kind": a.get("kind"),
+                        "artifact_id": a.get("artifact_id"),
                         "used_by": _idx_list(a.get("used_by", []), index_of),
                     }
                     for a in candidate.get("top_shared_artifacts", []) or []

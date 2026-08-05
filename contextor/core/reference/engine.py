@@ -2,6 +2,9 @@
 contextor/core/reference/engine.py
 
 Główny silnik zbierający referencje (Symbol Reference Engine).
+
+NOTE: Usage detail arrays (`_detail`) are intentionally capped at 
+`MAX_USAGE_DETAILS` to prevent massive I/O bloat in the artifact usage report.
 """
 
 import re
@@ -149,11 +152,15 @@ def _import_matches_symbol(imported, symbol):
     return False
 
 
+MAX_USAGE_DETAILS = 15
+
 def _normalize_references(references):
     for data in references.values():
         for key, values in data.items():
             if isinstance(values, list) and all(isinstance(v, str) for v in values):
                 data[key] = sorted(set(values))
+            elif isinstance(values, list) and key.endswith("_detail"):
+                data[key] = values[:MAX_USAGE_DETAILS]
     return references
 
 

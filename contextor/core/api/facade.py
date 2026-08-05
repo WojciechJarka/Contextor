@@ -19,14 +19,16 @@ from contextor.core.hotspots import detect_hotspots
 from contextor.core.paths import DEFAULT_IGNORED_DIRS, output_dir, repo_key, state_dir
 from contextor.core.reference.engine import reset_caches
 from contextor.core.reporting_engine.debt import compute_debt
-from contextor.core.reporting_engine.engine import (
-    _build_report_header,
+from contextor.core.reporting_engine.generators import (
     generate_report,
     generate_structure_report,
     generate_summary_report,
+    slice_report_for_layer,
+)
+from contextor.core.reporting_engine.io_manager import (
+    _build_report_header,
     save_all_reports,
     save_layer_reports,
-    slice_report_for_layer,
 )
 from contextor.core.reporting_layer.artifact_usage_report import generate_artifact_usage_report
 from contextor.core.reporting_layer.artifact_usage_report_compact import compact_artifact_report

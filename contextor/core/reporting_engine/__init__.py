@@ -1,11 +1,13 @@
-from .engine import (
+from .generators import (
     generate_collisions_report,
     generate_report,
     generate_structure_report,
     generate_summary_report,
+    slice_report_for_layer,
+)
+from .io_manager import (
     save_all_reports,
     save_layer_reports,
-    slice_report_for_layer,
 )
 from .formatting import save_json
 

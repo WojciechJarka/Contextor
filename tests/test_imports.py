@@ -32,7 +32,8 @@ IMPORT_TARGETS = [
     "contextor.core.paths",
     "contextor.core.api.facade",
     "contextor.core.symbol_engine.indexer",
-    "contextor.core.reporting_engine.engine",
+    "contextor.core.reporting_engine.generators",
+    "contextor.core.reporting_engine.io_manager",
     "contextor.core.reporting_layer.artifact_usage_report",
     "contextor.core.validator",
 ]
