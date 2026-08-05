@@ -343,7 +343,9 @@ class ContextorFacade:
         from datetime import datetime
         datestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
-        report = generate_single_file_report(ctx, len(modules))
+        from contextor.core.reporting_engine.dictionary import IndexDictionary
+        index_dict = IndexDictionary()
+        report = generate_single_file_report(ctx, len(modules), index_dict=index_dict)
 
         # Named after the module path, not the bare stem: two files called
         # 'engine.py' in different packages used to overwrite each other.
@@ -355,6 +357,11 @@ class ContextorFacade:
 
         output = str(output_dir() / f"single_{slug}_{datestamp}.json")
         save_single_file_report(report, output)
+        
+        index_output = str(output_dir() / f"single_{slug}_index_dictionary_{datestamp}.json")
+        import json
+        with open(index_output, "w", encoding="utf-8") as f:
+            json.dump(index_dict.to_json_dict(), f, indent=2, ensure_ascii=False)
 
         md_output = str(output_dir() / f"single_{slug}_llm_context_{datestamp}.md")
         generate_llm_markdown(report, md_output)

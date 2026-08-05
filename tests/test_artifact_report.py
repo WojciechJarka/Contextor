@@ -63,15 +63,19 @@ def test_usage_sidecar_and_filtering(sample_repo, isolated_dirs):
     
     # usage should not be inline in artifacts anymore
     engine = report["artifacts"]["core.alpha::Engine"]
+
+
     assert "usage" not in engine
     assert engine["artifact_id"] == "core.alpha::Engine"
     
     # 2. Filtering orphans: MAX_ITEMS from core.alpha shouldn't be there because consumer_count is 0
     assert "core.alpha::MAX_ITEMS" not in report["artifacts"]
     
+    from contextor.core.reporting_engine.dictionary import IndexDictionary
+    index_dict = IndexDictionary()
     # 3. compact report formatting
-    compact = compact_artifact_report(report)
-    assert compact["_format_version"] == "2"
+    compact = compact_artifact_report(report, index_dict)
+    assert compact["_format_version"] == "3"
     assert "shared_artifact_keys" in compact
     assert "shared_artifacts" not in compact
     assert compact["full_artifact_count"] == report["artifact_count"]

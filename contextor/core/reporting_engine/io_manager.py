@@ -196,8 +196,13 @@ def save_all_reports(
 
     if log:
         log("Generating compact version of artifacts report...")
-    compact_artifact_data = compact_artifact_report(artifact_data)
+    from contextor.core.reporting_engine.dictionary import IndexDictionary
+    index_dict = IndexDictionary()
+    compact_artifact_data = compact_artifact_report(artifact_data, index_dict)
     save_compact_artifact_report(compact_artifact_data, artifacts_compact_path)
+
+    index_dict_path = f"output/{repo_name}_index_dictionary{suffix}.json"
+    save_json(index_dict.to_json_dict(), index_dict_path, log=log, label="index dictionary")
 
     sanity_warnings = _sanity_check_reports(summary_data, artifact_data, compact_artifact_data)
     if sanity_warnings:
@@ -228,6 +233,7 @@ def save_all_reports(
                     global_collisions=all_collisions,
                     global_skipped_files=skipped_files,
                     report_header=report_header,
+                    index_dict=index_dict,
                 )
                 summary = layer_sliced["summary"]
                 layer_status = {

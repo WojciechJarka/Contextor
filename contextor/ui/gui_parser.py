@@ -16,11 +16,113 @@ from contextor.ui.path_memory import load_state, save_state
 from contextor.ui.progress_widget import create_progress_bar, run_with_progress
 from contextor.ui.theme import PAD_LG, PAD_MD, PAD_SM, HeaderTooltipManager
 
+def rewrite_index_to_text(json_path, output_dir="output"):
+    if not os.path.exists(json_path):
+        raise FileNotFoundError(f"File {json_path} does not exist.")
+
+    with open(json_path, encoding="utf-8") as f:
+        data = json.load(f)
+
+    if str(data.get("_format_version", "1")) != "3":
+        raise Exception("This tool requires an indexed compact report (schema v3).")
+
+    # Find the corresponding dictionary
+    dir_name = os.path.dirname(json_path)
+    base_name = os.path.basename(json_path)
+    
+    import re
+    m = re.search(r"_(\d{8}_\d{6})\.json$", base_name)
+    datestamp = m.group(1) if m else None
+    
+    dict_path = None
+    if datestamp:
+        for f in os.listdir(dir_name):
+            if "index_dictionary" in f and datestamp in f and f.endswith(".json"):
+                dict_path = os.path.join(dir_name, f)
+                break
+    else:
+        for f in os.listdir(dir_name):
+            if "index_dictionary" in f and f.endswith(".json"):
+                dict_path = os.path.join(dir_name, f)
+                break
+                
+    if not dict_path or not os.path.exists(dict_path):
+        raise Exception(f"Could not find matching index_dictionary for {base_name}.")
+
+    with open(dict_path, encoding="utf-8") as f:
+        index_dict = json.load(f)
+        
+    modules_dict = index_dict.get("modules", {})
+    artifacts_dict = index_dict.get("artifacts", {})
+    
+    def resolve_mod(m_id):
+        return modules_dict.get(str(m_id), m_id)
+
+    artifacts = data.get("artifacts", {})
+    rewritten_artifacts = {}
+    
+    for a_id, value in artifacts.items():
+        full_name = artifacts_dict.get(a_id, a_id)
+        
+        rewritten = dict(value)
+        rewritten["definer_module"] = resolve_mod(value.get("definer_module"))
+        if "consumer_module_indices" in value:
+            rewritten["consumer_modules"] = [resolve_mod(m) for m in value["consumer_module_indices"]]
+            del rewritten["consumer_module_indices"]
+            
+        usage = value.get("usage")
+        if usage:
+            new_usage = {}
+            for cat, vals in usage.items():
+                if cat == "ambiguous_calls" or cat.endswith("_detail"):
+                    new_vals = []
+                    for v in vals:
+                        if isinstance(v, dict):
+                            new_v = dict(v)
+                            new_v["module"] = resolve_mod(v.get("module"))
+                            new_vals.append(new_v)
+                        else:
+                            new_vals.append(resolve_mod(v))
+                    new_usage[cat] = new_vals
+                else:
+                    new_usage[cat] = [resolve_mod(m) for m in vals]
+            rewritten["usage"] = new_usage
+            
+        rewritten_artifacts[full_name] = rewritten
+
+    rewritten_data = {
+        "_format_version": "3_text",
+        "_format_note": "Rewritten from schema v3 back to text using index dictionary.",
+        "report_header": data.get("report_header", {}),
+        "runtime": data.get("runtime", {}),
+        "debug_info": data.get("debug_info", {}),
+        "module_count": data.get("module_count", 0),
+        "artifact_count": len(rewritten_artifacts),
+        "shared_artifact_count": data.get("shared_artifact_count", 0),
+        "artifacts": rewritten_artifacts,
+    }
+    
+    if "shared_artifact_keys" in data:
+        rewritten_data["shared_artifacts"] = [artifacts_dict.get(k, k) for k in data["shared_artifact_keys"]]
+
+    text_dir = os.path.join(output_dir, "text")
+    os.makedirs(text_dir, exist_ok=True)
+    
+    new_name = base_name.replace(".json", "_text.json")
+    output_path = os.path.join(text_dir, new_name)
+
+    with open(output_path, "w", encoding="utf-8") as f:
+        json.dump(rewritten_data, f, indent=2, ensure_ascii=False)
+
+    return output_path
+
+
+
 
 # ==========================================================
 # WARNING: INDEXED DEPENDENCY
-# This parser expects a Compact Artifacts Report (schema v2) 
-# where modules are mapped to integer indices.
+# This parser expects a Compact Artifacts Report (schema v3) 
+# and requires an associated index_dictionary.json.
 # ==========================================================
 def parse_and_filter_json(json_path, search_term, output_dir="output", public_api_only=False):
     if not os.path.exists(json_path):
@@ -29,38 +131,73 @@ def parse_and_filter_json(json_path, search_term, output_dir="output", public_ap
     with open(json_path, encoding="utf-8") as f:
         data = json.load(f)
 
+    if str(data.get("_format_version", "1")) != "3":
+        raise Exception("This parser requires an indexed compact report (schema v3). Please use the newest Contextor to generate reports.")
+
     artifacts = data.get("artifacts", {})
-    modules = data.get("modules", [])
-    if not artifacts or not modules:
-        raise Exception("Report must be a compact artifact report containing 'artifacts' and 'modules'.")
+    if not artifacts:
+        raise Exception("Report must contain 'artifacts'.")
+
+    # Find the corresponding dictionary
+    dir_name = os.path.dirname(json_path)
+    base_name = os.path.basename(json_path)
+    
+    # Try to extract datestamp
+    m = re.search(r"_(\d{8}_\d{6})\.json$", base_name)
+    datestamp = m.group(1) if m else None
+    
+    dict_path = None
+    if datestamp:
+        for f in os.listdir(dir_name):
+            if "index_dictionary" in f and datestamp in f and f.endswith(".json"):
+                dict_path = os.path.join(dir_name, f)
+                break
+    else:
+        for f in os.listdir(dir_name):
+            if "index_dictionary" in f and f.endswith(".json"):
+                dict_path = os.path.join(dir_name, f)
+                break
+                
+    if not dict_path or not os.path.exists(dict_path):
+        raise Exception(f"Could not find matching index_dictionary for {base_name}.")
+
+    with open(dict_path, encoding="utf-8") as f:
+        index_dict = json.load(f)
+        
+    modules_dict = index_dict.get("modules", {})
+    artifacts_dict = index_dict.get("artifacts", {})
 
     is_py_query = search_term.lower().endswith(".py")
     term = search_term[:-3] if is_py_query else search_term
     filtered_artifacts = {}
     
-    # Pre-compute matching module indices for file-based queries
     matching_module_indices = set()
+    matching_artifact_ids = set()
+    
     if is_py_query:
-        for i, mod in enumerate(modules):
-            # Matches e.g. "contextor.main", "contextor.core.main" for term="main"
+        for str_idx, mod in modules_dict.items():
             if mod == term or mod.endswith(f".{term}") or f".{term}." in mod or mod.startswith(f"{term}."):
-                matching_module_indices.add(i)
+                matching_module_indices.add(int(str_idx))
+    else:
+        for a_id, art_full_name in artifacts_dict.items():
+            # art_full_name looks like "contextor.core.main::my_func" or "contextor.core.main::my_func(arg)"
+            if term in art_full_name:
+                matching_artifact_ids.add(a_id)
 
-    for key, value in artifacts.items():
+    for a_id, value in artifacts.items():
         if public_api_only and isinstance(value, dict):
             c_count = value.get("consumer_count", 0)
-            art_name = str(value.get("artifact", ""))
             if c_count == 0:
                 continue
-            if art_name.startswith("_") and not (
-                art_name.startswith("__") and art_name.endswith("__")
-            ):
+            art_name = artifacts_dict.get(a_id, "")
+            # check if it's private but not a magic method by parsing the name after ::
+            local_name = art_name.split("::")[-1].split("(")[0]
+            if local_name.startswith("_") and not (local_name.startswith("__") and local_name.endswith("__")):
                 continue
                 
         match = False
 
         if is_py_query:
-            # === REGUŁY DLA PLIKU (np. main.py) ===
             definer_idx = value.get("definer_module")
             consumers_idx = value.get("consumer_module_indices", [])
             
@@ -68,21 +205,15 @@ def parse_and_filter_json(json_path, search_term, output_dir="output", public_ap
                 match = True
             elif matching_module_indices.intersection(consumers_idx):
                 match = True
-
         else:
-            # === REGUŁY DLA SYMBOLU (np. main) ===
-            art_name = str(value.get("artifact", ""))
-            art_id = str(value.get("artifact_id", key))
-            sig = str(value.get("signature", ""))
-            
-            if term == art_name or f"::{term}" in art_id or f" {term}(" in sig or term in art_id:
+            if a_id in matching_artifact_ids:
                 match = True
 
         if match:
-            filtered_artifacts[key] = value
+            filtered_artifacts[a_id] = value
 
     parsed_data = {
-        "_format_version": data.get("_format_version", "2"),
+        "_format_version": "3",
         "_format_note": data.get("_format_note", ""),
         "report_header": data.get("report_header", {}),
         "runtime": data.get("runtime", {}),
@@ -90,7 +221,6 @@ def parse_and_filter_json(json_path, search_term, output_dir="output", public_ap
         "module_count": data.get("module_count", 0),
         "artifact_count": len(filtered_artifacts),
         "shared_artifact_count": data.get("shared_artifact_count", 0),
-        "modules": modules,
         "artifacts": filtered_artifacts,
     }
 
@@ -98,8 +228,8 @@ def parse_and_filter_json(json_path, search_term, output_dir="output", public_ap
     prefix = "parsed_api_compact" if public_api_only else "parsed_compact"
     
     from datetime import datetime
-    datestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    output_filename = f"{prefix}_{sanitized_name}_{datestamp}.json"
+    datestamp_now = datetime.now().strftime("%Y%m%d_%H%M%S")
+    output_filename = f"{prefix}_{sanitized_name}_{datestamp_now}.json"
     os.makedirs(output_dir, exist_ok=True)
     output_path = os.path.join(output_dir, output_filename)
 
@@ -235,6 +365,36 @@ def run_parser_window(parent=None):
     )
     parse_btn.pack(padx=PAD_LG, pady=(0, PAD_MD), fill="x")
     p_tooltip.bind_tooltip(parse_btn, "Execute filtering and generate a new parsed JSON report.")
+    
+    def execute_rewrite():
+        json_path = json_path_var.get()
+        if not json_path:
+            messagebox.showwarning("Error", "Select a JSON file first", parent=parser_win)
+            return
+
+        def task():
+            return rewrite_index_to_text(json_path)
+
+        def on_success(out):
+            messagebox.showinfo("Success", f"Rewritten file saved to:\n{out}", parent=parser_win)
+
+        def on_error(exc):
+            messagebox.showerror("Error", str(exc), parent=parser_win)
+
+        run_with_progress(
+            parser_win,
+            progress_bar,
+            task,
+            on_success=on_success,
+            on_error=on_error,
+            buttons=[parse_btn, rewrite_btn],
+        )
+
+    rewrite_btn = ttk.Button(
+        parser_win, text="Rewrite Index -> Txt", style="Secondary.TButton", command=execute_rewrite
+    )
+    rewrite_btn.pack(padx=PAD_LG, pady=(0, PAD_MD), fill="x")
+    p_tooltip.bind_tooltip(rewrite_btn, "Rewrite indexed compact report to full text strings for human reading.")
 
     progress_bar = create_progress_bar(parser_win)
 

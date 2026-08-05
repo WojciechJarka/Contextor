@@ -97,11 +97,11 @@ def filter_artifacts(json_path: str, search_term: str) -> str:
         return f"Error: Artifacts file '{target}' does not exist."
         
     try:
-        filtered_chunks = parse_and_filter_json(str(target), search_term)
-        if not filtered_chunks:
+        filtered_path = parse_and_filter_json(str(target), search_term)
+        if not filtered_path:
             return f"No artifacts found matching '{search_term}'."
             
-        return f"Found {len(filtered_chunks)} artifacts:\n\n" + "\n---\n".join(filtered_chunks)
+        return Path(filtered_path).read_text(encoding="utf-8")
     except Exception as e:
         return f"Error filtering artifacts: {str(e)}"
 
@@ -120,6 +120,21 @@ def read_json_report(report_path: str) -> str:
         return target.read_text(encoding="utf-8")
     except Exception as e:
         return f"Error reading report: {str(e)}"
+
+@mcp.tool()
+def get_index_dictionary(dictionary_path: str) -> str:
+    """
+    Reads and returns the JSON content of the index dictionary.
+    Use this to look up strings for numerical indices and 'A-XXX' IDs found in compact reports.
+    """
+    target = Path(dictionary_path).expanduser().resolve()
+    if not target.is_file():
+        return f"Error: Dictionary file '{target}' does not exist."
+        
+    try:
+        return target.read_text(encoding="utf-8")
+    except Exception as e:
+        return f"Error reading dictionary: {str(e)}"
 
 
 def main():

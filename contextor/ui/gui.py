@@ -96,6 +96,25 @@ class ContextorGUI:
         else:
             self.parser_win = run_parser_window(parent=self.root)
 
+    def open_rewrite_tool(self):
+        import os
+        from tkinter import filedialog, messagebox
+        output_dir = os.path.abspath("output")
+        if not os.path.exists(output_dir):
+            output_dir = os.getcwd()
+        json_path = filedialog.askopenfilename(
+            title="Select indexed compact JSON to rewrite",
+            initialdir=output_dir, 
+            filetypes=[("JSON files", "*.json")]
+        )
+        if json_path:
+            from contextor.ui.gui_parser import rewrite_index_to_text
+            try:
+                out_path = rewrite_index_to_text(json_path)
+                messagebox.showinfo("Success", f"Rewritten text JSON saved to:\n{out_path}")
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to rewrite JSON:\n{e}")
+
     def _check_stale_excludes(self):
         """
         Validates if previously excluded files are still present
@@ -366,6 +385,11 @@ class ContextorGUI:
             bottom_frame, text="Parse JSON", style="Ghost.TButton", command=self.open_parser_window
         )
         p_btn.pack(side="right")
+        
+        rewrite_btn = ttk.Button(
+            bottom_frame, text="Rewrite Index -> Txt", style="Ghost.TButton", command=self.open_rewrite_tool
+        )
+        rewrite_btn.pack(side="right", padx=(0, PAD_SM))
 
         self.tooltip.bind_tooltip(out_btn, "Open directory containing all analysis reports.")
         self.tooltip.bind_tooltip(emp_btn, "Permanently delete all contents in the Output Folder.")
@@ -376,6 +400,10 @@ class ContextorGUI:
         self.tooltip.bind_tooltip(
             p_btn,
             "Utility tool to read analysis JSON outputs (it must be a full artifact JSON report).",
+        )
+        self.tooltip.bind_tooltip(
+            rewrite_btn,
+            "Rewrite indexed compact report to full text strings for human reading.",
         )
 
     # ======================================================

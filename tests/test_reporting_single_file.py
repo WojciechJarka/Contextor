@@ -49,4 +49,4 @@ def test_single_file_report_header_and_node_id():
     assert report["report_header"]["data_source"] == "single_file"
     assert report["report_header"]["schema_version"] == "1.0"
     assert report["repository_context"]["artifact_count_in_module"] == 1
-    assert report["global_node_id"] == "core.alpha"
+    assert report["global_node_id"] == 0

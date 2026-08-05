@@ -125,7 +125,9 @@ def _build_llm_summary(ctx: dict) -> dict:
     }
 
 
-def generate_single_file_report(ctx: dict, module_count: int, report_header: dict | None = None):
+from contextor.core.reporting_engine.dictionary import IndexDictionary
+
+def generate_single_file_report(ctx: dict, module_count: int, report_header: dict | None = None, index_dict: IndexDictionary | None = None):
     """
     Generates a single file report using pre-calculated context structures.
     """
@@ -141,16 +143,59 @@ def generate_single_file_report(ctx: dict, module_count: int, report_header: dic
     # already runs is not thrown away.
     module_semantics = ctx["semantic_context"].get("semantic_analysis", {})
 
+    if index_dict is None:
+        index_dict = IndexDictionary()
+        
+    my_mod_idx = index_dict.get_module_id(ctx["module_id"])
+    
+    # Compact artifact_consumption
+    compact_consumption = {}
+    for k, v in ctx["artifact_consumption"].items():
+        a_id = index_dict.get_artifact_id(k)
+        compact_usage = {}
+        for cat, values in (v.get("usage") or {}).items():
+            if not values: continue
+            if cat == "ambiguous_calls" or cat.endswith("_detail"):
+                compacted_vals = []
+                for val in values:
+                    if isinstance(val, dict):
+                        new_val = dict(val)
+                        new_val["module"] = index_dict.get_module_id(val.get("module"))
+                        compacted_vals.append(new_val)
+                    else:
+                        compacted_vals.append(index_dict.get_module_id(val))
+                compact_usage[cat] = compacted_vals
+            else:
+                compact_usage[cat] = [index_dict.get_module_id(m) for m in values]
+                
+        compact_consumption[a_id] = {
+            "artifact_id": a_id,
+            "kind": v.get("kind"),
+            "definer_module": index_dict.get_module_id(v.get("definer_module")),
+            "consumer_module_indices": [index_dict.get_module_id(c) for c in v.get("consumers", [])],
+            "consumer_count": v.get("consumer_count"),
+            "usage": compact_usage
+        }
+        
+    # Compact architecture
+    arch = ctx["architecture_context"]
+    compact_arch = {
+        "hard_dependencies": [index_dict.get_module_id(m) for m in arch.get("hard_dependencies", [])],
+        "hard_dependents": [index_dict.get_module_id(m) for m in arch.get("hard_dependents", [])],
+        "soft_dependencies": [index_dict.get_module_id(m) for m in arch.get("soft_dependencies", [])],
+        "soft_dependents": [index_dict.get_module_id(m) for m in arch.get("soft_dependents", [])],
+        "graph_metrics": arch.get("graph_metrics", {}),
+        "cycles": [
+            [index_dict.get_module_id(m) for m in cycle] for cycle in arch.get("cycles", [])
+        ] if "cycles" in arch else []
+    }
+
     report = {
         # --------------------------------------------------
         # IDENTITY
         # --------------------------------------------------
-        "module": ctx["module_id"],
-        # Explicit link to the global dependency graph node — allows a
-        # consumer holding only this single-file report to look up the
-        # module in artifacts.json / structure.json by key without
-        # reconstructing the id from the file path. (P5)
-        "global_node_id": ctx["module_id"],
+        "module_id": my_mod_idx,
+        "global_node_id": my_mod_idx,
         "file": str(ctx["file_path"]),
         "generated_at": datetime.now().isoformat(),
         # --------------------------------------------------
@@ -188,8 +233,8 @@ def generate_single_file_report(ctx: dict, module_count: int, report_header: dic
         # --------------------------------------------------
         # ARTIFACT CONSUMPTION
         # --------------------------------------------------
-        "artifact_consumption": ctx["artifact_consumption"],
-        "api_surface": ctx["api_surface"],
+        "artifact_consumption": compact_consumption,
+        "api_surface": [index_dict.get_artifact_id(a) for a in ctx["api_surface"]],
         # --------------------------------------------------
         # CODE SEMANTICS & STATE
         # --------------------------------------------------
@@ -233,7 +278,7 @@ def generate_single_file_report(ctx: dict, module_count: int, report_header: dic
         # --------------------------------------------------
         # ARCHITECTURE
         # --------------------------------------------------
-        "architecture": architecture,
+        "architecture": compact_arch,
         "lines_of_code": ctx.get("lines_of_code", 0),
         # --------------------------------------------------
         # TEST CONTEXT  (nowe - F5)

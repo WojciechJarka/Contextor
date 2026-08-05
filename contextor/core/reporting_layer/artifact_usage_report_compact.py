@@ -97,19 +97,24 @@ def _collect_module_ids(report: dict) -> set:
     return ids
 
 
-def build_module_index(report: dict):
-    """
-    Returns (module_list, module_to_index_map).
+from contextor.core.reporting_engine.dictionary import IndexDictionary
 
-    The list is sorted so that the result is deterministic
-    (stable diffs between runs / commits).
+def build_module_index(report: dict, index_dict: IndexDictionary = None) -> IndexDictionary:
     """
-
+    Builds or updates the IndexDictionary using the provided report.
+    """
+    if index_dict is None:
+        index_dict = IndexDictionary()
+        
     module_ids = sorted(_collect_module_ids(report))
-
-    index_of = {module_id: i for i, module_id in enumerate(module_ids)}
-
-    return module_ids, index_of
+    for module_id in module_ids:
+        index_dict.get_module_id(module_id)
+        
+    # Also collect artifact IDs
+    for key in report.get("artifacts", {}).keys():
+        index_dict.get_artifact_id(key)
+        
+    return index_dict
 
 
 # ==========================================================
@@ -187,7 +192,7 @@ def _compact_usage(usage: dict, index_of: dict) -> dict:
 # ==========================================================
 
 
-def compact_artifact_report(report: dict) -> dict:
+def compact_artifact_report(report: dict, index_dict: IndexDictionary = None) -> dict:
     """
     Transforms the full artifact report (as returned by
     generate_artifact_usage_report) into a compact version.
@@ -203,47 +208,45 @@ def compact_artifact_report(report: dict) -> dict:
     is reproducible 1:1 via "modules"[index].
     """
 
-    module_ids, index_of = build_module_index(report)
+    index_dict = build_module_index(report, index_dict)
 
     compact_artifacts = {}
 
     for key, artifact in report.get("artifacts", {}).items():
         definer = artifact.get("definer_module")
         consumers = artifact.get("consumers", []) or []
+        
+        a_id = index_dict.get_artifact_id(key)
 
         entry = {
-            "artifact_id": artifact.get("artifact_id", key),
-            "artifact": artifact.get("artifact"),
+            "artifact_id": a_id,
             "kind": artifact.get("kind"),
-            "signature": artifact.get("signature"),
-            "definer_module": _idx(definer, index_of),
-            "consumer_module_indices": _idx_list(consumers, index_of),
+            "definer_module": index_dict.get_module_id(definer) if definer else None,
+            "consumer_module_indices": [index_dict.get_module_id(c) for c in consumers],
             "consumer_count": artifact.get("consumer_count", len(consumers)),
         }
 
         # Schema v2: no inline usage — it lives in the sidecar file.
-        # If someone passes an old-format report, we still compact its usage
-        # for backward compatibility.
         legacy_usage = artifact.get("usage")
         if legacy_usage:
-            compacted_usage = _compact_usage(legacy_usage, index_of)
+            compacted_usage = _compact_usage(legacy_usage, index_dict.module_to_id)
             if compacted_usage:
                 entry["usage"] = compacted_usage
 
-        compact_artifacts[key] = entry
+        compact_artifacts[a_id] = entry
 
     compact_clusters = []
 
     for cluster in report.get("shared_usage_clusters", []) or []:
         compact_clusters.append(
             {
-                "modules": _idx_list(cluster.get("modules", []), index_of),
+                "modules": [index_dict.get_module_id(m) for m in cluster.get("modules", [])],
                 "size": cluster.get("size"),
                 "shared_artifact_count": cluster.get("shared_artifact_count"),
                 "shared_artifacts": [
                     {
-                        "artifact_id": a.get("artifact_id"),
-                        "consumer_module_indices": _idx_list(a.get("consumers", []), index_of),
+                        "artifact_id": index_dict.get_artifact_id(a.get("artifact_id")) if a.get("artifact_id") else None,
+                        "consumer_module_indices": [index_dict.get_module_id(c) for c in a.get("consumers", [])],
                     }
                     for a in cluster.get("shared_artifacts", []) or []
                 ],
@@ -255,15 +258,13 @@ def compact_artifact_report(report: dict) -> dict:
     for candidate in report.get("core_extraction_candidates", []) or []:
         compact_candidates.append(
             {
-                "consumer_modules": _idx_list(candidate.get("consumer_modules", []), index_of),
-                "likely_core_modules": _idx_list(
-                    candidate.get("likely_core_modules", []), index_of
-                ),
+                "consumer_modules": [index_dict.get_module_id(m) for m in candidate.get("consumer_modules", [])],
+                "likely_core_modules": [index_dict.get_module_id(m) for m in candidate.get("likely_core_modules", [])],
                 "shared_artifact_count": candidate.get("shared_artifact_count"),
                 "top_shared_artifacts": [
                     {
-                        "artifact_id": a.get("artifact_id"),
-                        "used_by": _idx_list(a.get("used_by", []), index_of),
+                        "artifact_id": index_dict.get_artifact_id(a.get("artifact_id")) if a.get("artifact_id") else None,
+                        "used_by": [index_dict.get_module_id(m) for m in a.get("used_by", [])],
                     }
                     for a in candidate.get("top_shared_artifacts", []) or []
                 ],
@@ -274,27 +275,21 @@ def compact_artifact_report(report: dict) -> dict:
     full_artifact_count = report.get("artifact_count", len(report.get("artifacts", {})))
 
     compact_report = {
-        "_format_version": "2",
+        "_format_version": "3",
         "_format_note": (
-            "Schema v2. Numbers inside 'definer_module' and any key ending in "
-            "'_module_indices' are INDEXES into the 'modules' array below "
-            "(e.g. index 13 means modules[13]), not counts or priorities. "
-            "'shared_artifact_keys' is a sorted list of artifact_id strings "
-            "(lookup in 'artifacts' dict). Inline 'usage' is in the sidecar "
-            "file artifacts_usage.json. Artifacts with zero consumers are "
-            "omitted from this report entirely."
+            "Schema v3. Completely detached from text identifiers. Numbers inside 'definer_module' and any key ending in "
+            "'_module_indices' are INDEXES into the master 'index_dictionary.json' "
+            "Artifact keys are also A-prefixed IDs (e.g. A1, A2) mapping to the master dictionary. "
+            "Artifacts with zero consumers are omitted from this report entirely."
         ),
         "runtime": report.get("runtime", {}),
         "module_count": report.get("module_count"),
         "full_artifact_count": full_artifact_count,
         "artifact_count": len(compact_artifacts),
         "shared_artifact_count": report.get("shared_artifact_count"),
-        # LEGEND: index -> module. Everywhere else in this file,
-        # module identifiers are numbers pointing to this list.
-        "modules": module_ids,
         "artifacts": dict(sorted(compact_artifacts.items())),
         # Keys only — look up in artifacts dict for details.
-        "shared_artifact_keys": report.get("shared_artifact_keys", []),
+        "shared_artifact_keys": [index_dict.get_artifact_id(k) for k in report.get("shared_artifact_keys", [])],
         "shared_usage_clusters": compact_clusters,
         "core_extraction_candidates": compact_candidates,
     }

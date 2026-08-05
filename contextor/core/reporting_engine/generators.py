@@ -465,6 +465,9 @@ def _compute_layer_health(
     return result
 
 
+from contextor.core.reporting_engine.dictionary import IndexDictionary
+from contextor.core.reporting_layer.artifact_usage_report_compact import compact_artifact_report
+
 def slice_report_for_layer(
     layer_path: str,
     root_path: str,
@@ -478,6 +481,7 @@ def slice_report_for_layer(
     global_collisions: list | None = None,
     global_skipped_files: list | None = None,
     report_header: dict | None = None,
+    index_dict: IndexDictionary | None = None,
 ) -> dict[str, dict[str, Any]]:
     abs_layer = os.path.abspath(layer_path)
     abs_root = os.path.abspath(root_path)
@@ -504,7 +508,8 @@ def slice_report_for_layer(
     all_known_modules = set(structure_map.keys())
     for targets in structure_map.values():
         all_known_modules.update(targets)
-    all_known_modules.update(global_compact_artifacts.get("modules", []))
+    if index_dict:
+        all_known_modules.update(index_dict.module_to_id.keys())
 
     layer_modules = sorted(m for m in all_known_modules if is_in_layer(m))
     layer_set = set(layer_modules)
@@ -655,97 +660,7 @@ def slice_report_for_layer(
         ],
     }
 
-    compact_modules = global_compact_artifacts.get("modules", [])
-    layer_global_indices = {idx for idx, mod in enumerate(compact_modules) if is_in_layer(mod)}
-
-    def _resolve(idx):
-        return compact_modules[idx] if idx is not None and 0 <= idx < len(compact_modules) else None
-
-    raw_layer_artifacts = {
-        k: v
-        for k, v in global_compact_artifacts.get("artifacts", {}).items()
-        if v.get("definer_module") in layer_global_indices
-    }
-
-    referenced_modules = set()
-
-    for artifact in raw_layer_artifacts.values():
-        definer = _resolve(artifact.get("definer_module"))
-        if definer:
-            referenced_modules.add(definer)
-        for c in artifact.get("consumers", []) or []:
-            mod = _resolve(c)
-            if mod:
-                referenced_modules.add(mod)
-        for values in (artifact.get("usage", {}) or {}).values():
-            for v in values or []:
-                if isinstance(v, dict):
-                    mod = _resolve(v.get("module"))
-                else:
-                    mod = _resolve(v)
-                if mod:
-                    referenced_modules.add(mod)
-
-    layer_compact_modules = sorted(referenced_modules)
-    new_index_of = {mod: i for i, mod in enumerate(layer_compact_modules)}
-
-    def _remap(idx):
-        mod = _resolve(idx)
-        return new_index_of.get(mod) if mod else None
-
-    layer_compact_artifacts = {}
-    for key, artifact in sorted(raw_layer_artifacts.items()):
-        remapped = {
-            "artifact": artifact.get("artifact"),
-            "kind": artifact.get("kind"),
-            "signature": artifact.get("signature"),
-            "definer_module": _remap(artifact.get("definer_module")),
-            "consumers": sorted(
-                v for v in (_remap(c) for c in artifact.get("consumers", []) or []) if v is not None
-            ),
-        }
-        usage = artifact.get("usage")
-        if usage:
-            remapped_usage = {}
-            for category, values in sorted(usage.items()):
-                if category == "ambiguous_calls" or category.endswith("_detail"):
-                    new_vals = []
-                    for v in values:
-                        if isinstance(v, dict):
-                            new_mod = _remap(v.get("module"))
-                            if new_mod is not None:
-                                new_val = dict(v)
-                                new_val["module"] = new_mod
-                                new_vals.append(new_val)
-                        else:
-                            new_mod = _remap(v)
-                            if new_mod is not None:
-                                new_vals.append(new_mod)
-                    if new_vals:
-                        if all(isinstance(x, dict) for x in new_vals):
-                            remapped_usage[category] = sorted(
-                                new_vals, key=lambda x: x.get("module", 0)
-                            )
-                        else:
-                            remapped_usage[category] = new_vals  # skip sorting if mixed
-                else:
-                    # Flat arrays of indices
-                    new_vals = sorted(m for m in (_remap(x) for x in values) if m is not None)
-                    if new_vals:
-                        remapped_usage[category] = new_vals
-
-            if remapped_usage:
-                remapped["usage"] = remapped_usage
-        layer_compact_artifacts[key] = remapped
-
-    layer_compact_artifacts_report = {
-        "_format_note": global_compact_artifacts.get("_format_note", ""),
-        "runtime": global_compact_artifacts.get("runtime", {}),
-        "layer_module_count": len(layer_modules),
-        "compact_module_count": len(layer_compact_modules),
-        "modules": layer_compact_modules,
-        "artifacts": layer_compact_artifacts,
-    }
+    layer_compact_artifacts_report = compact_artifact_report(layer_artifacts_report, index_dict)
 
     return {
         "summary": layer_summary_report,
