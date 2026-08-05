@@ -64,6 +64,10 @@ Contextor acts as an intelligence layer between software repositories and AI sys
 - Dedicated name collision reporting with zero-conflict validation
 - Strict, string-based artifact parsing engine for GUI filtering with short-circuit evaluation
 - Timestamped reports and automated routing of high-risk layers into dedicated timestamped subfolders
+- Git integration for commit and branch tracking
+- Automated JSON report diffing engine detecting regressions in technical debt, hotspots, and architectural bottlenecks
+- Detailed single-file Git patches bridging the gap between local changes and architectural impact
+- **Model Context Protocol (MCP) Server** enabling direct, autonomous integration with LLMs (e.g. Claude Desktop)
 
 ---
 

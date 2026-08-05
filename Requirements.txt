@@ -11,3 +11,5 @@
 
 # Fast JSON serialization for report output.
 orjson>=3.9
+# MCP server integration
+mcp>=1.0.0
