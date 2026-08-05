@@ -194,7 +194,10 @@ class ContextorFacade:
             modules, graph, progress_callback=progress_callback
         )
 
-        save_all_reports(
+        from datetime import datetime
+        datestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+        report_result = save_all_reports(
             repo_name=repo_name,
             modules=modules,
             graph=graph,
@@ -207,7 +210,12 @@ class ContextorFacade:
             collisions=all_collisions,
             progress_callback=progress_callback,
             skipped_files=index.skipped,
+            datestamp=datestamp,
         )
+
+        if log and report_result.get("high_risk_layers"):
+            high_risk_layers = ", ".join(report_result["high_risk_layers"])
+            log(f"Generated additional reports for high risk layers: {high_risk_layers}")
 
         return errors
 
@@ -280,12 +288,16 @@ class ContextorFacade:
 
         if log:
             log(f"Saving 5 layer reports for '{layer_name}'...")
+            
+        from datetime import datetime
+        datestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        
         save_layer_reports(
-            repo_name=repo_name, layer_name=layer_name, layer_reports=layer_sliced_reports, log=log
+            repo_name=repo_name, layer_name=layer_name, layer_reports=layer_sliced_reports, log=log, datestamp=datestamp
         )
 
         # Absolute, so what the GUI shows the user is a path that exists.
-        pattern = str(output_dir() / f"{repo_name}_{layer_name}_*.json")
+        pattern = str(output_dir() / f"{repo_name}_{layer_name}_*_{datestamp}.json")
 
         if log:
             log(f"Finished! Saved reports package: {pattern}")
@@ -326,6 +338,9 @@ class ContextorFacade:
         if log:
             log("Creating report for file...")
 
+        from datetime import datetime
+        datestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
         report = generate_single_file_report(ctx, len(modules))
 
         # Named after the module path, not the bare stem: two files called
@@ -336,10 +351,10 @@ class ContextorFacade:
         except ValueError:
             slug = file.stem
 
-        output = str(output_dir() / f"single_{slug}.json")
+        output = str(output_dir() / f"single_{slug}_{datestamp}.json")
         save_single_file_report(report, output)
 
-        md_output = str(output_dir() / f"single_{slug}_llm_context.md")
+        md_output = str(output_dir() / f"single_{slug}_llm_context_{datestamp}.md")
         generate_llm_markdown(report, md_output)
 
         if log:

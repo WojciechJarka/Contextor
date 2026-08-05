@@ -507,6 +507,15 @@ def build_core_extraction_candidates(
 # ==========================================================
 
 
+# ==========================================================
+# WARNING: HARDCODED DEPENDENCY
+# The JSON generation format below is tightly coupled with the 
+# string-matching parser in gui_parser.py. Do NOT change the 
+# structure or text formatting of the artifacts JSON. The parser 
+# relies on exact string placements (e.g., `"::main"`, `"artifact": "main"`)
+# for short-circuit evaluation without full dictionary parsing. 
+# Modifying this format will break the GUI parser's filtering logic.
+# ==========================================================
 def generate_artifact_usage_report(
     modules: dict, root_path: str, runtime: dict | None = None, progress_callback=None
 ) -> dict:

@@ -17,30 +17,15 @@ from contextor.ui.progress_widget import create_progress_bar, run_with_progress
 from contextor.ui.theme import PAD_LG, PAD_MD, PAD_SM, HeaderTooltipManager
 
 
-def matches_term(data, search_term, is_py_query):
-    if isinstance(data, dict):
-        return any(matches_term(v, search_term, is_py_query) for v in data.values())
-    elif isinstance(data, list):
-        return any(matches_term(i, search_term, is_py_query) for i in data)
-    elif isinstance(data, str):
-        if is_py_query:
-            return bool(re.search(rf"\.{re.escape(search_term)}(\.|$)", data))
-        else:
-            return bool(re.search(rf"(?<!\.)\b{re.escape(search_term)}\b", data))
-    return False
-
-
-def consumer_only_match(value, term):
-    if not isinstance(value, dict):
-        return False
-    consumers = value.get("consumers", [])
-    if term not in consumers:
-        return False
-    artifact = value.get("artifact", "")
-    key_hits = False
-    return not artifact == term and not key_hits
-
-
+# ==========================================================
+# WARNING: HARDCODED DEPENDENCY
+# This parser and the JSON generator (in artifact_usage_report.py) 
+# are tightly coupled. Do NOT change the structure or text format 
+# of the generated artifacts JSON, as this parser uses raw string 
+# matching (without full AST/dict parsing) for performance and 
+# precision. Any changes to the JSON generation format will break 
+# the filtering logic below.
+# ==========================================================
 def parse_and_filter_json(json_path, search_term, output_dir="output", public_api_only=False):
     if not os.path.exists(json_path):
         raise FileNotFoundError(f"File {json_path} does not exist.")
@@ -54,7 +39,6 @@ def parse_and_filter_json(json_path, search_term, output_dir="output", public_ap
 
     is_py_query = search_term.lower().endswith(".py")
     term = search_term[:-3] if is_py_query else search_term
-    term_lower = term.lower()
     filtered_artifacts = {}
 
     for key, value in artifacts.items():
@@ -68,39 +52,63 @@ def parse_and_filter_json(json_path, search_term, output_dir="output", public_ap
             ):
                 continue
 
-        key_lower = key.lower()
+        # Zrzut bloku z powrotem do ustandaryzowanego tekstu, aby zastosować reguły stringowe
+        # Doklejamy klucz, aby string zawierał pierwszą linię (np. "contextor.__main__::main": {)
+        block_dict = {key: value}
+        block_text = json.dumps(block_dict, indent=2)
+        
         match = False
 
         if is_py_query:
-            if (
-                f"{term_lower}::" in key_lower
-                or key_lower.startswith(term_lower)
-                or f".{term_lower}" in key_lower
-            ):
+            # === REGUŁY DLA PLIKU (np. main.py) ===
+            
+            # 1. & 2. main:: lub .main:: (szukamy w kluczu głównym i w tekście)
+            if f"{term}::" in block_text or f".{term}::" in block_text:
                 match = True
-        else:
-            artifact_name = ""
-            if isinstance(value, dict):
-                artifact_name = str(value.get("artifact", "")).lower()
-
-            if (
-                key_lower.startswith(term_lower + "::")
-                or f".{term_lower}::" in key_lower
-                or f"::{term_lower}" in key_lower
-                or key_lower == term_lower
-                or artifact_name == term_lower
-            ):
-                match = True
-
-            if matches_term(value, term, is_py_query):
-                if not consumer_only_match(value, term):
+                
+            # 3. .main" pomiędzy "consumers": [ a ],
+            elif '"consumers": [' in block_text:
+                # Wycinamy sekcję consumers do analizy
+                consumers_section = block_text.split('"consumers": [')[1].split('],')[0]
+                if f'.{term}"' in consumers_section:
                     match = True
+                    
+            # 4. "main" ale NIE "artifact": "main"
+            if not match:
+                # Sprawdzamy występowanie "main"
+                if f'"{term}"' in block_text:
+                    # Sprawdzamy czy to WYŁĄCZNIE przypadek "artifact": "main"
+                    # Usuwamy ten specyficzny ciąg i sprawdzamy, czy "main" nadal tam jest
+                    text_without_artifact = block_text.replace(f'"artifact": "{term}"', "")
+                    if f'"{term}"' in text_without_artifact:
+                        match = True
 
+        else:
+            # === REGUŁY DLA SYMBOLU (np. main) ===
+            
+            # 1. ::main"
+            if f"::{term}\"" in block_text:
+                match = True
+                
+            # 2. "artifact": "main"
+            elif f'"artifact": "{term}"' in block_text:
+                match = True
+                
+            # 3. spacja + main( w wierszu z "signature"
+            elif not match:
+                for line in block_text.splitlines():
+                    if '"signature":' in line and f' {term}(' in line:
+                        match = True
+                        break
+
+        # Short-circuiting - jeśli mamy match, zapisujemy i lecimy do następnego bloku
         if match:
             filtered_artifacts[key] = value
 
     parsed_data = {
+        "report_header": data.get("report_header", {}),
         "runtime": data.get("runtime", {}),
+        "debug_info": data.get("debug_info", {}),
         "module_count": data.get("module_count", 0),
         "artifact_count": len(filtered_artifacts),
         "shared_artifact_count": data.get("shared_artifact_count", 0),
@@ -109,7 +117,10 @@ def parse_and_filter_json(json_path, search_term, output_dir="output", public_ap
 
     sanitized_name = search_term.replace(".", "_").replace("/", "_")
     prefix = "parsed_api" if public_api_only else "parsed"
-    output_filename = f"{prefix}_{sanitized_name}.json"
+    
+    from datetime import datetime
+    datestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    output_filename = f"{prefix}_{sanitized_name}_{datestamp}.json"
     os.makedirs(output_dir, exist_ok=True)
     output_path = os.path.join(output_dir, output_filename)
 

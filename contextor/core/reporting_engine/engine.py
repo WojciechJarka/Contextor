@@ -854,40 +854,44 @@ def slice_report_for_layer(
 
 
 def save_layer_reports(
-    repo_name: str, layer_name: str, layer_reports: dict[str, dict[str, Any]], log=None
+    repo_name: str, layer_name: str, layer_reports: dict[str, dict[str, Any]], log=None, datestamp: str | None = None, layer_output_dir: str | None = None
 ) -> dict:
     """
     Saves all layer-specific report files and returns a status summary dict
     for aggregation into the global summary's ``layer_index``.
     """
-    prefix = f"output/{repo_name}_{layer_name}"
+    base_dir = f"output/{layer_output_dir}" if layer_output_dir else "output"
+    import os
+    os.makedirs(base_dir, exist_ok=True)
+    suffix = f"_{datestamp}" if datestamp else ""
+    prefix = f"{base_dir}/{repo_name}_{layer_name}"
     save_json(
         layer_reports["summary"],
-        f"{prefix}_summary.json",
+        f"{prefix}_summary{suffix}.json",
         log=log,
         label=f"layer report [{layer_name}] - summary",
     )
     save_json(
         layer_reports["structure"],
-        f"{prefix}_structure.json",
+        f"{prefix}_structure{suffix}.json",
         log=log,
         label=f"layer report [{layer_name}] - structure",
     )
     save_json(
         layer_reports["metrics"],
-        f"{prefix}_metrics.json",
+        f"{prefix}_metrics{suffix}.json",
         log=log,
         label=f"layer report [{layer_name}] - metrics",
     )
     save_json(
         layer_reports["artifacts"],
-        f"{prefix}_artifacts.json",
+        f"{prefix}_artifacts{suffix}.json",
         log=log,
         label=f"layer report [{layer_name}] - artifacts",
     )
     save_json(
         layer_reports["artifacts_compact"],
-        f"{prefix}_artifacts_compact.json",
+        f"{prefix}_artifacts_compact{suffix}.json",
         log=log,
         label=f"layer report [{layer_name}] - artifacts (compact)",
     )
@@ -917,6 +921,7 @@ def save_all_reports(
     progress_callback=None,
     skipped_files: list | None = None,
     layer_index: list[dict] | None = None,
+    datestamp: str | None = None,
 ):
     """
     Generate and save all reports for the repository.
@@ -930,12 +935,13 @@ def save_all_reports(
     # Build report_header once; passed to all sub-reports for consistency (P2)
     report_header = _build_report_header(root_path, data_source="global")
 
-    summary_path = f"output/{repo_name}_summary.json"
-    structure_path = f"output/{repo_name}_structure.json"
-    collisions_path = f"output/{repo_name}_name_collisions.json"
-    artifacts_path = f"output/{repo_name}_artifacts.json"
-    artifacts_compact_path = f"output/{repo_name}_artifacts_compact.json"
-    artifacts_usage_path = f"output/{repo_name}_artifacts_usage.json"
+    suffix = f"_{datestamp}" if datestamp else ""
+    summary_path = f"output/{repo_name}_summary{suffix}.json"
+    structure_path = f"output/{repo_name}_structure{suffix}.json"
+    collisions_path = f"output/{repo_name}_name_collisions{suffix}.json"
+    artifacts_path = f"output/{repo_name}_artifacts{suffix}.json"
+    artifacts_compact_path = f"output/{repo_name}_artifacts_compact{suffix}.json"
+    artifacts_usage_path = f"output/{repo_name}_artifacts_usage{suffix}.json"
 
     summary_data = generate_summary_report(
         metrics,
@@ -1021,11 +1027,14 @@ def save_all_reports(
                 }
                 if layer_status["computation_mode"] == "full":
                     # Only save files if layer triggered deep computation
+                    layer_dir = f"{repo_name}_high_risk_layers_{datestamp}" if datestamp else f"{repo_name}_high_risk_layers"
                     save_layer_reports(
                         repo_name=repo_name,
                         layer_name=layer,
                         layer_reports=layer_sliced,
                         log=log,
+                        datestamp=datestamp,
+                        layer_output_dir=layer_dir,
                     )
                 layer_index_data.append(layer_status)
             except Exception as e:
@@ -1040,9 +1049,12 @@ def save_all_reports(
     if log:
         log("All reports have been successfully saved.")
 
+    high_risk_layers = [layer["layer"] for layer in layer_index_data if layer.get("computation_mode") == "full"] if not layer_index else []
+
     return {
         "saved": True,
         "repo": repo_name,
+        "high_risk_layers": high_risk_layers,
         "files": [
             summary_path,
             structure_path,
