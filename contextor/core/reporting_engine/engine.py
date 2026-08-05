@@ -11,6 +11,11 @@ from typing import Any
 from pathlib import Path
 
 from contextor.core.analysis.git_context import collect_git_context
+from contextor.core.git.repo_state import is_git_repo, get_current_commit
+from contextor.core.git.diff_engine import diff_reports, detect_regression
+from contextor.core.reporting_layer.git_report import build_global_git_section
+import json
+import glob
 from contextor.core.graph.cycles import detect_cycles
 from contextor.core.graph.metrics import compute_graph_metrics
 from contextor.core.graph.thresholds import get_thresholds
@@ -953,6 +958,53 @@ def save_all_reports(
         report_header=report_header,
         layer_index=layer_index,
     )
+
+    # Git & Diff Integration
+    repo_state_info = {"is_git_repo": is_git_repo(root_path)}
+    if repo_state_info["is_git_repo"]:
+        repo_state_info["commit_sha"] = get_current_commit(root_path)
+
+    # Find previous summary report
+    import os
+    summary_pattern = os.path.join("output", f"{repo_name}_summary*.json")
+    existing_summaries = glob.glob(summary_pattern)
+    previous_summary = None
+    previous_header = None
+    diff_stats = None
+    regression = "UNCHANGED"
+
+    # Sort files to find the latest (excluding the one we are about to save)
+    # The suffix contains datestamp, so alphabetical sort works well.
+    existing_summaries.sort(reverse=True)
+    if existing_summaries:
+        # Assuming the newest existing one is the previous report
+        try:
+            with open(existing_summaries[0], "r", encoding="utf-8") as f:
+                old_summary = json.load(f)
+            previous_header = old_summary.get("report_header")
+            diff_stats = diff_reports(old_summary, summary_data)
+            regression = detect_regression(diff_stats)
+            
+            # Save diff report
+            diff_report_path = f"output/{repo_name}_report_diff{suffix}.json"
+            save_json({
+                "report_diff": {
+                    "previous_report": os.path.basename(existing_summaries[0]),
+                    "current_report": os.path.basename(summary_path),
+                    "changes": diff_stats,
+                    "status": regression
+                }
+            }, diff_report_path, log=log, label="report diff")
+            
+        except Exception as e:
+            if log:
+                log(f"[WARNING] Failed to load or diff previous summary: {e}")
+
+    git_section = build_global_git_section(
+        report_header, previous_header, diff_stats, repo_state_info, regression
+    )
+    summary_data["git_changes"] = git_section
+
     # summary_data is saved AFTER sanity checks below
 
     structure_data = generate_structure_report(graph.hard_edges, graph.soft_edges)

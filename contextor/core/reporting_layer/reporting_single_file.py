@@ -240,9 +240,9 @@ def generate_single_file_report(ctx: dict, module_count: int, report_header: dic
         # --------------------------------------------------
         "test_context": ctx.get("test_context", {}),
         # --------------------------------------------------
-        # GIT CONTEXT
+        # GIT
         # --------------------------------------------------
-        "git_context": ctx.get("git_context", {}),
+        "git": ctx.get("git_context", {}),
         # --------------------------------------------------
         # REPOSITORY CONTEXT
         # --------------------------------------------------

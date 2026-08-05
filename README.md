@@ -58,6 +58,12 @@ Contextor acts as an intelligence layer between software repositories and AI sys
 - LLM-ready context generation
 - JSON and Markdown reporting
 - Single-file architectural analysis
+- Separation of logical layers (e.g. core vs tests) for distinct, isolated architectural reports
+- Comprehensive global and per-layer metrics (density, in/out degree, internal vs external connections)
+- Hotspot classification and technical debt scoring directly linked to architectural action items
+- Dedicated name collision reporting with zero-conflict validation
+- Strict, string-based artifact parsing engine for GUI filtering with short-circuit evaluation
+- Timestamped reports and automated routing of high-risk layers into dedicated timestamped subfolders
 
 ---
 
