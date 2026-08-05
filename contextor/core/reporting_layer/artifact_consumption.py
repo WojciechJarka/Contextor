@@ -51,14 +51,14 @@ Output Contract build_artifact_consumption():
     "risk_score": float,
     "symbols": {
         "<symbol>": {
-            "direct": [...],
-            "import": [...],
-            "runtime": [...],
-            "transitive": [],
-            "reflection": [...],
-            "serialization": [...],
-            "cli_exposure": bool,
-            "api_exposure": bool,
+            "direct": {"modules": [...], "evidence_type": "..."},
+            "import": {"modules": [...], "evidence_type": "..."},
+            "runtime": {"modules": [...], "evidence_type": "..."},
+            "transitive": {"modules": [...], "evidence_type": "..."},
+            "reflection": {"matches": [...], "evidence_type": "..."},
+            "serialization": {"matches": [...], "evidence_type": "..."},
+            "cli_exposure": {"detected": bool, "evidence_type": "..."},
+            "api_exposure": {"detected": bool, "evidence_type": "..."},
             "risk_score": float
         }
     }
@@ -213,19 +213,41 @@ def build_symbol_consumption(
         base_risk = _symbol_risk_score(activity_entry)
 
         result[symbol] = {
-            "direct": usage.get("direct_calls", []),
-            "import": usage.get("api_imports", []),
-            "runtime": usage.get("runtime_calls", []),
-            "blast_radius_modules": module_transitive
-            if (usage.get("direct_calls") or usage.get("api_imports"))
-            else [],
+            "direct": {
+                "modules": usage.get("direct_calls", []),
+                "evidence_type": "ast_call_graph",
+            },
+            "import": {
+                "modules": usage.get("api_imports", []),
+                "evidence_type": "ast_import_statements",
+            },
+            "runtime": {
+                "modules": usage.get("runtime_calls", []),
+                "evidence_type": "ast_dynamic_getattr",
+            },
+            "blast_radius_modules": {
+                "modules": module_transitive if (usage.get("direct_calls") or usage.get("api_imports")) else [],
+                "evidence_type": "module_level_dependency",
+            },
             "blast_radius_score": len(
                 module_transitive if (usage.get("direct_calls") or usage.get("api_imports")) else []
             ),
-            "reflection": exposure_entry.get("reflection", []),
-            "serialization": exposure_entry.get("serialization", []),
-            "cli_exposure": exposure_entry.get("cli_exposure", False),
-            "api_exposure": exposure_entry.get("api_exposure", False),
+            "reflection": {
+                "matches": exposure_entry.get("reflection", []),
+                "evidence_type": "regex_string_match_in_getattr",
+            },
+            "serialization": {
+                "matches": exposure_entry.get("serialization", []),
+                "evidence_type": "regex_string_match_in_dumps",
+            },
+            "cli_exposure": {
+                "detected": exposure_entry.get("cli_exposure", False),
+                "evidence_type": "ast_decorator_pattern",
+            },
+            "api_exposure": {
+                "detected": exposure_entry.get("api_exposure", False),
+                "evidence_type": "ast_base_class_or_decorator",
+            },
             "risk_score": _apply_exposure_discount(
                 base_risk,
                 exposure_entry,
@@ -274,10 +296,22 @@ def build_module_consumption(
     fan_out = len(imports.get("internal", []))
 
     module_consumers = {
-        "direct": sorted(direct),
-        "import": sorted(api_import),
-        "runtime": sorted(runtime),
-        "transitive": transitive,
+        "direct": {
+            "modules": sorted(direct),
+            "evidence_type": "ast_call_graph",
+        },
+        "import": {
+            "modules": sorted(api_import),
+            "evidence_type": "ast_import_statements",
+        },
+        "runtime": {
+            "modules": sorted(runtime),
+            "evidence_type": "ast_dynamic_getattr",
+        },
+        "transitive": {
+            "modules": transitive,
+            "evidence_type": "module_level_dependency",
+        },
     }
 
     coupling = {

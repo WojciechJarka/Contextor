@@ -13,13 +13,18 @@ and transforms it into a compact version:
    categories in usage, modules in clusters / core_extraction_candidates)
    with an index to this table.
 
-2. For artifacts with no consumers, skips the entire
-   "usage"/"consumer_count" block - these are always empty lists and zeros.
+2. Artifacts with no consumers are already excluded from the source report
+   (filtered by build_artifact_index). No additional filtering needed here.
 
 3. For artifacts WITH consumers, keeps ONLY non-empty categories
-   in "usage".
+   in "usage" (if usage is present at all — it lives in the sidecar).
 
 ZERO data loss - this is the same report, encoded differently.
+
+Schema version: 2
+  - shared_artifacts full list replaced by shared_artifact_keys (list of str).
+  - No inline usage block per artifact (moved to sidecar).
+  - artifact_id field present inside each artifact entry.
 
 Layer: REPORT ASSEMBLY (auxiliary, invoked by reporting.py)
 
@@ -43,6 +48,8 @@ def _collect_module_ids(report: dict) -> set:
     JSON tree (too many false positives - "artifact", "kind",
     "message" are not module IDs) - we only collect from fields
     that we know hold module identifiers.
+
+    Schema v2: no shared_artifacts full objects, no inline usage per artifact.
     """
 
     ids = set()
@@ -55,20 +62,9 @@ def _collect_module_ids(report: dict) -> set:
         for c in artifact.get("consumers", []) or []:
             ids.add(c)
 
-        usage = artifact.get("usage", {}) or {}
-        for category_values in usage.values():
-            for v in category_values or []:
-                if isinstance(v, dict):
-                    if "module" in v:
-                        ids.add(v["module"])
-                else:
-                    ids.add(v)
+        # Schema v2: usage is in the sidecar, not inline. Skip usage scan here.
 
-    for a in report.get("shared_artifacts", []) or []:
-        if a.get("definer_module"):
-            ids.add(a["definer_module"])
-        for c in a.get("consumers", []) or []:
-            ids.add(c)
+    # shared_artifact_keys is a list of str keys, not full objects — no module ids here.
 
     for cluster in report.get("shared_usage_clusters", []) or []:
         for m in cluster.get("modules", []) or []:
@@ -191,6 +187,12 @@ def compact_artifact_report(report: dict) -> dict:
     Transforms the full artifact report (as returned by
     generate_artifact_usage_report) into a compact version.
 
+    Schema v2 changes vs v1:
+    - shared_artifacts full list replaced by shared_artifact_keys (list of str).
+    - No inline usage block per artifact (moved to sidecar file).
+    - artifact_id field preserved inside each compact artifact entry.
+    - _format_version: "2" for downstream validation.
+
     ZERO data loss - the same information encoded differently.
     The result has a different shape than the original, but every fact
     is reproducible 1:1 via "modules"[index].
@@ -205,40 +207,25 @@ def compact_artifact_report(report: dict) -> dict:
         consumers = artifact.get("consumers", []) or []
 
         entry = {
+            "artifact_id": artifact.get("artifact_id", key),
             "artifact": artifact.get("artifact"),
             "kind": artifact.get("kind"),
             "signature": artifact.get("signature"),
             "definer_module": _idx(definer, index_of),
             "consumer_module_indices": _idx_list(consumers, index_of),
+            "consumer_count": artifact.get("consumer_count", len(consumers)),
         }
 
-        # Skip usage ONLY if ALL usage categories are
-        # empty - it's not enough to look at "consumers", because
-        # ambiguous_calls by definition never go there
-        # (it's a guess, not a confirmed fact), and event_bindings
-        # are sometimes filtered out of consumers (excluding
-        # core.api_consumers) even though they have data themselves.
-        compacted_usage = _compact_usage(
-            artifact.get("usage", {}),
-            index_of,
-        )
-
-        if compacted_usage:
-            entry["usage"] = compacted_usage
+        # Schema v2: no inline usage — it lives in the sidecar file.
+        # If someone passes an old-format report, we still compact its usage
+        # for backward compatibility.
+        legacy_usage = artifact.get("usage")
+        if legacy_usage:
+            compacted_usage = _compact_usage(legacy_usage, index_of)
+            if compacted_usage:
+                entry["usage"] = compacted_usage
 
         compact_artifacts[key] = entry
-
-    compact_shared_artifacts = [
-        {
-            "key": a.get("key"),
-            "artifact": a.get("artifact"),
-            "kind": a.get("kind"),
-            "definer_module": _idx(a.get("definer_module"), index_of),
-            "consumer_module_indices": _idx_list(a.get("consumers", []), index_of),
-            "consumer_count": a.get("consumer_count"),
-        }
-        for a in report.get("shared_artifacts", []) or []
-    ]
 
     compact_clusters = []
 
@@ -283,34 +270,30 @@ def compact_artifact_report(report: dict) -> dict:
             }
         )
 
+    full_artifact_count = report.get("artifact_count", len(report.get("artifacts", {})))
+
     compact_report = {
+        "_format_version": "2",
         "_format_note": (
-            "This is a compacted artifact-usage report. Numbers inside "
-            "'definer_module' and any key ending in '_module_indices' "
-            "(consumer_module_indices, direct_calls_module_indices, "
-            "callback_calls_module_indices, event_bindings_module_indices, "
-            "runtime_calls_module_indices, api_imports_module_indices, "
-            "inheritance_module_indices, ambiguous_calls_module_indices) "
-            "are INDEXES into the 'modules' array below (e.g. index 13 "
-            "means modules[13]), not counts, ranks, or priorities - the "
-            "'_module_indices' suffix is the signal, so e.g. "
-            "consumer_module_indices: [61] means 'module at index 61', "
-            "not '61 consumers'. If an artifact entry has no 'usage' key, "
-            "it means it has zero consumers - not missing data. "
-            "'ambiguous_calls_module_indices' entries are low-confidence "
-            "guesses (short-name matches with no import confirming the "
-            "source module) and should be treated as 'maybe', never as "
-            "confirmed usage."
+            "Schema v2. Numbers inside 'definer_module' and any key ending in "
+            "'_module_indices' are INDEXES into the 'modules' array below "
+            "(e.g. index 13 means modules[13]), not counts or priorities. "
+            "'shared_artifact_keys' is a sorted list of artifact_id strings "
+            "(lookup in 'artifacts' dict). Inline 'usage' is in the sidecar "
+            "file artifacts_usage.json. Artifacts with zero consumers are "
+            "omitted from this report entirely."
         ),
         "runtime": report.get("runtime", {}),
         "module_count": report.get("module_count"),
-        "artifact_count": report.get("artifact_count"),
+        "full_artifact_count": full_artifact_count,
+        "artifact_count": len(compact_artifacts),
         "shared_artifact_count": report.get("shared_artifact_count"),
         # LEGEND: index -> module. Everywhere else in this file,
         # module identifiers are numbers pointing to this list.
         "modules": module_ids,
         "artifacts": dict(sorted(compact_artifacts.items())),
-        "shared_artifacts": compact_shared_artifacts,
+        # Keys only — look up in artifacts dict for details.
+        "shared_artifact_keys": report.get("shared_artifact_keys", []),
         "shared_usage_clusters": compact_clusters,
         "core_extraction_candidates": compact_candidates,
     }

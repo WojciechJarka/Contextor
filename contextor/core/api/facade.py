@@ -7,9 +7,10 @@ so they don't have to couple with internal analyzers.
 """
 
 import json
+import os
 from pathlib import Path
 
-from contextor.core.errors import checkpoint
+from contextor.core.errors import AnalysisCancelled, checkpoint
 from contextor.core.graph.cycles import detect_cycles
 from contextor.core.graph.graph import build_graph
 from contextor.core.graph.incremental import get_cached_graph
@@ -19,6 +20,7 @@ from contextor.core.paths import DEFAULT_IGNORED_DIRS, output_dir, repo_key, sta
 from contextor.core.reference.engine import reset_caches
 from contextor.core.reporting_engine.debt import compute_debt
 from contextor.core.reporting_engine.engine import (
+    _build_report_header,
     generate_report,
     generate_structure_report,
     generate_summary_report,
@@ -222,12 +224,13 @@ class ContextorFacade:
         if log:
             log(f"Processing layer '{layer_name}' in project '{repo_name}'...")
         excludes, extra_dirs = _load_excludes_for_repo(str(root_resolved))
-        modules = build_index(
+        index = index_repository(
             str(root_resolved),
             excludes=excludes,
             extra_ignored_dirs=extra_dirs,
             progress_callback=progress_callback,
         )
+        modules = index.modules
         graph, cache_hit = get_cached_graph(modules, build_graph)
 
         if log:
@@ -256,6 +259,10 @@ class ContextorFacade:
 
         if log:
             log(f"Slicing reports for layer: {layer_name}...")
+
+        # Build report_header once — same header for global summary and layer reports.
+        report_header = _build_report_header(str(root_resolved), "global")
+
         layer_sliced_reports = slice_report_for_layer(
             layer_path=str(layer_resolved),
             root_path=str(root_resolved),
@@ -264,6 +271,11 @@ class ContextorFacade:
             global_summary=global_summary,
             global_artifacts=global_artifacts,
             global_compact_artifacts=global_compact_artifacts,
+            global_hotspots=hotspots,
+            global_cycles=cycles,
+            global_collisions=all_collisions,
+            global_skipped_files=getattr(index, "skipped", []),
+            report_header=report_header,
         )
 
         if log:

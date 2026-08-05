@@ -125,7 +125,7 @@ def _build_llm_summary(ctx: dict) -> dict:
     }
 
 
-def generate_single_file_report(ctx: dict, module_count: int):
+def generate_single_file_report(ctx: dict, module_count: int, report_header: dict | None = None):
     """
     Generates a single file report using pre-calculated context structures.
     """
@@ -141,11 +141,16 @@ def generate_single_file_report(ctx: dict, module_count: int):
     # already runs is not thrown away.
     module_semantics = ctx["semantic_context"].get("semantic_analysis", {})
 
-    return {
+    report = {
         # --------------------------------------------------
         # IDENTITY
         # --------------------------------------------------
         "module": ctx["module_id"],
+        # Explicit link to the global dependency graph node — allows a
+        # consumer holding only this single-file report to look up the
+        # module in artifacts.json / structure.json by key without
+        # reconstructing the id from the file path. (P5)
+        "global_node_id": ctx["module_id"],
         "file": str(ctx["file_path"]),
         "generated_at": datetime.now().isoformat(),
         # --------------------------------------------------
@@ -245,9 +250,22 @@ def generate_single_file_report(ctx: dict, module_count: int):
             "module_count": module_count,
             "graph_metrics": architecture["graph_metrics"],
             "cycles": architecture["cycles"],
+            # Number of artifacts from this module present in the global
+            # artifact index (only those with >=1 consumer). A low count
+            # relative to symbol count suggests many unused exports. (P5b)
+            "artifact_count_in_module": len([
+                sym for sym in symbol_context.get("consumers", {}).values()
+                if (sym.get("consumer_count", {}).get("total", 0) if isinstance(sym.get("consumer_count"), dict) else sym.get("consumer_count", 0)) > 0
+            ]),
         },
         # --------------------------------------------------
         # LLM SUMMARY  (nowe - F6)
         # --------------------------------------------------
         "llm_summary": _build_llm_summary(ctx),
     }
+
+    # Inject report_header if provided (P2e) — same schema as other report types.
+    if report_header:
+        report["report_header"] = {**report_header, "data_source": "single_file"}
+
+    return report

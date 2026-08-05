@@ -8,7 +8,9 @@ Main analytical pipeline for generating JSON reports and extracting insights
 import os
 from datetime import datetime
 from typing import Any
+from pathlib import Path
 
+from contextor.core.analysis.git_context import collect_git_context
 from contextor.core.graph.cycles import detect_cycles
 from contextor.core.graph.metrics import compute_graph_metrics
 from contextor.core.graph.thresholds import get_thresholds
@@ -30,6 +32,111 @@ from .risk_signals import (
     _compute_risk_summary,
     _compute_soft_dependencies,
 )
+
+
+# ==========================================================
+# REPORT HEADER (P2)
+# ==========================================================
+
+
+def _build_report_header(root_path: str, data_source: str) -> dict:
+    """
+    Builds a stable report header present in every generated report.
+    Provides commit SHA, branch, tool version, and data_source tag so
+    a consumer (LLM or human) can unambiguously identify where a given
+    report comes from and how to reconcile it with others.
+    """
+    try:
+        import importlib.metadata
+        tool_version = importlib.metadata.version("contextor")
+    except Exception:
+        tool_version = "unknown"
+
+    # collect_git_context returns per-file data; we call it on root to get
+    # repo-level commit / branch (uses git log on the directory itself).
+    git_info = collect_git_context(root_path, root_path)
+
+    # Try to read branch name separately (git_context only returns commit date).
+    branch = None
+    try:
+        import subprocess
+        from pathlib import Path
+        p = Path(root_path)
+        if (p / ".git").exists():
+            result = subprocess.run(
+                ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                cwd=str(p), capture_output=True, text=True, check=True,
+            )
+            branch = result.stdout.strip() or None
+            result2 = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=str(p), capture_output=True, text=True, check=True,
+            )
+            commit_sha = result2.stdout.strip()[:12] or None
+        else:
+            commit_sha = None
+    except Exception:
+        commit_sha = None
+
+    return {
+        "schema_version": "1.0",
+        "generated_at": datetime.now().isoformat(),
+        "commit_sha": commit_sha,
+        "branch": branch,
+        "tool_version": tool_version,
+        "data_source": data_source,
+    }
+
+
+# ==========================================================
+# USAGE SIDECAR SAVE (P1b)
+# ==========================================================
+
+
+def _save_usage_sidecar(usage_sidecar: dict, path: str, log=None) -> None:
+    """
+    Saves the usage sidecar (artifact_id -> usage dict with line numbers)
+    extracted from the artifact report as a separate on-demand file.
+    """
+    save_json(usage_sidecar, path, log=log, label="artifacts usage sidecar")
+
+
+# ==========================================================
+# SANITY CHECKS (P6c)
+# ==========================================================
+
+
+def _sanity_check_reports(
+    summary: dict,
+    artifacts: dict,
+    compact: dict,
+) -> list[str]:
+    """
+    Cross-validates key counts between summary, artifacts and compact reports.
+    Returns a list of warning strings (empty = all consistent).
+    """
+    warnings = []
+
+    summary_nodes = summary.get("metrics", {}).get("nodes", None)
+    artifact_modules = artifacts.get("module_count", None)
+    if summary_nodes is not None and artifact_modules is not None:
+        if summary_nodes != artifact_modules:
+            warnings.append(
+                f"nodes mismatch: summary.metrics.nodes={summary_nodes} "
+                f"!= artifacts.module_count={artifact_modules}"
+            )
+
+    full_count = artifacts.get("artifact_count", None)
+    compact_count = compact.get("artifact_count", None)
+    if full_count is not None and compact_count is not None:
+        if full_count != compact_count:
+            warnings.append(
+                f"artifact_count mismatch: artifacts.json={full_count} "
+                f"!= artifacts_compact.json={compact_count}"
+            )
+
+    return warnings
+
 
 
 def _compute_import_profile(modules: dict) -> dict:
@@ -85,12 +192,33 @@ def _compute_action_items(
             )
 
     if isolated_modules:
-        items.append(
-            f"INFO: {len(isolated_modules)} isolated module(s) with no connections "
-            f"— remove or integrate: {', '.join(isolated_modules[:3])}"
-        )
+        # Distinguish CLI / entry-point modules (expected to be isolated)
+        # from genuinely dead code.
+        _ENTRYPOINT_PATTERNS = ("cli_", "__main__", "main", "scripts.", "entrypoint", "entry_")
+
+        entrypoints = [
+            m for m in isolated_modules
+            if any(
+                m == pat or m.endswith("." + pat) or m.startswith(pat)
+                or ("."+pat) in m
+                for pat in _ENTRYPOINT_PATTERNS
+            )
+        ]
+        dead_code = [m for m in isolated_modules if m not in entrypoints]
+
+        if entrypoints:
+            items.append(
+                f"INFO: {len(entrypoints)} isolated CLI/entry-point module(s) "
+                f"(expected, no action needed): {', '.join(entrypoints[:3])}"
+            )
+        if dead_code:
+            items.append(
+                f"INFO: {len(dead_code)} isolated module(s) with no connections "
+                f"— remove or integrate: {', '.join(dead_code[:3])}"
+            )
 
     return items[:5]
+
 
 
 def generate_summary_report(
@@ -100,6 +228,8 @@ def generate_summary_report(
     collisions: list | None = None,
     hotspots: list | None = None,
     skipped_files: list | None = None,
+    report_header: dict | None = None,
+    layer_index: list[dict] | None = None,
 ) -> dict:
     collisions = collisions or []
     hotspots = hotspots or []
@@ -147,6 +277,12 @@ def generate_summary_report(
         "action_items": action_items,
     }
 
+    if report_header:
+        report["report_header"] = report_header
+
+    if layer_index:
+        report["layer_index"] = layer_index
+
     # Stated explicitly so a partial analysis is visibly partial. These
     # files carry a '.py' name but are not analyzable Python.
     if skipped_files:
@@ -156,6 +292,7 @@ def generate_summary_report(
         report["skipped_file_count"] = len(skipped_files)
 
     return report
+
 
 
 def generate_structure_report(hard_edges: dict, soft_edges: dict) -> dict:
@@ -292,6 +429,139 @@ def generate_report(
     }
 
 
+def _compute_layer_health(
+    layer_set: set,
+    layer_modules: list,
+    internal_hard: dict,
+    internal_soft: dict,
+    inbound_hard: list,
+    outbound_hard: list,
+    global_hotspots: list,
+    global_cycles: list,
+    global_collisions: list,
+    global_skipped_files: list,
+    global_summary: dict,
+    report_header: dict | None = None,
+) -> dict:
+    """
+    Computes layer-scoped health signals.
+
+    Default mode: filter global results to modules in this layer.
+    Full per-layer computation is triggered automatically when:
+      - density_ratio > 3.0  (layer much denser than global)
+      - any filtered hotspot has score > 0.85 and type == HUB
+      - 0 cycles found by filtering but internal_edge_count > layer_module_count
+        (conditions necessary for a cycle are satisfied)
+    """
+    # --- filtered mode ---
+    layer_hotspots = [
+        h for h in global_hotspots if h.get("module") in layer_set
+    ]
+
+    layer_cycles = [
+        cycle for cycle in global_cycles
+        if any(m in layer_set for m in cycle)
+    ]
+
+    layer_real_collisions = [
+        c for c in global_collisions
+        if not getattr(c, "is_identical", False)
+        and all(n in layer_set for n in getattr(c, "nodes", []))
+    ]
+
+    layer_skipped = [
+        item for item in global_skipped_files
+        if any(item.path.replace("\\", "/").replace("/", ".") in m for m in layer_set)
+    ] if global_skipped_files else []
+
+    internal_edge_count = sum(len(v) for v in internal_hard.values())
+    layer_module_count = len(layer_modules)
+
+    # --- trigger check for full per-layer computation ---
+    global_density = global_summary.get("metrics", {}).get("density_hard", 0)
+    layer_density = (
+        round(internal_edge_count / (layer_module_count * (layer_module_count - 1)), 4)
+        if layer_module_count > 1 else 0
+    )
+    density_ratio = round(layer_density / global_density, 2) if global_density > 0 else 0
+
+    trigger_reasons = []
+    if density_ratio > 3.0:
+        trigger_reasons.append(f"density_ratio={density_ratio} > 3.0")
+    if any(h.get("score", 0) > 0.85 and h.get("type") == "HUB" for h in layer_hotspots):
+        trigger_reasons.append("filtered hotspot score > 0.85 (type=HUB)")
+    if not layer_cycles and internal_edge_count > layer_module_count:
+        trigger_reasons.append(
+            f"no cycles found but internal_edge_count({internal_edge_count}) "
+            f"> module_count({layer_module_count}) — possible cycle"
+        )
+
+    computation_mode = "filtered"
+
+    if trigger_reasons:
+        # Full per-layer computation
+        computation_mode = "full"
+        layer_cycles = detect_cycles(internal_hard)
+        layer_hotspots = detect_hotspots(internal_hard)
+
+    # --- debt (always per-layer using internal edges) ---
+    layer_metrics_raw = compute_graph_metrics(internal_hard, internal_soft)
+    layer_debt = compute_debt(
+        internal_hard,
+        internal_soft,
+        layer_cycles,
+        layer_metrics_raw,
+        hotspots=layer_hotspots,
+        collisions=layer_real_collisions,
+    )
+
+    active_layer_hotspots = [h for h in layer_hotspots if h.get("type") not in ("ISOLATED", "NORMAL")]
+    layer_status = _compute_status(layer_cycles, layer_real_collisions, active_layer_hotspots)
+
+    layer_action_items = _compute_action_items(
+        layer_cycles,
+        layer_real_collisions,
+        hotspots=active_layer_hotspots,
+        isolated_modules=[
+            h["module"] for h in layer_hotspots
+            if h.get("type") == "ISOLATED" and not h["module"].endswith("__init__")
+        ],
+    )
+
+    result = {
+        "status": layer_status,
+        "computation_mode": computation_mode,
+        "cycles": layer_cycles,
+        "layer_cycles_count": len(layer_cycles),
+        "hotspots": active_layer_hotspots[:5],
+        "debt_summary": {
+            "total_score": layer_debt.get("score", 0),
+            "normalized": layer_debt.get("normalized", 0),
+            "label": layer_debt.get("interpretation", {}).get("label", "unknown"),
+            "hotspot_count": len(active_layer_hotspots),
+        },
+        "action_items": layer_action_items,
+        "name_collisions_count": len(layer_real_collisions),
+        "global_context": {
+            "status": global_summary.get("status", "UNKNOWN"),
+            "cycles_total": global_summary.get("cycle_count", 0),
+            "nodes_total": global_summary.get("metrics", {}).get("nodes", 0),
+            "collision_count_total": global_summary.get("collision_count", 0),
+        },
+    }
+
+    if trigger_reasons:
+        result["full_computation_triggered_by"] = trigger_reasons
+
+    if layer_skipped:
+        result["skipped_files"] = [{"path": item.path, "reason": item.reason} for item in layer_skipped]
+
+    if report_header:
+        result["report_header"] = {**report_header, "data_source": "layer"}
+
+    return result
+
+
 def slice_report_for_layer(
     layer_path: str,
     root_path: str,
@@ -300,6 +570,11 @@ def slice_report_for_layer(
     global_summary: dict[str, Any],
     global_artifacts: dict[str, Any],
     global_compact_artifacts: dict[str, Any],
+    global_hotspots: list | None = None,
+    global_cycles: list | None = None,
+    global_collisions: list | None = None,
+    global_skipped_files: list | None = None,
+    report_header: dict | None = None,
 ) -> dict[str, dict[str, Any]]:
     abs_layer = os.path.abspath(layer_path)
     abs_root = os.path.abspath(root_path)
@@ -329,6 +604,7 @@ def slice_report_for_layer(
     all_known_modules.update(global_compact_artifacts.get("modules", []))
 
     layer_modules = sorted(m for m in all_known_modules if is_in_layer(m))
+    layer_set = set(layer_modules)
 
     hard_edges = global_structure.get("hard_edges", {})
     soft_edges = global_structure.get("soft_edges", {})
@@ -361,6 +637,22 @@ def slice_report_for_layer(
     inbound_hard = sorted(inbound_hard, key=lambda e: (e["source"], e["target"]))
     outbound_hard = sorted(outbound_hard, key=lambda e: (e["source"], e["target"]))
 
+    # --- Layer health (P3) ---
+    layer_health = _compute_layer_health(
+        layer_set=layer_set,
+        layer_modules=layer_modules,
+        internal_hard=internal_hard,
+        internal_soft=internal_soft,
+        inbound_hard=inbound_hard,
+        outbound_hard=outbound_hard,
+        global_hotspots=global_hotspots or [],
+        global_cycles=global_cycles or [],
+        global_collisions=global_collisions or [],
+        global_skipped_files=global_skipped_files or [],
+        global_summary=global_summary,
+        report_header=report_header,
+    )
+
     layer_summary_report = {
         "layer": {"path": layer_path, "root": os.path.abspath(root_path)},
         "layer_modules": layer_modules,
@@ -381,24 +673,65 @@ def slice_report_for_layer(
             "external_dependencies_count": len({e["target"] for e in outbound_hard}),
         },
         "generated_at": global_summary.get("generated_at", datetime.now().isoformat()),
+        # Health signals injected from layer_health (P3)
+        "status": layer_health["status"],
+        "computation_mode": layer_health["computation_mode"],
+        "cycles": layer_health["cycles"],
+        "layer_cycles_count": layer_health["layer_cycles_count"],
+        "hotspots": layer_health["hotspots"],
+        "debt_summary": layer_health["debt_summary"],
+        "action_items": layer_health["action_items"],
+        "name_collisions_count": layer_health["name_collisions_count"],
+        "global_context": layer_health["global_context"],
     }
+
+    if "full_computation_triggered_by" in layer_health:
+        layer_summary_report["full_computation_triggered_by"] = layer_health["full_computation_triggered_by"]
+    if "skipped_files" in layer_health:
+        layer_summary_report["skipped_files"] = layer_health["skipped_files"]
+    if report_header:
+        layer_summary_report["report_header"] = {**report_header, "data_source": "layer"}
 
     layer_structure_report = {"hard_edges": internal_hard, "soft_edges": internal_soft}
 
     layer_node_count = len(layer_modules)
     layer_edge_count = sum(len(v) for v in internal_hard.values())
+    layer_soft_edge_count = sum(len(v) for v in internal_soft.values())
 
     if layer_node_count > 1:
         layer_density = round(layer_edge_count / (layer_node_count * (layer_node_count - 1)), 4)
     else:
         layer_density = 0
 
+    global_density = global_metrics.get("density_hard", global_metrics.get("density", 0))
+    density_ratio = round(layer_density / global_density, 2) if global_density > 0 else 0
+
+    # P4: per-module in/out degree within layer
+    per_module_degrees = {}
+    for mod in layer_modules:
+        out_deg = len(internal_hard.get(mod, []))
+        in_deg = sum(1 for targets in internal_hard.values() if mod in targets)
+        # Also add inbound/outbound boundary connections
+        boundary_in = sum(1 for e in inbound_hard if e["target"] == mod)
+        boundary_out = sum(1 for e in outbound_hard if e["source"] == mod)
+        per_module_degrees[mod] = {
+            "in_degree": in_deg + boundary_in,
+            "out_degree": out_deg + boundary_out,
+            "internal_in": in_deg,
+            "internal_out": out_deg,
+        }
+
     layer_metrics_report = {
         "nodes": layer_node_count,
         "edges": layer_edge_count,
+        "edges_soft": layer_soft_edge_count,
         "density": layer_density,
-        "global_density": global_metrics.get("density", 0),
+        "global_density": global_density,
+        "density_ratio": density_ratio,
+        "inbound_edge_count": len(inbound_hard),
+        "outbound_edge_count": len(outbound_hard),
         "layer_scope": layer_path,
+        "per_module": per_module_degrees,
     }
 
     layer_artifacts = {
@@ -412,10 +745,10 @@ def slice_report_for_layer(
         "module_count": len(layer_modules),
         "artifact_count": len(layer_artifacts),
         "artifacts": layer_artifacts,
-        "shared_artifacts": [
-            a
-            for a in global_artifacts.get("shared_artifacts", [])
-            if is_in_layer(a.get("definer_module", ""))
+        # shared_artifact_keys filtered to this layer's artifacts
+        "shared_artifact_keys": [
+            k for k in global_artifacts.get("shared_artifact_keys", [])
+            if k in layer_artifacts
         ],
     }
 
@@ -522,7 +855,11 @@ def slice_report_for_layer(
 
 def save_layer_reports(
     repo_name: str, layer_name: str, layer_reports: dict[str, dict[str, Any]], log=None
-) -> None:
+) -> dict:
+    """
+    Saves all layer-specific report files and returns a status summary dict
+    for aggregation into the global summary's ``layer_index``.
+    """
     prefix = f"output/{repo_name}_{layer_name}"
     save_json(
         layer_reports["summary"],
@@ -555,6 +892,16 @@ def save_layer_reports(
         label=f"layer report [{layer_name}] - artifacts (compact)",
     )
 
+    summary = layer_reports["summary"]
+    return {
+        "layer": layer_name,
+        "module_count": summary.get("layer_module_count", 0),
+        "status": summary.get("status", "UNKNOWN"),
+        "cycles_count": summary.get("layer_cycles_count", 0),
+        "hotspot_count": len(summary.get("hotspots", [])),
+        "computation_mode": summary.get("computation_mode", "filtered"),
+    }
+
 
 def save_all_reports(
     repo_name: str,
@@ -569,18 +916,26 @@ def save_all_reports(
     collisions: list | None = None,
     progress_callback=None,
     skipped_files: list | None = None,
+    layer_index: list[dict] | None = None,
 ):
+    """
+    Generate and save all reports for the repository.
+    """
     if log:
         log("Starting sequential report saving...")
 
     all_collisions = collisions if collisions is not None else validate_name_collisions(modules)
     hotspots = detect_hotspots(graph.hard_edges)
 
+    # Build report_header once; passed to all sub-reports for consistency (P2)
+    report_header = _build_report_header(root_path, data_source="global")
+
     summary_path = f"output/{repo_name}_summary.json"
     structure_path = f"output/{repo_name}_structure.json"
     collisions_path = f"output/{repo_name}_name_collisions.json"
     artifacts_path = f"output/{repo_name}_artifacts.json"
     artifacts_compact_path = f"output/{repo_name}_artifacts_compact.json"
+    artifacts_usage_path = f"output/{repo_name}_artifacts_usage.json"
 
     summary_data = generate_summary_report(
         metrics,
@@ -589,8 +944,10 @@ def save_all_reports(
         collisions=all_collisions,
         hotspots=hotspots,
         skipped_files=skipped_files,
+        report_header=report_header,
+        layer_index=layer_index,
     )
-    save_json(summary_data, summary_path, log=log, label="summary report")
+    # summary_data is saved AFTER sanity checks below
 
     structure_data = generate_structure_report(graph.hard_edges, graph.soft_edges)
     save_json(structure_data, structure_path, log=log, label="graph structure report")
@@ -610,12 +967,75 @@ def save_all_reports(
         "root_path": root_path,
         "timestamp": datetime.now().isoformat(),
     }
+    artifact_data["report_header"] = {**report_header, "data_source": "artifacts"}
+
+    # Extract and save usage sidecar BEFORE stripping _usage_sidecar from the report (P1b)
+    usage_sidecar = artifact_data.pop("_usage_sidecar", {})
+    _save_usage_sidecar(usage_sidecar, artifacts_usage_path, log=log)
+
     save_json(artifact_data, artifacts_path, log=log, label="artifacts report")
 
     if log:
         log("Generating compact version of artifacts report...")
     compact_artifact_data = compact_artifact_report(artifact_data)
     save_compact_artifact_report(compact_artifact_data, artifacts_compact_path)
+
+    sanity_warnings = _sanity_check_reports(summary_data, artifact_data, compact_artifact_data)
+    if sanity_warnings:
+        summary_data["sanity_warnings"] = sanity_warnings
+        if log:
+            for w in sanity_warnings:
+                log(f"[SANITY] {w}")
+
+    # Generate layer reports (P3d)
+    if not layer_index:
+        layer_index_data = []
+        top_layers = set(m.split('.')[0] for m in modules.keys())
+        for layer in top_layers:
+            layer_path = Path(root_path) / layer
+            if not layer_path.is_dir():
+                continue
+            try:
+                layer_sliced = slice_report_for_layer(
+                    layer_path=str(layer_path),
+                    root_path=root_path,
+                    global_metrics=metrics,
+                    global_structure=structure_data,
+                    global_summary=summary_data,
+                    global_artifacts=artifact_data,
+                    global_compact_artifacts=compact_artifact_data,
+                    global_hotspots=hotspots,
+                    global_cycles=cycles,
+                    global_collisions=all_collisions,
+                    global_skipped_files=skipped_files,
+                    report_header=report_header,
+                )
+                summary = layer_sliced["summary"]
+                layer_status = {
+                    "layer": layer,
+                    "module_count": summary.get("layer_module_count", 0),
+                    "status": summary.get("status", "UNKNOWN"),
+                    "cycles_count": summary.get("layer_cycles_count", 0),
+                    "hotspot_count": len(summary.get("hotspots", [])),
+                    "computation_mode": summary.get("computation_mode", "filtered"),
+                }
+                if layer_status["computation_mode"] == "full":
+                    # Only save files if layer triggered deep computation
+                    save_layer_reports(
+                        repo_name=repo_name,
+                        layer_name=layer,
+                        layer_reports=layer_sliced,
+                        log=log,
+                    )
+                layer_index_data.append(layer_status)
+            except Exception as e:
+                if log:
+                    log(f"[WARNING] Failed to generate layer reports for {layer}: {e}")
+
+        if layer_index_data:
+            summary_data["layer_index"] = sorted(layer_index_data, key=lambda x: x.get("layer", ""))
+
+    save_json(summary_data, summary_path, log=log, label="summary report")
 
     if log:
         log("All reports have been successfully saved.")
@@ -629,6 +1049,15 @@ def save_all_reports(
             collisions_path,
             artifacts_path,
             artifacts_compact_path,
+            artifacts_usage_path,
         ],
-        "reports": ["summary", "structure", "collisions", "artifacts", "artifacts_compact"],
+        "reports": ["summary", "structure", "collisions", "artifacts", "artifacts_compact", "artifacts_usage"],
+        # Expose for callers that aggregate layer reports
+        "_report_header": report_header,
+        "_hotspots": hotspots,
+        "_cycles": cycles,
+        "_collisions": all_collisions,
+        "_summary_data": summary_data,
+        "_artifact_data": artifact_data,
+        "_compact_artifact_data": compact_artifact_data,
     }
