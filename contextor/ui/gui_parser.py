@@ -18,13 +18,9 @@ from contextor.ui.theme import PAD_LG, PAD_MD, PAD_SM, HeaderTooltipManager
 
 
 # ==========================================================
-# WARNING: HARDCODED DEPENDENCY
-# This parser and the JSON generator (in artifact_usage_report.py) 
-# are tightly coupled. Do NOT change the structure or text format 
-# of the generated artifacts JSON, as this parser uses raw string 
-# matching (without full AST/dict parsing) for performance and 
-# precision. Any changes to the JSON generation format will break 
-# the filtering logic below.
+# WARNING: INDEXED DEPENDENCY
+# This parser expects a Compact Artifacts Report (schema v2) 
+# where modules are mapped to integer indices.
 # ==========================================================
 def parse_and_filter_json(json_path, search_term, output_dir="output", public_api_only=False):
     if not os.path.exists(json_path):
@@ -34,12 +30,21 @@ def parse_and_filter_json(json_path, search_term, output_dir="output", public_ap
         data = json.load(f)
 
     artifacts = data.get("artifacts", {})
-    if not artifacts:
-        raise Exception("Report does not contain artifacts section")
+    modules = data.get("modules", [])
+    if not artifacts or not modules:
+        raise Exception("Report must be a compact artifact report containing 'artifacts' and 'modules'.")
 
     is_py_query = search_term.lower().endswith(".py")
     term = search_term[:-3] if is_py_query else search_term
     filtered_artifacts = {}
+    
+    # Pre-compute matching module indices for file-based queries
+    matching_module_indices = set()
+    if is_py_query:
+        for i, mod in enumerate(modules):
+            # Matches e.g. "contextor.main", "contextor.core.main" for term="main"
+            if mod == term or mod.endswith(f".{term}") or f".{term}." in mod or mod.startswith(f"{term}."):
+                matching_module_indices.add(i)
 
     for key, value in artifacts.items():
         if public_api_only and isinstance(value, dict):
@@ -51,72 +56,46 @@ def parse_and_filter_json(json_path, search_term, output_dir="output", public_ap
                 art_name.startswith("__") and art_name.endswith("__")
             ):
                 continue
-
-        # Zrzut bloku z powrotem do ustandaryzowanego tekstu, aby zastosować reguły stringowe
-        # Doklejamy klucz, aby string zawierał pierwszą linię (np. "contextor.__main__::main": {)
-        block_dict = {key: value}
-        block_text = json.dumps(block_dict, indent=2)
-        
+                
         match = False
 
         if is_py_query:
             # === REGUŁY DLA PLIKU (np. main.py) ===
+            definer_idx = value.get("definer_module")
+            consumers_idx = value.get("consumer_module_indices", [])
             
-            # 1. & 2. main:: lub .main:: (szukamy w kluczu głównym i w tekście)
-            if f"{term}::" in block_text or f".{term}::" in block_text:
+            if definer_idx in matching_module_indices:
                 match = True
-                
-            # 3. .main" pomiędzy "consumers": [ a ],
-            elif '"consumers": [' in block_text:
-                # Wycinamy sekcję consumers do analizy
-                consumers_section = block_text.split('"consumers": [')[1].split('],')[0]
-                if f'.{term}"' in consumers_section:
-                    match = True
-                    
-            # 4. "main" ale NIE "artifact": "main"
-            if not match:
-                # Sprawdzamy występowanie "main"
-                if f'"{term}"' in block_text:
-                    # Sprawdzamy czy to WYŁĄCZNIE przypadek "artifact": "main"
-                    # Usuwamy ten specyficzny ciąg i sprawdzamy, czy "main" nadal tam jest
-                    text_without_artifact = block_text.replace(f'"artifact": "{term}"', "")
-                    if f'"{term}"' in text_without_artifact:
-                        match = True
+            elif matching_module_indices.intersection(consumers_idx):
+                match = True
 
         else:
             # === REGUŁY DLA SYMBOLU (np. main) ===
+            art_name = str(value.get("artifact", ""))
+            art_id = str(value.get("artifact_id", key))
+            sig = str(value.get("signature", ""))
             
-            # 1. ::main"
-            if f"::{term}\"" in block_text:
+            if term == art_name or f"::{term}" in art_id or f" {term}(" in sig or term in art_id:
                 match = True
-                
-            # 2. "artifact": "main"
-            elif f'"artifact": "{term}"' in block_text:
-                match = True
-                
-            # 3. spacja + main( w wierszu z "signature"
-            elif not match:
-                for line in block_text.splitlines():
-                    if '"signature":' in line and f' {term}(' in line:
-                        match = True
-                        break
 
-        # Short-circuiting - jeśli mamy match, zapisujemy i lecimy do następnego bloku
         if match:
             filtered_artifacts[key] = value
 
     parsed_data = {
+        "_format_version": data.get("_format_version", "2"),
+        "_format_note": data.get("_format_note", ""),
         "report_header": data.get("report_header", {}),
         "runtime": data.get("runtime", {}),
         "debug_info": data.get("debug_info", {}),
         "module_count": data.get("module_count", 0),
         "artifact_count": len(filtered_artifacts),
         "shared_artifact_count": data.get("shared_artifact_count", 0),
+        "modules": modules,
         "artifacts": filtered_artifacts,
     }
 
     sanitized_name = search_term.replace(".", "_").replace("/", "_")
-    prefix = "parsed_api" if public_api_only else "parsed"
+    prefix = "parsed_api_compact" if public_api_only else "parsed_compact"
     
     from datetime import datetime
     datestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -128,6 +107,7 @@ def parse_and_filter_json(json_path, search_term, output_dir="output", public_ap
         json.dump(parsed_data, f, indent=2, ensure_ascii=False)
 
     return output_path
+
 
 
 def run_parser_window(parent=None):

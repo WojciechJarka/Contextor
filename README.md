@@ -1,8 +1,8 @@
 # Contextor
 
-Contextor transforms complex Python repositories into structured architectural context that both developers and Large Language Models (LLMs) can understand. It generates JSON reports - you can give access of Output json reports folder to LLM working directly in your repo. This way you spare tokens required by LLM for full structural analysis of the code base.
+Contextor transforms complex Python repositories into structured architectural context for Large Language Models (LLMs). Through its native Model Context Protocol (MCP) integration, LLMs can autonomously query the exact architectural context they need on demand. This allows the AI to retrieve surgically precise, context-sized reports, saving both time and thousands of tokens that would otherwise be wasted scanning the entire codebase.ed on demand. This allows the AI to retrieve surgically precise, context-sized reports, saving both time and thousands of tokens that would otherwise be wasted scanning the entire codebase.
 
-It builds a comprehensive representation of a project's architecture, dependencies, relationships, symbol usage, and technical debt through static analysis — without ever executing the analyzed code.
+It builds a comprehensive representation of a project's architecture, dependencies, relationships and technical debt through static analysis — without ever executing the analyzed code.
 
 Contextor acts as an intelligence layer between software repositories and AI systems, providing the architectural awareness required to reason about large and complex codebases.
 
@@ -10,36 +10,41 @@ Contextor acts as an intelligence layer between software repositories and AI sys
 
 ## What Contextor Does
 
+- **Semantic & Architectural Diffing:**  
+  Unlike Git, which tracks character-by-character textual changes, Contextor tracks *structural health*. It detects if a new commit accidentally introduced a circular dependency, inflated technical debt, or violated layer boundaries (e.g., Core layer calling UI).
 - **Dependency Graph Building:**  
   Extracts module dependencies, including hard imports and soft textual references, to construct a complete architectural graph of the project.
-
 - **Architectural Debt Calculation:**  
-  Calculates structural risk indicators by detecting circular dependencies, isolated modules, namespace collisions, dependency hotspots, and architectural inconsistencies.
-
-- **Artifact Consumption Tracking:**  
-  Analyzes how symbols (classes, functions, and methods) are defined, consumed, and exposed throughout the repository, including direct calls, API imports, reflection patterns, and CLI/API entry points.
-
-- **Context Generation:**  
-  Generates highly structured JSON and Markdown reports designed for Large Language Models (LLMs) and developers, providing architectural understanding, intent, ownership, dependencies, and change impact analysis.
-
-- **Single-File Architectural Deep Dives:**  
-  Provides detailed analysis of individual files, including semantic purpose, exported symbols, dependencies, consumers, and relationships with the wider system.
+  Calculates structural risk indicators by detecting isolated modules, namespace collisions, dependency hotspots, and architectural inconsistencies.
+- **Artifact Consumption Tracking (Blast Radius):**  
+  Analyzes how symbols (classes, functions) are consumed throughout the repository. Provides an exact "blast radius" for any refactoring by tracking direct calls, API imports, and reflection patterns.
+- **Context Generation for LLMs:**  
+  Generates ultra-compact, indexed JSON matrices and Markdown reports designed specifically for Large Language Models. It acts as a structural "GPS" for AI, saving thousands of tokens by delivering precise architectural context instead of raw, concatenated source files.
 
 ---
 
 ## What Contextor Does NOT Do
 
+- **Textual Code Diffing (Like Git):**  
+  Contextor is not a version control system. It will not show you that line 42 changed `foo` to `bar` or track whitespace changes. For exact textual "search & replace" diffs, use Git. Contextor focuses exclusively on the *architectural consequences* of those changes.
 - **Dynamic Analysis:**  
-  Contextor does not execute analyzed code. All analysis is performed through static repository inspection.
-
+  Contextor does not execute analyzed code. All analysis is performed through rapid static repository inspection.
 - **Deep Runtime Type Inference:**  
   Contextor relies on AST parsing and deterministic symbol analysis rather than runtime execution, dynamic inference, or complex type checking.
-
 - **Automated Code Modification:**  
-  Contextor does not rewrite code, fix bugs, or format files. It is designed for architectural visibility, analysis, and decision support.
-
+  Contextor does not rewrite code, fix bugs, or format files. It provides the map and the metrics; you (or your LLM) perform the surgery.
 - **Security Auditing:**  
   Contextor identifies structural risks and technical debt, but it is not a dedicated SAST security vulnerability scanner.
+
+---
+
+## Model Context Protocol (MCP) Integration
+
+Contextor natively supports the **Model Context Protocol**, allowing Large Language Models (like Claude) to autonomously explore your repository's architecture without flooding their context window.
+
+- **Zero-Bloat Context:** Instead of loading an entire repository or massive JSON files, the MCP server acts as an intelligent query layer. The LLM can ask for the "blast radius" of a specific function, and the MCP server will extract only the relevant subset of data from the ultra-compact `artifacts_compact.json` database.
+- **Dynamic Exploration:** The LLM can dynamically traverse the dependency graph, inspect core extraction candidates, or look up which files import a specific module—retrieving precise, mathematical mappings in milliseconds.
+- **Extreme Token Efficiency:** By serving only the requested architectural patterns (e.g., "Top 30 usage clusters" or "Consumers of class X"), Contextor reduces API token usage by orders of magnitude while providing the AI with perfect structural awareness.
 
 ---
 
@@ -56,18 +61,18 @@ Contextor acts as an intelligence layer between software repositories and AI sys
 - Architectural hotspot identification
 - Technical debt scoring
 - LLM-ready context generation
-- JSON and Markdown reporting
+- JSON reporting
 - Single-file architectural analysis
 - Separation of logical layers (e.g. core vs tests) for distinct, isolated architectural reports
 - Comprehensive global and per-layer metrics (density, in/out degree, internal vs external connections)
 - Hotspot classification and technical debt scoring directly linked to architectural action items
 - Dedicated name collision reporting with zero-conflict validation
-- Strict, string-based artifact parsing engine for GUI filtering with short-circuit evaluation
+- json parsing engine (for extraction of info about single file or single symbol from full artifacts report)
 - Timestamped reports and automated routing of high-risk layers into dedicated timestamped subfolders
 - Git integration for commit and branch tracking
 - Automated JSON report diffing engine detecting regressions in technical debt, hotspots, and architectural bottlenecks
 - Detailed single-file Git patches bridging the gap between local changes and architectural impact
-- **Model Context Protocol (MCP) Server** enabling direct, autonomous integration with LLMs (e.g. Claude Desktop)
+- **Model Context Protocol (MCP) Server** enabling direct, autonomous integration with LLMs (e.g. Claude Desktop, Antigravity)
 
 ---
 

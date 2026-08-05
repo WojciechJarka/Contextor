@@ -102,12 +102,8 @@ def save_layer_reports(
         log=log,
         label=f"layer report [{layer_name}] - metrics",
     )
-    save_json(
-        layer_reports["artifacts"],
-        f"{prefix}_artifacts{suffix}.json",
-        log=log,
-        label=f"layer report [{layer_name}] - artifacts",
-    )
+    # NOTE: layer_artifacts and sidecar are intentionally not saved to disk
+    # to avoid huge JSON duplication. We only keep compact layer artifacts.
     save_json(
         layer_reports["artifacts_compact"],
         f"{prefix}_artifacts_compact{suffix}.json",
@@ -195,11 +191,8 @@ def save_all_reports(
     }
     artifact_data["report_header"] = {**report_header, "data_source": "artifacts"}
 
-    # Extract and save usage sidecar BEFORE stripping _usage_sidecar from the report (P1b)
+    # Extract sidecar and discard (no longer written to disk to avoid 140MB bloat)
     usage_sidecar = artifact_data.pop("_usage_sidecar", {})
-    _save_usage_sidecar(usage_sidecar, artifacts_usage_path, log=log)
-
-    save_json(artifact_data, artifacts_path, log=log, label="artifacts report")
 
     if log:
         log("Generating compact version of artifacts report...")
