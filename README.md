@@ -1,6 +1,6 @@
 # Contextor
 
-Contextor transforms complex Python repositories into structured architectural context for Large Language Models (LLMs). Through its native Model Context Protocol (MCP) integration, LLMs can autonomously query the exact architectural context they need on demand. This allows the AI to retrieve surgically precise, context-sized reports, saving both time and thousands of tokens that would otherwise be wasted scanning the entire codebase.ed on demand. This allows the AI to retrieve surgically precise, context-sized reports, saving both time and thousands of tokens that would otherwise be wasted scanning the entire codebase.
+Contextor MCP transforms complex Python repositories into structured architectural context for Large Language Models (LLMs). Through its native Model Context Protocol (MCP) integration, LLMs can autonomously query the exact architectural context they need on demand. This allows the AI to retrieve surgically precise, context-sized reports, saving both time and thousands of tokens that would otherwise be wasted scanning the entire codebase.ed on demand. This allows the AI to retrieve surgically precise, context-sized reports, saving both time and thousands of tokens that would otherwise be wasted scanning the entire codebase.
 
 It builds a comprehensive representation of a project's architecture, dependencies, relationships and technical debt through static analysis — without ever executing the analyzed code.
 

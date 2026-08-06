@@ -27,10 +27,13 @@ contextor/ui/exclude_presets*.json
 Thumbs.db
 .DS_Store
 
-#GUI test suite folders
+# GUI test suite folders
 .hypothesis/
 .benchmarks/
 .pytest_cache/
 .coverage
 htmlcov/
 
+# MCP server
+stderr.txt
+stdout.txt

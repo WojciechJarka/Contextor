@@ -183,7 +183,7 @@ def analyze_single_file(repo_path: str, file_path: str) -> str:
     if not target_file.is_file():
         return f"Error: Target file '{target_file}' does not exist."
     try:
-        ContextorFacade.analyze_single_file(str(root), str(target_file), log=_stderr_log)
+        ContextorFacade.analyze_single_file(str(target_file), str(root), log=_stderr_log)
         return f"Single-file analysis complete for {target_file.name}."
     except Exception as e:
         return f"Error during single-file analysis: {str(e)}"
@@ -449,27 +449,30 @@ def get_layer_isolation(repo_path: str, layer_name: str) -> str:
     root = Path(repo_path).expanduser().resolve()
     repo_name = root.name
     
+    # Normalize layer_name in case user passes a path like "contextor/core"
+    normalized_layer_name = Path(layer_name).name
+    
     # Try to find layer-specific report in high_risk_layers
-    ga_path = _find_latest_report(root, f"*{repo_name}_{layer_name}_graph_analytics_*.json")
+    ga_path = _find_latest_report(root, f"*{repo_name}_{normalized_layer_name}_graph_analytics_*.json")
     
     if not ga_path:
         # Fallback to global summary if layer report doesn't exist
         summary_path = _find_latest_report(root, f"{repo_name}_summary_*.json")
         if not summary_path:
-             return f"Error: No layer report found for '{layer_name}' and no global summary found."
+             return f"Error: No layer report found for '{normalized_layer_name}' and no global summary found."
         try:
             summary = json.loads(summary_path.read_text(encoding="utf-8"))
             for layer in summary.get("layer_index", []):
-                if layer.get("layer") == layer_name:
+                if layer.get("layer") == normalized_layer_name:
                     return json.dumps(layer, indent=2)
-            return f"Layer '{layer_name}' not found in global layer index."
+            return f"Layer '{normalized_layer_name}' not found in global layer index."
         except Exception as e:
             return f"Error reading fallback layer info: {e}"
             
     try:
         ga = json.loads(ga_path.read_text(encoding="utf-8"))
         result = {
-            "layer": layer_name,
+            "layer": normalized_layer_name,
             "module_count": ga.get("module_count", 0),
             "clusters": ga.get("shared_usage_clusters", []),
             "dependency_types": ga.get("dependency_type_breakdown", {})
