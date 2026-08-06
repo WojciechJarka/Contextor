@@ -381,11 +381,23 @@ def get_file_edit_context(repo_path: str, file_path: str) -> str:
         art_comp = json.loads(art_path.read_text(encoding="utf-8"))
         
         mod_info = ga.get("modules", {}).get(module_name, {})
-        # hotspot_score lives in the summary report, not in graph_analytics.
-        # Fall back to betweenness as a proxy risk indicator.
-        risk_score = mod_info.get("hotspot_score") or round(
-            (mod_info.get("betweenness", 0) + mod_info.get("hub_score", 0)) / 2, 4
-        )
+        
+        # Prefer real hotspot score from summary.json, fall back to centrality proxy
+        risk_score = 0.0
+        summary_path = _find_latest_report(root, f"{repo_name}_summary_*.json")
+        if summary_path:
+            try:
+                summary = json.loads(summary_path.read_text(encoding="utf-8"))
+                for h in summary.get("top_hotspots", []):
+                    if h.get("module") == module_name:
+                        risk_score = h.get("score", 0.0)
+                        break
+            except Exception:
+                pass
+        if risk_score == 0.0:
+            risk_score = round(
+                (mod_info.get("betweenness", 0) + mod_info.get("hub_score", 0)) / 2, 4
+            )
         
         modules_rev = {str(v): str(k) for k, v in idx.get("modules", {}).items()}
         mod_id = modules_rev.get(module_name)
@@ -423,6 +435,9 @@ def get_file_edit_context(repo_path: str, file_path: str) -> str:
                         if not art_name.split("::")[-1].startswith("_"):
                             public_api.append(art_name)
         
+        # tests_covering: modules from 'tests.*' layer that depend on this module
+        tests_covering = [c for c in consumers if c.startswith("tests.")]
+        
         result = {
             "file": file_path,
             "file_exists": target_path.is_file(),
@@ -434,8 +449,8 @@ def get_file_edit_context(repo_path: str, file_path: str) -> str:
             "consumers": consumers,
             "risk_score": risk_score,
             "tests_covering": {
-                "available": False,
-                "tests": []
+                "available": len(tests_covering) > 0,
+                "tests": tests_covering
             }
         }
         
@@ -475,15 +490,89 @@ def get_layer_isolation(repo_path: str, layer_name: str) -> str:
             
     try:
         ga = json.loads(ga_path.read_text(encoding="utf-8"))
+        
+        # Build id->name map for resolving matrix indices
+        idx_path = _find_latest_report(root, f"{repo_name}_index_dictionary_*.json")
+        id_to_name: dict[str, str] = {}
+        if idx_path:
+            idx = json.loads(idx_path.read_text(encoding="utf-8"))
+            id_to_name = idx.get("modules", {})
+        
+        modules = ga.get("modules", {})
+        matrix = ga.get("module_dependency_matrix", {})
+        
+        # Allowed layer dependency directions (src_layer -> set of allowed tgt_layers)
+        # Higher layers may call lower layers but not vice versa.
+        # Order: tests > ui/cli > contract > engine > runtime > adapter
+        _LAYER_ORDER = ["tests", "ui", "cli", "contract", "engine", "runtime", "adapter"]
+        _LAYER_RANK = {l: i for i, l in enumerate(_LAYER_ORDER)}
+        
+        def _is_violation(src_layer: str, tgt_layer: str) -> bool:
+            """A violation occurs when a lower-ranked layer calls a higher-ranked one."""
+            src_rank = _LAYER_RANK.get(src_layer, -1)
+            tgt_rank = _LAYER_RANK.get(tgt_layer, -1)
+            if src_rank < 0 or tgt_rank < 0:
+                return False
+            # ui/cli calling engine/runtime is a violation
+            return src_rank > tgt_rank
+        
+        boundary_violations = []
+        for src_id, targets in matrix.items():
+            src_name = id_to_name.get(src_id, src_id)
+            src_layer = modules.get(src_name, {}).get("layer", "")
+            if not src_layer:
+                continue
+            for tgt_id in targets:
+                tgt_name = id_to_name.get(tgt_id, tgt_id)
+                if tgt_name == src_name:
+                    continue
+                tgt_layer = modules.get(tgt_name, {}).get("layer", "")
+                if not tgt_layer:
+                    continue
+                if _is_violation(src_layer, tgt_layer):
+                    boundary_violations.append({
+                        "from": src_name,
+                        "from_layer": src_layer,
+                        "to": tgt_name,
+                        "to_layer": tgt_layer,
+                    })
+        
         result = {
             "layer": normalized_layer_name,
             "module_count": ga.get("module_count", 0),
             "clusters": ga.get("shared_usage_clusters", []),
-            "dependency_types": ga.get("dependency_type_breakdown", {})
+            "dependency_types": ga.get("dependency_type_breakdown", {}),
+            "boundary_violations": boundary_violations,
+            "boundary_violations_count": len(boundary_violations),
         }
         return json.dumps(result, indent=2)
     except Exception as e:
         return f"Error extracting layer isolation: {e}"
+
+
+@mcp.tool()
+def get_report_diff(repo_path: str) -> str:
+    """
+    [OPTIMIZED] Returns architectural regression analysis between the last two analysis runs.
+    Shows delta in hotspot count, debt score, cycle count, and lists new/resolved hotspots.
+    Run analyze_project at least twice (on different code states) to populate this.
+    """
+    root = Path(repo_path).expanduser().resolve()
+    repo_name = root.name
+
+    diff_path = _find_latest_report(root, f"{repo_name}_report_diff_*.json")
+    if not diff_path:
+        return (
+            f"No diff report found for '{repo_name}'. "
+            "Run analyze_project at least twice (on different commits or code states) "
+            "to generate a regression diff."
+        )
+    try:
+        diff_data = json.loads(diff_path.read_text(encoding="utf-8"))
+        report = diff_data.get("report_diff", diff_data)
+        return json.dumps(report, indent=2)
+    except Exception as e:
+        return f"Error reading diff report: {e}"
 
 
 @mcp.tool()
@@ -499,8 +588,20 @@ def query_json_data(json_path: str, python_filter_expression: str) -> str:
         
     try:
         data = json.loads(target.read_text(encoding="utf-8"))
-        # Execute the comprehension safely
-        result = eval(python_filter_expression, {"data": data, "json": json})
+        # Safe sandbox: only whitelisted builtins, no import/exec/open
+        _safe_builtins = {
+            "__builtins__": {},
+            "data": data,
+            "json": json,
+            "sorted": sorted, "list": list, "dict": dict, "set": set,
+            "len": len, "str": str, "int": int, "float": float, "bool": bool,
+            "min": min, "max": max, "sum": sum,
+            "enumerate": enumerate, "zip": zip, "range": range,
+            "any": any, "all": all, "filter": filter, "map": map,
+            "isinstance": isinstance, "round": round, "abs": abs,
+            "True": True, "False": False, "None": None,
+        }
+        result = eval(python_filter_expression, _safe_builtins)
         return json.dumps(result, indent=2)
     except Exception as e:
         return f"Error executing query: {str(e)}\nMake sure 'data' is treated as a dict/list."

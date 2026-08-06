@@ -1,6 +1,6 @@
 # Contextor
 
-Contextor MCP transforms complex Python repositories into structured architectural context for Large Language Models (LLMs). Through its native Model Context Protocol (MCP) integration, LLMs can autonomously query the exact architectural context they need on demand. This allows the AI to retrieve surgically precise, context-sized reports, saving both time and thousands of tokens that would otherwise be wasted scanning the entire codebase.ed on demand. This allows the AI to retrieve surgically precise, context-sized reports, saving both time and thousands of tokens that would otherwise be wasted scanning the entire codebase.
+Contextor MCP transforms complex Python repositories into structured architectural context for Large Language Models (LLMs). Through its native Model Context Protocol (MCP) integration, LLMs can autonomously query the exact architectural context they need on demand. This allows the AI to retrieve surgically precise, context-sized reports, saving both time and thousands of tokens that would otherwise be wasted scanning the entire codebase.
 
 It builds a comprehensive representation of a project's architecture, dependencies, relationships and technical debt through static analysis — without ever executing the analyzed code.
 
@@ -30,7 +30,7 @@ Contextor acts as an intelligence layer between software repositories and AI sys
 - **Dynamic Analysis:**  
   Contextor does not execute analyzed code. All analysis is performed through rapid static repository inspection.
 - **Deep Runtime Type Inference:**  
-  Contextor relies on AST parsing and deterministic symbol analysis rather than runtime execution, dynamic inference, or complex type checking.
+  Contextor relies on AST parsing and deterministic symbol analysis rather than runtime execution, dynamic inference, or complex type checking. Dynamic dispatch patterns (e.g., `getattr(obj, name)`, `__import__`, dependency injection containers) cannot be resolved through static analysis alone — this is a known limitation shared by all static analyzers (mypy, pylint, pyright). Contextor partially addresses this through *soft reference* detection, which performs pattern-based textual matching for common dynamic usage patterns.
 - **Automated Code Modification:**  
   Contextor does not rewrite code, fix bugs, or format files. It provides the map and the metrics; you (or your LLM) perform the surgery.
 - **Security Auditing:**  
