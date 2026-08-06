@@ -1,4 +1,4 @@
-"""
+ """
 Contextor MCP Server
 ====================
 
