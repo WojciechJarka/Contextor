@@ -73,6 +73,8 @@ Contextor natively supports the **Model Context Protocol**, allowing Large Langu
 - Automated JSON report diffing engine detecting regressions in technical debt, hotspots, and architectural bottlenecks
 - Detailed single-file Git patches bridging the gap between local changes and architectural impact
 - **Model Context Protocol (MCP) Server** enabling direct, autonomous integration with LLMs (e.g. Claude Desktop, Antigravity)
+- **Graph Analytics Report** — per-module `fan_in`, `fan_out`, `export_degree`, `visibility`, architectural `layer`, graph-centrality scores (`betweenness`, `pagerank`, `hub_score`, `bridge_score`), Jaccard-similarity clusters, and a weighted Module Dependency Matrix; generated for all three report levels (full repo, layer, single file)
+- **Index Dictionary Deduplication** — when a new index dictionary is identical to the previous one it silently replaces it; when it differs the old file is preserved with an `_outdated` suffix so downstream consumers always point to the correct dictionary
 
 ---
 
@@ -238,6 +240,7 @@ Generated reports include:
 - architectural hotspots;
 - technical debt indicators;
 - cycle detection results;
+- graph analytics (fan-in/out, centrality, Jaccard clusters, Module Dependency Matrix);
 - LLM-ready context snapshots.
 
 The generated context allows Large Language Models to reason about complex repositories with architectural awareness instead of relying only on raw source files.

@@ -14,6 +14,7 @@ from contextor.core.hotspots import detect_hotspots
 from contextor.core.validator.collisions import validate_name_collisions
 from .formatting import save_json
 from .generators import _sanity_check_reports, generate_summary_report, generate_structure_report, generate_collisions_report, slice_report_for_layer
+from .graph_analytics import generate_graph_analytics_report
 
 def _build_report_header(root_path: str, data_source: str) -> dict:
     """
@@ -72,6 +73,78 @@ def _save_usage_sidecar(usage_sidecar: dict, path: str, log=None) -> None:
     save_json(usage_sidecar, path, log=log, label="artifacts usage sidecar")
 
 
+def _save_index_dictionary_with_dedup(
+    new_dict: dict,
+    path: str,
+    log=None,
+    label: str = "index dictionary",
+) -> None:
+    """
+    Saves the index dictionary with deduplication logic:
+
+    - If a previous index dictionary already exists and is IDENTICAL to the new one
+      → overwrite silently (remove old, write new).
+    - If the previous dictionary EXISTS but DIFFERS from the new one
+      → rename the old file by adding '_outdated' suffix before the extension,
+        then write the new file normally.
+    - If no previous dictionary exists → write normally.
+
+    This ensures the GUI 'rewrite index' button and downstream index operations
+    always read the correct (newest) dictionary.
+    """
+    target = Path(path)
+    # Find existing dictionary files with the same base pattern (any datestamp)
+    # Pattern: same directory, same base name up to the datestamp part.
+    # e.g. output/Contextor_Repo_index_dictionary_20260806_132423.json
+    #   -> look for output/Contextor_Repo_index_dictionary*.json
+    parent = target.parent
+    stem_base = target.stem  # e.g. Contextor_Repo_index_dictionary_20260806_132423
+    # Derive the base prefix (strip the last two _YYYYMMDD_HHMMSS segments)
+    parts = stem_base.rsplit("_", 2)
+    if len(parts) >= 3:
+        base_prefix = "_".join(parts[:-2])
+    else:
+        base_prefix = stem_base
+
+    pattern = str(parent / f"{base_prefix}*.json")
+    existing = sorted(
+        [f for f in glob.glob(pattern) if "_outdated" not in f],
+        reverse=True,
+    )
+
+    new_content = json.dumps(new_dict, sort_keys=True)
+
+    if existing:
+        latest = existing[0]
+        try:
+            old_content = json.dumps(
+                json.loads(Path(latest).read_text(encoding="utf-8")),
+                sort_keys=True,
+            )
+        except Exception:
+            old_content = None
+
+        if old_content is not None and old_content == new_content:
+            # Identical — remove old and write new
+            try:
+                os.remove(latest)
+                if log:
+                    log(f"[DICT] Identical dictionary found — replaced: {Path(latest).name}")
+            except OSError:
+                pass
+        else:
+            # Different — mark old as outdated
+            outdated_path = Path(latest).with_stem(Path(latest).stem + "_outdated")
+            try:
+                os.rename(latest, outdated_path)
+                if log:
+                    log(f"[DICT] Dictionary changed — old marked as outdated: {outdated_path.name}")
+            except OSError:
+                pass
+
+    save_json(new_dict, path, log=log, label=label)
+
+
 def save_layer_reports(
     repo_name: str, layer_name: str, layer_reports: dict[str, dict[str, Any]], log=None, datestamp: str | None = None, layer_output_dir: str | None = None
 ) -> dict:
@@ -110,6 +183,27 @@ def save_layer_reports(
         log=log,
         label=f"layer report [{layer_name}] - artifacts (compact)",
     )
+
+    # Graph analytics for this layer (scoped to layer modules)
+    layer_artifact_data = layer_reports.get("artifacts") or layer_reports.get("artifacts_compact", {})
+    layer_structure = layer_reports.get("structure", {})
+    layer_hard_edges = layer_structure.get("hard_edges", {})
+    layer_soft_edges = layer_structure.get("soft_edges", {})
+    index_dict = layer_reports.get("_index_dict")
+    if layer_artifact_data and isinstance(layer_artifact_data, dict) and "artifacts" in layer_artifact_data:
+        graph_analytics_layer_data = generate_graph_analytics_report(
+            artifact_data=layer_artifact_data,
+            hard_edges=layer_hard_edges,
+            soft_edges=layer_soft_edges,
+            index_dict=index_dict,
+            scope="layer",
+        )
+        save_json(
+            graph_analytics_layer_data,
+            f"{prefix}_graph_analytics{suffix}.json",
+            log=log,
+            label=f"layer report [{layer_name}] - graph analytics",
+        )
 
     summary = layer_reports["summary"]
     return {
@@ -202,7 +296,20 @@ def save_all_reports(
     save_compact_artifact_report(compact_artifact_data, artifacts_compact_path)
 
     index_dict_path = f"output/{repo_name}_index_dictionary{suffix}.json"
-    save_json(index_dict.to_json_dict(), index_dict_path, log=log, label="index dictionary")
+    _save_index_dictionary_with_dedup(index_dict.to_json_dict(), index_dict_path, log=log)
+
+    if log:
+        log("Generating graph analytics report...")
+    graph_analytics_path = f"output/{repo_name}_graph_analytics{suffix}.json"
+    graph_analytics_data = generate_graph_analytics_report(
+        artifact_data=artifact_data,
+        hard_edges=graph.hard_edges,
+        soft_edges=graph.soft_edges,
+        modules=modules,
+        index_dict=index_dict,
+        scope="global",
+    )
+    save_json(graph_analytics_data, graph_analytics_path, log=log, label="graph analytics report")
 
     sanity_warnings = _sanity_check_reports(summary_data, artifact_data, compact_artifact_data)
     if sanity_warnings:

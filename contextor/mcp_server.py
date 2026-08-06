@@ -9,14 +9,7 @@ import json
 from pathlib import Path
 import sys
 
-# We lazily import mcp to avoid blowing up if the user hasn't installed it yet,
-# though the entrypoint implies it is available.
-try:
-    from mcp.server.fastmcp import FastMCP
-except ImportError:
-    print("[ERROR] 'mcp' package is not installed. Please run MCP_installer.bat.")
-    sys.exit(1)
-
+from fastmcp import FastMCP
 from contextor.core.api.facade import ContextorFacade
 from contextor.ui.gui_parser import parse_and_filter_json
 
@@ -141,8 +134,17 @@ def main():
     """
     Entry point for the MCP server.
     """
-    mcp.run()
+    # Używamy bezpośrednio niskopoziomowego uruchomienia FastMCP,
+    # co pomija rysowanie banera ANSI w terminalu i chroni strumień stdio przed śmieciami.
+    import asyncio
+    
+    async def _run():
+        await mcp.run_stdio_async()
+        
+    asyncio.run(_run())
 
 
 if __name__ == "__main__":
+    import multiprocessing
+    multiprocessing.freeze_support()
     main()

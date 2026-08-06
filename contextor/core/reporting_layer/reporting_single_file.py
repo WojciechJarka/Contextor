@@ -149,8 +149,10 @@ def generate_single_file_report(ctx: dict, module_count: int, report_header: dic
     my_mod_idx = index_dict.get_module_id(ctx["module_id"])
     
     # Compact artifact_consumption
-    compact_consumption = {}
-    for k, v in ctx["artifact_consumption"].items():
+    original_ac = ctx.get("artifact_consumption", {})
+    compact_symbols = {}
+    
+    for k, v in original_ac.get("symbols", {}).items():
         a_id = index_dict.get_artifact_id(k)
         compact_usage = {}
         for cat, values in (v.get("usage") or {}).items():
@@ -168,14 +170,30 @@ def generate_single_file_report(ctx: dict, module_count: int, report_header: dic
             else:
                 compact_usage[cat] = [index_dict.get_module_id(m) for m in values]
                 
-        compact_consumption[a_id] = {
+        compact_symbols[a_id] = {
             "artifact_id": a_id,
             "kind": v.get("kind"),
             "definer_module": index_dict.get_module_id(v.get("definer_module")),
             "consumer_module_indices": [index_dict.get_module_id(c) for c in v.get("consumers", [])],
             "consumer_count": v.get("consumer_count"),
-            "usage": compact_usage
+            "usage": compact_usage,
+            "risk_score": v.get("risk_score", 0)
         }
+        
+    compact_module_consumers = {}
+    for cat, data in original_ac.get("consumers", {}).items():
+        compact_module_consumers[cat] = {
+            "modules": [index_dict.get_module_id(m) for m in data.get("modules", [])],
+            "evidence_type": data.get("evidence_type")
+        }
+
+    compact_consumption = {
+        "module": my_mod_idx,
+        "consumers": compact_module_consumers,
+        "coupling": original_ac.get("coupling", {}),
+        "risk_score": original_ac.get("risk_score", 0),
+        "symbols": compact_symbols
+    }
         
     # Compact architecture
     arch = ctx["architecture_context"]

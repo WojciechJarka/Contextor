@@ -27,6 +27,7 @@ from contextor.core.reporting_engine.generators import (
 )
 from contextor.core.reporting_engine.io_manager import (
     _build_report_header,
+    _save_index_dictionary_with_dedup,
     save_all_reports,
     save_layer_reports,
 )
@@ -357,11 +358,57 @@ class ContextorFacade:
 
         output = str(output_dir() / f"single_{slug}_{datestamp}.json")
         save_single_file_report(report, output)
-        
+
         index_output = str(output_dir() / f"single_{slug}_index_dictionary_{datestamp}.json")
-        import json
-        with open(index_output, "w", encoding="utf-8") as f:
-            json.dump(index_dict.to_json_dict(), f, indent=2, ensure_ascii=False)
+        _save_index_dictionary_with_dedup(
+            index_dict.to_json_dict(),
+            index_output,
+            log=log,
+            label="single-file index dictionary",
+        )
+
+        # Graph analytics for the single analyzed module
+        from contextor.core.reporting_engine.graph_analytics import generate_graph_analytics_report
+        from contextor.core.reporting_layer.artifact_usage_report import generate_artifact_usage_report as _gen_art
+        try:
+            sf_artifact_data = _gen_art(modules, repo_root, runtime={"cache_hit": cache_hit})
+            sf_artifact_data.pop("_usage_sidecar", None)
+            target_module_id = None
+            # Find module_id matching the analyzed file
+            file_resolved = file.resolve()
+            for mid, mod in modules.items():
+                mod_path = Path(getattr(mod, "absolute_path", None) or getattr(mod, "path", ""))
+                if mod_path.resolve() == file_resolved:
+                    target_module_id = mid
+                    break
+
+            scope_mods = {target_module_id} if target_module_id else None
+            # Include direct neighbors for useful matrix
+            if scope_mods and target_module_id:
+                from contextor.core.graph.graph import build_graph as _bg
+                hard_e = graph.hard_edges
+                neighbors = set(hard_e.get(target_module_id, []))
+                for src, tgts in hard_e.items():
+                    if target_module_id in tgts:
+                        neighbors.add(src)
+                scope_mods = {target_module_id} | neighbors
+
+            ga_data = generate_graph_analytics_report(
+                artifact_data=sf_artifact_data,
+                hard_edges=graph.hard_edges,
+                soft_edges=graph.soft_edges,
+                modules=modules,
+                index_dict=index_dict,
+                scope="single_file",
+                scope_modules=scope_mods,
+            )
+            ga_output = str(output_dir() / f"single_{slug}_graph_analytics_{datestamp}.json")
+            import json as _json
+            with open(ga_output, "w", encoding="utf-8") as f_ga:
+                _json.dump(ga_data, f_ga, indent=2, ensure_ascii=False)
+        except Exception as _ga_err:
+            if log:
+                log(f"[WARNING] graph_analytics skipped for single file: {_ga_err}")
 
         md_output = str(output_dir() / f"single_{slug}_llm_context_{datestamp}.md")
         generate_llm_markdown(report, md_output)
