@@ -42,9 +42,10 @@ Contextor acts as an intelligence layer between software repositories and AI sys
 
 Contextor natively supports the **Model Context Protocol**, allowing Large Language Models (like Claude) to autonomously explore your repository's architecture without flooding their context window.
 
-- **Zero-Bloat Context:** Instead of loading an entire repository or massive JSON files, the MCP server acts as an intelligent query layer. The LLM can ask for the "blast radius" of a specific function, and the MCP server will extract only the relevant subset of data from the ultra-compact `artifacts_compact.json` database.
-- **Dynamic Exploration:** The LLM can dynamically traverse the dependency graph, inspect core extraction candidates, or look up which files import a specific module—retrieving precise, mathematical mappings in milliseconds.
-- **Extreme Token Efficiency:** By serving only the requested architectural patterns (e.g., "Top 30 usage clusters" or "Consumers of class X"), Contextor reduces API token usage by orders of magnitude while providing the AI with perfect structural awareness.
+- **Contextor Query Layer:** Instead of serving raw, massive JSON files, the server exposes highly targeted endpoints (e.g., `get_project_architecture`, `get_module_context`, `get_artifact_blast_radius`).
+- **Automatic Path Resolution:** The LLM simply provides the repository path. The server automatically locates and parses the latest generated reports in the background without exposing raw file structures.
+- **Zero-Bloat Context:** By instantly merging data from multiple reports, the server delivers perfectly sized, synthesized insights (like exact inbound/outbound dependencies for a single module) to the LLM.
+- **Advanced Filtering:** Power-user tools allow LLMs to evaluate safe Python filters over JSON data directly on the server, extracting only what they need.
 
 ---
 
