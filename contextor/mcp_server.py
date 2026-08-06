@@ -1,11 +1,114 @@
 """
-contextor/mcp_server.py
+Contextor MCP Server
+====================
 
-Model Context Protocol (MCP) Server for Contextor.
-Provides advanced Query APIs for LLMs to safely and efficiently extract 
-architectural context without reading massive JSON dumps.
+Model Context Protocol server for Contextor architectural analysis tools.
+
+IMPORTANT:
+-----------
+MCP stdio transport is extremely sensitive.
+stdout MUST contain only JSON-RPC messages.
+
+Do NOT use:
+- print() to stdout
+- startup banners
+- debug logs on stdout
+- third-party libraries that write startup messages to stdout
+
+Use stderr for diagnostics only.
+
+
+EMERGENCY RECOVERY PROCEDURE
+============================
+
+If Antigravity shows:
+
+    context deadline exceeded
+
+or MCP server does not expose tools:
+
+1. Close Antigravity IDE completely.
+
+2. Verify installed FastMCP version:
+
+    python -m pip show fastmcp fastmcp-slim mcp
+
+
+3. If FastMCP installation is corrupted or mixed:
+
+    python -m pip uninstall fastmcp fastmcp-slim -y
+
+
+4. Remove remaining package folders manually if they exist:
+
+    <python>\Lib\site-packages\fastmcp
+    <python>\Lib\site-packages\fastmcp-*.dist-info
+
+
+5. Clean reinstall compatible version:
+
+    python -m pip install fastmcp==2.12.4
+
+
+6. Verify import:
+
+    python -c "from fastmcp import FastMCP; print('FAST MCP OK')"
+
+
+7. Verify MCP server starts:
+
+    python -m contextor.mcp_server
+
+
+8. Restart Antigravity IDE.
+
+9. Open MCP configuration and check:
+
+    contextor
+    Enabled
+    tools visible
+
+
+TROUBLESHOOTING CHECKS
+======================
+
+Check active Python:
+
+    python -c "import sys; print(sys.executable)"
+
+
+Check MCP package:
+
+    python -c "import mcp; print(mcp.__file__)"
+
+
+Check FastMCP package:
+
+    python -c "import fastmcp; print(fastmcp.__file__)"
+
+
+Expected:
+- mcp and fastmcp must come from the same Python environment.
+- Do not mix FastMCP 3.x packages with FastMCP 2.x runtime.
+- Do not install FastMCP globally when using an embedded Python distribution.
+
+
+WINDOWS NOTE
+============
+
+For Windows stdio transport:
+
+- keep "-u" in MCP command arguments
+- use UTF-8 encoding
+- redirect diagnostic output to stderr
+
+Example:
+
+    print("debug", file=sys.stderr, flush=True)
+
+
+The MCP server must start silently and wait for JSON-RPC messages.
 """
-
 import json
 import sys
 import glob
@@ -235,6 +338,106 @@ def get_artifact_blast_radius(repo_path: str, artifact_name: str) -> str:
         return json.dumps(result, indent=2)
     except Exception as e:
         return f"Error extracting blast radius: {e}"
+
+
+@mcp.tool()
+def get_file_edit_context(repo_path: str, file_path: str) -> str:
+    """
+    [OPTIMIZED] Specialized single-shot context pill for LLMs prior to editing a file.
+    Combines module metrics, API signature blast radius, and dependency trees into one response.
+    Returns: file, module, public_api, imports, consumers, risk_score, tests_covering.
+    """
+    root = Path(repo_path).expanduser().resolve()
+    repo_name = root.name
+    
+    # Deriving module name from file path
+    target_path = Path(file_path)
+    if target_path.is_absolute():
+        try:
+            rel_path = target_path.relative_to(root)
+        except ValueError:
+            rel_path = target_path
+    else:
+        rel_path = target_path
+
+    parts = list(rel_path.parts)
+    if parts and parts[-1].endswith(".py"):
+        parts[-1] = parts[-1][:-3]
+        if parts[-1] == "__init__":
+            parts.pop()
+    
+    module_name = ".".join(parts)
+    
+    ga_path = _find_latest_report(root, f"{repo_name}_graph_analytics_*.json")
+    idx_path = _find_latest_report(root, f"{repo_name}_index_dictionary_*.json")
+    art_path = _find_latest_report(root, f"{repo_name}_artifacts_compact_*.json")
+    
+    if not (ga_path and idx_path and art_path):
+        return "Error: Missing required reports. Run analyze_project first."
+        
+    try:
+        ga = json.loads(ga_path.read_text(encoding="utf-8"))
+        idx = json.loads(idx_path.read_text(encoding="utf-8"))
+        art_comp = json.loads(art_path.read_text(encoding="utf-8"))
+        
+        mod_info = ga.get("modules", {}).get(module_name, {})
+        risk_score = mod_info.get("hotspot_score", 0.0)
+        
+        modules_rev = {str(v): str(k) for k, v in idx.get("modules", {}).items()}
+        mod_id = modules_rev.get(module_name)
+        
+        imports = []
+        consumers = []
+        
+        matrix = ga.get("module_dependency_matrix", {})
+        if mod_id:
+            if mod_id in matrix:
+                for target_id in matrix[mod_id].keys():
+                    target_name = idx.get("modules", {}).get(target_id, target_id)
+                    imports.append(target_name)
+            for src_id, targets in matrix.items():
+                if mod_id in targets:
+                    src_name = idx.get("modules", {}).get(src_id, src_id)
+                    consumers.append(src_name)
+        else:
+            if module_name in matrix:
+                imports = list(matrix[module_name].keys())
+            for src_name, targets in matrix.items():
+                if module_name in targets:
+                    consumers.append(src_name)
+                    
+        public_api = []
+        if mod_id:
+            # O(1) lookup if index is present in artifacts_compact
+            if "module_artifacts" in art_comp and str(mod_id) in art_comp["module_artifacts"]:
+                public_api = art_comp["module_artifacts"][str(mod_id)]
+            else:
+                # O(n) fallback
+                for art_id, art_data in art_comp.get("artifacts", {}).items():
+                    if str(art_data.get("definer_module")) == mod_id:
+                        art_name = idx.get("artifacts", {}).get(art_id, str(art_id))
+                        if not art_name.split("::")[-1].startswith("_"):
+                            public_api.append(art_name)
+        
+        result = {
+            "file": file_path,
+            "file_exists": target_path.is_file(),
+            "module": module_name,
+            "layer": mod_info.get("layer", "unknown"),
+            "entrypoint": mod_info.get("entrypoint", False),
+            "public_api": public_api,
+            "imports": imports,
+            "consumers": consumers,
+            "risk_score": risk_score,
+            "tests_covering": {
+                "available": False,
+                "tests": []
+            }
+        }
+        
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        return f"Error extracting file edit context: {e}"
 
 
 @mcp.tool()
