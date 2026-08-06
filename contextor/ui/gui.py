@@ -108,10 +108,15 @@ class ContextorGUI:
             filetypes=[("JSON files", "*.json")]
         )
         if json_path:
-            from contextor.ui.gui_parser import rewrite_index_to_text
+            from contextor.ui.gui_parser import rewrite_index_to_text, find_index_dictionary
             try:
-                out_path = rewrite_index_to_text(json_path)
-                messagebox.showinfo("Success", f"Rewritten text JSON saved to:\n{out_path}")
+                def ask_user(msg):
+                    return messagebox.askokcancel("Fallback Index", msg)
+                    
+                dict_path = find_index_dictionary(json_path, ask_user)
+                if dict_path:
+                    out_path = rewrite_index_to_text(json_path, dict_path)
+                    messagebox.showinfo("Success", f"Rewritten text JSON saved to:\n{out_path}")
             except Exception as e:
                 messagebox.showerror("Error", f"Failed to rewrite JSON:\n{e}")
 

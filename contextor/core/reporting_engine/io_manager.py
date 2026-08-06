@@ -106,9 +106,9 @@ def _save_index_dictionary_with_dedup(
     else:
         base_prefix = stem_base
 
-    pattern = str(parent / f"{base_prefix}*.json")
+    pattern = str(parent / f"{base_prefix}_*_*.json")
     existing = sorted(
-        [f for f in glob.glob(pattern) if "_outdated" not in f],
+        [f for f in glob.glob(pattern) if "_outdated" not in f and len(Path(f).stem.split("_")) == len(parts) + 2],
         reverse=True,
     )
 
@@ -183,6 +183,16 @@ def save_layer_reports(
         log=log,
         label=f"layer report [{layer_name}] - artifacts (compact)",
     )
+    
+    index_dict = layer_reports.get("_index_dict")
+    if index_dict:
+        index_dict_path = f"{prefix}_index_dictionary{suffix}.json"
+        _save_index_dictionary_with_dedup(
+            index_dict.to_json_dict(), 
+            index_dict_path, 
+            log=log, 
+            label=f"layer report [{layer_name}] - index dictionary"
+        )
 
     # Graph analytics for this layer (scoped to layer modules)
     layer_artifact_data = layer_reports.get("artifacts") or layer_reports.get("artifacts_compact", {})

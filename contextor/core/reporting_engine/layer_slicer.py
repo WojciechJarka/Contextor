@@ -333,6 +333,8 @@ def slice_report_for_layer(
         ],
     }
 
+    if index_dict is None:
+        index_dict = IndexDictionary()
     layer_compact_artifacts_report = compact_artifact_report(layer_artifacts_report, index_dict)
 
     return {
@@ -341,4 +343,5 @@ def slice_report_for_layer(
         "metrics": layer_metrics_report,
         "artifacts": layer_artifacts_report,
         "artifacts_compact": layer_compact_artifacts_report,
+        "_index_dict": index_dict,
     }
