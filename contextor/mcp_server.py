@@ -112,8 +112,12 @@ The MCP server must start silently and wait for JSON-RPC messages.
 import json
 import sys
 import glob
+import warnings
 from pathlib import Path
 from typing import Any
+
+# Suppress all warnings (like AuthlibDeprecationWarning) to prevent JSON-RPC stream corruption
+warnings.filterwarnings("ignore")
 
 from fastmcp import FastMCP
 from contextor.core.api.facade import ContextorFacade
@@ -132,7 +136,7 @@ def _find_latest_report(repo_path: Path, pattern: str) -> Path | None:
     out_dir = repo_path / "output"
     if not out_dir.is_dir():
         return None
-    matches = sorted(glob.glob(str(out_dir / pattern)), reverse=True)
+    matches = sorted(glob.glob(str(out_dir / "**" / pattern), recursive=True), reverse=True)
     for match in matches:
         if "_outdated" not in match:
             return Path(match)

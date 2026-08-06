@@ -29,8 +29,8 @@ Contextor acts as an intelligence layer between software repositories and AI sys
   Contextor is not a version control system. It will not show you that line 42 changed `foo` to `bar` or track whitespace changes. For exact textual "search & replace" diffs, use Git. Contextor focuses exclusively on the *architectural consequences* of those changes.
 - **Dynamic Analysis:**  
   Contextor does not execute analyzed code. All analysis is performed through rapid static repository inspection.
-- **Deep Runtime Type Inference:**  
-  Contextor relies on AST parsing and deterministic symbol analysis rather than runtime execution, dynamic inference, or complex type checking. Dynamic dispatch patterns (e.g., `getattr(obj, name)`, `__import__`, dependency injection containers) cannot be resolved through static analysis alone — this is a known limitation shared by all static analyzers (mypy, pylint, pyright). Contextor partially addresses this through *soft reference* detection, which performs pattern-based textual matching for common dynamic usage patterns.
+- **Deep Runtime Type Inference & Reflection Frameworks:**  
+  Contextor relies on AST parsing and deterministic symbol analysis rather than runtime execution. Dynamic dispatch patterns (e.g., `getattr()`, `__import__`, dependency injection) and heavy reflection used by frameworks like Django or FastAPI cannot be perfectly resolved through static analysis alone. For "pure" Python code, accuracy is extremely high, but for heavily dynamic framework "magic", the structural graph may be incomplete. Contextor partially addresses this through *soft reference* detection (pattern-based textual matching).
 - **Automated Code Modification:**  
   Contextor does not rewrite code, fix bugs, or format files. It provides the map and the metrics; you (or your LLM) perform the surgery.
 - **Security Auditing:**  
@@ -45,7 +45,7 @@ Contextor natively supports the **Model Context Protocol**, allowing Large Langu
 - **Contextor Query Layer:** Instead of serving raw, massive JSON files, the server exposes highly targeted endpoints (e.g., `get_project_architecture`, `get_module_context`, `get_artifact_blast_radius`).
 - **Automatic Path Resolution:** The LLM simply provides the repository path. The server automatically locates and parses the latest generated reports in the background without exposing raw file structures.
 - **Zero-Bloat Context:** By instantly merging data from multiple reports, the server delivers perfectly sized, synthesized insights (like exact inbound/outbound dependencies for a single module) to the LLM.
-- **Advanced Filtering:** Power-user tools allow LLMs to evaluate safe Python filters over JSON data directly on the server, extracting only what they need.
+- **Secure Advanced Filtering:** Power-user tools (`query_json_data`) allow LLMs to extract exact JSON subsets directly on the server using a strictly sandboxed, restricted Python evaluation environment to ensure zero-risk security against unauthorized code execution.
 
 ---
 
