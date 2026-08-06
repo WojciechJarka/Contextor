@@ -215,7 +215,7 @@ def get_project_architecture(repo_path: str) -> str:
             "debt_summary": summary.get("debt_summary", {}),
             "layer_index": summary.get("layer_index", []),
             "top_global_hotspots": summary.get("top_hotspots", [])[:5],
-            "module_count": summary.get("metrics", {}).get("global_module_count", 0)
+            "module_count": summary.get("metrics", {}).get("nodes", 0)
         }
         return json.dumps(result, indent=2)
     except Exception as e:
@@ -381,7 +381,11 @@ def get_file_edit_context(repo_path: str, file_path: str) -> str:
         art_comp = json.loads(art_path.read_text(encoding="utf-8"))
         
         mod_info = ga.get("modules", {}).get(module_name, {})
-        risk_score = mod_info.get("hotspot_score", 0.0)
+        # hotspot_score lives in the summary report, not in graph_analytics.
+        # Fall back to betweenness as a proxy risk indicator.
+        risk_score = mod_info.get("hotspot_score") or round(
+            (mod_info.get("betweenness", 0) + mod_info.get("hub_score", 0)) / 2, 4
+        )
         
         modules_rev = {str(v): str(k) for k, v in idx.get("modules", {}).items()}
         mod_id = modules_rev.get(module_name)
