@@ -61,6 +61,8 @@ def rewrite_index_to_text(json_path, dict_path, output_dir="output"):
     if not os.path.exists(json_path):
         raise FileNotFoundError(f"File {json_path} does not exist.")
 
+    base_name = os.path.basename(json_path)
+
     with open(json_path, encoding="utf-8") as f:
         data = json.load(f)
 
