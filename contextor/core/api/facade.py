@@ -25,12 +25,9 @@ from contextor.core.reporting_engine.generators import (
     generate_summary_report,
     slice_report_for_layer,
 )
-from contextor.core.reporting_engine.io_manager import (
-    _build_report_header,
-    _save_index_dictionary_with_dedup,
-    save_all_reports,
-    save_layer_reports,
-)
+from contextor.core.reporting_engine.header import build_report_header
+from contextor.core.reporting_engine.pipeline import execute_global_pipeline
+from contextor.core.reporting_engine.io_manager import _save_index_dictionary_with_dedup
 from contextor.core.reporting_layer.artifact_usage_report import generate_artifact_usage_report
 from contextor.core.reporting_layer.artifact_usage_report_compact import compact_artifact_report
 from contextor.core.reporting_layer.reporting_llm import generate_llm_markdown
@@ -200,7 +197,7 @@ class ContextorFacade:
         from datetime import datetime
         datestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
-        report_result = save_all_reports(
+        report_result = execute_global_pipeline(
             repo_name=repo_name,
             modules=modules,
             graph=graph,
@@ -272,7 +269,7 @@ class ContextorFacade:
             log(f"Slicing reports for layer: {layer_name}...")
 
         # Build report_header once — same header for global summary and layer reports.
-        report_header = _build_report_header(str(root_resolved), "global")
+        report_header = build_report_header(str(root_resolved), "global")
 
         layer_sliced_reports = slice_report_for_layer(
             layer_path=str(layer_resolved),
@@ -295,7 +292,11 @@ class ContextorFacade:
         from datetime import datetime
         datestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         
-        save_layer_reports(
+        from contextor.core.reporting_engine.pipeline import execute_layer_pipeline
+        from contextor.core.reporting_engine.io_manager import write_layer_reports
+        
+        execute_layer_pipeline(repo_name, layer_name, layer_sliced_reports, log=log, datestamp=datestamp)
+        write_layer_reports(
             repo_name=repo_name, layer_name=layer_name, layer_reports=layer_sliced_reports, log=log, datestamp=datestamp
         )
 
@@ -357,7 +358,9 @@ class ContextorFacade:
             slug = file.stem
 
         output = str(output_dir() / f"single_{slug}_{datestamp}.json")
-        save_single_file_report(report, output)
+        from contextor.core.reporting_engine.dictionary import compact_recursively
+        compact_report = compact_recursively(report, index_dict, set(modules.keys()))
+        save_single_file_report(compact_report, output)
 
         index_output = str(output_dir() / f"single_{slug}_index_dictionary_{datestamp}.json")
         _save_index_dictionary_with_dedup(

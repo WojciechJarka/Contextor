@@ -22,6 +22,7 @@ contextor/ui/exclude_presets*.json
 # Editors
 .idea/
 .vscode/
+scratch/
 
 # OS
 Thumbs.db
@@ -37,3 +38,5 @@ htmlcov/
 # MCP server
 stderr.txt
 stdout.txt
+
+

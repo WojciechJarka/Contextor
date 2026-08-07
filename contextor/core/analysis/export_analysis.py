@@ -13,23 +13,47 @@ def _is_public(name: str) -> bool:
 
 
 def extract_exports(tree: ast.Module) -> dict:
-    """Extracts module exports ignoring `__all__` logic."""
+    """Extracts module exports, respecting `__all__` logic if present."""
     funcs, classes, consts, aliases = set(), set(), set(), []
 
+    has_all = False
+    all_exports = set()
     for node in tree.body:
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and _is_public(node.name):
-            funcs.add(node.name)
-        elif isinstance(node, ast.ClassDef) and _is_public(node.name):
-            classes.add(node.name)
+        if isinstance(node, ast.Assign):
+            for t in node.targets:
+                if isinstance(t, ast.Name) and t.id == "__all__":
+                    has_all = True
+                    if isinstance(node.value, (ast.List, ast.Tuple)):
+                        for elt in node.value.elts:
+                            if isinstance(elt, ast.Constant) and isinstance(elt.value, str):
+                                all_exports.add(elt.value)
+                            elif hasattr(elt, "s") and isinstance(elt.s, str):
+                                all_exports.add(elt.s)
+
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            if (has_all and node.name in all_exports) or (not has_all and _is_public(node.name)):
+                funcs.add(node.name)
+        elif isinstance(node, ast.ClassDef):
+            if (has_all and node.name in all_exports) or (not has_all and _is_public(node.name)):
+                classes.add(node.name)
         elif isinstance(node, ast.Assign):
             for t in node.targets:
-                if isinstance(t, ast.Name) and _is_public(t.id):
-                    consts.add(t.id)
-                    if isinstance(node.value, ast.Name) and node.value.id != t.id:
-                        aliases.append({"name": t.id, "target": node.value.id})
+                if isinstance(t, ast.Name):
+                    if t.id == "__all__":
+                        continue
+                    if (has_all and t.id in all_exports) or (not has_all and _is_public(t.id)):
+                        consts.add(t.id)
+                        if isinstance(node.value, ast.Name) and node.value.id != t.id:
+                            aliases.append({"name": t.id, "target": node.value.id})
+
+    if has_all:
+        symbols = sorted(all_exports)
+    else:
+        symbols = sorted(funcs | classes | consts)
 
     return {
-        "symbols": sorted(funcs | classes | consts),
+        "symbols": symbols,
         "functions": sorted(funcs),
         "classes": sorted(classes),
         "constants": sorted(consts),

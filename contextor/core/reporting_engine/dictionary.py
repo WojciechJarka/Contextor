@@ -62,5 +62,34 @@ class IndexDictionary:
                 idx._next_artifact_id = max(idx._next_artifact_id, num + 1)
             except ValueError:
                 pass
-                
         return idx
+
+def compact_recursively(data: Any, index_dict: IndexDictionary, known_modules: set[str]) -> Any:
+    """Recursively replaces module names and artifact keys with their integer IDs."""
+    if isinstance(data, dict):
+        return {
+            str(compact_recursively(k, index_dict, known_modules)): 
+            compact_recursively(v, index_dict, known_modules)
+            for k, v in data.items()
+        }
+    elif isinstance(data, list):
+        return [compact_recursively(x, index_dict, known_modules) for x in data]
+    elif isinstance(data, str):
+        if data in known_modules:
+            return index_dict.get_module_id(data)
+        if "::" in data:
+            parts = data.split("::")
+            if len(parts) == 2 and parts[0] in known_modules:
+                return index_dict.get_artifact_id(data)
+        if " -> " in data:
+            parts = data.split(" -> ")
+            compacted_parts = []
+            for part in parts:
+                if part in known_modules:
+                    compacted_parts.append(str(index_dict.get_module_id(part)))
+                else:
+                    compacted_parts.append(part)
+            return " -> ".join(compacted_parts)
+        return data
+    else:
+        return data

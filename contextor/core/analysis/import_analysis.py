@@ -106,30 +106,44 @@ class ImportUsageVisitor(ast.NodeVisitor):
 def extract_import_usage(tree):
 
     visitor = ImportUsageVisitor()
-
     visitor.visit(tree)
+
+    has_all = False
+    all_exports = set()
+    for node in tree.body:
+        if isinstance(node, ast.Assign):
+            for t in node.targets:
+                if isinstance(t, ast.Name) and t.id == "__all__":
+                    has_all = True
+                    if isinstance(node.value, (ast.List, ast.Tuple)):
+                        for elt in node.value.elts:
+                            if isinstance(elt, ast.Constant) and isinstance(elt.value, str):
+                                all_exports.add(elt.value)
+                            elif hasattr(elt, "s") and isinstance(elt.s, str):
+                                all_exports.add(elt.s)
 
     result = {}
 
     for name, data in visitor.names.items():
         runtime = data["runtime_usage"]
-
         type_usage = data["type_usage"]
+        
+        is_reexported = has_all and name in all_exports
 
-        if runtime:
+        if is_reexported:
+            classification = "re_exported"
+        elif runtime:
             classification = "runtime"
-
         elif type_usage:
             classification = "type_only"
-
         else:
             classification = "unused"
 
         result[name] = {
             **data,
             "classification": classification,
-            "confidence": "high" if runtime else "medium" if type_usage else "low",
-            "runtime_available": bool(runtime),
+            "confidence": "high" if (runtime or is_reexported) else "medium" if type_usage else "low",
+            "runtime_available": bool(runtime or is_reexported),
         }
 
     return result

@@ -511,6 +511,15 @@ def generate_graph_analytics_report(
     # Jaccard-based clusters
     clusters = build_jaccard_clusters(scoped_artifact_data)
 
+    if index_dict is not None:
+        compact_clusters = []
+        for cluster in clusters:
+            compact_cluster = cluster.copy()
+            compact_cluster["modules"] = [str(index_dict.get_module_id(m)) for m in cluster.get("modules", [])]
+            compact_cluster["shared_artifact_keys"] = [str(index_dict.get_artifact_id(a)) for a in cluster.get("shared_artifact_keys", [])]
+            compact_clusters.append(compact_cluster)
+        clusters = compact_clusters
+
     # Dependency type breakdown
     dep_breakdown = _compute_dep_type_breakdown(dep_matrix)
 
