@@ -1,4 +1,5 @@
 .gitignore export-ignore
+.github export-ignore
 .github/ export-ignore
 .gitattributes export-ignore
 run_gui.bat export-ignore
@@ -9,4 +10,6 @@ output/ export-ignore
 stderr.txt export-ignore
 stdout.txt export-ignore
 .pytest_cache export-ignore
-.git export-ignore`
+.git/ export-ignore
+GUI_test_suite_installer.bat export-ignore
+MCP_installer.bat export-ignore
