@@ -1,4 +1,4 @@
-## [1.2.0] - 2026-08-06
+## [1.2.0-beta] - 2026-08-06
 
 ### Added
 
@@ -94,7 +94,7 @@
 
 ### Validation
 
-- Verified all MCP tools in a full production end-to-end test.
+- Verified all MCP tools in a full end-to-end test.
 - Cross-validated generated reports against the analyzed source code.
 - Confirmed correct isolation of global, layer and single-file report scopes.
 - Verified zero cross-scope index overwrites.
