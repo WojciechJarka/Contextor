@@ -21,20 +21,20 @@ echo [1/5] Searching for Python interpreter...
 
 set "PYTHON_EXE="
 
-:: 1. Sprawdzanie wbudowanej ścieżki WinPython / SpiralProphet
+:: 1. Check embedded WinPython / SpiralProphet path
 if exist "C:\SpiralProphet\python\WPy64-31090\python-3.10.9.amd64\python.exe" (
     set "PYTHON_EXE=C:\SpiralProphet\python\WPy64-31090\python-3.10.9.amd64\python.exe"
     goto :PYTHON_FOUND
 )
 
-:: 2. Sprawdzanie zmiennej PATH
+:: 2. Check system PATH
 python --version >nul 2>&1
 if not errorlevel 1 (
     set "PYTHON_EXE=python"
     goto :PYTHON_FOUND
 )
 
-:: 3. Skanowanie lokalnych folderów (venv, .venv, WinPython)
+:: 3. Scan local directories (venv, .venv, WinPython)
 for /d %%d in (venv .venv Python python WPy64*) do (
     if exist "%%d\Scripts\python.exe" (
         set "PYTHON_EXE=%%d\Scripts\python.exe"
