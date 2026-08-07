@@ -9,4 +9,4 @@ output/ export-ignore
 stderr.txt export-ignore
 stdout.txt export-ignore
 .pytest_cache export-ignore
-.git export-ignore
+.git export-ignore`
