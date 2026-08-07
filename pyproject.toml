@@ -1,6 +1,6 @@
 [project]
 name = "contextor"
-version = "1.2.0b0"
+version = "1.1.0b0"
 description = "Static architectural analysis turning Python repositories into LLM-ready context."
 readme = "README.md"
 requires-python = ">=3.10"
