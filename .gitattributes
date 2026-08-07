@@ -4,3 +4,7 @@
 run_gui.bat export-ignore
 PUSH.bat export-ignore
 .hypothesis/ export-ignore
+contextor.egg-info/ export-ignore
+output/ export-ignore
+stderr.txt export-ignore
+stdout.txt export-ignore
