@@ -551,9 +551,10 @@ class ContextorGUI:
             return
 
         def task(log=None, progress_callback=None):
-            return ContextorFacade.analyze_project(
+            errors, _ = ContextorFacade.analyze_project(
                 path, log=log, progress_callback=progress_callback
             )
+            return errors
 
         def on_success(errors):
             if not errors:

@@ -256,6 +256,24 @@ def execute_global_pipeline(
     artifacts_compact_path = f"output/{repo_name}_artifacts_compact{suffix}.json"
     artifacts_usage_path = f"output/{repo_name}_artifacts_usage{suffix}.json"
 
+    from contextor.core.analysis.state_manager import AnalysisResult
+    analysis_result = AnalysisResult(
+        repo_name=repo_name,
+        root_path=root_path,
+        modules=modules,
+        graph=graph,
+        metrics=metrics,
+        cycles=cycles,
+        debt=debt,
+        collisions=all_collisions if all_collisions is not None else [],
+        hotspots=hotspots,
+        layer_index=layer_index_data,
+        artifacts=artifact_data.get("artifacts", {}),
+        compact_artifacts=compact_artifact_data,
+        summary_data=summary_data,
+        report_header=report_header,
+    )
+
     return {
         "saved": True,
         "repo": repo_name,
@@ -276,4 +294,5 @@ def execute_global_pipeline(
         "_summary_data": summary_data,
         "_artifact_data": artifact_data,
         "_compact_artifact_data": compact_artifact_data,
+        "_analysis_result": analysis_result,
     }

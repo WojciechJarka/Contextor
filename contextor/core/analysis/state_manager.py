@@ -37,6 +37,23 @@ class FileDelta:
     artifacts_changed: list = field(default_factory=list)
     
     metadata_changes: Dict[str, Any] = field(default_factory=dict)
+@dataclass
+class AnalysisResult:
+    """Canonical in-memory result of a full project analysis."""
+    repo_name: str
+    root_path: str
+    modules: Dict[str, Any]
+    graph: Optional[Any]
+    metrics: Dict[str, Any]
+    cycles: list
+    debt: Dict[str, Any]
+    collisions: list
+    hotspots: list
+    layer_index: list
+    artifacts: Dict[str, Any]
+    compact_artifacts: Dict[str, Any]
+    summary_data: Dict[str, Any]
+    report_header: Dict[str, Any]
 
 
 @dataclass

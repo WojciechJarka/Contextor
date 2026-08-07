@@ -217,7 +217,8 @@ class ContextorFacade:
             high_risk_layers = ", ".join(report_result["high_risk_layers"])
             log(f"Generated additional reports for high risk layers: {high_risk_layers}")
 
-        return errors
+        analysis_result = report_result.get("_analysis_result")
+        return errors, analysis_result
 
     @staticmethod
     def analyze_layer(root_dir: str, layer_dir: str, log=None, progress_callback=None) -> str:

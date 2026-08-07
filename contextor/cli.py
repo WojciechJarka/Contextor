@@ -91,7 +91,7 @@ def main(argv: list[str] | None = None) -> int:
     log = None if args.quiet else (lambda message: print(f"[INFO] {message}"))
 
     try:
-        errors = ContextorFacade.analyze_project(root, log=log)
+        errors, _ = ContextorFacade.analyze_project(root, log=log)
 
         if args.layer:
             layer = Path(args.layer).expanduser().resolve()
