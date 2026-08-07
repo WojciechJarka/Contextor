@@ -4,11 +4,11 @@ Contextor MCP transforms complex Python repositories into structured architectur
 
 It builds a comprehensive representation of a project's architecture, dependencies, relationships and technical debt through static analysis — without ever executing the analyzed code.
 
-Contextor acts as an intelligence layer between software repositories and AI systems, providing the architectural awareness required to reason about large and complex codebases.
+Contextor MCP acts as an intelligence layer between software repositories and AI systems, providing the architectural awareness required to reason about large and complex Python codebases.
 
 ---
 
-## What Contextor Does
+## What Contextor MCPDoes
 
 - **Semantic & Architectural Diffing:**  
   Unlike Git, which tracks character-by-character textual changes, Contextor tracks *structural health*. It detects if a new commit accidentally introduced a circular dependency, inflated technical debt, or violated layer boundaries (e.g., Core layer calling UI).
@@ -23,18 +23,18 @@ Contextor acts as an intelligence layer between software repositories and AI sys
 
 ---
 
-## What Contextor Does NOT Do
+## What Contextor MCP Does NOT Do
 
 - **Textual Code Diffing (Like Git):**  
-  Contextor is not a version control system. It will not show you that line 42 changed `foo` to `bar` or track whitespace changes. For exact textual "search & replace" diffs, use Git. Contextor focuses exclusively on the *architectural consequences* of those changes.
+  Contextor MCP is not a version control system. It will not show you that line 42 changed `foo` to `bar` or track whitespace changes. For exact textual "search & replace" diffs, use Git. Contextor focuses exclusively on the *architectural consequences* of those changes.
 - **Dynamic Analysis:**  
-  Contextor does not execute analyzed code. All analysis is performed through rapid static repository inspection.
+  Contextor MCP does not execute analyzed code. All analysis is performed through rapid static repository inspection.
 - **Deep Runtime Type Inference & Reflection Frameworks:**  
-  Contextor relies on AST parsing and deterministic symbol analysis rather than runtime execution. Dynamic dispatch patterns (e.g., `getattr()`, `__import__`, dependency injection) and heavy reflection used by frameworks like Django or FastAPI cannot be perfectly resolved through static analysis alone. For "pure" Python code, accuracy is extremely high, but for heavily dynamic framework "magic", the structural graph may be incomplete. Contextor partially addresses this through *soft reference* detection (pattern-based textual matching).
+  Contextor MCP relies on AST parsing and deterministic symbol analysis rather than runtime execution. Dynamic dispatch patterns (e.g., `getattr()`, `__import__`, dependency injection) and heavy reflection used by frameworks like Django or FastAPI cannot be perfectly resolved through static analysis alone. For "pure" Python code, accuracy is extremely high, but for heavily dynamic framework "magic", the structural graph may be incomplete. Contextor partially addresses this through *soft reference* detection (pattern-based textual matching).
 - **Automated Code Modification:**  
-  Contextor does not rewrite code, fix bugs, or format files. It provides the map and the metrics; you (or your LLM) perform the surgery.
+  Contextor MCP does not rewrite code, fix bugs, or format files. It provides the map and the metrics; you (or your LLM) perform the surgery.
 - **Security Auditing:**  
-  Contextor identifies structural risks and technical debt, but it is not a dedicated SAST security vulnerability scanner.
+  Contextor MCP identifies structural risks and technical debt, but it is not a dedicated SAST security vulnerability scanner.
 
 ---
 
@@ -45,6 +45,7 @@ Contextor natively supports the **Model Context Protocol**, allowing Large Langu
 - **Contextor Query Layer:** Instead of serving raw, massive JSON files, the server exposes highly targeted endpoints (e.g., `get_project_architecture`, `get_module_context`, `get_artifact_blast_radius`).
 - **Automatic Path Resolution:** The LLM simply provides the repository path. The server automatically locates and parses the latest generated reports in the background without exposing raw file structures.
 - **Zero-Bloat Context:** By instantly merging data from multiple reports, the server delivers perfectly sized, synthesized insights (like exact inbound/outbound dependencies for a single module) to the LLM.
+- **Architectural Regression Analysis:** Tools like `get_report_diff` allow LLMs to dynamically compare the latest analysis with previous runs, immediately surfacing newly introduced architectural cycles, technical debt changes, and shifting dependencies.
 - **Secure Advanced Filtering:** Power-user tools (`query_json_data`) allow LLMs to extract exact JSON subsets directly on the server using a strictly sandboxed, restricted Python evaluation environment to ensure zero-risk security against unauthorized code execution.
 
 ---
@@ -95,32 +96,13 @@ The only third-party runtime dependency is `orjson`.
 
 # Installation
 
-Clone the repository:
+Unpack the ZIP of the last release.
 
-```bash
-git clone https://github.com/YOUR_USERNAME/Contextor.git
-cd Contextor
-```
+To ensure your system's Python environment remains clean and stable, Contextor relies on isolated virtual environments. 
 
-Install dependencies:
+Simply double-click **`run_contextor.bat`**. 
 
-```bash
-python -m pip install -r requirements.txt
-```
-
-Or install Contextor as a package, which also provides a `contextor`
-command usable from any directory:
-
-```bash
-python -m pip install -e .
-```
-
-To also install the test tooling — required by the **Test suite** button
-in the GUI and by `pytest` on the command line:
-
-```bash
-python -m pip install -e ".[dev]"
-```
+This script will automatically create an isolated Python virtual environment (`venv`) inside the project folder, install all required dependencies there, and launch the Contextor interface. This guarantees your global Python environment remains completely untouched and safe.
 
 ---
 

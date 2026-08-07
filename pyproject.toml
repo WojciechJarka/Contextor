@@ -1,6 +1,6 @@
 [project]
 name = "contextor"
-version = "1.0.4"
+version = "1.2.0b0"
 description = "Static architectural analysis turning Python repositories into LLM-ready context."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -8,6 +8,7 @@ license = { file = "LICENSE" }
 dependencies = [
     "orjson>=3.9",
     "mcp>=1.0.0",
+    "fastmcp>=2.12.4",
 ]
 
 [project.optional-dependencies]
