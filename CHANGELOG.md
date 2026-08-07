@@ -121,7 +121,7 @@
 epo_state module and diff_engine to automatically identify previously generated reports, compute deltas across runs (hotspots, cycles, layers, and debt score), and accurately evaluate technical regression or improvements across the repository.
 - **Granular Git Impact Reports**: Single-file reports now feature a dedicated git section containing recent commits, authors, and truncated file patches, allowing the LLM to understand immediate local file changes alongside architectural implications.
 
-- **Model Context Protocol (MCP) Server**: Introduced a native FastMCP server allowing LLMs (like Claude) to directly invoke Contextor. The server exposes tools for global analysis (nalyze_project), layered analysis (nalyze_layer), single-file insights (nalyze_single_file), artifact filtering (ilter_artifacts), and reading raw JSON reports.
+- **Model Context Protocol (MCP) Server**: Introduced a native FastMCP server allowing LLMs (like Claude) to directly invoke Contextor. The server exposes tools for global analysis (analyze_project), layered analysis (analyze_layer), single-file insights (analyze_single_file), artifact filtering (filter_artifacts), and reading raw JSON reports.
 - **MCP Environment Installer**: Added MCP_installer.bat to safely handle environment detection and installation of MCP dependencies alongside Contextor.
 
 - **Engine Refactoring**: Split the oversized `contextor.core.reporting_engine.engine` module (SRP violation) into `generators.py` (business logic) and `io_manager.py` (I/O operations). This decoupling significantly improves maintainability and testability. Updated `facade.py` imports and completely refactored the test suite to include robust integration tests. The old engine module has been safely backed up to `legacy/engine.py`.
@@ -196,3 +196,14 @@ Full end-to-end production test covering all 10 MCP tools and all three report t
 - **New MCP Tool (`get_project_index`)**: Added a new MCP tool `get_project_index(repo_path: str)` to expose the active mapping of internal registry IDs to their actual module and artifact paths, allowing external LLM agents to accurately translate compact identifiers found in reports.
 - **GUI Parser String ID Support**: Updated `gui_parser.py` (specifically `parse_and_filter_json` and `rewrite_index_to_text`) to correctly parse and process the new string-based generation/slot IDs, removing legacy integer coercion bugs.
 - **Test Suite Updates**: Removed obsolete index-saving assertions and passed the mock `PersistentIdentityRegistry` instances into unit tests for `artifact_usage_report`, `generators`, and `reporting_single_file`.
+
+## [Patch] - 2026-08-07 (Session 2)
+
+### Fixed & Improved
+
+- **Pipeline Artifact Bug Fix**: Fixed a critical bug in `pipeline.py` where a typo (`symbols` instead of `artifacts`) incorrectly marked all artifacts as orphaned, causing massive ID generation bloat (e.g., `A.../2`, `A.../3`).
+- **Layer Slicer Index Passing**: Fixed `analyze_layer` (`layer_slicer.py`) crashing with `index_dict must be provided to build_module_index` by correctly spanning the registry transaction in `facade.py` to include artifact report compaction.
+- **Flattened Local Registry**: Removed redundant `repositories/<repo_name>` subdirectories from `PersistentIdentityRegistry`. The registry now stores its files directly in the root `.contextor/` folder.
+- **Indexed Structural Reports**: Updated `generate_structure_report` and `layer_slicer.py` to correctly map all string-based `hard_edges` and `soft_edges` to their compact registry IDs, drastically reducing report size and unifying the ID schema across all reports.
+- **Test Artifact Cleanup**: Fixed `tests/test_reporting_single_file.py` to use Pytest's `tmp_path` fixture instead of a hardcoded `"dummy_path"`, and removed the leaked `dummy_path` folder from the project root.
+- **End-to-End Validation**: Performed a full E2E test via the Model Context Protocol (MCP) server on the refactored architecture. All MCP query endpoints (`analyze_project`, `analyze_layer`, `get_project_architecture`, `get_project_index`, `get_module_context`) successfully passed and correctly interface with the centralized `.contextor/` registry.

@@ -147,84 +147,63 @@ def build_graph(modules: dict[str, Module]) -> ProjectGraph:
         # Import order does not affect graph
         # --------------------------------------------------
 
-        imports = sorted(
-            module.imports,
-            key=lambda imp: (
-                imp.module or "",
-                imp.level,
-                tuple(sorted(imp.names)),
-                imp.is_from_import,
-                imp.is_local,
-            ),
-        )
-
-        for imp in imports:
-            try:
-                result = resolve_internal(
-                    imp,
-                    trie,
-                    current_module_id=module_id,
-                    package_root=package_root,
-                )
-
-            except Exception:
-                # resolver failure
-                # must not destroy repository analysis
-
-                continue
-
-            # ==================================================
-            # UNKNOWN
-            # ==================================================
-
-            if result.kind == "UNKNOWN" or not result.target_module:
-                continue
-
-            target = result.target_module
-
-            # ==================================================
-            # SELF IMPORT
-            # ==================================================
-
-            if target == module_id:
-                continue
-
-            # ==================================================
-            # TYPE ONLY
-            # ==================================================
-
-            if _is_type_only_import(imp):
-                _add_edge(
-                    soft_edges,
-                    module_id,
-                    target,
-                )
-
-                continue
-
-            # ==================================================
-            # HARD DEPENDENCY
-            # ==================================================
-
-            if result.kind == "MODULE":
-                _add_edge(
-                    hard_edges,
-                    module_id,
-                    target,
-                )
-
-            # ==================================================
-            # SOFT DEPENDENCY
-            # ==================================================
-
-            elif result.kind == "FALLBACK":
-                _add_edge(
-                    soft_edges,
-                    module_id,
-                    target,
-                )
+        hard_targets, soft_targets = resolve_module_edges(module_id, module, trie, package_root)
+        
+        for target in hard_targets:
+            _add_edge(hard_edges, module_id, target)
+        for target in soft_targets:
+            _add_edge(soft_edges, module_id, target)
 
     return ProjectGraph(
         hard_edges={key: value for key, value in sorted(hard_edges.items())},
         soft_edges={key: value for key, value in sorted(soft_edges.items())},
     )
+
+def resolve_module_edges(module_id: str, module, trie, package_root: str) -> tuple[set[str], set[str]]:
+    """
+    Resolves outgoing hard and soft dependencies for a single module.
+    Extracted as a canonical unit of graph resolution for use in both
+    full builds and incremental updates.
+    """
+    hard: dict[str, set[str]] = {module_id: set()}
+    soft: dict[str, set[str]] = {module_id: set()}
+
+    imports = sorted(
+        module.imports,
+        key=lambda imp: (
+            imp.module or "",
+            imp.level,
+            tuple(sorted(imp.names)),
+            imp.is_from_import,
+            imp.is_local,
+        ),
+    )
+
+    for imp in imports:
+        try:
+            result = resolve_internal(
+                imp,
+                trie,
+                current_module_id=module_id,
+                package_root=package_root,
+            )
+        except Exception:
+            continue
+
+        if result.kind == "UNKNOWN" or not result.target_module:
+            continue
+
+        target = result.target_module
+        if target == module_id:
+            continue
+
+        if _is_type_only_import(imp):
+            _add_edge(soft, module_id, target)
+            continue
+
+        if result.kind == "MODULE":
+            _add_edge(hard, module_id, target)
+        elif result.kind == "FALLBACK":
+            _add_edge(soft, module_id, target)
+
+    return hard[module_id], soft[module_id]

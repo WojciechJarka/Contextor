@@ -99,6 +99,8 @@ def execute_global_pipeline(
         "root_path": root_path,
         "timestamp": datetime.now().isoformat(),
     }
+    
+    
     artifact_data["report_header"] = {**report_header, "data_source": "artifacts"}
 
     usage_sidecar = artifact_data.pop("_usage_sidecar", {})
@@ -234,6 +236,16 @@ def execute_global_pipeline(
     
     if log:
         log("All reports have been successfully generated and saved.")
+        
+    if log:
+        log("Initializing incremental cache...")
+    from contextor.core.analysis.state_manager import FileStateManager
+    from contextor.core.paths import repo_cache_dir
+    state_mgr = FileStateManager(str(repo_cache_dir(root_path)))
+    for module_id, mod in modules.items():
+        if mod.absolute_path:
+            state_mgr.update_state(mod.absolute_path)
+    state_mgr.save()
 
     high_risk_layers = [layer["layer"] for layer in layer_index_data if layer.get("computation_mode") == "full"] if not layer_index else []
 
