@@ -7,6 +7,7 @@ from contextor.core.graph.metrics import compute_graph_metrics
 from contextor.core.hotspots import detect_hotspots
 from contextor.core.reporting_engine.debt import compute_debt
 from contextor.core.reporting_engine.dictionary import IndexDictionary
+from contextor.core.reporting_engine.structure_generator import compact_structure_report
 from contextor.core.reporting_layer.artifact_usage_report_compact import compact_artifact_report
 
 from .formatting import _compute_status
@@ -337,9 +338,12 @@ def slice_report_for_layer(
         raise ValueError("index_dict must be provided to slice_report_for_layer")
     layer_compact_artifacts_report = compact_artifact_report(layer_artifacts_report, index_dict)
 
+    layer_structure_report = {"hard_edges": internal_hard, "soft_edges": internal_soft}
+    layer_compact_structure_report = compact_structure_report(layer_structure_report, index_dict)
+
     return {
         "summary": layer_summary_report,
-        "structure": layer_structure_report,
+        "structure": layer_compact_structure_report,
         "metrics": layer_metrics_report,
         "artifacts": layer_artifacts_report,
         "artifacts_compact": layer_compact_artifacts_report,

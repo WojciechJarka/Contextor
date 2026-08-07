@@ -118,6 +118,8 @@ def execute_global_pipeline(
         
         index_dict = IndexDictionary(registry)
         compact_artifact_data = compact_artifact_report(artifact_data, index_dict)
+        from .structure_generator import compact_structure_report
+        compact_structure_data = compact_structure_report(structure_data, index_dict)
 
     if log:
         log("Generating graph analytics report...")
@@ -219,7 +221,7 @@ def execute_global_pipeline(
             
     reports_data = {
         "summary": summary_data,
-        "structure": structure_data,
+        "structure": compact_structure_data,
         "collisions": collisions_data,
         "artifacts": artifact_data,
         "artifacts_compact": compact_artifact_data,
