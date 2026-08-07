@@ -28,10 +28,40 @@ goto check_deps
 :create_venv
 echo [INFO] Creating virtual environment ^(.venv^)...
 
-python --version >nul 2>&1
-if errorlevel 1 goto no_python
+set "PYTHON_EXE="
 
-python -m venv "%VENV_DIR%"
+:: 1. Check embedded WinPython / SpiralProphet path
+if exist "C:\SpiralProphet\python\WPy64-31090\python-3.10.9.amd64\python.exe" (
+    set "PYTHON_EXE=C:\SpiralProphet\python\WPy64-31090\python-3.10.9.amd64\python.exe"
+    goto :PYTHON_FOUND
+)
+
+:: 2. Check system PATH
+python --version >nul 2>&1
+if not errorlevel 1 (
+    set "PYTHON_EXE=python"
+    goto :PYTHON_FOUND
+)
+
+:: 3. Scan local directories (venv, .venv, WinPython)
+for /d %%d in (venv .venv Python python WPy64*) do (
+    if exist "%%d\Scripts\python.exe" (
+        set "PYTHON_EXE=%%d\Scripts\python.exe"
+        goto :PYTHON_FOUND
+    )
+    if exist "%%d\python.exe" (
+        set "PYTHON_EXE=%%d\python.exe"
+        goto :PYTHON_FOUND
+    )
+)
+
+:PYTHON_FOUND
+if "%PYTHON_EXE%"=="" (
+    goto no_python
+)
+
+echo [INFO] Using python: "%PYTHON_EXE%"
+"%PYTHON_EXE%" -m venv "%VENV_DIR%"
 if errorlevel 1 goto venv_failed
 
 if not exist "%VENV_PY%" goto venv_failed
