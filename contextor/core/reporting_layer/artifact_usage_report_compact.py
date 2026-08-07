@@ -104,7 +104,7 @@ def build_module_index(report: dict, index_dict: IndexDictionary = None) -> Inde
     Builds or updates the IndexDictionary using the provided report.
     """
     if index_dict is None:
-        index_dict = IndexDictionary()
+        raise ValueError("index_dict must be provided to build_module_index")
         
     module_ids = sorted(_collect_module_ids(report))
     for module_id in module_ids:

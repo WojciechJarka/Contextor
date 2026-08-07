@@ -1,10 +1,14 @@
 # Contextor
 
-Contextor MCP transforms complex Python repositories into structured architectural context for Large Language Models (LLMs). Through its native Model Context Protocol (MCP) integration, LLMs can autonomously query the exact architectural context they need on demand. This allows the AI to retrieve surgically precise, context-sized reports, saving both time and thousands of tokens that would otherwise be wasted scanning the entire codebase.
+Contextor
 
-It builds a comprehensive representation of a project's architecture, dependencies, relationships and technical debt through static analysis — without ever executing the analyzed code.
+Contextor MCP is an architectural intelligence layer that allows Large Language Models (LLMs) to autonomously explore, understand, and reason about complex Python repositories through the Model Context Protocol (MCP).
 
-Contextor MCP acts as an intelligence layer between software repositories and AI systems, providing the architectural awareness required to reason about large and complex Python codebases.
+Instead of sending entire codebases into an AI context window, Contextor automatically builds a persistent architectural map of the repository and provides the LLM with only the precise context required for the current task — dramatically reducing token usage, inference cost, and unnecessary code scanning.
+
+Through static analysis, Contextor discovers project structure, dependencies, symbol ownership, artifact relationships, architectural risks, and technical debt without ever executing the analyzed code.
+
+Contextor acts as a bridge between software repositories and AI agents, giving LLMs architectural awareness similar to having an always-updated technical map of the entire codebase.
 
 ---
 
@@ -76,7 +80,7 @@ Contextor natively supports the **Model Context Protocol**, allowing Large Langu
 - Detailed single-file Git patches bridging the gap between local changes and architectural impact
 - **Model Context Protocol (MCP) Server** enabling direct, autonomous integration with LLMs (e.g. Claude Desktop, Antigravity)
 - **Graph Analytics Report** — per-module `fan_in`, `fan_out`, `export_degree`, `visibility`, architectural `layer`, graph-centrality scores (`betweenness`, `pagerank`, `hub_score`, `bridge_score`), Jaccard-similarity clusters, and a weighted Module Dependency Matrix; generated for all three report levels (full repo, layer, single file)
-- **Index Dictionary Deduplication** — when a new index dictionary is identical to the previous one it silently replaces it; when it differs the old file is preserved with an `_outdated` suffix so downstream consumers always point to the correct dictionary
+- **Persistent Identity Registry** — a transactional, atomic indexing layer that maintains globally stable, generation-based string identifiers (e.g. 17/4, A5/2) for modules and artifacts across runs. It isolates repository identity state inside .contextor/ (automatically gitignored), providing consistent identity resolution, recovery of removed objects, and collision-free identifier reuse without polluting generated reports or repository history.
 
 ---
 
@@ -201,11 +205,12 @@ environment variable.
 
 # Files Contextor Writes
 
-Contextor never writes into the repository it analyzes. It writes only to:
+Contextor writes reports externally, but maintains a lightweight, git-ignored registry inside the analyzed repository for stable ID management:
 
 | Location | Contents | Override |
 |---|---|---|
 | `output/` next to the installation | Generated reports | `CONTEXTOR_OUTPUT_DIR` |
+| `.contextor/` inside the analyzed repository | Persistent Identity Registry (automatically added to `.gitignore`) | N/A |
 | User cache directory | Parse and graph caches, keyed per repository | `CONTEXTOR_CACHE_DIR` |
 | User config directory | GUI state, exclude configuration | `CONTEXTOR_STATE_DIR` |
 

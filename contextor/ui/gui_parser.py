@@ -180,7 +180,7 @@ def parse_and_filter_json(json_path, search_term, dict_path, output_dir="output"
     if is_py_query:
         for str_idx, mod in modules_dict.items():
             if mod == term or mod.endswith(f".{term}") or f".{term}." in mod or mod.startswith(f"{term}."):
-                matching_module_indices.add(int(str_idx))
+                matching_module_indices.add(str_idx)
     else:
         for a_id, art_full_name in artifacts_dict.items():
             # art_full_name looks like "contextor.core.main::my_func" or "contextor.core.main::my_func(arg)"
@@ -201,8 +201,8 @@ def parse_and_filter_json(json_path, search_term, dict_path, output_dir="output"
         match = False
 
         if is_py_query:
-            definer_idx = value.get("definer_module")
-            consumers_idx = value.get("consumer_module_indices", [])
+            definer_idx = str(value.get("definer_module"))
+            consumers_idx = [str(c) for c in value.get("consumer_module_indices", [])]
             
             if definer_idx in matching_module_indices:
                 match = True

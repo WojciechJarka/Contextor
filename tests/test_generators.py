@@ -94,25 +94,31 @@ def test_slice_report_for_layer(sample_repo, isolated_dirs):
     structure = generate_structure_report(graph.hard_edges, graph.soft_edges)
     artifacts = generate_artifact_usage_report(modules, root, {"cache_hit": False})
     artifacts.pop("_usage_sidecar", None)
-    compact = compact_artifact_report(artifacts)
-    summary = generate_summary_report(metrics, [], {"score": 0}, [], [], [])
-    
-    layer_path = str(sample_repo / "core")
-    
-    sliced = slice_report_for_layer(
-        layer_path=layer_path,
-        root_path=root,
-        global_metrics=metrics,
-        global_structure=structure,
-        global_summary=summary,
-        global_artifacts=artifacts,
-        global_compact_artifacts=compact,
-        global_hotspots=[],
-        global_cycles=[],
-        global_collisions=[],
-        global_skipped_files=[],
-        report_header={"schema_version": "1.0", "data_source": "global"},
-    )
+    from contextor.core.reporting_engine.dictionary import IndexDictionary
+    from contextor.core.reporting_engine.persistent_registry import PersistentIdentityRegistry
+    registry = PersistentIdentityRegistry(root)
+    with registry.transaction():
+        index_dict = IndexDictionary(registry)
+        compact = compact_artifact_report(artifacts, index_dict)
+        summary = generate_summary_report(metrics, [], {"score": 0}, [], [], [])
+        
+        layer_path = str(sample_repo / "core")
+        
+        sliced = slice_report_for_layer(
+            layer_path=layer_path,
+            root_path=root,
+            global_metrics=metrics,
+            global_structure=structure,
+            global_summary=summary,
+            global_artifacts=artifacts,
+            global_compact_artifacts=compact,
+            index_dict=index_dict,
+            global_hotspots=[],
+            global_cycles=[],
+            global_collisions=[],
+            global_skipped_files=[],
+            report_header={"schema_version": "1.0", "data_source": "global"},
+        )
     
     assert "summary" in sliced
     assert "metrics" in sliced

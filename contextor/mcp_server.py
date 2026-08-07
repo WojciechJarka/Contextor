@@ -227,6 +227,29 @@ def get_project_architecture(repo_path: str) -> str:
 
 
 @mcp.tool()
+def get_project_index(repo_path: str) -> str:
+    """
+    [OPTIMIZED] Returns the mapping of internal repository IDs to their actual paths.
+    Use this to translate IDs (e.g., '17/4') found in reports back to file paths or artifact names.
+    """
+    root = Path(repo_path).expanduser().resolve()
+    try:
+        from contextor.core.reporting_engine.persistent_registry import PersistentIdentityRegistry
+        registry = PersistentIdentityRegistry(str(root))
+        with registry.transaction():
+            modules = registry._state.get("module_registry", {}).get("id_to_path", {})
+            artifacts = registry._state.get("artifact_registry", {}).get("id_to_path", {})
+            
+        result = {
+            "modules": modules,
+            "artifacts": artifacts
+        }
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        return f"Error reading project index: {e}"
+
+
+@mcp.tool()
 def get_module_context(repo_path: str, module_name: str) -> str:
     """
     [OPTIMIZED] Retrieves a compressed context pill for a single module.
@@ -255,30 +278,20 @@ def get_module_context(repo_path: str, module_name: str) -> str:
         inbound = {}
         outbound = {}
         
-        # Note: In global scope, matrix keys are index IDs. We need the index dictionary.
-        idx_path = _find_latest_report(root, f"{repo_name}_index_dictionary_*.json")
-        if idx_path:
-            idx = json.loads(idx_path.read_text(encoding="utf-8"))
-            modules_rev = {str(v): str(k) for k, v in idx.get("modules", {}).items()}
-            # Find the ID for our module
-            mod_id = modules_rev.get(module_name)
+        from contextor.core.reporting_engine.persistent_registry import PersistentIdentityRegistry
+        registry = PersistentIdentityRegistry(str(root))
+        with registry.transaction():
+            mod_id = registry.get_module_id(module_name)
             
-            if mod_id and mod_id in matrix:
-                for target_id, dep_data in matrix[mod_id].items():
-                    target_name = idx.get("modules", {}).get(target_id, target_id)
+            if mod_id and str(mod_id) in matrix:
+                for target_id, dep_data in matrix[str(mod_id)].items():
+                    target_name = registry.get_module_path(target_id) or target_id
                     outbound[target_name] = dep_data
                     
             for src_id, targets in matrix.items():
-                if mod_id in targets:
-                    src_name = idx.get("modules", {}).get(src_id, src_id)
-                    inbound[src_name] = targets[mod_id]
-        else:
-            # Fallback if no index dictionary (e.g., matrix uses raw names)
-            if module_name in matrix:
-                outbound = matrix[module_name]
-            for src_name, targets in matrix.items():
-                if module_name in targets:
-                    inbound[src_name] = targets[module_name]
+                if str(mod_id) in targets:
+                    src_name = registry.get_module_path(src_id) or src_id
+                    inbound[src_name] = targets[str(mod_id)]
         
         result = {
             "module": module_name,
@@ -301,37 +314,34 @@ def get_artifact_blast_radius(repo_path: str, artifact_name: str) -> str:
     root = Path(repo_path).expanduser().resolve()
     repo_name = root.name
     
-    idx_path = _find_latest_report(root, f"{repo_name}_index_dictionary_*.json")
     art_path = _find_latest_report(root, f"{repo_name}_artifacts_compact_*.json")
     
-    if not idx_path or not art_path:
-        return "Error: Missing index dictionary or artifacts_compact report. Run analyze_project."
+    if not art_path:
+        return "Error: Missing artifacts_compact report. Run analyze_project."
         
     try:
-        idx = json.loads(idx_path.read_text(encoding="utf-8"))
+        from contextor.core.reporting_engine.persistent_registry import PersistentIdentityRegistry
+        registry = PersistentIdentityRegistry(str(root))
         art_comp = json.loads(art_path.read_text(encoding="utf-8"))
         
-        # Find the artifact ID
-        art_id = None
-        full_name = None
-        for key, val in idx.get("artifacts", {}).items():
-            # If the user passed just the name (e.g. 'IndexDictionary') or the full FQN (e.g. 'module::IndexDictionary')
-            if val == artifact_name or val.endswith("::" + artifact_name) or val.endswith("." + artifact_name):
-                art_id = key
-                full_name = val
-                break
+        with registry.transaction():
+            art_id = None
+            full_name = None
+            for key, val in registry._state.get("artifact_registry", {}).get("id_to_path", {}).items():
+                if val == artifact_name or val.endswith("::" + artifact_name) or val.endswith("." + artifact_name):
+                    art_id = key
+                    full_name = val
+                    break
+                    
+            if not art_id:
+                return f"Artifact '{artifact_name}' not found in the registry."
                 
-        if not art_id:
-            return f"Artifact '{artifact_name}' not found in the index dictionary."
-            
-        artifact_data = art_comp.get("artifacts", {}).get(art_id)
-        if not artifact_data:
-            return f"Artifact '{full_name}' found in index, but has no usage data (never consumed)."
-            
-        # Resolve module names
-        id_to_name = idx.get("modules", {})
-        definer = id_to_name.get(str(artifact_data.get("definer_module")), "Unknown")
-        consumers = [id_to_name.get(str(c), str(c)) for c in artifact_data.get("consumer_module_indices", [])]
+            artifact_data = art_comp.get("artifacts", {}).get(art_id)
+            if not artifact_data:
+                return f"Artifact '{full_name}' found in registry, but has no usage data (never consumed)."
+                
+            definer = registry.get_module_path(str(artifact_data.get("definer_module"))) or "Unknown"
+            consumers = [registry.get_module_path(str(c)) or str(c) for c in artifact_data.get("consumer_module_indices", [])]
         
         result = {
             "artifact": full_name,
@@ -373,15 +383,16 @@ def get_file_edit_context(repo_path: str, file_path: str) -> str:
     module_name = ".".join(parts)
     
     ga_path = _find_latest_report(root, f"{repo_name}_graph_analytics_*.json")
-    idx_path = _find_latest_report(root, f"{repo_name}_index_dictionary_*.json")
     art_path = _find_latest_report(root, f"{repo_name}_artifacts_compact_*.json")
     
-    if not (ga_path and idx_path and art_path):
+    if not (ga_path and art_path):
         return "Error: Missing required reports. Run analyze_project first."
         
     try:
+        from contextor.core.reporting_engine.persistent_registry import PersistentIdentityRegistry
+        registry = PersistentIdentityRegistry(str(root))
+        
         ga = json.loads(ga_path.read_text(encoding="utf-8"))
-        idx = json.loads(idx_path.read_text(encoding="utf-8"))
         art_comp = json.loads(art_path.read_text(encoding="utf-8"))
         
         mod_info = ga.get("modules", {}).get(module_name, {})
@@ -403,39 +414,29 @@ def get_file_edit_context(repo_path: str, file_path: str) -> str:
                 (mod_info.get("betweenness", 0) + mod_info.get("hub_score", 0)) / 2, 4
             )
         
-        modules_rev = {str(v): str(k) for k, v in idx.get("modules", {}).items()}
-        mod_id = modules_rev.get(module_name)
-        
-        imports = []
-        consumers = []
-        
-        matrix = ga.get("module_dependency_matrix", {})
-        if mod_id:
+        with registry.transaction():
+            mod_id = str(registry.get_module_id(module_name))
+            
+            imports = []
+            consumers = []
+            
+            matrix = ga.get("module_dependency_matrix", {})
             if mod_id in matrix:
                 for target_id in matrix[mod_id].keys():
-                    target_name = idx.get("modules", {}).get(target_id, target_id)
+                    target_name = registry.get_module_path(target_id) or target_id
                     imports.append(target_name)
             for src_id, targets in matrix.items():
                 if mod_id in targets:
-                    src_name = idx.get("modules", {}).get(src_id, src_id)
+                    src_name = registry.get_module_path(src_id) or src_id
                     consumers.append(src_name)
-        else:
-            if module_name in matrix:
-                imports = list(matrix[module_name].keys())
-            for src_name, targets in matrix.items():
-                if module_name in targets:
-                    consumers.append(src_name)
-                    
-        public_api = []
-        if mod_id:
-            # O(1) lookup if index is present in artifacts_compact
-            if "module_artifacts" in art_comp and str(mod_id) in art_comp["module_artifacts"]:
-                public_api = art_comp["module_artifacts"][str(mod_id)]
+                        
+            public_api = []
+            if "module_artifacts" in art_comp and mod_id in art_comp["module_artifacts"]:
+                public_api = art_comp["module_artifacts"][mod_id]
             else:
-                # O(n) fallback
                 for art_id, art_data in art_comp.get("artifacts", {}).items():
                     if str(art_data.get("definer_module")) == mod_id:
-                        art_name = idx.get("artifacts", {}).get(art_id, str(art_id))
+                        art_name = registry.get_artifact_path(art_id) or str(art_id)
                         if not art_name.split("::")[-1].startswith("_"):
                             public_api.append(art_name)
         
@@ -496,11 +497,10 @@ def get_layer_isolation(repo_path: str, layer_name: str) -> str:
         ga = json.loads(ga_path.read_text(encoding="utf-8"))
         
         # Build id->name map for resolving matrix indices
-        idx_path = _find_latest_report(root, f"{repo_name}_index_dictionary_*.json")
-        id_to_name: dict[str, str] = {}
-        if idx_path:
-            idx = json.loads(idx_path.read_text(encoding="utf-8"))
-            id_to_name = idx.get("modules", {})
+        from contextor.core.reporting_engine.persistent_registry import PersistentIdentityRegistry
+        registry = PersistentIdentityRegistry(str(root))
+        with registry.transaction():
+            id_to_name = registry._state.get("module_registry", {}).get("id_to_path", {})
         
         modules = ga.get("modules", {})
         matrix = ga.get("module_dependency_matrix", {})

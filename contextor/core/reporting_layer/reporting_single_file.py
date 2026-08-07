@@ -144,7 +144,7 @@ def generate_single_file_report(ctx: dict, module_count: int, report_header: dic
     module_semantics = ctx["semantic_context"].get("semantic_analysis", {})
 
     if index_dict is None:
-        index_dict = IndexDictionary()
+        raise ValueError("index_dict must be provided to generate_single_file_report")
         
     my_mod_idx = index_dict.get_module_id(ctx["module_id"])
     

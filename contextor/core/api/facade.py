@@ -27,7 +27,7 @@ from contextor.core.reporting_engine.generators import (
 )
 from contextor.core.reporting_engine.header import build_report_header
 from contextor.core.reporting_engine.pipeline import execute_global_pipeline
-from contextor.core.reporting_engine.io_manager import _save_index_dictionary_with_dedup
+
 from contextor.core.reporting_layer.artifact_usage_report import generate_artifact_usage_report
 from contextor.core.reporting_layer.artifact_usage_report_compact import compact_artifact_report
 from contextor.core.reporting_layer.reporting_llm import generate_llm_markdown
@@ -263,15 +263,22 @@ class ContextorFacade:
         global_artifacts = generate_artifact_usage_report(
             modules, str(root_resolved), runtime, progress_callback=progress_callback
         )
-        global_compact_artifacts = compact_artifact_report(global_artifacts)
+        
+        from contextor.core.reporting_engine.persistent_registry import PersistentIdentityRegistry
+        from contextor.core.reporting_engine.dictionary import IndexDictionary
+        registry = PersistentIdentityRegistry(str(root_resolved))
+        
+        with registry.transaction():
+            index_dict = IndexDictionary(registry)
+            global_compact_artifacts = compact_artifact_report(global_artifacts, index_dict)
 
-        if log:
-            log(f"Slicing reports for layer: {layer_name}...")
+            if log:
+                log(f"Slicing reports for layer: {layer_name}...")
 
-        # Build report_header once — same header for global summary and layer reports.
-        report_header = build_report_header(str(root_resolved), "global")
-
-        layer_sliced_reports = slice_report_for_layer(
+            # Build report_header once — same header for global summary and layer reports.
+            report_header = build_report_header(str(root_resolved), "global")
+            
+            layer_sliced_reports = slice_report_for_layer(
             layer_path=str(layer_resolved),
             root_path=str(root_resolved),
             global_metrics=metrics,
@@ -284,6 +291,7 @@ class ContextorFacade:
             global_collisions=all_collisions,
             global_skipped_files=getattr(index, "skipped", []),
             report_header=report_header,
+            index_dict=index_dict,
         )
 
         if log:
@@ -346,8 +354,12 @@ class ContextorFacade:
         datestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
         from contextor.core.reporting_engine.dictionary import IndexDictionary
-        index_dict = IndexDictionary()
-        report = generate_single_file_report(ctx, len(modules), index_dict=index_dict)
+        from contextor.core.reporting_engine.persistent_registry import PersistentIdentityRegistry
+        
+        registry = PersistentIdentityRegistry(repo_root)
+        with registry.transaction():
+            index_dict = IndexDictionary(registry)
+            report = generate_single_file_report(ctx, len(modules), index_dict=index_dict)
 
         # Named after the module path, not the bare stem: two files called
         # 'engine.py' in different packages used to overwrite each other.
@@ -362,13 +374,7 @@ class ContextorFacade:
         compact_report = compact_recursively(report, index_dict, set(modules.keys()))
         save_single_file_report(compact_report, output)
 
-        index_output = str(output_dir() / f"single_{slug}_index_dictionary_{datestamp}.json")
-        _save_index_dictionary_with_dedup(
-            index_dict.to_json_dict(),
-            index_output,
-            log=log,
-            label="single-file index dictionary",
-        )
+
 
         # Graph analytics for the single analyzed module
         from contextor.core.reporting_engine.graph_analytics import generate_graph_analytics_report

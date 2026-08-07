@@ -186,7 +186,7 @@ def slice_report_for_layer(
     for targets in structure_map.values():
         all_known_modules.update(targets)
     if index_dict:
-        all_known_modules.update(index_dict.module_to_id.keys())
+        all_known_modules.update(index_dict.registry.list_modules())
 
     layer_modules = sorted(m for m in all_known_modules if is_in_layer(m))
     layer_set = set(layer_modules)
@@ -334,7 +334,7 @@ def slice_report_for_layer(
     }
 
     if index_dict is None:
-        index_dict = IndexDictionary()
+        raise ValueError("index_dict must be provided to slice_report_for_layer")
     layer_compact_artifacts_report = compact_artifact_report(layer_artifacts_report, index_dict)
 
     return {

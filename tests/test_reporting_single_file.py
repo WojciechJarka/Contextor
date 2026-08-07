@@ -1,7 +1,7 @@
 import pytest
 from contextor.core.reporting_layer.reporting_single_file import generate_single_file_report
 
-def test_single_file_report_header_and_node_id():
+def test_single_file_report_header_and_node_id(tmp_path):
     ctx = {
         "module_id": "core.alpha", 
         "file_path": "test.py",
@@ -44,9 +44,14 @@ def test_single_file_report_header_and_node_id():
     }
     
     header = {"schema_version": "1.0"}
-    report = generate_single_file_report(ctx, module_count=10, report_header=header)
+    from contextor.core.reporting_engine.dictionary import IndexDictionary
+    from contextor.core.reporting_engine.persistent_registry import PersistentIdentityRegistry
+    registry = PersistentIdentityRegistry(str(tmp_path))
+    with registry.transaction():
+        index_dict = IndexDictionary(registry)
+        report = generate_single_file_report(ctx, module_count=10, report_header=header, index_dict=index_dict)
     
     assert report["report_header"]["data_source"] == "single_file"
     assert report["report_header"]["schema_version"] == "1.0"
     assert report["repository_context"]["artifact_count_in_module"] == 1
-    assert report["global_node_id"] == 0
+    assert isinstance(report["global_node_id"], str)

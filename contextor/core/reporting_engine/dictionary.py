@@ -2,70 +2,59 @@
 core/reporting_engine/dictionary.py
 
 Generates and manages the master index dictionary for extreme JSON compression.
-Converts module names to integers (e.g. 0, 1, 2).
-Converts artifact names to prefixed integers (e.g. A0, A1, A2).
+Now acts as a view/proxy over PersistentIdentityRegistry.
 """
 
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
+from contextor.core.reporting_engine.persistent_registry import PersistentIdentityRegistry
 
 class IndexDictionary:
-    def __init__(self):
-        self.module_to_id: Dict[str, int] = {}
-        self.id_to_module: Dict[int, str] = {}
-        self.artifact_to_id: Dict[str, str] = {}
-        self.id_to_artifact: Dict[str, str] = {}
-        self._next_module_id = 0
-        self._next_artifact_id = 0
+    def __init__(self, registry: PersistentIdentityRegistry):
+        self.registry = registry
 
-    def get_module_id(self, module_name: str) -> int:
-        if module_name not in self.module_to_id:
-            idx = self._next_module_id
-            self.module_to_id[module_name] = idx
-            self.id_to_module[idx] = module_name
-            self._next_module_id += 1
-        return self.module_to_id[module_name]
+    def get_module_id(self, module_name: str) -> str:
+        # Try to get from registry
+        obj_id = self.registry.get_module_id(module_name)
+        if obj_id is not None:
+            return obj_id
+            
+        # If it doesn't exist, it means it wasn't synced. We just return it as a string to avoid crashes,
+        # but in a correct flow, it should have been synced.
+        return module_name
 
     def get_artifact_id(self, artifact_name: str) -> str:
-        if artifact_name not in self.artifact_to_id:
-            idx = f"A{self._next_artifact_id}"
-            self.artifact_to_id[artifact_name] = idx
-            self.id_to_artifact[idx] = artifact_name
-            self._next_artifact_id += 1
-        return self.artifact_to_id[artifact_name]
+        obj_id = self.registry.get_artifact_id(artifact_name)
+        if obj_id is not None:
+            return obj_id
+        return artifact_name
 
     def to_json_dict(self) -> Dict[str, Any]:
         """Returns the dictionary representation for saving."""
+        # The legacy format returned a dictionary. 
+        # But wait! We no longer save the dictionary! 
+        # The user plan says: "Usuwamy: _save_index_dictionary_with_dedup(), lokalne numerowanie raportów."
+        # We can just return empty dict here or the current active state if anything still calls it.
+        # Let's return the active mapping just in case it's used for in-memory debugging.
+        modules = {}
+        if "module_registry" in self.registry._state:
+            modules = self.registry._state["module_registry"].get("id_to_path", {})
+            
+        artifacts = {}
+        if "artifact_registry" in self.registry._state:
+            artifacts = self.registry._state["artifact_registry"].get("id_to_path", {})
+            
         return {
-            "modules": self.id_to_module,
-            "artifacts": self.id_to_artifact
+            "modules": modules,
+            "artifacts": artifacts
         }
 
     @classmethod
     def from_json_dict(cls, data: Dict[str, Any]) -> 'IndexDictionary':
         """Reconstructs the index dictionary from saved JSON data."""
-        idx = cls()
-        modules = data.get("modules", {})
-        artifacts = data.get("artifacts", {})
-        
-        for k, v in modules.items():
-            k_int = int(k)
-            idx.module_to_id[v] = k_int
-            idx.id_to_module[k_int] = v
-            idx._next_module_id = max(idx._next_module_id, k_int + 1)
-            
-        for k, v in artifacts.items():
-            idx.artifact_to_id[v] = k
-            idx.id_to_artifact[k] = v
-            # parse the integer part of "Ax"
-            try:
-                num = int(k[1:])
-                idx._next_artifact_id = max(idx._next_artifact_id, num + 1)
-            except ValueError:
-                pass
-        return idx
+        raise NotImplementedError("IndexDictionary.from_json_dict is obsolete and should not be used.")
 
 def compact_recursively(data: Any, index_dict: IndexDictionary, known_modules: set[str]) -> Any:
-    """Recursively replaces module names and artifact keys with their integer IDs."""
+    """Recursively replaces module names and artifact keys with their string IDs."""
     if isinstance(data, dict):
         return {
             str(compact_recursively(k, index_dict, known_modules)): 

@@ -9,56 +9,7 @@ from .formatting import save_json
 def _save_usage_sidecar(usage_sidecar: dict, path: str, log=None) -> None:
     save_json(usage_sidecar, path, log=log, label="artifacts usage sidecar")
 
-def _save_index_dictionary_with_dedup(
-    new_dict: dict,
-    path: str,
-    log=None,
-    label: str = "index dictionary",
-) -> None:
-    target = Path(path)
-    parent = target.parent
-    stem_base = target.stem
-    parts = stem_base.rsplit("_", 2)
-    if len(parts) >= 3:
-        base_prefix = "_".join(parts[:-2])
-    else:
-        base_prefix = stem_base
 
-    pattern = str(parent / f"{base_prefix}_*_*.json")
-    existing = sorted(
-        [f for f in glob.glob(pattern) if "_outdated" not in f and len(Path(f).stem.split("_")) == len(parts) + 2],
-        reverse=True,
-    )
-
-    new_content = json.dumps(new_dict, sort_keys=True)
-
-    if existing:
-        latest = existing[0]
-        try:
-            old_content = json.dumps(
-                json.loads(Path(latest).read_text(encoding="utf-8")),
-                sort_keys=True,
-            )
-        except Exception:
-            old_content = None
-
-        if old_content is not None and old_content == new_content:
-            try:
-                os.remove(latest)
-                if log:
-                    log(f"[DICT] Identical dictionary found — replaced: {Path(latest).name}")
-            except OSError:
-                pass
-        else:
-            outdated_path = Path(latest).with_stem(Path(latest).stem + "_outdated")
-            try:
-                os.rename(latest, outdated_path)
-                if log:
-                    log(f"[DICT] Dictionary changed — old marked as outdated: {outdated_path.name}")
-            except OSError:
-                pass
-
-    save_json(new_dict, path, log=log, label=label)
 
 def write_layer_reports(
     repo_name: str, layer_name: str, layer_reports: dict[str, Any], log=None, datestamp: str | None = None, layer_output_dir: str | None = None
@@ -79,15 +30,7 @@ def write_layer_reports(
     if "graph_analytics" in layer_reports:
         save_json(layer_reports["graph_analytics"], f"{prefix}_graph_analytics{suffix}.json", log=log, label=f"layer report [{layer_name}] - graph analytics")
     
-    if "_index_dict" in layer_reports:
-        index_dict = layer_reports["_index_dict"]
-        index_dict_path = f"{prefix}_index_dictionary{suffix}.json"
-        _save_index_dictionary_with_dedup(
-            index_dict.to_json_dict(), 
-            index_dict_path, 
-            log=log, 
-            label=f"layer report [{layer_name}] - index dictionary"
-        )
+
 
 def write_global_reports(
     reports_data: dict[str, Any], repo_name: str, datestamp: str | None = None, log=None
@@ -104,8 +47,7 @@ def write_global_reports(
         from contextor.core.reporting_layer.artifact_usage_report_compact import save_compact_artifact_report
         save_compact_artifact_report(reports_data["artifacts_compact"], f"output/{repo_name}_artifacts_compact{suffix}.json")
         
-    if "index_dict" in reports_data:
-        _save_index_dictionary_with_dedup(reports_data["index_dict"], f"output/{repo_name}_index_dictionary{suffix}.json", log=log)
+
         
     if "graph_analytics" in reports_data:
         save_json(reports_data["graph_analytics"], f"output/{repo_name}_graph_analytics{suffix}.json", log=log, label="graph analytics report")

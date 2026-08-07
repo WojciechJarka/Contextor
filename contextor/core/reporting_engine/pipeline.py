@@ -106,8 +106,18 @@ def execute_global_pipeline(
     if log:
         log("Generating compact version of artifacts report...")
     
-    index_dict = IndexDictionary()
-    compact_artifact_data = compact_artifact_report(artifact_data, index_dict)
+    from contextor.core.reporting_engine.persistent_registry import PersistentIdentityRegistry
+    registry = PersistentIdentityRegistry(root_path)
+    
+    with registry.transaction():
+        # Sync with workspace to handle deletions/orphans
+        current_modules = set(modules.keys())
+        current_artifacts = set(artifact_data.get("artifacts", {}).keys())
+        registry.sync_with_workspace(current_modules, current_artifacts)
+        registry.run_garbage_collector()
+        
+        index_dict = IndexDictionary(registry)
+        compact_artifact_data = compact_artifact_report(artifact_data, index_dict)
 
     if log:
         log("Generating graph analytics report...")
@@ -214,7 +224,6 @@ def execute_global_pipeline(
         "artifacts": artifact_data,
         "artifacts_compact": compact_artifact_data,
         "usage_sidecar": usage_sidecar,
-        "index_dict": index_dict.to_json_dict(),
         "graph_analytics": graph_analytics_data,
         "diff_report": diff_report
     }

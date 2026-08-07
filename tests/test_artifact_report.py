@@ -72,9 +72,12 @@ def test_usage_sidecar_and_filtering(sample_repo, isolated_dirs):
     assert "core.alpha::MAX_ITEMS" not in report["artifacts"]
     
     from contextor.core.reporting_engine.dictionary import IndexDictionary
-    index_dict = IndexDictionary()
-    # 3. compact report formatting
-    compact = compact_artifact_report(report, index_dict)
+    from contextor.core.reporting_engine.persistent_registry import PersistentIdentityRegistry
+    registry = PersistentIdentityRegistry(str(sample_repo))
+    with registry.transaction():
+        index_dict = IndexDictionary(registry)
+        # 3. compact report formatting
+        compact = compact_artifact_report(report, index_dict)
     assert compact["_format_version"] == "3"
     assert "shared_artifact_keys" in compact
     assert "shared_artifacts" not in compact
