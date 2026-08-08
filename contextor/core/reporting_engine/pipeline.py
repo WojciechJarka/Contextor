@@ -51,6 +51,8 @@ def execute_global_pipeline(
     skipped_files: list | None = None,
     layer_index: list[dict] | None = None,
     datestamp: str | None = None,
+    trie: dict | None = None,
+    package_root: str = "",
 ):
     if log:
         log("Starting sequential report generation...")
@@ -268,10 +270,12 @@ def execute_global_pipeline(
         collisions=all_collisions if all_collisions is not None else [],
         hotspots=hotspots,
         layer_index=layer_index_data,
-        artifacts=artifact_data.get("artifacts", {}),
+        artifacts=artifact_data.get("_module_artifacts", {}),
         compact_artifacts=compact_artifact_data,
         summary_data=summary_data,
         report_header=report_header,
+        trie=trie,
+        package_root=package_root,
     )
 
     return {

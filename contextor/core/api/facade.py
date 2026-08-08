@@ -177,10 +177,17 @@ class ContextorFacade:
         )
         modules = index.modules
 
+        from contextor.core.graph.resolver import build_trie, detect_package_root
+        trie = build_trie(modules.keys())
+        package_root = detect_package_root(modules, trie)
+
         if log:
             log(f"Found {len(modules)} modules. Fetching graph...")
             _log_skipped(index.skipped, log)
-        graph, cache_hit = get_cached_graph(modules, build_graph)
+        graph, cache_hit = get_cached_graph(
+            modules, 
+            lambda m: build_graph(m, trie=trie, package_root=package_root)
+        )
 
         if log:
             log(f"Graph validation (cache_hit={cache_hit})...")
@@ -211,6 +218,8 @@ class ContextorFacade:
             progress_callback=progress_callback,
             skipped_files=index.skipped,
             datestamp=datestamp,
+            trie=trie,
+            package_root=package_root,
         )
 
         if log and report_result.get("high_risk_layers"):
@@ -240,7 +249,14 @@ class ContextorFacade:
             progress_callback=progress_callback,
         )
         modules = index.modules
-        graph, cache_hit = get_cached_graph(modules, build_graph)
+        from contextor.core.graph.resolver import build_trie, detect_package_root
+        trie = build_trie(modules.keys())
+        package_root = detect_package_root(modules, trie)
+        
+        graph, cache_hit = get_cached_graph(
+            modules, 
+            lambda m: build_graph(m, trie=trie, package_root=package_root)
+        )
 
         if log:
             log("Calculating metrics and collisions for the full project...")

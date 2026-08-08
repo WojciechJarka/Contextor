@@ -105,7 +105,12 @@ def build_graph(modules: dict[str, Module]) -> ProjectGraph:
           |
           v
      ProjectGraph
+    """
 
+def build_graph(modules: dict[str, Module], trie: dict | None = None, package_root: str | None = None) -> ProjectGraph:
+    """
+    Builds the dependency graph from parsed modules.
+    Optionally accepts pre-computed trie and package_root to avoid recomputation.
 
     Returns:
 
@@ -123,14 +128,16 @@ def build_graph(modules: dict[str, Module]) -> ProjectGraph:
     # Resolver index
     # ======================================================
 
-    trie = build_trie(modules.keys())
+    if trie is None:
+        trie = build_trie(modules.keys())
 
-    # Derived from the repository under analysis rather than hardcoded to
-    # Contextor's own package name.
-    package_root = detect_package_root(
-        modules,
-        trie,
-    )
+    if package_root is None:
+        # Derived from the repository under analysis rather than hardcoded to
+        # Contextor's own package name.
+        package_root = detect_package_root(
+            modules,
+            trie,
+        )
 
     # ======================================================
     # Deterministic traversal

@@ -54,6 +54,8 @@ class AnalysisResult:
     compact_artifacts: Dict[str, Any]
     summary_data: Dict[str, Any]
     report_header: Dict[str, Any]
+    trie: Optional[Any] = None
+    package_root: str = ""
 
 
 @dataclass

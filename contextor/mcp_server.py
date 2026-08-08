@@ -125,6 +125,10 @@ from contextor.core.api.facade import ContextorFacade
 # Initialize FastMCP Server
 mcp = FastMCP("Contextor")
 
+# Global state to maintain incremental engines across MCP sessions
+_live_engines: dict[str, Any] = {}
+
+
 
 def _stderr_log(msg: str) -> None:
     """Redirects progress logs to stderr to protect JSON-RPC on stdout."""
@@ -157,7 +161,29 @@ def analyze_project(repo_path: str) -> str:
     if not root.is_dir():
         return f"Error: Repository path '{root}' does not exist."
     try:
-        ContextorFacade.analyze_project(str(root), log=_stderr_log)
+        errors, analysis_result = ContextorFacade.analyze_project(str(root), log=_stderr_log)
+        
+        # Bootstrap the IncrementalAnalysisEngine for this repo session
+        from contextor.core.analysis.state_manager import RepositoryAnalysisState, FileStateManager
+        from contextor.core.reporting_engine.persistent_registry import PersistentIdentityRegistry
+        from contextor.core.analysis.incremental_engine import IncrementalAnalysisEngine
+        from contextor.core.paths import repo_cache_dir
+        
+        state = RepositoryAnalysisState(
+            modules=analysis_result.modules,
+            artifacts=analysis_result.artifacts,
+            dependency_graph=analysis_result.graph,
+            trie=analysis_result.trie,
+            package_root=analysis_result.package_root,
+            artifact_consumption={
+                "_report": analysis_result.compact_artifacts,
+            }
+        )
+        registry = PersistentIdentityRegistry(str(root))
+        state_mgr = FileStateManager(str(repo_cache_dir(str(root))))
+        
+        _live_engines[str(root)] = IncrementalAnalysisEngine(state, registry, state_mgr, str(root))
+        
         return f"Analysis complete for {root.name}."
     except Exception as e:
         return f"Error during analysis: {str(e)}"
@@ -191,6 +217,47 @@ def analyze_single_file(repo_path: str, file_path: str) -> str:
         return f"Single-file analysis complete for {target_file.name}."
     except Exception as e:
         return f"Error during single-file analysis: {str(e)}"
+
+
+@mcp.tool()
+def update_file(repo_path: str, file_path: str) -> str:
+    """
+    [OPTIMIZED] Incremental architectural update for a modified file.
+    Updates the canonical state and graph structure in real-time.
+    Requires `analyze_project` to have been run at least once during this session.
+    """
+    root = Path(repo_path).expanduser().resolve()
+    target_file = Path(file_path).expanduser().resolve()
+    
+    engine = _live_engines.get(str(root))
+    if not engine:
+        return json.dumps({"status": "NO_SESSION", "file_path": str(target_file), "error": "Run analyze_project first to initialize the session."}, indent=2)
+        
+    try:
+        res = engine.update_file(str(target_file))
+        result = {
+            "status": res.status,
+            "file_path": res.file_path,
+            "graph_state": res.graph_state,
+            "dependencies_state": res.dependencies_state,
+            "blast_radius_state": res.blast_radius_state,
+            "local_metrics_state": res.local_metrics_state,
+            "global_metrics_state": res.global_metrics_state,
+            "artifact_consumption_state": res.artifact_consumption_state
+        }
+        if res.delta:
+            result["delta"] = {
+                "module_path": res.delta.module_path,
+                "is_new": res.delta.is_new,
+                "is_deleted": res.delta.is_deleted,
+                "imports_added": res.delta.imports_added,
+                "imports_removed": res.delta.imports_removed,
+                "artifacts_added": res.delta.artifacts_added,
+                "artifacts_removed": res.delta.artifacts_removed
+            }
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        return json.dumps({"status": "ERROR", "file_path": str(target_file), "error": str(e)}, indent=2)
 
 
 # ==========================================================

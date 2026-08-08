@@ -613,6 +613,7 @@ def generate_artifact_usage_report(
     # Attach usage sidecar as a private key so engine.py can extract it
     # for save_usage_sidecar() without re-computing anything.
     report["_usage_sidecar"] = usage_sidecar
+    report["_module_artifacts"] = module_artifacts
 
     return report
 

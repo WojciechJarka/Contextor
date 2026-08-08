@@ -100,7 +100,7 @@ class IncrementalAnalysisEngine:
         # 4. Calculate FileDelta (Purely structural, NO identity logic here)
         # We need to know if it's a new file by checking if it exists in the active registry.
         # But wait, registry ID check is fast. We can check if it has an ID to know if it's new.
-        module_id = self.registry.get_module_id(str(rel_path))
+        module_id = self.registry.get_module_id(module_path)
         is_new = module_id is None
         
         delta = self._calculate_delta(module_path, module_id, is_new, new_imports, new_artifacts)
@@ -200,7 +200,7 @@ class IncrementalAnalysisEngine:
             from contextor.core.graph.graph import build_trie, detect_package_root, build_graph
             new_trie = build_trie(new_modules.keys())
             new_package_root = detect_package_root(new_modules, new_trie)
-            new_graph = build_graph(new_modules)
+            new_graph = build_graph(new_modules, trie=new_trie, package_root=new_package_root)
         else:
             # Incremental Graph Update for MODIFY
             new_trie = self.state.trie
