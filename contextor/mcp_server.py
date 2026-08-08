@@ -161,14 +161,50 @@ def analyze_project(repo_path: str) -> str:
     if not root.is_dir():
         return f"Error: Repository path '{root}' does not exist."
     try:
-        errors, analysis_result = ContextorFacade.analyze_project(str(root), log=_stderr_log)
-        
-        # Bootstrap the IncrementalAnalysisEngine for this repo session
-        from contextor.core.analysis.state_manager import RepositoryAnalysisState, FileStateManager
-        from contextor.core.reporting_engine.persistent_registry import PersistentIdentityRegistry
-        from contextor.core.analysis.incremental_engine import IncrementalAnalysisEngine
+        errors, analysis_result = ContextorFacade.analyze_project(
+            str(root),
+            log=_stderr_log,
+        )
+
+        if analysis_result is None:
+            raise RuntimeError(
+                "Analysis completed but returned no analysis state."
+            )
+
+        # Bootstrap the IncrementalAnalysisEngine for this repo session.
+        from contextor.core.analysis.state_manager import (
+            RepositoryAnalysisState,
+            FileStateManager,
+        )
+        from contextor.core.analysis.incremental_engine import (
+            IncrementalAnalysisEngine,
+        )
         from contextor.core.paths import repo_cache_dir
-        
+        from contextor.core.reporting_engine.persistent_registry import (
+            PersistentIdentityRegistry,
+        )
+
+        required_attrs = (
+            "modules",
+            "artifacts",
+            "graph",
+            "trie",
+            "package_root",
+            "compact_artifacts",
+        )
+
+        missing = [
+            name
+            for name in required_attrs
+            if not hasattr(analysis_result, name)
+        ]
+
+        if missing:
+            raise RuntimeError(
+                "Analysis result is incomplete. "
+                f"Missing: {', '.join(missing)}"
+            )
+
         state = RepositoryAnalysisState(
             modules=analysis_result.modules,
             artifacts=analysis_result.artifacts,
@@ -177,12 +213,20 @@ def analyze_project(repo_path: str) -> str:
             package_root=analysis_result.package_root,
             artifact_consumption={
                 "_report": analysis_result.compact_artifacts,
-            }
+            },
         )
+
         registry = PersistentIdentityRegistry(str(root))
-        state_mgr = FileStateManager(str(repo_cache_dir(str(root))))
-        
-        _live_engines[str(root)] = IncrementalAnalysisEngine(state, registry, state_mgr, str(root))
+        state_mgr = FileStateManager(
+            str(repo_cache_dir(str(root)))
+        )
+
+        _live_engines[str(root)] = IncrementalAnalysisEngine(
+            state,
+            registry,
+            state_mgr,
+            str(root),
+        )
         
         return f"Analysis complete for {root.name}."
     except Exception as e:
@@ -706,6 +750,50 @@ def main():
         sys.stderr.reconfigure(encoding='utf-8')
 
     import asyncio
+
+    # --- DIAGNOSTIC PATCH BEGIN ---
+    from datetime import datetime
+
+    import mcp.types as types
+
+    original_validate = types.JSONRPCMessage.model_validate_json
+
+    def traced_validate(cls, json_data, *args, **kwargs):
+        try:
+            if isinstance(json_data, bytes):
+                raw = json_data.decode("utf-8", errors="replace")
+            else:
+                raw = str(json_data)
+
+            try:
+                parsed = json.loads(raw)
+
+                with open("C:/Temp/mcp_inbound.log", "a", encoding="utf-8") as f:
+                    f.write(f"\n[{datetime.now().isoformat()}] INBOUND\n")
+                    f.write(f"type={'request' if 'id' in parsed else 'notification'}\n")
+                    f.write(f"method={parsed.get('method')}\n")
+                    f.write(f"id={parsed.get('id', 'absent')}\n")
+                    f.write(f"params={json.dumps(parsed.get('params', {}), ensure_ascii=False)}\n")
+                    f.write(f"raw={raw.strip()}\n")
+
+            except Exception as log_error:
+                try:
+                    with open("C:/Temp/mcp_inbound.log", "a", encoding="utf-8") as f:
+                        f.write(
+                            f"\n[{datetime.now().isoformat()}] "
+                            f"UNPARSEABLE: {repr(raw)} error={log_error}\n"
+                        )
+                except Exception:
+                    pass
+
+        except Exception:
+            pass
+
+        return original_validate(json_data, *args, **kwargs)
+
+    types.JSONRPCMessage.model_validate_json = classmethod(traced_validate)
+    # --- DIAGNOSTIC PATCH END ---
+
     async def _run():
         await mcp.run_stdio_async()
         
