@@ -16,48 +16,19 @@ from contextor.ui.path_memory import load_state, save_state
 from contextor.ui.progress_widget import create_progress_bar, run_with_progress
 from contextor.ui.theme import PAD_LG, PAD_MD, PAD_SM, HeaderTooltipManager
 
-def find_index_dictionary(json_path, ask_user_callback=None):
-    dir_name = os.path.dirname(json_path)
-    base_name = os.path.basename(json_path)
-    
-    import re
-    m = re.search(r"_(\d{8}_\d{6})\.json$", base_name)
-    datestamp = m.group(1) if m else None
-    
-    all_indices = []
-    for f in os.listdir(dir_name):
-        if "index_dictionary" in f and f.endswith(".json") and not f.startswith("single_"):
-            all_indices.append(f)
+def find_contextor_registry(repo_path):
+    """Finds .contextor directory inside the specified repo_path and returns registry paths."""
+    contextor_dir = os.path.join(repo_path, ".contextor")
+    if os.path.isdir(contextor_dir):
+        mod_reg = os.path.join(contextor_dir, "module_registry.json")
+        art_reg = os.path.join(contextor_dir, "artifact_registry.json")
+        if os.path.exists(mod_reg) and os.path.exists(art_reg):
+            return mod_reg, art_reg
             
-    if not all_indices:
-        raise Exception(f"Could not find ANY full index_dictionary in {dir_name}.")
-        
-    all_indices.sort(key=lambda x: (
-        len(x),
-        1 if "_outdated" in x else 0,
-        -os.path.getmtime(os.path.join(dir_name, x))
-    ))
-    
-    exact_matches = [f for f in all_indices if datestamp and datestamp in f]
-    
-    if exact_matches:
-        return os.path.join(dir_name, exact_matches[0])
-        
-    fallback_file = all_indices[0]
-    
-    if ask_user_callback:
-        msg = (
-            f"Missing exact index dictionary (expected file with datestamp {datestamp or 'N/A'}).\n\n"
-            f"Fallback to the newest full repo index:\n{fallback_file}\n\n"
-            f"Proceed?"
-        )
-        if not ask_user_callback(msg):
-            return None
-            
-    return os.path.join(dir_name, fallback_file)
+    raise Exception(f"Could not find valid .contextor directory with registries in {repo_path}")
 
 
-def rewrite_index_to_text(json_path, dict_path, output_dir="output"):
+def rewrite_index_to_text(json_path, repo_path, output_dir="output"):
     if not os.path.exists(json_path):
         raise FileNotFoundError(f"File {json_path} does not exist.")
 
@@ -69,14 +40,13 @@ def rewrite_index_to_text(json_path, dict_path, output_dir="output"):
     if str(data.get("_format_version", "1")) != "3":
         raise Exception("This tool requires an indexed compact report (schema v3).")
 
-    if not dict_path or not os.path.exists(dict_path):
-        raise Exception(f"Invalid dict_path provided: {dict_path}")
+    mod_reg_path, art_reg_path = find_contextor_registry(json_path)
 
-    with open(dict_path, encoding="utf-8") as f:
-        index_dict = json.load(f)
+    with open(mod_reg_path, encoding="utf-8") as f:
+        modules_dict = json.load(f).get("id_to_path", {})
         
-    modules_dict = index_dict.get("modules", {})
-    artifacts_dict = index_dict.get("artifacts", {})
+    with open(art_reg_path, encoding="utf-8") as f:
+        artifacts_dict = json.load(f).get("id_to_path", {})
     
     def resolve_mod(m_id):
         return modules_dict.get(str(m_id), m_id)
@@ -147,7 +117,7 @@ def rewrite_index_to_text(json_path, dict_path, output_dir="output"):
 # This parser expects a Compact Artifacts Report (schema v3) 
 # and requires an associated index_dictionary.json.
 # ==========================================================
-def parse_and_filter_json(json_path, search_term, dict_path, output_dir="output", public_api_only=False):
+def parse_and_filter_json(json_path, search_term, repo_path, output_dir="output", public_api_only=False):
     if not os.path.exists(json_path):
         raise FileNotFoundError(f"File {json_path} does not exist.")
 
@@ -161,14 +131,13 @@ def parse_and_filter_json(json_path, search_term, dict_path, output_dir="output"
     if not artifacts:
         raise Exception("Report must contain 'artifacts'.")
 
-    if not dict_path or not os.path.exists(dict_path):
-        raise Exception(f"Invalid dict_path provided: {dict_path}")
+    mod_reg_path, art_reg_path = find_contextor_registry(json_path)
 
-    with open(dict_path, encoding="utf-8") as f:
-        index_dict = json.load(f)
+    with open(mod_reg_path, encoding="utf-8") as f:
+        modules_dict = json.load(f).get("id_to_path", {})
         
-    modules_dict = index_dict.get("modules", {})
-    artifacts_dict = index_dict.get("artifacts", {})
+    with open(art_reg_path, encoding="utf-8") as f:
+        artifacts_dict = json.load(f).get("id_to_path", {})
 
     is_py_query = search_term.lower().endswith(".py")
     term = search_term[:-3] if is_py_query else search_term
@@ -243,7 +212,7 @@ def parse_and_filter_json(json_path, search_term, dict_path, output_dir="output"
 
 
 
-def run_parser_window(parent=None):
+def run_parser_window(repo_path=None, parent=None):
     parser_win = tk.Toplevel(parent) if parent else tk.Toplevel()
     parser_win.title("Parser JSON")
 
@@ -345,20 +314,12 @@ def run_parser_window(parent=None):
             messagebox.showwarning("Error", "Fill in both paths", parent=parser_win)
             return
 
-        def ask_user(msg):
-            return messagebox.askokcancel("Fallback Index", msg, parent=parser_win)
-
-        try:
-            dict_path = find_index_dictionary(json_path, ask_user)
-        except Exception as e:
-            messagebox.showerror("Error", str(e), parent=parser_win)
-            return
-            
-        if not dict_path:
+        if not repo_path:
+            messagebox.showwarning("Error", "No repository loaded in the main window.", parent=parser_win)
             return
 
         def task():
-            return parse_and_filter_json(json_path, term, dict_path, public_api_only=public_api)
+            return parse_and_filter_json(json_path, term, repo_path, public_api_only=public_api)
 
         def on_success(out):
             messagebox.showinfo("Success", f"Output file:\n{out}", parent=parser_win)

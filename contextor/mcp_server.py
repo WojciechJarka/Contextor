@@ -534,12 +534,10 @@ def get_file_edit_context(repo_path: str, file_path: str) -> str:
             matrix = ga.get("module_dependency_matrix", {})
             if mod_id in matrix:
                 for target_id in matrix[mod_id].keys():
-                    target_name = registry.get_module_path(target_id) or target_id
-                    imports.append(target_name)
+                    imports.append(target_id)
             for src_id, targets in matrix.items():
                 if mod_id in targets:
-                    src_name = registry.get_module_path(src_id) or src_id
-                    consumers.append(src_name)
+                    consumers.append(src_id)
                         
             public_api = []
             if "module_artifacts" in art_comp and mod_id in art_comp["module_artifacts"]:
@@ -547,17 +545,20 @@ def get_file_edit_context(repo_path: str, file_path: str) -> str:
             else:
                 for art_id, art_data in art_comp.get("artifacts", {}).items():
                     if str(art_data.get("definer_module")) == mod_id:
-                        art_name = registry.get_artifact_path(art_id) or str(art_id)
-                        if not art_name.split("::")[-1].startswith("_"):
-                            public_api.append(art_name)
+                        public_api.append(str(art_id))
         
-        # tests_covering: modules from 'tests.*' layer that depend on this module
-        tests_covering = [c for c in consumers if c.startswith("tests.")]
+        # tests_covering: test modules depend on this one, we can check prefix from paths if needed, 
+        # but since we only have IDs, we look up the path for the prefix check but keep the ID.
+        tests_covering = []
+        for c in consumers:
+            c_path = registry._state.get("module_registry", {}).get("id_to_path", {}).get(c, "")
+            if c_path.startswith("tests."):
+                tests_covering.append(c)
         
         result = {
             "file": file_path,
             "file_exists": target_path.is_file(),
-            "module": module_name,
+            "module": mod_id,
             "layer": mod_info.get("layer", "unknown"),
             "entrypoint": mod_info.get("entrypoint", False),
             "public_api": public_api,

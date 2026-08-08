@@ -223,31 +223,31 @@ def generate_single_file_report(ctx: dict, module_count: int, report_header: dic
         # --------------------------------------------------
         # SYMBOL DOMAIN
         # --------------------------------------------------
-        "symbols": symbol_context["symbols"],
-        "symbol_usage": symbol_context["usage"],
-        "symbol_ecosystem": symbol_context["ecosystem"],
+        "symbols": [index_dict.get_artifact_id(s) for s in symbol_context["symbols"]],
+        "symbol_usage": {index_dict.get_artifact_id(k): [index_dict.get_module_id(v) if '/' not in v else v for v in vals] for k, vals in symbol_context["usage"].items()},
+        "symbol_ecosystem": {index_dict.get_artifact_id(k): [index_dict.get_artifact_id(v) for v in vals] for k, vals in symbol_context["ecosystem"].items()},
         "symbol_references": symbol_context["references"],
-        "api_consumers": symbol_context["consumers"],
-        "api_consumer_summary": symbol_context["consumer_summary"],
+        "api_consumers": {index_dict.get_artifact_id(k): [index_dict.get_module_id(v) for v in vals] for k, vals in symbol_context["consumers"].items()},
+        "api_consumer_summary": {index_dict.get_artifact_id(k): v for k, v in symbol_context["consumer_summary"].items()},
         # --------------------------------------------------
         # API DOMAIN
         # --------------------------------------------------
-        "public_api": ctx["public_api"],
-        "exports": export_context["exports"],
+        "public_api": [index_dict.get_artifact_id(s) for s in ctx["public_api"]],
+        "exports": [index_dict.get_artifact_id(s) for s in export_context["exports"]],
         "export_summary": export_context["export_summary"],
         # --------------------------------------------------
         # SYMBOL ACTIVITY
         # --------------------------------------------------
-        "symbol_activity": ctx["symbol_activity"],
+        "symbol_activity": {index_dict.get_artifact_id(k): v for k, v in ctx["symbol_activity"].items()},
         "activity_summary": ctx["activity_summary"],
         "unused_public_api": sorted(
             [
-                symbol
+                index_dict.get_artifact_id(symbol)
                 for symbol, data in ctx["symbol_activity"].items()
                 if data["status"] == "UNUSED_PUBLIC"
             ]
         ),
-        "unused_candidates_old": export_context["unused_candidates"],
+        "unused_candidates_old": [index_dict.get_artifact_id(s) for s in export_context["unused_candidates"]],
         # --------------------------------------------------
         # ARTIFACT CONSUMPTION
         # --------------------------------------------------
@@ -325,6 +325,8 @@ def generate_single_file_report(ctx: dict, module_count: int, report_header: dic
         # LLM SUMMARY  (nowe - F6)
         # --------------------------------------------------
         "llm_summary": _build_llm_summary(ctx),
+        "_format_version": "3",
+        "_format_note": "Indexed Compact Single File Report"
     }
 
     # Inject report_header if provided (P2e) — same schema as other report types.
