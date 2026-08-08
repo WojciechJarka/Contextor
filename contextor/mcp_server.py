@@ -275,6 +275,20 @@ def update_file(repo_path: str, file_path: str) -> str:
     
     engine = _live_engines.get(str(root))
     if not engine:
+        from contextor.core.analysis.state_manager import load_engine_state, FileStateManager
+        from contextor.core.analysis.incremental_engine import IncrementalAnalysisEngine
+        from contextor.core.paths import repo_cache_dir
+        from contextor.core.reporting_engine.persistent_registry import PersistentIdentityRegistry
+        
+        cache_dir = str(repo_cache_dir(str(root)))
+        state = load_engine_state(cache_dir)
+        if state:
+            registry = PersistentIdentityRegistry(str(root))
+            state_mgr = FileStateManager(cache_dir)
+            engine = IncrementalAnalysisEngine(state, registry, state_mgr, str(root))
+            _live_engines[str(root)] = engine
+            
+    if not engine:
         return json.dumps({"status": "NO_SESSION", "file_path": str(target_file), "error": "Run analyze_project first to initialize the session."}, indent=2)
         
     try:

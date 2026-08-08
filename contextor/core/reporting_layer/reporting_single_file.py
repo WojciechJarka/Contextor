@@ -256,20 +256,20 @@ def generate_single_file_report(ctx: dict, module_count: int, report_header: dic
         # --------------------------------------------------
         # CODE SEMANTICS & STATE
         # --------------------------------------------------
-        "module_semantics": module_semantics,
+        "module_semantics": {index_dict.get_artifact_id(k): v for k, v in module_semantics.items()},
         "semantic_analysis": {
             "mutability": [
                 {
-                    "symbol": k,
+                    "symbol": index_dict.get_artifact_id(k),
                     "mutated_args": v.get("mutated_args", []),
-                    "globals_mutated": v.get("globals_mutated", []),
+                    "globals_mutated": [index_dict.get_artifact_id(g) for g in v.get("globals_mutated", [])],
                 }
                 for k, v in ctx.get("state_context", {}).items()
                 if not v.get("is_pure", True)
             ],
             "side_effects": [
                 {
-                    "symbol": k,
+                    "symbol": index_dict.get_artifact_id(k),
                     "nonlocals": v.get("nonlocals_used", []),
                     "self_mutations": v.get("self_mutations", []),
                     "captured": v.get("captured_in_closures", []),
@@ -279,7 +279,7 @@ def generate_single_file_report(ctx: dict, module_count: int, report_header: dic
             ],
             "risks": [
                 {
-                    "symbol": k,
+                    "symbol": index_dict.get_artifact_id(k),
                     "complexity": v.get("metrics", {}).get("complexity", 1),
                     "raises": v.get("metrics", {}).get("raises", []),
                 }
@@ -287,12 +287,12 @@ def generate_single_file_report(ctx: dict, module_count: int, report_header: dic
                 if v.get("metrics", {}).get("complexity", 1) > 5
             ],
         },
-        "functions": ctx.get("function_context", {}),
+        "functions": {index_dict.get_artifact_id(k): v for k, v in ctx.get("function_context", {}).items()},
         # --------------------------------------------------
         # IMPORTS
         # --------------------------------------------------
-        "imports": ctx["import_context"]["imports"],
-        "import_users": ctx["import_users"],
+        "imports": [index_dict.get_module_id(m) for m in ctx["import_context"]["imports"]],
+        "import_users": [index_dict.get_module_id(u) for u in ctx["import_users"]],
         # --------------------------------------------------
         # ARCHITECTURE
         # --------------------------------------------------
@@ -301,7 +301,11 @@ def generate_single_file_report(ctx: dict, module_count: int, report_header: dic
         # --------------------------------------------------
         # TEST CONTEXT  (nowe - F5)
         # --------------------------------------------------
-        "test_context": ctx.get("test_context", {}),
+        "test_context": {
+            "test_files": [index_dict.get_module_id(f) for f in ctx.get("test_context", {}).get("test_files", [])],
+            "tested_symbols": [index_dict.get_artifact_id(s) for s in ctx.get("test_context", {}).get("tested_symbols", [])],
+            "untested_public_symbols": [index_dict.get_artifact_id(s) for s in ctx.get("test_context", {}).get("untested_public_symbols", [])]
+        } if ctx.get("test_context") else {},
         # --------------------------------------------------
         # GIT
         # --------------------------------------------------

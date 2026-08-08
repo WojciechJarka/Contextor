@@ -94,7 +94,7 @@ class ContextorGUI:
             self.parser_win.lift()
             self.parser_win.focus_force()
         else:
-            self.parser_win = run_parser_window(parent=self.root)
+            self.parser_win = run_parser_window(repo_path=self.repo_path_var.get(), parent=self.root)
 
     def open_rewrite_tool(self):
         import os
@@ -110,7 +110,7 @@ class ContextorGUI:
         if json_path:
             from contextor.ui.gui_parser import rewrite_index_to_text
             try:
-                out_path = rewrite_index_to_text(json_path)
+                out_path = rewrite_index_to_text(json_path, self.repo_path_var.get())
                 messagebox.showinfo("Success", f"Rewritten text JSON saved to:\n{out_path}")
             except Exception as e:
                 messagebox.showerror("Error", f"Failed to rewrite JSON:\n{e}")

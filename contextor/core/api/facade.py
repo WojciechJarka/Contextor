@@ -227,6 +227,20 @@ class ContextorFacade:
             log(f"Generated additional reports for high risk layers: {high_risk_layers}")
 
         analysis_result = report_result.get("_analysis_result")
+        
+        if analysis_result:
+            from contextor.core.analysis.state_manager import RepositoryAnalysisState, save_engine_state
+            from contextor.core.paths import repo_cache_dir
+            state = RepositoryAnalysisState(
+                modules=getattr(analysis_result, "modules", {}),
+                artifacts=getattr(analysis_result, "artifacts", {}),
+                dependency_graph=getattr(analysis_result, "graph", None),
+                trie=getattr(analysis_result, "trie", None),
+                package_root=getattr(analysis_result, "package_root", ""),
+                artifact_consumption={"_report": getattr(analysis_result, "compact_artifacts", {})}
+            )
+            save_engine_state(state, str(repo_cache_dir(path)))
+
         return errors, analysis_result
 
     @staticmethod

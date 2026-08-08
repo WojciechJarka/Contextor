@@ -40,7 +40,7 @@ def rewrite_index_to_text(json_path, repo_path, output_dir="output"):
     if str(data.get("_format_version", "1")) != "3":
         raise Exception("This tool requires an indexed compact report (schema v3).")
 
-    mod_reg_path, art_reg_path = find_contextor_registry(json_path)
+    mod_reg_path, art_reg_path = find_contextor_registry(repo_path)
 
     with open(mod_reg_path, encoding="utf-8") as f:
         modules_dict = json.load(f).get("id_to_path", {})
@@ -131,7 +131,7 @@ def parse_and_filter_json(json_path, search_term, repo_path, output_dir="output"
     if not artifacts:
         raise Exception("Report must contain 'artifacts'.")
 
-    mod_reg_path, art_reg_path = find_contextor_registry(json_path)
+    mod_reg_path, art_reg_path = find_contextor_registry(repo_path)
 
     with open(mod_reg_path, encoding="utf-8") as f:
         modules_dict = json.load(f).get("id_to_path", {})
