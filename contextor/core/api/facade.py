@@ -239,7 +239,7 @@ class ContextorFacade:
                 package_root=getattr(analysis_result, "package_root", ""),
                 artifact_consumption={"_report": getattr(analysis_result, "compact_artifacts", {})}
             )
-            save_engine_state(state, str(repo_cache_dir(path)))
+            save_engine_state(state, str(repo_cache_dir(path)), datestamp)
 
         return errors, analysis_result
 
@@ -336,11 +336,11 @@ class ContextorFacade:
         
         execute_layer_pipeline(repo_name, layer_name, layer_sliced_reports, log=log, datestamp=datestamp)
         write_layer_reports(
-            repo_name=repo_name, layer_name=layer_name, layer_reports=layer_sliced_reports, log=log, datestamp=datestamp
+            repo_name=repo_name, layer_name=layer_name, layer_reports=layer_sliced_reports, log=log
         )
 
         # Absolute, so what the GUI shows the user is a path that exists.
-        pattern = str(output_dir() / f"{repo_name}_{layer_name}_*_{datestamp}.json")
+        pattern = str(output_dir() / f"{repo_name}_{layer_name}_*.json")
 
         if log:
             log(f"Finished! Saved reports package: {pattern}")
@@ -400,7 +400,7 @@ class ContextorFacade:
         except ValueError:
             slug = file.stem
 
-        output = str(output_dir() / f"single_{slug}_{datestamp}.json")
+        output = str(output_dir() / f"single_{slug}.json")
         from contextor.core.reporting_engine.dictionary import compact_recursively
         compact_report = compact_recursively(report, index_dict, set(modules.keys()))
         save_single_file_report(compact_report, output)
@@ -442,7 +442,7 @@ class ContextorFacade:
                 scope="single_file",
                 scope_modules=scope_mods,
             )
-            ga_output = str(output_dir() / f"single_{slug}_graph_analytics_{datestamp}.json")
+            ga_output = str(output_dir() / f"single_{slug}_graph_analytics.json")
             import json as _json
             with open(ga_output, "w", encoding="utf-8") as f_ga:
                 _json.dump(ga_data, f_ga, indent=2, ensure_ascii=False)
@@ -450,7 +450,7 @@ class ContextorFacade:
             if log:
                 log(f"[WARNING] graph_analytics skipped for single file: {_ga_err}")
 
-        md_output = str(output_dir() / f"single_{slug}_llm_context_{datestamp}.md")
+        md_output = str(output_dir() / f"single_{slug}_llm_context.md")
         generate_llm_markdown(report, md_output)
 
         if log:

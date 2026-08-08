@@ -148,10 +148,12 @@ def parse_and_filter_json(json_path, search_term, repo_path, output_dir="output"
     
     if is_py_query:
         for str_idx, mod in modules_dict.items():
+            if mod is None: continue
             if mod == term or mod.endswith(f".{term}") or f".{term}." in mod or mod.startswith(f"{term}."):
                 matching_module_indices.add(str_idx)
     else:
         for a_id, art_full_name in artifacts_dict.items():
+            if art_full_name is None: continue
             # art_full_name looks like "contextor.core.main::my_func" or "contextor.core.main::my_func(arg)"
             if term in art_full_name:
                 matching_artifact_ids.add(a_id)
@@ -199,9 +201,7 @@ def parse_and_filter_json(json_path, search_term, repo_path, output_dir="output"
     sanitized_name = search_term.replace(".", "_").replace("/", "_")
     prefix = "parsed_api_compact" if public_api_only else "parsed_compact"
     
-    from datetime import datetime
-    datestamp_now = datetime.now().strftime("%Y%m%d_%H%M%S")
-    output_filename = f"{prefix}_{sanitized_name}_{datestamp_now}.json"
+    output_filename = f"{prefix}_{sanitized_name}.json"
     os.makedirs(output_dir, exist_ok=True)
     output_path = os.path.join(output_dir, output_filename)
 

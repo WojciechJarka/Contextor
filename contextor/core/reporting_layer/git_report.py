@@ -9,10 +9,7 @@ from contextor.core.analysis.git_context import collect_git_context
 
 def build_global_git_section(
     current_header: dict,
-    previous_header: dict | None,
-    diff_stats: dict | None,
     repo_state: dict,
-    regression_status: str,
 ) -> dict:
     """
     Builds the 'git_changes' block for the global summary report.
@@ -21,18 +18,9 @@ def build_global_git_section(
         return {"status": "non_git_repo"}
 
     current_commit = current_header.get("commit_sha")
-    previous_commit = previous_header.get("commit_sha") if previous_header else None
-    
-    # Fallback to unchanged
-    if current_commit == previous_commit and diff_stats and diff_stats.get("is_empty"):
-        return {
-            "status": "no_changes",
-            "current_commit": current_commit,
-            "previous_commit": previous_commit
-        }
         
     git_section = {
-        "status": regression_status,
+        "status": "LIVE_CANONICAL_STATE",
         "current": {
             "branch": current_header.get("branch"),
             "commit_sha": current_commit,
@@ -40,21 +28,6 @@ def build_global_git_section(
         }
     }
     
-    if previous_header:
-        git_section["previous"] = {
-            "branch": previous_header.get("branch"),
-            "commit_sha": previous_commit,
-            "generated_at": previous_header.get("generated_at"),
-        }
-        
-    if diff_stats:
-        delta = {}
-        if "debt" in diff_stats:
-            for k, v in diff_stats["debt"].items():
-                delta[k] = v.get("delta")
-        if delta:
-            git_section["delta"] = delta
-            
     return git_section
 
 

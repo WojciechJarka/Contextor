@@ -37,92 +37,95 @@ class IncrementalAnalysisEngine:
         self.registry = registry
         self.state_manager = state_manager
         self.root_path = Path(root_path)
+        import threading
+        self._lock = threading.RLock()
 
     def update_file(self, file_path: str) -> IncrementalUpdateResult:
         """
-        Updates the canonical state incrementally for a single changed file.
-        Returns the update status and the freshness of the architectural model.
+            Updates the canonical state incrementally for a single changed file.
+            Returns the update status and the freshness of the architectural model.
         """
-        if not self.state_manager.has_changed(file_path):
-            return IncrementalUpdateResult(status="UNCHANGED", file_path=file_path)
+        with self._lock:
+            if not self.state_manager.has_changed(file_path):
+                return IncrementalUpdateResult(status="UNCHANGED", file_path=file_path)
+                
+            path = Path(file_path)
+            rel_path = path.relative_to(self.root_path)
+            module_path = ".".join(rel_path.with_suffix("").parts)
             
-        path = Path(file_path)
-        rel_path = path.relative_to(self.root_path)
-        module_path = ".".join(rel_path.with_suffix("").parts)
-        
-        # 1. Handle Deletion
-        current_state = self.state_manager.get_current_file_state(file_path, compute_hash=False)
-        if not current_state:
-            delta = FileDelta(
-                module_path=module_path,
-                is_deleted=True
-            )
-            self._apply_delta_and_commit(file_path, delta, [], {})
+            # 1. Handle Deletion
+            current_state = self.state_manager.get_current_file_state(file_path, compute_hash=False)
+            if not current_state:
+                delta = FileDelta(
+                    module_path=module_path,
+                    is_deleted=True
+                )
+                self._apply_delta_and_commit(file_path, delta, [], {})
+                return IncrementalUpdateResult(
+                    status="DELETED", 
+                    file_path=file_path, 
+                    delta=delta,
+                    graph_state="fresh",
+                    dependencies_state="fresh",
+                    blast_radius_state="deferred",
+                    local_metrics_state="deferred",
+                    global_metrics_state="deferred",
+                    artifact_consumption_state="deferred"
+                )
+
+            # 2. Parse new file
+            try:
+                new_imports, error = read_imports(path)
+                if error:
+                    # Syntax error = zero changes to the architectural model
+                    return IncrementalUpdateResult(status="SYNTAX_ERROR", file_path=file_path)
+            except Exception:
+                return IncrementalUpdateResult(status="ERROR", file_path=file_path)
+
+            # 3. Parse new artifacts
+            from contextor.core.reporting_layer.artifact_usage_report import extract_file_symbols, _module_own_symbols
+            try:
+                raw_symbols = extract_file_symbols(str(path))
+                own_symbols = _module_own_symbols(raw_symbols)
+                old_artifacts = self.state.artifacts.get(module_path, {})
+                old_consumers = old_artifacts.get("consumers", {})
+                new_artifacts = {
+                    "symbols": raw_symbols,
+                    "own_symbols": own_symbols,
+                    "consumers": old_consumers # Preserve previous snapshot
+                }
+            except Exception:
+                old_artifacts = self.state.artifacts.get(module_path, {})
+                old_consumers = old_artifacts.get("consumers", {})
+                new_artifacts = {"symbols": {}, "own_symbols": set(), "consumers": old_consumers}
+                raw_symbols = {}
+            
+            # 4. Calculate FileDelta (Purely structural, NO identity logic here)
+            # We need to know if it's a new file by checking if it exists in the active registry.
+            # But wait, registry ID check is fast. We can check if it has an ID to know if it's new.
+            module_id = self.registry.get_module_id(module_path)
+            is_new = module_id is None
+            
+            delta = self._calculate_delta(module_path, module_id, is_new, new_imports, new_artifacts)
+            
+            # 5. Apply and Commit
+            self._apply_delta_and_commit(file_path, delta, new_imports, new_artifacts)
+            
+            # Determine graph state based on whether it was a full canonical rebuild or local update
+            graph_state = "fresh" if (is_new or delta.is_deleted) else "fresh" # We always keep it fresh now because ADD/DELETE does full rebuild
+            
             return IncrementalUpdateResult(
-                status="DELETED", 
+                status="UPDATED", 
                 file_path=file_path, 
                 delta=delta,
-                graph_state="fresh",
+                graph_state=graph_state,
                 dependencies_state="fresh",
                 blast_radius_state="deferred",
                 local_metrics_state="deferred",
                 global_metrics_state="deferred",
                 artifact_consumption_state="deferred"
             )
-
-        # 2. Parse new file
-        try:
-            new_imports, error = read_imports(path)
-            if error:
-                # Syntax error = zero changes to the architectural model
-                return IncrementalUpdateResult(status="SYNTAX_ERROR", file_path=file_path)
-        except Exception:
-            return IncrementalUpdateResult(status="ERROR", file_path=file_path)
-
-        # 3. Parse new artifacts
-        from contextor.core.reporting_layer.artifact_usage_report import extract_file_symbols, _module_own_symbols
-        try:
-            raw_symbols = extract_file_symbols(str(path))
-            own_symbols = _module_own_symbols(raw_symbols)
-            old_artifacts = self.state.artifacts.get(module_path, {})
-            old_consumers = old_artifacts.get("consumers", {})
-            new_artifacts = {
-                "symbols": raw_symbols,
-                "own_symbols": own_symbols,
-                "consumers": old_consumers # Preserve previous snapshot
-            }
-        except Exception:
-            old_artifacts = self.state.artifacts.get(module_path, {})
-            old_consumers = old_artifacts.get("consumers", {})
-            new_artifacts = {"symbols": {}, "own_symbols": set(), "consumers": old_consumers}
-            raw_symbols = {}
-        
-        # 4. Calculate FileDelta (Purely structural, NO identity logic here)
-        # We need to know if it's a new file by checking if it exists in the active registry.
-        # But wait, registry ID check is fast. We can check if it has an ID to know if it's new.
-        module_id = self.registry.get_module_id(module_path)
-        is_new = module_id is None
-        
-        delta = self._calculate_delta(module_path, module_id, is_new, new_imports, new_artifacts)
-        
-        # 5. Apply and Commit
-        self._apply_delta_and_commit(file_path, delta, new_imports, new_artifacts)
-        
-        # Determine graph state based on whether it was a full canonical rebuild or local update
-        graph_state = "fresh" if (is_new or delta.is_deleted) else "fresh" # We always keep it fresh now because ADD/DELETE does full rebuild
-        
-        return IncrementalUpdateResult(
-            status="UPDATED", 
-            file_path=file_path, 
-            delta=delta,
-            graph_state=graph_state,
-            dependencies_state="fresh",
-            blast_radius_state="deferred",
-            local_metrics_state="deferred",
-            global_metrics_state="deferred",
-            artifact_consumption_state="deferred"
-        )
-        
+            
     def _calculate_delta(self, module_path: str, persistent_id: Optional[str], is_new: bool, new_imports: List, new_artifacts_dict: dict) -> FileDelta:
         delta = FileDelta(
             module_path=module_path,

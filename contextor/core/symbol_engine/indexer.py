@@ -172,7 +172,8 @@ def _process_single_file(path_str: str, root_str: str) -> dict:
 
     return {
         "module_id": module_id,
-        "path": str(path.resolve()),
+        "path": str(rel),
+        "absolute_path": str(path.resolve()),
         "imports": imports,
         "error": error,
         "filename": path.name,
@@ -279,7 +280,7 @@ def index_repository(
                 modules[res["module_id"]] = Module(
                     module_id=res["module_id"],
                     path=res["path"],
-                    absolute_path=res["path"],
+                    absolute_path=res.get("absolute_path", res["path"]),
                     imports=res["imports"],
                 )
 

@@ -135,16 +135,40 @@ def _stderr_log(msg: str) -> None:
     print(msg, file=sys.stderr, flush=True)
 
 
-def _find_latest_report(repo_path: Path, pattern: str) -> Path | None:
-    """Finds the most recently generated report matching the pattern."""
+def _get_canonical_report(repo_path: Path, filename: str) -> Path | None:
+    """Returns the canonical report path without globbing."""
     out_dir = repo_path / "output"
-    if not out_dir.is_dir():
-        return None
-    matches = sorted(glob.glob(str(out_dir / "**" / pattern), recursive=True), reverse=True)
-    for match in matches:
-        if "_outdated" not in match:
-            return Path(match)
+    target = out_dir / filename
+    if target.is_file():
+        return target
+    # Check for layer-specific subdirectories if not found in root output
+    for sub in out_dir.iterdir():
+        if sub.is_dir():
+            sub_target = sub / filename
+            if sub_target.is_file():
+                return sub_target
     return None
+
+def _get_or_init_engine(root: Path):
+    """
+    Returns the live engine from RAM. If absent, HYDRATES from the .contextor cache.
+    Does NOT silently trigger analyze_project.
+    """
+    engine = _live_engines.get(str(root))
+    if not engine:
+        from contextor.core.analysis.state_manager import load_engine_state, FileStateManager
+        from contextor.core.analysis.incremental_engine import IncrementalAnalysisEngine
+        from contextor.core.paths import repo_cache_dir
+        from contextor.core.reporting_engine.persistent_registry import PersistentIdentityRegistry
+        
+        cache_dir = str(repo_cache_dir(str(root)))
+        state_mgr = FileStateManager(cache_dir)
+        state = load_engine_state(cache_dir, getattr(state_mgr, "state_id", ""))
+        if state:
+            registry = PersistentIdentityRegistry(str(root))
+            engine = IncrementalAnalysisEngine(state, registry, state_mgr, str(root))
+            _live_engines[str(root)] = engine
+    return engine
 
 
 # ==========================================================
@@ -273,20 +297,7 @@ def update_file(repo_path: str, file_path: str) -> str:
     root = Path(repo_path).expanduser().resolve()
     target_file = Path(file_path).expanduser().resolve()
     
-    engine = _live_engines.get(str(root))
-    if not engine:
-        from contextor.core.analysis.state_manager import load_engine_state, FileStateManager
-        from contextor.core.analysis.incremental_engine import IncrementalAnalysisEngine
-        from contextor.core.paths import repo_cache_dir
-        from contextor.core.reporting_engine.persistent_registry import PersistentIdentityRegistry
-        
-        cache_dir = str(repo_cache_dir(str(root)))
-        state = load_engine_state(cache_dir)
-        if state:
-            registry = PersistentIdentityRegistry(str(root))
-            state_mgr = FileStateManager(cache_dir)
-            engine = IncrementalAnalysisEngine(state, registry, state_mgr, str(root))
-            _live_engines[str(root)] = engine
+    engine = _get_or_init_engine(root)
             
     if not engine:
         return json.dumps({"status": "NO_SESSION", "file_path": str(target_file), "error": "Run analyze_project first to initialize the session."}, indent=2)
@@ -332,7 +343,7 @@ def get_project_architecture(repo_path: str) -> str:
     root = Path(repo_path).expanduser().resolve()
     repo_name = root.name
     
-    summary_path = _find_latest_report(root, f"{repo_name}_summary_*.json")
+    summary_path = _get_canonical_report(root, f"{repo_name}_summary.json")
     if not summary_path:
         return f"Error: No summary report found for {repo_name}. Run analyze_project first."
         
@@ -384,7 +395,7 @@ def get_module_context(repo_path: str, module_name: str) -> str:
     root = Path(repo_path).expanduser().resolve()
     repo_name = root.name
     
-    ga_path = _find_latest_report(root, f"{repo_name}_graph_analytics_*.json")
+    ga_path = _get_canonical_report(root, f"{repo_name}_graph_analytics.json")
     if not ga_path:
         return f"Error: No graph_analytics report found. Run analyze_project first."
         
@@ -439,45 +450,107 @@ def get_artifact_blast_radius(repo_path: str, artifact_name: str) -> str:
     root = Path(repo_path).expanduser().resolve()
     repo_name = root.name
     
-    art_path = _find_latest_report(root, f"{repo_name}_artifacts_compact_*.json")
-    
-    if not art_path:
-        return "Error: Missing artifacts_compact report. Run analyze_project."
+    engine = _get_or_init_engine(root)
+    if not engine:
+        return "Error: No live canonical state found. Run analyze_project first."
         
     try:
-        from contextor.core.reporting_engine.persistent_registry import PersistentIdentityRegistry
-        registry = PersistentIdentityRegistry(str(root))
-        art_comp = json.loads(art_path.read_text(encoding="utf-8"))
+        art_id = None
+        full_name = None
         
-        with registry.transaction():
-            art_id = None
-            full_name = None
-            for key, val in registry._state.get("artifact_registry", {}).get("id_to_path", {}).items():
-                if val == artifact_name or val.endswith("::" + artifact_name) or val.endswith("." + artifact_name):
-                    art_id = key
-                    full_name = val
-                    break
-                    
-            if not art_id:
-                return f"Artifact '{artifact_name}' not found in the registry."
+        for key, val in engine.registry._state.get("artifact_registry", {}).get("id_to_path", {}).items():
+            if val == artifact_name or val.endswith("::" + artifact_name) or val.endswith("." + artifact_name):
+                art_id = key
+                full_name = val
+                break
                 
-            artifact_data = art_comp.get("artifacts", {}).get(art_id)
-            if not artifact_data:
-                return f"Artifact '{full_name}' found in registry, but has no usage data (never consumed)."
-                
-            definer = registry.get_module_path(str(artifact_data.get("definer_module"))) or "Unknown"
-            consumers = [registry.get_module_path(str(c)) or str(c) for c in artifact_data.get("consumer_module_indices", [])]
+        if not art_id:
+            return f"Artifact '{artifact_name}' not found in the live registry."
+            
+        # Find who defines it and its consumers from the live artifacts payload
+        definer_mod_path = None
+        consumers = []
+        for mod_path, mod_arts in engine.state.artifacts.items():
+            # Check consumers
+            for art_name, mod_consumers in mod_arts.get("consumers", {}).items():
+                 # We have to match by full name or ID logic, but since we know art_id/name:
+                 pass
         
+        # Simpler approach: use registry to find the definer
+        # Since Schema V3 dropped pure text search, get_artifact_blast_radius needs to find it.
+        # Let's search all artifacts for the name match
+        for mod_path, mod_arts in engine.state.artifacts.items():
+             symbols = mod_arts.get("symbols", {})
+             for kind in ["functions", "classes", "methods"]:
+                 for name in symbols.get(kind, {}).keys():
+                     if name == artifact_name or full_name and name == full_name.split("::")[-1]:
+                          definer_mod_path = mod_path
+                          raw_consumers = mod_arts.get("consumers", {}).get(name, [])
+                          consumers = [engine.registry.get_module_path(str(c)) or str(c) for c in raw_consumers]
+                          break
+                 if definer_mod_path: break
+             if definer_mod_path: break
+
+        if not definer_mod_path:
+             return f"Artifact '{artifact_name}' found in registry but missing from live AST structure."
+
         result = {
-            "artifact": full_name,
-            "definer": definer,
+            "artifact": full_name or artifact_name,
+            "definer": definer_mod_path,
             "consumer_count": len(consumers),
             "consumers": consumers
         }
         return json.dumps(result, indent=2)
     except Exception as e:
-        return f"Error extracting blast radius: {e}"
+        return f"Error calculating artifact blast radius: {e}"
 
+
+@mcp.tool()
+def search_artifacts(repo_path: str, search_term: str) -> str:
+    """
+    [OPTIMIZED] Searches the canonical live state for an artifact, module, or symbol matching 'search_term'.
+    Returns its properties and all its dependencies and consumers (blast radius).
+    Use this to extract arbitrary context about any symbol from the current architectural state.
+    """
+    root = Path(repo_path).expanduser().resolve()
+    repo_name = root.name
+    
+    engine = _get_or_init_engine(root)
+    if not engine:
+        return "Error: No live canonical state found. Run analyze_project first."
+        
+    try:
+        found_artifacts = {}
+        for mod_path, mod_arts in engine.state.artifacts.items():
+            symbols = mod_arts.get("symbols", {})
+            for kind in ["functions", "classes", "methods"]:
+                symbol_list = symbols.get(kind, [])
+                for name in symbol_list:
+                    if search_term in name:
+                        definer_mod = engine.registry.get_module_id(mod_path)
+                        # The Live Engine preserves the previous global analysis consumers mapping
+                        consumers_dict = mod_arts.get("consumers", {}).get(name, {})
+                        if isinstance(consumers_dict, dict):
+                            consumers = consumers_dict.get("consumers", [])
+                        else:
+                            consumers = consumers_dict
+                        
+                        consumer_paths = [engine.registry.get_module_path(str(c)) or str(c) for c in consumers]
+                        
+                        found_artifacts[name] = {
+                            "kind": kind,
+                            "definer_module_path": mod_path,
+                            "definer_module_id": definer_mod,
+                            "consumer_count": len(consumers),
+                            "consumers": consumer_paths
+                        }
+        
+        if not found_artifacts:
+            return f"No live artifacts found matching '{search_term}'."
+            
+        return json.dumps({"artifacts": found_artifacts}, indent=2)
+    except Exception as e:
+        return f"Error extracting artifact context from live state: {e}"
 
 @mcp.tool()
 def get_file_edit_context(repo_path: str, file_path: str) -> str:
@@ -507,8 +580,8 @@ def get_file_edit_context(repo_path: str, file_path: str) -> str:
     
     module_name = ".".join(parts)
     
-    ga_path = _find_latest_report(root, f"{repo_name}_graph_analytics_*.json")
-    art_path = _find_latest_report(root, f"{repo_name}_artifacts_compact_*.json")
+    ga_path = _get_canonical_report(root, f"{repo_name}_graph_analytics.json")
+    art_path = _get_canonical_report(root, f"{repo_name}_artifacts_compact.json")
     
     if not (ga_path and art_path):
         return "Error: Missing required reports. Run analyze_project first."
@@ -524,7 +597,7 @@ def get_file_edit_context(repo_path: str, file_path: str) -> str:
         
         # Prefer real hotspot score from summary.json, fall back to centrality proxy
         risk_score = 0.0
-        summary_path = _find_latest_report(root, f"{repo_name}_summary_*.json")
+        summary_path = _get_canonical_report(root, f"{repo_name}_summary.json")
         if summary_path:
             try:
                 summary = json.loads(summary_path.read_text(encoding="utf-8"))
@@ -603,11 +676,10 @@ def get_layer_isolation(repo_path: str, layer_name: str) -> str:
     normalized_layer_name = Path(layer_name).name
     
     # Try to find layer-specific report in high_risk_layers
-    ga_path = _find_latest_report(root, f"*{repo_name}_{normalized_layer_name}_graph_analytics_*.json")
-    
+    ga_path = _get_canonical_report(root, f"{repo_name}_{normalized_layer_name}_graph_analytics.json")
     if not ga_path:
         # Fallback to global summary if layer report doesn't exist
-        summary_path = _find_latest_report(root, f"{repo_name}_summary_*.json")
+        summary_path = _get_canonical_report(root, f"{repo_name}_summary.json")
         if not summary_path:
              return f"Error: No layer report found for '{normalized_layer_name}' and no global summary found."
         try:
@@ -690,7 +762,7 @@ def get_report_diff(repo_path: str) -> str:
     root = Path(repo_path).expanduser().resolve()
     repo_name = root.name
 
-    diff_path = _find_latest_report(root, f"{repo_name}_report_diff_*.json")
+    diff_path = _get_canonical_report(root, f"{repo_name}_report_diff.json")
     if not diff_path:
         return (
             f"No diff report found for '{repo_name}'. "
@@ -706,22 +778,26 @@ def get_report_diff(repo_path: str) -> str:
 
 
 @mcp.tool()
-def query_json_data(json_path: str, python_filter_expression: str) -> str:
+def query_canonical_state(repo_path: str, python_filter_expression: str) -> str:
     """
-    [ADVANCED] Allows you to run a safe Python list-comprehension or filter on a large JSON file.
-    The JSON payload is loaded into a variable named 'data'.
-    Example expression: "[k for k, v in data.get('modules', {}).items() if v.get('fan_in', 0) > 20]"
+    [ADVANCED] Allows you to run a safe Python list-comprehension or filter on the LIVE canonical state!
+    The live objects are loaded into variables: 'modules', 'artifacts', 'dependency_graph', 'registry'.
+    Example expression: "[m_path for m_path, mod in modules.items() if len(mod.imports) > 20]"
     """
-    target = Path(json_path).expanduser().resolve()
-    if not target.is_file():
-        return f"Error: File '{target}' does not exist."
+    root = Path(repo_path).expanduser().resolve()
+    engine = _get_or_init_engine(root)
+    
+    if not engine:
+        return f"Error: No live canonical state found for {root}. Run analyze_project first."
         
     try:
-        data = json.loads(target.read_text(encoding="utf-8"))
         # Safe sandbox: only whitelisted builtins, no import/exec/open
         _safe_builtins = {
             "__builtins__": {},
-            "data": data,
+            "modules": engine.state.modules,
+            "artifacts": engine.state.artifacts,
+            "dependency_graph": engine.state.dependency_graph,
+            "registry": engine.registry,
             "json": json,
             "sorted": sorted, "list": list, "dict": dict, "set": set,
             "len": len, "str": str, "int": int, "float": float, "bool": bool,
@@ -732,9 +808,22 @@ def query_json_data(json_path: str, python_filter_expression: str) -> str:
             "True": True, "False": False, "None": None,
         }
         result = eval(python_filter_expression, _safe_builtins)
-        return json.dumps(result, indent=2)
+        
+        # Serialize result safely, handling dataclasses if needed
+        import dataclasses
+        class SafeEncoder(json.JSONEncoder):
+             def default(self, o):
+                 if dataclasses.is_dataclass(o):
+                     return dataclasses.asdict(o)
+                 if hasattr(o, "to_dict"):
+                     return o.to_dict()
+                 if isinstance(o, set):
+                     return list(o)
+                 return str(o)
+                 
+        return json.dumps(result, indent=2, cls=SafeEncoder)
     except Exception as e:
-        return f"Error executing query: {str(e)}\nMake sure 'data' is treated as a dict/list."
+        return f"Error executing query: {str(e)}"
 
 
 # ==========================================================

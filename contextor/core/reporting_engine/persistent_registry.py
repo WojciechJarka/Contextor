@@ -170,7 +170,10 @@ class PersistentIdentityRegistry:
                 tmp_path = path.with_suffix(".json.tmp")
                 os.replace(tmp_path, path)
                 
-            os.remove(self.transaction_file)
+            try:
+                os.remove(self.transaction_file)
+            except FileNotFoundError:
+                pass
         finally:
             self._in_transaction = False
             # self._state = {} # Do not clear state so it can be queried later

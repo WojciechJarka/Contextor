@@ -86,20 +86,31 @@ class FileStateManager:
         self._load()
 
     def _load(self):
+        self.state_id = ""
         if self.state_file.exists():
             try:
                 with open(self.state_file, "r", encoding="utf-8") as f:
                     data = json.load(f)
+                    if "_meta" in data:
+                        self.state_id = data["_meta"].get("state_id", "")
+                        files_data = data.get("files", {})
+                    else:
+                        files_data = data
+                        
                     self._state = {
                         path: FileState.from_dict(fs) 
-                        for path, fs in data.items()
+                        for path, fs in files_data.items()
                     }
             except (json.JSONDecodeError, KeyError):
                 self._state = {}
 
-    def save(self):
+    def save(self, state_id: str = ""):
+        self.state_id = state_id
         with open(self.state_file, "w", encoding="utf-8") as f:
-            json.dump({path: fs.to_dict() for path, fs in self._state.items()}, f, indent=2)
+            json.dump({
+                "_meta": {"state_id": state_id},
+                "files": {path: fs.to_dict() for path, fs in self._state.items()}
+            }, f, indent=2)
 
     def _compute_hash(self, file_path: str) -> str:
         import hashlib
@@ -150,3 +161,46 @@ class FileStateManager:
             self._state[file_path] = current
         elif file_path in self._state:
             del self._state[file_path]
+
+ENGINE_CACHE_SCHEMA_VERSION = "1.0"
+
+def save_engine_state(state: RepositoryAnalysisState, cache_dir: str, state_id: str):
+    import pickle
+    import json
+    state_file = Path(cache_dir) / "engine_state.pkl"
+    meta_file = Path(cache_dir) / "engine_state.meta.json"
+    try:
+        with open(state_file, "wb") as f:
+            pickle.dump(state, f)
+        with open(meta_file, "w", encoding="utf-8") as f:
+            json.dump({
+                "schema_version": ENGINE_CACHE_SCHEMA_VERSION,
+                "state_id": state_id
+            }, f, indent=2)
+    except Exception as e:
+        import sys
+        print(f"Failed to save engine state: {e}", file=sys.stderr)
+
+def load_engine_state(cache_dir: str, expected_state_id: str) -> Optional[RepositoryAnalysisState]:
+    import pickle
+    import json
+    state_file = Path(cache_dir) / "engine_state.pkl"
+    meta_file = Path(cache_dir) / "engine_state.meta.json"
+    
+    if not state_file.exists() or not meta_file.exists():
+        return None
+        
+    try:
+        with open(meta_file, "r", encoding="utf-8") as f:
+            meta = json.load(f)
+            if meta.get("schema_version") != ENGINE_CACHE_SCHEMA_VERSION:
+                return None
+            if expected_state_id and meta.get("state_id") != expected_state_id:
+                return None
+                
+        with open(state_file, "rb") as f:
+            return pickle.load(f)
+    except Exception as e:
+        import sys
+        print(f"Failed to load engine state: {e}", file=sys.stderr)
+        return None

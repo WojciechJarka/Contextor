@@ -66,7 +66,6 @@ def execute_global_pipeline(
     from contextor.core.reporting_engine.dictionary import IndexDictionary
     from .graph_analytics import generate_graph_analytics_report
     from contextor.core.git.repo_state import is_git_repo, get_current_commit
-    from contextor.core.git.diff_engine import diff_reports, detect_regression
     from contextor.core.reporting_layer.git_report import build_global_git_section
 
     all_collisions = collisions if collisions is not None else validate_name_collisions(modules)
@@ -182,37 +181,8 @@ def execute_global_pipeline(
     if repo_state_info["is_git_repo"]:
         repo_state_info["commit_sha"] = get_current_commit(root_path)
 
-    suffix = f"_{datestamp}" if datestamp else ""
-    summary_pattern = os.path.join("output", f"{repo_name}_summary*.json")
-    existing_summaries = glob.glob(summary_pattern)
-    previous_header = None
-    diff_stats = None
-    regression = "UNCHANGED"
-    diff_report = None
-
-    existing_summaries.sort(reverse=True)
-    if existing_summaries:
-        try:
-            with open(existing_summaries[0], "r", encoding="utf-8") as f:
-                old_summary = json.load(f)
-            previous_header = old_summary.get("report_header")
-            diff_stats = diff_reports(old_summary, summary_data)
-            regression = detect_regression(diff_stats)
-            
-            diff_report = {
-                "report_diff": {
-                    "previous_report": os.path.basename(existing_summaries[0]),
-                    "current_report": f"{repo_name}_summary{suffix}.json",
-                    "changes": diff_stats,
-                    "status": regression
-                }
-            }
-        except Exception as e:
-            if log:
-                log(f"[WARNING] Failed to load or diff previous summary: {e}")
-
     git_section = build_global_git_section(
-        report_header, previous_header, diff_stats, repo_state_info, regression
+        report_header, repo_state_info
     )
     summary_data["git_changes"] = git_section
     
@@ -220,8 +190,8 @@ def execute_global_pipeline(
     
     for layer, layer_sliced, layer_status in layer_reports_payloads:
         if layer_status["computation_mode"] == "full":
-            layer_dir = f"{repo_name}_high_risk_layers_{datestamp}" if datestamp else f"{repo_name}_high_risk_layers"
-            write_layer_reports(repo_name, layer, layer_sliced, log=log, datestamp=datestamp, layer_output_dir=layer_dir)
+            layer_dir = f"{repo_name}_high_risk_layers"
+            write_layer_reports(repo_name, layer, layer_sliced, log=log, layer_output_dir=layer_dir)
             
     reports_data = {
         "summary": summary_data,
@@ -231,10 +201,9 @@ def execute_global_pipeline(
         "artifacts_compact": compact_artifact_data,
         "usage_sidecar": usage_sidecar,
         "graph_analytics": graph_analytics_data,
-        "diff_report": diff_report
     }
     
-    write_global_reports(reports_data, repo_name, datestamp=datestamp, log=log)
+    write_global_reports(reports_data, repo_name, log=log)
     
     if log:
         log("All reports have been successfully generated and saved.")
@@ -247,16 +216,17 @@ def execute_global_pipeline(
     for module_id, mod in modules.items():
         if mod.absolute_path:
             state_mgr.update_state(mod.absolute_path)
-    state_mgr.save()
+    # datestamp passed for cache consistency (engine_state <-> file_state)
+    state_mgr.save(datestamp or "")
 
     high_risk_layers = [layer["layer"] for layer in layer_index_data if layer.get("computation_mode") == "full"] if not layer_index else []
 
-    summary_path = f"output/{repo_name}_summary{suffix}.json"
-    structure_path = f"output/{repo_name}_structure{suffix}.json"
-    collisions_path = f"output/{repo_name}_name_collisions{suffix}.json"
-    artifacts_path = f"output/{repo_name}_artifacts{suffix}.json"
-    artifacts_compact_path = f"output/{repo_name}_artifacts_compact{suffix}.json"
-    artifacts_usage_path = f"output/{repo_name}_artifacts_usage{suffix}.json"
+    summary_path = f"output/{repo_name}_summary.json"
+    structure_path = f"output/{repo_name}_structure.json"
+    collisions_path = f"output/{repo_name}_name_collisions.json"
+    artifacts_path = f"output/{repo_name}_artifacts.json"
+    artifacts_compact_path = f"output/{repo_name}_artifacts_compact.json"
+    artifacts_usage_path = f"output/{repo_name}_artifacts_usage.json"
 
     from contextor.core.analysis.state_manager import AnalysisResult
     analysis_result = AnalysisResult(
