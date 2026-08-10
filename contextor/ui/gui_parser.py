@@ -40,52 +40,143 @@ def rewrite_index_to_text(json_path, repo_path, output_dir="output"):
     if str(data.get("_format_version", "1")) != "3":
         raise Exception("This tool requires an indexed compact report (schema v3).")
 
-    mod_reg_path, art_reg_path = find_contextor_registry(repo_path)
+    # TEMPORARY: persistent identity registry location.
+    registry_dir = os.path.join(
+        repo_path,
+        ".contextor",
+        "repositories",
+        os.path.basename(os.path.normpath(repo_path)),
+    )
 
-    with open(mod_reg_path, encoding="utf-8") as f:
-        modules_dict = json.load(f).get("id_to_path", {})
-        
-    with open(art_reg_path, encoding="utf-8") as f:
-        artifacts_dict = json.load(f).get("id_to_path", {})
-    
-    def resolve_mod(m_id):
-        return modules_dict.get(str(m_id), m_id)
+    module_registry_path = os.path.join(
+        registry_dir,
+        "module_registry.json",
+    )
+    artifact_registry_path = os.path.join(
+        registry_dir,
+        "artifact_registry.json",
+    )
+    module_recovery_path = os.path.join(
+        registry_dir,
+        "module_recovery.json",
+    )
+    artifact_recovery_path = os.path.join(
+        registry_dir,
+        "artifact_recovery.json",
+    )
+
+    def load_json(path):
+        if not os.path.exists(path):
+            return {}
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+
+    module_registry = load_json(module_registry_path)
+    artifact_registry = load_json(artifact_registry_path)
+    module_recovery = load_json(module_recovery_path)
+    artifact_recovery = load_json(artifact_recovery_path)
+
+    modules_dict = module_registry.get("id_to_path", {})
+    artifacts_dict = artifact_registry.get("id_to_path", {})
+
+    def resolve_module(module_id):
+        if module_id is None:
+            return module_id
+
+        key = str(module_id)
+
+        # 1. Active registry
+        resolved = modules_dict.get(key)
+        if resolved is not None:
+            return resolved
+
+        # 2. Recovery
+        recovered = module_recovery.get(key)
+        if isinstance(recovered, dict):
+            resolved = recovered.get("path")
+            if resolved is not None:
+                return resolved
+
+        # 3. No index -> preserve original ID
+        return module_id
+
+    def resolve_artifact(artifact_id):
+        if artifact_id is None:
+            return artifact_id
+
+        key = str(artifact_id)
+
+        # 1. Active registry
+        resolved = artifacts_dict.get(key)
+        if resolved is not None:
+            return resolved
+
+        # 2. Recovery
+        recovered = artifact_recovery.get(key)
+        if isinstance(recovered, dict):
+            resolved = recovered.get("name")
+            if resolved is not None:
+                return resolved
+
+        # 3. No index -> preserve original ID
+        return artifact_id
 
     artifacts = data.get("artifacts", {})
     rewritten_artifacts = {}
-    
+
     for a_id, value in artifacts.items():
-        full_name = artifacts_dict.get(a_id, a_id)
-        
+        full_name = resolve_artifact(a_id)
+
         rewritten = dict(value)
-        rewritten["definer_module"] = resolve_mod(value.get("definer_module"))
+
+        rewritten["definer_module"] = resolve_module(
+            value.get("definer_module")
+        )
+
         if "consumer_module_indices" in value:
-            rewritten["consumer_modules"] = [resolve_mod(m) for m in value["consumer_module_indices"]]
+            rewritten["consumer_modules"] = [
+                resolve_module(module_id)
+                for module_id in value["consumer_module_indices"]
+            ]
             del rewritten["consumer_module_indices"]
-            
+
         usage = value.get("usage")
+
         if usage:
             new_usage = {}
+
             for cat, vals in usage.items():
                 if cat == "ambiguous_calls" or cat.endswith("_detail"):
                     new_vals = []
+
                     for v in vals:
                         if isinstance(v, dict):
                             new_v = dict(v)
-                            new_v["module"] = resolve_mod(v.get("module"))
+                            new_v["module"] = resolve_module(
+                                v.get("module")
+                            )
                             new_vals.append(new_v)
                         else:
-                            new_vals.append(resolve_mod(v))
+                            new_vals.append(resolve_module(v))
+
                     new_usage[cat] = new_vals
+
                 else:
-                    new_usage[cat] = [resolve_mod(m) for m in vals]
+                    new_usage[cat] = [
+                        resolve_module(module_id)
+                        for module_id in vals
+                    ]
+
             rewritten["usage"] = new_usage
-            
+
         rewritten_artifacts[full_name] = rewritten
 
     rewritten_data = {
         "_format_version": "3_text",
-        "_format_note": "Rewritten from schema v3 back to text using index dictionary.",
+        "_format_note": (
+            "Rewritten from schema v3 using persistent identity registries "
+            "and recovery dictionaries."
+        ),
         "report_header": data.get("report_header", {}),
         "runtime": data.get("runtime", {}),
         "debug_info": data.get("debug_info", {}),
@@ -94,23 +185,28 @@ def rewrite_index_to_text(json_path, repo_path, output_dir="output"):
         "shared_artifact_count": data.get("shared_artifact_count", 0),
         "artifacts": rewritten_artifacts,
     }
-    
+
     if "shared_artifact_keys" in data:
-        rewritten_data["shared_artifacts"] = [artifacts_dict.get(k, k) for k in data["shared_artifact_keys"]]
+        rewritten_data["shared_artifacts"] = [
+            resolve_artifact(key)
+            for key in data["shared_artifact_keys"]
+        ]
 
     text_dir = os.path.join(output_dir, "text")
     os.makedirs(text_dir, exist_ok=True)
-    
+
     new_name = base_name.replace(".json", "_text.json")
     output_path = os.path.join(text_dir, new_name)
 
     with open(output_path, "w", encoding="utf-8") as f:
-        json.dump(rewritten_data, f, indent=2, ensure_ascii=False)
+        json.dump(
+            rewritten_data,
+            f,
+            indent=2,
+            ensure_ascii=False,
+        )
 
     return output_path
-
-
-
 
 # ==========================================================
 # WARNING: INDEXED DEPENDENCY
@@ -131,12 +227,27 @@ def parse_and_filter_json(json_path, search_term, repo_path, output_dir="output"
     if not artifacts:
         raise Exception("Report must contain 'artifacts'.")
 
-    mod_reg_path, art_reg_path = find_contextor_registry(repo_path)
+    registry_dir = os.path.join(
+        repo_path,
+        ".contextor",
+        "repositories",
+        os.path.basename(os.path.normpath(repo_path)),
+    )
 
-    with open(mod_reg_path, encoding="utf-8") as f:
+    module_registry_path = os.path.join(
+        registry_dir,
+        "module_registry.json",
+    )
+
+    artifact_registry_path = os.path.join(
+        registry_dir,
+        "artifact_registry.json",
+    )
+
+    with open(module_registry_path, encoding="utf-8") as f:
         modules_dict = json.load(f).get("id_to_path", {})
-        
-    with open(art_reg_path, encoding="utf-8") as f:
+
+    with open(artifact_registry_path, encoding="utf-8") as f:
         artifacts_dict = json.load(f).get("id_to_path", {})
 
     is_py_query = search_term.lower().endswith(".py")

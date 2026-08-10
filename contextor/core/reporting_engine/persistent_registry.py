@@ -2,7 +2,6 @@ import os
 import json
 import sys
 import uuid
-import shutil
 import datetime
 from contextlib import contextmanager
 from pathlib import Path
@@ -16,7 +15,12 @@ class PersistentIdentityRegistry:
         self.repo_path = Path(repo_path)
         self.contextor_dir = self.repo_path / ".contextor"
 
-        self.registry_dir = self.contextor_dir
+        # Persistent state is isolated per analyzed repository.
+        self.registry_dir = (
+            self.contextor_dir
+            / "repositories"
+            / self.repo_path.name
+        )
         self.registry_dir.mkdir(parents=True, exist_ok=True)
         self._ensure_gitignore()
 
@@ -40,7 +44,6 @@ class PersistentIdentityRegistry:
         self._in_transaction = False
         self._lock_file_obj = None
 
-        # Recovery if a transaction was interrupted
         self._recover_transaction()
         self._load_all()
 
@@ -130,7 +133,6 @@ class PersistentIdentityRegistry:
             except Exception:
                 pass
 
-        # Default structures
         if "registry" in name:
             return {
                 "schema_version": self.SCHEMA_VERSION,
@@ -164,7 +166,6 @@ class PersistentIdentityRegistry:
                 )
 
                 if tx.get("status") == "committing":
-                    # Re-apply renames
                     for file_key in tx.get("files", []):
                         path = self.files.get(file_key)
 
@@ -197,9 +198,6 @@ class PersistentIdentityRegistry:
 
             yield
 
-            # Commit phase
-            tmp_files = []
-
             for name, path in self.files.items():
                 tmp_path = path.with_suffix(".json.tmp")
                 data_str = json.dumps(
@@ -212,12 +210,9 @@ class PersistentIdentityRegistry:
                     encoding="utf-8",
                 )
 
-                # fsync
                 with open(tmp_path, "a") as f:
                     f.flush()
                     os.fsync(f.fileno())
-
-                tmp_files.append(name)
 
             tx_data = {
                 "transaction_id": f"tx_{uuid.uuid4().hex[:8]}",
@@ -234,7 +229,6 @@ class PersistentIdentityRegistry:
                 f.flush()
                 os.fsync(f.fileno())
 
-            # Atomic renames in exact order
             for name in list(self.files.keys()):
                 path = self.files[name]
                 tmp_path = path.with_suffix(".json.tmp")
@@ -247,14 +241,12 @@ class PersistentIdentityRegistry:
 
         finally:
             self._in_transaction = False
-            # self._state = {} # Do not clear state so it can be queried later
             self._unlock()
 
     # ---- Logic Methods ----
 
     def _allocate_slot(self, kind: str) -> str:
-        """Finds the smallest available slot, updates generation, returns ID."""
-
+        """Find the smallest available slot, update generation, return ID."""
         registry = self._state[f"{kind}_registry"]
         slots = self._state[f"{kind}_slots"]
 
@@ -269,7 +261,6 @@ class PersistentIdentityRegistry:
             used_slots.add(int(slot_part))
 
         slot = 1
-
         while slot in used_slots:
             slot += 1
 
@@ -287,11 +278,9 @@ class PersistentIdentityRegistry:
             return obj_id
 
         if self._in_transaction:
-            # Auto-allocate
             new_id = self._allocate_slot("module")
             self._state["module_registry"]["path_to_id"][path] = new_id
             self._state["module_registry"]["id_to_path"][new_id] = path
-
             return new_id
 
         return None
@@ -306,7 +295,6 @@ class PersistentIdentityRegistry:
             new_id = self._allocate_slot("artifact")
             self._state["artifact_registry"]["path_to_id"][name] = new_id
             self._state["artifact_registry"]["id_to_path"][new_id] = name
-
             return new_id
 
         return None
@@ -317,13 +305,11 @@ class PersistentIdentityRegistry:
         )
 
     def get_module_path(self, obj_id: str) -> Optional[str]:
-        # Active
         path = self._state["module_registry"]["id_to_path"].get(obj_id)
 
         if path:
             return path
 
-        # Recovery
         rec = self._state["module_recovery"].get(obj_id)
 
         if rec:
@@ -332,13 +318,11 @@ class PersistentIdentityRegistry:
         return None
 
     def get_artifact_name(self, obj_id: str) -> Optional[str]:
-        # Active
         name = self._state["artifact_registry"]["id_to_path"].get(obj_id)
 
         if name:
             return name
 
-        # Recovery
         rec = self._state["artifact_recovery"].get(obj_id)
 
         if rec:
@@ -351,8 +335,7 @@ class PersistentIdentityRegistry:
         current_modules: Set[str],
         current_artifacts: Set[str],
     ):
-        """Syncs the active workspace items, handles orphans, and restores if needed."""
-
+        """Sync active workspace items, handle orphans, and restore if needed."""
         self._sync_kind("module", current_modules)
         self._sync_kind("artifact", current_artifacts)
 
@@ -368,12 +351,10 @@ class PersistentIdentityRegistry:
             registry["path_to_id"].keys()
         )
 
-        # 1. Check for missing items (orphans)
         for path in active_paths:
             if path not in current_items:
                 obj_id = registry["path_to_id"][path]
 
-                # Move to recovery
                 recovery[obj_id] = {
                     "type": kind,
                     "path" if kind == "module" else "name": path,
@@ -381,14 +362,11 @@ class PersistentIdentityRegistry:
                     "status": "orphan",
                 }
 
-                # Delete from registry
                 del registry["path_to_id"][path]
                 del registry["id_to_path"][obj_id]
 
-        # 2. Add new items / Restore
         for path in current_items:
             if path not in registry["path_to_id"]:
-                # Check recovery to restore (exact path match)
                 restored_id = None
 
                 for rec_id, rec_data in list(recovery.items()):
@@ -406,8 +384,6 @@ class PersistentIdentityRegistry:
                 if restored_id:
                     registry["path_to_id"][path] = restored_id
                     registry["id_to_path"][restored_id] = path
-
-                    # Update status in recovery? Actually, remove from recovery since it's active again
                     del recovery[restored_id]
 
                 else:
@@ -422,7 +398,6 @@ class PersistentIdentityRegistry:
     ):
         refs = self._state["output_references"]
 
-        # Unregister previous if overwriting
         self.unregister_report_references(report_name)
 
         refs["report_to_ids"][report_name] = list(set(used_ids))
@@ -475,7 +450,6 @@ class PersistentIdentityRegistry:
     ):
         recovery = self._state[f"{kind}_recovery"]
 
-        # Calculate current size (approximate using json.dumps)
         current_size = len(
             json.dumps(recovery).encode("utf-8")
         )
@@ -485,7 +459,6 @@ class PersistentIdentityRegistry:
 
         refs = self._state["output_references"]["id_to_reports"]
 
-        # Sort by removed_at ascending (oldest first)
         def get_date(item):
             return item[1].get(
                 "removed_at",
@@ -503,11 +476,10 @@ class PersistentIdentityRegistry:
 
         for obj_id, _ in sorted_orphans:
             if obj_id in refs and len(refs[obj_id]) > 0:
-                continue  # KEEP! Still referenced in output
+                continue
 
             del recovery[obj_id]
 
-            # Check size again
             current_size = len(
                 json.dumps(recovery).encode("utf-8")
             )
