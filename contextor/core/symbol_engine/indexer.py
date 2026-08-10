@@ -272,7 +272,7 @@ def index_repository(
             if res["error"]:
                 skipped.append(
                     SkippedFile(
-                        path=str(Path(res["path"]).relative_to(root_path)),
+                        path=res["path"],
                         reason=res["error"],
                     )
                 )

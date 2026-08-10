@@ -1,4 +1,4 @@
-```python
+
 import json
 import os
 
@@ -175,4 +175,3 @@ def test_write_global_reports_uses_canonical_names(tmp_path, monkeypatch):
     assert not os.path.exists(
         os.path.join(output_dir, "test_repo_summary_20260808.json")
     )
-```
