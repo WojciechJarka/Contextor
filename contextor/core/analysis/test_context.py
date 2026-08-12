@@ -42,7 +42,10 @@ def _module_short_name(module_id: str) -> str:
 TEST_DIR_NAMES = ("tests", "test")
 
 
-def discover_test_dirs(root_path: str) -> dict:
+def discover_test_dirs(
+    root_path: str,
+    allowed_python_paths: list[str] | None = None,
+) -> dict:
     """
     Locates every test directory in the repository and lists its files.
 
@@ -55,10 +58,35 @@ def discover_test_dirs(root_path: str) -> dict:
     find_test_files() answers from memory instead of issuing two
     exists() probes per directory per module.
 
+    When ``allowed_python_paths`` is provided, discovery is derived only from
+    that already-filtered AST index. This keeps test coverage aligned with
+    per-analysis excludes and avoids a second repository walk.
+
     Returns {directory: frozenset(file names)}.
     """
 
-    root = Path(root_path)
+    root = Path(root_path).resolve()
+
+    if allowed_python_paths is not None:
+        listings: dict[Path, set[str]] = {root: set()}
+        for item in allowed_python_paths:
+            path = Path(item)
+            if not path.is_absolute():
+                path = root / path
+            path = path.resolve()
+            try:
+                path.relative_to(root)
+            except ValueError:
+                continue
+            if path.suffix != ".py":
+                continue
+            directory = path.parent
+            if directory == root or directory.name in TEST_DIR_NAMES:
+                listings.setdefault(directory, set()).add(path.name)
+        return {
+            directory: frozenset(file_names)
+            for directory, file_names in listings.items()
+        }
 
     listings: dict = {}
 
@@ -235,6 +263,7 @@ def build_test_context(
     root_path: str,
     public_symbols: list,
     test_dirs: dict | None = None,
+    allowed_python_paths: list[str] | None = None,
 ) -> dict:
     """
     Link: discovery + symbol matching.
@@ -254,6 +283,10 @@ def build_test_context(
             "untested_public_symbols": list(public_symbols or []),
         }
 
+    if test_dirs is None and allowed_python_paths is not None:
+        test_dirs = discover_test_dirs(
+            root_path, allowed_python_paths=allowed_python_paths
+        )
     test_files = find_test_files(module_id, root_path, test_dirs=test_dirs)
     tested = extract_tested_symbols(test_files, public_symbols or [])
     untested = sorted(s for s in (public_symbols or []) if s not in tested)

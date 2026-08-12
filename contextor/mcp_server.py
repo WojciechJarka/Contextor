@@ -1,4 +1,4 @@
-"""
+r"""
 Contextor MCP Server
 ====================
 
@@ -120,6 +120,54 @@ import threading
 from pathlib import Path
 from typing import Any
 
+
+def _is_virtual_environment() -> bool:
+    """Return whether this interpreter is isolated by venv/virtualenv."""
+
+    return bool(
+        getattr(sys, "real_prefix", None)
+        or sys.prefix != getattr(sys, "base_prefix", sys.prefix)
+    )
+
+
+def _project_venv_python() -> Path:
+    """Return the repository-local interpreter expected to host MCP."""
+
+    venv_dir = Path(__file__).resolve().parents[1] / ".venv"
+    if sys.platform == "win32":
+        return venv_dir / "Scripts" / "python.exe"
+    return venv_dir / "bin" / "python"
+
+
+def _ensure_virtual_environment() -> None:
+    """Re-exec MCP in the project venv before importing its dependencies.
+
+    LLM/client use: MCP configuration may safely invoke any Python that can
+    import this bootstrap module. Outside a virtual environment the process is
+    atomically replaced by ``.venv`` Python, preserving the JSON-RPC stdio
+    streams. A missing project venv is a startup error rather than permission to
+    fall back to globally installed, potentially incompatible dependencies.
+    """
+
+    if _is_virtual_environment():
+        return
+
+    interpreter = _project_venv_python()
+    if not interpreter.is_file():
+        raise RuntimeError(
+            "Contextor MCP must run in a virtual environment, but the "
+            f"project interpreter was not found: {interpreter}"
+        )
+
+    os.execv(
+        str(interpreter),
+        [str(interpreter), "-u", "-m", "contextor.mcp_server", *sys.argv[1:]],
+    )
+    raise RuntimeError("Contextor MCP virtual-environment re-exec returned unexpectedly.")
+
+
+_ensure_virtual_environment()
+
 # Suppress all warnings (like AuthlibDeprecationWarning) to prevent JSON-RPC stream corruption
 warnings.filterwarnings("ignore")
 
@@ -196,6 +244,7 @@ async def _run_analysis_worker(
     operation: str,
     root: Path,
     target: Path | None = None,
+    exclude_paths: list[str] | None = None,
 ) -> None:
     """Run analysis in-process without blocking the FastMCP event loop.
 
@@ -216,17 +265,25 @@ async def _run_analysis_worker(
             try:
                 if operation == "project":
                     _, result = ContextorFacade.analyze_project(
-                        str(root), log=_stderr_log
+                        str(root),
+                        log=_stderr_log,
+                        additional_excludes=exclude_paths,
                     )
                     if result is None:
                         raise RuntimeError("Analysis returned no canonical state.")
                 elif operation == "layer":
                     ContextorFacade.analyze_layer(
-                        str(root), str(target), log=_stderr_log
+                        str(root),
+                        str(target),
+                        log=_stderr_log,
+                        additional_excludes=exclude_paths,
                     )
                 elif operation == "single_file":
                     ContextorFacade.analyze_single_file(
-                        str(target), str(root), log=_stderr_log
+                        str(target),
+                        str(root),
+                        log=_stderr_log,
+                        additional_excludes=exclude_paths,
                     )
                 else:
                     raise ValueError(f"Unsupported analysis operation: {operation}")
@@ -398,16 +455,28 @@ def _resolve_cluster_ids(
 # ==========================================================
 
 @mcp.tool()
-async def analyze_project(repo_path: str) -> str:
+async def analyze_project(
+    repo_path: str, exclude_paths: list[str] | None = None
+) -> str:
     """
     Triggers a global architectural analysis on the specified repository.
     Generates all reports in the 'output' directory.
+
+    ``exclude_paths`` lets an LLM narrow this run without changing the saved
+    GUI exclude configuration. Use repository-relative Python files or
+    directory prefixes, for example ``["tests", "legacy/adapter.py"]``.
+    Contextor already ignores non-Python files. Per-run and GUI excludes are
+    combined before AST indexing.
+
+    LLM use: choose this for a repository-wide baseline. Exclude ``tests``
+    when production architecture is the only concern; keep it when later
+    queries need test coverage or ``tests_covering`` evidence.
     """
     root = Path(repo_path).expanduser().resolve()
     if not root.is_dir():
         return f"Error: Repository path '{root}' does not exist."
     try:
-        await _run_analysis_worker("project", root)
+        await _run_analysis_worker("project", root, exclude_paths=exclude_paths)
         _live_engines.pop(str(root), None)
         if _get_or_init_engine(root) is None:
             raise RuntimeError("Analysis completed but canonical state could not be loaded.")
@@ -417,24 +486,51 @@ async def analyze_project(repo_path: str) -> str:
         return f"Error during analysis: {str(e)}"
 
 @mcp.tool()
-async def analyze_layer(repo_path: str, layer_name: str) -> str:
+async def analyze_layer(
+    repo_path: str,
+    layer_name: str,
+    exclude_paths: list[str] | None = None,
+) -> str:
     """
     Triggers architectural analysis isolated to a specific layer (directory).
+
+    ``exclude_paths`` contains repository-relative Python files or directory
+    prefixes to omit from this run. It is merged with, but never persisted to,
+    the GUI exclude list. Non-Python files are ignored automatically.
+
+    LLM use: prefer this over a global run when the decision is confined to one
+    package. Exclude unrelated Python trees to reduce report size, but retain
+    tests when boundary or coverage evidence matters.
     """
     root = Path(repo_path).expanduser().resolve()
     layer = root / layer_name
     if not layer.is_dir():
         return f"Error: Layer path '{layer}' does not exist."
     try:
-        await _run_analysis_worker("layer", root, layer)
+        await _run_analysis_worker(
+            "layer", root, layer, exclude_paths=exclude_paths
+        )
         return f"Layer analysis complete for '{layer_name}'."
     except Exception as e:
         return f"Error during layer analysis: {str(e)}"
 
 @mcp.tool()
-async def analyze_single_file(repo_path: str, file_path: str) -> str:
+async def analyze_single_file(
+    repo_path: str,
+    file_path: str,
+    exclude_paths: list[str] | None = None,
+) -> str:
     """
     Triggers deep architectural analysis on a single Python file.
+
+    ``exclude_paths`` narrows the surrounding project context for this run.
+    Entries are repository-relative Python files or directory prefixes and are
+    combined with the saved GUI excludes without modifying them. Do not exclude
+    the target file itself.
+
+    LLM use: choose this for a focused symbol/API decision. Exclude unrelated
+    packages to save tokens; retain relevant tests when test discovery is part
+    of the question.
     """
     root = Path(repo_path).expanduser().resolve()
     target_file = Path(file_path).expanduser()
@@ -444,7 +540,9 @@ async def analyze_single_file(repo_path: str, file_path: str) -> str:
     if not target_file.is_file():
         return f"Error: Target file '{target_file}' does not exist."
     try:
-        await _run_analysis_worker("single_file", root, target_file)
+        await _run_analysis_worker(
+            "single_file", root, target_file, exclude_paths=exclude_paths
+        )
         return f"Single-file analysis complete for {target_file.name}."
     except Exception as e:
         return f"Error during single-file analysis: {str(e)}"
@@ -456,6 +554,11 @@ def update_file(repo_path: str, file_path: str) -> str:
     [OPTIMIZED] Incremental architectural update for a modified file.
     Updates the canonical state and graph structure in real-time.
     Requires `analyze_project` to have been run at least once during this session.
+
+    LLM use: call this after each edit instead of rebuilding every report. Read
+    ``semantic_diff`` for added/removed symbols and signature changes, then use
+    normal code diff for line-level meaning. Body-only changes are not claimed
+    as semantic symbol changes, and consumption/global metrics may be deferred.
     """
     root = Path(repo_path).expanduser().resolve()
     target_file = Path(file_path).expanduser()
@@ -617,6 +720,9 @@ def get_artifact_blast_radius(repo_path: str, artifact_name: str) -> str:
     [OPTIMIZED] Resolves direct, evidence-backed consumers of an artifact.
     Uses the current compact artifact report and reports its evidence scope;
     it does not claim that dynamic Python usage can be proven exact.
+
+    LLM use: call before changing or removing a public symbol. Treat consumers
+    as confirmed static evidence, not proof that dynamic Python has no callers.
     """
     root = Path(repo_path).expanduser().resolve()
     repo_name = root.name
@@ -671,6 +777,10 @@ def search_artifacts(
     Use this to extract arbitrary context about any symbol from the current architectural state.
     Exact symbol matches are preferred. ``limit``, ``total_matches`` and
     ``truncated`` bound broad searches without hiding their cardinality.
+
+    LLM use: start here when only a partial symbol/module name is known. Keep
+    the default limit, inspect ``truncated``, and narrow the term before raising
+    the limit to avoid loading irrelevant canonical state.
     """
     root = Path(repo_path).expanduser().resolve()
     repo_name = root.name
@@ -747,6 +857,9 @@ def get_file_edit_context(
     context window. Every bounded collection includes ``*_total`` and
     ``*_truncated`` metadata. Increase ``max_items`` only when the totals show
     that the omitted tail is relevant to the current decision.
+
+    LLM use: this is the preferred one-call briefing immediately before editing
+    a file. It complements, but does not replace, the source and code diff.
     """
     root = Path(repo_path).expanduser().resolve()
     repo_name = root.name
@@ -908,6 +1021,9 @@ def get_layer_isolation(
     ``max_clusters`` and ``max_boundary_violations`` bound verbose evidence.
     The response always retains full counts and explicit ``*_truncated`` flags,
     so an LLM can request a larger limit without loading everything by default.
+
+    LLM use: call before moving modules or changing layer boundaries. Resolve a
+    truncated tail only when the planned edit touches that omitted evidence.
     """
     root = Path(repo_path).expanduser().resolve()
     repo_name = root.name
@@ -1090,6 +1206,10 @@ def query_canonical_state_bounded(
     and ``truncated`` so an LLM can refine the expression or raise ``limit``
     only when omitted items matter. Select narrow scalar fields in the
     expression when individual nested values may themselves be large.
+
+    LLM use: use this as an escape hatch for questions not covered by a
+    dedicated tool. Prefer projected scalar fields and a small limit; it is a
+    structural query, not a substitute for reading the affected source.
     """
     raw = query_canonical_state.fn(
         repo_path=repo_path,
@@ -1117,6 +1237,9 @@ def lookup_index_entries(repo_path: str, ids: list[str]) -> str:
 
     Accepts both module IDs (e.g. '124/1') and artifact IDs (e.g. 'A35/1').
     Returns null for IDs not found in either registry.
+
+    LLM use: pass only IDs visible in the current result instead of loading the
+    full project dictionary. Null means unresolved/stale and must stay explicit.
     """
     root = Path(repo_path).expanduser().resolve()
     try:
@@ -1156,6 +1279,9 @@ def get_artifacts_for_module(
     result. ``total_artifact_count`` reports matches before limiting and
     ``truncated`` tells the LLM whether a narrower follow-up query is useful.
     Live state supplements the compact report with zero-consumer symbols.
+
+    LLM use: call before changing one module's API. Disable consumers for the
+    cheapest signature inventory; enable them only for impact analysis.
     """
     root = Path(repo_path).expanduser().resolve()
     repo_name = root.name
@@ -1300,6 +1426,9 @@ def lookup_artifact_by_symbol(
     Returns defining module, kind, consumer count, and consumer module list.
     Exact matches are preferred over partial matches. ``limit`` bounds the
     response while ``total_matches`` and ``truncated`` describe omitted data.
+
+    LLM use: choose this when no live session is available and a saved report is
+    sufficient. Narrow ambiguous names before increasing ``limit``.
     """
     root = Path(repo_path).expanduser().resolve()
     repo_name = root.name

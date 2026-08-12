@@ -5,9 +5,12 @@ End-to-end checks over a small synthetic repository.
 import ast
 from pathlib import Path
 
+import pytest
+
+from contextor.core.api import facade
+from contextor.core.api.facade import ContextorFacade
 from contextor.core.graph.cycles import detect_cycles
 from contextor.core.graph.graph import build_graph
-from contextor.core.api.facade import ContextorFacade
 from contextor.core.symbol_engine.indexer import build_index
 from contextor.core.validator.collisions import validate_name_collisions
 
@@ -23,6 +26,14 @@ def test_index_finds_every_source_file(sample_repo, isolated_dirs):
         "ui.__init__",
         "ui.app",
     }
+
+
+def test_index_excludes_selected_python_subtree(sample_repo, isolated_dirs):
+    modules = build_index(str(sample_repo), excludes=["core"])
+
+    assert modules
+    assert all(not module_name.startswith("core.") for module_name in modules)
+    assert "ui.app" in modules
 
 
 def test_index_never_writes_into_the_analyzed_repository(sample_repo, isolated_dirs):
@@ -125,6 +136,40 @@ def test_first_global_run_writes_canonical_and_timestamped_snapshot(
     assert len(snapshots) == 1
     assert (snapshots[0] / f"{repo_name}_summary.json").is_file()
     assert (snapshots[0] / f"{repo_name}_summary.md").is_file()
+
+
+def test_per_analysis_excludes_merge_with_gui_state_without_persisting(
+    tmp_path, monkeypatch
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    saved = ["generated", "pkg/ignored.py"]
+    monkeypatch.setattr(
+        facade,
+        "_load_excludes_for_repo",
+        lambda _repo: (saved.copy(), {".git", ".venv"}),
+    )
+
+    excludes, ignored_dirs = facade._analysis_filters(
+        str(repo), ["tests", "pkg\\ignored.py", str(repo / "legacy")]
+    )
+
+    assert excludes == ["generated", "pkg/ignored.py", "tests", "legacy"]
+    assert ignored_dirs == {".git", ".venv"}
+    assert saved == ["generated", "pkg/ignored.py"]
+
+
+def test_per_analysis_excludes_reject_paths_outside_repository(
+    tmp_path, monkeypatch
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    monkeypatch.setattr(
+        facade, "_load_excludes_for_repo", lambda _repo: ([], set())
+    )
+
+    with pytest.raises(ValueError, match="outside the repository"):
+        facade._analysis_filters(str(repo), [str(tmp_path / "other")])
 
 
 def test_layer_report_writers_receive_datestamp():

@@ -14,6 +14,9 @@ class TestContextBuilder:
                 payload.module_id,
                 payload.root_path,
                 public_api,
+                allowed_python_paths=[
+                    module.path for module in payload.modules.values()
+                ],
             )
         }
 

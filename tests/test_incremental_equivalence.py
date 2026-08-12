@@ -111,6 +111,58 @@ def test_incremental_new_file_delta_imports_are_json_serializable(tmp_path):
     assert result.delta.imports_added == ["pathlib"]
     __import__("json").dumps(result.delta.imports_added)
 
+
+def test_incremental_update_synchronizes_qualified_artifact_registry(tmp_path):
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    target = repo_dir / "a.py"
+    target.write_text("def foo():\n    return 1\n", encoding="utf-8")
+
+    registry = PersistentIdentityRegistry(str(repo_dir))
+    state = bootstrap_state(repo_dir, registry)
+    with registry.transaction():
+        registry.sync_with_workspace(
+            {"a"},
+            {"a::foo", "b::bar"},
+        )
+    foo_id = registry.get_artifact_id("a::foo")
+    bar_id = registry.get_artifact_id("b::bar")
+    engine = init_engine(tmp_path, repo_dir, state, registry)
+
+    target.write_text("def foo():\n    return 2\n", encoding="utf-8")
+    result = engine.update_file(str(target))
+
+    assert result.artifact_consumption_state == "deferred"
+    assert registry.get_artifact_id("a::foo") == foo_id
+    assert registry.get_artifact_id("b::bar") is None
+    assert registry.get_artifact_name(bar_id) == "b::bar"
+    assert registry.get_artifact_id("foo") is None
+    assert registry.get_artifact_id("bar") is None
+
+
+def test_incremental_update_allocates_qualified_identity_for_new_symbol(tmp_path):
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    target = repo_dir / "a.py"
+    target.write_text("def existing():\n    return 1\n", encoding="utf-8")
+
+    registry = PersistentIdentityRegistry(str(repo_dir))
+    state = bootstrap_state(repo_dir, registry)
+    with registry.transaction():
+        registry.sync_with_workspace({"a"}, {"a::existing"})
+    existing_id = registry.get_artifact_id("a::existing")
+    engine = init_engine(tmp_path, repo_dir, state, registry)
+
+    target.write_text(
+        "def existing():\n    return 2\n\ndef added():\n    return 3\n",
+        encoding="utf-8",
+    )
+    engine.update_file(str(target))
+
+    assert registry.get_artifact_id("a::existing") == existing_id
+    assert registry.get_artifact_id("a::added") is not None
+    assert registry.get_artifact_id("added") is None
+
 def test_incremental_delete_imported_module(tmp_path):
     repo_dir = tmp_path / "repo"
     repo_dir.mkdir()

@@ -8,6 +8,7 @@ discarded by a bare `except Exception: pass`.
 """
 
 from contextor.core.reporting_layer.artifact_usage_report import (
+    collect_qualified_artifact_identities,
     generate_artifact_usage_report,
 )
 from contextor.core.symbol_engine.indexer import build_index
@@ -48,6 +49,34 @@ def test_test_traceability_covers_every_module(sample_repo, isolated_dirs):
     report = generate_artifact_usage_report(modules, str(sample_repo))
 
     assert set(report["test_traceability"]) == set(modules)
+
+
+def test_all_defined_symbols_receive_collision_free_qualified_identities(tmp_path):
+    identities = collect_qualified_artifact_identities({
+        "pkg.first": {"own_symbols": {"run", "unused"}},
+        "pkg.second": {"own_symbols": {"run"}},
+    })
+
+    from contextor.core.reporting_engine.persistent_registry import (
+        PersistentIdentityRegistry,
+    )
+
+    registry = PersistentIdentityRegistry(str(tmp_path))
+    with registry.transaction():
+        registry.sync_with_workspace(
+            {"pkg.first", "pkg.second"}, identities
+        )
+
+    assert identities == {
+        "pkg.first::run",
+        "pkg.first::unused",
+        "pkg.second::run",
+    }
+    assert registry.get_artifact_id("pkg.first::run") != registry.get_artifact_id(
+        "pkg.second::run"
+    )
+    assert registry.get_artifact_id("pkg.first::unused") is not None
+    assert registry.get_artifact_id("run") is None
 
 from contextor.core.reporting_layer.artifact_usage_report_compact import compact_artifact_report
 

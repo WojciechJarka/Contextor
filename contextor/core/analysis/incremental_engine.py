@@ -222,18 +222,19 @@ class IncrementalAnalysisEngine:
 
         # 4. Fast set logic for orphans/re-allocations
         all_modules = set(new_modules.keys())
-        all_artifacts_set = set()
-        for mod_id, mod_artifacts_data in new_artifacts.items():
-            symbols = mod_artifacts_data.get("symbols", {})
-            all_artifacts_set.update(symbols.get("functions", []))
-            all_artifacts_set.update(symbols.get("classes", []))
-            all_artifacts_set.update(symbols.get("methods", []))
-        
+        from contextor.core.reporting_layer.artifact_usage_report import (
+            collect_qualified_artifact_identities,
+        )
+
+        current_artifacts = collect_qualified_artifact_identities(new_artifacts)
         # 5. Commit Boundary
         # Transaction context handles ONLY the write to the disk.
         # If any part of it fails (e.g. disk full), the with block will raise OSError.
         with self.registry.transaction():
-            self.registry.sync_with_workspace(all_modules, all_artifacts_set)
+            # Consumer evidence is deferred, but symbol definitions are fresh.
+            # Synchronize every qualified definition so new symbols receive an
+            # ID immediately and deleted ones follow the normal recovery path.
+            self.registry.sync_with_workspace(all_modules, current_artifacts)
             
         # ATOMIC RAM SWAP (Safe from exceptions because it runs only if transaction() exits cleanly)
         self.state.modules = new_modules

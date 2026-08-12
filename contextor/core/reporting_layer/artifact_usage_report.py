@@ -330,6 +330,16 @@ def build_artifact_index(
     )
 
 
+def collect_qualified_artifact_identities(module_artifacts: dict) -> set[str]:
+    """Return stable identities for every symbol defined by the repository."""
+    return {
+        f"{module_id}::{symbol}"
+        for module_id, data in module_artifacts.items()
+        for symbol in data.get("own_symbols", set())
+        if isinstance(symbol, str) and symbol
+    }
+
+
 # ==========================================================
 # SHARED ARTIFACTS
 # ==========================================================
@@ -729,7 +739,8 @@ def generate_artifact_usage_report(
     # Test directories are repository-level information and
     # therefore discovered once.
     test_dirs = discover_test_dirs(
-        root_path
+        root_path,
+        allowed_python_paths=[module.path for module in modules.values()],
     )
 
     for module_id in modules:

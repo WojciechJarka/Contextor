@@ -1,15 +1,120 @@
 """Regression tests for MCP subprocess handling and single-file reports."""
 
+import ast
 import asyncio
+import inspect
 import json
 import os
 import subprocess
 from contextlib import nullcontext
 from pathlib import Path
 
+import pytest
+
 from contextor import mcp_process_registry, mcp_server
 from contextor.core.analysis import git_context
 from contextor.core.api.facade import ContextorFacade
+
+
+def test_new_mcp_tools_document_their_llm_usage():
+    server_path = Path(mcp_server.__file__)
+    tree = ast.parse(server_path.read_text(encoding="utf-8"))
+    expected = {
+        "analyze_project",
+        "analyze_layer",
+        "analyze_single_file",
+        "update_file",
+        "get_artifact_blast_radius",
+        "search_artifacts",
+        "get_file_edit_context",
+        "get_layer_isolation",
+        "query_canonical_state_bounded",
+        "lookup_index_entries",
+        "get_artifacts_for_module",
+        "lookup_artifact_by_symbol",
+    }
+    docs = {
+        node.name: ast.get_docstring(node) or ""
+        for node in tree.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and node.name in expected
+    }
+
+    assert set(docs) == expected
+    assert all("LLM use:" in doc for doc in docs.values())
+    assert "exclude_paths" in docs["analyze_project"]
+    assert "tests_covering" in docs["analyze_project"]
+    assert "code diff" in docs["update_file"]
+
+
+def test_fastmcp_schema_exposes_excludes_and_llm_guidance():
+    signature = inspect.signature(mcp_server.analyze_project.fn)
+
+    assert "exclude_paths" in signature.parameters
+    assert "LLM use:" in mcp_server.analyze_project.description
+    assert "tests_covering" in mcp_server.analyze_project.description
+    assert "LLM use:" in mcp_server.update_file.description
+    assert "code diff" in mcp_server.update_file.description
+
+
+def test_mcp_bootstrap_keeps_an_existing_virtual_environment(monkeypatch):
+    monkeypatch.setattr(mcp_server.sys, "prefix", "C:/repo/.venv")
+    monkeypatch.setattr(mcp_server.sys, "base_prefix", "C:/Python")
+    exec_calls = []
+    monkeypatch.setattr(
+        mcp_server.os, "execv", lambda *args: exec_calls.append(args)
+    )
+
+    mcp_server._ensure_virtual_environment()
+
+    assert exec_calls == []
+
+
+def test_mcp_bootstrap_reexecs_outside_venv_with_preserved_stdio(monkeypatch):
+    interpreter = Path("C:/repo/.venv/Scripts/python.exe")
+    monkeypatch.setattr(mcp_server.sys, "prefix", "C:/Python")
+    monkeypatch.setattr(mcp_server.sys, "base_prefix", "C:/Python")
+    monkeypatch.setattr(mcp_server.sys, "argv", ["contextor-mcp", "--flag"])
+    monkeypatch.setattr(mcp_server, "_project_venv_python", lambda: interpreter)
+    monkeypatch.setattr(Path, "is_file", lambda self: self == interpreter)
+
+    class ReexecCalled(Exception):
+        pass
+
+    calls = []
+
+    def fake_execv(executable, argv):
+        calls.append((executable, argv))
+        raise ReexecCalled
+
+    monkeypatch.setattr(mcp_server.os, "execv", fake_execv)
+
+    with pytest.raises(ReexecCalled):
+        mcp_server._ensure_virtual_environment()
+
+    assert calls == [
+        (
+            str(interpreter),
+            [
+                str(interpreter),
+                "-u",
+                "-m",
+                "contextor.mcp_server",
+                "--flag",
+            ],
+        )
+    ]
+
+
+def test_mcp_bootstrap_fails_when_project_venv_is_missing(monkeypatch):
+    interpreter = Path("C:/repo/.venv/Scripts/python.exe")
+    monkeypatch.setattr(mcp_server.sys, "prefix", "C:/Python")
+    monkeypatch.setattr(mcp_server.sys, "base_prefix", "C:/Python")
+    monkeypatch.setattr(mcp_server, "_project_venv_python", lambda: interpreter)
+    monkeypatch.setattr(Path, "is_file", lambda _self: False)
+
+    with pytest.raises(RuntimeError, match="must run in a virtual environment"):
+        mcp_server._ensure_virtual_environment()
 
 
 def test_git_never_inherits_mcp_stdin_and_unregisters_after_exit(tmp_path, monkeypatch):
@@ -158,8 +263,10 @@ def test_mcp_single_file_worker_uses_registry_and_restores_environment(
     target.write_text("VALUE = 1\n", encoding="utf-8")
     calls = []
 
-    def fake_analysis(file_path, repo_path, log=None):
-        calls.append((file_path, repo_path, log))
+    def fake_analysis(
+        file_path, repo_path, log=None, additional_excludes=None
+    ):
+        calls.append((file_path, repo_path, log, additional_excludes))
         assert os.environ["CONTEXTOR_DISABLE_PROCESS_POOL"] == "1"
         assert os.environ["CONTEXTOR_MCP_PROCESS_REGISTRY"] == str(
             mcp_process_registry.registry_dir(repo)
@@ -172,10 +279,34 @@ def test_mcp_single_file_worker_uses_registry_and_restores_environment(
 
     asyncio.run(mcp_server._run_analysis_worker("single_file", repo, target))
 
-    assert calls == [(str(target), str(repo), mcp_server._stderr_log)]
+    assert calls == [(str(target), str(repo), mcp_server._stderr_log, None)]
     assert os.environ["CONTEXTOR_CACHE_DIR"] == "original-cache"
     assert "CONTEXTOR_DISABLE_PROCESS_POOL" not in os.environ
     assert "CONTEXTOR_MCP_PROCESS_REGISTRY" not in os.environ
+
+
+def test_mcp_analysis_worker_forwards_per_run_excludes(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    calls = []
+
+    def fake_analysis(
+        repo_path, log=None, progress_callback=None, additional_excludes=None
+    ):
+        calls.append((repo_path, additional_excludes))
+        return [], object()
+
+    monkeypatch.setattr(ContextorFacade, "analyze_project", fake_analysis)
+
+    asyncio.run(
+        mcp_server._run_analysis_worker(
+            "project", repo, exclude_paths=["tests", "legacy/adapter.py"]
+        )
+    )
+
+    assert calls == [
+        (str(repo), ["tests", "legacy/adapter.py"])
+    ]
 
 
 def test_single_file_report_is_written_end_to_end(sample_repo, isolated_dirs):

@@ -11,6 +11,7 @@ venv/
 
 # Contextor generated output
 output/
+output_baseline_pre_fix/
 *.tmp
 
 # Contextor local state (legacy in-tree locations; current state lives

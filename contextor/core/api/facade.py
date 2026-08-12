@@ -126,6 +126,50 @@ def _load_excludes_for_repo(repo_path: str) -> tuple[list, set]:
     return [], set(DEFAULT_IGNORED_DIRS)
 
 
+def _analysis_filters(
+    repo_path: str, additional_excludes: list[str] | None = None
+) -> tuple[list[str], set]:
+    """Combine saved GUI excludes with safe, per-analysis path exclusions.
+
+    ``additional_excludes`` is intentionally ephemeral: MCP and other API
+    callers can narrow one analysis without modifying the repository-specific
+    exclude state managed by the GUI. Entries identify a repository-relative
+    Python file or directory prefix. Absolute entries are accepted only when
+    they resolve inside the repository.
+    """
+
+    saved_excludes, extra_dirs = _load_excludes_for_repo(repo_path)
+    if not additional_excludes:
+        return list(saved_excludes), extra_dirs
+    if len(additional_excludes) > 500:
+        raise ValueError("At most 500 per-analysis exclude paths are allowed.")
+
+    root = Path(repo_path).expanduser().resolve()
+    combined = list(saved_excludes)
+    known = {str(item).replace("\\", "/").strip("/") for item in combined}
+
+    for item in additional_excludes:
+        if not isinstance(item, str) or not item.strip():
+            raise ValueError("Exclude paths must be non-empty strings.")
+        candidate = Path(item).expanduser()
+        if candidate.is_absolute():
+            try:
+                candidate = candidate.resolve().relative_to(root)
+            except ValueError as exc:
+                raise ValueError(
+                    f"Exclude path is outside the repository: {item}"
+                ) from exc
+
+        normalized = candidate.as_posix().removeprefix("./").strip("/")
+        if not normalized or ".." in Path(normalized).parts:
+            raise ValueError(f"Invalid repository-relative exclude path: {item}")
+        if normalized not in known:
+            combined.append(normalized)
+            known.add(normalized)
+
+    return combined, extra_dirs
+
+
 def _log_skipped(skipped, log) -> None:
     """
     Reports files that carry a '.py' name but are not analyzable Python.
@@ -151,7 +195,12 @@ class ContextorFacade:
     """
 
     @staticmethod
-    def analyze_project(path: str, log=None, progress_callback=None) -> list:
+    def analyze_project(
+        path: str,
+        log=None,
+        progress_callback=None,
+        additional_excludes: list[str] | None = None,
+    ) -> list:
         """
         Analyzes full project hierarchy, builds dependency graph, evaluates
         technical debt, detects cycles and saves all generated artifacts.
@@ -168,7 +217,7 @@ class ContextorFacade:
 
         if log:
             log("Starting directory indexing...")
-        excludes, extra_dirs = _load_excludes_for_repo(path)
+        excludes, extra_dirs = _analysis_filters(path, additional_excludes)
         index = index_repository(
             path,
             excludes=excludes,
@@ -244,7 +293,13 @@ class ContextorFacade:
         return errors, analysis_result
 
     @staticmethod
-    def analyze_layer(root_dir: str, layer_dir: str, log=None, progress_callback=None) -> str:
+    def analyze_layer(
+        root_dir: str,
+        layer_dir: str,
+        log=None,
+        progress_callback=None,
+        additional_excludes: list[str] | None = None,
+    ) -> str:
         """Analyzes a specific layer. Returns output pattern."""
         root_resolved = Path(root_dir).resolve()
         layer_resolved = Path(layer_dir).resolve()
@@ -255,7 +310,9 @@ class ContextorFacade:
 
         if log:
             log(f"Processing layer '{layer_name}' in project '{repo_name}'...")
-        excludes, extra_dirs = _load_excludes_for_repo(str(root_resolved))
+        excludes, extra_dirs = _analysis_filters(
+            str(root_resolved), additional_excludes
+        )
         index = index_repository(
             str(root_resolved),
             excludes=excludes,
@@ -352,7 +409,11 @@ class ContextorFacade:
 
     @staticmethod
     def analyze_single_file(
-        file_path: str, repo_root: str, log=None, progress_callback=None
+        file_path: str,
+        repo_root: str,
+        log=None,
+        progress_callback=None,
+        additional_excludes: list[str] | None = None,
     ) -> str:
         """Analyzes a single file within the context of a project. Returns report output path."""
         reset_caches()
@@ -363,7 +424,7 @@ class ContextorFacade:
 
         if log:
             log("Indexing and building project graph...")
-        excludes, extra_dirs = _load_excludes_for_repo(repo_root)
+        excludes, extra_dirs = _analysis_filters(repo_root, additional_excludes)
         modules = build_index(
             repo_root,
             excludes=excludes,

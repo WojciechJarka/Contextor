@@ -70,6 +70,33 @@ def test_finds_nonconventional_test_that_imports_module(tmp_path):
     assert context["untested_public_symbols"] == []
 
 
+def test_context_ignores_tests_absent_from_filtered_ast_index(tmp_path):
+    root = _repo(
+        tmp_path,
+        {
+            "pkg/module.py": "class Engine:\n    pass\n",
+            "tests/test_resolver.py": (
+                "from pkg.module import Engine\n\n"
+                "def test_engine():\n"
+                "    assert Engine()\n"
+            ),
+        },
+    )
+
+    context = build_test_context(
+        "pkg.module",
+        str(root),
+        ["Engine"],
+        allowed_python_paths=["pkg/module.py"],
+    )
+
+    assert context == {
+        "test_files": [],
+        "tested_symbols": [],
+        "untested_public_symbols": ["Engine"],
+    }
+
+
 def test_ignores_vendored_test_directories(tmp_path):
     """
     A 'tests' directory inside .venv belongs to a dependency, not to the

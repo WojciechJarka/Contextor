@@ -253,6 +253,7 @@ def execute_global_pipeline(
         PersistentIdentityRegistry,
     )
     from contextor.core.reporting_layer.artifact_usage_report import (
+        collect_qualified_artifact_identities,
         generate_artifact_usage_report,
     )
     from contextor.core.reporting_layer.artifact_usage_report_compact import (
@@ -395,11 +396,8 @@ def execute_global_pipeline(
             modules.keys()
         )
 
-        current_artifacts = set(
-            artifact_data.get(
-                "artifacts",
-                {},
-            ).keys()
+        current_artifacts = collect_qualified_artifact_identities(
+            artifact_data.get("_module_artifacts", {})
         )
 
         # Synchronize persistent identity state with the
