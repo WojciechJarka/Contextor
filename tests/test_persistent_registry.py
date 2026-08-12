@@ -1,4 +1,5 @@
 import os
+import json
 import shutil
 import pytest
 from pathlib import Path
@@ -99,6 +100,37 @@ def test_multi_repo_isolation(tmp_path):
     # Ensure they have separate metadata
     assert reg_a.repo_id != reg_b.repo_id
 
+
+def test_each_repository_has_separate_directory_and_repo_meta_json(tmp_path):
+    repo_a = tmp_path / "RepoA"
+    repo_b = tmp_path / "RepoB"
+    repo_a.mkdir()
+    repo_b.mkdir()
+
+    reg_a = PersistentIdentityRegistry(str(repo_a))
+    reg_b = PersistentIdentityRegistry(str(repo_b))
+    with reg_a.transaction():
+        reg_a.sync_with_workspace({"pkg.alpha"}, {"pkg.alpha::run"})
+    with reg_b.transaction():
+        reg_b.sync_with_workspace({"pkg.beta"}, {"pkg.beta::run"})
+
+    assert reg_a.registry_dir != reg_b.registry_dir
+    assert reg_a.registry_dir.is_dir()
+    assert reg_b.registry_dir.is_dir()
+
+    meta_a = json.loads((reg_a.registry_dir / "repo.meta.json").read_text(encoding="utf-8"))
+    meta_b = json.loads((reg_b.registry_dir / "repo.meta.json").read_text(encoding="utf-8"))
+    assert meta_a["repo_id"] != meta_b["repo_id"]
+
+    modules_a = json.loads((reg_a.registry_dir / "module_registry.json").read_text(encoding="utf-8"))
+    modules_b = json.loads((reg_b.registry_dir / "module_registry.json").read_text(encoding="utf-8"))
+    slots_a = json.loads((reg_a.registry_dir / "module_slots.json").read_text(encoding="utf-8"))
+    slots_b = json.loads((reg_b.registry_dir / "module_slots.json").read_text(encoding="utf-8"))
+    assert set(modules_a["path_to_id"]) == {"pkg.alpha"}
+    assert set(modules_b["path_to_id"]) == {"pkg.beta"}
+    assert slots_a["1"] == 1
+    assert slots_b["1"] == 1
+
 def test_garbage_collection_with_output_references(temp_repo):
     registry = PersistentIdentityRegistry(temp_repo)
     with registry.transaction():
@@ -134,3 +166,31 @@ def test_garbage_collection_with_output_references(temp_repo):
         
     # Now it should be purged
     assert registry.get_module_path(old_id) is None
+
+
+def test_registry_never_allocates_slots_for_empty_identities(temp_repo):
+    registry = PersistentIdentityRegistry(temp_repo)
+
+    with registry.transaction():
+        assert registry.get_module_id(None) is None
+        assert registry.get_module_id("") is None
+        assert registry.get_artifact_id(None) is None
+        assert registry.get_artifact_id("  ") is None
+
+    assert set(registry._state["module_slots"]) == {"schema_version"}
+    assert set(registry._state["artifact_slots"]) == {"schema_version"}
+
+
+def test_registry_repairs_reverse_only_entries_into_recovery(temp_repo):
+    registry = PersistentIdentityRegistry(temp_repo)
+    with registry.transaction():
+        registry._state["module_registry"]["id_to_path"]["9/3"] = "orphan.py"
+        registry._state["module_registry"]["id_to_path"]["10/2"] = None
+
+    with registry.transaction():
+        assert "9/3" not in registry._state["module_registry"]["id_to_path"]
+        assert "10/2" not in registry._state["module_registry"]["id_to_path"]
+        assert registry._state["module_recovery"]["9/3"]["path"] == "orphan.py"
+        assert "10/2" not in registry._state["module_recovery"]
+        assert registry._state["module_slots"]["9"] == 3
+        assert registry._state["module_slots"]["10"] == 2

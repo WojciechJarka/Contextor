@@ -1,0 +1,996 @@
+{
+  "action_items": [
+    "WARNING: Refactor 'contextor.core.reporting_engine.pipeline' (out_degree=14, type=OUTBOUND_HOTSPOT)"
+  ],
+  "boundary": {
+    "depended_on_by": [
+      "main",
+      "tests.test_artifact_consumption",
+      "tests.test_artifact_parallelism",
+      "tests.test_artifact_report",
+      "tests.test_cancellation",
+      "tests.test_cycles",
+      "tests.test_generators",
+      "tests.test_incremental_equivalence",
+      "tests.test_io_manager",
+      "tests.test_live_state_consistency",
+      "tests.test_mcp_regressions",
+      "tests.test_non_python_files",
+      "tests.test_path_parser",
+      "tests.test_paths_and_cache",
+      "tests.test_persistent_registry",
+      "tests.test_pipeline",
+      "tests.test_reporting_single_file",
+      "tests.test_resolver",
+      "tests.test_test_discovery",
+      "tests.test_test_runner"
+    ],
+    "depends_on": [],
+    "inbound_hard": [
+      {
+        "source": "main",
+        "target": "contextor.__main__"
+      },
+      {
+        "source": "tests.test_artifact_consumption",
+        "target": "contextor.core.reporting_layer.artifact_consumption"
+      },
+      {
+        "source": "tests.test_artifact_parallelism",
+        "target": "contextor.core.reporting_layer.artifact_usage_report"
+      },
+      {
+        "source": "tests.test_artifact_parallelism",
+        "target": "contextor.core.symbol_engine.indexer"
+      },
+      {
+        "source": "tests.test_artifact_report",
+        "target": "contextor.core.reporting_engine.dictionary"
+      },
+      {
+        "source": "tests.test_artifact_report",
+        "target": "contextor.core.reporting_engine.persistent_registry"
+      },
+      {
+        "source": "tests.test_artifact_report",
+        "target": "contextor.core.reporting_layer.artifact_usage_report"
+      },
+      {
+        "source": "tests.test_artifact_report",
+        "target": "contextor.core.reporting_layer.artifact_usage_report_compact"
+      },
+      {
+        "source": "tests.test_artifact_report",
+        "target": "contextor.core.symbol_engine.indexer"
+      },
+      {
+        "source": "tests.test_cancellation",
+        "target": "contextor.core.errors"
+      },
+      {
+        "source": "tests.test_cancellation",
+        "target": "contextor.core.graph.cycles"
+      },
+      {
+        "source": "tests.test_cancellation",
+        "target": "contextor.core.graph.graph"
+      },
+      {
+        "source": "tests.test_cancellation",
+        "target": "contextor.core.symbol_engine.indexer"
+      },
+      {
+        "source": "tests.test_cycles",
+        "target": "contextor.core.errors"
+      },
+      {
+        "source": "tests.test_cycles",
+        "target": "contextor.core.graph.cycles"
+      },
+      {
+        "source": "tests.test_generators",
+        "target": "contextor.core.api.facade"
+      },
+      {
+        "source": "tests.test_generators",
+        "target": "contextor.core.graph.graph"
+      },
+      {
+        "source": "tests.test_generators",
+        "target": "contextor.core.graph.metrics"
+      },
+      {
+        "source": "tests.test_generators",
+        "target": "contextor.core.reporting_engine.dictionary"
+      },
+      {
+        "source": "tests.test_generators",
+        "target": "contextor.core.reporting_engine.generators"
+      },
+      {
+        "source": "tests.test_generators",
+        "target": "contextor.core.reporting_engine.persistent_registry"
+      },
+      {
+        "source": "tests.test_generators",
+        "target": "contextor.core.reporting_layer.artifact_usage_report"
+      },
+      {
+        "source": "tests.test_generators",
+        "target": "contextor.core.reporting_layer.artifact_usage_report_compact"
+      },
+      {
+        "source": "tests.test_generators",
+        "target": "contextor.core.symbol_engine.indexer"
+      },
+      {
+        "source": "tests.test_incremental_equivalence",
+        "target": "contextor.core.analysis.incremental_engine"
+      },
+      {
+        "source": "tests.test_incremental_equivalence",
+        "target": "contextor.core.analysis.state_manager"
+      },
+      {
+        "source": "tests.test_incremental_equivalence",
+        "target": "contextor.core.graph.graph"
+      },
+      {
+        "source": "tests.test_incremental_equivalence",
+        "target": "contextor.core.reporting_engine.persistent_registry"
+      },
+      {
+        "source": "tests.test_incremental_equivalence",
+        "target": "contextor.core.reporting_layer.artifact_usage_report"
+      },
+      {
+        "source": "tests.test_incremental_equivalence",
+        "target": "contextor.core.symbol_engine.indexer"
+      },
+      {
+        "source": "tests.test_io_manager",
+        "target": "contextor.core.reporting_engine.header"
+      },
+      {
+        "source": "tests.test_io_manager",
+        "target": "contextor.core.reporting_engine.io_manager"
+      },
+      {
+        "source": "tests.test_live_state_consistency",
+        "target": "contextor.core.analysis.incremental_engine"
+      },
+      {
+        "source": "tests.test_live_state_consistency",
+        "target": "contextor.core.analysis.state_manager"
+      },
+      {
+        "source": "tests.test_live_state_consistency",
+        "target": "contextor.core.graph.graph"
+      },
+      {
+        "source": "tests.test_live_state_consistency",
+        "target": "contextor.core.reporting_engine.persistent_registry"
+      },
+      {
+        "source": "tests.test_live_state_consistency",
+        "target": "contextor.core.reporting_layer.artifact_usage_report"
+      },
+      {
+        "source": "tests.test_live_state_consistency",
+        "target": "contextor.core.symbol_engine.indexer"
+      },
+      {
+        "source": "tests.test_mcp_regressions",
+        "target": "contextor.core.api.facade"
+      },
+      {
+        "source": "tests.test_non_python_files",
+        "target": "contextor.core.source"
+      },
+      {
+        "source": "tests.test_non_python_files",
+        "target": "contextor.core.symbol_engine.indexer"
+      },
+      {
+        "source": "tests.test_path_parser",
+        "target": "contextor.repo_generator.path_parser"
+      },
+      {
+        "source": "tests.test_paths_and_cache",
+        "target": "contextor.core.analysis.cache_manager"
+      },
+      {
+        "source": "tests.test_paths_and_cache",
+        "target": "contextor.core.paths"
+      },
+      {
+        "source": "tests.test_paths_and_cache",
+        "target": "contextor.core.reporting_engine.formatting"
+      },
+      {
+        "source": "tests.test_persistent_registry",
+        "target": "contextor.core.reporting_engine.persistent_registry"
+      },
+      {
+        "source": "tests.test_pipeline",
+        "target": "contextor.core.graph.cycles"
+      },
+      {
+        "source": "tests.test_pipeline",
+        "target": "contextor.core.graph.graph"
+      },
+      {
+        "source": "tests.test_pipeline",
+        "target": "contextor.core.symbol_engine.indexer"
+      },
+      {
+        "source": "tests.test_pipeline",
+        "target": "contextor.core.validator.collisions"
+      },
+      {
+        "source": "tests.test_reporting_single_file",
+        "target": "contextor.core.reporting_engine.dictionary"
+      },
+      {
+        "source": "tests.test_reporting_single_file",
+        "target": "contextor.core.reporting_engine.persistent_registry"
+      },
+      {
+        "source": "tests.test_reporting_single_file",
+        "target": "contextor.core.reporting_layer.reporting_single_file"
+      },
+      {
+        "source": "tests.test_resolver",
+        "target": "contextor.core.domain.imports"
+      },
+      {
+        "source": "tests.test_resolver",
+        "target": "contextor.core.domain.module"
+      },
+      {
+        "source": "tests.test_resolver",
+        "target": "contextor.core.graph.resolver"
+      },
+      {
+        "source": "tests.test_test_discovery",
+        "target": "contextor.core.analysis.test_context"
+      },
+      {
+        "source": "tests.test_test_runner",
+        "target": "contextor.ui.test_runner"
+      }
+    ],
+    "outbound_hard": []
+  },
+  "computation_mode": "full",
+  "cycles": [],
+  "debt_summary": {
+    "hotspot_count": 18,
+    "label": "critical",
+    "normalized": 5.5,
+    "total_score": 5.5
+  },
+  "full_computation_triggered_by": [
+    "no cycles found but internal_edge_count(264) > module_count(133) — possible cycle"
+  ],
+  "generated_at": "2026-08-12T21:25:09.855692",
+  "global_context": {
+    "collision_count_total": 0,
+    "cycles_total": 0,
+    "nodes_total": 156,
+    "status": "WARNING"
+  },
+  "hotspots": [
+    {
+      "complexity_percentile": 1.0,
+      "explanation": {
+        "aggregation": "equal_average",
+        "classification": "HOTSPOT",
+        "dominant_factor": "complexity",
+        "metrics": {
+          "complexity": 1.0,
+          "geometric_score": 1.0,
+          "impact": 0.9032,
+          "log_score": 1.0
+        }
+      },
+      "impact_percentile": 0.9032,
+      "in_degree": 5,
+      "module": "contextor.core.api.facade",
+      "out_degree": 24,
+      "score": 0.9758,
+      "type": "HOTSPOT"
+    },
+    {
+      "complexity_percentile": 0.974,
+      "explanation": {
+        "aggregation": "equal_average",
+        "classification": "OUTBOUND_HOTSPOT",
+        "dominant_factor": "complexity",
+        "metrics": {
+          "complexity": 0.974,
+          "geometric_score": 0.483,
+          "impact": 0.6935,
+          "log_score": 0.833
+        }
+      },
+      "impact_percentile": 0.6935,
+      "in_degree": 2,
+      "module": "contextor.core.reporting_engine.pipeline",
+      "out_degree": 14,
+      "score": 0.7459,
+      "type": "OUTBOUND_HOTSPOT"
+    },
+    {
+      "complexity_percentile": 0.961,
+      "explanation": {
+        "aggregation": "equal_average",
+        "classification": "OUTBOUND_HOTSPOT",
+        "dominant_factor": "complexity",
+        "metrics": {
+          "complexity": 0.961,
+          "geometric_score": 0.4082,
+          "impact": 0.5726,
+          "log_score": 0.7541
+        }
+      },
+      "impact_percentile": 0.5726,
+      "in_degree": 2,
+      "module": "contextor.core.reporting_engine.summary_generator",
+      "out_degree": 10,
+      "score": 0.674,
+      "type": "OUTBOUND_HOTSPOT"
+    },
+    {
+      "complexity_percentile": 0.9481,
+      "explanation": {
+        "aggregation": "equal_average",
+        "classification": "OUTBOUND_HOTSPOT",
+        "dominant_factor": "complexity",
+        "metrics": {
+          "complexity": 0.9481,
+          "geometric_score": 0.3873,
+          "impact": 0.5806,
+          "log_score": 0.7306
+        }
+      },
+      "impact_percentile": 0.5806,
+      "in_degree": 2,
+      "module": "contextor.ui.gui",
+      "out_degree": 9,
+      "score": 0.6617,
+      "type": "OUTBOUND_HOTSPOT"
+    },
+    {
+      "complexity_percentile": 0.987,
+      "explanation": {
+        "aggregation": "equal_average",
+        "classification": "OUTBOUND_HOTSPOT",
+        "dominant_factor": "complexity",
+        "metrics": {
+          "complexity": 0.987,
+          "geometric_score": 0.3764,
+          "impact": 0.2339,
+          "log_score": 0.8657
+        }
+      },
+      "impact_percentile": 0.2339,
+      "in_degree": 1,
+      "module": "contextor.core.single_file.builders.layer0_builders",
+      "out_degree": 17,
+      "score": 0.6157,
+      "type": "OUTBOUND_HOTSPOT"
+    }
+  ],
+  "internal_edges": {
+    "hard": {
+      "contextor.__main__": [
+        "contextor.cli",
+        "contextor.ui.gui"
+      ],
+      "contextor.cli": [
+        "contextor.core.api.facade",
+        "contextor.core.errors",
+        "contextor.core.paths"
+      ],
+      "contextor.core.__init__": [
+        "contextor.core.graph.graph",
+        "contextor.core.reporting_layer.reporting_single_file",
+        "contextor.core.symbol_engine.indexer"
+      ],
+      "contextor.core.analysis.cache_manager": [
+        "contextor.core.paths"
+      ],
+      "contextor.core.analysis.git_context": [
+        "contextor.core.git.repo_state",
+        "contextor.mcp_process_registry"
+      ],
+      "contextor.core.analysis.incremental_engine": [
+        "contextor.core.analysis.state_manager",
+        "contextor.core.domain.module",
+        "contextor.core.graph.graph",
+        "contextor.core.reporting_engine.persistent_registry",
+        "contextor.core.reporting_layer.artifact_usage_report",
+        "contextor.core.symbol_engine.indexer"
+      ],
+      "contextor.core.analysis.module_intent": [
+        "contextor.core.source"
+      ],
+      "contextor.core.analysis.test_context": [
+        "contextor.core.paths",
+        "contextor.core.source"
+      ],
+      "contextor.core.api.facade": [
+        "contextor.core.analysis.state_manager",
+        "contextor.core.errors",
+        "contextor.core.graph.cycles",
+        "contextor.core.graph.graph",
+        "contextor.core.graph.incremental",
+        "contextor.core.graph.metrics",
+        "contextor.core.graph.resolver",
+        "contextor.core.paths",
+        "contextor.core.reference.engine",
+        "contextor.core.reporting_engine.debt",
+        "contextor.core.reporting_engine.dictionary",
+        "contextor.core.reporting_engine.generators",
+        "contextor.core.reporting_engine.graph_analytics",
+        "contextor.core.reporting_engine.header",
+        "contextor.core.reporting_engine.io_manager",
+        "contextor.core.reporting_engine.persistent_registry",
+        "contextor.core.reporting_engine.pipeline",
+        "contextor.core.reporting_layer.artifact_usage_report",
+        "contextor.core.reporting_layer.artifact_usage_report_compact",
+        "contextor.core.reporting_layer.reporting_llm",
+        "contextor.core.reporting_layer.reporting_single_file",
+        "contextor.core.single_file.single_file_analysis",
+        "contextor.core.symbol_engine.indexer",
+        "contextor.core.validator.collisions"
+      ],
+      "contextor.core.api_surface.__init__": [
+        "contextor.core.api_surface.engine",
+        "contextor.core.api_surface.metadata",
+        "contextor.core.api_surface.visitor"
+      ],
+      "contextor.core.api_surface.engine": [
+        "contextor.core.api_surface.visitor",
+        "contextor.core.source"
+      ],
+      "contextor.core.api_surface.metadata": [
+        "contextor.core.api_surface.engine"
+      ],
+      "contextor.core.context.__init__": [
+        "contextor.core.context.clusters",
+        "contextor.core.context.dependencies",
+        "contextor.core.context.locator",
+        "contextor.core.context.signals"
+      ],
+      "contextor.core.context.signals": [
+        "contextor.core.context.dependencies"
+      ],
+      "contextor.core.domain.__init__": [
+        "contextor.core.domain.graph",
+        "contextor.core.domain.imports",
+        "contextor.core.domain.module",
+        "contextor.core.domain.resolution",
+        "contextor.core.domain.validation"
+      ],
+      "contextor.core.domain.module": [
+        "contextor.core.domain.imports",
+        "contextor.core.source"
+      ],
+      "contextor.core.facts.build": [
+        "contextor.core.facts.context",
+        "contextor.core.facts.references",
+        "contextor.core.facts.symbol_index",
+        "contextor.core.graph.graph",
+        "contextor.core.symbol_engine.indexer"
+      ],
+      "contextor.core.facts.context": [
+        "contextor.core.domain.graph",
+        "contextor.core.facts.references",
+        "contextor.core.facts.symbols"
+      ],
+      "contextor.core.facts.references": [
+        "contextor.core.facts.symbols"
+      ],
+      "contextor.core.facts.symbol_index": [
+        "contextor.core.facts.symbols"
+      ],
+      "contextor.core.graph.cycles": [
+        "contextor.core.errors",
+        "contextor.core.paths"
+      ],
+      "contextor.core.graph.graph": [
+        "contextor.core.domain.graph",
+        "contextor.core.domain.module",
+        "contextor.core.graph.resolver"
+      ],
+      "contextor.core.graph.incremental": [
+        "contextor.core.domain.graph"
+      ],
+      "contextor.core.graph.resolver": [
+        "contextor.core.domain.imports",
+        "contextor.core.domain.resolution"
+      ],
+      "contextor.core.hotspots.__init__": [
+        "contextor.core.hotspots.classification",
+        "contextor.core.hotspots.degrees",
+        "contextor.core.hotspots.engine"
+      ],
+      "contextor.core.hotspots.engine": [
+        "contextor.core.graph.thresholds",
+        "contextor.core.hotspots.classification",
+        "contextor.core.hotspots.degrees",
+        "contextor.core.hotspots.normalization"
+      ],
+      "contextor.core.module.__init__": [
+        "contextor.core.domain.graph",
+        "contextor.core.domain.imports",
+        "contextor.core.domain.module",
+        "contextor.core.domain.resolution",
+        "contextor.core.domain.validation"
+      ],
+      "contextor.core.reference.__init__": [
+        "contextor.core.reference.engine",
+        "contextor.core.reference.visitor"
+      ],
+      "contextor.core.reference.engine": [
+        "contextor.core.reference.visitor",
+        "contextor.core.source"
+      ],
+      "contextor.core.reference.visitor": [
+        "contextor.core.reference.resolution"
+      ],
+      "contextor.core.reporting_engine.__init__": [
+        "contextor.core.reporting_engine.formatting",
+        "contextor.core.reporting_engine.generators",
+        "contextor.core.reporting_engine.pipeline"
+      ],
+      "contextor.core.reporting_engine.collisions_generator": [
+        "contextor.core.reporting_engine.formatting",
+        "contextor.core.validator.collisions"
+      ],
+      "contextor.core.reporting_engine.debt": [
+        "contextor.core.graph.thresholds"
+      ],
+      "contextor.core.reporting_engine.dictionary": [
+        "contextor.core.reporting_engine.persistent_registry"
+      ],
+      "contextor.core.reporting_engine.formatting": [
+        "contextor.core.paths"
+      ],
+      "contextor.core.reporting_engine.generators": [
+        "contextor.core.reporting_engine.collisions_generator",
+        "contextor.core.reporting_engine.layer_slicer",
+        "contextor.core.reporting_engine.structure_generator",
+        "contextor.core.reporting_engine.summary_generator"
+      ],
+      "contextor.core.reporting_engine.header": [
+        "contextor.core.analysis.git_context",
+        "contextor.core.git.repo_state"
+      ],
+      "contextor.core.reporting_engine.io_manager": [
+        "contextor.core.reporting_engine.formatting",
+        "contextor.core.reporting_layer.artifact_usage_report_compact"
+      ],
+      "contextor.core.reporting_engine.layer_slicer": [
+        "contextor.core.graph.cycles",
+        "contextor.core.graph.metrics",
+        "contextor.core.reporting_engine.debt",
+        "contextor.core.reporting_engine.dictionary",
+        "contextor.core.reporting_engine.formatting",
+        "contextor.core.reporting_engine.structure_generator",
+        "contextor.core.reporting_engine.summary_generator",
+        "contextor.core.reporting_layer.artifact_usage_report_compact"
+      ],
+      "contextor.core.reporting_engine.pipeline": [
+        "contextor.core.analysis.state_manager",
+        "contextor.core.git.repo_state",
+        "contextor.core.paths",
+        "contextor.core.reporting_engine.dictionary",
+        "contextor.core.reporting_engine.generators",
+        "contextor.core.reporting_engine.graph_analytics",
+        "contextor.core.reporting_engine.header",
+        "contextor.core.reporting_engine.io_manager",
+        "contextor.core.reporting_engine.persistent_registry",
+        "contextor.core.reporting_engine.structure_generator",
+        "contextor.core.reporting_layer.artifact_usage_report",
+        "contextor.core.reporting_layer.artifact_usage_report_compact",
+        "contextor.core.reporting_layer.git_report",
+        "contextor.core.validator.collisions"
+      ],
+      "contextor.core.reporting_engine.summary_generator": [
+        "contextor.core.graph.cycles",
+        "contextor.core.graph.metrics",
+        "contextor.core.graph.thresholds",
+        "contextor.core.reporting_engine.collisions_generator",
+        "contextor.core.reporting_engine.debt",
+        "contextor.core.reporting_engine.formatting",
+        "contextor.core.reporting_engine.graph_aggregators",
+        "contextor.core.reporting_engine.refactor_planner",
+        "contextor.core.reporting_engine.risk_signals",
+        "contextor.core.validator.collisions"
+      ],
+      "contextor.core.reporting_layer.artifact_consumption": [
+        "contextor.core.analysis.activity",
+        "contextor.core.analysis.exposure_analysis"
+      ],
+      "contextor.core.reporting_layer.artifact_usage_report": [
+        "contextor.core.analysis.test_context",
+        "contextor.core.api.api_consumers",
+        "contextor.core.errors",
+        "contextor.core.reference.engine"
+      ],
+      "contextor.core.reporting_layer.artifact_usage_report_compact": [
+        "contextor.core.reporting_engine.dictionary",
+        "contextor.core.reporting_engine.formatting"
+      ],
+      "contextor.core.reporting_layer.git_report": [
+        "contextor.core.analysis.git_context"
+      ],
+      "contextor.core.reporting_layer.reporting_llm": [
+        "contextor.core.paths"
+      ],
+      "contextor.core.reporting_layer.reporting_single_file": [
+        "contextor.core.paths",
+        "contextor.core.reporting_engine.dictionary"
+      ],
+      "contextor.core.single_file.__init__": [
+        "contextor.core.single_file.single_file_analysis"
+      ],
+      "contextor.core.single_file.builders.__init__": [
+        "contextor.core.single_file.builders.layer0_builders",
+        "contextor.core.single_file.builders.layer1_builders",
+        "contextor.core.single_file.builders.layer2_builders",
+        "contextor.core.single_file.builders.layer3_builders",
+        "contextor.core.single_file.builders.registry"
+      ],
+      "contextor.core.single_file.builders.layer0_builders": [
+        "contextor.core.analysis.call_chain",
+        "contextor.core.analysis.function_analysis",
+        "contextor.core.analysis.git_context",
+        "contextor.core.analysis.import_analysis",
+        "contextor.core.analysis.module_intent",
+        "contextor.core.analysis.risk_analysis",
+        "contextor.core.analysis.semantic_analysis",
+        "contextor.core.analysis.state_analysis",
+        "contextor.core.api.api_consumers",
+        "contextor.core.api_surface.engine",
+        "contextor.core.api_surface.metadata",
+        "contextor.core.graph.cycles",
+        "contextor.core.graph.metrics",
+        "contextor.core.graph.thresholds",
+        "contextor.core.reference.engine",
+        "contextor.core.single_file.builders.registry",
+        "contextor.core.validator.collisions"
+      ],
+      "contextor.core.single_file.builders.layer1_builders": [
+        "contextor.core.analysis.export_analysis",
+        "contextor.core.api.public_api",
+        "contextor.core.single_file.builders.registry"
+      ],
+      "contextor.core.single_file.builders.layer2_builders": [
+        "contextor.core.analysis.activity",
+        "contextor.core.analysis.test_context",
+        "contextor.core.single_file.builders.registry"
+      ],
+      "contextor.core.single_file.builders.layer3_builders": [
+        "contextor.core.reporting_layer.artifact_consumption",
+        "contextor.core.single_file.builders.registry"
+      ],
+      "contextor.core.single_file.single_file_analysis": [
+        "contextor.core.context.locator",
+        "contextor.core.source"
+      ],
+      "contextor.core.symbol_engine.__init__": [
+        "contextor.core.symbol_engine.extractor",
+        "contextor.core.symbol_engine.imports",
+        "contextor.core.symbol_engine.index",
+        "contextor.core.symbol_engine.usage"
+      ],
+      "contextor.core.symbol_engine.extractor": [
+        "contextor.core.source",
+        "contextor.core.symbol_engine.domain"
+      ],
+      "contextor.core.symbol_engine.index": [
+        "contextor.core.symbol_engine.extractor"
+      ],
+      "contextor.core.symbol_engine.indexer": [
+        "contextor.core.analysis.cache_manager",
+        "contextor.core.domain.imports",
+        "contextor.core.domain.module",
+        "contextor.core.errors",
+        "contextor.core.paths",
+        "contextor.core.source"
+      ],
+      "contextor.core.symbol_engine.usage": [
+        "contextor.core.symbol_engine.extractor"
+      ],
+      "contextor.core.validator.__init__": [
+        "contextor.core.validator.collisions",
+        "contextor.core.validator.validate"
+      ],
+      "contextor.core.validator.collisions": [
+        "contextor.core.domain.module",
+        "contextor.core.domain.validation",
+        "contextor.core.source"
+      ],
+      "contextor.core.validator.cycles": [
+        "contextor.core.domain.graph",
+        "contextor.core.domain.validation",
+        "contextor.core.graph.cycles"
+      ],
+      "contextor.core.validator.layers": [
+        "contextor.core.domain.graph",
+        "contextor.core.domain.module",
+        "contextor.core.domain.validation",
+        "contextor.core.validator.helpers",
+        "contextor.core.validator.rules"
+      ],
+      "contextor.core.validator.validate": [
+        "contextor.core.domain.graph",
+        "contextor.core.domain.module",
+        "contextor.core.domain.validation",
+        "contextor.core.errors",
+        "contextor.core.validator.collisions",
+        "contextor.core.validator.cycles",
+        "contextor.core.validator.layers"
+      ],
+      "contextor.mcp_server": [
+        "contextor.core.analysis.incremental_engine",
+        "contextor.core.analysis.state_manager",
+        "contextor.core.api.facade",
+        "contextor.core.paths",
+        "contextor.core.reporting_engine.persistent_registry",
+        "contextor.mcp_process_registry"
+      ],
+      "contextor.mcp_worker": [
+        "contextor.core.api.facade"
+      ],
+      "contextor.repo_generator.__init__": [
+        "contextor.repo_generator.main"
+      ],
+      "contextor.repo_generator.filters": [
+        "contextor.repo_generator.config",
+        "contextor.ui.path_memory",
+        "contextor.ui.theme"
+      ],
+      "contextor.repo_generator.icons": [
+        "contextor.ui.theme"
+      ],
+      "contextor.repo_generator.main": [
+        "contextor.repo_generator.config",
+        "contextor.repo_generator.filters",
+        "contextor.repo_generator.icons",
+        "contextor.repo_generator.path_parser",
+        "contextor.ui.path_memory",
+        "contextor.ui.theme"
+      ],
+      "contextor.ui.__init__": [
+        "contextor.ui.gui"
+      ],
+      "contextor.ui.exclude_gui": [
+        "contextor.core.api.facade",
+        "contextor.core.paths",
+        "contextor.ui.path_memory",
+        "contextor.ui.theme"
+      ],
+      "contextor.ui.gui": [
+        "contextor.core.api.facade",
+        "contextor.ui.exclude_check",
+        "contextor.ui.exclude_gui",
+        "contextor.ui.gui_parser",
+        "contextor.ui.path_memory",
+        "contextor.ui.progress_widget",
+        "contextor.ui.system_actions",
+        "contextor.ui.test_runner",
+        "contextor.ui.theme"
+      ],
+      "contextor.ui.gui_parser": [
+        "contextor.ui.path_memory",
+        "contextor.ui.progress_widget",
+        "contextor.ui.theme"
+      ],
+      "contextor.ui.path_memory": [
+        "contextor.core.paths"
+      ],
+      "contextor.ui.progress_widget": [
+        "contextor.core.errors"
+      ],
+      "contextor.ui.system_actions": [
+        "contextor.core.paths"
+      ],
+      "contextor.ui.test_runner": [
+        "contextor.core.errors",
+        "contextor.core.paths"
+      ]
+    },
+    "soft": {
+      "contextor.core.__init__": [
+        "contextor.core.validator.validate"
+      ],
+      "contextor.core.api.facade": [
+        "contextor.core.validator.validate"
+      ],
+      "contextor.repo_generator.filters": [
+        "contextor.ui.theme"
+      ],
+      "contextor.repo_generator.icons": [
+        "contextor.ui.theme"
+      ],
+      "contextor.repo_generator.main": [
+        "contextor.ui.theme"
+      ],
+      "contextor.ui.exclude_gui": [
+        "contextor.ui.theme"
+      ],
+      "contextor.ui.gui": [
+        "contextor.ui.theme"
+      ],
+      "contextor.ui.gui_parser": [
+        "contextor.ui.theme"
+      ],
+      "contextor.ui.progress_widget": [
+        "contextor.ui.theme"
+      ]
+    }
+  },
+  "layer": {
+    "path": "C:\\Temp\\Contextor_Repo\\contextor",
+    "root": "C:\\Temp\\Contextor_Repo"
+  },
+  "layer_cycles_count": 0,
+  "layer_module_count": 133,
+  "layer_modules": [
+    "contextor.__init__",
+    "contextor.__main__",
+    "contextor.cli",
+    "contextor.core.__init__",
+    "contextor.core.analysis.__init__",
+    "contextor.core.analysis.activity",
+    "contextor.core.analysis.cache_manager",
+    "contextor.core.analysis.call_chain",
+    "contextor.core.analysis.export_analysis",
+    "contextor.core.analysis.exposure_analysis",
+    "contextor.core.analysis.function_analysis",
+    "contextor.core.analysis.git_context",
+    "contextor.core.analysis.import_analysis",
+    "contextor.core.analysis.incremental_engine",
+    "contextor.core.analysis.module_intent",
+    "contextor.core.analysis.risk_analysis",
+    "contextor.core.analysis.semantic_analysis",
+    "contextor.core.analysis.state_analysis",
+    "contextor.core.analysis.state_manager",
+    "contextor.core.analysis.test_context",
+    "contextor.core.api.__init__",
+    "contextor.core.api.api_consumers",
+    "contextor.core.api.facade",
+    "contextor.core.api.public_api",
+    "contextor.core.api_surface.__init__",
+    "contextor.core.api_surface.engine",
+    "contextor.core.api_surface.metadata",
+    "contextor.core.api_surface.visitor",
+    "contextor.core.context.__init__",
+    "contextor.core.context.clusters",
+    "contextor.core.context.dependencies",
+    "contextor.core.context.locator",
+    "contextor.core.context.signals",
+    "contextor.core.domain.__init__",
+    "contextor.core.domain.graph",
+    "contextor.core.domain.imports",
+    "contextor.core.domain.module",
+    "contextor.core.domain.resolution",
+    "contextor.core.domain.validation",
+    "contextor.core.errors",
+    "contextor.core.facts.build",
+    "contextor.core.facts.context",
+    "contextor.core.facts.references",
+    "contextor.core.facts.symbol_index",
+    "contextor.core.facts.symbols",
+    "contextor.core.git.diff_engine",
+    "contextor.core.git.repo_state",
+    "contextor.core.graph.__init__",
+    "contextor.core.graph.cycles",
+    "contextor.core.graph.graph",
+    "contextor.core.graph.incremental",
+    "contextor.core.graph.metrics",
+    "contextor.core.graph.resolver",
+    "contextor.core.graph.thresholds",
+    "contextor.core.hotspots.__init__",
+    "contextor.core.hotspots.classification",
+    "contextor.core.hotspots.degrees",
+    "contextor.core.hotspots.engine",
+    "contextor.core.hotspots.normalization",
+    "contextor.core.module.__init__",
+    "contextor.core.paths",
+    "contextor.core.reference.__init__",
+    "contextor.core.reference.engine",
+    "contextor.core.reference.resolution",
+    "contextor.core.reference.visitor",
+    "contextor.core.reporting_engine.__init__",
+    "contextor.core.reporting_engine.collisions_generator",
+    "contextor.core.reporting_engine.debt",
+    "contextor.core.reporting_engine.dictionary",
+    "contextor.core.reporting_engine.formatting",
+    "contextor.core.reporting_engine.generators",
+    "contextor.core.reporting_engine.graph_aggregators",
+    "contextor.core.reporting_engine.graph_analytics",
+    "contextor.core.reporting_engine.header",
+    "contextor.core.reporting_engine.io_manager",
+    "contextor.core.reporting_engine.layer_slicer",
+    "contextor.core.reporting_engine.persistent_registry",
+    "contextor.core.reporting_engine.pipeline",
+    "contextor.core.reporting_engine.refactor_planner",
+    "contextor.core.reporting_engine.risk_signals",
+    "contextor.core.reporting_engine.structure_generator",
+    "contextor.core.reporting_engine.summary_generator",
+    "contextor.core.reporting_layer.__init__",
+    "contextor.core.reporting_layer.artifact_consumption",
+    "contextor.core.reporting_layer.artifact_usage_report",
+    "contextor.core.reporting_layer.artifact_usage_report_compact",
+    "contextor.core.reporting_layer.git_report",
+    "contextor.core.reporting_layer.reporting_layer",
+    "contextor.core.reporting_layer.reporting_llm",
+    "contextor.core.reporting_layer.reporting_single_file",
+    "contextor.core.single_file.__init__",
+    "contextor.core.single_file.builders.__init__",
+    "contextor.core.single_file.builders.layer0_builders",
+    "contextor.core.single_file.builders.layer1_builders",
+    "contextor.core.single_file.builders.layer2_builders",
+    "contextor.core.single_file.builders.layer3_builders",
+    "contextor.core.single_file.builders.registry",
+    "contextor.core.single_file.single_file_analysis",
+    "contextor.core.source",
+    "contextor.core.symbol_engine.__init__",
+    "contextor.core.symbol_engine.domain",
+    "contextor.core.symbol_engine.extractor",
+    "contextor.core.symbol_engine.imports",
+    "contextor.core.symbol_engine.index",
+    "contextor.core.symbol_engine.indexer",
+    "contextor.core.symbol_engine.usage",
+    "contextor.core.validator.__init__",
+    "contextor.core.validator.collisions",
+    "contextor.core.validator.cycles",
+    "contextor.core.validator.helpers",
+    "contextor.core.validator.layers",
+    "contextor.core.validator.rules",
+    "contextor.core.validator.validate",
+    "contextor.dummy_test",
+    "contextor.mcp_process_registry",
+    "contextor.mcp_server",
+    "contextor.mcp_worker",
+    "contextor.repo_generator.__init__",
+    "contextor.repo_generator.config",
+    "contextor.repo_generator.filters",
+    "contextor.repo_generator.icons",
+    "contextor.repo_generator.main",
+    "contextor.repo_generator.path_parser",
+    "contextor.ui.__init__",
+    "contextor.ui.exclude_check",
+    "contextor.ui.exclude_gui",
+    "contextor.ui.gui",
+    "contextor.ui.gui_parser",
+    "contextor.ui.path_memory",
+    "contextor.ui.progress_widget",
+    "contextor.ui.system_actions",
+    "contextor.ui.test_runner",
+    "contextor.ui.theme"
+  ],
+  "name_collisions_count": 0,
+  "report_header": {
+    "branch": null,
+    "commit_sha": null,
+    "data_source": "layer",
+    "generated_at": "2026-08-12T21:25:09.855692",
+    "schema_version": "1.0"
+  },
+  "status": "WARNING",
+  "summary": {
+    "external_dependencies_count": 0,
+    "external_dependents_count": 20,
+    "inbound_edge_count": 58,
+    "internal_edge_count": 264,
+    "outbound_edge_count": 0
+  },
+  "total_module_count": 156
+}

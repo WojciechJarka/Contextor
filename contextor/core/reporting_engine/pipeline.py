@@ -628,6 +628,7 @@ def execute_global_pipeline(
                 repo_name,
                 layer,
                 layer_sliced,
+                datestamp=datestamp,
                 log=log,
                 layer_output_dir=layer_dir,
             )
@@ -667,6 +668,7 @@ def execute_global_pipeline(
     write_global_reports(
         reports_data,
         repo_name,
+        datestamp=datestamp,
         log=log,
     )
 

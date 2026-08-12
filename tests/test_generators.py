@@ -5,6 +5,19 @@ from contextor.core.reporting_engine.generators import (
     slice_report_for_layer,
 )
 
+
+def test_build_report_header_reads_commit_and_branch(monkeypatch):
+    from contextor.core.reporting_engine import header
+
+    monkeypatch.setattr(header, "is_git_repo", lambda _root: True)
+    monkeypatch.setattr(header, "get_current_commit", lambda _root: "abc123")
+    monkeypatch.setattr(header, "get_branch", lambda _root: "main")
+
+    result = header.build_report_header("/repo", "global")
+
+    assert result["commit_sha"] == "abc123"
+    assert result["branch"] == "main"
+
 def test_compute_action_items_entrypoints():
     isolated = ["cli_main", "core.engine", "tests.test_app", "main"]
     hotspots = [{"module": "core.alpha", "type": "OUTBOUND_HOTSPOT", "out_degree": 10}]
@@ -39,10 +52,7 @@ def test_sanity_check_reports():
     warnings_ok = _sanity_check_reports(summary_ok, artifacts_ok, compact_ok)
     assert len(warnings_ok) == 0
 
-def test_compute_layer_health_trigger():
-    layer_summary = {"status": "ok", "metrics": {"density_ratio": 5.0, "density": 0.5}}
-    global_summary = {"status": "ok", "metrics": {"density": 0.1}}
-    
+def test_compute_layer_health_does_not_infer_cycle_from_edge_count():
     health = _compute_layer_health(
         layer_set={"core.a"},
         layer_modules=["core.a"],
@@ -56,7 +66,7 @@ def test_compute_layer_health_trigger():
         global_skipped_files=[],
         global_summary={"metrics": {"density_hard": 0.5}},
     )
-    assert health["computation_mode"] == "full"
+    assert health["computation_mode"] == "filtered"
 
 def test_compute_layer_health_filtered():
     layer_summary = {"status": "ok", "metrics": {"density_ratio": 1.5, "density": 0.15}}

@@ -123,6 +123,51 @@ def test_write_layer_reports_has_no_datestamp_suffix(tmp_path, monkeypatch):
 
     assert os.path.isfile(canonical_path)
     assert not os.path.exists(legacy_path)
+    assert os.path.isfile(
+        os.path.join(expected_dir, "20260808", "test_repo_test_layer_summary.json")
+    )
+
+
+def test_standalone_layer_snapshot_shares_repository_timestamp_directory(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(
+        "contextor.core.reporting_engine.formatting.resolve_report_path",
+        lambda path: os.path.join(str(tmp_path), path),
+    )
+    monkeypatch.setattr(
+        "contextor.core.reporting_engine.io_manager.resolve_report_path",
+        lambda path: os.path.join(str(tmp_path), path),
+    )
+
+    write_layer_reports(
+        "repo",
+        "ui",
+        {"summary": {"status": "OK"}},
+        datestamp="20260808",
+    )
+
+    snapshot = (
+        tmp_path / "output" / "repo_20260808" / "repo_ui_summary.json"
+    )
+    assert snapshot.is_file()
+
+
+def test_write_layer_reports_emits_markdown_summary(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "contextor.core.reporting_engine.formatting.resolve_report_path",
+        lambda path: os.path.join(str(tmp_path), path),
+    )
+    monkeypatch.setattr(
+        "contextor.core.reporting_engine.io_manager.resolve_report_path",
+        lambda path: os.path.join(str(tmp_path), path),
+    )
+
+    write_layer_reports("repo", "ui", {"summary": {"status": "OK", "layer_module_count": 3}})
+
+    markdown = tmp_path / "output" / "repo_ui_summary.md"
+    assert markdown.is_file()
+    assert "# Layer report: ui" in markdown.read_text(encoding="utf-8")
 
 
 def test_write_global_reports_uses_canonical_names(tmp_path, monkeypatch):
@@ -137,6 +182,7 @@ def test_write_global_reports_uses_canonical_names(tmp_path, monkeypatch):
         "graph_analytics": {
             "nodes": 1,
         },
+        "diff_report": {"changed": True},
     }
 
     def mock_resolve_report_path(path):
@@ -175,3 +221,33 @@ def test_write_global_reports_uses_canonical_names(tmp_path, monkeypatch):
     assert not os.path.exists(
         os.path.join(output_dir, "test_repo_summary_20260808.json")
     )
+
+    assert os.path.isfile(
+        os.path.join(output_dir, "test_repo_20260808", "test_repo_summary.json")
+    )
+    assert os.path.isfile(
+        os.path.join(
+            output_dir,
+            "test_repo_20260808",
+            "test_repo_report_diff.json",
+        )
+    )
+
+
+def test_write_global_reports_emits_markdown_summary(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "contextor.core.reporting_engine.formatting.resolve_report_path",
+        lambda path: os.path.join(str(tmp_path), path),
+    )
+    monkeypatch.setattr(
+        "contextor.core.reporting_engine.io_manager.resolve_report_path",
+        lambda path: os.path.join(str(tmp_path), path),
+    )
+
+    write_global_reports({"summary": {"status": "OK", "metrics": {"nodes": 4}}}, "repo")
+
+    markdown = tmp_path / "output" / "repo_summary.md"
+    assert markdown.is_file()
+    content = markdown.read_text(encoding="utf-8")
+    assert "# Project report: repo" in content
+    assert "**nodes:** 4" in content

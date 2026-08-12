@@ -236,9 +236,6 @@ def _fallback_dependency_type(artifact: dict) -> str:
     """
     kind = artifact.get("kind", "unknown")
 
-    if kind == "class":
-        return "inheritance"
-
     if kind in ("function", "method"):
         return "call"
 
@@ -1443,6 +1440,11 @@ def generate_graph_analytics_report(
         )
     )
 
+    dependency_matrix = build_module_dependency_matrix(
+        scoped_artifact_data,
+        scoped_edges,
+    )
+
     # P0-3: Resolve the artifact source used for visibility.
     # Visibility must reflect whether a module is consumed *anywhere* in
     # the project, not only within the current scope.  When the caller
@@ -1596,9 +1598,19 @@ def generate_graph_analytics_report(
     )
 
     if scope_modules:
-        all_module_ids &= set(
-            scope_modules
-        )
+        all_module_ids.update(scope_modules)
+
+    matrix_fan_out = {
+        module_id: set(dependencies)
+        for module_id, dependencies in dependency_matrix.items()
+    }
+    matrix_fan_in: dict[str, set[str]] = defaultdict(set)
+    for consumer, dependencies in dependency_matrix.items():
+        for definer in dependencies:
+            matrix_fan_in[definer].add(consumer)
+
+    all_module_ids.update(matrix_fan_out)
+    all_module_ids.update(matrix_fan_in)
 
     # ------------------------------------------------------
     # Per-module metrics
@@ -1636,13 +1648,13 @@ def generate_graph_analytics_report(
 
         entry: dict[str, Any] = {
             "fan_in": len(
-                fan_in.get(
+                matrix_fan_in.get(
                     module_id,
                     set(),
                 )
             ),
             "fan_out": len(
-                fan_out.get(
+                matrix_fan_out.get(
                     module_id,
                     set(),
                 )
@@ -1702,13 +1714,6 @@ def generate_graph_analytics_report(
     # ------------------------------------------------------
     # Module dependency matrix
     # ------------------------------------------------------
-
-    dependency_matrix = (
-        build_module_dependency_matrix(
-            scoped_artifact_data,
-            scoped_edges,
-        )
-    )
 
     compact_matrix = _compact_matrix(
         dependency_matrix,

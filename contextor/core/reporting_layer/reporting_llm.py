@@ -6,6 +6,7 @@ based on the `single_file_report`.
 """
 
 from datetime import datetime
+from pathlib import Path
 
 from contextor.core.paths import atomic_write, resolve_report_path
 
@@ -14,8 +15,18 @@ def _format_api_surface(surface: dict) -> str:
     if not surface:
         return "No public API detected."
 
+    entries = []
+    for category, values in surface.items():
+        if category in {"functions", "methods", "classes"} and isinstance(values, dict):
+            entries.extend(values.items())
+        elif isinstance(values, dict) and "kind" in values:
+            entries.append((category, values))
+
+    if not entries:
+        return "No public API detected."
+
     lines = ["| Symbol | Type | Line | Signature | Consumers |", "|---|---|---|---|---|"]
-    for name, data in surface.items():
+    for name, data in entries:
         kind = data.get("kind", "unknown")
         line_start = data.get("line_start", "?")
         signature = data.get("signature") or data.get("detailed_signature") or ""
@@ -45,7 +56,7 @@ def generate_llm_markdown(single_file_report: dict, output_path: str):
     Transforms the JSON single file report into a Markdown context bundle.
     """
 
-    module_id = single_file_report.get("module", "unknown")
+    module_name = single_file_report.get("module_name") or single_file_report.get("module_id", "unknown")
     llm_summary = single_file_report.get("llm_summary", {})
 
     purpose = llm_summary.get("purpose", "No module intent found.")
@@ -54,7 +65,9 @@ def generate_llm_markdown(single_file_report: dict, output_path: str):
     entry_chains = llm_summary.get("entry_chains", [])
     git_ctx = llm_summary.get("git_context", {})
 
-    content = f"""# Module Context Bundle: `{module_id}`
+    json_name = Path(output_path).name.replace("_llm_context.md", ".json")
+
+    content = f"""# Module Context Bundle: `{module_name}`
 Generated: {datetime.now().isoformat()}
 
 ## Module Intent
@@ -83,11 +96,12 @@ Generated: {datetime.now().isoformat()}
 
 ## Dependencies & Impact
 - **Direct Dependents:** {len(llm_summary.get("direct_dependents", []))}
-- **Transitive Blast Radius:** {len(llm_summary.get("transitive_dependents", []))}
+- **Additional Transitive Dependents:** {len(llm_summary.get("transitive_dependents", []))}
+- **Module Dependency Radius:** {llm_summary.get("module_dependency_radius", 0)}
 - **Impact Depth:** {llm_summary.get("impact_depth", 0)}
 
 ---
-_Note: This is a compressed LLM bundle. Refer to `single_{module_id}.json` for full semantic and graph details._
+_Note: This is a compressed LLM bundle. Refer to `{json_name}` for full semantic and graph details._
 """
 
     atomic_write(resolve_report_path(output_path), content)

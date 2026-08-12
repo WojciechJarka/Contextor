@@ -1,0 +1,811 @@
+{
+  "density": 0.015,
+  "density_ratio": 1.13,
+  "edges": 264,
+  "edges_soft": 9,
+  "global_density": 0.0133,
+  "inbound_edge_count": 58,
+  "layer_scope": "C:\\Temp\\Contextor_Repo\\contextor",
+  "nodes": 133,
+  "outbound_edge_count": 0,
+  "per_module": {
+    "contextor.__init__": {
+      "in_degree": 0,
+      "internal_in": 0,
+      "internal_out": 0,
+      "out_degree": 0
+    },
+    "contextor.__main__": {
+      "in_degree": 1,
+      "internal_in": 0,
+      "internal_out": 2,
+      "out_degree": 2
+    },
+    "contextor.cli": {
+      "in_degree": 1,
+      "internal_in": 1,
+      "internal_out": 3,
+      "out_degree": 3
+    },
+    "contextor.core.__init__": {
+      "in_degree": 0,
+      "internal_in": 0,
+      "internal_out": 3,
+      "out_degree": 3
+    },
+    "contextor.core.analysis.__init__": {
+      "in_degree": 0,
+      "internal_in": 0,
+      "internal_out": 0,
+      "out_degree": 0
+    },
+    "contextor.core.analysis.activity": {
+      "in_degree": 2,
+      "internal_in": 2,
+      "internal_out": 0,
+      "out_degree": 0
+    },
+    "contextor.core.analysis.cache_manager": {
+      "in_degree": 2,
+      "internal_in": 1,
+      "internal_out": 1,
+      "out_degree": 1
+    },
+    "contextor.core.analysis.call_chain": {
+      "in_degree": 1,
+      "internal_in": 1,
+      "internal_out": 0,
+      "out_degree": 0
+    },
+    "contextor.core.analysis.export_analysis": {
+      "in_degree": 1,
+      "internal_in": 1,
+      "internal_out": 0,
+      "out_degree": 0
+    },
+    "contextor.core.analysis.exposure_analysis": {
+      "in_degree": 1,
+      "internal_in": 1,
+      "internal_out": 0,
+      "out_degree": 0
+    },
+    "contextor.core.analysis.function_analysis": {
+      "in_degree": 1,
+      "internal_in": 1,
+      "internal_out": 0,
+      "out_degree": 0
+    },
+    "contextor.core.analysis.git_context": {
+      "in_degree": 3,
+      "internal_in": 3,
+      "internal_out": 2,
+      "out_degree": 2
+    },
+    "contextor.core.analysis.import_analysis": {
+      "in_degree": 1,
+      "internal_in": 1,
+      "internal_out": 0,
+      "out_degree": 0
+    },
+    "contextor.core.analysis.incremental_engine": {
+      "in_degree": 3,
+      "internal_in": 1,
+      "internal_out": 6,
+      "out_degree": 6
+    },
+    "contextor.core.analysis.module_intent": {
+      "in_degree": 1,
+      "internal_in": 1,
+      "internal_out": 1,
+      "out_degree": 1
+    },
+    "contextor.core.analysis.risk_analysis": {
+      "in_degree": 1,
+      "internal_in": 1,
+      "internal_out": 0,
+      "out_degree": 0
+    },
+    "contextor.core.analysis.semantic_analysis": {
+      "in_degree": 1,
+      "internal_in": 1,
+      "internal_out": 0,
+      "out_degree": 0
+    },
+    "contextor.core.analysis.state_analysis": {
+      "in_degree": 1,
+      "internal_in": 1,
+      "internal_out": 0,
+      "out_degree": 0
+    },
+    "contextor.core.analysis.state_manager": {
+      "in_degree": 6,
+      "internal_in": 4,
+      "internal_out": 0,
+      "out_degree": 0
+    },
+    "contextor.core.analysis.test_context": {
+      "in_degree": 3,
+      "internal_in": 2,
+      "internal_out": 2,
+      "out_degree": 2
+    },
+    "contextor.core.api.__init__": {
+      "in_degree": 0,
+      "internal_in": 0,
+      "internal_out": 0,
+      "out_degree": 0
+    },
+    "contextor.core.api.api_consumers": {
+      "in_degree": 2,
+      "internal_in": 2,
+      "internal_out": 0,
+      "out_degree": 0
+    },
+    "contextor.core.api.facade": {
+      "in_degree": 7,
+      "internal_in": 5,
+      "internal_out": 24,
+      "out_degree": 24
+    },
+    "contextor.core.api.public_api": {
+      "in_degree": 1,
+      "internal_in": 1,
+      "internal_out": 0,
+      "out_degree": 0
+    },
+    "contextor.core.api_surface.__init__": {
+      "in_degree": 0,
+      "internal_in": 0,
+      "internal_out": 3,
+      "out_degree": 3
+    },
+    "contextor.core.api_surface.engine": {
+      "in_degree": 3,
+      "internal_in": 3,
+      "internal_out": 2,
+      "out_degree": 2
+    },
+    "contextor.core.api_surface.metadata": {
+      "in_degree": 2,
+      "internal_in": 2,
+      "internal_out": 1,
+      "out_degree": 1
+    },
+    "contextor.core.api_surface.visitor": {
+      "in_degree": 2,
+      "internal_in": 2,
+      "internal_out": 0,
+      "out_degree": 0
+    },
+    "contextor.core.context.__init__": {
+      "in_degree": 0,
+      "internal_in": 0,
+      "internal_out": 4,
+      "out_degree": 4
+    },
+    "contextor.core.context.clusters": {
+      "in_degree": 1,
+      "internal_in": 1,
+      "internal_out": 0,
+      "out_degree": 0
+    },
+    "contextor.core.context.dependencies": {
+      "in_degree": 2,
+      "internal_in": 2,
+      "internal_out": 0,
+      "out_degree": 0
+    },
+    "contextor.core.context.locator": {
+      "in_degree": 2,
+      "internal_in": 2,
+      "internal_out": 0,
+      "out_degree": 0
+    },
+    "contextor.core.context.signals": {
+      "in_degree": 1,
+      "internal_in": 1,
+      "internal_out": 1,
+      "out_degree": 1
+    },
+    "contextor.core.domain.__init__": {
+      "in_degree": 0,
+      "internal_in": 0,
+      "internal_out": 5,
+      "out_degree": 5
+    },
+    "contextor.core.domain.graph": {
+      "in_degree": 8,
+      "internal_in": 8,
+      "internal_out": 0,
+      "out_degree": 0
+    },
+    "contextor.core.domain.imports": {
+      "in_degree": 6,
+      "internal_in": 5,
+      "internal_out": 0,
+      "out_degree": 0
+    },
+    "contextor.core.domain.module": {
+      "in_degree": 9,
+      "internal_in": 8,
+      "internal_out": 2,
+      "out_degree": 2
+    },
+    "contextor.core.domain.resolution": {
+      "in_degree": 3,
+      "internal_in": 3,
+      "internal_out": 0,
+      "out_degree": 0
+    },
+    "contextor.core.domain.validation": {
+      "in_degree": 6,
+      "internal_in": 6,
+      "internal_out": 0,
+      "out_degree": 0
+    },
+    "contextor.core.errors": {
+      "in_degree": 10,
+      "internal_in": 8,
+      "internal_out": 0,
+      "out_degree": 0
+    },
+    "contextor.core.facts.build": {
+      "in_degree": 0,
+      "internal_in": 0,
+      "internal_out": 5,
+      "out_degree": 5
+    },
+    "contextor.core.facts.context": {
+      "in_degree": 1,
+      "internal_in": 1,
+      "internal_out": 3,
+      "out_degree": 3
+    },
+    "contextor.core.facts.references": {
+      "in_degree": 2,
+      "internal_in": 2,
+      "internal_out": 1,
+      "out_degree": 1
+    },
+    "contextor.core.facts.symbol_index": {
+      "in_degree": 1,
+      "internal_in": 1,
+      "internal_out": 1,
+      "out_degree": 1
+    },
+    "contextor.core.facts.symbols": {
+      "in_degree": 3,
+      "internal_in": 3,
+      "internal_out": 0,
+      "out_degree": 0
+    },
+    "contextor.core.git.diff_engine": {
+      "in_degree": 0,
+      "internal_in": 0,
+      "internal_out": 0,
+      "out_degree": 0
+    },
+    "contextor.core.git.repo_state": {
+      "in_degree": 3,
+      "internal_in": 3,
+      "internal_out": 0,
+      "out_degree": 0
+    },
+    "contextor.core.graph.__init__": {
+      "in_degree": 0,
+      "internal_in": 0,
+      "internal_out": 0,
+      "out_degree": 0
+    },
+    "contextor.core.graph.cycles": {
+      "in_degree": 8,
+      "internal_in": 5,
+      "internal_out": 2,
+      "out_degree": 2
+    },
+    "contextor.core.graph.graph": {
+      "in_degree": 9,
+      "internal_in": 4,
+      "internal_out": 3,
+      "out_degree": 3
+    },
+    "contextor.core.graph.incremental": {
+      "in_degree": 1,
+      "internal_in": 1,
+      "internal_out": 1,
+      "out_degree": 1
+    },
+    "contextor.core.graph.metrics": {
+      "in_degree": 5,
+      "internal_in": 4,
+      "internal_out": 0,
+      "out_degree": 0
+    },
+    "contextor.core.graph.resolver": {
+      "in_degree": 3,
+      "internal_in": 2,
+      "internal_out": 2,
+      "out_degree": 2
+    },
+    "contextor.core.graph.thresholds": {
+      "in_degree": 4,
+      "internal_in": 4,
+      "internal_out": 0,
+      "out_degree": 0
+    },
+    "contextor.core.hotspots.__init__": {
+      "in_degree": 0,
+      "internal_in": 0,
+      "internal_out": 3,
+      "out_degree": 3
+    },
+    "contextor.core.hotspots.classification": {
+      "in_degree": 2,
+      "internal_in": 2,
+      "internal_out": 0,
+      "out_degree": 0
+    },
+    "contextor.core.hotspots.degrees": {
+      "in_degree": 2,
+      "internal_in": 2,
+      "internal_out": 0,
+      "out_degree": 0
+    },
+    "contextor.core.hotspots.engine": {
+      "in_degree": 1,
+      "internal_in": 1,
+      "internal_out": 4,
+      "out_degree": 4
+    },
+    "contextor.core.hotspots.normalization": {
+      "in_degree": 1,
+      "internal_in": 1,
+      "internal_out": 0,
+      "out_degree": 0
+    },
+    "contextor.core.module.__init__": {
+      "in_degree": 0,
+      "internal_in": 0,
+      "internal_out": 5,
+      "out_degree": 5
+    },
+    "contextor.core.paths": {
+      "in_degree": 16,
+      "internal_in": 15,
+      "internal_out": 0,
+      "out_degree": 0
+    },
+    "contextor.core.reference.__init__": {
+      "in_degree": 0,
+      "internal_in": 0,
+      "internal_out": 2,
+      "out_degree": 2
+    },
+    "contextor.core.reference.engine": {
+      "in_degree": 4,
+      "internal_in": 4,
+      "internal_out": 2,
+      "out_degree": 2
+    },
+    "contextor.core.reference.resolution": {
+      "in_degree": 1,
+      "internal_in": 1,
+      "internal_out": 0,
+      "out_degree": 0
+    },
+    "contextor.core.reference.visitor": {
+      "in_degree": 2,
+      "internal_in": 2,
+      "internal_out": 1,
+      "out_degree": 1
+    },
+    "contextor.core.reporting_engine.__init__": {
+      "in_degree": 0,
+      "internal_in": 0,
+      "internal_out": 3,
+      "out_degree": 3
+    },
+    "contextor.core.reporting_engine.collisions_generator": {
+      "in_degree": 2,
+      "internal_in": 2,
+      "internal_out": 2,
+      "out_degree": 2
+    },
+    "contextor.core.reporting_engine.debt": {
+      "in_degree": 3,
+      "internal_in": 3,
+      "internal_out": 1,
+      "out_degree": 1
+    },
+    "contextor.core.reporting_engine.dictionary": {
+      "in_degree": 8,
+      "internal_in": 5,
+      "internal_out": 1,
+      "out_degree": 1
+    },
+    "contextor.core.reporting_engine.formatting": {
+      "in_degree": 7,
+      "internal_in": 6,
+      "internal_out": 1,
+      "out_degree": 1
+    },
+    "contextor.core.reporting_engine.generators": {
+      "in_degree": 4,
+      "internal_in": 3,
+      "internal_out": 4,
+      "out_degree": 4
+    },
+    "contextor.core.reporting_engine.graph_aggregators": {
+      "in_degree": 1,
+      "internal_in": 1,
+      "internal_out": 0,
+      "out_degree": 0
+    },
+    "contextor.core.reporting_engine.graph_analytics": {
+      "in_degree": 2,
+      "internal_in": 2,
+      "internal_out": 0,
+      "out_degree": 0
+    },
+    "contextor.core.reporting_engine.header": {
+      "in_degree": 3,
+      "internal_in": 2,
+      "internal_out": 2,
+      "out_degree": 2
+    },
+    "contextor.core.reporting_engine.io_manager": {
+      "in_degree": 3,
+      "internal_in": 2,
+      "internal_out": 2,
+      "out_degree": 2
+    },
+    "contextor.core.reporting_engine.layer_slicer": {
+      "in_degree": 1,
+      "internal_in": 1,
+      "internal_out": 8,
+      "out_degree": 8
+    },
+    "contextor.core.reporting_engine.persistent_registry": {
+      "in_degree": 11,
+      "internal_in": 5,
+      "internal_out": 0,
+      "out_degree": 0
+    },
+    "contextor.core.reporting_engine.pipeline": {
+      "in_degree": 2,
+      "internal_in": 2,
+      "internal_out": 14,
+      "out_degree": 14
+    },
+    "contextor.core.reporting_engine.refactor_planner": {
+      "in_degree": 1,
+      "internal_in": 1,
+      "internal_out": 0,
+      "out_degree": 0
+    },
+    "contextor.core.reporting_engine.risk_signals": {
+      "in_degree": 1,
+      "internal_in": 1,
+      "internal_out": 0,
+      "out_degree": 0
+    },
+    "contextor.core.reporting_engine.structure_generator": {
+      "in_degree": 3,
+      "internal_in": 3,
+      "internal_out": 0,
+      "out_degree": 0
+    },
+    "contextor.core.reporting_engine.summary_generator": {
+      "in_degree": 2,
+      "internal_in": 2,
+      "internal_out": 10,
+      "out_degree": 10
+    },
+    "contextor.core.reporting_layer.__init__": {
+      "in_degree": 0,
+      "internal_in": 0,
+      "internal_out": 0,
+      "out_degree": 0
+    },
+    "contextor.core.reporting_layer.artifact_consumption": {
+      "in_degree": 2,
+      "internal_in": 1,
+      "internal_out": 2,
+      "out_degree": 2
+    },
+    "contextor.core.reporting_layer.artifact_usage_report": {
+      "in_degree": 8,
+      "internal_in": 3,
+      "internal_out": 4,
+      "out_degree": 4
+    },
+    "contextor.core.reporting_layer.artifact_usage_report_compact": {
+      "in_degree": 6,
+      "internal_in": 4,
+      "internal_out": 2,
+      "out_degree": 2
+    },
+    "contextor.core.reporting_layer.git_report": {
+      "in_degree": 1,
+      "internal_in": 1,
+      "internal_out": 1,
+      "out_degree": 1
+    },
+    "contextor.core.reporting_layer.reporting_layer": {
+      "in_degree": 0,
+      "internal_in": 0,
+      "internal_out": 0,
+      "out_degree": 0
+    },
+    "contextor.core.reporting_layer.reporting_llm": {
+      "in_degree": 1,
+      "internal_in": 1,
+      "internal_out": 1,
+      "out_degree": 1
+    },
+    "contextor.core.reporting_layer.reporting_single_file": {
+      "in_degree": 3,
+      "internal_in": 2,
+      "internal_out": 2,
+      "out_degree": 2
+    },
+    "contextor.core.single_file.__init__": {
+      "in_degree": 0,
+      "internal_in": 0,
+      "internal_out": 1,
+      "out_degree": 1
+    },
+    "contextor.core.single_file.builders.__init__": {
+      "in_degree": 0,
+      "internal_in": 0,
+      "internal_out": 5,
+      "out_degree": 5
+    },
+    "contextor.core.single_file.builders.layer0_builders": {
+      "in_degree": 1,
+      "internal_in": 1,
+      "internal_out": 17,
+      "out_degree": 17
+    },
+    "contextor.core.single_file.builders.layer1_builders": {
+      "in_degree": 1,
+      "internal_in": 1,
+      "internal_out": 3,
+      "out_degree": 3
+    },
+    "contextor.core.single_file.builders.layer2_builders": {
+      "in_degree": 1,
+      "internal_in": 1,
+      "internal_out": 3,
+      "out_degree": 3
+    },
+    "contextor.core.single_file.builders.layer3_builders": {
+      "in_degree": 1,
+      "internal_in": 1,
+      "internal_out": 2,
+      "out_degree": 2
+    },
+    "contextor.core.single_file.builders.registry": {
+      "in_degree": 5,
+      "internal_in": 5,
+      "internal_out": 0,
+      "out_degree": 0
+    },
+    "contextor.core.single_file.single_file_analysis": {
+      "in_degree": 2,
+      "internal_in": 2,
+      "internal_out": 2,
+      "out_degree": 2
+    },
+    "contextor.core.source": {
+      "in_degree": 10,
+      "internal_in": 9,
+      "internal_out": 0,
+      "out_degree": 0
+    },
+    "contextor.core.symbol_engine.__init__": {
+      "in_degree": 0,
+      "internal_in": 0,
+      "internal_out": 4,
+      "out_degree": 4
+    },
+    "contextor.core.symbol_engine.domain": {
+      "in_degree": 1,
+      "internal_in": 1,
+      "internal_out": 0,
+      "out_degree": 0
+    },
+    "contextor.core.symbol_engine.extractor": {
+      "in_degree": 3,
+      "internal_in": 3,
+      "internal_out": 2,
+      "out_degree": 2
+    },
+    "contextor.core.symbol_engine.imports": {
+      "in_degree": 1,
+      "internal_in": 1,
+      "internal_out": 0,
+      "out_degree": 0
+    },
+    "contextor.core.symbol_engine.index": {
+      "in_degree": 1,
+      "internal_in": 1,
+      "internal_out": 1,
+      "out_degree": 1
+    },
+    "contextor.core.symbol_engine.indexer": {
+      "in_degree": 12,
+      "internal_in": 4,
+      "internal_out": 6,
+      "out_degree": 6
+    },
+    "contextor.core.symbol_engine.usage": {
+      "in_degree": 1,
+      "internal_in": 1,
+      "internal_out": 1,
+      "out_degree": 1
+    },
+    "contextor.core.validator.__init__": {
+      "in_degree": 0,
+      "internal_in": 0,
+      "internal_out": 2,
+      "out_degree": 2
+    },
+    "contextor.core.validator.collisions": {
+      "in_degree": 8,
+      "internal_in": 7,
+      "internal_out": 3,
+      "out_degree": 3
+    },
+    "contextor.core.validator.cycles": {
+      "in_degree": 1,
+      "internal_in": 1,
+      "internal_out": 3,
+      "out_degree": 3
+    },
+    "contextor.core.validator.helpers": {
+      "in_degree": 1,
+      "internal_in": 1,
+      "internal_out": 0,
+      "out_degree": 0
+    },
+    "contextor.core.validator.layers": {
+      "in_degree": 1,
+      "internal_in": 1,
+      "internal_out": 5,
+      "out_degree": 5
+    },
+    "contextor.core.validator.rules": {
+      "in_degree": 1,
+      "internal_in": 1,
+      "internal_out": 0,
+      "out_degree": 0
+    },
+    "contextor.core.validator.validate": {
+      "in_degree": 1,
+      "internal_in": 1,
+      "internal_out": 7,
+      "out_degree": 7
+    },
+    "contextor.dummy_test": {
+      "in_degree": 0,
+      "internal_in": 0,
+      "internal_out": 0,
+      "out_degree": 0
+    },
+    "contextor.mcp_process_registry": {
+      "in_degree": 2,
+      "internal_in": 2,
+      "internal_out": 0,
+      "out_degree": 0
+    },
+    "contextor.mcp_server": {
+      "in_degree": 0,
+      "internal_in": 0,
+      "internal_out": 6,
+      "out_degree": 6
+    },
+    "contextor.mcp_worker": {
+      "in_degree": 0,
+      "internal_in": 0,
+      "internal_out": 1,
+      "out_degree": 1
+    },
+    "contextor.repo_generator.__init__": {
+      "in_degree": 0,
+      "internal_in": 0,
+      "internal_out": 1,
+      "out_degree": 1
+    },
+    "contextor.repo_generator.config": {
+      "in_degree": 2,
+      "internal_in": 2,
+      "internal_out": 0,
+      "out_degree": 0
+    },
+    "contextor.repo_generator.filters": {
+      "in_degree": 1,
+      "internal_in": 1,
+      "internal_out": 3,
+      "out_degree": 3
+    },
+    "contextor.repo_generator.icons": {
+      "in_degree": 1,
+      "internal_in": 1,
+      "internal_out": 1,
+      "out_degree": 1
+    },
+    "contextor.repo_generator.main": {
+      "in_degree": 1,
+      "internal_in": 1,
+      "internal_out": 6,
+      "out_degree": 6
+    },
+    "contextor.repo_generator.path_parser": {
+      "in_degree": 2,
+      "internal_in": 1,
+      "internal_out": 0,
+      "out_degree": 0
+    },
+    "contextor.ui.__init__": {
+      "in_degree": 0,
+      "internal_in": 0,
+      "internal_out": 1,
+      "out_degree": 1
+    },
+    "contextor.ui.exclude_check": {
+      "in_degree": 1,
+      "internal_in": 1,
+      "internal_out": 0,
+      "out_degree": 0
+    },
+    "contextor.ui.exclude_gui": {
+      "in_degree": 1,
+      "internal_in": 1,
+      "internal_out": 4,
+      "out_degree": 4
+    },
+    "contextor.ui.gui": {
+      "in_degree": 2,
+      "internal_in": 2,
+      "internal_out": 9,
+      "out_degree": 9
+    },
+    "contextor.ui.gui_parser": {
+      "in_degree": 1,
+      "internal_in": 1,
+      "internal_out": 3,
+      "out_degree": 3
+    },
+    "contextor.ui.path_memory": {
+      "in_degree": 5,
+      "internal_in": 5,
+      "internal_out": 1,
+      "out_degree": 1
+    },
+    "contextor.ui.progress_widget": {
+      "in_degree": 2,
+      "internal_in": 2,
+      "internal_out": 1,
+      "out_degree": 1
+    },
+    "contextor.ui.system_actions": {
+      "in_degree": 1,
+      "internal_in": 1,
+      "internal_out": 1,
+      "out_degree": 1
+    },
+    "contextor.ui.test_runner": {
+      "in_degree": 2,
+      "internal_in": 1,
+      "internal_out": 2,
+      "out_degree": 2
+    },
+    "contextor.ui.theme": {
+      "in_degree": 6,
+      "internal_in": 6,
+      "internal_out": 0,
+      "out_degree": 0
+    }
+  }
+}

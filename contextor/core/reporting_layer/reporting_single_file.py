@@ -16,6 +16,60 @@ from datetime import datetime
 import orjson
 
 from contextor.core.paths import atomic_write, resolve_report_path
+from contextor.core.reporting_engine.dictionary import IndexDictionary
+
+
+def _qualified_artifact_name(module_name: str, symbol: str) -> str:
+    """Return the repository-wide identity used by the global artifact report."""
+    if "::" in symbol:
+        return symbol
+    return f"{module_name}::{symbol}"
+
+
+def _artifact_id(index_dict: IndexDictionary, module_name: str, symbol: str) -> str:
+    return index_dict.get_artifact_id(_qualified_artifact_name(module_name, symbol))
+
+
+def _symbol_kinds(symbols: dict) -> dict[str, str]:
+    kinds = {}
+    if not isinstance(symbols, dict):
+        return kinds
+    for category, kind in (
+        ("classes", "class"),
+        ("functions", "function"),
+        ("methods", "method"),
+        ("globals", "global"),
+    ):
+        for symbol in symbols.get(category, []):
+            kinds[symbol] = kind
+    return kinds
+
+
+def _flatten_api_surface(surface: dict) -> dict:
+    """Normalize grouped and already-flat API surface schemas."""
+    if not isinstance(surface, dict):
+        return {}
+    grouped = {"classes", "functions", "methods", "globals"}
+    flattened = {}
+    for name, data in surface.items():
+        if name in grouped and isinstance(data, dict):
+            flattened.update(data)
+        else:
+            flattened[name] = data
+    return flattened
+
+
+def _compact_module_evidence(data: dict, index_dict: IndexDictionary) -> dict:
+    compacted = {}
+    for category, value in data.items():
+        if isinstance(value, dict) and isinstance(value.get("modules"), list):
+            compacted[category] = {
+                **value,
+                "modules": [index_dict.get_module_id(module) for module in value["modules"]],
+            }
+        else:
+            compacted[category] = value
+    return compacted
 
 
 def save_single_file_report(report, path):
@@ -53,8 +107,9 @@ def _build_llm_summary(ctx: dict) -> dict:
     transitive_dependents = [e["module"] for e in impact if e.get("depth", 0) > 1]
     impact_depth = max((e.get("depth", 0) for e in impact), default=0)
 
-    # 1. Blast Radius
-    blast_radius = len(direct_dependents) + len(transitive_dependents)
+    # Module-level reverse dependency closure. This is deliberately not
+    # presented as an exact symbol-level refactoring blast radius.
+    module_dependency_radius = len(direct_dependents) + len(transitive_dependents)
 
     # 2. AI Guidance (Hints Vector based on Debt/Hotspots)
     guidance = []
@@ -70,9 +125,10 @@ def _build_llm_summary(ctx: dict) -> dict:
         guidance.append(
             "INFO: Module appears to be a configuration hub. High level of outgoing dependencies is natural here. Focus on data consistency."
         )
-    if blast_radius > 15:
+    if module_dependency_radius > 15:
         guidance.append(
-            f"WARNING: Blast radius is {blast_radius} modules. Do not change the public API without thorough testing (or maintain backward compatibility)."
+            f"WARNING: Module dependency radius is {module_dependency_radius} modules. "
+            "Public API changes require regression testing or backward compatibility."
         )
     if not guidance:
         guidance.append(
@@ -80,7 +136,9 @@ def _build_llm_summary(ctx: dict) -> dict:
         )
 
     # 3. Deep Surface (API callable by LLM)
-    api_surface_deep = ctx.get("api_surface", {}).get("surface", {})
+    api_surface_deep = _flatten_api_surface(
+        ctx.get("api_surface", {}).get("surface", {})
+    )
     functions = ctx.get("function_context", {})
 
     enriched_surface = {}
@@ -103,7 +161,8 @@ def _build_llm_summary(ctx: dict) -> dict:
         "public_api_count": len(ctx.get("public_api", [])),
         "live_symbols": activity.get("live", 0),
         "unused_public_api_count": activity.get("unused_public_api", 0),
-        "blast_radius": blast_radius,
+        "module_dependency_radius": module_dependency_radius,
+        "module_dependency_radius_kind": "reverse_hard_dependency_closure",
         "direct_dependents": direct_dependents,
         "transitive_dependents": transitive_dependents,
         "impact_depth": impact_depth,
@@ -125,8 +184,6 @@ def _build_llm_summary(ctx: dict) -> dict:
     }
 
 
-from contextor.core.reporting_engine.dictionary import IndexDictionary
-
 def generate_single_file_report(ctx: dict, module_count: int, report_header: dict | None = None, index_dict: IndexDictionary | None = None):
     """
     Generates a single file report using pre-calculated context structures.
@@ -146,36 +203,31 @@ def generate_single_file_report(ctx: dict, module_count: int, report_header: dic
     if index_dict is None:
         raise ValueError("index_dict must be provided to generate_single_file_report")
         
-    my_mod_idx = index_dict.get_module_id(ctx["module_id"])
+    module_name = ctx["module_id"]
+    my_mod_idx = index_dict.get_module_id(module_name)
+    artifact_id = lambda symbol: _artifact_id(index_dict, module_name, symbol)
+    symbol_kinds = _symbol_kinds(symbol_context["symbols"])
     
     # Compact artifact_consumption
     original_ac = ctx.get("artifact_consumption", {})
     compact_symbols = {}
     
     for k, v in original_ac.get("symbols", {}).items():
-        a_id = index_dict.get_artifact_id(k)
-        compact_usage = {}
-        for cat, values in (v.get("usage") or {}).items():
-            if not values: continue
-            if cat == "ambiguous_calls" or cat.endswith("_detail"):
-                compacted_vals = []
-                for val in values:
-                    if isinstance(val, dict):
-                        new_val = dict(val)
-                        new_val["module"] = index_dict.get_module_id(val.get("module"))
-                        compacted_vals.append(new_val)
-                    else:
-                        compacted_vals.append(index_dict.get_module_id(val))
-                compact_usage[cat] = compacted_vals
-            else:
-                compact_usage[cat] = [index_dict.get_module_id(m) for m in values]
-                
+        a_id = artifact_id(k)
+        compact_usage = _compact_module_evidence(v, index_dict)
+        consumers = sorted({
+            module
+            for value in v.values()
+            if isinstance(value, dict)
+            for module in value.get("modules", [])
+            if module
+        })
         compact_symbols[a_id] = {
             "artifact_id": a_id,
-            "kind": v.get("kind"),
-            "definer_module": index_dict.get_module_id(v.get("definer_module")),
-            "consumer_module_indices": [index_dict.get_module_id(c) for c in v.get("consumers", [])],
-            "consumer_count": v.get("consumer_count"),
+            "kind": symbol_kinds.get(k),
+            "definer_module": my_mod_idx,
+            "consumer_module_indices": [index_dict.get_module_id(c) for c in consumers],
+            "consumer_count": len(consumers),
             "usage": compact_usage,
             "risk_score": v.get("risk_score", 0)
         }
@@ -199,9 +251,9 @@ def generate_single_file_report(ctx: dict, module_count: int, report_header: dic
     arch = ctx["architecture_context"]
     compact_arch = {
         "hard_dependencies": [index_dict.get_module_id(m) for m in arch.get("hard_dependencies", [])],
-        "hard_dependents": [index_dict.get_module_id(m) for m in arch.get("hard_dependents", [])],
+        "hard_dependents": [index_dict.get_module_id(m) for m in arch.get("imported_by", [])],
         "soft_dependencies": [index_dict.get_module_id(m) for m in arch.get("soft_dependencies", [])],
-        "soft_dependents": [index_dict.get_module_id(m) for m in arch.get("soft_dependents", [])],
+        "soft_dependents": [index_dict.get_module_id(m) for m in arch.get("soft_imported_by", [])],
         "graph_metrics": arch.get("graph_metrics", {}),
         "cycles": [
             [index_dict.get_module_id(m) for m in cycle] for cycle in arch.get("cycles", [])
@@ -213,6 +265,7 @@ def generate_single_file_report(ctx: dict, module_count: int, report_header: dic
         # IDENTITY
         # --------------------------------------------------
         "module_id": my_mod_idx,
+        "module_name": module_name,
         "global_node_id": my_mod_idx,
         "file": str(ctx["file_path"]),
         "generated_at": datetime.now().isoformat(),
@@ -223,53 +276,65 @@ def generate_single_file_report(ctx: dict, module_count: int, report_header: dic
         # --------------------------------------------------
         # SYMBOL DOMAIN
         # --------------------------------------------------
-        "symbols": [index_dict.get_artifact_id(s) for s in symbol_context["symbols"]],
-        "symbol_usage": {index_dict.get_artifact_id(k): [index_dict.get_module_id(v) if '/' not in v else v for v in vals] for k, vals in symbol_context["usage"].items()},
-        "symbol_ecosystem": {index_dict.get_artifact_id(k): [index_dict.get_artifact_id(v) for v in vals] for k, vals in symbol_context["ecosystem"].items()},
+        "symbols": [artifact_id(s) for s in symbol_context["all_symbols"]],
+        "symbol_usage": {artifact_id(k): [index_dict.get_module_id(v) for v in vals] for k, vals in symbol_context["usage"].items()},
+        "symbol_ecosystem": {artifact_id(k): [index_dict.get_module_id(v) for v in vals] for k, vals in symbol_context["ecosystem"].items()},
         "symbol_references": symbol_context["references"],
-        "api_consumers": {index_dict.get_artifact_id(k): [index_dict.get_module_id(v) for v in vals] for k, vals in symbol_context["consumers"].items()},
-        "api_consumer_summary": {index_dict.get_artifact_id(k): v for k, v in symbol_context["consumer_summary"].items()},
+        "api_consumers": {artifact_id(k): _compact_module_evidence(v, index_dict) for k, v in symbol_context["consumers"].items()},
+        "api_consumer_summary": symbol_context["consumer_summary"],
         # --------------------------------------------------
         # API DOMAIN
         # --------------------------------------------------
-        "public_api": [index_dict.get_artifact_id(s) for s in ctx["public_api"]],
-        "exports": [index_dict.get_artifact_id(s) for s in export_context["exports"]],
+        "public_api": [artifact_id(s) for s in ctx["public_api"]],
+        "exports": [
+            artifact_id(s)
+            for s in (
+                export_context["exports"].get("symbols", [])
+                if isinstance(export_context["exports"], dict)
+                else export_context["exports"]
+            )
+        ],
         "export_summary": export_context["export_summary"],
         # --------------------------------------------------
         # SYMBOL ACTIVITY
         # --------------------------------------------------
-        "symbol_activity": {index_dict.get_artifact_id(k): v for k, v in ctx["symbol_activity"].items()},
+        "symbol_activity": {artifact_id(k): v for k, v in ctx["symbol_activity"].items()},
         "activity_summary": ctx["activity_summary"],
         "unused_public_api": sorted(
             [
-                index_dict.get_artifact_id(symbol)
+                artifact_id(symbol)
                 for symbol, data in ctx["symbol_activity"].items()
                 if data["status"] == "UNUSED_PUBLIC"
             ]
         ),
-        "unused_candidates_old": [index_dict.get_artifact_id(s) for s in export_context["unused_candidates"]],
+        "unused_candidates_old": [artifact_id(s) for s in export_context["unused_candidates"]],
         # --------------------------------------------------
         # ARTIFACT CONSUMPTION
         # --------------------------------------------------
         "artifact_consumption": compact_consumption,
-        "api_surface": [index_dict.get_artifact_id(a) for a in ctx["api_surface"]],
+        "api_surface": {
+            artifact_id(name): data
+            for name, data in _flatten_api_surface(
+                ctx.get("api_surface", {}).get("surface", {})
+            ).items()
+        },
         # --------------------------------------------------
         # CODE SEMANTICS & STATE
         # --------------------------------------------------
-        "module_semantics": {index_dict.get_artifact_id(k): v for k, v in module_semantics.items()},
+        "module_semantics": module_semantics,
         "semantic_analysis": {
             "mutability": [
                 {
-                    "symbol": index_dict.get_artifact_id(k),
+                    "symbol": artifact_id(k),
                     "mutated_args": v.get("mutated_args", []),
-                    "globals_mutated": [index_dict.get_artifact_id(g) for g in v.get("globals_mutated", [])],
+                    "globals_mutated": [artifact_id(g) for g in v.get("globals_mutated", [])],
                 }
                 for k, v in ctx.get("state_context", {}).items()
                 if not v.get("is_pure", True)
             ],
             "side_effects": [
                 {
-                    "symbol": index_dict.get_artifact_id(k),
+                    "symbol": artifact_id(k),
                     "nonlocals": v.get("nonlocals_used", []),
                     "self_mutations": v.get("self_mutations", []),
                     "captured": v.get("captured_in_closures", []),
@@ -279,7 +344,7 @@ def generate_single_file_report(ctx: dict, module_count: int, report_header: dic
             ],
             "risks": [
                 {
-                    "symbol": index_dict.get_artifact_id(k),
+                    "symbol": artifact_id(k),
                     "complexity": v.get("metrics", {}).get("complexity", 1),
                     "raises": v.get("metrics", {}).get("raises", []),
                 }
@@ -287,11 +352,17 @@ def generate_single_file_report(ctx: dict, module_count: int, report_header: dic
                 if v.get("metrics", {}).get("complexity", 1) > 5
             ],
         },
-        "functions": {index_dict.get_artifact_id(k): v for k, v in ctx.get("function_context", {}).items()},
+        "functions": {artifact_id(k): v for k, v in ctx.get("function_context", {}).items()},
         # --------------------------------------------------
         # IMPORTS
         # --------------------------------------------------
-        "imports": [index_dict.get_module_id(m) for m in ctx["import_context"]["imports"]],
+        "imports": {
+            category: [
+                index_dict.get_module_id(module) if category in {"internal", "local"} else module
+                for module in modules
+            ]
+            for category, modules in ctx["import_context"]["imports"].items()
+        } if isinstance(ctx["import_context"]["imports"], dict) else [],
         "import_users": [index_dict.get_module_id(u) for u in ctx["import_users"]],
         # --------------------------------------------------
         # ARCHITECTURE
@@ -302,9 +373,9 @@ def generate_single_file_report(ctx: dict, module_count: int, report_header: dic
         # TEST CONTEXT  (nowe - F5)
         # --------------------------------------------------
         "test_context": {
-            "test_files": [index_dict.get_module_id(f) for f in ctx.get("test_context", {}).get("test_files", [])],
-            "tested_symbols": [index_dict.get_artifact_id(s) for s in ctx.get("test_context", {}).get("tested_symbols", [])],
-            "untested_public_symbols": [index_dict.get_artifact_id(s) for s in ctx.get("test_context", {}).get("untested_public_symbols", [])]
+            "test_files": ctx.get("test_context", {}).get("test_files", []),
+            "tested_symbols": [artifact_id(s) for s in ctx.get("test_context", {}).get("tested_symbols", [])],
+            "untested_public_symbols": [artifact_id(s) for s in ctx.get("test_context", {}).get("untested_public_symbols", [])]
         } if ctx.get("test_context") else {},
         # --------------------------------------------------
         # GIT

@@ -106,6 +106,37 @@ def find_test_files(module_id: str, root_path: str, test_dirs: dict | None = Non
         if candidate in file_names
     ]
 
+    # A test file does not need to mirror the implementation filename.
+    # Include tests that directly import the analyzed module so files such
+    # as test_resolver.py can cover domain.module.py.
+    for directory, file_names in test_dirs.items():
+        if directory == Path(root_path):
+            candidate_names = [name for name in file_names if name.startswith("test_") or name.endswith("_test.py")]
+        else:
+            candidate_names = [name for name in file_names if name.endswith(".py")]
+
+        for name in candidate_names:
+            test_path = directory / name
+            try:
+                tree = parse_source(test_path)
+            except Exception:
+                continue
+
+            imports_target = any(
+                (
+                    isinstance(node, ast.Import)
+                    and any(alias.name == module_id or alias.name.startswith(module_id + ".") for alias in node.names)
+                )
+                or (
+                    isinstance(node, ast.ImportFrom)
+                    and node.level == 0
+                    and (node.module == module_id or (node.module or "").startswith(module_id + "."))
+                )
+                for node in ast.walk(tree)
+            )
+            if imports_target:
+                found.append(str(test_path))
+
     # Deduplication
     return sorted(set(found))
 

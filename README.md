@@ -21,7 +21,7 @@ Contextor acts as a bridge between software repositories and AI agents, giving L
 - **Architectural Debt Calculation:**  
   Calculates structural risk indicators by detecting isolated modules, namespace collisions, dependency hotspots, and architectural inconsistencies.
 - **Artifact Consumption Tracking (Blast Radius):**  
-  Analyzes how symbols (classes, functions) are consumed throughout the repository. Provides an exact "blast radius" for any refactoring by tracking direct calls, API imports, and reflection patterns.
+  Analyzes how symbols (classes, functions) are consumed throughout the repository. Reports evidence-backed direct static consumers from calls, API imports, and detectable reflection patterns. Dynamic Python behavior can make this radius incomplete, so it is presented with its evidence scope rather than as mathematically exact.
 - **Context Generation for LLMs:**  
   Generates ultra-compact, indexed JSON matrices and Markdown reports designed specifically for Large Language Models. It acts as a structural "GPS" for AI, saving thousands of tokens by delivering precise architectural context instead of raw, concatenated source files.
 
@@ -48,9 +48,9 @@ Contextor natively supports the **Model Context Protocol**, allowing Large Langu
 
 - **Contextor Query Layer:** Instead of serving raw, massive JSON files, the server exposes highly targeted endpoints (e.g., `get_project_architecture`, `get_module_context`, `get_artifact_blast_radius`).
 - **Automatic Path Resolution:** The LLM simply provides the repository path. The server automatically locates and parses the latest generated reports in the background without exposing raw file structures.
-- **Zero-Bloat Context:** By instantly merging data from multiple reports, the server delivers perfectly sized, synthesized insights (like exact inbound/outbound dependencies for a single module) to the LLM.
+- **Bounded Context:** By merging data from multiple reports, the server delivers compact synthesized insights, resolves requested registry IDs, and exposes limits plus truncation counters for larger collections.
 - **Architectural Regression Analysis:** Tools like `get_report_diff` allow LLMs to dynamically compare the latest analysis with previous runs, immediately surfacing newly introduced architectural cycles, technical debt changes, and shifting dependencies.
-- **Secure Advanced Filtering:** Power-user tools (`query_json_data`) allow LLMs to extract exact JSON subsets directly on the server using a strictly sandboxed, restricted Python evaluation environment to ensure zero-risk security against unauthorized code execution.
+- **Restricted Advanced Filtering:** The `query_canonical_state` tool lets an LLM extract small subsets from live canonical state using a restricted expression environment. It is intended for targeted structural queries, not arbitrary code execution.
 
 ---
 
@@ -74,7 +74,7 @@ Contextor natively supports the **Model Context Protocol**, allowing Large Langu
 - Hotspot classification and technical debt scoring directly linked to architectural action items
 - Dedicated name collision reporting with zero-conflict validation
 - json parsing engine (for extraction of info about single file or single symbol from full artifacts report)
-- Timestamped reports and automated routing of high-risk layers into dedicated timestamped subfolders
+- Stable canonical report names plus immutable timestamped snapshot subfolders for repository, layer, and single-file runs; high-risk layer packages use the same history model
 - Git integration for commit and branch tracking
 - Automated JSON report diffing engine detecting regressions in technical debt, hotspots, and architectural bottlenecks
 - Detailed single-file Git patches bridging the gap between local changes and architectural impact
@@ -200,6 +200,10 @@ Generated reports are saved into the `output/` directory next to the
 Contextor installation, regardless of the directory you launch from.
 Override the location with `--output` or the `CONTEXTOR_OUTPUT_DIR`
 environment variable.
+
+Each analysis keeps stable canonical filenames for MCP clients and also writes
+a historical copy under `output/<repository>_<timestamp>/`. The canonical files
+represent the latest run; timestamped subfolders are suitable for comparisons.
 
 ---
 

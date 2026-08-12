@@ -1,0 +1,4310 @@
+{
+  "_format_note": "Schema v3. Module identifiers are integer indexes into the master index dictionary. Artifact identifiers are A-prefixed IDs mapping to the master artifact dictionary. Artifact definitions are stored once under 'artifacts'. Shared-artifact structures contain references only. Artifacts with zero consumers are omitted from this compact report.",
+  "_format_version": "3",
+  "artifact_count": 356,
+  "artifacts": {
+    "A1/4": {
+      "artifact_id": "A1/4",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "171/1"
+      ],
+      "definer_module": "75/1",
+      "kind": "global"
+    },
+    "A10/4": {
+      "artifact_id": "A10/4",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "156/7"
+      ],
+      "definer_module": "26/1",
+      "kind": "function"
+    },
+    "A1000/1": {
+      "artifact_id": "A1000/1",
+      "consumer_count": 11,
+      "consumer_module_indices": [
+        "101/1",
+        "117/1",
+        "121/1",
+        "123/1",
+        "133/1",
+        "149/1",
+        "26/1",
+        "46/1",
+        "7/1",
+        "70/1",
+        "97/1"
+      ],
+      "definer_module": "19/1",
+      "kind": "class"
+    },
+    "A1001/1": {
+      "artifact_id": "A1001/1",
+      "consumer_count": 2,
+      "consumer_module_indices": [
+        "101/1",
+        "26/1"
+      ],
+      "definer_module": "19/1",
+      "kind": "method"
+    },
+    "A1002/1": {
+      "artifact_id": "A1002/1",
+      "consumer_count": 2,
+      "consumer_module_indices": [
+        "101/1",
+        "26/1"
+      ],
+      "definer_module": "19/1",
+      "kind": "method"
+    },
+    "A1003/1": {
+      "artifact_id": "A1003/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "101/1"
+      ],
+      "definer_module": "19/1",
+      "kind": "method"
+    },
+    "A1004/1": {
+      "artifact_id": "A1004/1",
+      "consumer_count": 2,
+      "consumer_module_indices": [
+        "101/1",
+        "123/1"
+      ],
+      "definer_module": "19/1",
+      "kind": "method"
+    },
+    "A1005/1": {
+      "artifact_id": "A1005/1",
+      "consumer_count": 3,
+      "consumer_module_indices": [
+        "101/1",
+        "123/1",
+        "70/1"
+      ],
+      "definer_module": "19/1",
+      "kind": "method"
+    },
+    "A1006/1": {
+      "artifact_id": "A1006/1",
+      "consumer_count": 8,
+      "consumer_module_indices": [
+        "101/1",
+        "121/1",
+        "123/1",
+        "149/1",
+        "26/1",
+        "46/1",
+        "7/1",
+        "70/1"
+      ],
+      "definer_module": "19/1",
+      "kind": "method"
+    },
+    "A1007/1": {
+      "artifact_id": "A1007/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "101/1"
+      ],
+      "definer_module": "19/1",
+      "kind": "method"
+    },
+    "A1008/1": {
+      "artifact_id": "A1008/1",
+      "consumer_count": 2,
+      "consumer_module_indices": [
+        "149/1",
+        "73/1"
+      ],
+      "definer_module": "123/1",
+      "kind": "function"
+    },
+    "A1009/1": {
+      "artifact_id": "A1009/1",
+      "consumer_count": 2,
+      "consumer_module_indices": [
+        "149/1",
+        "73/1"
+      ],
+      "definer_module": "123/1",
+      "kind": "function"
+    },
+    "A1010/1": {
+      "artifact_id": "A1010/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "80/1"
+      ],
+      "definer_module": "55/1",
+      "kind": "function"
+    },
+    "A1011/1": {
+      "artifact_id": "A1011/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "80/1"
+      ],
+      "definer_module": "114/1",
+      "kind": "function"
+    },
+    "A1012/1": {
+      "artifact_id": "A1012/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "80/1"
+      ],
+      "definer_module": "114/1",
+      "kind": "function"
+    },
+    "A1013/1": {
+      "artifact_id": "A1013/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "80/1"
+      ],
+      "definer_module": "114/1",
+      "kind": "function"
+    },
+    "A1014/1": {
+      "artifact_id": "A1014/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "80/1"
+      ],
+      "definer_module": "114/1",
+      "kind": "function"
+    },
+    "A1015/1": {
+      "artifact_id": "A1015/1",
+      "consumer_count": 2,
+      "consumer_module_indices": [
+        "123/1",
+        "15/1"
+      ],
+      "definer_module": "29/1",
+      "kind": "function"
+    },
+    "A1016/1": {
+      "artifact_id": "A1016/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "68/1"
+      ],
+      "definer_module": "29/1",
+      "kind": "function"
+    },
+    "A1017/1": {
+      "artifact_id": "A1017/1",
+      "consumer_count": 2,
+      "consumer_module_indices": [
+        "15/1",
+        "68/1"
+      ],
+      "definer_module": "80/1",
+      "kind": "function"
+    },
+    "A1018/1": {
+      "artifact_id": "A1018/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "68/1"
+      ],
+      "definer_module": "80/1",
+      "kind": "function"
+    },
+    "A1019/1": {
+      "artifact_id": "A1019/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "68/1"
+      ],
+      "definer_module": "80/1",
+      "kind": "function"
+    },
+    "A1020/1": {
+      "artifact_id": "A1020/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "68/1"
+      ],
+      "definer_module": "80/1",
+      "kind": "function"
+    },
+    "A1021/1": {
+      "artifact_id": "A1021/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "108/1"
+      ],
+      "definer_module": "64/1",
+      "kind": "function"
+    },
+    "A1022/1": {
+      "artifact_id": "A1022/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "74/1"
+      ],
+      "definer_module": "64/1",
+      "kind": "function"
+    },
+    "A1023/1": {
+      "artifact_id": "A1023/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "74/1"
+      ],
+      "definer_module": "64/1",
+      "kind": "function"
+    },
+    "A1024/1": {
+      "artifact_id": "A1024/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "71/1"
+      ],
+      "definer_module": "9/1",
+      "kind": "function"
+    },
+    "A1025/1": {
+      "artifact_id": "A1025/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "133/1"
+      ],
+      "definer_module": "9/1",
+      "kind": "function"
+    },
+    "A1026/1": {
+      "artifact_id": "A1026/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "71/1"
+      ],
+      "definer_module": "9/1",
+      "kind": "function"
+    },
+    "A1027/1": {
+      "artifact_id": "A1027/1",
+      "consumer_count": 3,
+      "consumer_module_indices": [
+        "117/1",
+        "70/1",
+        "71/1"
+      ],
+      "definer_module": "9/1",
+      "kind": "function"
+    },
+    "A1028/1": {
+      "artifact_id": "A1028/1",
+      "consumer_count": 3,
+      "consumer_module_indices": [
+        "117/1",
+        "70/1",
+        "71/1"
+      ],
+      "definer_module": "9/1",
+      "kind": "function"
+    },
+    "A1029/1": {
+      "artifact_id": "A1029/1",
+      "consumer_count": 4,
+      "consumer_module_indices": [
+        "121/1",
+        "123/1",
+        "149/1",
+        "46/1"
+      ],
+      "definer_module": "9/1",
+      "kind": "function"
+    },
+    "A1030/1": {
+      "artifact_id": "A1030/1",
+      "consumer_count": 5,
+      "consumer_module_indices": [
+        "121/1",
+        "123/1",
+        "149/1",
+        "15/1",
+        "46/1"
+      ],
+      "definer_module": "57/1",
+      "kind": "function"
+    },
+    "A1031/1": {
+      "artifact_id": "A1031/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "60/1"
+      ],
+      "definer_module": "57/1",
+      "kind": "function"
+    },
+    "A1032/1": {
+      "artifact_id": "A1032/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "123/1"
+      ],
+      "definer_module": "91/1",
+      "kind": "function"
+    },
+    "A1033/1": {
+      "artifact_id": "A1033/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "149/1"
+      ],
+      "definer_module": "100/1",
+      "kind": "function"
+    },
+    "A1034/1": {
+      "artifact_id": "A1034/1",
+      "consumer_count": 3,
+      "consumer_module_indices": [
+        "13/1",
+        "149/1",
+        "7/1"
+      ],
+      "definer_module": "21/1",
+      "kind": "function"
+    },
+    "A1035/1": {
+      "artifact_id": "A1035/1",
+      "consumer_count": 2,
+      "consumer_module_indices": [
+        "13/1",
+        "149/1"
+      ],
+      "definer_module": "21/1",
+      "kind": "function"
+    },
+    "A1036/1": {
+      "artifact_id": "A1036/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "56/1"
+      ],
+      "definer_module": "90/1",
+      "kind": "class"
+    },
+    "A1037/1": {
+      "artifact_id": "A1037/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "56/1"
+      ],
+      "definer_module": "90/1",
+      "kind": "class"
+    },
+    "A1038/1": {
+      "artifact_id": "A1038/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "56/1"
+      ],
+      "definer_module": "90/1",
+      "kind": "class"
+    },
+    "A1039/1": {
+      "artifact_id": "A1039/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "56/1"
+      ],
+      "definer_module": "90/1",
+      "kind": "class"
+    },
+    "A1040/1": {
+      "artifact_id": "A1040/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "56/1"
+      ],
+      "definer_module": "90/1",
+      "kind": "class"
+    },
+    "A1041/1": {
+      "artifact_id": "A1041/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "56/1"
+      ],
+      "definer_module": "90/1",
+      "kind": "class"
+    },
+    "A1042/1": {
+      "artifact_id": "A1042/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "56/1"
+      ],
+      "definer_module": "90/1",
+      "kind": "class"
+    },
+    "A1043/1": {
+      "artifact_id": "A1043/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "56/1"
+      ],
+      "definer_module": "90/1",
+      "kind": "class"
+    },
+    "A1044/1": {
+      "artifact_id": "A1044/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "56/1"
+      ],
+      "definer_module": "90/1",
+      "kind": "class"
+    },
+    "A1045/1": {
+      "artifact_id": "A1045/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "56/1"
+      ],
+      "definer_module": "90/1",
+      "kind": "class"
+    },
+    "A1046/1": {
+      "artifact_id": "A1046/1",
+      "consumer_count": 18,
+      "consumer_module_indices": [
+        "10/1",
+        "102/1",
+        "104/1",
+        "112/1",
+        "113/1",
+        "120/1",
+        "137/1",
+        "138/1",
+        "19/1",
+        "24/1",
+        "26/1",
+        "38/1",
+        "44/1",
+        "45/1",
+        "52/1",
+        "77/1",
+        "88/1",
+        "98/1"
+      ],
+      "definer_module": "90/1",
+      "kind": "global"
+    },
+    "A1047/1": {
+      "artifact_id": "A1047/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "10/1"
+      ],
+      "definer_module": "90/1",
+      "kind": "global"
+    },
+    "A1048/1": {
+      "artifact_id": "A1048/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "56/1"
+      ],
+      "definer_module": "35/1",
+      "kind": "class"
+    },
+    "A1049/1": {
+      "artifact_id": "A1049/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "56/1"
+      ],
+      "definer_module": "35/1",
+      "kind": "class"
+    },
+    "A1050/1": {
+      "artifact_id": "A1050/1",
+      "consumer_count": 18,
+      "consumer_module_indices": [
+        "10/1",
+        "102/1",
+        "104/1",
+        "112/1",
+        "113/1",
+        "120/1",
+        "137/1",
+        "138/1",
+        "19/1",
+        "24/1",
+        "26/1",
+        "38/1",
+        "44/1",
+        "45/1",
+        "52/1",
+        "77/1",
+        "88/1",
+        "98/1"
+      ],
+      "definer_module": "35/1",
+      "kind": "global"
+    },
+    "A1051/1": {
+      "artifact_id": "A1051/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "10/1"
+      ],
+      "definer_module": "35/1",
+      "kind": "global"
+    },
+    "A1052/1": {
+      "artifact_id": "A1052/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "56/1"
+      ],
+      "definer_module": "58/1",
+      "kind": "class"
+    },
+    "A1053/1": {
+      "artifact_id": "A1053/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "56/1"
+      ],
+      "definer_module": "58/1",
+      "kind": "class"
+    },
+    "A1054/1": {
+      "artifact_id": "A1054/1",
+      "consumer_count": 18,
+      "consumer_module_indices": [
+        "10/1",
+        "102/1",
+        "104/1",
+        "112/1",
+        "113/1",
+        "120/1",
+        "137/1",
+        "138/1",
+        "19/1",
+        "24/1",
+        "26/1",
+        "38/1",
+        "44/1",
+        "45/1",
+        "52/1",
+        "77/1",
+        "88/1",
+        "98/1"
+      ],
+      "definer_module": "58/1",
+      "kind": "global"
+    },
+    "A1055/1": {
+      "artifact_id": "A1055/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "10/1"
+      ],
+      "definer_module": "58/1",
+      "kind": "global"
+    },
+    "A1056/1": {
+      "artifact_id": "A1056/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "56/1"
+      ],
+      "definer_module": "108/1",
+      "kind": "class"
+    },
+    "A1057/1": {
+      "artifact_id": "A1057/1",
+      "consumer_count": 18,
+      "consumer_module_indices": [
+        "10/1",
+        "102/1",
+        "104/1",
+        "112/1",
+        "113/1",
+        "120/1",
+        "137/1",
+        "138/1",
+        "19/1",
+        "24/1",
+        "26/1",
+        "38/1",
+        "44/1",
+        "45/1",
+        "52/1",
+        "77/1",
+        "88/1",
+        "98/1"
+      ],
+      "definer_module": "108/1",
+      "kind": "global"
+    },
+    "A1058/1": {
+      "artifact_id": "A1058/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "10/1"
+      ],
+      "definer_module": "108/1",
+      "kind": "global"
+    },
+    "A1059/1": {
+      "artifact_id": "A1059/1",
+      "consumer_count": 5,
+      "consumer_module_indices": [
+        "108/1",
+        "35/1",
+        "56/1",
+        "58/1",
+        "90/1"
+      ],
+      "definer_module": "10/1",
+      "kind": "class"
+    },
+    "A1060/1": {
+      "artifact_id": "A1060/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "56/1"
+      ],
+      "definer_module": "10/1",
+      "kind": "class"
+    },
+    "A1061/1": {
+      "artifact_id": "A1061/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "90/1"
+      ],
+      "definer_module": "10/1",
+      "kind": "class"
+    },
+    "A1062/1": {
+      "artifact_id": "A1062/1",
+      "consumer_count": 5,
+      "consumer_module_indices": [
+        "108/1",
+        "35/1",
+        "56/1",
+        "58/1",
+        "90/1"
+      ],
+      "definer_module": "10/1",
+      "kind": "class"
+    },
+    "A1063/1": {
+      "artifact_id": "A1063/1",
+      "consumer_count": 15,
+      "consumer_module_indices": [
+        "120/1",
+        "133/1",
+        "149/1",
+        "17/1",
+        "23/1",
+        "26/1",
+        "28/1",
+        "38/1",
+        "69/1",
+        "75/1",
+        "77/1",
+        "84/1",
+        "85/1",
+        "90/1",
+        "91/1"
+      ],
+      "definer_module": "10/1",
+      "kind": "global"
+    },
+    "A1064/1": {
+      "artifact_id": "A1064/1",
+      "consumer_count": 15,
+      "consumer_module_indices": [
+        "104/1",
+        "120/1",
+        "123/1",
+        "131/1",
+        "134/1",
+        "138/1",
+        "16/1",
+        "18/1",
+        "45/1",
+        "50/1",
+        "76/1",
+        "9/1",
+        "90/1",
+        "95/1",
+        "96/1"
+      ],
+      "definer_module": "10/1",
+      "kind": "global"
+    },
+    "A1065/1": {
+      "artifact_id": "A1065/1",
+      "consumer_count": 24,
+      "consumer_module_indices": [
+        "1/1",
+        "108/1",
+        "112/1",
+        "115/1",
+        "122/1",
+        "123/1",
+        "124/1",
+        "133/1",
+        "136/1",
+        "137/1",
+        "138/1",
+        "16/1",
+        "20/1",
+        "38/1",
+        "42/1",
+        "50/1",
+        "57/1",
+        "58/1",
+        "64/1",
+        "71/1",
+        "76/1",
+        "9/1",
+        "90/1",
+        "95/1"
+      ],
+      "definer_module": "10/1",
+      "kind": "global"
+    },
+    "A1066/1": {
+      "artifact_id": "A1066/1",
+      "consumer_count": 27,
+      "consumer_module_indices": [
+        "108/1",
+        "11/1",
+        "117/1",
+        "121/1",
+        "123/1",
+        "130/1",
+        "133/1",
+        "136/1",
+        "149/1",
+        "153/1",
+        "16/1",
+        "18/1",
+        "20/1",
+        "23/1",
+        "32/1",
+        "39/1",
+        "45/1",
+        "46/1",
+        "64/1",
+        "70/1",
+        "71/1",
+        "78/1",
+        "80/1",
+        "9/1",
+        "90/1",
+        "92/1",
+        "95/1"
+      ],
+      "definer_module": "10/1",
+      "kind": "global"
+    },
+    "A1067/1": {
+      "artifact_id": "A1067/1",
+      "consumer_count": 17,
+      "consumer_module_indices": [
+        "102/1",
+        "104/1",
+        "112/1",
+        "113/1",
+        "120/1",
+        "137/1",
+        "138/1",
+        "19/1",
+        "24/1",
+        "26/1",
+        "38/1",
+        "44/1",
+        "45/1",
+        "52/1",
+        "77/1",
+        "88/1",
+        "98/1"
+      ],
+      "definer_module": "10/1",
+      "kind": "global"
+    },
+    "A1068/1": {
+      "artifact_id": "A1068/1",
+      "consumer_count": 23,
+      "consumer_module_indices": [
+        "108/1",
+        "117/1",
+        "123/1",
+        "133/1",
+        "136/1",
+        "138/1",
+        "148/1",
+        "15/1",
+        "151/1",
+        "28/1",
+        "37/1",
+        "38/1",
+        "50/1",
+        "58/1",
+        "64/1",
+        "70/1",
+        "71/1",
+        "76/1",
+        "78/1",
+        "84/1",
+        "9/1",
+        "90/1",
+        "91/1"
+      ],
+      "definer_module": "10/1",
+      "kind": "global"
+    },
+    "A1069/1": {
+      "artifact_id": "A1069/1",
+      "consumer_count": 9,
+      "consumer_module_indices": [
+        "105/1",
+        "115/1",
+        "122/1",
+        "143/1",
+        "16/1",
+        "17/1",
+        "23/1",
+        "90/1",
+        "95/1"
+      ],
+      "definer_module": "10/1",
+      "kind": "global"
+    },
+    "A1070/1": {
+      "artifact_id": "A1070/1",
+      "consumer_count": 17,
+      "consumer_module_indices": [
+        "108/1",
+        "112/1",
+        "120/1",
+        "134/1",
+        "137/1",
+        "138/1",
+        "14/1",
+        "17/1",
+        "28/1",
+        "3/1",
+        "34/1",
+        "35/1",
+        "38/1",
+        "72/1",
+        "76/1",
+        "77/1",
+        "90/1"
+      ],
+      "definer_module": "10/1",
+      "kind": "global"
+    },
+    "A1071/1": {
+      "artifact_id": "A1071/1",
+      "consumer_count": 2,
+      "consumer_module_indices": [
+        "144/1",
+        "149/1"
+      ],
+      "definer_module": "23/1",
+      "kind": "function"
+    },
+    "A1072/1": {
+      "artifact_id": "A1072/1",
+      "consumer_count": 8,
+      "consumer_module_indices": [
+        "120/1",
+        "134/1",
+        "135/1",
+        "153/1",
+        "23/1",
+        "28/1",
+        "76/1",
+        "77/1"
+      ],
+      "definer_module": "105/1",
+      "kind": "class"
+    },
+    "A1073/1": {
+      "artifact_id": "A1073/1",
+      "consumer_count": 7,
+      "consumer_module_indices": [
+        "120/1",
+        "134/1",
+        "135/1",
+        "153/1",
+        "28/1",
+        "38/1",
+        "77/1"
+      ],
+      "definer_module": "105/1",
+      "kind": "function"
+    },
+    "A1074/1": {
+      "artifact_id": "A1074/1",
+      "consumer_count": 4,
+      "consumer_module_indices": [
+        "153/1",
+        "17/1",
+        "23/1",
+        "76/1"
+      ],
+      "definer_module": "105/1",
+      "kind": "function"
+    },
+    "A1075/1": {
+      "artifact_id": "A1075/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "77/1"
+      ],
+      "definer_module": "4/1",
+      "kind": "class"
+    },
+    "A1076/1": {
+      "artifact_id": "A1076/1",
+      "consumer_count": 3,
+      "consumer_module_indices": [
+        "131/1",
+        "64/1",
+        "90/1"
+      ],
+      "definer_module": "4/1",
+      "kind": "method"
+    },
+    "A1077/1": {
+      "artifact_id": "A1077/1",
+      "consumer_count": 2,
+      "consumer_module_indices": [
+        "131/1",
+        "98/1"
+      ],
+      "definer_module": "4/1",
+      "kind": "global"
+    },
+    "A1078/1": {
+      "artifact_id": "A1078/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "33/1"
+      ],
+      "definer_module": "4/1",
+      "kind": "global"
+    },
+    "A1079/1": {
+      "artifact_id": "A1079/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "131/1"
+      ],
+      "definer_module": "4/1",
+      "kind": "global"
+    },
+    "A1080/1": {
+      "artifact_id": "A1080/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "131/1"
+      ],
+      "definer_module": "4/1",
+      "kind": "global"
+    },
+    "A1081/1": {
+      "artifact_id": "A1081/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "50/1"
+      ],
+      "definer_module": "77/1",
+      "kind": "class"
+    },
+    "A1082/1": {
+      "artifact_id": "A1082/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "138/1"
+      ],
+      "definer_module": "77/1",
+      "kind": "function"
+    },
+    "A1083/1": {
+      "artifact_id": "A1083/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "30/1"
+      ],
+      "definer_module": "77/1",
+      "kind": "function"
+    },
+    "A1084/1": {
+      "artifact_id": "A1084/1",
+      "consumer_count": 2,
+      "consumer_module_indices": [
+        "30/1",
+        "50/1"
+      ],
+      "definer_module": "77/1",
+      "kind": "function"
+    },
+    "A1085/1": {
+      "artifact_id": "A1085/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "30/1"
+      ],
+      "definer_module": "104/1",
+      "kind": "function"
+    },
+    "A1086/1": {
+      "artifact_id": "A1086/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "30/1"
+      ],
+      "definer_module": "50/1",
+      "kind": "function"
+    },
+    "A1087/1": {
+      "artifact_id": "A1087/1",
+      "consumer_count": 8,
+      "consumer_module_indices": [
+        "11/1",
+        "121/1",
+        "13/1",
+        "149/1",
+        "32/1",
+        "46/1",
+        "71/1",
+        "78/1"
+      ],
+      "definer_module": "28/1",
+      "kind": "function"
+    },
+    "A1088/1": {
+      "artifact_id": "A1088/1",
+      "consumer_count": 4,
+      "consumer_module_indices": [
+        "117/1",
+        "149/1",
+        "153/1",
+        "70/1"
+      ],
+      "definer_module": "28/1",
+      "kind": "function"
+    },
+    "A1089/1": {
+      "artifact_id": "A1089/1",
+      "consumer_count": 27,
+      "consumer_module_indices": [
+        "108/1",
+        "11/1",
+        "117/1",
+        "121/1",
+        "123/1",
+        "130/1",
+        "133/1",
+        "136/1",
+        "149/1",
+        "153/1",
+        "16/1",
+        "18/1",
+        "20/1",
+        "23/1",
+        "32/1",
+        "39/1",
+        "45/1",
+        "46/1",
+        "64/1",
+        "70/1",
+        "71/1",
+        "78/1",
+        "80/1",
+        "9/1",
+        "90/1",
+        "92/1",
+        "95/1"
+      ],
+      "definer_module": "28/1",
+      "kind": "global"
+    },
+    "A1090/1": {
+      "artifact_id": "A1090/1",
+      "consumer_count": 25,
+      "consumer_module_indices": [
+        "105/1",
+        "120/1",
+        "124/1",
+        "129/1",
+        "133/1",
+        "147/1",
+        "149/1",
+        "17/1",
+        "171/1",
+        "19/1",
+        "21/1",
+        "37/1",
+        "50/1",
+        "57/1",
+        "6/1",
+        "60/1",
+        "69/1",
+        "76/1",
+        "77/1",
+        "81/1",
+        "83/1",
+        "85/1",
+        "86/1",
+        "87/1",
+        "89/1"
+      ],
+      "definer_module": "28/1",
+      "kind": "global"
+    },
+    "A1091/1": {
+      "artifact_id": "A1091/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "133/1"
+      ],
+      "definer_module": "28/1",
+      "kind": "function"
+    },
+    "A1092/1": {
+      "artifact_id": "A1092/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "149/1"
+      ],
+      "definer_module": "28/1",
+      "kind": "global"
+    },
+    "A1093/1": {
+      "artifact_id": "A1093/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "30/1"
+      ],
+      "definer_module": "138/1",
+      "kind": "function"
+    },
+    "A1094/1": {
+      "artifact_id": "A1094/1",
+      "consumer_count": 8,
+      "consumer_module_indices": [
+        "11/1",
+        "123/1",
+        "130/1",
+        "149/1",
+        "22/1",
+        "39/1",
+        "80/1",
+        "90/1"
+      ],
+      "definer_module": "120/1",
+      "kind": "function"
+    },
+    "A1095/1": {
+      "artifact_id": "A1095/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "130/1"
+      ],
+      "definer_module": "111/1",
+      "kind": "function"
+    },
+    "A1096/1": {
+      "artifact_id": "A1096/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "1/1"
+      ],
+      "definer_module": "49/1",
+      "kind": "function"
+    },
+    "A1097/1": {
+      "artifact_id": "A1097/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "130/1"
+      ],
+      "definer_module": "1/1",
+      "kind": "function"
+    },
+    "A1098/1": {
+      "artifact_id": "A1098/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "130/1"
+      ],
+      "definer_module": "1/1",
+      "kind": "function"
+    },
+    "A1099/1": {
+      "artifact_id": "A1099/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "1/1"
+      ],
+      "definer_module": "2/1",
+      "kind": "global"
+    },
+    "A11/4": {
+      "artifact_id": "A11/4",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "156/7"
+      ],
+      "definer_module": "26/1",
+      "kind": "function"
+    },
+    "A1100/1": {
+      "artifact_id": "A1100/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "1/1"
+      ],
+      "definer_module": "2/1",
+      "kind": "global"
+    },
+    "A1101/1": {
+      "artifact_id": "A1101/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "22/1"
+      ],
+      "definer_module": "130/1",
+      "kind": "function"
+    },
+    "A1102/1": {
+      "artifact_id": "A1102/1",
+      "consumer_count": 2,
+      "consumer_module_indices": [
+        "10/1",
+        "102/1"
+      ],
+      "definer_module": "26/1",
+      "kind": "method"
+    },
+    "A1103/1": {
+      "artifact_id": "A1103/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "69/1"
+      ],
+      "definer_module": "26/1",
+      "kind": "function"
+    },
+    "A1105/1": {
+      "artifact_id": "A1105/1",
+      "consumer_count": 2,
+      "consumer_module_indices": [
+        "5/1",
+        "83/1"
+      ],
+      "definer_module": "59/1",
+      "kind": "global"
+    },
+    "A1106/1": {
+      "artifact_id": "A1106/1",
+      "consumer_count": 2,
+      "consumer_module_indices": [
+        "5/1",
+        "83/1"
+      ],
+      "definer_module": "59/1",
+      "kind": "global"
+    },
+    "A1107/1": {
+      "artifact_id": "A1107/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "83/1"
+      ],
+      "definer_module": "5/1",
+      "kind": "class"
+    },
+    "A1108/1": {
+      "artifact_id": "A1108/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "147/1"
+      ],
+      "definer_module": "5/1",
+      "kind": "method"
+    },
+    "A1109/1": {
+      "artifact_id": "A1109/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "147/1"
+      ],
+      "definer_module": "5/1",
+      "kind": "method"
+    },
+    "A1110/1": {
+      "artifact_id": "A1110/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "147/1"
+      ],
+      "definer_module": "5/1",
+      "kind": "method"
+    },
+    "A1111/1": {
+      "artifact_id": "A1111/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "147/1"
+      ],
+      "definer_module": "5/1",
+      "kind": "method"
+    },
+    "A1112/1": {
+      "artifact_id": "A1112/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "147/1"
+      ],
+      "definer_module": "5/1",
+      "kind": "method"
+    },
+    "A1113/1": {
+      "artifact_id": "A1113/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "147/1"
+      ],
+      "definer_module": "5/1",
+      "kind": "method"
+    },
+    "A1114/1": {
+      "artifact_id": "A1114/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "147/1"
+      ],
+      "definer_module": "5/1",
+      "kind": "method"
+    },
+    "A1115/1": {
+      "artifact_id": "A1115/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "147/1"
+      ],
+      "definer_module": "5/1",
+      "kind": "method"
+    },
+    "A1116/1": {
+      "artifact_id": "A1116/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "83/1"
+      ],
+      "definer_module": "48/1",
+      "kind": "function"
+    },
+    "A1117/1": {
+      "artifact_id": "A1117/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "69/1"
+      ],
+      "definer_module": "83/1",
+      "kind": "method"
+    },
+    "A1118/1": {
+      "artifact_id": "A1118/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "147/1"
+      ],
+      "definer_module": "83/1",
+      "kind": "method"
+    },
+    "A1119/1": {
+      "artifact_id": "A1119/1",
+      "consumer_count": 2,
+      "consumer_module_indices": [
+        "124/1",
+        "69/1"
+      ],
+      "definer_module": "83/1",
+      "kind": "function"
+    },
+    "A1120/1": {
+      "artifact_id": "A1120/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "65/1"
+      ],
+      "definer_module": "83/1",
+      "kind": "function"
+    },
+    "A1121/1": {
+      "artifact_id": "A1121/1",
+      "consumer_count": 2,
+      "consumer_module_indices": [
+        "83/1",
+        "87/1"
+      ],
+      "definer_module": "106/1",
+      "kind": "function"
+    },
+    "A1122/1": {
+      "artifact_id": "A1122/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "69/1"
+      ],
+      "definer_module": "25/1",
+      "kind": "function"
+    },
+    "A1123/1": {
+      "artifact_id": "A1123/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "5/1"
+      ],
+      "definer_module": "147/1",
+      "kind": "function"
+    },
+    "A1124/1": {
+      "artifact_id": "A1124/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "5/1"
+      ],
+      "definer_module": "147/1",
+      "kind": "function"
+    },
+    "A1125/1": {
+      "artifact_id": "A1125/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "5/1"
+      ],
+      "definer_module": "147/1",
+      "kind": "function"
+    },
+    "A1126/1": {
+      "artifact_id": "A1126/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "5/1"
+      ],
+      "definer_module": "147/1",
+      "kind": "function"
+    },
+    "A1127/1": {
+      "artifact_id": "A1127/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "5/1"
+      ],
+      "definer_module": "147/1",
+      "kind": "function"
+    },
+    "A1128/1": {
+      "artifact_id": "A1128/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "5/1"
+      ],
+      "definer_module": "147/1",
+      "kind": "function"
+    },
+    "A1129/1": {
+      "artifact_id": "A1129/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "5/1"
+      ],
+      "definer_module": "147/1",
+      "kind": "function"
+    },
+    "A1130/1": {
+      "artifact_id": "A1130/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "69/1"
+      ],
+      "definer_module": "147/1",
+      "kind": "function"
+    },
+    "A1131/1": {
+      "artifact_id": "A1131/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "83/1"
+      ],
+      "definer_module": "147/1",
+      "kind": "function"
+    },
+    "A1132/1": {
+      "artifact_id": "A1132/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "69/1"
+      ],
+      "definer_module": "147/1",
+      "kind": "function"
+    },
+    "A1133/1": {
+      "artifact_id": "A1133/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "5/1"
+      ],
+      "definer_module": "147/1",
+      "kind": "function"
+    },
+    "A1134/1": {
+      "artifact_id": "A1134/1",
+      "consumer_count": 2,
+      "consumer_module_indices": [
+        "124/1",
+        "83/1"
+      ],
+      "definer_module": "69/1",
+      "kind": "method"
+    },
+    "A1135/1": {
+      "artifact_id": "A1135/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "83/1"
+      ],
+      "definer_module": "69/1",
+      "kind": "method"
+    },
+    "A1136/1": {
+      "artifact_id": "A1136/1",
+      "consumer_count": 2,
+      "consumer_module_indices": [
+        "124/1",
+        "67/1"
+      ],
+      "definer_module": "69/1",
+      "kind": "method"
+    },
+    "A1137/1": {
+      "artifact_id": "A1137/1",
+      "consumer_count": 3,
+      "consumer_module_indices": [
+        "26/1",
+        "47/1",
+        "82/1"
+      ],
+      "definer_module": "69/1",
+      "kind": "function"
+    },
+    "A1138/1": {
+      "artifact_id": "A1138/1",
+      "consumer_count": 2,
+      "consumer_module_indices": [
+        "69/1",
+        "83/1"
+      ],
+      "definer_module": "124/1",
+      "kind": "function"
+    },
+    "A1139/1": {
+      "artifact_id": "A1139/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "69/1"
+      ],
+      "definer_module": "124/1",
+      "kind": "function"
+    },
+    "A1140/1": {
+      "artifact_id": "A1140/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "69/1"
+      ],
+      "definer_module": "124/1",
+      "kind": "function"
+    },
+    "A1141/1": {
+      "artifact_id": "A1141/1",
+      "consumer_count": 2,
+      "consumer_module_indices": [
+        "67/1",
+        "69/1"
+      ],
+      "definer_module": "124/1",
+      "kind": "function"
+    },
+    "A1142/1": {
+      "artifact_id": "A1142/1",
+      "consumer_count": 5,
+      "consumer_module_indices": [
+        "124/1",
+        "147/1",
+        "5/1",
+        "69/1",
+        "83/1"
+      ],
+      "definer_module": "27/1",
+      "kind": "function"
+    },
+    "A1143/1": {
+      "artifact_id": "A1143/1",
+      "consumer_count": 5,
+      "consumer_module_indices": [
+        "124/1",
+        "147/1",
+        "5/1",
+        "69/1",
+        "83/1"
+      ],
+      "definer_module": "27/1",
+      "kind": "function"
+    },
+    "A1144/1": {
+      "artifact_id": "A1144/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "69/1"
+      ],
+      "definer_module": "67/1",
+      "kind": "function"
+    },
+    "A1145/1": {
+      "artifact_id": "A1145/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "69/1"
+      ],
+      "definer_module": "67/1",
+      "kind": "function"
+    },
+    "A1146/1": {
+      "artifact_id": "A1146/1",
+      "consumer_count": 2,
+      "consumer_module_indices": [
+        "124/1",
+        "69/1"
+      ],
+      "definer_module": "67/1",
+      "kind": "function"
+    },
+    "A1147/1": {
+      "artifact_id": "A1147/1",
+      "consumer_count": 2,
+      "consumer_module_indices": [
+        "124/1",
+        "69/1"
+      ],
+      "definer_module": "67/1",
+      "kind": "function"
+    },
+    "A1148/1": {
+      "artifact_id": "A1148/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "69/1"
+      ],
+      "definer_module": "33/1",
+      "kind": "function"
+    },
+    "A1149/1": {
+      "artifact_id": "A1149/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "69/1"
+      ],
+      "definer_module": "33/1",
+      "kind": "function"
+    },
+    "A1150/1": {
+      "artifact_id": "A1150/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "69/1"
+      ],
+      "definer_module": "141/1",
+      "kind": "class"
+    },
+    "A1151/1": {
+      "artifact_id": "A1151/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "152/1"
+      ],
+      "definer_module": "141/1",
+      "kind": "global"
+    },
+    "A1152/1": {
+      "artifact_id": "A1152/1",
+      "consumer_count": 2,
+      "consumer_module_indices": [
+        "152/1",
+        "69/1"
+      ],
+      "definer_module": "141/1",
+      "kind": "function"
+    },
+    "A1153/1": {
+      "artifact_id": "A1153/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "69/1"
+      ],
+      "definer_module": "141/1",
+      "kind": "function"
+    },
+    "A1154/1": {
+      "artifact_id": "A1154/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "44/1"
+      ],
+      "definer_module": "140/1",
+      "kind": "global"
+    },
+    "A1155/1": {
+      "artifact_id": "A1155/1",
+      "consumer_count": 5,
+      "consumer_module_indices": [
+        "124/1",
+        "147/1",
+        "5/1",
+        "69/1",
+        "83/1"
+      ],
+      "definer_module": "140/1",
+      "kind": "class"
+    },
+    "A1156/1": {
+      "artifact_id": "A1156/1",
+      "consumer_count": 2,
+      "consumer_module_indices": [
+        "124/1",
+        "147/1"
+      ],
+      "definer_module": "140/1",
+      "kind": "method"
+    },
+    "A1157/1": {
+      "artifact_id": "A1157/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "44/1"
+      ],
+      "definer_module": "140/1",
+      "kind": "global"
+    },
+    "A1158/1": {
+      "artifact_id": "A1158/1",
+      "consumer_count": 5,
+      "consumer_module_indices": [
+        "124/1",
+        "147/1",
+        "5/1",
+        "69/1",
+        "83/1"
+      ],
+      "definer_module": "140/1",
+      "kind": "global"
+    },
+    "A1159/1": {
+      "artifact_id": "A1159/1",
+      "consumer_count": 5,
+      "consumer_module_indices": [
+        "124/1",
+        "147/1",
+        "5/1",
+        "69/1",
+        "83/1"
+      ],
+      "definer_module": "140/1",
+      "kind": "global"
+    },
+    "A1160/1": {
+      "artifact_id": "A1160/1",
+      "consumer_count": 6,
+      "consumer_module_indices": [
+        "124/1",
+        "147/1",
+        "48/1",
+        "5/1",
+        "69/1",
+        "83/1"
+      ],
+      "definer_module": "140/1",
+      "kind": "global"
+    },
+    "A1161/1": {
+      "artifact_id": "A1161/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "44/1"
+      ],
+      "definer_module": "140/1",
+      "kind": "class"
+    },
+    "A1162/1": {
+      "artifact_id": "A1162/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "44/1"
+      ],
+      "definer_module": "140/1",
+      "kind": "function"
+    },
+    "A1163/1": {
+      "artifact_id": "A1163/1",
+      "consumer_count": 3,
+      "consumer_module_indices": [
+        "44/1",
+        "69/1",
+        "83/1"
+      ],
+      "definer_module": "140/1",
+      "kind": "function"
+    },
+    "A1164/1": {
+      "artifact_id": "A1164/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "67/1"
+      ],
+      "definer_module": "140/1",
+      "kind": "function"
+    },
+    "A1165/1": {
+      "artifact_id": "A1165/1",
+      "consumer_count": 2,
+      "consumer_module_indices": [
+        "124/1",
+        "83/1"
+      ],
+      "definer_module": "140/1",
+      "kind": "function"
+    },
+    "A1166/1": {
+      "artifact_id": "A1166/1",
+      "consumer_count": 2,
+      "consumer_module_indices": [
+        "44/1",
+        "69/1"
+      ],
+      "definer_module": "140/1",
+      "kind": "function"
+    },
+    "A12/4": {
+      "artifact_id": "A12/4",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "156/7"
+      ],
+      "definer_module": "26/1",
+      "kind": "function"
+    },
+    "A13/4": {
+      "artifact_id": "A13/4",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "156/7"
+      ],
+      "definer_module": "84/1",
+      "kind": "function"
+    },
+    "A2/4": {
+      "artifact_id": "A2/4",
+      "consumer_count": 2,
+      "consumer_module_indices": [
+        "26/1",
+        "84/1"
+      ],
+      "definer_module": "171/1",
+      "kind": "function"
+    },
+    "A3/4": {
+      "artifact_id": "A3/4",
+      "consumer_count": 2,
+      "consumer_module_indices": [
+        "156/7",
+        "26/1"
+      ],
+      "definer_module": "171/1",
+      "kind": "function"
+    },
+    "A4/4": {
+      "artifact_id": "A4/4",
+      "consumer_count": 3,
+      "consumer_module_indices": [
+        "124/1",
+        "156/7",
+        "26/1"
+      ],
+      "definer_module": "171/1",
+      "kind": "function"
+    },
+    "A5/4": {
+      "artifact_id": "A5/4",
+      "consumer_count": 2,
+      "consumer_module_indices": [
+        "26/1",
+        "84/1"
+      ],
+      "definer_module": "171/1",
+      "kind": "function"
+    },
+    "A6/4": {
+      "artifact_id": "A6/4",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "26/1"
+      ],
+      "definer_module": "171/1",
+      "kind": "function"
+    },
+    "A7/4": {
+      "artifact_id": "A7/4",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "26/1"
+      ],
+      "definer_module": "171/1",
+      "kind": "function"
+    },
+    "A8/4": {
+      "artifact_id": "A8/4",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "84/1"
+      ],
+      "definer_module": "148/1",
+      "kind": "function"
+    },
+    "A823/1": {
+      "artifact_id": "A823/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "103/1"
+      ],
+      "definer_module": "82/1",
+      "kind": "function"
+    },
+    "A824/1": {
+      "artifact_id": "A824/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "82/1"
+      ],
+      "definer_module": "89/1",
+      "kind": "function"
+    },
+    "A825/1": {
+      "artifact_id": "A825/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "64/1"
+      ],
+      "definer_module": "43/1",
+      "kind": "global"
+    },
+    "A826/1": {
+      "artifact_id": "A826/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "64/1"
+      ],
+      "definer_module": "43/1",
+      "kind": "global"
+    },
+    "A827/1": {
+      "artifact_id": "A827/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "64/1"
+      ],
+      "definer_module": "43/1",
+      "kind": "global"
+    },
+    "A828/1": {
+      "artifact_id": "A828/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "64/1"
+      ],
+      "definer_module": "43/1",
+      "kind": "global"
+    },
+    "A829/1": {
+      "artifact_id": "A829/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "58/1"
+      ],
+      "definer_module": "43/1",
+      "kind": "function"
+    },
+    "A830/1": {
+      "artifact_id": "A830/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "58/1"
+      ],
+      "definer_module": "43/1",
+      "kind": "function"
+    },
+    "A831/1": {
+      "artifact_id": "A831/1",
+      "consumer_count": 2,
+      "consumer_module_indices": [
+        "143/1",
+        "28/1"
+      ],
+      "definer_module": "85/1",
+      "kind": "class"
+    },
+    "A832/1": {
+      "artifact_id": "A832/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "143/1"
+      ],
+      "definer_module": "85/1",
+      "kind": "method"
+    },
+    "A833/1": {
+      "artifact_id": "A833/1",
+      "consumer_count": 5,
+      "consumer_module_indices": [
+        "110/1",
+        "143/1",
+        "26/1",
+        "9/1",
+        "95/1"
+      ],
+      "definer_module": "85/1",
+      "kind": "method"
+    },
+    "A834/1": {
+      "artifact_id": "A834/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "90/1"
+      ],
+      "definer_module": "86/1",
+      "kind": "function"
+    },
+    "A835/1": {
+      "artifact_id": "A835/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "35/1"
+      ],
+      "definer_module": "98/1",
+      "kind": "function"
+    },
+    "A836/1": {
+      "artifact_id": "A836/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "35/1"
+      ],
+      "definer_module": "98/1",
+      "kind": "function"
+    },
+    "A837/1": {
+      "artifact_id": "A837/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "35/1"
+      ],
+      "definer_module": "98/1",
+      "kind": "function"
+    },
+    "A838/1": {
+      "artifact_id": "A838/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "64/1"
+      ],
+      "definer_module": "72/1",
+      "kind": "function"
+    },
+    "A839/1": {
+      "artifact_id": "A839/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "90/1"
+      ],
+      "definer_module": "3/1",
+      "kind": "function"
+    },
+    "A840/1": {
+      "artifact_id": "A840/1",
+      "consumer_count": 3,
+      "consumer_module_indices": [
+        "151/1",
+        "90/1",
+        "91/1"
+      ],
+      "definer_module": "84/1",
+      "kind": "function"
+    },
+    "A841/1": {
+      "artifact_id": "A841/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "90/1"
+      ],
+      "definer_module": "14/1",
+      "kind": "function"
+    },
+    "A842/1": {
+      "artifact_id": "A842/1",
+      "consumer_count": 3,
+      "consumer_module_indices": [
+        "117/1",
+        "26/1",
+        "70/1"
+      ],
+      "definer_module": "133/1",
+      "kind": "class"
+    },
+    "A843/1": {
+      "artifact_id": "A843/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "70/1"
+      ],
+      "definer_module": "133/1",
+      "kind": "method"
+    },
+    "A844/1": {
+      "artifact_id": "A844/1",
+      "consumer_count": 14,
+      "consumer_module_indices": [
+        "120/1",
+        "149/1",
+        "17/1",
+        "23/1",
+        "26/1",
+        "28/1",
+        "38/1",
+        "69/1",
+        "75/1",
+        "77/1",
+        "84/1",
+        "85/1",
+        "90/1",
+        "91/1"
+      ],
+      "definer_module": "133/1",
+      "kind": "global"
+    },
+    "A845/1": {
+      "artifact_id": "A845/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "90/1"
+      ],
+      "definer_module": "17/1",
+      "kind": "function"
+    },
+    "A846/1": {
+      "artifact_id": "A846/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "90/1"
+      ],
+      "definer_module": "61/1",
+      "kind": "function"
+    },
+    "A847/1": {
+      "artifact_id": "A847/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "90/1"
+      ],
+      "definer_module": "8/1",
+      "kind": "function"
+    },
+    "A848/1": {
+      "artifact_id": "A848/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "90/1"
+      ],
+      "definer_module": "34/1",
+      "kind": "function"
+    },
+    "A849/1": {
+      "artifact_id": "A849/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "123/1"
+      ],
+      "definer_module": "75/1",
+      "kind": "class"
+    },
+    "A850/1": {
+      "artifact_id": "A850/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "133/1"
+      ],
+      "definer_module": "75/1",
+      "kind": "class"
+    },
+    "A851/1": {
+      "artifact_id": "A851/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "117/1"
+      ],
+      "definer_module": "75/1",
+      "kind": "class"
+    },
+    "A852/1": {
+      "artifact_id": "A852/1",
+      "consumer_count": 5,
+      "consumer_module_indices": [
+        "117/1",
+        "123/1",
+        "133/1",
+        "26/1",
+        "70/1"
+      ],
+      "definer_module": "75/1",
+      "kind": "class"
+    },
+    "A853/1": {
+      "artifact_id": "A853/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "123/1"
+      ],
+      "definer_module": "75/1",
+      "kind": "method"
+    },
+    "A854/1": {
+      "artifact_id": "A854/1",
+      "consumer_count": 3,
+      "consumer_module_indices": [
+        "117/1",
+        "123/1",
+        "70/1"
+      ],
+      "definer_module": "75/1",
+      "kind": "method"
+    },
+    "A855/1": {
+      "artifact_id": "A855/1",
+      "consumer_count": 4,
+      "consumer_module_indices": [
+        "117/1",
+        "133/1",
+        "149/1",
+        "70/1"
+      ],
+      "definer_module": "75/1",
+      "kind": "class"
+    },
+    "A856/1": {
+      "artifact_id": "A856/1",
+      "consumer_count": 4,
+      "consumer_module_indices": [
+        "121/1",
+        "133/1",
+        "9/1",
+        "95/1"
+      ],
+      "definer_module": "75/1",
+      "kind": "global"
+    },
+    "A857/1": {
+      "artifact_id": "A857/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "63/1"
+      ],
+      "definer_module": "75/1",
+      "kind": "global"
+    },
+    "A858/1": {
+      "artifact_id": "A858/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "57/1"
+      ],
+      "definer_module": "75/1",
+      "kind": "global"
+    },
+    "A859/1": {
+      "artifact_id": "A859/1",
+      "consumer_count": 7,
+      "consumer_module_indices": [
+        "123/1",
+        "149/1",
+        "63/1",
+        "80/1",
+        "81/1",
+        "90/1",
+        "94/1"
+      ],
+      "definer_module": "75/1",
+      "kind": "global"
+    },
+    "A860/1": {
+      "artifact_id": "A860/1",
+      "consumer_count": 2,
+      "consumer_module_indices": [
+        "123/1",
+        "149/1"
+      ],
+      "definer_module": "75/1",
+      "kind": "global"
+    },
+    "A861/1": {
+      "artifact_id": "A861/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "117/1"
+      ],
+      "definer_module": "75/1",
+      "kind": "global"
+    },
+    "A862/1": {
+      "artifact_id": "A862/1",
+      "consumer_count": 9,
+      "consumer_module_indices": [
+        "110/1",
+        "121/1",
+        "130/1",
+        "136/1",
+        "137/1",
+        "149/1",
+        "32/1",
+        "9/1",
+        "92/1"
+      ],
+      "definer_module": "75/1",
+      "kind": "global"
+    },
+    "A863/1": {
+      "artifact_id": "A863/1",
+      "consumer_count": 3,
+      "consumer_module_indices": [
+        "63/1",
+        "80/1",
+        "90/1"
+      ],
+      "definer_module": "75/1",
+      "kind": "global"
+    },
+    "A864/1": {
+      "artifact_id": "A864/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "133/1"
+      ],
+      "definer_module": "75/1",
+      "kind": "global"
+    },
+    "A865/1": {
+      "artifact_id": "A865/1",
+      "consumer_count": 2,
+      "consumer_module_indices": [
+        "26/1",
+        "70/1"
+      ],
+      "definer_module": "75/1",
+      "kind": "function"
+    },
+    "A866/1": {
+      "artifact_id": "A866/1",
+      "consumer_count": 4,
+      "consumer_module_indices": [
+        "121/1",
+        "123/1",
+        "149/1",
+        "80/1"
+      ],
+      "definer_module": "75/1",
+      "kind": "global"
+    },
+    "A867/1": {
+      "artifact_id": "A867/1",
+      "consumer_count": 2,
+      "consumer_module_indices": [
+        "120/1",
+        "133/1"
+      ],
+      "definer_module": "75/1",
+      "kind": "global"
+    },
+    "A868/1": {
+      "artifact_id": "A868/1",
+      "consumer_count": 27,
+      "consumer_module_indices": [
+        "108/1",
+        "11/1",
+        "117/1",
+        "121/1",
+        "123/1",
+        "130/1",
+        "133/1",
+        "136/1",
+        "149/1",
+        "153/1",
+        "16/1",
+        "18/1",
+        "20/1",
+        "23/1",
+        "32/1",
+        "39/1",
+        "45/1",
+        "46/1",
+        "64/1",
+        "70/1",
+        "71/1",
+        "78/1",
+        "80/1",
+        "9/1",
+        "90/1",
+        "92/1",
+        "95/1"
+      ],
+      "definer_module": "75/1",
+      "kind": "global"
+    },
+    "A869/1": {
+      "artifact_id": "A869/1",
+      "consumer_count": 2,
+      "consumer_module_indices": [
+        "16/1",
+        "45/1"
+      ],
+      "definer_module": "75/1",
+      "kind": "global"
+    },
+    "A870/1": {
+      "artifact_id": "A870/1",
+      "consumer_count": 2,
+      "consumer_module_indices": [
+        "123/1",
+        "149/1"
+      ],
+      "definer_module": "75/1",
+      "kind": "global"
+    },
+    "A871/1": {
+      "artifact_id": "A871/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "123/1"
+      ],
+      "definer_module": "75/1",
+      "kind": "global"
+    },
+    "A872/1": {
+      "artifact_id": "A872/1",
+      "consumer_count": 23,
+      "consumer_module_indices": [
+        "108/1",
+        "117/1",
+        "123/1",
+        "133/1",
+        "136/1",
+        "138/1",
+        "148/1",
+        "15/1",
+        "151/1",
+        "28/1",
+        "37/1",
+        "38/1",
+        "50/1",
+        "58/1",
+        "64/1",
+        "70/1",
+        "71/1",
+        "76/1",
+        "78/1",
+        "84/1",
+        "9/1",
+        "90/1",
+        "91/1"
+      ],
+      "definer_module": "75/1",
+      "kind": "global"
+    },
+    "A873/1": {
+      "artifact_id": "A873/1",
+      "consumer_count": 2,
+      "consumer_module_indices": [
+        "149/1",
+        "70/1"
+      ],
+      "definer_module": "75/1",
+      "kind": "function"
+    },
+    "A874/1": {
+      "artifact_id": "A874/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "123/1"
+      ],
+      "definer_module": "75/1",
+      "kind": "global"
+    },
+    "A875/1": {
+      "artifact_id": "A875/1",
+      "consumer_count": 5,
+      "consumer_module_indices": [
+        "117/1",
+        "149/1",
+        "16/1",
+        "45/1",
+        "70/1"
+      ],
+      "definer_module": "75/1",
+      "kind": "global"
+    },
+    "A876/1": {
+      "artifact_id": "A876/1",
+      "consumer_count": 3,
+      "consumer_module_indices": [
+        "150/1",
+        "58/1",
+        "9/1"
+      ],
+      "definer_module": "38/1",
+      "kind": "function"
+    },
+    "A877/1": {
+      "artifact_id": "A877/1",
+      "consumer_count": 2,
+      "consumer_module_indices": [
+        "150/1",
+        "9/1"
+      ],
+      "definer_module": "38/1",
+      "kind": "function"
+    },
+    "A878/1": {
+      "artifact_id": "A878/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "150/1"
+      ],
+      "definer_module": "38/1",
+      "kind": "function"
+    },
+    "A879/1": {
+      "artifact_id": "A879/1",
+      "consumer_count": 2,
+      "consumer_module_indices": [
+        "9/1",
+        "90/1"
+      ],
+      "definer_module": "31/1",
+      "kind": "function"
+    },
+    "A880/1": {
+      "artifact_id": "A880/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "90/1"
+      ],
+      "definer_module": "31/1",
+      "kind": "function"
+    },
+    "A881/1": {
+      "artifact_id": "A881/1",
+      "consumer_count": 5,
+      "consumer_module_indices": [
+        "156/7",
+        "158/7",
+        "26/1",
+        "69/1",
+        "89/1"
+      ],
+      "definer_module": "149/1",
+      "kind": "class"
+    },
+    "A882/1": {
+      "artifact_id": "A882/1",
+      "consumer_count": 4,
+      "consumer_module_indices": [
+        "158/7",
+        "26/1",
+        "69/1",
+        "89/1"
+      ],
+      "definer_module": "149/1",
+      "kind": "method"
+    },
+    "A883/1": {
+      "artifact_id": "A883/1",
+      "consumer_count": 4,
+      "consumer_module_indices": [
+        "158/7",
+        "26/1",
+        "69/1",
+        "89/1"
+      ],
+      "definer_module": "149/1",
+      "kind": "method"
+    },
+    "A884/1": {
+      "artifact_id": "A884/1",
+      "consumer_count": 5,
+      "consumer_module_indices": [
+        "156/7",
+        "158/7",
+        "26/1",
+        "69/1",
+        "89/1"
+      ],
+      "definer_module": "149/1",
+      "kind": "method"
+    },
+    "A885/1": {
+      "artifact_id": "A885/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "121/1"
+      ],
+      "definer_module": "149/1",
+      "kind": "function"
+    },
+    "A886/1": {
+      "artifact_id": "A886/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "147/1"
+      ],
+      "definer_module": "149/1",
+      "kind": "function"
+    },
+    "A887/1": {
+      "artifact_id": "A887/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "35/1"
+      ],
+      "definer_module": "24/1",
+      "kind": "function"
+    },
+    "A888/1": {
+      "artifact_id": "A888/1",
+      "consumer_count": 3,
+      "consumer_module_indices": [
+        "131/1",
+        "90/1",
+        "99/1"
+      ],
+      "definer_module": "134/1",
+      "kind": "function"
+    },
+    "A889/1": {
+      "artifact_id": "A889/1",
+      "consumer_count": 2,
+      "consumer_module_indices": [
+        "90/1",
+        "99/1"
+      ],
+      "definer_module": "131/1",
+      "kind": "function"
+    },
+    "A890/1": {
+      "artifact_id": "A890/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "99/1"
+      ],
+      "definer_module": "131/1",
+      "kind": "function"
+    },
+    "A891/1": {
+      "artifact_id": "A891/1",
+      "consumer_count": 2,
+      "consumer_module_indices": [
+        "134/1",
+        "99/1"
+      ],
+      "definer_module": "102/1",
+      "kind": "class"
+    },
+    "A892/1": {
+      "artifact_id": "A892/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "116/1"
+      ],
+      "definer_module": "122/1",
+      "kind": "function"
+    },
+    "A893/1": {
+      "artifact_id": "A893/1",
+      "consumer_count": 2,
+      "consumer_module_indices": [
+        "116/1",
+        "42/1"
+      ],
+      "definer_module": "41/1",
+      "kind": "function"
+    },
+    "A894/1": {
+      "artifact_id": "A894/1",
+      "consumer_count": 2,
+      "consumer_module_indices": [
+        "116/1",
+        "42/1"
+      ],
+      "definer_module": "41/1",
+      "kind": "function"
+    },
+    "A895/1": {
+      "artifact_id": "A895/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "116/1"
+      ],
+      "definer_module": "41/1",
+      "kind": "function"
+    },
+    "A896/1": {
+      "artifact_id": "A896/1",
+      "consumer_count": 2,
+      "consumer_module_indices": [
+        "116/1",
+        "23/1"
+      ],
+      "definer_module": "96/1",
+      "kind": "function"
+    },
+    "A897/1": {
+      "artifact_id": "A897/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "116/1"
+      ],
+      "definer_module": "42/1",
+      "kind": "function"
+    },
+    "A898/1": {
+      "artifact_id": "A898/1",
+      "consumer_count": 8,
+      "consumer_module_indices": [
+        "1/1",
+        "111/1",
+        "115/1",
+        "130/1",
+        "16/1",
+        "40/1",
+        "66/1",
+        "92/1"
+      ],
+      "definer_module": "119/1",
+      "kind": "class"
+    },
+    "A899/1": {
+      "artifact_id": "A899/1",
+      "consumer_count": 13,
+      "consumer_module_indices": [
+        "11/1",
+        "111/1",
+        "121/1",
+        "123/1",
+        "136/1",
+        "149/1",
+        "16/1",
+        "18/1",
+        "32/1",
+        "42/1",
+        "80/1",
+        "90/1",
+        "95/1"
+      ],
+      "definer_module": "119/1",
+      "kind": "global"
+    },
+    "A9/4": {
+      "artifact_id": "A9/4",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "26/1"
+      ],
+      "definer_module": "171/1",
+      "kind": "function"
+    },
+    "A900/1": {
+      "artifact_id": "A900/1",
+      "consumer_count": 9,
+      "consumer_module_indices": [
+        "121/1",
+        "123/1",
+        "136/1",
+        "149/1",
+        "16/1",
+        "42/1",
+        "63/1",
+        "80/1",
+        "90/1"
+      ],
+      "definer_module": "119/1",
+      "kind": "global"
+    },
+    "A901/1": {
+      "artifact_id": "A901/1",
+      "consumer_count": 6,
+      "consumer_module_indices": [
+        "135/1",
+        "20/1",
+        "28/1",
+        "40/1",
+        "45/1",
+        "66/1"
+      ],
+      "definer_module": "128/1",
+      "kind": "class"
+    },
+    "A902/1": {
+      "artifact_id": "A902/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "45/1"
+      ],
+      "definer_module": "128/1",
+      "kind": "global"
+    },
+    "A903/1": {
+      "artifact_id": "A903/1",
+      "consumer_count": 15,
+      "consumer_module_indices": [
+        "104/1",
+        "120/1",
+        "123/1",
+        "131/1",
+        "134/1",
+        "138/1",
+        "16/1",
+        "18/1",
+        "45/1",
+        "50/1",
+        "76/1",
+        "9/1",
+        "90/1",
+        "95/1",
+        "96/1"
+      ],
+      "definer_module": "128/1",
+      "kind": "global"
+    },
+    "A904/1": {
+      "artifact_id": "A904/1",
+      "consumer_count": 4,
+      "consumer_module_indices": [
+        "16/1",
+        "34/1",
+        "38/1",
+        "45/1"
+      ],
+      "definer_module": "128/1",
+      "kind": "global"
+    },
+    "A905/1": {
+      "artifact_id": "A905/1",
+      "consumer_count": 9,
+      "consumer_module_indices": [
+        "1/1",
+        "120/1",
+        "130/1",
+        "133/1",
+        "16/1",
+        "20/1",
+        "28/1",
+        "40/1",
+        "66/1"
+      ],
+      "definer_module": "135/1",
+      "kind": "class"
+    },
+    "A906/1": {
+      "artifact_id": "A906/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "50/1"
+      ],
+      "definer_module": "135/1",
+      "kind": "method"
+    },
+    "A907/1": {
+      "artifact_id": "A907/1",
+      "consumer_count": 3,
+      "consumer_module_indices": [
+        "112/1",
+        "123/1",
+        "9/1"
+      ],
+      "definer_module": "135/1",
+      "kind": "global"
+    },
+    "A908/1": {
+      "artifact_id": "A908/1",
+      "consumer_count": 6,
+      "consumer_module_indices": [
+        "16/1",
+        "20/1",
+        "64/1",
+        "74/1",
+        "80/1",
+        "92/1"
+      ],
+      "definer_module": "135/1",
+      "kind": "global"
+    },
+    "A909/1": {
+      "artifact_id": "A909/1",
+      "consumer_count": 24,
+      "consumer_module_indices": [
+        "1/1",
+        "108/1",
+        "112/1",
+        "115/1",
+        "122/1",
+        "123/1",
+        "124/1",
+        "133/1",
+        "136/1",
+        "137/1",
+        "138/1",
+        "16/1",
+        "20/1",
+        "38/1",
+        "42/1",
+        "50/1",
+        "57/1",
+        "58/1",
+        "64/1",
+        "71/1",
+        "76/1",
+        "9/1",
+        "90/1",
+        "95/1"
+      ],
+      "definer_module": "135/1",
+      "kind": "global"
+    },
+    "A910/1": {
+      "artifact_id": "A910/1",
+      "consumer_count": 26,
+      "consumer_module_indices": [
+        "105/1",
+        "120/1",
+        "124/1",
+        "129/1",
+        "133/1",
+        "147/1",
+        "149/1",
+        "17/1",
+        "171/1",
+        "19/1",
+        "21/1",
+        "28/1",
+        "37/1",
+        "50/1",
+        "57/1",
+        "6/1",
+        "60/1",
+        "69/1",
+        "76/1",
+        "77/1",
+        "81/1",
+        "83/1",
+        "85/1",
+        "86/1",
+        "87/1",
+        "89/1"
+      ],
+      "definer_module": "135/1",
+      "kind": "global"
+    },
+    "A911/1": {
+      "artifact_id": "A911/1",
+      "consumer_count": 3,
+      "consumer_module_indices": [
+        "40/1",
+        "45/1",
+        "66/1"
+      ],
+      "definer_module": "118/1",
+      "kind": "class"
+    },
+    "A912/1": {
+      "artifact_id": "A912/1",
+      "consumer_count": 4,
+      "consumer_module_indices": [
+        "18/1",
+        "19/1",
+        "26/1",
+        "70/1"
+      ],
+      "definer_module": "118/1",
+      "kind": "global"
+    },
+    "A913/1": {
+      "artifact_id": "A913/1",
+      "consumer_count": 6,
+      "consumer_module_indices": [
+        "1/1",
+        "111/1",
+        "120/1",
+        "130/1",
+        "40/1",
+        "66/1"
+      ],
+      "definer_module": "146/1",
+      "kind": "class"
+    },
+    "A914/1": {
+      "artifact_id": "A914/1",
+      "consumer_count": 4,
+      "consumer_module_indices": [
+        "18/1",
+        "19/1",
+        "26/1",
+        "70/1"
+      ],
+      "definer_module": "146/1",
+      "kind": "global"
+    },
+    "A915/1": {
+      "artifact_id": "A915/1",
+      "consumer_count": 3,
+      "consumer_module_indices": [
+        "158/7",
+        "51/1",
+        "90/1"
+      ],
+      "definer_module": "146/1",
+      "kind": "global"
+    },
+    "A916/1": {
+      "artifact_id": "A916/1",
+      "consumer_count": 4,
+      "consumer_module_indices": [
+        "11/1",
+        "114/1",
+        "129/1",
+        "95/1"
+      ],
+      "definer_module": "146/1",
+      "kind": "global"
+    },
+    "A917/1": {
+      "artifact_id": "A917/1",
+      "consumer_count": 8,
+      "consumer_module_indices": [
+        "141/1",
+        "149/1",
+        "28/1",
+        "32/1",
+        "67/1",
+        "89/1",
+        "9/1",
+        "94/1"
+      ],
+      "definer_module": "51/1",
+      "kind": "class"
+    },
+    "A918/1": {
+      "artifact_id": "A918/1",
+      "consumer_count": 6,
+      "consumer_module_indices": [
+        "129/1",
+        "130/1",
+        "149/1",
+        "28/1",
+        "32/1",
+        "9/1"
+      ],
+      "definer_module": "51/1",
+      "kind": "function"
+    },
+    "A919/1": {
+      "artifact_id": "A919/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "78/1"
+      ],
+      "definer_module": "115/1",
+      "kind": "class"
+    },
+    "A920/1": {
+      "artifact_id": "A920/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "114/1"
+      ],
+      "definer_module": "115/1",
+      "kind": "method"
+    },
+    "A921/1": {
+      "artifact_id": "A921/1",
+      "consumer_count": 15,
+      "consumer_module_indices": [
+        "104/1",
+        "120/1",
+        "123/1",
+        "131/1",
+        "134/1",
+        "138/1",
+        "16/1",
+        "18/1",
+        "45/1",
+        "50/1",
+        "76/1",
+        "9/1",
+        "90/1",
+        "95/1",
+        "96/1"
+      ],
+      "definer_module": "115/1",
+      "kind": "method"
+    },
+    "A922/1": {
+      "artifact_id": "A922/1",
+      "consumer_count": 10,
+      "consumer_module_indices": [
+        "112/1",
+        "117/1",
+        "120/1",
+        "138/1",
+        "21/1",
+        "38/1",
+        "43/1",
+        "64/1",
+        "9/1",
+        "98/1"
+      ],
+      "definer_module": "115/1",
+      "kind": "method"
+    },
+    "A923/1": {
+      "artifact_id": "A923/1",
+      "consumer_count": 9,
+      "consumer_module_indices": [
+        "110/1",
+        "121/1",
+        "130/1",
+        "136/1",
+        "137/1",
+        "149/1",
+        "32/1",
+        "9/1",
+        "92/1"
+      ],
+      "definer_module": "115/1",
+      "kind": "global"
+    },
+    "A924/1": {
+      "artifact_id": "A924/1",
+      "consumer_count": 27,
+      "consumer_module_indices": [
+        "108/1",
+        "11/1",
+        "117/1",
+        "121/1",
+        "123/1",
+        "130/1",
+        "133/1",
+        "136/1",
+        "149/1",
+        "153/1",
+        "16/1",
+        "18/1",
+        "20/1",
+        "23/1",
+        "32/1",
+        "39/1",
+        "45/1",
+        "46/1",
+        "64/1",
+        "70/1",
+        "71/1",
+        "78/1",
+        "80/1",
+        "9/1",
+        "90/1",
+        "92/1",
+        "95/1"
+      ],
+      "definer_module": "115/1",
+      "kind": "global"
+    },
+    "A925/1": {
+      "artifact_id": "A925/1",
+      "consumer_count": 4,
+      "consumer_module_indices": [
+        "43/1",
+        "76/1",
+        "9/1",
+        "90/1"
+      ],
+      "definer_module": "115/1",
+      "kind": "global"
+    },
+    "A926/1": {
+      "artifact_id": "A926/1",
+      "consumer_count": 23,
+      "consumer_module_indices": [
+        "108/1",
+        "117/1",
+        "123/1",
+        "133/1",
+        "136/1",
+        "138/1",
+        "148/1",
+        "15/1",
+        "151/1",
+        "28/1",
+        "37/1",
+        "38/1",
+        "50/1",
+        "58/1",
+        "64/1",
+        "70/1",
+        "71/1",
+        "76/1",
+        "78/1",
+        "84/1",
+        "9/1",
+        "90/1",
+        "91/1"
+      ],
+      "definer_module": "115/1",
+      "kind": "global"
+    },
+    "A927/1": {
+      "artifact_id": "A927/1",
+      "consumer_count": 6,
+      "consumer_module_indices": [
+        "138/1",
+        "24/1",
+        "45/1",
+        "74/1",
+        "78/1",
+        "9/1"
+      ],
+      "definer_module": "115/1",
+      "kind": "global"
+    },
+    "A928/1": {
+      "artifact_id": "A928/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "115/1"
+      ],
+      "definer_module": "137/1",
+      "kind": "class"
+    },
+    "A929/1": {
+      "artifact_id": "A929/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "78/1"
+      ],
+      "definer_module": "137/1",
+      "kind": "function"
+    },
+    "A930/1": {
+      "artifact_id": "A930/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "43/1"
+      ],
+      "definer_module": "137/1",
+      "kind": "global"
+    },
+    "A931/1": {
+      "artifact_id": "A931/1",
+      "consumer_count": 2,
+      "consumer_module_indices": [
+        "64/1",
+        "74/1"
+      ],
+      "definer_module": "137/1",
+      "kind": "global"
+    },
+    "A932/1": {
+      "artifact_id": "A932/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "43/1"
+      ],
+      "definer_module": "137/1",
+      "kind": "global"
+    },
+    "A933/1": {
+      "artifact_id": "A933/1",
+      "consumer_count": 4,
+      "consumer_module_indices": [
+        "43/1",
+        "76/1",
+        "9/1",
+        "90/1"
+      ],
+      "definer_module": "137/1",
+      "kind": "global"
+    },
+    "A934/1": {
+      "artifact_id": "A934/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "78/1"
+      ],
+      "definer_module": "112/1",
+      "kind": "function"
+    },
+    "A935/1": {
+      "artifact_id": "A935/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "112/1"
+      ],
+      "definer_module": "107/1",
+      "kind": "class"
+    },
+    "A936/1": {
+      "artifact_id": "A936/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "112/1"
+      ],
+      "definer_module": "107/1",
+      "kind": "class"
+    },
+    "A937/1": {
+      "artifact_id": "A937/1",
+      "consumer_count": 3,
+      "consumer_module_indices": [
+        "112/1",
+        "115/1",
+        "137/1"
+      ],
+      "definer_module": "107/1",
+      "kind": "class"
+    },
+    "A938/1": {
+      "artifact_id": "A938/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "43/1"
+      ],
+      "definer_module": "107/1",
+      "kind": "method"
+    },
+    "A939/1": {
+      "artifact_id": "A939/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "89/1"
+      ],
+      "definer_module": "107/1",
+      "kind": "global"
+    },
+    "A940/1": {
+      "artifact_id": "A940/1",
+      "consumer_count": 7,
+      "consumer_module_indices": [
+        "112/1",
+        "138/1",
+        "3/1",
+        "34/1",
+        "38/1",
+        "77/1",
+        "98/1"
+      ],
+      "definer_module": "107/1",
+      "kind": "global"
+    },
+    "A941/1": {
+      "artifact_id": "A941/1",
+      "consumer_count": 4,
+      "consumer_module_indices": [
+        "18/1",
+        "19/1",
+        "26/1",
+        "70/1"
+      ],
+      "definer_module": "107/1",
+      "kind": "global"
+    },
+    "A942/1": {
+      "artifact_id": "A942/1",
+      "consumer_count": 5,
+      "consumer_module_indices": [
+        "106/1",
+        "141/1",
+        "152/1",
+        "17/1",
+        "83/1"
+      ],
+      "definer_module": "107/1",
+      "kind": "global"
+    },
+    "A943/1": {
+      "artifact_id": "A943/1",
+      "consumer_count": 24,
+      "consumer_module_indices": [
+        "1/1",
+        "108/1",
+        "112/1",
+        "115/1",
+        "122/1",
+        "123/1",
+        "124/1",
+        "133/1",
+        "136/1",
+        "137/1",
+        "138/1",
+        "16/1",
+        "20/1",
+        "38/1",
+        "42/1",
+        "50/1",
+        "57/1",
+        "58/1",
+        "64/1",
+        "71/1",
+        "76/1",
+        "9/1",
+        "90/1",
+        "95/1"
+      ],
+      "definer_module": "107/1",
+      "kind": "global"
+    },
+    "A944/1": {
+      "artifact_id": "A944/1",
+      "consumer_count": 18,
+      "consumer_module_indices": [
+        "10/1",
+        "102/1",
+        "104/1",
+        "112/1",
+        "113/1",
+        "120/1",
+        "137/1",
+        "138/1",
+        "19/1",
+        "24/1",
+        "26/1",
+        "38/1",
+        "44/1",
+        "45/1",
+        "52/1",
+        "77/1",
+        "88/1",
+        "98/1"
+      ],
+      "definer_module": "107/1",
+      "kind": "global"
+    },
+    "A945/1": {
+      "artifact_id": "A945/1",
+      "consumer_count": 13,
+      "consumer_module_indices": [
+        "112/1",
+        "124/1",
+        "125/1",
+        "129/1",
+        "136/1",
+        "147/1",
+        "27/1",
+        "37/1",
+        "48/1",
+        "57/1",
+        "67/1",
+        "69/1",
+        "83/1"
+      ],
+      "definer_module": "107/1",
+      "kind": "global"
+    },
+    "A946/1": {
+      "artifact_id": "A946/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "24/1"
+      ],
+      "definer_module": "107/1",
+      "kind": "global"
+    },
+    "A947/1": {
+      "artifact_id": "A947/1",
+      "consumer_count": 6,
+      "consumer_module_indices": [
+        "138/1",
+        "24/1",
+        "45/1",
+        "74/1",
+        "78/1",
+        "9/1"
+      ],
+      "definer_module": "107/1",
+      "kind": "global"
+    },
+    "A948/1": {
+      "artifact_id": "A948/1",
+      "consumer_count": 2,
+      "consumer_module_indices": [
+        "123/1",
+        "151/1"
+      ],
+      "definer_module": "148/1",
+      "kind": "function"
+    },
+    "A949/1": {
+      "artifact_id": "A949/1",
+      "consumer_count": 3,
+      "consumer_module_indices": [
+        "123/1",
+        "151/1",
+        "84/1"
+      ],
+      "definer_module": "148/1",
+      "kind": "function"
+    },
+    "A950/1": {
+      "artifact_id": "A950/1",
+      "consumer_count": 8,
+      "consumer_module_indices": [
+        "11/1",
+        "111/1",
+        "149/1",
+        "15/1",
+        "32/1",
+        "80/1",
+        "90/1",
+        "94/1"
+      ],
+      "definer_module": "129/1",
+      "kind": "function"
+    },
+    "A951/1": {
+      "artifact_id": "A951/1",
+      "consumer_count": 9,
+      "consumer_module_indices": [
+        "11/1",
+        "117/1",
+        "121/1",
+        "13/1",
+        "133/1",
+        "149/1",
+        "32/1",
+        "70/1",
+        "78/1"
+      ],
+      "definer_module": "16/1",
+      "kind": "function"
+    },
+    "A952/1": {
+      "artifact_id": "A952/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "133/1"
+      ],
+      "definer_module": "16/1",
+      "kind": "function"
+    },
+    "A953/1": {
+      "artifact_id": "A953/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "149/1"
+      ],
+      "definer_module": "92/1",
+      "kind": "function"
+    },
+    "A954/1": {
+      "artifact_id": "A954/1",
+      "consumer_count": 5,
+      "consumer_module_indices": [
+        "121/1",
+        "149/1",
+        "15/1",
+        "80/1",
+        "90/1"
+      ],
+      "definer_module": "142/1",
+      "kind": "function"
+    },
+    "A955/1": {
+      "artifact_id": "A955/1",
+      "consumer_count": 3,
+      "consumer_module_indices": [
+        "149/1",
+        "16/1",
+        "20/1"
+      ],
+      "definer_module": "45/1",
+      "kind": "function"
+    },
+    "A956/1": {
+      "artifact_id": "A956/1",
+      "consumer_count": 3,
+      "consumer_module_indices": [
+        "149/1",
+        "16/1",
+        "20/1"
+      ],
+      "definer_module": "45/1",
+      "kind": "function"
+    },
+    "A957/1": {
+      "artifact_id": "A957/1",
+      "consumer_count": 2,
+      "consumer_module_indices": [
+        "16/1",
+        "20/1"
+      ],
+      "definer_module": "45/1",
+      "kind": "function"
+    },
+    "A958/1": {
+      "artifact_id": "A958/1",
+      "consumer_count": 4,
+      "consumer_module_indices": [
+        "18/1",
+        "63/1",
+        "80/1",
+        "90/1"
+      ],
+      "definer_module": "54/1",
+      "kind": "function"
+    },
+    "A959/1": {
+      "artifact_id": "A959/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "18/1"
+      ],
+      "definer_module": "53/1",
+      "kind": "function"
+    },
+    "A960/1": {
+      "artifact_id": "A960/1",
+      "consumer_count": 2,
+      "consumer_module_indices": [
+        "132/1",
+        "18/1"
+      ],
+      "definer_module": "53/1",
+      "kind": "function"
+    },
+    "A961/1": {
+      "artifact_id": "A961/1",
+      "consumer_count": 2,
+      "consumer_module_indices": [
+        "132/1",
+        "18/1"
+      ],
+      "definer_module": "53/1",
+      "kind": "function"
+    },
+    "A962/1": {
+      "artifact_id": "A962/1",
+      "consumer_count": 2,
+      "consumer_module_indices": [
+        "132/1",
+        "18/1"
+      ],
+      "definer_module": "36/1",
+      "kind": "function"
+    },
+    "A963/1": {
+      "artifact_id": "A963/1",
+      "consumer_count": 2,
+      "consumer_module_indices": [
+        "132/1",
+        "18/1"
+      ],
+      "definer_module": "36/1",
+      "kind": "function"
+    },
+    "A964/1": {
+      "artifact_id": "A964/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "132/1"
+      ],
+      "definer_module": "18/1",
+      "kind": "function"
+    },
+    "A965/1": {
+      "artifact_id": "A965/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "18/1"
+      ],
+      "definer_module": "93/1",
+      "kind": "function"
+    },
+    "A966/1": {
+      "artifact_id": "A966/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "18/1"
+      ],
+      "definer_module": "93/1",
+      "kind": "function"
+    },
+    "A967/1": {
+      "artifact_id": "A967/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "18/1"
+      ],
+      "definer_module": "93/1",
+      "kind": "function"
+    },
+    "A968/1": {
+      "artifact_id": "A968/1",
+      "consumer_count": 3,
+      "consumer_module_indices": [
+        "149/1",
+        "28/1",
+        "38/1"
+      ],
+      "definer_module": "37/1",
+      "kind": "global"
+    },
+    "A969/1": {
+      "artifact_id": "A969/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "129/1"
+      ],
+      "definer_module": "37/1",
+      "kind": "function"
+    },
+    "A970/1": {
+      "artifact_id": "A970/1",
+      "consumer_count": 3,
+      "consumer_module_indices": [
+        "100/1",
+        "21/1",
+        "81/1"
+      ],
+      "definer_module": "37/1",
+      "kind": "function"
+    },
+    "A971/1": {
+      "artifact_id": "A971/1",
+      "consumer_count": 2,
+      "consumer_module_indices": [
+        "147/1",
+        "27/1"
+      ],
+      "definer_module": "37/1",
+      "kind": "function"
+    },
+    "A972/1": {
+      "artifact_id": "A972/1",
+      "consumer_count": 8,
+      "consumer_module_indices": [
+        "124/1",
+        "143/1",
+        "149/1",
+        "33/1",
+        "6/1",
+        "69/1",
+        "83/1",
+        "89/1"
+      ],
+      "definer_module": "37/1",
+      "kind": "function"
+    },
+    "A973/1": {
+      "artifact_id": "A973/1",
+      "consumer_count": 3,
+      "consumer_module_indices": [
+        "141/1",
+        "16/1",
+        "45/1"
+      ],
+      "definer_module": "37/1",
+      "kind": "function"
+    },
+    "A974/1": {
+      "artifact_id": "A974/1",
+      "consumer_count": 4,
+      "consumer_module_indices": [
+        "123/1",
+        "143/1",
+        "149/1",
+        "85/1"
+      ],
+      "definer_module": "37/1",
+      "kind": "function"
+    },
+    "A975/1": {
+      "artifact_id": "A975/1",
+      "consumer_count": 4,
+      "consumer_module_indices": [
+        "143/1",
+        "147/1",
+        "149/1",
+        "26/1"
+      ],
+      "definer_module": "37/1",
+      "kind": "function"
+    },
+    "A976/1": {
+      "artifact_id": "A976/1",
+      "consumer_count": 3,
+      "consumer_module_indices": [
+        "100/1",
+        "21/1",
+        "81/1"
+      ],
+      "definer_module": "37/1",
+      "kind": "function"
+    },
+    "A977/1": {
+      "artifact_id": "A977/1",
+      "consumer_count": 3,
+      "consumer_module_indices": [
+        "147/1",
+        "149/1",
+        "27/1"
+      ],
+      "definer_module": "37/1",
+      "kind": "function"
+    },
+    "A978/1": {
+      "artifact_id": "A978/1",
+      "consumer_count": 3,
+      "consumer_module_indices": [
+        "12/1",
+        "9/1",
+        "90/1"
+      ],
+      "definer_module": "76/1",
+      "kind": "function"
+    },
+    "A979/1": {
+      "artifact_id": "A979/1",
+      "consumer_count": 2,
+      "consumer_module_indices": [
+        "12/1",
+        "90/1"
+      ],
+      "definer_module": "76/1",
+      "kind": "function"
+    },
+    "A980/1": {
+      "artifact_id": "A980/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "149/1"
+      ],
+      "definer_module": "76/1",
+      "kind": "function"
+    },
+    "A981/1": {
+      "artifact_id": "A981/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "88/1"
+      ],
+      "definer_module": "113/1",
+      "kind": "function"
+    },
+    "A982/1": {
+      "artifact_id": "A982/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "88/1"
+      ],
+      "definer_module": "113/1",
+      "kind": "function"
+    },
+    "A983/1": {
+      "artifact_id": "A983/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "88/1"
+      ],
+      "definer_module": "113/1",
+      "kind": "function"
+    },
+    "A984/1": {
+      "artifact_id": "A984/1",
+      "consumer_count": 2,
+      "consumer_module_indices": [
+        "12/1",
+        "76/1"
+      ],
+      "definer_module": "88/1",
+      "kind": "class"
+    },
+    "A985/1": {
+      "artifact_id": "A985/1",
+      "consumer_count": 2,
+      "consumer_module_indices": [
+        "68/1",
+        "80/1"
+      ],
+      "definer_module": "39/1",
+      "kind": "function"
+    },
+    "A986/1": {
+      "artifact_id": "A986/1",
+      "consumer_count": 3,
+      "consumer_module_indices": [
+        "149/1",
+        "15/1",
+        "80/1"
+      ],
+      "definer_module": "63/1",
+      "kind": "function"
+    },
+    "A987/1": {
+      "artifact_id": "A987/1",
+      "consumer_count": 8,
+      "consumer_module_indices": [
+        "121/1",
+        "123/1",
+        "149/1",
+        "15/1",
+        "21/1",
+        "46/1",
+        "57/1",
+        "7/1"
+      ],
+      "definer_module": "97/1",
+      "kind": "class"
+    },
+    "A988/1": {
+      "artifact_id": "A988/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "149/1"
+      ],
+      "definer_module": "97/1",
+      "kind": "function"
+    },
+    "A989/1": {
+      "artifact_id": "A989/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "39/1"
+      ],
+      "definer_module": "81/1",
+      "kind": "function"
+    },
+    "A990/1": {
+      "artifact_id": "A990/1",
+      "consumer_count": 2,
+      "consumer_module_indices": [
+        "15/1",
+        "80/1"
+      ],
+      "definer_module": "81/1",
+      "kind": "function"
+    },
+    "A991/1": {
+      "artifact_id": "A991/1",
+      "consumer_count": 3,
+      "consumer_module_indices": [
+        "143/1",
+        "60/1",
+        "73/1"
+      ],
+      "definer_module": "81/1",
+      "kind": "function"
+    },
+    "A992/1": {
+      "artifact_id": "A992/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "80/1"
+      ],
+      "definer_module": "110/1",
+      "kind": "function"
+    },
+    "A993/1": {
+      "artifact_id": "A993/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "80/1"
+      ],
+      "definer_module": "110/1",
+      "kind": "function"
+    },
+    "A994/1": {
+      "artifact_id": "A994/1",
+      "consumer_count": 2,
+      "consumer_module_indices": [
+        "123/1",
+        "149/1"
+      ],
+      "definer_module": "95/1",
+      "kind": "function"
+    },
+    "A995/1": {
+      "artifact_id": "A995/1",
+      "consumer_count": 3,
+      "consumer_module_indices": [
+        "123/1",
+        "149/1",
+        "6/1"
+      ],
+      "definer_module": "151/1",
+      "kind": "function"
+    },
+    "A996/1": {
+      "artifact_id": "A996/1",
+      "consumer_count": 2,
+      "consumer_module_indices": [
+        "123/1",
+        "6/1"
+      ],
+      "definer_module": "60/1",
+      "kind": "function"
+    },
+    "A997/1": {
+      "artifact_id": "A997/1",
+      "consumer_count": 3,
+      "consumer_module_indices": [
+        "123/1",
+        "149/1",
+        "6/1"
+      ],
+      "definer_module": "60/1",
+      "kind": "function"
+    },
+    "A998/1": {
+      "artifact_id": "A998/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "68/1"
+      ],
+      "definer_module": "15/1",
+      "kind": "function"
+    },
+    "A999/1": {
+      "artifact_id": "A999/1",
+      "consumer_count": 1,
+      "consumer_module_indices": [
+        "68/1"
+      ],
+      "definer_module": "15/1",
+      "kind": "function"
+    }
+  },
+  "core_extraction_candidates": [],
+  "full_artifact_count": 356,
+  "module_count": 133,
+  "runtime": {
+    "cache_hit": false,
+    "generated_at": "2026-08-12T21:25:19.950988"
+  },
+  "shared_artifact_count": null,
+  "shared_artifact_keys": [
+    "A1000/1",
+    "A1001/1",
+    "A1002/1",
+    "A1004/1",
+    "A1005/1",
+    "A1006/1",
+    "A1008/1",
+    "A1009/1",
+    "A1015/1",
+    "A1017/1",
+    "A1027/1",
+    "A1028/1",
+    "A1029/1",
+    "A1030/1",
+    "A1034/1",
+    "A1035/1",
+    "A1046/1",
+    "A1050/1",
+    "A1054/1",
+    "A1057/1",
+    "A1059/1",
+    "A1062/1",
+    "A1063/1",
+    "A1064/1",
+    "A1065/1",
+    "A1066/1",
+    "A1067/1",
+    "A1068/1",
+    "A1069/1",
+    "A1070/1",
+    "A1071/1",
+    "A1072/1",
+    "A1073/1",
+    "A1074/1",
+    "A1076/1",
+    "A1077/1",
+    "A1084/1",
+    "A1087/1",
+    "A1088/1",
+    "A1089/1",
+    "A1090/1",
+    "A1094/1",
+    "A1102/1",
+    "A1105/1",
+    "A1106/1",
+    "A1119/1",
+    "A1121/1",
+    "A1134/1",
+    "A1136/1",
+    "A1137/1",
+    "A1138/1",
+    "A1141/1",
+    "A1142/1",
+    "A1143/1",
+    "A1146/1",
+    "A1147/1",
+    "A1152/1",
+    "A1155/1",
+    "A1156/1",
+    "A1158/1",
+    "A1159/1",
+    "A1160/1",
+    "A1163/1",
+    "A1165/1",
+    "A1166/1",
+    "A2/4",
+    "A3/4",
+    "A4/4",
+    "A5/4",
+    "A831/1",
+    "A833/1",
+    "A840/1",
+    "A842/1",
+    "A844/1",
+    "A852/1",
+    "A854/1",
+    "A855/1",
+    "A856/1",
+    "A859/1",
+    "A860/1",
+    "A862/1",
+    "A863/1",
+    "A865/1",
+    "A866/1",
+    "A867/1",
+    "A868/1",
+    "A869/1",
+    "A870/1",
+    "A872/1",
+    "A873/1",
+    "A875/1",
+    "A876/1",
+    "A877/1",
+    "A879/1",
+    "A881/1",
+    "A882/1",
+    "A883/1",
+    "A884/1",
+    "A888/1",
+    "A889/1",
+    "A891/1",
+    "A893/1",
+    "A894/1",
+    "A896/1",
+    "A898/1",
+    "A899/1",
+    "A900/1",
+    "A901/1",
+    "A903/1",
+    "A904/1",
+    "A905/1",
+    "A907/1",
+    "A908/1",
+    "A909/1",
+    "A910/1",
+    "A911/1",
+    "A912/1",
+    "A913/1",
+    "A914/1",
+    "A915/1",
+    "A916/1",
+    "A917/1",
+    "A918/1",
+    "A921/1",
+    "A922/1",
+    "A923/1",
+    "A924/1",
+    "A925/1",
+    "A926/1",
+    "A927/1",
+    "A931/1",
+    "A933/1",
+    "A937/1",
+    "A940/1",
+    "A941/1",
+    "A942/1",
+    "A943/1",
+    "A944/1",
+    "A945/1",
+    "A947/1",
+    "A948/1",
+    "A949/1",
+    "A950/1",
+    "A951/1",
+    "A954/1",
+    "A955/1",
+    "A956/1",
+    "A957/1",
+    "A958/1",
+    "A960/1",
+    "A961/1",
+    "A962/1",
+    "A963/1",
+    "A968/1",
+    "A970/1",
+    "A971/1",
+    "A972/1",
+    "A973/1",
+    "A974/1",
+    "A975/1",
+    "A976/1",
+    "A977/1",
+    "A978/1",
+    "A979/1",
+    "A984/1",
+    "A985/1",
+    "A986/1",
+    "A987/1",
+    "A990/1",
+    "A991/1",
+    "A994/1",
+    "A995/1",
+    "A996/1",
+    "A997/1"
+  ],
+  "shared_usage_clusters": []
+}

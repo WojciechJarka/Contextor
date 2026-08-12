@@ -155,6 +155,51 @@ class PersistentIdentityRegistry:
             name: self._load_json(name)
             for name in self.files
         }
+        self._repair_kind("module")
+        self._repair_kind("artifact")
+
+    def _repair_kind(self, kind: str) -> None:
+        """Repair one-sided registry mappings loaded from older/corrupt state."""
+        registry = self._state[f"{kind}_registry"]
+        recovery = self._state[f"{kind}_recovery"]
+        slots = self._state[f"{kind}_slots"]
+        path_to_id = registry["path_to_id"]
+        id_to_path = registry["id_to_path"]
+        value_key = "path" if kind == "module" else "name"
+
+        def record_generation(obj_id: str) -> None:
+            try:
+                head, raw_generation = str(obj_id).split("/", 1)
+                slot = head.removeprefix("A") if kind == "artifact" else head
+                generation = int(raw_generation)
+                slots[slot] = max(int(slots.get(slot, 0)), generation)
+            except (TypeError, ValueError):
+                return
+
+        for obj_id, path in list(id_to_path.items()):
+            record_generation(obj_id)
+            if isinstance(path, str) and path.strip() and path_to_id.get(path) == obj_id:
+                continue
+            if isinstance(path, str) and path.strip():
+                recovery.setdefault(obj_id, {
+                    "type": kind,
+                    value_key: path,
+                    "removed_at": datetime.datetime.now().isoformat(),
+                    "status": "orphan",
+                })
+            del id_to_path[obj_id]
+
+        for path, obj_id in list(path_to_id.items()):
+            record_generation(obj_id)
+            if not isinstance(path, str) or not path.strip():
+                del path_to_id[path]
+                id_to_path.pop(obj_id, None)
+                continue
+            id_to_path[obj_id] = path
+
+        for obj_id in recovery:
+            if obj_id != "schema_version":
+                record_generation(obj_id)
 
     def _recover_transaction(self):
         if self.transaction_file.exists():
@@ -272,6 +317,8 @@ class PersistentIdentityRegistry:
         return f"{prefix}{slot}/{gen}"
 
     def get_module_id(self, path: str) -> str:
+        if not isinstance(path, str) or not path.strip():
+            return None
         obj_id = self._state["module_registry"]["path_to_id"].get(path)
 
         if obj_id:
@@ -286,6 +333,8 @@ class PersistentIdentityRegistry:
         return None
 
     def get_artifact_id(self, name: str) -> str:
+        if not isinstance(name, str) or not name.strip():
+            return None
         obj_id = self._state["artifact_registry"]["path_to_id"].get(name)
 
         if obj_id:

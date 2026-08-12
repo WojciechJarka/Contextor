@@ -93,6 +93,24 @@ def test_incremental_add_imported_module(tmp_path):
     
     compare_states(engine.state, state_baseline, compare_artifacts=False)
 
+
+def test_incremental_new_file_delta_imports_are_json_serializable(tmp_path):
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    (repo_dir / "existing.py").write_text("VALUE = 1\n", encoding="utf-8")
+
+    registry = PersistentIdentityRegistry(str(repo_dir))
+    state = bootstrap_state(repo_dir, registry)
+    engine = init_engine(tmp_path, repo_dir, state, registry)
+
+    target = repo_dir / "new_module.py"
+    target.write_text("import pathlib\n", encoding="utf-8")
+
+    result = engine.update_file(str(target))
+
+    assert result.delta.imports_added == ["pathlib"]
+    __import__("json").dumps(result.delta.imports_added)
+
 def test_incremental_delete_imported_module(tmp_path):
     repo_dir = tmp_path / "repo"
     repo_dir.mkdir()

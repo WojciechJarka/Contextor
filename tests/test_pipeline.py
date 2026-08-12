@@ -2,8 +2,12 @@
 End-to-end checks over a small synthetic repository.
 """
 
+import ast
+from pathlib import Path
+
 from contextor.core.graph.cycles import detect_cycles
 from contextor.core.graph.graph import build_graph
+from contextor.core.api.facade import ContextorFacade
 from contextor.core.symbol_engine.indexer import build_index
 from contextor.core.validator.collisions import validate_name_collisions
 
@@ -73,3 +77,82 @@ def test_constant_collision_is_detected(sample_repo, isolated_dirs):
     collisions = validate_name_collisions(build_index(str(sample_repo)))
 
     assert any("'MAX_ITEMS'" in c.message for c in collisions)
+
+
+def test_global_pipeline_forwards_datestamp_to_report_writer():
+    pipeline_path = (
+        Path(__file__).parents[1]
+        / "contextor"
+        / "core"
+        / "reporting_engine"
+        / "pipeline.py"
+    )
+    tree = ast.parse(pipeline_path.read_text(encoding="utf-8"))
+    pipeline = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef)
+        and node.name == "execute_global_pipeline"
+    )
+    write_call = next(
+        node
+        for node in ast.walk(pipeline)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "write_global_reports"
+    )
+
+    forwarded = {keyword.arg: keyword.value for keyword in write_call.keywords}
+    assert isinstance(forwarded["datestamp"], ast.Name)
+    assert forwarded["datestamp"].id == "datestamp"
+
+
+def test_first_global_run_writes_canonical_and_timestamped_snapshot(
+    sample_repo, isolated_dirs, monkeypatch
+):
+    monkeypatch.setenv("CONTEXTOR_DISABLE_PROCESS_POOL", "1")
+
+    ContextorFacade.analyze_project(str(sample_repo))
+
+    output = isolated_dirs / "output"
+    repo_name = sample_repo.name
+    assert (output / f"{repo_name}_summary.json").is_file()
+    snapshots = [
+        path
+        for path in output.glob(f"{repo_name}_*")
+        if path.is_dir()
+    ]
+    assert len(snapshots) == 1
+    assert (snapshots[0] / f"{repo_name}_summary.json").is_file()
+    assert (snapshots[0] / f"{repo_name}_summary.md").is_file()
+
+
+def test_layer_report_writers_receive_datestamp():
+    root = Path(__file__).parents[1]
+    targets = {
+        root / "contextor" / "core" / "api" / "facade.py": "analyze_layer",
+        root / "contextor" / "core" / "reporting_engine" / "pipeline.py": (
+            "execute_global_pipeline"
+        ),
+    }
+
+    for path, function_name in targets.items():
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        function = next(
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and node.name == function_name
+        )
+        calls = [
+            node
+            for node in ast.walk(function)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "write_layer_reports"
+        ]
+        assert calls
+        for call in calls:
+            forwarded = {keyword.arg: keyword.value for keyword in call.keywords}
+            assert isinstance(forwarded["datestamp"], ast.Name)
+            assert forwarded["datestamp"].id == "datestamp"

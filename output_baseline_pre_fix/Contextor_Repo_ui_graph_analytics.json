@@ -1,0 +1,307 @@
+{
+  "dependency_type_breakdown": {
+    "call": 18,
+    "import": 14,
+    "inheritance": 4
+  },
+  "metric_notes": {
+    "betweenness": "Sampled betweenness centrality approximation. Only the first 80 source nodes (sorted deterministically) are used for large graphs (sample_limit=80). Max-normalized to [0, 1].",
+    "bridge_score": "Bridge heuristic score — NOT a formal bridge/articulation-point metric from graph theory. Formula: sampled_betweenness × (1 − outgoing_local_clustering). Higher values suggest structural broker role.",
+    "pagerank": "Max-normalized PageRank (d=0.85, 50 iter). Values do NOT sum to 1.0. Scores are divided by the maximum observed value so the top-ranked node always equals 1.0."
+  },
+  "module_count": 10,
+  "module_dependency_matrix": {
+    "124/1": {
+      "140/1": {
+        "dep_types": [
+          "call",
+          "import",
+          "inheritance"
+        ],
+        "weight": 6
+      },
+      "27/1": {
+        "dep_types": [
+          "call",
+          "import"
+        ],
+        "weight": 2
+      },
+      "67/1": {
+        "dep_types": [
+          "call",
+          "import"
+        ],
+        "weight": 2
+      },
+      "69/1": {
+        "dep_types": [
+          "call"
+        ],
+        "weight": 2
+      }
+    },
+    "147/1": {
+      "140/1": {
+        "dep_types": [
+          "call",
+          "import",
+          "inheritance"
+        ],
+        "weight": 5
+      },
+      "27/1": {
+        "dep_types": [
+          "call",
+          "import"
+        ],
+        "weight": 2
+      }
+    },
+    "47/1": {
+      "69/1": {
+        "dep_types": [
+          "call",
+          "import"
+        ],
+        "weight": 1
+      }
+    },
+    "67/1": {
+      "124/1": {
+        "dep_types": [
+          "call"
+        ],
+        "weight": 1
+      },
+      "140/1": {
+        "dep_types": [
+          "call"
+        ],
+        "weight": 1
+      },
+      "69/1": {
+        "dep_types": [
+          "call"
+        ],
+        "weight": 1
+      }
+    },
+    "69/1": {
+      "124/1": {
+        "dep_types": [
+          "call",
+          "import"
+        ],
+        "weight": 4
+      },
+      "140/1": {
+        "dep_types": [
+          "call",
+          "import",
+          "inheritance"
+        ],
+        "weight": 6
+      },
+      "141/1": {
+        "dep_types": [
+          "call",
+          "import",
+          "inheritance"
+        ],
+        "weight": 3
+      },
+      "147/1": {
+        "dep_types": [
+          "call",
+          "import"
+        ],
+        "weight": 2
+      },
+      "25/1": {
+        "dep_types": [
+          "call",
+          "import"
+        ],
+        "weight": 1
+      },
+      "27/1": {
+        "dep_types": [
+          "call",
+          "import"
+        ],
+        "weight": 2
+      },
+      "33/1": {
+        "dep_types": [
+          "call",
+          "import"
+        ],
+        "weight": 2
+      },
+      "67/1": {
+        "dep_types": [
+          "call",
+          "import"
+        ],
+        "weight": 4
+      }
+    }
+  },
+  "modules": {
+    "contextor.ui.__init__": {
+      "authority_score": 0.0,
+      "betweenness": 0.0,
+      "bridge_score": 0.0,
+      "export_degree": 0,
+      "fan_in": 0,
+      "fan_out": 1,
+      "hub_score": 0.0,
+      "layer": "ui",
+      "module_idx": "47/1",
+      "pagerank": 0.489206,
+      "visibility": "private"
+    },
+    "contextor.ui.exclude_check": {
+      "authority_score": 0.532169,
+      "betweenness": 0.0,
+      "bridge_score": 0.0,
+      "export_degree": 1,
+      "fan_in": 1,
+      "fan_out": 0,
+      "hub_score": 0.0,
+      "layer": "ui",
+      "module_idx": "25/1",
+      "pagerank": 0.585366,
+      "visibility": "internal"
+    },
+    "contextor.ui.exclude_gui": {
+      "authority_score": 0.532169,
+      "betweenness": 0.0,
+      "bridge_score": 0.0,
+      "export_degree": 11,
+      "fan_in": 1,
+      "fan_out": 2,
+      "hub_score": 0.36589,
+      "layer": "ui",
+      "module_idx": "147/1",
+      "pagerank": 0.585366,
+      "visibility": "public"
+    },
+    "contextor.ui.gui": {
+      "authority_score": 0.0,
+      "betweenness": 1.0,
+      "bridge_score": 0.910714,
+      "export_degree": 4,
+      "fan_in": 3,
+      "fan_out": 8,
+      "hub_score": 1.0,
+      "layer": "ui",
+      "module_idx": "69/1",
+      "pagerank": 0.905032,
+      "visibility": "public"
+    },
+    "contextor.ui.gui_parser": {
+      "authority_score": 0.532169,
+      "betweenness": 0.0,
+      "bridge_score": 0.0,
+      "export_degree": 4,
+      "fan_in": 2,
+      "fan_out": 4,
+      "hub_score": 0.513212,
+      "layer": "ui",
+      "module_idx": "124/1",
+      "pagerank": 0.585366,
+      "visibility": "public"
+    },
+    "contextor.ui.path_memory": {
+      "authority_score": 1.0,
+      "betweenness": 0.0,
+      "bridge_score": 0.0,
+      "export_degree": 2,
+      "fan_in": 3,
+      "fan_out": 0,
+      "hub_score": 0.0,
+      "layer": "ui",
+      "module_idx": "27/1",
+      "pagerank": 1.0,
+      "visibility": "public"
+    },
+    "contextor.ui.progress_widget": {
+      "authority_score": 0.805285,
+      "betweenness": 0.0,
+      "bridge_score": 0.0,
+      "export_degree": 4,
+      "fan_in": 2,
+      "fan_out": 3,
+      "hub_score": 0.0,
+      "layer": "ui",
+      "module_idx": "67/1",
+      "pagerank": 0.75122,
+      "visibility": "internal"
+    },
+    "contextor.ui.system_actions": {
+      "authority_score": 0.532169,
+      "betweenness": 0.0,
+      "bridge_score": 0.0,
+      "export_degree": 2,
+      "fan_in": 1,
+      "fan_out": 0,
+      "hub_score": 0.0,
+      "layer": "ui",
+      "module_idx": "33/1",
+      "pagerank": 0.585366,
+      "visibility": "internal"
+    },
+    "contextor.ui.test_runner": {
+      "authority_score": 0.532169,
+      "betweenness": 0.0,
+      "bridge_score": 0.0,
+      "export_degree": 4,
+      "fan_in": 1,
+      "fan_out": 0,
+      "hub_score": 0.0,
+      "layer": "ui",
+      "module_idx": "141/1",
+      "pagerank": 0.585366,
+      "visibility": "public"
+    },
+    "contextor.ui.theme": {
+      "authority_score": 1.0,
+      "betweenness": 0.0,
+      "bridge_score": 0.0,
+      "export_degree": 13,
+      "fan_in": 4,
+      "fan_out": 0,
+      "hub_score": 0.0,
+      "layer": "ui",
+      "module_idx": "140/1",
+      "pagerank": 1.0,
+      "visibility": "public"
+    }
+  },
+  "report_type": "graph_analytics",
+  "schema_version": "1.0",
+  "scope": "layer",
+  "shared_usage_clusters": [
+    {
+      "jaccard_similarity": 0.5833,
+      "modules": [
+        "147/1",
+        "124/1"
+      ],
+      "shared_artifact_count": 7,
+      "shared_artifact_keys": [
+        "A1142/1",
+        "A1143/1",
+        "A1155/1",
+        "A1156/1",
+        "A1158/1",
+        "A1159/1",
+        "A1160/1"
+      ],
+      "shared_ratio": 0.5833,
+      "size": 2
+    }
+  ]
+}

@@ -51,6 +51,25 @@ def test_unknown_module_has_no_tests(tmp_path):
     assert find_test_files("pkg.nothing", str(root)) == []
 
 
+def test_finds_nonconventional_test_that_imports_module(tmp_path):
+    root = _repo(
+        tmp_path,
+        {
+            "tests/test_resolver.py": (
+                "from pkg.domain.module import Engine\n\n"
+                "def test_engine():\n"
+                "    assert Engine()\n"
+            )
+        },
+    )
+
+    context = build_test_context("pkg.domain.module", str(root), ["Engine"])
+
+    assert context["test_files"] == [str(root / "tests" / "test_resolver.py")]
+    assert context["tested_symbols"] == ["Engine"]
+    assert context["untested_public_symbols"] == []
+
+
 def test_ignores_vendored_test_directories(tmp_path):
     """
     A 'tests' directory inside .venv belongs to a dependency, not to the

@@ -308,6 +308,91 @@ def _read_registries(
     )
 
 
+def _semantic_artifact_diff(old_artifacts: dict, new_artifacts: dict) -> dict:
+    """Return a compact, JSON-safe semantic delta from cached symbol facts."""
+    old_symbols = old_artifacts.get("symbols", {}) if old_artifacts else {}
+    new_symbols = new_artifacts.get("symbols", {}) if new_artifacts else {}
+
+    def names(symbols: dict) -> set[str]:
+        return {
+            str(name)
+            for category in ("classes", "functions", "methods", "globals")
+            for name in symbols.get(category, [])
+        }
+
+    old_names = names(old_symbols)
+    new_names = names(new_symbols)
+    old_signatures = old_symbols.get("signatures", {}) or {}
+    new_signatures = new_symbols.get("signatures", {}) or {}
+    changed_signatures = {
+        name: {"before": old_signatures[name], "after": new_signatures[name]}
+        for name in sorted(old_names & new_names)
+        if old_signatures.get(name) != new_signatures.get(name)
+    }
+
+    added = sorted(new_names - old_names)
+    removed = sorted(old_names - new_names)
+    affected = sorted(set(added) | set(removed) | set(changed_signatures))
+    return {
+        "symbols_added": added,
+        "symbols_removed": removed,
+        "signatures_changed": changed_signatures,
+        "affected_symbols": affected,
+        "changed_symbol_count": len(affected),
+        "body_only_changes_tracked": False,
+    }
+
+
+def _bounded_items(items: list, limit: int) -> tuple[list, int, bool]:
+    """Bound an MCP collection while preserving its total cardinality."""
+    total = len(items)
+    safe_limit = max(0, min(int(limit), 500))
+    selected = items[:safe_limit]
+    return selected, total, total > len(selected)
+
+
+def _bounded_query_result(value, limit: int) -> dict:
+    """Wrap and bound a top-level canonical-state query result."""
+    if isinstance(value, dict):
+        selected, total, truncated = _bounded_items(list(value.items()), limit)
+        result = dict(selected)
+        result_type = "dict"
+    elif isinstance(value, (list, tuple, set)):
+        selected, total, truncated = _bounded_items(list(value), limit)
+        result = selected
+        result_type = type(value).__name__
+    else:
+        result = value
+        total = 1
+        truncated = False
+        result_type = type(value).__name__
+    return {
+        "result": result,
+        "result_type": result_type,
+        "total_items": total,
+        "truncated": truncated,
+    }
+
+
+def _resolve_cluster_ids(
+    cluster: dict,
+    module_names: dict,
+    artifact_names: dict,
+) -> dict:
+    """Make one analytics cluster directly readable by an LLM."""
+    resolved = dict(cluster)
+    resolved["modules"] = [
+        module_names.get(str(item), str(item))
+        for item in cluster.get("modules", [])
+    ]
+    resolved["shared_artifact_keys"] = [
+        artifact_names.get(str(item), str(item))
+        for item in cluster.get("shared_artifact_keys", [])
+    ]
+    resolved["ids_resolved"] = True
+    return resolved
+
+
 # ==========================================================
 # 1. ANALYSIS TRIGGER TOOLS
 # ==========================================================
@@ -373,7 +458,10 @@ def update_file(repo_path: str, file_path: str) -> str:
     Requires `analyze_project` to have been run at least once during this session.
     """
     root = Path(repo_path).expanduser().resolve()
-    target_file = Path(file_path).expanduser().resolve()
+    target_file = Path(file_path).expanduser()
+    if not target_file.is_absolute():
+        target_file = root / target_file
+    target_file = target_file.resolve()
     
     engine = _get_or_init_engine(root)
             
@@ -381,7 +469,11 @@ def update_file(repo_path: str, file_path: str) -> str:
         return json.dumps({"status": "NO_SESSION", "file_path": str(target_file), "error": "Run analyze_project first to initialize the session."}, indent=2)
         
     try:
+        rel_path = target_file.relative_to(root)
+        module_path = ".".join(rel_path.with_suffix("").parts)
+        old_artifacts = engine.state.artifacts.get(module_path, {})
         res = engine.update_file(str(target_file))
+        new_artifacts = engine.state.artifacts.get(module_path, {})
         result = {
             "status": res.status,
             "file_path": res.file_path,
@@ -390,7 +482,8 @@ def update_file(repo_path: str, file_path: str) -> str:
             "blast_radius_state": res.blast_radius_state,
             "local_metrics_state": res.local_metrics_state,
             "global_metrics_state": res.global_metrics_state,
-            "artifact_consumption_state": res.artifact_consumption_state
+            "artifact_consumption_state": res.artifact_consumption_state,
+            "semantic_diff": _semantic_artifact_diff(old_artifacts, new_artifacts),
         }
         if res.delta:
             result["delta"] = {
@@ -521,69 +614,45 @@ def get_module_context(repo_path: str, module_name: str) -> str:
 @mcp.tool()
 def get_artifact_blast_radius(repo_path: str, artifact_name: str) -> str:
     """
-    [OPTIMIZED] Resolves the blast radius of a specific function, class, or variable.
-    Returns the defining module and the exact list of modules that consume it.
-    Use this to see what breaks if you change an artifact's signature.
+    [OPTIMIZED] Resolves direct, evidence-backed consumers of an artifact.
+    Uses the current compact artifact report and reports its evidence scope;
+    it does not claim that dynamic Python usage can be proven exact.
     """
     root = Path(repo_path).expanduser().resolve()
     repo_name = root.name
     
-    engine = _get_or_init_engine(root)
-    if not engine:
-        return "Error: No live canonical state found. Run analyze_project first."
-        
     try:
-        art_id = None
-        full_name = None
-        
-        for key, val in engine.registry._state.get("artifact_registry", {}).get("id_to_path", {}).items():
-            if val == artifact_name or val.endswith("::" + artifact_name) or val.endswith("." + artifact_name):
-                art_id = key
-                full_name = val
-                break
-                
-        if not art_id:
-            return f"Artifact '{artifact_name}' not found in the live registry."
-            
-        # Find who defines it and its consumers from the live artifacts payload
-        definer_mod_path = None
-        consumers = []
-        for mod_path, mod_arts in engine.state.artifacts.items():
-            # Check consumers
-            for art_name, mod_consumers in mod_arts.get("consumers", {}).items():
-                 # We have to match by full name or ID logic, but since we know art_id/name:
-                 pass
-        
-        # Simpler approach: use registry to find the definer
-        # Since Schema V3 dropped pure text search, get_artifact_blast_radius needs to find it.
-        # Let's search all artifacts for the name match
-        for mod_path, mod_arts in engine.state.artifacts.items():
-             symbols = mod_arts.get("symbols", {})
-             for kind in ["functions", "classes", "methods"]:
-                 symbol_dict = symbols.get(kind, {})
-                 if not isinstance(symbol_dict, dict):
-                     continue
-                 for name in symbol_dict.keys():
-                     if name == artifact_name or (full_name and name == full_name.split("::")[-1]):
-                          definer_mod_path = mod_path
-                          raw_consumers = mod_arts.get("consumers", {}).get(name, [])
-                          if isinstance(raw_consumers, dict):
-                              raw_consumers = raw_consumers.get("consumers", [])
-                          elif not isinstance(raw_consumers, list):
-                              raw_consumers = []
-                          consumers = [engine.registry.get_module_path(str(c)) or str(c) for c in raw_consumers]
-                          break
-                 if definer_mod_path: break
-             if definer_mod_path: break
+        _, mod_id_to_path, _, art_id_to_path = _read_registries(root)
+        candidates = [
+            (art_id, full_name)
+            for art_id, full_name in art_id_to_path.items()
+            if full_name == artifact_name
+            or full_name.endswith("::" + artifact_name)
+        ]
+        if not candidates:
+            return f"Artifact '{artifact_name}' not found in the registry."
 
-        if not definer_mod_path:
-             return f"Artifact '{artifact_name}' found in registry but missing from live AST structure."
+        art_path = _get_canonical_report(root, f"{repo_name}_artifacts_compact.json")
+        if not art_path:
+            return "Error: No current artifacts_compact report. Run analyze_project first."
+        artifacts = json.loads(art_path.read_text(encoding="utf-8")).get("artifacts", {})
+        current = [item for item in candidates if item[0] in artifacts]
+        if not current:
+            return f"Artifact '{artifact_name}' is not present in the current artifact report."
+        art_id, full_name = sorted(current, key=lambda item: item[1])[0]
+        art_data = artifacts[art_id]
+        definer_id = str(art_data.get("definer_module", ""))
+        consumer_ids = art_data.get("consumer_module_indices", [])
 
         result = {
-            "artifact": full_name or artifact_name,
-            "definer": definer_mod_path,
-            "consumer_count": len(consumers),
-            "consumers": consumers
+            "artifact": full_name,
+            "artifact_id": art_id,
+            "kind": art_data.get("kind"),
+            "definer": mod_id_to_path.get(definer_id, definer_id),
+            "consumer_count": len(consumer_ids),
+            "consumers": [mod_id_to_path.get(item, item) for item in consumer_ids],
+            "evidence_scope": "direct_static_artifact_consumption",
+            "data_source": "current_artifacts_compact",
         }
         return json.dumps(result, indent=2)
     except Exception as e:
@@ -591,11 +660,17 @@ def get_artifact_blast_radius(repo_path: str, artifact_name: str) -> str:
 
 
 @mcp.tool()
-def search_artifacts(repo_path: str, search_term: str) -> str:
+def search_artifacts(
+    repo_path: str,
+    search_term: str,
+    limit: int = 20,
+) -> str:
     """
     [OPTIMIZED] Searches the canonical live state for an artifact, module, or symbol matching 'search_term'.
     Returns its properties and all its dependencies and consumers (blast radius).
     Use this to extract arbitrary context about any symbol from the current architectural state.
+    Exact symbol matches are preferred. ``limit``, ``total_matches`` and
+    ``truncated`` bound broad searches without hiding their cardinality.
     """
     root = Path(repo_path).expanduser().resolve()
     repo_name = root.name
@@ -605,15 +680,20 @@ def search_artifacts(repo_path: str, search_term: str) -> str:
         return "Error: No live canonical state found. Run analyze_project first."
         
     try:
-        found_artifacts = {}
+        found_artifacts = []
+        kind_by_category = {
+            "functions": "function",
+            "classes": "class",
+            "methods": "method",
+            "globals": "global",
+        }
         for mod_path, mod_arts in engine.state.artifacts.items():
             symbols = mod_arts.get("symbols", {})
-            for kind in ["functions", "classes", "methods"]:
-                # symbols[kind] is a dict {name: details}, not a list.
-                symbol_dict = symbols.get(kind, {})
-                if not isinstance(symbol_dict, dict):
-                    continue
-                for name in symbol_dict.keys():
+            for category, kind in kind_by_category.items():
+                raw_names = symbols.get(category, [])
+                names = raw_names.keys() if isinstance(raw_names, dict) else raw_names
+                for raw_name in names:
+                    name = str(raw_name)
                     if search_term.lower() in name.lower():
                         definer_mod = engine.registry.get_module_id(mod_path)
                         consumers_dict = mod_arts.get("consumers", {}).get(name, {})
@@ -627,33 +707,52 @@ def search_artifacts(repo_path: str, search_term: str) -> str:
                             for c in consumers
                         ]
 
-                        found_artifacts[f"{mod_path}::{name}"] = {
+                        found_artifacts.append((name.lower() != search_term.lower(), name.lower(), f"{mod_path}::{name}", {
                             "kind": kind,
                             "definer_module_path": mod_path,
                             "definer_module_id": definer_mod,
                             "consumer_count": len(consumers),
                             "consumers": consumer_paths,
-                        }
+                        }))
 
         if not found_artifacts:
             return f"No live artifacts found matching '{search_term}'."
 
-        return json.dumps({"artifacts": found_artifacts}, indent=2)
+        found_artifacts.sort()
+        if not found_artifacts[0][0]:
+            found_artifacts = [item for item in found_artifacts if not item[0]]
+        selected, total, truncated = _bounded_items(found_artifacts, limit)
+        return json.dumps({
+            "query": search_term,
+            "match_count": len(selected),
+            "total_matches": total,
+            "truncated": truncated,
+            "artifacts": {item[2]: item[3] for item in selected},
+        }, indent=2)
     except Exception as e:
         return f"Error extracting artifact context from live state: {e}"
 
 @mcp.tool()
-def get_file_edit_context(repo_path: str, file_path: str) -> str:
+def get_file_edit_context(
+    repo_path: str,
+    file_path: str,
+    max_items: int = 30,
+) -> str:
     """
     [OPTIMIZED] Specialized single-shot context pill for LLMs prior to editing a file.
     Combines module metrics, API signature blast radius, and dependency trees into one response.
     Returns: file, module, public_api, imports, consumers, risk_score, tests_covering.
+
+    Collections are bounded by ``max_items`` (default 30) to protect the LLM
+    context window. Every bounded collection includes ``*_total`` and
+    ``*_truncated`` metadata. Increase ``max_items`` only when the totals show
+    that the omitted tail is relevant to the current decision.
     """
     root = Path(repo_path).expanduser().resolve()
     repo_name = root.name
     
     # Deriving module name from file path
-    target_path = Path(file_path)
+    target_path = Path(file_path).expanduser()
     if target_path.is_absolute():
         try:
             rel_path = target_path.relative_to(root)
@@ -661,6 +760,7 @@ def get_file_edit_context(repo_path: str, file_path: str) -> str:
             rel_path = target_path
     else:
         rel_path = target_path
+        target_path = root / target_path
 
     parts = list(rel_path.parts)
     if parts and parts[-1].endswith(".py"):
@@ -677,9 +777,6 @@ def get_file_edit_context(repo_path: str, file_path: str) -> str:
         return "Error: Missing required reports. Run analyze_project first."
         
     try:
-        from contextor.core.reporting_engine.persistent_registry import PersistentIdentityRegistry
-        registry = PersistentIdentityRegistry(str(root))
-        
         ga = json.loads(ga_path.read_text(encoding="utf-8"))
         art_comp = json.loads(art_path.read_text(encoding="utf-8"))
         
@@ -703,54 +800,92 @@ def get_file_edit_context(repo_path: str, file_path: str) -> str:
             )
         
         # We must read registries OUTSIDE the transaction block to avoid Resource Deadlock
-        _, _, _, art_id_to_path = _read_registries(root)
-
-        with registry.transaction():
-            mod_id = str(registry.get_module_id(module_name))
+        mod_path_to_id, mod_id_to_path, _, art_id_to_path = _read_registries(root)
+        mod_id = mod_path_to_id.get(module_name)
+        if not mod_id:
+            return f"Error: Module '{module_name}' is not present in the current registry."
             
-            imports = []
-            consumers = []
+        imports = []
+        consumers = []
             
-            matrix = ga.get("module_dependency_matrix", {})
-            if mod_id in matrix:
-                for target_id in matrix[mod_id].keys():
-                    imports.append(target_id)
-            for src_id, targets in matrix.items():
-                if mod_id in targets:
-                    consumers.append(src_id)
+        matrix = ga.get("module_dependency_matrix", {})
+        if mod_id in matrix:
+            for target_id in matrix[mod_id].keys():
+                imports.append(target_id)
+        for src_id, targets in matrix.items():
+            if mod_id in targets:
+                consumers.append(src_id)
                         
-            # Resolve public API artifact IDs to human-readable names so an
-            # LLM does not need a separate lookup_index_entries call.
-            public_api = {}
-            if "module_artifacts" in art_comp and mod_id in art_comp["module_artifacts"]:
-                for art_id in art_comp["module_artifacts"][mod_id]:
-                    public_api[str(art_id)] = art_id_to_path.get(str(art_id), str(art_id))
-            else:
-                for art_id, art_data in art_comp.get("artifacts", {}).items():
-                    if str(art_data.get("definer_module")) == mod_id:
-                        public_api[str(art_id)] = art_id_to_path.get(str(art_id), str(art_id))
+        # Resolve public API artifact IDs to human-readable names so an
+        # LLM does not need a separate lookup_index_entries call.
+        public_api = {}
+        unresolved_public_api_ids = []
+        if "module_artifacts" in art_comp and mod_id in art_comp["module_artifacts"]:
+            for art_id in art_comp["module_artifacts"][mod_id]:
+                resolved = art_id_to_path.get(str(art_id))
+                if resolved:
+                    public_api[str(art_id)] = resolved
+                else:
+                    unresolved_public_api_ids.append(str(art_id))
+        else:
+            for art_id, art_data in art_comp.get("artifacts", {}).items():
+                if str(art_data.get("definer_module")) == mod_id:
+                    resolved = art_id_to_path.get(str(art_id))
+                    if resolved:
+                        public_api[str(art_id)] = resolved
+                    else:
+                        unresolved_public_api_ids.append(str(art_id))
         
         # tests_covering: test modules depend on this one, we can check prefix from paths if needed, 
         # but since we only have IDs, we look up the path for the prefix check but keep the ID.
         tests_covering = []
         for c in consumers:
-            c_path = registry._state.get("module_registry", {}).get("id_to_path", {}).get(c, "")
+            c_path = mod_id_to_path.get(c, "")
             if c_path.startswith("tests."):
-                tests_covering.append(c)
+                tests_covering.append({"module_id": c, "module": c_path})
+
+        public_api_items, public_api_total, public_api_truncated = _bounded_items(
+            sorted(public_api.items()), max_items
+        )
+        import_items, imports_total, imports_truncated = _bounded_items(
+            sorted(imports), max_items
+        )
+        consumer_items, consumers_total, consumers_truncated = _bounded_items(
+            sorted(consumers), max_items
+        )
+        test_items, tests_total, tests_truncated = _bounded_items(
+            tests_covering, max_items
+        )
         
         result = {
             "file": file_path,
             "file_exists": target_path.is_file(),
-            "module": mod_id,
+            "module": module_name,
+            "module_id": mod_id,
             "layer": mod_info.get("layer", "unknown"),
             "entrypoint": mod_info.get("entrypoint", False),
-            "public_api": public_api,
-            "imports": imports,
-            "consumers": consumers,
+            "public_api": dict(public_api_items),
+            "public_api_total": public_api_total,
+            "public_api_truncated": public_api_truncated,
+            "unresolved_public_api_ids": sorted(set(unresolved_public_api_ids)),
+            "imports": [
+                {"module_id": item, "module": mod_id_to_path.get(item)}
+                for item in import_items
+            ],
+            "imports_total": imports_total,
+            "imports_truncated": imports_truncated,
+            "consumers": [
+                {"module_id": item, "module": mod_id_to_path.get(item)}
+                for item in consumer_items
+            ],
+            "consumers_total": consumers_total,
+            "consumers_truncated": consumers_truncated,
             "risk_score": risk_score,
             "tests_covering": {
-                "available": len(tests_covering) > 0,
-                "tests": tests_covering
+                "available": tests_total > 0,
+                "total": tests_total,
+                "truncated": tests_truncated,
+                "tests": test_items,
             }
         }
         
@@ -760,10 +895,19 @@ def get_file_edit_context(repo_path: str, file_path: str) -> str:
 
 
 @mcp.tool()
-def get_layer_isolation(repo_path: str, layer_name: str) -> str:
+def get_layer_isolation(
+    repo_path: str,
+    layer_name: str,
+    max_clusters: int = 8,
+    max_boundary_violations: int = 10,
+) -> str:
     """
     [OPTIMIZED] Extracts isolation metrics, clusters, and leaks for a specific architectural layer.
     Use this before refactoring a large component to understand its internal cohesion.
+
+    ``max_clusters`` and ``max_boundary_violations`` bound verbose evidence.
+    The response always retains full counts and explicit ``*_truncated`` flags,
+    so an LLM can request a larger limit without loading everything by default.
     """
     root = Path(repo_path).expanduser().resolve()
     repo_name = root.name
@@ -790,11 +934,8 @@ def get_layer_isolation(repo_path: str, layer_name: str) -> str:
     try:
         ga = json.loads(ga_path.read_text(encoding="utf-8"))
         
-        # Build id->name map for resolving matrix indices
-        from contextor.core.reporting_engine.persistent_registry import PersistentIdentityRegistry
-        registry = PersistentIdentityRegistry(str(root))
-        with registry.transaction():
-            id_to_name = registry._state.get("module_registry", {}).get("id_to_path", {})
+        # Resolve only the IDs exposed by this bounded response.
+        _, id_to_name, _, artifact_id_to_name = _read_registries(root)
         
         modules = ga.get("modules", {})
         matrix = ga.get("module_dependency_matrix", {})
@@ -835,13 +976,26 @@ def get_layer_isolation(repo_path: str, layer_name: str) -> str:
                         "to_layer": tgt_layer,
                     })
         
+        clusters, cluster_count, clusters_truncated = _bounded_items(
+            ga.get("shared_usage_clusters", []), max_clusters
+        )
+        clusters = [
+            _resolve_cluster_ids(cluster, id_to_name, artifact_id_to_name)
+            for cluster in clusters
+        ]
+        violations, violation_count, violations_truncated = _bounded_items(
+            boundary_violations, max_boundary_violations
+        )
         result = {
             "layer": normalized_layer_name,
             "module_count": ga.get("module_count", 0),
-            "clusters": ga.get("shared_usage_clusters", []),
+            "clusters": clusters,
+            "cluster_count": cluster_count,
+            "clusters_truncated": clusters_truncated,
             "dependency_types": ga.get("dependency_type_breakdown", {}),
-            "boundary_violations": boundary_violations,
-            "boundary_violations_count": len(boundary_violations),
+            "boundary_violations": violations,
+            "boundary_violations_count": violation_count,
+            "boundary_violations_truncated": violations_truncated,
         }
         return json.dumps(result, indent=2)
     except Exception as e:
@@ -922,6 +1076,32 @@ def query_canonical_state(repo_path: str, python_filter_expression: str) -> str:
         return f"Error executing query: {str(e)}"
 
 
+@mcp.tool()
+def query_canonical_state_bounded(
+    repo_path: str,
+    python_filter_expression: str,
+    limit: int = 100,
+) -> str:
+    """
+    [OPTIMIZED] Runs the same restricted expression as
+    ``query_canonical_state`` but bounds top-level list/dict results.
+
+    Prefer this tool for exploration. The response includes ``total_items``
+    and ``truncated`` so an LLM can refine the expression or raise ``limit``
+    only when omitted items matter. Select narrow scalar fields in the
+    expression when individual nested values may themselves be large.
+    """
+    raw = query_canonical_state.fn(
+        repo_path=repo_path,
+        python_filter_expression=python_filter_expression,
+    )
+    try:
+        value = json.loads(raw)
+    except (TypeError, json.JSONDecodeError):
+        return raw
+    return json.dumps(_bounded_query_result(value, limit), indent=2)
+
+
 # ==========================================================
 # 3. TARGETED INDEX / ARTIFACT QUERY TOOLS
 # ==========================================================
@@ -957,6 +1137,8 @@ def get_artifacts_for_module(
     repo_path: str,
     module_name: str,
     include_consumers: bool = True,
+    symbol_filter: str = "",
+    limit: int = 50,
 ) -> str:
     """
     [OPTIMIZED] Returns all artifacts exported by a module with consumer info.
@@ -970,8 +1152,10 @@ def get_artifacts_for_module(
 
     Set ``include_consumers=False`` for a compact signatures-only view.
 
-    Note: artifacts with zero consumers are omitted from the compact report
-    (by design of artifacts_compact schema v3).
+    Use ``symbol_filter`` to select a name substring and ``limit`` to bound the
+    result. ``total_artifact_count`` reports matches before limiting and
+    ``truncated`` tells the LLM whether a narrower follow-up query is useful.
+    Live state supplements the compact report with zero-consumer symbols.
     """
     root = Path(repo_path).expanduser().resolve()
     repo_name = root.name
@@ -1000,7 +1184,7 @@ def get_artifacts_for_module(
         return "Error: No artifacts_compact report found. Run analyze_project first."
 
     try:
-        mod_path_to_id, mod_id_to_path, _, art_id_to_path = _read_registries(root)
+        mod_path_to_id, mod_id_to_path, art_path_to_id, art_id_to_path = _read_registries(root)
 
         mod_compact_id = mod_path_to_id.get(module_name)
         if not mod_compact_id:
@@ -1037,13 +1221,61 @@ def get_artifacts_for_module(
 
             result_artifacts[art_id] = entry
 
+        engine = _get_or_init_engine(root)
+        live_artifacts = (
+            engine.state.artifacts.get(module_name, {}) if engine else {}
+        )
+        live_symbols = live_artifacts.get("symbols", {})
+        signatures = live_symbols.get("signatures", {}) or {}
+        kind_by_category = {
+            "classes": "class",
+            "functions": "function",
+            "methods": "method",
+            "globals": "global",
+        }
+        for category, kind in kind_by_category.items():
+            for raw_symbol in live_symbols.get(category, []):
+                symbol = str(raw_symbol)
+                full_name = f"{module_name}::{symbol}"
+                artifact_id = art_path_to_id.get(full_name)
+                key = artifact_id or full_name
+                existing = result_artifacts.get(artifact_id, {}) if artifact_id else {}
+                entry = {
+                    "artifact_id": artifact_id,
+                    "symbol": symbol,
+                    "full_name": full_name,
+                    "kind": existing.get("kind", kind),
+                    "signature": signatures.get(symbol),
+                    "consumer_count": existing.get("consumer_count", 0),
+                }
+                if include_consumers:
+                    entry["consumers"] = existing.get("consumers", [])
+                result_artifacts[key] = entry
+
+        entries = sorted(
+            result_artifacts.items(),
+            key=lambda item: item[1].get("symbol", "").lower(),
+        )
+        if symbol_filter:
+            term = symbol_filter.lower()
+            entries = [
+                item
+                for item in entries
+                if term in item[1].get("symbol", "").lower()
+            ]
+        selected, total_count, truncated = _bounded_items(entries, limit)
+
         return json.dumps(
             {
                 "module": module_name,
                 "module_id": mod_compact_id,
-                "artifact_count": len(result_artifacts),
-                "note": "Artifacts with zero consumers are omitted (compact report schema v3).",
-                "artifacts": result_artifacts,
+                "artifact_count": len(selected),
+                "total_artifact_count": total_count,
+                "truncated": truncated,
+                "symbol_filter": symbol_filter or None,
+                "data_sources": ["live_symbol_state", "artifacts_compact"],
+                "complete_symbol_catalog": bool(engine),
+                "artifacts": dict(selected),
             },
             indent=2,
         )
@@ -1052,7 +1284,11 @@ def get_artifacts_for_module(
 
 
 @mcp.tool()
-def lookup_artifact_by_symbol(repo_path: str, symbol_name: str) -> str:
+def lookup_artifact_by_symbol(
+    repo_path: str,
+    symbol_name: str,
+    limit: int = 20,
+) -> str:
     """
     [OPTIMIZED] Finds artifacts matching a symbol name and returns their details.
 
@@ -1062,6 +1298,8 @@ def lookup_artifact_by_symbol(repo_path: str, symbol_name: str) -> str:
 
     Works on the saved compact report — no active analysis session required.
     Returns defining module, kind, consumer count, and consumer module list.
+    Exact matches are preferred over partial matches. ``limit`` bounds the
+    response while ``total_matches`` and ``truncated`` describe omitted data.
     """
     root = Path(repo_path).expanduser().resolve()
     repo_name = root.name
@@ -1071,28 +1309,37 @@ def lookup_artifact_by_symbol(repo_path: str, symbol_name: str) -> str:
         return "Error: No artifacts_compact report found. Run analyze_project first."
 
     try:
-        mod_path_to_id, mod_id_to_path, art_path_to_id, art_id_to_path = (
-            _read_registries(root)
-        )
+        _, mod_id_to_path, _, art_id_to_path = _read_registries(root)
 
         term = symbol_name.lower()
 
         # Search artifact registry: keys are "module::symbol" strings.
-        matched_ids: dict[str, str] = {}  # art_id → full_name
-        for full_name, art_id in art_path_to_id.items():
-            symbol_part = full_name.split("::", 1)[-1] if "::" in full_name else full_name
-            if term in symbol_part.lower():
-                matched_ids[art_id] = full_name
-
-        if not matched_ids:
-            return f"No artifacts found matching '{symbol_name}'."
-
         art_comp = json.loads(art_path.read_text(encoding="utf-8"))
         artifacts_raw = art_comp.get("artifacts", {})
 
+        candidates = []
+        for art_id in artifacts_raw:
+            full_name = art_id_to_path.get(str(art_id))
+            if not full_name or "::" not in full_name:
+                continue
+            symbol_part = full_name.split("::", 1)[1]
+            if term in symbol_part.lower():
+                candidates.append(
+                    (symbol_part.lower() != term, symbol_part.lower(), art_id, full_name)
+                )
+
+        candidates.sort()
+        if candidates and not candidates[0][0]:
+            candidates = [item for item in candidates if not item[0]]
+        total_matches = len(candidates)
+        candidates = candidates[: max(1, min(int(limit), 100))]
+
+        if not candidates:
+            return f"No current artifacts found matching '{symbol_name}'."
+
         results: dict = {}
-        for art_id, full_name in matched_ids.items():
-            art_data = artifacts_raw.get(art_id, {})
+        for _, _, art_id, full_name in candidates:
+            art_data = artifacts_raw[art_id]
             definer_id = str(art_data.get("definer_module", ""))
             consumer_ids = art_data.get("consumer_module_indices", [])
 
@@ -1109,6 +1356,9 @@ def lookup_artifact_by_symbol(repo_path: str, symbol_name: str) -> str:
             {
                 "query": symbol_name,
                 "match_count": len(results),
+                "total_matches": total_matches,
+                "truncated": total_matches > len(results),
+                "data_source": "current_artifacts_compact",
                 "artifacts": results,
             },
             indent=2,

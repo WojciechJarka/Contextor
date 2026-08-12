@@ -109,11 +109,6 @@ def _compute_layer_health(
         trigger_reasons.append(f"density_ratio={density_ratio} > 3.0")
     if any(h.get("score", 0) > 0.85 and h.get("type") == "HUB" for h in layer_hotspots):
         trigger_reasons.append("filtered hotspot score > 0.85 (type=HUB)")
-    if not layer_cycles and internal_edge_count > layer_module_count:
-        trigger_reasons.append(
-            f"no cycles found but internal_edge_count({internal_edge_count}) "
-            f"> module_count({layer_module_count}) — possible cycle"
-        )
 
     computation_mode = "filtered"
 
@@ -367,7 +362,15 @@ def slice_report_for_layer(
             k for k in global_artifacts.get("shared_artifact_keys", [])
             if k in layer_artifacts
         ],
+        "_usage_sidecar": {
+            k: v
+            for k, v in global_artifacts.get("_usage_sidecar", {}).items()
+            if k in layer_artifacts
+        },
     }
+    layer_artifacts_report["shared_artifact_count"] = len(
+        layer_artifacts_report["shared_artifact_keys"]
+    )
 
     if index_dict is None:
         raise ValueError("index_dict must be provided to slice_report_for_layer")

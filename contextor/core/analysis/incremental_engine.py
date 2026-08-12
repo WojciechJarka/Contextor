@@ -133,7 +133,9 @@ class IncrementalAnalysisEngine:
         )
         
         if is_new or persistent_id is None:
-            delta.imports_added = new_imports or []
+            delta.imports_added = sorted(
+                {imp.module for imp in (new_imports or []) if imp.module}
+            )
             symbols = new_artifacts_dict.get("symbols", {})
             delta.artifacts_added = list(symbols.get("functions", [])) + \
                                     list(symbols.get("classes", [])) + \

@@ -1,0 +1,454 @@
+{
+  "schema_version": "1.0",
+  "report_type": "graph_analytics",
+  "scope": "single_file",
+  "module_count": 12,
+  "metric_notes": {
+    "pagerank": "Max-normalized PageRank (d=0.85, 50 iter). Values do NOT sum to 1.0. Scores are divided by the maximum observed value so the top-ranked node always equals 1.0.",
+    "betweenness": "Sampled betweenness centrality approximation. Only the first 80 source nodes (sorted deterministically) are used for large graphs (sample_limit=80). Max-normalized to [0, 1].",
+    "bridge_score": "Bridge heuristic score — NOT a formal bridge/articulation-point metric from graph theory. Formula: sampled_betweenness × (1 − outgoing_local_clustering). Higher values suggest structural broker role."
+  },
+  "modules": {
+    "contextor.core.analysis.incremental_engine": {
+      "fan_in": 2,
+      "fan_out": 3,
+      "export_degree": 3,
+      "visibility": "public",
+      "layer": "runtime",
+      "betweenness": 0.0,
+      "pagerank": 0.168567,
+      "hub_score": 0.606938,
+      "authority_score": 0.0,
+      "bridge_score": 0.0,
+      "module_idx": "133/1"
+    },
+    "contextor.core.domain.__init__": {
+      "fan_in": 0,
+      "fan_out": 2,
+      "export_degree": 0,
+      "visibility": "private",
+      "layer": "contract",
+      "betweenness": 0.0,
+      "pagerank": 0.168567,
+      "hub_score": 0.826705,
+      "authority_score": 0.0,
+      "bridge_score": 0.0,
+      "module_idx": "40/1"
+    },
+    "contextor.core.domain.imports": {
+      "fan_in": 7,
+      "fan_out": 0,
+      "export_degree": 4,
+      "visibility": "public",
+      "layer": "contract",
+      "betweenness": 0.0,
+      "pagerank": 0.869783,
+      "hub_score": 0.0,
+      "authority_score": 0.620529,
+      "bridge_score": 0.0,
+      "module_idx": "128/1"
+    },
+    "contextor.core.domain.module": {
+      "fan_in": 10,
+      "fan_out": 2,
+      "export_degree": 6,
+      "visibility": "public",
+      "layer": "contract",
+      "betweenness": 1.0,
+      "pagerank": 1.0,
+      "hub_score": 0.489855,
+      "authority_score": 1.0,
+      "bridge_score": 1.0,
+      "module_idx": "135/1"
+    },
+    "contextor.core.graph.graph": {
+      "fan_in": 1,
+      "fan_out": 3,
+      "export_degree": 2,
+      "visibility": "public",
+      "layer": "runtime",
+      "betweenness": 0.0,
+      "pagerank": 0.216328,
+      "hub_score": 0.510145,
+      "authority_score": 0.094868,
+      "bridge_score": 0.0,
+      "module_idx": "16/1"
+    },
+    "contextor.core.module.__init__": {
+      "fan_in": 0,
+      "fan_out": 2,
+      "export_degree": 0,
+      "visibility": "private",
+      "layer": "adapter",
+      "betweenness": 0.0,
+      "pagerank": 0.168567,
+      "hub_score": 0.826705,
+      "authority_score": 0.0,
+      "bridge_score": 0.0,
+      "module_idx": "66/1"
+    },
+    "contextor.core.source": {
+      "fan_in": 3,
+      "fan_out": 2,
+      "export_degree": 3,
+      "visibility": "public",
+      "layer": "adapter",
+      "betweenness": 0.0,
+      "pagerank": 0.746799,
+      "hub_score": 0.0,
+      "authority_score": 0.339698,
+      "bridge_score": 0.0,
+      "module_idx": "105/1"
+    },
+    "contextor.core.symbol_engine.indexer": {
+      "fan_in": 6,
+      "fan_out": 4,
+      "export_degree": 6,
+      "visibility": "public",
+      "layer": "runtime",
+      "betweenness": 0.095238,
+      "pagerank": 0.216328,
+      "hub_score": 1.0,
+      "authority_score": 0.094868,
+      "bridge_score": 0.063492,
+      "module_idx": "28/1"
+    },
+    "contextor.core.validator.collisions": {
+      "fan_in": 1,
+      "fan_out": 5,
+      "export_degree": 1,
+      "visibility": "public",
+      "layer": "runtime",
+      "betweenness": 0.047619,
+      "pagerank": 0.216328,
+      "hub_score": 0.68344,
+      "authority_score": 0.094868,
+      "bridge_score": 0.02381,
+      "module_idx": "120/1"
+    },
+    "contextor.core.validator.layers": {
+      "fan_in": 1,
+      "fan_out": 1,
+      "export_degree": 2,
+      "visibility": "internal",
+      "layer": "runtime",
+      "betweenness": 0.0,
+      "pagerank": 0.216328,
+      "hub_score": 0.510145,
+      "authority_score": 0.094868,
+      "bridge_score": 0.0,
+      "module_idx": "1/1"
+    },
+    "contextor.core.validator.validate": {
+      "fan_in": 0,
+      "fan_out": 4,
+      "export_degree": 1,
+      "visibility": "internal",
+      "layer": "runtime",
+      "betweenness": 0.0,
+      "pagerank": 0.168567,
+      "hub_score": 0.606938,
+      "authority_score": 0.0,
+      "bridge_score": 0.0,
+      "module_idx": "130/1"
+    },
+    "tests.test_resolver": {
+      "fan_in": 0,
+      "fan_out": 3,
+      "export_degree": 0,
+      "visibility": "private",
+      "layer": "tests",
+      "betweenness": 0.0,
+      "pagerank": 0.168567,
+      "hub_score": 0.826705,
+      "authority_score": 0.0,
+      "bridge_score": 0.0,
+      "module_idx": "20/1"
+    }
+  },
+  "module_dependency_matrix": {
+    "133/1": {
+      "135/1": {
+        "weight": 3,
+        "dep_types": [
+          "import",
+          "inheritance"
+        ]
+      },
+      "16/1": {
+        "weight": 2,
+        "dep_types": [
+          "call",
+          "import"
+        ]
+      },
+      "28/1": {
+        "weight": 3,
+        "dep_types": [
+          "call",
+          "import"
+        ]
+      }
+    },
+    "40/1": {
+      "128/1": {
+        "weight": 1,
+        "dep_types": [
+          "import",
+          "inheritance"
+        ]
+      },
+      "135/1": {
+        "weight": 1,
+        "dep_types": [
+          "import",
+          "inheritance"
+        ]
+      }
+    },
+    "135/1": {
+      "128/1": {
+        "weight": 1,
+        "dep_types": [
+          "import",
+          "inheritance"
+        ]
+      },
+      "105/1": {
+        "weight": 2,
+        "dep_types": [
+          "call",
+          "import",
+          "inheritance"
+        ]
+      }
+    },
+    "16/1": {
+      "128/1": {
+        "weight": 2,
+        "dep_types": [
+          "import"
+        ]
+      },
+      "135/1": {
+        "weight": 3,
+        "dep_types": [
+          "import",
+          "inheritance"
+        ]
+      },
+      "28/1": {
+        "weight": 1,
+        "dep_types": [
+          "import"
+        ]
+      }
+    },
+    "66/1": {
+      "128/1": {
+        "weight": 1,
+        "dep_types": [
+          "import",
+          "inheritance"
+        ]
+      },
+      "135/1": {
+        "weight": 1,
+        "dep_types": [
+          "import",
+          "inheritance"
+        ]
+      }
+    },
+    "105/1": {
+      "135/1": {
+        "weight": 1,
+        "dep_types": [
+          "import"
+        ]
+      },
+      "28/1": {
+        "weight": 1,
+        "dep_types": [
+          "import"
+        ]
+      }
+    },
+    "28/1": {
+      "133/1": {
+        "weight": 1,
+        "dep_types": [
+          "import"
+        ]
+      },
+      "128/1": {
+        "weight": 1,
+        "dep_types": [
+          "import",
+          "inheritance"
+        ]
+      },
+      "135/1": {
+        "weight": 2,
+        "dep_types": [
+          "import",
+          "inheritance"
+        ]
+      },
+      "105/1": {
+        "weight": 2,
+        "dep_types": [
+          "call",
+          "import",
+          "inheritance"
+        ]
+      }
+    },
+    "120/1": {
+      "133/1": {
+        "weight": 1,
+        "dep_types": [
+          "import"
+        ]
+      },
+      "128/1": {
+        "weight": 1,
+        "dep_types": [
+          "import"
+        ]
+      },
+      "135/1": {
+        "weight": 2,
+        "dep_types": [
+          "import",
+          "inheritance"
+        ]
+      },
+      "105/1": {
+        "weight": 2,
+        "dep_types": [
+          "call",
+          "import",
+          "inheritance"
+        ]
+      },
+      "28/1": {
+        "weight": 1,
+        "dep_types": [
+          "import"
+        ]
+      }
+    },
+    "1/1": {
+      "135/1": {
+        "weight": 2,
+        "dep_types": [
+          "import",
+          "inheritance"
+        ]
+      }
+    },
+    "130/1": {
+      "135/1": {
+        "weight": 1,
+        "dep_types": [
+          "import",
+          "inheritance"
+        ]
+      },
+      "28/1": {
+        "weight": 1,
+        "dep_types": [
+          "import"
+        ]
+      },
+      "120/1": {
+        "weight": 1,
+        "dep_types": [
+          "call",
+          "import"
+        ]
+      },
+      "1/1": {
+        "weight": 2,
+        "dep_types": [
+          "call",
+          "import"
+        ]
+      }
+    },
+    "20/1": {
+      "128/1": {
+        "weight": 1,
+        "dep_types": [
+          "import",
+          "inheritance"
+        ]
+      },
+      "135/1": {
+        "weight": 3,
+        "dep_types": [
+          "import",
+          "inheritance"
+        ]
+      },
+      "28/1": {
+        "weight": 1,
+        "dep_types": [
+          "import"
+        ]
+      }
+    }
+  },
+  "shared_usage_clusters": [
+    {
+      "modules": [
+        "133/1",
+        "20/1"
+      ],
+      "size": 2,
+      "shared_artifact_count": 3,
+      "shared_artifact_keys": [
+        "A905/1",
+        "A909/1",
+        "A1089/1"
+      ],
+      "jaccard_similarity": 0.3,
+      "shared_ratio": 0.3
+    },
+    {
+      "modules": [
+        "40/1",
+        "66/1",
+        "28/1"
+      ],
+      "size": 3,
+      "shared_artifact_count": 2,
+      "shared_artifact_keys": [
+        "A901/1",
+        "A905/1"
+      ],
+      "jaccard_similarity": 0.5556,
+      "shared_ratio": 0.3333
+    },
+    {
+      "modules": [
+        "16/1",
+        "1/1"
+      ],
+      "size": 2,
+      "shared_artifact_count": 2,
+      "shared_artifact_keys": [
+        "A905/1",
+        "A909/1"
+      ],
+      "jaccard_similarity": 0.3333,
+      "shared_ratio": 0.3333
+    }
+  ],
+  "dependency_type_breakdown": {
+    "call": 7,
+    "import": 31,
+    "inheritance": 17
+  }
+}

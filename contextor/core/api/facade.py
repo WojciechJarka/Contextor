@@ -336,7 +336,11 @@ class ContextorFacade:
         
         execute_layer_pipeline(repo_name, layer_name, layer_sliced_reports, log=log, datestamp=datestamp)
         write_layer_reports(
-            repo_name=repo_name, layer_name=layer_name, layer_reports=layer_sliced_reports, log=log
+            repo_name=repo_name,
+            layer_name=layer_name,
+            layer_reports=layer_sliced_reports,
+            datestamp=datestamp,
+            log=log,
         )
 
         # Absolute, so what the GUI shows the user is a path that exists.
@@ -403,7 +407,11 @@ class ContextorFacade:
         output = str(output_dir() / f"single_{slug}.json")
         from contextor.core.reporting_engine.dictionary import compact_recursively
         compact_report = compact_recursively(report, index_dict, set(modules.keys()))
+        compact_report["module_name"] = report["module_name"]
         save_single_file_report(compact_report, output)
+        snapshot_dir = output_dir() / f"{Path(repo_root).resolve().name}_{datestamp}"
+        snapshot_json = snapshot_dir / f"single_{slug}.json"
+        save_single_file_report(compact_report, str(snapshot_json))
 
 
 
@@ -412,7 +420,6 @@ class ContextorFacade:
         from contextor.core.reporting_layer.artifact_usage_report import generate_artifact_usage_report as _gen_art
         try:
             sf_artifact_data = _gen_art(modules, repo_root, runtime={"cache_hit": cache_hit})
-            sf_artifact_data.pop("_usage_sidecar", None)
             target_module_id = None
             # Find module_id matching the analyzed file
             file_resolved = file.resolve()
@@ -446,12 +453,23 @@ class ContextorFacade:
             import json as _json
             with open(ga_output, "w", encoding="utf-8") as f_ga:
                 _json.dump(ga_data, f_ga, indent=2, ensure_ascii=False)
+            snapshot_dir.mkdir(parents=True, exist_ok=True)
+            with open(
+                snapshot_dir / f"single_{slug}_graph_analytics.json",
+                "w",
+                encoding="utf-8",
+            ) as f_ga:
+                _json.dump(ga_data, f_ga, indent=2, ensure_ascii=False)
         except Exception as _ga_err:
             if log:
                 log(f"[WARNING] graph_analytics skipped for single file: {_ga_err}")
 
         md_output = str(output_dir() / f"single_{slug}_llm_context.md")
         generate_llm_markdown(report, md_output)
+        generate_llm_markdown(
+            report,
+            str(snapshot_dir / f"single_{slug}_llm_context.md"),
+        )
 
         if log:
             log("Single file report and MD bundle saved successfully.")

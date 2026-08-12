@@ -93,14 +93,14 @@ class SymbolReferenceVisitor(ast.NodeVisitor):
 
             resolved = _resolve_alias(name, self.aliases)
 
-            _, match = _classify_match(
+            classification, match = _classify_match(
                 name,
                 resolved,
                 self.target_symbols,
                 self.aliases,
             )
 
-            if match:
+            if classification == "confirmed" and match:
                 self.event_bound.add(
                     (
                         match,
@@ -117,14 +117,14 @@ class SymbolReferenceVisitor(ast.NodeVisitor):
 
             resolved = _resolve_alias(name, self.aliases)
 
-            _, match = _classify_match(
+            classification, match = _classify_match(
                 name,
                 resolved,
                 self.target_symbols,
                 self.aliases,
             )
 
-            if match:
+            if classification == "confirmed" and match:
                 self.event_bound.add(
                     (
                         match,
@@ -160,14 +160,14 @@ class SymbolReferenceVisitor(ast.NodeVisitor):
 
             resolved = _resolve_alias(name, self.aliases)
 
-            _, match = _classify_match(
+            classification, match = _classify_match(
                 name,
                 resolved,
                 self.target_symbols,
                 self.aliases,
             )
 
-            if match:
+            if classification == "confirmed" and match:
                 self.callback_called.add(
                     (
                         match,
@@ -283,14 +283,14 @@ class SymbolReferenceVisitor(ast.NodeVisitor):
                 self.aliases,
             )
 
-            _, arg_match = _classify_match(
+            classification, arg_match = _classify_match(
                 arg_name,
                 resolved_arg,
                 self.target_symbols,
                 self.aliases,
             )
 
-            if arg_match:
+            if classification == "confirmed" and arg_match:
                 self.callback_called.add(
                     (
                         arg_match,
@@ -407,14 +407,14 @@ class SymbolReferenceVisitor(ast.NodeVisitor):
                 self.aliases,
             )
 
-            _, match = _classify_match(
+            classification, match = _classify_match(
                 base_name,
                 resolved,
                 self.target_symbols,
                 self.aliases,
             )
 
-            if match:
+            if classification == "confirmed" and match:
                 self.inherited.append(
                     (
                         node.name,
