@@ -5,6 +5,7 @@ Minimal interface for Git repository state.
 """
 
 import subprocess
+import os
 from pathlib import Path
 
 
@@ -81,9 +82,16 @@ def _read_head(root_path: str) -> tuple[str | None, str | None]:
 
 def _run_git(args, cwd):
     try:
+        env = {
+            **os.environ,
+            "GIT_TERMINAL_PROMPT": "0",
+            "GIT_PAGER": "cat",
+        }
         result = subprocess.run(
             ["git"] + args,
             cwd=cwd,
+            env=env,
+            stdin=subprocess.DEVNULL,
             capture_output=True,
             text=True,
             check=True,

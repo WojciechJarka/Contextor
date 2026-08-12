@@ -6,15 +6,24 @@ Requires `git` in system PATH.
 """
 
 import subprocess
+import os
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from contextor.core.git.repo_state import is_git_repo
 
 
 def _run_git(args, cwd):
     try:
+        env = {
+            **os.environ,
+            "GIT_TERMINAL_PROMPT": "0",
+            "GIT_PAGER": "cat",
+        }
         result = subprocess.run(
             ["git"] + args,
             cwd=cwd,
+            env=env,
+            stdin=subprocess.DEVNULL,
             capture_output=True,
             text=True,
             check=True,
@@ -49,7 +58,20 @@ def collect_git_context(file_path: str, root_path: str) -> dict:
     except ValueError:
         return {"status": "non_git_repo"}
 
-    log_info = _run_git(["log", "-1", "--format=%H|%cI|%an", "--", rel_path], cwd=str(p_root))
+    commands = {
+        "log_info": ["log", "-1", "--format=%H|%cI|%an", "--", rel_path],
+        "recent_commits": ["log", "--since=30.days", "--oneline", "--", rel_path],
+        "diff_stats": ["diff", "HEAD~1", "HEAD", "--numstat", "--", rel_path],
+        "patch": ["diff", "HEAD~1", "HEAD", "--", rel_path],
+    }
+    with ThreadPoolExecutor(max_workers=len(commands)) as executor:
+        futures = {
+            name: executor.submit(_run_git, args, str(p_root))
+            for name, args in commands.items()
+        }
+        git_results = {name: future.result() for name, future in futures.items()}
+
+    log_info = git_results["log_info"]
     if log_info and "|" in log_info:
         parts = log_info.split("|", 2)
         if len(parts) == 3:
@@ -57,15 +79,13 @@ def collect_git_context(file_path: str, root_path: str) -> dict:
             default_ctx["last_modified"] = parts[1]
             default_ctx["last_author"] = parts[2]
 
-    recent_commits = _run_git(
-        ["log", "--since=30.days", "--oneline", "--", rel_path], cwd=str(p_root)
-    )
+    recent_commits = git_results["recent_commits"]
     if recent_commits:
         lines = len(recent_commits.splitlines())
         default_ctx["commits_last_30d"] = lines
         default_ctx["churn_score"] = min(1.0, lines / 10.0)
 
-    diff_stats = _run_git(["diff", "HEAD~1", "HEAD", "--numstat", "--", rel_path], cwd=str(p_root))
+    diff_stats = git_results["diff_stats"]
     if diff_stats:
         parts = diff_stats.split()
         if len(parts) >= 2:
@@ -75,7 +95,7 @@ def collect_git_context(file_path: str, root_path: str) -> dict:
             except ValueError:
                 pass
                 
-    patch = _run_git(["diff", "HEAD~1", "HEAD", "--", rel_path], cwd=str(p_root))
+    patch = git_results["patch"]
     if patch:
         # opcjonalnie przycięte
         default_ctx["patch"] = patch[:2000]
