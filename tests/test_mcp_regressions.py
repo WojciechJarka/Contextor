@@ -6,6 +6,7 @@ import inspect
 import json
 import os
 import subprocess
+from types import SimpleNamespace
 from contextlib import nullcontext
 from pathlib import Path
 
@@ -14,6 +15,12 @@ import pytest
 from contextor import mcp_process_registry, mcp_server
 from contextor.core.analysis import git_context
 from contextor.core.api.facade import ContextorFacade
+from contextor.core.analysis.state_manager import (
+    RepositoryAnalysisState,
+    load_engine_state,
+)
+from contextor.core.report_query import IndexCatalog, query_indexed_report
+from contextor.core.symbol_engine.extractor import extract_file_symbols
 
 
 def test_new_mcp_tools_document_their_llm_usage():
@@ -32,6 +39,7 @@ def test_new_mcp_tools_document_their_llm_usage():
         "lookup_index_entries",
         "get_artifacts_for_module",
         "lookup_artifact_by_symbol",
+        "extract_indexed_report_context",
     }
     docs = {
         node.name: ast.get_docstring(node) or ""
@@ -47,14 +55,201 @@ def test_new_mcp_tools_document_their_llm_usage():
     assert "code diff" in docs["update_file"]
 
 
+def test_extract_indexed_report_context_returns_every_shared_resolver_block(tmp_path, monkeypatch):
+    catalog = IndexCatalog(
+        modules={"1/1": "main", "2/1": "pkg.cli"},
+        artifacts={"A1/1": "main::main", "A2/1": "pkg.cli::main"},
+        module_paths={"main": "main.py", "pkg.cli": "pkg/cli.py"},
+    )
+    report = {
+        "_format_version": "3",
+        "artifacts": {
+            "A1/1": {
+                "definer_module": "1/1",
+                "consumer_module_indices": ["2/1"],
+                "nested": {"text": "complete }, block"},
+            },
+            "A2/1": {
+                "definer_module": "2/1",
+                "consumer_module_indices": [],
+            },
+        },
+    }
+    report_path = tmp_path / "report.json"
+    report_path.write_text(json.dumps(report), encoding="utf-8")
+    monkeypatch.setattr(mcp_server, "catalog_from_registry", lambda *_args, **_kwargs: catalog)
+    monkeypatch.setattr(mcp_server, "_get_or_init_engine", lambda _root: None)
+
+    raw = mcp_server.extract_indexed_report_context.fn(
+        repo_path=str(tmp_path),
+        query="pkg/cli.py",
+        report_path=str(report_path),
+    )
+    result = json.loads(raw)
+    expected = query_indexed_report(report, "pkg/cli.py", catalog, repo_root=str(tmp_path))
+
+    assert result["artifacts"] == expected["artifacts"]
+    assert result["artifact_count"] == 2
+    assert result["total_artifact_count"] == 2
+    assert result["truncated"] is False
+    assert result["artifacts"]["main::main"]["nested"]["text"] == "complete }, block"
+    assert "LLM use:" in mcp_server.extract_indexed_report_context.description
+
+
+def test_extract_indexed_report_context_can_filter_to_public_api(tmp_path, monkeypatch):
+    catalog = IndexCatalog(
+        modules={"1/1": "pkg.cli"},
+        artifacts={
+            "A1/1": "pkg.cli::run",
+            "A2/1": "pkg.cli::_helper",
+            "A3/1": "pkg.cli::__enter__",
+        },
+        module_paths={"pkg.cli": "pkg/cli.py"},
+    )
+    report = {
+        "_format_version": "3",
+        "artifacts": {
+            artifact_id: {
+                "definer_module": "1/1",
+                "consumer_module_indices": [],
+                "consumer_count": 0,
+            }
+            for artifact_id in catalog.artifacts
+        },
+    }
+    report_path = tmp_path / "report.json"
+    report_path.write_text(json.dumps(report), encoding="utf-8")
+    monkeypatch.setattr(mcp_server, "catalog_from_registry", lambda *_args, **_kwargs: catalog)
+    monkeypatch.setattr(mcp_server, "_get_or_init_engine", lambda _root: None)
+
+    all_artifacts = json.loads(
+        mcp_server.extract_indexed_report_context.fn(
+            repo_path=str(tmp_path), query="pkg/cli.py", report_path=str(report_path)
+        )
+    )
+    public_only = json.loads(
+        mcp_server.extract_indexed_report_context.fn(
+            repo_path=str(tmp_path),
+            query="pkg/cli.py",
+            report_path=str(report_path),
+            public_api_only=True,
+        )
+    )
+
+    assert set(all_artifacts["artifacts"]) == {
+        "pkg.cli::run",
+        "pkg.cli::_helper",
+        "pkg.cli::__enter__",
+    }
+    assert set(public_only["artifacts"]) == {
+        "pkg.cli::run",
+        "pkg.cli::__enter__",
+    }
+    assert public_only["artifact_count"] == 2
+
+
+def test_file_edit_context_prefers_fresh_live_graph_over_stale_saved_matrix(
+    tmp_path, monkeypatch
+):
+    graph_report = tmp_path / "graph.json"
+    artifact_report = tmp_path / "artifacts.json"
+    summary_report = tmp_path / "summary.json"
+    graph_report.write_text(
+        json.dumps({"modules": {}, "module_dependency_matrix": {}}), encoding="utf-8"
+    )
+    artifact_report.write_text(json.dumps({"artifacts": {}}), encoding="utf-8")
+    summary_report.write_text(json.dumps({"top_hotspots": []}), encoding="utf-8")
+    reports = {
+        "graph_analytics.json": graph_report,
+        "artifacts_compact.json": artifact_report,
+        "summary.json": summary_report,
+    }
+    monkeypatch.setattr(
+        mcp_server,
+        "_get_canonical_report",
+        lambda _root, name: next(
+            (path for suffix, path in reports.items() if name.endswith(suffix)), None
+        ),
+    )
+    monkeypatch.setattr(
+        mcp_server,
+        "_read_registries",
+        lambda _root: (
+            {"provider": "1/1", "consumer": "2/1"},
+            {"1/1": "provider", "2/1": "consumer"},
+            {"provider::run": "A1/1", "provider::_private": "A2/1"},
+            {"A1/1": "provider::run", "A2/1": "provider::_private"},
+        ),
+    )
+    graph = SimpleNamespace(
+        hard_edges={"provider": set(), "consumer": {"provider"}},
+        soft_edges={"provider": set(), "consumer": set()},
+    )
+    engine = SimpleNamespace(
+        state=SimpleNamespace(
+            modules={"provider": object(), "consumer": object()},
+            artifacts={"provider": {"symbols": {"functions": ["run"]}}},
+            dependency_graph=graph,
+        )
+    )
+    monkeypatch.setattr(mcp_server, "_get_or_init_engine", lambda _root: engine)
+    (tmp_path / "provider.py").write_text("def run(): pass\n", encoding="utf-8")
+
+    result = json.loads(
+        mcp_server.get_file_edit_context.fn(
+            repo_path=str(tmp_path), file_path="provider.py"
+        )
+    )
+
+    assert result["consumers"] == [{"module_id": "2/1", "module": "consumer"}]
+    assert result["public_api"] == {"A1/1": "provider::run"}
+    assert result["dependency_data_source"] == "live_canonical_graph"
+    assert result["artifact_data_source"] == "live_registry_and_symbol_state"
+
+
+def test_incremental_live_state_persistence_roundtrips_for_restart(
+    tmp_path, monkeypatch
+):
+    cache_root = tmp_path / "cache"
+    monkeypatch.setattr(mcp_server, "_mcp_cache_root", lambda _root: cache_root)
+    state = RepositoryAnalysisState(
+        modules={},
+        artifacts={"new.module": {"symbols": {"functions": ["run"]}}},
+        dependency_graph=None,
+        trie={},
+        package_root=None,
+        artifact_consumption={},
+    )
+    engine = SimpleNamespace(
+        state=state,
+        state_manager=SimpleNamespace(state_id="after-incremental-update"),
+    )
+
+    persisted = mcp_server._persist_live_engine(tmp_path, engine)
+
+    from contextor.core.paths import repo_key
+
+    loaded = load_engine_state(
+        str(cache_root / repo_key(tmp_path)), "after-incremental-update"
+    )
+    assert persisted is True
+    assert loaded is not None
+    assert loaded.artifacts == state.artifacts
+
+
 def test_fastmcp_schema_exposes_excludes_and_llm_guidance():
     signature = inspect.signature(mcp_server.analyze_project.fn)
+    extraction_signature = inspect.signature(
+        mcp_server.extract_indexed_report_context.fn
+    )
 
     assert "exclude_paths" in signature.parameters
+    assert "public_api_only" in extraction_signature.parameters
     assert "LLM use:" in mcp_server.analyze_project.description
     assert "tests_covering" in mcp_server.analyze_project.description
     assert "LLM use:" in mcp_server.update_file.description
     assert "code diff" in mcp_server.update_file.description
+    assert "public_api_only" in mcp_server.extract_indexed_report_context.description
 
 
 def test_mcp_bootstrap_keeps_an_existing_virtual_environment(monkeypatch):
@@ -372,7 +567,35 @@ def test_semantic_artifact_diff_reports_signature_changes():
         "after": "def kept(value: str) -> str",
     }
     assert result["changed_symbol_count"] == 3
-    assert result["body_only_changes_tracked"] is False
+    assert result["bodies_changed"] == []
+    assert result["body_only_changes_tracked"] is True
+
+
+def test_semantic_artifact_diff_flags_body_only_change_without_body_text(tmp_path):
+    source = tmp_path / "module.py"
+    source.write_text(
+        "def calculate(value: int) -> int:\n"
+        "    return value + 1\n",
+        encoding="utf-8",
+    )
+    old = {"symbols": extract_file_symbols(source)}
+    source.write_text(
+        "def calculate(value: int) -> int:\n"
+        "    # formatting/comments do not enter the hash\n"
+        "    return value * 2\n",
+        encoding="utf-8",
+    )
+    new = {"symbols": extract_file_symbols(source)}
+
+    result = mcp_server._semantic_artifact_diff(old, new)
+
+    assert result["symbols_added"] == []
+    assert result["symbols_removed"] == []
+    assert result["signatures_changed"] == {}
+    assert result["bodies_changed"] == ["calculate"]
+    assert result["body_change_count"] == 1
+    assert result["affected_symbols"] == ["calculate"]
+    assert "return value" not in json.dumps(result)
 
 
 def test_artifact_lookup_ignores_stale_registry_entries(tmp_path, monkeypatch):

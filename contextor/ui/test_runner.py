@@ -32,6 +32,11 @@ _RESULT_RE = re.compile(
 
 _COLLECTED_RE = re.compile(r"(\d+)\s+tests?\s+collected")
 
+_SUMMARY_RE = re.compile(
+    r"(?P<count>\d+)\s+(?P<outcome>passed|failed|errors?|skipped|xfailed|xpassed)\b",
+    re.IGNORECASE,
+)
+
 _OUTCOME_ORDER = ("FAILED", "ERROR", "PASSED", "SKIPPED", "XFAIL", "XPASS")
 
 
@@ -74,17 +79,25 @@ def _ensure_runnable() -> None:
         )
 
 
-def _popen(arguments: list[str]) -> subprocess.Popen:
+def _popen(arguments: list[str], *, show_console: bool = False) -> subprocess.Popen:
     """
     Starts pytest with its output merged into one stream.
+
+    On Windows every runner-owned process is hidden by default.  The GUI's
+    ``Open CMD log`` checkbox passes ``show_console=True`` when the user
+    explicitly wants normal console inheritance.
     """
 
     creation_flags = 0
+    startup_info = None
 
     # The GUI normally runs with its console hidden; without this a
     # console window pops up for every child process on Windows.
-    if sys.platform == "win32":
+    if sys.platform == "win32" and not show_console:
         creation_flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        startup_info = subprocess.STARTUPINFO()
+        startup_info.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        startup_info.wShowWindow = subprocess.SW_HIDE
 
     return subprocess.Popen(
         [sys.executable, "-m", "pytest", "-p", "no:nbval", *arguments],
@@ -97,10 +110,11 @@ def _popen(arguments: list[str]) -> subprocess.Popen:
         errors="replace",
         bufsize=1,
         creationflags=creation_flags,
+        startupinfo=startup_info,
     )
 
 
-def _count_tests() -> int:
+def _count_tests(*, show_console: bool = False) -> int:
     """
     Number of tests pytest will run, for the progress bar.
 
@@ -108,7 +122,10 @@ def _count_tests() -> int:
     """
 
     try:
-        completed = _popen(["--collect-only", "-q", str(tests_dir())])
+        completed = _popen(
+            ["--collect-only", "-q", str(tests_dir())],
+            show_console=show_console,
+        )
 
         output = completed.stdout.read() if completed.stdout else ""
         completed.wait(timeout=120)
@@ -121,7 +138,32 @@ def _count_tests() -> int:
     return int(match.group(1)) if match else 0
 
 
-def run_test_suite(log=None, progress_callback=None) -> dict:
+def _summary_counts(line: str) -> dict[str, int]:
+    """Parse pytest's terminal summary when plugins suppress per-test lines."""
+
+    result = dict.fromkeys(_OUTCOME_ORDER, 0)
+    outcome_map = {
+        "passed": "PASSED",
+        "xpassed": "XPASS",
+        "failed": "FAILED",
+        "error": "ERROR",
+        "errors": "ERROR",
+        "skipped": "SKIPPED",
+        "xfailed": "XFAIL",
+    }
+    for match in _SUMMARY_RE.finditer(line):
+        result[outcome_map[match.group("outcome").lower()]] += int(
+            match.group("count")
+        )
+    return result
+
+
+def run_test_suite(
+    log=None,
+    progress_callback=None,
+    *,
+    show_console: bool = False,
+) -> dict:
     """
     Runs the full suite and returns a summary.
 
@@ -137,7 +179,7 @@ def run_test_suite(log=None, progress_callback=None) -> dict:
     if log:
         log(f"Running test suite from {tests_dir()}")
 
-    total = _count_tests()
+    total = _count_tests(show_console=show_console)
 
     if log and total:
         log(f"Collected {total} tests.")
@@ -145,8 +187,12 @@ def run_test_suite(log=None, progress_callback=None) -> dict:
     counts = dict.fromkeys(_OUTCOME_ORDER, 0)
     failures: list[str] = []
     completed = 0
+    fallback_counts = dict.fromkeys(_OUTCOME_ORDER, 0)
 
-    process = _popen(["-v", "--tb=short", "-p", "no:cacheprovider", str(tests_dir())])
+    process = _popen(
+        ["-v", "--tb=short", "-p", "no:cacheprovider", str(tests_dir())],
+        show_console=show_console,
+    )
 
     try:
         for raw_line in process.stdout:
@@ -157,6 +203,10 @@ def run_test_suite(log=None, progress_callback=None) -> dict:
 
             if log:
                 log(line)
+
+            line_summary = _summary_counts(line)
+            if sum(line_summary.values()):
+                fallback_counts = line_summary
 
             match = _RESULT_RE.match(line)
 
@@ -184,6 +234,17 @@ def run_test_suite(log=None, progress_callback=None) -> dict:
 
         if process.stdout:
             process.stdout.close()
+
+    if completed == 0 and sum(fallback_counts.values()):
+        counts = fallback_counts
+        completed = sum(counts.values())
+
+    if completed == 0 and exit_code == 0:
+        raise TestSuiteUnavailable(
+            "pytest exited successfully but reported no test results. "
+            f"Interpreter: {sys.executable}. Restart the GUI through run_gui.bat "
+            "so it uses the project .venv, then try again."
+        )
 
     return {
         "passed": counts["PASSED"] + counts["XPASS"],

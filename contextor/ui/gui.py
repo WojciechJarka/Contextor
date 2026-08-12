@@ -499,12 +499,16 @@ class ContextorGUI:
         """
 
         def task(log=None, progress_callback=None):
-            return run_test_suite(log=log, progress_callback=progress_callback)
+            return run_test_suite(
+                log=log,
+                progress_callback=progress_callback,
+                show_console=self.cmd_var.get(),
+            )
 
         def on_success(result):
             summary = format_summary(result)
 
-            if result["exit_code"] == 0:
+            if result["exit_code"] == 0 and result["total"] > 0:
                 messagebox.showinfo(
                     "Test suite passed",
                     f"All {result['passed']} tests passed.\n\n{summary}",

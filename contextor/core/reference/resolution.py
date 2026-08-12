@@ -90,6 +90,42 @@ def _resolve_alias(name, aliases):
     return name
 
 
+def _absolute_import_module(current_module, imported_module, level=0):
+    """Resolve an AST ImportFrom module against its importing module."""
+
+    if not level:
+        return imported_module or ""
+    parts = str(current_module or "").split(".")
+    if parts[-1:] == ["__init__"]:
+        parts.pop()
+    elif parts:
+        parts.pop()
+    climb = max(0, int(level) - 1)
+    if climb:
+        parts = parts[:-climb] if climb <= len(parts) else []
+    if imported_module:
+        parts.extend(str(imported_module).split("."))
+    return ".".join(part for part in parts if part)
+
+
+def _resolve_reexport(name, reexports):
+    """Resolve a full name through the longest known re-export prefix."""
+
+    if not name or not reexports:
+        return name
+    direct = reexports.get(name)
+    if direct is not None:
+        return direct
+    parts = name.split(".")
+    for index in range(len(parts) - 1, 0, -1):
+        prefix = ".".join(parts[:index])
+        target = reexports.get(prefix)
+        if target is not None:
+            suffix = ".".join(parts[index:])
+            return f"{target}.{suffix}" if suffix else target
+    return name
+
+
 def _match_symbol(value, symbols):
     if not value:
         return None

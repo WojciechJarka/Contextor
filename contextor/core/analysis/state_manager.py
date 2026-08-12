@@ -177,9 +177,11 @@ def save_engine_state(state: RepositoryAnalysisState, cache_dir: str, state_id: 
                 "schema_version": ENGINE_CACHE_SCHEMA_VERSION,
                 "state_id": state_id
             }, f, indent=2)
+        return True
     except Exception as e:
         import sys
         print(f"Failed to save engine state: {e}", file=sys.stderr)
+        return False
 
 def load_engine_state(cache_dir: str, expected_state_id: str) -> Optional[RepositoryAnalysisState]:
     import pickle

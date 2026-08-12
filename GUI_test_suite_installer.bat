@@ -20,31 +20,33 @@ echo.
 echo [1/5] Searching for Python interpreter...
 
 set "PYTHON_EXE="
+set "VENV_PY=%CD%\.venv\Scripts\python.exe"
 
-:: 1. Check embedded WinPython / SpiralProphet path
+:: 1. Always install into the project virtual environment when it exists.
+if exist "%VENV_PY%" (
+    set "PYTHON_EXE=%VENV_PY%"
+    goto :PYTHON_FOUND
+)
+
+:: 2. Create the project virtual environment with an available base Python.
+set "BOOTSTRAP_PY="
 if exist "C:\SpiralProphet\python\WPy64-31090\python-3.10.9.amd64\python.exe" (
-    set "PYTHON_EXE=C:\SpiralProphet\python\WPy64-31090\python-3.10.9.amd64\python.exe"
-    goto :PYTHON_FOUND
+    set "BOOTSTRAP_PY=C:\SpiralProphet\python\WPy64-31090\python-3.10.9.amd64\python.exe"
 )
+if not defined BOOTSTRAP_PY (
+    python --version >nul 2>&1
+    if not errorlevel 1 set "BOOTSTRAP_PY=python"
+)
+if not defined BOOTSTRAP_PY goto :PYTHON_FOUND
 
-:: 2. Check system PATH
-python --version >nul 2>&1
-if not errorlevel 1 (
-    set "PYTHON_EXE=python"
-    goto :PYTHON_FOUND
+echo [INFO] Creating project virtual environment at %CD%\.venv ...
+"%BOOTSTRAP_PY%" -m venv "%CD%\.venv"
+if errorlevel 1 (
+    echo [ERROR] Failed to create the project virtual environment.
+    pause
+    exit /b 1
 )
-
-:: 3. Scan local directories (venv, .venv, WinPython)
-for /d %%d in (venv .venv Python python WPy64*) do (
-    if exist "%%d\Scripts\python.exe" (
-        set "PYTHON_EXE=%%d\Scripts\python.exe"
-        goto :PYTHON_FOUND
-    )
-    if exist "%%d\python.exe" (
-        set "PYTHON_EXE=%%d\python.exe"
-        goto :PYTHON_FOUND
-    )
-)
+if exist "%VENV_PY%" set "PYTHON_EXE=%VENV_PY%"
 
 :PYTHON_FOUND
 if "%PYTHON_EXE%"=="" (

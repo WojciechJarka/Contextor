@@ -1,4 +1,5 @@
 import ast
+import hashlib
 from pathlib import Path
 
 from contextor.core.source import SourceError, parse_source
@@ -20,23 +21,44 @@ def _extract_signature(node):
     if not hasattr(ast, "unparse"):
         return ""
     try:
-        # Instead of constructing a dummy, unparse the whole node and extract the signature line
-        unparsed = ast.unparse(node)
-        # Function signature is everything before the first colon followed by a newline or just the first line
-        sig = unparsed.split(":\n")[0]
-        if sig.endswith(":"):
-            sig = sig[:-1]
-
-        # In case the body is one line (e.g., def foo(): pass), it might not have :\n
-        # So we can just split by \n and take the first line as a fallback
-        if "\n" in sig:
-            sig = sig.split("\n")[0]
-            if sig.endswith(":"):
-                sig = sig[:-1]
-
-        return sig
+        function_type = (
+            ast.AsyncFunctionDef
+            if isinstance(node, ast.AsyncFunctionDef)
+            else ast.FunctionDef
+        )
+        stub = function_type(
+            name=node.name,
+            args=node.args,
+            body=[ast.Pass()],
+            decorator_list=[],
+            returns=node.returns,
+            type_comment=getattr(node, "type_comment", None),
+        )
+        if hasattr(node, "type_params"):
+            stub.type_params = node.type_params
+        ast.fix_missing_locations(stub)
+        return ast.unparse(stub).split(":\n", 1)[0].rstrip(":")
     except Exception:
         return ""
+
+
+def _body_fingerprint(node):
+    """Hash normalized executable body AST, ignoring layout and a leading docstring."""
+
+    body = list(node.body)
+    if (
+        body
+        and isinstance(body[0], ast.Expr)
+        and isinstance(body[0].value, ast.Constant)
+        and isinstance(body[0].value.value, str)
+    ):
+        body = body[1:]
+    normalized = ast.dump(
+        ast.Module(body=body, type_ignores=[]),
+        annotate_fields=True,
+        include_attributes=False,
+    )
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:16]
 
 
 class SymbolVisitor(ast.NodeVisitor):
@@ -46,28 +68,26 @@ class SymbolVisitor(ast.NodeVisitor):
         self.function_depth = 0
 
     def visit_ClassDef(self, node):
+        if self.function_depth:
+            self.generic_visit(node)
+            return
         self.facts.classes.add(node.name)
         self.class_stack.append(node.name)
         self.generic_visit(node)
         self.class_stack.pop()
 
     def visit_FunctionDef(self, node):
-        if self.class_stack:
-            full_name = f"{self.class_stack[-1]}.{node.name}"
-            self.facts.methods.add(full_name)
-        else:
-            full_name = node.name
-            self.facts.functions.add(full_name)
-
-        sig = _extract_signature(node)
-        if sig:
-            self.facts.signatures[full_name] = sig
-
-        self.function_depth += 1
-        self.generic_visit(node)
-        self.function_depth -= 1
+        self._visit_function(node)
 
     def visit_AsyncFunctionDef(self, node):
+        self._visit_function(node)
+
+    def _visit_function(self, node):
+        if self.function_depth:
+            self.function_depth += 1
+            self.generic_visit(node)
+            self.function_depth -= 1
+            return
         if self.class_stack:
             full_name = f"{self.class_stack[-1]}.{node.name}"
             self.facts.methods.add(full_name)
@@ -78,6 +98,7 @@ class SymbolVisitor(ast.NodeVisitor):
         sig = _extract_signature(node)
         if sig:
             self.facts.signatures[full_name] = sig
+        self.facts.body_fingerprints[full_name] = _body_fingerprint(node)
 
         self.function_depth += 1
         self.generic_visit(node)

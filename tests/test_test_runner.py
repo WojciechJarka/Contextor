@@ -7,7 +7,20 @@ else. Matching anywhere in the line also caught pytest's trailing
 put the literal word FAILED into the list of failing tests.
 """
 
-from contextor.ui.test_runner import _RESULT_RE, format_summary
+import io
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+
+from contextor.ui import gui
+from contextor.ui import test_runner
+from contextor.ui.test_runner import (
+    _RESULT_RE,
+    TestSuiteUnavailable as SuiteUnavailable,
+    _summary_counts,
+    format_summary,
+)
 
 
 def _parse(line):
@@ -74,3 +87,112 @@ def test_summary_of_a_clean_run_lists_no_failures():
 
     assert "Failing tests:" not in summary
     assert "Passed:  5" in summary
+
+
+def test_terminal_summary_fallback_counts_outcomes():
+    counts = _summary_counts("=== 1 failed, 7 passed, 2 skipped, 1 xfailed ===")
+
+    assert counts["FAILED"] == 1
+    assert counts["PASSED"] == 7
+    assert counts["SKIPPED"] == 2
+    assert counts["XFAIL"] == 1
+
+
+class _FakeProcess:
+    def __init__(self, output, exit_code=0):
+        self.stdout = io.StringIO(output)
+        self._exit_code = exit_code
+
+    def wait(self, timeout=None):
+        return self._exit_code
+
+    def poll(self):
+        return self._exit_code
+
+    def kill(self):
+        pass
+
+    def terminate(self):
+        pass
+
+
+def test_success_without_any_reported_test_is_unavailable(monkeypatch):
+    monkeypatch.setattr(test_runner, "_ensure_runnable", lambda: None)
+    monkeypatch.setattr(test_runner, "_count_tests", lambda **_kwargs: 0)
+    monkeypatch.setattr(
+        test_runner,
+        "_popen",
+        lambda _args, **_kwargs: _FakeProcess("", 0),
+    )
+
+    with pytest.raises(SuiteUnavailable, match="no test results"):
+        test_runner.run_test_suite()
+
+
+def test_gui_launchers_target_project_virtual_environment():
+    root = Path(__file__).resolve().parents[1]
+    launcher = (root / "run_gui.bat").read_text(encoding="utf-8").lower()
+    installer = (root / "GUI_test_suite_installer.bat").read_text(
+        encoding="utf-8"
+    ).lower()
+
+    assert ".venv\\scripts\\pythonw.exe" in launcher
+    assert ".venv\\scripts\\python.exe" in installer
+    assert "start \"\" /d \"%~dp0\" \"c:\\spiralprophet" not in launcher
+
+
+def test_pytest_console_is_hidden_unless_explicitly_requested(monkeypatch):
+    calls = []
+
+    def fake_popen(*args, **kwargs):
+        calls.append((args, kwargs))
+        return object()
+
+    monkeypatch.setattr(test_runner.subprocess, "Popen", fake_popen)
+
+    test_runner._popen(["--collect-only"], show_console=False)
+    hidden_kwargs = calls[-1][1]
+
+    assert hidden_kwargs["creationflags"] & test_runner.subprocess.CREATE_NO_WINDOW
+    assert hidden_kwargs["startupinfo"].dwFlags & test_runner.subprocess.STARTF_USESHOWWINDOW
+    assert hidden_kwargs["startupinfo"].wShowWindow == test_runner.subprocess.SW_HIDE
+
+    test_runner._popen(["--collect-only"], show_console=True)
+    visible_kwargs = calls[-1][1]
+
+    assert visible_kwargs["creationflags"] == 0
+    assert visible_kwargs["startupinfo"] is None
+
+
+@pytest.mark.parametrize("checkbox_value", [False, True])
+def test_gui_cmd_checkbox_controls_test_runner_console(monkeypatch, checkbox_value):
+    captured = {}
+
+    def fake_run_with_progress(_root, _bar, task, **_kwargs):
+        captured["task"] = task
+
+    def fake_run_test_suite(**kwargs):
+        captured["runner_kwargs"] = kwargs
+        return {"exit_code": 0, "total": 1, "passed": 1}
+
+    monkeypatch.setattr(gui, "run_with_progress", fake_run_with_progress)
+    monkeypatch.setattr(gui, "run_test_suite", fake_run_test_suite)
+
+    controller = SimpleNamespace(
+        root=object(),
+        progress_bar=SimpleNamespace(is_cancelled=True),
+        cmd_var=SimpleNamespace(get=lambda: checkbox_value),
+        log_box=object(),
+        cpu_indicator=object(),
+        stop_btn=object(),
+        _busy_buttons=lambda: [],
+    )
+
+    gui.ContextorGUI.run_test_suite(controller)
+    captured["task"](log="log", progress_callback="progress")
+
+    assert captured["runner_kwargs"] == {
+        "log": "log",
+        "progress_callback": "progress",
+        "show_console": checkbox_value,
+    }

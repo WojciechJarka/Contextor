@@ -11,11 +11,13 @@ usage report.
 """
 
 import re
+import ast
 from pathlib import Path
 
 from contextor.core.source import SourceError, read_source
 
 from .visitor import SymbolReferenceVisitor
+from .resolution import _absolute_import_module, _resolve_reexport
 
 
 # ==========================================================
@@ -28,6 +30,7 @@ _IDENTIFIER_CACHE: dict[str, frozenset[str]] = {}
 # module. The repository is treated as a fixed snapshot for
 # the duration of an analysis.
 _FINGERPRINT_CACHE: dict[str, str | None] = {}
+_REEXPORT_CACHE: dict[tuple[int, int], dict[str, str]] = {}
 
 _IDENTIFIER_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
@@ -40,6 +43,7 @@ def reset_caches() -> None:
     """
     _IDENTIFIER_CACHE.clear()
     _FINGERPRINT_CACHE.clear()
+    _REEXPORT_CACHE.clear()
 
 
 def _cache_key(path: Path) -> str | None:
@@ -116,6 +120,105 @@ def _search_needles(
         needles.update(symbol.split("."))
 
     return needles
+
+
+def _explicit_all(tree) -> set[str] | None:
+    for node in getattr(tree, "body", []):
+        if not isinstance(node, ast.Assign):
+            continue
+        if not any(isinstance(target, ast.Name) and target.id == "__all__" for target in node.targets):
+            continue
+        if isinstance(node.value, (ast.List, ast.Tuple, ast.Set)):
+            return {
+                item.value
+                for item in node.value.elts
+                if isinstance(item, ast.Constant) and isinstance(item.value, str)
+            }
+        return set()
+    return None
+
+
+def _export_module_name(module_id: str) -> str:
+    return module_id.removesuffix(".__init__")
+
+
+def _build_reexport_map(modules) -> dict[str, str]:
+    """Build cycle-safe transitive identities for top-level ImportFrom re-exports."""
+
+    cache_key = (id(modules), len(modules))
+    cached = _REEXPORT_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+    raw: dict[str, str] = {}
+    module_exports: dict[str, dict[str, str]] = {}
+    star_imports: list[tuple[str, str, set[str] | None]] = []
+    for module_id, module in modules.items():
+        tree = getattr(module, "ast_tree", None)
+        if tree is None:
+            continue
+        exporter = _export_module_name(module_id)
+        allowed = _explicit_all(tree)
+        bindings: dict[str, str] = {}
+        for node in tree.body:
+            if isinstance(node, ast.ImportFrom):
+                source = _absolute_import_module(
+                    module_id, node.module, node.level or 0
+                )
+                for item in node.names:
+                    if item.name == "*":
+                        star_imports.append((exporter, source, allowed))
+                        continue
+                    bindings[item.asname or item.name] = f"{source}.{item.name}"
+            elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                bindings[node.name] = f"{exporter}.{node.name}"
+            elif isinstance(node, (ast.Assign, ast.AnnAssign)):
+                targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+                value = node.value
+                for target in targets:
+                    if not isinstance(target, ast.Name) or target.id == "__all__":
+                        continue
+                    if isinstance(value, ast.Name) and value.id in bindings:
+                        bindings[target.id] = bindings[value.id]
+                    else:
+                        bindings[target.id] = f"{exporter}.{target.id}"
+        visible_bindings = {}
+        for local, target in bindings.items():
+            if allowed is not None and local not in allowed:
+                continue
+            if allowed is None and local.startswith("_"):
+                continue
+            visible_bindings[local] = target
+            key = f"{exporter}.{local}"
+            if key != target:
+                raw[key] = target
+        module_exports[exporter] = visible_bindings
+
+    changed = True
+    while changed:
+        changed = False
+        for exporter, source, allowed in star_imports:
+            for local, target in list(module_exports.get(source, {}).items()):
+                if allowed is not None and local not in allowed:
+                    continue
+                if allowed is None and local.startswith("_"):
+                    continue
+                key = f"{exporter}.{local}"
+                if key not in raw:
+                    raw[key] = target
+                    module_exports.setdefault(exporter, {})[local] = target
+                    changed = True
+
+    resolved = {}
+    for key, initial in raw.items():
+        target = initial
+        visited = {key}
+        while target in raw and target not in visited:
+            visited.add(target)
+            target = raw[target]
+        if target not in visited:
+            resolved[key] = target
+    _REEXPORT_CACHE[cache_key] = resolved
+    return resolved
 
 
 def _empty_reference():
@@ -256,6 +359,7 @@ def build_symbol_references(
         }
 
     target_symbols = set(qualified_map.keys())
+    reexports = _build_reexport_map(modules)
 
     references = {
         symbol: _empty_reference()
@@ -265,6 +369,11 @@ def build_symbol_references(
     needles = _search_needles(
         bare_symbols,
         definer_module,
+    )
+    needles.update(
+        exported.split(".")[-1]
+        for exported, original in reexports.items()
+        if original in target_symbols
     )
 
     for module_id, module in modules.items():
@@ -282,9 +391,12 @@ def build_symbol_references(
         # CHEAP TEXTUAL PREFILTER
         # --------------------------------------------------
 
-        if needles.isdisjoint(
-            _identifiers_for(path, key)
-        ):
+        exporter = _export_module_name(module_id)
+        exposes_target = any(
+            exported.startswith(exporter + ".") and original in target_symbols
+            for exported, original in reexports.items()
+        )
+        if not exposes_target and needles.isdisjoint(_identifiers_for(path, key)):
             continue
 
         tree = module.ast_tree
@@ -293,7 +405,9 @@ def build_symbol_references(
             continue
 
         visitor = SymbolReferenceVisitor(
-            target_symbols
+            target_symbols,
+            reexports=reexports,
+            current_module=module_id,
         )
 
         visitor.visit(tree)
@@ -464,20 +578,26 @@ def build_symbol_references(
                 None,
             )
 
-            if (
-                definer_module
-                and not _import_matches_symbol(
-                    imp_module or "",
-                    definer_module,
-                )
-            ):
-                continue
-
             for imported_name in imp.names:
+                source_module = _absolute_import_module(
+                    module_id, imp_module, getattr(imp, "level", 0)
+                )
                 for symbol in target_symbols:
                     bare_symbol = qualified_map[symbol]
-
-                    if imported_name == bare_symbol:
+                    imported_identity = _resolve_reexport(
+                        f"{source_module}.{imported_name}", reexports
+                    )
+                    if imported_identity == symbol or (
+                        imported_name == "*"
+                        and (
+                            symbol.startswith(source_module + ".")
+                            or any(
+                                exported.startswith(source_module + ".")
+                                and original == symbol
+                                for exported, original in reexports.items()
+                            )
+                        )
+                    ):
                         references[symbol][
                             "imported_from"
                         ].append(module_id)

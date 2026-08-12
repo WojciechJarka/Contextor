@@ -10,6 +10,7 @@ class SymbolFacts:
     calls: set[str] = field(default_factory=set)
     assignments: set[str] = field(default_factory=set)
     signatures: dict[str, str] = field(default_factory=dict)
+    body_fingerprints: dict[str, str] = field(default_factory=dict)
     errors: list[str] = field(default_factory=list)
 
     def all_symbols(self) -> set[str]:
@@ -24,5 +25,6 @@ class SymbolFacts:
             "calls": sorted(self.calls),
             "assignments": sorted(self.assignments),
             "signatures": self.signatures,
+            "body_fingerprints": self.body_fingerprints,
             "errors": self.errors,
         }

@@ -173,6 +173,11 @@ warnings.filterwarnings("ignore")
 
 from fastmcp import FastMCP
 from contextor.core.api.facade import ContextorFacade
+from contextor.core.report_query import (
+    catalog_from_registry,
+    filter_public_artifact_report,
+    query_indexed_report as _query_indexed_report,
+)
 from contextor.mcp_process_registry import (
     process_identity,
     read_records,
@@ -340,6 +345,23 @@ def _get_or_init_engine(root: Path):
     return engine
 
 
+def _persist_live_engine(root: Path, engine) -> bool:
+    """Persist incremental canonical state so the next MCP process can hydrate it."""
+
+    from contextor.core.analysis.state_manager import save_engine_state
+    from contextor.core.paths import repo_key
+
+    cache_dir = _mcp_cache_root(root) / repo_key(root)
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    return bool(
+        save_engine_state(
+            engine.state,
+            str(cache_dir),
+            getattr(engine.state_manager, "state_id", ""),
+        )
+    )
+
+
 def _read_registries(
     root: Path,
 ) -> tuple[dict, dict, dict, dict]:
@@ -381,22 +403,33 @@ def _semantic_artifact_diff(old_artifacts: dict, new_artifacts: dict) -> dict:
     new_names = names(new_symbols)
     old_signatures = old_symbols.get("signatures", {}) or {}
     new_signatures = new_symbols.get("signatures", {}) or {}
+    old_bodies = old_symbols.get("body_fingerprints", {}) or {}
+    new_bodies = new_symbols.get("body_fingerprints", {}) or {}
     changed_signatures = {
         name: {"before": old_signatures[name], "after": new_signatures[name]}
         for name in sorted(old_names & new_names)
         if old_signatures.get(name) != new_signatures.get(name)
     }
+    changed_bodies = sorted(
+        name
+        for name in old_names & new_names & old_bodies.keys() & new_bodies.keys()
+        if old_bodies[name] != new_bodies[name]
+    )
 
     added = sorted(new_names - old_names)
     removed = sorted(old_names - new_names)
-    affected = sorted(set(added) | set(removed) | set(changed_signatures))
+    affected = sorted(
+        set(added) | set(removed) | set(changed_signatures) | set(changed_bodies)
+    )
     return {
         "symbols_added": added,
         "symbols_removed": removed,
         "signatures_changed": changed_signatures,
+        "bodies_changed": changed_bodies,
+        "body_change_count": len(changed_bodies),
         "affected_symbols": affected,
         "changed_symbol_count": len(affected),
-        "body_only_changes_tracked": False,
+        "body_only_changes_tracked": True,
     }
 
 
@@ -557,8 +590,9 @@ def update_file(repo_path: str, file_path: str) -> str:
 
     LLM use: call this after each edit instead of rebuilding every report. Read
     ``semantic_diff`` for added/removed symbols and signature changes, then use
-    normal code diff for line-level meaning. Body-only changes are not claimed
-    as semantic symbol changes, and consumption/global metrics may be deferred.
+    normal code diff for line-level meaning. ``bodies_changed`` uses normalized
+    AST fingerprints to flag body-only edits without sending body text; it does
+    not explain their meaning. Consumption/global metrics may be deferred.
     """
     root = Path(repo_path).expanduser().resolve()
     target_file = Path(file_path).expanduser()
@@ -576,6 +610,11 @@ def update_file(repo_path: str, file_path: str) -> str:
         module_path = ".".join(rel_path.with_suffix("").parts)
         old_artifacts = engine.state.artifacts.get(module_path, {})
         res = engine.update_file(str(target_file))
+        live_state_persisted = (
+            _persist_live_engine(root, engine)
+            if res.status in {"UPDATED", "DELETED"}
+            else True
+        )
         new_artifacts = engine.state.artifacts.get(module_path, {})
         result = {
             "status": res.status,
@@ -586,6 +625,7 @@ def update_file(repo_path: str, file_path: str) -> str:
             "local_metrics_state": res.local_metrics_state,
             "global_metrics_state": res.global_metrics_state,
             "artifact_consumption_state": res.artifact_consumption_state,
+            "live_state_persisted": live_state_persisted,
             "semantic_diff": _semantic_artifact_diff(old_artifacts, new_artifacts),
         }
         if res.delta:
@@ -913,27 +953,63 @@ def get_file_edit_context(
             )
         
         # We must read registries OUTSIDE the transaction block to avoid Resource Deadlock
-        mod_path_to_id, mod_id_to_path, _, art_id_to_path = _read_registries(root)
+        mod_path_to_id, mod_id_to_path, art_path_to_id, art_id_to_path = _read_registries(root)
         mod_id = mod_path_to_id.get(module_name)
         if not mod_id:
             return f"Error: Module '{module_name}' is not present in the current registry."
             
         imports = []
         consumers = []
-            
+        dependency_data_source = "saved_graph_analytics"
+        artifact_data_source = "saved_artifacts_compact"
         matrix = ga.get("module_dependency_matrix", {})
-        if mod_id in matrix:
-            for target_id in matrix[mod_id].keys():
-                imports.append(target_id)
-        for src_id, targets in matrix.items():
-            if mod_id in targets:
-                consumers.append(src_id)
+        engine = _get_or_init_engine(root)
+        live_graph = engine.state.dependency_graph if engine else None
+        if engine and module_name in engine.state.modules and live_graph:
+            target_modules = set(live_graph.hard_edges.get(module_name, set()))
+            target_modules.update(live_graph.soft_edges.get(module_name, set()))
+            imports = [
+                mod_path_to_id[target]
+                for target in sorted(target_modules)
+                if target in mod_path_to_id
+            ]
+            consumer_modules = {
+                source
+                for edge_map in (live_graph.hard_edges, live_graph.soft_edges)
+                for source, targets in edge_map.items()
+                if module_name in targets
+            }
+            consumers = [
+                mod_path_to_id[source]
+                for source in sorted(consumer_modules)
+                if source in mod_path_to_id
+            ]
+            dependency_data_source = "live_canonical_graph"
+        else:
+            if mod_id in matrix:
+                imports.extend(matrix[mod_id].keys())
+            for src_id, targets in matrix.items():
+                if mod_id in targets:
+                    consumers.append(src_id)
                         
         # Resolve public API artifact IDs to human-readable names so an
         # LLM does not need a separate lookup_index_entries call.
         public_api = {}
         unresolved_public_api_ids = []
-        if "module_artifacts" in art_comp and mod_id in art_comp["module_artifacts"]:
+        if engine and module_name in engine.state.artifacts:
+            prefix = module_name + "::"
+            for full_name, art_id in sorted(art_path_to_id.items()):
+                if not full_name.startswith(prefix):
+                    continue
+                local_name = full_name.split("::", 1)[-1]
+                leaf = local_name.rsplit(".", 1)[-1]
+                if leaf.startswith("_") and not (
+                    leaf.startswith("__") and leaf.endswith("__")
+                ):
+                    continue
+                public_api[str(art_id)] = full_name
+            artifact_data_source = "live_registry_and_symbol_state"
+        elif "module_artifacts" in art_comp and mod_id in art_comp["module_artifacts"]:
             for art_id in art_comp["module_artifacts"][mod_id]:
                 resolved = art_id_to_path.get(str(art_id))
                 if resolved:
@@ -994,6 +1070,8 @@ def get_file_edit_context(
             "consumers_total": consumers_total,
             "consumers_truncated": consumers_truncated,
             "risk_score": risk_score,
+            "dependency_data_source": dependency_data_source,
+            "artifact_data_source": artifact_data_source,
             "tests_covering": {
                 "available": tests_total > 0,
                 "total": tests_total,
@@ -1225,6 +1303,76 @@ def query_canonical_state_bounded(
 # ==========================================================
 # 3. TARGETED INDEX / ARTIFACT QUERY TOOLS
 # ==========================================================
+
+@mcp.tool()
+def extract_indexed_report_context(
+    repo_path: str,
+    query: str,
+    report_path: str = "",
+    resolve_indices: bool = True,
+    public_api_only: bool = False,
+) -> str:
+    """
+    [OPTIMIZED] Extracts complete matching blocks from an indexed artifact report.
+
+    Resolution is index-first and shared with the GUI parser. Queries may use an
+    artifact/module ID, a ``.py`` path, a full ``module::symbol`` key, or explicit
+    ``file:``, ``module:``, ``symbol:`` and ``artifact:`` prefixes. Exact matches
+    are never replaced by fuzzy guesses; ambiguous and missing queries remain
+    explicit. Active dictionaries fall back to both recovery dictionaries, while
+    blocks with unresolved artifact or definer IDs are omitted with diagnostics.
+
+    Omit ``report_path`` to read the current compact artifact report. Every matched
+    block is returned in full, including nested objects; results are never silently
+    sampled or truncated.
+
+    Set ``public_api_only=True`` to mirror the GUI checkbox: private names are
+    excluded, but zero detected consumers do not make an artifact private.
+
+    LLM use: prefer this over reading a whole compact JSON when one file, symbol, or
+    ID is relevant. Inspect resolution/diagnostics and narrow an ambiguous query;
+    do not treat suggestions as confirmed matches.
+    """
+    root = Path(repo_path).expanduser().resolve()
+    try:
+        if report_path:
+            selected_path = Path(report_path).expanduser()
+            if not selected_path.is_absolute():
+                selected_path = root / selected_path
+            selected_path = selected_path.resolve()
+        else:
+            selected_path = _get_canonical_report(
+                root, f"{root.name}_artifacts_compact.json"
+            )
+        if not selected_path or not selected_path.is_file():
+            return "Error: No indexed artifact report found. Run analysis or pass report_path."
+
+        report = json.loads(selected_path.read_text(encoding="utf-8"))
+        engine = _get_or_init_engine(root)
+        module_paths = None
+        if engine:
+            module_paths = {
+                str(module_name): str(module.path)
+                for module_name, module in engine.state.modules.items()
+                if getattr(module, "path", None)
+            }
+        catalog = catalog_from_registry(str(root), module_paths=module_paths)
+        if public_api_only:
+            report = filter_public_artifact_report(report, catalog)
+        result = _query_indexed_report(
+            report,
+            query,
+            catalog,
+            repo_root=str(root),
+            resolve_indices=resolve_indices,
+        )
+        result["total_artifact_count"] = result["artifact_count"]
+        result["truncated"] = False
+        result["data_source"] = str(selected_path)
+        return json.dumps(result, indent=2, ensure_ascii=False)
+    except Exception as e:
+        return f"Error extracting indexed report context: {e}"
+
 
 @mcp.tool()
 def lookup_index_entries(repo_path: str, ids: list[str]) -> str:

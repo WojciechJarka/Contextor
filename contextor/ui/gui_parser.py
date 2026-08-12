@@ -11,6 +11,12 @@ import re
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
+from contextor.core.report_query import (
+    catalog_from_registry,
+    filter_public_artifact_report,
+    query_indexed_report,
+    rewrite_selected_indices,
+)
 from contextor.ui import theme
 from contextor.ui.path_memory import load_state, save_state
 from contextor.ui.progress_widget import create_progress_bar, run_with_progress
@@ -29,6 +35,8 @@ def find_contextor_registry(repo_path):
 
 
 def rewrite_index_to_text(json_path, repo_path, output_dir="output"):
+    """Rewrite a complete compact report through the shared active/recovery validator."""
+
     if not os.path.exists(json_path):
         raise FileNotFoundError(f"File {json_path} does not exist.")
 
@@ -40,136 +48,11 @@ def rewrite_index_to_text(json_path, repo_path, output_dir="output"):
     if str(data.get("_format_version", "1")) != "3":
         raise Exception("This tool requires an indexed compact report (schema v3).")
 
-    # TEMPORARY: persistent identity registry location.
-    registry_dir = os.path.join(
-        repo_path,
-        ".contextor",
-        "repositories",
-        os.path.basename(os.path.normpath(repo_path)),
-    )
-
-    module_registry_path = os.path.join(
-        registry_dir,
-        "module_registry.json",
-    )
-    artifact_registry_path = os.path.join(
-        registry_dir,
-        "artifact_registry.json",
-    )
-    module_recovery_path = os.path.join(
-        registry_dir,
-        "module_recovery.json",
-    )
-    artifact_recovery_path = os.path.join(
-        registry_dir,
-        "artifact_recovery.json",
-    )
-
-    def load_json(path):
-        if not os.path.exists(path):
-            return {}
-        with open(path, encoding="utf-8") as f:
-            return json.load(f)
-
-    module_registry = load_json(module_registry_path)
-    artifact_registry = load_json(artifact_registry_path)
-    module_recovery = load_json(module_recovery_path)
-    artifact_recovery = load_json(artifact_recovery_path)
-
-    modules_dict = module_registry.get("id_to_path", {})
-    artifacts_dict = artifact_registry.get("id_to_path", {})
-
-    def resolve_module(module_id):
-        if module_id is None:
-            return module_id
-
-        key = str(module_id)
-
-        # 1. Active registry
-        resolved = modules_dict.get(key)
-        if resolved is not None:
-            return resolved
-
-        # 2. Recovery
-        recovered = module_recovery.get(key)
-        if isinstance(recovered, dict):
-            resolved = recovered.get("path")
-            if resolved is not None:
-                return resolved
-
-        # 3. No index -> preserve original ID
-        return module_id
-
-    def resolve_artifact(artifact_id):
-        if artifact_id is None:
-            return artifact_id
-
-        key = str(artifact_id)
-
-        # 1. Active registry
-        resolved = artifacts_dict.get(key)
-        if resolved is not None:
-            return resolved
-
-        # 2. Recovery
-        recovered = artifact_recovery.get(key)
-        if isinstance(recovered, dict):
-            resolved = recovered.get("name")
-            if resolved is not None:
-                return resolved
-
-        # 3. No index -> preserve original ID
-        return artifact_id
-
     artifacts = data.get("artifacts", {})
-    rewritten_artifacts = {}
-
-    for a_id, value in artifacts.items():
-        full_name = resolve_artifact(a_id)
-
-        rewritten = dict(value)
-
-        rewritten["definer_module"] = resolve_module(
-            value.get("definer_module")
-        )
-
-        if "consumer_module_indices" in value:
-            rewritten["consumer_modules"] = [
-                resolve_module(module_id)
-                for module_id in value["consumer_module_indices"]
-            ]
-            del rewritten["consumer_module_indices"]
-
-        usage = value.get("usage")
-
-        if usage:
-            new_usage = {}
-
-            for cat, vals in usage.items():
-                if cat == "ambiguous_calls" or cat.endswith("_detail"):
-                    new_vals = []
-
-                    for v in vals:
-                        if isinstance(v, dict):
-                            new_v = dict(v)
-                            new_v["module"] = resolve_module(
-                                v.get("module")
-                            )
-                            new_vals.append(new_v)
-                        else:
-                            new_vals.append(resolve_module(v))
-
-                    new_usage[cat] = new_vals
-
-                else:
-                    new_usage[cat] = [
-                        resolve_module(module_id)
-                        for module_id in vals
-                    ]
-
-            rewritten["usage"] = new_usage
-
-        rewritten_artifacts[full_name] = rewritten
+    if not isinstance(artifacts, dict):
+        raise Exception("Report must contain an 'artifacts' object.")
+    catalog = catalog_from_registry(repo_path)
+    rewritten_artifacts, diagnostics = rewrite_selected_indices(artifacts, catalog)
 
     rewritten_data = {
         "_format_version": "3_text",
@@ -183,14 +66,24 @@ def rewrite_index_to_text(json_path, repo_path, output_dir="output"):
         "module_count": data.get("module_count", 0),
         "artifact_count": len(rewritten_artifacts),
         "shared_artifact_count": data.get("shared_artifact_count", 0),
+        "index_diagnostics": diagnostics,
         "artifacts": rewritten_artifacts,
     }
 
     if "shared_artifact_keys" in data:
-        rewritten_data["shared_artifacts"] = [
-            resolve_artifact(key)
-            for key in data["shared_artifact_keys"]
-        ]
+        shared_artifacts = []
+        for key in data["shared_artifact_keys"]:
+            str_key = str(key)
+            resolved = catalog.artifacts.get(str_key) or (
+                catalog.recovered_artifacts or {}
+            ).get(str_key)
+            if resolved:
+                shared_artifacts.append(resolved)
+            else:
+                diagnostics["dropped_references"].append(
+                    {"field": "shared_artifact_keys", "artifact_id": str_key}
+                )
+        rewritten_data["shared_artifacts"] = shared_artifacts
 
     text_dir = os.path.join(output_dir, "text")
     os.makedirs(text_dir, exist_ok=True)
@@ -214,6 +107,8 @@ def rewrite_index_to_text(json_path, repo_path, output_dir="output"):
 # and requires an associated index_dictionary.json.
 # ==========================================================
 def parse_and_filter_json(json_path, search_term, repo_path, output_dir="output", public_api_only=False):
+    """Select complete indexed artifact blocks and save their resolved text form."""
+
     if not os.path.exists(json_path):
         raise FileNotFoundError(f"File {json_path} does not exist.")
 
@@ -223,79 +118,18 @@ def parse_and_filter_json(json_path, search_term, repo_path, output_dir="output"
     if str(data.get("_format_version", "1")) != "3":
         raise Exception("This parser requires an indexed compact report (schema v3). Please use the newest Contextor to generate reports.")
 
-    artifacts = data.get("artifacts", {})
-    if not artifacts:
+    if not isinstance(data.get("artifacts"), dict) or not data["artifacts"]:
         raise Exception("Report must contain 'artifacts'.")
-
-    registry_dir = os.path.join(
-        repo_path,
-        ".contextor",
-        "repositories",
-        os.path.basename(os.path.normpath(repo_path)),
+    catalog = catalog_from_registry(repo_path)
+    query_data = filter_public_artifact_report(data, catalog) if public_api_only else data
+    query_result = query_indexed_report(
+        query_data,
+        search_term,
+        catalog,
+        repo_root=repo_path,
+        resolve_indices=True,
     )
-
-    module_registry_path = os.path.join(
-        registry_dir,
-        "module_registry.json",
-    )
-
-    artifact_registry_path = os.path.join(
-        registry_dir,
-        "artifact_registry.json",
-    )
-
-    with open(module_registry_path, encoding="utf-8") as f:
-        modules_dict = json.load(f).get("id_to_path", {})
-
-    with open(artifact_registry_path, encoding="utf-8") as f:
-        artifacts_dict = json.load(f).get("id_to_path", {})
-
-    is_py_query = search_term.lower().endswith(".py")
-    term = search_term[:-3] if is_py_query else search_term
-    filtered_artifacts = {}
-    
-    matching_module_indices = set()
-    matching_artifact_ids = set()
-    
-    if is_py_query:
-        for str_idx, mod in modules_dict.items():
-            if mod is None: continue
-            if mod == term or mod.endswith(f".{term}") or f".{term}." in mod or mod.startswith(f"{term}."):
-                matching_module_indices.add(str_idx)
-    else:
-        for a_id, art_full_name in artifacts_dict.items():
-            if art_full_name is None: continue
-            # art_full_name looks like "contextor.core.main::my_func" or "contextor.core.main::my_func(arg)"
-            if term in art_full_name:
-                matching_artifact_ids.add(a_id)
-
-    for a_id, value in artifacts.items():
-        if public_api_only and isinstance(value, dict):
-            c_count = value.get("consumer_count", 0)
-            if c_count == 0:
-                continue
-            art_name = artifacts_dict.get(a_id, "")
-            # check if it's private but not a magic method by parsing the name after ::
-            local_name = art_name.split("::")[-1].split("(")[0]
-            if local_name.startswith("_") and not (local_name.startswith("__") and local_name.endswith("__")):
-                continue
-                
-        match = False
-
-        if is_py_query:
-            definer_idx = str(value.get("definer_module"))
-            consumers_idx = [str(c) for c in value.get("consumer_module_indices", [])]
-            
-            if definer_idx in matching_module_indices:
-                match = True
-            elif matching_module_indices.intersection(consumers_idx):
-                match = True
-        else:
-            if a_id in matching_artifact_ids:
-                match = True
-
-        if match:
-            filtered_artifacts[a_id] = value
+    filtered_artifacts = query_result["artifacts"]
 
     parsed_data = {
         "_format_version": "3",
@@ -306,6 +140,8 @@ def parse_and_filter_json(json_path, search_term, repo_path, output_dir="output"
         "module_count": data.get("module_count", 0),
         "artifact_count": len(filtered_artifacts),
         "shared_artifact_count": data.get("shared_artifact_count", 0),
+        "query_resolution": query_result["resolution"],
+        "query_diagnostics": query_result["diagnostics"],
         "artifacts": filtered_artifacts,
     }
 
@@ -320,7 +156,6 @@ def parse_and_filter_json(json_path, search_term, repo_path, output_dir="output"
         json.dump(parsed_data, f, indent=2, ensure_ascii=False)
 
     return output_path
-
 
 
 def run_parser_window(repo_path=None, parent=None):
@@ -390,13 +225,13 @@ def run_parser_window(repo_path=None, parent=None):
     public_api_var = tk.BooleanVar(value=state.get("public_api_only", False))
     cb_api = ttk.Checkbutton(
         parser_win,
-        text="Public API Only (hide elements with consumer_count=0 and private)",
+        text="Public API Only (hide private names)",
         variable=public_api_var,
         style="TCheckbutton",
     )
     cb_api.pack(anchor="w", padx=PAD_LG, pady=(0, PAD_LG))
     p_tooltip.bind_tooltip(
-        cb_api, "Filter out private and unused artifacts from the parsed report."
+        cb_api, "Filter private names; zero detected consumers does not make an API private."
     )
 
     def on_closing():

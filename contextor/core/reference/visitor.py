@@ -9,8 +9,10 @@ import ast
 
 from .resolution import (
     _attribute_name,
+    _absolute_import_module,
     _classify_match,
     _resolve_alias,
+    _resolve_reexport,
 )
 
 
@@ -32,7 +34,7 @@ class SymbolReferenceVisitor(ast.NodeVisitor):
         class inheritance relationships
     """
 
-    def __init__(self, target_symbols):
+    def __init__(self, target_symbols, reexports=None, current_module=None):
         self.target_symbols = set(target_symbols)
 
         self.called = set()
@@ -44,6 +46,14 @@ class SymbolReferenceVisitor(ast.NodeVisitor):
         self.aliases = {}
         self.instances = {}
         self.context_stack = []
+        self.reexports = dict(reexports or {})
+        self.current_module = current_module
+
+    def _resolve_name(self, name):
+        return _resolve_reexport(
+            _resolve_alias(name, self.aliases),
+            self.reexports,
+        )
 
     # ======================================================
     # CONTEXT
@@ -91,7 +101,7 @@ class SymbolReferenceVisitor(ast.NodeVisitor):
 
             name = _attribute_name(node.args[1])
 
-            resolved = _resolve_alias(name, self.aliases)
+            resolved = self._resolve_name(name)
 
             classification, match = _classify_match(
                 name,
@@ -115,7 +125,7 @@ class SymbolReferenceVisitor(ast.NodeVisitor):
 
             name = _attribute_name(node.args[0])
 
-            resolved = _resolve_alias(name, self.aliases)
+            resolved = self._resolve_name(name)
 
             classification, match = _classify_match(
                 name,
@@ -158,7 +168,7 @@ class SymbolReferenceVisitor(ast.NodeVisitor):
 
             name = _attribute_name(keyword.value)
 
-            resolved = _resolve_alias(name, self.aliases)
+            resolved = self._resolve_name(name)
 
             classification, match = _classify_match(
                 name,
@@ -181,12 +191,15 @@ class SymbolReferenceVisitor(ast.NodeVisitor):
     # ======================================================
 
     def visit_ImportFrom(self, node):
+        source_module = _absolute_import_module(
+            self.current_module, node.module, node.level or 0
+        )
         for item in node.names:
             local_name = item.asname or item.name
 
             imported_name = (
-                f"{node.module}.{item.name}"
-                if node.module
+                f"{source_module}.{item.name}"
+                if source_module
                 else item.name
             )
 
@@ -209,10 +222,7 @@ class SymbolReferenceVisitor(ast.NodeVisitor):
     def visit_Assign(self, node):
         if isinstance(node.value, ast.Call):
             constructor = _attribute_name(node.value.func)
-            constructor = _resolve_alias(
-                constructor,
-                self.aliases,
-            )
+            constructor = self._resolve_name(constructor)
 
             if constructor:
                 for target in node.targets:
@@ -243,10 +253,7 @@ class SymbolReferenceVisitor(ast.NodeVisitor):
         ):
             dynamic_name = node.args[1].value
 
-            resolved_dyn = _resolve_alias(
-                dynamic_name,
-                self.aliases,
-            )
+            resolved_dyn = self._resolve_name(dynamic_name)
 
             _, dyn_match = _classify_match(
                 dynamic_name,
@@ -278,10 +285,7 @@ class SymbolReferenceVisitor(ast.NodeVisitor):
             if not arg_name:
                 continue
 
-            resolved_arg = _resolve_alias(
-                arg_name,
-                self.aliases,
-            )
+            resolved_arg = self._resolve_name(arg_name)
 
             classification, arg_match = _classify_match(
                 arg_name,
@@ -303,10 +307,7 @@ class SymbolReferenceVisitor(ast.NodeVisitor):
         # Direct call
         # --------------------------------------------------
 
-        resolved = _resolve_alias(
-            called_name,
-            self.aliases,
-        )
+        resolved = self._resolve_name(called_name)
 
         if resolved in self.target_symbols:
             self.called.add(
@@ -402,10 +403,7 @@ class SymbolReferenceVisitor(ast.NodeVisitor):
         for base in node.bases:
             base_name = _attribute_name(base)
 
-            resolved = _resolve_alias(
-                base_name,
-                self.aliases,
-            )
+            resolved = self._resolve_name(base_name)
 
             classification, match = _classify_match(
                 base_name,
