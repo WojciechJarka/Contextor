@@ -109,17 +109,14 @@ Example:
 
 The MCP server must start silently and wait for JSON-RPC messages.
 """
+import atexit
 import json
 import os
 import subprocess
 import sys
 import glob
-import faulthandler
 import warnings
-import tempfile
 import threading
-import time
-from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -128,6 +125,15 @@ warnings.filterwarnings("ignore")
 
 from fastmcp import FastMCP
 from contextor.core.api.facade import ContextorFacade
+from contextor.mcp_process_registry import (
+    process_identity,
+    read_records,
+    record_matches_process,
+    register_process,
+    registry_dir,
+    remove_record,
+    terminate_registered_process,
+)
 
 # Initialize FastMCP Server
 mcp = FastMCP("Contextor")
@@ -148,14 +154,42 @@ def _stderr_log(msg: str) -> None:
     print(msg, file=sys.stderr, flush=True)
 
 
-def _trace(root: Path, message: str) -> None:
-    trace = root / ".contextor" / "mcp_trace.log"
-    trace.parent.mkdir(parents=True, exist_ok=True)
-    with trace.open("a", encoding="utf-8") as handle:
-        handle.write(
-            f"{datetime.now().isoformat(timespec='milliseconds')} "
-            f"pid={os.getpid()} {message}\n"
-        )
+def _cleanup_orphaned_processes(directory: Path) -> None:
+    """Stop only registered MCP/Git processes whose recorded parent is gone."""
+    # Two passes handle a stale server and one of its Git children regardless
+    # of filesystem iteration order: pass one stops the server, pass two the child.
+    for _ in range(2):
+        stopped_process = False
+        for record_path, record in read_records(directory):
+            if not record_matches_process(record):
+                remove_record(record_path)
+                continue
+            try:
+                parent_pid = int(record["parent_pid"])
+            except (KeyError, TypeError, ValueError):
+                remove_record(record_path)
+                continue
+            _, parent_creation_time, parent_alive = process_identity(parent_pid)
+            expected_parent_creation = record.get("parent_creation_time")
+            if expected_parent_creation is not None and parent_creation_time is not None:
+                parent_alive = int(expected_parent_creation) == parent_creation_time
+            if not parent_alive:
+                stopped_process = terminate_registered_process(record) or stopped_process
+                remove_record(record_path)
+        if not stopped_process:
+            break
+
+
+def _cleanup_owned_processes(directory: Path, owner_pid: int) -> None:
+    """Stop registered child processes still owned by this server."""
+    for record_path, record in read_records(directory):
+        try:
+            is_child = int(record.get("parent_pid")) == owner_pid
+        except (TypeError, ValueError):
+            is_child = False
+        if is_child:
+            terminate_registered_process(record)
+            remove_record(record_path)
 
 
 async def _run_analysis_worker(
@@ -172,36 +206,31 @@ async def _run_analysis_worker(
     import asyncio
 
     def run() -> None:
-        started = time.monotonic()
-        _trace(root, f"in_process_begin operation={operation}")
-        stack_log = root / ".contextor" / "mcp_server_stacks.log"
         with _analysis_lock:
             previous_pool_setting = os.environ.get("CONTEXTOR_DISABLE_PROCESS_POOL")
             previous_cache = os.environ.get("CONTEXTOR_CACHE_DIR")
+            previous_registry = os.environ.get("CONTEXTOR_MCP_PROCESS_REGISTRY")
             os.environ["CONTEXTOR_DISABLE_PROCESS_POOL"] = "1"
             os.environ["CONTEXTOR_CACHE_DIR"] = str(_mcp_cache_root(root))
-            with stack_log.open("a", encoding="utf-8", buffering=1) as stack_handle:
-                faulthandler.dump_traceback_later(15, repeat=True, file=stack_handle)
-                try:
-                    progress_log = lambda message: _trace(root, f"progress {message}")
-                    if operation == "project":
-                        _, result = ContextorFacade.analyze_project(
-                            str(root), log=progress_log
-                        )
-                        if result is None:
-                            raise RuntimeError("Analysis returned no canonical state.")
-                    elif operation == "layer":
-                        ContextorFacade.analyze_layer(
-                            str(root), str(target), log=progress_log
-                        )
-                    elif operation == "single_file":
-                        ContextorFacade.analyze_single_file(
-                            str(target), str(root), log=progress_log
-                        )
-                    else:
-                        raise ValueError(f"Unsupported analysis operation: {operation}")
-                finally:
-                    faulthandler.cancel_dump_traceback_later()
+            os.environ["CONTEXTOR_MCP_PROCESS_REGISTRY"] = str(registry_dir(root))
+            try:
+                if operation == "project":
+                    _, result = ContextorFacade.analyze_project(
+                        str(root), log=_stderr_log
+                    )
+                    if result is None:
+                        raise RuntimeError("Analysis returned no canonical state.")
+                elif operation == "layer":
+                    ContextorFacade.analyze_layer(
+                        str(root), str(target), log=_stderr_log
+                    )
+                elif operation == "single_file":
+                    ContextorFacade.analyze_single_file(
+                        str(target), str(root), log=_stderr_log
+                    )
+                else:
+                    raise ValueError(f"Unsupported analysis operation: {operation}")
+            finally:
                 if previous_pool_setting is None:
                     os.environ.pop("CONTEXTOR_DISABLE_PROCESS_POOL", None)
                 else:
@@ -210,58 +239,12 @@ async def _run_analysis_worker(
                     os.environ.pop("CONTEXTOR_CACHE_DIR", None)
                 else:
                     os.environ["CONTEXTOR_CACHE_DIR"] = previous_cache
-        _trace(root, f"in_process_complete elapsed={time.monotonic() - started:.3f}")
+                if previous_registry is None:
+                    os.environ.pop("CONTEXTOR_MCP_PROCESS_REGISTRY", None)
+                else:
+                    os.environ["CONTEXTOR_MCP_PROCESS_REGISTRY"] = previous_registry
 
     await asyncio.to_thread(run)
-
-
-def _install_jsonrpc_trace(log_path: Path) -> None:
-    """
-    Installs a temporary debug hook that logs inbound JSON-RPC payloads.
-
-    This is disabled by default because stdio transports are fragile and we
-    do not want diagnostic noise to interfere with Antigravity or Codex.
-    """
-    import mcp.types as types
-
-    original_validate = types.JSONRPCMessage.model_validate_json
-
-    def traced_validate(cls, json_data, *args, **kwargs):
-        try:
-            if isinstance(json_data, bytes):
-                raw = json_data.decode("utf-8", errors="replace")
-            else:
-                raw = str(json_data)
-
-            try:
-                parsed = json.loads(raw)
-
-                log_path.parent.mkdir(parents=True, exist_ok=True)
-                with log_path.open("a", encoding="utf-8") as f:
-                    f.write(f"\n[{datetime.now().isoformat()}] INBOUND\n")
-                    f.write(f"type={'request' if 'id' in parsed else 'notification'}\n")
-                    f.write(f"method={parsed.get('method')}\n")
-                    f.write(f"id={parsed.get('id', 'absent')}\n")
-                    f.write(f"params={json.dumps(parsed.get('params', {}), ensure_ascii=False)}\n")
-                    f.write(f"raw={raw.strip()}\n")
-
-            except Exception as log_error:
-                try:
-                    log_path.parent.mkdir(parents=True, exist_ok=True)
-                    with log_path.open("a", encoding="utf-8") as f:
-                        f.write(
-                            f"\n[{datetime.now().isoformat()}] "
-                            f"UNPARSEABLE: {repr(raw)} error={log_error}\n"
-                        )
-                except Exception:
-                    pass
-
-        except Exception:
-            pass
-
-        return original_validate(json_data, *args, **kwargs)
-
-    types.JSONRPCMessage.model_validate_json = classmethod(traced_validate)
 
 
 def _get_canonical_report(repo_path: Path, filename: str) -> Path | None:
@@ -336,21 +319,16 @@ async def analyze_project(repo_path: str) -> str:
     Generates all reports in the 'output' directory.
     """
     root = Path(repo_path).expanduser().resolve()
-    _trace(root, "analyze_project_enter")
     if not root.is_dir():
         return f"Error: Repository path '{root}' does not exist."
     try:
         await _run_analysis_worker("project", root)
-        _trace(root, "analyze_project_worker_complete")
         _live_engines.pop(str(root), None)
-        _trace(root, "analyze_project_hydrate_begin")
         if _get_or_init_engine(root) is None:
             raise RuntimeError("Analysis completed but canonical state could not be loaded.")
-        _trace(root, "analyze_project_hydrate_complete")
         
         return f"Analysis complete for {root.name}."
     except Exception as e:
-        _trace(root, f"analyze_project_error error={e!r}")
         return f"Error during analysis: {str(e)}"
 
 @mcp.tool()
@@ -1167,14 +1145,22 @@ def main():
         sys.stderr.reconfigure(encoding='utf-8')
 
     import asyncio
-    if os.environ.get("CONTEXTOR_MCP_DEBUG_INBOUND", "").lower() in {"1", "true", "yes"}:
-        trace_path = Path(
-            os.environ.get(
-                "CONTEXTOR_MCP_INBOUND_LOG",
-                str(Path(tempfile.gettempdir()) / "contextor_mcp_inbound.log"),
-            )
-        )
-        _install_jsonrpc_trace(trace_path)
+
+    process_directory = registry_dir(Path.cwd().resolve())
+    _cleanup_orphaned_processes(process_directory)
+    server_record = register_process(
+        process_directory,
+        pid=os.getpid(),
+        parent_pid=os.getppid(),
+        kind="mcp-server",
+        executable=sys.executable,
+    )
+
+    def _shutdown_cleanup() -> None:
+        _cleanup_owned_processes(process_directory, os.getpid())
+        remove_record(server_record)
+
+    atexit.register(_shutdown_cleanup)
 
     transport = os.environ.get("CONTEXTOR_MCP_TRANSPORT", "stdio").lower()
 

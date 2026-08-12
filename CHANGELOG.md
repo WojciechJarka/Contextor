@@ -69,6 +69,7 @@
 - Fixed incorrect `module_count` returned by `get_project_architecture`.
 - Fixed incorrect `risk_score` calculation in `get_file_edit_context`.
 - Fixed Windows Codex MCP analysis hangs by isolating Git from the JSON-RPC stdin stream, using non-interactive Git subprocesses and native HEAD/ref resolution; verified all 17 MCP tools end to end.
+- Added identity-verified MCP process cleanup for normal shutdown and orphan recovery on the next server start.
 
 #### Reporting
 

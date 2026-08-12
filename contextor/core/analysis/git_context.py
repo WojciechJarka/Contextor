@@ -7,30 +7,48 @@ Requires `git` in system PATH.
 
 import subprocess
 import os
+import shutil
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from contextor.core.git.repo_state import is_git_repo
+from contextor.mcp_process_registry import register_process, remove_record
 
 
 def _run_git(args, cwd):
+    record_path = None
     try:
         env = {
             **os.environ,
             "GIT_TERMINAL_PROMPT": "0",
             "GIT_PAGER": "cat",
         }
-        result = subprocess.run(
-            ["git"] + args,
+        executable = shutil.which("git") or "git"
+        process = subprocess.Popen(
+            [executable] + args,
             cwd=cwd,
             env=env,
             stdin=subprocess.DEVNULL,
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
-            check=True,
         )
-        return result.stdout.strip()
+        registry = os.environ.get("CONTEXTOR_MCP_PROCESS_REGISTRY")
+        if registry:
+            record_path = register_process(
+                Path(registry),
+                pid=process.pid,
+                parent_pid=os.getpid(),
+                kind="git",
+                executable=executable,
+            )
+        stdout, _ = process.communicate()
+        if process.returncode != 0:
+            return None
+        return stdout.strip()
     except Exception:
         return None
+    finally:
+        remove_record(record_path)
 
 
 def collect_git_context(file_path: str, root_path: str) -> dict:
