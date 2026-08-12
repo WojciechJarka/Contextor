@@ -110,16 +110,9 @@ Example:
 The MCP server must start silently and wait for JSON-RPC messages.
 """
 import json
-import os
-import subprocess
 import sys
 import glob
-import faulthandler
 import warnings
-import tempfile
-import threading
-import time
-from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -134,134 +127,12 @@ mcp = FastMCP("Contextor")
 
 # Global state to maintain incremental engines across MCP sessions
 _live_engines: dict[str, Any] = {}
-_analysis_lock = threading.Lock()
-
-
-def _mcp_cache_root(root: Path) -> Path:
-    """Writable cache root dedicated to MCP analysis of this repository."""
-    return root / ".contextor" / "cache"
 
 
 
 def _stderr_log(msg: str) -> None:
     """Redirects progress logs to stderr to protect JSON-RPC on stdout."""
     print(msg, file=sys.stderr, flush=True)
-
-
-def _trace(root: Path, message: str) -> None:
-    trace = root / ".contextor" / "mcp_trace.log"
-    trace.parent.mkdir(parents=True, exist_ok=True)
-    with trace.open("a", encoding="utf-8") as handle:
-        handle.write(
-            f"{datetime.now().isoformat(timespec='milliseconds')} "
-            f"pid={os.getpid()} {message}\n"
-        )
-
-
-async def _run_analysis_worker(
-    operation: str,
-    root: Path,
-    target: Path | None = None,
-) -> None:
-    """Run analysis in-process without blocking the FastMCP event loop.
-
-    Codex Desktop can start the child interpreter but leaves it stalled before
-    Python reaches ``contextor.mcp_worker.main``.  The MCP-only sequential mode
-    avoids both that child interpreter and nested process pools.
-    """
-    import asyncio
-
-    def run() -> None:
-        started = time.monotonic()
-        _trace(root, f"in_process_begin operation={operation}")
-        stack_log = root / ".contextor" / "mcp_server_stacks.log"
-        with _analysis_lock:
-            previous_pool_setting = os.environ.get("CONTEXTOR_DISABLE_PROCESS_POOL")
-            previous_cache = os.environ.get("CONTEXTOR_CACHE_DIR")
-            os.environ["CONTEXTOR_DISABLE_PROCESS_POOL"] = "1"
-            os.environ["CONTEXTOR_CACHE_DIR"] = str(_mcp_cache_root(root))
-            with stack_log.open("a", encoding="utf-8", buffering=1) as stack_handle:
-                faulthandler.dump_traceback_later(15, repeat=True, file=stack_handle)
-                try:
-                    progress_log = lambda message: _trace(root, f"progress {message}")
-                    if operation == "project":
-                        _, result = ContextorFacade.analyze_project(
-                            str(root), log=progress_log
-                        )
-                        if result is None:
-                            raise RuntimeError("Analysis returned no canonical state.")
-                    elif operation == "layer":
-                        ContextorFacade.analyze_layer(
-                            str(root), str(target), log=progress_log
-                        )
-                    elif operation == "single_file":
-                        ContextorFacade.analyze_single_file(
-                            str(target), str(root), log=progress_log
-                        )
-                    else:
-                        raise ValueError(f"Unsupported analysis operation: {operation}")
-                finally:
-                    faulthandler.cancel_dump_traceback_later()
-                if previous_pool_setting is None:
-                    os.environ.pop("CONTEXTOR_DISABLE_PROCESS_POOL", None)
-                else:
-                    os.environ["CONTEXTOR_DISABLE_PROCESS_POOL"] = previous_pool_setting
-                if previous_cache is None:
-                    os.environ.pop("CONTEXTOR_CACHE_DIR", None)
-                else:
-                    os.environ["CONTEXTOR_CACHE_DIR"] = previous_cache
-        _trace(root, f"in_process_complete elapsed={time.monotonic() - started:.3f}")
-
-    await asyncio.to_thread(run)
-
-
-def _install_jsonrpc_trace(log_path: Path) -> None:
-    """
-    Installs a temporary debug hook that logs inbound JSON-RPC payloads.
-
-    This is disabled by default because stdio transports are fragile and we
-    do not want diagnostic noise to interfere with Antigravity or Codex.
-    """
-    import mcp.types as types
-
-    original_validate = types.JSONRPCMessage.model_validate_json
-
-    def traced_validate(cls, json_data, *args, **kwargs):
-        try:
-            if isinstance(json_data, bytes):
-                raw = json_data.decode("utf-8", errors="replace")
-            else:
-                raw = str(json_data)
-
-            try:
-                parsed = json.loads(raw)
-
-                log_path.parent.mkdir(parents=True, exist_ok=True)
-                with log_path.open("a", encoding="utf-8") as f:
-                    f.write(f"\n[{datetime.now().isoformat()}] INBOUND\n")
-                    f.write(f"type={'request' if 'id' in parsed else 'notification'}\n")
-                    f.write(f"method={parsed.get('method')}\n")
-                    f.write(f"id={parsed.get('id', 'absent')}\n")
-                    f.write(f"params={json.dumps(parsed.get('params', {}), ensure_ascii=False)}\n")
-                    f.write(f"raw={raw.strip()}\n")
-
-            except Exception as log_error:
-                try:
-                    log_path.parent.mkdir(parents=True, exist_ok=True)
-                    with log_path.open("a", encoding="utf-8") as f:
-                        f.write(
-                            f"\n[{datetime.now().isoformat()}] "
-                            f"UNPARSEABLE: {repr(raw)} error={log_error}\n"
-                        )
-                except Exception:
-                    pass
-
-        except Exception:
-            pass
-
-        return original_validate(json_data, *args, **kwargs)
-
-    types.JSONRPCMessage.model_validate_json = classmethod(traced_validate)
 
 
 def _get_canonical_report(repo_path: Path, filename: str) -> Path | None:
@@ -287,10 +158,10 @@ def _get_or_init_engine(root: Path):
     if not engine:
         from contextor.core.analysis.state_manager import load_engine_state, FileStateManager
         from contextor.core.analysis.incremental_engine import IncrementalAnalysisEngine
-        from contextor.core.paths import repo_key
+        from contextor.core.paths import repo_cache_dir
         from contextor.core.reporting_engine.persistent_registry import PersistentIdentityRegistry
         
-        cache_dir = str(_mcp_cache_root(root) / repo_key(root))
+        cache_dir = str(repo_cache_dir(str(root)))
         state_mgr = FileStateManager(cache_dir)
         state = load_engine_state(cache_dir, getattr(state_mgr, "state_id", ""))
         if state:
@@ -330,31 +201,88 @@ def _read_registries(
 # ==========================================================
 
 @mcp.tool()
-async def analyze_project(repo_path: str) -> str:
+def analyze_project(repo_path: str) -> str:
     """
     Triggers a global architectural analysis on the specified repository.
     Generates all reports in the 'output' directory.
     """
     root = Path(repo_path).expanduser().resolve()
-    _trace(root, "analyze_project_enter")
     if not root.is_dir():
         return f"Error: Repository path '{root}' does not exist."
     try:
-        await _run_analysis_worker("project", root)
-        _trace(root, "analyze_project_worker_complete")
-        _live_engines.pop(str(root), None)
-        _trace(root, "analyze_project_hydrate_begin")
-        if _get_or_init_engine(root) is None:
-            raise RuntimeError("Analysis completed but canonical state could not be loaded.")
-        _trace(root, "analyze_project_hydrate_complete")
+        errors, analysis_result = ContextorFacade.analyze_project(
+            str(root),
+            log=_stderr_log,
+        )
+
+        if analysis_result is None:
+            raise RuntimeError(
+                "Analysis completed but returned no analysis state."
+            )
+
+        # Bootstrap the IncrementalAnalysisEngine for this repo session.
+        from contextor.core.analysis.state_manager import (
+            RepositoryAnalysisState,
+            FileStateManager,
+        )
+        from contextor.core.analysis.incremental_engine import (
+            IncrementalAnalysisEngine,
+        )
+        from contextor.core.paths import repo_cache_dir
+        from contextor.core.reporting_engine.persistent_registry import (
+            PersistentIdentityRegistry,
+        )
+
+        required_attrs = (
+            "modules",
+            "artifacts",
+            "graph",
+            "trie",
+            "package_root",
+            "compact_artifacts",
+        )
+
+        missing = [
+            name
+            for name in required_attrs
+            if not hasattr(analysis_result, name)
+        ]
+
+        if missing:
+            raise RuntimeError(
+                "Analysis result is incomplete. "
+                f"Missing: {', '.join(missing)}"
+            )
+
+        state = RepositoryAnalysisState(
+            modules=analysis_result.modules,
+            artifacts=analysis_result.artifacts,
+            dependency_graph=analysis_result.graph,
+            trie=analysis_result.trie,
+            package_root=analysis_result.package_root,
+            artifact_consumption={
+                "_report": analysis_result.compact_artifacts,
+            },
+        )
+
+        registry = PersistentIdentityRegistry(str(root))
+        state_mgr = FileStateManager(
+            str(repo_cache_dir(str(root)))
+        )
+
+        _live_engines[str(root)] = IncrementalAnalysisEngine(
+            state,
+            registry,
+            state_mgr,
+            str(root),
+        )
         
         return f"Analysis complete for {root.name}."
     except Exception as e:
-        _trace(root, f"analyze_project_error error={e!r}")
         return f"Error during analysis: {str(e)}"
 
 @mcp.tool()
-async def analyze_layer(repo_path: str, layer_name: str) -> str:
+def analyze_layer(repo_path: str, layer_name: str) -> str:
     """
     Triggers architectural analysis isolated to a specific layer (directory).
     """
@@ -363,25 +291,22 @@ async def analyze_layer(repo_path: str, layer_name: str) -> str:
     if not layer.is_dir():
         return f"Error: Layer path '{layer}' does not exist."
     try:
-        await _run_analysis_worker("layer", root, layer)
+        ContextorFacade.analyze_layer(str(root), str(layer), log=_stderr_log)
         return f"Layer analysis complete for '{layer_name}'."
     except Exception as e:
         return f"Error during layer analysis: {str(e)}"
 
 @mcp.tool()
-async def analyze_single_file(repo_path: str, file_path: str) -> str:
+def analyze_single_file(repo_path: str, file_path: str) -> str:
     """
     Triggers deep architectural analysis on a single Python file.
     """
     root = Path(repo_path).expanduser().resolve()
-    target_file = Path(file_path).expanduser()
-    if not target_file.is_absolute():
-        target_file = root / target_file
-    target_file = target_file.resolve()
+    target_file = Path(file_path).expanduser().resolve()
     if not target_file.is_file():
         return f"Error: Target file '{target_file}' does not exist."
     try:
-        await _run_analysis_worker("single_file", root, target_file)
+        ContextorFacade.analyze_single_file(str(target_file), str(root), log=_stderr_log)
         return f"Single-file analysis complete for {target_file.name}."
     except Exception as e:
         return f"Error during single-file analysis: {str(e)}"
@@ -726,7 +651,7 @@ def get_file_edit_context(repo_path: str, file_path: str) -> str:
         
         # We must read registries OUTSIDE the transaction block to avoid Resource Deadlock
         _, _, _, art_id_to_path = _read_registries(root)
-
+        
         with registry.transaction():
             mod_id = str(registry.get_module_id(module_name))
             
@@ -1014,7 +939,7 @@ def get_artifacts_for_module(
             parts[-1] = parts[-1][:-3]
             if parts[-1] == "__init__":
                 parts.pop()
-
+        
         module_name = ".".join(parts)
 
     art_path = _get_canonical_report(root, f"{repo_name}_artifacts_compact.json")
@@ -1167,29 +1092,52 @@ def main():
         sys.stderr.reconfigure(encoding='utf-8')
 
     import asyncio
-    if os.environ.get("CONTEXTOR_MCP_DEBUG_INBOUND", "").lower() in {"1", "true", "yes"}:
-        trace_path = Path(
-            os.environ.get(
-                "CONTEXTOR_MCP_INBOUND_LOG",
-                str(Path(tempfile.gettempdir()) / "contextor_mcp_inbound.log"),
-            )
-        )
-        _install_jsonrpc_trace(trace_path)
 
-    transport = os.environ.get("CONTEXTOR_MCP_TRANSPORT", "stdio").lower()
+    # --- DIAGNOSTIC PATCH BEGIN ---
+    from datetime import datetime
+
+    import mcp.types as types
+
+    original_validate = types.JSONRPCMessage.model_validate_json
+
+    def traced_validate(cls, json_data, *args, **kwargs):
+        try:
+            if isinstance(json_data, bytes):
+                raw = json_data.decode("utf-8", errors="replace")
+            else:
+                raw = str(json_data)
+
+            try:
+                parsed = json.loads(raw)
+
+                with open("C:/Temp/mcp_inbound.log", "a", encoding="utf-8") as f:
+                    f.write(f"\n[{datetime.now().isoformat()}] INBOUND\n")
+                    f.write(f"type={'request' if 'id' in parsed else 'notification'}\n")
+                    f.write(f"method={parsed.get('method')}\n")
+                    f.write(f"id={parsed.get('id', 'absent')}\n")
+                    f.write(f"params={json.dumps(parsed.get('params', {}), ensure_ascii=False)}\n")
+                    f.write(f"raw={raw.strip()}\n")
+
+            except Exception as log_error:
+                try:
+                    with open("C:/Temp/mcp_inbound.log", "a", encoding="utf-8") as f:
+                        f.write(
+                            f"\n[{datetime.now().isoformat()}] "
+                            f"UNPARSEABLE: {repr(raw)} error={log_error}\n"
+                        )
+                except Exception:
+                    pass
+
+        except Exception:
+            pass
+
+        return original_validate(json_data, *args, **kwargs)
+
+    types.JSONRPCMessage.model_validate_json = classmethod(traced_validate)
+    # --- DIAGNOSTIC PATCH END ---
 
     async def _run():
-        if transport in {"http", "streamable-http"}:
-            host = os.environ.get("CONTEXTOR_MCP_HOST", "127.0.0.1")
-            port = int(os.environ.get("CONTEXTOR_MCP_PORT", "8765"))
-            await mcp.run_http_async(
-                transport="streamable-http",
-                host=host,
-                port=port,
-                show_banner=False,
-            )
-        else:
-            await mcp.run_stdio_async()
+        await mcp.run_stdio_async()
         
     asyncio.run(_run())
 

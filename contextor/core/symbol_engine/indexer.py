@@ -12,6 +12,7 @@ Builds stable module_id against project root.
 
 import ast
 import dataclasses
+import os
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 
@@ -25,6 +26,7 @@ from contextor.core.domain.module import (
 from contextor.core.errors import AnalysisCancelled, checkpoint
 from contextor.core.paths import DEFAULT_IGNORED_DIRS
 from contextor.core.source import SourceError, parse_source
+
 
 # ==========================================================
 # IMPORT EXTRACTION
@@ -260,6 +262,25 @@ def index_repository(
         progress_callback(0, total_files, "Start...")
 
     completed = 0
+    if os.environ.get("CONTEXTOR_DISABLE_PROCESS_POOL") == "1":
+        for path in files_to_process:
+            res = _process_single_file(str(path), str(root_path))
+            if res["error"]:
+                skipped.append(SkippedFile(path=res["path"], reason=res["error"]))
+            else:
+                modules[res["module_id"]] = Module(
+                    module_id=res["module_id"],
+                    path=res["path"],
+                    absolute_path=res.get("absolute_path", res["path"]),
+                    imports=res["imports"],
+                )
+            completed += 1
+            checkpoint(progress_callback, res["filename"], completed, total_files)
+        return RepositoryIndex(
+            modules=modules,
+            skipped=sorted(skipped, key=lambda item: item.path),
+        )
+
     with ProcessPoolExecutor() as executor:
         futures = {
             executor.submit(_process_single_file, str(p), str(root_path)): p

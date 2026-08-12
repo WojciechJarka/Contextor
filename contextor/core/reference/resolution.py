@@ -7,6 +7,7 @@ for the reference building engine.
 
 import ast
 
+
 IGNORED_AMBIGUOUS_METHODS = {
     "visit",
     "get",
@@ -47,9 +48,46 @@ def _attribute_name(node):
 
 
 def _resolve_alias(name, aliases):
+    """
+    Resolve an identifier or an attribute rooted at an imported alias.
+
+    Examples:
+
+        aliases = {
+            "SymbolFacts":
+                "contextor.core.symbol_engine.domain.SymbolFacts"
+        }
+
+        _resolve_alias("SymbolFacts", aliases)
+        -> "contextor.core.symbol_engine.domain.SymbolFacts"
+
+        _resolve_alias("SymbolFacts.all_symbols", aliases)
+        -> "contextor.core.symbol_engine.domain.SymbolFacts.all_symbols"
+
+    A direct alias match still takes precedence.  If no alias applies,
+    the original name is returned unchanged.
+    """
     if not name:
         return None
-    return aliases.get(name, name)
+
+    direct = aliases.get(name)
+    if direct is not None:
+        return direct
+
+    parts = name.split(".")
+
+    # Find the longest alias prefix.  This matters when aliases contain
+    # nested names or when a short imported name is used as the root of
+    # an attribute chain.
+    for index in range(len(parts) - 1, 0, -1):
+        prefix = ".".join(parts[:index])
+        alias = aliases.get(prefix)
+
+        if alias is not None:
+            suffix = ".".join(parts[index:])
+            return f"{alias}.{suffix}" if suffix else alias
+
+    return name
 
 
 def _match_symbol(value, symbols):
@@ -60,7 +98,11 @@ def _match_symbol(value, symbols):
         return value
 
     short = value.split(".")[-1]
-    candidates = [symbol for symbol in symbols if symbol.split(".")[-1] == short]
+    candidates = [
+        symbol
+        for symbol in symbols
+        if symbol.split(".")[-1] == short
+    ]
 
     if len(candidates) == 1:
         return candidates[0]
@@ -72,11 +114,20 @@ def _classify_match(name, resolved, target_symbols, aliases):
     if not resolved:
         return None, None
 
+    # Fully resolved names are authoritative.
     if resolved in target_symbols:
         return "confirmed", resolved
 
-    if name in aliases:
-        return None, None
+    # If the original expression is rooted in an alias but the alias
+    # could not be resolved to a target, do not downgrade it to a
+    # short-name ambiguous match.
+    if name:
+        parts = name.split(".")
+
+        for index in range(len(parts), 0, -1):
+            prefix = ".".join(parts[:index])
+            if prefix in aliases:
+                return None, None
 
     match = _match_symbol(resolved, target_symbols)
     if match:

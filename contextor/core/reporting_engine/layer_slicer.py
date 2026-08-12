@@ -44,7 +44,11 @@ def _compute_layer_health(
 
     layer_cycles = [
         cycle for cycle in global_cycles
-        if any(m in layer_set for m in cycle)
+        # P0-5: A cycle belongs to a layer only when ALL of its modules
+        # are inside the layer.  Using any() would count cross-layer
+        # cycles as layer cycles, inflating layer cycle count and
+        # mis-attributing responsibility.
+        if all(m in layer_set for m in cycle)
     ]
 
     layer_real_collisions = [
@@ -53,9 +57,40 @@ def _compute_layer_health(
         and all(n in layer_set for n in getattr(c, "nodes", []))
     ]
 
+    # P1-6: Match skipped files to the layer using module-prefix lookup.
+    # The previous approach converted the file path to a dotted string and
+    # searched for it as a substring inside module IDs, which could produce
+    # false positives for short or ambiguous path segments.
+    # We now check whether any module in layer_set starts with the dotted
+    # path prefix derived from the skipped file, which is the same
+    # convention used to derive module identifiers from file paths.
+    def _file_matches_layer(item) -> bool:
+        raw_path = getattr(item, "path", "") or ""
+        # Normalise separators and strip leading/trailing slashes.
+        dotted = raw_path.replace("\\", "/").strip("/").replace("/", ".")
+        # Remove common file extensions so `contextor/core/api/foo.py`
+        # becomes `contextor.core.api.foo` for prefix matching.
+        for ext in (".py", ".pyi"):
+            if dotted.endswith(ext):
+                dotted = dotted[: -len(ext)]
+                break
+        # Strip .__init__ suffix so that `contextor/core/api/__init__.py`
+        # is treated as `contextor.core.api` and correctly matched against
+        # the layer_set entry for the package itself.
+        if dotted.endswith(".__init__"):
+            dotted = dotted[: -len(".__init__")]
+        if not dotted:
+            return False
+        # A file belongs to the layer if its derived module ID is exactly
+        # a layer module or is a prefix of one (handles sub-packages).
+        return dotted in layer_set or any(
+            m == dotted or m.startswith(dotted + ".")
+            for m in layer_set
+        )
+
     layer_skipped = [
         item for item in global_skipped_files
-        if any(item.path.replace("\\", "/").replace("/", ".") in m for m in layer_set)
+        if _file_matches_layer(item)
     ] if global_skipped_files else []
 
     internal_edge_count = sum(len(v) for v in internal_hard.values())
@@ -344,6 +379,11 @@ def slice_report_for_layer(
     return {
         "summary": layer_summary_report,
         "structure": layer_compact_structure_report,
+        # structure_raw exposes the non-compact edge graph with full module names.
+        # execute_layer_pipeline must use this (not "structure") when passing
+        # hard_edges to generate_graph_analytics_report, otherwise compact IDs
+        # leak into graph metrics and produce ghost entries in the modules dict.
+        "structure_raw": layer_structure_report,
         "metrics": layer_metrics_report,
         "artifacts": layer_artifacts_report,
         "artifacts_compact": layer_compact_artifacts_report,

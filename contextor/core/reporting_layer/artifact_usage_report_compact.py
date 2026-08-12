@@ -1,119 +1,209 @@
 """
-core/reporting_layer/artifact_usage_report_compact.py
+contextor/core/reporting_layer/artifact_usage_report_compact.py
 
-COMPACT VERSION of the artifact report - ADDITIONAL report, does not replace
-generate_artifact_usage_report() or its output file.
+COMPACT VERSION of the artifact usage report.
 
-Takes exactly the same dict that is returned by
-generate_artifact_usage_report() (from core/artifact_usage_report.py),
-and transforms it into a compact version:
+Auxiliary representation of the report produced by
+generate_artifact_usage_report(). It does not replace the source report.
 
-1. Builds a module table ("modules": [...]) and replaces every
-   occurrence of a module identifier (definer_module, consumers,
-   categories in usage, modules in clusters / core_extraction_candidates)
-   with an index to this table.
+Responsibilities:
 
-2. Artifacts with no consumers are already excluded from the source report
-   (filtered by build_artifact_index). No additional filtering needed here.
+- builds a stable module/artifact index through IndexDictionary;
+- replaces textual module identifiers with integer module IDs;
+- replaces artifact identifiers with A-prefixed artifact IDs;
+- removes empty usage categories;
+- preserves shared-artifact references without duplicating artifact data;
+- keeps the compact representation deterministic and JSON-safe.
 
-3. For artifacts WITH consumers, keeps ONLY non-empty categories
-   in "usage" (if usage is present at all — it lives in the sidecar).
+Schema version: 3
 
-ZERO data loss - this is the same report, encoded differently.
-
-Schema version: 2
-  - shared_artifacts full list replaced by shared_artifact_keys (list of str).
-  - No inline usage block per artifact (moved to sidecar).
-  - artifact_id field present inside each artifact entry.
-
-Layer: REPORT ASSEMBLY (auxiliary, invoked by reporting.py)
-
-Does not do:
-- artifact gathering (handled by artifact_usage_report.py)
-- file saving (handled by save_json in reporting.py)
-
-NOTE: 
-To prevent I/O bloat, `shared_usage_clusters` processing assumes the upstream 
-report has already capped clusters to a reasonable limit (e.g., 30) and that 
-inner artifacts are stored by `artifact_id` rather than duplicating their full definitions.
+The source of truth remains generate_artifact_usage_report().
 """
+
+from __future__ import annotations
 
 import json
 import os
+from typing import Any
+
+from contextor.core.reporting_engine.dictionary import IndexDictionary
+
 
 # ==========================================================
-# MODULE INDEX
+# MODULE / ARTIFACT INDEX
 # ==========================================================
 
 
-def _collect_module_ids(report: dict) -> set:
+def _collect_module_ids(report: dict) -> set[str]:
     """
-    Collects ALL module identifiers appearing in the report.
-    We purposely DO NOT perform generic searching across the whole
-    JSON tree (too many false positives - "artifact", "kind",
-    "message" are not module IDs) - we only collect from fields
-    that we know hold module identifiers.
+    Collect all module identifiers known to occur in the report.
 
-    Schema v2: no shared_artifacts full objects, no inline usage per artifact.
+    Only fields with known module semantics are inspected.
+    Generic recursive searching is intentionally avoided.
     """
-
-    ids = set()
+    ids: set[str] = set()
 
     for artifact in report.get("artifacts", {}).values():
+        if not isinstance(artifact, dict):
+            continue
+
         definer = artifact.get("definer_module")
-        if definer:
+        if isinstance(definer, str) and definer:
             ids.add(definer)
 
-        for c in artifact.get("consumers", []) or []:
-            ids.add(c)
-
-        # Schema v2: usage is in the sidecar, not inline. Skip usage scan here.
-
-    # shared_artifact_keys is a list of str keys, not full objects — no module ids here.
+        for consumer in artifact.get("consumers", []) or []:
+            if isinstance(consumer, str) and consumer:
+                ids.add(consumer)
 
     for cluster in report.get("shared_usage_clusters", []) or []:
-        for m in cluster.get("modules", []) or []:
-            ids.add(m)
+        if not isinstance(cluster, dict):
+            continue
 
-        for a in cluster.get("shared_artifacts", []) or []:
-            if a.get("definer_module"):
-                ids.add(a["definer_module"])
-            for c in a.get("consumers", []) or []:
-                ids.add(c)
+        for module_id in cluster.get("modules", []) or []:
+            if isinstance(module_id, str) and module_id:
+                ids.add(module_id)
 
-    for candidate in report.get("core_extraction_candidates", []) or []:
-        for m in candidate.get("consumer_modules", []) or []:
-            ids.add(m)
+        # Legacy representation.
+        for artifact in cluster.get("shared_artifacts", []) or []:
+            if not isinstance(artifact, dict):
+                continue
 
-        for m in candidate.get("likely_core_modules", []) or []:
-            ids.add(m)
+            definer = artifact.get("definer_module")
+            if isinstance(definer, str) and definer:
+                ids.add(definer)
 
-        for a in candidate.get("top_shared_artifacts", []) or []:
-            if a.get("defined_in"):
-                ids.add(a["defined_in"])
-            for u in a.get("used_by", []) or []:
-                ids.add(u)
+            for consumer in artifact.get("consumers", []) or []:
+                if isinstance(consumer, str) and consumer:
+                    ids.add(consumer)
+
+    for candidate in report.get(
+        "core_extraction_candidates",
+        [],
+    ) or []:
+        if not isinstance(candidate, dict):
+            continue
+
+        for module_id in candidate.get(
+            "consumer_modules",
+            [],
+        ) or []:
+            if isinstance(module_id, str) and module_id:
+                ids.add(module_id)
+
+        for module_id in candidate.get(
+            "likely_core_modules",
+            [],
+        ) or []:
+            if isinstance(module_id, str) and module_id:
+                ids.add(module_id)
+
+        # Legacy representation.
+        for artifact in candidate.get(
+            "top_shared_artifacts",
+            [],
+        ) or []:
+            if not isinstance(artifact, dict):
+                continue
+
+            defined_in = artifact.get("defined_in")
+            if isinstance(defined_in, str) and defined_in:
+                ids.add(defined_in)
+
+            for consumer in artifact.get(
+                "used_by",
+                [],
+            ) or []:
+                if isinstance(consumer, str) and consumer:
+                    ids.add(consumer)
 
     return ids
 
 
-from contextor.core.reporting_engine.dictionary import IndexDictionary
-
-def build_module_index(report: dict, index_dict: IndexDictionary = None) -> IndexDictionary:
+def _collect_artifact_ids(report: dict) -> set[str]:
     """
-    Builds or updates the IndexDictionary using the provided report.
+    Collect all artifact identifiers that may require indexing.
+
+    The primary artifact dictionary is authoritative.
+
+    Legacy shared-artifact/candidate structures are also inspected so
+    their references can be represented safely when encountered.
+    """
+    ids: set[str] = set()
+
+    for artifact_key in report.get("artifacts", {}).keys():
+        if isinstance(artifact_key, str) and artifact_key:
+            ids.add(artifact_key)
+
+    for cluster in report.get("shared_usage_clusters", []) or []:
+        if not isinstance(cluster, dict):
+            continue
+
+        for artifact_key in cluster.get(
+            "shared_artifact_keys",
+            [],
+        ) or []:
+            if isinstance(artifact_key, str) and artifact_key:
+                ids.add(artifact_key)
+
+        for artifact in cluster.get(
+            "shared_artifacts",
+            [],
+        ) or []:
+            if not isinstance(artifact, dict):
+                continue
+
+            artifact_id = artifact.get("artifact_id")
+            if isinstance(artifact_id, str) and artifact_id:
+                ids.add(artifact_id)
+
+    for candidate in report.get(
+        "core_extraction_candidates",
+        [],
+    ) or []:
+        if not isinstance(candidate, dict):
+            continue
+
+        for artifact_key in candidate.get(
+            "shared_artifact_keys",
+            [],
+        ) or []:
+            if isinstance(artifact_key, str) and artifact_key:
+                ids.add(artifact_key)
+
+        for artifact in candidate.get(
+            "top_shared_artifacts",
+            [],
+        ) or []:
+            if not isinstance(artifact, dict):
+                continue
+
+            artifact_id = artifact.get("artifact_id")
+            if isinstance(artifact_id, str) and artifact_id:
+                ids.add(artifact_id)
+
+    return ids
+
+
+def build_module_index(
+    report: dict,
+    index_dict: IndexDictionary | None = None,
+) -> IndexDictionary:
+    """
+    Populate the provided IndexDictionary.
+
+    Identity assignment is delegated entirely to IndexDictionary.
     """
     if index_dict is None:
-        raise ValueError("index_dict must be provided to build_module_index")
-        
-    module_ids = sorted(_collect_module_ids(report))
-    for module_id in module_ids:
+        raise ValueError(
+            "index_dict must be provided to build_module_index"
+        )
+
+    for module_id in sorted(_collect_module_ids(report)):
         index_dict.get_module_id(module_id)
-        
-    # Also collect artifact IDs
-    for key in report.get("artifacts", {}).keys():
-        index_dict.get_artifact_id(key)
-        
+
+    for artifact_id in sorted(_collect_artifact_ids(report)):
+        index_dict.get_artifact_id(artifact_id)
+
     return index_dict
 
 
@@ -121,11 +211,8 @@ def build_module_index(report: dict, index_dict: IndexDictionary = None) -> Inde
 # COMPACTION HELPERS
 # ==========================================================
 
-# Keys whose values are lists of module-table indices (rather than counts,
-# ranks, or raw module-id strings) get an explicit "_module_indices" suffix
-# so the key name alone disambiguates them - no need to rely on a reader
-# noticing _format_note before interpreting e.g. "consumers": [61].
-_INDEX_KEY_RENAMES = {
+
+_INDEX_KEY_RENAMES: dict[str, str] = {
     "consumers": "consumer_module_indices",
     "direct_calls": "direct_calls_module_indices",
     "callback_calls": "callback_calls_module_indices",
@@ -138,51 +225,251 @@ _INDEX_KEY_RENAMES = {
 
 
 def _renamed(key: str) -> str:
-    """Applies the index-key rename if this key holds module indices."""
-
+    """Rename a usage category containing module indexes."""
     return _INDEX_KEY_RENAMES.get(key, key)
 
 
-def _idx(module_id, index_of):
-    """Safe mapping string -> index (None if missing)."""
+def _idx(
+    module_id: str | None,
+    index_of: dict[str, int],
+) -> int | str | None:
+    """
+    Convert a module identifier to its compact index.
 
+    Unknown identifiers are preserved instead of silently discarded.
+    """
     if module_id is None:
         return None
 
     return index_of.get(module_id, module_id)
 
 
-def _idx_list(module_ids, index_of):
+def _idx_list(
+    module_ids: list[str] | None,
+    index_of: dict[str, int],
+) -> list[int | str | None]:
+    """Convert module identifiers to compact indexes."""
+    return [
+        _idx(module_id, index_of)
+        for module_id in (module_ids or [])
+    ]
 
-    return [_idx(m, index_of) for m in (module_ids or [])]
+
+def _artifact_id(
+    artifact_key: str,
+    index_dict: IndexDictionary,
+) -> str:
+    """Resolve one artifact identifier through the master index."""
+    return index_dict.get_artifact_id(artifact_key)
 
 
-def _compact_usage(usage: dict, index_of: dict) -> dict:
+def _compact_usage(
+    usage: dict,
+    index_of: dict[str, int],
+) -> dict[str, Any]:
     """
-    Keeps ONLY non-empty categories, replacing values
-    with module indexes. Special logic for 'ambiguous_calls'
-    which holds dicts instead of string module IDs.
-    """
+    Compact an artifact usage mapping.
 
-    compact = {}
+    Empty categories are omitted.
+
+    Detail records preserve all metadata while converting only their
+    module-bearing ``module`` field.
+    """
+    compact: dict[str, Any] = {}
 
     for category, values in (usage or {}).items():
         if not values:
             continue
 
-        if category == "ambiguous_calls" or category.endswith("_detail"):
-            # Values are dicts like {"module": "mod_id", "reason": "...", "line": 42}
-            compacted_values = []
+        if category.endswith("_detail"):
+            compacted_values: list[Any] = []
+
             for item in values:
                 if isinstance(item, dict):
                     compact_item = dict(item)
-                    compact_item["module"] = _idx(item.get("module"), index_of)
+
+                    if "module" in compact_item:
+                        compact_item["module"] = _idx(
+                            compact_item.get("module"),
+                            index_of,
+                        )
+
                     compacted_values.append(compact_item)
                 else:
-                    compacted_values.append(_idx(item, index_of))
+                    compacted_values.append(
+                        _idx(item, index_of)
+                    )
+
+            if compacted_values:
+                compact[_renamed(category)] = compacted_values
+
+            continue
+
+        if category == "ambiguous_calls":
+            compacted_values = []
+
+            for item in values:
+                if isinstance(item, dict):
+                    compact_item = dict(item)
+
+                    if "module" in compact_item:
+                        compact_item["module"] = _idx(
+                            compact_item.get("module"),
+                            index_of,
+                        )
+
+                    compacted_values.append(compact_item)
+                else:
+                    compacted_values.append(
+                        _idx(item, index_of)
+                    )
+
+            if compacted_values:
+                compact[_renamed(category)] = compacted_values
+
+            continue
+
+        compacted_values = _idx_list(
+            values,
+            index_of,
+        )
+
+        if compacted_values:
             compact[_renamed(category)] = compacted_values
-        else:
-            compact[_renamed(category)] = _idx_list(values, index_of)
+
+    return compact
+
+
+def _compact_cluster(
+    cluster: dict,
+    index_dict: IndexDictionary,
+) -> dict[str, Any]:
+    """
+    Compact one shared-usage cluster.
+
+    Schema v3 stores artifact references only.
+    """
+    compact: dict[str, Any] = {
+        "modules": sorted(
+            index_dict.get_module_id(module_id)
+            for module_id in cluster.get(
+                "modules",
+                [],
+            )
+            or []
+        ),
+        "size": cluster.get("size"),
+        "shared_artifact_count": cluster.get(
+            "shared_artifact_count"
+        ),
+    }
+
+    artifact_keys = cluster.get("shared_artifact_keys")
+
+    if artifact_keys is not None:
+        compact["shared_artifact_keys"] = sorted(
+            _artifact_id(
+                artifact_id,
+                index_dict,
+            )
+            for artifact_id in artifact_keys
+            if isinstance(artifact_id, str)
+        )
+    else:
+        legacy_ids: list[str] = []
+
+        for artifact in cluster.get(
+            "shared_artifacts",
+            [],
+        ) or []:
+            if not isinstance(artifact, dict):
+                continue
+
+            artifact_id = artifact.get("artifact_id")
+
+            if isinstance(artifact_id, str):
+                legacy_ids.append(
+                    _artifact_id(
+                        artifact_id,
+                        index_dict,
+                    )
+                )
+
+        compact["shared_artifact_keys"] = sorted(
+            set(legacy_ids)
+        )
+
+    return compact
+
+
+def _compact_candidate(
+    candidate: dict,
+    index_dict: IndexDictionary,
+) -> dict[str, Any]:
+    """
+    Compact one core-extraction candidate.
+
+    Artifact definitions are represented only by IDs.
+    """
+    compact: dict[str, Any] = {
+        "consumer_modules": sorted(
+            index_dict.get_module_id(module_id)
+            for module_id in candidate.get(
+                "consumer_modules",
+                [],
+            )
+            or []
+        ),
+        "likely_core_modules": sorted(
+            index_dict.get_module_id(module_id)
+            for module_id in candidate.get(
+                "likely_core_modules",
+                [],
+            )
+            or []
+        ),
+        "shared_artifact_count": candidate.get(
+            "shared_artifact_count"
+        ),
+        "reason": candidate.get("reason"),
+    }
+
+    artifact_keys = candidate.get(
+        "shared_artifact_keys"
+    )
+
+    if artifact_keys is not None:
+        compact["top_shared_artifact_keys"] = sorted(
+            _artifact_id(
+                artifact_id,
+                index_dict,
+            )
+            for artifact_id in artifact_keys
+            if isinstance(artifact_id, str)
+        )
+    else:
+        legacy_ids: list[str] = []
+
+        for artifact in candidate.get(
+            "top_shared_artifacts",
+            [],
+        ) or []:
+            if not isinstance(artifact, dict):
+                continue
+
+            artifact_id = artifact.get("artifact_id")
+
+            if isinstance(artifact_id, str):
+                legacy_ids.append(
+                    _artifact_id(
+                        artifact_id,
+                        index_dict,
+                    )
+                )
+
+        compact["top_shared_artifact_keys"] = sorted(
+            set(legacy_ids)
+        )
 
     return compact
 
@@ -192,111 +479,172 @@ def _compact_usage(usage: dict, index_of: dict) -> dict:
 # ==========================================================
 
 
-def compact_artifact_report(report: dict, index_dict: IndexDictionary = None) -> dict:
+def compact_artifact_report(
+    report: dict,
+    index_dict: IndexDictionary | None = None,
+) -> dict:
     """
-    Transforms the full artifact report (as returned by
-    generate_artifact_usage_report) into a compact version.
+    Transform the full artifact usage report into schema-v3 form.
 
-    Schema v2 changes vs v1:
-    - shared_artifacts full list replaced by shared_artifact_keys (list of str).
-    - No inline usage block per artifact (moved to sidecar file).
-    - artifact_id field preserved inside each compact artifact entry.
-    - _format_version: "2" for downstream validation.
+    The original report is never mutated.
 
-    ZERO data loss - the same information encoded differently.
-    The result has a different shape than the original, but every fact
-    is reproducible 1:1 via "modules"[index].
+    Schema v3:
+
+    - module IDs become integer indexes;
+    - artifact IDs become A-prefixed identifiers;
+    - artifact definitions occur once under ``artifacts``;
+    - shared structures contain references only;
+    - empty usage categories are removed;
+    - zero-consumer artifacts are omitted from the compact table.
     """
+    if not isinstance(report, dict):
+        raise TypeError("report must be a dict")
 
-    index_dict = build_module_index(report, index_dict)
+    if index_dict is None:
+        raise ValueError(
+            "index_dict must be provided to compact_artifact_report"
+        )
 
-    compact_artifacts = {}
+    build_module_index(
+        report,
+        index_dict,
+    )
 
-    for key, artifact in report.get("artifacts", {}).items():
+    compact_artifacts: dict[str, dict[str, Any]] = {}
+
+    for artifact_key, artifact in sorted(
+        report.get("artifacts", {}).items(),
+        key=lambda item: str(item[0]),
+    ):
+        if not isinstance(artifact, dict):
+            continue
+
         definer = artifact.get("definer_module")
-        consumers = artifact.get("consumers", []) or []
-        
-        a_id = index_dict.get_artifact_id(key)
+        consumers = artifact.get(
+            "consumers",
+            [],
+        ) or []
 
-        entry = {
-            "artifact_id": a_id,
+        # Compact report intentionally contains only consumed artifacts.
+        if not consumers:
+            continue
+
+        artifact_id = _artifact_id(
+            artifact_key,
+            index_dict,
+        )
+
+        entry: dict[str, Any] = {
+            "artifact_id": artifact_id,
             "kind": artifact.get("kind"),
-            "definer_module": index_dict.get_module_id(definer) if definer else None,
-            "consumer_module_indices": [index_dict.get_module_id(c) for c in consumers],
-            "consumer_count": artifact.get("consumer_count", len(consumers)),
+            "definer_module": (
+                index_dict.get_module_id(definer)
+                if definer
+                else None
+            ),
+            "consumer_module_indices": sorted(
+                index_dict.get_module_id(consumer)
+                for consumer in consumers
+                if isinstance(consumer, str)
+            ),
+            "consumer_count": artifact.get(
+                "consumer_count",
+                len(consumers),
+            ),
         }
 
-        # Schema v2: no inline usage — it lives in the sidecar file.
         legacy_usage = artifact.get("usage")
-        if legacy_usage:
-            compacted_usage = _compact_usage(legacy_usage, index_dict.module_to_id)
+
+        if isinstance(legacy_usage, dict):
+            compacted_usage = _compact_usage(
+                legacy_usage,
+                index_dict.module_to_id,
+            )
+
             if compacted_usage:
                 entry["usage"] = compacted_usage
 
-        compact_artifacts[a_id] = entry
+        compact_artifacts[artifact_id] = entry
 
-    compact_clusters = []
-
-    for cluster in report.get("shared_usage_clusters", []) or []:
-        compact_clusters.append(
-            {
-                "modules": [index_dict.get_module_id(m) for m in cluster.get("modules", [])],
-                "size": cluster.get("size"),
-                "shared_artifact_count": cluster.get("shared_artifact_count"),
-                "shared_artifacts": [
-                    {
-                        "artifact_id": index_dict.get_artifact_id(a.get("artifact_id")) if a.get("artifact_id") else None,
-                        "consumer_module_indices": [index_dict.get_module_id(c) for c in a.get("consumers", [])],
-                    }
-                    for a in cluster.get("shared_artifacts", []) or []
-                ],
-            }
+    compact_clusters = [
+        _compact_cluster(
+            cluster,
+            index_dict,
         )
-
-    compact_candidates = []
-
-    for candidate in report.get("core_extraction_candidates", []) or []:
-        compact_candidates.append(
-            {
-                "consumer_modules": [index_dict.get_module_id(m) for m in candidate.get("consumer_modules", [])],
-                "likely_core_modules": [index_dict.get_module_id(m) for m in candidate.get("likely_core_modules", [])],
-                "shared_artifact_count": candidate.get("shared_artifact_count"),
-                "top_shared_artifacts": [
-                    {
-                        "artifact_id": index_dict.get_artifact_id(a.get("artifact_id")) if a.get("artifact_id") else None,
-                        "used_by": [index_dict.get_module_id(m) for m in a.get("used_by", [])],
-                    }
-                    for a in candidate.get("top_shared_artifacts", []) or []
-                ],
-                "reason": candidate.get("reason"),
-            }
+        for cluster in report.get(
+            "shared_usage_clusters",
+            [],
         )
+        or []
+        if isinstance(cluster, dict)
+    ]
 
-    full_artifact_count = report.get("artifact_count", len(report.get("artifacts", {})))
+    compact_candidates = [
+        _compact_candidate(
+            candidate,
+            index_dict,
+        )
+        for candidate in report.get(
+            "core_extraction_candidates",
+            [],
+        )
+        or []
+        if isinstance(candidate, dict)
+    ]
 
-    compact_report = {
+    full_artifact_count = report.get(
+        "artifact_count",
+        len(report.get("artifacts", {})),
+    )
+
+    source_shared_keys = report.get(
+        "shared_artifact_keys",
+        [],
+    ) or []
+
+    compact_shared_keys = sorted(
+        _artifact_id(
+            artifact_key,
+            index_dict,
+        )
+        for artifact_key in source_shared_keys
+        if isinstance(artifact_key, str)
+    )
+
+    compact_report: dict[str, Any] = {
         "_format_version": "3",
         "_format_note": (
-            "Schema v3. Completely detached from text identifiers. Numbers inside 'definer_module' and any key ending in "
-            "'_module_indices' are INDEXES into the master 'index_dictionary.json' "
-            "Artifact keys are also A-prefixed IDs (e.g. A1, A2) mapping to the master dictionary. "
-            "Artifacts with zero consumers are omitted from this report entirely."
+            "Schema v3. Module identifiers are integer indexes into "
+            "the master index dictionary. Artifact identifiers are "
+            "A-prefixed IDs mapping to the master artifact dictionary. "
+            "Artifact definitions are stored once under 'artifacts'. "
+            "Shared-artifact structures contain references only. "
+            "Artifacts with zero consumers are omitted from this "
+            "compact report."
         ),
-        "runtime": report.get("runtime", {}),
-        "module_count": report.get("module_count"),
+        "runtime": report.get(
+            "runtime",
+            {},
+        ),
+        "module_count": report.get(
+            "module_count"
+        ),
         "full_artifact_count": full_artifact_count,
         "artifact_count": len(compact_artifacts),
-        "shared_artifact_count": report.get("shared_artifact_count"),
-        "artifacts": dict(sorted(compact_artifacts.items())),
-        # Keys only — look up in artifacts dict for details.
-        "shared_artifact_keys": [index_dict.get_artifact_id(k) for k in report.get("shared_artifact_keys", [])],
+        "shared_artifact_count": report.get(
+            "shared_artifact_count"
+        ),
+        "artifacts": dict(
+            sorted(
+                compact_artifacts.items(),
+                key=lambda item: item[0],
+            )
+        ),
+        "shared_artifact_keys": compact_shared_keys,
         "shared_usage_clusters": compact_clusters,
         "core_extraction_candidates": compact_candidates,
     }
 
-    # debug_info is attached by reporting.py AFTER report generation
-    # (see save_all_reports) - if it is already there, we copy it
-    # unmodified (it doesn't contain module IDs to compact).
     if "debug_info" in report:
         compact_report["debug_info"] = report["debug_info"]
 
@@ -308,9 +656,8 @@ def compact_artifact_report(report: dict, index_dict: IndexDictionary = None) ->
 # ==========================================================
 
 
-def _line(obj) -> str:
-    """Serializes a single object on one line, without extra spaces."""
-
+def _line(obj: Any) -> str:
+    """Serialize one JSON value into a single line."""
     return json.dumps(
         obj,
         ensure_ascii=False,
@@ -318,66 +665,83 @@ def _line(obj) -> str:
     )
 
 
-def save_compact_artifact_report(report: dict, path: str) -> None:
+def save_compact_artifact_report(
+    report: dict,
+    path: str,
+) -> None:
     """
-    Saves the COMPACT artifact report (result of compact_artifact_report)
-    in a "one block = one line" format.
+    Save a compact artifact report using one artifact per line.
 
-    Assumes the exact shape returned by compact_artifact_report:
-    "artifacts" and "shared_artifacts" keys are broken down into
-    multiple lines (one element each); all other top-level keys
-    (runtime, module_count, modules, shared_usage_clusters,
-    core_extraction_candidates, debug_info...) are saved as single,
-    one-line fields - they are small structures anyway.
+    Top-level metadata remains one JSON value per line.
+    The ``artifacts`` mapping is expanded so every artifact occupies
+    one line.
     """
-
-    from contextor.core.reporting_engine.formatting import resolve_report_path
+    from contextor.core.reporting_engine.formatting import (
+        resolve_report_path,
+    )
 
     target = resolve_report_path(path)
 
-    os.makedirs(target.parent, exist_ok=True)
+    os.makedirs(
+        target.parent,
+        exist_ok=True,
+    )
 
-    artifacts = report.get("artifacts", {})
-    shared_artifacts = report.get("shared_artifacts", [])
+    artifacts = report.get(
+        "artifacts",
+        {},
+    )
 
     other_fields = {
-        key: value for key, value in report.items() if key not in ("artifacts", "shared_artifacts")
+        key: value
+        for key, value in report.items()
+        if key != "artifacts"
     }
 
-    with open(target, "w", encoding="utf-8") as f:
+    with open(
+        target,
+        "w",
+        encoding="utf-8",
+    ) as f:
         f.write("{\n")
 
-        for key, value in other_fields.items():
-            f.write(f"  {_line(key)}: {_line(value)},\n")
+        top_level_items = list(
+            other_fields.items()
+        )
 
-        # --- artifacts: jeden artefakt = jeden wiersz ---
+        for index, (key, value) in enumerate(
+            top_level_items
+        ):
+            f.write(
+                f"  {_line(key)}: {_line(value)},\n"
+            )
 
         f.write('  "artifacts": {\n')
 
-        items = list(artifacts.items())
+        artifact_items = sorted(
+            artifacts.items(),
+            key=lambda item: str(item[0]),
+        )
 
-        for i, (key, value) in enumerate(items):
-            comma = "," if i < len(items) - 1 else ""
+        for index, (key, value) in enumerate(
+            artifact_items
+        ):
+            comma = (
+                ","
+                if index < len(artifact_items) - 1
+                else ""
+            )
 
-            f.write(f"    {_line(key)}: {_line(value)}{comma}\n")
+            f.write(
+                f"    {_line(key)}: {_line(value)}{comma}\n"
+            )
 
-        f.write("  },\n")
-
-        # --- shared_artifacts: jeden wpis = jeden wiersz ---
-
-        f.write('  "shared_artifacts": [\n')
-
-        for i, item in enumerate(shared_artifacts):
-            comma = "," if i < len(shared_artifacts) - 1 else ""
-
-            f.write(f"    {_line(item)}{comma}\n")
-
-        f.write("  ]\n")
+        f.write("  }\n")
         f.write("}\n")
 
 
 # ==========================================================
-# EXPORTS
+# PUBLIC EXPORTS
 # ==========================================================
 
 
@@ -386,4 +750,3 @@ __all__ = [
     "build_module_index",
     "save_compact_artifact_report",
 ]
-

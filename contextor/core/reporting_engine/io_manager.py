@@ -12,8 +12,19 @@ def _save_usage_sidecar(usage_sidecar: dict, path: str, log=None) -> None:
 
 
 def write_layer_reports(
-    repo_name: str, layer_name: str, layer_reports: dict[str, Any], log=None, layer_output_dir: str | None = None
+    repo_name: str,
+    layer_name: str,
+    layer_reports: dict[str, Any],
+    log=None,
+    layer_output_dir: str | None = None,
+    datestamp: str | None = None,
 ):
+    """Write layer-specific report files.
+
+    ``datestamp`` is accepted for API consistency with write_global_reports but
+    is deliberately not appended to filenames — layer report names are stable
+    and do not include a date suffix.
+    """
     base_dir = f"output/{layer_output_dir}" if layer_output_dir else "output"
     os.makedirs(base_dir, exist_ok=True)
     prefix = f"{base_dir}/{repo_name}_{layer_name}"

@@ -1,10 +1,10 @@
 """
-core/api/api_consumers.py
+contextor/core/api/api_consumers.py
 
 API CONSUMER AGGREGATOR
 
 Layer:
-    FACT AGGREGATION
+FACT AGGREGATION
 
 Responsibilities:
 
@@ -21,9 +21,8 @@ Does not do:
 
 Source of truth:
 
-    symbol_reference.py
+    contextor.core.reference.engine
 """
-
 
 # ==========================================================
 # NORMALIZATION
@@ -32,7 +31,7 @@ Source of truth:
 
 def _normalize_list(value):
     """
-    Normalizes the input structure.
+    Normalizes a collection of consumer module identifiers.
 
     Supports:
         None
@@ -40,11 +39,23 @@ def _normalize_list(value):
         set
         tuple
     """
-
     if not value:
         return []
 
     return sorted(set(value))
+
+
+def _normalize_detail(value):
+    """
+    Normalizes reference detail records.
+
+    Detail records are dictionaries and therefore must not be
+    passed through set() directly.
+    """
+    if not value:
+        return []
+
+    return list(value)
 
 
 # ==========================================================
@@ -57,26 +68,44 @@ def extract_api_consumers(symbols, references, signatures=None):
     Builds an API symbol consumers map.
 
     Parameters:
-
         symbols:
             List of module symbols.
 
         references:
-            Output from:
-                build_symbol_references()
-
+            Output from build_symbol_references().
 
     Returns:
-
         {
-            symbol:
-            {
-                consumers: [],
-                usage: {},
-                consumer_count: {}
+            symbol: {
+                "signature": str,
+                "consumers": [],
+                "usage": {},
+                "consumer_count": {},
             }
         }
 
+    Consumer classification is based exclusively on the reference
+    categories produced by the Symbol Reference Engine.
+
+    Usage categories are intentionally kept separate:
+
+        direct_calls
+            Confirmed runtime calls.
+
+        callback_calls
+            Confirmed callables passed as arguments.
+
+        event_bindings
+            Explicit event/subscription bindings.
+
+        api_imports
+            Confirmed imports.
+
+        inheritance
+            Confirmed inheritance relationships.
+
+    Ambiguous short-name matches are retained as diagnostic
+    evidence but never contribute to consumers or consumer_count.
     """
 
     result = {}
@@ -84,64 +113,139 @@ def extract_api_consumers(symbols, references, signatures=None):
     for symbol in symbols:
         reference = references.get(symbol, {})
 
-        direct_calls = _normalize_list(reference.get("called_by"))
+        # --------------------------------------------------
+        # CONFIRMED USAGE CATEGORIES
+        # --------------------------------------------------
 
-        callback_calls = _normalize_list(reference.get("callback_calls"))
+        direct_calls = _normalize_list(
+            reference.get("called_by")
+        )
 
-        event_bindings = _normalize_list(reference.get("event_bound_by"))
+        callback_calls = _normalize_list(
+            reference.get("callback_called")
+            or reference.get("callback_calls")
+        )
 
+        event_bindings = _normalize_list(
+            reference.get("event_bound_by")
+        )
+
+        api_imports = _normalize_list(
+            reference.get("imported_from")
+        )
+
+        inheritance = _normalize_list(
+            reference.get("inherited_by")
+        )
+
+        # Runtime calls mean actual invocation only.
         #
-        # Runtime = actual real calls
-        # Callback and event bindings are
-        # separated into distinct categories.
+        # Callback passing and event binding are separate
+        # semantic categories and must not be folded into
+        # direct_calls.
+        runtime_calls = direct_calls
+
+        # --------------------------------------------------
+        # AMBIGUOUS USAGE
+        # --------------------------------------------------
         #
-        runtime_calls = sorted(set(direct_calls + callback_calls))
+        # These matches originate exclusively from short-name
+        # fallback matching. They are diagnostic evidence only.
+        #
 
-        api_imports = _normalize_list(reference.get("imported_from"))
-
-        inheritance = _normalize_list(reference.get("inherited_by"))
-
-        # Matches hit EXCLUSIVELY via fallback by short name
-        # (see symbol_reference.py::_classify_match) -
-        # these are guesses. They never count towards consumers/consumer_count,
-        # but are worth exposing to the LLM instead of silently dropping the signal.
-        raw_ambiguous_detail = reference.get("called_by_ambiguous_detail", [])
+        raw_ambiguous_detail = reference.get(
+            "called_by_ambiguous_detail",
+            [],
+        )
 
         ambiguous_calls = []
-        _seen_amb = set()
+        seen_ambiguous = set()
+
         for item in raw_ambiguous_detail:
-            key = (item.get("module"), item.get("reason"))
-            if key not in _seen_amb:
-                _seen_amb.add(key)
-                # Dopisujemy confidence, zgodnie z wytycznymi Phase 7.1
-                item_copy = dict(item)
-                item_copy["confidence"] = 0.3
-                if item_copy["confidence"] >= 0.5:
-                    ambiguous_calls.append(item_copy)
+            if not isinstance(item, dict):
+                continue
 
-        ambiguous_calls = sorted(ambiguous_calls, key=lambda x: x["module"])
+            module = item.get("module")
+            reason = item.get("reason")
 
-        consumers = sorted(set(runtime_calls + event_bindings + api_imports + inheritance))
+            key = (module, reason)
 
-        consumers = [item for item in consumers if item != "core.api_consumers"]
+            if key in seen_ambiguous:
+                continue
+
+            seen_ambiguous.add(key)
+
+            item_copy = dict(item)
+
+            # Explicit heuristic confidence.
+            item_copy["confidence"] = 0.3
+
+            ambiguous_calls.append(item_copy)
+
+        ambiguous_calls.sort(
+            key=lambda item: (
+                item.get("module") or "",
+                item.get("line") or 0,
+            )
+        )
+
+        # --------------------------------------------------
+        # CONSUMERS
+        # --------------------------------------------------
+
+        consumers = sorted(
+            set(
+                runtime_calls
+                + callback_calls
+                + event_bindings
+                + api_imports
+                + inheritance
+            )
+        )
+
+        # Defensive self-reference filtering.
+        consumers = [
+            consumer
+            for consumer in consumers
+            if consumer != "core.api_consumers"
+            and consumer != "contextor.core.api.api_consumers"
+        ]
+
+        # --------------------------------------------------
+        # RESULT
+        # --------------------------------------------------
 
         result[symbol] = {
-            "signature": signatures.get(symbol, "") if signatures else "",
+            "signature": (
+                signatures.get(symbol, "")
+                if signatures
+                else ""
+            ),
             "consumers": consumers,
             "usage": {
                 "direct_calls": direct_calls,
-                "direct_calls_detail": reference.get("called_by_detail", []),
+                "direct_calls_detail": _normalize_detail(
+                    reference.get("called_by_detail")
+                ),
                 "callback_calls": callback_calls,
+                "callback_calls_detail": _normalize_detail(
+                    reference.get("callback_called_detail")
+                ),
                 "event_bindings": event_bindings,
-                "event_bindings_detail": reference.get("event_bound_by_detail", []),
+                "event_bindings_detail": _normalize_detail(
+                    reference.get("event_bound_by_detail")
+                ),
                 "runtime_calls": runtime_calls,
                 "api_imports": api_imports,
                 "inheritance": inheritance,
-                "inheritance_detail": reference.get("inherited_by_detail", []),
+                "inheritance_detail": _normalize_detail(
+                    reference.get("inherited_by_detail")
+                ),
                 "ambiguous_calls": ambiguous_calls,
             },
             "consumer_count": {
                 "total": len(consumers),
+                "direct_calls": len(direct_calls),
                 "callbacks": len(callback_calls),
                 "events": len(event_bindings),
                 "api_imports": len(api_imports),
@@ -150,11 +254,6 @@ def extract_api_consumers(symbols, references, signatures=None):
         }
 
     return result
-
-
-# ==========================================================
-# CONSUMER FILTERS
-# ==========================================================
 
 
 # ==========================================================
@@ -168,32 +267,30 @@ def summarize_api_consumers(consumers):
 
     Does not assess quality.
 
-    Przykład:
+    Example:
 
-    {
-        total_symbols: 10,
-        used_symbols: 7,
-        unused_symbols: 3
-    }
-
+        {
+            "total_symbols": 10,
+            "used_symbols": 7,
+            "unused_symbols": 3,
+        }
     """
 
     total = len(consumers)
-
     used = 0
 
     for item in consumers.values():
         usage = item.get("usage", {})
 
         has_activity = any(
-            usage.get(k)
-            for k in [
+            usage.get(key)
+            for key in (
                 "direct_calls",
                 "callback_calls",
                 "event_bindings",
                 "api_imports",
                 "inheritance",
-            ]
+            )
         )
 
         if has_activity:
@@ -206,12 +303,9 @@ def summarize_api_consumers(consumers):
     }
 
 
-# Removed build_api_consumers
-
 # ==========================================================
 # PUBLIC EXPORTS
 # ==========================================================
-
 
 __all__ = [
     "extract_api_consumers",

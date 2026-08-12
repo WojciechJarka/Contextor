@@ -12,7 +12,13 @@ from contextor.core.git.repo_state import is_git_repo
 
 def _run_git(args, cwd):
     try:
-        result = subprocess.run(["git"] + args, cwd=cwd, capture_output=True, text=True, check=True)
+        result = subprocess.run(
+            ["git"] + args,
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
         return result.stdout.strip()
     except Exception:
         return None
