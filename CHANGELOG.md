@@ -15,8 +15,28 @@
 
 ### Part III — LIVE model and LLM-oriented MCP tools
 
+- Added one authenticated localhost Canonical LIVE owner in RAM, shared by the
+  desktop watcher and MCP through revisioned IPC. Atomic disk snapshots are now
+  recovery state rather than the primary cross-process communication path.
+- Desktop startup reconnects to existing LIVE state and file create/edit/delete
+  events update it automatically after the initial full analysis. MCP refreshes
+  its local adapter whenever the shared revision advances; manual `update_file`
+  remains a fallback and routes through the shared owner when available.
+- Added the GUI `LIVE suite` button and pytest `live` marker. The complete Test
+  suite still includes LIVE, while the focused button runs only LIVE unit,
+  socket/process integration, watcher, restart, persistence and MCP regressions.
+  LIVE tests isolate output/cache/state paths from production directories.
+- Made project architecture, artifact blast radius, file-edit context and layer
+  isolation LIVE-first. Missing JSON reports no longer disable structural
+  answers; reports are optional metric/cluster enrichment and historical output.
 - Added persistent canonical LIVE state that survives MCP restarts and supports
   incremental file addition, modification and deletion without a global rebuild.
+- Added versioned ``describe_canonical_state`` and
+  ``query_canonical_projection`` endpoints. The v1 JSON query contract exposes
+  normalized modules, artifacts and dependencies with per-field operator
+  allowlists, deterministic ordering, strict null semantics, structural errors
+  and hard request/result limits; it never evaluates expressions or exposes
+  raw Python objects. Expression-based canonical queries are now legacy.
 - Added semantic file deltas for symbols, signatures, normalized AST body
   fingerprints, imports and removed artifacts. These complement—rather than
   replace—the normal source and Git diff.
@@ -32,7 +52,8 @@
   timeouts during long report generation.
 - Completed global analysis jobs now expose bounded parser/read coverage gaps
   through ``analysis_coverage.skipped_python_files``, including syntax-error
-  counts and the original indexer reason for each skipped Python file.
+  counts, structured first parser ``line_number`` and ``column_number`` when
+  available, and the original indexer reason for each skipped Python file.
 - `get_module_context` now combines current LIVE dependencies with clearly
   labelled saved or deferred metrics, including newly created modules before a
   full report refresh.

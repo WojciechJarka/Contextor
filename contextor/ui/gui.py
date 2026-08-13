@@ -10,6 +10,7 @@ from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
 from contextor.core.api.facade import ContextorFacade
+from contextor.core.live_state import DesktopLiveWatcher, connect_or_start
 from contextor.repo_generator import run_repo_generator
 from contextor.ui import theme
 from contextor.ui.exclude_check import check_stale_excludes
@@ -69,9 +70,13 @@ class ContextorGUI:
         self.exclude_win = None
         self.repo_builder_win = None
         self.parser_win = None
+        self.live_watcher = None
 
         self._check_stale_excludes()
         self._build_ui()
+
+        if self.repo_path_var.get() and Path(self.repo_path_var.get()).is_dir():
+            self.root.after_idle(lambda: self._start_live_watcher(self.repo_path_var.get()))
 
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
 
@@ -194,6 +199,14 @@ class ContextorGUI:
         )
         self.test_suite_btn.pack(side="left", padx=(PAD_SM, 0))
 
+        self.live_suite_btn = ttk.Button(
+            title_frame,
+            text="LIVE suite",
+            style="Ghost.TButton",
+            command=self.run_live_suite,
+        )
+        self.live_suite_btn.pack(side="left", padx=(PAD_SM, 0))
+
         sub_label = ttk.Label(
             header, text="Static architecture analysis · Read-only mode", style="Sub.TLabel"
         )
@@ -203,7 +216,11 @@ class ContextorGUI:
         )
         self.tooltip.bind_tooltip(
             self.test_suite_btn,
-            "Run Contextor's own test suite and report the results.",
+            "Run Contextor's complete test suite, including LIVE tests.",
+        )
+        self.tooltip.bind_tooltip(
+            self.live_suite_btn,
+            "Run only tests marked as part of the canonical LIVE system.",
         )
         self.tooltip.bind_tooltip(
             self.theme_btn,
@@ -491,18 +508,22 @@ class ContextorGUI:
             self.analyze_layer_btn,
             self.analyze_single_btn,
             self.test_suite_btn,
+            self.live_suite_btn,
         ]
 
-    def run_test_suite(self):
+    def _run_test_suite(self, *, live_only: bool):
         """
-        Runs Contextor's own test suite and reports the outcome.
+        Runs the selected Contextor test suite and reports the outcome.
         """
+
+        suite_title = "LIVE suite" if live_only else "Test suite"
 
         def task(log=None, progress_callback=None):
             return run_test_suite(
                 log=log,
                 progress_callback=progress_callback,
                 show_console=self.cmd_var.get(),
+                live_only=live_only,
             )
 
         def on_success(result):
@@ -510,21 +531,21 @@ class ContextorGUI:
 
             if result["exit_code"] == 0 and result["total"] > 0:
                 messagebox.showinfo(
-                    "Test suite passed",
+                    f"{suite_title} passed",
                     f"All {result['passed']} tests passed.\n\n{summary}",
                 )
                 return
 
-            messagebox.showwarning("Test suite failed", summary)
+            messagebox.showwarning(f"{suite_title} failed", summary)
 
         def on_error(exc):
             if isinstance(exc, TestSuiteUnavailable):
-                messagebox.showwarning("Test suite unavailable", str(exc))
+                messagebox.showwarning(f"{suite_title} unavailable", str(exc))
                 return
-            messagebox.showerror("Test suite", str(exc))
+            messagebox.showerror(suite_title, str(exc))
 
         def on_cancel():
-            messagebox.showinfo("Test suite", "Test run cancelled.")
+            messagebox.showinfo(suite_title, "Test run cancelled.")
 
         self.progress_bar.is_cancelled = False
 
@@ -541,6 +562,16 @@ class ContextorGUI:
             stop_button=self.stop_btn,
         )
 
+    def run_test_suite(self):
+        """Runs every test, including the canonical LIVE suite."""
+
+        self._run_test_suite(live_only=False)
+
+    def run_live_suite(self):
+        """Runs only tests marked for the canonical LIVE system."""
+
+        self._run_test_suite(live_only=True)
+
     def analyze(self):
         path = self.repo_path_var.get()
         if not path:
@@ -556,6 +587,7 @@ class ContextorGUI:
             return errors
 
         def on_success(errors):
+            self._start_live_watcher(path)
             if not errors:
                 messagebox.showinfo("OK", "No issues found. Repository is healthy!")
                 return
@@ -578,6 +610,21 @@ class ContextorGUI:
             cpu_indicator=self.cpu_indicator,
             stop_button=self.stop_btn,
         )
+
+    def _start_live_watcher(self, path):
+        """Connect desktop to the shared LIVE owner and watch this repository."""
+
+        if self.live_watcher:
+            self.live_watcher.stop()
+        client = connect_or_start(path)
+        from contextor.core.analysis.state_manager import load_engine_state
+        from contextor.core.paths import repo_cache_dir
+
+        state = load_engine_state(str(repo_cache_dir(path)), "")
+        if state is not None:
+            client.publish(state, origin="desktop_analysis")
+        self.live_watcher = DesktopLiveWatcher(path, client)
+        self.live_watcher.start()
 
     def analyze_layer(self):
         root_dir = self.repo_path_var.get()
@@ -681,6 +728,9 @@ class ContextorGUI:
 
     def on_closing(self):
         import re
+
+        if self.live_watcher:
+            self.live_watcher.stop()
 
         geom = self.root.geometry()
         m = re.match(r"^(\d+x\d+)([+-]?\d+)([+-]?\d+)$", geom.replace("+-", "-"))

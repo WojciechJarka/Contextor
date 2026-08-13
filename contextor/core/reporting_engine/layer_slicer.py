@@ -168,7 +168,15 @@ def _compute_layer_health(
         result["full_computation_triggered_by"] = trigger_reasons
 
     if layer_skipped:
-        result["skipped_files"] = [{"path": item.path, "reason": item.reason} for item in layer_skipped]
+        result["skipped_files"] = [
+            {
+                "path": item.path,
+                "reason": item.reason,
+                "line_number": getattr(item, "line_number", None),
+                "column_number": getattr(item, "column_number", None),
+            }
+            for item in layer_skipped
+        ]
 
     if report_header:
         result["report_header"] = {**report_header, "data_source": "layer"}

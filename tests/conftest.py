@@ -29,6 +29,20 @@ def isolated_dirs(tmp_path, monkeypatch):
     return tmp_path
 
 
+@pytest.fixture(autouse=True)
+def isolate_live_test_artifacts(request, tmp_path, monkeypatch):
+    """LIVE tests must never write reports or cache into production locations."""
+
+    if request.node.get_closest_marker("live") is None:
+        return
+    for variable, name in (
+        ("CONTEXTOR_CACHE_DIR", "live-cache"),
+        ("CONTEXTOR_STATE_DIR", "live-state"),
+        ("CONTEXTOR_OUTPUT_DIR", "live-output"),
+    ):
+        monkeypatch.setenv(variable, str(tmp_path / name))
+
+
 @pytest.fixture
 def sample_repo(tmp_path):
     """

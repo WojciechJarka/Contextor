@@ -182,7 +182,12 @@ warnings.filterwarnings("ignore")
 
 from fastmcp import FastMCP
 from contextor.core.api.facade import ContextorFacade
+from contextor.core.canonical_state_query import (
+    describe_contract as _describe_canonical_contract,
+    execute_projection as _execute_canonical_projection,
+)
 from contextor.core.paths import output_dir as resolve_output_dir
+from contextor.core.source import SourceError, read_source
 from contextor.core.report_query import (
     catalog_from_registry,
     filter_public_artifact_report,
@@ -203,6 +208,7 @@ mcp = FastMCP("Contextor")
 
 # Global state to maintain incremental engines across MCP sessions
 _live_engines: dict[str, Any] = {}
+_live_engine_revisions: dict[str, int] = {}
 _analysis_lock = threading.Lock()
 _analysis_job_lock = threading.RLock()
 _analysis_tasks: dict[str, Any] = {}
@@ -210,8 +216,10 @@ _analysis_jobs_by_repo: dict[str, str] = {}
 
 
 def _mcp_cache_root(root: Path) -> Path:
-    """Writable cache root dedicated to MCP analysis of this repository."""
-    return root / ".contextor" / "cache"
+    """Shared application cache root used by desktop and MCP."""
+    from contextor.core.paths import app_cache_dir
+
+    return app_cache_dir()
 
 
 def _analysis_job_dir(root: Path) -> Path:
@@ -236,7 +244,9 @@ def _write_analysis_job(root: Path, job: dict) -> None:
     directory = _analysis_job_dir(root)
     directory.mkdir(parents=True, exist_ok=True)
     target = _job_path(root, str(job["job_id"]))
-    temporary = target.with_suffix(".json.tmp")
+    # Job progress is written from worker threads and can also be observed by
+    # another MCP process. A per-write sibling avoids collisions on Windows.
+    temporary = target.with_name(f"{target.name}.{uuid4().hex}.tmp")
     payload = {**job, "updated_at": _utc_now()}
     with _analysis_job_lock:
         temporary.write_text(
@@ -463,10 +473,16 @@ async def _execute_analysis_job(
         )
         if job["operation"] == "project":
             _live_engines.pop(str(root), None)
-            if _get_or_init_engine(root) is None:
+            engine = _get_or_init_engine(root)
+            if engine is None:
                 raise RuntimeError(
                     "Analysis completed but canonical state could not be loaded."
                 )
+            from contextor.core.live_state import connect_or_start
+
+            live_client = connect_or_start(root)
+            published = live_client.publish(engine.state, origin="mcp_analysis")
+            _live_engine_revisions[str(root)] = int(published["revision"])
         job = {
             **job,
             **(analysis_outcome or {}),
@@ -558,17 +574,43 @@ def _get_or_init_engine(root: Path):
     Returns the live engine from RAM. If absent, HYDRATES from the .contextor cache.
     Does NOT silently trigger analyze_project.
     """
+    from contextor.core.live_state import connect
+
     engine = _live_engines.get(str(root))
+    client = connect(root)
+    if client:
+        remote = client.ping()
+        remote_revision = int(remote.get("revision", 0))
+        if remote_revision > _live_engine_revisions.get(str(root), -1):
+            snapshot = client.snapshot()
+            state = snapshot.get("state")
+            if state is not None:
+                from contextor.core.analysis.state_manager import FileStateManager
+                from contextor.core.analysis.incremental_engine import IncrementalAnalysisEngine
+                from contextor.core.paths import repo_cache_dir
+                from contextor.core.reporting_engine.persistent_registry import PersistentIdentityRegistry
+
+                manager = FileStateManager(str(repo_cache_dir(root)))
+                engine = IncrementalAnalysisEngine(
+                    state,
+                    PersistentIdentityRegistry(str(root)),
+                    manager,
+                    str(root),
+                )
+                _live_engines[str(root)] = engine
+                _live_engine_revisions[str(root)] = remote_revision
     if not engine:
         from contextor.core.analysis.state_manager import load_engine_state, FileStateManager
         from contextor.core.analysis.incremental_engine import IncrementalAnalysisEngine
+        from contextor.core.live_state import read_metadata
         from contextor.core.paths import repo_key
         from contextor.core.reporting_engine.persistent_registry import PersistentIdentityRegistry
         
         cache_dir = str(_mcp_cache_root(root) / repo_key(root))
-        state_mgr = FileStateManager(cache_dir)
-        state = load_engine_state(cache_dir, getattr(state_mgr, "state_id", ""))
+        metadata = read_metadata(cache_dir)
+        state = load_engine_state(cache_dir, metadata.state_id if metadata else "")
         if state:
+            state_mgr = FileStateManager(cache_dir)
             registry = PersistentIdentityRegistry(str(root))
             engine = IncrementalAnalysisEngine(state, registry, state_mgr, str(root))
             _live_engines[str(root)] = engine
@@ -588,6 +630,7 @@ def _persist_live_engine(root: Path, engine) -> bool:
             engine.state,
             str(cache_dir),
             getattr(engine.state_manager, "state_id", ""),
+            writer="mcp",
         )
     )
 
@@ -711,7 +754,7 @@ def _symbol_signature(node: ast.AST) -> str:
 
 def _ast_symbol_candidates(path: Path, requested_symbol: str) -> list[dict]:
     """Find complete class/function/method AST nodes matching one symbol name."""
-    source = path.read_text(encoding="utf-8")
+    source = read_source(path)
     tree = ast.parse(source, filename=str(path))
     lines = source.splitlines(keepends=True)
     normalized = requested_symbol.split("::", 1)[-1].strip()
@@ -741,6 +784,7 @@ def _ast_symbol_candidates(path: Path, requested_symbol: str) -> list[dict]:
                 "kind": kind,
                 "node": node,
                 "source": source_text,
+                "source_lines": lines,
                 "docstring": docstring,
                 "start_line": start_line,
                 "end_line": end_line,
@@ -846,9 +890,7 @@ def _symbol_preview(root: Path, candidate: dict, member_limit: int | None) -> di
                 or [child.lineno]
             )
             end_line = getattr(child, "end_lineno", child.lineno)
-            member_source = "".join(
-                Path(candidate["file_path"]).read_text(encoding="utf-8").splitlines(keepends=True)[start_line - 1 : end_line]
-            )
+            member_source = "".join(candidate["source_lines"][start_line - 1 : end_line])
             members.append(
                 {
                     "name": child.name,
@@ -933,8 +975,31 @@ def _static_test_reachability(
     ]
 
 
+# Keep well below the host tool-transport context threshold.  This is a
+# transport guard, not a limit on canonical-state data held in memory.
+_LEGACY_QUERY_MAX_RESPONSE_BYTES = 12 * 1024
+
+
+def _legacy_query_value_summary(value) -> dict:
+    """Describe a legacy query value without returning its nested payload."""
+    if isinstance(value, dict):
+        keys = [str(key) for key in value]
+        preview = keys[:20]
+        return {
+            "type": "dict",
+            "total_keys": len(keys),
+            "keys": preview,
+            "keys_truncated": len(preview) < len(keys),
+        }
+    if isinstance(value, (list, tuple, set)):
+        return {"type": type(value).__name__, "total_items": len(value)}
+    if isinstance(value, str):
+        return {"type": "string", "characters": len(value)}
+    return {"type": type(value).__name__}
+
+
 def _bounded_query_result(value, limit: int | None) -> dict:
-    """Wrap and bound a top-level canonical-state query result."""
+    """Wrap a legacy query result and prevent one nested record overfilling MCP."""
     if isinstance(value, dict):
         selected, total, truncated = _bounded_items(list(value.items()), limit)
         result = dict(selected)
@@ -948,11 +1013,31 @@ def _bounded_query_result(value, limit: int | None) -> dict:
         total = 1
         truncated = False
         result_type = type(value).__name__
-    return {
+    bounded = {
         "result": result,
         "result_type": result_type,
         "total_items": total,
         "truncated": truncated,
+    }
+    encoded = json.dumps(bounded, indent=2).encode("utf-8")
+    if len(encoded) <= _LEGACY_QUERY_MAX_RESPONSE_BYTES:
+        return bounded
+
+    return {
+        "result": {
+            "status": "payload_too_large",
+            "preview": _legacy_query_value_summary(result),
+        },
+        "result_type": result_type,
+        "total_items": total,
+        "truncated": truncated,
+        "payload_truncated": True,
+        "original_response_bytes": len(encoded),
+        "max_response_bytes": _LEGACY_QUERY_MAX_RESPONSE_BYTES,
+        "recommendation": (
+            "Project scalar fields in the legacy expression, or use "
+            "describe_canonical_state followed by query_canonical_projection."
+        ),
     }
 
 
@@ -1088,7 +1173,9 @@ def get_analysis_status(
 
     A completed global project job includes ``analysis_coverage`` when its
     indexer finished: ``skipped_python_files`` reports files that could not be
-    statically analyzed, their parser/read reason, and ``syntax_error_count``.
+    statically analyzed, their parser/read reason, structured ``line_number``
+    and ``column_number`` when parser coordinates exist, and
+    ``syntax_error_count``.
     ``max_skipped_files`` bounds returned entries (default 10); pass ``None``
     for every skipped file. ``total`` and ``truncated`` make the coverage gap
     explicit. Layer and single-file jobs do not claim global coverage.
@@ -1129,6 +1216,55 @@ def get_analysis_status(
 
 
 @mcp.tool()
+def get_live_events(
+    repo_path: str,
+    after_revision: int | None = None,
+    limit: int | None = 20,
+) -> str:
+    """Return revisioned desktop/MCP LIVE events since a known revision.
+
+    Events are retained in RAM by the shared LIVE owner (most recent 100).
+    Each event identifies its ``origin`` (``desktop_watcher``,
+    ``mcp_analysis`` or ``mcp``), operation, status and file path. Syntax
+    failures additionally expose ``error``, ``line_number`` and
+    ``column_number``. The response always includes the current ``revision``,
+    ``total`` and ``truncated``; ``limit`` defaults to 20 and may be ``None``
+    for all retained events.
+
+    LLM workflow after every file edit:
+    - If the desktop app is running, do *not* call ``update_file``. Its watcher
+      owns the update. Poll this tool with the last observed revision until the
+      desktop event arrives, then react to its status before further edits.
+    - If the desktop app is not running, call ``update_file`` after every edit,
+      then call this tool to confirm the revision and diagnostics.
+
+    MCP cannot push unsolicited messages into an idle model; this bounded,
+    revisioned feed is the reliable pull mechanism for continuous LIVE state.
+    """
+    root = Path(repo_path).expanduser().resolve()
+    if after_revision is not None and (
+        isinstance(after_revision, bool) or after_revision < 0
+    ):
+        return json.dumps({"status": "error", "error": "invalid_after_revision"}, indent=2)
+    if limit is not None and (
+        isinstance(limit, bool) or not isinstance(limit, int) or limit < 1
+    ):
+        return json.dumps({"status": "error", "error": "invalid_limit"}, indent=2)
+    from contextor.core.live_state import connect
+
+    client = connect(root)
+    if client is None:
+        return json.dumps(
+            {"status": "no_live_service", "repo_path": str(root), "events": [], "total": 0, "truncated": False},
+            indent=2,
+        )
+    try:
+        return json.dumps(client.get_events(after_revision=after_revision, limit=limit), indent=2)
+    except (OSError, EOFError, RuntimeError) as exc:
+        return json.dumps({"status": "error", "error": str(exc)}, indent=2)
+
+
+@mcp.tool()
 def update_file(
     repo_path: str,
     file_path: str,
@@ -1138,8 +1274,10 @@ def update_file(
 ) -> str:
     """
     [OPTIMIZED] Incremental architectural update for a modified file.
-    Updates the canonical state and graph structure in real-time.
-    Requires `analyze_project` to have been run at least once during this session.
+    Updates the canonical state and graph structure in real-time. When the
+    shared LIVE service is available, the update executes in its owner process
+    so desktop and MCP observe the same revision; otherwise the hydrated local
+    engine remains a fallback. Requires a completed project analysis.
 
     Semantic-diff collections always expose ``total`` and ``truncated``. The
     default compact response omits ``items``; set ``compact=False`` for bounded
@@ -1151,11 +1289,16 @@ def update_file(
     ``runtime_restart_required``; ``delta`` and runtime warning fields are
     conditional. Invalid projections return the current allowlist.
 
-    LLM use: call this after each edit instead of rebuilding every report. Read
-    ``semantic_diff`` for added/removed symbols and signature changes, then use
-    normal code diff for line-level meaning. ``bodies_changed`` uses normalized
-    AST fingerprints to flag body-only edits without sending body text; it does
-    not explain their meaning. Consumption/global metrics may be deferred.
+    LLM use after every file edit: if the desktop app is running, its watcher
+    owns the update. Do not call this tool; poll ``get_live_events`` from the
+    last revision until the ``desktop_watcher`` event reports the result. If
+    desktop is not running, call this tool after every edit, then poll
+    ``get_live_events`` to confirm the shared revision and any syntax
+    diagnostic. Read ``semantic_diff`` for added/removed symbols and signature
+    changes, then use normal code diff for line-level meaning. ``bodies_changed``
+    uses normalized AST fingerprints to flag body-only edits without sending
+    body text; it does not explain their meaning. Consumption/global metrics
+    may be deferred.
     Editing this MCP server file updates disk and canonical state, but not the
     code already loaded by the running MCP process; restart the server whenever
     ``runtime_restart_required`` is true, then verify the tool live.
@@ -1175,12 +1318,24 @@ def update_file(
         rel_path = target_file.relative_to(root)
         module_path = ".".join(rel_path.with_suffix("").parts)
         old_artifacts = engine.state.artifacts.get(module_path, {})
-        res = engine.update_file(str(target_file))
-        live_state_persisted = (
-            _persist_live_engine(root, engine)
-            if res.status in {"UPDATED", "DELETED"}
-            else True
-        )
+        from contextor.core.live_state import connect
+
+        live_client = connect(root)
+        if live_client:
+            remote = live_client.update_file(str(target_file), origin="mcp")
+            if remote.get("status") != "ok":
+                raise RuntimeError(remote.get("error", "Shared LIVE update failed."))
+            res = remote["result"]
+            _live_engine_revisions[str(root)] = int(remote["revision"]) - 1
+            engine = _get_or_init_engine(root)
+            live_state_persisted = True
+        else:
+            res = engine.update_file(str(target_file))
+            live_state_persisted = (
+                _persist_live_engine(root, engine)
+                if res.status in {"UPDATED", "DELETED"}
+                else True
+            )
         new_artifacts = engine.state.artifacts.get(module_path, {})
         semantic_diff = _semantic_artifact_diff(old_artifacts, new_artifacts)
         result = {
@@ -1255,7 +1410,7 @@ def get_project_architecture(
     independently to every collection; pass ``None`` for all items. ``fields``
     projects top-level keys after compact shaping. Allowed values are
     ``action_items``, ``debt_summary``, ``layer_index``,
-    ``top_global_hotspots``, and ``module_count``.
+    ``top_global_hotspots``, ``module_count``, and ``data_source``.
 
     LLM use: start compact with the default limit. Increase it only when a
     relevant collection is truncated, or pass ``None`` after explicitly
@@ -1264,12 +1419,22 @@ def get_project_architecture(
     root = Path(repo_path).expanduser().resolve()
     repo_name = root.name
     
-    summary_path = _get_canonical_report(root, f"{repo_name}_summary.json")
-    if not summary_path:
-        return f"Error: No summary report found for {repo_name}. Run analyze_project first."
-        
     try:
-        summary = json.loads(summary_path.read_text(encoding="utf-8"))
+        summary_path = _get_canonical_report(root, f"{repo_name}_summary.json")
+        engine = _get_or_init_engine(root)
+        if summary_path:
+            summary = json.loads(summary_path.read_text(encoding="utf-8"))
+            data_source = "current_summary_report"
+        elif engine:
+            layer_info = engine.state.layer_information or {}
+            summary = dict(layer_info.get("summary_data", {}) or {})
+            summary.setdefault("layer_index", layer_info.get("layer_index", []))
+            summary.setdefault("top_hotspots", layer_info.get("hotspots", []))
+            summary.setdefault("debt_summary", layer_info.get("debt", {}))
+            summary.setdefault("metrics", {"nodes": len(engine.state.modules)})
+            data_source = "live_canonical_state"
+        else:
+            return f"Error: No LIVE state or summary report found for {repo_name}. Run analyze_project first."
         
         collections = {}
         for key, source_key in (
@@ -1287,7 +1452,8 @@ def get_project_architecture(
         result = {
             **collections,
             "debt_summary": summary.get("debt_summary", {}),
-            "module_count": summary.get("metrics", {}).get("nodes", 0)
+            "module_count": summary.get("metrics", {}).get("nodes", 0),
+            "data_source": data_source,
         }
         if fields is not None:
             allowed_fields = set(result)
@@ -1491,8 +1657,9 @@ def get_artifact_blast_radius(
 ) -> str:
     """
     [OPTIMIZED] Resolves direct, evidence-backed consumers of an artifact.
-    Uses the current compact artifact report and reports its evidence scope;
-    it does not claim that dynamic Python usage can be proven exact.
+    Uses canonical LIVE symbol consumption first and falls back to the current
+    compact artifact report. It does not claim that dynamic Python usage can
+    be proven exact.
 
     ``consumers`` always contains ``total`` and ``truncated``. The default
     compact response omits ``items``; set ``compact=False`` for bounded static
@@ -1508,7 +1675,70 @@ def get_artifact_blast_radius(
     repo_name = root.name
     
     try:
-        _, mod_id_to_path, _, art_id_to_path = _read_registries(root)
+        _, mod_id_to_path, art_path_to_id, art_id_to_path = _read_registries(root)
+        engine = _get_or_init_engine(root)
+        if engine:
+            live_matches = []
+            for module_name, artifact_state in engine.state.artifacts.items():
+                for local_name in artifact_state.get("own_symbols", []) or []:
+                    full_name = f"{module_name}::{local_name}"
+                    if full_name != artifact_name and local_name != artifact_name:
+                        continue
+                    symbols = artifact_state.get("symbols", {}) or {}
+                    kinds = [
+                        kind
+                        for category, kind in (
+                            ("classes", "class"),
+                            ("functions", "function"),
+                            ("methods", "method"),
+                            ("globals", "global"),
+                        )
+                        if local_name in (symbols.get(category, []) or [])
+                    ]
+                    consumer_state = (artifact_state.get("consumers", {}) or {}).get(
+                        local_name, {}
+                    )
+                    live_matches.append(
+                        {
+                            "artifact": full_name,
+                            "artifact_id": art_path_to_id.get(full_name),
+                            "kind": kinds[0] if len(kinds) == 1 else "ambiguous",
+                            "definer": module_name,
+                            "consumer_items": sorted(
+                                consumer_state.get("consumers", []) or []
+                            ),
+                        }
+                    )
+            if live_matches:
+                selected = sorted(live_matches, key=lambda item: item["artifact"])[0]
+                consumer_items, consumer_total, consumer_truncated = _bounded_items(
+                    selected.pop("consumer_items"), max_items
+                )
+                result = {
+                    **selected,
+                    "consumers": {
+                        "total": consumer_total,
+                        "truncated": consumer_truncated,
+                    },
+                    "evidence_scope": "direct_static_artifact_consumption",
+                    "data_source": "live_canonical_state",
+                }
+                if not compact:
+                    result["consumers"]["items"] = consumer_items
+                if fields is not None:
+                    unknown_fields = sorted(set(fields) - set(result))
+                    if unknown_fields:
+                        return json.dumps(
+                            {
+                                "error": "Unsupported fields for get_artifact_blast_radius",
+                                "unknown_fields": unknown_fields,
+                                "allowed_fields": sorted(result),
+                            },
+                            indent=2,
+                        )
+                    result = {field: result[field] for field in fields}
+                return json.dumps(result, indent=2)
+
         candidates = [
             (art_id, full_name)
             for art_id, full_name in art_id_to_path.items()
@@ -1810,7 +2040,7 @@ def get_symbol_implementation(
         candidates = []
         for path in _resolve_symbol_source_paths(root, file_paths):
             candidates.extend(_ast_symbol_candidates(path, symbol))
-    except (OSError, SyntaxError, UnicodeDecodeError, ValueError) as exc:
+    except (OSError, SyntaxError, UnicodeDecodeError, SourceError, ValueError) as exc:
         return json.dumps({"status": "error", "error": str(exc)}, indent=2)
 
     if not candidates:
@@ -1904,7 +2134,7 @@ def get_symbol_implementation(
     if "static_context" in selected_sections:
         result["static_context"] = _symbol_static_context(root, candidate)
     if "methods" in selected_sections:
-        source_lines = Path(candidate["file_path"]).read_text(encoding="utf-8").splitlines(keepends=True)
+        source_lines = read_source(Path(candidate["file_path"])).splitlines(keepends=True)
         available_methods = {
             child.name: child
             for child in node.body
@@ -1952,7 +2182,9 @@ def get_file_edit_context(
 ) -> str:
     """
     [OPTIMIZED] Specialized single-shot context pill for LLMs prior to editing a file.
-    Combines module metrics, API signature blast radius, and dependency trees into one response.
+    Combines LIVE module/API/dependency state in one response. Saved reports
+    enrich risk and layer metrics when available but are never required when
+    canonical LIVE state exists.
     By default returns a compact decision summary: identity, risk, data sources,
     and collection metadata. Set ``compact=False`` to include bounded ``items``
     (or ``tests`` for ``tests_covering``) in the same nested collection objects.
@@ -2001,15 +2233,20 @@ def get_file_edit_context(
     
     ga_path = _get_canonical_report(root, f"{repo_name}_graph_analytics.json")
     art_path = _get_canonical_report(root, f"{repo_name}_artifacts_compact.json")
-    
-    if not (ga_path and art_path):
-        return "Error: Missing required reports. Run analyze_project first."
+    engine = _get_or_init_engine(root)
+
+    if not (ga_path and art_path) and not engine:
+        return "Error: No canonical LIVE state or required reports. Run analyze_project first."
         
     try:
-        ga = json.loads(ga_path.read_text(encoding="utf-8"))
-        art_comp = json.loads(art_path.read_text(encoding="utf-8"))
+        ga = json.loads(ga_path.read_text(encoding="utf-8")) if ga_path else {}
+        art_comp = json.loads(art_path.read_text(encoding="utf-8")) if art_path else {}
         
         mod_info = ga.get("modules", {}).get(module_name, {})
+        if not mod_info and engine:
+            state_metrics = getattr(engine.state, "metrics", {}) or {}
+            candidate_metrics = state_metrics.get(module_name, {}) if isinstance(state_metrics, dict) else {}
+            mod_info = candidate_metrics if isinstance(candidate_metrics, dict) else {}
         
         # Prefer real hotspot score from summary.json, fall back to centrality proxy
         risk_score = 0.0
@@ -2027,19 +2264,28 @@ def get_file_edit_context(
             risk_score = round(
                 (mod_info.get("betweenness", 0) + mod_info.get("hub_score", 0)) / 2, 4
             )
+        if risk_score == 0.0 and engine:
+            for hotspot in (getattr(engine.state, "layer_information", {}) or {}).get("hotspots", []) or []:
+                if hotspot.get("module") == module_name:
+                    risk_score = hotspot.get("score", 0.0)
+                    break
         
         # We must read registries OUTSIDE the transaction block to avoid Resource Deadlock
         mod_path_to_id, mod_id_to_path, art_path_to_id, art_id_to_path = _read_registries(root)
-        mod_id = mod_path_to_id.get(module_name)
+        live_module = engine.state.modules.get(module_name) if engine else None
+        mod_id = mod_path_to_id.get(module_name) or getattr(live_module, "module_id", None)
         if not mod_id:
-            return f"Error: Module '{module_name}' is not present in the current registry."
+            if live_module is None:
+                if ga_path or art_path:
+                    return f"Error: Module '{module_name}' is not present in the current registry."
+                return f"Error: Module '{module_name}' is not present in canonical LIVE state."
+            mod_id = module_name
             
         imports = []
         consumers = []
         dependency_data_source = "saved_graph_analytics"
         artifact_data_source = "saved_artifacts_compact"
         matrix = ga.get("module_dependency_matrix", {})
-        engine = _get_or_init_engine(root)
         live_graph = engine.state.dependency_graph if engine else None
         reachability_hard = {}
         reachability_soft = {}
@@ -2048,22 +2294,14 @@ def get_file_edit_context(
             reachability_soft = live_graph.soft_edges
             target_modules = set(live_graph.hard_edges.get(module_name, set()))
             target_modules.update(live_graph.soft_edges.get(module_name, set()))
-            imports = [
-                mod_path_to_id[target]
-                for target in sorted(target_modules)
-                if target in mod_path_to_id
-            ]
+            imports = [mod_path_to_id.get(target, target) for target in sorted(target_modules)]
             consumer_modules = {
                 source
                 for edge_map in (live_graph.hard_edges, live_graph.soft_edges)
                 for source, targets in edge_map.items()
                 if module_name in targets
             }
-            consumers = [
-                mod_path_to_id[source]
-                for source in sorted(consumer_modules)
-                if source in mod_path_to_id
-            ]
+            consumers = [mod_path_to_id.get(source, source) for source in sorted(consumer_modules)]
             dependency_data_source = "live_canonical_graph"
         else:
             if mod_id in matrix:
@@ -2095,6 +2333,16 @@ def get_file_edit_context(
                 ):
                     continue
                 public_api[str(art_id)] = full_name
+            live_symbols = engine.state.artifacts[module_name].get("own_symbols", []) or []
+            for local_name in sorted(live_symbols):
+                leaf = str(local_name).rsplit(".", 1)[-1]
+                if leaf.startswith("_") and not (
+                    leaf.startswith("__") and leaf.endswith("__")
+                ):
+                    continue
+                full_name = prefix + str(local_name)
+                artifact_key = str(art_path_to_id.get(full_name, full_name))
+                public_api.setdefault(artifact_key, full_name)
             artifact_data_source = "live_registry_and_symbol_state"
         elif "module_artifacts" in art_comp and mod_id in art_comp["module_artifacts"]:
             for art_id in art_comp["module_artifacts"][mod_id]:
@@ -2173,7 +2421,10 @@ def get_file_edit_context(
             },
             "imports": {
                 "items": [
-                    {"module_id": item, "module": mod_id_to_path.get(item)}
+                    {
+                        "module_id": mod_path_to_id.get(item, item),
+                        "module": mod_id_to_path.get(item, item),
+                    }
                     for item in import_items
                 ],
                 "total": imports_total,
@@ -2181,7 +2432,10 @@ def get_file_edit_context(
             },
             "consumers": {
                 "items": [
-                    {"module_id": item, "module": mod_id_to_path.get(item)}
+                    {
+                        "module_id": mod_path_to_id.get(item, item),
+                        "module": mod_id_to_path.get(item, item),
+                    }
                     for item in consumer_items
                 ],
                 "total": consumers_total,
@@ -2251,10 +2505,9 @@ def get_layer_isolation(
     [OPTIMIZED] Extracts isolation metrics, clusters, and leaks for a specific architectural layer.
     Use this before refactoring a large component to understand its internal cohesion.
 
-    Reads the layer report from the same central output directory used by the
-    desktop GUI, CLI, and ``analyze_layer``. Reports are never expected inside
-    the analyzed repository. Run ``analyze_layer`` first when no matching
-    dedicated report exists.
+    Uses a dedicated layer report when present and otherwise derives bounded
+    boundary evidence from canonical LIVE state. Reports enrich clusters and
+    metrics but are not required for structural isolation.
 
     ``max_clusters`` and ``max_boundary_violations`` bound verbose evidence.
     Collections always expose ``total`` and ``truncated``. The compact default
@@ -2283,6 +2536,78 @@ def get_layer_isolation(
     # Try to find layer-specific report in high_risk_layers
     ga_path = _get_canonical_report(root, f"{repo_name}_{normalized_layer_name}_graph_analytics.json")
     if not ga_path:
+        engine = _get_or_init_engine(root)
+        if engine and engine.state.dependency_graph:
+            graph = engine.state.dependency_graph
+            layer_modules = {
+                name
+                for name in engine.state.modules
+                if name == requested_layer or name.startswith(requested_layer + ".")
+            }
+            if layer_modules:
+                boundary_edges = []
+                dependency_types = {"hard": 0, "soft": 0}
+                for edge_type, edge_map in (
+                    ("hard", graph.hard_edges),
+                    ("soft", graph.soft_edges),
+                ):
+                    for source, targets in edge_map.items():
+                        for target in targets:
+                            source_inside = source in layer_modules
+                            target_inside = target in layer_modules
+                            if source_inside:
+                                dependency_types[edge_type] += 1
+                            if source_inside != target_inside:
+                                boundary_edges.append(
+                                    {
+                                        "from": source,
+                                        "to": target,
+                                        "edge_type": edge_type,
+                                        "direction": "outbound" if source_inside else "inbound",
+                                    }
+                                )
+                items, total, truncated = _bounded_items(
+                    sorted(
+                        boundary_edges,
+                        key=lambda item: (
+                            item["from"], item["to"], item["edge_type"]
+                        ),
+                    ),
+                    max_boundary_violations,
+                )
+                result = {
+                    "layer": requested_layer,
+                    "report_layer": normalized_layer_name,
+                    "data_source": "live_canonical_graph",
+                    "module_count": len(layer_modules),
+                    "clusters": {
+                        "total": 0,
+                        "truncated": False,
+                        "available": False,
+                    },
+                    "dependency_types": dependency_types,
+                    "boundary_violations": {
+                        "total": total,
+                        "truncated": truncated,
+                        "evidence_scope": "cross_boundary_edges_not_policy_violations",
+                    },
+                }
+                if not compact:
+                    result["clusters"]["items"] = []
+                    result["boundary_violations"]["items"] = items
+                if fields is not None:
+                    unknown_fields = sorted(set(fields) - set(result))
+                    if unknown_fields:
+                        return json.dumps(
+                            {
+                                "error": "Unsupported fields for get_layer_isolation",
+                                "unknown_fields": unknown_fields,
+                                "allowed_fields": sorted(result),
+                            },
+                            indent=2,
+                        )
+                    result = {field: result[field] for field in fields}
+                return json.dumps(result, indent=2)
         # Fallback to global summary if layer report doesn't exist
         summary_path = _get_canonical_report(root, f"{repo_name}_summary.json")
         if not summary_path:
@@ -2497,7 +2822,10 @@ def _execute_canonical_query(engine: object, python_filter_expression: str) -> s
 @mcp.tool()
 def query_canonical_state(repo_path: str, python_filter_expression: str) -> str:
     """
-    [ADVANCED] Allows you to run a safe Python list-comprehension or filter on the LIVE canonical state!
+    [DEPRECATED] Executes a restricted Python expression against LIVE state.
+    Kept temporarily for migration compatibility. It receives no new features;
+    prefer ``describe_canonical_state`` followed by
+    ``query_canonical_projection`` for versioned, normalized, bounded queries.
     The live objects are loaded into variables: 'modules', 'artifacts', 'dependency_graph', 'registry'.
     Example expression: "[m_path for m_path, mod in modules.items() if len(mod.imports) > 20]"
 
@@ -2521,15 +2849,23 @@ def query_canonical_state_bounded(
     limit: int | None = 100,
 ) -> str:
     """
-    [OPTIMIZED] Runs the same restricted expression as
+    [DEPRECATED] Runs the same restricted expression as
     ``query_canonical_state`` but bounds top-level list/dict results.
+
+    Kept temporarily for migration compatibility. Prefer
+    ``describe_canonical_state`` and ``query_canonical_projection``; the new
+    path does not expose Python objects or evaluate expressions.
 
     Prefer this tool for exploration. The response includes ``total_items``
     and ``truncated`` so an LLM can refine the expression or raise ``limit``
     only when omitted items matter. Select narrow scalar fields in the
     expression when individual nested values may themselves be large.
     Pass ``limit=None`` only after explicitly choosing an unbounded top-level
-    result; nested values are never automatically compacted.
+    result. A legacy response with a nested value larger than 12 KiB is
+    replaced by a structured ``payload_too_large`` preview; it reports the
+    original size and directs the caller to a scalar expression or the
+    projection API. This transport safety fallback is independent of the
+    top-level ``limit``.
 
     LLM use: use this as an escape hatch for questions not covered by a
     dedicated tool. Prefer projected scalar fields and a small limit; it is a
@@ -2547,6 +2883,71 @@ def query_canonical_state_bounded(
     except (TypeError, json.JSONDecodeError):
         return raw
     return json.dumps(_bounded_query_result(value, limit), indent=2)
+
+
+@mcp.tool()
+def describe_canonical_state() -> str:
+    """Return the complete versioned contract for safe canonical LIVE queries.
+
+    This endpoint is passive discovery only: it returns ``SCHEMA_V1`` and
+    ``LANGUAGE_V1`` from the same constants used by query validation. It does
+    not read repository data, execute expressions, reflect over Python objects,
+    or fetch records. The response documents the three roots (``modules``,
+    ``artifacts``, ``dependencies``), every selectable field, per-field
+    operators, null semantics, canonical ordering and hard request limits.
+
+    LLM use: call this before composing a projection request or when a
+    structural validation error reports an unfamiliar field/operator. Cache by
+    ``schema_version`` and ``language_version``; do not treat it as repository
+    data or use it in place of ``query_canonical_projection``.
+    """
+    return json.dumps(_describe_canonical_contract(), indent=2, ensure_ascii=False)
+
+
+@mcp.tool()
+def query_canonical_projection(repo_path: str, request: dict[str, Any]) -> str:
+    """Execute a safe, bounded JSON query over normalized canonical LIVE data.
+
+    ``request`` must explicitly include ``schema_version``,
+    ``language_version``, ``root``, ``filters`` and ``select``. It may include
+    ``limit`` (default 20, maximum 200). Filters are a flat AND and use only the
+    operators declared for each field by ``describe_canonical_state``. Empty
+    ``filters`` matches all records; empty ``select`` returns every selectable
+    field. Results always report ``total_matches``, ``returned``, ``limit`` and
+    ``truncated``.
+
+    The executor first converts LIVE state to read-only JSON-safe records. It
+    never uses ``eval``, accepts no Python expressions, exposes no arbitrary
+    attributes and omits local absolute paths. Artifacts preserve the
+    distinction between confirmed zero consumers and unavailable consumption
+    data via ``consumer_data_available`` plus nullable consumer fields.
+    Structural errors return one deterministic error with ``code``, ``path``
+    and repair details.
+
+    LLM use: discover the contract first, request the smallest useful field
+    selection, and narrow filters when ``truncated`` is true. Use legacy
+    ``query_canonical_state*`` only for temporary migration gaps.
+    """
+    root = Path(repo_path).expanduser().resolve()
+    engine = _get_or_init_engine(root)
+    if not engine:
+        return json.dumps(
+            {
+                "status": "error",
+                "error": {
+                    "code": "canonical_state_unavailable",
+                    "message": "No live canonical state is available. Run analyze_project first.",
+                    "path": "repo_path",
+                    "details": {"repo_path": str(root)},
+                },
+            },
+            indent=2,
+        )
+    return json.dumps(
+        _execute_canonical_projection(engine.state, request),
+        indent=2,
+        ensure_ascii=False,
+    )
 
 
 # ==========================================================

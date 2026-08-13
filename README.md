@@ -48,11 +48,12 @@ Contextor natively supports the **Model Context Protocol**, allowing Large Langu
 
 - **Contextor Query Layer:** Instead of serving raw, massive JSON files, the server exposes highly targeted endpoints (e.g., `get_project_architecture`, `get_module_context`, `get_artifact_blast_radius`).
 - **Non-blocking Analysis Jobs:** Repository, layer, and single-file analyses return durable job IDs with progress status, so long report runs do not time out the MCP client.
-- **Automatic Path Resolution:** The LLM simply provides the repository path. The server automatically locates and parses the latest generated reports in the background without exposing raw file structures.
+- **Shared Canonical LIVE:** One authenticated localhost owner keeps the current repository state in RAM for both desktop and MCP. The desktop watcher publishes file changes automatically after the initial full analysis; revisioned disk snapshots are used only for recovery.
+- **LIVE-first Context:** Project architecture, file-edit safety, artifact blast radius and layer isolation use current LIVE state first. Saved reports enrich expensive metrics and historical evidence but are not required for structural answers.
 - **Bounded Context:** By merging data from multiple reports, the server delivers compact synthesized insights, resolves requested registry IDs, and exposes limits plus truncation counters for larger collections.
 - **Architectural Regression Analysis:** `get_report_diff` compares consecutive canonical runs—including working-tree states on the same commit—and surfaces changes in structural metrics, layers and technical debt.
 - **Focused Refactor Evidence:** Nested-layer isolation and static test-reachability paths through aliases, re-exports and facades give the LLM compact evidence without claiming runtime coverage.
-- **Restricted Advanced Filtering:** The `query_canonical_state` tool lets an LLM extract small subsets from live canonical state using a restricted expression environment. It is intended for targeted structural queries, not arbitrary code execution.
+- **Versioned LIVE Queries:** `describe_canonical_state` publishes the safe schema and operator contract, while `query_canonical_projection` performs bounded JSON queries over normalized modules, artifacts, and dependencies without evaluating Python expressions. The older `query_canonical_state` tools remain temporarily available for migration only.
 - **MCP Server Restart Boundary:** `update_file` synchronizes code on disk with Contextor's canonical state, but it cannot reload Python code already executing inside the MCP process. When the edited target is `contextor/mcp_server.py`, the response sets `runtime_restart_required: true`; restart the MCP server and verify the changed endpoint live before treating runtime behavior as current.
 
 ---

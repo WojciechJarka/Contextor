@@ -162,21 +162,18 @@ class FileStateManager:
         elif file_path in self._state:
             del self._state[file_path]
 
-ENGINE_CACHE_SCHEMA_VERSION = "1.0"
+ENGINE_CACHE_SCHEMA_VERSION = "1.1"
 
-def save_engine_state(state: RepositoryAnalysisState, cache_dir: str, state_id: str):
-    import pickle
-    import json
-    state_file = Path(cache_dir) / "engine_state.pkl"
-    meta_file = Path(cache_dir) / "engine_state.meta.json"
+def save_engine_state(
+    state: RepositoryAnalysisState,
+    cache_dir: str,
+    state_id: str,
+    *,
+    writer: str = "unknown",
+):
+    from contextor.core.live_state import save_snapshot
     try:
-        with open(state_file, "wb") as f:
-            pickle.dump(state, f)
-        with open(meta_file, "w", encoding="utf-8") as f:
-            json.dump({
-                "schema_version": ENGINE_CACHE_SCHEMA_VERSION,
-                "state_id": state_id
-            }, f, indent=2)
+        save_snapshot(state, cache_dir, state_id, writer=writer)
         return True
     except Exception as e:
         import sys
@@ -184,24 +181,10 @@ def save_engine_state(state: RepositoryAnalysisState, cache_dir: str, state_id: 
         return False
 
 def load_engine_state(cache_dir: str, expected_state_id: str) -> Optional[RepositoryAnalysisState]:
-    import pickle
-    import json
-    state_file = Path(cache_dir) / "engine_state.pkl"
-    meta_file = Path(cache_dir) / "engine_state.meta.json"
-    
-    if not state_file.exists() or not meta_file.exists():
-        return None
-        
+    from contextor.core.live_state import load_snapshot
     try:
-        with open(meta_file, "r", encoding="utf-8") as f:
-            meta = json.load(f)
-            if meta.get("schema_version") != ENGINE_CACHE_SCHEMA_VERSION:
-                return None
-            if expected_state_id and meta.get("state_id") != expected_state_id:
-                return None
-                
-        with open(state_file, "rb") as f:
-            return pickle.load(f)
+        loaded = load_snapshot(cache_dir, expected_state_id)
+        return loaded[0] if loaded else None
     except Exception as e:
         import sys
         print(f"Failed to load engine state: {e}", file=sys.stderr)

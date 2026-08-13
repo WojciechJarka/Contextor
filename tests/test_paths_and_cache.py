@@ -5,6 +5,10 @@ Path resolution and the per-file cache.
 from contextor.core.analysis.cache_manager import CacheManager
 from contextor.core.paths import output_dir, repo_cache_dir, repo_key
 
+import pytest
+
+pytestmark = pytest.mark.live
+
 
 def test_repo_key_distinguishes_same_named_repositories(tmp_path):
     first = tmp_path / "work" / "api"

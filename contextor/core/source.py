@@ -73,7 +73,10 @@ def parse_source(path: str | Path) -> ast.AST:
         return ast.parse(source)
 
     except SyntaxError as exc:
-        raise SourceError(f"is not valid Python (line {exc.lineno}: {exc.msg})") from None
+        location = f"line {exc.lineno}"
+        if exc.offset is not None:
+            location += f", column {exc.offset}"
+        raise SourceError(f"is not valid Python ({location}: {exc.msg})") from None
 
     except ValueError as exc:
         # ast.parse rejects sources containing null bytes.

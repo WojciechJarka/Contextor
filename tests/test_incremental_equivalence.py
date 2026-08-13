@@ -8,6 +8,8 @@ from contextor.core.reporting_engine.persistent_registry import PersistentIdenti
 from contextor.core.symbol_engine.indexer import index_repository
 from contextor.core.graph.graph import build_graph, build_trie, detect_package_root
 
+pytestmark = pytest.mark.live
+
 def bootstrap_state(root_path: Path, registry: PersistentIdentityRegistry) -> RepositoryAnalysisState:
     repo_index = index_repository(str(root_path))
     modules = repo_index.modules
@@ -291,6 +293,8 @@ def test_incremental_syntax_error(tmp_path):
     res = engine.update_file(str(file_a))
     
     assert res.status == "SYNTAX_ERROR"
+    assert res.line_number == 1
+    assert res.column_number == 9
     assert res.graph_state == "stale"  # Because we default to stale on error, or it just wasn't reached.
     assert id(engine.state.modules) == old_modules_id
     assert "foo" in engine.state.artifacts["a"]["own_symbols"]

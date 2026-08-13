@@ -2,6 +2,9 @@
 
 import json
 
+import pytest
+import threading
+
 from contextor import mcp_server
 from contextor.core.analysis.incremental_engine import IncrementalAnalysisEngine
 from contextor.core.analysis.state_manager import FileStateManager, RepositoryAnalysisState
@@ -13,6 +16,45 @@ from contextor.core.reporting_layer.artifact_usage_report import (
     collect_qualified_artifact_identities,
 )
 from contextor.core.symbol_engine.indexer import index_repository
+from contextor.core.live_state import CanonicalLiveServer, LiveStateClient
+
+pytestmark = pytest.mark.live
+
+
+def test_mcp_refreshes_its_engine_from_a_newer_shared_live_revision(tmp_path, monkeypatch):
+    first = RepositoryAnalysisState(modules={"old": object()})
+    second = RepositoryAnalysisState(modules={"new": object()})
+    server = CanonicalLiveServer(first)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    client = LiveStateClient(server.endpoint)
+    monkeypatch.setattr("contextor.core.live_state.connect", lambda _root: client)
+    monkeypatch.setattr(mcp_server, "_live_engines", {})
+    monkeypatch.setattr(mcp_server, "_live_engine_revisions", {})
+
+    class FakeManager:
+        state_id = ""
+
+        def __init__(self, _cache):
+            pass
+
+    class FakeEngine:
+        def __init__(self, state, *_args):
+            self.state = state
+
+    monkeypatch.setattr("contextor.core.analysis.state_manager.FileStateManager", FakeManager)
+    monkeypatch.setattr("contextor.core.analysis.incremental_engine.IncrementalAnalysisEngine", FakeEngine)
+    try:
+        initial = mcp_server._get_or_init_engine(tmp_path)
+        assert set(initial.state.modules) == {"old"}
+
+        client.publish(second)
+        refreshed = mcp_server._get_or_init_engine(tmp_path)
+        assert set(refreshed.state.modules) == {"new"}
+        assert refreshed is not initial
+    finally:
+        server.close()
+        thread.join(timeout=2)
 
 
 def test_update_persist_restart_hydrate_keeps_live_reverse_context(tmp_path, monkeypatch):

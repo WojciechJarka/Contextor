@@ -14,6 +14,8 @@ from contextor.core.symbol_engine.indexer import index_repository
 from contextor.core.graph.graph import build_graph, build_trie, detect_package_root
 from contextor.core.reporting_layer.artifact_usage_report import collect_module_artifacts, build_artifact_index
 
+pytestmark = pytest.mark.live
+
 
 def bootstrap_fresh_state(root_path: Path) -> RepositoryAnalysisState:
     """The Oracle: Generates a completely fresh state from the current filesystem."""

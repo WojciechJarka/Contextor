@@ -34,6 +34,9 @@ testpaths = ["tests"]
 # production code, not a test suite; restricting discovery to tests/
 # keeps pytest from collecting it.
 python_files = ["test_*.py"]
+markers = [
+    "live: canonical LIVE state, incremental updates, and MCP LIVE integration",
+]
 
 [tool.ruff]
 line-length = 100

@@ -286,9 +286,21 @@ class ContextorFacade:
                 dependency_graph=getattr(analysis_result, "graph", None),
                 trie=getattr(analysis_result, "trie", None),
                 package_root=getattr(analysis_result, "package_root", ""),
-                artifact_consumption={"_report": getattr(analysis_result, "compact_artifacts", {})}
+                artifact_consumption={"_report": getattr(analysis_result, "compact_artifacts", {})},
+                metrics=getattr(analysis_result, "metrics", {}),
+                layer_information={
+                    "layer_index": getattr(analysis_result, "layer_index", []),
+                    "hotspots": getattr(analysis_result, "hotspots", []),
+                    "debt": getattr(analysis_result, "debt", {}),
+                    "summary_data": getattr(analysis_result, "summary_data", {}),
+                },
             )
-            save_engine_state(state, str(repo_cache_dir(path)), datestamp)
+            save_engine_state(
+                state,
+                str(repo_cache_dir(path)),
+                datestamp,
+                writer="desktop",
+            )
 
         return errors, analysis_result
 

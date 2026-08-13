@@ -11,6 +11,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.live
+
 from contextor import mcp_process_registry, mcp_server
 from contextor.core.analysis import git_context
 from contextor.core.api.facade import ContextorFacade
@@ -20,6 +22,79 @@ from contextor.core.analysis.state_manager import (
 )
 from contextor.core.report_query import IndexCatalog, query_indexed_report
 from contextor.core.symbol_engine.extractor import extract_file_symbols
+
+
+def _live_engine_fixture():
+    graph = SimpleNamespace(
+        hard_edges={"pkg.module": {"pkg.dep"}, "tests.test_module": {"pkg.module"}},
+        soft_edges={"external.client": {"pkg.module"}},
+    )
+    module = SimpleNamespace(module_id="1/1", path="pkg/module.py", imports=[])
+    state = RepositoryAnalysisState(
+        modules={"pkg.module": module, "pkg.dep": object(), "tests.test_module": object()},
+        artifacts={
+            "pkg.module": {
+                "own_symbols": ["api"],
+                "symbols": {"functions": ["api"], "signatures": {"api": "api()"}},
+                "consumers": {
+                    "api": {
+                        "consumer_count": {"total": 1},
+                        "consumers": ["tests.test_module"],
+                    }
+                },
+            }
+        },
+        dependency_graph=graph,
+        metrics={"pkg.module": {"layer": "domain", "hub_score": 0.4}},
+        layer_information={
+            "layer_index": [{"layer": "pkg", "module_count": 2}],
+            "hotspots": [{"module": "pkg.module", "score": 0.7}],
+            "debt": {"score": 3},
+            "summary_data": {"action_items": ["review pkg.module"]},
+        },
+    )
+    return SimpleNamespace(state=state)
+
+
+def test_live_first_tools_work_without_any_saved_reports(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    target = repo / "pkg" / "module.py"
+    target.parent.mkdir(parents=True)
+    target.write_text("def api():\n    return 1\n", encoding="utf-8")
+    engine = _live_engine_fixture()
+    monkeypatch.setattr(mcp_server, "_get_canonical_report", lambda *_args: None)
+    monkeypatch.setattr(mcp_server, "_get_or_init_engine", lambda _root: engine)
+    monkeypatch.setattr(
+        mcp_server,
+        "_read_registries",
+        lambda _root: (
+            {"pkg.module": "1/1", "pkg.dep": "2/1", "tests.test_module": "3/1"},
+            {"1/1": "pkg.module", "2/1": "pkg.dep", "3/1": "tests.test_module"},
+            {"pkg.module::api": "A1/1"},
+            {"A1/1": "pkg.module::api"},
+        ),
+    )
+
+    architecture = json.loads(mcp_server.get_project_architecture.fn(str(repo)))
+    blast = json.loads(
+        mcp_server.get_artifact_blast_radius.fn(str(repo), "pkg.module::api", compact=False)
+    )
+    edit = json.loads(
+        mcp_server.get_file_edit_context.fn(
+            str(repo), "pkg/module.py", compact=False, max_items=10
+        )
+    )
+    layer = json.loads(mcp_server.get_layer_isolation.fn(str(repo), "pkg", compact=False))
+
+    assert architecture["data_source"] == "live_canonical_state"
+    assert architecture["module_count"] == 3
+    assert blast["data_source"] == "live_canonical_state"
+    assert blast["consumers"]["items"] == ["tests.test_module"]
+    assert edit["dependency_data_source"] == "live_canonical_graph"
+    assert edit["public_api"]["total"] == 1
+    assert edit["tests_covering"]["available"] is True
+    assert layer["data_source"] == "live_canonical_graph"
+    assert layer["module_count"] == 2
 
 
 def test_analysis_endpoint_returns_reusable_job_and_pollable_completion(
@@ -32,8 +107,16 @@ def test_analysis_endpoint_returns_reusable_job_and_pollable_completion(
     async def fake_worker(*_args, **_kwargs):
         await release.wait()
 
+    published = []
+    engine = SimpleNamespace(state={"fresh": True})
+    client = SimpleNamespace(
+        publish=lambda state, *, origin: published.append((state, origin)) or {"revision": 1}
+    )
     monkeypatch.setattr(mcp_server, "_run_analysis_worker", fake_worker)
-    monkeypatch.setattr(mcp_server, "_get_or_init_engine", lambda _root: object())
+    monkeypatch.setattr(mcp_server, "_get_or_init_engine", lambda _root: engine)
+    monkeypatch.setattr(
+        "contextor.core.live_state.connect_or_start", lambda _root: client
+    )
     mcp_server._analysis_tasks.clear()
     mcp_server._analysis_jobs_by_repo.clear()
 
@@ -57,6 +140,7 @@ def test_analysis_endpoint_returns_reusable_job_and_pollable_completion(
         )
         assert completed["status"] == "completed"
         assert completed["error"] is None
+        assert published == [(engine.state, "mcp_analysis")]
 
     asyncio.run(scenario())
 
@@ -119,8 +203,8 @@ def test_project_worker_carries_indexer_skips_into_durable_job_status(
     repo = tmp_path / "repo"
     repo.mkdir()
     skipped = [
-        {"path": "broken_indent.py", "reason": "is not valid Python (line 2: unexpected indent)"},
-        {"path": "broken_bracket.py", "reason": "is not valid Python (line 1: '[' was never closed)"},
+        {"path": "broken_indent.py", "reason": "is not valid Python (line 2, column 5: unexpected indent)", "line_number": 2, "column_number": 5},
+        {"path": "broken_bracket.py", "reason": "is not valid Python (line 1, column 8: '[' was never closed)"},
     ]
 
     def fake_analyze_project(*_args, **_kwargs):
@@ -156,7 +240,7 @@ def test_analysis_status_bounds_and_exposes_skipped_python_files(tmp_path):
             "error": None,
             "owner_pid": os.getpid(),
             "skipped_python_files": [
-                {"path": "broken_indent.py", "reason": "is not valid Python (line 2: unexpected indent)"},
+                {"path": "broken_indent.py", "reason": "is not valid Python (line 2, column 5: unexpected indent)", "line_number": 2, "column_number": 5},
                 {"path": "unreadable.py", "reason": "not valid text in its declared encoding"},
                 {"path": "broken_bracket.py", "reason": "is not valid Python (line 1: '[' was never closed)"},
             ],
@@ -171,6 +255,8 @@ def test_analysis_status_bounds_and_exposes_skipped_python_files(tmp_path):
     assert collection["syntax_error_count"] == 2
     assert collection["truncated"] is True
     assert len(collection["items"]) == 1
+    assert collection["items"][0]["line_number"] == 2
+    assert collection["items"][0]["column_number"] == 5
 
     unbounded = json.loads(
         mcp_server.get_analysis_status.fn(str(repo), job_id, max_skipped_files=None)
@@ -1638,6 +1724,25 @@ def test_symbol_implementation_refuses_ambiguous_source_without_guessing(
     assert result["status"] == "ambiguous"
     assert result["candidate_count"] == 2
     assert "implementation" not in result
+
+
+def test_symbol_implementation_uses_contextor_source_reader_for_utf8_bom(
+    tmp_path, monkeypatch
+):
+    source = tmp_path / "bom.py"
+    source.write_bytes(b"\xef\xbb\xbfdef readable():\n    return 1\n")
+    monkeypatch.setattr(mcp_server, "_get_or_init_engine", lambda _root: None)
+
+    result = json.loads(
+        mcp_server.get_symbol_implementation.fn(
+            repo_path=str(tmp_path),
+            symbol="readable",
+            file_paths=["bom.py"],
+        )
+    )
+
+    assert result["status"] == "resolved"
+    assert result["resolution"]["symbol"] == "readable"
 
 
 def test_project_architecture_and_report_diff_offer_optional_bounds(

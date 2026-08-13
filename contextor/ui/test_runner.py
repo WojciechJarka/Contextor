@@ -114,7 +114,13 @@ def _popen(arguments: list[str], *, show_console: bool = False) -> subprocess.Po
     )
 
 
-def _count_tests(*, show_console: bool = False) -> int:
+def _suite_arguments(*, live_only: bool) -> list[str]:
+    """Pytest selection shared by collection and execution."""
+
+    return ["-m", "live"] if live_only else []
+
+
+def _count_tests(*, show_console: bool = False, live_only: bool = False) -> int:
     """
     Number of tests pytest will run, for the progress bar.
 
@@ -123,7 +129,12 @@ def _count_tests(*, show_console: bool = False) -> int:
 
     try:
         completed = _popen(
-            ["--collect-only", "-q", str(tests_dir())],
+            [
+                "--collect-only",
+                "-q",
+                *_suite_arguments(live_only=live_only),
+                str(tests_dir()),
+            ],
             show_console=show_console,
         )
 
@@ -163,9 +174,10 @@ def run_test_suite(
     progress_callback=None,
     *,
     show_console: bool = False,
+    live_only: bool = False,
 ) -> dict:
     """
-    Runs the full suite and returns a summary.
+    Runs the full suite, or only tests marked ``live``, and returns a summary.
 
     Returns:
         {
@@ -176,10 +188,12 @@ def run_test_suite(
 
     _ensure_runnable()
 
-    if log:
-        log(f"Running test suite from {tests_dir()}")
+    suite_label = "LIVE suite" if live_only else "test suite"
 
-    total = _count_tests(show_console=show_console)
+    if log:
+        log(f"Running {suite_label} from {tests_dir()}")
+
+    total = _count_tests(show_console=show_console, live_only=live_only)
 
     if log and total:
         log(f"Collected {total} tests.")
@@ -190,7 +204,14 @@ def run_test_suite(
     fallback_counts = dict.fromkeys(_OUTCOME_ORDER, 0)
 
     process = _popen(
-        ["-v", "--tb=short", "-p", "no:cacheprovider", str(tests_dir())],
+        [
+            "-v",
+            "--tb=short",
+            "-p",
+            "no:cacheprovider",
+            *_suite_arguments(live_only=live_only),
+            str(tests_dir()),
+        ],
         show_console=show_console,
     )
 

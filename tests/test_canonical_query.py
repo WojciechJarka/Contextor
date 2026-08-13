@@ -22,6 +22,8 @@ from contextor.mcp_server import (
     _execute_canonical_query,
 )
 
+pytestmark = pytest.mark.live
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -204,6 +206,26 @@ class TestQueryCanonicalStateBounded:
         parsed = json.loads(result)
         assert parsed["truncated"] is False
         assert parsed["total_items"] == 2
+
+    def test_replaces_a_single_oversized_nested_record_with_a_preview(
+        self, tmp_path, monkeypatch
+    ):
+        modules = {"mod.large": {"evidence": "x" * (64 * 1024)}}
+        engine = _make_engine(modules=modules)
+        monkeypatch.setattr(mcp_server, "_get_or_init_engine", lambda _root: engine)
+
+        result = mcp_server.query_canonical_state_bounded.fn(
+            str(tmp_path), "list(modules.values())", limit=1
+        )
+        parsed = json.loads(result)
+
+        assert parsed["total_items"] == 1
+        assert parsed["truncated"] is False
+        assert parsed["payload_truncated"] is True
+        assert parsed["result"]["status"] == "payload_too_large"
+        assert parsed["result"]["preview"] == {"type": "list", "total_items": 1}
+        assert parsed["original_response_bytes"] > parsed["max_response_bytes"]
+        assert len(result.encode("utf-8")) < parsed["max_response_bytes"]
 
     def test_propagates_query_error_directly(self, tmp_path, monkeypatch):
         engine = _make_engine()

@@ -58,6 +58,19 @@ def test_unparsable_file_is_skipped_and_reported(tmp_path, isolated_dirs):
     assert "not valid Python" in reasons["broken.py"]
 
 
+def test_unparsable_file_keeps_its_parser_line_number(tmp_path, isolated_dirs):
+    root = _repo(tmp_path)
+    (root / "broken.py").write_text(
+        "def broken():\n    return [1, 2\n", encoding="utf-8"
+    )
+
+    index = index_repository(str(root))
+
+    skipped = next(item for item in index.skipped if item.path == "broken.py")
+    assert skipped.line_number == 2
+    assert skipped.column_number == 12
+
+
 def test_skip_reason_does_not_repeat_the_path(tmp_path, isolated_dirs):
     root = _repo(tmp_path)
     (root / "blob.py").write_bytes(b"\x00\x01\x02\xff\xfe")

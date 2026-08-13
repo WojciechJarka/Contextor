@@ -189,7 +189,13 @@ def generate_summary_report(
 
     if skipped_files:
         report["skipped_files"] = [
-            {"path": item.path, "reason": item.reason} for item in skipped_files
+            {
+                "path": item.path,
+                "reason": item.reason,
+                "line_number": getattr(item, "line_number", None),
+                "column_number": getattr(item, "column_number", None),
+            }
+            for item in skipped_files
         ]
         report["skipped_file_count"] = len(skipped_files)
 

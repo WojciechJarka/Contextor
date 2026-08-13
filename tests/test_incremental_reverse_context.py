@@ -1,5 +1,7 @@
 """Focused graph-freshness test for a newly added importing module."""
 
+import pytest
+
 from contextor.core.analysis.incremental_engine import IncrementalAnalysisEngine
 from contextor.core.analysis.state_manager import FileStateManager, RepositoryAnalysisState
 from contextor.core.graph.graph import build_graph, build_trie, detect_package_root
@@ -9,6 +11,8 @@ from contextor.core.reporting_layer.artifact_usage_report import (
     collect_qualified_artifact_identities,
 )
 from contextor.core.symbol_engine.indexer import index_repository
+
+pytestmark = pytest.mark.live
 
 
 def test_new_importing_file_immediately_updates_forward_and_reverse_graph(tmp_path):

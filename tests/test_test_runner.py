@@ -13,6 +13,8 @@ from types import SimpleNamespace
 
 import pytest
 
+pytestmark = pytest.mark.live
+
 from contextor.ui import gui
 from contextor.ui import test_runner
 from contextor.ui.test_runner import (
@@ -129,6 +131,36 @@ def test_success_without_any_reported_test_is_unavailable(monkeypatch):
         test_runner.run_test_suite()
 
 
+@pytest.mark.parametrize(
+    ("live_only", "expected_selector"),
+    [(False, []), (True, ["-m", "live"])],
+)
+def test_runner_uses_the_same_suite_selector_for_collection_and_execution(
+    monkeypatch, live_only, expected_selector
+):
+    calls = []
+
+    monkeypatch.setattr(test_runner, "_ensure_runnable", lambda: None)
+
+    def fake_popen(arguments, **_kwargs):
+        calls.append(arguments)
+        if "--collect-only" in arguments:
+            return _FakeProcess("1 test collected\n", 0)
+        return _FakeProcess("tests/test_x.py::test_y PASSED [100%]\n", 0)
+
+    monkeypatch.setattr(test_runner, "_popen", fake_popen)
+
+    result = test_runner.run_test_suite(live_only=live_only)
+
+    assert result["passed"] == 1
+    assert calls[0][2:2 + len(expected_selector)] == expected_selector
+    run_selector_start = calls[1].index("no:cacheprovider") + 1
+    assert calls[1][run_selector_start:run_selector_start + len(expected_selector)] == expected_selector
+    if not expected_selector:
+        assert "-m" not in calls[0]
+        assert "-m" not in calls[1]
+
+
 def test_gui_launchers_target_project_virtual_environment():
     root = Path(__file__).resolve().parents[1]
     launcher = (root / "run_gui.bat").read_text(encoding="utf-8").lower()
@@ -188,6 +220,9 @@ def test_gui_cmd_checkbox_controls_test_runner_console(monkeypatch, checkbox_val
         _busy_buttons=lambda: [],
     )
 
+    controller._run_test_suite = lambda **kwargs: gui.ContextorGUI._run_test_suite(
+        controller, **kwargs
+    )
     gui.ContextorGUI.run_test_suite(controller)
     captured["task"](log="log", progress_callback="progress")
 
@@ -195,4 +230,37 @@ def test_gui_cmd_checkbox_controls_test_runner_console(monkeypatch, checkbox_val
         "log": "log",
         "progress_callback": "progress",
         "show_console": checkbox_value,
+        "live_only": False,
     }
+
+
+def test_gui_live_suite_selects_only_live_tests(monkeypatch):
+    captured = {}
+
+    def fake_run_with_progress(_root, _bar, task, **_kwargs):
+        captured["task"] = task
+
+    def fake_run_test_suite(**kwargs):
+        captured["runner_kwargs"] = kwargs
+        return {"exit_code": 0, "total": 1, "passed": 1, "failed": 0, "skipped": 0, "failures": []}
+
+    monkeypatch.setattr(gui, "run_with_progress", fake_run_with_progress)
+    monkeypatch.setattr(gui, "run_test_suite", fake_run_test_suite)
+
+    controller = SimpleNamespace(
+        root=object(),
+        progress_bar=SimpleNamespace(is_cancelled=True),
+        cmd_var=SimpleNamespace(get=lambda: False),
+        log_box=object(),
+        cpu_indicator=object(),
+        stop_btn=object(),
+        _busy_buttons=lambda: [],
+    )
+    controller._run_test_suite = lambda **kwargs: gui.ContextorGUI._run_test_suite(
+        controller, **kwargs
+    )
+
+    gui.ContextorGUI.run_live_suite(controller)
+    captured["task"](log="log", progress_callback="progress")
+
+    assert captured["runner_kwargs"]["live_only"] is True

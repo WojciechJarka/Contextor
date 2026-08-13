@@ -13,6 +13,7 @@ Builds stable module_id against project root.
 import ast
 import dataclasses
 import os
+import re
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 
@@ -197,6 +198,18 @@ class SkippedFile:
 
     reason: str
 
+    line_number: int | None = None
+
+    column_number: int | None = None
+
+
+def _syntax_error_location(reason: str | None) -> tuple[int | None, int | None]:
+    """Extract parser coordinates while preserving the readable reason."""
+    match = re.search(r"\(line (\d+)(?:, column (\d+))?:", reason or "")
+    if not match:
+        return None, None
+    return int(match.group(1)), int(match.group(2)) if match.group(2) else None
+
 
 @dataclasses.dataclass(frozen=True)
 class RepositoryIndex:
@@ -266,7 +279,15 @@ def index_repository(
         for path in files_to_process:
             res = _process_single_file(str(path), str(root_path))
             if res["error"]:
-                skipped.append(SkippedFile(path=res["path"], reason=res["error"]))
+                line_number, column_number = _syntax_error_location(res["error"])
+                skipped.append(
+                    SkippedFile(
+                        path=res["path"],
+                        reason=res["error"],
+                        line_number=line_number,
+                        column_number=column_number,
+                    )
+                )
             else:
                 modules[res["module_id"]] = Module(
                     module_id=res["module_id"],
@@ -291,10 +312,13 @@ def index_repository(
             res = future.result()
 
             if res["error"]:
+                line_number, column_number = _syntax_error_location(res["error"])
                 skipped.append(
                     SkippedFile(
                         path=res["path"],
                         reason=res["error"],
+                        line_number=line_number,
+                        column_number=column_number,
                     )
                 )
             else:

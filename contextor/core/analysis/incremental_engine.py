@@ -1,3 +1,4 @@
+import ast
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, List, Set, Dict, Any
@@ -19,6 +20,9 @@ class IncrementalUpdateResult:
     local_metrics_state: str = "stale"
     global_metrics_state: str = "stale"
     artifact_consumption_state: str = "stale"
+    error: str | None = None
+    line_number: int | None = None
+    column_number: int | None = None
 
 
 class IncrementalAnalysisEngine:
@@ -85,12 +89,32 @@ class IncrementalAnalysisEngine:
 
             # 2. Parse new file
             try:
+                ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+            except SyntaxError as exc:
+                # Keep the existing canonical record unchanged, but make the
+                # parser diagnostic available to desktop LIVE and MCP.
+                return IncrementalUpdateResult(
+                    status="SYNTAX_ERROR",
+                    file_path=file_path,
+                    error=exc.msg,
+                    line_number=exc.lineno,
+                    column_number=exc.offset,
+                )
+            except OSError as exc:
+                return IncrementalUpdateResult(
+                    status="ERROR", file_path=file_path, error=str(exc)
+                )
+            try:
                 new_imports, error = read_imports(path)
                 if error:
                     # Syntax error = zero changes to the architectural model
-                    return IncrementalUpdateResult(status="SYNTAX_ERROR", file_path=file_path)
-            except Exception:
-                return IncrementalUpdateResult(status="ERROR", file_path=file_path)
+                    return IncrementalUpdateResult(
+                        status="SYNTAX_ERROR", file_path=file_path, error=str(error)
+                    )
+            except Exception as exc:
+                return IncrementalUpdateResult(
+                    status="ERROR", file_path=file_path, error=str(exc)
+                )
 
             # 3. Parse new artifacts
             from contextor.core.reporting_layer.artifact_usage_report import extract_file_symbols, _module_own_symbols
