@@ -5,6 +5,7 @@ Core presentation layer. ContextorGUI manages root Tkinter window,
 state persistence, sub-windows and orchestrates the analysis process.
 """
 
+import threading
 import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
@@ -71,6 +72,7 @@ class ContextorGUI:
         self.repo_builder_win = None
         self.parser_win = None
         self.live_watcher = None
+        self.live_status_var = tk.StringVar(value="LIVE: waiting for analysis")
 
         self._check_stale_excludes()
         self._build_ui()
@@ -153,7 +155,7 @@ class ContextorGUI:
         self._setup_actions()
         self._setup_progress()
         self._setup_toolbar()
-        self.container.rowconfigure(3, weight=1)
+        self.container.rowconfigure(4, weight=1)
 
     def _setup_header(self):
         header = ttk.Frame(self.container)
@@ -257,10 +259,27 @@ class ContextorGUI:
             self.tooltip.bind_tooltip(button, tooltip_text)
 
     def _setup_project_section(self):
+        live_status_row = ttk.Frame(self.container)
+        live_status_row.grid(row=1, column=0, sticky="ew", pady=(0, PAD_SM))
+        live_status_row.columnconfigure(0, weight=1)
+
+        self.live_status_label = ttk.Label(
+            live_status_row,
+            textvariable=self.live_status_var,
+            style="Cpu.TLabel",
+            width=64,
+            anchor="w",
+        )
+        self.live_status_label.grid(row=0, column=0, sticky="e")
+        self.tooltip.bind_tooltip(
+            self.live_status_label,
+            "LIVE status bar: desktop watcher activity and the latest shared canonical LIVE update.",
+        )
+
         project_section = ttk.Labelframe(
             self.container, text="Project", padding=(PAD_MD, PAD_SM, PAD_MD, PAD_MD)
         )
-        project_section.grid(row=1, column=0, sticky="ew")
+        project_section.grid(row=2, column=0, sticky="ew")
         project_section.columnconfigure(0, weight=1)
 
         self._add_path_row(
@@ -298,7 +317,7 @@ class ContextorGUI:
         and binds them to their respective execution callbacks.
         """
         actions_section = ttk.Frame(self.container)
-        actions_section.grid(row=2, column=0, sticky="ew", pady=(PAD_LG, 0))
+        actions_section.grid(row=3, column=0, sticky="ew", pady=(PAD_LG, 0))
         for i in range(4):
             actions_section.columnconfigure(i, weight=1)
 
@@ -355,7 +374,7 @@ class ContextorGUI:
         scrolled text box for streaming stdout log messages.
         """
         progress_section = ttk.Frame(self.container)
-        progress_section.grid(row=3, column=0, sticky="nsew", pady=(PAD_LG, 0))
+        progress_section.grid(row=4, column=0, sticky="nsew", pady=(PAD_LG, 0))
         progress_section.columnconfigure(0, weight=1)
 
         self.progress_bar = create_progress_bar(progress_section)
@@ -368,9 +387,9 @@ class ContextorGUI:
         Builds the bottom toolbar providing access to auxiliary
         windows: Output Folder, Exclude Editor, Repo Builder, JSON Parser.
         """
-        ttk.Separator(self.container).grid(row=4, column=0, sticky="ew", pady=(PAD_MD, PAD_SM))
+        ttk.Separator(self.container).grid(row=5, column=0, sticky="ew", pady=(PAD_MD, PAD_SM))
         bottom_frame = ttk.Frame(self.container)
-        bottom_frame.grid(row=5, column=0, sticky="ew")
+        bottom_frame.grid(row=6, column=0, sticky="ew")
 
         out_btn = ttk.Button(
             bottom_frame,
@@ -611,19 +630,37 @@ class ContextorGUI:
             stop_button=self.stop_btn,
         )
 
+    def _set_live_status(self, message: str):
+        """Queue status-bar updates safely from the watcher background thread."""
+        if not hasattr(self, "live_status_var"):
+            return
+        if threading.current_thread() is threading.main_thread():
+            self.live_status_var.set(message)
+        else:
+            self.root.after(0, self.live_status_var.set, message)
+
     def _start_live_watcher(self, path):
         """Connect desktop to the shared LIVE owner and watch this repository."""
 
         if self.live_watcher:
             self.live_watcher.stop()
-        client = connect_or_start(path)
+        try:
+            client = connect_or_start(path)
+        except (OSError, EOFError, RuntimeError, TimeoutError) as exc:
+            self._set_live_status(f"LIVE connection error: {exc}")
+            return
         from contextor.core.analysis.state_manager import load_engine_state
         from contextor.core.paths import repo_cache_dir
 
         state = load_engine_state(str(repo_cache_dir(path)), "")
         if state is not None:
             client.publish(state, origin="desktop_analysis")
-        self.live_watcher = DesktopLiveWatcher(path, client)
+            self._set_live_status("LIVE: shared state published; watcher active")
+        else:
+            self._set_live_status("LIVE: no snapshot; waiting for analysis")
+        self.live_watcher = DesktopLiveWatcher(
+            path, client, on_status=self._set_live_status
+        )
         self.live_watcher.start()
 
     def analyze_layer(self):

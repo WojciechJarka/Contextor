@@ -122,6 +122,7 @@ def test_updater_failure_does_not_kill_the_service():
 
 def test_desktop_watcher_reports_create_edit_and_delete_without_manual_update(tmp_path):
     updates = []
+    statuses = []
 
     def update(state, file_path):
         updates.append(file_path)
@@ -130,7 +131,9 @@ def test_desktop_watcher_reports_create_edit_and_delete_without_manual_update(tm
     server = CanonicalLiveServer({"updates": 0}, updater=update)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
-    watcher = DesktopLiveWatcher(tmp_path, LiveStateClient(server.endpoint))
+    watcher = DesktopLiveWatcher(
+        tmp_path, LiveStateClient(server.endpoint), on_status=statuses.append
+    )
     target = tmp_path / "sample.py"
     try:
         target.write_text("value = 1\n", encoding="utf-8")
@@ -145,6 +148,11 @@ def test_desktop_watcher_reports_create_edit_and_delete_without_manual_update(tm
         assert snapshot["revision"] == 3
         assert snapshot["state"] == {"updates": 3}
         assert updates == [str(target)] * 3
+        assert statuses == [
+            "Updating LIVE: sample.py", "LIVE update successful: sample.py",
+            "Updating LIVE: sample.py", "LIVE update successful: sample.py",
+            "Updating LIVE: sample.py", "LIVE update successful: sample.py",
+        ]
     finally:
         server.close()
         thread.join(timeout=2)
@@ -155,7 +163,8 @@ def test_first_run_watcher_waits_for_initial_canonical_state(tmp_path):
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     client = LiveStateClient(server.endpoint)
-    watcher = DesktopLiveWatcher(tmp_path, client)
+    statuses = []
+    watcher = DesktopLiveWatcher(tmp_path, client, on_status=statuses.append)
     try:
         (tmp_path / "before_analysis.py").write_text("value = 1\n", encoding="utf-8")
         assert watcher.poll_once() == []
@@ -163,11 +172,40 @@ def test_first_run_watcher_waits_for_initial_canonical_state(tmp_path):
             "status": "ok", "protocol_version": LIVE_PROTOCOL_VERSION,
             "revision": 0, "available": False,
         }
+        assert statuses == ["LIVE: no snapshot; waiting for analysis"]
 
         client.publish({"ready": True})
         (tmp_path / "after_analysis.py").write_text("value = 2\n", encoding="utf-8")
         response = watcher.poll_once()
         assert response == [str(tmp_path / "after_analysis.py")]
+    finally:
+        server.close()
+        thread.join(timeout=2)
+
+
+def test_desktop_watcher_reports_syntax_location(tmp_path):
+    statuses = []
+    result = SimpleNamespace(
+        status="SYNTAX_ERROR",
+        file_path=str(tmp_path / "broken.py"),
+        error="invalid syntax",
+        line_number=2,
+        column_number=7,
+    )
+    server = CanonicalLiveServer({"ready": True}, updater=lambda *_args: result)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    watcher = DesktopLiveWatcher(
+        tmp_path, LiveStateClient(server.endpoint), on_status=statuses.append
+    )
+    try:
+        target = tmp_path / "broken.py"
+        target.write_text("def broken(:\n", encoding="utf-8")
+        assert watcher.poll_once() == [str(target)]
+        assert statuses == [
+            "Updating LIVE: broken.py",
+            "LIVE syntax error: broken.py line 2, column 7: invalid syntax",
+        ]
     finally:
         server.close()
         thread.join(timeout=2)

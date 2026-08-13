@@ -22,8 +22,8 @@ def test_desktop_publishes_latest_snapshot_and_replaces_existing_watcher(
             events.append(("publish", published, origin))
 
     class Watcher:
-        def __init__(self, root, client):
-            events.append(("watcher", root, client))
+        def __init__(self, root, client, *, on_status=None):
+            events.append(("watcher", root, client, on_status))
 
         def start(self):
             events.append(("start",))
@@ -32,7 +32,10 @@ def test_desktop_publishes_latest_snapshot_and_replaces_existing_watcher(
             events.append(("stop-new",))
 
     old_watcher = SimpleNamespace(stop=lambda: events.append(("stop-old",)))
-    controller = SimpleNamespace(live_watcher=old_watcher)
+    controller = SimpleNamespace(
+        live_watcher=old_watcher,
+        _set_live_status=lambda message: events.append(("status", message)),
+    )
     monkeypatch.setattr(gui, "connect_or_start", lambda _path: Client())
     monkeypatch.setattr(gui, "DesktopLiveWatcher", Watcher)
     monkeypatch.setattr(
@@ -54,14 +57,17 @@ def test_desktop_starts_uninitialized_watcher_without_publishing(tmp_path, monke
     events = []
 
     class Watcher:
-        def __init__(self, _root, _client):
+        def __init__(self, _root, _client, *, on_status=None):
             pass
 
         def start(self):
             events.append("started")
 
     client = SimpleNamespace(publish=lambda _state: events.append("published"))
-    controller = SimpleNamespace(live_watcher=None)
+    controller = SimpleNamespace(
+        live_watcher=None,
+        _set_live_status=lambda message: events.append(("status", message)),
+    )
     monkeypatch.setattr(gui, "connect_or_start", lambda _path: client)
     monkeypatch.setattr(gui, "DesktopLiveWatcher", Watcher)
     monkeypatch.setattr(
@@ -71,4 +77,7 @@ def test_desktop_starts_uninitialized_watcher_without_publishing(tmp_path, monke
 
     gui.ContextorGUI._start_live_watcher(controller, str(repo))
 
-    assert events == ["started"]
+    assert events == [
+        ("status", "LIVE: no snapshot; waiting for analysis"),
+        "started",
+    ]

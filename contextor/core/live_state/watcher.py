@@ -3,19 +3,33 @@
 from __future__ import annotations
 
 import threading
+from collections.abc import Callable
 from pathlib import Path
 
 from .ipc import LiveStateClient
 
 
 class DesktopLiveWatcher:
-    def __init__(self, root: str | Path, client: LiveStateClient, *, interval: float = 0.75):
+    def __init__(
+        self,
+        root: str | Path,
+        client: LiveStateClient,
+        *,
+        interval: float = 0.75,
+        on_status: Callable[[str], None] | None = None,
+    ):
         self.root = Path(root).resolve()
         self.client = client
         self.interval = interval
+        self.on_status = on_status
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._snapshot = self._scan()
+
+    def _emit(self, message: str) -> None:
+        """Forward a compact status message without assuming a GUI exists."""
+        if self.on_status is not None:
+            self.on_status(message)
 
     def _scan(self) -> dict[str, tuple[int, int]]:
         result = {}
@@ -34,15 +48,30 @@ class DesktopLiveWatcher:
         status = self.client.ping()
         if not status.get("available"):
             self._snapshot = current
+            self._emit("LIVE: no snapshot; waiting for analysis")
             return []
         changed = sorted(
             path for path in set(self._snapshot) | set(current)
             if self._snapshot.get(path) != current.get(path)
         )
         for path in changed:
+            self._emit(f"Updating LIVE: {Path(path).name}")
             response = self.client.update_file(path, origin="desktop_watcher")
             if response.get("status") != "ok":
+                self._emit(f"LIVE connection error: {response.get('error', 'update failed')}")
                 raise RuntimeError(f"LIVE update failed for {path}: {response.get('error')}")
+            result = response.get("result")
+            result_status = getattr(result, "status", "UPDATED")
+            if result_status == "SYNTAX_ERROR":
+                line = getattr(result, "line_number", None)
+                column = getattr(result, "column_number", None)
+                error = getattr(result, "error", "syntax error")
+                position = f" line {line}, column {column}" if line and column else ""
+                self._emit(f"LIVE syntax error: {Path(path).name}{position}: {error}")
+            elif result_status in {"UPDATED", "DELETED", "UNCHANGED"}:
+                self._emit(f"LIVE update successful: {Path(path).name}")
+            else:
+                self._emit(f"LIVE update error: {Path(path).name}: {result_status}")
         self._snapshot = current
         return changed
 
@@ -57,7 +86,8 @@ class DesktopLiveWatcher:
         while not self._stop.wait(self.interval):
             try:
                 self.poll_once()
-            except (OSError, RuntimeError, EOFError):
+            except (OSError, RuntimeError, EOFError) as exc:
+                self._emit(f"LIVE connection error: {exc}")
                 continue
 
     def stop(self) -> None:
