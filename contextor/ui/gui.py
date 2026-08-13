@@ -7,11 +7,13 @@ state persistence, sub-windows and orchestrates the analysis process.
 
 import threading
 import tkinter as tk
+from datetime import datetime
+from queue import Empty, Queue
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
 from contextor.core.api.facade import ContextorFacade
-from contextor.core.live_state import DesktopLiveWatcher, connect_or_start
+from contextor.core.live_state import DesktopLiveEventFeed, DesktopLiveWatcher, connect_or_start
 from contextor.repo_generator import run_repo_generator
 from contextor.ui import theme
 from contextor.ui.exclude_check import check_stale_excludes
@@ -72,7 +74,10 @@ class ContextorGUI:
         self.repo_builder_win = None
         self.parser_win = None
         self.live_watcher = None
+        self.live_event_feed = None
         self.live_status_var = tk.StringVar(value="LIVE: waiting for analysis")
+        self._live_status_queue: Queue[str] = Queue()
+        self._live_status_draining = False
 
         self._check_stale_excludes()
         self._build_ui()
@@ -260,17 +265,18 @@ class ContextorGUI:
 
     def _setup_project_section(self):
         live_status_row = ttk.Frame(self.container)
-        live_status_row.grid(row=1, column=0, sticky="ew", pady=(0, PAD_SM))
+        live_status_row.grid(
+            row=1, column=0, sticky="ew", padx=(PAD_MD, PAD_MD), pady=(0, PAD_SM)
+        )
         live_status_row.columnconfigure(0, weight=1)
 
         self.live_status_label = ttk.Label(
             live_status_row,
             textvariable=self.live_status_var,
             style="Cpu.TLabel",
-            width=64,
             anchor="w",
         )
-        self.live_status_label.grid(row=0, column=0, sticky="e")
+        self.live_status_label.grid(row=0, column=0, sticky="ew")
         self.tooltip.bind_tooltip(
             self.live_status_label,
             "LIVE status bar: desktop watcher activity and the latest shared canonical LIVE update.",
@@ -631,19 +637,39 @@ class ContextorGUI:
         )
 
     def _set_live_status(self, message: str):
-        """Queue status-bar updates safely from the watcher background thread."""
+        """Append one status to the shared GUI queue, never overwriting a peer event."""
         if not hasattr(self, "live_status_var"):
             return
+        self._live_status_queue.put(f"{message}  {datetime.now():%H:%M:%S}")
         if threading.current_thread() is threading.main_thread():
-            self.live_status_var.set(message)
+            self._drain_live_status_queue()
         else:
-            self.root.after(0, self.live_status_var.set, message)
+            self.root.after(0, self._drain_live_status_queue)
+
+    def _drain_live_status_queue(self):
+        """Display queued desktop and MCP messages one at a time on Tk's thread."""
+        if self._live_status_draining:
+            return
+        try:
+            message = self._live_status_queue.get_nowait()
+        except Empty:
+            return
+        self._live_status_draining = True
+        self.live_status_var.set(message)
+
+        def next_message():
+            self._live_status_draining = False
+            self._drain_live_status_queue()
+
+        self.root.after(1250, next_message)
 
     def _start_live_watcher(self, path):
         """Connect desktop to the shared LIVE owner and watch this repository."""
 
         if self.live_watcher:
             self.live_watcher.stop()
+        if self.live_event_feed:
+            self.live_event_feed.stop()
         try:
             client = connect_or_start(path)
         except (OSError, EOFError, RuntimeError, TimeoutError) as exc:
@@ -661,7 +687,9 @@ class ContextorGUI:
         self.live_watcher = DesktopLiveWatcher(
             path, client, on_status=self._set_live_status
         )
+        self.live_event_feed = DesktopLiveEventFeed(client, self._set_live_status)
         self.live_watcher.start()
+        self.live_event_feed.start()
 
     def analyze_layer(self):
         root_dir = self.repo_path_var.get()
@@ -768,6 +796,8 @@ class ContextorGUI:
 
         if self.live_watcher:
             self.live_watcher.stop()
+        if self.live_event_feed:
+            self.live_event_feed.stop()
 
         geom = self.root.geometry()
         m = re.match(r"^(\d+x\d+)([+-]?\d+)([+-]?\d+)$", geom.replace("+-", "-"))

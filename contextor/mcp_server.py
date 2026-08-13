@@ -110,6 +110,7 @@ Example:
 The MCP server must start silently and wait for JSON-RPC messages.
 """
 import atexit
+import asyncio
 import ast
 import hashlib
 import json
@@ -211,7 +212,7 @@ _live_engines: dict[str, Any] = {}
 _live_engine_revisions: dict[str, int] = {}
 _analysis_lock = threading.Lock()
 _analysis_job_lock = threading.RLock()
-_analysis_tasks: dict[str, Any] = {}
+_analysis_tasks: dict[str, threading.Thread] = {}
 _analysis_jobs_by_repo: dict[str, str] = {}
 
 
@@ -516,13 +517,11 @@ def _start_analysis_job(
 ) -> dict:
     """Accept a non-blocking analysis, deduplicating an active job per repo."""
 
-    import asyncio
-
     repo_key = str(root)
     with _analysis_job_lock:
         active_id = _analysis_jobs_by_repo.get(repo_key)
         active_task = _analysis_tasks.get(active_id) if active_id else None
-        if active_id and active_task is not None and not active_task.done():
+        if active_id and active_task is not None and active_task.is_alive():
             existing = _read_analysis_job(root, active_id)
             if existing is not None:
                 return _public_job(existing, reused=True)
@@ -543,12 +542,18 @@ def _start_analysis_job(
             "owner_pid": os.getpid(),
         }
         _write_analysis_job(root, job)
-        task = asyncio.create_task(
-            _execute_analysis_job(root, job, target, exclude_paths),
+        def run_job() -> None:
+            """Own a dedicated loop; FastMCP may close a tool-call loop early."""
+            asyncio.run(_execute_analysis_job(root, job, target, exclude_paths))
+
+        task = threading.Thread(
+            target=run_job,
             name=f"contextor-analysis-{job_id}",
+            daemon=True,
         )
         _analysis_jobs_by_repo[repo_key] = job_id
         _analysis_tasks[job_id] = task
+        task.start()
         return _public_job(job)
 
 

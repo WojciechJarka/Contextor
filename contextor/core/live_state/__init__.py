@@ -3,7 +3,7 @@
 from .store import LiveStateMetadata, load_snapshot, read_metadata, save_snapshot
 from .ipc import CanonicalLiveServer, LiveEndpoint, LiveStateClient
 from .runtime import connect, connect_or_start
-from .watcher import DesktopLiveWatcher
+from .watcher import DesktopLiveEventFeed, DesktopLiveWatcher
 
 __all__ = [
     "CanonicalLiveServer",
@@ -11,6 +11,7 @@ __all__ = [
     "LiveStateClient",
     "LiveStateMetadata",
     "DesktopLiveWatcher",
+    "DesktopLiveEventFeed",
     "connect",
     "connect_or_start",
     "load_snapshot",

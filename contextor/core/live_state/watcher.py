@@ -94,3 +94,53 @@ class DesktopLiveWatcher:
         self._stop.set()
         if self._thread:
             self._thread.join(timeout=max(2.0, self.interval * 2))
+
+
+class DesktopLiveEventFeed:
+    """Forward queued MCP-origin LIVE events to the desktop status callback."""
+
+    def __init__(self, client: LiveStateClient, on_status: Callable[[str], None], *, interval: float = 0.75):
+        self.client = client
+        self.on_status = on_status
+        self.interval = interval
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+        self._revision = int(client.ping().get("revision", 0))
+
+    def _message(self, event: dict) -> str | None:
+        if event.get("origin") not in {"mcp", "mcp_analysis"}:
+            return None
+        if event.get("operation") == "status":
+            return str(event.get("message", "MCP: LIVE activity"))
+        if event.get("operation") == "publish" and event.get("origin") == "mcp_analysis":
+            return "MCP: analysis published shared LIVE state"
+        return None
+
+    def poll_once(self) -> None:
+        response = self.client.get_events(after_revision=self._revision, limit=100)
+        if response.get("status") != "ok":
+            return
+        for event in response.get("events", []):
+            message = self._message(event)
+            if message:
+                self.on_status(message)
+        self._revision = int(response.get("revision", self._revision))
+
+    def start(self) -> None:
+        if self._thread and self._thread.is_alive():
+            return
+        self._stop.clear()
+        self._thread = threading.Thread(target=self._run, name="contextor-live-event-feed", daemon=True)
+        self._thread.start()
+
+    def _run(self) -> None:
+        while not self._stop.wait(self.interval):
+            try:
+                self.poll_once()
+            except (OSError, RuntimeError, EOFError):
+                continue
+
+    def stop(self) -> None:
+        self._stop.set()
+        if self._thread:
+            self._thread.join(timeout=max(2.0, self.interval * 2))

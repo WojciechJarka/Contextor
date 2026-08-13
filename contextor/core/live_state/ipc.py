@@ -62,6 +62,8 @@ class CanonicalLiveServer:
             value = getattr(result, name, None)
             if value is not None:
                 event[name] = value
+        if request.get("message") is not None:
+            event["message"] = str(request["message"])
         self._events.append(event)
         del self._events[:-100]
 
@@ -98,6 +100,10 @@ class CanonicalLiveServer:
                 self._state = request.get("state")
                 self._revision += 1
                 self._record_event("publish", request)
+                return {"status": "ok", "revision": self._revision}
+            if operation == "status":
+                self._revision += 1
+                self._record_event("status", request)
                 return {"status": "ok", "revision": self._revision}
             if operation == "update_file":
                 if self._state is None or self._updater is None:
@@ -169,3 +175,6 @@ class LiveStateClient:
 
     def get_events(self, *, after_revision: int | None = None, limit: int | None = 20) -> dict[str, Any]:
         return self.request("get_events", after_revision=after_revision, limit=limit)
+
+    def status(self, message: str, *, origin: str = "unknown") -> dict[str, Any]:
+        return self.request("status", message=message, origin=origin)

@@ -5,6 +5,7 @@ import inspect
 import json
 import os
 import subprocess
+import threading
 from types import SimpleNamespace
 from contextlib import nullcontext
 from pathlib import Path
@@ -102,10 +103,10 @@ def test_analysis_endpoint_returns_reusable_job_and_pollable_completion(
 ):
     repo = tmp_path / "repo"
     repo.mkdir()
-    release = asyncio.Event()
+    release = threading.Event()
 
     async def fake_worker(*_args, **_kwargs):
-        await release.wait()
+        await asyncio.to_thread(release.wait)
 
     published = []
     engine = SimpleNamespace(state={"fresh": True})
@@ -134,7 +135,8 @@ def test_analysis_endpoint_returns_reusable_job_and_pollable_completion(
 
         task = mcp_server._analysis_tasks[first["job_id"]]
         release.set()
-        await task
+        task.join(timeout=5)
+        assert not task.is_alive()
         completed = json.loads(
             mcp_server.get_analysis_status.fn(str(repo), first["job_id"])
         )
@@ -159,7 +161,8 @@ def test_analysis_job_persists_failure_for_later_polling(tmp_path, monkeypatch):
     async def scenario():
         accepted = json.loads(await mcp_server.analyze_project.fn(str(repo)))
         task = mcp_server._analysis_tasks[accepted["job_id"]]
-        await task
+        task.join(timeout=5)
+        assert not task.is_alive()
         failed = json.loads(
             mcp_server.get_analysis_status.fn(str(repo), accepted["job_id"])
         )
@@ -306,13 +309,13 @@ def test_layer_and_single_file_tools_submit_nonblocking_jobs(tmp_path, monkeypat
 def test_analysis_status_exposes_latest_worker_progress(tmp_path, monkeypatch):
     repo = tmp_path / "repo"
     repo.mkdir()
-    progress_written = asyncio.Event()
-    release = asyncio.Event()
+    progress_written = threading.Event()
+    release = threading.Event()
 
     async def fake_worker(*_args, log=None, **_kwargs):
         log("Indexing 42 modules...")
         progress_written.set()
-        await release.wait()
+        await asyncio.to_thread(release.wait)
 
     monkeypatch.setattr(mcp_server, "_run_analysis_worker", fake_worker)
     monkeypatch.setattr(mcp_server, "_get_or_init_engine", lambda _root: object())
@@ -321,14 +324,16 @@ def test_analysis_status_exposes_latest_worker_progress(tmp_path, monkeypatch):
 
     async def scenario():
         accepted = json.loads(await mcp_server.analyze_project.fn(str(repo)))
-        await progress_written.wait()
+        await asyncio.to_thread(progress_written.wait)
         running = json.loads(
             mcp_server.get_analysis_status.fn(str(repo), accepted["job_id"])
         )
         assert running["status"] == "running"
         assert running["message"] == "Indexing 42 modules..."
         release.set()
-        await mcp_server._analysis_tasks[accepted["job_id"]]
+        task = mcp_server._analysis_tasks[accepted["job_id"]]
+        task.join(timeout=5)
+        assert not task.is_alive()
 
     asyncio.run(scenario())
 
