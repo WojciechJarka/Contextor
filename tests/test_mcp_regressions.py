@@ -282,6 +282,21 @@ def test_extract_indexed_report_context_returns_every_shared_resolver_block(tmp_
     assert result["artifacts"]["main::main"]["nested"]["text"] == "complete }, block"
     assert "LLM use:" in mcp_server.extract_indexed_report_context.description
 
+    bounded = json.loads(mcp_server.extract_indexed_report_context.fn(
+        repo_path=str(tmp_path), query="pkg/cli.py", report_path=str(report_path),
+        max_items=1, fields=["artifacts", "artifact_count", "total_artifact_count", "truncated"],
+    ))
+    assert bounded["artifact_count"] == 1
+    assert bounded["total_artifact_count"] == 2
+    assert bounded["truncated"] is True
+
+    unbounded = json.loads(mcp_server.extract_indexed_report_context.fn(
+        repo_path=str(tmp_path), query="pkg/cli.py", report_path=str(report_path),
+        max_items=None, fields=["artifacts", "truncated"],
+    ))
+    assert len(unbounded["artifacts"]) == 2
+    assert unbounded["truncated"] is False
+
 
 def test_extract_indexed_report_context_can_filter_to_public_api(tmp_path, monkeypatch):
     catalog = IndexCatalog(
@@ -450,6 +465,28 @@ def test_fastmcp_schema_exposes_excludes_and_llm_guidance():
     )
     assert "public_api_only" in mcp_server.extract_indexed_report_context.description
 
+    payload_controlled = (
+        mcp_server.update_file,
+        mcp_server.get_project_architecture,
+        mcp_server.get_module_context,
+        mcp_server.get_artifact_blast_radius,
+        mcp_server.search_artifacts,
+        mcp_server.get_file_edit_context,
+        mcp_server.get_layer_isolation,
+        mcp_server.get_report_diff,
+        mcp_server.extract_indexed_report_context,
+        mcp_server.get_artifacts_for_module,
+        mcp_server.lookup_artifact_by_symbol,
+    )
+    for tool in payload_controlled:
+        assert "None" in tool.description
+        assert "fields" in tool.description
+    assert "read_json_report" not in {
+        node.name
+        for node in ast.parse(Path(mcp_server.__file__).read_text(encoding="utf-8")).body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    }
+
 
 def test_update_file_marks_running_mcp_server_as_requiring_restart(monkeypatch):
     server_path = Path(mcp_server.__file__).resolve()
@@ -471,6 +508,13 @@ def test_update_file_marks_running_mcp_server_as_requiring_restart(monkeypatch):
     monkeypatch.setattr(mcp_server, "_get_or_init_engine", lambda _root: engine)
     monkeypatch.setattr(mcp_server, "_persist_live_engine", lambda *_args: True)
 
+    current = json.loads(
+        mcp_server.update_file.fn(repo_path=str(repo), file_path=str(server_path))
+    )
+    assert current["runtime_restart_required"] is False
+    assert "runtime_state" not in current
+
+    monkeypatch.setattr(mcp_server, "_MCP_SERVER_SOURCE_FINGERPRINT", "stale")
     result = json.loads(
         mcp_server.update_file.fn(repo_path=str(repo), file_path=str(server_path))
     )
@@ -827,6 +871,34 @@ def test_semantic_artifact_diff_flags_body_only_change_without_body_text(tmp_pat
     assert "return value" not in json.dumps(result)
 
 
+def test_semantic_diff_view_is_compact_bounded_and_schema_stable():
+    diff = {
+        "symbols_added": ["a", "b"],
+        "symbols_removed": ["c"],
+        "signatures_changed": {
+            "a": {"before": "def a()", "after": "def a(value)"},
+            "b": {"before": "def b()", "after": "def b(value)"},
+        },
+        "bodies_changed": ["a", "b"],
+        "affected_symbols": ["a", "b", "c"],
+        "changed_symbol_count": 3,
+        "body_change_count": 2,
+        "body_only_changes_tracked": True,
+    }
+
+    compact = mcp_server._semantic_diff_view(diff, max_items=1, compact=True)
+    full = mcp_server._semantic_diff_view(diff, max_items=1, compact=False)
+
+    assert compact["symbols_added"] == {"total": 2, "truncated": True}
+    assert "items" not in compact["signatures_changed"]
+    assert full["symbols_added"]["items"] == ["a"]
+    assert full["signatures_changed"]["items"] == {
+        "a": {"before": "def a()", "after": "def a(value)"}
+    }
+    assert full["affected_symbols"]["total"] == 3
+    assert full["affected_symbols"]["truncated"] is True
+
+
 def test_artifact_lookup_ignores_stale_registry_entries(tmp_path, monkeypatch):
     report = tmp_path / "artifacts.json"
     report.write_text(
@@ -836,8 +908,8 @@ def test_artifact_lookup_ignores_stale_registry_entries(tmp_path, monkeypatch):
                     "A1/1": {
                         "kind": "function",
                         "definer_module": "1/1",
-                        "consumer_module_indices": [],
-                        "consumer_count": 0,
+                        "consumer_module_indices": ["2/1", "3/1"],
+                        "consumer_count": 2,
                     }
                 }
             }
@@ -850,7 +922,7 @@ def test_artifact_lookup_ignores_stale_registry_entries(tmp_path, monkeypatch):
         "_read_registries",
         lambda _root: (
             {},
-            {"1/1": "pkg.module"},
+            {"1/1": "pkg.module", "2/1": "pkg.first", "3/1": "pkg.second"},
             {
                 "pkg.module::target": "A1/1",
                 "stale.module::target": "A9/9",
@@ -864,14 +936,28 @@ def test_artifact_lookup_ignores_stale_registry_entries(tmp_path, monkeypatch):
 
     result = json.loads(
         mcp_server.lookup_artifact_by_symbol.fn(
-            repo_path=str(tmp_path), symbol_name="target"
+            repo_path=str(tmp_path), symbol_name="target", evidence_limit=1
         )
     )
 
     assert result["match_count"] == 1
     assert list(result["artifacts"]) == ["A1/1"]
     assert result["artifacts"]["A1/1"]["kind"] == "function"
+    assert result["artifacts"]["A1/1"]["consumers"] == {
+        "total": 2,
+        "truncated": True,
+    }
     assert result["data_source"] == "current_artifacts_compact"
+
+    full = json.loads(mcp_server.lookup_artifact_by_symbol.fn(
+        repo_path=str(tmp_path), symbol_name="target", evidence_limit=1,
+        compact=False, fields=["artifacts"],
+    ))
+    assert full["artifacts"]["A1/1"]["consumers"] == {
+        "items": ["pkg.first"],
+        "total": 2,
+        "truncated": True,
+    }
 
 
 def test_file_edit_context_decodes_modules_and_marks_unresolved_api(
@@ -1078,8 +1164,40 @@ def test_artifacts_for_module_includes_live_zero_consumer_signature(
         "full_name": "pkg.module::unused",
         "kind": "function",
         "signature": "def unused(value: int) -> None",
-        "consumer_count": 0,
-        "consumers": [],
+        "consumers": {"total": 0, "truncated": False},
+    }
+
+
+def test_artifacts_for_module_bounds_nested_consumers(tmp_path, monkeypatch):
+    report = tmp_path / "artifacts.json"
+    report.write_text(json.dumps({"artifacts": {"A1/1": {
+        "kind": "function",
+        "definer_module": "1/1",
+        "consumer_module_indices": ["2/1", "3/1"],
+    }}}), encoding="utf-8")
+    monkeypatch.setattr(mcp_server, "_get_canonical_report", lambda *_: report)
+    monkeypatch.setattr(mcp_server, "_get_or_init_engine", lambda _root: None)
+    monkeypatch.setattr(
+        mcp_server,
+        "_read_registries",
+        lambda _root: (
+            {"pkg.module": "1/1"},
+            {"1/1": "pkg.module", "2/1": "pkg.first", "3/1": "pkg.second"},
+            {"pkg.module::run": "A1/1"},
+            {"A1/1": "pkg.module::run"},
+        ),
+    )
+
+    result = json.loads(mcp_server.get_artifacts_for_module.fn(
+        repo_path=str(tmp_path), module_name="pkg.module", evidence_limit=1,
+        compact=False, fields=["artifacts"],
+    ))
+
+    consumers = result["artifacts"]["A1/1"]["consumers"]
+    assert consumers == {
+        "items": ["pkg.first"],
+        "total": 2,
+        "truncated": True,
     }
 
 
@@ -1091,6 +1209,13 @@ def test_bounded_mcp_collections_report_truncation():
     assert selected == ["first", "second"]
     assert total == 3
     assert truncated is True
+
+    unbounded, unbounded_total, unbounded_truncated = mcp_server._bounded_items(
+        ["first", "second", "third"], None
+    )
+    assert unbounded == ["first", "second", "third"]
+    assert unbounded_total == 3
+    assert unbounded_truncated is False
 
 
 def test_bounded_canonical_query_preserves_totals_for_lists_and_dicts():
@@ -1162,9 +1287,26 @@ def test_live_artifact_search_handles_list_based_symbol_state(
 
     assert result["total_matches"] == 1
     assert result["truncated"] is False
-    assert result["artifacts"]["pkg.module::target"]["consumers"] == [
-        "tests.test_module"
-    ]
+    assert result["artifacts"]["pkg.module::target"]["consumers"] == {
+        "total": 1,
+        "truncated": False,
+    }
+
+    full = json.loads(
+        mcp_server.search_artifacts.fn(
+            repo_path=str(tmp_path),
+            search_term="target",
+            limit=1,
+            evidence_limit=1,
+            compact=False,
+            fields=["artifacts"],
+        )
+    )
+    assert full["artifacts"]["pkg.module::target"]["consumers"] == {
+        "items": ["tests.test_module"],
+        "total": 1,
+        "truncated": False,
+    }
 
 
 def test_live_artifact_search_also_returns_matching_modules(tmp_path, monkeypatch):
@@ -1206,11 +1348,26 @@ def test_live_artifact_search_also_returns_matching_modules(tmp_path, monkeypatc
     assert result["total_matches"] == 1
     assert result["artifacts"] == {}
     assert module["module_id"] == "7/1"
-    assert module["dependencies_inbound"] == ["pkg.caller", "pkg.soft_caller"]
-    assert module["dependencies_outbound"] == [
-        "pkg.dependency",
-        "pkg.soft_dependency",
-    ]
+    assert module["dependencies_inbound"] == {"total": 2, "truncated": False}
+    assert module["dependencies_outbound"] == {"total": 2, "truncated": False}
+
+    full = json.loads(
+        mcp_server.search_artifacts.fn(
+            repo_path=str(tmp_path),
+            search_term="unique_probe",
+            limit=10,
+            evidence_limit=1,
+            compact=False,
+            fields=["modules"],
+        )
+    )
+    full_module = full["modules"]["pkg.unique_probe"]
+    assert full_module["dependencies_inbound"]["items"] == ["pkg.caller"]
+    assert full_module["dependencies_inbound"]["total"] == 2
+    assert full_module["dependencies_inbound"]["truncated"] is True
+    assert full_module["dependencies_outbound"]["items"] == ["pkg.dependency"]
+    assert full_module["dependencies_outbound"]["total"] == 2
+    assert full_module["dependencies_outbound"]["truncated"] is True
 
 
 def test_module_context_exposes_new_live_module_before_full_report(
@@ -1349,6 +1506,111 @@ def test_layer_isolation_addresses_nested_dotted_and_path_layers(
     assert result["module_count"] == 2
 
 
+def test_layer_isolation_reads_report_from_shared_output_dir(tmp_path, monkeypatch):
+    repo = tmp_path / "sample_repo"
+    repo.mkdir()
+    reports = tmp_path / "shared_reports"
+    reports.mkdir()
+    report = reports / "sample_repo_package_graph_analytics.json"
+    report.write_text(
+        json.dumps(
+            {
+                "module_count": 1,
+                "modules": {},
+                "module_dependency_matrix": {},
+                "shared_usage_clusters": [],
+                "dependency_type_breakdown": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(mcp_server, "resolve_output_dir", lambda: reports)
+    monkeypatch.setattr(
+        mcp_server,
+        "_read_registries",
+        lambda _root: ({}, {}, {}, {}),
+    )
+
+    result = json.loads(
+        mcp_server.get_layer_isolation.fn(str(repo), "package")
+    )
+
+    assert result["module_count"] == 1
+    assert result["data_source"] == str(report)
+    assert not (repo / "output").exists()
+
+
+def test_layer_isolation_handles_missing_shared_output_dir(tmp_path, monkeypatch):
+    repo = tmp_path / "sample_repo"
+    repo.mkdir()
+    monkeypatch.setattr(
+        mcp_server,
+        "resolve_output_dir",
+        lambda: tmp_path / "missing_reports",
+    )
+
+    result = mcp_server.get_layer_isolation.fn(str(repo), "package")
+
+    assert result == (
+        "Error: No layer report found for 'package' and no global summary found."
+    )
+
+
+def test_project_architecture_and_report_diff_offer_optional_bounds(
+    tmp_path, monkeypatch
+):
+    summary_path = tmp_path / "summary.json"
+    diff_path = tmp_path / "diff.json"
+    summary_path.write_text(json.dumps({
+        "action_items": ["a", "b"],
+        "layer_index": [{"layer": "a"}, {"layer": "b"}],
+        "top_hotspots": [{"module": "a"}, {"module": "b"}],
+        "debt_summary": {"total_score": 1},
+        "metrics": {"nodes": 2},
+    }), encoding="utf-8")
+    diff_path.write_text(json.dumps({
+        "classification": "REGRESSION",
+        "report_diff": {
+            "metrics": {}, "debt": {}, "is_empty": False,
+            "layers": {"a": {"module_count": {}}, "b": {"module_count": {}}},
+        },
+    }), encoding="utf-8")
+
+    def canonical(_root, filename):
+        if filename.endswith("_summary.json"):
+            return summary_path
+        if filename.endswith("_report_diff.json"):
+            return diff_path
+        return None
+
+    monkeypatch.setattr(mcp_server, "_get_canonical_report", canonical)
+
+    architecture = json.loads(mcp_server.get_project_architecture.fn(
+        repo_path=str(tmp_path), max_items=1, compact=False,
+        fields=["action_items", "top_global_hotspots"],
+    ))
+    assert architecture["action_items"] == {
+        "items": ["a"], "total": 2, "truncated": True,
+    }
+    assert architecture["top_global_hotspots"]["total"] == 2
+
+    diff = json.loads(mcp_server.get_report_diff.fn(
+        repo_path=str(tmp_path), max_items=1, compact=False,
+        fields=["report_diff"],
+    ))
+    layers = diff["report_diff"]["layers"]
+    assert list(layers["items"]) == ["a"]
+    assert layers["total"] == 2
+    assert layers["truncated"] is True
+
+    all_layers = json.loads(mcp_server.get_report_diff.fn(
+        repo_path=str(tmp_path), max_items=None, compact=False,
+        fields=["report_diff"],
+    ))["report_diff"]["layers"]
+    assert set(all_layers["items"]) == {"a", "b"}
+    assert all_layers["truncated"] is False
+
+
 def test_test_reachability_finds_direct_alias_and_reexport_paths():
     hard_edges = {
         "tests.test_direct": {"pkg.target"},
@@ -1438,11 +1700,27 @@ def test_artifact_blast_radius_uses_only_current_compact_report(
 
     result = json.loads(
         mcp_server.get_artifact_blast_radius.fn(
-            repo_path=str(tmp_path), artifact_name="target"
+            repo_path=str(tmp_path), artifact_name="target", max_items=0
         )
     )
 
     assert result["artifact_id"] == "A1/1"
     assert result["definer"] == "pkg.module"
-    assert result["consumers"] == ["tests.test_module"]
+    assert result["consumers"] == {"total": 1, "truncated": True}
     assert result["evidence_scope"] == "direct_static_artifact_consumption"
+
+    full = json.loads(
+        mcp_server.get_artifact_blast_radius.fn(
+            repo_path=str(tmp_path),
+            artifact_name="target",
+            compact=False,
+            fields=["consumers"],
+        )
+    )
+    assert full == {
+        "consumers": {
+            "items": ["tests.test_module"],
+            "total": 1,
+            "truncated": False,
+        }
+    }

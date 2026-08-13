@@ -110,6 +110,7 @@ Example:
 The MCP server must start silently and wait for JSON-RPC messages.
 """
 import atexit
+import hashlib
 import json
 import os
 import subprocess
@@ -121,6 +122,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
+
+
+_MCP_SERVER_SOURCE_FINGERPRINT = hashlib.sha256(
+    Path(__file__).read_bytes()
+).hexdigest()
 
 
 def _is_virtual_environment() -> bool:
@@ -175,6 +181,7 @@ warnings.filterwarnings("ignore")
 
 from fastmcp import FastMCP
 from contextor.core.api.facade import ContextorFacade
+from contextor.core.paths import output_dir as resolve_output_dir
 from contextor.core.report_query import (
     catalog_from_registry,
     filter_public_artifact_report,
@@ -503,8 +510,11 @@ def _start_analysis_job(
 
 
 def _get_canonical_report(repo_path: Path, filename: str) -> Path | None:
-    """Returns the canonical report path without globbing."""
-    out_dir = repo_path / "output"
+    """Return a report from the shared GUI/CLI/MCP output directory."""
+    del repo_path  # Reports are installation-scoped, never repository-local.
+    out_dir = resolve_output_dir()
+    if not out_dir.is_dir():
+        return None
     target = out_dir / filename
     if target.is_file():
         return target
@@ -626,12 +636,38 @@ def _semantic_artifact_diff(old_artifacts: dict, new_artifacts: dict) -> dict:
     }
 
 
-def _bounded_items(items: list, limit: int) -> tuple[list, int, bool]:
-    """Bound an MCP collection while preserving its total cardinality."""
+def _bounded_items(items: list, limit: int | None) -> tuple[list, int, bool]:
+    """Optionally bound an MCP collection while preserving its cardinality."""
     total = len(items)
-    safe_limit = max(0, min(int(limit), 500))
+    if limit is None:
+        return items, total, False
+    safe_limit = max(0, int(limit))
     selected = items[:safe_limit]
     return selected, total, total > len(selected)
+
+
+def _semantic_diff_view(diff: dict, max_items: int | None, compact: bool) -> dict:
+    """Shape semantic diff collections for a bounded LLM response."""
+    result = {
+        "changed_symbol_count": diff.get("changed_symbol_count", 0),
+        "body_change_count": diff.get("body_change_count", 0),
+        "body_only_changes_tracked": diff.get("body_only_changes_tracked", False),
+    }
+    for key in (
+        "symbols_added",
+        "symbols_removed",
+        "signatures_changed",
+        "bodies_changed",
+        "affected_symbols",
+    ):
+        value = diff.get(key, {}) if key == "signatures_changed" else diff.get(key, [])
+        entries = sorted(value.items()) if isinstance(value, dict) else list(value)
+        selected, total, truncated = _bounded_items(entries, max_items)
+        collection = {"total": total, "truncated": truncated}
+        if not compact:
+            collection["items"] = dict(selected) if isinstance(value, dict) else selected
+        result[key] = collection
+    return result
 
 
 def _static_test_reachability(
@@ -675,7 +711,7 @@ def _static_test_reachability(
     ]
 
 
-def _bounded_query_result(value, limit: int) -> dict:
+def _bounded_query_result(value, limit: int | None) -> dict:
     """Wrap and bound a top-level canonical-state query result."""
     if isinstance(value, dict):
         selected, total, truncated = _bounded_items(list(value.items()), limit)
@@ -854,11 +890,27 @@ def get_analysis_status(repo_path: str, job_id: str | None = None) -> str:
 
 
 @mcp.tool()
-def update_file(repo_path: str, file_path: str) -> str:
+def update_file(
+    repo_path: str,
+    file_path: str,
+    max_items: int | None = 30,
+    compact: bool = True,
+    fields: list[str] | None = None,
+) -> str:
     """
     [OPTIMIZED] Incremental architectural update for a modified file.
     Updates the canonical state and graph structure in real-time.
     Requires `analyze_project` to have been run at least once during this session.
+
+    Semantic-diff collections always expose ``total`` and ``truncated``. The
+    default compact response omits ``items``; set ``compact=False`` for bounded
+    symbol/signature evidence. ``max_items`` is the per-collection limit;
+    pass ``None`` to return all requested evidence without truncation.
+    ``fields`` projects top-level response keys after compact shaping. Stable
+    fields include ``status``, ``file_path``, graph/metrics state fields,
+    ``live_state_persisted``, ``semantic_diff`` and
+    ``runtime_restart_required``; ``delta`` and runtime warning fields are
+    conditional. Invalid projections return the current allowlist.
 
     LLM use: call this after each edit instead of rebuilding every report. Read
     ``semantic_diff`` for added/removed symbols and signature changes, then use
@@ -891,6 +943,7 @@ def update_file(repo_path: str, file_path: str) -> str:
             else True
         )
         new_artifacts = engine.state.artifacts.get(module_path, {})
+        semantic_diff = _semantic_artifact_diff(old_artifacts, new_artifacts)
         result = {
             "status": res.status,
             "file_path": res.file_path,
@@ -901,9 +954,13 @@ def update_file(repo_path: str, file_path: str) -> str:
             "global_metrics_state": res.global_metrics_state,
             "artifact_consumption_state": res.artifact_consumption_state,
             "live_state_persisted": live_state_persisted,
-            "semantic_diff": _semantic_artifact_diff(old_artifacts, new_artifacts),
+            "semantic_diff": _semantic_diff_view(semantic_diff, max_items, compact),
         }
-        runtime_restart_required = target_file == Path(__file__).resolve()
+        runtime_restart_required = (
+            target_file == Path(__file__).resolve()
+            and hashlib.sha256(target_file.read_bytes()).hexdigest()
+            != _MCP_SERVER_SOURCE_FINGERPRINT
+        )
         result["runtime_restart_required"] = runtime_restart_required
         if runtime_restart_required:
             result["runtime_state"] = "stale_until_mcp_server_restart"
@@ -922,6 +979,19 @@ def update_file(repo_path: str, file_path: str) -> str:
                 "artifacts_added": res.delta.artifacts_added,
                 "artifacts_removed": res.delta.artifacts_removed
             }
+        if fields is not None:
+            allowed_fields = set(result)
+            unknown_fields = sorted(set(fields) - allowed_fields)
+            if unknown_fields:
+                return json.dumps(
+                    {
+                        "error": "Unsupported fields for update_file",
+                        "unknown_fields": unknown_fields,
+                        "allowed_fields": sorted(allowed_fields),
+                    },
+                    indent=2,
+                )
+            result = {field: result[field] for field in fields}
         return json.dumps(result, indent=2)
     except Exception as e:
         return json.dumps({"status": "ERROR", "file_path": str(target_file), "error": str(e)}, indent=2)
@@ -932,11 +1002,25 @@ def update_file(repo_path: str, file_path: str) -> str:
 # ==========================================================
 
 @mcp.tool()
-def get_project_architecture(repo_path: str) -> str:
+def get_project_architecture(
+    repo_path: str,
+    max_items: int | None = 10,
+    compact: bool = True,
+    fields: list[str] | None = None,
+) -> str:
     """
     [OPTIMIZED] The highest-level architectural summary of the project.
-    Returns global action items, debt summary, layer index, and top 5 global hotspots.
-    Use this first when exploring a new repository.
+    Returns global action items, debt summary, layer index, and hotspots.
+    Collections always expose ``total`` and ``truncated``. The compact default
+    omits ``items``; set ``compact=False`` for evidence. ``max_items`` applies
+    independently to every collection; pass ``None`` for all items. ``fields``
+    projects top-level keys after compact shaping. Allowed values are
+    ``action_items``, ``debt_summary``, ``layer_index``,
+    ``top_global_hotspots``, and ``module_count``.
+
+    LLM use: start compact with the default limit. Increase it only when a
+    relevant collection is truncated, or pass ``None`` after explicitly
+    deciding that the complete collection is worth the token cost.
     """
     root = Path(repo_path).expanduser().resolve()
     repo_name = root.name
@@ -948,13 +1032,34 @@ def get_project_architecture(repo_path: str) -> str:
     try:
         summary = json.loads(summary_path.read_text(encoding="utf-8"))
         
+        collections = {}
+        for key, source_key in (
+            ("action_items", "action_items"),
+            ("layer_index", "layer_index"),
+            ("top_global_hotspots", "top_hotspots"),
+        ):
+            items, total, truncated = _bounded_items(
+                summary.get(source_key, []), max_items
+            )
+            collection = {"total": total, "truncated": truncated}
+            if not compact:
+                collection["items"] = items
+            collections[key] = collection
         result = {
-            "action_items": summary.get("action_items", []),
+            **collections,
             "debt_summary": summary.get("debt_summary", {}),
-            "layer_index": summary.get("layer_index", []),
-            "top_global_hotspots": summary.get("top_hotspots", [])[:5],
             "module_count": summary.get("metrics", {}).get("nodes", 0)
         }
+        if fields is not None:
+            allowed_fields = set(result)
+            unknown_fields = sorted(set(fields) - allowed_fields)
+            if unknown_fields:
+                return json.dumps({
+                    "error": "Unsupported fields for get_project_architecture",
+                    "unknown_fields": unknown_fields,
+                    "allowed_fields": sorted(allowed_fields),
+                }, indent=2)
+            result = {field: result[field] for field in fields}
         return json.dumps(result, indent=2)
     except Exception as e:
         return f"Error reading project architecture: {e}"
@@ -964,7 +1069,7 @@ def get_project_architecture(repo_path: str) -> str:
 def get_module_context(
     repo_path: str,
     module_name: str,
-    max_items: int = 30,
+    max_items: int | None = 30,
     compact: bool = True,
     fields: list[str] | None = None,
 ) -> str:
@@ -979,8 +1084,8 @@ def get_module_context(
     Dependency collections always expose ``total`` and ``truncated``. The
     default compact response omits edge ``items``; set ``compact=False`` for
     bounded evidence. ``max_items`` applies independently to inbound and
-    outbound edges (maximum 500). ``fields`` projects top-level keys after
-    ``compact`` shapes the response. Allowed values are ``module``, ``metrics``,
+    outbound edges; pass ``None`` to return every edge. ``compact`` shapes the
+    response before ``fields`` projects it. Allowed values are ``module``, ``metrics``,
     ``metrics_source``, ``dependency_data_source``,
     ``dependencies_inbound_who_calls_me``, and
     ``dependencies_outbound_who_i_call``. Invalid projections return a
@@ -1138,11 +1243,24 @@ def get_module_context(
     return json.dumps(result, indent=2)
 
 @mcp.tool()
-def get_artifact_blast_radius(repo_path: str, artifact_name: str) -> str:
+def get_artifact_blast_radius(
+    repo_path: str,
+    artifact_name: str,
+    max_items: int | None = 30,
+    compact: bool = True,
+    fields: list[str] | None = None,
+) -> str:
     """
     [OPTIMIZED] Resolves direct, evidence-backed consumers of an artifact.
     Uses the current compact artifact report and reports its evidence scope;
     it does not claim that dynamic Python usage can be proven exact.
+
+    ``consumers`` always contains ``total`` and ``truncated``. The default
+    compact response omits ``items``; set ``compact=False`` for bounded static
+    evidence. ``max_items`` controls returned consumers; pass ``None`` for all
+    consumers without truncation. ``fields`` projects top-level
+    keys after compact shaping. Allowed values are ``artifact``, ``artifact_id``,
+    ``kind``, ``definer``, ``consumers``, ``evidence_scope``, and ``data_source``.
 
     LLM use: call before changing or removing a public symbol. Treat consumers
     as confirmed static evidence, not proof that dynamic Python has no callers.
@@ -1173,16 +1291,47 @@ def get_artifact_blast_radius(repo_path: str, artifact_name: str) -> str:
         definer_id = str(art_data.get("definer_module", ""))
         consumer_ids = art_data.get("consumer_module_indices", [])
 
-        result = {
+        resolved_consumers = [mod_id_to_path.get(item, item) for item in consumer_ids]
+        consumer_items, consumer_total, consumer_truncated = _bounded_items(
+            resolved_consumers, max_items
+        )
+        common_result = {
             "artifact": full_name,
             "artifact_id": art_id,
             "kind": art_data.get("kind"),
             "definer": mod_id_to_path.get(definer_id, definer_id),
-            "consumer_count": len(consumer_ids),
-            "consumers": [mod_id_to_path.get(item, item) for item in consumer_ids],
             "evidence_scope": "direct_static_artifact_consumption",
             "data_source": "current_artifacts_compact",
         }
+        full_result = {
+            **common_result,
+            "consumers": {
+                "items": consumer_items,
+                "total": consumer_total,
+                "truncated": consumer_truncated,
+            },
+        }
+        compact_result = {
+            **common_result,
+            "consumers": {
+                "total": consumer_total,
+                "truncated": consumer_truncated,
+            },
+        }
+        result = compact_result if compact else full_result
+        if fields is not None:
+            allowed_fields = set(result)
+            unknown_fields = sorted(set(fields) - allowed_fields)
+            if unknown_fields:
+                return json.dumps(
+                    {
+                        "error": "Unsupported fields for get_artifact_blast_radius",
+                        "unknown_fields": unknown_fields,
+                        "allowed_fields": sorted(allowed_fields),
+                    },
+                    indent=2,
+                )
+            result = {field: result[field] for field in fields}
         return json.dumps(result, indent=2)
     except Exception as e:
         return f"Error calculating artifact blast radius: {e}"
@@ -1192,7 +1341,10 @@ def get_artifact_blast_radius(repo_path: str, artifact_name: str) -> str:
 def search_artifacts(
     repo_path: str,
     search_term: str,
-    limit: int = 20,
+    limit: int | None = 20,
+    evidence_limit: int | None = 20,
+    compact: bool = True,
+    fields: list[str] | None = None,
 ) -> str:
     """
     [OPTIMIZED] Searches the canonical live state for an artifact, module, or symbol matching 'search_term'.
@@ -1200,6 +1352,12 @@ def search_artifacts(
     Use this to extract arbitrary context about any symbol from the current architectural state.
     Exact symbol matches are preferred. ``limit``, ``total_matches`` and
     ``truncated`` bound broad searches without hiding their cardinality.
+    Nested module dependencies and artifact consumers are independently bounded
+    by ``evidence_limit``. They always expose ``total`` and ``truncated``;
+    set ``compact=False`` to include ``items``. Pass ``None`` for either limit
+    to return every match or every nested evidence item. ``fields``
+    projects ``query``, ``match_count``, ``total_matches``, ``truncated``,
+    ``modules`` or ``artifacts`` after compact shaping.
 
     LLM use: start here when only a partial symbol/module name is known. Keep
     the default limit, inspect ``truncated``, and narrow the term before raising
@@ -1251,17 +1409,33 @@ def search_artifacts(
                     mod_path.casefold(),
                     module_leaf.casefold(),
                 }
+                inbound_items, inbound_total, inbound_truncated = _bounded_items(
+                    inbound, evidence_limit
+                )
+                outbound_items, outbound_total, outbound_truncated = _bounded_items(
+                    outbound, evidence_limit
+                )
+                module_entry = {
+                    "kind": "module",
+                    "module_id": engine.registry.get_module_id(mod_path),
+                    "dependencies_inbound": {
+                        "total": inbound_total,
+                        "truncated": inbound_truncated,
+                    },
+                    "dependencies_outbound": {
+                        "total": outbound_total,
+                        "truncated": outbound_truncated,
+                    },
+                }
+                if not compact:
+                    module_entry["dependencies_inbound"]["items"] = inbound_items
+                    module_entry["dependencies_outbound"]["items"] = outbound_items
                 found_modules.append(
                     (
                         not exact_module,
                         mod_path.casefold(),
                         mod_path,
-                        {
-                            "kind": "module",
-                            "module_id": engine.registry.get_module_id(mod_path),
-                            "dependencies_inbound": inbound,
-                            "dependencies_outbound": outbound,
-                        },
+                        module_entry,
                     )
                 )
         for mod_path, mod_arts in engine.state.artifacts.items():
@@ -1284,13 +1458,21 @@ def search_artifacts(
                             for c in consumers
                         ]
 
-                        found_artifacts.append((name.lower() != search_term.lower(), name.lower(), f"{mod_path}::{name}", {
+                        consumer_items, consumer_total, consumer_truncated = _bounded_items(
+                            consumer_paths, evidence_limit
+                        )
+                        artifact_entry = {
                             "kind": kind,
                             "definer_module_path": mod_path,
                             "definer_module_id": definer_mod,
-                            "consumer_count": len(consumers),
-                            "consumers": consumer_paths,
-                        }))
+                            "consumers": {
+                                "total": consumer_total,
+                                "truncated": consumer_truncated,
+                            },
+                        }
+                        if not compact:
+                            artifact_entry["consumers"]["items"] = consumer_items
+                        found_artifacts.append((name.lower() != search_term.lower(), name.lower(), f"{mod_path}::{name}", artifact_entry))
 
         if not found_artifacts and not found_modules:
             return f"No live modules or artifacts found matching '{search_term}'."
@@ -1310,14 +1492,25 @@ def search_artifacts(
         selected, total, truncated = _bounded_items(all_found, limit)
         selected_artifacts = [item for item in selected if item[2] == "artifact"]
         selected_modules = [item for item in selected if item[2] == "module"]
-        return json.dumps({
+        result = {
             "query": search_term,
             "match_count": len(selected),
             "total_matches": total,
             "truncated": truncated,
             "modules": {item[3]: item[4] for item in selected_modules},
             "artifacts": {item[3]: item[4] for item in selected_artifacts},
-        }, indent=2)
+        }
+        if fields is not None:
+            allowed_fields = set(result)
+            unknown_fields = sorted(set(fields) - allowed_fields)
+            if unknown_fields:
+                return json.dumps({
+                    "error": "Unsupported fields for search_artifacts",
+                    "unknown_fields": unknown_fields,
+                    "allowed_fields": sorted(allowed_fields),
+                }, indent=2)
+            result = {field: result[field] for field in fields}
+        return json.dumps(result, indent=2)
     except Exception as e:
         return f"Error extracting artifact context from live state: {e}"
 
@@ -1325,7 +1518,7 @@ def search_artifacts(
 def get_file_edit_context(
     repo_path: str,
     file_path: str,
-    max_items: int = 30,
+    max_items: int | None = 30,
     compact: bool = True,
     fields: list[str] | None = None,
 ) -> str:
@@ -1349,9 +1542,9 @@ def get_file_edit_context(
     modules, including paths through aliases, re-exports and facades. It is
     structural evidence, not runtime line or branch coverage.
 
-    Collections are bounded by ``max_items`` (default 30, maximum 500) to
-    protect the LLM context window. Increase it only when a nested collection's
-    ``truncated`` flag is true and the omitted evidence matters.
+    Collections use ``max_items`` (default 30) to protect the LLM context
+    window. Increase it when omitted evidence matters, or pass ``None`` to
+    return every item without truncation.
 
     LLM use: this is the preferred one-call briefing immediately before editing
     a file. It complements, but does not replace, the source and code diff.
@@ -1621,16 +1814,27 @@ def get_file_edit_context(
 def get_layer_isolation(
     repo_path: str,
     layer_name: str,
-    max_clusters: int = 8,
-    max_boundary_violations: int = 10,
+    max_clusters: int | None = 8,
+    max_boundary_violations: int | None = 10,
+    compact: bool = True,
+    fields: list[str] | None = None,
 ) -> str:
     """
     [OPTIMIZED] Extracts isolation metrics, clusters, and leaks for a specific architectural layer.
     Use this before refactoring a large component to understand its internal cohesion.
 
+    Reads the layer report from the same central output directory used by the
+    desktop GUI, CLI, and ``analyze_layer``. Reports are never expected inside
+    the analyzed repository. Run ``analyze_layer`` first when no matching
+    dedicated report exists.
+
     ``max_clusters`` and ``max_boundary_violations`` bound verbose evidence.
-    The response always retains full counts and explicit ``*_truncated`` flags,
-    so an LLM can request a larger limit without loading everything by default.
+    Collections always expose ``total`` and ``truncated``. The compact default
+    omits ``items``; set ``compact=False`` for evidence. Increase either limit
+    or pass ``None`` for the complete corresponding collection. ``fields``
+    projects top-level keys after compact shaping. Allowed values are ``layer``,
+    ``report_layer``, ``data_source``, ``module_count``, ``clusters``,
+    ``dependency_types``, and ``boundary_violations``.
 
     LLM use: call before moving modules or changing layer boundaries. Resolve a
     truncated tail only when the planned edit touches that omitted evidence.
@@ -1723,31 +1927,58 @@ def get_layer_isolation(
         violations, violation_count, violations_truncated = _bounded_items(
             boundary_violations, max_boundary_violations
         )
+        cluster_collection = {
+            "total": cluster_count,
+            "truncated": clusters_truncated,
+        }
+        violation_collection = {
+            "total": violation_count,
+            "truncated": violations_truncated,
+        }
+        if not compact:
+            cluster_collection["items"] = clusters
+            violation_collection["items"] = violations
         result = {
             "layer": requested_layer,
             "report_layer": normalized_layer_name,
             "data_source": str(ga_path),
             "module_count": ga.get("module_count", 0),
-            "clusters": clusters,
-            "cluster_count": cluster_count,
-            "clusters_truncated": clusters_truncated,
+            "clusters": cluster_collection,
             "dependency_types": ga.get("dependency_type_breakdown", {}),
-            "boundary_violations": violations,
-            "boundary_violations_count": violation_count,
-            "boundary_violations_truncated": violations_truncated,
+            "boundary_violations": violation_collection,
         }
+        if fields is not None:
+            allowed_fields = set(result)
+            unknown_fields = sorted(set(fields) - allowed_fields)
+            if unknown_fields:
+                return json.dumps({
+                    "error": "Unsupported fields for get_layer_isolation",
+                    "unknown_fields": unknown_fields,
+                    "allowed_fields": sorted(allowed_fields),
+                }, indent=2)
+            result = {field: result[field] for field in fields}
         return json.dumps(result, indent=2)
     except Exception as e:
         return f"Error extracting layer isolation: {e}"
 
 
 @mcp.tool()
-def get_report_diff(repo_path: str) -> str:
+def get_report_diff(
+    repo_path: str,
+    max_items: int | None = 20,
+    compact: bool = True,
+    fields: list[str] | None = None,
+) -> str:
     """
     [OPTIMIZED] Returns architectural regression analysis between the last two analysis runs.
     Shows delta in hotspot count, debt score, cycle count, and lists new/resolved hotspots.
     Consecutive runs are compared before the canonical summary is overwritten,
     including different working-tree states on the same commit.
+    Layer changes are returned as a collection with ``total`` and ``truncated``;
+    set ``compact=False`` for bounded ``items``. ``max_items=None`` returns all
+    changed layers. ``fields`` projects top-level keys after compact shaping;
+    current reports expose ``classification``, ``report_diff``, ``baseline``,
+    ``current``, and ``comparison_basis``.
 
     LLM use: run analysis once before and once after a change, then inspect the
     classification and metric deltas here. An empty diff means no tracked
@@ -1765,6 +1996,25 @@ def get_report_diff(repo_path: str) -> str:
         )
     try:
         diff_data = json.loads(diff_path.read_text(encoding="utf-8"))
+        report_diff = diff_data.get("report_diff", {})
+        layers = report_diff.get("layers", {})
+        layer_items, layer_total, layer_truncated = _bounded_items(
+            sorted(layers.items()), max_items
+        )
+        layer_collection = {"total": layer_total, "truncated": layer_truncated}
+        if not compact:
+            layer_collection["items"] = dict(layer_items)
+        diff_data["report_diff"] = {**report_diff, "layers": layer_collection}
+        if fields is not None:
+            allowed_fields = set(diff_data)
+            unknown_fields = sorted(set(fields) - allowed_fields)
+            if unknown_fields:
+                return json.dumps({
+                    "error": "Unsupported fields for get_report_diff",
+                    "unknown_fields": unknown_fields,
+                    "allowed_fields": sorted(allowed_fields),
+                }, indent=2)
+            diff_data = {field: diff_data[field] for field in fields}
         return json.dumps(diff_data, indent=2)
     except Exception as e:
         return f"Error reading diff report: {e}"
@@ -1840,7 +2090,7 @@ def query_canonical_state(repo_path: str, python_filter_expression: str) -> str:
 def query_canonical_state_bounded(
     repo_path: str,
     python_filter_expression: str,
-    limit: int = 100,
+    limit: int | None = 100,
 ) -> str:
     """
     [OPTIMIZED] Runs the same restricted expression as
@@ -1850,6 +2100,8 @@ def query_canonical_state_bounded(
     and ``truncated`` so an LLM can refine the expression or raise ``limit``
     only when omitted items matter. Select narrow scalar fields in the
     expression when individual nested values may themselves be large.
+    Pass ``limit=None`` only after explicitly choosing an unbounded top-level
+    result; nested values are never automatically compacted.
 
     LLM use: use this as an escape hatch for questions not covered by a
     dedicated tool. Prefer projected scalar fields and a small limit; it is a
@@ -1880,6 +2132,8 @@ def extract_indexed_report_context(
     report_path: str = "",
     resolve_indices: bool = True,
     public_api_only: bool = False,
+    max_items: int | None = 20,
+    fields: list[str] | None = None,
 ) -> str:
     """
     [OPTIMIZED] Extracts complete matching blocks from an indexed artifact report.
@@ -1891,9 +2145,14 @@ def extract_indexed_report_context(
     explicit. Active dictionaries fall back to both recovery dictionaries, while
     blocks with unresolved artifact or definer IDs are omitted with diagnostics.
 
-    Omit ``report_path`` to read the current compact artifact report. Every matched
-    block is returned in full, including nested objects; results are never silently
-    sampled or truncated.
+    Omit ``report_path`` to read the current compact artifact report. Every
+    selected block is returned complete, including nested objects. ``max_items``
+    controls the number of complete artifact blocks (default 20); pass ``None``
+    for every match. ``total_artifact_count`` and ``truncated`` expose omitted
+    matches. ``fields`` projects top-level keys after bounding; accepted names
+    are the keys returned by the shared indexed-query resolver plus
+    ``total_artifact_count``, ``truncated``, and ``data_source``. Invalid
+    projections return the exact current allowlist.
 
     Set ``public_api_only=True`` to mirror the GUI checkbox: private names are
     excluded, but zero detected consumers do not make an artifact private.
@@ -1935,9 +2194,25 @@ def extract_indexed_report_context(
             repo_root=str(root),
             resolve_indices=resolve_indices,
         )
-        result["total_artifact_count"] = result["artifact_count"]
-        result["truncated"] = False
+        artifact_entries = sorted(result.get("artifacts", {}).items())
+        selected_entries, total_artifacts, artifacts_truncated = _bounded_items(
+            artifact_entries, max_items
+        )
+        result["artifacts"] = dict(selected_entries)
+        result["artifact_count"] = len(selected_entries)
+        result["total_artifact_count"] = total_artifacts
+        result["truncated"] = artifacts_truncated
         result["data_source"] = str(selected_path)
+        if fields is not None:
+            allowed_fields = set(result)
+            unknown_fields = sorted(set(fields) - allowed_fields)
+            if unknown_fields:
+                return json.dumps({
+                    "error": "Unsupported fields for extract_indexed_report_context",
+                    "unknown_fields": unknown_fields,
+                    "allowed_fields": sorted(allowed_fields),
+                }, indent=2)
+            result = {field: result[field] for field in fields}
         return json.dumps(result, indent=2, ensure_ascii=False)
     except Exception as e:
         return f"Error extracting indexed report context: {e}"
@@ -1959,6 +2234,8 @@ def lookup_index_entries(repo_path: str, ids: list[str]) -> str:
     LLM use: pass only IDs visible in the current result instead of loading the
     full project dictionary. Recovery means a known historical identity and
     must not be presented as an active symbol; missing means no known identity.
+    Output size is controlled directly by the number of IDs supplied; split a
+    large set when one response would not fit the context window.
     """
     root = Path(repo_path).expanduser().resolve()
     try:
@@ -1991,7 +2268,10 @@ def get_artifacts_for_module(
     module_name: str,
     include_consumers: bool = True,
     symbol_filter: str = "",
-    limit: int = 50,
+    limit: int | None = 50,
+    evidence_limit: int | None = 20,
+    compact: bool = True,
+    fields: list[str] | None = None,
 ) -> str:
     """
     [OPTIMIZED] Returns all artifacts exported by a module with consumer info.
@@ -2003,7 +2283,15 @@ def get_artifacts_for_module(
     - A full dotted module name: 'contextor.ui.gui_parser'
     - A file path relative to the repo root: 'contextor/ui/gui_parser.py'
 
-    Set ``include_consumers=False`` for a compact signatures-only view.
+    Set ``include_consumers=False`` for a signatures-only view. When included,
+    each ``consumers`` object always exposes ``total`` and ``truncated``;
+    ``compact=False`` adds ``items``. ``limit`` controls artifact matches and
+    ``evidence_limit`` controls consumers per artifact; pass ``None`` for all
+    matches or all nested evidence. ``fields`` projects top-level keys after
+    compact shaping. Allowed values are ``module``, ``module_id``,
+    ``artifact_count``, ``total_artifact_count``, ``truncated``,
+    ``symbol_filter``, ``data_sources``, ``complete_symbol_catalog``, and
+    ``artifacts``.
 
     Use ``symbol_filter`` to select a name substring and ``limit`` to bound the
     result. ``total_artifact_count`` reports matches before limiting and
@@ -2066,14 +2354,22 @@ def get_artifacts_for_module(
                 "symbol": symbol,
                 "full_name": full_name,
                 "kind": art_data.get("kind"),
-                "consumer_count": art_data.get("consumer_count", 0),
             }
 
             if include_consumers:
                 consumer_ids = art_data.get("consumer_module_indices", [])
-                entry["consumers"] = [
+                resolved_consumers = [
                     mod_id_to_path.get(c, c) for c in consumer_ids
                 ]
+                consumer_items, consumer_total, consumer_truncated = _bounded_items(
+                    resolved_consumers, evidence_limit
+                )
+                entry["consumers"] = {
+                    "total": consumer_total,
+                    "truncated": consumer_truncated,
+                }
+                if not compact:
+                    entry["consumers"]["items"] = consumer_items
 
             result_artifacts[art_id] = entry
 
@@ -2102,10 +2398,11 @@ def get_artifacts_for_module(
                     "full_name": full_name,
                     "kind": existing.get("kind", kind),
                     "signature": signatures.get(symbol),
-                    "consumer_count": existing.get("consumer_count", 0),
                 }
                 if include_consumers:
-                    entry["consumers"] = existing.get("consumers", [])
+                    entry["consumers"] = existing.get(
+                        "consumers", {"total": 0, "truncated": False}
+                    )
                 result_artifacts[key] = entry
 
         entries = sorted(
@@ -2121,8 +2418,7 @@ def get_artifacts_for_module(
             ]
         selected, total_count, truncated = _bounded_items(entries, limit)
 
-        return json.dumps(
-            {
+        result = {
                 "module": module_name,
                 "module_id": mod_compact_id,
                 "artifact_count": len(selected),
@@ -2132,9 +2428,18 @@ def get_artifacts_for_module(
                 "data_sources": ["live_symbol_state", "artifacts_compact"],
                 "complete_symbol_catalog": bool(engine),
                 "artifacts": dict(selected),
-            },
-            indent=2,
-        )
+            }
+        if fields is not None:
+            allowed_fields = set(result)
+            unknown_fields = sorted(set(fields) - allowed_fields)
+            if unknown_fields:
+                return json.dumps({
+                    "error": "Unsupported fields for get_artifacts_for_module",
+                    "unknown_fields": unknown_fields,
+                    "allowed_fields": sorted(allowed_fields),
+                }, indent=2)
+            result = {field: result[field] for field in fields}
+        return json.dumps(result, indent=2)
     except Exception as e:
         return f"Error reading artifacts for module: {e}"
 
@@ -2143,7 +2448,10 @@ def get_artifacts_for_module(
 def lookup_artifact_by_symbol(
     repo_path: str,
     symbol_name: str,
-    limit: int = 20,
+    limit: int | None = 20,
+    evidence_limit: int | None = 20,
+    compact: bool = True,
+    fields: list[str] | None = None,
 ) -> str:
     """
     [OPTIMIZED] Finds artifacts matching a symbol name and returns their details.
@@ -2156,6 +2464,12 @@ def lookup_artifact_by_symbol(
     Returns defining module, kind, consumer count, and consumer module list.
     Exact matches are preferred over partial matches. ``limit`` bounds the
     response while ``total_matches`` and ``truncated`` describe omitted data.
+    Consumers within every match are bounded independently by
+    ``evidence_limit``, always expose ``total`` and ``truncated``, and include
+    ``items`` only when ``compact=False``. Pass ``None`` for all matches or all
+    consumers. ``fields`` projects top-level keys after compact shaping.
+    Allowed values are ``query``, ``match_count``, ``total_matches``,
+    ``truncated``, ``data_source``, and ``artifacts``.
 
     LLM use: choose this when no live session is available and a saved report is
     sufficient. Narrow ambiguous names before increasing ``limit``.
@@ -2190,8 +2504,9 @@ def lookup_artifact_by_symbol(
         candidates.sort()
         if candidates and not candidates[0][0]:
             candidates = [item for item in candidates if not item[0]]
-        total_matches = len(candidates)
-        candidates = candidates[: max(1, min(int(limit), 100))]
+        candidates, total_matches, matches_truncated = _bounded_items(
+            candidates, limit
+        )
 
         if not candidates:
             return f"No current artifacts found matching '{symbol_name}'."
@@ -2202,48 +2517,45 @@ def lookup_artifact_by_symbol(
             definer_id = str(art_data.get("definer_module", ""))
             consumer_ids = art_data.get("consumer_module_indices", [])
 
-            results[art_id] = {
+            resolved_consumers = [mod_id_to_path.get(c, c) for c in consumer_ids]
+            consumer_items, consumer_total, consumer_truncated = _bounded_items(
+                resolved_consumers, evidence_limit
+            )
+            entry = {
                 "symbol": full_name.split("::", 1)[-1] if "::" in full_name else full_name,
                 "full_name": full_name,
                 "kind": art_data.get("kind", "unknown"),
                 "definer_module": mod_id_to_path.get(definer_id, definer_id),
-                "consumer_count": art_data.get("consumer_count", 0),
-                "consumers": [mod_id_to_path.get(c, c) for c in consumer_ids],
+                "consumers": {
+                    "total": consumer_total,
+                    "truncated": consumer_truncated,
+                },
             }
+            if not compact:
+                entry["consumers"]["items"] = consumer_items
+            results[art_id] = entry
 
-        return json.dumps(
-            {
+        result = {
                 "query": symbol_name,
                 "match_count": len(results),
                 "total_matches": total_matches,
-                "truncated": total_matches > len(results),
+                "truncated": matches_truncated,
                 "data_source": "current_artifacts_compact",
                 "artifacts": results,
-            },
-            indent=2,
-        )
+            }
+        if fields is not None:
+            allowed_fields = set(result)
+            unknown_fields = sorted(set(fields) - allowed_fields)
+            if unknown_fields:
+                return json.dumps({
+                    "error": "Unsupported fields for lookup_artifact_by_symbol",
+                    "unknown_fields": unknown_fields,
+                    "allowed_fields": sorted(allowed_fields),
+                }, indent=2)
+            result = {field: result[field] for field in fields}
+        return json.dumps(result, indent=2)
     except Exception as e:
         return f"Error searching artifacts by symbol: {e}"
-
-
-# ==========================================================
-# 4. FALLBACK TOOLS
-# ==========================================================
-
-@mcp.tool()
-def read_json_report(report_path: str) -> str:
-    """
-    [DEPRECATED] Reads a raw JSON report from disk.
-    WARNING: Prefer using the targeted query tools (get_project_architecture, get_module_context) 
-    to save context tokens. Use this only for small files like 'name_collisions'.
-    """
-    target = Path(report_path).expanduser().resolve()
-    if not target.is_file():
-        return f"Error: Report file '{target}' does not exist."
-    try:
-        return target.read_text(encoding="utf-8")
-    except Exception as e:
-        return f"Error reading report: {str(e)}"
 
 
 def main():
