@@ -213,10 +213,22 @@ def _best_tier(candidates: list[dict]) -> list[dict]:
     if not candidates:
         return []
     best = max(item["score"] for item in candidates)
-    return sorted(
+    tier = sorted(
         (item for item in candidates if item["score"] == best),
         key=lambda item: (item["name"].casefold(), item["id"]),
     )
+    active_local_names = {
+        str(item.get("local_name", item["name"])).casefold()
+        for item in tier
+        if item.get("index_source") == "active"
+    }
+    return [
+        item
+        for item in tier
+        if item.get("index_source") != "recovery"
+        or str(item.get("local_name", item["name"])).casefold()
+        not in active_local_names
+    ]
 
 
 def _suggestion_match(value: str, target: str) -> tuple[str, int] | None:

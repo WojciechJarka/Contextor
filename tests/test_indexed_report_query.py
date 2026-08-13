@@ -420,6 +420,21 @@ def test_qualified_prefixes_are_suggestions_without_becoming_matches():
     ]
 
 
+def test_active_fuzzy_suggestion_suppresses_same_symbol_from_recovery():
+    catalog = IndexCatalog(
+        modules={"1/1": "contextor.ui.test_runner"},
+        artifacts={"A1/1": "contextor.ui.test_runner::run_test_suite"},
+        recovered_artifacts={"A2/1": "run_test_suite"},
+    )
+
+    result = resolve_index_query("run_test_suit", catalog)
+
+    assert result["matches"] == []
+    assert [(item["name"], item["index_source"]) for item in result["suggestions"]] == [
+        ("contextor.ui.test_runner::run_test_suite", "active")
+    ]
+
+
 def test_exact_matches_suppress_fuzzy_suggestion_noise():
     result = resolve_index_query("main", _catalog())
 
