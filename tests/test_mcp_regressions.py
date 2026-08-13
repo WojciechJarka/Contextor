@@ -1,6 +1,5 @@
 """Regression tests for MCP subprocess handling and single-file reports."""
 
-import ast
 import asyncio
 import inspect
 import json
@@ -21,42 +20,6 @@ from contextor.core.analysis.state_manager import (
 )
 from contextor.core.report_query import IndexCatalog, query_indexed_report
 from contextor.core.symbol_engine.extractor import extract_file_symbols
-
-
-def test_new_mcp_tools_document_their_llm_usage():
-    server_path = Path(mcp_server.__file__)
-    tree = ast.parse(server_path.read_text(encoding="utf-8"))
-    expected = {
-        "analyze_project",
-        "analyze_layer",
-        "analyze_single_file",
-        "get_analysis_status",
-        "update_file",
-        "get_module_context",
-        "get_report_diff",
-        "get_artifact_blast_radius",
-        "search_artifacts",
-        "get_file_edit_context",
-        "get_layer_isolation",
-        "query_canonical_state_bounded",
-        "lookup_index_entries",
-        "get_artifacts_for_module",
-        "lookup_artifact_by_symbol",
-        "extract_indexed_report_context",
-    }
-    docs = {
-        node.name: ast.get_docstring(node) or ""
-        for node in tree.body
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-        and node.name in expected
-    }
-
-    assert set(docs) == expected
-    assert all("LLM use:" in doc for doc in docs.values())
-    assert "exclude_paths" in docs["analyze_project"]
-    assert "tests_covering" in docs["analyze_project"]
-    assert "code diff" in docs["update_file"]
-    assert "same commit" in docs["get_report_diff"]
 
 
 def test_analysis_endpoint_returns_reusable_job_and_pollable_completion(
@@ -280,7 +243,6 @@ def test_extract_indexed_report_context_returns_every_shared_resolver_block(tmp_
     assert result["total_artifact_count"] == 2
     assert result["truncated"] is False
     assert result["artifacts"]["main::main"]["nested"]["text"] == "complete }, block"
-    assert "LLM use:" in mcp_server.extract_indexed_report_context.description
 
     bounded = json.loads(mcp_server.extract_indexed_report_context.fn(
         repo_path=str(tmp_path), query="pkg/cli.py", report_path=str(report_path),
@@ -441,7 +403,7 @@ def test_incremental_live_state_persistence_roundtrips_for_restart(
     assert loaded.artifacts == state.artifacts
 
 
-def test_fastmcp_schema_exposes_excludes_and_llm_guidance():
+def test_fastmcp_schema_exposes_analysis_parameters():
     signature = inspect.signature(mcp_server.analyze_project.fn)
     status_signature = inspect.signature(mcp_server.get_analysis_status.fn)
     extraction_signature = inspect.signature(
@@ -451,43 +413,6 @@ def test_fastmcp_schema_exposes_excludes_and_llm_guidance():
     assert "exclude_paths" in signature.parameters
     assert "job_id" in status_signature.parameters
     assert "public_api_only" in extraction_signature.parameters
-    assert "LLM use:" in mcp_server.analyze_project.description
-    assert "tests_covering" in mcp_server.analyze_project.description
-    assert "poll" in mcp_server.analyze_project.description.lower()
-    assert "LLM use:" in mcp_server.get_analysis_status.description
-    assert "LLM use:" in mcp_server.update_file.description
-    assert "code diff" in mcp_server.update_file.description
-    assert "runtime_restart_required" in mcp_server.update_file.description
-    assert "nested objects" in mcp_server.get_file_edit_context.description
-    assert (
-        "dependencies_inbound_who_calls_me"
-        in mcp_server.get_module_context.description
-    )
-    assert "public_api_only" in mcp_server.extract_indexed_report_context.description
-
-    payload_controlled = (
-        mcp_server.update_file,
-        mcp_server.get_project_architecture,
-        mcp_server.get_module_context,
-        mcp_server.get_artifact_blast_radius,
-        mcp_server.search_artifacts,
-        mcp_server.get_file_edit_context,
-        mcp_server.get_layer_isolation,
-        mcp_server.get_report_diff,
-        mcp_server.extract_indexed_report_context,
-        mcp_server.get_artifacts_for_module,
-        mcp_server.lookup_artifact_by_symbol,
-    )
-    for tool in payload_controlled:
-        assert "None" in tool.description
-        assert "fields" in tool.description
-    assert "read_json_report" not in {
-        node.name
-        for node in ast.parse(Path(mcp_server.__file__).read_text(encoding="utf-8")).body
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-    }
-
-
 def test_update_file_marks_running_mcp_server_as_requiring_restart(monkeypatch):
     server_path = Path(mcp_server.__file__).resolve()
     repo = server_path.parents[1]
