@@ -8,6 +8,28 @@ from .formatting import save_json
 from contextor.core.paths import atomic_write, resolve_report_path
 
 
+def _automatic_report_diff(repo_name: str, current_summary: object) -> dict | None:
+    """Compare with the canonical summary before the current run overwrites it."""
+    if not isinstance(current_summary, dict):
+        return None
+    previous_path = resolve_report_path(f"output/{repo_name}_summary.json")
+    try:
+        previous_summary = json.loads(previous_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+
+    from contextor.core.git.diff_engine import detect_regression, diff_reports
+
+    report_diff = diff_reports(previous_summary, current_summary)
+    return {
+        "classification": detect_regression(report_diff),
+        "report_diff": report_diff,
+        "baseline": previous_summary.get("report_header", {}),
+        "current": current_summary.get("report_header", {}),
+        "comparison_basis": "consecutive_canonical_runs",
+    }
+
+
 def _summary_markdown(title: str, summary: dict) -> str:
     lines = [f"# {title}", ""]
     for label, key in (("Status", "status"), ("Generated", "generated_at"), ("Modules", "layer_module_count")):
@@ -87,6 +109,11 @@ def write_global_reports(
     reports_data: dict[str, Any], repo_name: str, datestamp: str | None = None, log=None
 ):
     snapshot_prefix = f"output/{repo_name}_{datestamp}/{repo_name}" if datestamp else None
+    if reports_data.get("diff_report") is None:
+        reports_data["diff_report"] = _automatic_report_diff(
+            repo_name,
+            reports_data.get("summary"),
+        )
 
     if "structure" in reports_data:
         save_json(reports_data["structure"], f"output/{repo_name}_structure.json", log=log, label="graph structure report")

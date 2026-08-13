@@ -5,10 +5,8 @@ from .generators import (
     generate_summary_report,
     slice_report_for_layer,
 )
-from .pipeline import (
-    execute_global_pipeline,
-    execute_layer_pipeline,
-)
+from .layer_pipeline import execute_layer_pipeline
+from .pipeline import execute_global_pipeline
 from .formatting import save_json
 
 __all__ = [

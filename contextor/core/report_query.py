@@ -291,6 +291,22 @@ def resolve_index_query(
     recovered_modules = dict(catalog.recovered_modules or {})
     recovered_artifacts = dict(catalog.recovered_artifacts or {})
 
+    # Natural, fully-qualified dotted module names are common LLM input. Keep
+    # short names such as ``main`` and ``cli`` classified as symbols, but let
+    # an exact indexed module identity win before fuzzy/symbol resolution.
+    explicit_prefix, _ = _split_explicit_prefix(query.strip())
+    indexed_module_names = [
+        *catalog.modules.values(),
+        *recovered_modules.values(),
+    ]
+    if (
+        explicit_prefix is None
+        and query_kind == "symbol"
+        and "." in value
+        and any(name.casefold() == value.casefold() for name in indexed_module_names)
+    ):
+        query_kind = "module"
+
     if query_kind in {"module_id", "artifact_id"}:
         active = catalog.modules if query_kind == "module_id" else catalog.artifacts
         recovered = recovered_modules if query_kind == "module_id" else recovered_artifacts

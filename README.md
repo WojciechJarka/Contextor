@@ -12,7 +12,7 @@ Contextor acts as a bridge between software repositories and AI agents, giving L
 
 ---
 
-## What Contextor MCPDoes
+## What Contextor MCP Does
 
 - **Semantic & Architectural Diffing:**  
   Unlike Git, which tracks character-by-character textual changes, Contextor tracks *structural health*. It detects if a new commit accidentally introduced a circular dependency, inflated technical debt, or violated layer boundaries (e.g., Core layer calling UI).
@@ -47,9 +47,11 @@ Contextor acts as a bridge between software repositories and AI agents, giving L
 Contextor natively supports the **Model Context Protocol**, allowing Large Language Models (like Claude) to autonomously explore your repository's architecture without flooding their context window.
 
 - **Contextor Query Layer:** Instead of serving raw, massive JSON files, the server exposes highly targeted endpoints (e.g., `get_project_architecture`, `get_module_context`, `get_artifact_blast_radius`).
+- **Non-blocking Analysis Jobs:** Repository, layer, and single-file analyses return durable job IDs with progress status, so long report runs do not time out the MCP client.
 - **Automatic Path Resolution:** The LLM simply provides the repository path. The server automatically locates and parses the latest generated reports in the background without exposing raw file structures.
 - **Bounded Context:** By merging data from multiple reports, the server delivers compact synthesized insights, resolves requested registry IDs, and exposes limits plus truncation counters for larger collections.
-- **Architectural Regression Analysis:** Tools like `get_report_diff` allow LLMs to dynamically compare the latest analysis with previous runs, immediately surfacing newly introduced architectural cycles, technical debt changes, and shifting dependencies.
+- **Architectural Regression Analysis:** `get_report_diff` compares consecutive canonical runs—including working-tree states on the same commit—and surfaces changes in structural metrics, layers and technical debt.
+- **Focused Refactor Evidence:** Nested-layer isolation and static test-reachability paths through aliases, re-exports and facades give the LLM compact evidence without claiming runtime coverage.
 - **Restricted Advanced Filtering:** The `query_canonical_state` tool lets an LLM extract small subsets from live canonical state using a restricted expression environment. It is intended for targeted structural queries, not arbitrary code execution.
 
 ---

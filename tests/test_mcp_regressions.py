@@ -30,7 +30,10 @@ def test_new_mcp_tools_document_their_llm_usage():
         "analyze_project",
         "analyze_layer",
         "analyze_single_file",
+        "get_analysis_status",
         "update_file",
+        "get_module_context",
+        "get_report_diff",
         "get_artifact_blast_radius",
         "search_artifacts",
         "get_file_edit_context",
@@ -53,6 +56,165 @@ def test_new_mcp_tools_document_their_llm_usage():
     assert "exclude_paths" in docs["analyze_project"]
     assert "tests_covering" in docs["analyze_project"]
     assert "code diff" in docs["update_file"]
+    assert "same commit" in docs["get_report_diff"]
+
+
+def test_analysis_endpoint_returns_reusable_job_and_pollable_completion(
+    tmp_path, monkeypatch
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    release = asyncio.Event()
+
+    async def fake_worker(*_args, **_kwargs):
+        await release.wait()
+
+    monkeypatch.setattr(mcp_server, "_run_analysis_worker", fake_worker)
+    monkeypatch.setattr(mcp_server, "_get_or_init_engine", lambda _root: object())
+    mcp_server._analysis_tasks.clear()
+    mcp_server._analysis_jobs_by_repo.clear()
+
+    async def scenario():
+        first = json.loads(await mcp_server.analyze_project.fn(str(repo)))
+        second = json.loads(await mcp_server.analyze_project.fn(str(repo)))
+
+        assert first["status"] == "queued"
+        assert second["job_id"] == first["job_id"]
+        assert second["reused"] is True
+        running = json.loads(
+            mcp_server.get_analysis_status.fn(str(repo), first["job_id"])
+        )
+        assert running["status"] in {"queued", "running"}
+
+        task = mcp_server._analysis_tasks[first["job_id"]]
+        release.set()
+        await task
+        completed = json.loads(
+            mcp_server.get_analysis_status.fn(str(repo), first["job_id"])
+        )
+        assert completed["status"] == "completed"
+        assert completed["error"] is None
+
+    asyncio.run(scenario())
+
+
+def test_analysis_job_persists_failure_for_later_polling(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    async def broken_worker(*_args, **_kwargs):
+        raise RuntimeError("simulated analysis failure")
+
+    monkeypatch.setattr(mcp_server, "_run_analysis_worker", broken_worker)
+    mcp_server._analysis_tasks.clear()
+    mcp_server._analysis_jobs_by_repo.clear()
+
+    async def scenario():
+        accepted = json.loads(await mcp_server.analyze_project.fn(str(repo)))
+        task = mcp_server._analysis_tasks[accepted["job_id"]]
+        await task
+        failed = json.loads(
+            mcp_server.get_analysis_status.fn(str(repo), accepted["job_id"])
+        )
+        assert failed["status"] == "failed"
+        assert "simulated analysis failure" in failed["error"]
+
+    asyncio.run(scenario())
+
+
+def test_analysis_status_marks_previous_server_job_interrupted(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    job_id = "a" * 32
+    mcp_server._write_analysis_job(
+        repo,
+        {
+            "job_id": job_id,
+            "operation": "project",
+            "repo_path": str(repo),
+            "target": None,
+            "status": "running",
+            "created_at": "2026-01-01T00:00:00+00:00",
+            "started_at": "2026-01-01T00:00:01+00:00",
+            "completed_at": None,
+            "message": "Analysis started.",
+            "error": None,
+            "owner_pid": -1,
+        },
+    )
+
+    result = json.loads(mcp_server.get_analysis_status.fn(str(repo), job_id))
+
+    assert result["status"] == "interrupted"
+    assert result["error"] == "owner_process_changed"
+    assert result["completed_at"]
+
+
+def test_layer_and_single_file_tools_submit_nonblocking_jobs(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    layer = repo / "pkg"
+    layer.mkdir(parents=True)
+    target = layer / "module.py"
+    target.write_text("VALUE = 1\n", encoding="utf-8")
+    calls = []
+
+    def fake_start(operation, root, submitted_target=None, exclude_paths=None):
+        calls.append((operation, root, submitted_target, exclude_paths))
+        return {"job_id": operation, "status": "queued"}
+
+    monkeypatch.setattr(mcp_server, "_start_analysis_job", fake_start)
+
+    layer_result = json.loads(
+        asyncio.run(
+            mcp_server.analyze_layer.fn(
+                str(repo), "pkg", exclude_paths=["tests"]
+            )
+        )
+    )
+    file_result = json.loads(
+        asyncio.run(
+            mcp_server.analyze_single_file.fn(
+                str(repo), "pkg/module.py", exclude_paths=["legacy"]
+            )
+        )
+    )
+
+    assert layer_result == {"job_id": "layer", "status": "queued"}
+    assert file_result == {"job_id": "single_file", "status": "queued"}
+    assert calls == [
+        ("layer", repo.resolve(), layer.resolve(), ["tests"]),
+        ("single_file", repo.resolve(), target.resolve(), ["legacy"]),
+    ]
+
+
+def test_analysis_status_exposes_latest_worker_progress(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    progress_written = asyncio.Event()
+    release = asyncio.Event()
+
+    async def fake_worker(*_args, log=None, **_kwargs):
+        log("Indexing 42 modules...")
+        progress_written.set()
+        await release.wait()
+
+    monkeypatch.setattr(mcp_server, "_run_analysis_worker", fake_worker)
+    monkeypatch.setattr(mcp_server, "_get_or_init_engine", lambda _root: object())
+    mcp_server._analysis_tasks.clear()
+    mcp_server._analysis_jobs_by_repo.clear()
+
+    async def scenario():
+        accepted = json.loads(await mcp_server.analyze_project.fn(str(repo)))
+        await progress_written.wait()
+        running = json.loads(
+            mcp_server.get_analysis_status.fn(str(repo), accepted["job_id"])
+        )
+        assert running["status"] == "running"
+        assert running["message"] == "Indexing 42 modules..."
+        release.set()
+        await mcp_server._analysis_tasks[accepted["job_id"]]
+
+    asyncio.run(scenario())
 
 
 def test_lookup_index_entries_distinguishes_active_recovery_and_missing(
@@ -264,14 +426,18 @@ def test_incremental_live_state_persistence_roundtrips_for_restart(
 
 def test_fastmcp_schema_exposes_excludes_and_llm_guidance():
     signature = inspect.signature(mcp_server.analyze_project.fn)
+    status_signature = inspect.signature(mcp_server.get_analysis_status.fn)
     extraction_signature = inspect.signature(
         mcp_server.extract_indexed_report_context.fn
     )
 
     assert "exclude_paths" in signature.parameters
+    assert "job_id" in status_signature.parameters
     assert "public_api_only" in extraction_signature.parameters
     assert "LLM use:" in mcp_server.analyze_project.description
     assert "tests_covering" in mcp_server.analyze_project.description
+    assert "poll" in mcp_server.analyze_project.description.lower()
+    assert "LLM use:" in mcp_server.get_analysis_status.description
     assert "LLM use:" in mcp_server.update_file.description
     assert "code diff" in mcp_server.update_file.description
     assert "public_api_only" in mcp_server.extract_indexed_report_context.description
@@ -759,8 +925,17 @@ def test_file_edit_context_decodes_modules_and_marks_unresolved_api(
     assert result["consumers_total"] == 2
     assert result["consumers_truncated"] is True
     assert result["tests_covering"]["tests"] == [
-        {"module_id": "3/1", "module": "tests.test_module"}
+        {
+            "module_id": "3/1",
+            "module": "tests.test_module",
+            "distance": 1,
+            "evidence_path": ["tests.test_module", "pkg.module"],
+            "evidence_scope": "static_dependency_reachability",
+        }
     ]
+    assert result["tests_covering"]["evidence_scope"] == (
+        "static_dependency_reachability"
+    )
     assert result["tests_covering"]["total"] == 2
     assert result["tests_covering"]["truncated"] is True
 
@@ -949,6 +1124,143 @@ def test_live_artifact_search_also_returns_matching_modules(tmp_path, monkeypatc
         "pkg.dependency",
         "pkg.soft_dependency",
     ]
+
+
+def test_module_context_exposes_new_live_module_before_full_report(
+    tmp_path, monkeypatch
+):
+    report = tmp_path / "graph.json"
+    report.write_text(
+        json.dumps({"modules": {"pkg.old": {}}, "module_dependency_matrix": {}}),
+        encoding="utf-8",
+    )
+
+    class Registry:
+        def get_module_id(self, module):
+            return {"pkg.new": "9/1"}.get(module)
+
+    class Graph:
+        hard_edges = {
+            "pkg.caller": {"pkg.new"},
+            "pkg.new": {"pkg.dependency"},
+        }
+        soft_edges = {"pkg.new": {"pkg.optional"}}
+
+    class State:
+        modules = {"pkg.new": object()}
+        artifacts = {}
+        dependency_graph = Graph()
+
+    class Engine:
+        state = State()
+        registry = Registry()
+
+    monkeypatch.setattr(mcp_server, "_get_or_init_engine", lambda _root: Engine())
+    monkeypatch.setattr(
+        mcp_server, "_get_canonical_report", lambda _root, _name: report
+    )
+
+    result = json.loads(
+        mcp_server.get_module_context.fn(
+            repo_path=str(tmp_path), module_name="pkg.new"
+        )
+    )
+
+    assert result["module"] == "pkg.new"
+    assert result["metrics"] == {
+        "module_idx": "9/1",
+        "fan_in": 1,
+        "fan_out": 2,
+        "visibility": "unknown",
+        "metrics_state": "deferred",
+    }
+    assert result["metrics_source"] == "deferred_until_full_analysis"
+    assert result["dependency_data_source"] == "live_canonical_graph"
+    assert set(result["dependencies_inbound_who_calls_me"]) == {"pkg.caller"}
+    assert set(result["dependencies_outbound_who_i_call"]) == {
+        "pkg.dependency",
+        "pkg.optional",
+    }
+
+
+@pytest.mark.parametrize(
+    "query",
+    ["contextor.core.reporting_engine", "contextor/core/reporting_engine"],
+)
+def test_layer_isolation_addresses_nested_dotted_and_path_layers(
+    tmp_path, monkeypatch, query
+):
+    report = tmp_path / "nested_graph.json"
+    report.write_text(
+        json.dumps(
+            {
+                "module_count": 2,
+                "modules": {},
+                "module_dependency_matrix": {},
+                "shared_usage_clusters": [],
+                "dependency_type_breakdown": {"import": 1},
+            }
+        ),
+        encoding="utf-8",
+    )
+    requested = []
+
+    def canonical(_root, filename):
+        requested.append(filename)
+        return report if filename.endswith("_reporting_engine_graph_analytics.json") else None
+
+    monkeypatch.setattr(mcp_server, "_get_canonical_report", canonical)
+    monkeypatch.setattr(
+        mcp_server,
+        "_read_registries",
+        lambda _root: ({}, {}, {}, {}),
+    )
+
+    result = json.loads(
+        mcp_server.get_layer_isolation.fn(str(tmp_path), query)
+    )
+
+    assert requested == [
+        f"{tmp_path.name}_reporting_engine_graph_analytics.json"
+    ]
+    assert result["layer"] == "contextor.core.reporting_engine"
+    assert result["report_layer"] == "reporting_engine"
+    assert result["module_count"] == 2
+
+
+def test_test_reachability_finds_direct_alias_and_reexport_paths():
+    hard_edges = {
+        "tests.test_direct": {"pkg.target"},
+        "tests.test_alias": {"pkg.public_api"},
+        "pkg.public_api": {"pkg.target"},
+        "tests.test_indirect": {"pkg.facade"},
+        "pkg.facade": {"pkg.public_api"},
+    }
+
+    result = mcp_server._static_test_reachability(
+        "pkg.target",
+        hard_edges,
+        {},
+        {"tests.test_direct", "tests.test_alias", "tests.test_indirect"},
+        {
+            "tests.test_direct": "1/1",
+            "tests.test_alias": "2/1",
+            "tests.test_indirect": "3/1",
+        },
+    )
+
+    by_module = {item["module"]: item for item in result}
+    assert by_module["tests.test_direct"]["distance"] == 1
+    assert by_module["tests.test_alias"]["evidence_path"] == [
+        "tests.test_alias",
+        "pkg.public_api",
+        "pkg.target",
+    ]
+    assert by_module["tests.test_indirect"]["distance"] == 3
+    assert all(
+        item["evidence_scope"] == "static_dependency_reachability"
+        for item in result
+    )
 
 
 def test_file_edit_context_missing_module_does_not_open_registry_transaction(

@@ -117,8 +117,10 @@ import sys
 import glob
 import warnings
 import threading
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 
 def _is_virtual_environment() -> bool:
@@ -194,11 +196,96 @@ mcp = FastMCP("Contextor")
 # Global state to maintain incremental engines across MCP sessions
 _live_engines: dict[str, Any] = {}
 _analysis_lock = threading.Lock()
+_analysis_job_lock = threading.RLock()
+_analysis_tasks: dict[str, Any] = {}
+_analysis_jobs_by_repo: dict[str, str] = {}
 
 
 def _mcp_cache_root(root: Path) -> Path:
     """Writable cache root dedicated to MCP analysis of this repository."""
     return root / ".contextor" / "cache"
+
+
+def _analysis_job_dir(root: Path) -> Path:
+    """Return the persistent MCP analysis-job directory for one repository."""
+
+    return root / ".contextor" / "analysis_jobs"
+
+
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _job_path(root: Path, job_id: str) -> Path:
+    if len(job_id) != 32 or any(char not in "0123456789abcdef" for char in job_id):
+        raise ValueError("Invalid analysis job ID.")
+    return _analysis_job_dir(root) / f"{job_id}.json"
+
+
+def _write_analysis_job(root: Path, job: dict) -> None:
+    """Atomically persist one job so client disconnects cannot lose its status."""
+
+    directory = _analysis_job_dir(root)
+    directory.mkdir(parents=True, exist_ok=True)
+    target = _job_path(root, str(job["job_id"]))
+    temporary = target.with_suffix(".json.tmp")
+    payload = {**job, "updated_at": _utc_now()}
+    with _analysis_job_lock:
+        temporary.write_text(
+            json.dumps(payload, indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        os.replace(temporary, target)
+
+
+def _read_analysis_job(root: Path, job_id: str) -> dict | None:
+    try:
+        path = _job_path(root, job_id)
+    except ValueError:
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def _latest_analysis_job(root: Path) -> dict | None:
+    directory = _analysis_job_dir(root)
+    if not directory.is_dir():
+        return None
+    candidates = sorted(
+        directory.glob("*.json"),
+        key=lambda path: path.stat().st_mtime_ns,
+        reverse=True,
+    )
+    for path in candidates:
+        job = _read_analysis_job(root, path.stem)
+        if job is not None:
+            return job
+    return None
+
+
+def _public_job(job: dict, *, reused: bool = False) -> dict:
+    """Return a stable, JSON-safe job view intended for an MCP client."""
+
+    visible = {
+        key: job.get(key)
+        for key in (
+            "job_id",
+            "operation",
+            "repo_path",
+            "target",
+            "status",
+            "created_at",
+            "started_at",
+            "completed_at",
+            "updated_at",
+            "message",
+            "error",
+        )
+    }
+    visible["reused"] = reused
+    return visible
 
 
 
@@ -250,6 +337,7 @@ async def _run_analysis_worker(
     root: Path,
     target: Path | None = None,
     exclude_paths: list[str] | None = None,
+    log=None,
 ) -> None:
     """Run analysis in-process without blocking the FastMCP event loop.
 
@@ -258,6 +346,7 @@ async def _run_analysis_worker(
     avoids both that child interpreter and nested process pools.
     """
     import asyncio
+    effective_log = log or _stderr_log
 
     def run() -> None:
         with _analysis_lock:
@@ -271,7 +360,7 @@ async def _run_analysis_worker(
                 if operation == "project":
                     _, result = ContextorFacade.analyze_project(
                         str(root),
-                        log=_stderr_log,
+                        log=effective_log,
                         additional_excludes=exclude_paths,
                     )
                     if result is None:
@@ -280,14 +369,14 @@ async def _run_analysis_worker(
                     ContextorFacade.analyze_layer(
                         str(root),
                         str(target),
-                        log=_stderr_log,
+                        log=effective_log,
                         additional_excludes=exclude_paths,
                     )
                 elif operation == "single_file":
                     ContextorFacade.analyze_single_file(
                         str(target),
                         str(root),
-                        log=_stderr_log,
+                        log=effective_log,
                         additional_excludes=exclude_paths,
                     )
                 else:
@@ -307,6 +396,110 @@ async def _run_analysis_worker(
                     os.environ["CONTEXTOR_MCP_PROCESS_REGISTRY"] = previous_registry
 
     await asyncio.to_thread(run)
+
+
+async def _execute_analysis_job(
+    root: Path,
+    job: dict,
+    target: Path | None,
+    exclude_paths: list[str] | None,
+) -> None:
+    """Execute one accepted analysis and leave a durable terminal status."""
+
+    job = {
+        **job,
+        "status": "running",
+        "started_at": _utc_now(),
+        "message": "Analysis started.",
+    }
+    _write_analysis_job(root, job)
+
+    def job_log(message: str) -> None:
+        nonlocal job
+        _stderr_log(message)
+        job = {**job, "message": str(message)}
+        _write_analysis_job(root, job)
+
+    try:
+        await _run_analysis_worker(
+            str(job["operation"]),
+            root,
+            target,
+            exclude_paths,
+            log=job_log,
+        )
+        if job["operation"] == "project":
+            _live_engines.pop(str(root), None)
+            if _get_or_init_engine(root) is None:
+                raise RuntimeError(
+                    "Analysis completed but canonical state could not be loaded."
+                )
+        job = {
+            **job,
+            "status": "completed",
+            "completed_at": _utc_now(),
+            "message": "Analysis completed successfully.",
+            "error": None,
+        }
+        _write_analysis_job(root, job)
+    except Exception as exc:
+        job = {
+            **job,
+            "status": "failed",
+            "completed_at": _utc_now(),
+            "message": "Analysis failed.",
+            "error": f"{type(exc).__name__}: {exc}",
+        }
+        _write_analysis_job(root, job)
+    finally:
+        with _analysis_job_lock:
+            _analysis_tasks.pop(str(job["job_id"]), None)
+            if _analysis_jobs_by_repo.get(str(root)) == job["job_id"]:
+                _analysis_jobs_by_repo.pop(str(root), None)
+
+
+def _start_analysis_job(
+    operation: str,
+    root: Path,
+    target: Path | None = None,
+    exclude_paths: list[str] | None = None,
+) -> dict:
+    """Accept a non-blocking analysis, deduplicating an active job per repo."""
+
+    import asyncio
+
+    repo_key = str(root)
+    with _analysis_job_lock:
+        active_id = _analysis_jobs_by_repo.get(repo_key)
+        active_task = _analysis_tasks.get(active_id) if active_id else None
+        if active_id and active_task is not None and not active_task.done():
+            existing = _read_analysis_job(root, active_id)
+            if existing is not None:
+                return _public_job(existing, reused=True)
+
+        job_id = uuid4().hex
+        job = {
+            "job_id": job_id,
+            "operation": operation,
+            "repo_path": repo_key,
+            "target": str(target) if target is not None else None,
+            "exclude_paths": list(exclude_paths or []),
+            "status": "queued",
+            "created_at": _utc_now(),
+            "started_at": None,
+            "completed_at": None,
+            "message": "Analysis accepted.",
+            "error": None,
+            "owner_pid": os.getpid(),
+        }
+        _write_analysis_job(root, job)
+        task = asyncio.create_task(
+            _execute_analysis_job(root, job, target, exclude_paths),
+            name=f"contextor-analysis-{job_id}",
+        )
+        _analysis_jobs_by_repo[repo_key] = job_id
+        _analysis_tasks[job_id] = task
+        return _public_job(job)
 
 
 def _get_canonical_report(repo_path: Path, filename: str) -> Path | None:
@@ -441,6 +634,47 @@ def _bounded_items(items: list, limit: int) -> tuple[list, int, bool]:
     return selected, total, total > len(selected)
 
 
+def _static_test_reachability(
+    target: str,
+    hard_edges: dict,
+    soft_edges: dict,
+    test_modules: set[str],
+    module_to_id: dict[str, str],
+    max_depth: int = 6,
+) -> list[dict]:
+    """Return shortest static dependency paths from tests to one module."""
+    reverse: dict[str, set[str]] = {}
+    for edge_map in (hard_edges, soft_edges):
+        for source, targets in edge_map.items():
+            for destination in targets:
+                reverse.setdefault(str(destination), set()).add(str(source))
+
+    paths = {target: [target]}
+    queue = [target]
+    while queue:
+        current = queue.pop(0)
+        current_path = paths[current]
+        if len(current_path) - 1 >= max_depth:
+            continue
+        for predecessor in sorted(reverse.get(current, set())):
+            if predecessor in paths:
+                continue
+            paths[predecessor] = [predecessor, *current_path]
+            queue.append(predecessor)
+
+    return [
+        {
+            "module_id": module_to_id.get(module),
+            "module": module,
+            "distance": len(paths[module]) - 1,
+            "evidence_path": paths[module],
+            "evidence_scope": "static_dependency_reachability",
+        }
+        for module in sorted(test_modules)
+        if module in paths and module != target
+    ]
+
+
 def _bounded_query_result(value, limit: int) -> dict:
     """Wrap and bound a top-level canonical-state query result."""
     if isinstance(value, dict):
@@ -492,8 +726,8 @@ async def analyze_project(
     repo_path: str, exclude_paths: list[str] | None = None
 ) -> str:
     """
-    Triggers a global architectural analysis on the specified repository.
-    Generates all reports in the 'output' directory.
+    Starts a non-blocking global architectural analysis and returns a job ID.
+    Poll ``get_analysis_status`` until it reports ``completed`` or ``failed``.
 
     ``exclude_paths`` lets an LLM narrow this run without changing the saved
     GUI exclude configuration. Use repository-relative Python files or
@@ -501,22 +735,18 @@ async def analyze_project(
     Contextor already ignores non-Python files. Per-run and GUI excludes are
     combined before AST indexing.
 
-    LLM use: choose this for a repository-wide baseline. Exclude ``tests``
-    when production architecture is the only concern; keep it when later
-    queries need test coverage or ``tests_covering`` evidence.
+    LLM use: choose this for a repository-wide baseline, then poll the returned
+    job instead of repeating the call. Exclude ``tests`` when production
+    architecture is the only concern; keep it when later queries need test
+    coverage or ``tests_covering`` evidence.
     """
     root = Path(repo_path).expanduser().resolve()
     if not root.is_dir():
         return f"Error: Repository path '{root}' does not exist."
-    try:
-        await _run_analysis_worker("project", root, exclude_paths=exclude_paths)
-        _live_engines.pop(str(root), None)
-        if _get_or_init_engine(root) is None:
-            raise RuntimeError("Analysis completed but canonical state could not be loaded.")
-        
-        return f"Analysis complete for {root.name}."
-    except Exception as e:
-        return f"Error during analysis: {str(e)}"
+    return json.dumps(
+        _start_analysis_job("project", root, exclude_paths=exclude_paths),
+        indent=2,
+    )
 
 @mcp.tool()
 async def analyze_layer(
@@ -525,27 +755,28 @@ async def analyze_layer(
     exclude_paths: list[str] | None = None,
 ) -> str:
     """
-    Triggers architectural analysis isolated to a specific layer (directory).
+    Starts non-blocking analysis isolated to a specific layer (directory).
+    Poll ``get_analysis_status`` with the returned job ID.
 
     ``exclude_paths`` contains repository-relative Python files or directory
     prefixes to omit from this run. It is merged with, but never persisted to,
     the GUI exclude list. Non-Python files are ignored automatically.
 
     LLM use: prefer this over a global run when the decision is confined to one
-    package. Exclude unrelated Python trees to reduce report size, but retain
-    tests when boundary or coverage evidence matters.
+    package, then poll its job instead of repeating the call. Exclude unrelated
+    Python trees to reduce report size, but retain tests when boundary or
+    coverage evidence matters.
     """
     root = Path(repo_path).expanduser().resolve()
     layer = root / layer_name
     if not layer.is_dir():
         return f"Error: Layer path '{layer}' does not exist."
-    try:
-        await _run_analysis_worker(
+    return json.dumps(
+        _start_analysis_job(
             "layer", root, layer, exclude_paths=exclude_paths
-        )
-        return f"Layer analysis complete for '{layer_name}'."
-    except Exception as e:
-        return f"Error during layer analysis: {str(e)}"
+        ),
+        indent=2,
+    )
 
 @mcp.tool()
 async def analyze_single_file(
@@ -554,16 +785,17 @@ async def analyze_single_file(
     exclude_paths: list[str] | None = None,
 ) -> str:
     """
-    Triggers deep architectural analysis on a single Python file.
+    Starts non-blocking deep analysis on a single Python file.
+    Poll ``get_analysis_status`` with the returned job ID.
 
     ``exclude_paths`` narrows the surrounding project context for this run.
     Entries are repository-relative Python files or directory prefixes and are
     combined with the saved GUI excludes without modifying them. Do not exclude
     the target file itself.
 
-    LLM use: choose this for a focused symbol/API decision. Exclude unrelated
-    packages to save tokens; retain relevant tests when test discovery is part
-    of the question.
+    LLM use: choose this for a focused symbol/API decision, then poll its job
+    instead of repeating the call. Exclude unrelated packages to save tokens;
+    retain relevant tests when test discovery is part of the question.
     """
     root = Path(repo_path).expanduser().resolve()
     target_file = Path(file_path).expanduser()
@@ -572,13 +804,53 @@ async def analyze_single_file(
     target_file = target_file.resolve()
     if not target_file.is_file():
         return f"Error: Target file '{target_file}' does not exist."
-    try:
-        await _run_analysis_worker(
+    return json.dumps(
+        _start_analysis_job(
             "single_file", root, target_file, exclude_paths=exclude_paths
+        ),
+        indent=2,
+    )
+
+
+@mcp.tool()
+def get_analysis_status(repo_path: str, job_id: str | None = None) -> str:
+    """Return durable status for a non-blocking MCP analysis job.
+
+    Omit ``job_id`` to inspect the repository's most recently updated job.
+    Terminal states are ``completed``, ``failed`` and ``interrupted``. A job
+    left running by a previous MCP server process is marked ``interrupted``
+    rather than remaining permanently ambiguous.
+
+    LLM use: poll this after an analyze tool returns. Do not start another
+    analysis while status is ``queued`` or ``running``; repeated analyze calls
+    already return the same active job ID.
+    """
+
+    root = Path(repo_path).expanduser().resolve()
+    if not root.is_dir():
+        return json.dumps(
+            {"status": "missing_repository", "repo_path": str(root)}, indent=2
         )
-        return f"Single-file analysis complete for {target_file.name}."
-    except Exception as e:
-        return f"Error during single-file analysis: {str(e)}"
+    job = (
+        _read_analysis_job(root, job_id)
+        if job_id is not None
+        else _latest_analysis_job(root)
+    )
+    if job is None:
+        return json.dumps(
+            {"status": "not_found", "job_id": job_id, "repo_path": str(root)},
+            indent=2,
+        )
+    if job.get("status") in {"queued", "running"} and job.get("owner_pid") != os.getpid():
+        job = {
+            **job,
+            "status": "interrupted",
+            "completed_at": _utc_now(),
+            "message": "The MCP server process that owned this job is no longer active.",
+            "error": "owner_process_changed",
+        }
+        _write_analysis_job(root, job)
+    return json.dumps(_public_job(job), indent=2)
 
 
 @mcp.tool()
@@ -702,57 +974,121 @@ def get_project_index(repo_path: str) -> str:
 @mcp.tool()
 def get_module_context(repo_path: str, module_name: str) -> str:
     """
-    [OPTIMIZED] Retrieves a compressed context pill for a single module.
-    Returns its layer, visibility, metrics (fan_in/out, pagerank), and its direct inbound/outbound dependencies.
-    Use this right before editing a file to understand its blast radius and requirements.
+    [OPTIMIZED] Retrieve a compressed context pill for one module.
+
+    Full-report metrics are combined with the canonical LIVE dependency graph.
+    A file added through update_file is therefore immediately queryable, even
+    before another global report refreshes expensive metrics. Deferred metrics
+    are labelled explicitly instead of hiding the module.
+
+    LLM use: call immediately before editing a known module. Trust LIVE
+    inbound/outbound edges for current structure; treat metrics marked
+    deferred as unavailable until the next full analysis.
     """
     root = Path(repo_path).expanduser().resolve()
     repo_name = root.name
-    
+
+    ga = {}
     ga_path = _get_canonical_report(root, f"{repo_name}_graph_analytics.json")
-    if not ga_path:
-        return f"Error: No graph_analytics report found. Run analyze_project first."
-        
-    try:
-        ga = json.loads(ga_path.read_text(encoding="utf-8"))
-        modules = ga.get("modules", {})
-        
-        if module_name not in modules:
-            return f"Module '{module_name}' not found in the project graph."
-            
-        mod_info = modules[module_name]
-        
-        # Resolve compact dependencies using index_dictionary if possible
+    if ga_path:
+        try:
+            ga = json.loads(ga_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            ga = {}
+
+    saved_modules = ga.get("modules", {})
+    engine = _get_or_init_engine(root)
+    live_modules = set()
+    if engine:
+        live_modules = set(getattr(engine.state, "modules", {})) | set(
+            getattr(engine.state, "artifacts", {})
+        )
+
+    if module_name not in saved_modules and module_name not in live_modules:
+        if not ga_path and not engine:
+            return "Error: No graph state found. Run analyze_project first."
+        return f"Module '{module_name}' not found in the project graph."
+
+    inbound = {}
+    outbound = {}
+    dependency_source = "saved_graph_analytics"
+
+    if module_name in live_modules:
+        graph = getattr(engine.state, "dependency_graph", None)
+        hard_edges = getattr(graph, "hard_edges", {}) if graph else {}
+        soft_edges = getattr(graph, "soft_edges", {}) if graph else {}
+
+        def relationship(source: str, target: str) -> dict:
+            classes = []
+            if target in set(hard_edges.get(source, set())):
+                classes.append("hard_dependency")
+            if target in set(soft_edges.get(source, set())):
+                classes.append("soft_dependency")
+            return {
+                "dep_types": classes,
+                "weight": 1,
+                "data_source": "live_canonical_graph",
+            }
+
+        targets = set(hard_edges.get(module_name, set())) | set(
+            soft_edges.get(module_name, set())
+        )
+        outbound = {
+            target: relationship(module_name, target)
+            for target in sorted(targets)
+        }
+        sources = set(hard_edges) | set(soft_edges)
+        inbound = {
+            source: relationship(source, module_name)
+            for source in sorted(sources)
+            if module_name
+            in (
+                set(hard_edges.get(source, set()))
+                | set(soft_edges.get(source, set()))
+            )
+        }
+        dependency_source = "live_canonical_graph"
+    else:
         matrix = ga.get("module_dependency_matrix", {})
-        
-        inbound = {}
-        outbound = {}
-        
-        from contextor.core.reporting_engine.persistent_registry import PersistentIdentityRegistry
+        from contextor.core.reporting_engine.persistent_registry import (
+            PersistentIdentityRegistry,
+        )
+
         registry = PersistentIdentityRegistry(str(root))
         with registry.transaction():
             mod_id = registry.get_module_id(module_name)
-            
             if mod_id and str(mod_id) in matrix:
                 for target_id, dep_data in matrix[str(mod_id)].items():
                     target_name = registry.get_module_path(target_id) or target_id
                     outbound[target_name] = dep_data
-                    
             for src_id, targets in matrix.items():
                 if str(mod_id) in targets:
                     src_name = registry.get_module_path(src_id) or src_id
                     inbound[src_name] = targets[str(mod_id)]
-        
-        result = {
-            "module": module_name,
-            "metrics": mod_info,
-            "dependencies_inbound_who_calls_me": inbound,
-            "dependencies_outbound_who_i_call": outbound
-        }
-        return json.dumps(result, indent=2)
-    except Exception as e:
-        return f"Error extracting module context: {e}"
 
+    metrics = saved_modules.get(module_name)
+    metrics_source = "saved_graph_analytics"
+    if metrics is None:
+        metrics_source = "deferred_until_full_analysis"
+        metrics = {
+            "module_idx": engine.registry.get_module_id(module_name),
+            "fan_in": len(inbound),
+            "fan_out": len(outbound),
+            "visibility": "unknown",
+            "metrics_state": "deferred",
+        }
+
+    return json.dumps(
+        {
+            "module": module_name,
+            "metrics": metrics,
+            "metrics_source": metrics_source,
+            "dependency_data_source": dependency_source,
+            "dependencies_inbound_who_calls_me": inbound,
+            "dependencies_outbound_who_i_call": outbound,
+        },
+        indent=2,
+    )
 
 @mcp.tool()
 def get_artifact_blast_radius(repo_path: str, artifact_name: str) -> str:
@@ -949,6 +1285,10 @@ def get_file_edit_context(
     Combines module metrics, API signature blast radius, and dependency trees into one response.
     Returns: file, module, public_api, imports, consumers, risk_score, tests_covering.
 
+    ``tests_covering`` reports bounded static dependency paths from test
+    modules, including paths through aliases, re-exports and facades. It is
+    structural evidence, not runtime line or branch coverage.
+
     Collections are bounded by ``max_items`` (default 30) to protect the LLM
     context window. Every bounded collection includes ``*_total`` and
     ``*_truncated`` metadata. Increase ``max_items`` only when the totals show
@@ -1021,7 +1361,11 @@ def get_file_edit_context(
         matrix = ga.get("module_dependency_matrix", {})
         engine = _get_or_init_engine(root)
         live_graph = engine.state.dependency_graph if engine else None
+        reachability_hard = {}
+        reachability_soft = {}
         if engine and module_name in engine.state.modules and live_graph:
+            reachability_hard = live_graph.hard_edges
+            reachability_soft = live_graph.soft_edges
             target_modules = set(live_graph.hard_edges.get(module_name, set()))
             target_modules.update(live_graph.soft_edges.get(module_name, set()))
             imports = [
@@ -1047,6 +1391,13 @@ def get_file_edit_context(
             for src_id, targets in matrix.items():
                 if mod_id in targets:
                     consumers.append(src_id)
+            reachability_hard = {
+                mod_id_to_path.get(src_id, src_id): {
+                    mod_id_to_path.get(target_id, target_id)
+                    for target_id in targets
+                }
+                for src_id, targets in matrix.items()
+            }
                         
         # Resolve public API artifact IDs to human-readable names so an
         # LLM does not need a separate lookup_index_entries call.
@@ -1081,13 +1432,31 @@ def get_file_edit_context(
                     else:
                         unresolved_public_api_ids.append(str(art_id))
         
-        # tests_covering: test modules depend on this one, we can check prefix from paths if needed, 
-        # but since we only have IDs, we look up the path for the prefix check but keep the ID.
-        tests_covering = []
-        for c in consumers:
-            c_path = mod_id_to_path.get(c, "")
-            if c_path.startswith("tests."):
-                tests_covering.append({"module_id": c, "module": c_path})
+        graph_modules = set(reachability_hard) | set(reachability_soft)
+        graph_modules.update(
+            target
+            for edge_map in (reachability_hard, reachability_soft)
+            for targets in edge_map.values()
+            for target in targets
+        )
+        test_modules = {
+            name
+            for name in graph_modules
+            if name.startswith("tests.")
+            or name == "tests"
+            or name.rsplit(".", 1)[-1].startswith("test_")
+            or ga.get("modules", {}).get(name, {}).get("layer") == "tests"
+        }
+        tests_covering = _static_test_reachability(
+            module_name,
+            reachability_hard,
+            reachability_soft,
+            test_modules,
+            {
+                **{path: module_id for module_id, path in mod_id_to_path.items()},
+                **mod_path_to_id,
+            },
+        )
 
         public_api_items, public_api_total, public_api_truncated = _bounded_items(
             sorted(public_api.items()), max_items
@@ -1132,6 +1501,8 @@ def get_file_edit_context(
                 "available": tests_total > 0,
                 "total": tests_total,
                 "truncated": tests_truncated,
+                "evidence_scope": "static_dependency_reachability",
+                "max_depth": 6,
                 "tests": test_items,
             }
         }
@@ -1162,8 +1533,15 @@ def get_layer_isolation(
     root = Path(repo_path).expanduser().resolve()
     repo_name = root.name
     
-    # Normalize layer_name in case user passes a path like "contextor/core"
-    normalized_layer_name = Path(layer_name).name
+    raw_layer = str(layer_name).strip().replace("\\", "/").strip("/")
+    candidate = Path(raw_layer).expanduser()
+    if candidate.is_absolute():
+        try:
+            raw_layer = candidate.resolve().relative_to(root).as_posix()
+        except ValueError:
+            return f"Error: Layer path '{candidate}' is outside the repository."
+    requested_layer = raw_layer.replace("/", ".")
+    normalized_layer_name = requested_layer.rsplit(".", 1)[-1]
     
     # Try to find layer-specific report in high_risk_layers
     ga_path = _get_canonical_report(root, f"{repo_name}_{normalized_layer_name}_graph_analytics.json")
@@ -1177,7 +1555,11 @@ def get_layer_isolation(
             for layer in summary.get("layer_index", []):
                 if layer.get("layer") == normalized_layer_name:
                     return json.dumps(layer, indent=2)
-            return f"Layer '{normalized_layer_name}' not found in global layer index."
+            return (
+                f"Layer '{requested_layer}' has no dedicated report and is not "
+                "present in the global top-level layer index. Run analyze_layer "
+                "for this nested layer first."
+            )
         except Exception as e:
             return f"Error reading fallback layer info: {e}"
             
@@ -1237,7 +1619,9 @@ def get_layer_isolation(
             boundary_violations, max_boundary_violations
         )
         result = {
-            "layer": normalized_layer_name,
+            "layer": requested_layer,
+            "report_layer": normalized_layer_name,
+            "data_source": str(ga_path),
             "module_count": ga.get("module_count", 0),
             "clusters": clusters,
             "cluster_count": cluster_count,
@@ -1257,7 +1641,12 @@ def get_report_diff(repo_path: str) -> str:
     """
     [OPTIMIZED] Returns architectural regression analysis between the last two analysis runs.
     Shows delta in hotspot count, debt score, cycle count, and lists new/resolved hotspots.
-    Run analyze_project at least twice (on different code states) to populate this.
+    Consecutive runs are compared before the canonical summary is overwritten,
+    including different working-tree states on the same commit.
+
+    LLM use: run analysis once before and once after a change, then inspect the
+    classification and metric deltas here. An empty diff means no tracked
+    architectural metric changed; it does not mean source text was identical.
     """
     root = Path(repo_path).expanduser().resolve()
     repo_name = root.name
@@ -1271,8 +1660,7 @@ def get_report_diff(repo_path: str) -> str:
         )
     try:
         diff_data = json.loads(diff_path.read_text(encoding="utf-8"))
-        report = diff_data.get("report_diff", diff_data)
-        return json.dumps(report, indent=2)
+        return json.dumps(diff_data, indent=2)
     except Exception as e:
         return f"Error reading diff report: {e}"
 

@@ -3,6 +3,7 @@ End-to-end checks over a small synthetic repository.
 """
 
 import ast
+import json
 from pathlib import Path
 
 import pytest
@@ -11,6 +12,9 @@ from contextor.core.api import facade
 from contextor.core.api.facade import ContextorFacade
 from contextor.core.graph.cycles import detect_cycles
 from contextor.core.graph.graph import build_graph
+from contextor.core import reporting_engine
+from contextor.core.reporting_engine import artifact_pipeline, layer_pipeline
+from contextor.core.reporting_engine import io_manager
 from contextor.core.symbol_engine.indexer import build_index
 from contextor.core.validator.collisions import validate_name_collisions
 
@@ -201,3 +205,194 @@ def test_layer_report_writers_receive_datestamp():
             forwarded = {keyword.arg: keyword.value for keyword in call.keywords}
             assert isinstance(forwarded["datestamp"], ast.Name)
             assert forwarded["datestamp"].id == "datestamp"
+
+
+def test_extracted_layer_pipeline_builds_analytics_and_status(monkeypatch):
+    captured = {}
+
+    def fake_graph_analytics(**kwargs):
+        captured.update(kwargs)
+        return {"scope": kwargs["scope"]}
+
+    monkeypatch.setattr(
+        layer_pipeline,
+        "generate_graph_analytics_report",
+        fake_graph_analytics,
+    )
+    reports = {
+        "artifacts": {"artifacts": {}},
+        "structure_raw": {
+            "hard_edges": {"pkg.one": ["pkg.two"]},
+            "soft_edges": {},
+        },
+        "summary": {
+            "layer_modules": ["pkg.one", "pkg.two", 123],
+            "layer_module_count": 2,
+            "layer_cycles_count": 0,
+            "hotspots": ["pkg.one"],
+            "status": "WARNING",
+            "computation_mode": "full",
+        },
+        "_index_dict": object(),
+        "_global_artifact_data": {"artifacts": {"global": {}}},
+    }
+
+    status = layer_pipeline.execute_layer_pipeline("repo", "pkg", reports)
+
+    assert reports["graph_analytics"] == {"scope": "layer"}
+    assert captured["scope_modules"] == {"pkg.one", "pkg.two"}
+    assert captured["hard_edges"] == {"pkg.one": ["pkg.two"]}
+    assert captured["global_artifact_data"] is reports["_global_artifact_data"]
+    assert status == {
+        "layer": "pkg",
+        "module_count": 2,
+        "status": "WARNING",
+        "cycles_count": 0,
+        "hotspot_count": 1,
+        "computation_mode": "full",
+    }
+
+
+def test_reporting_engine_keeps_layer_pipeline_as_public_package_api():
+    assert reporting_engine.execute_layer_pipeline is (
+        layer_pipeline.execute_layer_pipeline
+    )
+
+
+def test_artifact_pipeline_builds_all_views_from_one_full_report(monkeypatch):
+    calls = {}
+    full_report = {
+        "artifacts": {"raw": {}},
+        "_module_artifacts": {"pkg.one": {"run"}},
+        "_usage_sidecar": {"run": ["pkg.two"]},
+    }
+
+    class Transaction:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+    class FakeArtifactRegistry:
+        def __init__(self, root_path):
+            calls["registry_root"] = root_path
+
+        def transaction(self):
+            return Transaction()
+
+        def sync_with_workspace(self, modules, artifacts):
+            calls["sync"] = (modules, artifacts)
+
+        def run_garbage_collector(self):
+            calls["garbage_collected"] = True
+
+    index = object()
+    monkeypatch.setattr(
+        artifact_pipeline,
+        "generate_artifact_usage_report",
+        lambda *args, **kwargs: full_report,
+    )
+    monkeypatch.setattr(
+        artifact_pipeline,
+        "collect_qualified_artifact_identities",
+        lambda value: {"pkg.one::run"} if value else set(),
+    )
+    monkeypatch.setattr(
+        artifact_pipeline,
+        "PersistentIdentityRegistry",
+        FakeArtifactRegistry,
+    )
+    monkeypatch.setattr(artifact_pipeline, "IndexDictionary", lambda _registry: index)
+    monkeypatch.setattr(
+        artifact_pipeline,
+        "compact_artifact_report",
+        lambda artifact_data, index_dict: {
+            "same_source": artifact_data is full_report,
+            "same_index": index_dict is index,
+        },
+    )
+    monkeypatch.setattr(
+        artifact_pipeline,
+        "compact_structure_report",
+        lambda structure, index_dict: {
+            "structure": structure,
+            "same_index": index_dict is index,
+        },
+    )
+
+    def fake_analytics(**kwargs):
+        calls["analytics"] = kwargs
+        return {"scope": kwargs["scope"]}
+
+    monkeypatch.setattr(
+        artifact_pipeline, "generate_graph_analytics_report", fake_analytics
+    )
+
+    result = artifact_pipeline.build_artifact_pipeline(
+        modules={"pkg.one": object()},
+        root_path="repo-root",
+        runtime={"mode": "test"},
+        report_header={"branch": "main"},
+        structure_data={"hard_edges": {}},
+        hard_edges={"pkg.one": {"pkg.two"}},
+        soft_edges={},
+    )
+
+    assert result.artifact_data is full_report
+    assert result.usage_sidecar == {"run": ["pkg.two"]}
+    assert result.compact_artifact_data == {
+        "same_source": True,
+        "same_index": True,
+    }
+    assert result.compact_structure_data["same_index"] is True
+    assert result.graph_analytics_data == {"scope": "global"}
+    assert full_report["report_header"]["data_source"] == "artifacts"
+    assert calls["sync"] == ({"pkg.one"}, {"pkg.one::run"})
+    assert calls["garbage_collected"] is True
+    assert calls["analytics"]["artifact_data"] is full_report
+    assert calls["analytics"]["index_dict"] is index
+
+
+def test_consecutive_global_writes_diff_same_commit_worktree_states(
+    tmp_path, monkeypatch
+):
+    output = tmp_path / "output"
+
+    def report_path(value):
+        relative = Path(value)
+        return tmp_path / relative
+
+    def save(payload, path, **_kwargs):
+        target = report_path(path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(json.dumps(payload), encoding="utf-8")
+
+    monkeypatch.setattr(io_manager, "resolve_report_path", report_path)
+    monkeypatch.setattr(io_manager, "save_json", save)
+    monkeypatch.setattr(io_manager, "_save_markdown", lambda *_args: None)
+    first = {
+        "summary": {
+            "report_header": {"commit_sha": "same"},
+            "metrics": {"nodes": 10, "edges_total": 12},
+            "debt_summary": {"hotspot_count": 2, "total_score": 3.0},
+        }
+    }
+    second = {
+        "summary": {
+            "report_header": {"commit_sha": "same"},
+            "metrics": {"nodes": 11, "edges_total": 14},
+            "debt_summary": {"hotspot_count": 1, "total_score": 2.0},
+        }
+    }
+
+    io_manager.write_global_reports(first, "repo")
+    io_manager.write_global_reports(second, "repo")
+
+    diff = json.loads((output / "repo_report_diff.json").read_text())
+    assert diff["classification"] == "IMPROVED"
+    assert diff["comparison_basis"] == "consecutive_canonical_runs"
+    assert diff["baseline"]["commit_sha"] == "same"
+    assert diff["current"]["commit_sha"] == "same"
+    assert diff["report_diff"]["metrics"]["nodes"]["delta"] == 1
+    assert diff["report_diff"]["debt"]["hotspot_count"]["delta"] == -1

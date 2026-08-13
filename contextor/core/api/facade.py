@@ -388,7 +388,9 @@ class ContextorFacade:
         from datetime import datetime
         datestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         
-        from contextor.core.reporting_engine.pipeline import execute_layer_pipeline
+        from contextor.core.reporting_engine.layer_pipeline import (
+            execute_layer_pipeline,
+        )
         from contextor.core.reporting_engine.io_manager import write_layer_reports
         
         execute_layer_pipeline(repo_name, layer_name, layer_sliced_reports, log=log, datestamp=datestamp)

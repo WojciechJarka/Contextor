@@ -1,3 +1,56 @@
+## [1.2.0-beta Patch — Parts II–IV] - 2026-08-13
+
+### Part II — Reliable reporting and persistent identities
+
+- Repaired global, layer and single-file report consistency, including real
+  module/symbol identities, correct Markdown context, Git headers and
+  timestamped physical snapshots alongside stable canonical filenames.
+- Unified GUI and MCP indexed report parsing. Exact module paths, dotted module
+  names, qualified symbols, active/recovery registries and public-API filtering
+  now share one resolution path with explicit ambiguity diagnostics.
+- Corrected artifact consumption, dependency classification, test discovery,
+  layer module accounting and false name-collision handling for local symbols.
+- Preserved per-repository identity isolation, generation-based IDs, recovery
+  dictionaries and reusable slot bookkeeping across incremental updates.
+
+### Part III — LIVE model and LLM-oriented MCP tools
+
+- Added persistent canonical LIVE state that survives MCP restarts and supports
+  incremental file addition, modification and deletion without a global rebuild.
+- Added semantic file deltas for symbols, signatures, normalized AST body
+  fingerprints, imports and removed artifacts. These complement—rather than
+  replace—the normal source and Git diff.
+- Added bounded, documented MCP context tools for indexed report extraction,
+  module APIs, blast radius, file-edit context, registry lookup and safe
+  canonical-state projection.
+- Made project, layer and single-file analysis non-blocking. Analysis calls now
+  return durable job IDs with progress and terminal status, eliminating client
+  timeouts during long report generation.
+- `get_module_context` now combines current LIVE dependencies with clearly
+  labelled saved or deferred metrics, including newly created modules before a
+  full report refresh.
+
+### Part IV — Refactor guidance and final MCP completeness
+
+- Used Contextor's own hotspot and blast-radius data to split the reporting
+  orchestrator into dedicated `artifact_pipeline` and `layer_pipeline` modules.
+  The reporting pipeline's outbound degree fell from 15 to 10 while preserving
+  the package-level public API.
+- `get_report_diff` now compares consecutive canonical runs even when both
+  working-tree states share the same commit SHA, and records comparison headers
+  plus regression classification.
+- `get_layer_isolation` now accepts nested layer paths and dotted layer names
+  while retaining the full requested layer identity.
+- `tests_covering` now reports bounded static reachability through aliases,
+  re-exports and facades, including distance and an evidence path. It is
+  explicitly structural evidence, not runtime line coverage.
+- Fixed public collision collection so classes nested inside functions are not
+  misreported as module-level APIs.
+- Validated the final paths with focused unit/regression suites and temporary
+  repository modules; removed probes were correctly transferred to recovery.
+
+---
+
 ## [1.2.0-beta] - 2026-08-06
 
 ### Added

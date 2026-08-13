@@ -153,7 +153,7 @@ class PublicSymbolCollector(ast.NodeVisitor):
         Collect only top-level classes.
         """
 
-        if self.class_depth == 0:
+        if self.class_depth == 0 and self.function_depth == 0:
             self._add(
                 node.name,
                 "class",

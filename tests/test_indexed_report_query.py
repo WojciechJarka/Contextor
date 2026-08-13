@@ -153,7 +153,33 @@ def test_symbol_main_does_not_match_modules_named_main():
         "pkg.main::main",
         "pkg.cli::main",
     }
-    assert "tools.main::Runner.main" not in {item["name"] for item in result["matches"]}
+    assert "tools.main::Runner.main" not in {
+        item["name"] for item in result["matches"]
+    }
+
+
+def test_exact_dotted_module_name_is_resolved_from_index_before_symbol_rules():
+    result = resolve_index_query("pkg.cli", _catalog())
+
+    assert result["status"] == "matched"
+    assert result["query_kind"] == "module"
+    assert result["matches"] == [
+        {
+            "id": "5/1",
+            "name": "pkg.cli",
+            "kind": "module",
+            "match_kind": "exact_module",
+            "score": 100,
+            "in_report": None,
+            "path": "src/pkg/cli.py",
+            "path_source": "index",
+            "index_source": "active",
+        }
+    ]
+
+    explicit_symbol = resolve_index_query("symbol:pkg.cli", _catalog())
+    assert explicit_symbol["query_kind"] == "symbol"
+    assert explicit_symbol["matches"] == []
 
 
 def test_qualified_method_is_selected_before_suffix_matches():
