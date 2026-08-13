@@ -53,6 +53,7 @@ Contextor natively supports the **Model Context Protocol**, allowing Large Langu
 - **Architectural Regression Analysis:** `get_report_diff` compares consecutive canonical runs—including working-tree states on the same commit—and surfaces changes in structural metrics, layers and technical debt.
 - **Focused Refactor Evidence:** Nested-layer isolation and static test-reachability paths through aliases, re-exports and facades give the LLM compact evidence without claiming runtime coverage.
 - **Restricted Advanced Filtering:** The `query_canonical_state` tool lets an LLM extract small subsets from live canonical state using a restricted expression environment. It is intended for targeted structural queries, not arbitrary code execution.
+- **MCP Server Restart Boundary:** `update_file` synchronizes code on disk with Contextor's canonical state, but it cannot reload Python code already executing inside the MCP process. When the edited target is `contextor/mcp_server.py`, the response sets `runtime_restart_required: true`; restart the MCP server and verify the changed endpoint live before treating runtime behavior as current.
 
 ---
 

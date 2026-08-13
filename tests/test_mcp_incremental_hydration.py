@@ -74,6 +74,7 @@ def test_update_persist_restart_hydrate_keeps_live_reverse_context(tmp_path, mon
     )
     assert update["status"] == "UPDATED"
     assert update["live_state_persisted"] is True
+    assert update["runtime_restart_required"] is False
 
     mcp_server._live_engines.clear()
     hydrated = mcp_server._get_or_init_engine(repo.resolve())

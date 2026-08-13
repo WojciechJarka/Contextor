@@ -442,7 +442,43 @@ def test_fastmcp_schema_exposes_excludes_and_llm_guidance():
     assert "LLM use:" in mcp_server.get_analysis_status.description
     assert "LLM use:" in mcp_server.update_file.description
     assert "code diff" in mcp_server.update_file.description
+    assert "runtime_restart_required" in mcp_server.update_file.description
+    assert "nested objects" in mcp_server.get_file_edit_context.description
+    assert (
+        "dependencies_inbound_who_calls_me"
+        in mcp_server.get_module_context.description
+    )
     assert "public_api_only" in mcp_server.extract_indexed_report_context.description
+
+
+def test_update_file_marks_running_mcp_server_as_requiring_restart(monkeypatch):
+    server_path = Path(mcp_server.__file__).resolve()
+    repo = server_path.parents[1]
+    engine = SimpleNamespace(
+        state=SimpleNamespace(artifacts={"contextor.mcp_server": {}}),
+        update_file=lambda file_path: SimpleNamespace(
+            status="UPDATED",
+            file_path=file_path,
+            graph_state="fresh",
+            dependencies_state="fresh",
+            blast_radius_state="deferred",
+            local_metrics_state="deferred",
+            global_metrics_state="deferred",
+            artifact_consumption_state="deferred",
+            delta=None,
+        ),
+    )
+    monkeypatch.setattr(mcp_server, "_get_or_init_engine", lambda _root: engine)
+    monkeypatch.setattr(mcp_server, "_persist_live_engine", lambda *_args: True)
+
+    result = json.loads(
+        mcp_server.update_file.fn(repo_path=str(repo), file_path=str(server_path))
+    )
+
+    assert result["runtime_restart_required"] is True
+    assert result["runtime_state"] == "stale_until_mcp_server_restart"
+    assert "running MCP process" in result["runtime_warning"]
+    assert "Restart" in result["runtime_warning"]
 
 
 def test_mcp_bootstrap_keeps_an_existing_virtual_environment(monkeypatch):
@@ -1227,11 +1263,45 @@ def test_module_context_exposes_new_live_module_before_full_report(
     }
     assert result["metrics_source"] == "deferred_until_full_analysis"
     assert result["dependency_data_source"] == "live_canonical_graph"
-    assert set(result["dependencies_inbound_who_calls_me"]) == {"pkg.caller"}
-    assert set(result["dependencies_outbound_who_i_call"]) == {
-        "pkg.dependency",
-        "pkg.optional",
+    assert result["dependencies_inbound_who_calls_me"] == {
+        "total": 1,
+        "truncated": False,
     }
+    assert result["dependencies_outbound_who_i_call"] == {
+        "total": 2,
+        "truncated": False,
+    }
+
+    full = json.loads(
+        mcp_server.get_module_context.fn(
+            repo_path=str(tmp_path),
+            module_name="pkg.new",
+            max_items=1,
+            compact=False,
+            fields=[
+                "dependencies_inbound_who_calls_me",
+                "dependencies_outbound_who_i_call",
+            ],
+        )
+    )
+    assert set(full["dependencies_inbound_who_calls_me"]["items"]) == {
+        "pkg.caller"
+    }
+    assert full["dependencies_inbound_who_calls_me"]["total"] == 1
+    assert full["dependencies_inbound_who_calls_me"]["truncated"] is False
+    assert len(full["dependencies_outbound_who_i_call"]["items"]) == 1
+    assert full["dependencies_outbound_who_i_call"]["total"] == 2
+    assert full["dependencies_outbound_who_i_call"]["truncated"] is True
+
+    invalid = json.loads(
+        mcp_server.get_module_context.fn(
+            repo_path=str(tmp_path),
+            module_name="pkg.new",
+            fields=["unknown_field"],
+        )
+    )
+    assert invalid["error"] == "Unsupported fields for get_module_context"
+    assert invalid["unknown_fields"] == ["unknown_field"]
 
 
 @pytest.mark.parametrize(

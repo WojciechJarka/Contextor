@@ -865,6 +865,9 @@ def update_file(repo_path: str, file_path: str) -> str:
     normal code diff for line-level meaning. ``bodies_changed`` uses normalized
     AST fingerprints to flag body-only edits without sending body text; it does
     not explain their meaning. Consumption/global metrics may be deferred.
+    Editing this MCP server file updates disk and canonical state, but not the
+    code already loaded by the running MCP process; restart the server whenever
+    ``runtime_restart_required`` is true, then verify the tool live.
     """
     root = Path(repo_path).expanduser().resolve()
     target_file = Path(file_path).expanduser()
@@ -900,6 +903,15 @@ def update_file(repo_path: str, file_path: str) -> str:
             "live_state_persisted": live_state_persisted,
             "semantic_diff": _semantic_artifact_diff(old_artifacts, new_artifacts),
         }
+        runtime_restart_required = target_file == Path(__file__).resolve()
+        result["runtime_restart_required"] = runtime_restart_required
+        if runtime_restart_required:
+            result["runtime_state"] = "stale_until_mcp_server_restart"
+            result["runtime_warning"] = (
+                "Canonical state now describes the MCP server code on disk, but "
+                "the running MCP process still executes the previously loaded code. "
+                "Restart the MCP server and verify the changed tool live."
+            )
         if res.delta:
             result["delta"] = {
                 "module_path": res.delta.module_path,
@@ -949,7 +961,13 @@ def get_project_architecture(repo_path: str) -> str:
 
 
 @mcp.tool()
-def get_module_context(repo_path: str, module_name: str) -> str:
+def get_module_context(
+    repo_path: str,
+    module_name: str,
+    max_items: int = 30,
+    compact: bool = True,
+    fields: list[str] | None = None,
+) -> str:
     """
     [OPTIMIZED] Retrieve a compressed context pill for one module.
 
@@ -957,6 +975,16 @@ def get_module_context(repo_path: str, module_name: str) -> str:
     A file added through update_file is therefore immediately queryable, even
     before another global report refreshes expensive metrics. Deferred metrics
     are labelled explicitly instead of hiding the module.
+
+    Dependency collections always expose ``total`` and ``truncated``. The
+    default compact response omits edge ``items``; set ``compact=False`` for
+    bounded evidence. ``max_items`` applies independently to inbound and
+    outbound edges (maximum 500). ``fields`` projects top-level keys after
+    ``compact`` shapes the response. Allowed values are ``module``, ``metrics``,
+    ``metrics_source``, ``dependency_data_source``,
+    ``dependencies_inbound_who_calls_me``, and
+    ``dependencies_outbound_who_i_call``. Invalid projections return a
+    structured error with the current allowlist.
 
     LLM use: call immediately before editing a known module. Trust LIVE
     inbound/outbound edges for current structure; treat metrics marked
@@ -1055,17 +1083,59 @@ def get_module_context(repo_path: str, module_name: str) -> str:
             "metrics_state": "deferred",
         }
 
-    return json.dumps(
-        {
-            "module": module_name,
-            "metrics": metrics,
-            "metrics_source": metrics_source,
-            "dependency_data_source": dependency_source,
-            "dependencies_inbound_who_calls_me": inbound,
-            "dependencies_outbound_who_i_call": outbound,
-        },
-        indent=2,
+    inbound_items, inbound_total, inbound_truncated = _bounded_items(
+        sorted(inbound.items()), max_items
     )
+    outbound_items, outbound_total, outbound_truncated = _bounded_items(
+        sorted(outbound.items()), max_items
+    )
+    common_result = {
+        "module": module_name,
+        "metrics": metrics,
+        "metrics_source": metrics_source,
+        "dependency_data_source": dependency_source,
+    }
+    full_result = {
+        **common_result,
+        "dependencies_inbound_who_calls_me": {
+            "items": dict(inbound_items),
+            "total": inbound_total,
+            "truncated": inbound_truncated,
+        },
+        "dependencies_outbound_who_i_call": {
+            "items": dict(outbound_items),
+            "total": outbound_total,
+            "truncated": outbound_truncated,
+        },
+    }
+    compact_result = {
+        **common_result,
+        "dependencies_inbound_who_calls_me": {
+            "total": inbound_total,
+            "truncated": inbound_truncated,
+        },
+        "dependencies_outbound_who_i_call": {
+            "total": outbound_total,
+            "truncated": outbound_truncated,
+        },
+    }
+    result = compact_result if compact else full_result
+
+    if fields is not None:
+        allowed_fields = set(result)
+        unknown_fields = sorted(set(fields) - allowed_fields)
+        if unknown_fields:
+            return json.dumps(
+                {
+                    "error": "Unsupported fields for get_module_context",
+                    "unknown_fields": unknown_fields,
+                    "allowed_fields": sorted(allowed_fields),
+                },
+                indent=2,
+            )
+        result = {field: result[field] for field in fields}
+
+    return json.dumps(result, indent=2)
 
 @mcp.tool()
 def get_artifact_blast_radius(repo_path: str, artifact_name: str) -> str:
@@ -1269,20 +1339,19 @@ def get_file_edit_context(
     ``fields`` is a projection that returns only explicitly requested fields.
     Allowed values are: ``file``, ``file_exists``, ``module``, ``module_id``,
     ``layer``, ``entrypoint``, ``risk_score``, ``public_api``, ``imports``,
-    ``consumers``, ``tests_covering``, ``unresolved_public_api_ids``,
-    ``dependency_data_source``, and ``artifact_data_source``. Selecting a
-    collection automatically includes its ``*_total`` and ``*_truncated``
-    metadata. ``compact`` shapes the response first; ``fields`` then selects
-    top-level keys without changing their schema.
+    ``consumers``, ``tests_covering``, ``dependency_data_source``, and
+    ``artifact_data_source``. Collection fields are nested objects that always
+    contain ``total`` and ``truncated``; full mode additionally includes
+    ``items`` (or ``tests``). ``compact`` shapes the response first; ``fields``
+    then selects top-level keys without changing their schema.
 
     ``tests_covering`` reports bounded static dependency paths from test
     modules, including paths through aliases, re-exports and facades. It is
     structural evidence, not runtime line or branch coverage.
 
-    Collections are bounded by ``max_items`` (default 30) to protect the LLM
-    context window. Every bounded collection includes ``*_total`` and
-    ``*_truncated`` metadata. Increase ``max_items`` only when the totals show
-    that the omitted tail is relevant to the current decision.
+    Collections are bounded by ``max_items`` (default 30, maximum 500) to
+    protect the LLM context window. Increase it only when a nested collection's
+    ``truncated`` flag is true and the omitted evidence matters.
 
     LLM use: this is the preferred one-call briefing immediately before editing
     a file. It complements, but does not replace, the source and code diff.
