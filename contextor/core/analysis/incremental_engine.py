@@ -56,9 +56,19 @@ class IncrementalAnalysisEngine:
             # 1. Handle Deletion
             current_state = self.state_manager.get_current_file_state(file_path, compute_hash=False)
             if not current_state:
+                old_artifacts = self.state.artifacts.get(module_path, {})
+                old_module = self.state.modules.get(module_path)
                 delta = FileDelta(
                     module_path=module_path,
-                    is_deleted=True
+                    is_deleted=True,
+                    imports_removed=sorted(
+                        {
+                            imp.module
+                            for imp in (old_module.imports if old_module else [])
+                            if imp.module
+                        }
+                    ),
+                    artifacts_removed=sorted(self._artifact_names(old_artifacts)),
                 )
                 self._apply_delta_and_commit(file_path, delta, [], {})
                 return IncrementalUpdateResult(
@@ -126,6 +136,17 @@ class IncrementalAnalysisEngine:
                 artifact_consumption_state="deferred"
             )
             
+    @staticmethod
+    def _artifact_names(artifacts: dict) -> set[str]:
+        """Return definition artifacts represented in one module snapshot."""
+
+        symbols = artifacts.get("symbols", {}) if artifacts else {}
+        return {
+            str(name)
+            for category in ("functions", "classes", "methods")
+            for name in symbols.get(category, [])
+        }
+
     def _calculate_delta(self, module_path: str, persistent_id: Optional[str], is_new: bool, new_imports: List, new_artifacts_dict: dict) -> FileDelta:
         delta = FileDelta(
             module_path=module_path,
@@ -136,10 +157,7 @@ class IncrementalAnalysisEngine:
             delta.imports_added = sorted(
                 {imp.module for imp in (new_imports or []) if imp.module}
             )
-            symbols = new_artifacts_dict.get("symbols", {})
-            delta.artifacts_added = list(symbols.get("functions", [])) + \
-                                    list(symbols.get("classes", [])) + \
-                                    list(symbols.get("methods", []))
+            delta.artifacts_added = sorted(self._artifact_names(new_artifacts_dict))
             return delta
             
         # Get old state using the canonical dot-path!
@@ -154,21 +172,15 @@ class IncrementalAnalysisEngine:
         delta.imports_removed = list(old_import_names - new_import_names)
         
         # Compute artifacts delta
-        symbols = new_artifacts_dict.get("symbols", {})
-        new_artifact_names = set(symbols.get("functions", [])) | \
-                             set(symbols.get("classes", [])) | \
-                             set(symbols.get("methods", []))
+        new_artifact_names = self._artifact_names(new_artifacts_dict)
                              
         old_artifacts = self.state.artifacts.get(module_path, {})
         # Note: self.state.artifacts contains the tuple (symbols, own_symbols, consumers)
         # So we just get the own_symbols from it to compute delta.
-        old_symbols = old_artifacts.get("symbols", {})
-        old_artifact_names = set(old_symbols.get("functions", [])) | \
-                             set(old_symbols.get("classes", [])) | \
-                             set(old_symbols.get("methods", []))
+        old_artifact_names = self._artifact_names(old_artifacts)
                              
-        delta.artifacts_added = list(new_artifact_names - old_artifact_names)
-        delta.artifacts_removed = list(old_artifact_names - new_artifact_names)
+        delta.artifacts_added = sorted(new_artifact_names - old_artifact_names)
+        delta.artifacts_removed = sorted(old_artifact_names - new_artifact_names)
         
         return delta
 

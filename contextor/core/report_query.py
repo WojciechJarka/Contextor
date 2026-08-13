@@ -225,9 +225,12 @@ def _suggestion_match(value: str, target: str) -> tuple[str, int] | None:
     folded_value = value.casefold()
     if not folded_value:
         return None
+    folded_target = target.casefold()
+    if folded_target.startswith(folded_value):
+        return "qualified_prefix_suggestion", 70
     segments = [
         segment
-        for segment in re.split(r"::|[._/\\]+", target.casefold())
+        for segment in re.split(r"::|[._/\\]+", folded_target)
         if segment
     ]
     if any(segment.startswith(folded_value) for segment in segments):

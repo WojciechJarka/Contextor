@@ -48,3 +48,43 @@ def test_new_importing_file_immediately_updates_forward_and_reverse_graph(tmp_pa
         if "provider" in targets
     }
     assert reverse_consumers == {"consumer"}
+
+
+def test_deleted_file_reports_all_removed_definition_artifacts(tmp_path):
+    module_file = tmp_path / "removable.py"
+    module_file.write_text(
+        "from pathlib import Path\n\n"
+        "def run():\n    return Path('.')\n\n"
+        "class Worker:\n    def execute(self):\n        return run()\n",
+        encoding="utf-8",
+    )
+    modules = index_repository(str(tmp_path)).modules
+    artifacts, failures = collect_module_artifacts(modules, str(tmp_path))
+    assert not failures
+    trie = build_trie(modules)
+    package_root = detect_package_root(modules, trie)
+    state = RepositoryAnalysisState(
+        modules=dict(modules),
+        artifacts=artifacts,
+        dependency_graph=build_graph(modules, trie=trie, package_root=package_root),
+        trie=trie,
+        package_root=package_root,
+        artifact_consumption={},
+    )
+    registry = PersistentIdentityRegistry(str(tmp_path))
+    with registry.transaction():
+        registry.sync_with_workspace(
+            set(modules), collect_qualified_artifact_identities(artifacts)
+        )
+    state_manager = FileStateManager(str(tmp_path / ".contextor"))
+    state_manager.update_state(str(module_file))
+    engine = IncrementalAnalysisEngine(state, registry, state_manager, str(tmp_path))
+
+    module_file.unlink()
+    result = engine.update_file(str(module_file))
+
+    assert result.status == "DELETED"
+    assert result.delta.is_deleted is True
+    assert result.delta.artifacts_removed == ["Worker", "Worker.execute", "run"]
+    assert result.delta.imports_removed == ["pathlib"]
+    assert "removable" not in engine.state.artifacts

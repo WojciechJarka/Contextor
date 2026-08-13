@@ -831,12 +831,56 @@ def search_artifacts(
         
     try:
         found_artifacts = []
+        found_modules = []
         kind_by_category = {
             "functions": "function",
             "classes": "class",
             "methods": "method",
             "globals": "global",
         }
+        module_paths = sorted(
+            set(getattr(engine.state, "modules", {}))
+            | set(engine.state.artifacts)
+        )
+        for mod_path in module_paths:
+            module_leaf = mod_path.rsplit(".", 1)[-1]
+            if search_term.casefold() in mod_path.casefold():
+                graph = engine.state.dependency_graph
+                inbound = []
+                outbound = []
+                if graph is not None:
+                    hard_edges = getattr(graph, "hard_edges", {})
+                    soft_edges = getattr(graph, "soft_edges", {})
+                    outbound = sorted(
+                        set(hard_edges.get(mod_path, set()))
+                        | set(soft_edges.get(mod_path, set()))
+                    )
+                    inbound = sorted(
+                        source
+                        for source in set(hard_edges) | set(soft_edges)
+                        if mod_path
+                        in (
+                            set(hard_edges.get(source, set()))
+                            | set(soft_edges.get(source, set()))
+                        )
+                    )
+                exact_module = search_term.casefold() in {
+                    mod_path.casefold(),
+                    module_leaf.casefold(),
+                }
+                found_modules.append(
+                    (
+                        not exact_module,
+                        mod_path.casefold(),
+                        mod_path,
+                        {
+                            "kind": "module",
+                            "module_id": engine.registry.get_module_id(mod_path),
+                            "dependencies_inbound": inbound,
+                            "dependencies_outbound": outbound,
+                        },
+                    )
+                )
         for mod_path, mod_arts in engine.state.artifacts.items():
             symbols = mod_arts.get("symbols", {})
             for category, kind in kind_by_category.items():
@@ -865,19 +909,31 @@ def search_artifacts(
                             "consumers": consumer_paths,
                         }))
 
-        if not found_artifacts:
-            return f"No live artifacts found matching '{search_term}'."
+        if not found_artifacts and not found_modules:
+            return f"No live modules or artifacts found matching '{search_term}'."
 
         found_artifacts.sort()
-        if not found_artifacts[0][0]:
-            found_artifacts = [item for item in found_artifacts if not item[0]]
-        selected, total, truncated = _bounded_items(found_artifacts, limit)
+        found_modules.sort()
+        all_found = [
+            (item[0], item[1], "artifact", item[2], item[3])
+            for item in found_artifacts
+        ] + [
+            (item[0], item[1], "module", item[2], item[3])
+            for item in found_modules
+        ]
+        all_found.sort()
+        if not all_found[0][0]:
+            all_found = [item for item in all_found if not item[0]]
+        selected, total, truncated = _bounded_items(all_found, limit)
+        selected_artifacts = [item for item in selected if item[2] == "artifact"]
+        selected_modules = [item for item in selected if item[2] == "module"]
         return json.dumps({
             "query": search_term,
             "match_count": len(selected),
             "total_matches": total,
             "truncated": truncated,
-            "artifacts": {item[2]: item[3] for item in selected},
+            "modules": {item[3]: item[4] for item in selected_modules},
+            "artifacts": {item[3]: item[4] for item in selected_artifacts},
         }, indent=2)
     except Exception as e:
         return f"Error extracting artifact context from live state: {e}"
@@ -1384,20 +1440,33 @@ def lookup_index_entries(repo_path: str, ids: list[str]) -> str:
     shared_usage_clusters).  Much cheaper than loading the entire registry.
 
     Accepts both module IDs (e.g. '124/1') and artifact IDs (e.g. 'A35/1').
-    Returns null for IDs not found in either registry.
+    Each ID resolves to ``{"name": ..., "status": "active|recovery|missing"}``
+    so stale identities are distinguishable from malformed or unknown IDs.
 
     LLM use: pass only IDs visible in the current result instead of loading the
-    full project dictionary. Null means unresolved/stale and must stay explicit.
+    full project dictionary. Recovery means a known historical identity and
+    must not be presented as an active symbol; missing means no known identity.
     """
     root = Path(repo_path).expanduser().resolve()
     try:
-        _, mod_id_to_path, _, art_id_to_path = _read_registries(root)
+        catalog = catalog_from_registry(str(root))
         result = {}
         for id_ in ids:
-            if id_.startswith("A"):
-                result[id_] = art_id_to_path.get(id_)
+            normalized_id = str(id_)
+            if normalized_id.upper().startswith("A"):
+                normalized_id = normalized_id.upper()
+                active = catalog.artifacts
+                recovery = catalog.recovered_artifacts or {}
             else:
-                result[id_] = mod_id_to_path.get(id_)
+                active = catalog.modules
+                recovery = catalog.recovered_modules or {}
+            if normalized_id in active:
+                entry = {"name": active[normalized_id], "status": "active"}
+            elif normalized_id in recovery:
+                entry = {"name": recovery[normalized_id], "status": "recovery"}
+            else:
+                entry = {"name": None, "status": "missing"}
+            result[str(id_)] = entry
         return json.dumps(result, indent=2)
     except Exception as e:
         return f"Error resolving index entries: {e}"

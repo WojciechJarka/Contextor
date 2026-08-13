@@ -55,6 +55,31 @@ def test_new_mcp_tools_document_their_llm_usage():
     assert "code diff" in docs["update_file"]
 
 
+def test_lookup_index_entries_distinguishes_active_recovery_and_missing(
+    tmp_path, monkeypatch
+):
+    catalog = IndexCatalog(
+        modules={"1/1": "pkg.active"},
+        artifacts={"A1/1": "pkg.active::run"},
+        recovered_modules={"2/1": "pkg.removed"},
+        recovered_artifacts={"A2/1": "pkg.removed::old"},
+    )
+    monkeypatch.setattr(mcp_server, "catalog_from_registry", lambda _root: catalog)
+
+    result = json.loads(
+        mcp_server.lookup_index_entries.fn(
+            repo_path=str(tmp_path),
+            ids=["1/1", "2/1", "A1/1", "a2/1", "999/1"],
+        )
+    )
+
+    assert result["1/1"] == {"name": "pkg.active", "status": "active"}
+    assert result["2/1"] == {"name": "pkg.removed", "status": "recovery"}
+    assert result["A1/1"] == {"name": "pkg.active::run", "status": "active"}
+    assert result["a2/1"] == {"name": "pkg.removed::old", "status": "recovery"}
+    assert result["999/1"] == {"name": None, "status": "missing"}
+
+
 def test_extract_indexed_report_context_returns_every_shared_resolver_block(tmp_path, monkeypatch):
     catalog = IndexCatalog(
         modules={"1/1": "main", "2/1": "pkg.cli"},
@@ -877,6 +902,52 @@ def test_live_artifact_search_handles_list_based_symbol_state(
     assert result["truncated"] is False
     assert result["artifacts"]["pkg.module::target"]["consumers"] == [
         "tests.test_module"
+    ]
+
+
+def test_live_artifact_search_also_returns_matching_modules(tmp_path, monkeypatch):
+    class Registry:
+        def get_module_id(self, module):
+            return {"pkg.unique_probe": "7/1"}.get(module)
+
+        def get_module_path(self, module_id):
+            return None
+
+    class Graph:
+        hard_edges = {
+            "pkg.caller": {"pkg.unique_probe"},
+            "pkg.unique_probe": {"pkg.dependency"},
+        }
+        soft_edges = {
+            "pkg.soft_caller": {"pkg.unique_probe"},
+            "pkg.unique_probe": {"pkg.soft_dependency"},
+        }
+
+    class State:
+        modules = {"pkg.unique_probe": object()}
+        artifacts = {}
+        dependency_graph = Graph()
+
+    class Engine:
+        state = State()
+        registry = Registry()
+
+    monkeypatch.setattr(mcp_server, "_get_or_init_engine", lambda _root: Engine())
+
+    result = json.loads(
+        mcp_server.search_artifacts.fn(
+            repo_path=str(tmp_path), search_term="unique_probe", limit=10
+        )
+    )
+
+    module = result["modules"]["pkg.unique_probe"]
+    assert result["total_matches"] == 1
+    assert result["artifacts"] == {}
+    assert module["module_id"] == "7/1"
+    assert module["dependencies_inbound"] == ["pkg.caller", "pkg.soft_caller"]
+    assert module["dependencies_outbound"] == [
+        "pkg.dependency",
+        "pkg.soft_dependency",
     ]
 
 

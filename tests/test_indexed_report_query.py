@@ -391,6 +391,35 @@ def test_fuzzy_suggestions_do_not_match_middle_of_unrelated_word():
     assert all("acyclic" not in item["name"] for item in result["suggestions"])
 
 
+def test_qualified_prefixes_are_suggestions_without_becoming_matches():
+    catalog = IndexCatalog(
+        modules={"1/1": "contextor.ui.test_runner"},
+        artifacts={
+            "A1/1": "contextor.ui.test_runner::run_test_suite",
+            "A2/1": "contextor.core.api.facade::ContextorFacade.analyze_project",
+        },
+    )
+
+    short = resolve_index_query("run_test_suit", catalog)
+    qualified = resolve_index_query("ContextorFacade.analyze_proj", catalog)
+    full = resolve_index_query(
+        "artifact:contextor.core.api.facade::ContextorFacade.analyze_proj",
+        catalog,
+    )
+
+    assert short["status"] == "not_found"
+    assert short["matches"] == []
+    assert [item["name"] for item in short["suggestions"]] == [
+        "contextor.ui.test_runner::run_test_suite"
+    ]
+    assert [item["name"] for item in qualified["suggestions"]] == [
+        "contextor.core.api.facade::ContextorFacade.analyze_project"
+    ]
+    assert [item["name"] for item in full["suggestions"]] == [
+        "contextor.core.api.facade::ContextorFacade.analyze_project"
+    ]
+
+
 def test_exact_matches_suppress_fuzzy_suggestion_noise():
     result = resolve_index_query("main", _catalog())
 
