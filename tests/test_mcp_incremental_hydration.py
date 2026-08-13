@@ -80,11 +80,11 @@ def test_update_persist_restart_hydrate_keeps_live_reverse_context(tmp_path, mon
     assert hydrated is not None
     context = json.loads(
         mcp_server.get_file_edit_context.fn(
-            repo_path=str(repo), file_path="provider.py"
+            repo_path=str(repo), file_path="provider.py", compact=False
         )
     )
 
-    assert context["consumers"] == [
+    assert context["consumers"]["items"] == [
         {"module_id": registry.get_module_id("consumer"), "module": "consumer"}
     ]
     assert context["dependency_data_source"] == "live_canonical_graph"

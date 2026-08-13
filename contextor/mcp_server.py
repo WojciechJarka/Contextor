@@ -949,29 +949,6 @@ def get_project_architecture(repo_path: str) -> str:
 
 
 @mcp.tool()
-def get_project_index(repo_path: str) -> str:
-    """
-    [OPTIMIZED] Returns the mapping of internal repository IDs to their actual paths.
-    Use this to translate IDs (e.g., '17/4') found in reports back to file paths or artifact names.
-    """
-    root = Path(repo_path).expanduser().resolve()
-    try:
-        from contextor.core.reporting_engine.persistent_registry import PersistentIdentityRegistry
-        registry = PersistentIdentityRegistry(str(root))
-        with registry.transaction():
-            modules = registry._state.get("module_registry", {}).get("id_to_path", {})
-            artifacts = registry._state.get("artifact_registry", {}).get("id_to_path", {})
-            
-        result = {
-            "modules": modules,
-            "artifacts": artifacts
-        }
-        return json.dumps(result, indent=2)
-    except Exception as e:
-        return f"Error reading project index: {e}"
-
-
-@mcp.tool()
 def get_module_context(repo_path: str, module_name: str) -> str:
     """
     [OPTIMIZED] Retrieve a compressed context pill for one module.
@@ -1279,11 +1256,24 @@ def get_file_edit_context(
     repo_path: str,
     file_path: str,
     max_items: int = 30,
+    compact: bool = True,
+    fields: list[str] | None = None,
 ) -> str:
     """
     [OPTIMIZED] Specialized single-shot context pill for LLMs prior to editing a file.
     Combines module metrics, API signature blast radius, and dependency trees into one response.
-    Returns: file, module, public_api, imports, consumers, risk_score, tests_covering.
+    By default returns a compact decision summary: identity, risk, data sources,
+    and collection metadata. Set ``compact=False`` to include bounded ``items``
+    (or ``tests`` for ``tests_covering``) in the same nested collection objects.
+
+    ``fields`` is a projection that returns only explicitly requested fields.
+    Allowed values are: ``file``, ``file_exists``, ``module``, ``module_id``,
+    ``layer``, ``entrypoint``, ``risk_score``, ``public_api``, ``imports``,
+    ``consumers``, ``tests_covering``, ``unresolved_public_api_ids``,
+    ``dependency_data_source``, and ``artifact_data_source``. Selecting a
+    collection automatically includes its ``*_total`` and ``*_truncated``
+    metadata. ``compact`` shapes the response first; ``fields`` then selects
+    top-level keys without changing their schema.
 
     ``tests_covering`` reports bounded static dependency paths from test
     modules, including paths through aliases, re-exports and facades. It is
@@ -1471,32 +1461,42 @@ def get_file_edit_context(
             tests_covering, max_items
         )
         
-        result = {
+        common_result = {
             "file": file_path,
             "file_exists": target_path.is_file(),
             "module": module_name,
             "module_id": mod_id,
             "layer": mod_info.get("layer", "unknown"),
             "entrypoint": mod_info.get("entrypoint", False),
-            "public_api": dict(public_api_items),
-            "public_api_total": public_api_total,
-            "public_api_truncated": public_api_truncated,
-            "unresolved_public_api_ids": sorted(set(unresolved_public_api_ids)),
-            "imports": [
-                {"module_id": item, "module": mod_id_to_path.get(item)}
-                for item in import_items
-            ],
-            "imports_total": imports_total,
-            "imports_truncated": imports_truncated,
-            "consumers": [
-                {"module_id": item, "module": mod_id_to_path.get(item)}
-                for item in consumer_items
-            ],
-            "consumers_total": consumers_total,
-            "consumers_truncated": consumers_truncated,
             "risk_score": risk_score,
             "dependency_data_source": dependency_data_source,
             "artifact_data_source": artifact_data_source,
+        }
+        full_result = {
+            **common_result,
+            "public_api": {
+                "items": dict(public_api_items),
+                "total": public_api_total,
+                "truncated": public_api_truncated,
+                "unresolved_ids": sorted(set(unresolved_public_api_ids)),
+                "unresolved_total": len(set(unresolved_public_api_ids)),
+            },
+            "imports": {
+                "items": [
+                    {"module_id": item, "module": mod_id_to_path.get(item)}
+                    for item in import_items
+                ],
+                "total": imports_total,
+                "truncated": imports_truncated,
+            },
+            "consumers": {
+                "items": [
+                    {"module_id": item, "module": mod_id_to_path.get(item)}
+                    for item in consumer_items
+                ],
+                "total": consumers_total,
+                "truncated": consumers_truncated,
+            },
             "tests_covering": {
                 "available": tests_total > 0,
                 "total": tests_total,
@@ -1506,7 +1506,43 @@ def get_file_edit_context(
                 "tests": test_items,
             }
         }
-        
+
+        compact_result = {
+            **common_result,
+            "public_api": {
+                key: full_result["public_api"][key]
+                for key in ("total", "truncated", "unresolved_total")
+            },
+            "imports": {
+                key: full_result["imports"][key]
+                for key in ("total", "truncated")
+            },
+            "consumers": {
+                key: full_result["consumers"][key]
+                for key in ("total", "truncated")
+            },
+            "tests_covering": {
+                key: full_result["tests_covering"][key]
+                for key in ("available", "total", "truncated", "evidence_scope", "max_depth")
+            },
+        }
+
+        result = compact_result if compact else full_result
+
+        if fields is not None:
+            allowed_fields = set(result)
+            unknown_fields = sorted(set(fields) - allowed_fields)
+            if unknown_fields:
+                return json.dumps(
+                    {
+                        "error": "Unsupported fields for get_file_edit_context",
+                        "unknown_fields": unknown_fields,
+                        "allowed_fields": sorted(allowed_fields),
+                    },
+                    indent=2,
+                )
+            result = {field: result[field] for field in fields}
+
         return json.dumps(result, indent=2)
     except Exception as e:
         return f"Error extracting file edit context: {e}"

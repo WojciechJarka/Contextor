@@ -384,12 +384,14 @@ def test_file_edit_context_prefers_fresh_live_graph_over_stale_saved_matrix(
 
     result = json.loads(
         mcp_server.get_file_edit_context.fn(
-            repo_path=str(tmp_path), file_path="provider.py"
+            repo_path=str(tmp_path), file_path="provider.py", compact=False
         )
     )
 
-    assert result["consumers"] == [{"module_id": "2/1", "module": "consumer"}]
-    assert result["public_api"] == {"A1/1": "provider::run"}
+    assert result["consumers"]["items"] == [
+        {"module_id": "2/1", "module": "consumer"}
+    ]
+    assert result["public_api"]["items"] == {"A1/1": "provider::run"}
     assert result["dependency_data_source"] == "live_canonical_graph"
     assert result["artifact_data_source"] == "live_registry_and_symbol_state"
 
@@ -905,25 +907,28 @@ def test_file_edit_context_decodes_modules_and_marks_unresolved_api(
 
     result = json.loads(
         mcp_server.get_file_edit_context.fn(
-            repo_path=str(repo), file_path="pkg/module.py", max_items=1
+            repo_path=str(repo), file_path="pkg/module.py", max_items=1, compact=False
         )
     )
 
     assert result["module"] == "pkg.module"
     assert result["file_exists"] is True
     assert result["module_id"] == "1/1"
-    assert result["imports"] == [{"module_id": "2/1", "module": "pkg.dep"}]
-    assert result["consumers"] == [
+    assert result["imports"]["items"] == [
+        {"module_id": "2/1", "module": "pkg.dep"}
+    ]
+    assert result["consumers"]["items"] == [
         {"module_id": "3/1", "module": "tests.test_module"}
     ]
-    assert result["public_api"] == {"A1/1": "pkg.module::api"}
-    assert result["public_api_total"] == 2
-    assert result["public_api_truncated"] is True
-    assert result["unresolved_public_api_ids"] == ["A2/1"]
-    assert result["imports_total"] == 2
-    assert result["imports_truncated"] is True
-    assert result["consumers_total"] == 2
-    assert result["consumers_truncated"] is True
+    assert result["public_api"]["items"] == {"A1/1": "pkg.module::api"}
+    assert result["public_api"]["total"] == 2
+    assert result["public_api"]["truncated"] is True
+    assert result["public_api"]["unresolved_ids"] == ["A2/1"]
+    assert result["public_api"]["unresolved_total"] == 1
+    assert result["imports"]["total"] == 2
+    assert result["imports"]["truncated"] is True
+    assert result["consumers"]["total"] == 2
+    assert result["consumers"]["truncated"] is True
     assert result["tests_covering"]["tests"] == [
         {
             "module_id": "3/1",
@@ -938,6 +943,52 @@ def test_file_edit_context_decodes_modules_and_marks_unresolved_api(
     )
     assert result["tests_covering"]["total"] == 2
     assert result["tests_covering"]["truncated"] is True
+
+    compact = json.loads(
+        mcp_server.get_file_edit_context.fn(
+            repo_path=str(repo), file_path="pkg/module.py", max_items=1
+        )
+    )
+    assert compact["consumers"] == {"total": 2, "truncated": True}
+    assert compact["imports"] == {"total": 2, "truncated": True}
+    assert compact["public_api"] == {
+        "total": 2,
+        "truncated": True,
+        "unresolved_total": 1,
+    }
+    assert compact["tests_covering"]["total"] == 2
+    assert "tests" not in compact["tests_covering"]
+
+    projection = json.loads(
+        mcp_server.get_file_edit_context.fn(
+            repo_path=str(repo),
+            file_path="pkg/module.py",
+            max_items=1,
+            fields=["risk_score", "consumers"],
+        )
+    )
+    assert set(projection) == {"risk_score", "consumers"}
+    assert projection["consumers"] == {"total": 2, "truncated": True}
+
+    evidence_projection = json.loads(
+        mcp_server.get_file_edit_context.fn(
+            repo_path=str(repo),
+            file_path="pkg/module.py",
+            max_items=1,
+            compact=False,
+            fields=["consumers", "tests_covering"],
+        )
+    )
+    assert evidence_projection["consumers"] == result["consumers"]
+    assert evidence_projection["tests_covering"] == result["tests_covering"]
+
+    invalid = json.loads(
+        mcp_server.get_file_edit_context.fn(
+            repo_path=str(repo), file_path="pkg/module.py", fields=["unknown_field"]
+        )
+    )
+    assert invalid["error"] == "Unsupported fields for get_file_edit_context"
+    assert invalid["unknown_fields"] == ["unknown_field"]
 
 
 def test_artifacts_for_module_includes_live_zero_consumer_signature(
