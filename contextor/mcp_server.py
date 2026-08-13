@@ -223,6 +223,18 @@ def _mcp_cache_root(root: Path) -> Path:
     return app_cache_dir()
 
 
+def _publish_mcp_live_status(root: Path, message: str) -> None:
+    """Best-effort status for the desktop LIVE bar; never fails a tool call."""
+    try:
+        from contextor.core.live_state import connect
+
+        client = connect(root)
+        if client is not None:
+            client.status(message, origin="mcp")
+    except (OSError, EOFError, RuntimeError):
+        pass
+
+
 def _analysis_job_dir(root: Path) -> Path:
     """Return the persistent MCP analysis-job directory for one repository."""
 
@@ -1094,6 +1106,7 @@ async def analyze_project(
     root = Path(repo_path).expanduser().resolve()
     if not root.is_dir():
         return f"Error: Repository path '{root}' does not exist."
+    _publish_mcp_live_status(root, "MCP: analyzing full repository")
     return json.dumps(
         _start_analysis_job("project", root, exclude_paths=exclude_paths),
         indent=2,
@@ -1122,6 +1135,7 @@ async def analyze_layer(
     layer = root / layer_name
     if not layer.is_dir():
         return f"Error: Layer path '{layer}' does not exist."
+    _publish_mcp_live_status(root, f"MCP: analyzing layer {layer_name}")
     return json.dumps(
         _start_analysis_job(
             "layer", root, layer, exclude_paths=exclude_paths
@@ -1155,6 +1169,7 @@ async def analyze_single_file(
     target_file = target_file.resolve()
     if not target_file.is_file():
         return f"Error: Target file '{target_file}' does not exist."
+    _publish_mcp_live_status(root, f"MCP: analyzing file {target_file.name}")
     return json.dumps(
         _start_analysis_job(
             "single_file", root, target_file, exclude_paths=exclude_paths
@@ -2035,6 +2050,7 @@ def get_symbol_implementation(
     root = Path(repo_path).expanduser().resolve()
     if not root.is_dir():
         return json.dumps({"status": "error", "error": f"Repository path '{root}' does not exist."}, indent=2)
+    _publish_mcp_live_status(root, f"MCP: reading symbol {symbol}")
     normalized_mode = mode.strip().lower()
     if normalized_mode not in {"preview", "fetch"}:
         return json.dumps(

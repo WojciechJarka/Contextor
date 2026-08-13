@@ -668,7 +668,7 @@ class ContextorGUI:
 
         if self.live_watcher:
             self.live_watcher.stop()
-        if self.live_event_feed:
+        if getattr(self, "live_event_feed", None):
             self.live_event_feed.stop()
         try:
             client = connect_or_start(path)
