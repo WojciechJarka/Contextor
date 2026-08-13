@@ -9,7 +9,7 @@ from multiprocessing.connection import Client, Listener
 from typing import Any, Callable
 
 
-LIVE_PROTOCOL_VERSION = 2
+LIVE_PROTOCOL_VERSION = 3
 
 
 @dataclass(frozen=True)
