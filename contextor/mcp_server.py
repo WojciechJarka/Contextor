@@ -1665,19 +1665,16 @@ def get_report_diff(repo_path: str) -> str:
         return f"Error reading diff report: {e}"
 
 
-@mcp.tool()
-def query_canonical_state(repo_path: str, python_filter_expression: str) -> str:
+def _execute_canonical_query(engine: object, python_filter_expression: str) -> str:
+    """Execute a restricted Python expression against a live canonical engine state.
+
+    Provides a safe sandbox with whitelisted builtins only — no import, exec or
+    open. The engine's ``modules``, ``artifacts``, ``dependency_graph`` and
+    ``registry`` objects are injected as top-level variables.
+
+    Returns a JSON-serialised string on success, or an ``"Error: ..."`` string
+    on failure so callers can propagate the message directly to the LLM.
     """
-    [ADVANCED] Allows you to run a safe Python list-comprehension or filter on the LIVE canonical state!
-    The live objects are loaded into variables: 'modules', 'artifacts', 'dependency_graph', 'registry'.
-    Example expression: "[m_path for m_path, mod in modules.items() if len(mod.imports) > 20]"
-    """
-    root = Path(repo_path).expanduser().resolve()
-    engine = _get_or_init_engine(root)
-    
-    if not engine:
-        return f"Error: No live canonical state found for {root}. Run analyze_project first."
-        
     try:
         # Safe sandbox: only whitelisted builtins, no import/exec/open
         _safe_builtins = {
@@ -1696,22 +1693,42 @@ def query_canonical_state(repo_path: str, python_filter_expression: str) -> str:
             "True": True, "False": False, "None": None,
         }
         result = eval(python_filter_expression, _safe_builtins)
-        
+
         # Serialize result safely, handling dataclasses if needed
         import dataclasses
         class SafeEncoder(json.JSONEncoder):
-             def default(self, o):
-                 if dataclasses.is_dataclass(o):
-                     return dataclasses.asdict(o)
-                 if hasattr(o, "to_dict"):
-                     return o.to_dict()
-                 if isinstance(o, set):
-                     return list(o)
-                 return str(o)
-                 
+            def default(self, o):
+                if dataclasses.is_dataclass(o):
+                    return dataclasses.asdict(o)
+                if hasattr(o, "to_dict"):
+                    return o.to_dict()
+                if isinstance(o, set):
+                    return list(o)
+                return str(o)
+
         return json.dumps(result, indent=2, cls=SafeEncoder)
     except Exception as e:
         return f"Error executing query: {str(e)}"
+
+
+@mcp.tool()
+def query_canonical_state(repo_path: str, python_filter_expression: str) -> str:
+    """
+    [ADVANCED] Allows you to run a safe Python list-comprehension or filter on the LIVE canonical state!
+    The live objects are loaded into variables: 'modules', 'artifacts', 'dependency_graph', 'registry'.
+    Example expression: "[m_path for m_path, mod in modules.items() if len(mod.imports) > 20]"
+
+    LLM use: prefer ``query_canonical_state_bounded`` for exploration; use this
+    tool only when you need unbounded results or when the expression already
+    projects to a small scalar value.
+    """
+    root = Path(repo_path).expanduser().resolve()
+    engine = _get_or_init_engine(root)
+    
+    if not engine:
+        return f"Error: No live canonical state found for {root}. Run analyze_project first."
+        
+    return _execute_canonical_query(engine, python_filter_expression)
 
 
 @mcp.tool()
@@ -1733,10 +1750,13 @@ def query_canonical_state_bounded(
     dedicated tool. Prefer projected scalar fields and a small limit; it is a
     structural query, not a substitute for reading the affected source.
     """
-    raw = query_canonical_state.fn(
-        repo_path=repo_path,
-        python_filter_expression=python_filter_expression,
-    )
+    root = Path(repo_path).expanduser().resolve()
+    engine = _get_or_init_engine(root)
+
+    if not engine:
+        return f"Error: No live canonical state found for {root}. Run analyze_project first."
+
+    raw = _execute_canonical_query(engine, python_filter_expression)
     try:
         value = json.loads(raw)
     except (TypeError, json.JSONDecodeError):

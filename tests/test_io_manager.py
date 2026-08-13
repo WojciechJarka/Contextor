@@ -133,11 +133,11 @@ def test_standalone_layer_snapshot_shares_repository_timestamp_directory(
 ):
     monkeypatch.setattr(
         "contextor.core.reporting_engine.formatting.resolve_report_path",
-        lambda path: os.path.join(str(tmp_path), path),
+        lambda path: tmp_path / path,
     )
     monkeypatch.setattr(
         "contextor.core.reporting_engine.io_manager.resolve_report_path",
-        lambda path: os.path.join(str(tmp_path), path),
+        lambda path: tmp_path / path,
     )
 
     write_layer_reports(
@@ -156,11 +156,11 @@ def test_standalone_layer_snapshot_shares_repository_timestamp_directory(
 def test_write_layer_reports_emits_markdown_summary(tmp_path, monkeypatch):
     monkeypatch.setattr(
         "contextor.core.reporting_engine.formatting.resolve_report_path",
-        lambda path: os.path.join(str(tmp_path), path),
+        lambda path: tmp_path / path,
     )
     monkeypatch.setattr(
         "contextor.core.reporting_engine.io_manager.resolve_report_path",
-        lambda path: os.path.join(str(tmp_path), path),
+        lambda path: tmp_path / path,
     )
 
     write_layer_reports("repo", "ui", {"summary": {"status": "OK", "layer_module_count": 3}})
@@ -237,11 +237,11 @@ def test_write_global_reports_uses_canonical_names(tmp_path, monkeypatch):
 def test_write_global_reports_emits_markdown_summary(tmp_path, monkeypatch):
     monkeypatch.setattr(
         "contextor.core.reporting_engine.formatting.resolve_report_path",
-        lambda path: os.path.join(str(tmp_path), path),
+        lambda path: tmp_path / path,
     )
     monkeypatch.setattr(
         "contextor.core.reporting_engine.io_manager.resolve_report_path",
-        lambda path: os.path.join(str(tmp_path), path),
+        lambda path: tmp_path / path,
     )
 
     write_global_reports({"summary": {"status": "OK", "metrics": {"nodes": 4}}}, "repo")
