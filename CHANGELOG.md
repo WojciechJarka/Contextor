@@ -23,9 +23,16 @@
 - Added bounded, documented MCP context tools for indexed report extraction,
   module APIs, blast radius, file-edit context, registry lookup and safe
   canonical-state projection.
+- Added `get_symbol_implementation`: an AST-backed two-phase MCP reader.
+  Its preview reports the cost of complete response variants before source is
+  fetched; fetch returns only whole classes, functions or explicitly selected
+  methods, never arbitrary line fragments.
 - Made project, layer and single-file analysis non-blocking. Analysis calls now
   return durable job IDs with progress and terminal status, eliminating client
   timeouts during long report generation.
+- Completed global analysis jobs now expose bounded parser/read coverage gaps
+  through ``analysis_coverage.skipped_python_files``, including syntax-error
+  counts and the original indexer reason for each skipped Python file.
 - `get_module_context` now combines current LIVE dependencies with clearly
   labelled saved or deferred metrics, including newly created modules before a
   full report refresh.

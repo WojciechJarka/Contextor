@@ -113,6 +113,73 @@ def test_analysis_status_marks_previous_server_job_interrupted(tmp_path):
     assert result["completed_at"]
 
 
+def test_project_worker_carries_indexer_skips_into_durable_job_status(
+    tmp_path, monkeypatch
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    skipped = [
+        {"path": "broken_indent.py", "reason": "is not valid Python (line 2: unexpected indent)"},
+        {"path": "broken_bracket.py", "reason": "is not valid Python (line 1: '[' was never closed)"},
+    ]
+
+    def fake_analyze_project(*_args, **_kwargs):
+        return [], SimpleNamespace(summary_data={"skipped_files": skipped})
+
+    monkeypatch.setattr(
+        mcp_server.ContextorFacade,
+        "analyze_project",
+        staticmethod(fake_analyze_project),
+    )
+
+    outcome = asyncio.run(mcp_server._run_analysis_worker("project", repo))
+
+    assert outcome == {"skipped_python_files": skipped}
+
+
+def test_analysis_status_bounds_and_exposes_skipped_python_files(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    job_id = "b" * 32
+    mcp_server._write_analysis_job(
+        repo,
+        {
+            "job_id": job_id,
+            "operation": "project",
+            "repo_path": str(repo),
+            "target": None,
+            "status": "completed",
+            "created_at": "2026-01-01T00:00:00+00:00",
+            "started_at": "2026-01-01T00:00:01+00:00",
+            "completed_at": "2026-01-01T00:00:02+00:00",
+            "message": "Analysis completed successfully.",
+            "error": None,
+            "owner_pid": os.getpid(),
+            "skipped_python_files": [
+                {"path": "broken_indent.py", "reason": "is not valid Python (line 2: unexpected indent)"},
+                {"path": "unreadable.py", "reason": "not valid text in its declared encoding"},
+                {"path": "broken_bracket.py", "reason": "is not valid Python (line 1: '[' was never closed)"},
+            ],
+        },
+    )
+
+    bounded = json.loads(
+        mcp_server.get_analysis_status.fn(str(repo), job_id, max_skipped_files=1)
+    )
+    collection = bounded["analysis_coverage"]["skipped_python_files"]
+    assert collection["total"] == 3
+    assert collection["syntax_error_count"] == 2
+    assert collection["truncated"] is True
+    assert len(collection["items"]) == 1
+
+    unbounded = json.loads(
+        mcp_server.get_analysis_status.fn(str(repo), job_id, max_skipped_files=None)
+    )
+    all_items = unbounded["analysis_coverage"]["skipped_python_files"]
+    assert all_items["truncated"] is False
+    assert len(all_items["items"]) == 3
+
+
 def test_layer_and_single_file_tools_submit_nonblocking_jobs(tmp_path, monkeypatch):
     repo = tmp_path / "repo"
     layer = repo / "pkg"
@@ -1479,6 +1546,98 @@ def test_layer_isolation_handles_missing_shared_output_dir(tmp_path, monkeypatch
     assert result == (
         "Error: No layer report found for 'package' and no global summary found."
     )
+
+
+def test_symbol_implementation_previews_costs_and_fetches_complete_ast_symbols(
+    tmp_path, monkeypatch
+):
+    source = tmp_path / "pkg" / "service.py"
+    source.parent.mkdir()
+    source.write_text(
+        """def traced(value):
+    return value
+
+
+@traced
+class Service:
+    \"\"\"Service documentation.\"\"\"
+
+    @staticmethod
+    def save(value: str) -> str:
+        \"\"\"Save one value.\"\"\"
+        return value.upper()
+
+    def remove(self, value: str) -> str:
+        return value.lower()
+
+
+def standalone(value: int) -> int:
+    return value + 1
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(mcp_server, "_get_or_init_engine", lambda _root: None)
+
+    preview = json.loads(
+        mcp_server.get_symbol_implementation.fn(
+            repo_path=str(tmp_path),
+            symbol="Service",
+            file_paths=["pkg/service.py"],
+            member_limit=1,
+        )
+    )
+
+    assert preview["status"] == "resolved"
+    assert preview["mode"] == "preview"
+    assert "implementation" not in preview
+    assert preview["methods"]["total"] == 2
+    assert preview["methods"]["truncated"] is True
+    assert preview["fetch_plans"]["implementation"]["bytes"] > 0
+    assert preview["source_contract"]["no_partial_symbol_source"] is True
+
+    fetched = json.loads(
+        mcp_server.get_symbol_implementation.fn(
+            repo_path=str(tmp_path),
+            symbol="Service",
+            file_paths=["pkg/service.py"],
+            mode="fetch",
+            include=["signature", "docstring", "methods"],
+            methods=["save"],
+        )
+    )
+
+    assert fetched["signature"] == "class Service"
+    assert fetched["docstring"] == "Service documentation."
+    assert fetched["methods"][0]["name"] == "save"
+    assert fetched["methods"][0]["implementation"] == (
+        "    @staticmethod\n"
+        "    def save(value: str) -> str:\n"
+        "        \"\"\"Save one value.\"\"\"\n"
+        "        return value.upper()\n"
+    )
+    assert "remove" not in fetched["methods"][0]["implementation"]
+
+
+def test_symbol_implementation_refuses_ambiguous_source_without_guessing(
+    tmp_path, monkeypatch
+):
+    first = tmp_path / "one.py"
+    second = tmp_path / "two.py"
+    first.write_text("def same():\n    return 1\n", encoding="utf-8")
+    second.write_text("def same():\n    return 2\n", encoding="utf-8")
+    monkeypatch.setattr(mcp_server, "_get_or_init_engine", lambda _root: None)
+
+    result = json.loads(
+        mcp_server.get_symbol_implementation.fn(
+            repo_path=str(tmp_path),
+            symbol="same",
+            file_paths=["one.py", "two.py"],
+        )
+    )
+
+    assert result["status"] == "ambiguous"
+    assert result["candidate_count"] == 2
+    assert "implementation" not in result
 
 
 def test_project_architecture_and_report_diff_offer_optional_bounds(
