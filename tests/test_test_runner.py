@@ -196,8 +196,7 @@ def test_pytest_console_is_hidden_unless_explicitly_requested(monkeypatch):
     assert visible_kwargs["startupinfo"] is None
 
 
-@pytest.mark.parametrize("checkbox_value", [False, True])
-def test_gui_cmd_checkbox_controls_test_runner_console(monkeypatch, checkbox_value):
+def test_gui_full_test_suite_streams_to_in_window_operation_log(monkeypatch):
     captured = {}
 
     def fake_run_with_progress(_root, _bar, task, **_kwargs):
@@ -213,54 +212,37 @@ def test_gui_cmd_checkbox_controls_test_runner_console(monkeypatch, checkbox_val
     controller = SimpleNamespace(
         root=object(),
         progress_bar=SimpleNamespace(is_cancelled=True),
-        cmd_var=SimpleNamespace(get=lambda: checkbox_value),
         log_box=object(),
         cpu_indicator=object(),
         stop_btn=object(),
         _busy_buttons=lambda: [],
     )
 
-    controller._run_test_suite = lambda **kwargs: gui.ContextorGUI._run_test_suite(
-        controller, **kwargs
-    )
+    controller._run_test_suite = lambda: gui.ContextorGUI._run_test_suite(controller)
     gui.ContextorGUI.run_test_suite(controller)
     captured["task"](log="log", progress_callback="progress")
 
     assert captured["runner_kwargs"] == {
         "log": "log",
         "progress_callback": "progress",
-        "show_console": checkbox_value,
         "live_only": False,
     }
 
 
-def test_gui_live_suite_selects_only_live_tests(monkeypatch):
-    captured = {}
+@pytest.mark.parametrize("visible", [True, False])
+def test_cmd_log_checkbox_controls_global_program_log(monkeypatch, visible):
+    calls = []
 
-    def fake_run_with_progress(_root, _bar, task, **_kwargs):
-        captured["task"] = task
-
-    def fake_run_test_suite(**kwargs):
-        captured["runner_kwargs"] = kwargs
-        return {"exit_code": 0, "total": 1, "passed": 1, "failed": 0, "skipped": 0, "failures": []}
-
-    monkeypatch.setattr(gui, "run_with_progress", fake_run_with_progress)
-    monkeypatch.setattr(gui, "run_test_suite", fake_run_test_suite)
-
+    monkeypatch.setattr(gui, "configure_program_log", lambda: calls.append("configure"))
+    monkeypatch.setattr(gui, "open_cmd_log", lambda: calls.append("open") or True)
+    monkeypatch.setattr(gui, "close_cmd_log", lambda: calls.append("close"))
     controller = SimpleNamespace(
-        root=object(),
-        progress_bar=SimpleNamespace(is_cancelled=True),
-        cmd_var=SimpleNamespace(get=lambda: False),
-        log_box=object(),
-        cpu_indicator=object(),
-        stop_btn=object(),
-        _busy_buttons=lambda: [],
-    )
-    controller._run_test_suite = lambda **kwargs: gui.ContextorGUI._run_test_suite(
-        controller, **kwargs
+        cmd_var=SimpleNamespace(get=lambda: visible, set=lambda _value: None),
     )
 
-    gui.ContextorGUI.run_live_suite(controller)
-    captured["task"](log="log", progress_callback="progress")
+    gui.ContextorGUI._toggle_cmd_log(controller)
 
-    assert captured["runner_kwargs"]["live_only"] is True
+    if visible:
+        assert calls == ["configure", "open"]
+    else:
+        assert calls == ["close"]

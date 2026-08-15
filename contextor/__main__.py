@@ -42,6 +42,9 @@ def _hide_console() -> None:
 
 
 def _run_gui() -> int:
+    from contextor.core.program_log import configure_program_log
+
+    configure_program_log()
     _hide_console()
 
     from contextor.ui.gui import run

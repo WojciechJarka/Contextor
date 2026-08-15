@@ -1256,6 +1256,58 @@ def test_artifacts_for_module_includes_live_zero_consumer_signature(
     }
 
 
+def test_artifacts_for_module_uses_live_state_without_compact_report(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(mcp_server, "_get_canonical_report", lambda *_: None)
+    monkeypatch.setattr(
+        mcp_server,
+        "_read_registries",
+        lambda _root: (
+            {"pkg.module": "1/1"},
+            {"1/1": "pkg.module"},
+            {"pkg.module::run": "A1/1"},
+            {"A1/1": "pkg.module::run"},
+        ),
+    )
+
+    class State:
+        modules = {"pkg.module": object()}
+        artifacts = {
+            "pkg.module": {
+                "symbols": {
+                    "classes": [],
+                    "functions": ["run"],
+                    "methods": [],
+                    "globals": [],
+                    "signatures": {"run": "def run() -> None"},
+                }
+            }
+        }
+
+    class Engine:
+        state = State()
+
+    monkeypatch.setattr(mcp_server, "_get_or_init_engine", lambda _root: Engine())
+
+    result = json.loads(
+        mcp_server.get_artifacts_for_module.fn(
+            repo_path=str(tmp_path), module_name="pkg.module"
+        )
+    )
+
+    assert result["data_sources"] == ["live_symbol_state"]
+    assert result["complete_symbol_catalog"] is True
+    assert result["artifacts"]["A1/1"] == {
+        "artifact_id": "A1/1",
+        "symbol": "run",
+        "full_name": "pkg.module::run",
+        "kind": "function",
+        "signature": "def run() -> None",
+        "consumers": {"total": 0, "truncated": False},
+    }
+
+
 def test_artifacts_for_module_bounds_nested_consumers(tmp_path, monkeypatch):
     report = tmp_path / "artifacts.json"
     report.write_text(json.dumps({"artifacts": {"A1/1": {

@@ -491,10 +491,14 @@ async def _execute_analysis_job(
                 raise RuntimeError(
                     "Analysis completed but canonical state could not be loaded."
                 )
+            # Validate the hydrated engine before opening or starting the LIVE
+            # IPC service. Besides failing faster on corrupt hydration, this
+            # avoids starting a service for an unusable canonical state.
+            engine_state = engine.state
             from contextor.core.live_state import connect_or_start
 
             live_client = connect_or_start(root)
-            published = live_client.publish(engine.state, origin="mcp_analysis")
+            published = live_client.publish(engine_state, origin="mcp_analysis")
             _live_engine_revisions[str(root)] = int(published["revision"])
         job = {
             **job,
@@ -3158,7 +3162,10 @@ def get_artifacts_for_module(
     Use ``symbol_filter`` to select a name substring and ``limit`` to bound the
     result. ``total_artifact_count`` reports matches before limiting and
     ``truncated`` tells the LLM whether a narrower follow-up query is useful.
-    Live state supplements the compact report with zero-consumer symbols.
+    Canonical LIVE state is sufficient on its own and is the source of truth
+    for the symbol catalogue. A compact artifact report, when present, only
+    enriches symbols with saved consumer evidence. ``data_sources`` reports
+    which sources were actually available; no global report is required.
 
     LLM use: call before changing one module's API. Disable consumers for the
     cheapest signature inventory; enable them only for impact analysis.
@@ -3185,22 +3192,35 @@ def get_artifacts_for_module(
 
         module_name = ".".join(parts)
 
-    art_path = _get_canonical_report(root, f"{repo_name}_artifacts_compact.json")
-    if not art_path:
-        return "Error: No artifacts_compact report found. Run analyze_project first."
-
     try:
         mod_path_to_id, mod_id_to_path, art_path_to_id, art_id_to_path = _read_registries(root)
-
+        engine = _get_or_init_engine(root)
+        live_modules = getattr(engine.state, "modules", {}) if engine else {}
+        live_artifact_catalog = (
+            getattr(engine.state, "artifacts", {}) if engine else {}
+        )
+        live_artifacts = live_artifact_catalog.get(module_name, {})
         mod_compact_id = mod_path_to_id.get(module_name)
-        if not mod_compact_id:
+        live_module = live_modules.get(module_name)
+        if not mod_compact_id and live_module is not None:
+            mod_compact_id = getattr(live_module, "module_id", None)
+            if mod_compact_id is None and isinstance(live_module, dict):
+                mod_compact_id = live_module.get("module_id")
+        if not mod_compact_id and live_module is None and not live_artifacts:
             return (
-                f"Module '{module_name}' not found in registry. "
-                "Check the module name or run analyze_project."
+                f"Module '{module_name}' not found in registry or canonical LIVE state. "
+                "Check the module name or run an analysis."
             )
 
-        art_comp = json.loads(art_path.read_text(encoding="utf-8"))
-        artifacts_raw = art_comp.get("artifacts", {})
+        art_path = _get_canonical_report(
+            root, f"{repo_name}_artifacts_compact.json"
+        )
+        artifacts_raw = {}
+        data_sources = ["live_symbol_state"] if engine else []
+        if art_path:
+            art_comp = json.loads(art_path.read_text(encoding="utf-8"))
+            artifacts_raw = art_comp.get("artifacts", {})
+            data_sources.append("artifacts_compact")
 
         result_artifacts: dict = {}
         for art_id, art_data in artifacts_raw.items():
@@ -3235,10 +3255,6 @@ def get_artifacts_for_module(
 
             result_artifacts[art_id] = entry
 
-        engine = _get_or_init_engine(root)
-        live_artifacts = (
-            engine.state.artifacts.get(module_name, {}) if engine else {}
-        )
         live_symbols = live_artifacts.get("symbols", {})
         signatures = live_symbols.get("signatures", {}) or {}
         kind_by_category = {
@@ -3287,7 +3303,7 @@ def get_artifacts_for_module(
                 "total_artifact_count": total_count,
                 "truncated": truncated,
                 "symbol_filter": symbol_filter or None,
-                "data_sources": ["live_symbol_state", "artifacts_compact"],
+                "data_sources": data_sources,
                 "complete_symbol_catalog": bool(engine),
                 "artifacts": dict(selected),
             }

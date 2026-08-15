@@ -225,6 +225,51 @@ def _resolve_repository_target(
     return root, candidate
 
 
+class _StagedProgress:
+    """Map every top-level analysis stage into one monotonic progress range."""
+
+    _SCALE = 1000
+
+    def __init__(self, callback, total_stages: int, log=None):
+        self._callback = callback
+        self._total_stages = total_stages
+        self._current_stage = 0
+        self._label = "Preparing analysis"
+        self._log = log
+
+    def begin(self, label: str):
+        """Start a stage and return its bounded item-level progress callback."""
+
+        if self._current_stage >= self._total_stages:
+            raise RuntimeError("Progress plan contains more stages than declared")
+        self._current_stage += 1
+        self._label = label
+        if self._log:
+            self._log(f"[PROGRESS] Step {self._current_stage}/{self._total_stages}: {label}")
+        if not self._emit(0.0, label):
+            raise AnalysisCancelled()
+        return self.items
+
+    def items(self, completed, total, filename):
+        ratio = (completed / total) if total else 0.0
+        ratio = min(1.0, max(0.0, ratio))
+        detail = str(filename) if filename else self._label
+        return self._emit(ratio, detail)
+
+    def finish(self):
+        self._current_stage = self._total_stages
+        self._emit(1.0, "Analysis complete")
+
+    def _emit(self, ratio: float, detail: str):
+        if self._callback is None:
+            return True
+        completed = int(((self._current_stage - 1) + ratio) * self._SCALE)
+        total = self._total_stages * self._SCALE
+        message = f"Step {self._current_stage}/{self._total_stages}: {self._label} — {detail}"
+        result = self._callback(completed, total, message)
+        return result is not False
+
+
 class ContextorFacade:
     """
     Main entry point for executing static analysis workflows.
@@ -251,6 +296,8 @@ class ContextorFacade:
         Returns:
             list: List of architectural validation errors, if any.
         """
+        progress = _StagedProgress(progress_callback, total_stages=8, log=log)
+        progress.begin("Initializing repository identity")
         registry = _initialize_repository_identity(path)
         path = str(registry.repo_path.resolve())
         reset_caches()
@@ -258,11 +305,12 @@ class ContextorFacade:
         if log:
             log("Starting directory indexing...")
         excludes, extra_dirs = _analysis_filters(path, additional_excludes)
+        index_progress = progress.begin("Indexing repository files")
         index = index_repository(
             path,
             excludes=excludes,
             extra_ignored_dirs=extra_dirs,
-            progress_callback=progress_callback,
+            progress_callback=index_progress,
         )
         modules = index.modules
 
@@ -273,26 +321,36 @@ class ContextorFacade:
         if log:
             log(f"Found {len(modules)} modules. Fetching graph...")
             _log_skipped(index.skipped, log)
+        progress.begin("Resolving dependency graph")
+        graph_progress = progress.items
         graph, cache_hit = get_cached_graph(
             modules, 
-            lambda m: build_graph(m, trie=trie, package_root=package_root)
+            lambda m: build_graph(
+                m,
+                trie=trie,
+                package_root=package_root,
+                progress_callback=graph_progress,
+            )
         )
 
         if log:
             log(f"Graph validation (cache_hit={cache_hit})...")
-        errors = validate(modules, graph, progress_callback=progress_callback)
+        validation_progress = progress.begin("Validating dependency graph")
+        errors = validate(modules, graph, progress_callback=validation_progress)
 
         repo_name = Path(path).name
 
         if log:
             log("Calculating metrics, detecting cycles and tech debt...")
+        metrics_progress = progress.begin("Computing metrics, cycles and debt")
         metrics, cycles, all_collisions, debt = _compute_metrics_and_debt(
-            modules, graph, progress_callback=progress_callback
+            modules, graph, progress_callback=metrics_progress
         )
 
         from datetime import datetime
         datestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
+        report_progress = progress.begin("Generating architectural reports")
         report_result = execute_global_pipeline(
             repo_name=repo_name,
             modules=modules,
@@ -304,7 +362,7 @@ class ContextorFacade:
             root_path=path,
             log=log,
             collisions=all_collisions,
-            progress_callback=progress_callback,
+            progress_callback=report_progress,
             skipped_files=index.skipped,
             datestamp=datestamp,
             trie=trie,
@@ -317,6 +375,7 @@ class ContextorFacade:
 
         analysis_result = report_result.get("_analysis_result")
         
+        progress.begin("Persisting canonical LIVE snapshot")
         if analysis_result:
             from contextor.core.analysis.state_manager import RepositoryAnalysisState, save_engine_state
             from contextor.core.paths import repo_cache_dir
@@ -344,6 +403,8 @@ class ContextorFacade:
                 root_path=path,
             )
 
+        progress.begin("Finalizing analysis")
+        progress.finish()
         return errors, analysis_result
 
     @staticmethod
@@ -355,12 +416,15 @@ class ContextorFacade:
         additional_excludes: list[str] | None = None,
     ) -> str:
         """Analyzes a specific layer. Returns output pattern."""
+        progress = _StagedProgress(progress_callback, total_stages=10, log=log)
+        progress.begin("Validating repository and layer scope")
         root_resolved, layer_resolved = _resolve_repository_target(
             root_dir, layer_dir, target_kind="layer"
         )
         repo_name = root_resolved.name
         layer_name = layer_resolved.name
 
+        progress.begin("Initializing repository identity")
         registry = _initialize_repository_identity(root_resolved)
         reset_caches()
 
@@ -369,32 +433,42 @@ class ContextorFacade:
         excludes, extra_dirs = _analysis_filters(
             str(root_resolved), additional_excludes
         )
+        index_progress = progress.begin("Indexing repository files")
         index = index_repository(
             str(root_resolved),
             excludes=excludes,
             extra_ignored_dirs=extra_dirs,
-            progress_callback=progress_callback,
+            progress_callback=index_progress,
         )
         modules = index.modules
         from contextor.core.graph.resolver import build_trie, detect_package_root
         trie = build_trie(modules.keys())
         package_root = detect_package_root(modules, trie)
         
+        progress.begin("Resolving dependency graph")
+        graph_progress = progress.items
         graph, cache_hit = get_cached_graph(
             modules, 
-            lambda m: build_graph(m, trie=trie, package_root=package_root)
+            lambda m: build_graph(
+                m,
+                trie=trie,
+                package_root=package_root,
+                progress_callback=graph_progress,
+            )
         )
 
         if log:
             log("Calculating metrics and collisions for the full project...")
+        metrics_progress = progress.begin("Computing metrics, cycles and debt")
         metrics, cycles, all_collisions, debt = _compute_metrics_and_debt(
-            modules, graph, progress_callback=progress_callback
+            modules, graph, progress_callback=metrics_progress
         )
 
         runtime = {"cache_hit": cache_hit}
 
         if log:
             log("Preparing data structures for slicing...")
+        progress.begin("Preparing report data structures")
         hotspots = detect_hotspots(graph.hard_edges)
         global_summary = generate_summary_report(
             metrics,
@@ -404,12 +478,14 @@ class ContextorFacade:
             hotspots=hotspots,
         )
         global_structure = generate_structure_report(graph.hard_edges, graph.soft_edges)
+        artifacts_progress = progress.begin("Analyzing artifact usage")
         global_artifacts = generate_artifact_usage_report(
-            modules, str(root_resolved), runtime, progress_callback=progress_callback
+            modules, str(root_resolved), runtime, progress_callback=artifacts_progress
         )
         
         from contextor.core.reporting_engine.dictionary import IndexDictionary
         
+        progress.begin("Compacting and slicing layer reports")
         with registry.transaction():
             index_dict = IndexDictionary(registry)
             global_compact_artifacts = compact_artifact_report(global_artifacts, index_dict)
@@ -447,7 +523,15 @@ class ContextorFacade:
         )
         from contextor.core.reporting_engine.io_manager import write_layer_reports
         
-        execute_layer_pipeline(repo_name, layer_name, layer_sliced_reports, log=log, datestamp=datestamp)
+        progress.begin("Writing layer report bundle")
+        execute_layer_pipeline(
+            repo_name,
+            layer_name,
+            layer_sliced_reports,
+            log=log,
+            datestamp=datestamp,
+            progress_callback=progress.items,
+        )
         write_layer_reports(
             repo_name=repo_name,
             layer_name=layer_name,
@@ -459,6 +543,8 @@ class ContextorFacade:
         # Absolute, so what the GUI shows the user is a path that exists.
         pattern = str(output_dir() / f"{repo_name}_{layer_name}_*.json")
 
+        progress.begin("Finalizing layer analysis")
+        progress.finish()
         if log:
             log(f"Finished! Saved reports package: {pattern}")
         return pattern
@@ -472,11 +558,14 @@ class ContextorFacade:
         additional_excludes: list[str] | None = None,
     ) -> str:
         """Analyzes a single file within the context of a project. Returns report output path."""
+        progress = _StagedProgress(progress_callback, total_stages=11, log=log)
+        progress.begin("Validating repository and file scope")
         root_resolved, file = _resolve_repository_target(
             repo_root, file_path, target_kind="file"
         )
         if file.suffix.lower() != ".py":
             raise ValueError(f"Selected file is not a Python file: {file}")
+        progress.begin("Initializing repository identity")
         registry = _initialize_repository_identity(root_resolved)
         repo_root = str(registry.repo_path.resolve())
         reset_caches()
@@ -486,22 +575,34 @@ class ContextorFacade:
         if log:
             log("Indexing and building project graph...")
         excludes, extra_dirs = _analysis_filters(repo_root, additional_excludes)
+        index_progress = progress.begin("Indexing repository files")
         modules = build_index(
             repo_root,
             excludes=excludes,
             extra_ignored_dirs=extra_dirs,
-            progress_callback=progress_callback,
+            progress_callback=index_progress,
         )
-        graph, cache_hit = get_cached_graph(modules, build_graph)
+        graph_progress = progress.begin("Resolving dependency graph")
+        graph, cache_hit = get_cached_graph(
+            modules,
+            lambda m: build_graph(m, progress_callback=graph_progress),
+        )
 
         if log:
             log("Generating global report (hotspots)...")
+        progress.begin("Generating global context")
         global_report = generate_report(graph, modules=modules, runtime={"cache_hit": cache_hit})
 
         if log:
             log("Fetching deep context for file...")
+        progress.begin("Collecting deep file context")
         ctx = collect_all_contexts(
-            file_path, modules, graph, global_report=global_report, root_path=repo_root
+            file_path,
+            modules,
+            graph,
+            global_report=global_report,
+            root_path=repo_root,
+            progress_callback=progress.items,
         )
 
         if log:
@@ -512,6 +613,7 @@ class ContextorFacade:
 
         from contextor.core.reporting_engine.dictionary import IndexDictionary
 
+        progress.begin("Building and compacting file report")
         with registry.transaction():
             index_dict = IndexDictionary(registry)
             report = generate_single_file_report(ctx, len(modules), index_dict=index_dict)
@@ -526,7 +628,13 @@ class ContextorFacade:
 
         output = str(output_dir() / f"single_{slug}.json")
         from contextor.core.reporting_engine.dictionary import compact_recursively
-        compact_report = compact_recursively(report, index_dict, set(modules.keys()))
+        progress.begin("Writing JSON report snapshots")
+        compact_report = compact_recursively(
+            report,
+            index_dict,
+            set(modules.keys()),
+            progress_callback=progress.items,
+        )
         compact_report["module_name"] = report["module_name"]
         save_single_file_report(compact_report, output)
         snapshot_dir = output_dir() / f"{Path(repo_root).resolve().name}_{datestamp}"
@@ -536,10 +644,16 @@ class ContextorFacade:
 
 
         # Graph analytics for the single analyzed module
+        progress.begin("Generating graph analytics")
         from contextor.core.reporting_engine.graph_analytics import generate_graph_analytics_report
         from contextor.core.reporting_layer.artifact_usage_report import generate_artifact_usage_report as _gen_art
         try:
-            sf_artifact_data = _gen_art(modules, repo_root, runtime={"cache_hit": cache_hit})
+            sf_artifact_data = _gen_art(
+                modules,
+                repo_root,
+                runtime={"cache_hit": cache_hit},
+                progress_callback=progress.items,
+            )
             target_module_id = None
             # Find module_id matching the analyzed file
             file_resolved = file.resolve()
@@ -568,6 +682,7 @@ class ContextorFacade:
                 index_dict=index_dict,
                 scope="single_file",
                 scope_modules=scope_mods,
+                progress_callback=progress.items,
             )
             ga_output = str(output_dir() / f"single_{slug}_graph_analytics.json")
             import json as _json
@@ -584,6 +699,7 @@ class ContextorFacade:
             if log:
                 log(f"[WARNING] graph_analytics skipped for single file: {_ga_err}")
 
+        progress.begin("Writing Markdown context")
         md_output = str(output_dir() / f"single_{slug}_llm_context.md")
         generate_llm_markdown(report, md_output)
         generate_llm_markdown(
@@ -591,6 +707,8 @@ class ContextorFacade:
             str(snapshot_dir / f"single_{slug}_llm_context.md"),
         )
 
+        progress.begin("Finalizing single-file analysis")
+        progress.finish()
         if log:
             log("Single file report and MD bundle saved successfully.")
         return output

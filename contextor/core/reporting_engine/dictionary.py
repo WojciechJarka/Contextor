@@ -53,16 +53,35 @@ class IndexDictionary:
         """Reconstructs the index dictionary from saved JSON data."""
         raise NotImplementedError("IndexDictionary.from_json_dict is obsolete and should not be used.")
 
-def compact_recursively(data: Any, index_dict: IndexDictionary, known_modules: set[str]) -> Any:
+def compact_recursively(
+    data: Any,
+    index_dict: IndexDictionary,
+    known_modules: set[str],
+    progress_callback=None,
+    _counter=None,
+) -> Any:
     """Recursively replaces module names and artifact keys with their string IDs."""
+    from contextor.core.errors import checkpoint
+
+    if _counter is None:
+        _counter = [0]
+    _counter[0] += 1
+    if _counter[0] % 256 == 0:
+        checkpoint(
+            progress_callback,
+            f"Compacting report nodes: {_counter[0]}",
+        )
     if isinstance(data, dict):
         return {
-            str(compact_recursively(k, index_dict, known_modules)): 
-            compact_recursively(v, index_dict, known_modules)
+            str(compact_recursively(k, index_dict, known_modules, progress_callback, _counter)):
+            compact_recursively(v, index_dict, known_modules, progress_callback, _counter)
             for k, v in data.items()
         }
     elif isinstance(data, list):
-        return [compact_recursively(x, index_dict, known_modules) for x in data]
+        return [
+            compact_recursively(x, index_dict, known_modules, progress_callback, _counter)
+            for x in data
+        ]
     elif isinstance(data, str):
         if data in known_modules:
             return index_dict.get_module_id(data)

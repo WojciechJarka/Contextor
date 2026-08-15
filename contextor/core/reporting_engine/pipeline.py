@@ -22,6 +22,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from contextor.core.errors import checkpoint
+from contextor.core.program_log import log_program_event
+
 # ==========================================================
 # GLOBAL PIPELINE
 # ==========================================================
@@ -58,10 +61,15 @@ def execute_global_pipeline(
     PersistentIdentityRegistry is the single authority for module
     and artifact identity.
     """
+    log_program_event(
+        "REPORT", "global pipeline start", repo=repo_name, modules=len(modules)
+    )
     if log:
         log(
             "Starting sequential report generation..."
         )
+
+    checkpoint(progress_callback, "Report pipeline: preparing global data")
 
     # ------------------------------------------------------
     # IMPORTS
@@ -213,7 +221,13 @@ def execute_global_pipeline(
             }
         )
 
-        for layer in top_layers:
+        for completed, layer in enumerate(top_layers):
+            checkpoint(
+                progress_callback,
+                f"Report pipeline layer: {layer}",
+                completed,
+                len(top_layers),
+            )
             layer_path = (
                 Path(root_path) / layer
             )
@@ -271,6 +285,7 @@ def execute_global_pipeline(
                         layer_sliced,
                         log=log,
                         datestamp=datestamp,
+                        progress_callback=progress_callback,
                     )
                 )
 
@@ -331,11 +346,18 @@ def execute_global_pipeline(
     # WRITE HIGH-RISK LAYER REPORTS
     # ------------------------------------------------------
 
-    for (
+    high_risk_total = len(layer_reports_payloads)
+    for completed, (
         layer,
         layer_sliced,
         layer_status,
-    ) in layer_reports_payloads:
+    ) in enumerate(layer_reports_payloads):
+        checkpoint(
+            progress_callback,
+            f"Writing high-risk layer: {layer}",
+            completed,
+            high_risk_total,
+        )
 
         if (
             layer_status.get(
@@ -388,6 +410,7 @@ def execute_global_pipeline(
     # WRITE GLOBAL REPORTS
     # ------------------------------------------------------
 
+    checkpoint(progress_callback, "Writing global reports")
     write_global_reports(
         reports_data,
         repo_name,
@@ -418,7 +441,13 @@ def execute_global_pipeline(
         )
     )
 
-    for module_id, module in modules.items():
+    for completed, (module_id, module) in enumerate(modules.items()):
+        checkpoint(
+            progress_callback,
+            f"Persisting incremental state: {module_id}",
+            completed,
+            len(modules),
+        )
         absolute_path = getattr(
             module,
             "absolute_path",
@@ -513,6 +542,14 @@ def execute_global_pipeline(
     # RESULT
     # ------------------------------------------------------
 
+    checkpoint(progress_callback, "Finalizing global report pipeline", 1, 1)
+    log_program_event(
+        "REPORT",
+        "global pipeline complete",
+        repo=repo_name,
+        reports=7,
+        layers=len(layer_index_data),
+    )
     return {
         "saved": True,
         "repo": repo_name,

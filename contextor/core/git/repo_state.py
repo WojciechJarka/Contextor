@@ -87,6 +87,15 @@ def _run_git(args, cwd):
             "GIT_TERMINAL_PROMPT": "0",
             "GIT_PAGER": "cat",
         }
+        process_options = {}
+        if os.name == "nt":
+            process_options["creationflags"] = getattr(
+                subprocess, "CREATE_NO_WINDOW", 0
+            )
+            startup_info = subprocess.STARTUPINFO()
+            startup_info.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            startup_info.wShowWindow = subprocess.SW_HIDE
+            process_options["startupinfo"] = startup_info
         result = subprocess.run(
             ["git"] + args,
             cwd=cwd,
@@ -96,6 +105,7 @@ def _run_git(args, cwd):
             text=True,
             check=True,
             timeout=5,
+            **process_options,
         )
         return result.stdout.strip()
     except Exception:

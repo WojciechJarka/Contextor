@@ -4,6 +4,37 @@
   outside the chosen repository root. GUI users receive an immediate warning;
   facade/MCP callers receive a `ValueError` before an identity or analysis job
   can be created.
+- Reset the determinate GUI progress bar on success and error as well as
+  cancellation, preventing a completed operation from leaving a stale percent.
+- Split project, layer and single-file analysis into explicit end-to-end
+  progress stages. Long report generation, JSON/Markdown serialization,
+  snapshot persistence and finalization now retain a sub-100% progress range;
+  the GUI refreshes its global ETA once per second even when an individual
+  stage has no item-level callback.
+- Repaired ``Open CMD log`` as a separate tail of the process-wide Contextor
+  stdout/stderr log, including analysis stages, test output and uncaught
+  tracebacks. The lower GUI operation log remains permanently visible and
+  independent. Removed the separate GUI ``LIVE suite`` button; Test suite
+  remains the full run, including LIVE tests.
+- Added cooperative STOP checkpoints throughout dependency graph resolution,
+  global/layer report orchestration and graph analytics (matrix construction,
+  PageRank, betweenness, HITS, Jaccard clusters and module assembly). Windows
+  Git probes and pytest subprocesses now run without flashing helper consoles;
+  only the explicitly requested CMD program log creates a visible console.
+- Corrected the CMD tail launcher so its visible console inherits stdout and
+  remains open while following the process log. Test-suite failures are now
+  logged as ``[FAILED]`` rather than receiving the runner's generic success
+  message. MCP project jobs validate hydrated canonical state before starting
+  LIVE IPC, avoiding a slow orphan service path after invalid hydration.
+- Made ``get_artifacts_for_module`` genuinely LIVE-first: canonical symbol
+  state now works without an ``artifacts_compact`` report, while an available
+  report remains an optional source of saved consumer evidence. The response
+  reports only the data sources that were actually used.
+- Repaired the optional program-log console: the checkbox again has its own
+  tooltip and launches a persistent Python tail inside a real CMD window,
+  without PowerShell quoting or prompt fall-through. The log now records
+  low-volume technical builder, report-pipeline and graph-analytics events;
+  GUI progress stages remain confined to the lower operation log.
 
 ## [1.2.0-beta Patch — Central repository identities] - 2026-08-14
 

@@ -26,7 +26,12 @@ def read_tree(file_path: str):
 
 
 def collect_all_contexts(
-    file_path: str, modules: dict, project_graph, global_report: dict = None, root_path: str = None
+    file_path: str,
+    modules: dict,
+    project_graph,
+    global_report: dict = None,
+    root_path: str = None,
+    progress_callback=None,
 ):
     """
     Acts as the master pipeline for a single file. Gathers INTENT, SYMBOL, STATE,
@@ -53,7 +58,7 @@ def collect_all_contexts(
         global_report=global_report,
     )
 
-    results = default_registry.build_all(payload)
+    results = default_registry.build_all(payload, progress_callback=progress_callback)
     
     # Inject base metadata
     results["module_id"] = module_id

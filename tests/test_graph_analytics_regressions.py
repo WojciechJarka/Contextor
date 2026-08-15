@@ -1,7 +1,27 @@
+import pytest
+
+from contextor.core.errors import AnalysisCancelled
 from contextor.core.reporting_engine.graph_analytics import (
     build_module_dependency_matrix,
     generate_graph_analytics_report,
 )
+
+
+def test_graph_analytics_honours_stop_callback_during_internal_work():
+    calls = []
+
+    def stop(completed, total, message):
+        calls.append((completed, total, message))
+        return False
+
+    with pytest.raises(AnalysisCancelled):
+        generate_graph_analytics_report(
+            artifact_data={"artifacts": {}},
+            hard_edges={"pkg.consumer": ["pkg.model"], "pkg.model": []},
+            progress_callback=stop,
+        )
+
+    assert calls
 
 
 def test_class_consumption_without_inheritance_evidence_is_not_inheritance():

@@ -57,6 +57,9 @@ from __future__ import annotations
 from collections import defaultdict, deque
 from typing import Any
 
+from contextor.core.errors import checkpoint
+from contextor.core.program_log import log_program_event
+
 
 # ==========================================================
 # LAYER CLASSIFICATION
@@ -250,6 +253,7 @@ def _fallback_dependency_type(artifact: dict) -> str:
 def build_module_dependency_matrix(
     artifact_data: dict,
     hard_edges: dict,
+    progress_callback=None,
 ) -> dict[str, dict[str, dict]]:
     """
     Build a weighted module-to-module dependency matrix.
@@ -296,7 +300,16 @@ def build_module_dependency_matrix(
         )
     )
 
+    total_work = len(artifacts) + len(hard_edges or {})
+    completed = 0
     for key, artifact in artifacts.items():
+        checkpoint(
+            progress_callback,
+            f"Graph analytics matrix: {key}",
+            completed,
+            total_work,
+        )
+        completed += 1
         if not isinstance(artifact, dict):
             continue
 
@@ -332,6 +345,13 @@ def build_module_dependency_matrix(
 
     # Add import-level edges that are not represented by artifact usage.
     for source, targets in (hard_edges or {}).items():
+        checkpoint(
+            progress_callback,
+            f"Graph analytics imports: {source}",
+            completed,
+            total_work,
+        )
+        completed += 1
         if not isinstance(source, str):
             continue
 
@@ -392,6 +412,7 @@ def build_jaccard_clusters(
     min_jaccard: float = 0.30,
     max_cluster_size: int = 25,
     min_cluster_size: int = 2,
+    progress_callback=None,
 ) -> list[dict]:
     """
     Build deterministic complete-linkage clusters of consumer modules.
@@ -427,7 +448,13 @@ def build_jaccard_clusters(
 
     module_artifacts: dict[str, set[str]] = defaultdict(set)
 
-    for key, artifact in artifacts.items():
+    for completed, (key, artifact) in enumerate(artifacts.items()):
+        checkpoint(
+            progress_callback,
+            f"Graph analytics clusters: {key}",
+            completed,
+            len(artifacts),
+        )
         if not isinstance(artifact, dict):
             continue
 
@@ -451,6 +478,12 @@ def build_jaccard_clusters(
     adjacency: dict[str, set[str]] = defaultdict(set)
 
     for index, module_a in enumerate(modules):
+        checkpoint(
+            progress_callback,
+            f"Graph analytics similarities: {module_a}",
+            index,
+            len(modules),
+        )
         for module_b in modules[index + 1:]:
             similarity = _jaccard(
                 frozen[module_a],
@@ -465,7 +498,14 @@ def build_jaccard_clusters(
 
     unassigned = list(modules)
 
+    cluster_total = len(unassigned)
     while unassigned:
+        checkpoint(
+            progress_callback,
+            "Graph analytics cluster assembly",
+            cluster_total - len(unassigned),
+            cluster_total,
+        )
         seed = unassigned.pop(0)
 
         if seed not in adjacency:
@@ -657,6 +697,7 @@ def _compute_pagerank(
     hard_edges: dict,
     damping: float = 0.85,
     iterations: int = 50,
+    progress_callback=None,
 ) -> dict[str, float]:
     """
     Compute deterministic PageRank using pure Python.
@@ -687,7 +728,13 @@ def _compute_pagerank(
         for node in nodes
     }
 
-    for _ in range(iterations):
+    for iteration in range(iterations):
+        checkpoint(
+            progress_callback,
+            "Graph analytics PageRank",
+            iteration,
+            iterations,
+        )
         new_rank = {
             node: (1.0 - damping) / n
             for node in nodes
@@ -747,6 +794,7 @@ def _compute_pagerank(
 def _compute_betweenness(
     hard_edges: dict,
     sample_limit: int = 80,
+    progress_callback=None,
 ) -> dict[str, float]:
     """
     Approximate directed betweenness centrality via Brandes-style BFS.
@@ -772,7 +820,13 @@ def _compute_betweenness(
 
     sources = nodes[:sample_limit]
 
-    for source in sources:
+    for completed, source in enumerate(sources):
+        checkpoint(
+            progress_callback,
+            f"Graph analytics betweenness: {source}",
+            completed,
+            len(sources),
+        )
         distance: dict[str, int] = {
             source: 0
         }
@@ -877,6 +931,7 @@ def _compute_betweenness(
 def _compute_hub_authority(
     hard_edges: dict,
     iterations: int = 20,
+    progress_callback=None,
 ) -> tuple[dict[str, float], dict[str, float]]:
     """
     Compute HITS hub and authority scores.
@@ -904,7 +959,13 @@ def _compute_hub_authority(
         for node in nodes
     }
 
-    for _ in range(iterations):
+    for iteration in range(iterations):
+        checkpoint(
+            progress_callback,
+            "Graph analytics hub/authority",
+            iteration,
+            iterations,
+        )
         new_authority = {
             node: 0.0
             for node in nodes
@@ -1369,6 +1430,7 @@ def generate_graph_analytics_report(
     scope: str = "global",
     scope_modules: set[str] | None = None,
     global_artifact_data: dict | None = None,
+    progress_callback=None,
 ) -> dict:
     """
     Generate the graph analytics report.
@@ -1432,6 +1494,15 @@ def generate_graph_analytics_report(
             "hard_edges must be a dict"
         )
 
+    log_program_event(
+        "GRAPH",
+        "analytics start",
+        scope=scope,
+        hard_sources=len(hard_edges),
+        soft_sources=len(soft_edges or {}),
+    )
+
+    checkpoint(progress_callback, "Graph analytics: filtering scope")
     scoped_artifact_data, scoped_edges = (
         _filter_scope(
             artifact_data,
@@ -1443,6 +1514,7 @@ def generate_graph_analytics_report(
     dependency_matrix = build_module_dependency_matrix(
         scoped_artifact_data,
         scoped_edges,
+        progress_callback=progress_callback,
     )
 
     # P0-3: Resolve the artifact source used for visibility.
@@ -1471,7 +1543,13 @@ def generate_graph_analytics_report(
     )
 
     if isinstance(artifacts, dict):
-        for artifact in artifacts.values():
+        for completed, artifact in enumerate(artifacts.values()):
+            checkpoint(
+                progress_callback,
+                "Graph analytics: scoped consumers",
+                completed,
+                len(artifacts),
+            )
             if not isinstance(artifact, dict):
                 continue
 
@@ -1511,7 +1589,13 @@ def generate_graph_analytics_report(
     )
 
     if isinstance(_global_artifacts, dict):
-        for _artifact in _global_artifacts.values():
+        for completed, _artifact in enumerate(_global_artifacts.values()):
+            checkpoint(
+                progress_callback,
+                "Graph analytics: global visibility",
+                completed,
+                len(_global_artifacts),
+            )
             if not isinstance(_artifact, dict):
                 continue
 
@@ -1543,16 +1627,19 @@ def generate_graph_analytics_report(
     # ------------------------------------------------------
 
     pagerank = _compute_pagerank(
-        scoped_edges
+        scoped_edges,
+        progress_callback=progress_callback,
     )
 
     betweenness = _compute_betweenness(
-        scoped_edges
+        scoped_edges,
+        progress_callback=progress_callback,
     )
 
     hub_scores, authority_scores = (
         _compute_hub_authority(
-            scoped_edges
+            scoped_edges,
+            progress_callback=progress_callback,
         )
     )
 
@@ -1621,9 +1708,14 @@ def generate_graph_analytics_report(
         dict[str, Any],
     ] = {}
 
-    for module_id in sorted(
-        all_module_ids
-    ):
+    ordered_module_ids = sorted(all_module_ids)
+    for completed, module_id in enumerate(ordered_module_ids):
+        checkpoint(
+            progress_callback,
+            f"Graph analytics module report: {module_id}",
+            completed,
+            len(ordered_module_ids),
+        )
         layer = _classify_layer(
             module_id
         )
@@ -1725,7 +1817,8 @@ def generate_graph_analytics_report(
     # ------------------------------------------------------
 
     clusters = build_jaccard_clusters(
-        scoped_artifact_data
+        scoped_artifact_data,
+        progress_callback=progress_callback,
     )
 
     clusters = _compact_clusters(
@@ -1788,6 +1881,14 @@ def generate_graph_analytics_report(
         ),
     }
 
+    checkpoint(progress_callback, "Graph analytics: finalizing", 1, 1)
+    log_program_event(
+        "GRAPH",
+        "analytics complete",
+        scope=scope,
+        modules=len(modules_report),
+        clusters=len(clusters),
+    )
     return report
 
 

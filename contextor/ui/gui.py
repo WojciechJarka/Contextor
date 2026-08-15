@@ -31,6 +31,7 @@ from contextor.ui.progress_widget import (
     create_progress_bar,
     run_with_progress,
 )
+from contextor.core.program_log import close_cmd_log, configure_program_log, open_cmd_log
 from contextor.ui.system_actions import handle_empty_output_folder, handle_open_output_folder
 from contextor.ui.test_runner import (
     TestSuiteUnavailable,
@@ -197,18 +198,13 @@ class ContextorGUI:
 
         self.cmd_var = tk.BooleanVar(value=False)
 
-        def toggle_cmd():
-            import ctypes
-            import sys
-
-            if sys.platform == "win32":
-                hwnd = ctypes.windll.kernel32.GetConsoleWindow()
-                if hwnd:
-                    ctypes.windll.user32.ShowWindow(hwnd, 5 if self.cmd_var.get() else 0)
-
-        ttk.Checkbutton(
-            title_frame, text="Open CMD log", variable=self.cmd_var, command=toggle_cmd
-        ).pack(side="left", padx=(20, 0))
+        self.cmd_log_checkbox = ttk.Checkbutton(
+            title_frame,
+            text="Open CMD log",
+            variable=self.cmd_var,
+            command=self._toggle_cmd_log,
+        )
+        self.cmd_log_checkbox.pack(side="left", padx=(20, 0))
 
         self.test_suite_btn = ttk.Button(
             title_frame,
@@ -218,14 +214,6 @@ class ContextorGUI:
         )
         self.test_suite_btn.pack(side="left", padx=(PAD_SM, 0))
 
-        self.live_suite_btn = ttk.Button(
-            title_frame,
-            text="LIVE suite",
-            style="Ghost.TButton",
-            command=self.run_live_suite,
-        )
-        self.live_suite_btn.pack(side="left", padx=(PAD_SM, 0))
-
         sub_label = ttk.Label(
             header, text="Static architecture analysis · Read-only mode", style="Sub.TLabel"
         )
@@ -234,12 +222,12 @@ class ContextorGUI:
             sub_label, "Static architecture analysis · Read-only mode"
         )
         self.tooltip.bind_tooltip(
-            self.test_suite_btn,
-            "Run Contextor's complete test suite, including LIVE tests.",
+            self.cmd_log_checkbox,
+            "Open a separate CMD window with low-volume technical logs from the whole program.",
         )
         self.tooltip.bind_tooltip(
-            self.live_suite_btn,
-            "Run only tests marked as part of the canonical LIVE system.",
+            self.test_suite_btn,
+            "Run Contextor's complete test suite, including LIVE tests.",
         )
         self.tooltip.bind_tooltip(
             self.theme_btn,
@@ -410,6 +398,17 @@ class ContextorGUI:
         self.cpu_indicator = create_cpu_indicator(progress_section)
         self.log_box = create_log_box(progress_section, height=8)
         self.log_box.configure(relief="flat", borderwidth=0)
+        self.log_box.pack(before=self.progress_bar, fill="x", padx=10, pady=(0, 5))
+
+    def _toggle_cmd_log(self):
+        """Toggle the separate CMD tail for the whole Contextor process."""
+
+        if self.cmd_var.get():
+            configure_program_log()
+            if not open_cmd_log():
+                self.cmd_var.set(False)
+        else:
+            close_cmd_log()
 
     def _setup_toolbar(self):
         """
@@ -557,22 +556,20 @@ class ContextorGUI:
             self.analyze_layer_btn,
             self.analyze_single_btn,
             self.test_suite_btn,
-            self.live_suite_btn,
         ]
 
-    def _run_test_suite(self, *, live_only: bool):
+    def _run_test_suite(self):
         """
         Runs the selected Contextor test suite and reports the outcome.
         """
 
-        suite_title = "LIVE suite" if live_only else "Test suite"
+        suite_title = "Test suite"
 
         def task(log=None, progress_callback=None):
             return run_test_suite(
                 log=log,
                 progress_callback=progress_callback,
-                show_console=self.cmd_var.get(),
-                live_only=live_only,
+                live_only=False,
             )
 
         def on_success(result):
@@ -614,12 +611,7 @@ class ContextorGUI:
     def run_test_suite(self):
         """Runs every test, including the canonical LIVE suite."""
 
-        self._run_test_suite(live_only=False)
-
-    def run_live_suite(self):
-        """Runs only tests marked for the canonical LIVE system."""
-
-        self._run_test_suite(live_only=True)
+        self._run_test_suite()
 
     def analyze(self):
         path = self.repo_path_var.get()
@@ -880,6 +872,8 @@ class ContextorGUI:
 
     def on_closing(self):
         import re
+
+        close_cmd_log()
 
         watchers = list(getattr(self, "live_watchers", {}).values())
         feeds = list(getattr(self, "live_event_feeds", {}).values())

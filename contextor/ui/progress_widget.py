@@ -6,10 +6,12 @@ Contains indeterminate progress bars, determinate progress bars, and log console
 """
 
 import threading
+import time
 import tkinter as tk
 from tkinter import scrolledtext, ttk
 
 from contextor.core.errors import AnalysisCancelled
+from contextor.core.program_log import emit_program_log
 from contextor.ui import theme
 
 
@@ -25,6 +27,16 @@ def truncate_path(path_str, max_len=55):
         return "..." + filename[-(max_len - 4) :]
 
     return "..." + path_str[-(max_len - 3) :]
+
+
+def _format_eta(completed, total, elapsed):
+    """Return an honest global ETA without claiming completion mid-task."""
+
+    if total <= 0 or completed <= 0:
+        return "ETA: estimating…"
+    remaining = elapsed * max(0, total - completed) / completed
+    mins, secs = divmod(int(remaining), 60)
+    return f"ETA: {mins}m {secs}s"
 
 
 def create_progress_bar(parent, **pack_kwargs):
@@ -151,12 +163,36 @@ def run_with_progress(
             log_box.see(tk.END)
             log_box.config(state="disabled")
 
-    import time
-
     start_time = time.time()
+    progress_state = {
+        "active": True,
+        "completed": 0,
+        "total": 0,
+        "filename": "",
+    }
+
+    def refresh_eta():
+        """Keep ETA alive while an opaque report/write stage is running."""
+
+        if not progress_state["active"]:
+            return
+        completed = progress_state["completed"]
+        total = progress_state["total"]
+        if total > 0:
+            perc = (completed / total) * 100
+            elapsed = time.time() - start_time
+            progress_container.time_label.config(
+                text=f"[{perc:5.1f}%] {_format_eta(completed, total, elapsed)}"
+            )
+        root.after(1000, refresh_eta)
 
     def update_progress(completed, total, filename):
         short_filename = truncate_path(str(filename))
+        progress_state.update(
+            completed=completed,
+            total=total,
+            filename=short_filename,
+        )
         if total > 0:
             perc = (completed / total) * 100
             progress_container.det["value"] = perc
@@ -165,42 +201,50 @@ def run_with_progress(
             )
 
             elapsed = time.time() - start_time
-            if completed > 0:
-                speed = completed / elapsed
-                remaining = (total - completed) / speed if speed > 0 else 0
-                mins = int(remaining // 60)
-                secs = int(remaining % 60)
-                progress_container.time_label.config(text=f"[{perc:5.1f}%] ETA: {mins}m {secs}s")
+            progress_container.time_label.config(
+                text=f"[{perc:5.1f}%] {_format_eta(completed, total, elapsed)}"
+            )
         else:
             progress_container.flicker_label.config(
                 text=short_filename, anchor="e", justify="right"
             )
 
-    def finish_success(result):
-        progress_container.indet.stop()
-        progress_container.flicker_label.config(text="")
-        progress_container.time_label.config(text="")
-        set_buttons_state("normal")
-        write_log("[SUCCESS] Operation completed successfully.")
-        if on_success:
-            on_success(result)
+    def reset_progress_display():
+        """Clear determinate state after every terminal operation outcome."""
 
-    def finish_error(exc):
-        progress_container.indet.stop()
-        progress_container.flicker_label.config(text="")
-        progress_container.time_label.config(text="")
-        set_buttons_state("normal")
-        write_log(f"[ERROR] {exc}")
-        if on_error:
-            on_error(exc)
-
-    def finish_cancelled():
+        progress_state["active"] = False
         progress_container.indet.stop()
         progress_container.det["value"] = 0
         progress_container.flicker_label.config(text="")
         progress_container.time_label.config(text="")
+
+    def finish_success(result):
+        reset_progress_display()
         set_buttons_state("normal")
-        write_log("[CANCELLED] Analysis stopped by user.")
+        if isinstance(result, dict) and result.get("exit_code", 0) != 0:
+            message = f"[FAILED] Operation completed with exit code {result['exit_code']}."
+        else:
+            message = "[SUCCESS] Operation completed successfully."
+        emit_program_log(message)
+        write_log(message)
+        if on_success:
+            on_success(result)
+
+    def finish_error(exc):
+        reset_progress_display()
+        set_buttons_state("normal")
+        message = f"[ERROR] {exc}"
+        emit_program_log(message)
+        write_log(message)
+        if on_error:
+            on_error(exc)
+
+    def finish_cancelled():
+        reset_progress_display()
+        set_buttons_state("normal")
+        message = "[CANCELLED] Analysis stopped by user."
+        emit_program_log(message)
+        write_log(message)
         if on_cancel:
             on_cancel()
 
@@ -214,12 +258,15 @@ def run_with_progress(
                 kwargs["log"] = lambda msg: root.after(0, write_log, msg)
             if "progress_callback" in sig.parameters:
                 last_call = [0]
+                last_filename = [None]
 
                 def p_callback(completed, total, filename):
                     now = time.time()
-                    if now - last_call[0] > 0.1:
+                    is_stage_change = filename != last_filename[0]
+                    if is_stage_change or now - last_call[0] > 0.1:
                         root.after(0, update_progress, completed, total, filename)
                         last_call[0] = now
+                        last_filename[0] = filename
                     return not getattr(progress_container, "is_cancelled", False)
 
                 kwargs["progress_callback"] = p_callback
@@ -240,13 +287,15 @@ def run_with_progress(
     progress_container.indet.start(10)
     progress_container.det["value"] = 0
     progress_container.flicker_label.config(text="")
-    progress_container.time_label.config(text="")
+    # Some secondary GUI tasks have no measurable item callback. Keep their
+    # indeterminate operation explicit instead of reusing a stale 100%/0s ETA.
+    progress_container.time_label.config(text="[ -- ] ETA: estimating…")
+    root.after(1000, refresh_eta)
 
     if log_box:
         log_box.config(state="normal")
         log_box.delete("1.0", tk.END)
         log_box.config(state="disabled")
-        log_box.pack(before=progress_container, fill="x", padx=10, pady=(0, 5))
         if cpu_indicator:
             cpu_indicator.pack(before=log_box, side="top", anchor="e", padx=10, pady=(0, 2))
 

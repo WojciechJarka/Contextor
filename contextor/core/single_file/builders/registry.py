@@ -2,6 +2,8 @@ import ast
 from dataclasses import dataclass
 from typing import Any, Protocol, runtime_checkable
 
+from contextor.core.program_log import log_program_event
+
 @dataclass(frozen=True)
 class ContextPayload:
     file_path: str
@@ -49,7 +51,9 @@ class BuilderRegistry:
     def register(self, builder: ContextBuilder) -> None:
         self._builders.append(builder)
         
-    def build_all(self, payload: ContextPayload) -> dict[str, Any]:
+    def build_all(self, payload: ContextPayload, progress_callback=None) -> dict[str, Any]:
+        from contextor.core.errors import checkpoint
+
         # Validate providers
         all_provided = set()
         for b in self._builders:
@@ -91,11 +95,18 @@ class BuilderRegistry:
                 
         # Execution
         state = BuildState()
-        for b in sorted_builders:
+        for completed, b in enumerate(sorted_builders):
+            checkpoint(
+                progress_callback,
+                f"Single-file context builder: {b.name}",
+                completed,
+                len(sorted_builders),
+            )
             missing = b.requires - state.keys()
             if missing:
                 raise RuntimeError(f"[{b.name}] Runtime dependency error. Missing: {missing}")
                 
+            log_program_event("BUILDER", "start", name=b.name)
             result = b.build(payload, state)
             
             # Validate output matches provides
@@ -106,5 +117,8 @@ class BuilderRegistry:
                 raise RuntimeError(f"[{b.name}] Contract violation. Unexpected: {unexpected}. Missing: {missing_provided}")
                 
             state.update(result)
+            log_program_event(
+                "BUILDER", "complete", name=b.name, outputs=len(result)
+            )
             
         return state.to_dict()

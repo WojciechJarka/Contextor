@@ -23,6 +23,15 @@ def _run_git(args, cwd):
             "GIT_PAGER": "cat",
         }
         executable = shutil.which("git") or "git"
+        process_options = {}
+        if os.name == "nt":
+            process_options["creationflags"] = getattr(
+                subprocess, "CREATE_NO_WINDOW", 0
+            )
+            startup_info = subprocess.STARTUPINFO()
+            startup_info.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            startup_info.wShowWindow = subprocess.SW_HIDE
+            process_options["startupinfo"] = startup_info
         process = subprocess.Popen(
             [executable] + args,
             cwd=cwd,
@@ -31,6 +40,7 @@ def _run_git(args, cwd):
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
+            **process_options,
         )
         registry = os.environ.get("CONTEXTOR_MCP_PROCESS_REGISTRY")
         if registry:

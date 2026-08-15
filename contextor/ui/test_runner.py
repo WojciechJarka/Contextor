@@ -83,9 +83,9 @@ def _popen(arguments: list[str], *, show_console: bool = False) -> subprocess.Po
     """
     Starts pytest with its output merged into one stream.
 
-    On Windows every runner-owned process is hidden by default.  The GUI's
-    ``Open CMD log`` checkbox passes ``show_console=True`` when the user
-    explicitly wants normal console inheritance.
+    On Windows every runner-owned process is hidden by default. The GUI
+    streams output into its own operation log instead of relying on a
+    console window that may not exist in a desktop launch.
     """
 
     creation_flags = 0

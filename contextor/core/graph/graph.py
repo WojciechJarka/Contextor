@@ -42,6 +42,7 @@ from contextor.core.graph.resolver import (
     detect_package_root,
     resolve_internal,
 )
+from contextor.core.errors import checkpoint
 
 # ==========================================================
 # HELPERS
@@ -107,7 +108,12 @@ def build_graph(modules: dict[str, Module]) -> ProjectGraph:
      ProjectGraph
     """
 
-def build_graph(modules: dict[str, Module], trie: dict | None = None, package_root: str | None = None) -> ProjectGraph:
+def build_graph(
+    modules: dict[str, Module],
+    trie: dict | None = None,
+    package_root: str | None = None,
+    progress_callback=None,
+) -> ProjectGraph:
     """
     Builds the dependency graph from parsed modules.
     Optionally accepts pre-computed trie and package_root to avoid recomputation.
@@ -143,7 +149,14 @@ def build_graph(modules: dict[str, Module], trie: dict | None = None, package_ro
     # Deterministic traversal
     # ======================================================
 
-    for module_id in sorted(modules.keys()):
+    ordered_modules = sorted(modules.keys())
+    for completed, module_id in enumerate(ordered_modules):
+        checkpoint(
+            progress_callback,
+            f"Resolving graph: {module_id}",
+            completed,
+            len(ordered_modules),
+        )
         module = modules[module_id]
 
         hard_edges.setdefault(module_id, set())

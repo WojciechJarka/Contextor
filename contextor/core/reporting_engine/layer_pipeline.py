@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from contextor.core.program_log import log_program_event
+
 from .graph_analytics import generate_graph_analytics_report
 
 
@@ -17,8 +19,10 @@ def execute_layer_pipeline(
     layer_reports: dict[str, Any],
     log=None,
     datestamp: str | None = None,
+    progress_callback=None,
 ) -> dict:
     """Complete report-specific processing for one architectural layer."""
+    log_program_event("REPORT", "layer pipeline start", layer=layer_name)
     del repo_name, log, datestamp  # Reserved by the stable public interface.
 
     artifact_data = layer_reports.get("artifacts")
@@ -53,9 +57,17 @@ def execute_layer_pipeline(
             scope="layer",
             scope_modules=scope_modules,
             global_artifact_data=layer_reports.get("_global_artifact_data"),
+            progress_callback=progress_callback,
         )
 
-    return _layer_status(layer_name, layer_reports.get("summary", {}))
+    status = _layer_status(layer_name, layer_reports.get("summary", {}))
+    log_program_event(
+        "REPORT",
+        "layer pipeline complete",
+        layer=layer_name,
+        mode=status.get("computation_mode"),
+    )
+    return status
 
 
 def _is_full_artifact_report(value: object) -> bool:

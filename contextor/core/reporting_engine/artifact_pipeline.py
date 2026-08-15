@@ -5,6 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 
+from contextor.core.errors import checkpoint
+from contextor.core.program_log import log_program_event
+
 from contextor.core.reporting_layer.artifact_usage_report import (
     collect_qualified_artifact_identities,
     generate_artifact_usage_report,
@@ -44,6 +47,7 @@ def build_artifact_pipeline(
     log=None,
 ) -> ArtifactPipelineResult:
     """Build mutually consistent artifact and graph report representations."""
+    log_program_event("REPORT", "artifact pipeline start", modules=len(modules))
     if log:
         log("Generating artifact usage report...")
 
@@ -63,6 +67,8 @@ def build_artifact_pipeline(
         "data_source": "artifacts",
     }
     usage_sidecar = artifact_data.get("_usage_sidecar", {})
+
+    checkpoint(progress_callback, "Compacting artifact and structure reports")
 
     if log:
         log("Generating compact version of artifacts report...")
@@ -89,6 +95,8 @@ def build_artifact_pipeline(
     if log:
         log("Generating graph analytics report...")
 
+    checkpoint(progress_callback, "Starting graph analytics")
+
     graph_analytics_data = generate_graph_analytics_report(
         artifact_data=artifact_data,
         hard_edges=hard_edges,
@@ -96,6 +104,12 @@ def build_artifact_pipeline(
         modules=modules,
         index_dict=index_dict,
         scope="global",
+        progress_callback=progress_callback,
+    )
+    log_program_event(
+        "REPORT",
+        "artifact pipeline complete",
+        artifacts=len(artifact_data.get("artifacts", {})),
     )
     return ArtifactPipelineResult(
         artifact_data=artifact_data,
