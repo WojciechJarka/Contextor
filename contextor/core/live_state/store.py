@@ -12,12 +12,12 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
-SCHEMA_VERSION = "1.2"
+LIVE_STATE_SCHEMA_VERSION = "1.2"
 
 
 @dataclass(frozen=True)
 class LiveStateMetadata:
-    schema_version: str = SCHEMA_VERSION
+    schema_version: str = LIVE_STATE_SCHEMA_VERSION
     state_id: str = ""
     revision: int = 0
     writer: str = "unknown"
@@ -36,7 +36,9 @@ def read_metadata(cache_dir: str | Path) -> LiveStateMetadata | None:
     _, meta_file, _ = _paths(cache_dir)
     try:
         payload = json.loads(meta_file.read_text(encoding="utf-8"))
-        if payload.get("schema_version") not in {"1.0", "1.1", SCHEMA_VERSION}:
+        if payload.get("schema_version") not in {
+            "1.0", "1.1", LIVE_STATE_SCHEMA_VERSION
+        }:
             return None
         return LiveStateMetadata(
             schema_version=str(payload.get("schema_version", "1.0")),

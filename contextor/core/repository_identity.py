@@ -24,7 +24,7 @@ class RepositoryIdentity:
 
 
 def _central_root() -> Path:
-    from contextor.core.paths import repository_registry_root
+    from contextor.core.repository_storage import repository_registry_root
 
     return repository_registry_root()
 

@@ -146,7 +146,9 @@ class LiveStateClient:
     def __init__(self, endpoint: LiveEndpoint):
         self.endpoint = endpoint
 
-    def request(self, operation: str, **payload: Any) -> dict[str, Any]:
+    def request(
+        self, operation: str, *, timeout: float = 30.0, **payload: Any
+    ) -> dict[str, Any]:
         connection = Client(
             self.endpoint.address,
             family="AF_INET",
@@ -154,6 +156,13 @@ class LiveStateClient:
         )
         try:
             connection.send({"operation": operation, **payload})
+            import multiprocessing.connection as mpc
+            ready = mpc.wait([connection], timeout=timeout)
+            if not ready:
+                raise TimeoutError(
+                    "Canonical LIVE service did not respond within "
+                    f"{timeout:g}s for op={operation}"
+                )
             response = connection.recv()
         finally:
             connection.close()
@@ -167,8 +176,16 @@ class LiveStateClient:
     def snapshot(self) -> dict[str, Any]:
         return self.request("snapshot")
 
-    def publish(self, state: Any, *, origin: str = "unknown") -> dict[str, Any]:
-        return self.request("publish", state=state, origin=origin)
+    def publish(
+        self,
+        state: Any,
+        *,
+        origin: str = "unknown",
+        timeout: float = 30.0,
+    ) -> dict[str, Any]:
+        return self.request(
+            "publish", timeout=timeout, state=state, origin=origin
+        )
 
     def update_file(self, file_path: str, *, origin: str = "unknown") -> dict[str, Any]:
         return self.request("update_file", file_path=file_path, origin=origin)

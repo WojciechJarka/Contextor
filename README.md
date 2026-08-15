@@ -56,6 +56,23 @@ Contextor natively supports the **Model Context Protocol**, allowing Large Langu
 - **Versioned LIVE Queries:** `describe_canonical_state` publishes the safe schema and operator contract, while `query_canonical_projection` performs bounded JSON queries over normalized modules, artifacts, and dependencies without evaluating Python expressions. The older `query_canonical_state` tools remain temporarily available for migration only.
 - **MCP Server Restart Boundary:** `update_file` synchronizes code on disk with Contextor's canonical state, but it cannot reload Python code already executing inside the MCP process. When the edited target is `contextor/mcp_server.py`, the response sets `runtime_restart_required: true`; restart the MCP server and verify the changed endpoint live before treating runtime behavior as current.
 
+### First run and warm LIVE iterations
+
+Contextor needs one complete repository-wide architectural baseline before it
+can answer scoped questions safely. Therefore, the first analysis of a newly
+registered repository builds the full module index, dependency graph and
+artifact-consumption state even when the requested operation is only a layer
+or a single file. A cold layer/single-file run can consequently take roughly
+as long as the first repository analysis.
+
+After that baseline exists, desktop, CLI and MCP layer/single-file analyses
+reuse the canonical LIVE state (or its recovery snapshot). A single-file run
+refreshes only the selected file incrementally; both scoped workflows reuse
+the existing module graph and artifact evidence instead of reparsing the whole
+repository. Full indexing remains a correctness fallback when canonical state
+is missing, incomplete, belongs to another repository root, or must be rebuilt
+after analysis-scope/exclusion changes.
+
 ---
 
 # Features

@@ -8,7 +8,7 @@ import pytest
 from contextor import mcp_server
 from contextor.core.canonical_state_query import (
     LANGUAGE_VERSION,
-    SCHEMA_VERSION,
+    CANONICAL_QUERY_SCHEMA_VERSION,
     describe_contract,
     execute_projection,
     validate_request,
@@ -21,7 +21,7 @@ pytestmark = pytest.mark.live
 
 def _request(root, *, filters=None, select=None, limit=None):
     request = {
-        "schema_version": SCHEMA_VERSION,
+        "schema_version": CANONICAL_QUERY_SCHEMA_VERSION,
         "language_version": LANGUAGE_VERSION,
         "root": root,
         "filters": filters or [],

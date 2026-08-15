@@ -112,12 +112,15 @@ def test_analysis_endpoint_returns_reusable_job_and_pollable_completion(
     published = []
     engine = SimpleNamespace(state={"fresh": True})
     client = SimpleNamespace(
-        publish=lambda state, *, origin: published.append((state, origin)) or {"revision": 1}
+        publish=lambda state, *, origin, timeout: published.append(
+            (state, origin, timeout)
+        ) or {"revision": 1}
     )
     monkeypatch.setattr(mcp_server, "_run_analysis_worker", fake_worker)
     monkeypatch.setattr(mcp_server, "_get_or_init_engine", lambda _root: engine)
     monkeypatch.setattr(
-        "contextor.core.live_state.connect_or_start", lambda _root: client
+        "contextor.core.live_state.connect_or_start",
+        lambda _root, timeout: client,
     )
     mcp_server._analysis_tasks.clear()
     mcp_server._analysis_jobs_by_repo.clear()
@@ -143,7 +146,7 @@ def test_analysis_endpoint_returns_reusable_job_and_pollable_completion(
         )
         assert completed["status"] == "completed"
         assert completed["error"] is None
-        assert published == [(engine.state, "mcp_analysis")]
+        assert published == [(engine.state, "mcp_analysis", 10.0)]
 
     asyncio.run(scenario())
 

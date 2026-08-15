@@ -35,6 +35,18 @@
   without PowerShell quoting or prompt fall-through. The log now records
   low-volume technical builder, report-pipeline and graph-analytics events;
   GUI progress stages remain confined to the lower operation log.
+- Made desktop and MCP single-file reports reuse canonical LIVE/snapshot
+  modules, dependency graph and artifact-consumption evidence. The selected
+  file is refreshed incrementally, while repository indexing, graph rebuild
+  and global artifact reparsing are now fallback-only operations when no
+  complete canonical state exists. LIVE IPC request/publish timeouts are
+  configurable per call and covered by regression tests.
+- Added the same canonical warm path to layer reports and documented cold-start
+  behavior: the first scoped run builds the repository baseline, while later
+  layer/file iterations reuse LIVE state. Broke the real ``paths`` ↔
+  ``repository_identity`` cycle through a dependency-neutral storage-root
+  module and replaced colliding module-level ``SCHEMA_VERSION`` names with
+  domain-specific canonical-query and LIVE-state constants.
 
 ## [1.2.0-beta Patch — Central repository identities] - 2026-08-14
 

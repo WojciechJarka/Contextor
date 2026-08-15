@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-SCHEMA_VERSION = "1.0"
+CANONICAL_QUERY_SCHEMA_VERSION = "1.0"
 LANGUAGE_VERSION = "1.0"
 
 DEFAULT_LIMIT = 20
@@ -48,7 +48,7 @@ ARRAY_OPERATORS = [
 ]
 
 SCHEMA_V1: dict[str, Any] = {
-    "version": SCHEMA_VERSION,
+    "version": CANONICAL_QUERY_SCHEMA_VERSION,
     "roots": {
         "modules": {
             "description": "Modules currently present in canonical LIVE state.",
@@ -167,7 +167,7 @@ def describe_contract() -> dict[str, Any]:
     """Return the complete public v1 schema and language contract."""
 
     return {
-        "schema_version": SCHEMA_VERSION,
+        "schema_version": CANONICAL_QUERY_SCHEMA_VERSION,
         "language_version": LANGUAGE_VERSION,
         "schema": SCHEMA_V1,
         "language": LANGUAGE_V1,

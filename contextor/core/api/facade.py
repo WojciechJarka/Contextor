@@ -26,6 +26,9 @@ from contextor.core.reporting_engine.generators import (
     slice_report_for_layer,
 )
 from contextor.core.reporting_engine.header import build_report_header
+from contextor.core.reporting_engine.canonical_artifacts import (
+    canonical_artifact_report,
+)
 from contextor.core.reporting_engine.pipeline import execute_global_pipeline
 from contextor.core.reporting_engine.persistent_registry import (
     PersistentIdentityRegistry,
@@ -42,6 +45,7 @@ from contextor.core.single_file.single_file_analysis import collect_all_contexts
 from contextor.core.symbol_engine.indexer import build_index, index_repository
 from contextor.core.validator import validate
 from contextor.core.validator.collisions import validate_name_collisions
+from contextor.core.live_state import hydrate_repository_engine
 
 
 def _compute_metrics_and_debt(modules, graph, progress_callback=None):
@@ -433,29 +437,49 @@ class ContextorFacade:
         excludes, extra_dirs = _analysis_filters(
             str(root_resolved), additional_excludes
         )
-        index_progress = progress.begin("Indexing repository files")
-        index = index_repository(
-            str(root_resolved),
-            excludes=excludes,
-            extra_ignored_dirs=extra_dirs,
-            progress_callback=index_progress,
-        )
-        modules = index.modules
         from contextor.core.graph.resolver import build_trie, detect_package_root
-        trie = build_trie(modules.keys())
-        package_root = detect_package_root(modules, trie)
-        
-        progress.begin("Resolving dependency graph")
-        graph_progress = progress.items
-        graph, cache_hit = get_cached_graph(
-            modules, 
-            lambda m: build_graph(
-                m,
-                trie=trie,
-                package_root=package_root,
-                progress_callback=graph_progress,
+
+        hydrated = hydrate_repository_engine(root_resolved)
+        if hydrated is not None:
+            progress.begin("Loading canonical LIVE context")
+            modules = hydrated.engine.state.modules
+            trie = hydrated.engine.state.trie or build_trie(modules.keys())
+            package_root = (
+                hydrated.engine.state.package_root
+                or detect_package_root(modules, trie)
             )
-        )
+            progress.begin("Reusing canonical dependency graph")
+            graph = hydrated.engine.state.dependency_graph
+            cache_hit = True
+            skipped_files = []
+            if log:
+                log(
+                    "Reused canonical context "
+                    f"from {hydrated.source}; skipped repository re-indexing."
+                )
+        else:
+            index_progress = progress.begin("Indexing repository files")
+            index = index_repository(
+                str(root_resolved),
+                excludes=excludes,
+                extra_ignored_dirs=extra_dirs,
+                progress_callback=index_progress,
+            )
+            modules = index.modules
+            trie = build_trie(modules.keys())
+            package_root = detect_package_root(modules, trie)
+            progress.begin("Resolving dependency graph")
+            graph_progress = progress.items
+            graph, cache_hit = get_cached_graph(
+                modules,
+                lambda m: build_graph(
+                    m,
+                    trie=trie,
+                    package_root=package_root,
+                    progress_callback=graph_progress,
+                ),
+            )
+            skipped_files = getattr(index, "skipped", [])
 
         if log:
             log("Calculating metrics and collisions for the full project...")
@@ -478,10 +502,19 @@ class ContextorFacade:
             hotspots=hotspots,
         )
         global_structure = generate_structure_report(graph.hard_edges, graph.soft_edges)
-        artifacts_progress = progress.begin("Analyzing artifact usage")
-        global_artifacts = generate_artifact_usage_report(
-            modules, str(root_resolved), runtime, progress_callback=artifacts_progress
-        )
+        artifacts_progress = progress.begin("Preparing artifact usage")
+        if hydrated is not None:
+            checkpoint(artifacts_progress, "Projecting canonical artifacts", 0, 1)
+            global_artifacts = canonical_artifact_report(
+                hydrated.engine.state.artifacts
+            )
+        else:
+            global_artifacts = generate_artifact_usage_report(
+                modules,
+                str(root_resolved),
+                runtime,
+                progress_callback=artifacts_progress,
+            )
         
         from contextor.core.reporting_engine.dictionary import IndexDictionary
         
@@ -507,7 +540,7 @@ class ContextorFacade:
             global_hotspots=hotspots,
             global_cycles=cycles,
             global_collisions=all_collisions,
-            global_skipped_files=getattr(index, "skipped", []),
+            global_skipped_files=skipped_files,
             report_header=report_header,
             index_dict=index_dict,
         )
@@ -573,20 +606,52 @@ class ContextorFacade:
             log(f"Single file analysis: {file.name}")
 
         if log:
-            log("Indexing and building project graph...")
+            log("Preparing project context...")
         excludes, extra_dirs = _analysis_filters(repo_root, additional_excludes)
-        index_progress = progress.begin("Indexing repository files")
-        modules = build_index(
-            repo_root,
-            excludes=excludes,
-            extra_ignored_dirs=extra_dirs,
-            progress_callback=index_progress,
-        )
-        graph_progress = progress.begin("Resolving dependency graph")
-        graph, cache_hit = get_cached_graph(
-            modules,
-            lambda m: build_graph(m, progress_callback=graph_progress),
-        )
+        hydrated = hydrate_repository_engine(repo_root)
+        if hydrated is not None:
+            progress.begin("Loading canonical LIVE context")
+            update_progress = progress.begin("Refreshing selected file in LIVE context")
+            checkpoint(update_progress, f"Refreshing {file.name}", 0, 1)
+            update_result = hydrated.engine.update_file(str(file))
+            if update_result.status in {"SYNTAX_ERROR", "ERROR"}:
+                location = ""
+                if getattr(update_result, "line_number", None):
+                    location = f" at line {update_result.line_number}"
+                raise ValueError(
+                    f"Cannot analyze {file.name}{location}: {update_result.error}"
+                )
+            modules = hydrated.engine.state.modules
+            graph = hydrated.engine.state.dependency_graph
+            cache_hit = True
+            if update_result.status == "UPDATED" and hydrated.client is not None:
+                try:
+                    hydrated.client.publish(
+                        hydrated.engine.state,
+                        origin="scoped_analysis",
+                        timeout=5.0,
+                    )
+                except (TimeoutError, OSError, EOFError, ConnectionError, RuntimeError):
+                    if log:
+                        log("[WARNING] Updated single-file state could not be published to LIVE.")
+            if log:
+                log(
+                    "Reused canonical context "
+                    f"from {hydrated.source}; skipped repository re-indexing."
+                )
+        else:
+            index_progress = progress.begin("Indexing repository files")
+            modules = build_index(
+                repo_root,
+                excludes=excludes,
+                extra_ignored_dirs=extra_dirs,
+                progress_callback=index_progress,
+            )
+            graph_progress = progress.begin("Resolving dependency graph")
+            graph, cache_hit = get_cached_graph(
+                modules,
+                lambda m: build_graph(m, progress_callback=graph_progress),
+            )
 
         if log:
             log("Generating global report (hotspots)...")
@@ -648,12 +713,17 @@ class ContextorFacade:
         from contextor.core.reporting_engine.graph_analytics import generate_graph_analytics_report
         from contextor.core.reporting_layer.artifact_usage_report import generate_artifact_usage_report as _gen_art
         try:
-            sf_artifact_data = _gen_art(
-                modules,
-                repo_root,
-                runtime={"cache_hit": cache_hit},
-                progress_callback=progress.items,
-            )
+            if hydrated is not None:
+                sf_artifact_data = canonical_artifact_report(
+                    hydrated.engine.state.artifacts
+                )
+            else:
+                sf_artifact_data = _gen_art(
+                    modules,
+                    repo_root,
+                    runtime={"cache_hit": cache_hit},
+                    progress_callback=progress.items,
+                )
             target_module_id = None
             # Find module_id matching the analyzed file
             file_resolved = file.resolve()

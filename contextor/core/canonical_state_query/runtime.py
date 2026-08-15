@@ -14,7 +14,7 @@ from .contract import (
     MAX_REQUEST_BYTES,
     MAX_SELECT_FIELDS,
     SCHEMA_V1,
-    SCHEMA_VERSION,
+    CANONICAL_QUERY_SCHEMA_VERSION,
 )
 from .projection import RECORD_BUILDERS
 
@@ -139,12 +139,12 @@ def validate_request(request: Any) -> tuple[dict[str, Any] | None, dict[str, Any
             return None, _error(
                 "missing_required_field", f"Required field '{required}' is missing.", required
             )
-    if request["schema_version"] != SCHEMA_VERSION:
+    if request["schema_version"] != CANONICAL_QUERY_SCHEMA_VERSION:
         return None, _error(
             "unsupported_schema_version",
             "Unsupported schema version.",
             "schema_version",
-            supported_versions=[SCHEMA_VERSION],
+            supported_versions=[CANONICAL_QUERY_SCHEMA_VERSION],
         )
     if request["language_version"] != LANGUAGE_VERSION:
         return None, _error(
@@ -279,7 +279,7 @@ def validate_request(request: Any) -> tuple[dict[str, Any] | None, dict[str, Any
         if value_error:
             return None, value_error
     return {
-        "schema_version": SCHEMA_VERSION,
+        "schema_version": CANONICAL_QUERY_SCHEMA_VERSION,
         "language_version": LANGUAGE_VERSION,
         "root": root,
         "filters": filters,
@@ -334,7 +334,7 @@ def execute_projection(state: Any, request: Any) -> dict[str, Any]:
     results = [{field: record[field] for field in selected} for record in matches[:limit]]
     return {
         "status": "ok",
-        "schema_version": SCHEMA_VERSION,
+        "schema_version": CANONICAL_QUERY_SCHEMA_VERSION,
         "language_version": LANGUAGE_VERSION,
         "root": normalized["root"],
         "total_matches": len(matches),

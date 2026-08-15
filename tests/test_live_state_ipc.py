@@ -2,6 +2,7 @@
 
 import threading
 import time
+import multiprocessing.connection as mpc
 from types import SimpleNamespace
 
 import pytest
@@ -13,10 +14,35 @@ from contextor.core.live_state import (
     LiveStateClient,
 )
 from contextor.core.live_state.ipc import LIVE_PROTOCOL_VERSION
+from contextor.core.live_state import ipc as ipc_module
 from contextor.core.live_state.runtime import connect_or_start, endpoint_file
 from contextor.core.reporting_engine.persistent_registry import PersistentIdentityRegistry
 
 pytestmark = pytest.mark.live
+
+
+def test_client_request_timeout_closes_connection(monkeypatch):
+    sent = []
+
+    class Connection:
+        closed = False
+
+        def send(self, payload):
+            sent.append(payload)
+
+        def close(self):
+            self.closed = True
+
+    connection = Connection()
+    monkeypatch.setattr(ipc_module, "Client", lambda *_args, **_kwargs: connection)
+    monkeypatch.setattr(mpc, "wait", lambda _connections, timeout: [])
+    client = LiveStateClient(SimpleNamespace(address=("127.0.0.1", 1), authkey=b"x"))
+
+    with pytest.raises(TimeoutError, match="0.01s.*op=ping"):
+        client.request("ping", timeout=0.01)
+
+    assert sent == [{"operation": "ping"}]
+    assert connection.closed is True
 
 
 @pytest.fixture

@@ -497,9 +497,14 @@ async def _execute_analysis_job(
             engine_state = engine.state
             from contextor.core.live_state import connect_or_start
 
-            live_client = connect_or_start(root)
-            published = live_client.publish(engine_state, origin="mcp_analysis")
-            _live_engine_revisions[str(root)] = int(published["revision"])
+            try:
+                live_client = connect_or_start(root, timeout=10.0)
+                published = live_client.publish(
+                    engine_state, origin="mcp_analysis", timeout=10.0
+                )
+                _live_engine_revisions[str(root)] = int(published["revision"])
+            except (TimeoutError, OSError, EOFError, ConnectionError, RuntimeError) as live_exc:
+                job_log(f"Warning: Live state publish skipped/failed: {live_exc}")
         job = {
             **job,
             **(analysis_outcome or {}),

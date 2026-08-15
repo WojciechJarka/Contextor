@@ -34,12 +34,6 @@ def package_root() -> Path:
     return Path(__file__).resolve().parents[2]
 
 
-def repository_registry_root() -> Path:
-    """Central identity registry owned by Contextor, never an analyzed repo."""
-
-    return _env_dir("CONTEXTOR_REGISTRY_DIR") or package_root() / ".contextor" / "repositories"
-
-
 # ==========================================================
 # RESOLUTION HELPERS
 # ==========================================================
