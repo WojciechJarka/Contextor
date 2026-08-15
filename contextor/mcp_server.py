@@ -109,17 +109,15 @@ Example:
 
 The MCP server must start silently and wait for JSON-RPC messages.
 """
-import atexit
-import asyncio
 import ast
+import asyncio
+import atexit
 import hashlib
 import json
 import os
-import subprocess
 import sys
-import glob
-import warnings
 import threading
+import warnings
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -318,6 +316,9 @@ def _public_job(
             "updated_at",
             "message",
             "error",
+            "live_publish_status",
+            "live_publish_revision",
+            "live_publish_warning",
         )
     }
     if "skipped_python_files" in job:
@@ -502,25 +503,53 @@ async def _execute_analysis_job(
                 published = live_client.publish(
                     engine_state, origin="mcp_analysis", timeout=10.0
                 )
-                _live_engine_revisions[str(root)] = int(published["revision"])
+                revision = int(published["revision"])
+                _live_engine_revisions[str(root)] = revision
+                job = {
+                    **job,
+                    "live_publish_status": "success",
+                    "live_publish_revision": revision,
+                    "live_publish_warning": None,
+                }
             except (TimeoutError, OSError, EOFError, ConnectionError, RuntimeError) as live_exc:
-                job_log(f"Warning: Live state publish skipped/failed: {live_exc}")
+                publish_status = (
+                    "timed_out" if isinstance(live_exc, TimeoutError) else "failed"
+                )
+                warning = f"{type(live_exc).__name__}: {live_exc}"
+                _stderr_log(f"Warning: Live state publish {publish_status}: {warning}")
+                job = {
+                    **job,
+                    "live_publish_status": publish_status,
+                    "live_publish_revision": None,
+                    "live_publish_warning": warning,
+                }
+        publish_status = job.get("live_publish_status")
+        completed_message = "Analysis completed successfully."
+        if job["operation"] == "project" and publish_status != "success":
+            completed_message = (
+                "Analysis completed, but canonical LIVE publish "
+                f"{publish_status or 'failed'}."
+            )
         job = {
             **job,
             **(analysis_outcome or {}),
             "status": "completed",
             "completed_at": _utc_now(),
-            "message": "Analysis completed successfully.",
+            "message": completed_message,
             "error": None,
         }
         _write_analysis_job(root, job)
     except Exception as exc:
+        live_publish_status = job.get("live_publish_status")
+        if job.get("operation") == "project" and live_publish_status == "pending":
+            live_publish_status = "not_attempted"
         job = {
             **job,
             "status": "failed",
             "completed_at": _utc_now(),
             "message": "Analysis failed.",
             "error": f"{type(exc).__name__}: {exc}",
+            "live_publish_status": live_publish_status,
         }
         _write_analysis_job(root, job)
     finally:
@@ -560,6 +589,11 @@ def _start_analysis_job(
             "completed_at": None,
             "message": "Analysis accepted.",
             "error": None,
+            "live_publish_status": (
+                "pending" if operation == "project" else "not_applicable"
+            ),
+            "live_publish_revision": None,
+            "live_publish_warning": None,
             "owner_pid": os.getpid(),
         }
         _write_analysis_job(root, job)
@@ -1013,72 +1047,6 @@ def _static_test_reachability(
     ]
 
 
-# Keep well below the host tool-transport context threshold.  This is a
-# transport guard, not a limit on canonical-state data held in memory.
-_LEGACY_QUERY_MAX_RESPONSE_BYTES = 12 * 1024
-
-
-def _legacy_query_value_summary(value) -> dict:
-    """Describe a legacy query value without returning its nested payload."""
-    if isinstance(value, dict):
-        keys = [str(key) for key in value]
-        preview = keys[:20]
-        return {
-            "type": "dict",
-            "total_keys": len(keys),
-            "keys": preview,
-            "keys_truncated": len(preview) < len(keys),
-        }
-    if isinstance(value, (list, tuple, set)):
-        return {"type": type(value).__name__, "total_items": len(value)}
-    if isinstance(value, str):
-        return {"type": "string", "characters": len(value)}
-    return {"type": type(value).__name__}
-
-
-def _bounded_query_result(value, limit: int | None) -> dict:
-    """Wrap a legacy query result and prevent one nested record overfilling MCP."""
-    if isinstance(value, dict):
-        selected, total, truncated = _bounded_items(list(value.items()), limit)
-        result = dict(selected)
-        result_type = "dict"
-    elif isinstance(value, (list, tuple, set)):
-        selected, total, truncated = _bounded_items(list(value), limit)
-        result = selected
-        result_type = type(value).__name__
-    else:
-        result = value
-        total = 1
-        truncated = False
-        result_type = type(value).__name__
-    bounded = {
-        "result": result,
-        "result_type": result_type,
-        "total_items": total,
-        "truncated": truncated,
-    }
-    encoded = json.dumps(bounded, indent=2).encode("utf-8")
-    if len(encoded) <= _LEGACY_QUERY_MAX_RESPONSE_BYTES:
-        return bounded
-
-    return {
-        "result": {
-            "status": "payload_too_large",
-            "preview": _legacy_query_value_summary(result),
-        },
-        "result_type": result_type,
-        "total_items": total,
-        "truncated": truncated,
-        "payload_truncated": True,
-        "original_response_bytes": len(encoded),
-        "max_response_bytes": _LEGACY_QUERY_MAX_RESPONSE_BYTES,
-        "recommendation": (
-            "Project scalar fields in the legacy expression, or use "
-            "describe_canonical_state followed by query_canonical_projection."
-        ),
-    }
-
-
 def _resolve_cluster_ids(
     cluster: dict,
     module_names: dict,
@@ -1220,6 +1188,16 @@ def get_analysis_status(
     ``max_skipped_files`` bounds returned entries (default 10); pass ``None``
     for every skipped file. ``total`` and ``truncated`` make the coverage gap
     explicit. Layer and single-file jobs do not claim global coverage.
+
+    Every job also exposes durable LIVE publication state. Project jobs move
+    from ``live_publish_status='pending'`` to ``success``, ``timed_out`` or
+    ``failed``; an analysis failure before publication reports
+    ``not_attempted``. Successful publication includes
+    ``live_publish_revision``. Publication failures preserve
+    ``live_publish_warning`` even though the report job itself may complete.
+    Layer and single-file jobs report ``not_applicable`` because their shared
+    facade updates canonical state incrementally rather than publishing a new
+    global baseline here.
 
     LLM use: poll this after an analyze tool returns. Do not start another
     analysis while status is ``queued`` or ``running``; repeated analyze calls
@@ -2815,118 +2793,6 @@ def get_report_diff(
         return f"Error reading diff report: {e}"
 
 
-def _execute_canonical_query(engine: object, python_filter_expression: str) -> str:
-    """Execute a restricted Python expression against a live canonical engine state.
-
-    Provides a safe sandbox with whitelisted builtins only — no import, exec or
-    open. The engine's ``modules``, ``artifacts``, ``dependency_graph`` and
-    ``registry`` objects are injected as top-level variables.
-
-    Returns a JSON-serialised string on success, or an ``"Error: ..."`` string
-    on failure so callers can propagate the message directly to the LLM.
-    """
-    try:
-        # Safe sandbox: only whitelisted builtins, no import/exec/open
-        _safe_builtins = {
-            "__builtins__": {},
-            "modules": engine.state.modules,
-            "artifacts": engine.state.artifacts,
-            "dependency_graph": engine.state.dependency_graph,
-            "registry": engine.registry,
-            "json": json,
-            "sorted": sorted, "list": list, "dict": dict, "set": set,
-            "len": len, "str": str, "int": int, "float": float, "bool": bool,
-            "min": min, "max": max, "sum": sum,
-            "enumerate": enumerate, "zip": zip, "range": range,
-            "any": any, "all": all, "filter": filter, "map": map,
-            "isinstance": isinstance, "round": round, "abs": abs,
-            "True": True, "False": False, "None": None,
-        }
-        result = eval(python_filter_expression, _safe_builtins)
-
-        # Serialize result safely, handling dataclasses if needed
-        import dataclasses
-        class SafeEncoder(json.JSONEncoder):
-            def default(self, o):
-                if dataclasses.is_dataclass(o):
-                    return dataclasses.asdict(o)
-                if hasattr(o, "to_dict"):
-                    return o.to_dict()
-                if isinstance(o, set):
-                    return list(o)
-                return str(o)
-
-        return json.dumps(result, indent=2, cls=SafeEncoder)
-    except Exception as e:
-        return f"Error executing query: {str(e)}"
-
-
-@mcp.tool()
-def query_canonical_state(repo_path: str, python_filter_expression: str) -> str:
-    """
-    [DEPRECATED] Executes a restricted Python expression against LIVE state.
-    Kept temporarily for migration compatibility. It receives no new features;
-    prefer ``describe_canonical_state`` followed by
-    ``query_canonical_projection`` for versioned, normalized, bounded queries.
-    The live objects are loaded into variables: 'modules', 'artifacts', 'dependency_graph', 'registry'.
-    Example expression: "[m_path for m_path, mod in modules.items() if len(mod.imports) > 20]"
-
-    LLM use: prefer ``query_canonical_state_bounded`` for exploration; use this
-    tool only when you need unbounded results or when the expression already
-    projects to a small scalar value.
-    """
-    root = Path(repo_path).expanduser().resolve()
-    engine = _get_or_init_engine(root)
-    
-    if not engine:
-        return f"Error: No live canonical state found for {root}. Run analyze_project first."
-        
-    return _execute_canonical_query(engine, python_filter_expression)
-
-
-@mcp.tool()
-def query_canonical_state_bounded(
-    repo_path: str,
-    python_filter_expression: str,
-    limit: int | None = 100,
-) -> str:
-    """
-    [DEPRECATED] Runs the same restricted expression as
-    ``query_canonical_state`` but bounds top-level list/dict results.
-
-    Kept temporarily for migration compatibility. Prefer
-    ``describe_canonical_state`` and ``query_canonical_projection``; the new
-    path does not expose Python objects or evaluate expressions.
-
-    Prefer this tool for exploration. The response includes ``total_items``
-    and ``truncated`` so an LLM can refine the expression or raise ``limit``
-    only when omitted items matter. Select narrow scalar fields in the
-    expression when individual nested values may themselves be large.
-    Pass ``limit=None`` only after explicitly choosing an unbounded top-level
-    result. A legacy response with a nested value larger than 12 KiB is
-    replaced by a structured ``payload_too_large`` preview; it reports the
-    original size and directs the caller to a scalar expression or the
-    projection API. This transport safety fallback is independent of the
-    top-level ``limit``.
-
-    LLM use: use this as an escape hatch for questions not covered by a
-    dedicated tool. Prefer projected scalar fields and a small limit; it is a
-    structural query, not a substitute for reading the affected source.
-    """
-    root = Path(repo_path).expanduser().resolve()
-    engine = _get_or_init_engine(root)
-
-    if not engine:
-        return f"Error: No live canonical state found for {root}. Run analyze_project first."
-
-    raw = _execute_canonical_query(engine, python_filter_expression)
-    try:
-        value = json.loads(raw)
-    except (TypeError, json.JSONDecodeError):
-        return raw
-    return json.dumps(_bounded_query_result(value, limit), indent=2)
-
-
 @mcp.tool()
 def describe_canonical_state() -> str:
     """Return the complete versioned contract for safe canonical LIVE queries.
@@ -2967,8 +2833,7 @@ def query_canonical_projection(repo_path: str, request: dict[str, Any]) -> str:
     and repair details.
 
     LLM use: discover the contract first, request the smallest useful field
-    selection, and narrow filters when ``truncated`` is true. Use legacy
-    ``query_canonical_state*`` only for temporary migration gaps.
+    selection, and narrow filters when ``truncated`` is true.
     """
     root = Path(repo_path).expanduser().resolve()
     engine = _get_or_init_engine(root)

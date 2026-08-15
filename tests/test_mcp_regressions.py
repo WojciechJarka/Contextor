@@ -146,6 +146,9 @@ def test_analysis_endpoint_returns_reusable_job_and_pollable_completion(
         )
         assert completed["status"] == "completed"
         assert completed["error"] is None
+        assert completed["live_publish_status"] == "success"
+        assert completed["live_publish_revision"] == 1
+        assert completed["live_publish_warning"] is None
         assert published == [(engine.state, "mcp_analysis", 10.0)]
 
     asyncio.run(scenario())
@@ -172,6 +175,49 @@ def test_analysis_job_persists_failure_for_later_polling(tmp_path, monkeypatch):
         )
         assert failed["status"] == "failed"
         assert "simulated analysis failure" in failed["error"]
+        assert failed["live_publish_status"] == "not_attempted"
+
+    asyncio.run(scenario())
+
+
+def test_analysis_job_preserves_live_publish_timeout_status(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    async def fake_worker(*_args, **_kwargs):
+        return {"skipped_python_files": []}
+
+    engine = SimpleNamespace(state={"fresh": True})
+
+    class Client:
+        def publish(self, _state, *, origin, timeout):
+            assert origin == "mcp_analysis"
+            assert timeout == 10.0
+            raise TimeoutError("simulated LIVE timeout")
+
+    monkeypatch.setattr(mcp_server, "_run_analysis_worker", fake_worker)
+    monkeypatch.setattr(mcp_server, "_get_or_init_engine", lambda _root: engine)
+    monkeypatch.setattr(
+        "contextor.core.live_state.connect_or_start",
+        lambda _root, timeout: Client(),
+    )
+    mcp_server._analysis_tasks.clear()
+    mcp_server._analysis_jobs_by_repo.clear()
+
+    async def scenario():
+        accepted = json.loads(await mcp_server.analyze_project.fn(str(repo)))
+        task = mcp_server._analysis_tasks[accepted["job_id"]]
+        task.join(timeout=5)
+        assert not task.is_alive()
+
+        completed = json.loads(
+            mcp_server.get_analysis_status.fn(str(repo), accepted["job_id"])
+        )
+        assert completed["status"] == "completed"
+        assert completed["live_publish_status"] == "timed_out"
+        assert completed["live_publish_revision"] is None
+        assert "simulated LIVE timeout" in completed["live_publish_warning"]
+        assert "LIVE publish timed_out" in completed["message"]
 
     asyncio.run(scenario())
 
@@ -1359,26 +1405,6 @@ def test_bounded_mcp_collections_report_truncation():
     assert unbounded == ["first", "second", "third"]
     assert unbounded_total == 3
     assert unbounded_truncated is False
-
-
-def test_bounded_canonical_query_preserves_totals_for_lists_and_dicts():
-    bounded_list = mcp_server._bounded_query_result([1, 2, 3], 2)
-    bounded_dict = mcp_server._bounded_query_result(
-        {"first": 1, "second": 2}, 1
-    )
-
-    assert bounded_list == {
-        "result": [1, 2],
-        "result_type": "list",
-        "total_items": 3,
-        "truncated": True,
-    }
-    assert bounded_dict == {
-        "result": {"first": 1},
-        "result_type": "dict",
-        "total_items": 2,
-        "truncated": True,
-    }
 
 
 def test_layer_cluster_ids_are_resolved_without_an_extra_lookup():

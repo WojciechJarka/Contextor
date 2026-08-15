@@ -207,6 +207,14 @@ def test_mcp_describe_and_query_tools_share_the_contract(tmp_path, monkeypatch):
     assert queried["results"] == [{"module_name": "pkg.used", "import_count": 1}]
 
 
+def test_expression_based_canonical_query_tools_are_not_exposed():
+    tool_names = set(mcp_server.mcp._tool_manager._tools)
+
+    assert "query_canonical_state" not in tool_names
+    assert "query_canonical_state_bounded" not in tool_names
+    assert {"describe_canonical_state", "query_canonical_projection"} <= tool_names
+
+
 def test_mcp_projection_returns_structured_unavailable_state(tmp_path, monkeypatch):
     monkeypatch.setattr(mcp_server, "_get_or_init_engine", lambda _root: None)
 

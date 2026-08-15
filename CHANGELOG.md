@@ -1,5 +1,9 @@
 ## [1.2.0-beta Patch — Scoped analysis guards] - 2026-08-15
 
+- Removed the deprecated expression-based ``query_canonical_state`` and
+  ``query_canonical_state_bounded`` MCP endpoints together with their private
+  ``eval`` runtime and transport limiter. Canonical ad-hoc queries now use only
+  the versioned, bounded ``query_canonical_projection`` contract.
 - Blocked layer and single-file analysis when the selected target resolves
   outside the chosen repository root. GUI users receive an immediate warning;
   facade/MCP callers receive a `ValueError` before an identity or analysis job
@@ -47,6 +51,11 @@
   ``repository_identity`` cycle through a dependency-neutral storage-root
   module and replaced colliding module-level ``SCHEMA_VERSION`` names with
   domain-specific canonical-query and LIVE-state constants.
+- Made global MCP analysis publication status durable and independent from the
+  report result. ``get_analysis_status`` now preserves
+  ``live_publish_status``, the published revision and any timeout/failure
+  warning across later polling and server restarts; failed publication no
+  longer disappears behind a generic successful-analysis message.
 
 ## [1.2.0-beta Patch — Central repository identities] - 2026-08-14
 
