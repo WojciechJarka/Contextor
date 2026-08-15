@@ -202,6 +202,29 @@ def _initialize_repository_identity(repo_root: str | Path) -> PersistentIdentity
     return registry
 
 
+def _resolve_repository_target(
+    repo_root: str | Path,
+    target: str | Path,
+    *,
+    target_kind: str,
+) -> tuple[Path, Path]:
+    """Resolve and validate one layer/file target against its repository root."""
+
+    root = Path(repo_root).expanduser().resolve()
+    candidate = Path(target).expanduser().resolve()
+    if not root.is_dir():
+        raise ValueError(f"Repository root does not exist: {root}")
+    if candidate == root or root not in candidate.parents:
+        raise ValueError(
+            f"Selected {target_kind} is outside the repository root: {candidate} (root: {root})"
+        )
+    if target_kind == "layer" and not candidate.is_dir():
+        raise ValueError(f"Selected layer does not exist or is not a directory: {candidate}")
+    if target_kind == "file" and not candidate.is_file():
+        raise ValueError(f"Selected file does not exist or is not a file: {candidate}")
+    return root, candidate
+
+
 class ContextorFacade:
     """
     Main entry point for executing static analysis workflows.
@@ -332,8 +355,9 @@ class ContextorFacade:
         additional_excludes: list[str] | None = None,
     ) -> str:
         """Analyzes a specific layer. Returns output pattern."""
-        root_resolved = Path(root_dir).resolve()
-        layer_resolved = Path(layer_dir).resolve()
+        root_resolved, layer_resolved = _resolve_repository_target(
+            root_dir, layer_dir, target_kind="layer"
+        )
         repo_name = root_resolved.name
         layer_name = layer_resolved.name
 
@@ -448,11 +472,14 @@ class ContextorFacade:
         additional_excludes: list[str] | None = None,
     ) -> str:
         """Analyzes a single file within the context of a project. Returns report output path."""
-        registry = _initialize_repository_identity(repo_root)
+        root_resolved, file = _resolve_repository_target(
+            repo_root, file_path, target_kind="file"
+        )
+        if file.suffix.lower() != ".py":
+            raise ValueError(f"Selected file is not a Python file: {file}")
+        registry = _initialize_repository_identity(root_resolved)
         repo_root = str(registry.repo_path.resolve())
         reset_caches()
-
-        file = Path(file_path)
         if log:
             log(f"Single file analysis: {file.name}")
 

@@ -18,7 +18,7 @@ from contextor.core.repository_identity import (
     RepositoryIdentityError,
     read_repository_identity,
 )
-from contextor.core.paths import prune_orphaned_repository_caches
+from contextor.core.paths import prune_startup_caches
 from contextor.repo_generator import run_repo_generator
 from contextor.ui import theme
 from contextor.ui.exclude_check import check_stale_excludes
@@ -87,8 +87,8 @@ class ContextorGUI:
         self._live_status_queue: Queue[str] = Queue()
         self._live_status_draining = False
 
-        cache_cleanup = prune_orphaned_repository_caches()
-        if cache_cleanup["errors"]:
+        cache_cleanup = prune_startup_caches()
+        if any(section["errors"] for section in cache_cleanup.values()):
             self.live_status_var.set("LIVE: cache cleanup incomplete")
 
         self._check_stale_excludes()
@@ -775,7 +775,12 @@ class ContextorGUI:
             messagebox.showerror("Invalid path", "Could not resolve selected paths.")
             return
 
-        if layer_resolved == root_resolved or root_resolved not in layer_resolved.parents:
+        if (
+            not root_resolved.is_dir()
+            or not layer_resolved.is_dir()
+            or layer_resolved == root_resolved
+            or root_resolved not in layer_resolved.parents
+        ):
             messagebox.showwarning(
                 "Invalid layer", "Layer must be a subdirectory of the selected repository root."
             )
@@ -823,13 +828,31 @@ class ContextorGUI:
             )
             return
 
+        try:
+            root_resolved = Path(repo_root).resolve()
+            file_resolved = Path(file_path).resolve()
+        except (OSError, RuntimeError):
+            messagebox.showerror("Invalid path", "Could not resolve selected paths.")
+            return
+        if (
+            not root_resolved.is_dir()
+            or not file_resolved.is_file()
+            or root_resolved not in file_resolved.parents
+        ):
+            messagebox.showwarning(
+                "Invalid file",
+                "Selected Python file must be inside the selected repository root.\n"
+                f"Repository root:\n{root_resolved}",
+            )
+            return
+
         def task(log=None, progress_callback=None):
             return ContextorFacade.analyze_single_file(
-                file_path, repo_root, log=log, progress_callback=progress_callback
+                str(file_resolved), str(root_resolved), log=log, progress_callback=progress_callback
             )
 
         def on_success(output):
-            self._start_live_watcher(repo_root)
+            self._start_live_watcher(str(root_resolved))
             messagebox.showinfo("Done", f"Single file report created:\n{output}")
 
         def on_error(exc):

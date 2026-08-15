@@ -1,3 +1,10 @@
+## [1.2.0-beta Patch — Scoped analysis guards] - 2026-08-15
+
+- Blocked layer and single-file analysis when the selected target resolves
+  outside the chosen repository root. GUI users receive an immediate warning;
+  facade/MCP callers receive a `ValueError` before an identity or analysis job
+  can be created.
+
 ## [1.2.0-beta Patch — Central repository identities] - 2026-08-14
 
 - Moved creation and lookup of persistent identity dictionaries to Contextor's
@@ -7,7 +14,9 @@
   identities by the canonical `root_path` stored in `repo.meta.json`.
 - Bound AppData LIVE snapshots to durable repository IDs and added GUI-startup
   cleanup for orphaned `ctx_*` cache directories whose IDs no longer exist in
-  the central registry.
+  the central registry. Startup cleanup also removes pytest cache directories
+  and legacy path-keyed caches only after the same registered root has a
+  complete snapshot under its current repository ID.
 - Added per-repository desktop LIVE watchers so changing the GUI root preserves
   updates for repositories already watched in the current desktop session.
 - Full, layer and single-file analysis now initialize the same central identity;

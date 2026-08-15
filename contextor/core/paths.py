@@ -15,6 +15,7 @@ Rules enforced here:
 
 import hashlib
 import os
+import re
 import shutil
 from pathlib import Path
 
@@ -229,6 +230,76 @@ def prune_orphaned_repository_caches() -> dict[str, list[str]]:
         except OSError as exc:
             result["errors"].append(f"{candidate.name}: {exc}")
     return result
+
+
+_TEST_CACHE_DIRECTORY = re.compile(
+    r"^(?:test_.+|test_repo|repo|RealMcpLiveTest|TestRepoLive)-[0-9a-f]{16}$",
+    re.IGNORECASE,
+)
+
+
+def prune_test_cache_entries() -> dict[str, list[str]]:
+    """Remove legacy cache directories created by pytest temporary repositories."""
+
+    cache_root = app_cache_dir()
+    result = {"removed": [], "errors": []}
+    if not cache_root.is_dir():
+        return result
+    resolved_root = cache_root.resolve()
+    for candidate in cache_root.iterdir():
+        if not candidate.is_dir() or not _TEST_CACHE_DIRECTORY.fullmatch(candidate.name):
+            continue
+        resolved_candidate = candidate.resolve()
+        if resolved_candidate.parent != resolved_root:
+            result["errors"].append(f"unsafe cache path: {resolved_candidate}")
+            continue
+        try:
+            shutil.rmtree(resolved_candidate)
+            result["removed"].append(candidate.name)
+        except OSError as exc:
+            result["errors"].append(f"{candidate.name}: {exc}")
+    return result
+
+
+def prune_superseded_legacy_repo_caches() -> dict[str, list[str]]:
+    """Remove path-keyed caches only after the same registered root has a snapshot by ID."""
+
+    from contextor.core.repository_identity import registered_repository_identities
+
+    cache_root = app_cache_dir()
+    result = {"removed": [], "errors": []}
+    if not cache_root.is_dir():
+        return result
+    resolved_root = cache_root.resolve()
+    for identity in registered_repository_identities():
+        legacy = legacy_repo_cache_dir(identity.root_path)
+        current = cache_root / "repositories" / identity.repo_id
+        if not legacy.is_dir() or legacy == current:
+            continue
+        # A modern cache directory alone is not proof of a completed handoff.
+        # Keep the legacy parse cache until a complete revisioned snapshot exists.
+        if not (current / "engine_state.meta.json").is_file():
+            continue
+        resolved_legacy = legacy.resolve()
+        if resolved_legacy.parent != resolved_root:
+            result["errors"].append(f"unsafe cache path: {resolved_legacy}")
+            continue
+        try:
+            shutil.rmtree(resolved_legacy)
+            result["removed"].append(legacy.name)
+        except OSError as exc:
+            result["errors"].append(f"{legacy.name}: {exc}")
+    return result
+
+
+def prune_startup_caches() -> dict[str, dict[str, list[str]]]:
+    """Run the safe cache cleanup policy used when desktop Contextor starts."""
+
+    return {
+        "orphaned_repository_caches": prune_orphaned_repository_caches(),
+        "superseded_legacy_repo_caches": prune_superseded_legacy_repo_caches(),
+        "test_cache_entries": prune_test_cache_entries(),
+    }
 
 
 # ==========================================================

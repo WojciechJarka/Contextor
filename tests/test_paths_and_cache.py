@@ -7,6 +7,8 @@ from contextor.core.paths import (
     legacy_repo_cache_dir,
     output_dir,
     prune_orphaned_repository_caches,
+    prune_superseded_legacy_repo_caches,
+    prune_startup_caches,
     repo_cache_dir,
     repo_key,
 )
@@ -75,6 +77,54 @@ def test_orphaned_repo_id_cache_is_removed_but_registered_and_unrelated_remain(
     assert valid.is_dir()
     assert unrelated.is_dir()
     assert not orphan.exists()
+
+
+def test_startup_cleanup_removes_only_pytest_cache_directories(tmp_path, monkeypatch):
+    cache_root = tmp_path / "cache"
+    monkeypatch.setenv("CONTEXTOR_CACHE_DIR", str(cache_root))
+    test_cache = cache_root / "test_symbol_lookup0-0123456789abcdef"
+    real_cache = cache_root / "Spiral-Prophet_Repo-0123456789abcdef"
+    for directory in (test_cache, real_cache):
+        directory.mkdir(parents=True)
+        (directory / "marker.txt").write_text("cache", encoding="utf-8")
+
+    result = prune_startup_caches()
+
+    assert result["test_cache_entries"] == {
+        "removed": [test_cache.name],
+        "errors": [],
+    }
+    assert not test_cache.exists()
+    assert real_cache.is_dir()
+
+
+def test_superseded_legacy_cache_requires_matching_registry_and_snapshot(
+    tmp_path, monkeypatch
+):
+    cache_root = tmp_path / "cache"
+    monkeypatch.setenv("CONTEXTOR_CACHE_DIR", str(cache_root))
+    migrated_repo = tmp_path / "migrated"
+    incomplete_repo = tmp_path / "incomplete"
+    unknown_repo = tmp_path / "unknown"
+    for repo in (migrated_repo, incomplete_repo, unknown_repo):
+        repo.mkdir()
+    migrated = PersistentIdentityRegistry(str(migrated_repo))
+    incomplete = PersistentIdentityRegistry(str(incomplete_repo))
+    migrated_legacy = legacy_repo_cache_dir(migrated_repo)
+    incomplete_legacy = legacy_repo_cache_dir(incomplete_repo)
+    unknown_legacy = legacy_repo_cache_dir(unknown_repo)
+    for directory in (migrated_legacy, incomplete_legacy, unknown_legacy):
+        directory.mkdir(parents=True)
+    current = cache_root / "repositories" / migrated.repo_id
+    current.mkdir(parents=True)
+    (current / "engine_state.meta.json").write_text("{}", encoding="utf-8")
+
+    result = prune_superseded_legacy_repo_caches()
+
+    assert result == {"removed": [migrated_legacy.name], "errors": []}
+    assert not migrated_legacy.exists()
+    assert incomplete_legacy.is_dir()
+    assert unknown_legacy.is_dir()
 
 
 def test_cache_roundtrip(tmp_path, monkeypatch):

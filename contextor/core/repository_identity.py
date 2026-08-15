@@ -94,10 +94,16 @@ def read_repository_identity(
 def registered_repository_ids() -> set[str]:
     """Return IDs backed by valid metadata in Contextor's central registry."""
 
+    return {identity.repo_id for identity in registered_repository_identities()}
+
+
+def registered_repository_identities() -> tuple[RepositoryIdentity, ...]:
+    """Return every valid central identity, including its canonical root path."""
+
     registry_root = _central_root()
     if not registry_root.is_dir():
-        return set()
-    identities = set()
+        return ()
+    identities = []
     for meta_path in registry_root.glob("*__ctx_*/repo.meta.json"):
         try:
             payload = json.loads(meta_path.read_text(encoding="utf-8"))
@@ -105,8 +111,8 @@ def registered_repository_ids() -> set[str]:
             identity = _identity_from_meta(meta_path, root)
         except (OSError, ValueError, TypeError, KeyError, RepositoryIdentityError):
             continue
-        identities.add(identity.repo_id)
-    return identities
+        identities.append(identity)
+    return tuple(identities)
 
 
 def ensure_repository_identity(
