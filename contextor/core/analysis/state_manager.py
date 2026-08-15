@@ -170,20 +170,40 @@ def save_engine_state(
     state_id: str,
     *,
     writer: str = "unknown",
+    repo_id: str = "",
+    root_path: str = "",
 ):
     from contextor.core.live_state import save_snapshot
     try:
-        save_snapshot(state, cache_dir, state_id, writer=writer)
+        save_snapshot(
+            state,
+            cache_dir,
+            state_id,
+            writer=writer,
+            repo_id=repo_id,
+            root_path=root_path,
+        )
         return True
     except Exception as e:
         import sys
         print(f"Failed to save engine state: {e}", file=sys.stderr)
         return False
 
-def load_engine_state(cache_dir: str, expected_state_id: str) -> Optional[RepositoryAnalysisState]:
+def load_engine_state(
+    cache_dir: str,
+    expected_state_id: str,
+    *,
+    expected_repo_id: str = "",
+    expected_root_path: str = "",
+) -> Optional[RepositoryAnalysisState]:
     from contextor.core.live_state import load_snapshot
     try:
-        loaded = load_snapshot(cache_dir, expected_state_id)
+        loaded = load_snapshot(
+            cache_dir,
+            expected_state_id,
+            expected_repo_id=expected_repo_id,
+            expected_root_path=expected_root_path,
+        )
         return loaded[0] if loaded else None
     except Exception as e:
         import sys

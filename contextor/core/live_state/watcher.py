@@ -9,7 +9,49 @@ from pathlib import Path
 from .ipc import LiveStateClient
 
 
-class DesktopLiveWatcher:
+class _PollingLiveWorker:
+    """Shared lifecycle for small, fault-tolerant desktop LIVE pollers.
+
+    Subclasses implement :meth:`poll_once` and may override
+    :meth:`_handle_poll_error`.  The worker intentionally owns no IPC or GUI
+    policy, so the file watcher and MCP event feed retain their distinct
+    behaviour while sharing the threading contract.
+    """
+
+    def __init__(self, *, interval: float, thread_name: str):
+        self.interval = interval
+        self._thread_name = thread_name
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+
+    def poll_once(self) -> object:
+        """Perform one polling iteration."""
+        raise NotImplementedError
+
+    def _handle_poll_error(self, _exc: OSError | RuntimeError | EOFError) -> None:
+        """Keep polling after a transient failure by default."""
+
+    def start(self) -> None:
+        if self._thread and self._thread.is_alive():
+            return
+        self._stop.clear()
+        self._thread = threading.Thread(target=self._run, name=self._thread_name, daemon=True)
+        self._thread.start()
+
+    def _run(self) -> None:
+        while not self._stop.wait(self.interval):
+            try:
+                self.poll_once()
+            except (OSError, RuntimeError, EOFError) as exc:
+                self._handle_poll_error(exc)
+
+    def stop(self) -> None:
+        self._stop.set()
+        if self._thread:
+            self._thread.join(timeout=max(2.0, self.interval * 2))
+
+
+class DesktopLiveWatcher(_PollingLiveWorker):
     def __init__(
         self,
         root: str | Path,
@@ -20,10 +62,8 @@ class DesktopLiveWatcher:
     ):
         self.root = Path(root).resolve()
         self.client = client
-        self.interval = interval
+        super().__init__(interval=interval, thread_name="contextor-live-watcher")
         self.on_status = on_status
-        self._stop = threading.Event()
-        self._thread: threading.Thread | None = None
         self._snapshot = self._scan()
 
     def _emit(self, message: str) -> None:
@@ -75,36 +115,17 @@ class DesktopLiveWatcher:
         self._snapshot = current
         return changed
 
-    def start(self) -> None:
-        if self._thread and self._thread.is_alive():
-            return
-        self._stop.clear()
-        self._thread = threading.Thread(target=self._run, name="contextor-live-watcher", daemon=True)
-        self._thread.start()
-
-    def _run(self) -> None:
-        while not self._stop.wait(self.interval):
-            try:
-                self.poll_once()
-            except (OSError, RuntimeError, EOFError) as exc:
-                self._emit(f"LIVE connection error: {exc}")
-                continue
-
-    def stop(self) -> None:
-        self._stop.set()
-        if self._thread:
-            self._thread.join(timeout=max(2.0, self.interval * 2))
+    def _handle_poll_error(self, exc: OSError | RuntimeError | EOFError) -> None:
+        self._emit(f"LIVE connection error: {exc}")
 
 
-class DesktopLiveEventFeed:
+class DesktopLiveEventFeed(_PollingLiveWorker):
     """Forward queued MCP-origin LIVE events to the desktop status callback."""
 
     def __init__(self, client: LiveStateClient, on_status: Callable[[str], None], *, interval: float = 0.75):
         self.client = client
         self.on_status = on_status
-        self.interval = interval
-        self._stop = threading.Event()
-        self._thread: threading.Thread | None = None
+        super().__init__(interval=interval, thread_name="contextor-live-event-feed")
         self._revision = int(client.ping().get("revision", 0))
 
     def _message(self, event: dict) -> str | None:
@@ -125,22 +146,3 @@ class DesktopLiveEventFeed:
             if message:
                 self.on_status(message)
         self._revision = int(response.get("revision", self._revision))
-
-    def start(self) -> None:
-        if self._thread and self._thread.is_alive():
-            return
-        self._stop.clear()
-        self._thread = threading.Thread(target=self._run, name="contextor-live-event-feed", daemon=True)
-        self._thread.start()
-
-    def _run(self) -> None:
-        while not self._stop.wait(self.interval):
-            try:
-                self.poll_once()
-            except (OSError, RuntimeError, EOFError):
-                continue
-
-    def stop(self) -> None:
-        self._stop.set()
-        if self._thread:
-            self._thread.join(timeout=max(2.0, self.interval * 2))

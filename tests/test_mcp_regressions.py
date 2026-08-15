@@ -22,6 +22,7 @@ from contextor.core.analysis.state_manager import (
     load_engine_state,
 )
 from contextor.core.report_query import IndexCatalog, query_indexed_report
+from contextor.core.reporting_engine.persistent_registry import PersistentIdentityRegistry
 from contextor.core.symbol_engine.extractor import extract_file_symbols
 
 
@@ -535,7 +536,8 @@ def test_incremental_live_state_persistence_roundtrips_for_restart(
     tmp_path, monkeypatch
 ):
     cache_root = tmp_path / "cache"
-    monkeypatch.setattr(mcp_server, "_mcp_cache_root", lambda _root: cache_root)
+    monkeypatch.setenv("CONTEXTOR_CACHE_DIR", str(cache_root))
+    registry = PersistentIdentityRegistry(str(tmp_path))
     state = RepositoryAnalysisState(
         modules={},
         artifacts={"new.module": {"symbols": {"functions": ["run"]}}},
@@ -551,10 +553,13 @@ def test_incremental_live_state_persistence_roundtrips_for_restart(
 
     persisted = mcp_server._persist_live_engine(tmp_path, engine)
 
-    from contextor.core.paths import repo_key
+    from contextor.core.paths import repo_cache_dir
 
     loaded = load_engine_state(
-        str(cache_root / repo_key(tmp_path)), "after-incremental-update"
+        str(repo_cache_dir(tmp_path)),
+        "after-incremental-update",
+        expected_repo_id=registry.repo_id,
+        expected_root_path=tmp_path,
     )
     assert persisted is True
     assert loaded is not None

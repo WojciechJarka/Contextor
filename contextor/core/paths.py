@@ -15,6 +15,7 @@ Rules enforced here:
 
 import hashlib
 import os
+import shutil
 from pathlib import Path
 
 # ==========================================================
@@ -30,6 +31,12 @@ def package_root() -> Path:
     """
 
     return Path(__file__).resolve().parents[2]
+
+
+def repository_registry_root() -> Path:
+    """Central identity registry owned by Contextor, never an analyzed repo."""
+
+    return _env_dir("CONTEXTOR_REGISTRY_DIR") or package_root() / ".contextor" / "repositories"
 
 
 # ==========================================================
@@ -176,10 +183,52 @@ def repo_key(root_path: str | Path) -> str:
 
 def repo_cache_dir(root_path: str | Path) -> Path:
     """
-    Cache directory dedicated to one analyzed repository.
+    Cache directory dedicated to one analyzed repository identity.
+
+    Registered repositories use their durable ``repo_id``. Before the first
+    registration, callers retain the legacy path-derived cache location.
     """
 
+    from contextor.core.repository_identity import read_repository_identity
+
+    identity = read_repository_identity(root_path)
+    if identity is not None:
+        return app_cache_dir() / "repositories" / identity.repo_id
+    return legacy_repo_cache_dir(root_path)
+
+
+def legacy_repo_cache_dir(root_path: str | Path) -> Path:
+    """Pre-identity cache location retained only for safe migration."""
+
     return app_cache_dir() / repo_key(root_path)
+
+
+def prune_orphaned_repository_caches() -> dict[str, list[str]]:
+    """Remove repo-ID caches that no longer have a central identity record."""
+
+    from contextor.core.repository_identity import registered_repository_ids
+
+    cache_root = app_cache_dir() / "repositories"
+    result = {"removed": [], "errors": []}
+    if not cache_root.is_dir():
+        return result
+    registered = registered_repository_ids()
+    resolved_root = cache_root.resolve()
+    for candidate in cache_root.iterdir():
+        if not candidate.is_dir() or not candidate.name.startswith("ctx_"):
+            continue
+        if candidate.name in registered:
+            continue
+        resolved_candidate = candidate.resolve()
+        if resolved_candidate.parent != resolved_root:
+            result["errors"].append(f"unsafe cache path: {resolved_candidate}")
+            continue
+        try:
+            shutil.rmtree(resolved_candidate)
+            result["removed"].append(candidate.name)
+        except OSError as exc:
+            result["errors"].append(f"{candidate.name}: {exc}")
+    return result
 
 
 # ==========================================================

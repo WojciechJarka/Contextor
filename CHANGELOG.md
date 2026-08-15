@@ -1,3 +1,18 @@
+## [1.2.0-beta Patch — Central repository identities] - 2026-08-14
+
+- Moved creation and lookup of persistent identity dictionaries to Contextor's
+  central `.contextor/repositories/` directory. Analyzed repositories are no
+  longer modified to hold registries or `.gitignore` entries.
+- Namespaced every registry directory as `<repo_name>__<repo_id>` and resolved
+  identities by the canonical `root_path` stored in `repo.meta.json`.
+- Bound AppData LIVE snapshots to durable repository IDs and added GUI-startup
+  cleanup for orphaned `ctx_*` cache directories whose IDs no longer exist in
+  the central registry.
+- Added per-repository desktop LIVE watchers so changing the GUI root preserves
+  updates for repositories already watched in the current desktop session.
+- Full, layer and single-file analysis now initialize the same central identity;
+  scoped analysis success refreshes the permanent Repo ID shown by the GUI.
+
 ## [1.2.0-beta Patch — Parts II–IV] - 2026-08-13
 
 ### Part II — Reliable reporting and persistent identities

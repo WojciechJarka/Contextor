@@ -121,6 +121,10 @@ def test_each_repository_has_separate_directory_and_repo_meta_json(tmp_path):
     meta_a = json.loads((reg_a.registry_dir / "repo.meta.json").read_text(encoding="utf-8"))
     meta_b = json.loads((reg_b.registry_dir / "repo.meta.json").read_text(encoding="utf-8"))
     assert meta_a["repo_id"] != meta_b["repo_id"]
+    assert reg_a.registry_dir.name == f"RepoA__{reg_a.repo_id}"
+    assert reg_b.registry_dir.name == f"RepoB__{reg_b.repo_id}"
+    assert not (repo_a / ".contextor").exists()
+    assert not (repo_b / ".contextor").exists()
 
     modules_a = json.loads((reg_a.registry_dir / "module_registry.json").read_text(encoding="utf-8"))
     modules_b = json.loads((reg_b.registry_dir / "module_registry.json").read_text(encoding="utf-8"))

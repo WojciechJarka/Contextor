@@ -213,12 +213,14 @@ represent the latest run; timestamped subfolders are suitable for comparisons.
 
 # Files Contextor Writes
 
-Contextor writes reports externally, but maintains a lightweight, git-ignored registry inside the analyzed repository for stable ID management:
+Contextor keeps analyzed repositories read-only. Stable identity dictionaries
+live in the installation-owned central registry, with one directory per root and
+repository ID (for example `MyRepo__ctx_1234abcd`).
 
 | Location | Contents | Override |
 |---|---|---|
 | `output/` next to the installation | Generated reports | `CONTEXTOR_OUTPUT_DIR` |
-| `.contextor/` inside the analyzed repository | Persistent Identity Registry (automatically added to `.gitignore`) | N/A |
+| `.contextor/repositories/<repo_name>__<repo_id>/` next to the installation | Central Persistent Identity Registry | `CONTEXTOR_REGISTRY_DIR` |
 | User cache directory | Parse and graph caches, keyed per repository | `CONTEXTOR_CACHE_DIR` |
 | User config directory | GUI state, exclude configuration | `CONTEXTOR_STATE_DIR` |
 

@@ -14,6 +14,11 @@ from tkinter import filedialog, messagebox, ttk
 
 from contextor.core.api.facade import ContextorFacade
 from contextor.core.live_state import DesktopLiveEventFeed, DesktopLiveWatcher, connect_or_start
+from contextor.core.repository_identity import (
+    RepositoryIdentityError,
+    read_repository_identity,
+)
+from contextor.core.paths import prune_orphaned_repository_caches
 from contextor.repo_generator import run_repo_generator
 from contextor.ui import theme
 from contextor.ui.exclude_check import check_stale_excludes
@@ -75,9 +80,16 @@ class ContextorGUI:
         self.parser_win = None
         self.live_watcher = None
         self.live_event_feed = None
+        self.live_watchers = {}
+        self.live_event_feeds = {}
         self.live_status_var = tk.StringVar(value="LIVE: waiting for analysis")
+        self.repo_id_var = tk.StringVar(value="Repo ID: unregistered")
         self._live_status_queue: Queue[str] = Queue()
         self._live_status_draining = False
+
+        cache_cleanup = prune_orphaned_repository_caches()
+        if cache_cleanup["errors"]:
+            self.live_status_var.set("LIVE: cache cleanup incomplete")
 
         self._check_stale_excludes()
         self._build_ui()
@@ -281,6 +293,17 @@ class ContextorGUI:
             self.live_status_label,
             "LIVE status bar: desktop watcher activity and the latest shared canonical LIVE update.",
         )
+        self.repo_id_label = ttk.Label(
+            live_status_row,
+            textvariable=self.repo_id_var,
+            style="Cpu.TLabel",
+            anchor="e",
+        )
+        self.repo_id_label.grid(row=0, column=1, sticky="e", padx=(PAD_MD, 0))
+        self.tooltip.bind_tooltip(
+            self.repo_id_label,
+            "Durable repository ID binding the selected root, registry, snapshots and canonical LIVE state.",
+        )
 
         project_section = ttk.Labelframe(
             self.container, text="Project", padding=(PAD_MD, PAD_SM, PAD_MD, PAD_MD)
@@ -463,6 +486,7 @@ class ContextorGUI:
             self.repo_path_var.set(directory)
             self.layer_path_var.set("")
             save_state(repository=directory)
+            self._start_live_watcher(directory)
 
     def browse_layer(self):
         root_dir = self.repo_path_var.get()
@@ -664,32 +688,70 @@ class ContextorGUI:
         self.root.after(1250, next_message)
 
     def _start_live_watcher(self, path):
-        """Connect desktop to the shared LIVE owner and watch this repository."""
-
-        if self.live_watcher:
-            self.live_watcher.stop()
-        if getattr(self, "live_event_feed", None):
-            self.live_event_feed.stop()
+        """Connect and retain one independent LIVE watcher per repository ID."""
         try:
+            identity = ContextorGUI._refresh_repo_identity(self, path)
+        except RepositoryIdentityError as exc:
+            self._set_live_status(f"LIVE identity error: {exc}")
+            return
+        if identity is None:
+            self._set_live_status("LIVE: repository not registered; run an analysis")
+            return
+        watchers = getattr(self, "live_watchers", None)
+        if watchers is None:
+            watchers = self.live_watchers = {}
+        feeds = getattr(self, "live_event_feeds", None)
+        if feeds is None:
+            feeds = self.live_event_feeds = {}
+        try:
+            from contextor.core.live_state import migrate_legacy_snapshot
+
+            cache = migrate_legacy_snapshot(path)
             client = connect_or_start(path)
-        except (OSError, EOFError, RuntimeError, TimeoutError) as exc:
+        except (OSError, EOFError, RuntimeError, TimeoutError, RepositoryIdentityError) as exc:
             self._set_live_status(f"LIVE connection error: {exc}")
             return
         from contextor.core.analysis.state_manager import load_engine_state
-        from contextor.core.paths import repo_cache_dir
 
-        state = load_engine_state(str(repo_cache_dir(path)), "")
+        state = load_engine_state(
+            str(cache),
+            "",
+            expected_repo_id=identity.repo_id,
+            expected_root_path=identity.root_path,
+        )
         if state is not None:
             client.publish(state, origin="desktop_analysis")
             self._set_live_status("LIVE: shared state published; watcher active")
         else:
             self._set_live_status("LIVE: no snapshot; waiting for analysis")
-        self.live_watcher = DesktopLiveWatcher(
-            path, client, on_status=self._set_live_status
-        )
-        self.live_event_feed = DesktopLiveEventFeed(client, self._set_live_status)
+        existing_watcher = watchers.get(identity.repo_id)
+        if existing_watcher is not None:
+            self.live_watcher = existing_watcher
+            self.live_event_feed = feeds.get(identity.repo_id)
+            return
+
+        def status_callback(message, name=identity.repo_name):
+            self._set_live_status(f"[{name}] {message}")
+
+        self.live_watcher = DesktopLiveWatcher(path, client, on_status=status_callback)
+        self.live_event_feed = DesktopLiveEventFeed(client, status_callback)
+        watchers[identity.repo_id] = self.live_watcher
+        feeds[identity.repo_id] = self.live_event_feed
         self.live_watcher.start()
         self.live_event_feed.start()
+
+    def _refresh_repo_identity(self, path):
+        """Refresh the permanent repository identity shown beside LIVE status."""
+
+        try:
+            identity = read_repository_identity(path)
+        except RepositoryIdentityError:
+            self.repo_id_var.set("Repo ID: invalid")
+            raise
+        self.repo_id_var.set(
+            f"Repo ID: {identity.repo_id}" if identity else "Repo ID: unregistered"
+        )
+        return identity
 
     def analyze_layer(self):
         root_dir = self.repo_path_var.get()
@@ -728,6 +790,7 @@ class ContextorGUI:
             )
 
         def on_success(output_pattern):
+            self._start_live_watcher(str(root_resolved))
             messagebox.showinfo("Done", f"Generated 5 layer reports:\n{output_pattern}")
 
         def on_error(exc):
@@ -766,6 +829,7 @@ class ContextorGUI:
             )
 
         def on_success(output):
+            self._start_live_watcher(repo_root)
             messagebox.showinfo("Done", f"Single file report created:\n{output}")
 
         def on_error(exc):
@@ -794,10 +858,12 @@ class ContextorGUI:
     def on_closing(self):
         import re
 
-        if self.live_watcher:
-            self.live_watcher.stop()
-        if self.live_event_feed:
-            self.live_event_feed.stop()
+        watchers = list(getattr(self, "live_watchers", {}).values())
+        feeds = list(getattr(self, "live_event_feeds", {}).values())
+        for watcher in watchers:
+            watcher.stop()
+        for feed in feeds:
+            feed.stop()
 
         geom = self.root.geometry()
         m = re.match(r"^(\d+x\d+)([+-]?\d+)([+-]?\d+)$", geom.replace("+-", "-"))

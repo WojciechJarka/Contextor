@@ -23,6 +23,7 @@ def isolated_dirs(tmp_path, monkeypatch):
         ("CONTEXTOR_CACHE_DIR", "cache"),
         ("CONTEXTOR_STATE_DIR", "state"),
         ("CONTEXTOR_OUTPUT_DIR", "output"),
+        ("CONTEXTOR_REGISTRY_DIR", "registries"),
     ):
         monkeypatch.setenv(variable, str(tmp_path / name))
 
@@ -39,8 +40,17 @@ def isolate_live_test_artifacts(request, tmp_path, monkeypatch):
         ("CONTEXTOR_CACHE_DIR", "live-cache"),
         ("CONTEXTOR_STATE_DIR", "live-state"),
         ("CONTEXTOR_OUTPUT_DIR", "live-output"),
+        ("CONTEXTOR_REGISTRY_DIR", "live-registries"),
     ):
         monkeypatch.setenv(variable, str(tmp_path / name))
+
+
+@pytest.fixture(autouse=True)
+def isolate_central_registry(tmp_path, monkeypatch):
+    """No test may write repository identities into Contextor's real registry."""
+
+    if "CONTEXTOR_REGISTRY_DIR" not in __import__("os").environ:
+        monkeypatch.setenv("CONTEXTOR_REGISTRY_DIR", str(tmp_path / "registries"))
 
 
 @pytest.fixture

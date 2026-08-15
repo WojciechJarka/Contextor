@@ -23,15 +23,18 @@ from contextor.ui.progress_widget import create_progress_bar, run_with_progress
 from contextor.ui.theme import PAD_LG, PAD_MD, PAD_SM, HeaderTooltipManager
 
 def find_contextor_registry(repo_path):
-    """Finds .contextor directory inside the specified repo_path and returns registry paths."""
-    contextor_dir = os.path.join(repo_path, ".contextor")
-    if os.path.isdir(contextor_dir):
-        mod_reg = os.path.join(contextor_dir, "module_registry.json")
-        art_reg = os.path.join(contextor_dir, "artifact_registry.json")
-        if os.path.exists(mod_reg) and os.path.exists(art_reg):
-            return mod_reg, art_reg
-            
-    raise Exception(f"Could not find valid .contextor directory with registries in {repo_path}")
+    """Resolve one repository's dictionaries from Contextor's central registry."""
+
+    from contextor.core.repository_identity import registry_meta_path
+
+    meta_path = registry_meta_path(repo_path)
+    if meta_path is not None:
+        mod_reg = meta_path.parent / "module_registry.json"
+        art_reg = meta_path.parent / "artifact_registry.json"
+        if mod_reg.is_file() and art_reg.is_file():
+            return str(mod_reg), str(art_reg)
+
+    raise Exception(f"Could not find central Contextor registries for {repo_path}")
 
 
 def rewrite_index_to_text(json_path, repo_path, output_dir="output"):

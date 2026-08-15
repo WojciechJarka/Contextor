@@ -9,7 +9,7 @@ from contextor import mcp_server
 from contextor.core.analysis.incremental_engine import IncrementalAnalysisEngine
 from contextor.core.analysis.state_manager import FileStateManager, RepositoryAnalysisState
 from contextor.core.graph.graph import build_graph, build_trie, detect_package_root
-from contextor.core.paths import repo_key
+from contextor.core.paths import repo_cache_dir
 from contextor.core.reporting_engine.persistent_registry import PersistentIdentityRegistry
 from contextor.core.reporting_layer.artifact_usage_report import (
     collect_module_artifacts,
@@ -81,11 +81,11 @@ def test_update_persist_restart_hydrate_keeps_live_reverse_context(tmp_path, mon
             set(modules), collect_qualified_artifact_identities(artifacts)
         )
     cache_root = tmp_path / "cache"
-    cache_dir = cache_root / repo_key(repo)
+    monkeypatch.setenv("CONTEXTOR_CACHE_DIR", str(cache_root))
+    cache_dir = repo_cache_dir(repo)
     state_manager = FileStateManager(str(cache_dir))
     state_manager.update_state(str(provider))
     engine = IncrementalAnalysisEngine(state, registry, state_manager, str(repo))
-    monkeypatch.setattr(mcp_server, "_mcp_cache_root", lambda _root: cache_root)
     monkeypatch.setattr(mcp_server, "_live_engines", {str(repo.resolve()): engine})
 
     graph_report = tmp_path / "graph.json"

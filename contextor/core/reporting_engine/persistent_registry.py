@@ -12,20 +12,13 @@ class PersistentIdentityRegistry:
     SCHEMA_VERSION = 1
 
     def __init__(self, repo_path: str):
-        self.repo_path = Path(repo_path)
-        self.contextor_dir = self.repo_path / ".contextor"
+        self.repo_path = Path(repo_path).expanduser().resolve()
+        from contextor.core.repository_identity import ensure_repository_identity
 
-        # Persistent state is isolated per analyzed repository.
-        self.registry_dir = (
-            self.contextor_dir
-            / "repositories"
-            / self.repo_path.name
-        )
-        self.registry_dir.mkdir(parents=True, exist_ok=True)
-        self._ensure_gitignore()
+        identity, self.registry_dir = ensure_repository_identity(self.repo_path)
+        self.repo_id = identity.repo_id
 
         self.meta_file = self.registry_dir / "repo.meta.json"
-        self._init_meta()
 
         self.lock_file = self.registry_dir / ".lock"
         self.transaction_file = self.registry_dir / "transaction.tmp"
@@ -46,41 +39,6 @@ class PersistentIdentityRegistry:
 
         self._recover_transaction()
         self._load_all()
-
-    def _ensure_gitignore(self):
-        gitignore = self.repo_path / ".gitignore"
-        entry = ".contextor/\n"
-
-        if gitignore.exists():
-            content = gitignore.read_text(encoding="utf-8")
-
-            if ".contextor" not in content:
-                with open(gitignore, "a", encoding="utf-8") as f:
-                    if not content.endswith("\n"):
-                        f.write("\n")
-                    f.write(entry)
-        else:
-            gitignore.write_text(entry, encoding="utf-8")
-
-    def _init_meta(self):
-        if not self.meta_file.exists():
-            data = {
-                "schema_version": self.SCHEMA_VERSION,
-                "repo_id": f"ctx_{uuid.uuid4().hex[:8]}",
-                "repo_name": self.repo_path.name,
-                "root_path": str(self.repo_path.absolute()),
-                "created_at": datetime.datetime.now().isoformat(),
-            }
-            self.meta_file.write_text(
-                json.dumps(data, indent=2),
-                encoding="utf-8",
-            )
-        else:
-            data = json.loads(
-                self.meta_file.read_text(encoding="utf-8")
-            )
-
-        self.repo_id = data["repo_id"]
 
     def _lock(self):
         self._lock_file_obj = open(self.lock_file, "w")
@@ -157,6 +115,14 @@ class PersistentIdentityRegistry:
         }
         self._repair_kind("module")
         self._repair_kind("artifact")
+
+    def ensure_initialized(self) -> None:
+        """Persist the complete dictionary set once for a new repository."""
+
+        if all(path.is_file() for path in self.files.values()):
+            return
+        with self.transaction():
+            pass
 
     def _repair_kind(self, kind: str) -> None:
         """Repair one-sided registry mappings loaded from older/corrupt state."""

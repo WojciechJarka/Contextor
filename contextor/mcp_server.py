@@ -619,13 +619,21 @@ def _get_or_init_engine(root: Path):
     if not engine:
         from contextor.core.analysis.state_manager import load_engine_state, FileStateManager
         from contextor.core.analysis.incremental_engine import IncrementalAnalysisEngine
-        from contextor.core.live_state import read_metadata
-        from contextor.core.paths import repo_key
+        from contextor.core.live_state import migrate_legacy_snapshot, read_metadata
+        from contextor.core.repository_identity import read_repository_identity
         from contextor.core.reporting_engine.persistent_registry import PersistentIdentityRegistry
-        
-        cache_dir = str(_mcp_cache_root(root) / repo_key(root))
+
+        identity = read_repository_identity(root)
+        if identity is None:
+            return None
+        cache_dir = str(migrate_legacy_snapshot(root))
         metadata = read_metadata(cache_dir)
-        state = load_engine_state(cache_dir, metadata.state_id if metadata else "")
+        state = load_engine_state(
+            cache_dir,
+            metadata.state_id if metadata else "",
+            expected_repo_id=identity.repo_id,
+            expected_root_path=identity.root_path,
+        )
         if state:
             state_mgr = FileStateManager(cache_dir)
             registry = PersistentIdentityRegistry(str(root))
@@ -638,9 +646,11 @@ def _persist_live_engine(root: Path, engine) -> bool:
     """Persist incremental canonical state so the next MCP process can hydrate it."""
 
     from contextor.core.analysis.state_manager import save_engine_state
-    from contextor.core.paths import repo_key
+    from contextor.core.paths import repo_cache_dir
+    from contextor.core.repository_identity import require_repository_identity
 
-    cache_dir = _mcp_cache_root(root) / repo_key(root)
+    identity = require_repository_identity(root)
+    cache_dir = repo_cache_dir(root)
     cache_dir.mkdir(parents=True, exist_ok=True)
     return bool(
         save_engine_state(
@@ -648,6 +658,8 @@ def _persist_live_engine(root: Path, engine) -> bool:
             str(cache_dir),
             getattr(engine.state_manager, "state_id", ""),
             writer="mcp",
+            repo_id=identity.repo_id,
+            root_path=identity.root_path,
         )
     )
 

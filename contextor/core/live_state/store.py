@@ -5,13 +5,14 @@ from __future__ import annotations
 import json
 import os
 import pickle
+import shutil
 import time
 import uuid
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
-SCHEMA_VERSION = "1.1"
+SCHEMA_VERSION = "1.2"
 
 
 @dataclass(frozen=True)
@@ -20,6 +21,8 @@ class LiveStateMetadata:
     state_id: str = ""
     revision: int = 0
     writer: str = "unknown"
+    repo_id: str = ""
+    root_path: str = ""
 
 
 def _paths(cache_dir: str | Path) -> tuple[Path, Path, Path]:
@@ -33,12 +36,15 @@ def read_metadata(cache_dir: str | Path) -> LiveStateMetadata | None:
     _, meta_file, _ = _paths(cache_dir)
     try:
         payload = json.loads(meta_file.read_text(encoding="utf-8"))
-        if payload.get("schema_version") not in {"1.0", SCHEMA_VERSION}:
+        if payload.get("schema_version") not in {"1.0", "1.1", SCHEMA_VERSION}:
             return None
         return LiveStateMetadata(
+            schema_version=str(payload.get("schema_version", "1.0")),
             state_id=str(payload.get("state_id", "")),
             revision=int(payload.get("revision", 0)),
             writer=str(payload.get("writer", "legacy")),
+            repo_id=str(payload.get("repo_id", "")),
+            root_path=str(payload.get("root_path", "")),
         )
     except (OSError, ValueError, TypeError):
         return None
@@ -67,6 +73,9 @@ def save_snapshot(
     state_id: str,
     *,
     writer: str = "unknown",
+    repo_id: str = "",
+    root_path: str = "",
+    revision_floor: int = 0,
 ) -> LiveStateMetadata:
     """Atomically publish a complete snapshot and monotonically increasing revision."""
 
@@ -78,10 +87,24 @@ def save_snapshot(
     meta_tmp = meta_file.with_name(f".{meta_file.name}.{token}.tmp")
     try:
         current = read_metadata(cache_dir)
+        normalized_root = (
+            str(Path(root_path).expanduser().resolve()) if root_path else ""
+        )
+        if current and repo_id and current.repo_id and current.repo_id != repo_id:
+            raise ValueError("Snapshot repository ID does not match existing metadata.")
+        if (
+            current
+            and normalized_root
+            and current.root_path
+            and Path(current.root_path).expanduser().resolve() != Path(normalized_root)
+        ):
+            raise ValueError("Snapshot repository root does not match existing metadata.")
         metadata = LiveStateMetadata(
             state_id=state_id,
-            revision=(current.revision if current else 0) + 1,
+            revision=max(current.revision if current else 0, revision_floor) + 1,
             writer=writer,
+            repo_id=repo_id,
+            root_path=normalized_root,
         )
         with state_tmp.open("wb") as stream:
             pickle.dump({"metadata": asdict(metadata), "state": state}, stream)
@@ -107,12 +130,27 @@ def save_snapshot(
 def load_snapshot(
     cache_dir: str | Path,
     expected_state_id: str = "",
+    *,
+    expected_repo_id: str = "",
+    expected_root_path: str = "",
 ) -> tuple[Any, LiveStateMetadata] | None:
     """Load one complete published snapshot, rejecting incompatible identities."""
 
     state_file, _, _ = _paths(cache_dir)
     metadata = read_metadata(cache_dir)
+    normalized_root = (
+        str(Path(expected_root_path).expanduser().resolve())
+        if expected_root_path
+        else ""
+    )
     if metadata is None or (expected_state_id and metadata.state_id != expected_state_id):
+        return None
+    if expected_repo_id and metadata.repo_id != expected_repo_id:
+        return None
+    if normalized_root and (
+        not metadata.root_path
+        or Path(metadata.root_path).expanduser().resolve() != Path(normalized_root)
+    ):
         return None
     try:
         with state_file.open("rb") as stream:
@@ -120,13 +158,53 @@ def load_snapshot(
         if isinstance(payload, dict) and set(payload) == {"metadata", "state"}:
             embedded = payload["metadata"]
             embedded_metadata = LiveStateMetadata(
+                schema_version=str(embedded.get("schema_version", "1.0")),
                 state_id=str(embedded.get("state_id", "")),
                 revision=int(embedded.get("revision", 0)),
                 writer=str(embedded.get("writer", "unknown")),
+                repo_id=str(embedded.get("repo_id", "")),
+                root_path=str(embedded.get("root_path", "")),
             )
-            if expected_state_id and embedded_metadata.state_id != expected_state_id:
+            if embedded_metadata != metadata:
                 return None
             return payload["state"], embedded_metadata
         return payload, metadata
     except (OSError, pickle.PickleError, EOFError):
         return None
+
+
+def migrate_legacy_snapshot(repo_root: str | Path) -> Path:
+    """Copy a verified path-keyed snapshot into its repo-ID cache directory."""
+
+    from contextor.core.paths import legacy_repo_cache_dir, repo_cache_dir
+    from contextor.core.repository_identity import require_repository_identity
+
+    root = Path(repo_root).expanduser().resolve()
+    identity = require_repository_identity(root)
+    target = repo_cache_dir(root)
+    if read_metadata(target) is not None:
+        return target
+
+    legacy = legacy_repo_cache_dir(root)
+    if legacy == target:
+        return target
+    loaded = load_snapshot(legacy)
+    if loaded is None:
+        return target
+
+    state, metadata = loaded
+    save_snapshot(
+        state,
+        target,
+        metadata.state_id,
+        writer=f"migration:{metadata.writer}",
+        repo_id=identity.repo_id,
+        root_path=identity.root_path,
+        revision_floor=metadata.revision,
+    )
+    legacy_file_state = legacy / "file_state.json"
+    target_file_state = target / "file_state.json"
+    if legacy_file_state.is_file() and not target_file_state.exists():
+        target_file_state.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(legacy_file_state, target_file_state)
+    return target

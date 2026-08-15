@@ -11,9 +11,10 @@ import time
 from pathlib import Path
 
 from contextor.core.paths import repo_cache_dir
+from contextor.core.repository_identity import require_repository_identity
 
 from .ipc import CanonicalLiveServer, LIVE_PROTOCOL_VERSION, LiveEndpoint, LiveStateClient
-from .store import load_snapshot, read_metadata, save_snapshot
+from .store import load_snapshot, migrate_legacy_snapshot, read_metadata, save_snapshot
 
 
 def endpoint_file(repo_path: str | Path) -> Path:
@@ -109,6 +110,7 @@ def connect_or_start(repo_path: str | Path, *, timeout: float = 10.0) -> LiveSta
 
 
 def _repository_updater(root: Path):
+    identity = require_repository_identity(root)
     cache = repo_cache_dir(root)
 
     def update(state, file_path: str):
@@ -130,6 +132,8 @@ def _repository_updater(root: Path):
             cache,
             getattr(manager, "state_id", ""),
             writer="live-service",
+            repo_id=identity.repo_id,
+            root_path=identity.root_path,
         )
         return delta
 
@@ -138,8 +142,13 @@ def _repository_updater(root: Path):
 
 def run_service(repo_path: str | Path) -> None:
     root = Path(repo_path).resolve()
-    cache = repo_cache_dir(root)
-    loaded = load_snapshot(cache)
+    identity = require_repository_identity(root)
+    cache = migrate_legacy_snapshot(root)
+    loaded = load_snapshot(
+        cache,
+        expected_repo_id=identity.repo_id,
+        expected_root_path=identity.root_path,
+    )
     state = loaded[0] if loaded else None
     revision = (read_metadata(cache).revision if read_metadata(cache) else 0)
     server = CanonicalLiveServer(

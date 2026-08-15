@@ -27,6 +27,9 @@ from contextor.core.reporting_engine.generators import (
 )
 from contextor.core.reporting_engine.header import build_report_header
 from contextor.core.reporting_engine.pipeline import execute_global_pipeline
+from contextor.core.reporting_engine.persistent_registry import (
+    PersistentIdentityRegistry,
+)
 
 from contextor.core.reporting_layer.artifact_usage_report import generate_artifact_usage_report
 from contextor.core.reporting_layer.artifact_usage_report_compact import compact_artifact_report
@@ -187,6 +190,18 @@ def _log_skipped(skipped, log) -> None:
         log(f"  … and {len(skipped) - 10} more (see the report)")
 
 
+def _initialize_repository_identity(repo_root: str | Path) -> PersistentIdentityRegistry:
+    """Persist a repository identity before any analysis pipeline starts."""
+
+    root = Path(repo_root).expanduser().resolve()
+    if not root.is_dir():
+        raise ValueError(f"Repository root does not exist: {root}")
+
+    registry = PersistentIdentityRegistry(str(root))
+    registry.ensure_initialized()
+    return registry
+
+
 class ContextorFacade:
     """
     Main entry point for executing static analysis workflows.
@@ -213,6 +228,8 @@ class ContextorFacade:
         Returns:
             list: List of architectural validation errors, if any.
         """
+        registry = _initialize_repository_identity(path)
+        path = str(registry.repo_path.resolve())
         reset_caches()
 
         if log:
@@ -300,6 +317,8 @@ class ContextorFacade:
                 str(repo_cache_dir(path)),
                 datestamp,
                 writer="desktop",
+                repo_id=registry.repo_id,
+                root_path=path,
             )
 
         return errors, analysis_result
@@ -318,6 +337,7 @@ class ContextorFacade:
         repo_name = root_resolved.name
         layer_name = layer_resolved.name
 
+        registry = _initialize_repository_identity(root_resolved)
         reset_caches()
 
         if log:
@@ -364,9 +384,7 @@ class ContextorFacade:
             modules, str(root_resolved), runtime, progress_callback=progress_callback
         )
         
-        from contextor.core.reporting_engine.persistent_registry import PersistentIdentityRegistry
         from contextor.core.reporting_engine.dictionary import IndexDictionary
-        registry = PersistentIdentityRegistry(str(root_resolved))
         
         with registry.transaction():
             index_dict = IndexDictionary(registry)
@@ -430,6 +448,8 @@ class ContextorFacade:
         additional_excludes: list[str] | None = None,
     ) -> str:
         """Analyzes a single file within the context of a project. Returns report output path."""
+        registry = _initialize_repository_identity(repo_root)
+        repo_root = str(registry.repo_path.resolve())
         reset_caches()
 
         file = Path(file_path)
@@ -464,9 +484,7 @@ class ContextorFacade:
         datestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
         from contextor.core.reporting_engine.dictionary import IndexDictionary
-        from contextor.core.reporting_engine.persistent_registry import PersistentIdentityRegistry
-        
-        registry = PersistentIdentityRegistry(repo_root)
+
         with registry.transaction():
             index_dict = IndexDictionary(registry)
             report = generate_single_file_report(ctx, len(modules), index_dict=index_dict)

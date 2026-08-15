@@ -6,9 +6,15 @@ from types import SimpleNamespace
 
 import pytest
 
-from contextor.core.live_state import CanonicalLiveServer, DesktopLiveWatcher, LiveStateClient
+from contextor.core.live_state import (
+    CanonicalLiveServer,
+    DesktopLiveEventFeed,
+    DesktopLiveWatcher,
+    LiveStateClient,
+)
 from contextor.core.live_state.ipc import LIVE_PROTOCOL_VERSION
 from contextor.core.live_state.runtime import connect_or_start, endpoint_file
+from contextor.core.reporting_engine.persistent_registry import PersistentIdentityRegistry
 
 pytestmark = pytest.mark.live
 
@@ -88,6 +94,43 @@ def test_live_events_preserve_desktop_origin_and_syntax_diagnostic(live_server):
         "line_number": 2,
         "column_number": 9,
     }]
+
+
+def test_desktop_event_feed_forwards_only_mcp_status_messages(live_server):
+    _server, client = live_server
+    statuses = []
+    feed = DesktopLiveEventFeed(client, statuses.append)
+
+    client.status("MCP: reading symbol demo", origin="mcp")
+    client.status("desktop-only", origin="desktop_watcher")
+    client.publish({"ready": True}, origin="mcp_analysis")
+    feed.poll_once()
+
+    assert statuses == [
+        "MCP: reading symbol demo",
+        "MCP: analysis published shared LIVE state",
+    ]
+
+
+def test_desktop_event_feed_background_worker_starts_and_stops(live_server):
+    _server, client = live_server
+    delivered = threading.Event()
+    statuses = []
+
+    def receive(message):
+        statuses.append(message)
+        delivered.set()
+
+    feed = DesktopLiveEventFeed(client, receive, interval=0.01)
+    try:
+        feed.start()
+        client.status("MCP: background status", origin="mcp")
+        assert delivered.wait(timeout=1)
+        assert statuses == ["MCP: background status"]
+    finally:
+        feed.stop()
+    assert feed._thread is not None
+    assert not feed._thread.is_alive()
 
 
 def test_invalid_and_unavailable_operations_return_structured_errors():
@@ -215,6 +258,7 @@ def test_real_service_process_starts_connects_and_stops(tmp_path, monkeypatch):
     cache = tmp_path / "cache"
     repo = tmp_path / "repo"
     repo.mkdir()
+    PersistentIdentityRegistry(str(repo))
     monkeypatch.setenv("CONTEXTOR_CACHE_DIR", str(cache))
 
     client = connect_or_start(repo)

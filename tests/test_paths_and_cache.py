@@ -3,7 +3,16 @@ Path resolution and the per-file cache.
 """
 
 from contextor.core.analysis.cache_manager import CacheManager
-from contextor.core.paths import output_dir, repo_cache_dir, repo_key
+from contextor.core.paths import (
+    legacy_repo_cache_dir,
+    output_dir,
+    prune_orphaned_repository_caches,
+    repo_cache_dir,
+    repo_key,
+)
+from contextor.core.reporting_engine.persistent_registry import (
+    PersistentIdentityRegistry,
+)
 
 import pytest
 
@@ -29,6 +38,43 @@ def test_repo_cache_lives_outside_the_analyzed_repository(tmp_path, monkeypatch)
     cache_dir = repo_cache_dir(repo)
 
     assert repo.resolve() not in cache_dir.resolve().parents
+
+
+def test_registered_repo_cache_is_keyed_by_durable_repo_id(tmp_path, monkeypatch):
+    cache_root = tmp_path / "cache"
+    monkeypatch.setenv("CONTEXTOR_CACHE_DIR", str(cache_root))
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    legacy = legacy_repo_cache_dir(repo)
+    registry = PersistentIdentityRegistry(str(repo))
+
+    assert repo_cache_dir(repo) == cache_root / "repositories" / registry.repo_id
+    assert repo_cache_dir(repo) != legacy
+
+
+def test_orphaned_repo_id_cache_is_removed_but_registered_and_unrelated_remain(
+    tmp_path, monkeypatch
+):
+    cache_root = tmp_path / "cache"
+    monkeypatch.setenv("CONTEXTOR_CACHE_DIR", str(cache_root))
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    registry = PersistentIdentityRegistry(str(repo))
+    repositories = cache_root / "repositories"
+    valid = repositories / registry.repo_id
+    orphan = repositories / "ctx_orphaned"
+    unrelated = repositories / "legacy-path-cache"
+    for directory in (valid, orphan, unrelated):
+        directory.mkdir(parents=True)
+        (directory / "marker.txt").write_text("keep?", encoding="utf-8")
+
+    result = prune_orphaned_repository_caches()
+
+    assert result == {"removed": ["ctx_orphaned"], "errors": []}
+    assert valid.is_dir()
+    assert unrelated.is_dir()
+    assert not orphan.exists()
 
 
 def test_cache_roundtrip(tmp_path, monkeypatch):
