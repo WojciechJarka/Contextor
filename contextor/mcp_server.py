@@ -1521,7 +1521,7 @@ def get_module_context(
     bounded evidence. ``max_items`` applies independently to inbound and
     outbound edges; pass ``None`` to return every edge. ``compact`` shapes the
     response before ``fields`` projects it. Allowed values are ``module``, ``metrics``,
-    ``metrics_source``, ``dependency_data_source``,
+    ``metrics_source``, ``degree_metrics_source``, ``dependency_data_source``,
     ``dependencies_inbound_who_calls_me``, and
     ``dependencies_outbound_who_i_call``. Invalid projections return a
     structured error with the current allowlist.
@@ -1611,17 +1611,45 @@ def get_module_context(
                     src_name = registry.get_module_path(src_id) or src_id
                     inbound[src_name] = targets[str(mod_id)]
 
-    metrics = saved_modules.get(module_name)
-    metrics_source = "saved_graph_analytics"
-    if metrics is None:
-        metrics_source = "deferred_until_full_analysis"
-        metrics = {
-            "module_idx": engine.registry.get_module_id(module_name),
-            "fan_in": len(inbound),
-            "fan_out": len(outbound),
-            "visibility": "unknown",
-            "metrics_state": "deferred",
-        }
+    saved_record = saved_modules.get(module_name)
+    has_live_graph = (
+        module_name in live_modules
+        and engine is not None
+        and getattr(engine.state, "dependency_graph", None) is not None
+    )
+
+    if has_live_graph:
+        graph = engine.state.dependency_graph
+        hard_edges = getattr(graph, "hard_edges", {}) or {}
+        live_fan_out = len(hard_edges.get(module_name, set()))
+        live_fan_in = sum(
+            1 for _, targets in hard_edges.items() if module_name in targets
+        )
+        if saved_record is not None:
+            metrics = dict(saved_record)
+            metrics["fan_in"] = live_fan_in
+            metrics["fan_out"] = live_fan_out
+            metrics_source = "saved_graph_analytics"
+            degree_metrics_source = "live_canonical_graph"
+        else:
+            metrics = {
+                "fan_in": live_fan_in,
+                "fan_out": live_fan_out,
+            }
+            metrics_source = "deferred_until_full_analysis"
+            degree_metrics_source = "live_canonical_graph"
+    else:
+        if saved_record is not None:
+            metrics = dict(saved_record)
+            metrics_source = "saved_graph_analytics"
+            degree_metrics_source = "saved_graph_analytics"
+        else:
+            metrics = {
+                "fan_in": len(inbound),
+                "fan_out": len(outbound),
+            }
+            metrics_source = "deferred_until_full_analysis"
+            degree_metrics_source = "saved_graph_analytics"
 
     inbound_items, inbound_total, inbound_truncated = _bounded_items(
         sorted(inbound.items()), max_items
@@ -1633,6 +1661,7 @@ def get_module_context(
         "module": module_name,
         "metrics": metrics,
         "metrics_source": metrics_source,
+        "degree_metrics_source": degree_metrics_source,
         "dependency_data_source": dependency_source,
     }
     full_result = {

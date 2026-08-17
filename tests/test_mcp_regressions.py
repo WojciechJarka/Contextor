@@ -1632,13 +1632,11 @@ def test_module_context_exposes_new_live_module_before_full_report(
 
     assert result["module"] == "pkg.new"
     assert result["metrics"] == {
-        "module_idx": "9/1",
         "fan_in": 1,
-        "fan_out": 2,
-        "visibility": "unknown",
-        "metrics_state": "deferred",
+        "fan_out": 1,
     }
     assert result["metrics_source"] == "deferred_until_full_analysis"
+    assert result["degree_metrics_source"] == "live_canonical_graph"
     assert result["dependency_data_source"] == "live_canonical_graph"
     assert result["dependencies_inbound_who_calls_me"] == {
         "total": 1,
