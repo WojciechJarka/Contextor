@@ -12,6 +12,7 @@ from contextor.core.analysis.state_manager import (
     RepositoryAnalysisState,
 )
 from contextor.core.graph.graph import build_graph, build_trie, detect_package_root
+from contextor.core.graph.metrics import compute_graph_metrics
 from contextor.core.reporting_engine.persistent_registry import (
     PersistentIdentityRegistry,
 )
@@ -346,7 +347,7 @@ def test_identical_old_new_graph_no_degree_updates():
 
 
 # =========================================================================
-# Stage 2B Integration Tests (Canonical State & MCP Verification)
+# Stage 2C Macro Metrics & MCP Overlay Integration Tests
 # =========================================================================
 
 def _setup_engine(tmp_path):
@@ -361,16 +362,7 @@ def _setup_engine(tmp_path):
     package_root = detect_package_root(modules, trie)
     graph = build_graph(modules, trie=trie, package_root=package_root)
 
-    # Canonical macro graph summary metrics
-    macro_metrics = {
-        "nodes": 2,
-        "edges_hard": 0,
-        "edges_soft": 0,
-        "edges_total": 0,
-        "density_hard": 0.0,
-        "in_degree_max": 0,
-        "out_degree_max": 0,
-    }
+    macro_metrics = compute_graph_metrics(graph.hard_edges, graph.soft_edges)
 
     state = RepositoryAnalysisState(
         modules=dict(modules),
@@ -393,25 +385,218 @@ def _setup_engine(tmp_path):
     return engine, provider, target, macro_metrics
 
 
-def test_e2e_modify_updates_hard_edges_and_get_module_context_degrees(tmp_path, monkeypatch):
-    engine, provider, target, macro_metrics = _setup_engine(tmp_path)
+def test_stage2c_add_isolated_module_macro_metrics(tmp_path):
+    engine, provider, target, initial_metrics = _setup_engine(tmp_path)
+    assert initial_metrics["nodes"] == 2
+    assert initial_metrics["edges_hard"] == 0
 
-    # Modify provider to import target
-    provider.write_text("import target\ndef run():\n    return target.target()\n", encoding="utf-8")
-    result = engine.update_file(str(provider))
+    isolated = tmp_path / "isolated.py"
+    isolated.write_text("VALUE = 42\n", encoding="utf-8")
 
+    result = engine.update_file(str(isolated))
     assert result.status == "UPDATED"
     assert result.local_metrics_state == "deferred"
+    assert result.global_metrics_state == "deferred"
 
-    # Canonical dependency_graph is updated
-    assert engine.state.dependency_graph.hard_edges["provider"] == {"target"}
+    expected = compute_graph_metrics(
+        engine.state.dependency_graph.hard_edges,
+        engine.state.dependency_graph.soft_edges,
+    )
+    assert engine.state.metrics == expected
+    assert engine.state.metrics["nodes"] == 3
+    assert engine.state.metrics["edges_hard"] == 0
+    assert engine.state.metrics["edges_total"] == 0
 
-    # RepositoryAnalysisState.metrics remains macro summary, unaffected by per-module keys
+
+def test_stage2c_add_module_with_hard_import_macro_metrics(tmp_path, monkeypatch):
+    engine, provider, target, initial_metrics = _setup_engine(tmp_path)
+
+    consumer = tmp_path / "consumer.py"
+    consumer.write_text("import target\n", encoding="utf-8")
+
+    result = engine.update_file(str(consumer))
+    assert result.status == "UPDATED"
+
+    expected = compute_graph_metrics(
+        engine.state.dependency_graph.hard_edges,
+        engine.state.dependency_graph.soft_edges,
+    )
+    assert engine.state.metrics == expected
+    assert engine.state.metrics["nodes"] == 3
+    assert engine.state.metrics["edges_hard"] == 1
+    assert engine.state.metrics["edges_total"] == 1
+    assert engine.state.metrics["out_degree_max"] == 1
+    assert engine.state.metrics["in_degree_max"] == 1
+
+    # MCP overlay verification
+    monkeypatch.setattr(mcp_server, "_get_or_init_engine", lambda _root: engine)
+    monkeypatch.setattr(mcp_server, "_get_canonical_report", lambda _root, _name: None)
+
+    resp_consumer = json.loads(
+        mcp_server.get_module_context.fn(repo_path=str(tmp_path), module_name="consumer")
+    )
+    assert resp_consumer["metrics"] == {"fan_in": 0, "fan_out": 1}
+    assert resp_consumer["degree_metrics_source"] == "live_canonical_graph"
+
+
+def test_stage2c_modify_adding_hard_edge_macro_metrics(tmp_path):
+    engine, provider, target, _ = _setup_engine(tmp_path)
+
+    provider.write_text("import target\n", encoding="utf-8")
+    result = engine.update_file(str(provider))
+    assert result.status == "UPDATED"
+
+    expected = compute_graph_metrics(
+        engine.state.dependency_graph.hard_edges,
+        engine.state.dependency_graph.soft_edges,
+    )
+    assert engine.state.metrics == expected
+    assert engine.state.metrics["nodes"] == 2
+    assert engine.state.metrics["edges_hard"] == 1
+    assert engine.state.metrics["edges_total"] == 1
+    assert engine.state.metrics["density_hard"] == 0.5
+
+
+def test_stage2c_modify_removing_hard_edge_macro_metrics(tmp_path):
+    engine, provider, target, _ = _setup_engine(tmp_path)
+
+    # First add edge
+    provider.write_text("import target\n", encoding="utf-8")
+    engine.update_file(str(provider))
+    assert engine.state.metrics["edges_hard"] == 1
+
+    # Now remove edge
+    provider.write_text("def run(): pass\n", encoding="utf-8")
+    result = engine.update_file(str(provider))
+    assert result.status == "UPDATED"
+
+    expected = compute_graph_metrics(
+        engine.state.dependency_graph.hard_edges,
+        engine.state.dependency_graph.soft_edges,
+    )
+    assert engine.state.metrics == expected
+    assert engine.state.metrics["nodes"] == 2
+    assert engine.state.metrics["edges_hard"] == 0
+    assert engine.state.metrics["edges_total"] == 0
+    assert engine.state.metrics["density_hard"] == 0.0
+
+
+def test_stage2c_delete_module_macro_metrics(tmp_path):
+    engine, provider, target, _ = _setup_engine(tmp_path)
+
+    # Connect provider -> target
+    provider.write_text("import target\n", encoding="utf-8")
+    engine.update_file(str(provider))
+    assert engine.state.metrics["nodes"] == 2
+    assert engine.state.metrics["edges_hard"] == 1
+
+    # Delete provider
+    provider.unlink()
+    result = engine.update_file(str(provider))
+    assert result.status == "DELETED"
+
+    expected = compute_graph_metrics(
+        engine.state.dependency_graph.hard_edges,
+        engine.state.dependency_graph.soft_edges,
+    )
+    assert engine.state.metrics == expected
+    assert engine.state.metrics["nodes"] == 1
+    assert engine.state.metrics["edges_hard"] == 0
+    assert engine.state.metrics["edges_total"] == 0
+
+
+def test_stage2c_density_and_degree_max_match_canonical_graph(tmp_path):
+    engine, provider, target, _ = _setup_engine(tmp_path)
+
+    # Add mod_a and mod_b both importing target
+    mod_a = tmp_path / "mod_a.py"
+    mod_a.write_text("import target\n", encoding="utf-8")
+    engine.update_file(str(mod_a))
+
+    mod_b = tmp_path / "mod_b.py"
+    mod_b.write_text("import target\nimport mod_a\n", encoding="utf-8")
+    engine.update_file(str(mod_b))
+
+    expected = compute_graph_metrics(
+        engine.state.dependency_graph.hard_edges,
+        engine.state.dependency_graph.soft_edges,
+    )
+    assert engine.state.metrics == expected
+    assert engine.state.metrics["nodes"] == 4
+    assert engine.state.metrics["edges_hard"] == 3
+    # Target has in_degree = 2 (from mod_a and mod_b), mod_b has out_degree = 2
+    assert engine.state.metrics["in_degree_max"] == 2
+    assert engine.state.metrics["out_degree_max"] == 2
+    assert engine.state.metrics["density_hard"] == round(3 / (4 * 3), 4)
+
+
+def test_stage2c_soft_edge_change_affects_soft_total_only(tmp_path):
+    engine, provider, target, _ = _setup_engine(tmp_path)
+
+    # Fallback import in provider targeting target (produces a soft edge)
+    provider.write_text(
+        "from target.submodule import item\n",
+        encoding="utf-8",
+    )
+    result = engine.update_file(str(provider))
+    assert result.status == "UPDATED"
+
+    expected = compute_graph_metrics(
+        engine.state.dependency_graph.hard_edges,
+        engine.state.dependency_graph.soft_edges,
+    )
+    assert engine.state.metrics == expected
+    assert engine.state.metrics["edges_hard"] == 0
+    assert engine.state.metrics["edges_soft"] == 1
+    assert engine.state.metrics["edges_total"] == 1
+    assert engine.state.metrics["in_degree_max"] == 0
+    assert engine.state.metrics["out_degree_max"] == 0
+
+
+def test_stage2c_failed_registry_transaction_leaves_old_metrics_unchanged(tmp_path, monkeypatch):
+    engine, provider, target, initial_metrics = _setup_engine(tmp_path)
+
+    def failing_sync(*args, **kwargs):
+        raise OSError("Simulated disk failure during transaction")
+
+    monkeypatch.setattr(engine.registry, "sync_with_workspace", failing_sync)
+
+    provider.write_text("import target\n", encoding="utf-8")
+    with pytest.raises(OSError):
+        engine.update_file(str(provider))
+
+    # state.metrics must remain exactly the old initial metrics
+    assert engine.state.metrics == initial_metrics
+
+
+def test_stage2c_no_module_keys_introduced_into_state_metrics(tmp_path):
+    engine, provider, target, _ = _setup_engine(tmp_path)
+
+    mod_a = tmp_path / "mod_a.py"
+    mod_a.write_text("import target\n", encoding="utf-8")
+    engine.update_file(str(mod_a))
+
+    expected_keys = {
+        "nodes",
+        "edges_hard",
+        "edges_soft",
+        "edges_total",
+        "density_hard",
+        "in_degree_max",
+        "out_degree_max",
+    }
+    assert set(engine.state.metrics.keys()) == expected_keys
     assert "provider" not in engine.state.metrics
     assert "target" not in engine.state.metrics
-    assert engine.state.metrics == macro_metrics
+    assert "mod_a" not in engine.state.metrics
 
-    # get_module_context truthfully derives degrees directly from current canonical hard_edges
+
+def test_stage2c_get_module_context_behavior_preserved(tmp_path, monkeypatch):
+    engine, provider, target, _ = _setup_engine(tmp_path)
+
+    provider.write_text("import target\n", encoding="utf-8")
+    engine.update_file(str(provider))
+
     monkeypatch.setattr(mcp_server, "_get_or_init_engine", lambda _root: engine)
     monkeypatch.setattr(mcp_server, "_get_canonical_report", lambda _root, _name: None)
 
@@ -428,250 +613,11 @@ def test_e2e_modify_updates_hard_edges_and_get_module_context_degrees(tmp_path, 
     assert resp_target["degree_metrics_source"] == "live_canonical_graph"
 
 
-def test_e2e_modify_removes_edge_updates_get_module_context_degrees(tmp_path, monkeypatch):
+def test_stage2c_local_metrics_state_and_global_metrics_state_remain_deferred(tmp_path):
     engine, provider, target, _ = _setup_engine(tmp_path)
 
-    # First add import
     provider.write_text("import target\n", encoding="utf-8")
-    engine.update_file(str(provider))
-    assert engine.state.dependency_graph.hard_edges["provider"] == {"target"}
-
-    # Now remove import
-    provider.write_text("def run(): pass\n", encoding="utf-8")
     result = engine.update_file(str(provider))
 
-    assert result.status == "UPDATED"
-    assert engine.state.dependency_graph.hard_edges["provider"] == set()
-
-    monkeypatch.setattr(mcp_server, "_get_or_init_engine", lambda _root: engine)
-    monkeypatch.setattr(mcp_server, "_get_canonical_report", lambda _root, _name: None)
-
-    resp_provider = json.loads(
-        mcp_server.get_module_context.fn(repo_path=str(tmp_path), module_name="provider")
-    )
-    assert resp_provider["metrics"] == {"fan_in": 0, "fan_out": 0}
-
-    resp_target = json.loads(
-        mcp_server.get_module_context.fn(repo_path=str(tmp_path), module_name="target")
-    )
-    assert resp_target["metrics"] == {"fan_in": 0, "fan_out": 0}
-
-
-def test_e2e_add_updates_dependency_graph_and_get_module_context_live_degrees(tmp_path, monkeypatch):
-    engine, provider, target, macro_metrics = _setup_engine(tmp_path)
-
-    new_file = tmp_path / "new_consumer.py"
-    new_file.write_text("import target\n", encoding="utf-8")
-
-    result = engine.update_file(str(new_file))
-    assert result.status == "UPDATED"
     assert result.local_metrics_state == "deferred"
-
-    # Canonical graph contains new module and edge
-    assert engine.state.dependency_graph.hard_edges["new_consumer"] == {"target"}
-
-    # state.metrics has no module records
-    assert "new_consumer" not in engine.state.metrics
-    assert engine.state.metrics == macro_metrics
-
-    # get_module_context reflects new consumer
-    monkeypatch.setattr(mcp_server, "_get_or_init_engine", lambda _root: engine)
-    monkeypatch.setattr(mcp_server, "_get_canonical_report", lambda _root, _name: None)
-
-    resp_consumer = json.loads(
-        mcp_server.get_module_context.fn(repo_path=str(tmp_path), module_name="new_consumer")
-    )
-    assert resp_consumer["metrics"] == {"fan_in": 0, "fan_out": 1}
-    assert resp_consumer["degree_metrics_source"] == "live_canonical_graph"
-
-    resp_target = json.loads(
-        mcp_server.get_module_context.fn(repo_path=str(tmp_path), module_name="target")
-    )
-    assert resp_target["metrics"] == {"fan_in": 1, "fan_out": 0}
-
-
-def test_e2e_delete_updates_graph_and_get_module_context_degrees(tmp_path, monkeypatch):
-    engine, provider, target, macro_metrics = _setup_engine(tmp_path)
-
-    # Connect provider -> target
-    provider.write_text("import target\n", encoding="utf-8")
-    engine.update_file(str(provider))
-
-    # Now delete provider.py
-    provider.unlink()
-    result = engine.update_file(str(provider))
-
-    assert result.status == "DELETED"
-    assert "provider" not in engine.state.modules
-    assert "provider" not in engine.state.dependency_graph.hard_edges
-
-    # state.metrics remains macro summary
-    assert "provider" not in engine.state.metrics
-    assert engine.state.metrics == macro_metrics
-
-    monkeypatch.setattr(mcp_server, "_get_or_init_engine", lambda _root: engine)
-    monkeypatch.setattr(mcp_server, "_get_canonical_report", lambda _root, _name: None)
-
-    resp_target = json.loads(
-        mcp_server.get_module_context.fn(repo_path=str(tmp_path), module_name="target")
-    )
-    assert resp_target["metrics"] == {"fan_in": 0, "fan_out": 0}
-
-
-def test_state_metrics_not_structurally_polluted_after_incremental_updates(tmp_path):
-    engine, provider, target, macro_metrics = _setup_engine(tmp_path)
-
-    # Perform multiple ADD, MODIFY, DELETE operations
-    mod_a = tmp_path / "mod_a.py"
-    mod_a.write_text("import target\n", encoding="utf-8")
-    engine.update_file(str(mod_a))
-
-    mod_b = tmp_path / "mod_b.py"
-    mod_b.write_text("import mod_a\n", encoding="utf-8")
-    engine.update_file(str(mod_b))
-
-    mod_a.write_text("def a(): pass\n", encoding="utf-8")
-    engine.update_file(str(mod_a))
-
-    mod_b.unlink()
-    engine.update_file(str(mod_b))
-
-    # Exact schema invariant check
-    expected_keys = {
-        "nodes",
-        "edges_hard",
-        "edges_soft",
-        "edges_total",
-        "density_hard",
-        "in_degree_max",
-        "out_degree_max",
-    }
-    assert set(engine.state.metrics.keys()) == expected_keys
-    assert engine.state.metrics == macro_metrics
-
-
-def test_e2e_failed_registry_transaction_leaves_canonical_state_unchanged(tmp_path, monkeypatch):
-    engine, provider, target, macro_metrics = _setup_engine(tmp_path)
-    original_modules_keys = set(engine.state.modules.keys())
-    original_graph_edges = dict(engine.state.dependency_graph.hard_edges)
-
-    def failing_sync(*args, **kwargs):
-        raise OSError("Simulated disk failure during transaction")
-
-    monkeypatch.setattr(engine.registry, "sync_with_workspace", failing_sync)
-
-    provider.write_text("import target\n", encoding="utf-8")
-    with pytest.raises(OSError):
-        engine.update_file(str(provider))
-
-    # state must be completely unaltered
-    assert set(engine.state.modules.keys()) == original_modules_keys
-    assert engine.state.dependency_graph.hard_edges == original_graph_edges
-    assert engine.state.metrics == macro_metrics
-
-
-def test_get_module_context_ignores_soft_edges_for_degrees(tmp_path, monkeypatch):
-    class DummyState:
-        modules = {"pkg.soft_mod": object(), "pkg.target": object()}
-        artifacts = {}
-        dependency_graph = ProjectGraph(
-            hard_edges={"pkg.soft_mod": set(), "pkg.target": set()},
-            soft_edges={"pkg.soft_mod": {"pkg.target"}},
-        )
-        metrics = {"nodes": 2, "edges_hard": 0, "edges_soft": 1}
-
-    class DummyEngine:
-        state = DummyState()
-
-    monkeypatch.setattr(mcp_server, "_get_or_init_engine", lambda _root: DummyEngine())
-    monkeypatch.setattr(mcp_server, "_get_canonical_report", lambda _root, _name: None)
-
-    resp = json.loads(
-        mcp_server.get_module_context.fn(repo_path=str(tmp_path), module_name="pkg.soft_mod")
-    )
-
-    assert resp["metrics"] == {
-        "fan_in": 0,
-        "fan_out": 0,
-    }
-    assert resp["degree_metrics_source"] == "live_canonical_graph"
-
-
-def test_get_module_context_overlays_live_degrees_preserving_saved_wider_metrics(tmp_path, monkeypatch):
-    report_file = tmp_path / f"{tmp_path.name}_graph_analytics.json"
-    report_file.write_text(
-        json.dumps(
-            {
-                "modules": {
-                    "pkg.provider": {
-                        "fan_in": 0,
-                        "fan_out": 0,
-                        "pagerank": 0.42,
-                        "export_degree": 5,
-                        "visibility": "public",
-                    }
-                }
-            }
-        ),
-        encoding="utf-8",
-    )
-
-    class DummyState:
-        modules = {"pkg.provider": object(), "pkg.target": object()}
-        artifacts = {}
-        dependency_graph = ProjectGraph(
-            hard_edges={"pkg.provider": {"pkg.target"}, "pkg.target": set()},
-            soft_edges={},
-        )
-        metrics = {"nodes": 2, "edges_hard": 1}
-
-    class DummyEngine:
-        state = DummyState()
-
-    monkeypatch.setattr(mcp_server, "_get_or_init_engine", lambda _root: DummyEngine())
-    monkeypatch.setattr(mcp_server, "_get_canonical_report", lambda _root, _name: report_file)
-
-    resp = json.loads(
-        mcp_server.get_module_context.fn(repo_path=str(tmp_path), module_name="pkg.provider")
-    )
-
-    assert resp["module"] == "pkg.provider"
-    assert resp["metrics"]["fan_out"] == 1
-    assert resp["metrics"]["fan_in"] == 0
-    assert resp["metrics"]["pagerank"] == 0.42
-    assert resp["metrics"]["export_degree"] == 5
-    assert resp["metrics"]["visibility"] == "public"
-    assert resp["metrics_source"] == "saved_graph_analytics"
-    assert resp["degree_metrics_source"] == "live_canonical_graph"
-    assert resp["dependency_data_source"] == "live_canonical_graph"
-
-
-def test_get_module_context_no_live_graph_does_not_claim_live_degree_source(tmp_path, monkeypatch):
-    report_file = tmp_path / f"{tmp_path.name}_graph_analytics.json"
-    report_file.write_text(
-        json.dumps(
-            {
-                "modules": {
-                    "pkg.mod": {
-                        "fan_in": 5,
-                        "fan_out": 7,
-                        "pagerank": 0.33,
-                    }
-                }
-            }
-        ),
-        encoding="utf-8",
-    )
-
-    monkeypatch.setattr(mcp_server, "_get_or_init_engine", lambda _root: None)
-    monkeypatch.setattr(mcp_server, "_get_canonical_report", lambda _root, _name: report_file)
-
-    resp = json.loads(
-        mcp_server.get_module_context.fn(repo_path=str(tmp_path), module_name="pkg.mod")
-    )
-
-    assert resp["metrics"]["fan_in"] == 5
-    assert resp["metrics"]["fan_out"] == 7
-    assert resp["metrics"]["pagerank"] == 0.33
-    assert resp["degree_metrics_source"] == "saved_graph_analytics"
-    assert resp["metrics_source"] == "saved_graph_analytics"
+    assert result.global_metrics_state == "deferred"

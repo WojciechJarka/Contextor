@@ -294,6 +294,13 @@ class IncrementalAnalysisEngine:
             else set()
         )
 
+        # 2.2 Synchronize candidate macro graph metrics from canonical new_graph
+        if new_graph is not None:
+            from contextor.core.graph.metrics import compute_graph_metrics
+            new_metrics = compute_graph_metrics(new_graph.hard_edges, new_graph.soft_edges)
+        else:
+            new_metrics = self.state.metrics
+
         # 3. Canonical update for artifact_consumption (Deferred)
         # We preserve the previous snapshot entirely until a global rebuild occurs.
         new_artifact_consumption = self.state.artifact_consumption
@@ -318,6 +325,7 @@ class IncrementalAnalysisEngine:
         self.state.modules = new_modules
         self.state.artifacts = new_artifacts
         self.state.dependency_graph = new_graph
+        self.state.metrics = new_metrics
         self.state.artifact_consumption = new_artifact_consumption
         self.state.trie = new_trie
         self.state.package_root = new_package_root
