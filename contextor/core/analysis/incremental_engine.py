@@ -203,9 +203,10 @@ class IncrementalAnalysisEngine:
                 blast_radius_state=blast_radius_state,
                 local_metrics_state="deferred",
                 global_metrics_state="deferred",
-                artifact_consumption_state="deferred",
+                artifact_consumption_state="fresh",
                 affected_modules=affected_modules,
             )
+
             
     @staticmethod
     def _artifact_names(artifacts: dict) -> set[str]:
@@ -266,13 +267,15 @@ class IncrementalAnalysisEngine:
         new_artifacts = dict(self.state.artifacts)
         old_graph = self.state.dependency_graph
         
+        mod_id = Path(delta.module_path).stem if delta.module_path.endswith(".py") else delta.module_path
         # 1. Update working dictionaries
         if delta.is_deleted:
-            if delta.module_path in new_modules:
-                del new_modules[delta.module_path]
-            if delta.module_path in new_artifacts:
-                del new_artifacts[delta.module_path]
+            new_modules.pop(mod_id, None)
+            new_modules.pop(delta.module_path, None)
+            new_artifacts.pop(mod_id, None)
+            new_artifacts.pop(delta.module_path, None)
         else:
+
             from contextor.core.domain.module import Module
             new_module = Module(
                 module_id=delta.module_path,
@@ -328,14 +331,16 @@ class IncrementalAnalysisEngine:
         else:
             new_metrics = self.state.metrics
 
-        # 3. Canonical update for artifact_consumption (Deferred)
-        # We preserve the previous snapshot entirely until a global rebuild occurs.
-        new_artifact_consumption = self.state.artifact_consumption
+        # 3. Canonical update for artifact_consumption
+        from contextor.core.domain.usage_facts import ModuleUsageFacts, diff_usage_facts
+        from contextor.core.reference.engine import extract_module_usage_facts, _build_reexport_map
+        from contextor.core.reference.resolution import _resolve_alias, _resolve_reexport
 
-        # 3.1 Update canonical ModuleUsageFacts
-        from contextor.core.reference.engine import extract_module_usage_facts
         new_module_usages = dict(getattr(self.state, "module_usages", {}))
+        old_usage = new_module_usages.get(delta.module_path, ModuleUsageFacts())
+
         if delta.is_deleted:
+            new_usage = ModuleUsageFacts()
             new_module_usages.pop(delta.module_path, None)
         else:
             source_text = None
@@ -344,11 +349,121 @@ class IncrementalAnalysisEngine:
                     source_text = path.read_text(encoding="utf-8")
                 except OSError:
                     source_text = None
-            new_module_usages[delta.module_path] = extract_module_usage_facts(
+            new_usage = extract_module_usage_facts(
                 delta.module_path,
                 source_text,
                 imports=new_imports,
             )
+            new_module_usages[delta.module_path] = new_usage
+
+        usage_delta = diff_usage_facts(delta.module_path, old_usage, new_usage)
+        new_artifact_consumption = dict(self.state.artifact_consumption or {})
+        if delta.is_deleted:
+            mod_id = Path(delta.module_path).stem if delta.module_path.endswith(".py") else delta.module_path
+            for art_key in list(new_artifact_consumption.keys()):
+                if art_key == mod_id or art_key == delta.module_path or art_key.startswith(mod_id + ".") or art_key.startswith(delta.module_path + "."):
+                    new_artifact_consumption.pop(art_key, None)
+
+
+        reexports = _build_reexport_map(new_modules)
+
+        def _get_copy_of_entry(raw_entry: dict) -> dict:
+            consumers = list(raw_entry.get("consumers", []))
+            channels = {
+                k: list(v)
+                for k, v in raw_entry.get("channels", {}).items()
+            }
+            return {"consumers": consumers, "channels": channels}
+
+        # 3.1 Unregister removed usages for delta.module_path
+        old_aliases = dict(old_usage.aliases)
+        rem_tagged = (
+            [(sym, "direct_calls") for sym in usage_delta.removed_direct_calls] +
+            [(sym, "runtime_calls") for sym in usage_delta.removed_runtime_calls] +
+            [(sym, "qualified_refs") for sym in usage_delta.removed_qualified_refs] +
+            [(sym, "callback_calls") for sym in usage_delta.removed_callback_calls] +
+            [(sym, "event_bindings") for sym in usage_delta.removed_event_bindings] +
+            [(sym, "api_imports") for sym in usage_delta.removed_imports] +
+            [(item[1], "inheritance") for item in usage_delta.removed_inheritance_refs if len(item) >= 2 and item[1]]
+        )
+        for rem_symbol, ch_name in rem_tagged:
+            target = _resolve_reexport(_resolve_alias(rem_symbol, old_aliases), reexports)
+            if target and target in new_artifact_consumption:
+                entry = _get_copy_of_entry(new_artifact_consumption[target])
+                ch_list = entry["channels"].get(delta.module_path, [])
+                if ch_name in ch_list:
+                    ch_list.remove(ch_name)
+                if ch_list:
+                    entry["channels"][delta.module_path] = sorted(set(ch_list))
+                else:
+                    entry["channels"].pop(delta.module_path, None)
+                    if delta.module_path in entry["consumers"]:
+                        entry["consumers"].remove(delta.module_path)
+                entry["consumers"] = sorted(set(entry["consumers"]))
+                new_artifact_consumption[target] = entry
+
+        def _is_valid_target(t: str) -> bool:
+            if not t:
+                return False
+            mod_prefix = t.rsplit(".", 1)[0] if "." in t else t
+            top_prefix = t.split(".")[0] if "." in t else t
+            return mod_prefix in new_modules or top_prefix in new_modules or t in new_modules
+
+        # 3.2 Register all current new_usage calls for delta.module_path
+        new_aliases = dict(new_usage.aliases)
+        cur_tagged = (
+            [(sym, "direct_calls") for sym in new_usage.direct_calls] +
+            [(sym, "runtime_calls") for sym in new_usage.runtime_calls] +
+            [(sym, "qualified_refs") for sym in new_usage.qualified_refs] +
+            [(sym, "callback_calls") for sym in new_usage.callback_calls] +
+            [(sym, "event_bindings") for sym in new_usage.event_bindings] +
+            [(sym, "api_imports") for sym in new_usage.imports] +
+            [(item[1], "inheritance") for item in new_usage.inheritance_refs if len(item) >= 2 and item[1]]
+        )
+        for add_symbol, ch_name in cur_tagged:
+            target = _resolve_reexport(_resolve_alias(add_symbol, new_aliases), reexports)
+            if target and _is_valid_target(target):
+                entry = _get_copy_of_entry(new_artifact_consumption.get(target, {}))
+                if delta.module_path not in entry["consumers"]:
+                    entry["consumers"].append(delta.module_path)
+                entry["consumers"] = sorted(set(entry["consumers"]))
+                ch_list = set(entry["channels"].get(delta.module_path, []))
+                ch_list.add(ch_name)
+                entry["channels"][delta.module_path] = sorted(ch_list)
+                new_artifact_consumption[target] = entry
+
+        # 3.3 Re-evaluate unchanged consumer modules in RAM if re-exports/aliases changed
+        if usage_delta.added_aliases or usage_delta.removed_aliases or usage_delta.added_imports or usage_delta.removed_imports:
+            old_reexports = _build_reexport_map(self.state.modules)
+            new_reexports = reexports
+            for consumer_path, consumer_facts in new_module_usages.items():
+                if consumer_path == delta.module_path:
+                    continue
+                c_aliases = dict(consumer_facts.aliases)
+                for call in (consumer_facts.direct_calls + consumer_facts.qualified_refs):
+                    old_t = _resolve_reexport(_resolve_alias(call, c_aliases), old_reexports)
+                    new_t = _resolve_reexport(_resolve_alias(call, c_aliases), new_reexports)
+                    if old_t and old_t != new_t and old_t in new_artifact_consumption:
+                        entry = _get_copy_of_entry(new_artifact_consumption[old_t])
+                        if consumer_path in entry["consumers"]:
+                            entry["consumers"].remove(consumer_path)
+                        entry["channels"].pop(consumer_path, None)
+                        entry["consumers"] = sorted(set(entry["consumers"]))
+                        new_artifact_consumption[old_t] = entry
+                    if new_t and _is_valid_target(new_t):
+                        entry = _get_copy_of_entry(new_artifact_consumption.get(new_t, {}))
+                        if consumer_path not in entry["consumers"]:
+                            entry["consumers"].append(consumer_path)
+                        entry["consumers"] = sorted(set(entry["consumers"]))
+                        ch_list = set(entry["channels"].get(consumer_path, ["direct_calls"]))
+                        entry["channels"][consumer_path] = sorted(ch_list)
+                        new_artifact_consumption[new_t] = entry
+
+
+
+
+
+
 
         # 4. Fast set logic for orphans/re-allocations
         all_modules = set(new_modules.keys())

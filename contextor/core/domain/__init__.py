@@ -21,6 +21,8 @@ from .validation import (
 )
 from .usage_facts import (
     ModuleUsageFacts,
+    UsageDelta,
+    diff_usage_facts,
 )
 
 __all__ = [
@@ -30,5 +32,8 @@ __all__ = [
     "ProjectGraph",
     "ValidationError",
     "ModuleUsageFacts",
+    "UsageDelta",
+    "diff_usage_facts",
 ]
+
 

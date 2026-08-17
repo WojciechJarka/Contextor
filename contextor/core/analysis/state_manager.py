@@ -135,8 +135,9 @@ class FileStateManager:
         """Returns True if the file was modified since it was last tracked."""
         current = self.get_current_file_state(file_path, compute_hash=False)
         if not current:
-            # If it doesn't exist on disk but we track it, it was deleted (changed)
-            return file_path in self._state
+            # File does not exist on disk -> deleted or new non-existent path
+            return True
+
             
         tracked = self._state.get(file_path)
         if not tracked:

@@ -711,14 +711,19 @@ def extract_module_usage_facts(
         if imported_target:
             import_names.add(imported_target)
 
-    direct_calls = tuple(
-        sorted(
-            set(
-                item[0] if isinstance(item, tuple) else item
-                for item in visitor.called
-            )
-        )
+    all_calls = set(
+        item[0] if isinstance(item, tuple) else item
+        for item in visitor.called
     )
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            from .resolution import _attribute_name
+            name = _attribute_name(node.func)
+            if name:
+                all_calls.add(name)
+
+    direct_calls = tuple(sorted(all_calls))
+
     runtime_calls = tuple(
         sorted(
             set(
@@ -727,30 +732,47 @@ def extract_module_usage_facts(
             )
         )
     )
-    callback_calls = tuple(
-        sorted(
-            set(
-                item[0] if isinstance(item, tuple) else item
-                for item in visitor.callback_called
-            )
-        )
+    cb_set = set(
+        item[0] if isinstance(item, tuple) else item
+        for item in visitor.callback_called
     )
-    event_bindings = tuple(
-        sorted(
-            set(
-                item[0] if isinstance(item, tuple) else item
-                for item in visitor.event_bound
-            )
-        )
+    ev_set = set(
+        item[0] if isinstance(item, tuple) else item
+        for item in visitor.event_bound
     )
-    inheritance_refs = tuple(
-        sorted(
-            set(
-                (item[0], item[1]) if len(item) >= 2 else (item[0], "")
-                for item in visitor.inherited
-            )
-        )
+    callback_keys = {"command", "callback", "handler", "func", "on_click", "on_change", "on_submit"}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            from .resolution import _attribute_name
+            for kw in node.keywords:
+                if kw.arg in callback_keys:
+                    kn = _attribute_name(kw.value)
+                    if kn:
+                        cb_set.add(kn)
+            func_name = _attribute_name(node.func)
+            if func_name and func_name.rsplit(".", 1)[-1] in {"bind", "subscribe", "on"}:
+                if len(node.args) >= 1:
+                    arg_n = _attribute_name(node.args[-1])
+                    if arg_n:
+                        ev_set.add(arg_n)
+
+    callback_calls = tuple(sorted(cb_set))
+    event_bindings = tuple(sorted(ev_set))
+
+    inh_set = set(
+        (item[0], item[1]) if len(item) >= 2 else (item[0], "")
+        for item in visitor.inherited
     )
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ClassDef):
+            from .resolution import _attribute_name
+            for base in node.bases:
+                b_name = _attribute_name(base)
+                if b_name:
+                    inh_set.add((node.name, b_name))
+
+    inheritance_refs = tuple(sorted(inh_set))
+
     aliases = tuple(
         sorted(
             set(
@@ -761,13 +783,16 @@ def extract_module_usage_facts(
         )
     )
 
-    qualified_refs = tuple(
-        sorted(
-            set(
-                v for _k, v in visitor.aliases.items() if "." in str(v)
-            )
-        )
-    )
+    qual_refs = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Attribute):
+            from .resolution import _attribute_name
+            name = _attribute_name(node)
+            if name and "." in name:
+                qual_refs.add(name)
+
+    qualified_refs = tuple(sorted(qual_refs))
+
 
     return ModuleUsageFacts(
         imports=tuple(sorted(import_names)),

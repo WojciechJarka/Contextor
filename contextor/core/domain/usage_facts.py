@@ -76,3 +76,104 @@ class ModuleUsageFacts:
             aliases=aliases,
         )
 
+
+@dataclass(frozen=True)
+class UsageDelta:
+    """
+    Pure, deterministic value model representing differences between two ModuleUsageFacts.
+    """
+
+    module_path: str
+    added_imports: Tuple[str, ...] = ()
+    removed_imports: Tuple[str, ...] = ()
+    added_direct_calls: Tuple[str, ...] = ()
+    removed_direct_calls: Tuple[str, ...] = ()
+    added_runtime_calls: Tuple[str, ...] = ()
+    removed_runtime_calls: Tuple[str, ...] = ()
+    added_callback_calls: Tuple[str, ...] = ()
+    removed_callback_calls: Tuple[str, ...] = ()
+    added_event_bindings: Tuple[str, ...] = ()
+    removed_event_bindings: Tuple[str, ...] = ()
+    added_inheritance_refs: Tuple[Tuple[str, str], ...] = ()
+    removed_inheritance_refs: Tuple[Tuple[str, str], ...] = ()
+    added_qualified_refs: Tuple[str, ...] = ()
+    removed_qualified_refs: Tuple[str, ...] = ()
+    added_aliases: Tuple[Tuple[str, str], ...] = ()
+    removed_aliases: Tuple[Tuple[str, str], ...] = ()
+
+    @property
+    def is_empty(self) -> bool:
+        """Returns True if no usage channel changed."""
+        return not any(
+            [
+                self.added_imports,
+                self.removed_imports,
+                self.added_direct_calls,
+                self.removed_direct_calls,
+                self.added_runtime_calls,
+                self.removed_runtime_calls,
+                self.added_callback_calls,
+                self.removed_callback_calls,
+                self.added_event_bindings,
+                self.removed_event_bindings,
+                self.added_inheritance_refs,
+                self.removed_inheritance_refs,
+                self.added_qualified_refs,
+                self.removed_qualified_refs,
+                self.added_aliases,
+                self.removed_aliases,
+            ]
+        )
+
+
+def _diff_tuples(
+    old_tup: Tuple[Any, ...], new_tup: Tuple[Any, ...]
+) -> Tuple[Tuple[Any, ...], Tuple[Any, ...]]:
+    old_set = set(old_tup)
+    new_set = set(new_tup)
+    added = tuple(sorted(new_set - old_set))
+    removed = tuple(sorted(old_set - new_set))
+    return added, removed
+
+
+def diff_usage_facts(
+    module_path: str,
+    old_facts: ModuleUsageFacts | None,
+    new_facts: ModuleUsageFacts | None,
+) -> UsageDelta:
+    """
+    Computes pure UsageDelta between old and new ModuleUsageFacts for a module.
+    """
+    old_f = old_facts or ModuleUsageFacts()
+    new_f = new_facts or ModuleUsageFacts()
+
+    add_imp, rem_imp = _diff_tuples(old_f.imports, new_f.imports)
+    add_dc, rem_dc = _diff_tuples(old_f.direct_calls, new_f.direct_calls)
+    add_rc, rem_rc = _diff_tuples(old_f.runtime_calls, new_f.runtime_calls)
+    add_cc, rem_cc = _diff_tuples(old_f.callback_calls, new_f.callback_calls)
+    add_eb, rem_eb = _diff_tuples(old_f.event_bindings, new_f.event_bindings)
+    add_inh, rem_inh = _diff_tuples(old_f.inheritance_refs, new_f.inheritance_refs)
+    add_qr, rem_qr = _diff_tuples(old_f.qualified_refs, new_f.qualified_refs)
+    add_alias, rem_alias = _diff_tuples(old_f.aliases, new_f.aliases)
+
+    return UsageDelta(
+        module_path=module_path,
+        added_imports=add_imp,
+        removed_imports=rem_imp,
+        added_direct_calls=add_dc,
+        removed_direct_calls=rem_dc,
+        added_runtime_calls=add_rc,
+        removed_runtime_calls=rem_rc,
+        added_callback_calls=add_cc,
+        removed_callback_calls=rem_cc,
+        added_event_bindings=add_eb,
+        removed_event_bindings=rem_eb,
+        added_inheritance_refs=add_inh,
+        removed_inheritance_refs=rem_inh,
+        added_qualified_refs=add_qr,
+        removed_qualified_refs=rem_qr,
+        added_aliases=add_alias,
+        removed_aliases=rem_alias,
+    )
+
+
