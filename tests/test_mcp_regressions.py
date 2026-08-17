@@ -120,7 +120,7 @@ def test_analysis_endpoint_returns_reusable_job_and_pollable_completion(
     monkeypatch.setattr(mcp_server, "_get_or_init_engine", lambda _root: engine)
     monkeypatch.setattr(
         "contextor.core.live_state.connect_or_start",
-        lambda _root, timeout: client,
+        lambda _root, *args, **kwargs: client,
     )
     mcp_server._analysis_tasks.clear()
     mcp_server._analysis_jobs_by_repo.clear()
@@ -199,7 +199,7 @@ def test_analysis_job_preserves_live_publish_timeout_status(tmp_path, monkeypatc
     monkeypatch.setattr(mcp_server, "_get_or_init_engine", lambda _root: engine)
     monkeypatch.setattr(
         "contextor.core.live_state.connect_or_start",
-        lambda _root, timeout: Client(),
+        lambda _root, *args, **kwargs: Client(),
     )
     mcp_server._analysis_tasks.clear()
     mcp_server._analysis_jobs_by_repo.clear()

@@ -163,12 +163,13 @@ def test_runner_uses_the_same_suite_selector_for_collection_and_execution(
 
 def test_gui_launchers_target_project_virtual_environment():
     root = Path(__file__).resolve().parents[1]
-    launcher = (root / "run_gui.bat").read_text(encoding="utf-8").lower()
+    launcher = (root / "run_contextor.bat").read_text(encoding="utf-8").lower()
     installer = (root / "GUI_test_suite_installer.bat").read_text(
         encoding="utf-8"
     ).lower()
 
-    assert ".venv\\scripts\\pythonw.exe" in launcher
+    assert "set \"venv_dir=%project_dir%\\.venv\"" in launcher
+    assert "set \"venv_py=%venv_dir%\\scripts\\python.exe\"" in launcher
     assert ".venv\\scripts\\python.exe" in installer
     assert "start \"\" /d \"%~dp0\" \"c:\\spiralprophet" not in launcher
 

@@ -35,6 +35,28 @@
   `affected_modules` payloads.
 - Note: Local/global graph metrics, artifact-level consumption refresh, test-impact
   propagation, and artifact-level blast radius remain deferred in this stage.
+  
+  - Hardened canonical LIVE runtime ownership so GUI and MCP clients can safely share one service without stealing or falsely claiming ownership.
+- Added durable per-process `owner_token` identities alongside service and owner PIDs. PID values are now used only for process/liveness tracking, while ownership requires an explicit token match.
+- Added serialized per-repository LIVE startup and post-spawn process verification to prevent concurrent GUI/MCP startups from leaving competing or orphaned runtime processes.
+- Added Windows-safe owner monitoring using a retained process handle, preventing PID reuse from keeping orphaned LIVE runtimes alive after their owner exits.
+- GUI shutdown now terminates only the LIVE runtime it can prove it owns. Connected external or MCP-owned runtimes are left untouched.
+- Added graceful IPC shutdown with exact-PID process-tree termination as a fallback and race-safe endpoint cleanup.
+- Fixed normal listener shutdown on Windows so closing the LIVE server no longer produces `WinError 10038` / `PytestUnhandledThreadExceptionWarning`.
+- Preserved backward compatibility with legacy LIVE endpoint files lacking ownership metadata; such services remain connectable but are never implicitly treated as owned.
+- Verified the lifecycle end-to-end on Windows: GUI-created LIVE remained shared with MCP, disappeared cleanly when the GUI closed, removed its endpoint, and restarted with a new service PID, owner PID, port, authentication key and owner token.
+- Updated the GUI launcher regression to target the canonical `run_contextor.bat` launcher and its repository-local `.venv`.
+
+ — Incremental LIVE graph metrics
+
+- Synchronized canonical `RepositoryAnalysisState.metrics` directly from the current in-memory dependency graph after incremental ADD, MODIFY and DELETE operations, without a full repository source rescan.
+- Preserved `state.metrics` as a macro-only graph summary containing `nodes`, hard/soft/total edge counts, hard-edge density and maximum in/out degree; no per-module metric records are stored there.
+- Kept per-module `fan_in` and `fan_out` live by deriving them directly from the current canonical hard-edge graph in `get_module_context`.
+- Added `degree_metrics_source = "live_canonical_graph"` so LLM-facing context can distinguish immediately fresh degree metrics from wider deferred analytical families.
+- Retained broader local/global analytical freshness as deferred where PageRank, HITS, betweenness, bridge and other non-local metric families are not yet incrementally refreshed.
+- Verified the full LIVE update cycle end-to-end: baseline → isolated ADD → connected ADD → edge-removing MODIFY → DELETE consumer → DELETE target.
+- Confirmed at every checkpoint that canonical `state.metrics` exactly matched an independently recomputed `compute_graph_metrics(...)` oracle.
+- Verified full cleanup and reversibility: after deleting probe modules, LIVE graph metrics returned exactly to the original baseline state.
 
 ## [1.2.0-beta Patch — Scoped analysis guards] - 2026-08-15
 

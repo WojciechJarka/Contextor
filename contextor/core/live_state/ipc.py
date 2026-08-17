@@ -17,6 +17,9 @@ class LiveEndpoint:
     host: str
     port: int
     authkey_hex: str
+    pid: int | None = None
+    owner_pid: int | None = None
+    owner_token: str | None = None
 
     @property
     def address(self) -> tuple[str, int]:
@@ -88,7 +91,12 @@ class CanonicalLiveServer:
 
     def serve_forever(self) -> None:
         while not self._stop.is_set():
-            connection = self._listener.accept()
+            try:
+                connection = self._listener.accept()
+            except OSError:
+                if self._stop.is_set():
+                    break
+                raise
             try:
                 request = connection.recv()
                 response = self._dispatch(request)
@@ -140,8 +148,10 @@ class CanonicalLiveServer:
                 total = len(events)
                 selected = events if limit is None else events[:max(0, int(limit))]
                 return {
-                    "status": "ok", "revision": self._revision,
-                    "events": selected, "total": total,
+                    "status": "ok",
+                    "revision": self._revision,
+                    "events": selected,
+                    "total": total,
                     "truncated": len(selected) < total,
                 }
             if operation == "shutdown":
@@ -150,20 +160,31 @@ class CanonicalLiveServer:
             return {"status": "error", "error": "unknown_operation"}
 
     def close(self) -> None:
-        if self._stop.is_set():
-            return
-        try:
-            LiveStateClient(self.endpoint).request("shutdown")
-        finally:
+        if not self._stop.is_set():
             self._stop.set()
-            self._listener.close()
+            try:
+                self._listener.close()
+            except OSError:
+                pass
 
 
 class LiveStateClient:
     """Small synchronous client used by desktop watcher and MCP adapters."""
 
-    def __init__(self, endpoint: LiveEndpoint):
+    def __init__(
+        self,
+        endpoint: LiveEndpoint,
+        *,
+        is_owner: bool = False,
+        service_pid: int | None = None,
+        owner_pid: int | None = None,
+        owner_token: str | None = None,
+    ):
         self.endpoint = endpoint
+        self.is_owner = is_owner
+        self.service_pid = service_pid if service_pid is not None else getattr(endpoint, "pid", None)
+        self.owner_pid = owner_pid if owner_pid is not None else getattr(endpoint, "owner_pid", None)
+        self.owner_token = owner_token if owner_token is not None else getattr(endpoint, "owner_token", None)
 
     def request(
         self, operation: str, *, timeout: float = 30.0, **payload: Any

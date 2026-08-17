@@ -5,8 +5,10 @@ Core presentation layer. ContextorGUI manages root Tkinter window,
 state persistence, sub-windows and orchestrates the analysis process.
 """
 
+import os
 import threading
 import tkinter as tk
+import uuid
 from datetime import datetime
 from queue import Empty, Queue
 from pathlib import Path
@@ -46,7 +48,6 @@ from contextor.ui.theme import (
     apply_theme,
 )
 
-
 class ContextorGUI:
     """
     Main application controller and view wrapper.
@@ -79,6 +80,9 @@ class ContextorGUI:
         self.exclude_win = None
         self.repo_builder_win = None
         self.parser_win = None
+        self.owner_token = uuid.uuid4().hex
+        self.live_client = None
+        self.live_clients = {}
         self.live_watcher = None
         self.live_event_feed = None
         self.live_watchers = {}
@@ -695,11 +699,20 @@ class ContextorGUI:
         feeds = getattr(self, "live_event_feeds", None)
         if feeds is None:
             feeds = self.live_event_feeds = {}
+        clients = getattr(self, "live_clients", None)
+        if clients is None:
+            clients = self.live_clients = {}
         try:
             from contextor.core.live_state import migrate_legacy_snapshot
 
             cache = migrate_legacy_snapshot(path)
-            client = connect_or_start(path)
+            client = connect_or_start(
+                path,
+                owner_pid=os.getpid(),
+                owner_token=getattr(self, "owner_token", None),
+            )
+            self.live_client = client
+            clients[identity.repo_id] = client
         except (OSError, EOFError, RuntimeError, TimeoutError, RepositoryIdentityError) as exc:
             self._set_live_status(f"LIVE connection error: {exc}")
             return
@@ -725,7 +738,21 @@ class ContextorGUI:
         def status_callback(message, name=identity.repo_name):
             self._set_live_status(f"[{name}] {message}")
 
-        self.live_watcher = DesktopLiveWatcher(path, client, on_status=status_callback)
+        def on_reconnect(new_client):
+            self.live_client = new_client
+            self.live_clients[identity.repo_id] = new_client
+            feed = feeds.get(identity.repo_id)
+            if feed is not None:
+                feed.client = new_client
+
+        self.live_watcher = DesktopLiveWatcher(
+            path,
+            client,
+            owner_pid=os.getpid(),
+            owner_token=getattr(self, "owner_token", None),
+            on_status=status_callback,
+            on_reconnect=on_reconnect,
+        )
         self.live_event_feed = DesktopLiveEventFeed(client, status_callback)
         watchers[identity.repo_id] = self.live_watcher
         feeds[identity.repo_id] = self.live_event_feed
@@ -872,6 +899,7 @@ class ContextorGUI:
 
     def on_closing(self):
         import re
+        import time
 
         close_cmd_log()
 
@@ -881,6 +909,42 @@ class ContextorGUI:
             watcher.stop()
         for feed in feeds:
             feed.stop()
+
+        clients = list(getattr(self, "live_clients", {}).values())
+        live_client = getattr(self, "live_client", None)
+        if live_client is not None and live_client not in clients:
+            clients.append(live_client)
+
+        gui_owner_token = getattr(self, "owner_token", None)
+        for client in clients:
+            is_owner = getattr(client, "is_owner", False)
+            client_token = getattr(client, "owner_token", None)
+            service_pid = getattr(client, "service_pid", None)
+
+            can_shutdown = (
+                is_owner is True
+                and gui_owner_token is not None
+                and client_token is not None
+                and client_token == gui_owner_token
+                and service_pid is not None
+            )
+            if not can_shutdown:
+                continue
+
+            try:
+                client.request("shutdown", timeout=1.5)
+            except Exception:
+                pass
+            if service_pid is not None:
+                from contextor.core.live_state.runtime import _is_pid_alive, _terminate_pid_tree
+
+                deadline = time.monotonic() + 1.5
+                while time.monotonic() < deadline:
+                    if not _is_pid_alive(service_pid):
+                        break
+                    time.sleep(0.05)
+                if _is_pid_alive(service_pid):
+                    _terminate_pid_tree(service_pid)
 
         geom = self.root.geometry()
         m = re.match(r"^(\d+x\d+)([+-]?\d+)([+-]?\d+)$", geom.replace("+-", "-"))

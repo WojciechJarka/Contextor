@@ -57,19 +57,44 @@ class DesktopLiveWatcher(_PollingLiveWorker):
         root: str | Path,
         client: LiveStateClient,
         *,
+        owner_pid: int | None = None,
+        owner_token: str | None = None,
         interval: float = 0.75,
         on_status: Callable[[str], None] | None = None,
+        on_reconnect: Callable[[LiveStateClient], None] | None = None,
     ):
         self.root = Path(root).resolve()
         self.client = client
+        self.owner_pid = owner_pid
+        self.owner_token = owner_token
         super().__init__(interval=interval, thread_name="contextor-live-watcher")
         self.on_status = on_status
+        self.on_reconnect = on_reconnect
         self._snapshot = self._scan()
 
     def _emit(self, message: str) -> None:
         """Forward a compact status message without assuming a GUI exists."""
         if self.on_status is not None:
             self.on_status(message)
+
+    def _recover_client(self) -> LiveStateClient | None:
+        """Attempt to reconnect or restart LIVE on genuine connection failure."""
+        try:
+            from .runtime import connect_or_start
+
+            new_client = connect_or_start(
+                self.root,
+                owner_pid=self.owner_pid,
+                owner_token=self.owner_token,
+                timeout=10.0,
+            )
+            self.client = new_client
+            if self.on_reconnect is not None:
+                self.on_reconnect(new_client)
+            return new_client
+        except Exception as exc:
+            self._emit(f"LIVE recovery failed: {exc}")
+            return None
 
     def _scan(self) -> dict[str, tuple[int, int]]:
         result = {}
@@ -85,7 +110,14 @@ class DesktopLiveWatcher(_PollingLiveWorker):
 
     def poll_once(self) -> list[str]:
         current = self._scan()
-        status = self.client.ping()
+        try:
+            status = self.client.ping()
+        except (OSError, EOFError, TimeoutError, ConnectionError):
+            self._emit("LIVE: connection lost; recovering...")
+            if self._recover_client() is None:
+                raise
+            status = self.client.ping()
+
         if not status.get("available"):
             self._snapshot = current
             self._emit("LIVE: no snapshot; waiting for analysis")
@@ -96,7 +128,14 @@ class DesktopLiveWatcher(_PollingLiveWorker):
         )
         for path in changed:
             self._emit(f"Updating LIVE: {Path(path).name}")
-            response = self.client.update_file(path, origin="desktop_watcher")
+            try:
+                response = self.client.update_file(path, origin="desktop_watcher")
+            except (OSError, EOFError, TimeoutError, ConnectionError):
+                self._emit("LIVE: connection lost during update; recovering...")
+                if self._recover_client() is None:
+                    raise
+                response = self.client.update_file(path, origin="desktop_watcher")
+
             if response.get("status") != "ok":
                 self._emit(f"LIVE connection error: {response.get('error', 'update failed')}")
                 raise RuntimeError(f"LIVE update failed for {path}: {response.get('error')}")
@@ -122,11 +161,20 @@ class DesktopLiveWatcher(_PollingLiveWorker):
 class DesktopLiveEventFeed(_PollingLiveWorker):
     """Forward queued MCP-origin LIVE events to the desktop status callback."""
 
-    def __init__(self, client: LiveStateClient, on_status: Callable[[str], None], *, interval: float = 0.75):
+    def __init__(
+        self,
+        client: LiveStateClient,
+        on_status: Callable[[str], None],
+        *,
+        interval: float = 0.75,
+    ):
         self.client = client
         self.on_status = on_status
         super().__init__(interval=interval, thread_name="contextor-live-event-feed")
-        self._revision = int(client.ping().get("revision", 0))
+        try:
+            self._revision = int(client.ping().get("revision", 0))
+        except (OSError, EOFError, TimeoutError, ConnectionError):
+            self._revision = 0
 
     def _message(self, event: dict) -> str | None:
         if event.get("origin") not in {"mcp", "mcp_analysis"}:
@@ -138,7 +186,10 @@ class DesktopLiveEventFeed(_PollingLiveWorker):
         return None
 
     def poll_once(self) -> None:
-        response = self.client.get_events(after_revision=self._revision, limit=100)
+        try:
+            response = self.client.get_events(after_revision=self._revision, limit=100)
+        except (OSError, EOFError, TimeoutError, ConnectionError):
+            return
         if response.get("status") != "ok":
             return
         for event in response.get("events", []):

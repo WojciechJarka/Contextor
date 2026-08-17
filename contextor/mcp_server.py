@@ -205,6 +205,8 @@ from contextor.mcp_process_registry import (
 # Initialize FastMCP Server
 mcp = FastMCP("Contextor")
 
+_MCP_OWNER_TOKEN: str = uuid4().hex
+
 # Global state to maintain incremental engines across MCP sessions
 _live_engines: dict[str, Any] = {}
 _live_engine_revisions: dict[str, int] = {}
@@ -499,7 +501,12 @@ async def _execute_analysis_job(
             from contextor.core.live_state import connect_or_start
 
             try:
-                live_client = connect_or_start(root, timeout=10.0)
+                live_client = connect_or_start(
+                    root,
+                    owner_pid=os.getpid(),
+                    owner_token=_MCP_OWNER_TOKEN,
+                    timeout=10.0,
+                )
                 published = live_client.publish(
                     engine_state, origin="mcp_analysis", timeout=10.0
                 )
