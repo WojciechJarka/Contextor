@@ -57,11 +57,12 @@ def _acquire_lock(lock_file: Path, timeout: float = 5.0) -> int:
     while True:
         try:
             return os.open(lock_file, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-        except FileExistsError:
+        except (FileExistsError, PermissionError):
             try:
                 if time.time() - lock_file.stat().st_mtime > 30:
                     lock_file.unlink()
                     continue
+
             except FileNotFoundError:
                 continue
             if time.monotonic() >= deadline:
