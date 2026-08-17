@@ -58,6 +58,22 @@
 - Confirmed at every checkpoint that canonical `state.metrics` exactly matched an independently recomputed `compute_graph_metrics(...)` oracle.
 - Verified full cleanup and reversibility: after deleting probe modules, LIVE graph metrics returned exactly to the original baseline state.
 
+— Dependency-driven LIVE semantic refresh
+
+- Reworked incremental repository updates around a deterministic `RefreshPlanner` and explicit `REPARSE → RECOMPUTE → PATCH → GRAPH → COMMIT` execution model.
+- LIVE updates now parse changed source only once, reuse cached canonical facts for unchanged modules, and avoid repository-wide source rescans during normal ADD, MODIFY and DELETE operations.
+- Added canonical per-module `ModuleUsageFacts` for imports, direct calls, qualified references, runtime calls, callbacks, event bindings, inheritance and aliases.
+- Added incremental, channel-aware artifact-consumption maintenance with alias and re-export resolution, including re-export retargeting without reparsing unchanged consumers.
+- Added semantic `FileDelta` / `UsageDelta` driven invalidation and bounded RAM reevaluation of only affected modules.
+- Dependency graph updates, reverse blast radius and macro graph metrics are now executed directly from the refresh plan and kept synchronized with the current canonical state.
+- Added transactional Copy-On-Write refresh execution so published LIVE state is never partially mutated before commit.
+- Integrated persistent module and artifact identity updates into planned incremental transactions while preserving generation and recovery semantics.
+- Separated static refresh completeness from runtime semantic certainty, allowing statically complete LIVE updates to explicitly retain unresolved dynamic Python relations.
+- Corrected freshness semantics so unchanged canonical families remain `fresh` when an update does not invalidate them, instead of being marked stale merely because no recomputation was required.
+- Added explicit `requires_resync`, `runtime_unresolved`, deferred advanced-metrics and per-update blast-radius states without inflating normal MCP/LIVE payloads.
+- Verified incremental canonical parity against fresh static rebuilds for module state, definitions, dependency edges, macro metrics, usage facts, artifact-consumption channels, identities and affected-module sets.
+- Hardened RefreshPlan execution with fail-closed dispatch, no-double-parse guarantees, no unchanged-source rereads and exact `plan == executed work` invariants.
+
 ## [1.2.0-beta Patch — Scoped analysis guards] - 2026-08-15
 
 - Removed the deprecated expression-based ``query_canonical_state`` and
