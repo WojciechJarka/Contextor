@@ -37,6 +37,21 @@ class FileDelta:
     artifacts_changed: list = field(default_factory=list)
     
     metadata_changes: Dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def is_empty(self) -> bool:
+        return (
+            not self.is_new
+            and not self.is_deleted
+            and not self.imports_added
+            and not self.imports_removed
+            and not self.imports_changed
+            and not self.artifacts_added
+            and not self.artifacts_removed
+            and not self.artifacts_changed
+            and not self.metadata_changes
+        )
+
 @dataclass
 class AnalysisResult:
     """Canonical in-memory result of a full project analysis."""

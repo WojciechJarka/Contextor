@@ -106,8 +106,21 @@ class RefreshPlanner:
                 reason=f"Module ADD for '{module_path}'.",
             )
 
-        # 3. Alias / Re-export Retargeting
+        # 3. Pure Semantic No-op
+        if (delta is None or delta.is_empty) and (usage_delta is None or usage_delta.is_empty):
+            return RefreshPlan(
+                reparse_modules=(),
+                recompute_modules=(),
+                patch_families=(),
+                graph_recomputations=(),
+                refresh_completeness="complete",
+                semantic_certainty="statically_resolved",
+                reason=f"No semantic changes in '{module_path}'.",
+            )
+
+        # 4. Alias / Re-export Retargeting
         has_alias_reexport_change = False
+
         if usage_delta and (usage_delta.added_aliases or usage_delta.removed_aliases):
             has_alias_reexport_change = True
 
@@ -126,10 +139,10 @@ class RefreshPlanner:
                     if c_facts.aliases or c_facts.direct_calls or c_facts.qualified_refs:
                         recompute_set.add(c_path)
 
-            patch_families = ["module_usages", "artifact_consumption"]
+            patch_families = ["definitions", "module_usages", "artifact_consumption"]
             graph_recomputations = []
             if has_import_changes:
-                patch_families.append("dependency_graph")
+                patch_families.extend(["modules", "dependency_graph"])
                 graph_recomputations.extend(["macro_metrics", "reverse_blast_radius"])
 
             return RefreshPlan(
@@ -148,6 +161,8 @@ class RefreshPlanner:
                 reparse_modules=(),
                 recompute_modules=(),
                 patch_families=(
+                    "modules",
+                    "definitions",
                     "module_usages",
                     "dependency_graph",
                     "artifact_consumption",
@@ -157,6 +172,7 @@ class RefreshPlanner:
                 semantic_certainty="statically_resolved",
                 reason=f"Import changes in '{module_path}'.",
             )
+
 
         # 5. Symbol Add / Remove / Change
         if delta and (delta.artifacts_added or delta.artifacts_removed or delta.artifacts_changed):
@@ -190,9 +206,10 @@ class RefreshPlanner:
         return RefreshPlan(
             reparse_modules=(),
             recompute_modules=(),
-            patch_families=("module_usages", "artifact_consumption"),
+            patch_families=("definitions", "module_usages", "artifact_consumption"),
             graph_recomputations=(),
             refresh_completeness="complete",
             semantic_certainty="statically_resolved",
             reason=f"Body-only usage change in '{module_path}'.",
         )
+

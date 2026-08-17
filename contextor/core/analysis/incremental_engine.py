@@ -96,7 +96,17 @@ class IncrementalAnalysisEngine:
         """
         with self._lock:
             if not self.state_manager.has_changed(file_path):
-                return IncrementalUpdateResult(status="UNCHANGED", file_path=file_path)
+                return IncrementalUpdateResult(
+                    status="UNCHANGED",
+                    file_path=file_path,
+                    graph_state="fresh" if self.state.dependency_graph is not None else "stale",
+                    dependencies_state="fresh",
+                    blast_radius_state="deferred",
+                    local_metrics_state="deferred",
+                    global_metrics_state="deferred",
+                    artifact_consumption_state="fresh" if self.state.artifact_consumption is not None else "stale",
+                )
+
                 
             path = Path(file_path)
             rel_path = path.relative_to(self.root_path)
@@ -241,8 +251,17 @@ class IncrementalAnalysisEngine:
                 file_path, delta, usage_delta, plan, new_imports, new_artifacts, new_usage
             )
             
-            graph_state = "fresh" if ("dependency_graph" in plan.patch_families or is_new or delta.is_deleted) else "fresh"
-            blast_radius_state = "fresh" if blast_radius_complete else "deferred"
+            if plan.refresh_completeness == "requires_resync":
+                graph_state = "stale"
+                dependencies_state = "stale"
+                blast_radius_state = "deferred"
+                artifact_consumption_state = "stale"
+            else:
+                graph_state = "fresh" if ("dependency_graph" in plan.patch_families or self.state.dependency_graph is not None) else "stale"
+                dependencies_state = "fresh"
+                blast_radius_state = "fresh" if blast_radius_complete else "deferred"
+                artifact_consumption_state = "fresh" if ("artifact_consumption" in plan.patch_families or self.state.artifact_consumption is not None) else "stale"
+
             affected_modules = sorted(affected_set) if blast_radius_complete else []
             
             return IncrementalUpdateResult(
@@ -250,15 +269,16 @@ class IncrementalAnalysisEngine:
                 file_path=file_path, 
                 delta=delta,
                 graph_state=graph_state,
-                dependencies_state="fresh",
+                dependencies_state=dependencies_state,
                 blast_radius_state=blast_radius_state,
                 local_metrics_state="deferred",
                 global_metrics_state="deferred",
-                artifact_consumption_state="fresh",
+                artifact_consumption_state=artifact_consumption_state,
                 affected_modules=affected_modules,
                 shadow_plan=plan,
                 execution_trace=execution_trace,
             )
+
 
             
     @staticmethod
