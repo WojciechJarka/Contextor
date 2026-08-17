@@ -122,6 +122,31 @@ def test_live_events_preserve_desktop_origin_and_syntax_diagnostic(live_server):
     }]
 
 
+def test_live_events_record_blast_radius_state_and_bounded_affected_modules(live_server):
+    server, client = live_server
+
+    modules = [f"mod_{i}" for i in range(25)]
+    result = SimpleNamespace(
+        status="UPDATED",
+        file_path="provider.py",
+        blast_radius_state="fresh",
+        affected_modules=modules,
+    )
+    server._updater = lambda _state, _path: result
+    response = client.update_file("provider.py", origin="desktop_watcher")
+    events = client.get_events(after_revision=0, limit=20)
+
+    assert response["revision"] == 1
+    assert events["total"] == 1
+    assert events["events"][0]["blast_radius_state"] == "fresh"
+    assert events["events"][0]["affected_modules"] == {
+        "total": 25,
+        "truncated": True,
+        "items": modules[:20],
+    }
+
+
+
 def test_desktop_event_feed_forwards_only_mcp_status_messages(live_server):
     _server, client = live_server
     statuses = []

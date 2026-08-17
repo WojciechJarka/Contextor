@@ -635,10 +635,11 @@ def test_update_file_marks_running_mcp_server_as_requiring_restart(monkeypatch):
             file_path=file_path,
             graph_state="fresh",
             dependencies_state="fresh",
-            blast_radius_state="deferred",
+            blast_radius_state="fresh",
             local_metrics_state="deferred",
             global_metrics_state="deferred",
             artifact_consumption_state="deferred",
+            affected_modules=["contextor.mcp_server"],
             delta=None,
         ),
     )
@@ -660,6 +661,56 @@ def test_update_file_marks_running_mcp_server_as_requiring_restart(monkeypatch):
     assert result["runtime_state"] == "stale_until_mcp_server_restart"
     assert "running MCP process" in result["runtime_warning"]
     assert "Restart" in result["runtime_warning"]
+
+
+def test_mcp_update_file_shapes_affected_modules_compact_full_and_fields(tmp_path, monkeypatch):
+    target = tmp_path / "provider.py"
+    target.write_text("def run(): pass\n", encoding="utf-8")
+    engine = SimpleNamespace(
+        state=SimpleNamespace(artifacts={"provider": {}}),
+        update_file=lambda file_path: SimpleNamespace(
+            status="UPDATED",
+            file_path=file_path,
+            graph_state="fresh",
+            dependencies_state="fresh",
+            blast_radius_state="fresh",
+            local_metrics_state="deferred",
+            global_metrics_state="deferred",
+            artifact_consumption_state="deferred",
+            affected_modules=["consumer_a", "consumer_b", "provider"],
+            delta=None,
+        ),
+    )
+    monkeypatch.setattr(mcp_server, "_get_or_init_engine", lambda _root: engine)
+    monkeypatch.setattr(mcp_server, "_persist_live_engine", lambda *_args: True)
+
+    compact = json.loads(
+        mcp_server.update_file.fn(repo_path=str(tmp_path), file_path=str(target), compact=True)
+    )
+    assert compact["status"] == "UPDATED"
+    assert compact["blast_radius_state"] == "fresh"
+    assert compact["affected_modules"] == {"total": 3, "truncated": False}
+    assert "items" not in compact["affected_modules"]
+
+    full = json.loads(
+        mcp_server.update_file.fn(repo_path=str(tmp_path), file_path=str(target), compact=False, max_items=2)
+    )
+    assert full["affected_modules"] == {
+        "total": 3,
+        "truncated": True,
+        "items": ["consumer_a", "consumer_b"],
+    }
+
+    filtered = json.loads(
+        mcp_server.update_file.fn(
+            repo_path=str(tmp_path),
+            file_path=str(target),
+            fields=["status", "affected_modules"],
+        )
+    )
+    assert set(filtered.keys()) == {"status", "affected_modules"}
+    assert filtered["status"] == "UPDATED"
+
 
 
 def test_mcp_bootstrap_keeps_an_existing_virtual_environment(monkeypatch):

@@ -1244,7 +1244,9 @@ def get_live_events(
 
     Events are retained in RAM by the shared LIVE owner (most recent 100).
     Each event identifies its ``origin`` (``desktop_watcher``,
-    ``mcp_analysis`` or ``mcp``), operation, status and file path. Syntax
+    ``mcp_analysis`` or ``mcp``), operation, status and file path. Update
+    events additionally expose ``blast_radius_state`` and a bounded
+    ``affected_modules`` collection (hard limit of 20 items in journal). Syntax
     failures additionally expose ``error``, ``line_number`` and
     ``column_number``. The response always includes the current ``revision``,
     ``total`` and ``truncated``; ``limit`` defaults to 20 and may be ``None``
@@ -1298,12 +1300,14 @@ def update_file(
     so desktop and MCP observe the same revision; otherwise the hydrated local
     engine remains a fallback. Requires a completed project analysis.
 
-    Semantic-diff collections always expose ``total`` and ``truncated``. The
-    default compact response omits ``items``; set ``compact=False`` for bounded
-    symbol/signature evidence. ``max_items`` is the per-collection limit;
-    pass ``None`` to return all requested evidence without truncation.
-    ``fields`` projects top-level response keys after compact shaping. Stable
-    fields include ``status``, ``file_path``, graph/metrics state fields,
+    Semantic-diff and affected-modules collections always expose ``total`` and
+    ``truncated``. The default compact response omits ``items``; set
+    ``compact=False`` for bounded symbol/signature/affected-module evidence.
+    ``max_items`` is the per-collection limit; pass ``None`` to return all
+    requested evidence without truncation. ``fields`` projects top-level
+    response keys after compact shaping. Stable fields include ``status``,
+    ``file_path``, graph/metrics state fields, ``affected_modules`` (containing
+    the module-level reverse blast radius when ``blast_radius_state == "fresh"``),
     ``live_state_persisted``, ``semantic_diff`` and
     ``runtime_restart_required``; ``delta`` and runtime warning fields are
     conditional. Invalid projections return the current allowlist.
@@ -1357,6 +1361,12 @@ def update_file(
             )
         new_artifacts = engine.state.artifacts.get(module_path, {})
         semantic_diff = _semantic_artifact_diff(old_artifacts, new_artifacts)
+        affected_items, affected_total, affected_truncated = _bounded_items(
+            getattr(res, "affected_modules", []) or [], max_items
+        )
+        affected_view = {"total": affected_total, "truncated": affected_truncated}
+        if not compact:
+            affected_view["items"] = affected_items
         result = {
             "status": res.status,
             "file_path": res.file_path,
@@ -1366,6 +1376,7 @@ def update_file(
             "local_metrics_state": res.local_metrics_state,
             "global_metrics_state": res.global_metrics_state,
             "artifact_consumption_state": res.artifact_consumption_state,
+            "affected_modules": affected_view,
             "live_state_persisted": live_state_persisted,
             "semantic_diff": _semantic_diff_view(semantic_diff, max_items, compact),
         }

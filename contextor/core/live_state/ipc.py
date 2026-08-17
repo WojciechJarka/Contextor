@@ -55,13 +55,32 @@ class CanonicalLiveServer:
             "revision": self._revision,
             "operation": operation,
             "origin": str(request.get("origin", "unknown")),
-            "status": getattr(result, "status", "PUBLISHED"),
-            "file_path": getattr(result, "file_path", request.get("file_path")),
+            "status": getattr(result, "status", "PUBLISHED") if not isinstance(result, dict) else result.get("status", "PUBLISHED"),
+            "file_path": getattr(result, "file_path", request.get("file_path")) if not isinstance(result, dict) else result.get("file_path", request.get("file_path")),
         }
         for name in ("error", "line_number", "column_number"):
-            value = getattr(result, name, None)
+            value = getattr(result, name, None) if not isinstance(result, dict) else result.get(name)
             if value is not None:
                 event[name] = value
+        blast_radius_state = (
+            getattr(result, "blast_radius_state", None)
+            if not isinstance(result, dict)
+            else result.get("blast_radius_state")
+        )
+        if blast_radius_state is not None:
+            event["blast_radius_state"] = blast_radius_state
+        affected = (
+            getattr(result, "affected_modules", None)
+            if not isinstance(result, dict)
+            else result.get("affected_modules")
+        )
+        if affected is not None:
+            total = len(affected)
+            event["affected_modules"] = {
+                "total": total,
+                "truncated": total > 20,
+                "items": list(affected[:20]),
+            }
         if request.get("message") is not None:
             event["message"] = str(request["message"])
         self._events.append(event)

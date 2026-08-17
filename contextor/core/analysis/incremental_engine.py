@@ -1,7 +1,10 @@
 import ast
-from dataclasses import dataclass
+from collections import defaultdict, deque
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional, List, Set, Dict, Any
+from typing import Optional, List, Set, Dict
+
+from contextor.core.domain.graph import ProjectGraph
 
 from contextor.core.analysis.state_manager import FileStateManager, RepositoryAnalysisState, FileDelta
 from contextor.core.reporting_engine.persistent_registry import PersistentIdentityRegistry
@@ -23,6 +26,7 @@ class IncrementalUpdateResult:
     error: str | None = None
     line_number: int | None = None
     column_number: int | None = None
+    affected_modules: list[str] = field(default_factory=list)
 
 
 class IncrementalAnalysisEngine:
@@ -74,17 +78,20 @@ class IncrementalAnalysisEngine:
                     ),
                     artifacts_removed=sorted(self._artifact_names(old_artifacts)),
                 )
-                self._apply_delta_and_commit(file_path, delta, [], {})
+                affected_set, blast_radius_complete = self._apply_delta_and_commit(file_path, delta, [], {})
+                blast_radius_state = "fresh" if blast_radius_complete else "deferred"
+                affected_modules = sorted(affected_set) if blast_radius_complete else []
                 return IncrementalUpdateResult(
                     status="DELETED", 
                     file_path=file_path, 
                     delta=delta,
                     graph_state="fresh",
                     dependencies_state="fresh",
-                    blast_radius_state="deferred",
+                    blast_radius_state=blast_radius_state,
                     local_metrics_state="deferred",
                     global_metrics_state="deferred",
-                    artifact_consumption_state="deferred"
+                    artifact_consumption_state="deferred",
+                    affected_modules=affected_modules,
                 )
 
             # 2. Parse new file
@@ -143,10 +150,12 @@ class IncrementalAnalysisEngine:
             delta = self._calculate_delta(module_path, module_id, is_new, new_imports, new_artifacts)
             
             # 5. Apply and Commit
-            self._apply_delta_and_commit(file_path, delta, new_imports, new_artifacts)
+            affected_set, blast_radius_complete = self._apply_delta_and_commit(file_path, delta, new_imports, new_artifacts)
             
             # Determine graph state based on whether it was a full canonical rebuild or local update
             graph_state = "fresh" if (is_new or delta.is_deleted) else "fresh" # We always keep it fresh now because ADD/DELETE does full rebuild
+            blast_radius_state = "fresh" if blast_radius_complete else "deferred"
+            affected_modules = sorted(affected_set) if blast_radius_complete else []
             
             return IncrementalUpdateResult(
                 status="UPDATED", 
@@ -154,10 +163,11 @@ class IncrementalAnalysisEngine:
                 delta=delta,
                 graph_state=graph_state,
                 dependencies_state="fresh",
-                blast_radius_state="deferred",
+                blast_radius_state=blast_radius_state,
                 local_metrics_state="deferred",
                 global_metrics_state="deferred",
-                artifact_consumption_state="deferred"
+                artifact_consumption_state="deferred",
+                affected_modules=affected_modules,
             )
             
     @staticmethod
@@ -208,7 +218,7 @@ class IncrementalAnalysisEngine:
         
         return delta
 
-    def _apply_delta_and_commit(self, file_path: str, delta: FileDelta, new_imports: list, mod_artifacts: dict):
+    def _apply_delta_and_commit(self, file_path: str, delta: FileDelta, new_imports: list, mod_artifacts: dict) -> tuple[Set[str], bool]:
         """
         Applies the delta to the graph/registry and commits atomically.
         """
@@ -217,6 +227,7 @@ class IncrementalAnalysisEngine:
         # 0. Shallow copy state to guarantee transactional atomicity
         new_modules = dict(self.state.modules)
         new_artifacts = dict(self.state.artifacts)
+        old_graph = self.state.dependency_graph
         
         # 1. Update working dictionaries
         if delta.is_deleted:
@@ -252,6 +263,27 @@ class IncrementalAnalysisEngine:
                 hard, soft = resolve_module_edges(delta.module_path, new_modules[delta.module_path], new_trie, new_package_root)
                 new_graph = new_graph.with_module_edges(delta.module_path, hard, soft)
 
+        # 2.1 Calculate reverse blast radius over OLD ∪ NEW graph evidence with operation-specific completeness
+        if delta.is_deleted:
+            # DELETE requires OLD graph evidence to discover consumers of the deleted module
+            blast_radius_complete = old_graph is not None
+        elif delta.is_new:
+            # ADD requires candidate NEW graph evidence to discover dependencies/consumers
+            blast_radius_complete = new_graph is not None
+        else:
+            # MODIFY requires both OLD and candidate NEW graph evidence
+            blast_radius_complete = old_graph is not None and new_graph is not None
+
+        affected_set = (
+            self._calculate_affected_set(
+                delta.module_path,
+                old_graph=old_graph,
+                new_graph=new_graph,
+            )
+            if blast_radius_complete
+            else set()
+        )
+
         # 3. Canonical update for artifact_consumption (Deferred)
         # We preserve the previous snapshot entirely until a global rebuild occurs.
         new_artifact_consumption = self.state.artifact_consumption
@@ -283,18 +315,43 @@ class IncrementalAnalysisEngine:
         # Post-Transaction: Update FileState in RAM
         self.state_manager.update_state(file_path)
 
+        return affected_set, blast_radius_complete
+
         
-    def _calculate_affected_set(self, changed_module: str, delta: FileDelta) -> Set[str]:
+    def _calculate_affected_set(
+        self,
+        changed_module: str,
+        old_graph: Optional[ProjectGraph] = None,
+        new_graph: Optional[ProjectGraph] = None,
+    ) -> Set[str]:
         """
-        Calculates the blast radius of the change.
+        Calculates the reverse transitive closure (blast radius) of the change.
+        A module is affected if it directly or transitively depends on changed_module
+        in either the old or candidate new dependency graph (hard and soft edges).
         """
-        affected = {changed_module}
-        
-        # Example propagation logic using blast radius
-        if self.state.dependency_graph:
-            # Add modules that depend on the changed artifacts
-            pass
-            
+        affected: Set[str] = {changed_module}
+
+        graphs = [g for g in (old_graph, new_graph) if g is not None]
+        if not graphs:
+            return affected
+
+        reverse_edges: dict[str, set[str]] = defaultdict(set)
+        for g in graphs:
+            for source, targets in g.hard_edges.items():
+                for target in targets:
+                    reverse_edges[target].add(source)
+            for source, targets in g.soft_edges.items():
+                for target in targets:
+                    reverse_edges[target].add(source)
+
+        queue = deque([changed_module])
+        while queue:
+            curr = queue.popleft()
+            for consumer in reverse_edges.get(curr, set()):
+                if consumer not in affected:
+                    affected.add(consumer)
+                    queue.append(consumer)
+
         return affected
         
     def _update_local_metrics(self, affected_set: Set[str]):
