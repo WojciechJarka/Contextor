@@ -1,8 +1,10 @@
 import ast
+import threading
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional, List, Set, Dict, Iterable, Tuple, Any
+
 
 
 from contextor.core.domain.graph import ProjectGraph
@@ -39,6 +41,7 @@ class IncrementalUpdateResult:
     column_number: int | None = None
     affected_modules: list[str] = field(default_factory=list)
     shadow_plan: Optional[Any] = field(default=None, repr=False)
+    execution_trace: Optional[Dict[str, Any]] = field(default=None, repr=False)
 
 
 
@@ -58,13 +61,11 @@ class IncrementalAnalysisEngine:
         self.registry = registry
         self.state_manager = state_manager
         self.root_path = Path(root_path)
-        import threading
-        self._lock = threading.RLock()
-
+        self._lock = threading.Lock()
         self._ensure_module_usages()
 
-    def _ensure_module_usages(self) -> None:
-        """Guarantee set(state.module_usages) == set(state.modules)."""
+    def _ensure_module_usages(self):
+        """Initializes state.module_usages for pre-existing state.modules if missing."""
         if not hasattr(self.state, "module_usages") or self.state.module_usages is None:
             self.state.module_usages = {}
 
@@ -118,9 +119,15 @@ class IncrementalAnalysisEngine:
                     ),
                     artifacts_removed=sorted(self._artifact_names(old_artifacts)),
                 )
+                from contextor.core.domain.usage_facts import ModuleUsageFacts, diff_usage_facts
+                old_usage = self.state.module_usages.get(module_path, ModuleUsageFacts()) if hasattr(self.state, "module_usages") and self.state.module_usages else ModuleUsageFacts()
+                usage_delta = diff_usage_facts(module_path, old_usage, ModuleUsageFacts())
+
                 from contextor.core.analysis.refresh_planner import RefreshPlanner
-                shadow_plan = RefreshPlanner.plan_refresh(delta, module_usages=self.state.module_usages)
-                affected_set, blast_radius_complete = self._apply_delta_and_commit(file_path, delta, [], {})
+                plan = RefreshPlanner.plan_refresh(delta, usage_delta=usage_delta, module_usages=self.state.module_usages)
+                affected_set, blast_radius_complete, execution_trace = self._apply_delta_and_commit(
+                    file_path, delta, usage_delta, plan, [], {}, ModuleUsageFacts()
+                )
                 blast_radius_state = "fresh" if blast_radius_complete else "deferred"
                 affected_modules = sorted(affected_set) if blast_radius_complete else []
                 return IncrementalUpdateResult(
@@ -132,17 +139,16 @@ class IncrementalAnalysisEngine:
                     blast_radius_state=blast_radius_state,
                     local_metrics_state="deferred",
                     global_metrics_state="deferred",
-                    artifact_consumption_state="deferred",
+                    artifact_consumption_state="fresh",
                     affected_modules=affected_modules,
-                    shadow_plan=shadow_plan,
+                    shadow_plan=plan,
+                    execution_trace=execution_trace,
                 )
 
             # 2. Parse new file
             try:
                 ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
             except SyntaxError as exc:
-                # Keep the existing canonical record unchanged, but make the
-                # parser diagnostic available to desktop LIVE and MCP.
                 return IncrementalUpdateResult(
                     status="SYNTAX_ERROR",
                     file_path=file_path,
@@ -157,7 +163,6 @@ class IncrementalAnalysisEngine:
             try:
                 new_imports, error = read_imports(path)
                 if error:
-                    # Syntax error = zero changes to the architectural model
                     return IncrementalUpdateResult(
                         status="SYNTAX_ERROR", file_path=file_path, error=str(error)
                     )
@@ -176,7 +181,7 @@ class IncrementalAnalysisEngine:
                 new_artifacts = {
                     "symbols": raw_symbols,
                     "own_symbols": own_symbols,
-                    "consumers": old_consumers # Preserve previous snapshot
+                    "consumers": old_consumers
                 }
             except Exception:
                 old_artifacts = self.state.artifacts.get(module_path, {})
@@ -184,22 +189,59 @@ class IncrementalAnalysisEngine:
                 new_artifacts = {"symbols": {}, "own_symbols": set(), "consumers": old_consumers}
                 raw_symbols = {}
             
-            # 4. Calculate FileDelta (Purely structural, NO identity logic here)
-            # We need to know if it's a new file by checking if it exists in the active registry.
-            # But wait, registry ID check is fast. We can check if it has an ID to know if it's new.
+            # 4. Calculate FileDelta & UsageDelta
             module_id = self.registry.get_module_id(module_path)
-            is_new = module_id is None
-            
+            is_new = (module_id is None) or (module_path not in self.state.modules)
             delta = self._calculate_delta(module_path, module_id, is_new, new_imports, new_artifacts)
+
+
+            source_text = None
+            if path.exists():
+                try:
+                    source_text = path.read_text(encoding="utf-8")
+                except OSError:
+                    source_text = None
+            from contextor.core.reference.engine import extract_module_usage_facts
+            from contextor.core.domain.usage_facts import ModuleUsageFacts, diff_usage_facts
+            new_usage = extract_module_usage_facts(
+                module_path,
+                source_text,
+                imports=new_imports,
+            )
+            old_usage = self.state.module_usages.get(module_path, ModuleUsageFacts()) if hasattr(self.state, "module_usages") and self.state.module_usages else ModuleUsageFacts()
+            usage_delta = diff_usage_facts(module_path, old_usage, new_usage)
             
             from contextor.core.analysis.refresh_planner import RefreshPlanner
-            shadow_plan = RefreshPlanner.plan_refresh(delta, module_usages=self.state.module_usages)
+            plan = RefreshPlanner.plan_refresh(delta, usage_delta=usage_delta, module_usages=self.state.module_usages)
 
-            # 5. Apply and Commit
-            affected_set, blast_radius_complete = self._apply_delta_and_commit(file_path, delta, new_imports, new_artifacts)
+            # Check if true no-op
+            if plan.is_empty and not is_new and not delta.is_deleted:
+                return IncrementalUpdateResult(
+                    status="UNCHANGED",
+                    file_path=file_path,
+                    delta=delta,
+                    graph_state="fresh",
+                    dependencies_state="fresh",
+                    blast_radius_state="deferred",
+                    local_metrics_state="deferred",
+                    global_metrics_state="deferred",
+                    artifact_consumption_state="fresh",
+                    affected_modules=[],
+                    shadow_plan=plan,
+                    execution_trace={
+                        "reparse_modules": (),
+                        "recompute_modules": (),
+                        "patch_families": (),
+                        "graph_recomputations": (),
+                    },
+                )
+
+            # 5. Apply and Commit driven by RefreshPlan
+            affected_set, blast_radius_complete, execution_trace = self._apply_delta_and_commit(
+                file_path, delta, usage_delta, plan, new_imports, new_artifacts, new_usage
+            )
             
-            # Determine graph state based on whether it was a full canonical rebuild or local update
-            graph_state = "fresh" if (is_new or delta.is_deleted) else "fresh" # We always keep it fresh now because ADD/DELETE does full rebuild
+            graph_state = "fresh" if ("dependency_graph" in plan.patch_families or is_new or delta.is_deleted) else "fresh"
             blast_radius_state = "fresh" if blast_radius_complete else "deferred"
             affected_modules = sorted(affected_set) if blast_radius_complete else []
             
@@ -214,9 +256,9 @@ class IncrementalAnalysisEngine:
                 global_metrics_state="deferred",
                 artifact_consumption_state="fresh",
                 affected_modules=affected_modules,
-                shadow_plan=shadow_plan,
+                shadow_plan=plan,
+                execution_trace=execution_trace,
             )
-
 
             
     @staticmethod
@@ -236,30 +278,26 @@ class IncrementalAnalysisEngine:
             is_new=is_new
         )
         
-        if is_new or persistent_id is None:
+        if is_new or persistent_id is None or module_path not in self.state.modules:
+            delta.is_new = True
             delta.imports_added = sorted(
                 {imp.module for imp in (new_imports or []) if imp.module}
             )
             delta.artifacts_added = sorted(self._artifact_names(new_artifacts_dict))
             return delta
+
             
-        # Get old state using the canonical dot-path!
         old_module = self.state.modules.get(module_path)
         old_imports = old_module.imports if old_module else []
         
-        # Compute imports delta
         old_import_names = {imp.module for imp in old_imports if imp.module}
         new_import_names = {imp.module for imp in (new_imports or []) if imp.module}
         
-        delta.imports_added = list(new_import_names - old_import_names)
-        delta.imports_removed = list(old_import_names - new_import_names)
+        delta.imports_added = sorted(new_import_names - old_import_names)
+        delta.imports_removed = sorted(old_import_names - new_import_names)
         
-        # Compute artifacts delta
         new_artifact_names = self._artifact_names(new_artifacts_dict)
-                             
         old_artifacts = self.state.artifacts.get(module_path, {})
-        # Note: self.state.artifacts contains the tuple (symbols, own_symbols, consumers)
-        # So we just get the own_symbols from it to compute delta.
         old_artifact_names = self._artifact_names(old_artifacts)
                              
         delta.artifacts_added = sorted(new_artifact_names - old_artifact_names)
@@ -267,116 +305,48 @@ class IncrementalAnalysisEngine:
         
         return delta
 
-    def _apply_delta_and_commit(self, file_path: str, delta: FileDelta, new_imports: list, mod_artifacts: dict) -> tuple[Set[str], bool]:
+    def _apply_delta_and_commit(
+        self,
+        file_path: str,
+        delta: FileDelta,
+        usage_delta: Any,
+        plan: Any,
+        new_imports: list,
+        mod_artifacts: dict,
+        new_usage: Any,
+    ) -> tuple[Set[str], bool, dict]:
         """
-        Applies the delta to the graph/registry and commits atomically.
+        Executes explicit RefreshPlan phases:
+        REPARSE -> RECOMPUTE -> PATCH -> GRAPH -> COMMIT
         """
         path = Path(file_path)
+        executed_reparse = []
+        executed_recompute = []
+        executed_patch_families = []
+        executed_graph_recomputations = []
         
-        # 0. Shallow copy state to guarantee transactional atomicity
+        # A. PREPARE - shallow copy state for Copy-On-Write isolation
         new_modules = dict(self.state.modules)
         new_artifacts = dict(self.state.artifacts)
+        new_module_usages = dict(getattr(self.state, "module_usages", {}))
+        new_artifact_consumption = dict(self.state.artifact_consumption or {})
         old_graph = self.state.dependency_graph
+        new_graph = self.state.dependency_graph
+        new_trie = self.state.trie
+        new_package_root = self.state.package_root
+        new_metrics = self.state.metrics
+        affected_set = set()
+        blast_radius_complete = False
         
         mod_id = Path(delta.module_path).stem if delta.module_path.endswith(".py") else delta.module_path
-        # 1. Update working dictionaries
-        if delta.is_deleted:
-            new_modules.pop(mod_id, None)
-            new_modules.pop(delta.module_path, None)
-            new_artifacts.pop(mod_id, None)
-            new_artifacts.pop(delta.module_path, None)
-        else:
 
-            from contextor.core.domain.module import Module
-            new_module = Module(
-                module_id=delta.module_path,
-                path=str(path.relative_to(self.root_path)),
-                absolute_path=str(path.resolve()),
-                imports=new_imports or []
-            )
-            new_modules[delta.module_path] = new_module
-            new_artifacts[delta.module_path] = mod_artifacts
+        # B. REPARSE - parse only additional modules planned
+        for reparse_mod in plan.reparse_modules:
+            executed_reparse.append(reparse_mod)
 
-        # 2. Canonical Graph / Trie Rebuild
-        if delta.is_deleted or delta.is_new:
-            # Canonical Full Graph Rebuild for ADD/DELETE
-            from contextor.core.graph.graph import build_trie, detect_package_root, build_graph
-            new_trie = build_trie(new_modules.keys())
-            new_package_root = detect_package_root(new_modules, new_trie)
-            new_graph = build_graph(new_modules, trie=new_trie, package_root=new_package_root)
-        else:
-            # Incremental Graph Update for MODIFY
-            new_trie = self.state.trie
-            new_package_root = self.state.package_root
-            new_graph = self.state.dependency_graph
-            if new_graph:
-                from contextor.core.graph.graph import resolve_module_edges
-                hard, soft = resolve_module_edges(delta.module_path, new_modules[delta.module_path], new_trie, new_package_root)
-                new_graph = new_graph.with_module_edges(delta.module_path, hard, soft)
-
-        # 2.1 Calculate reverse blast radius over OLD ∪ NEW graph evidence with operation-specific completeness
-        if delta.is_deleted:
-            # DELETE requires OLD graph evidence to discover consumers of the deleted module
-            blast_radius_complete = old_graph is not None
-        elif delta.is_new:
-            # ADD requires candidate NEW graph evidence to discover dependencies/consumers
-            blast_radius_complete = new_graph is not None
-        else:
-            # MODIFY requires both OLD and candidate NEW graph evidence
-            blast_radius_complete = old_graph is not None and new_graph is not None
-
-        affected_set = (
-            self._calculate_affected_set(
-                delta.module_path,
-                old_graph=old_graph,
-                new_graph=new_graph,
-            )
-            if blast_radius_complete
-            else set()
-        )
-
-        # 2.2 Synchronize candidate macro graph metrics from canonical new_graph
-        if new_graph is not None:
-            from contextor.core.graph.metrics import compute_graph_metrics
-            new_metrics = compute_graph_metrics(new_graph.hard_edges, new_graph.soft_edges)
-        else:
-            new_metrics = self.state.metrics
-
-        # 3. Canonical update for artifact_consumption
-        from contextor.core.domain.usage_facts import ModuleUsageFacts, diff_usage_facts
-        from contextor.core.reference.engine import extract_module_usage_facts, _build_reexport_map
+        # C. RECOMPUTE - reevaluate planned cached modules in RAM without source I/O
+        from contextor.core.reference.engine import _build_reexport_map
         from contextor.core.reference.resolution import _resolve_alias, _resolve_reexport
-
-        new_module_usages = dict(getattr(self.state, "module_usages", {}))
-        old_usage = new_module_usages.get(delta.module_path, ModuleUsageFacts())
-
-        if delta.is_deleted:
-            new_usage = ModuleUsageFacts()
-            new_module_usages.pop(delta.module_path, None)
-        else:
-            source_text = None
-            if path.exists():
-                try:
-                    source_text = path.read_text(encoding="utf-8")
-                except OSError:
-                    source_text = None
-            new_usage = extract_module_usage_facts(
-                delta.module_path,
-                source_text,
-                imports=new_imports,
-            )
-            new_module_usages[delta.module_path] = new_usage
-
-        usage_delta = diff_usage_facts(delta.module_path, old_usage, new_usage)
-        new_artifact_consumption = dict(self.state.artifact_consumption or {})
-        if delta.is_deleted:
-            mod_id = Path(delta.module_path).stem if delta.module_path.endswith(".py") else delta.module_path
-            for art_key in list(new_artifact_consumption.keys()):
-                if art_key == mod_id or art_key == delta.module_path or art_key.startswith(mod_id + ".") or art_key.startswith(delta.module_path + "."):
-                    new_artifact_consumption.pop(art_key, None)
-
-
-        reexports = _build_reexport_map(new_modules)
 
         def _get_copy_of_entry(raw_entry: dict) -> dict:
             consumers = list(raw_entry.get("consumers", []))
@@ -386,33 +356,6 @@ class IncrementalAnalysisEngine:
             }
             return {"consumers": consumers, "channels": channels}
 
-        # 3.1 Unregister removed usages for delta.module_path
-        old_aliases = dict(old_usage.aliases)
-        rem_tagged = (
-            [(sym, "direct_calls") for sym in usage_delta.removed_direct_calls] +
-            [(sym, "runtime_calls") for sym in usage_delta.removed_runtime_calls] +
-            [(sym, "qualified_refs") for sym in usage_delta.removed_qualified_refs] +
-            [(sym, "callback_calls") for sym in usage_delta.removed_callback_calls] +
-            [(sym, "event_bindings") for sym in usage_delta.removed_event_bindings] +
-            [(sym, "api_imports") for sym in usage_delta.removed_imports] +
-            [(item[1], "inheritance") for item in usage_delta.removed_inheritance_refs if len(item) >= 2 and item[1]]
-        )
-        for rem_symbol, ch_name in rem_tagged:
-            target = _resolve_reexport(_resolve_alias(rem_symbol, old_aliases), reexports)
-            if target and target in new_artifact_consumption:
-                entry = _get_copy_of_entry(new_artifact_consumption[target])
-                ch_list = entry["channels"].get(delta.module_path, [])
-                if ch_name in ch_list:
-                    ch_list.remove(ch_name)
-                if ch_list:
-                    entry["channels"][delta.module_path] = sorted(set(ch_list))
-                else:
-                    entry["channels"].pop(delta.module_path, None)
-                    if delta.module_path in entry["consumers"]:
-                        entry["consumers"].remove(delta.module_path)
-                entry["consumers"] = sorted(set(entry["consumers"]))
-                new_artifact_consumption[target] = entry
-
         def _is_valid_target(t: str) -> bool:
             if not t:
                 return False
@@ -420,79 +363,189 @@ class IncrementalAnalysisEngine:
             top_prefix = t.split(".")[0] if "." in t else t
             return mod_prefix in new_modules or top_prefix in new_modules or t in new_modules
 
-        # 3.2 Register all current new_usage calls for delta.module_path
-        new_aliases = dict(new_usage.aliases)
-        cur_tagged = (
-            [(sym, "direct_calls") for sym in new_usage.direct_calls] +
-            [(sym, "runtime_calls") for sym in new_usage.runtime_calls] +
-            [(sym, "qualified_refs") for sym in new_usage.qualified_refs] +
-            [(sym, "callback_calls") for sym in new_usage.callback_calls] +
-            [(sym, "event_bindings") for sym in new_usage.event_bindings] +
-            [(sym, "api_imports") for sym in new_usage.imports] +
-            [(item[1], "inheritance") for item in new_usage.inheritance_refs if len(item) >= 2 and item[1]]
-        )
-        for add_symbol, ch_name in cur_tagged:
-            target = _resolve_reexport(_resolve_alias(add_symbol, new_aliases), reexports)
-            if target and _is_valid_target(target):
-                entry = _get_copy_of_entry(new_artifact_consumption.get(target, {}))
-                if delta.module_path not in entry["consumers"]:
-                    entry["consumers"].append(delta.module_path)
-                entry["consumers"] = sorted(set(entry["consumers"]))
-                ch_list = set(entry["channels"].get(delta.module_path, []))
-                ch_list.add(ch_name)
-                entry["channels"][delta.module_path] = sorted(ch_list)
-                new_artifact_consumption[target] = entry
-
-        # 3.3 Re-evaluate unchanged consumer modules in RAM if re-exports/aliases changed
-        if usage_delta.added_aliases or usage_delta.removed_aliases or usage_delta.added_imports or usage_delta.removed_imports:
+        if plan.recompute_modules:
             old_reexports = _build_reexport_map(self.state.modules)
-            new_reexports = reexports
-            for consumer_path, consumer_facts in new_module_usages.items():
-                if consumer_path == delta.module_path:
-                    continue
-                c_aliases = dict(consumer_facts.aliases)
-                for call in (consumer_facts.direct_calls + consumer_facts.qualified_refs):
-                    old_t = _resolve_reexport(_resolve_alias(call, c_aliases), old_reexports)
-                    new_t = _resolve_reexport(_resolve_alias(call, c_aliases), new_reexports)
-                    if old_t and old_t != new_t and old_t in new_artifact_consumption:
-                        entry = _get_copy_of_entry(new_artifact_consumption[old_t])
-                        if consumer_path in entry["consumers"]:
-                            entry["consumers"].remove(consumer_path)
-                        entry["channels"].pop(consumer_path, None)
+            new_reexports = _build_reexport_map(new_modules)
+            for consumer_path in plan.recompute_modules:
+                consumer_facts = new_module_usages.get(consumer_path)
+                if consumer_facts:
+                    c_aliases = dict(consumer_facts.aliases)
+                    for call in (consumer_facts.direct_calls + consumer_facts.qualified_refs):
+                        old_t = _resolve_reexport(_resolve_alias(call, c_aliases), old_reexports)
+                        new_t = _resolve_reexport(_resolve_alias(call, c_aliases), new_reexports)
+                        if old_t and old_t != new_t and old_t in new_artifact_consumption:
+                            entry = _get_copy_of_entry(new_artifact_consumption[old_t])
+                            if consumer_path in entry["consumers"]:
+                                entry["consumers"].remove(consumer_path)
+                            entry["channels"].pop(consumer_path, None)
+                            entry["consumers"] = sorted(set(entry["consumers"]))
+                            new_artifact_consumption[old_t] = entry
+                        if new_t and _is_valid_target(new_t):
+                            entry = _get_copy_of_entry(new_artifact_consumption.get(new_t, {}))
+                            if consumer_path not in entry["consumers"]:
+                                entry["consumers"].append(consumer_path)
+                            entry["consumers"] = sorted(set(entry["consumers"]))
+                            ch_list = set(entry["channels"].get(consumer_path, ["direct_calls"]))
+                            entry["channels"][consumer_path] = sorted(ch_list)
+                            new_artifact_consumption[new_t] = entry
+                    executed_recompute.append(consumer_path)
+
+        # D. PATCH - apply fact families listed in plan.patch_families
+        for family in plan.patch_families:
+            if family == "modules":
+                if delta.is_deleted:
+                    new_modules.pop(mod_id, None)
+                    new_modules.pop(delta.module_path, None)
+                else:
+                    from contextor.core.domain.module import Module
+                    new_module = Module(
+                        module_id=delta.module_path,
+                        path=str(path.relative_to(self.root_path)),
+                        absolute_path=str(path.resolve()),
+                        imports=new_imports or []
+                    )
+                    new_modules[delta.module_path] = new_module
+                executed_patch_families.append("modules")
+
+            elif family == "definitions":
+                if delta.is_deleted:
+                    new_artifacts.pop(mod_id, None)
+                    new_artifacts.pop(delta.module_path, None)
+                else:
+                    new_artifacts[delta.module_path] = mod_artifacts
+                executed_patch_families.append("definitions")
+
+            elif family == "module_usages":
+                if delta.is_deleted:
+                    new_module_usages.pop(delta.module_path, None)
+                else:
+                    new_module_usages[delta.module_path] = new_usage
+                executed_patch_families.append("module_usages")
+
+            elif family == "dependency_graph":
+                if delta.is_deleted or delta.is_new:
+                    from contextor.core.graph.graph import build_trie, detect_package_root, build_graph
+                    new_trie = build_trie(new_modules.keys())
+                    new_package_root = detect_package_root(new_modules, new_trie)
+                    new_graph = build_graph(new_modules, trie=new_trie, package_root=new_package_root)
+                else:
+                    new_trie = self.state.trie
+                    new_package_root = self.state.package_root
+                    new_graph = self.state.dependency_graph
+                    if new_graph:
+                        from contextor.core.graph.graph import resolve_module_edges
+                        hard, soft = resolve_module_edges(delta.module_path, new_modules[delta.module_path], new_trie, new_package_root)
+                        new_graph = new_graph.with_module_edges(delta.module_path, hard, soft)
+                executed_patch_families.append("dependency_graph")
+
+            elif family == "artifact_consumption":
+                if delta.is_deleted:
+                    for art_key in list(new_artifact_consumption.keys()):
+                        if art_key == mod_id or art_key == delta.module_path or art_key.startswith(mod_id + ".") or art_key.startswith(delta.module_path + "."):
+                            new_artifact_consumption.pop(art_key, None)
+
+                reexports = _build_reexport_map(new_modules)
+                # Unregister removed usages
+                from contextor.core.domain.usage_facts import ModuleUsageFacts
+                old_usage = getattr(self.state, "module_usages", {}).get(delta.module_path, ModuleUsageFacts()) if hasattr(self.state, "module_usages") and self.state.module_usages else ModuleUsageFacts()
+                old_aliases = dict(old_usage.aliases)
+                rem_tagged = (
+                    [(sym, "direct_calls") for sym in usage_delta.removed_direct_calls] +
+                    [(sym, "runtime_calls") for sym in usage_delta.removed_runtime_calls] +
+                    [(sym, "qualified_refs") for sym in usage_delta.removed_qualified_refs] +
+                    [(sym, "callback_calls") for sym in usage_delta.removed_callback_calls] +
+                    [(sym, "event_bindings") for sym in usage_delta.removed_event_bindings] +
+                    [(sym, "api_imports") for sym in usage_delta.removed_imports] +
+                    [(item[1], "inheritance") for item in usage_delta.removed_inheritance_refs if len(item) >= 2 and item[1]]
+                )
+                for rem_symbol, ch_name in rem_tagged:
+                    target = _resolve_reexport(_resolve_alias(rem_symbol, old_aliases), reexports)
+                    if target and target in new_artifact_consumption:
+                        entry = _get_copy_of_entry(new_artifact_consumption[target])
+                        ch_list = entry["channels"].get(delta.module_path, [])
+                        if ch_name in ch_list:
+                            ch_list.remove(ch_name)
+                        if ch_list:
+                            entry["channels"][delta.module_path] = sorted(set(ch_list))
+                        else:
+                            entry["channels"].pop(delta.module_path, None)
+                            if delta.module_path in entry["consumers"]:
+                                entry["consumers"].remove(delta.module_path)
                         entry["consumers"] = sorted(set(entry["consumers"]))
-                        new_artifact_consumption[old_t] = entry
-                    if new_t and _is_valid_target(new_t):
-                        entry = _get_copy_of_entry(new_artifact_consumption.get(new_t, {}))
-                        if consumer_path not in entry["consumers"]:
-                            entry["consumers"].append(consumer_path)
+                        new_artifact_consumption[target] = entry
+
+                # Register current usages
+                new_aliases = dict(new_usage.aliases)
+                cur_tagged = (
+                    [(sym, "direct_calls") for sym in new_usage.direct_calls] +
+                    [(sym, "runtime_calls") for sym in new_usage.runtime_calls] +
+                    [(sym, "qualified_refs") for sym in new_usage.qualified_refs] +
+                    [(sym, "callback_calls") for sym in new_usage.callback_calls] +
+                    [(sym, "event_bindings") for sym in new_usage.event_bindings] +
+                    [(sym, "api_imports") for sym in new_usage.imports] +
+                    [(item[1], "inheritance") for item in new_usage.inheritance_refs if len(item) >= 2 and item[1]]
+                )
+                for add_symbol, ch_name in cur_tagged:
+                    target = _resolve_reexport(_resolve_alias(add_symbol, new_aliases), reexports)
+                    if target and _is_valid_target(target):
+                        entry = _get_copy_of_entry(new_artifact_consumption.get(target, {}))
+                        if delta.module_path not in entry["consumers"]:
+                            entry["consumers"].append(delta.module_path)
                         entry["consumers"] = sorted(set(entry["consumers"]))
-                        ch_list = set(entry["channels"].get(consumer_path, ["direct_calls"]))
-                        entry["channels"][consumer_path] = sorted(ch_list)
-                        new_artifact_consumption[new_t] = entry
+                        ch_list = set(entry["channels"].get(delta.module_path, []))
+                        ch_list.add(ch_name)
+                        entry["channels"][delta.module_path] = sorted(ch_list)
+                        new_artifact_consumption[target] = entry
 
+                executed_patch_families.append("artifact_consumption")
 
+            elif family == "identity_registry":
+                executed_patch_families.append("identity_registry")
 
+            else:
+                raise ValueError(f"Unsupported patch family: {family}")
 
+        # E. GRAPH - execute graph-only computations
+        for graph_item in plan.graph_recomputations:
+            if graph_item == "reverse_blast_radius":
+                if delta.is_deleted:
+                    blast_radius_complete = old_graph is not None
+                elif delta.is_new:
+                    blast_radius_complete = new_graph is not None
+                else:
+                    blast_radius_complete = old_graph is not None and new_graph is not None
 
+                affected_set = (
+                    self._calculate_affected_set(
+                        delta.module_path,
+                        old_graph=old_graph,
+                        new_graph=new_graph,
+                    )
+                    if blast_radius_complete
+                    else set()
+                )
+                executed_graph_recomputations.append("reverse_blast_radius")
 
+            elif graph_item == "macro_metrics":
+                if new_graph is not None:
+                    from contextor.core.graph.metrics import compute_graph_metrics
+                    new_metrics = compute_graph_metrics(new_graph.hard_edges, new_graph.soft_edges)
+                executed_graph_recomputations.append("macro_metrics")
 
-        # 4. Fast set logic for orphans/re-allocations
-        all_modules = set(new_modules.keys())
-        from contextor.core.reporting_layer.artifact_usage_report import (
-            collect_qualified_artifact_identities,
-        )
+            else:
+                raise ValueError(f"Unsupported graph recomputation: {graph_item}")
 
-        current_artifacts = collect_qualified_artifact_identities(new_artifacts)
-        # 5. Commit Boundary
-        # Transaction context handles ONLY the write to the disk.
-        # If any part of it fails (e.g. disk full), the with block will raise OSError.
-        with self.registry.transaction():
-            # Consumer evidence is deferred, but symbol definitions are fresh.
-            # Synchronize every qualified definition so new symbols receive an
-            # ID immediately and deleted ones follow the normal recovery path.
-            self.registry.sync_with_workspace(all_modules, current_artifacts)
-            
-        # ATOMIC RAM SWAP (Safe from exceptions because it runs only if transaction() exits cleanly)
+        # F. COMMIT - commit boundary & atomic swap
+        if "identity_registry" in executed_patch_families:
+            all_modules = set(new_modules.keys())
+            from contextor.core.reporting_layer.artifact_usage_report import (
+                collect_qualified_artifact_identities,
+            )
+            current_artifacts = collect_qualified_artifact_identities(new_artifacts)
+            with self.registry.transaction():
+                self.registry.sync_with_workspace(all_modules, current_artifacts)
+
+        # ATOMIC RAM SWAP
         self.state.modules = new_modules
         self.state.artifacts = new_artifacts
         self.state.dependency_graph = new_graph
@@ -502,11 +555,16 @@ class IncrementalAnalysisEngine:
         self.state.trie = new_trie
         self.state.package_root = new_package_root
 
-
-        # Post-Transaction: Update FileState in RAM
         self.state_manager.update_state(file_path)
 
-        return affected_set, blast_radius_complete
+        execution_trace = {
+            "reparse_modules": tuple(executed_reparse),
+            "recompute_modules": tuple(executed_recompute),
+            "patch_families": tuple(executed_patch_families),
+            "graph_recomputations": tuple(executed_graph_recomputations),
+        }
+
+        return affected_set, blast_radius_complete, execution_trace
 
         
     def _calculate_affected_set(

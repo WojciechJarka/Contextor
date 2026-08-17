@@ -106,13 +106,43 @@ class RefreshPlanner:
                 reason=f"Module ADD for '{module_path}'.",
             )
 
-        # 3. Import Changes
+        # 3. Alias / Re-export Retargeting
+        has_alias_reexport_change = False
+        if usage_delta and (usage_delta.added_aliases or usage_delta.removed_aliases):
+            has_alias_reexport_change = True
+
         has_import_changes = False
         if delta and (delta.imports_added or delta.imports_removed or delta.imports_changed):
             has_import_changes = True
         if usage_delta and (usage_delta.added_imports or usage_delta.removed_imports):
             has_import_changes = True
 
+        if has_alias_reexport_change:
+            recompute_set = set()
+            if usages:
+                for c_path, c_facts in usages.items():
+                    if c_path == module_path:
+                        continue
+                    if c_facts.aliases or c_facts.direct_calls or c_facts.qualified_refs:
+                        recompute_set.add(c_path)
+
+            patch_families = ["module_usages", "artifact_consumption"]
+            graph_recomputations = []
+            if has_import_changes:
+                patch_families.append("dependency_graph")
+                graph_recomputations.extend(["macro_metrics", "reverse_blast_radius"])
+
+            return RefreshPlan(
+                reparse_modules=(),
+                recompute_modules=tuple(sorted(recompute_set)),
+                patch_families=tuple(patch_families),
+                graph_recomputations=tuple(graph_recomputations),
+                refresh_completeness="complete",
+                semantic_certainty="statically_resolved",
+                reason=f"Alias/re-export change in '{module_path}'.",
+            )
+
+        # 4. Generic Import Changes (without alias changes)
         if has_import_changes:
             return RefreshPlan(
                 reparse_modules=(),
@@ -128,7 +158,7 @@ class RefreshPlanner:
                 reason=f"Import changes in '{module_path}'.",
             )
 
-        # 4. Symbol Add / Remove / Change
+        # 5. Symbol Add / Remove / Change
         if delta and (delta.artifacts_added or delta.artifacts_removed or delta.artifacts_changed):
             recompute_set = set()
             if delta.artifacts_removed and usages:
@@ -155,29 +185,6 @@ class RefreshPlanner:
                 reason=f"Artifact definitions change in '{module_path}'.",
             )
 
-        # 5. Alias / Re-export Retargeting
-        has_alias_reexport_change = False
-        if usage_delta and (usage_delta.added_aliases or usage_delta.removed_aliases):
-            has_alias_reexport_change = True
-
-        if has_alias_reexport_change:
-            recompute_set = set()
-            if usages:
-                for c_path, c_facts in usages.items():
-                    if c_path == module_path:
-                        continue
-                    if c_facts.aliases:
-                        recompute_set.add(c_path)
-
-            return RefreshPlan(
-                reparse_modules=(),
-                recompute_modules=tuple(sorted(recompute_set)),
-                patch_families=("module_usages", "artifact_consumption"),
-                graph_recomputations=(),
-                refresh_completeness="complete",
-                semantic_certainty="statically_resolved",
-                reason=f"Alias/re-export change in '{module_path}'.",
-            )
 
         # 6. Default: Body-only Usage Change
         return RefreshPlan(
