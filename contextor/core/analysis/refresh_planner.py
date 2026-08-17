@@ -211,9 +211,9 @@ class RefreshPlanner:
             )
 
         # 6. Default: Body-only Usage Change
-        patch_families = ["definitions", "module_usages", "artifact_consumption"]
+        patch_families = []
         if usage_delta and not usage_delta.is_empty:
-            patch_families.append("cached_analytics")
+            patch_families = ["module_usages", "artifact_consumption", "cached_analytics"]
 
         return RefreshPlan(
             reparse_modules=(),
@@ -224,5 +224,6 @@ class RefreshPlanner:
             semantic_certainty="statically_resolved",
             reason=f"Body-only usage change in '{module_path}'.",
         )
+
 
 

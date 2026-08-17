@@ -1,14 +1,15 @@
 """
 tests/test_cached_facts_live_analytics.py
 
-Stage 3D.3 / 3D.3a — CACHED_FACTS LIVE Analytics Integration Tests.
+Stage 3D.3 / 3D.3a / 3D.3b — CACHED_FACTS LIVE Analytics Integration Tests.
 Proves pure RAM execution, production parity, bounded recomputations,
 snapshot lifecycle, atomicity, consumer projections, plan-vs-execution equality,
-minimal invalidation on pure body edits, and certainty/completeness freshness preservation.
+minimal invalidation on pure body edits, certainty/completeness freshness preservation,
+and zero-call execution minimality for pure implementation-body changes.
 """
 
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 import json
 import time
 import pytest
@@ -314,7 +315,6 @@ def test_snapshot_lifecycle_and_consumer_projection(tmp_path):
 
     # 1. Legacy snapshot reconstruction
     leg_state = _CachedAnalyticsLegacySnapshotState(modules, graph, metrics)
-
     save_snapshot(leg_state, cache_dir, "legacy_snap", repo_id="r1", root_path=str(tmp_path))
 
     loaded_leg, _ = load_snapshot(cache_dir, expected_state_id="legacy_snap")
@@ -495,3 +495,140 @@ def test_requires_resync_invalidates_cached_analytics_freshness(tmp_path):
     assert res.shadow_plan.refresh_completeness == "requires_resync"
     assert res.cached_analytics_state == "stale"
     assert engine.state.cached_analytics_state == "stale"
+
+
+def test_stage3d3b_pure_body_minimal_execution_and_full_static_parity(tmp_path):
+    """10. Stage 3D.3b: Pure body edit produces minimal plan (), 0-call execution, and 100% full static parity."""
+    f = tmp_path / "calculator.py"
+    f.write_text("def add(a, b):\n    return a + b\n", encoding="utf-8")
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+
+    engine = IncrementalAnalysisEngine(
+        RepositoryAnalysisState(modules={}),
+        PersistentIdentityRegistry(str(tmp_path)),
+        FileStateManager(str(cache_dir)),
+        str(tmp_path),
+    )
+    engine.update_file(str(f))
+
+    # Edit pure body: return a + b -> return a + b + 0
+    time.sleep(0.15)
+    f.write_text("def add(a, b):\n    return a + b + 0\n", encoding="utf-8")
+    engine.state_manager._state.pop(str(f), None)
+
+    with patch.object(engine.registry, "sync_with_workspace") as mock_reg_sync, \
+         patch("contextor.core.reporting_engine.graph_analytics.compute_cached_analytics") as mock_cached, \
+         patch("contextor.core.graph.metrics.compute_graph_metrics") as mock_metrics:
+
+        res = engine.update_file(str(f))
+
+    assert res.shadow_plan.patch_families == ()
+    assert res.shadow_plan.reparse_modules == ()
+    assert res.shadow_plan.recompute_modules == ()
+    assert res.shadow_plan.graph_recomputations == ()
+    assert res.execution_trace["patch_families"] == ()
+    assert res.execution_trace["graph_recomputations"] == ()
+
+    # Zero-call execution minimality
+    assert mock_reg_sync.call_count == 0
+    assert mock_cached.call_count == 0
+    assert mock_metrics.call_count == 0
+
+    # Static rebuild parity check
+    oracle_engine = IncrementalAnalysisEngine(
+        RepositoryAnalysisState(modules={}),
+        PersistentIdentityRegistry(str(tmp_path)),
+        FileStateManager(str(cache_dir / "oracle")),
+        str(tmp_path),
+    )
+    oracle_engine.update_file(str(f))
+
+    assert set(engine.state.modules.keys()) == set(oracle_engine.state.modules.keys())
+    assert set(engine.state.artifacts.keys()) == set(oracle_engine.state.artifacts.keys())
+    assert engine.state.cached_analytics == oracle_engine.state.cached_analytics
+    assert engine.state.cached_analytics_state == oracle_engine.state.cached_analytics_state == "fresh"
+
+
+def test_stage3d3c_call_retarget_minimal_execution_counts_and_parity(tmp_path):
+    """11. Stage 3D.3c: Pure call-retarget edit produces ('module_usages', 'artifact_consumption', 'cached_analytics') with 0 definitions patch."""
+    target_py = tmp_path / "target.py"
+    target_py.write_text(
+        "def foo():\n"
+        "    return 1\n"
+        "def bar():\n"
+        "    return 2\n",
+        encoding="utf-8",
+    )
+
+    consumer_py = tmp_path / "consumer.py"
+    consumer_py.write_text(
+        "from target import foo, bar\n"
+        "def run():\n"
+        "    return foo()\n",
+        encoding="utf-8",
+    )
+
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+
+    engine = IncrementalAnalysisEngine(
+        RepositoryAnalysisState(modules={}),
+        PersistentIdentityRegistry(str(tmp_path)),
+        FileStateManager(str(cache_dir)),
+        str(tmp_path),
+    )
+    engine.update_file(str(target_py))
+    engine.update_file(str(consumer_py))
+
+    old_consumer_artifacts = engine.state.artifacts["consumer"]
+
+    # Retarget call: foo() -> bar() (no definition change, no import change)
+    time.sleep(0.15)
+    consumer_py.write_text(
+        "from target import foo, bar\n"
+        "def run():\n"
+        "    return bar()\n",
+        encoding="utf-8",
+    )
+    engine.state_manager._state.pop(str(consumer_py), None)
+
+    with patch.object(engine.registry, "sync_with_workspace") as mock_reg_sync, \
+         patch("contextor.core.graph.metrics.compute_graph_metrics") as mock_metrics:
+
+        res = engine.update_file(str(consumer_py))
+
+    # Shadow plan assertions
+    assert res.shadow_plan.reparse_modules == ()
+    assert res.shadow_plan.recompute_modules == ()
+    assert res.shadow_plan.graph_recomputations == ()
+    assert res.shadow_plan.patch_families == ("module_usages", "artifact_consumption", "cached_analytics")
+    assert "definitions" not in res.shadow_plan.patch_families
+    assert "identity_registry" not in res.shadow_plan.patch_families
+
+    # Execution trace assertions
+    assert res.execution_trace["patch_families"] == ("module_usages", "artifact_consumption", "cached_analytics")
+    assert res.execution_trace["graph_recomputations"] == ()
+
+    # Zero unnecessary calls
+    assert mock_reg_sync.call_count == 0
+    assert mock_metrics.call_count == 0
+
+    # Definitions object in state remains exact same reference or identical
+    assert engine.state.artifacts["consumer"]["own_symbols"] == old_consumer_artifacts["own_symbols"]
+
+    # Full static rebuild parity check
+    oracle_engine = IncrementalAnalysisEngine(
+        RepositoryAnalysisState(modules={}),
+        PersistentIdentityRegistry(str(tmp_path)),
+        FileStateManager(str(cache_dir / "oracle_c")),
+        str(tmp_path),
+    )
+    oracle_engine.update_file(str(target_py))
+    oracle_engine.update_file(str(consumer_py))
+
+    assert set(engine.state.modules.keys()) == set(oracle_engine.state.modules.keys())
+    assert set(engine.state.artifacts.keys()) == set(oracle_engine.state.artifacts.keys())
+    assert engine.state.cached_analytics == oracle_engine.state.cached_analytics
+    assert engine.state.cached_analytics_state == oracle_engine.state.cached_analytics_state == "fresh"
+
