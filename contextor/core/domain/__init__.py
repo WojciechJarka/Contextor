@@ -24,6 +24,9 @@ from .usage_facts import (
     UsageDelta,
     diff_usage_facts,
 )
+from .refresh_plan import (
+    RefreshPlan,
+)
 
 __all__ = [
     "ImportRef",
@@ -34,6 +37,8 @@ __all__ = [
     "ModuleUsageFacts",
     "UsageDelta",
     "diff_usage_facts",
+    "RefreshPlan",
 ]
+
 
 

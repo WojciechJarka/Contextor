@@ -2,7 +2,8 @@ import ast
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional, List, Set, Dict, Iterable, Tuple
+from typing import Optional, List, Set, Dict, Iterable, Tuple, Any
+
 
 from contextor.core.domain.graph import ProjectGraph
 
@@ -37,6 +38,8 @@ class IncrementalUpdateResult:
     line_number: int | None = None
     column_number: int | None = None
     affected_modules: list[str] = field(default_factory=list)
+    shadow_plan: Optional[Any] = field(default=None, repr=False)
+
 
 
 class IncrementalAnalysisEngine:
@@ -115,6 +118,8 @@ class IncrementalAnalysisEngine:
                     ),
                     artifacts_removed=sorted(self._artifact_names(old_artifacts)),
                 )
+                from contextor.core.analysis.refresh_planner import RefreshPlanner
+                shadow_plan = RefreshPlanner.plan_refresh(delta, module_usages=self.state.module_usages)
                 affected_set, blast_radius_complete = self._apply_delta_and_commit(file_path, delta, [], {})
                 blast_radius_state = "fresh" if blast_radius_complete else "deferred"
                 affected_modules = sorted(affected_set) if blast_radius_complete else []
@@ -129,6 +134,7 @@ class IncrementalAnalysisEngine:
                     global_metrics_state="deferred",
                     artifact_consumption_state="deferred",
                     affected_modules=affected_modules,
+                    shadow_plan=shadow_plan,
                 )
 
             # 2. Parse new file
@@ -186,6 +192,9 @@ class IncrementalAnalysisEngine:
             
             delta = self._calculate_delta(module_path, module_id, is_new, new_imports, new_artifacts)
             
+            from contextor.core.analysis.refresh_planner import RefreshPlanner
+            shadow_plan = RefreshPlanner.plan_refresh(delta, module_usages=self.state.module_usages)
+
             # 5. Apply and Commit
             affected_set, blast_radius_complete = self._apply_delta_and_commit(file_path, delta, new_imports, new_artifacts)
             
@@ -205,7 +214,9 @@ class IncrementalAnalysisEngine:
                 global_metrics_state="deferred",
                 artifact_consumption_state="fresh",
                 affected_modules=affected_modules,
+                shadow_plan=shadow_plan,
             )
+
 
             
     @staticmethod
