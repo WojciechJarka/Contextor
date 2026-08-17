@@ -58,6 +58,33 @@ class IncrementalAnalysisEngine:
         import threading
         self._lock = threading.RLock()
 
+        self._ensure_module_usages()
+
+    def _ensure_module_usages(self) -> None:
+        """Guarantee set(state.module_usages) == set(state.modules)."""
+        if not hasattr(self.state, "module_usages") or self.state.module_usages is None:
+            self.state.module_usages = {}
+
+        missing_modules = set(self.state.modules.keys()) - set(self.state.module_usages.keys())
+        if missing_modules:
+            from contextor.core.reference.engine import extract_module_usage_facts
+            for mod_path in missing_modules:
+                mod = self.state.modules[mod_path]
+                mod_abs = getattr(mod, "absolute_path", None) or getattr(mod, "path", None)
+                source_text = None
+                if mod_abs and Path(mod_abs).exists():
+                    try:
+                        source_text = Path(mod_abs).read_text(encoding="utf-8")
+                    except OSError:
+                        source_text = None
+                imports = getattr(mod, "imports", [])
+                self.state.module_usages[mod_path] = extract_module_usage_facts(
+                    mod_path,
+                    source_text,
+                    imports=imports,
+                )
+
+
     def update_file(self, file_path: str) -> IncrementalUpdateResult:
         """
             Updates the canonical state incrementally for a single changed file.
@@ -305,6 +332,24 @@ class IncrementalAnalysisEngine:
         # We preserve the previous snapshot entirely until a global rebuild occurs.
         new_artifact_consumption = self.state.artifact_consumption
 
+        # 3.1 Update canonical ModuleUsageFacts
+        from contextor.core.reference.engine import extract_module_usage_facts
+        new_module_usages = dict(getattr(self.state, "module_usages", {}))
+        if delta.is_deleted:
+            new_module_usages.pop(delta.module_path, None)
+        else:
+            source_text = None
+            if path.exists():
+                try:
+                    source_text = path.read_text(encoding="utf-8")
+                except OSError:
+                    source_text = None
+            new_module_usages[delta.module_path] = extract_module_usage_facts(
+                delta.module_path,
+                source_text,
+                imports=new_imports,
+            )
+
         # 4. Fast set logic for orphans/re-allocations
         all_modules = set(new_modules.keys())
         from contextor.core.reporting_layer.artifact_usage_report import (
@@ -327,8 +372,10 @@ class IncrementalAnalysisEngine:
         self.state.dependency_graph = new_graph
         self.state.metrics = new_metrics
         self.state.artifact_consumption = new_artifact_consumption
+        self.state.module_usages = new_module_usages
         self.state.trie = new_trie
         self.state.package_root = new_package_root
+
 
         # Post-Transaction: Update FileState in RAM
         self.state_manager.update_state(file_path)

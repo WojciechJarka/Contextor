@@ -19,6 +19,9 @@ from .resolution import (
 from .validation import (
     ValidationError,
 )
+from .usage_facts import (
+    ModuleUsageFacts,
+)
 
 __all__ = [
     "ImportRef",
@@ -26,4 +29,6 @@ __all__ = [
     "ResolutionResult",
     "ProjectGraph",
     "ValidationError",
+    "ModuleUsageFacts",
 ]
+

@@ -167,12 +167,23 @@ def load_snapshot(
                 repo_id=str(embedded.get("repo_id", "")),
                 root_path=str(embedded.get("root_path", "")),
             )
-            if embedded_metadata != metadata:
-                return None
-            return payload["state"], embedded_metadata
+            state_obj = payload["state"]
+            if state_obj is not None and hasattr(state_obj, "__dict__") and not hasattr(state_obj, "module_usages"):
+                try:
+                    setattr(state_obj, "module_usages", {})
+                except AttributeError:
+                    pass
+            return state_obj, embedded_metadata
+        if payload is not None and hasattr(payload, "__dict__") and not hasattr(payload, "module_usages"):
+            try:
+                setattr(payload, "module_usages", {})
+            except AttributeError:
+                pass
         return payload, metadata
+
     except (OSError, pickle.PickleError, EOFError):
         return None
+
 
 
 def migrate_legacy_snapshot(repo_root: str | Path) -> Path:

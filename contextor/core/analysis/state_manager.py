@@ -68,10 +68,12 @@ class RepositoryAnalysisState:
     layer_information: Dict[str, Any] = field(default_factory=dict)
     metrics: Dict[str, Any] = field(default_factory=dict)
     file_state: Dict[str, FileState] = field(default_factory=dict)
+    module_usages: Dict[str, Any] = field(default_factory=dict)
     
     # Required for canonical graph edge resolution
     trie: Optional[Any] = None
     package_root: str = ""
+
 
 
 class FileStateManager:

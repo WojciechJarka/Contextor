@@ -1,4 +1,3 @@
-
 """
 contextor/core/reference/engine.py
 
@@ -10,19 +9,17 @@ MAX_USAGE_DETAILS to prevent massive I/O bloat in the artifact
 usage report.
 """
 
+from __future__ import annotations
+
 import re
 import ast
 from pathlib import Path
 
+from contextor.core.domain.usage_facts import ModuleUsageFacts
 from contextor.core.source import SourceError, read_source
 
 from .visitor import SymbolReferenceVisitor
 from .resolution import _absolute_import_module, _resolve_reexport
-
-
-# ==========================================================
-# PROCESS-LOCAL IDENTIFIER CACHE
-# ==========================================================
 
 _IDENTIFIER_CACHE: dict[str, frozenset[str]] = {}
 
@@ -649,12 +646,150 @@ def find_import_users(
 
 
 # ==========================================================
+# CANONICAL MODULE USAGE FACTS EXTRACTOR
+# ==========================================================
+
+
+def extract_module_usage_facts(
+    module_path: str,
+    source_or_tree: str | ast.AST | None,
+    imports: list | None = None,
+    target_symbols: set | None = None,
+    reexports: dict | None = None,
+) -> ModuleUsageFacts:
+    """
+    Extract outbound ModuleUsageFacts for a single module.
+
+    Canonical producer of per-module outbound usage facts.
+    REUSES production SymbolReferenceVisitor - zero duplicate AST visitors created.
+    """
+    from contextor.core.domain.usage_facts import ModuleUsageFacts
+
+    if source_or_tree is None:
+        raw_imports = tuple(
+            sorted(
+                set(
+                    imp.module
+                    for imp in (imports or [])
+                    if getattr(imp, "module", None)
+                )
+            )
+        )
+        return ModuleUsageFacts(imports=raw_imports)
+
+    if isinstance(source_or_tree, str):
+        try:
+            tree = ast.parse(source_or_tree)
+        except SyntaxError:
+            raw_imports = tuple(
+                sorted(
+                    set(
+                        imp.module
+                        for imp in (imports or [])
+                        if getattr(imp, "module", None)
+                    )
+                )
+            )
+            return ModuleUsageFacts(imports=raw_imports)
+    else:
+        tree = source_or_tree
+
+    visitor = SymbolReferenceVisitor(
+        target_symbols=target_symbols or set(),
+        reexports=reexports or {},
+        current_module=module_path,
+    )
+    visitor.visit(tree)
+
+    import_names = set()
+    if imports:
+        for imp in imports:
+            mod_name = getattr(imp, "module", None)
+            if mod_name:
+                import_names.add(mod_name)
+    for _local_name, imported_target in visitor.aliases.items():
+        if imported_target:
+            import_names.add(imported_target)
+
+    direct_calls = tuple(
+        sorted(
+            set(
+                item[0] if isinstance(item, tuple) else item
+                for item in visitor.called
+            )
+        )
+    )
+    runtime_calls = tuple(
+        sorted(
+            set(
+                item[0] if isinstance(item, tuple) else item
+                for item in visitor.called_ambiguous
+            )
+        )
+    )
+    callback_calls = tuple(
+        sorted(
+            set(
+                item[0] if isinstance(item, tuple) else item
+                for item in visitor.callback_called
+            )
+        )
+    )
+    event_bindings = tuple(
+        sorted(
+            set(
+                item[0] if isinstance(item, tuple) else item
+                for item in visitor.event_bound
+            )
+        )
+    )
+    inheritance_refs = tuple(
+        sorted(
+            set(
+                (item[0], item[1]) if len(item) >= 2 else (item[0], "")
+                for item in visitor.inherited
+            )
+        )
+    )
+    aliases = tuple(
+        sorted(
+            set(
+                (str(k), str(v))
+                for k, v in visitor.aliases.items()
+                if k and v
+            )
+        )
+    )
+
+    qualified_refs = tuple(
+        sorted(
+            set(
+                v for _k, v in visitor.aliases.items() if "." in str(v)
+            )
+        )
+    )
+
+    return ModuleUsageFacts(
+        imports=tuple(sorted(import_names)),
+        direct_calls=direct_calls,
+        runtime_calls=runtime_calls,
+        callback_calls=callback_calls,
+        event_bindings=event_bindings,
+        inheritance_refs=inheritance_refs,
+        qualified_refs=qualified_refs,
+        aliases=aliases,
+    )
+
+
+
+# ==========================================================
 # PUBLIC EXPORTS
 # ==========================================================
 
 __all__ = [
     "MAX_USAGE_DETAILS",
     "build_symbol_references",
+    "extract_module_usage_facts",
     "find_import_users",
     "reset_caches",
 ]
