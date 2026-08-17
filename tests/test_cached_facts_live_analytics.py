@@ -1,9 +1,10 @@
 """
 tests/test_cached_facts_live_analytics.py
 
-Stage 3D.3 — CACHED_FACTS LIVE Analytics Integration Tests.
+Stage 3D.3 / 3D.3a — CACHED_FACTS LIVE Analytics Integration Tests.
 Proves pure RAM execution, production parity, bounded recomputations,
-snapshot lifecycle, atomicity, consumer projections, and plan-vs-execution equality.
+snapshot lifecycle, atomicity, consumer projections, plan-vs-execution equality,
+minimal invalidation on pure body edits, and certainty/completeness freshness preservation.
 """
 
 from pathlib import Path
@@ -23,6 +24,7 @@ from contextor.core.analysis.state_manager import (
 from contextor.core.domain.graph import ProjectGraph
 from contextor.core.domain.module import Module
 from contextor.core.domain.imports import ImportRef
+from contextor.core.domain.refresh_plan import RefreshPlan
 from contextor.core.graph.metrics import compute_graph_metrics
 from contextor.core.live_state.store import save_snapshot, load_snapshot
 from contextor.core.reporting_engine.graph_analytics import (
@@ -286,7 +288,7 @@ def test_layer_violation_detection_and_resolution(tmp_path):
     assert len(engine.state.cached_analytics["layer_violations"]) == 0
 
 
-class LegacySnapshotState:
+class _CachedAnalyticsLegacySnapshotState:
     """Mock state without cached_analytics or topology fields."""
     def __init__(self, modules, graph, metrics):
         self.modules = modules
@@ -311,7 +313,8 @@ def test_snapshot_lifecycle_and_consumer_projection(tmp_path):
     metrics = compute_graph_metrics({"contextor.core.analysis.mod": set()}, {"contextor.core.analysis.mod": set()})
 
     # 1. Legacy snapshot reconstruction
-    leg_state = LegacySnapshotState(modules, graph, metrics)
+    leg_state = _CachedAnalyticsLegacySnapshotState(modules, graph, metrics)
+
     save_snapshot(leg_state, cache_dir, "legacy_snap", repo_id="r1", root_path=str(tmp_path))
 
     loaded_leg, _ = load_snapshot(cache_dir, expected_state_id="legacy_snap")
@@ -385,3 +388,110 @@ def test_atomicity_and_isolation_on_failure(tmp_path):
     # Published state must be completely uncorrupted
     assert engine.state.cached_analytics == old_cached
     assert engine.state is old_state_obj
+
+
+def test_pure_body_change_no_cached_analytics_invalidation(tmp_path):
+    """7. Stage 3D.3a: Pure body implementation edit (return 10 -> return 1000) must not schedule cached_analytics."""
+    f = tmp_path / "worker.py"
+    f.write_text("def compute():\n    return 10\n", encoding="utf-8")
+    cache_dir = tmp_path / "cache"
+
+    engine = IncrementalAnalysisEngine(
+        RepositoryAnalysisState(modules={}),
+        PersistentIdentityRegistry(str(tmp_path)),
+        FileStateManager(str(cache_dir)),
+        str(tmp_path),
+    )
+    res_init = engine.update_file(str(f))
+    assert res_init.cached_analytics_state == "fresh"
+
+    old_cached = dict(engine.state.cached_analytics)
+
+    # Pure body implementation edit
+    time.sleep(0.15)
+    f.write_text("def compute():\n    return 1000000\n", encoding="utf-8")
+
+    with patch("contextor.core.reporting_engine.graph_analytics.compute_cached_analytics") as mock_compute:
+        res = engine.update_file(str(f))
+
+        # Pure body change with unchanged imports/exports/usages is UNCHANGED
+        assert res.status in ("UNCHANGED", "UPDATED")
+        if res.shadow_plan:
+            assert "cached_analytics" not in res.shadow_plan.patch_families
+        assert "cached_analytics" not in res.execution_trace.get("patch_families", ())
+        assert mock_compute.call_count == 0
+        assert engine.state.cached_analytics == old_cached
+        assert engine.state.cached_analytics_state == "fresh"
+
+
+def test_runtime_unresolved_certainty_preserves_freshness(tmp_path):
+    """8. Stage 3D.3a: runtime_unresolved certainty + complete refresh must keep cached_analytics_state fresh."""
+    f = tmp_path / "dyn.py"
+    f.write_text("def eval_code(code):\n    return eval(code)\n", encoding="utf-8")
+    cache_dir = tmp_path / "cache"
+
+    engine = IncrementalAnalysisEngine(
+        RepositoryAnalysisState(modules={}),
+        PersistentIdentityRegistry(str(tmp_path)),
+        FileStateManager(str(cache_dir)),
+        str(tmp_path),
+    )
+    engine.update_file(str(f))
+
+    # Mock RefreshPlanner to return complete + runtime_unresolved
+    plan_unresolved = RefreshPlan(
+        reparse_modules=(),
+        recompute_modules=(),
+        patch_families=("definitions", "module_usages", "artifact_consumption"),
+        graph_recomputations=(),
+        refresh_completeness="complete",
+        semantic_certainty="runtime_unresolved",
+        reason="Dynamic eval inside function",
+    )
+
+    with patch("contextor.core.analysis.refresh_planner.RefreshPlanner.plan_refresh", return_value=plan_unresolved):
+        time.sleep(0.15)
+        f.write_text("def eval_code(code):\n    return eval(code) + 1000\n", encoding="utf-8")
+        engine.state_manager._state.pop(str(f), None)
+        res = engine.update_file(str(f))
+
+    assert res.shadow_plan.refresh_completeness == "complete"
+    assert res.shadow_plan.semantic_certainty == "runtime_unresolved"
+    assert res.cached_analytics_state == "fresh"
+    assert engine.state.cached_analytics_state == "fresh"
+
+
+def test_requires_resync_invalidates_cached_analytics_freshness(tmp_path):
+    """9. Stage 3D.3a: requires_resync completeness must set cached_analytics_state to stale."""
+    f = tmp_path / "mod.py"
+    f.write_text("def run(): pass\n", encoding="utf-8")
+    cache_dir = tmp_path / "cache"
+
+    engine = IncrementalAnalysisEngine(
+        RepositoryAnalysisState(modules={}),
+        PersistentIdentityRegistry(str(tmp_path)),
+        FileStateManager(str(cache_dir)),
+        str(tmp_path),
+    )
+    engine.update_file(str(f))
+    assert engine.state.cached_analytics_state == "fresh"
+
+    plan_resync = RefreshPlan(
+        reparse_modules=(),
+        recompute_modules=(),
+        patch_families=("definitions", "module_usages"),
+        graph_recomputations=(),
+        refresh_completeness="requires_resync",
+        semantic_certainty="statically_resolved",
+        reason="Corrupted state requires resync",
+    )
+
+    with patch("contextor.core.analysis.refresh_planner.RefreshPlanner.plan_refresh", return_value=plan_resync):
+        time.sleep(0.15)
+        f.write_text("def run(): return 1000\n", encoding="utf-8")
+        engine.state_manager._state.pop(str(f), None)
+        res = engine.update_file(str(f))
+
+    assert res.shadow_plan.refresh_completeness == "requires_resync"
+    assert res.cached_analytics_state == "stale"
+    assert engine.state.cached_analytics_state == "stale"

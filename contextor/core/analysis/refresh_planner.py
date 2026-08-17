@@ -196,34 +196,33 @@ class RefreshPlanner:
                         if call in removed_set or any(call.endswith("." + r) for r in removed_set):
                             recompute_set.add(c_path)
 
+            patch_families = ["definitions", "identity_registry", "module_usages", "artifact_consumption"]
+            if bool(delta.artifacts_added or delta.artifacts_removed) or (usage_delta and not usage_delta.is_empty):
+                patch_families.append("cached_analytics")
 
             return RefreshPlan(
                 reparse_modules=(),
                 recompute_modules=tuple(sorted(recompute_set)),
-                patch_families=(
-                    "definitions",
-                    "identity_registry",
-                    "module_usages",
-                    "artifact_consumption",
-                    "cached_analytics",
-                ),
-
+                patch_families=tuple(patch_families),
                 graph_recomputations=(),
                 refresh_completeness="complete",
                 semantic_certainty="statically_resolved",
                 reason=f"Artifact definitions change in '{module_path}'.",
             )
 
-
         # 6. Default: Body-only Usage Change
+        patch_families = ["definitions", "module_usages", "artifact_consumption"]
+        if usage_delta and not usage_delta.is_empty:
+            patch_families.append("cached_analytics")
+
         return RefreshPlan(
             reparse_modules=(),
             recompute_modules=(),
-            patch_families=("definitions", "module_usages", "artifact_consumption", "cached_analytics"),
-
+            patch_families=tuple(patch_families),
             graph_recomputations=(),
             refresh_completeness="complete",
             semantic_certainty="statically_resolved",
             reason=f"Body-only usage change in '{module_path}'.",
         )
+
 
