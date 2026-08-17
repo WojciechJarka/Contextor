@@ -1892,14 +1892,86 @@ def generate_graph_analytics_report(
     return report
 
 
+def compute_topology_analytics(
+    hard_edges: dict[str, Any],
+    soft_edges: dict[str, Any] | None = None,
+    metrics: dict[str, Any] | None = None,
+    progress_callback=None,
+) -> dict[str, Any]:
+    """
+    Compute pure-RAM canonical topology analytics family:
+    - PageRank
+    - Betweenness
+    - HITS (hub_scores, authority_scores)
+    - Bridge Score
+    - Hotspots
+    - Module Risk
+    - Inspection Targets
+    """
+    pagerank = _compute_pagerank(hard_edges, progress_callback=progress_callback)
+    betweenness = _compute_betweenness(hard_edges, progress_callback=progress_callback)
+    hub_scores, authority_scores = _compute_hub_authority(
+        hard_edges, progress_callback=progress_callback
+    )
+    bridge_scores = _compute_bridge_score(hard_edges, betweenness)
+
+    from contextor.core.hotspots.engine import detect_hotspots
+    from contextor.core.reporting_engine.risk_signals import (
+        _compute_module_risk,
+        _compute_inspection_targets,
+    )
+
+    hotspots = detect_hotspots(hard_edges)
+
+    soft = soft_edges or {}
+    max_soft = max((len(t) for t in soft.values()), default=1) or 1
+
+    if metrics:
+        max_in = max(metrics.get("in_degree_max", 1), metrics.get("max_in_degree", 1), 1)
+        max_out = max(metrics.get("out_degree_max", 1), metrics.get("max_out_degree", 1), 1)
+    else:
+        in_degrees: dict[str, int] = defaultdict(int)
+        out_degrees = {src: len(targets) for src, targets in hard_edges.items()}
+        for targets in hard_edges.values():
+            for t in targets:
+                in_degrees[t] += 1
+        max_in = max(in_degrees.values(), default=1) or 1
+        max_out = max(out_degrees.values(), default=1) or 1
+
+    metrics_dict = {
+        "max_in_degree": max_in,
+        "max_out_degree": max_out,
+        "max_soft_out_degree": max_soft,
+    }
+    graph_dict = {
+        "hard_edges": hard_edges,
+        "soft_edges": soft,
+    }
+    module_risk = _compute_module_risk(metrics_dict, graph_dict)
+    inspection_targets = _compute_inspection_targets(hotspots)
+
+    return {
+        "pagerank": pagerank,
+        "betweenness": betweenness,
+        "hub_scores": hub_scores,
+        "authority_scores": authority_scores,
+        "bridge_scores": bridge_scores,
+        "hotspots": hotspots,
+        "module_risk": module_risk,
+        "inspection_targets": inspection_targets,
+    }
+
+
 # ==========================================================
 # EXPORTS
 # ==========================================================
 
 __all__ = [
     "generate_graph_analytics_report",
+    "compute_topology_analytics",
     "build_module_dependency_matrix",
     "build_jaccard_clusters",
     "_classify_layer",
     "_classify_visibility",
 ]
+

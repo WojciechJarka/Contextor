@@ -1632,7 +1632,23 @@ def get_module_context(
         live_fan_in = sum(
             1 for _, targets in hard_edges.items() if module_name in targets
         )
-        if saved_record is not None:
+        topo = getattr(engine.state, "topology_analytics", {}) or {}
+        topo_freshness = getattr(engine.state, "topology_metrics_state", "fresh" if topo else "deferred")
+        if topo_freshness == "fresh" and topo and module_name in topo.get("pagerank", {}):
+            metrics = dict(saved_record) if saved_record is not None else {}
+            metrics["fan_in"] = live_fan_in
+            metrics["fan_out"] = live_fan_out
+            metrics["pagerank"] = topo["pagerank"].get(module_name, 0.0)
+            metrics["betweenness"] = topo["betweenness"].get(module_name, 0.0)
+            metrics["hub_score"] = topo["hub_scores"].get(module_name, 0.0)
+            metrics["authority_score"] = topo["authority_scores"].get(module_name, 0.0)
+            metrics["bridge_score"] = topo["bridge_scores"].get(module_name, 0.0)
+            if "module_risk" in topo and module_name in topo["module_risk"]:
+                metrics["risk_score"] = topo["module_risk"][module_name]
+            metrics_source = "live_canonical_graph"
+            degree_metrics_source = "live_canonical_graph"
+        elif saved_record is not None:
+
             metrics = dict(saved_record)
             metrics["fan_in"] = live_fan_in
             metrics["fan_out"] = live_fan_out
@@ -1645,6 +1661,7 @@ def get_module_context(
             }
             metrics_source = "deferred_until_full_analysis"
             degree_metrics_source = "live_canonical_graph"
+
     else:
         if saved_record is not None:
             metrics = dict(saved_record)

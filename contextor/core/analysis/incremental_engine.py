@@ -35,7 +35,9 @@ class IncrementalUpdateResult:
     blast_radius_state: str = "stale"
     local_metrics_state: str = "stale"
     global_metrics_state: str = "stale"
+    topology_metrics_state: str = "stale"
     artifact_consumption_state: str = "stale"
+
     error: str | None = None
     line_number: int | None = None
     column_number: int | None = None
@@ -63,8 +65,28 @@ class IncrementalAnalysisEngine:
         self.root_path = Path(root_path)
         self._lock = threading.Lock()
         self._ensure_module_usages()
+        self._ensure_topology_analytics()
+
+    def _ensure_topology_analytics(self):
+        """Materializes state.topology_analytics from canonical graph if missing/empty and not stale."""
+        if not hasattr(self.state, "topology_metrics_state") or self.state.topology_metrics_state is None:
+            self.state.topology_metrics_state = "fresh" if bool(getattr(self.state, "topology_analytics", None)) else "deferred"
+
+        if not hasattr(self.state, "topology_analytics") or self.state.topology_analytics is None:
+            self.state.topology_analytics = {}
+
+        if self.state.topology_metrics_state != "stale" and not self.state.topology_analytics and getattr(self.state, "dependency_graph", None) is not None:
+            from contextor.core.reporting_engine.graph_analytics import compute_topology_analytics
+            self.state.topology_analytics = compute_topology_analytics(
+                self.state.dependency_graph.hard_edges,
+                self.state.dependency_graph.soft_edges,
+                self.state.metrics,
+            )
+            self.state.topology_metrics_state = "fresh"
+
 
     def _ensure_module_usages(self):
+
         """Initializes state.module_usages for pre-existing state.modules if missing."""
         if not hasattr(self.state, "module_usages") or self.state.module_usages is None:
             self.state.module_usages = {}
@@ -104,8 +126,11 @@ class IncrementalAnalysisEngine:
                     blast_radius_state="deferred",
                     local_metrics_state="deferred",
                     global_metrics_state="deferred",
+                    topology_metrics_state=getattr(self.state, "topology_metrics_state", "fresh" if bool(getattr(self.state, "topology_analytics", None)) else "deferred"),
                     artifact_consumption_state="fresh" if self.state.artifact_consumption is not None else "stale",
                 )
+
+
 
                 
             path = Path(file_path)
@@ -149,11 +174,13 @@ class IncrementalAnalysisEngine:
                     blast_radius_state=blast_radius_state,
                     local_metrics_state="deferred",
                     global_metrics_state="deferred",
+                    topology_metrics_state="fresh",
                     artifact_consumption_state="fresh",
                     affected_modules=affected_modules,
                     shadow_plan=plan,
                     execution_trace=execution_trace,
                 )
+
 
             # 2. Parse new file
             try:
@@ -235,6 +262,7 @@ class IncrementalAnalysisEngine:
                     blast_radius_state="deferred",
                     local_metrics_state="deferred",
                     global_metrics_state="deferred",
+                    topology_metrics_state=getattr(self.state, "topology_metrics_state", "fresh" if bool(getattr(self.state, "topology_analytics", None)) else "deferred"),
                     artifact_consumption_state="fresh",
                     affected_modules=[],
                     shadow_plan=plan,
@@ -246,6 +274,8 @@ class IncrementalAnalysisEngine:
                     },
                 )
 
+
+
             # 5. Apply and Commit driven by RefreshPlan
             affected_set, blast_radius_complete, execution_trace = self._apply_delta_and_commit(
                 file_path, delta, usage_delta, plan, new_imports, new_artifacts, new_usage
@@ -255,12 +285,18 @@ class IncrementalAnalysisEngine:
                 graph_state = "stale"
                 dependencies_state = "stale"
                 blast_radius_state = "deferred"
+                topology_metrics_state = "stale"
                 artifact_consumption_state = "stale"
             else:
                 graph_state = "fresh" if ("dependency_graph" in plan.patch_families or self.state.dependency_graph is not None) else "stale"
                 dependencies_state = "fresh"
                 blast_radius_state = "fresh" if blast_radius_complete else "deferred"
+                if "advanced_graph_metrics" in plan.graph_recomputations:
+                    topology_metrics_state = "fresh"
+                else:
+                    topology_metrics_state = getattr(self.state, "topology_metrics_state", "fresh" if bool(getattr(self.state, "topology_analytics", None)) else "deferred")
                 artifact_consumption_state = "fresh" if ("artifact_consumption" in plan.patch_families or self.state.artifact_consumption is not None) else "stale"
+
 
             affected_modules = sorted(affected_set) if blast_radius_complete else []
             
@@ -273,11 +309,13 @@ class IncrementalAnalysisEngine:
                 blast_radius_state=blast_radius_state,
                 local_metrics_state="deferred",
                 global_metrics_state="deferred",
+                topology_metrics_state=topology_metrics_state,
                 artifact_consumption_state=artifact_consumption_state,
                 affected_modules=affected_modules,
                 shadow_plan=plan,
                 execution_trace=execution_trace,
             )
+
 
 
             
@@ -355,8 +393,10 @@ class IncrementalAnalysisEngine:
         new_trie = self.state.trie
         new_package_root = self.state.package_root
         new_metrics = self.state.metrics
+        new_topology_analytics = dict(getattr(self.state, "topology_analytics", {}) or {})
         affected_set = set()
         blast_radius_complete = False
+
         
         mod_id = Path(delta.module_path).stem if delta.module_path.endswith(".py") else delta.module_path
 
@@ -552,6 +592,16 @@ class IncrementalAnalysisEngine:
                     new_metrics = compute_graph_metrics(new_graph.hard_edges, new_graph.soft_edges)
                 executed_graph_recomputations.append("macro_metrics")
 
+            elif graph_item == "advanced_graph_metrics":
+                if new_graph is not None:
+                    from contextor.core.reporting_engine.graph_analytics import compute_topology_analytics
+                    new_topology_analytics = compute_topology_analytics(
+                        new_graph.hard_edges,
+                        new_graph.soft_edges,
+                        new_metrics,
+                    )
+                executed_graph_recomputations.append("advanced_graph_metrics")
+
             else:
                 raise ValueError(f"Unsupported graph recomputation: {graph_item}")
 
@@ -570,7 +620,14 @@ class IncrementalAnalysisEngine:
         self.state.artifacts = new_artifacts
         self.state.dependency_graph = new_graph
         self.state.metrics = new_metrics
+        self.state.topology_analytics = new_topology_analytics
+        if plan.refresh_completeness == "requires_resync":
+            self.state.topology_metrics_state = "stale"
+        elif "advanced_graph_metrics" in plan.graph_recomputations:
+            self.state.topology_metrics_state = "fresh"
         self.state.artifact_consumption = new_artifact_consumption
+
+
         self.state.module_usages = new_module_usages
         self.state.trie = new_trie
         self.state.package_root = new_package_root

@@ -56,8 +56,9 @@ class RefreshPlanner:
                     if c_path == module_path:
                         continue
                     c_aliases = dict(c_facts.aliases)
-                    for call in c_facts.direct_calls + c_facts.qualified_refs + c_facts.runtime_calls:
+                    for call in tuple(c_facts.direct_calls) + tuple(c_facts.qualified_refs) + tuple(c_facts.runtime_calls):
                         resolved = _resolve_alias(call, c_aliases)
+
                         if (
                             call == module_path
                             or call.startswith(module_path + ".")
@@ -81,7 +82,7 @@ class RefreshPlanner:
                     "dependency_graph",
                     "artifact_consumption",
                 ),
-                graph_recomputations=("macro_metrics", "reverse_blast_radius"),
+                graph_recomputations=("macro_metrics", "reverse_blast_radius", "advanced_graph_metrics"),
                 refresh_completeness="complete",
                 semantic_certainty="statically_resolved",
                 reason=f"Module DELETE for '{module_path}'.",
@@ -100,7 +101,7 @@ class RefreshPlanner:
                     "dependency_graph",
                     "artifact_consumption",
                 ),
-                graph_recomputations=("macro_metrics", "reverse_blast_radius"),
+                graph_recomputations=("macro_metrics", "reverse_blast_radius", "advanced_graph_metrics"),
                 refresh_completeness="complete",
                 semantic_certainty="statically_resolved",
                 reason=f"Module ADD for '{module_path}'.",
@@ -143,7 +144,7 @@ class RefreshPlanner:
             graph_recomputations = []
             if has_import_changes:
                 patch_families.extend(["modules", "dependency_graph"])
-                graph_recomputations.extend(["macro_metrics", "reverse_blast_radius"])
+                graph_recomputations.extend(["macro_metrics", "reverse_blast_radius", "advanced_graph_metrics"])
 
             return RefreshPlan(
                 reparse_modules=(),
@@ -167,11 +168,12 @@ class RefreshPlanner:
                     "dependency_graph",
                     "artifact_consumption",
                 ),
-                graph_recomputations=("macro_metrics", "reverse_blast_radius"),
+                graph_recomputations=("macro_metrics", "reverse_blast_radius", "advanced_graph_metrics"),
                 refresh_completeness="complete",
                 semantic_certainty="statically_resolved",
                 reason=f"Import changes in '{module_path}'.",
             )
+
 
 
         # 5. Symbol Add / Remove / Change
@@ -182,9 +184,10 @@ class RefreshPlanner:
                 for c_path, c_facts in usages.items():
                     if c_path == module_path:
                         continue
-                    for call in c_facts.direct_calls + c_facts.qualified_refs:
+                    for call in tuple(c_facts.direct_calls) + tuple(c_facts.qualified_refs):
                         if call in removed_set or any(call.endswith("." + r) for r in removed_set):
                             recompute_set.add(c_path)
+
 
             return RefreshPlan(
                 reparse_modules=(),

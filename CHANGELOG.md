@@ -74,6 +74,14 @@
 - Verified incremental canonical parity against fresh static rebuilds for module state, definitions, dependency edges, macro metrics, usage facts, artifact-consumption channels, identities and affected-module sets.
 - Hardened RefreshPlan execution with fail-closed dispatch, no-double-parse guarantees, no unchanged-source rereads and exact `plan == executed work` invariants.
 
+- Added persistent LIVE topology analytics derived entirely from the canonical dependency graph, including PageRank, Betweenness, HITS hub/authority scores, Bridge Score, Hotspots, Module Risk and Inspection Targets.
+- Advanced graph analytics now refresh only when dependency topology changes and remain current across body-only edits and no-op updates without unnecessary recomputation.
+- Added persistent `topology_metrics_state` provenance so fresh, stale and deferred topology analytics remain correctly distinguishable across snapshots and process restarts.
+- Legacy snapshots without topology analytics are reconstructed directly from the canonical graph in RAM with zero source rereads.
+- Updated LIVE consumers such as module context to prefer canonical topology analytics over stale saved graph-analysis snapshots when fresh state is available.
+- Preserved compact MCP/LIVE payloads while making topology metrics available through existing context and report projections.
+- Verified topology analytics parity against fresh production computation across import changes, module ADD/DELETE, restart, snapshot recovery and body-only updates.
+
 ## [1.2.0-beta Patch — Scoped analysis guards] - 2026-08-15
 
 - Removed the deprecated expression-based ``query_canonical_state`` and

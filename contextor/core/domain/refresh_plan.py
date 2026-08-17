@@ -25,7 +25,9 @@ VALID_PATCH_FAMILIES = {
 VALID_GRAPH_RECOMPUTATIONS = {
     "macro_metrics",
     "reverse_blast_radius",
+    "advanced_graph_metrics",
 }
+
 
 
 @dataclass(frozen=True)

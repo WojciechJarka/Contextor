@@ -169,18 +169,42 @@ def load_snapshot(
                 root_path=str(embedded.get("root_path", "")),
             )
             state_obj = payload["state"]
-            if state_obj is not None and hasattr(state_obj, "__dict__") and not hasattr(state_obj, "module_usages"):
+            if state_obj is not None and hasattr(state_obj, "__dict__"):
+                if not hasattr(state_obj, "module_usages"):
+                    try:
+                        setattr(state_obj, "module_usages", {})
+                    except AttributeError:
+                        pass
+                if not hasattr(state_obj, "topology_analytics"):
+                    try:
+                        setattr(state_obj, "topology_analytics", {})
+                    except AttributeError:
+                        pass
+                if not hasattr(state_obj, "topology_metrics_state"):
+                    try:
+                        setattr(state_obj, "topology_metrics_state", "deferred")
+                    except AttributeError:
+                        pass
+            return state_obj, embedded_metadata
+        if payload is not None and hasattr(payload, "__dict__"):
+            if not hasattr(payload, "module_usages"):
                 try:
-                    setattr(state_obj, "module_usages", {})
+                    setattr(payload, "module_usages", {})
                 except AttributeError:
                     pass
-            return state_obj, embedded_metadata
-        if payload is not None and hasattr(payload, "__dict__") and not hasattr(payload, "module_usages"):
-            try:
-                setattr(payload, "module_usages", {})
-            except AttributeError:
-                pass
+            if not hasattr(payload, "topology_analytics"):
+                try:
+                    setattr(payload, "topology_analytics", {})
+                except AttributeError:
+                    pass
+            if not hasattr(payload, "topology_metrics_state"):
+                try:
+                    setattr(payload, "topology_metrics_state", "deferred")
+                except AttributeError:
+                    pass
         return payload, metadata
+
+
 
     except (OSError, pickle.PickleError, EOFError):
         return None

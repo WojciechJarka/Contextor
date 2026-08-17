@@ -377,20 +377,30 @@ class ContextorFacade:
             high_risk_layers = ", ".join(report_result["high_risk_layers"])
             log(f"Generated additional reports for high risk layers: {high_risk_layers}")
 
+
         analysis_result = report_result.get("_analysis_result")
         
         progress.begin("Persisting canonical LIVE snapshot")
         if analysis_result:
             from contextor.core.analysis.state_manager import RepositoryAnalysisState, save_engine_state
             from contextor.core.paths import repo_cache_dir
+            from contextor.core.reporting_engine.graph_analytics import compute_topology_analytics
+
+            graph = getattr(analysis_result, "graph", None)
+            hard_edges = getattr(graph, "hard_edges", {}) if graph else {}
+            soft_edges = getattr(graph, "soft_edges", {}) if graph else {}
+            metrics = getattr(analysis_result, "metrics", {})
+            topology_analytics = compute_topology_analytics(hard_edges, soft_edges, metrics) if hard_edges else {}
+
             state = RepositoryAnalysisState(
                 modules=getattr(analysis_result, "modules", {}),
                 artifacts=getattr(analysis_result, "artifacts", {}),
-                dependency_graph=getattr(analysis_result, "graph", None),
+                dependency_graph=graph,
                 trie=getattr(analysis_result, "trie", None),
                 package_root=getattr(analysis_result, "package_root", ""),
                 artifact_consumption={"_report": getattr(analysis_result, "compact_artifacts", {})},
-                metrics=getattr(analysis_result, "metrics", {}),
+                metrics=metrics,
+                topology_analytics=topology_analytics,
                 layer_information={
                     "layer_index": getattr(analysis_result, "layer_index", []),
                     "hotspots": getattr(analysis_result, "hotspots", []),

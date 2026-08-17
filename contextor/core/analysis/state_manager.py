@@ -84,10 +84,14 @@ class RepositoryAnalysisState:
     metrics: Dict[str, Any] = field(default_factory=dict)
     file_state: Dict[str, FileState] = field(default_factory=dict)
     module_usages: Dict[str, Any] = field(default_factory=dict)
+    topology_analytics: Dict[str, Any] = field(default_factory=dict)
+    topology_metrics_state: str = "deferred"
     
     # Required for canonical graph edge resolution
+
     trie: Optional[Any] = None
     package_root: str = ""
+
 
 
 
