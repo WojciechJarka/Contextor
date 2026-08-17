@@ -81,7 +81,9 @@ class RefreshPlanner:
                     "module_usages",
                     "dependency_graph",
                     "artifact_consumption",
+                    "cached_analytics",
                 ),
+
                 graph_recomputations=("macro_metrics", "reverse_blast_radius", "advanced_graph_metrics"),
                 refresh_completeness="complete",
                 semantic_certainty="statically_resolved",
@@ -100,7 +102,9 @@ class RefreshPlanner:
                     "module_usages",
                     "dependency_graph",
                     "artifact_consumption",
+                    "cached_analytics",
                 ),
+
                 graph_recomputations=("macro_metrics", "reverse_blast_radius", "advanced_graph_metrics"),
                 refresh_completeness="complete",
                 semantic_certainty="statically_resolved",
@@ -145,6 +149,8 @@ class RefreshPlanner:
             if has_import_changes:
                 patch_families.extend(["modules", "dependency_graph"])
                 graph_recomputations.extend(["macro_metrics", "reverse_blast_radius", "advanced_graph_metrics"])
+            patch_families.append("cached_analytics")
+
 
             return RefreshPlan(
                 reparse_modules=(),
@@ -167,7 +173,9 @@ class RefreshPlanner:
                     "module_usages",
                     "dependency_graph",
                     "artifact_consumption",
+                    "cached_analytics",
                 ),
+
                 graph_recomputations=("macro_metrics", "reverse_blast_radius", "advanced_graph_metrics"),
                 refresh_completeness="complete",
                 semantic_certainty="statically_resolved",
@@ -197,7 +205,9 @@ class RefreshPlanner:
                     "identity_registry",
                     "module_usages",
                     "artifact_consumption",
+                    "cached_analytics",
                 ),
+
                 graph_recomputations=(),
                 refresh_completeness="complete",
                 semantic_certainty="statically_resolved",
@@ -209,7 +219,8 @@ class RefreshPlanner:
         return RefreshPlan(
             reparse_modules=(),
             recompute_modules=(),
-            patch_families=("definitions", "module_usages", "artifact_consumption"),
+            patch_families=("definitions", "module_usages", "artifact_consumption", "cached_analytics"),
+
             graph_recomputations=(),
             refresh_completeness="complete",
             semantic_certainty="statically_resolved",

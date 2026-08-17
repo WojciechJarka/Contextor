@@ -1962,6 +1962,87 @@ def compute_topology_analytics(
     }
 
 
+def compute_cached_analytics(
+    modules: Dict[str, Any],
+    artifacts: Dict[str, Any] | None = None,
+    artifact_consumption: Dict[str, Any] | None = None,
+    hard_edges: Dict[str, Any] | None = None,
+) -> Dict[str, Any]:
+    """
+    Computes CLASS C cached-facts analytics (module layers, visibility,
+    export degrees, and layer validation rules) entirely in pure RAM.
+    """
+    modules_dict = modules if isinstance(modules, dict) else {}
+    artifacts_dict = artifacts if isinstance(artifacts, dict) else {}
+    consumption_dict = artifact_consumption if isinstance(artifact_consumption, dict) else {}
+    edges_dict = hard_edges if isinstance(hard_edges, dict) else {}
+
+    # 1. Module Layers
+    module_layers: Dict[str, str] = {
+        mod_id: _classify_layer(mod_id)
+        for mod_id in sorted(modules_dict.keys())
+    }
+
+    # 2. Export Degrees
+    export_degree: Dict[str, int] = {}
+    for mod_id in sorted(modules_dict.keys()):
+        art = artifacts_dict.get(mod_id, {})
+        if isinstance(art, dict):
+            own = art.get("own_symbols")
+            if own is not None:
+                export_degree[mod_id] = len(own)
+            else:
+                syms = art.get("symbols", {})
+                export_degree[mod_id] = (
+                    len(syms.get("functions", []))
+                    + len(syms.get("classes", []))
+                    + len(syms.get("methods", []))
+                )
+        elif isinstance(art, (list, set, tuple)):
+            export_degree[mod_id] = len(art)
+        else:
+            export_degree[mod_id] = 0
+
+    # 3. Visibility
+    # Map definer module -> confirmed consumer modules
+    definer_consumers: Dict[str, set[str]] = defaultdict(set)
+    for key, val in consumption_dict.items():
+        if key.startswith("_"):
+            continue
+        consumers = val.get("consumers", []) if isinstance(val, dict) else []
+        if not consumers:
+            continue
+
+        for mod_id in modules_dict:
+            if key == mod_id or key.startswith(mod_id + ".") or key.startswith(mod_id + "::"):
+                for c in consumers:
+                    if c and c != mod_id:
+                        definer_consumers[mod_id].add(c)
+
+    visibility: Dict[str, str] = {}
+    for mod_id in sorted(modules_dict.keys()):
+        mod_layer = module_layers.get(mod_id, "adapter")
+        c_mods = sorted(definer_consumers.get(mod_id, set()))
+        visibility[mod_id] = _classify_visibility(mod_id, c_mods, mod_layer)
+
+    # 4. Layer Validation
+    from contextor.core.validator.layers import validate_layer_rules, validate_forbidden_dependencies
+    from contextor.core.domain.graph import ProjectGraph
+    pg = ProjectGraph(hard_edges=edges_dict, soft_edges={})
+    violations = validate_layer_rules(modules_dict, pg) + validate_forbidden_dependencies(modules_dict, pg)
+    layer_violations = [
+        {"kind": v.kind, "message": v.message, "nodes": list(v.nodes)}
+        for v in violations
+    ]
+
+    return {
+        "module_layers": module_layers,
+        "visibility": visibility,
+        "export_degree": export_degree,
+        "layer_violations": layer_violations,
+    }
+
+
 # ==========================================================
 # EXPORTS
 # ==========================================================
@@ -1969,9 +2050,12 @@ def compute_topology_analytics(
 __all__ = [
     "generate_graph_analytics_report",
     "compute_topology_analytics",
+    "compute_cached_analytics",
     "build_module_dependency_matrix",
     "build_jaccard_clusters",
     "_classify_layer",
     "_classify_visibility",
+    "_compute_export_degrees",
 ]
+
 

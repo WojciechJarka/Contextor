@@ -20,7 +20,9 @@ VALID_PATCH_FAMILIES = {
     "artifact_consumption",
     "dependency_graph",
     "identity_registry",
+    "cached_analytics",
 }
+
 
 VALID_GRAPH_RECOMPUTATIONS = {
     "macro_metrics",

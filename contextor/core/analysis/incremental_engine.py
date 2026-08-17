@@ -36,7 +36,9 @@ class IncrementalUpdateResult:
     local_metrics_state: str = "stale"
     global_metrics_state: str = "stale"
     topology_metrics_state: str = "stale"
+    cached_analytics_state: str = "stale"
     artifact_consumption_state: str = "stale"
+
 
     error: str | None = None
     line_number: int | None = None
@@ -66,6 +68,7 @@ class IncrementalAnalysisEngine:
         self._lock = threading.Lock()
         self._ensure_module_usages()
         self._ensure_topology_analytics()
+        self._ensure_cached_analytics()
 
     def _ensure_topology_analytics(self):
         """Materializes state.topology_analytics from canonical graph if missing/empty and not stale."""
@@ -83,6 +86,25 @@ class IncrementalAnalysisEngine:
                 self.state.metrics,
             )
             self.state.topology_metrics_state = "fresh"
+
+    def _ensure_cached_analytics(self):
+        """Materializes state.cached_analytics from canonical facts if missing/empty and not stale."""
+        if not hasattr(self.state, "cached_analytics_state") or self.state.cached_analytics_state is None:
+            self.state.cached_analytics_state = "fresh" if bool(getattr(self.state, "cached_analytics", None)) else "deferred"
+
+        if not hasattr(self.state, "cached_analytics") or self.state.cached_analytics is None:
+            self.state.cached_analytics = {}
+
+        if self.state.cached_analytics_state != "stale" and not self.state.cached_analytics and getattr(self.state, "modules", None):
+            from contextor.core.reporting_engine.graph_analytics import compute_cached_analytics
+            hard_edges = getattr(self.state.dependency_graph, "hard_edges", {}) if self.state.dependency_graph else {}
+            self.state.cached_analytics = compute_cached_analytics(
+                modules=self.state.modules,
+                artifacts=getattr(self.state, "artifacts", {}),
+                artifact_consumption=getattr(self.state, "artifact_consumption", {}),
+                hard_edges=hard_edges,
+            )
+            self.state.cached_analytics_state = "fresh"
 
 
     def _ensure_module_usages(self):
@@ -127,8 +149,10 @@ class IncrementalAnalysisEngine:
                     local_metrics_state="deferred",
                     global_metrics_state="deferred",
                     topology_metrics_state=getattr(self.state, "topology_metrics_state", "fresh" if bool(getattr(self.state, "topology_analytics", None)) else "deferred"),
+                    cached_analytics_state=getattr(self.state, "cached_analytics_state", "fresh" if bool(getattr(self.state, "cached_analytics", None)) else "deferred"),
                     artifact_consumption_state="fresh" if self.state.artifact_consumption is not None else "stale",
                 )
+
 
 
 
@@ -175,11 +199,13 @@ class IncrementalAnalysisEngine:
                     local_metrics_state="deferred",
                     global_metrics_state="deferred",
                     topology_metrics_state="fresh",
+                    cached_analytics_state="fresh",
                     artifact_consumption_state="fresh",
                     affected_modules=affected_modules,
                     shadow_plan=plan,
                     execution_trace=execution_trace,
                 )
+
 
 
             # 2. Parse new file
@@ -263,6 +289,7 @@ class IncrementalAnalysisEngine:
                     local_metrics_state="deferred",
                     global_metrics_state="deferred",
                     topology_metrics_state=getattr(self.state, "topology_metrics_state", "fresh" if bool(getattr(self.state, "topology_analytics", None)) else "deferred"),
+                    cached_analytics_state=getattr(self.state, "cached_analytics_state", "fresh" if bool(getattr(self.state, "cached_analytics", None)) else "deferred"),
                     artifact_consumption_state="fresh",
                     affected_modules=[],
                     shadow_plan=plan,
@@ -276,6 +303,7 @@ class IncrementalAnalysisEngine:
 
 
 
+
             # 5. Apply and Commit driven by RefreshPlan
             affected_set, blast_radius_complete, execution_trace = self._apply_delta_and_commit(
                 file_path, delta, usage_delta, plan, new_imports, new_artifacts, new_usage
@@ -286,6 +314,7 @@ class IncrementalAnalysisEngine:
                 dependencies_state = "stale"
                 blast_radius_state = "deferred"
                 topology_metrics_state = "stale"
+                cached_analytics_state = "stale"
                 artifact_consumption_state = "stale"
             else:
                 graph_state = "fresh" if ("dependency_graph" in plan.patch_families or self.state.dependency_graph is not None) else "stale"
@@ -295,6 +324,10 @@ class IncrementalAnalysisEngine:
                     topology_metrics_state = "fresh"
                 else:
                     topology_metrics_state = getattr(self.state, "topology_metrics_state", "fresh" if bool(getattr(self.state, "topology_analytics", None)) else "deferred")
+                if "cached_analytics" in plan.patch_families:
+                    cached_analytics_state = "fresh"
+                else:
+                    cached_analytics_state = getattr(self.state, "cached_analytics_state", "fresh" if bool(getattr(self.state, "cached_analytics", None)) else "deferred")
                 artifact_consumption_state = "fresh" if ("artifact_consumption" in plan.patch_families or self.state.artifact_consumption is not None) else "stale"
 
 
@@ -310,6 +343,7 @@ class IncrementalAnalysisEngine:
                 local_metrics_state="deferred",
                 global_metrics_state="deferred",
                 topology_metrics_state=topology_metrics_state,
+                cached_analytics_state=cached_analytics_state,
                 artifact_consumption_state=artifact_consumption_state,
                 affected_modules=affected_modules,
                 shadow_plan=plan,
@@ -394,8 +428,10 @@ class IncrementalAnalysisEngine:
         new_package_root = self.state.package_root
         new_metrics = self.state.metrics
         new_topology_analytics = dict(getattr(self.state, "topology_analytics", {}) or {})
+        new_cached_analytics = dict(getattr(self.state, "cached_analytics", {}) or {})
         affected_set = set()
         blast_radius_complete = False
+
 
         
         mod_id = Path(delta.module_path).stem if delta.module_path.endswith(".py") else delta.module_path
@@ -562,8 +598,20 @@ class IncrementalAnalysisEngine:
             elif family == "identity_registry":
                 executed_patch_families.append("identity_registry")
 
+            elif family == "cached_analytics":
+                from contextor.core.reporting_engine.graph_analytics import compute_cached_analytics
+                hard_edges = getattr(new_graph, "hard_edges", {}) if new_graph else {}
+                new_cached_analytics = compute_cached_analytics(
+                    modules=new_modules,
+                    artifacts=new_artifacts,
+                    artifact_consumption=new_artifact_consumption,
+                    hard_edges=hard_edges,
+                )
+                executed_patch_families.append("cached_analytics")
+
             else:
                 raise ValueError(f"Unsupported patch family: {family}")
+
 
         # E. GRAPH - execute graph-only computations
         for graph_item in plan.graph_recomputations:
@@ -621,11 +669,17 @@ class IncrementalAnalysisEngine:
         self.state.dependency_graph = new_graph
         self.state.metrics = new_metrics
         self.state.topology_analytics = new_topology_analytics
+        self.state.cached_analytics = new_cached_analytics
         if plan.refresh_completeness == "requires_resync":
             self.state.topology_metrics_state = "stale"
-        elif "advanced_graph_metrics" in plan.graph_recomputations:
-            self.state.topology_metrics_state = "fresh"
+            self.state.cached_analytics_state = "stale"
+        else:
+            if "advanced_graph_metrics" in plan.graph_recomputations:
+                self.state.topology_metrics_state = "fresh"
+            if "cached_analytics" in plan.patch_families:
+                self.state.cached_analytics_state = "fresh"
         self.state.artifact_consumption = new_artifact_consumption
+
 
 
         self.state.module_usages = new_module_usages

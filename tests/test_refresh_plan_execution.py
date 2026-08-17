@@ -88,7 +88,8 @@ def test_case_a_body_only_retarget(tmp_path):
     # Plan vs Execution Equality
     assert trace["reparse_modules"] == res.shadow_plan.reparse_modules == ()
     assert trace["recompute_modules"] == res.shadow_plan.recompute_modules == ()
-    assert set(trace["patch_families"]) == set(res.shadow_plan.patch_families) == {"definitions", "module_usages", "artifact_consumption"}
+    assert set(trace["patch_families"]) == set(res.shadow_plan.patch_families) == {"definitions", "module_usages", "artifact_consumption", "cached_analytics"}
+
     assert trace["graph_recomputations"] == res.shadow_plan.graph_recomputations == ()
 
 

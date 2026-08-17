@@ -185,6 +185,16 @@ def load_snapshot(
                         setattr(state_obj, "topology_metrics_state", "deferred")
                     except AttributeError:
                         pass
+                if not hasattr(state_obj, "cached_analytics"):
+                    try:
+                        setattr(state_obj, "cached_analytics", {})
+                    except AttributeError:
+                        pass
+                if not hasattr(state_obj, "cached_analytics_state"):
+                    try:
+                        setattr(state_obj, "cached_analytics_state", "deferred")
+                    except AttributeError:
+                        pass
             return state_obj, embedded_metadata
         if payload is not None and hasattr(payload, "__dict__"):
             if not hasattr(payload, "module_usages"):
@@ -202,7 +212,18 @@ def load_snapshot(
                     setattr(payload, "topology_metrics_state", "deferred")
                 except AttributeError:
                     pass
+            if not hasattr(payload, "cached_analytics"):
+                try:
+                    setattr(payload, "cached_analytics", {})
+                except AttributeError:
+                    pass
+            if not hasattr(payload, "cached_analytics_state"):
+                try:
+                    setattr(payload, "cached_analytics_state", "deferred")
+                except AttributeError:
+                    pass
         return payload, metadata
+
 
 
 

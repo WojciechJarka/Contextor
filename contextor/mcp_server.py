@@ -1648,7 +1648,6 @@ def get_module_context(
             metrics_source = "live_canonical_graph"
             degree_metrics_source = "live_canonical_graph"
         elif saved_record is not None:
-
             metrics = dict(saved_record)
             metrics["fan_in"] = live_fan_in
             metrics["fan_out"] = live_fan_out
@@ -1661,6 +1660,17 @@ def get_module_context(
             }
             metrics_source = "deferred_until_full_analysis"
             degree_metrics_source = "live_canonical_graph"
+
+        cached_analytics = getattr(engine.state, "cached_analytics", {}) or {}
+        cached_freshness = getattr(engine.state, "cached_analytics_state", "fresh" if cached_analytics else "deferred")
+        if cached_freshness == "fresh" and cached_analytics:
+            if "module_layers" in cached_analytics and module_name in cached_analytics["module_layers"]:
+                metrics["layer"] = cached_analytics["module_layers"][module_name]
+            if "visibility" in cached_analytics and module_name in cached_analytics["visibility"]:
+                metrics["visibility"] = cached_analytics["visibility"][module_name]
+            if "export_degree" in cached_analytics and module_name in cached_analytics["export_degree"]:
+                metrics["export_degree"] = cached_analytics["export_degree"][module_name]
+
 
     else:
         if saved_record is not None:
