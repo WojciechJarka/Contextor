@@ -1,3 +1,41 @@
+## [1.2.0-beta Patch — Incremental module-level blast radius in LIVE] - 2026-08-17
+
+- Added incremental module-level reverse blast radius propagation to the
+  canonical LIVE engine (`IncrementalAnalysisEngine`). Updates now calculate the
+  transitive reverse dependency reachability (`_calculate_affected_set`) over
+  the union of hard and soft graph edges with cycle termination.
+- Implemented operation-specific freshness contracts for blast radius:
+  - `ADD`: marked as `"fresh"` when candidate `NEW` graph evidence is available,
+    allowing newly resolved dependencies and newly active consumers to be included.
+  - `DELETE`: marked as `"fresh"` only when `OLD` graph evidence is present,
+    preventing post-deletion rebuilt graphs from silently omitting lost consumers.
+  - `MODIFY`: marked as `"fresh"` when both `OLD` and candidate `NEW` graph
+    evidence are present to guarantee complete closure.
+  - Missing graph evidence marks `blast_radius_state` as `"deferred"` with an
+    empty `affected_modules = []`, avoiding false claims of completeness.
+- Extended `IncrementalUpdateResult` with an event-specific field
+  `affected_modules: list[str] = field(default_factory=list)` containing the
+  sorted reverse blast radius when `blast_radius_state == "fresh"`. The field
+  is purely event-specific and is not persisted in `RepositoryAnalysisState`.
+- Added bounded `affected_modules` payloads (`{"total": N, "truncated": bool, "items": [...]}`)
+  and `blast_radius_state` to the IPC event journal (`CanonicalLiveServer._record_event`)
+  with a hard limit of 20 items per event in the 100-event RAM ring buffer.
+- Updated MCP `update_file` to expose the same contract: `compact=True` omits
+  `items`, `compact=False` provides bounded items up to `max_items`, and dynamic
+  `fields` projection seamlessly includes `affected_modules`. Updated docstrings
+  in `update_file` and `get_live_events` to document the new payloads.
+- Added targeted unit and regression tests covering MODIFY provider with upstream
+  consumer, DELETE provider with OLD consumer preservation, ADD resolving
+  previously unresolved imports, DELETE with missing OLD graph, missing graph
+  evidence fallback (`deferred`), syntax errors (`stale`), IPC event bounding,
+  and MCP compact/full/fields shaping.
+- Verified end-to-end live runtime behavior with the active `desktop_watcher`
+  after canonical LIVE owner restart, confirming real-time emission of `UPDATED`
+  and `DELETED` events containing `blast_radius_state: "fresh"` and valid
+  `affected_modules` payloads.
+- Note: Local/global graph metrics, artifact-level consumption refresh, test-impact
+  propagation, and artifact-level blast radius remain deferred in this stage.
+
 ## [1.2.0-beta Patch — Scoped analysis guards] - 2026-08-15
 
 - Removed the deprecated expression-based ``query_canonical_state`` and
