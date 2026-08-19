@@ -1718,44 +1718,50 @@ def get_module_context(
             1 for _, targets in hard_edges.items() if module_name in targets
         )
         topo = getattr(engine.state, "topology_analytics", {}) or {}
-        topo_freshness = getattr(engine.state, "topology_metrics_state", "fresh" if topo else "deferred")
-        if topo_freshness == "fresh" and topo and module_name in topo.get("pagerank", {}):
-            metrics = dict(saved_record) if saved_record is not None else {}
-            metrics["fan_in"] = live_fan_in
-            metrics["fan_out"] = live_fan_out
-            metrics["pagerank"] = topo["pagerank"].get(module_name, 0.0)
-            metrics["betweenness"] = topo["betweenness"].get(module_name, 0.0)
-            metrics["hub_score"] = topo["hub_scores"].get(module_name, 0.0)
-            metrics["authority_score"] = topo["authority_scores"].get(module_name, 0.0)
-            metrics["bridge_score"] = topo["bridge_scores"].get(module_name, 0.0)
-            if "module_risk" in topo and module_name in topo["module_risk"]:
+        topo_freshness = getattr(engine.state, "topology_metrics_state", "deferred")
+
+        metrics = {
+            "fan_in": live_fan_in,
+            "fan_out": live_fan_out,
+        }
+        degree_metrics_source = "live_canonical_graph"
+
+        if topo_freshness == "fresh" and isinstance(topo, dict):
+            has_any_topo = False
+            for topo_key, metric_field in [
+                ("pagerank", "pagerank"),
+                ("betweenness", "betweenness"),
+                ("hub_scores", "hub_score"),
+                ("authority_scores", "authority_score"),
+                ("bridge_scores", "bridge_score"),
+            ]:
+                val_map = topo.get(topo_key, {})
+                if isinstance(val_map, dict) and module_name in val_map:
+                    metrics[metric_field] = val_map[module_name]
+                    has_any_topo = True
+
+            if "module_risk" in topo and isinstance(topo["module_risk"], dict) and module_name in topo["module_risk"]:
                 metrics["risk_score"] = topo["module_risk"][module_name]
-            metrics_source = "live_canonical_graph"
-            degree_metrics_source = "live_canonical_graph"
-        elif saved_record is not None:
-            metrics = dict(saved_record)
-            metrics["fan_in"] = live_fan_in
-            metrics["fan_out"] = live_fan_out
-            metrics_source = "saved_graph_analytics"
-            degree_metrics_source = "live_canonical_graph"
+                has_any_topo = True
+
+            metrics_source = "live_canonical_topology" if has_any_topo else "live_canonical_graph"
+        elif topo_freshness == "stale":
+            metrics_source = "stale_topology_analytics"
         else:
-            metrics = {
-                "fan_in": live_fan_in,
-                "fan_out": live_fan_out,
-            }
-            metrics_source = "deferred_until_full_analysis"
-            degree_metrics_source = "live_canonical_graph"
+            metrics_source = "deferred_topology_analytics"
+
+        if mod_path_to_id.get(module_name):
+            metrics["module_idx"] = mod_path_to_id[module_name]
 
         cached_analytics = getattr(engine.state, "cached_analytics", {}) or {}
-        cached_freshness = getattr(engine.state, "cached_analytics_state", "fresh" if cached_analytics else "deferred")
-        if cached_freshness == "fresh" and cached_analytics:
+        cached_freshness = getattr(engine.state, "cached_analytics_state", "deferred")
+        if cached_freshness == "fresh" and isinstance(cached_analytics, dict):
             if "module_layers" in cached_analytics and module_name in cached_analytics["module_layers"]:
                 metrics["layer"] = cached_analytics["module_layers"][module_name]
             if "visibility" in cached_analytics and module_name in cached_analytics["visibility"]:
                 metrics["visibility"] = cached_analytics["visibility"][module_name]
             if "export_degree" in cached_analytics and module_name in cached_analytics["export_degree"]:
                 metrics["export_degree"] = cached_analytics["export_degree"][module_name]
-
 
     else:
         if saved_record is not None:
@@ -1767,7 +1773,7 @@ def get_module_context(
                 "fan_in": len(inbound),
                 "fan_out": len(outbound),
             }
-            metrics_source = "deferred_until_full_analysis"
+            metrics_source = "deferred_topology_analytics"
             degree_metrics_source = "saved_graph_analytics"
 
     inbound_items, inbound_total, inbound_truncated = _bounded_items(
@@ -1839,7 +1845,7 @@ def get_artifact_blast_radius(
     compact artifact report. It does not claim that dynamic Python usage can
     be proven exact.
 
-    Candidate, consumer & architecture semantics:
+    Candidate, consumer & reachability semantics:
       - If a module name or module ID is passed, returns a structured diagnostic with deterministic public-first ranked artifact candidates defined by that module.
       - ``consumers``: Direct static symbol consumers with confirmed references.
       - ``architecture``:
@@ -1851,13 +1857,16 @@ def get_artifact_blast_radius(
           * ``test_consumer_count``: Unique direct consumers whose canonical layer is "tests".
           * ``cross_layer_consumers``: Boolean indicating if ``cross_layer_consumer_count > 0``.
           * ``cross_layer_sample``: Bounded sample of cross-layer production consumers (excluding tests).
+      - ``downstream_module_reachability``:
+          Conservative module-level downstream reachability seeded by confirmed direct symbol consumer modules.
+          It does not represent transitive symbol-to-symbol consumption.
 
     ``consumers`` always contains ``total`` and ``truncated``. The default
     compact response omits ``items``; set ``compact=False`` for bounded static
     evidence. ``max_items`` controls returned consumers; pass ``None`` for all
     consumers without truncation. ``fields`` projects top-level
     keys after compact shaping. Allowed values are ``artifact``, ``artifact_id``,
-    ``kind``, ``definer``, ``architecture``, ``consumers``, ``evidence_scope``, and ``data_source``.
+    ``kind``, ``definer``, ``architecture``, ``downstream_module_reachability``, ``consumers``, ``evidence_scope``, and ``data_source``.
 
     LLM use: call before changing or removing a public symbol. Treat consumers
     as confirmed static evidence, not proof that dynamic Python has no callers.
@@ -1983,9 +1992,79 @@ def get_artifact_blast_radius(
                         "reason": f"Cached analytics state is '{cached_state}'.",
                     }
 
+                # 2. Downstream module reachability (Model B)
+                from contextor.core.analysis.incremental.graph_ops import calculate_affected_set
+
+                dep_graph = getattr(engine.state, "dependency_graph", None) if engine else None
+                definer_module = selected.get("definer", "")
+
+                if dep_graph is not None:
+                    all_reachable: set[str] = set()
+                    for seed_mod in unique_direct_consumers:
+                        all_reachable.update(calculate_affected_set(seed_mod, old_graph=dep_graph))
+
+                    downstream_set = all_reachable - set(unique_direct_consumers) - {definer_module}
+                    sorted_downstream = sorted(downstream_set)
+                    total_downstream = len(sorted_downstream)
+
+                    downstream_reachability = {
+                        "available": True,
+                        "total_downstream_count": total_downstream,
+                    }
+
+                    if cached_state == "fresh" and isinstance(cached_analytics, dict):
+                        module_layers = cached_analytics.get("module_layers", {}) or {}
+                        prod_downstream = []
+                        test_downstream = []
+                        unknown_downstream = []
+
+                        for d_mod in sorted_downstream:
+                            d_layer = module_layers.get(d_mod)
+                            if d_layer == "tests":
+                                test_downstream.append(d_mod)
+                            elif d_layer is not None:
+                                prod_downstream.append(d_mod)
+                            else:
+                                unknown_downstream.append(d_mod)
+
+                        prod_sample, prod_total, prod_trunc = _bounded_items(prod_downstream, 5)
+                        test_sample, test_total, test_trunc = _bounded_items(test_downstream, 5)
+
+                        downstream_reachability.update(
+                            {
+                                "layer_classification_available": True,
+                                "production_downstream_count": len(prod_downstream),
+                                "test_downstream_count": len(test_downstream),
+                                "unknown_layer_downstream_count": len(unknown_downstream),
+                                "production_downstream_sample": {
+                                    "total": prod_total,
+                                    "items": prod_sample,
+                                    "truncated": prod_trunc,
+                                },
+                                "test_downstream_sample": {
+                                    "total": test_total,
+                                    "items": test_sample,
+                                    "truncated": test_trunc,
+                                },
+                            }
+                        )
+                    else:
+                        downstream_reachability.update(
+                            {
+                                "layer_classification_available": False,
+                                "reason": f"Cached analytics state is '{cached_state}'.",
+                            }
+                        )
+                else:
+                    downstream_reachability = {
+                        "available": False,
+                        "reason": "Live dependency graph is not available.",
+                    }
+
                 result = {
                     **selected,
                     "architecture": architecture,
+                    "downstream_module_reachability": downstream_reachability,
                     "consumers": {
                         "total": consumer_total,
                         "truncated": consumer_truncated,
@@ -2150,6 +2229,10 @@ def get_artifact_blast_radius(
             "architecture": {
                 "available": False,
                 "reason": "Live canonical analytics unavailable in report-only mode.",
+            },
+            "downstream_module_reachability": {
+                "available": False,
+                "reason": "Live dependency graph is not available in report-only mode.",
             },
             "evidence_scope": "direct_static_artifact_consumption",
             "data_source": "current_artifacts_compact",

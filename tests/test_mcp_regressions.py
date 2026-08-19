@@ -1635,7 +1635,7 @@ def test_module_context_exposes_new_live_module_before_full_report(
         "fan_in": 1,
         "fan_out": 1,
     }
-    assert result["metrics_source"] == "deferred_until_full_analysis"
+    assert result["metrics_source"] == "deferred_topology_analytics"
     assert result["degree_metrics_source"] == "live_canonical_graph"
     assert result["dependency_data_source"] == "live_canonical_graph"
     assert result["dependencies_inbound_who_calls_me"] == {
@@ -3038,5 +3038,343 @@ def test_artifact_blast_radius_architecture_projection(monkeypatch, tmp_path):
     assert res_def["architecture"]["available"] is False
     assert "deferred" in res_def["architecture"]["reason"]
     assert res_def["consumers"]["total"] == 2  # consumers contract remains fully functional
+
+
+def test_artifact_blast_radius_downstream_module_reachability(monkeypatch, tmp_path):
+    root = tmp_path / "repo"
+    root.mkdir()
+
+    from types import SimpleNamespace
+    from contextor.core.domain.graph import ProjectGraph
+
+    monkeypatch.setattr(
+        mcp_server,
+        "_read_registries",
+        lambda _root: (
+            {
+                "pkg.definer": "1/1",
+                "pkg.direct_a": "2/1",
+                "pkg.downstream_b": "3/1",
+                "pkg.downstream_c": "4/1",
+                "tests.test_downstream": "5/1",
+                "pkg.unclassified_downstream": "6/1",
+                "pkg.zero_cons": "7/1",
+            },
+            {
+                "1/1": "pkg.definer",
+                "2/1": "pkg.direct_a",
+                "3/1": "pkg.downstream_b",
+                "4/1": "pkg.downstream_c",
+                "5/1": "tests.test_downstream",
+                "6/1": "pkg.unclassified_downstream",
+                "7/1": "pkg.zero_cons",
+            },
+            {
+                "pkg.definer::sym_zero": "A1/1",
+                "pkg.definer::sym_chain": "A2/1",
+                "pkg.definer::sym_self": "A3/1",
+            },
+            {
+                "A1/1": "pkg.definer::sym_zero",
+                "A2/1": "pkg.definer::sym_chain",
+                "A3/1": "pkg.definer::sym_self",
+            },
+        ),
+    )
+
+    # Graph topology:
+    # pkg.direct_a imports pkg.definer
+    # pkg.downstream_b imports pkg.direct_a
+    # pkg.downstream_c imports pkg.downstream_b (creates chain: definer <- direct_a <- downstream_b <- downstream_c)
+    # tests.test_downstream imports pkg.downstream_b
+    # pkg.unclassified_downstream imports pkg.downstream_c
+    # Cycle: pkg.downstream_b imports pkg.downstream_c AND pkg.downstream_c imports pkg.downstream_b
+    dep_graph = ProjectGraph(
+        hard_edges={
+            "pkg.direct_a": {"pkg.definer"},
+            "pkg.downstream_b": {"pkg.direct_a", "pkg.downstream_c"},
+            "pkg.downstream_c": {"pkg.downstream_b"},
+            "tests.test_downstream": {"pkg.downstream_b"},
+            "pkg.unclassified_downstream": {"pkg.downstream_c"},
+            "pkg.definer": set(),
+            "pkg.zero_cons": set(),
+        },
+        soft_edges={},
+    )
+
+    engine_fresh = SimpleNamespace(
+        state=SimpleNamespace(
+            artifacts={
+                "pkg.definer": {
+                    "own_symbols": ["sym_zero", "sym_chain", "sym_self"],
+                    "symbols": {"functions": ["sym_zero", "sym_chain", "sym_self"]},
+                    "consumers": {
+                        "sym_zero": {"consumers": []},
+                        "sym_chain": {"consumers": ["pkg.direct_a"]},
+                        "sym_self": {"consumers": ["pkg.definer"]},
+                    },
+                }
+            },
+            cached_analytics={
+                "module_layers": {
+                    "pkg.definer": "core",
+                    "pkg.direct_a": "adapter",
+                    "pkg.downstream_b": "ui",
+                    "pkg.downstream_c": "cli",
+                    "tests.test_downstream": "tests",
+                    # pkg.unclassified_downstream omitted
+                },
+            },
+            cached_analytics_state="fresh",
+            dependency_graph=dep_graph,
+        )
+    )
+    monkeypatch.setattr(mcp_server, "_get_or_init_engine", lambda _root: engine_fresh)
+
+    # 1. Zero direct consumers -> downstream total = 0
+    res_zero = json.loads(
+        mcp_server.get_artifact_blast_radius.fn(
+            repo_path=str(root),
+            artifact_name="pkg.definer::sym_zero",
+            compact=False,
+        )
+    )
+    reach_zero = res_zero["downstream_module_reachability"]
+    assert reach_zero["available"] is True
+    assert reach_zero["total_downstream_count"] == 0
+    assert reach_zero["production_downstream_count"] == 0
+    assert reach_zero["test_downstream_count"] == 0
+    assert reach_zero["unknown_layer_downstream_count"] == 0
+
+    # 2. Chain with cycle and layer classification:
+    # Direct = {pkg.direct_a}
+    # Downstream = {pkg.downstream_b, pkg.downstream_c, tests.test_downstream, pkg.unclassified_downstream} (total: 4)
+    # Definer (pkg.definer) and direct (pkg.direct_a) are EXCLUDED from downstream
+    res_chain = json.loads(
+        mcp_server.get_artifact_blast_radius.fn(
+            repo_path=str(root),
+            artifact_name="pkg.definer::sym_chain",
+            compact=False,
+        )
+    )
+    reach_chain = res_chain["downstream_module_reachability"]
+    assert reach_chain["available"] is True
+    assert reach_chain["total_downstream_count"] == 4
+    assert reach_chain["layer_classification_available"] is True
+    assert reach_chain["production_downstream_count"] == 2      # downstream_b (ui), downstream_c (cli)
+    assert reach_chain["test_downstream_count"] == 1            # tests.test_downstream (tests)
+    assert reach_chain["unknown_layer_downstream_count"] == 1   # pkg.unclassified_downstream
+    assert reach_chain["production_downstream_sample"]["items"] == ["pkg.downstream_b", "pkg.downstream_c"]
+    assert reach_chain["test_downstream_sample"]["items"] == ["tests.test_downstream"]
+
+    # Invariant: production + test + unknown == total downstream
+    assert (
+        reach_chain["production_downstream_count"]
+        + reach_chain["test_downstream_count"]
+        + reach_chain["unknown_layer_downstream_count"]
+    ) == reach_chain["total_downstream_count"]
+
+    # Disjointness proof:
+    direct_set = set(res_chain["consumers"]["items"])
+    downstream_items = set(reach_chain["production_downstream_sample"]["items"]) | set(reach_chain["test_downstream_sample"]["items"])
+    assert direct_set.isdisjoint(downstream_items)
+    assert "pkg.definer" not in downstream_items
+
+    # 3. Same-module direct consumer seed:
+    # sym_self has direct = {pkg.definer}
+    # Reverse reachability from pkg.definer reaches direct_a, downstream_b, downstream_c, test_downstream, unclassified_downstream
+    # Downstream excludes pkg.definer -> total downstream = 5
+    res_self = json.loads(
+        mcp_server.get_artifact_blast_radius.fn(
+            repo_path=str(root),
+            artifact_name="pkg.definer::sym_self",
+            compact=False,
+        )
+    )
+    reach_self = res_self["downstream_module_reachability"]
+    assert reach_self["available"] is True
+    assert reach_self["total_downstream_count"] == 5
+    assert "pkg.definer" not in reach_self["production_downstream_sample"]["items"]
+
+    # 4. Stale cached analytics:
+    # Module reachability is still available because dependency_graph is present, but layer classification is unavailable
+    engine_stale = SimpleNamespace(
+        state=SimpleNamespace(
+            artifacts=engine_fresh.state.artifacts,
+            cached_analytics={"module_layers": {}},
+            cached_analytics_state="stale",
+            dependency_graph=dep_graph,
+        )
+    )
+    monkeypatch.setattr(mcp_server, "_get_or_init_engine", lambda _root: engine_stale)
+    res_stale = json.loads(
+        mcp_server.get_artifact_blast_radius.fn(
+            repo_path=str(root),
+            artifact_name="pkg.definer::sym_chain",
+            compact=False,
+        )
+    )
+    reach_stale = res_stale["downstream_module_reachability"]
+    assert reach_stale["available"] is True
+    assert reach_stale["total_downstream_count"] == 4
+    assert reach_stale["layer_classification_available"] is False
+    assert "stale" in reach_stale["reason"]
+    assert "production_downstream_count" not in reach_stale
+
+
+def test_module_context_topology_provenance_and_freshness(monkeypatch, tmp_path):
+    root = tmp_path / "repo"
+    root.mkdir()
+
+    from types import SimpleNamespace
+    from contextor.core.domain.graph import ProjectGraph
+
+    report = root / "graph.json"
+    report.write_text(
+        json.dumps({
+            "modules": {
+                "pkg.mod_a": {
+                    "pagerank": 0.999,          # deliberately different from LIVE
+                    "betweenness": 0.888,
+                    "hub_score": 0.777,
+                    "authority_score": 0.666,
+                    "bridge_score": 0.555,
+                    "risk_score": 0.444,
+                    "layer": "saved_layer",
+                },
+                "pkg.mod_b": {
+                    "pagerank": 0.111,
+                },
+            },
+            "module_dependency_matrix": {},
+        }),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(mcp_server, "_get_canonical_report", lambda _root, _name: report)
+
+    monkeypatch.setattr(
+        mcp_server,
+        "_read_registries",
+        lambda _root: (
+            {"pkg.mod_a": "1/1", "pkg.mod_b": "2/1", "pkg.mod_c": "3/1"},
+            {"1/1": "pkg.mod_a", "2/1": "pkg.mod_b", "3/1": "pkg.mod_c"},
+            {},
+            {},
+        ),
+    )
+
+    dep_graph = ProjectGraph(
+        hard_edges={
+            "pkg.mod_a": {"pkg.mod_b"},
+            "pkg.mod_c": {"pkg.mod_a"},
+            "pkg.mod_b": set(),
+        },
+        soft_edges={},
+    )
+
+    # 1. Fresh state: LIVE topology overrides saved report
+    engine_fresh = SimpleNamespace(
+        state=SimpleNamespace(
+            modules={"pkg.mod_a": object(), "pkg.mod_b": object(), "pkg.mod_c": object()},
+            artifacts={},
+            dependency_graph=dep_graph,
+            topology_analytics={
+                "pagerank": {"pkg.mod_a": 0.1234},
+                "betweenness": {"pkg.mod_a": 0.2345},
+                "hub_scores": {"pkg.mod_a": 0.3456},
+                "authority_scores": {"pkg.mod_a": 0.4567},
+                "bridge_scores": {"pkg.mod_a": 0.5678},
+                "module_risk": {"pkg.mod_a": 0.6789},
+                # pkg.mod_b partially present: only pagerank
+                "pagerank": {"pkg.mod_a": 0.1234, "pkg.mod_b": 0.0555},
+            },
+            topology_metrics_state="fresh",
+            cached_analytics={
+                "module_layers": {"pkg.mod_a": "core"},
+                "visibility": {"pkg.mod_a": "public"},
+                "export_degree": {"pkg.mod_a": 5},
+            },
+            cached_analytics_state="fresh",
+        )
+    )
+    monkeypatch.setattr(mcp_server, "_get_or_init_engine", lambda _root: engine_fresh)
+
+    # For pkg.mod_a: LIVE topology metrics override saved report
+    res_a = json.loads(mcp_server.get_module_context.fn(repo_path=str(root), module_name="pkg.mod_a"))
+    metrics_a = res_a["metrics"]
+    assert metrics_a["fan_in"] == 1
+    assert metrics_a["fan_out"] == 1
+    assert metrics_a["pagerank"] == 0.1234      # LIVE, not saved 0.999!
+    assert metrics_a["betweenness"] == 0.2345   # LIVE, not saved 0.888!
+    assert metrics_a["hub_score"] == 0.3456     # LIVE, not saved 0.777!
+    assert metrics_a["authority_score"] == 0.4567
+    assert metrics_a["bridge_score"] == 0.5678
+    assert metrics_a["risk_score"] == 0.6789
+    assert metrics_a["layer"] == "core"
+    assert res_a["metrics_source"] == "live_canonical_topology"
+    assert res_a["degree_metrics_source"] == "live_canonical_graph"
+
+    # For pkg.mod_c: Fresh state, but mod_c has no entries in topology_analytics -> NO 0.0 fake default
+    res_c = json.loads(mcp_server.get_module_context.fn(repo_path=str(root), module_name="pkg.mod_c"))
+    metrics_c = res_c["metrics"]
+    assert metrics_c["fan_in"] == 0
+    assert metrics_c["fan_out"] == 1
+    assert "pagerank" not in metrics_c
+    assert "betweenness" not in metrics_c
+    assert "hub_score" not in metrics_c
+    assert res_c["metrics_source"] == "live_canonical_graph"
+
+    # 2. Stale state: NO saved report fallback even when saved_modules has pkg.mod_a
+    engine_stale = SimpleNamespace(
+        state=SimpleNamespace(
+            modules=engine_fresh.state.modules,
+            artifacts={},
+            dependency_graph=dep_graph,
+            topology_analytics=engine_fresh.state.topology_analytics,
+            topology_metrics_state="stale",
+            cached_analytics=engine_fresh.state.cached_analytics,
+            cached_analytics_state="fresh",
+        )
+    )
+    monkeypatch.setattr(mcp_server, "_get_or_init_engine", lambda _root: engine_stale)
+    res_stale = json.loads(mcp_server.get_module_context.fn(repo_path=str(root), module_name="pkg.mod_a"))
+    metrics_stale = res_stale["metrics"]
+    assert metrics_stale["fan_in"] == 1
+    assert metrics_stale["fan_out"] == 1
+    # Pagerank and betweenness from saved report MUST NOT be substituted!
+    assert "pagerank" not in metrics_stale
+    assert "betweenness" not in metrics_stale
+    assert res_stale["metrics_source"] == "stale_topology_analytics"
+    assert res_stale["degree_metrics_source"] == "live_canonical_graph"
+
+    # 3. Deferred state: NO saved report fallback
+    engine_deferred = SimpleNamespace(
+        state=SimpleNamespace(
+            modules=engine_fresh.state.modules,
+            artifacts={},
+            dependency_graph=dep_graph,
+            topology_analytics={},
+            topology_metrics_state="deferred",
+            cached_analytics={},
+            cached_analytics_state="deferred",
+        )
+    )
+    monkeypatch.setattr(mcp_server, "_get_or_init_engine", lambda _root: engine_deferred)
+    res_def = json.loads(mcp_server.get_module_context.fn(repo_path=str(root), module_name="pkg.mod_a"))
+    metrics_def = res_def["metrics"]
+    assert metrics_def["fan_in"] == 1
+    assert metrics_def["fan_out"] == 1
+    assert "pagerank" not in metrics_def
+    assert res_def["metrics_source"] == "deferred_topology_analytics"
+    assert res_def["degree_metrics_source"] == "live_canonical_graph"
+
+    # 4. Engine absent (report-only fallback) -> saved report behavior preserved
+    monkeypatch.setattr(mcp_server, "_get_or_init_engine", lambda _root: None)
+    res_report = json.loads(mcp_server.get_module_context.fn(repo_path=str(root), module_name="pkg.mod_a"))
+    assert res_report["metrics"]["pagerank"] == 0.999
+    assert res_report["metrics_source"] == "saved_graph_analytics"
+    assert res_report["degree_metrics_source"] == "saved_graph_analytics"
+
+
 
 

@@ -179,6 +179,29 @@ LLM-friendly MCP target resolution
 - MCP tool descriptions were updated to expose the exact semantics directly to coding agents.
 - LIVE verification confirmed correct same-layer, cross-layer and test-impact classification for real Contextor artifacts.
 
+### Symbol-Seeded Downstream Module Reachability
+
+- Extended `get_artifact_blast_radius` with conservative downstream module reachability seeded by confirmed direct symbol consumers.
+- Reused the canonical `calculate_affected_set` implementation over the LIVE hard + soft dependency graph; no duplicate traversal algorithm was introduced.
+- Kept direct symbol consumers and downstream modules strictly separate:
+  - direct consumers remain confirmed symbol-level references,
+  - downstream modules represent additional module-level dependents reachable behind those direct consumers.
+- Explicitly avoided false symbol-level precision: downstream modules are not presented as transitive consumers of the original symbol.
+- Added separate downstream counts for:
+  - production modules,
+  - test modules,
+  - modules with unknown canonical layer.
+- Added bounded production and test downstream samples while preserving deterministic output.
+- Downstream reachability remains available whenever the canonical LIVE dependency graph is available; layer classification is exposed only when cached layer analytics are fresh.
+- Enforced invariants:
+  - direct consumers and downstream modules are disjoint,
+  - the defining module is excluded from downstream results,
+  - production + test + unknown downstream counts equal the total downstream count.
+- Existing direct-consumer `architecture` classification remains unchanged and continues to describe only confirmed direct symbol consumers.
+- The MCP tool description now explicitly defines the feature as conservative module-level downstream reachability rather than transitive symbol-to-symbol consumption.
+- LIVE verification confirmed real downstream expansion for facade and incremental-analysis symbols, including production/test separation and zero-result behavior for locally unused symbols.
+- Targeted MCP regression verification passed: `16/16`.
+
 ### Regression and contract verification
 
 - Added deterministic GUI progress-widget regression coverage for named-operation durations and legacy success-message compatibility.
