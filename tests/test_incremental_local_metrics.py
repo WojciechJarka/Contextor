@@ -435,8 +435,10 @@ def test_stage2c_add_module_with_hard_import_macro_metrics(tmp_path, monkeypatch
     resp_consumer = json.loads(
         mcp_server.get_module_context.fn(repo_path=str(tmp_path), module_name="consumer")
     )
-    assert resp_consumer["metrics"] == {"fan_in": 0, "fan_out": 1}
+    assert resp_consumer["metrics"]["fan_in"] == 0
+    assert resp_consumer["metrics"]["fan_out"] == 1
     assert resp_consumer["degree_metrics_source"] == "live_canonical_graph"
+
 
 
 def test_stage2c_modify_adding_hard_edge_macro_metrics(tmp_path):
@@ -561,7 +563,7 @@ def test_stage2c_failed_registry_transaction_leaves_old_metrics_unchanged(tmp_pa
 
     monkeypatch.setattr(engine.registry, "sync_with_workspace", failing_sync)
 
-    provider.write_text("import target\n", encoding="utf-8")
+    provider.write_text("def provide_service():\n    pass\n", encoding="utf-8")
     with pytest.raises(OSError):
         engine.update_file(str(provider))
 
@@ -603,13 +605,15 @@ def test_stage2c_get_module_context_behavior_preserved(tmp_path, monkeypatch):
     resp_provider = json.loads(
         mcp_server.get_module_context.fn(repo_path=str(tmp_path), module_name="provider")
     )
-    assert resp_provider["metrics"] == {"fan_in": 0, "fan_out": 1}
+    assert resp_provider["metrics"]["fan_in"] == 0
+    assert resp_provider["metrics"]["fan_out"] == 1
     assert resp_provider["degree_metrics_source"] == "live_canonical_graph"
 
     resp_target = json.loads(
         mcp_server.get_module_context.fn(repo_path=str(tmp_path), module_name="target")
     )
-    assert resp_target["metrics"] == {"fan_in": 1, "fan_out": 0}
+    assert resp_target["metrics"]["fan_in"] == 1
+    assert resp_target["metrics"]["fan_out"] == 0
     assert resp_target["degree_metrics_source"] == "live_canonical_graph"
 
 

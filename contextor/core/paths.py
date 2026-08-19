@@ -346,6 +346,7 @@ DEFAULT_IGNORED_DIRS = frozenset(
         ".idea",
         ".vscode",
         "scratch",
+        "legacy",
     }
 )
 

@@ -171,3 +171,48 @@ def test_failed_test_result_is_not_logged_as_success(monkeypatch):
 
     assert any(message.startswith("[FAILED]") for message in emitted)
     assert not any(message.startswith("[SUCCESS]") for message in emitted)
+
+
+def test_success_logs_duration_for_named_operations(monkeypatch):
+    monkeypatch.setattr(progress_widget.threading, "Thread", _SynchronousThread)
+
+    test_cases = [
+        ("Repository analysis", 100.0, 183.2, 83),
+        ("Layer analysis", 200.0, 211.7, 12),
+        ("Single-file analysis", 300.0, 303.4, 3),
+    ]
+
+    for op_name, start_t, end_t, expected_dur in test_cases:
+        clock_ticks = [start_t, end_t]
+        monkeypatch.setattr(progress_widget.time, "monotonic", lambda ticks=clock_ticks: ticks.pop(0))
+
+        emitted = []
+        monkeypatch.setattr(progress_widget, "emit_program_log", emitted.append)
+
+        progress_widget.run_with_progress(
+            _Root(),
+            _progress_container(),
+            lambda: "done",
+            operation_name=op_name,
+        )
+
+        assert emitted == [f"[SUCCESS] {op_name} completed. (duration: {expected_dur} s)"]
+
+
+def test_success_without_operation_name_preserves_exact_legacy_message(monkeypatch):
+    monkeypatch.setattr(progress_widget.threading, "Thread", _SynchronousThread)
+
+    clock_ticks = [100.0, 183.0]
+    monkeypatch.setattr(progress_widget.time, "monotonic", lambda: clock_ticks.pop(0))
+
+    emitted = []
+    monkeypatch.setattr(progress_widget, "emit_program_log", emitted.append)
+
+    progress_widget.run_with_progress(
+        _Root(),
+        _progress_container(),
+        lambda: "done",
+        operation_name=None,
+    )
+
+    assert emitted == ["[SUCCESS] Operation completed successfully."]

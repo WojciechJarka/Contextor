@@ -131,11 +131,12 @@ def test_incremental_update_synchronizes_qualified_artifact_registry(tmp_path):
     bar_id = registry.get_artifact_id("b::bar")
     engine = init_engine(tmp_path, repo_dir, state, registry)
 
-    target.write_text("def foo():\n    return 2\n", encoding="utf-8")
+    target.write_text("def bar_new():\n    return 2\n", encoding="utf-8")
     result = engine.update_file(str(target))
 
-    assert result.artifact_consumption_state == "deferred"
-    assert registry.get_artifact_id("a::foo") == foo_id
+    assert result.artifact_consumption_state == "fresh"
+    assert registry.get_artifact_id("a::bar_new") is not None
+    assert registry.get_artifact_id("a::foo") is None
     assert registry.get_artifact_id("b::bar") is None
     assert registry.get_artifact_name(bar_id) == "b::bar"
     assert registry.get_artifact_id("foo") is None
@@ -205,7 +206,7 @@ def test_incremental_modify_consumers(tmp_path):
     file_b.write_text("def bar_modified():\n    pass\n")
     res = engine.update_file(str(file_b))
     
-    assert res.artifact_consumption_state == "deferred"
+    assert res.artifact_consumption_state == "fresh"
     assert res.graph_state == "fresh"
     
     registry_baseline = PersistentIdentityRegistry(str(repo_dir))
@@ -213,13 +214,13 @@ def test_incremental_modify_consumers(tmp_path):
     
     compare_states(engine.state, state_baseline, compare_artifacts=False)
     
-    # Explicitly check that incremental state preserved the old snapshot (b still listed as consumer)
-    inc_foo_data = engine.state.artifacts["a"]["consumers"].get("foo", {})
+    # Check that incremental state dropped the consumer (b no longer listed)
+    inc_foo_data = getattr(engine.state, "artifact_consumption", {}).get("a.foo", {})
     inc_consumers = inc_foo_data.get("consumers", []) if isinstance(inc_foo_data, dict) else inc_foo_data
-    assert "b" in inc_consumers
+    assert "b" not in inc_consumers
     
-    # Explicitly check that full rebuild correctly dropped the consumer (b no longer listed)
-    base_foo_data = state_baseline.artifacts["a"].get("consumers", {}).get("foo", {})
+    # Check that full rebuild correctly dropped the consumer (b no longer listed)
+    base_foo_data = getattr(state_baseline, "artifact_consumption", {}).get("a.foo", {})
     base_consumers = base_foo_data.get("consumers", []) if isinstance(base_foo_data, dict) else base_foo_data
     assert "b" not in base_consumers
     
@@ -315,7 +316,7 @@ def test_incremental_graph_rebuild_failure(tmp_path):
     file_b = repo_dir / "b.py"
     file_b.write_text("def bar():\n    pass\n")
     
-    with patch("contextor.core.graph.graph.build_graph") as mock_build_graph:
+    with patch("contextor.core.analysis.incremental.plan_executor.build_graph") as mock_build_graph:
         mock_build_graph.side_effect = RuntimeError("Graph Rebuild Crash")
         with pytest.raises(RuntimeError, match="Graph Rebuild Crash"):
             engine.update_file(str(file_b))

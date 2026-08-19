@@ -27,7 +27,7 @@ from contextor.core.paths import package_root
 # block - whose lines start with the outcome instead - is not counted a
 # second time.
 _RESULT_RE = re.compile(
-    r"^(?P<nodeid>\S+::\S+)\s+(?P<outcome>PASSED|FAILED|ERROR|SKIPPED|XFAIL|XPASS)\b"
+    r"^(?P<nodeid>.+::.+)\s+(?P<outcome>PASSED|FAILED|ERROR|SKIPPED|XFAIL|XPASS)\b"
 )
 
 _COLLECTED_RE = re.compile(r"(\d+)\s+tests?\s+collected")

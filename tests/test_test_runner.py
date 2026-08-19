@@ -43,6 +43,38 @@ def test_matches_a_parametrized_test():
     assert _parse(line) == ("tests/test_cancellation.py::test_validate[0]", "FAILED")
 
 
+def test_matches_parametrized_test_with_spaces_in_node_id():
+    line = (
+        "tests/test_facade_progress_staging.py::"
+        "test_facade_workflows_keep_progress_below_100_until_finalization"
+        "[project-Finalizing analysis] PASSED               [ 13%]"
+    )
+    assert _parse(line) == (
+        "tests/test_facade_progress_staging.py::"
+        "test_facade_workflows_keep_progress_below_100_until_finalization"
+        "[project-Finalizing analysis]",
+        "PASSED",
+    )
+
+
+def test_matches_parametrized_test_with_multiple_spaces():
+    line = "tests/test_example.py::test_case[param with multiple spaces here] SKIPPED [ 42%]"
+
+    assert _parse(line) == (
+        "tests/test_example.py::test_case[param with multiple spaces here]",
+        "SKIPPED",
+    )
+
+
+def test_matches_parametrized_test_with_embedded_status_keyword():
+    line = "tests/test_example.py::test_case[case-PASSED value] FAILED          [ 99%]"
+
+    assert _parse(line) == (
+        "tests/test_example.py::test_case[case-PASSED value]",
+        "FAILED",
+    )
+
+
 def test_ignores_the_short_summary_block():
     """
     These lines start with the outcome and would otherwise be counted a

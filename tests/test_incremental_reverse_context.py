@@ -224,13 +224,13 @@ def test_update_file_returns_fresh_blast_radius_for_modified_provider(tmp_path):
     state_manager.update_state(str(consumer))
     engine = IncrementalAnalysisEngine(state, registry, state_manager, str(tmp_path))
 
-    # Modify provider
-    provider.write_text("def run():\n    return 2\n", encoding="utf-8")
+    # Modify provider with structural import change
+    provider.write_text("import sys\ndef run():\n    return 2\n", encoding="utf-8")
     result = engine.update_file(str(provider))
 
     assert result.status == "UPDATED"
     assert result.blast_radius_state == "fresh"
-    assert result.affected_modules == ["consumer", "provider"]
+    assert sorted(result.affected_modules) == ["consumer", "provider"]
 
 
 def test_update_file_returns_fresh_blast_radius_for_deleted_file(tmp_path):

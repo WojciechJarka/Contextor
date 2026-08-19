@@ -654,6 +654,7 @@ class ContextorGUI:
             log_box=self.log_box,
             cpu_indicator=self.cpu_indicator,
             stop_button=self.stop_btn,
+            operation_name="Repository analysis",
         )
 
     def _set_live_status(self, message: str):
@@ -832,6 +833,7 @@ class ContextorGUI:
             log_box=self.log_box,
             cpu_indicator=self.cpu_indicator,
             stop_button=self.stop_btn,
+            operation_name="Layer analysis",
         )
 
     def analyze_single(self):
@@ -889,6 +891,7 @@ class ContextorGUI:
             log_box=self.log_box,
             cpu_indicator=self.cpu_indicator,
             stop_button=self.stop_btn,
+            operation_name="Single-file analysis",
         )
 
     def open_output_folder(self):

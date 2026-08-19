@@ -82,6 +82,110 @@
 - Preserved compact MCP/LIVE payloads while making topology metrics available through existing context and report projections.
 - Verified topology analytics parity against fresh production computation across import changes, module ADD/DELETE, restart, snapshot recovery and body-only updates.
 
+## [1.2.0-beta Patch — LIVE Analytics & Incremental Engine Refactor] - 2026-08-18
+
+### Persistent LIVE topology and cached analytics
+
+- Added persistent canonical LIVE topology analytics, including PageRank,
+  betweenness, HITS hub/authority scores, bridge scores, hotspots,
+  module risk and inspection targets.
+- Added persistent cached architectural analytics for module layers,
+  visibility, export degree and layer violations.
+- Added explicit freshness tracking for topology and cached analytics with
+  `fresh`, `stale` and `deferred` states preserved across LIVE snapshots
+  and MCP restarts.
+- Added RAM-only reconstruction of missing legacy analytics from canonical
+  dependency, module, artifact and artifact-consumption state without
+  unnecessary source reads.
+- Added stale-state guards so non-empty stale analytics are never silently
+  reconstructed or promoted to fresh after restart.
+- Extended LIVE module-context responses with canonical topology and cached
+  analytics while preserving existing fan-in and fan-out information.
+- Refined RefreshPlanner invalidation so statically complete
+  `runtime_unresolved` updates may remain fresh.
+- Added true no-op handling for implementation-body-only changes when no
+  modeled imports, definitions or usage facts change.
+- Reduced call-retarget refresh scope to the canonical usage,
+  artifact-consumption and cached-analytics families actually affected.
+- Reduced unnecessary persistent identity-registry synchronization for
+  updates that do not add or remove symbol identities.
+
+### Incremental artifact consumption and refresh execution
+
+- Maintained canonical incremental `ModuleUsageFacts` and reverse
+  artifact-consumption state across LIVE ADD, MODIFY and DELETE updates.
+- Preserved typed usage channels for API imports, direct calls,
+  qualified references, runtime calls, callback calls, event bindings
+  and inheritance.
+- Added RefreshPlan-driven incremental execution with explicit
+  `REPARSE`, `RECOMPUTE`, `PATCH`, `GRAPH` and commit boundaries.
+- Preserved fail-closed execution for unsupported refresh tokens and exact
+  plan-versus-execution tracing.
+- Preserved Copy-on-Write isolation so failed recomputation, analytics or
+  registry operations do not publish partially updated canonical state.
+- Preserved correct re-export resolution ordering by ensuring recomputation
+  observes candidate module state before resolving new re-export targets.
+- Kept persistent identity-registry transactions outside candidate-state
+  computation so persistent commit remains owned by the incremental engine.
+- Preserved semantic separation between refresh completeness and static
+  certainty, allowing `complete + runtime_unresolved` states without
+  incorrectly marking canonical static data stale.
+
+### Incremental engine decomposition
+
+- Refactored the incremental analysis engine from a monolithic implementation
+  into cohesive incremental-analysis components while preserving its public
+  behavior and compatibility.
+- Extracted pure reverse blast-radius and local degree calculations into
+  `analysis/incremental/graph_ops.py`.
+- Extracted LIVE bootstrap and canonical-state materialization into
+  `analysis/incremental/materialization.py`.
+- Extracted source preparation, syntax validation, import and symbol
+  extraction, and semantic `FileDelta` / `UsageDelta` calculation into
+  `analysis/incremental/preparation.py`.
+- Reduced duplicate source handling in the preparation path and reused the
+  prepared source data across downstream incremental analysis.
+- Extracted RefreshPlan candidate-state execution into
+  `analysis/incremental/plan_executor.py`, including recomputation,
+  patch-family dispatch, graph recomputations and execution tracing.
+- Kept lock ownership, update lifecycle, registry transaction handling,
+  canonical-state publication and file-state acknowledgement in the
+  incremental engine orchestration boundary.
+- Reduced `incremental_engine.py` from approximately 802 to 374 lines before
+  final subsystem consolidation, removing more than half of the original
+  monolithic implementation.
+- Preserved existing incremental engine import contracts throughout the
+  refactor while preparing the implementation for final consolidation under
+  the dedicated `analysis.incremental` subsystem.
+
+### Regression and contract alignment
+
+- Updated historical Stage 2 tests to the current LIVE artifact-consumption
+  freshness contract.
+- Updated module-context tests to validate required fan-in and fan-out
+  behavior without rejecting the newer topology and cached-analytics fields.
+- Updated failure-injection tests to target the extracted RefreshPlan
+  execution boundary while preserving Copy-on-Write rollback guarantees.
+- Updated registry failure fixtures so they exercise updates that genuinely
+  require persistent identity synchronization.
+- Updated reverse-blast-radius fixtures so they exercise modeled dependency
+  changes instead of implementation-body-only no-ops.
+- Verified the Stage 3 critical regression ratchet with 139 passing tests.
+- Consolidated the incremental analysis subsystem under
+  `analysis/incremental`, moving the canonical engine implementation to
+  `analysis/incremental/engine.py`.
+- Replaced the former top-level `analysis/incremental_engine.py`
+  implementation with a lightweight backward-compatible facade, preserving
+  all existing engine, result and degree-delta import paths.
+- Added package-level incremental-engine exports while preserving reference
+  identity between legacy, canonical and package-level imports.
+- Completed the incremental-engine decomposition with clear boundaries for
+  orchestration, source preparation, RefreshPlan execution, state
+  materialization and pure graph operations.
+- Reduced the historical `incremental_engine.py` from approximately 802 lines
+  to an 18-line compatibility facade, with the canonical orchestrator now
+  isolated in `analysis/incremental/engine.py`.
+
 ## [1.2.0-beta Patch — Scoped analysis guards] - 2026-08-15
 
 - Removed the deprecated expression-based ``query_canonical_state`` and

@@ -103,7 +103,6 @@ def create_log_box(parent, height=5, **pack_kwargs):
         fg=theme.palette().console_fg,
         font=("Consolas", 9),
     )
-
     return log_box
 
 
@@ -141,6 +140,7 @@ def run_with_progress(
     cpu_indicator=None,
     stop_button=None,
     on_cancel=None,
+    operation_name=None,
 ):
     """
     Runs `task` in a separate thread, animating the progress bar
@@ -164,6 +164,7 @@ def run_with_progress(
             log_box.config(state="disabled")
 
     start_time = time.time()
+    start_monotonic = time.monotonic()
     progress_state = {
         "active": True,
         "completed": 0,
@@ -223,6 +224,9 @@ def run_with_progress(
         set_buttons_state("normal")
         if isinstance(result, dict) and result.get("exit_code", 0) != 0:
             message = f"[FAILED] Operation completed with exit code {result['exit_code']}."
+        elif operation_name:
+            duration = round(time.monotonic() - start_monotonic)
+            message = f"[SUCCESS] {operation_name} completed. (duration: {duration} s)"
         else:
             message = "[SUCCESS] Operation completed successfully."
         emit_program_log(message)
