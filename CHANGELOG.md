@@ -122,6 +122,46 @@ LLM-friendly MCP target resolution
   - `live_revision`,
   from their respective LIVE state sources.
 
+### MCP artifact ranking and dependency semantics
+
+- Improved module-to-artifact diagnostics in `get_artifact_blast_radius` with deterministic public-first candidate ranking.
+- Artifact candidates now prioritize:
+  - canonical exported/public API symbols,
+  - syntactically public non-exported symbols,
+  - dunder methods,
+  - private methods,
+  - private/internal symbols.
+- Candidate ranking changes presentation only; the complete addressable artifact set is preserved without filtering private or internal symbols.
+- Reused the existing canonical public API extraction logic rather than introducing a second definition of symbol visibility.
+- Clarified MCP dependency semantics for coding agents:
+  - `fan_in` represents direct inbound hard dependency/import edges only,
+  - `direct consumer` represents unique direct consumers across hard and soft dependency edges,
+  - `transitive consumer` represents reverse transitive reachability across hard and soft dependencies, excluding the target itself.
+- Confirmed that differences between `fan_in` and pre-edit `direct_count` are intentional rather than inconsistent metrics; for example, soft test consumers may contribute to `direct_count` without contributing to hard-import `fan_in`.
+- Updated MCP tool descriptions so agents receive these definitions directly instead of having to infer the meaning of the metrics.
+- Targeted MCP regression verification passed: `9/9`.
+
+### Pre-Edit Layer Guard
+
+- Extended `get_file_edit_context(..., mode="minimal")` with a lightweight `layer_guard` so coding agents can see layer-rule context before editing without invoking the full `get_layer_isolation` workflow.
+- `layer_guard` is built entirely from canonical in-memory state and existing validator rules; it performs no source reads, report reads, repository analysis, graph recomputation or LIVE mutation.
+- Added canonical layer-rule visibility:
+  - `outbound_rules_defined`
+  - `forbidden_outbound_layers`
+  - `forbidden_outbound_prefixes`
+- Added current layer-violation visibility with separate:
+  - `outbound_violation_count`
+  - `inbound_violation_count`
+  - bounded violation details with explicit direction.
+- `outbound_rules_defined` refers only to rules governing dependencies originating from the target module's layer and does not imply that the module cannot participate as the target of an inbound violation.
+- Layer-rule facts respect `cached_analytics_state` freshness:
+  - `fresh` exposes canonical rule and violation data,
+  - `stale` or `deferred` returns the guard as unavailable rather than serving outdated results.
+- Added `get_layer_isolation` guidance when the module has outbound restrictions or participates in an inbound/outbound layer violation.
+- Preserved the legacy `get_file_edit_context` contract unchanged.
+- LIVE verification confirmed correct behavior for both restricted and unrestricted layers, including canonical `layer`, `risk_score`, `live_revision` and layer-rule state.
+- Targeted MCP regression verification passed: `14/14`.
+
 ### Regression and contract verification
 
 - Added deterministic GUI progress-widget regression coverage for named-operation durations and legacy success-message compatibility.

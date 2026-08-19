@@ -2636,3 +2636,160 @@ def test_file_edit_context_live_revision_lifecycle(tmp_path, monkeypatch):
     legacy_res = json.loads(mcp_server.get_file_edit_context.fn(repo_path=str(root1), file_path="r1/mod.py"))
     assert "public_api" in legacy_res
     assert "live_revision" not in legacy_res
+
+
+def test_file_edit_context_layer_guard(monkeypatch, tmp_path):
+    root = tmp_path / "repo"
+    root.mkdir()
+
+    from types import SimpleNamespace
+
+    # Mock registries
+    monkeypatch.setattr(
+        mcp_server,
+        "_read_registries",
+        lambda _root: (
+            {"pkg.ui_mod": "1/1", "pkg.cli_mod": "2/1", "pkg.core_mod": "3/1"},
+            {"1/1": "pkg.ui_mod", "2/1": "pkg.cli_mod", "3/1": "pkg.core_mod"},
+            {},
+            {},
+        ),
+    )
+
+    # 1. Fresh cached analytics + module with no violations
+    engine_fresh_clean = SimpleNamespace(
+        state=SimpleNamespace(
+            modules={
+                "pkg.ui_mod": SimpleNamespace(layer="ui"),
+                "pkg.cli_mod": SimpleNamespace(layer="cli"),
+                "pkg.core_mod": SimpleNamespace(layer="adapter"),
+            },
+            cached_analytics={
+                "module_layers": {"pkg.ui_mod": "ui", "pkg.cli_mod": "cli", "pkg.core_mod": "adapter"},
+                "layer_violations": [],
+            },
+            cached_analytics_state="fresh",
+            topology_analytics={},
+            topology_metrics_state="fresh",
+            dependency_graph=None,
+        )
+    )
+    monkeypatch.setattr(mcp_server, "_get_or_init_engine", lambda _root: engine_fresh_clean)
+
+    res_clean_ui = json.loads(mcp_server.get_file_edit_context.fn(repo_path=str(root), target="pkg.ui_mod", mode="minimal"))
+    assert res_clean_ui["layer_guard"]["available"] is True
+    assert res_clean_ui["layer_guard"]["outbound_rules_defined"] is True
+    assert "rules_defined" not in res_clean_ui["layer_guard"]
+    assert res_clean_ui["layer_guard"]["forbidden_outbound_layers"] == ["cli"]
+    assert res_clean_ui["layer_guard"]["forbidden_outbound_prefixes"] == ["core.internal"]
+    assert res_clean_ui["layer_guard"]["outbound_violation_count"] == 0
+    assert res_clean_ui["layer_guard"]["inbound_violation_count"] == 0
+    assert res_clean_ui["layer_guard"]["violations"]["total"] == 0
+    assert res_clean_ui["layer_guard"]["violations"]["items"] == []
+    assert res_clean_ui["layer_guard"]["suggested_next_tool"] == "get_layer_isolation"
+
+    # 2. Module without rules defined (adapter)
+    res_clean_core = json.loads(mcp_server.get_file_edit_context.fn(repo_path=str(root), target="pkg.core_mod", mode="minimal"))
+    assert res_clean_core["layer_guard"]["available"] is True
+    assert res_clean_core["layer_guard"]["outbound_rules_defined"] is False
+    assert "rules_defined" not in res_clean_core["layer_guard"]
+    assert "forbidden_outbound_layers" not in res_clean_core["layer_guard"]
+    assert res_clean_core["layer_guard"]["outbound_violation_count"] == 0
+    assert res_clean_core["layer_guard"]["inbound_violation_count"] == 0
+    assert "suggested_next_tool" not in res_clean_core["layer_guard"]
+
+    # 3. Fresh + Outbound & Inbound violations
+    sample_v = [
+        {"kind": "LAYER", "message": "ui -> cli dependency: pkg.ui_mod -> pkg.cli_mod", "nodes": ["pkg.ui_mod", "pkg.cli_mod"]},
+        {"kind": "FORBIDDEN_DEPENDENCY", "message": "ui accessing internal core: pkg.ui_mod -> core.internal.x", "nodes": ["pkg.ui_mod", "core.internal.x"]},
+    ]
+    engine_with_v = SimpleNamespace(
+        state=SimpleNamespace(
+            modules=engine_fresh_clean.state.modules,
+            cached_analytics={
+                "module_layers": {"pkg.ui_mod": "ui", "pkg.cli_mod": "cli", "pkg.core_mod": "adapter"},
+                "layer_violations": sample_v,
+            },
+            cached_analytics_state="fresh",
+            topology_analytics={},
+            topology_metrics_state="fresh",
+            dependency_graph=None,
+        )
+    )
+    monkeypatch.setattr(mcp_server, "_get_or_init_engine", lambda _root: engine_with_v)
+
+    # For pkg.ui_mod (source of 2 violations -> 2 outbound)
+    res_ui_v = json.loads(mcp_server.get_file_edit_context.fn(repo_path=str(root), target="pkg.ui_mod", mode="minimal"))
+    assert res_ui_v["layer_guard"]["outbound_violation_count"] == 2
+    assert res_ui_v["layer_guard"]["inbound_violation_count"] == 0
+    assert res_ui_v["layer_guard"]["violations"]["total"] == 2
+    assert len(res_ui_v["layer_guard"]["violations"]["items"]) == 2
+    assert res_ui_v["layer_guard"]["violations"]["items"][0]["direction"] == "outbound"
+    assert res_ui_v["layer_guard"]["violations"]["items"][0]["source_module"] == "pkg.ui_mod"
+    assert res_ui_v["layer_guard"]["violations"]["items"][0]["target_module"] == "pkg.cli_mod"
+    assert res_ui_v["layer_guard"]["suggested_next_tool"] == "get_layer_isolation"
+
+    # For pkg.cli_mod (target of 1 violation -> 1 inbound)
+    res_cli_v = json.loads(mcp_server.get_file_edit_context.fn(repo_path=str(root), target="pkg.cli_mod", mode="minimal"))
+    assert res_cli_v["layer_guard"]["outbound_violation_count"] == 0
+    assert res_cli_v["layer_guard"]["inbound_violation_count"] == 1
+    assert res_cli_v["layer_guard"]["violations"]["total"] == 1
+    assert res_cli_v["layer_guard"]["violations"]["items"][0]["direction"] == "inbound"
+    assert res_cli_v["layer_guard"]["suggested_next_tool"] == "get_layer_isolation"
+
+    # 4. Critical case: outbound_rules_defined == False + inbound_violation_count > 0 -> suggested_next_tool present
+    sample_inbound_core_v = [
+        {"kind": "FORBIDDEN_DEPENDENCY", "message": "ui accessing internal core: pkg.ui_mod -> pkg.core_mod", "nodes": ["pkg.ui_mod", "pkg.core_mod"]},
+    ]
+    engine_inbound_core = SimpleNamespace(
+        state=SimpleNamespace(
+            modules=engine_fresh_clean.state.modules,
+            cached_analytics={
+                "module_layers": {"pkg.ui_mod": "ui", "pkg.cli_mod": "cli", "pkg.core_mod": "adapter"},
+                "layer_violations": sample_inbound_core_v,
+            },
+            cached_analytics_state="fresh",
+            topology_analytics={},
+            topology_metrics_state="fresh",
+            dependency_graph=None,
+        )
+    )
+    monkeypatch.setattr(mcp_server, "_get_or_init_engine", lambda _root: engine_inbound_core)
+    res_inbound_core = json.loads(mcp_server.get_file_edit_context.fn(repo_path=str(root), target="pkg.core_mod", mode="minimal"))
+    assert res_inbound_core["layer_guard"]["outbound_rules_defined"] is False
+    assert res_inbound_core["layer_guard"]["outbound_violation_count"] == 0
+    assert res_inbound_core["layer_guard"]["inbound_violation_count"] == 1
+    assert res_inbound_core["layer_guard"]["suggested_next_tool"] == "get_layer_isolation"
+
+    # 5. Deferred cached analytics -> layer_guard unavailable
+    engine_deferred = SimpleNamespace(
+        state=SimpleNamespace(
+            modules=engine_fresh_clean.state.modules,
+            cached_analytics={},
+            cached_analytics_state="deferred",
+            topology_analytics={},
+            topology_metrics_state="deferred",
+            dependency_graph=None,
+        )
+    )
+    monkeypatch.setattr(mcp_server, "_get_or_init_engine", lambda _root: engine_deferred)
+    res_deferred = json.loads(mcp_server.get_file_edit_context.fn(repo_path=str(root), target="pkg.ui_mod", mode="minimal"))
+    assert res_deferred["layer_guard"]["available"] is False
+    assert "deferred" in res_deferred["layer_guard"]["reason"]
+
+    # 6. Stale cached analytics -> layer_guard unavailable
+    engine_stale = SimpleNamespace(
+        state=SimpleNamespace(
+            modules=engine_fresh_clean.state.modules,
+            cached_analytics={"layer_violations": sample_v},
+            cached_analytics_state="stale",
+            topology_analytics={},
+            topology_metrics_state="stale",
+            dependency_graph=None,
+        )
+    )
+    monkeypatch.setattr(mcp_server, "_get_or_init_engine", lambda _root: engine_stale)
+    res_stale = json.loads(mcp_server.get_file_edit_context.fn(repo_path=str(root), target="pkg.ui_mod", mode="minimal"))
+    assert res_stale["layer_guard"]["available"] is False
+    assert "stale" in res_stale["layer_guard"]["reason"]
+

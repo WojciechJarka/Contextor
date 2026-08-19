@@ -2697,6 +2697,74 @@ def get_file_edit_context(
                     else:
                         warnings.append(f"Canonical module_risk not computed for '{module_name}'.")
 
+            layer_guard = {"available": False}
+            if engine:
+                if cached_state == "fresh":
+                    from contextor.core.validator.rules import FORBIDDEN_LAYER_RULES, FORBIDDEN_PREFIX_RULES
+
+                    forbidden_outbound_layers = [r[1] for r in FORBIDDEN_LAYER_RULES if r[0] == layer]
+                    forbidden_outbound_prefixes = [r[1] for r in FORBIDDEN_PREFIX_RULES if r[0] == layer]
+                    outbound_rules_defined = bool(forbidden_outbound_layers or forbidden_outbound_prefixes)
+
+                    raw_violations = cached_analytics.get("layer_violations", []) if isinstance(cached_analytics, dict) else []
+                    outbound_violations = [
+                        v for v in raw_violations
+                        if len(v.get("nodes", [])) >= 2 and v["nodes"][0] == module_name
+                    ]
+                    inbound_violations = [
+                        v for v in raw_violations
+                        if len(v.get("nodes", [])) >= 2 and v["nodes"][1] == module_name
+                    ]
+
+                    all_module_violations = []
+                    for v in outbound_violations:
+                        all_module_violations.append(
+                            {
+                                "direction": "outbound",
+                                "kind": v.get("kind", "LAYER"),
+                                "source_module": v["nodes"][0],
+                                "target_module": v["nodes"][1],
+                                "message": v.get("message", ""),
+                            }
+                        )
+                    for v in inbound_violations:
+                        all_module_violations.append(
+                            {
+                                "direction": "inbound",
+                                "kind": v.get("kind", "LAYER"),
+                                "source_module": v["nodes"][0],
+                                "target_module": v["nodes"][1],
+                                "message": v.get("message", ""),
+                            }
+                        )
+
+                    sample_violations, total_v, truncated_v = _bounded_items(
+                        all_module_violations, 5
+                    )
+
+                    layer_guard = {
+                        "available": True,
+                        "outbound_rules_defined": outbound_rules_defined,
+                        "outbound_violation_count": len(outbound_violations),
+                        "inbound_violation_count": len(inbound_violations),
+                        "violations": {
+                            "total": total_v,
+                            "items": sample_violations,
+                            "truncated": truncated_v,
+                        },
+                    }
+                    if forbidden_outbound_layers:
+                        layer_guard["forbidden_outbound_layers"] = forbidden_outbound_layers
+                    if forbidden_outbound_prefixes:
+                        layer_guard["forbidden_outbound_prefixes"] = forbidden_outbound_prefixes
+                    if outbound_rules_defined or len(outbound_violations) > 0 or len(inbound_violations) > 0:
+                        layer_guard["suggested_next_tool"] = "get_layer_isolation"
+                else:
+                    layer_guard = {
+                        "available": False,
+                        "reason": f"Cached analytics state is '{cached_state}'.",
+                    }
+
             live_revision = _live_engine_revisions.get(str(root)) if engine else None
 
             return json.dumps(
@@ -2709,6 +2777,7 @@ def get_file_edit_context(
                     "live_revision": live_revision,
                     "layer": layer,
                     "risk_score": risk_score,
+                    "layer_guard": layer_guard,
                     "consumers": {
                         "direct_count": len(direct_consumers),
                         "transitive_count": transitive_count,
