@@ -2043,6 +2043,215 @@ def compute_cached_analytics(
     }
 
 
+def _symbol_kind(symbol: str, symbols: dict) -> str:
+    """Resolve artifact kind from symbols dictionary."""
+    if not isinstance(symbols, dict):
+        return "unknown"
+    if symbol in symbols.get("classes", []):
+        return "class"
+    if symbol in symbols.get("functions", []):
+        return "function"
+    if symbol in symbols.get("methods", []):
+        return "method"
+    if symbol in symbols.get("globals", []):
+        return "global"
+    return "unknown"
+
+
+def build_artifact_data_projection(
+    artifacts: dict[str, Any] | None = None,
+    artifact_consumption: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """
+    Build a pure-RAM semantics-preserving projection of canonical state facts
+    (state.artifacts, state.artifact_consumption) into the snapshot
+    artifact_data contract for Dependency Matrix and Shared Usage Clusters.
+
+    Invariants:
+    1. Method identity: preserves class qualification (e.g. module::Class.method).
+    2. Self-consumption parity: retains consumer == definer_module if external consumers exist.
+    3. Exact canonical key: strictly f"{mod_path}::{symbol}".
+    4. Single SSOT: reads strictly from state.artifact_consumption without fallback.
+    5. Zero filesystem reads, zero report reads, zero AST parsing.
+    """
+    artifacts_dict = artifacts if isinstance(artifacts, dict) else {}
+    consumption_dict = (
+        artifact_consumption if isinstance(artifact_consumption, dict) else {}
+    )
+
+    projected_artifacts: dict[str, dict[str, Any]] = {}
+    usage_sidecar: dict[str, dict[str, list[str]]] = {}
+
+    for mod_path, mod_data in artifacts_dict.items():
+        if not isinstance(mod_data, dict):
+            continue
+
+        symbols = mod_data.get("symbols", {})
+        own_symbols = mod_data.get("own_symbols", [])
+
+        if not isinstance(symbols, dict):
+            symbols = {}
+
+        if not isinstance(own_symbols, (list, tuple, set)):
+            own_symbols = []
+
+        for raw_symbol in own_symbols:
+            if not isinstance(raw_symbol, str) or not raw_symbol:
+                continue
+
+            symbol = str(raw_symbol)
+            target_key = f"{mod_path}::{symbol}"
+
+            # Single SSOT: strictly state.artifact_consumption[target_key]
+            c_entry = consumption_dict.get(target_key)
+            if not isinstance(c_entry, dict):
+                continue
+
+            raw_consumers = c_entry.get("consumers", [])
+            if not isinstance(raw_consumers, (list, tuple, set)):
+                continue
+
+            # Retain all confirmed consumer modules
+            consumer_modules = sorted(
+                {
+                    c
+                    for c in raw_consumers
+                    if isinstance(c, str) and c
+                }
+            )
+
+            # Filter out definer when checking if artifact has active external consumers,
+            # matching snapshot build_artifact_index filter contract
+            external_consumers = [c for c in consumer_modules if c != mod_path]
+            if not external_consumers:
+                continue
+
+            key = target_key
+            kind = _symbol_kind(symbol, symbols)
+
+            projected_artifacts[key] = {
+                "artifact_id": key,
+                "artifact": symbol,
+                "kind": kind,
+                "definer_module": mod_path,
+                "consumers": consumer_modules,
+                "consumer_count": len(consumer_modules),
+            }
+
+            # Map usage channels from canonical channels mapping
+            channels = c_entry.get("channels")
+            if isinstance(channels, dict) and channels:
+                usage_mapping: dict[str, list[str]] = defaultdict(list)
+                for consumer_mod, ch_list in channels.items():
+                    if consumer_mod in consumer_modules and isinstance(
+                        ch_list, (list, tuple, set)
+                    ):
+                        for ch in ch_list:
+                            if isinstance(ch, str) and ch:
+                                usage_mapping[ch].append(consumer_mod)
+
+                if usage_mapping:
+                    usage_sidecar[key] = {
+                        k: sorted(set(v))
+                        for k, v in usage_mapping.items()
+                    }
+
+    return {
+        "artifacts": dict(sorted(projected_artifacts.items())),
+        "_usage_sidecar": usage_sidecar,
+    }
+
+
+def compute_dependency_matrix(
+    artifacts: dict[str, Any] | None = None,
+    artifact_consumption: dict[str, Any] | None = None,
+    hard_edges: dict[str, Any] | None = None,
+    progress_callback=None,
+) -> dict[str, dict[str, dict]]:
+    """
+    Compute Dependency Matrix from canonical RAM facts using the existing
+    snapshot semantic builder.
+    """
+    projected = build_artifact_data_projection(
+        artifacts=artifacts,
+        artifact_consumption=artifact_consumption,
+    )
+    edges = hard_edges if isinstance(hard_edges, dict) else {}
+    return build_module_dependency_matrix(
+        artifact_data=projected,
+        hard_edges=edges,
+        progress_callback=progress_callback,
+    )
+
+
+def compute_shared_usage_clusters(
+    artifacts: dict[str, Any] | None = None,
+    artifact_consumption: dict[str, Any] | None = None,
+    min_jaccard: float = 0.30,
+    max_cluster_size: int = 25,
+    min_cluster_size: int = 2,
+    progress_callback=None,
+) -> list[dict]:
+    """
+    Compute Shared Usage Clusters (Jaccard) from canonical RAM facts using the
+    existing snapshot semantic builder.
+    """
+    projected = build_artifact_data_projection(
+        artifacts=artifacts,
+        artifact_consumption=artifact_consumption,
+    )
+    return build_jaccard_clusters(
+        artifact_data=projected,
+        min_jaccard=min_jaccard,
+        max_cluster_size=max_cluster_size,
+        min_cluster_size=min_cluster_size,
+        progress_callback=progress_callback,
+    )
+
+
+def compute_dependency_matrix_from_state(
+    state: Any,
+    progress_callback=None,
+) -> dict[str, dict[str, dict]]:
+    """
+    Compute Dependency Matrix directly from a RepositoryAnalysisState instance
+    using canonical RAM facts.
+    """
+    artifacts = getattr(state, "artifacts", {}) or {}
+    consumption = getattr(state, "artifact_consumption", {}) or {}
+    graph = getattr(state, "dependency_graph", None)
+    hard_edges = getattr(graph, "hard_edges", {}) or {} if graph else {}
+    return compute_dependency_matrix(
+        artifacts=artifacts,
+        artifact_consumption=consumption,
+        hard_edges=hard_edges,
+        progress_callback=progress_callback,
+    )
+
+
+def compute_shared_usage_clusters_from_state(
+    state: Any,
+    min_jaccard: float = 0.30,
+    max_cluster_size: int = 25,
+    min_cluster_size: int = 2,
+    progress_callback=None,
+) -> list[dict]:
+    """
+    Compute Shared Usage Clusters directly from a RepositoryAnalysisState instance
+    using canonical RAM facts.
+    """
+    artifacts = getattr(state, "artifacts", {}) or {}
+    consumption = getattr(state, "artifact_consumption", {}) or {}
+    return compute_shared_usage_clusters(
+        artifacts=artifacts,
+        artifact_consumption=consumption,
+        min_jaccard=min_jaccard,
+        max_cluster_size=max_cluster_size,
+        min_cluster_size=min_cluster_size,
+        progress_callback=progress_callback,
+    )
+
+
 # ==========================================================
 # EXPORTS
 # ==========================================================
@@ -2053,9 +2262,15 @@ __all__ = [
     "compute_cached_analytics",
     "build_module_dependency_matrix",
     "build_jaccard_clusters",
+    "build_artifact_data_projection",
+    "compute_dependency_matrix",
+    "compute_shared_usage_clusters",
+    "compute_dependency_matrix_from_state",
+    "compute_shared_usage_clusters_from_state",
     "_classify_layer",
     "_classify_visibility",
     "_compute_export_degrees",
 ]
+
 
 

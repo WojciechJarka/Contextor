@@ -255,18 +255,61 @@ def ensure_collisions(state: RepositoryAnalysisState) -> None:
                 state.collisions_state = "deferred"
 
 
+def ensure_artifact_consumption(state: RepositoryAnalysisState) -> None:
+    """
+    Ensures state.artifact_consumption conforms to the canonical contract.
+    Lifecycle rules:
+    1. If state requires resync or is already marked stale: fail-closed (preserve stale marker).
+    2. If consumption is a recognized LEGACY shape (e.g. {"_report": ...}):
+       safely migrates in RAM from state.artifacts and marks state as fresh.
+    3. If consumption is a VALID canonical structure: marks fresh (if not already set) and preserves.
+    4. If consumption is an INVALID modern canonical structure:
+       DO NOT auto-heal from state.artifacts; set state.artifact_consumption_state = "stale" (fail-closed).
+    """
+    if getattr(state, "resync_required", False) or getattr(state, "artifact_consumption_state", None) == "stale":
+        state.artifact_consumption_state = "stale"
+        return
+
+    from contextor.core.analysis.state_manager import (
+        build_canonical_artifact_consumption,
+        is_legacy_artifact_consumption,
+        validate_canonical_artifact_consumption,
+    )
+
+    consumption = getattr(state, "artifact_consumption", None)
+
+    # A. Explicit Legacy Migration
+    if is_legacy_artifact_consumption(consumption):
+        raw_artifacts = getattr(state, "artifacts", {}) or {}
+        state.artifact_consumption = build_canonical_artifact_consumption(raw_artifacts)
+        state.artifact_consumption_state = "fresh"
+        return
+
+    # B. Valid Canonical State
+    if validate_canonical_artifact_consumption(consumption):
+        if not hasattr(state, "artifact_consumption_state") or state.artifact_consumption_state == "deferred":
+            state.artifact_consumption_state = "fresh"
+        return
+
+    # C. Invalid Modern Canonical State -> Fail Closed
+    state.artifact_consumption_state = "stale"
+
+
 def materialize_incremental_state(state: RepositoryAnalysisState) -> None:
     """
     Orchestrates complete materialization of incremental state in exact required lifecycle order:
-    1. ensure_module_usages (legacy source-backed reconstruction if needed)
-    2. ensure_topology_analytics (RAM-only)
-    3. ensure_cached_analytics (RAM-only)
-    4. ensure_cycles (RAM-only)
-    5. ensure_collisions (RAM-only)
+    1. ensure_artifact_consumption (RAM-only self-heal from legacy _report if needed)
+    2. ensure_module_usages (legacy source-backed reconstruction if needed)
+    3. ensure_topology_analytics (RAM-only)
+    4. ensure_cached_analytics (RAM-only)
+    5. ensure_cycles (RAM-only)
+    6. ensure_collisions (RAM-only)
     """
+    ensure_artifact_consumption(state)
     ensure_module_usages(state)
     ensure_topology_analytics(state)
     ensure_cached_analytics(state)
     ensure_cycles(state)
     ensure_collisions(state)
+
 

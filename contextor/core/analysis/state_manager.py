@@ -81,6 +81,7 @@ class RepositoryAnalysisState:
     artifacts: Dict[str, Any] = field(default_factory=dict)
     dependency_graph: Optional[Any] = None
     artifact_consumption: Dict[str, Any] = field(default_factory=dict)
+    artifact_consumption_state: str = "deferred"
     layer_information: Dict[str, Any] = field(default_factory=dict)
     metrics: Dict[str, Any] = field(default_factory=dict)
     file_state: Dict[str, FileState] = field(default_factory=dict)
@@ -240,3 +241,164 @@ def load_engine_state(
         import sys
         print(f"Failed to load engine state: {e}", file=sys.stderr)
         return None
+
+
+CANONICAL_USAGE_CHANNELS: frozenset[str] = frozenset({
+    "direct_calls",
+    "runtime_calls",
+    "qualified_refs",
+    "callback_calls",
+    "event_bindings",
+    "api_imports",
+    "inheritance",
+})
+
+
+def is_legacy_artifact_consumption(consumption: Any) -> bool:
+    """
+    Returns True if consumption matches a known legacy persisted structure
+    that is safe and expected to migrate in RAM:
+    - Dict containing "_report" (historical reporting payload snapshot).
+    """
+    if consumption is None:
+        return True
+    if isinstance(consumption, dict) and "_report" in consumption:
+        return True
+    return False
+
+
+def validate_canonical_artifact_consumption(consumption: Any) -> bool:
+    """
+    Validates that consumption adheres strictly to the canonical per-target contract:
+    - Dict with target keys strictly of shape "<non-empty definer>::<non-empty symbol>"
+    - Rejects legacy "_report" payload
+    - Each value is dict with "consumers" (sorted unique list[str]) and "channels" (dict[str, sorted unique list[str]])
+    - channels keys are a subset of consumers (set(channels) <= set(consumers))
+    - all channel names belong to CANONICAL_USAGE_CHANNELS
+    - deterministic ordering: consumers == sorted(set(consumers)), ch_list == sorted(set(ch_list))
+    """
+    if not isinstance(consumption, dict):
+        return False
+    if "_report" in consumption:
+        return False
+
+    for target, entry in consumption.items():
+        if not isinstance(target, str) or not target:
+            return False
+
+        definer, sep, symbol = target.partition("::")
+        if not sep or not definer or not symbol:
+            return False
+
+        if not isinstance(entry, dict):
+            return False
+
+        consumers = entry.get("consumers")
+        if not isinstance(consumers, list):
+            return False
+
+        for c in consumers:
+            if not isinstance(c, str) or not c:
+                return False
+
+        # Deterministic sorting and uniqueness invariant
+        if consumers != sorted(set(consumers)):
+            return False
+
+        consumer_set = set(consumers)
+
+        channels = entry.get("channels")
+        if not isinstance(channels, dict):
+            return False
+
+        # Invariant: set(channels.keys()) <= set(consumers)
+        if not set(channels.keys()).issubset(consumer_set):
+            return False
+
+        for c_mod, ch_list in channels.items():
+            if not isinstance(ch_list, list):
+                return False
+            if ch_list != sorted(set(ch_list)):
+                return False
+            for ch in ch_list:
+                if not isinstance(ch, str) or ch not in CANONICAL_USAGE_CHANNELS:
+                    return False
+
+    return True
+
+
+def build_canonical_artifact_consumption(
+    artifacts: dict[str, Any],
+) -> dict[str, dict[str, Any]]:
+    """
+    Transform raw analysis module artifacts into normalized canonical per-target
+    artifact_consumption mapping.
+
+    Schema:
+        {
+            "<definer_module>::<qualified_symbol>": {
+                "consumers": sorted_list_of_consumers,
+                "channels": {
+                    "<consumer_module>": sorted_list_of_channels,
+                },
+            },
+        }
+    """
+    result: dict[str, dict[str, Any]] = {}
+    if not isinstance(artifacts, dict):
+        return result
+
+    for module_path, module_data in artifacts.items():
+        if not isinstance(module_data, dict):
+            continue
+
+        consumers_by_symbol = module_data.get("consumers", {})
+        if not isinstance(consumers_by_symbol, dict):
+            continue
+
+        for symbol, entry in consumers_by_symbol.items():
+            if not isinstance(symbol, str) or not isinstance(entry, dict):
+                continue
+
+            target = f"{module_path}::{symbol}"
+
+            raw_consumers = entry.get("consumers", [])
+            consumers = sorted(
+                {
+                    consumer
+                    for consumer in raw_consumers
+                    if isinstance(consumer, str) and consumer
+                }
+            )
+            consumer_set = set(consumers)
+
+            usage = entry.get("usage", {})
+            channels_by_consumer: dict[str, list[str]] = {}
+
+            if isinstance(usage, dict):
+                for channel, channel_consumers in usage.items():
+                    if channel not in CANONICAL_USAGE_CHANNELS:
+                        continue
+
+                    if not isinstance(channel_consumers, (list, tuple, set)):
+                        continue
+
+                    for consumer in channel_consumers:
+                        if (
+                            isinstance(consumer, str)
+                            and consumer
+                            and consumer in consumer_set
+                        ):
+                            channels_by_consumer.setdefault(
+                                consumer, []
+                            ).append(channel)
+
+            result[target] = {
+                "consumers": consumers,
+                "channels": {
+                    consumer: sorted(set(channels))
+                    for consumer, channels in channels_by_consumer.items()
+                },
+            }
+
+    return result

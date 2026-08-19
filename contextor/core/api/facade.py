@@ -382,7 +382,11 @@ class ContextorFacade:
         
         progress.begin("Persisting canonical LIVE snapshot")
         if analysis_result:
-            from contextor.core.analysis.state_manager import RepositoryAnalysisState, save_engine_state
+            from contextor.core.analysis.state_manager import (
+                RepositoryAnalysisState,
+                build_canonical_artifact_consumption,
+                save_engine_state,
+            )
             from contextor.core.paths import repo_cache_dir
             from contextor.core.reporting_engine.graph_analytics import compute_topology_analytics
 
@@ -406,13 +410,17 @@ class ContextorFacade:
                 canonical_collisions = []
                 collisions_state = "deferred"
 
+            raw_artifacts = getattr(analysis_result, "artifacts", {}) or {}
+            canonical_consumption = build_canonical_artifact_consumption(raw_artifacts)
+
             state = RepositoryAnalysisState(
                 modules=getattr(analysis_result, "modules", {}),
-                artifacts=getattr(analysis_result, "artifacts", {}),
+                artifacts=raw_artifacts,
                 dependency_graph=graph,
                 trie=getattr(analysis_result, "trie", None),
                 package_root=getattr(analysis_result, "package_root", ""),
-                artifact_consumption={"_report": getattr(analysis_result, "compact_artifacts", {})},
+                artifact_consumption=canonical_consumption,
+                artifact_consumption_state="fresh",
                 metrics=metrics,
                 topology_analytics=topology_analytics,
                 topology_metrics_state="fresh",
