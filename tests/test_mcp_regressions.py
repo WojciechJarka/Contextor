@@ -2053,3 +2053,556 @@ def test_artifact_blast_radius_uses_only_current_compact_report(
             "truncated": False,
         }
     }
+
+
+def test_file_edit_context_minimal_mode_and_target_resolution(tmp_path, monkeypatch):
+    root = tmp_path
+    pkg_file = root / "pkg" / "module.py"
+    pkg_file.parent.mkdir(parents=True)
+    pkg_file.write_text("def hello(): pass\n", encoding="utf-8")
+
+    from contextor.core.domain.graph import ProjectGraph
+
+    mock_graph = ProjectGraph(
+        hard_edges={"consumer.mod": {"pkg.module"}, "tests.test_pkg": {"consumer.mod"}},
+        soft_edges={},
+    )
+    engine = SimpleNamespace(
+        state=SimpleNamespace(
+            modules={"pkg.module": SimpleNamespace(layer="core")},
+            artifacts={"pkg.module": {"own_symbols": ["hello"]}},
+            dependency_graph=mock_graph,
+            revision=42,
+            topology_metrics_state="fresh",
+            topology_analytics={"module_risk": {"pkg.module": 0.15}},
+            cached_analytics_state="fresh",
+            cached_analytics={"module_layers": {"pkg.module": "core"}},
+        )
+    )
+    mcp_server._live_engine_revisions[str(root)] = 42
+    monkeypatch.setattr(mcp_server, "_get_or_init_engine", lambda _root: engine)
+    monkeypatch.setattr(
+        mcp_server,
+        "_read_registries",
+        lambda _root: (
+            {"pkg.module": "10/1", "consumer.mod": "20/1", "tests.test_pkg": "30/1"},
+            {"10/1": "pkg.module", "20/1": "consumer.mod", "30/1": "tests.test_pkg"},
+            {"pkg.module::hello": "A1/1"},
+            {"A1/1": "pkg.module::hello"},
+        ),
+    )
+
+    # 1. Legacy call (mode=None) keeps exact legacy contract
+    legacy_res = json.loads(
+        mcp_server.get_file_edit_context.fn(
+            repo_path=str(root),
+            file_path="pkg/module.py",
+        )
+    )
+    assert "public_api" in legacy_res
+    assert "imports" in legacy_res
+    assert "consumers" in legacy_res
+    assert "dependency_data_source" in legacy_res
+    assert "scope_hint" not in legacy_res
+    assert "state_certainty" not in legacy_res
+
+    # 2. Minimal mode via relative path (fresh topology & cached analytics)
+    min_rel = json.loads(
+        mcp_server.get_file_edit_context.fn(
+            repo_path=str(root),
+            target="pkg/module.py",
+            mode="minimal",
+        )
+    )
+    assert min_rel["resolved_as"] == "module"
+    assert min_rel["module"] == "pkg.module"
+    assert min_rel["module_id"] == "10/1"
+    assert min_rel["live_revision"] == 42
+    assert min_rel["layer"] == "core"
+    assert min_rel["risk_score"] == 0.15
+    assert min_rel["consumers"]["direct_count"] == 1
+    assert min_rel["consumers"]["transitive_count"] == 2
+    assert min_rel["consumers"]["sample"] == ["consumer.mod"]
+    assert min_rel["consumers"]["truncated"] is False
+    assert min_rel["tests_covering"]["count"] == 1
+    assert min_rel["tests_covering"]["sample"] == ["tests.test_pkg"]
+    assert min_rel["warnings"] == []
+    assert "scope_hint" not in min_rel
+    assert "state_certainty" not in min_rel
+
+    # 3. Minimal mode via dotted module name
+    min_dotted = json.loads(
+        mcp_server.get_file_edit_context.fn(
+            repo_path=str(root),
+            target="pkg.module",
+            mode="minimal",
+        )
+    )
+    assert min_dotted["module"] == "pkg.module"
+    assert min_dotted["resolved_as"] == "module"
+
+    # 4. Minimal mode via module ID
+    min_id = json.loads(
+        mcp_server.get_file_edit_context.fn(
+            repo_path=str(root),
+            target="10/1",
+            mode="minimal",
+        )
+    )
+    assert min_id["module"] == "pkg.module"
+    assert min_id["resolved_as"] == "module"
+
+    # 5. Minimal mode via absolute path
+    min_abs = json.loads(
+        mcp_server.get_file_edit_context.fn(
+            repo_path=str(root),
+            target=str(pkg_file),
+            mode="minimal",
+        )
+    )
+    assert min_abs["module"] == "pkg.module"
+    assert min_abs["resolved_as"] == "module"
+
+    # 6. Artifact input returns structured diagnostic
+    art_res = json.loads(
+        mcp_server.get_file_edit_context.fn(
+            repo_path=str(root),
+            target="pkg.module::hello",
+            mode="minimal",
+        )
+    )
+    assert art_res["resolved_as"] == "artifact"
+    assert art_res["artifact"] == "pkg.module::hello"
+    assert art_res["artifact_id"] == "A1/1"
+    assert art_res["definer_module"] == "pkg.module"
+    assert art_res["suggested_next_tool"] == "get_artifact_blast_radius"
+
+    # 7. Conflicting target and file_path returns clear validation error when resolving to different targets
+    conflict_res = json.loads(
+        mcp_server.get_file_edit_context.fn(
+            repo_path=str(root),
+            file_path="pkg/module.py",
+            target="consumer.mod",
+            mode="minimal",
+        )
+    )
+    assert "error" in conflict_res
+    assert "Conflicting" in conflict_res["error"]
+
+    # 8. Equivalent target and file_path in different representations do NOT conflict
+    equiv_res1 = json.loads(
+        mcp_server.get_file_edit_context.fn(
+            repo_path=str(root),
+            file_path="pkg/module.py",
+            target="pkg.module",
+            mode="minimal",
+        )
+    )
+    assert equiv_res1.get("resolved_as") == "module"
+    assert equiv_res1["module"] == "pkg.module"
+
+    equiv_res2 = json.loads(
+        mcp_server.get_file_edit_context.fn(
+            repo_path=str(root),
+            file_path=str(pkg_file),
+            target="10/1",
+            mode="minimal",
+        )
+    )
+    assert equiv_res2.get("resolved_as") == "module"
+    assert equiv_res2["module"] == "pkg.module"
+
+    # 9. Unsupported mode is rejected explicitly
+    unsupported_mode_res = json.loads(
+        mcp_server.get_file_edit_context.fn(
+            repo_path=str(root),
+            target="pkg.module",
+            mode="invalid_unsupported_mode",
+        )
+    )
+    assert "error" in unsupported_mode_res
+    assert "Unsupported mode" in unsupported_mode_res["error"]
+
+    # 10. Sample bounding and truncation semantics
+    bounded_res = json.loads(
+        mcp_server.get_file_edit_context.fn(
+            repo_path=str(root),
+            target="pkg.module",
+            mode="minimal",
+            max_items=0,
+        )
+    )
+    assert bounded_res["consumers"]["direct_count"] == 1
+    assert bounded_res["consumers"]["sample"] == []
+    assert bounded_res["consumers"]["truncated"] is True
+    assert bounded_res["tests_covering"]["count"] == 1
+    assert bounded_res["tests_covering"]["sample"] == []
+    assert bounded_res["tests_covering"]["truncated"] is True
+
+    # 11. Freshness guards on module_risk: deferred -> null, stale -> null, fresh+missing -> null with warning
+    engine.state.topology_metrics_state = "deferred"
+    deferred_res = json.loads(
+        mcp_server.get_file_edit_context.fn(
+            repo_path=str(root),
+            target="pkg.module",
+            mode="minimal",
+        )
+    )
+    assert deferred_res["risk_score"] is None
+
+    engine.state.topology_metrics_state = "stale"
+    stale_res = json.loads(
+        mcp_server.get_file_edit_context.fn(
+            repo_path=str(root),
+            target="pkg.module",
+            mode="minimal",
+        )
+    )
+    assert stale_res["risk_score"] is None
+
+    engine.state.topology_metrics_state = "fresh"
+    engine.state.topology_analytics = {"module_risk": {}}
+    missing_res = json.loads(
+        mcp_server.get_file_edit_context.fn(
+            repo_path=str(root),
+            target="pkg.module",
+            mode="minimal",
+        )
+    )
+    assert missing_res["risk_score"] is None
+    assert any("Canonical module_risk not computed" in w for w in missing_res["warnings"])
+
+    # 12. Freshness guards on layer: deferred -> unknown, stale -> unknown, fresh+missing -> unknown with warning
+    engine.state.cached_analytics_state = "deferred"
+    def_layer_res = json.loads(
+        mcp_server.get_file_edit_context.fn(
+            repo_path=str(root),
+            target="pkg.module",
+            mode="minimal",
+        )
+    )
+    assert def_layer_res["layer"] == "unknown"
+
+    engine.state.cached_analytics_state = "stale"
+    stale_layer_res = json.loads(
+        mcp_server.get_file_edit_context.fn(
+            repo_path=str(root),
+            target="pkg.module",
+            mode="minimal",
+        )
+    )
+    assert stale_layer_res["layer"] == "unknown"
+
+    engine.state.cached_analytics_state = "fresh"
+    engine.state.cached_analytics = {"module_layers": {}}
+    missing_layer_res = json.loads(
+        mcp_server.get_file_edit_context.fn(
+            repo_path=str(root),
+            target="pkg.module",
+            mode="minimal",
+        )
+    )
+    assert missing_layer_res["layer"] == "unknown"
+    assert any("Canonical module_layers entry not found" in w for w in missing_layer_res["warnings"])
+
+
+def test_module_context_forgiving_input_and_artifact_redirect(tmp_path, monkeypatch):
+    root = tmp_path
+    from contextor.core.domain.graph import ProjectGraph
+
+    mock_graph = ProjectGraph(
+        hard_edges={"consumer.mod": {"pkg.module"}, "pkg.module": {"dep.mod"}},
+        soft_edges={},
+    )
+    engine = SimpleNamespace(
+        state=SimpleNamespace(
+            modules={"pkg.module": SimpleNamespace(layer="core")},
+            artifacts={"pkg.module": {"own_symbols": ["hello"]}},
+            dependency_graph=mock_graph,
+            revision=42,
+            topology_metrics_state="fresh",
+            topology_analytics={"module_risk": {"pkg.module": 0.15}, "pagerank": {"pkg.module": 0.1}, "betweenness": {}, "hub_scores": {}, "authority_scores": {}, "bridge_scores": {}},
+        )
+    )
+    monkeypatch.setattr(mcp_server, "_get_or_init_engine", lambda _root: engine)
+    monkeypatch.setattr(
+        mcp_server,
+        "_read_registries",
+        lambda _root: (
+            {"pkg.module": "10/1", "consumer.mod": "20/1", "dep.mod": "30/1"},
+            {"10/1": "pkg.module", "20/1": "consumer.mod", "30/1": "dep.mod"},
+            {"pkg.module::hello": "A1/1"},
+            {"A1/1": "pkg.module::hello"},
+        ),
+    )
+
+    # 1. Legacy call via module_name
+    legacy_res = json.loads(
+        mcp_server.get_module_context.fn(
+            repo_path=str(root),
+            module_name="pkg.module",
+        )
+    )
+    assert legacy_res["module"] == "pkg.module"
+    assert "metrics" in legacy_res
+
+    # 2. Call via module alias
+    alias_res = json.loads(
+        mcp_server.get_module_context.fn(
+            repo_path=str(root),
+            module="pkg.module",
+        )
+    )
+    assert alias_res["module"] == "pkg.module"
+
+    # 3. Call via module ID
+    id_res = json.loads(
+        mcp_server.get_module_context.fn(
+            repo_path=str(root),
+            module="10/1",
+        )
+    )
+    assert id_res["module"] == "pkg.module"
+
+    # 4. Equivalent module_name and module
+    equiv_res = json.loads(
+        mcp_server.get_module_context.fn(
+            repo_path=str(root),
+            module_name="pkg.module",
+            module="10/1",
+        )
+    )
+    assert equiv_res["module"] == "pkg.module"
+
+    # 5. Conflicting module_name and module
+    conflict_res = json.loads(
+        mcp_server.get_module_context.fn(
+            repo_path=str(root),
+            module_name="pkg.module",
+            module="consumer.mod",
+        )
+    )
+    assert "error" in conflict_res
+    assert "Conflicting" in conflict_res["error"]
+
+    # 6. Artifact passed to module tool -> structured redirect
+    art_redirect = json.loads(
+        mcp_server.get_module_context.fn(
+            repo_path=str(root),
+            module="pkg.module::hello",
+        )
+    )
+    assert art_redirect["resolved_as"] == "artifact"
+    assert art_redirect["artifact"] == "pkg.module::hello"
+    assert art_redirect["definer_module"] == "pkg.module"
+    assert art_redirect["suggested_next_tool"] == "get_artifact_blast_radius"
+
+
+def test_artifact_blast_radius_module_aware_diagnostic(tmp_path, monkeypatch):
+    root = tmp_path
+    engine = SimpleNamespace(
+        state=SimpleNamespace(
+            modules={"pkg.module": SimpleNamespace(layer="core")},
+            artifacts={
+                "pkg.module": {
+                    "own_symbols": ["hello", "WorldClass"],
+                    "symbols": {"functions": ["hello"], "classes": ["WorldClass"]},
+                    "consumers": {"hello": {"consumers": ["consumer.mod"]}},
+                }
+            },
+            dependency_graph=None,
+        )
+    )
+    monkeypatch.setattr(mcp_server, "_get_or_init_engine", lambda _root: engine)
+    monkeypatch.setattr(
+        mcp_server,
+        "_read_registries",
+        lambda _root: (
+            {"pkg.module": "10/1"},
+            {"10/1": "pkg.module"},
+            {"pkg.module::hello": "A1/1", "pkg.module::WorldClass": "A2/1"},
+            {"A1/1": "pkg.module::hello", "A2/1": "pkg.module::WorldClass"},
+        ),
+    )
+
+    # 7. Valid artifact unchanged
+    valid_res = json.loads(
+        mcp_server.get_artifact_blast_radius.fn(
+            repo_path=str(root),
+            artifact_name="pkg.module::hello",
+        )
+    )
+    assert valid_res["artifact"] == "pkg.module::hello"
+    assert valid_res["definer"] == "pkg.module"
+
+    # 8. Artifact ID unchanged
+    id_res = json.loads(
+        mcp_server.get_artifact_blast_radius.fn(
+            repo_path=str(root),
+            artifact_name="A1/1",
+        )
+    )
+    assert id_res["artifact_id"] == "A1/1"
+
+    # 9. Module dotted name -> module diagnostic with candidates
+    mod_diag = json.loads(
+        mcp_server.get_artifact_blast_radius.fn(
+            repo_path=str(root),
+            artifact_name="pkg.module",
+        )
+    )
+    assert mod_diag["resolved_as"] == "module"
+    assert mod_diag["module"] == "pkg.module"
+    assert mod_diag["module_id"] == "10/1"
+    assert mod_diag["suggested_next_tool"] == "get_module_context"
+    assert mod_diag["artifact_candidates"]["total"] == 2
+    assert len(mod_diag["artifact_candidates"]["items"]) == 2
+    assert mod_diag["artifact_candidates"]["truncated"] is False
+
+    # 10. Module ID -> module diagnostic with candidates
+    mod_id_diag = json.loads(
+        mcp_server.get_artifact_blast_radius.fn(
+            repo_path=str(root),
+            artifact_name="10/1",
+        )
+    )
+    assert mod_id_diag["resolved_as"] == "module"
+    assert mod_id_diag["module"] == "pkg.module"
+
+    # 11. Bounded artifact candidates
+    bounded_diag = json.loads(
+        mcp_server.get_artifact_blast_radius.fn(
+            repo_path=str(root),
+            artifact_name="pkg.module",
+            max_items=1,
+        )
+    )
+    assert bounded_diag["artifact_candidates"]["total"] == 2
+    assert len(bounded_diag["artifact_candidates"]["items"]) == 1
+    assert bounded_diag["artifact_candidates"]["truncated"] is True
+
+    # 12. Truly unknown target -> not found
+    unknown_res = mcp_server.get_artifact_blast_radius.fn(
+        repo_path=str(root),
+        artifact_name="nonexistent_completely_unknown",
+    )
+    assert "not found" in str(unknown_res)
+
+
+def test_file_edit_context_live_revision_lifecycle(tmp_path, monkeypatch):
+    root1 = tmp_path / "repo1"
+    root2 = tmp_path / "repo2"
+    root1.mkdir(parents=True)
+    root2.mkdir(parents=True)
+
+    from contextor.core.domain.graph import ProjectGraph
+    from contextor.core.live_state.store import LiveStateMetadata
+
+    mock_graph = ProjectGraph(hard_edges={}, soft_edges={})
+    engine1 = SimpleNamespace(
+        state=SimpleNamespace(
+            modules={"r1.mod": SimpleNamespace(layer="core")},
+            artifacts={"r1.mod": {"own_symbols": []}},
+            dependency_graph=mock_graph,
+            topology_metrics_state="fresh",
+            topology_analytics={"module_risk": {"r1.mod": 0.1}},
+            cached_analytics_state="fresh",
+            cached_analytics={"module_layers": {"r1.mod": "core"}},
+        ),
+        state_manager=SimpleNamespace(state_id="state1"),
+    )
+    engine2 = SimpleNamespace(
+        state=SimpleNamespace(
+            modules={"r2.mod": SimpleNamespace(layer="ui")},
+            artifacts={"r2.mod": {"own_symbols": []}},
+            dependency_graph=mock_graph,
+            topology_metrics_state="fresh",
+            topology_analytics={"module_risk": {"r2.mod": 0.2}},
+            cached_analytics_state="fresh",
+            cached_analytics={"module_layers": {"r2.mod": "ui"}},
+        ),
+        state_manager=SimpleNamespace(state_id="state2"),
+    )
+
+    import contextor.core.live_state as core_live_state
+    import contextor.core.repository_identity as core_repo_id
+    import contextor.core.analysis.state_manager as core_state_mgr
+
+    # Clear revision dictionary
+    mcp_server._live_engine_revisions.clear()
+    mcp_server._live_engines.clear()
+
+    # 1. Hydrated metadata revision -> minimal pre-edit returns exact persisted revision
+    monkeypatch.setattr(core_live_state, "connect", lambda _r: None)
+    monkeypatch.setattr(core_repo_id, "read_repository_identity", lambda r: SimpleNamespace(repo_id=f"id_{r.name}", root_path=str(r)))
+    monkeypatch.setattr(core_live_state, "migrate_legacy_snapshot", lambda r: str(r / ".contextor"))
+    monkeypatch.setattr(core_live_state, "read_metadata", lambda _c: LiveStateMetadata(revision=366, state_id="s366"))
+    monkeypatch.setattr(core_state_mgr, "load_engine_state", lambda _c, _sid, **_kw: engine1.state)
+    monkeypatch.setattr(mcp_server, "_read_registries", lambda _r: ({"r1.mod": "1/1"}, {"1/1": "r1.mod"}, {}, {}))
+
+    res1 = json.loads(
+        mcp_server.get_file_edit_context.fn(
+            repo_path=str(root1),
+            target="r1.mod",
+            mode="minimal",
+        )
+    )
+    assert res1["live_revision"] == 366
+    assert mcp_server._live_engine_revisions[str(root1)] == 366
+
+    # 2. No metadata / revision -> null
+    mcp_server._live_engine_revisions.clear()
+    mcp_server._live_engines.clear()
+    monkeypatch.setattr(core_live_state, "read_metadata", lambda _c: None)
+    res_no_meta = json.loads(
+        mcp_server.get_file_edit_context.fn(
+            repo_path=str(root1),
+            target="r1.mod",
+            mode="minimal",
+        )
+    )
+    assert res_no_meta["live_revision"] is None
+
+    # 3. Active / newer revision in _live_engine_revisions -> exact newer revision
+    mcp_server._live_engine_revisions[str(root1)] = 367
+    res_active = json.loads(
+        mcp_server.get_file_edit_context.fn(
+            repo_path=str(root1),
+            target="r1.mod",
+            mode="minimal",
+        )
+    )
+    assert res_active["live_revision"] == 367
+
+    # 4. Hydration does not increment revision
+    assert mcp_server._live_engine_revisions[str(root1)] == 367
+
+    # 5. Two repo roots retain independent revision values
+    monkeypatch.setattr(core_live_state, "read_metadata", lambda c: LiveStateMetadata(revision=500, state_id="s500") if "repo2" in str(c) else LiveStateMetadata(revision=366, state_id="s366"))
+    monkeypatch.setattr(core_state_mgr, "load_engine_state", lambda c, _sid, **_kw: engine2.state if "repo2" in str(c) else engine1.state)
+    monkeypatch.setattr(mcp_server, "_read_registries", lambda r: ({"r2.mod": "2/1"}, {"2/1": "r2.mod"}, {}, {}) if "repo2" in str(r) else ({"r1.mod": "1/1"}, {"1/1": "r1.mod"}, {}, {}))
+
+    mcp_server._live_engine_revisions.clear()
+    mcp_server._live_engines.clear()
+
+    res_r1 = json.loads(mcp_server.get_file_edit_context.fn(repo_path=str(root1), target="r1.mod", mode="minimal"))
+    res_r2 = json.loads(mcp_server.get_file_edit_context.fn(repo_path=str(root2), target="r2.mod", mode="minimal"))
+    assert res_r1["live_revision"] == 366
+    assert res_r2["live_revision"] == 500
+    assert mcp_server._live_engine_revisions[str(root1)] == 366
+    assert mcp_server._live_engine_revisions[str(root2)] == 500
+
+    # 6. Rejected / invalid hydration does not publish invalid revision
+    mcp_server._live_engine_revisions[str(root1)] = 999
+    monkeypatch.setattr(core_state_mgr, "load_engine_state", lambda _c, _sid, **_kw: None)
+    mcp_server._live_engines.clear()
+    engine_rejected = mcp_server._get_or_init_engine(root1)
+    assert engine_rejected is None
+    assert str(root1) not in mcp_server._live_engine_revisions
+
+    # 7. Legacy get_file_edit_context contract unchanged
+    monkeypatch.setattr(core_state_mgr, "load_engine_state", lambda _c, _sid, **_kw: engine1.state)
+    mcp_server._live_engine_revisions[str(root1)] = 366
+    legacy_res = json.loads(mcp_server.get_file_edit_context.fn(repo_path=str(root1), file_path="r1/mod.py"))
+    assert "public_api" in legacy_res
+    assert "live_revision" not in legacy_res

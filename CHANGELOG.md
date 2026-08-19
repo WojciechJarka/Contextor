@@ -1,3 +1,86 @@
+Patch — MCP Pre-Edit Ergonomics & GUI Operation Timing] - 2026-08-19
+
+### Lightweight pre-edit context for coding agents
+
+- Extended `get_file_edit_context` with an opt-in `mode="minimal"` designed as a low-overhead pre-edit guard for coding agents.
+- Preserved the existing `get_file_edit_context` contract as the default behavior; existing positional and named callers remain backward-compatible.
+- Added flexible target resolution through the existing canonical index resolver. Minimal mode can resolve:
+  - absolute Python file paths,
+  - repository-relative paths,
+  - dotted module names,
+  - persistent module IDs,
+  - symbols and artifact references.
+- Reduced common pre-edit workflows from multiple MCP round-trips to a single query for dotted module names, module IDs and other canonical target forms.
+- Added canonical equivalence handling for `file_path` and `target`; different textual representations of the same module are accepted, while genuinely conflicting targets return an explicit structured validation error.
+- Added explicit validation for unsupported `mode` values instead of silently falling back to another response contract.
+- Symbol/artifact inputs are resolved without being misclassified as modules and return their canonical identity, defining module and a `get_artifact_blast_radius` next-tool hint.
+- Minimal responses remain bounded and expose only pre-edit facts required for rapid repository orientation:
+  - canonical module identity,
+  - file,
+  - layer,
+  - LIVE revision when available,
+  - canonical module risk,
+  - direct consumer count,
+  - transitive consumer count,
+  - bounded consumer sample,
+  - statically reachable covering-test count,
+  - bounded test sample,
+  - truncation state and warnings.
+- Reused the canonical reverse-reachability implementation in `analysis.incremental.graph_ops.calculate_affected_set`; no duplicate MCP-specific BFS implementation was introduced.
+- Minimal mode performs no source-code reads, repository analysis, report generation, graph recomputation or LIVE mutation.
+- Removed proposed heuristic `local / guarded / deep` scope classification rather than exposing uncalibrated safety judgments to coding agents.
+
+### Canonical LIVE risk integration
+
+- Fixed `get_file_edit_context(mode="minimal")` reading per-module risk from the wrong LIVE state field.
+- `risk_score` now uses the canonical:
+  `RepositoryAnalysisState.topology_analytics["module_risk"]`
+  source used by LIVE topology analytics.
+- Risk values are now guarded by `topology_metrics_state`:
+  - `fresh` + available module risk → canonical risk value,
+  - `deferred` → `null`,
+  - `stale` → `null`,
+  - `fresh` with a missing module entry → `null` with a diagnostic warning.
+- Removed fallback estimation from unrelated hotspot, betweenness and HITS metrics so `risk_score` retains one stable semantic meaning.
+- Direct LIVE MCP verification confirmed canonical risk propagation for representative modules, including:
+  - `contextor.ui.gui`,
+  - `contextor.core.api.facade`.
+
+### GUI analysis duration reporting
+
+- Added end-to-end operation timing for the three primary GUI analysis actions:
+  - repository analysis,
+  - layer analysis,
+  - single-file analysis.
+- Successful operations now emit messages such as:
+  - `[SUCCESS] Repository analysis completed. (duration: 83 s)`
+  - `[SUCCESS] Layer analysis completed. (duration: 12 s)`
+  - `[SUCCESS] Single-file analysis completed. (duration: 3 s)`
+- Timing is measured once in the shared `run_with_progress` lifecycle using a monotonic clock rather than duplicated across individual analysis handlers.
+- Duration covers the user-visible analysis lifecycle from operation start until successful task completion/finalization.
+- Existing consumers of `run_with_progress` that do not provide an operation name preserve the previous success-message contract exactly.
+- Failure, cancellation, progress and ETA semantics remain unchanged.
+
+### Regression and contract verification
+
+- Added deterministic GUI progress-widget regression coverage for named-operation durations and legacy success-message compatibility.
+- Added MCP regression coverage for:
+  - legacy `get_file_edit_context` compatibility,
+  - absolute and repository-relative path resolution,
+  - dotted module resolution,
+  - persistent module-ID resolution,
+  - artifact/symbol resolution,
+  - equivalent `file_path` / `target` representations,
+  - canonical conflict detection,
+  - invalid mode handling,
+  - bounded consumer/test samples,
+  - topology freshness behavior for canonical module risk.
+- Targeted GUI regression suite passed:
+  `13 passed`.
+- Targeted MCP `get_file_edit_context` regression suite passed:
+  `4 passed`.
+- Direct verification against the running MCP server confirmed the new minimal pre-edit paths, canonical target resolution, artifact guidance and LIVE risk wiring.
+
 ## [1.2.0-beta Patch — Incremental module-level blast radius in LIVE] - 2026-08-17
 
 - Added incremental module-level reverse blast radius propagation to the

@@ -689,6 +689,11 @@ def _get_or_init_engine(root: Path):
             registry = PersistentIdentityRegistry(str(root))
             engine = IncrementalAnalysisEngine(state, registry, state_mgr, str(root))
             _live_engines[str(root)] = engine
+            if metadata and metadata.revision is not None:
+                _live_engine_revisions[str(root)] = int(metadata.revision)
+        else:
+            _live_engines.pop(str(root), None)
+            _live_engine_revisions.pop(str(root), None)
     return engine
 
 
@@ -1510,10 +1515,11 @@ def get_project_architecture(
 @mcp.tool()
 def get_module_context(
     repo_path: str,
-    module_name: str,
+    module_name: str = "",
     max_items: int | None = 30,
     compact: bool = True,
     fields: list[str] | None = None,
+    module: str | None = None,
 ) -> str:
     """
     [OPTIMIZED] Retrieve a compressed context pill for one module.
@@ -1522,6 +1528,10 @@ def get_module_context(
     A file added through update_file is therefore immediately queryable, even
     before another global report refreshes expensive metrics. Deferred metrics
     are labelled explicitly instead of hiding the module.
+
+    Accepts ``module_name`` or LLM-friendly alias ``module`` (or module ID).
+    If an artifact/symbol identity is passed, returns a structured diagnostic
+    redirecting to ``get_artifact_blast_radius``.
 
     Dependency collections always expose ``total`` and ``truncated``. The
     default compact response omits edge ``items``; set ``compact=False`` for
@@ -1539,6 +1549,77 @@ def get_module_context(
     """
     root = Path(repo_path).expanduser().resolve()
     repo_name = root.name
+
+    from contextor.core.report_query import IndexCatalog, catalog_from_registry, resolve_index_query
+
+    mod_path_to_id, mod_id_to_path, art_path_to_id, art_id_to_path = _read_registries(root)
+    catalog = catalog_from_registry(str(root))
+    if not catalog.modules and mod_id_to_path:
+        catalog = IndexCatalog(
+            modules=mod_id_to_path,
+            artifacts=art_id_to_path,
+            module_paths={name: name.replace(".", "/") + ".py" for name in mod_path_to_id},
+            recovered_modules={},
+            recovered_artifacts={},
+        )
+
+    effective_name = (module_name or "").strip()
+    effective_alias = (module or "").strip()
+
+    if effective_name and effective_alias:
+        res_name = resolve_index_query(effective_name, catalog, repo_root=str(root))
+        res_alias = resolve_index_query(effective_alias, catalog, repo_root=str(root))
+        matches_name = res_name.get("matches", [])
+        matches_alias = res_alias.get("matches", [])
+        if matches_name and matches_alias:
+            m_n = matches_name[0]
+            m_a = matches_alias[0]
+            if (
+                (m_n.get("id") != m_a.get("id"))
+                or (m_n.get("name") != m_a.get("name"))
+                or (m_n.get("kind") != m_a.get("kind"))
+            ):
+                return json.dumps(
+                    {
+                        "error": "Conflicting 'module_name' and 'module' arguments provided. Resolved to different canonical targets.",
+                        "module_name": effective_name,
+                        "module_name_resolved": {"id": m_n.get("id"), "name": m_n.get("name"), "kind": m_n.get("kind")},
+                        "module": effective_alias,
+                        "module_resolved": {"id": m_a.get("id"), "name": m_a.get("name"), "kind": m_a.get("kind")},
+                    },
+                    indent=2,
+                )
+
+    input_query = effective_alias or effective_name
+    if not input_query:
+        return json.dumps({"error": "Either 'module_name' or 'module' must be provided."}, indent=2)
+
+    resolution = resolve_index_query(input_query, catalog, repo_root=str(root))
+    if resolution.get("matches"):
+        top = resolution["matches"][0]
+        if top.get("kind") == "artifact":
+            art_name = top["name"]
+            art_id = top["id"]
+            definer_mod = art_name.split("::", 1)[0]
+            return json.dumps(
+                {
+                    "target": input_query,
+                    "resolved_as": "artifact",
+                    "artifact": art_name,
+                    "artifact_id": art_id,
+                    "definer_module": definer_mod,
+                    "suggested_next_tool": "get_artifact_blast_radius",
+                    "warnings": [
+                        "Target resolved to an artifact/symbol rather than a module. "
+                        "Use get_artifact_blast_radius for symbol-level consumption."
+                    ],
+                },
+                indent=2,
+            )
+        elif top.get("kind") == "module":
+            module_name = top["name"]
+    else:
+        module_name = input_query
 
     ga = {}
     ga_path = _get_canonical_report(root, f"{repo_name}_graph_analytics.json")
@@ -1768,14 +1849,21 @@ def get_artifact_blast_radius(
     repo_name = root.name
     
     try:
-        _, mod_id_to_path, art_path_to_id, art_id_to_path = _read_registries(root)
+        mod_path_to_id, mod_id_to_path, art_path_to_id, art_id_to_path = _read_registries(root)
         engine = _get_or_init_engine(root)
+        target_art = art_id_to_path.get(artifact_name, artifact_name)
         if engine:
             live_matches = []
             for module_name, artifact_state in engine.state.artifacts.items():
                 for local_name in artifact_state.get("own_symbols", []) or []:
                     full_name = f"{module_name}::{local_name}"
-                    if full_name != artifact_name and local_name != artifact_name:
+                    art_id = str(art_path_to_id.get(full_name, ""))
+                    if (
+                        full_name != artifact_name
+                        and local_name != artifact_name
+                        and art_id != artifact_name
+                        and full_name != target_art
+                    ):
                         continue
                     symbols = artifact_state.get("symbols", {}) or {}
                     kinds = [
@@ -1839,6 +1927,81 @@ def get_artifact_blast_radius(
             or full_name.endswith("::" + artifact_name)
         ]
         if not candidates:
+            from contextor.core.report_query import IndexCatalog, catalog_from_registry, resolve_index_query
+
+            catalog = catalog_from_registry(str(root))
+            if not catalog.modules and mod_id_to_path:
+                catalog = IndexCatalog(
+                    modules=mod_id_to_path,
+                    artifacts=art_id_to_path,
+                    module_paths={name: name.replace(".", "/") + ".py" for name in mod_path_to_id},
+                    recovered_modules={},
+                    recovered_artifacts={},
+                )
+            resolution = resolve_index_query(artifact_name, catalog, repo_root=str(root))
+            if resolution.get("matches"):
+                top = resolution["matches"][0]
+                if top.get("kind") == "module":
+                    target_module = top["name"]
+                    target_module_id = top["id"]
+                    prefix = target_module + "::"
+                    art_state = (getattr(engine.state, "artifacts", {}) or {}).get(target_module, {}) if engine else {}
+                    symbols = art_state.get("symbols", {}) or {}
+                    kind_map = {}
+                    for category, kind_label in [
+                        ("classes", "class"),
+                        ("functions", "function"),
+                        ("methods", "method"),
+                        ("globals", "global"),
+                    ]:
+                        for s in symbols.get(category, []) or []:
+                            kind_map[str(s)] = kind_label
+
+                    candidates_list = []
+                    seen_artifacts = set()
+                    for full_name, art_id in sorted(art_path_to_id.items()):
+                        if full_name.startswith(prefix):
+                            local_name = full_name.split("::", 1)[-1]
+                            seen_artifacts.add(local_name)
+                            candidates_list.append(
+                                {
+                                    "artifact_id": str(art_id),
+                                    "artifact": full_name,
+                                    "kind": kind_map.get(local_name, "symbol"),
+                                }
+                            )
+                    for local_name in sorted(art_state.get("own_symbols", []) or []):
+                        if local_name not in seen_artifacts:
+                            full_name = f"{target_module}::{local_name}"
+                            candidates_list.append(
+                                {
+                                    "artifact_id": str(art_path_to_id.get(full_name, "")),
+                                    "artifact": full_name,
+                                    "kind": kind_map.get(str(local_name), "symbol"),
+                                }
+                            )
+                            seen_artifacts.add(local_name)
+
+                    items, total, truncated = _bounded_items(candidates_list, max_items)
+                    return json.dumps(
+                        {
+                            "target": artifact_name,
+                            "resolved_as": "module",
+                            "module": target_module,
+                            "module_id": target_module_id,
+                            "suggested_next_tool": "get_module_context",
+                            "artifact_candidates": {
+                                "total": total,
+                                "items": items,
+                                "truncated": truncated,
+                            },
+                            "warnings": [
+                                "Target resolved to a module rather than an artifact. "
+                                "Use get_module_context for module-level context or choose one of the artifact candidates."
+                            ],
+                        },
+                        indent=2,
+                    )
             return f"Artifact '{artifact_name}' not found in the registry."
 
         art_path = _get_canonical_report(root, f"{repo_name}_artifacts_compact.json")
@@ -2269,45 +2432,261 @@ def get_symbol_implementation(
 @mcp.tool()
 def get_file_edit_context(
     repo_path: str,
-    file_path: str,
+    file_path: str = "",
     max_items: int | None = 30,
     compact: bool = True,
     fields: list[str] | None = None,
+    mode: str | None = None,
+    target: str | None = None,
 ) -> str:
     """
-    [OPTIMIZED] Specialized single-shot context pill for LLMs prior to editing a file.
-    Combines LIVE module/API/dependency state in one response. Saved reports
-    enrich risk and layer metrics when available but are never required when
-    canonical LIVE state exists.
-    By default returns a compact decision summary: identity, risk, data sources,
-    and collection metadata. Set ``compact=False`` to include bounded ``items``
-    (or ``tests`` for ``tests_covering``) in the same nested collection objects.
+    [OPTIMIZED] Specialized single-shot context pill for LLMs prior to editing a file or module.
+    Combines LIVE module/API/dependency state in one response.
 
-    ``fields`` is a projection that returns only explicitly requested fields.
-    Allowed values are: ``file``, ``file_exists``, ``module``, ``module_id``,
-    ``layer``, ``entrypoint``, ``risk_score``, ``public_api``, ``imports``,
-    ``consumers``, ``tests_covering``, ``dependency_data_source``, and
-    ``artifact_data_source``. Collection fields are nested objects that always
-    contain ``total`` and ``truncated``; full mode additionally includes
-    ``items`` (or ``tests``). ``compact`` shapes the response first; ``fields``
-    then selects top-level keys without changing their schema.
+    Modes:
+      - ``mode=None`` (default): Legacy behavior. When ``compact=True`` (default), returns
+        top-level collection metadata (counts and truncated flags). When ``compact=False``,
+        returns bounded lists of items/tests (using legacy ``max_items``, default 30). Supports ``fields`` projection.
+      - ``mode='minimal'``: Ultra-lightweight pre-edit projection designed for rapid LLM
+        decision-making. Accepts a forgiving ``target`` (relative path, absolute path,
+        dotted module name, or module ID). Returns direct and transitive consumer counts,
+        bounded samples (capped at at most 5 items by default, regardless of legacy ``max_items=30`` default),
+        and covering tests in 100% in-memory RAM without disk reads. Sample collections explicitly provide
+        both total count and a ``truncated`` boolean flag.
 
-    ``tests_covering`` reports bounded static dependency paths from test
-    modules, including paths through aliases, re-exports and facades. It is
-    structural evidence, not runtime line or branch coverage.
-
-    Collections use ``max_items`` (default 30) to protect the LLM context
-    window. Increase it when omitted evidence matters, or pass ``None`` to
-    return every item without truncation.
-
-    LLM use: this is the preferred one-call briefing immediately before editing
-    a file. It complements, but does not replace, the source and code diff.
+    If an artifact/symbol identity is passed as target in minimal mode, returns a structured
+    diagnostic indicating the definer module and suggesting ``get_artifact_blast_radius``.
     """
     root = Path(repo_path).expanduser().resolve()
     repo_name = root.name
-    
+
+    # Validate mode explicitly
+    if mode is not None and mode != "minimal":
+        return json.dumps(
+            {
+                "error": f"Unsupported mode '{mode}'. Allowed modes are: None (legacy), 'minimal'.",
+                "allowed_modes": [None, "minimal"],
+            },
+            indent=2,
+        )
+
+    # Read registries & catalog for canonical resolution
+    from contextor.core.report_query import IndexCatalog, catalog_from_registry, resolve_index_query
+
+    mod_path_to_id, mod_id_to_path, art_path_to_id, art_id_to_path = _read_registries(root)
+    catalog = catalog_from_registry(str(root))
+    if not catalog.modules and mod_id_to_path:
+        catalog = IndexCatalog(
+            modules=mod_id_to_path,
+            artifacts=art_id_to_path,
+            module_paths={name: name.replace(".", "/") + ".py" for name in mod_path_to_id},
+            recovered_modules={},
+            recovered_artifacts={},
+        )
+
+    # Handle input target resolution and canonical conflict detection
+    effective_file = (file_path or "").strip()
+    effective_target = (target or "").strip()
+
+    if effective_file and effective_target:
+        res_file = resolve_index_query(effective_file, catalog, repo_root=str(root))
+        res_target = resolve_index_query(effective_target, catalog, repo_root=str(root))
+        matches_file = res_file.get("matches", [])
+        matches_target = res_target.get("matches", [])
+        if matches_file and matches_target:
+            m_f = matches_file[0]
+            m_t = matches_target[0]
+            if (
+                (m_f.get("id") != m_t.get("id"))
+                or (m_f.get("name") != m_t.get("name"))
+                or (m_f.get("kind") != m_t.get("kind"))
+            ):
+                return json.dumps(
+                    {
+                        "error": "Conflicting 'file_path' and 'target' arguments provided. Resolved to different canonical targets.",
+                        "file_path": effective_file,
+                        "file_path_resolved": {"id": m_f.get("id"), "name": m_f.get("name"), "kind": m_f.get("kind")},
+                        "target": effective_target,
+                        "target_resolved": {"id": m_t.get("id"), "name": m_t.get("name"), "kind": m_t.get("kind")},
+                    },
+                    indent=2,
+                )
+        elif effective_file != effective_target:
+            # Fallback string comparison when unindexed
+            try:
+                norm_file = Path(effective_file).resolve().relative_to(root).as_posix()
+            except ValueError:
+                norm_file = effective_file.replace("\\", "/").lstrip("./")
+            try:
+                norm_target = Path(effective_target).resolve().relative_to(root).as_posix()
+            except ValueError:
+                norm_target = effective_target.replace("\\", "/").lstrip("./")
+            if norm_file != norm_target and norm_file.replace("/", ".").rstrip(".py") != norm_target:
+                return json.dumps(
+                    {
+                        "error": "Conflicting 'file_path' and 'target' arguments provided. Provide only one.",
+                        "file_path": file_path,
+                        "target": target,
+                    },
+                    indent=2,
+                )
+
+    query_input = effective_target or effective_file
+    if not query_input:
+        return json.dumps({"error": "Either 'target' or 'file_path' must be provided."}, indent=2)
+
+    # -------------------------------------------------------------------------
+    # MINIMAL PRE-EDIT PROJECTION (mode == "minimal")
+    # -------------------------------------------------------------------------
+    if mode == "minimal":
+        try:
+            from contextor.core.analysis.incremental.graph_ops import calculate_affected_set
+
+            resolution = resolve_index_query(query_input, catalog, repo_root=str(root))
+
+            if not resolution.get("matches"):
+                return json.dumps(
+                    {
+                        "status": "not_found",
+                        "target": query_input,
+                        "reason": resolution.get("reason", "no_matching_entry"),
+                        "suggestions": resolution.get("suggestions", []),
+                    },
+                    indent=2,
+                )
+
+            top = resolution["matches"][0]
+            kind = top.get("kind")
+
+            # Handling artifact / symbol input
+            if kind == "artifact":
+                art_name = top["name"]
+                art_id = top["id"]
+                definer_mod = art_name.split("::", 1)[0]
+                definer_file = (catalog.module_paths or {}).get(definer_mod) or definer_mod.replace(".", "/") + ".py"
+                return json.dumps(
+                    {
+                        "target": query_input,
+                        "resolved_as": "artifact",
+                        "artifact": art_name,
+                        "artifact_id": art_id,
+                        "definer_module": definer_mod,
+                        "definer_file": definer_file,
+                        "suggested_next_tool": "get_artifact_blast_radius",
+                        "warnings": [
+                            "Target resolved to an artifact/symbol rather than a module. "
+                            "Use get_artifact_blast_radius for symbol-level consumption."
+                        ],
+                    },
+                    indent=2,
+                )
+
+            module_name = top["name"]
+            module_id = top["id"]
+            file_path_resolved = (catalog.module_paths or {}).get(module_name) or module_name.replace(".", "/") + ".py"
+
+            engine = _get_or_init_engine(root)
+            live_graph = getattr(engine.state, "dependency_graph", None) if engine else None
+
+            direct_consumers = []
+            transitive_count = 0
+
+            if live_graph:
+                consumer_modules = {
+                    src
+                    for edge_map in (live_graph.hard_edges, live_graph.soft_edges)
+                    for src, targets in edge_map.items()
+                    if module_name in targets
+                }
+                direct_consumers = sorted(consumer_modules)
+                affected = calculate_affected_set(module_name, new_graph=live_graph)
+                transitive_count = len(affected - {module_name})
+
+            reachability_hard = getattr(live_graph, "hard_edges", {}) if live_graph else {}
+            reachability_soft = getattr(live_graph, "soft_edges", {}) if live_graph else {}
+            graph_modules = set(reachability_hard) | set(reachability_soft)
+            for edge_map in (reachability_hard, reachability_soft):
+                for tgts in edge_map.values():
+                    graph_modules.update(tgts)
+
+            test_modules = {
+                name
+                for name in graph_modules
+                if name.startswith("tests.") or name == "tests" or name.rsplit(".", 1)[-1].startswith("test_")
+            }
+
+            mod_path_to_id = {name: mid for mid, name in catalog.modules.items()}
+            tests_covering = _static_test_reachability(
+                module_name,
+                reachability_hard,
+                reachability_soft,
+                test_modules,
+                mod_path_to_id,
+            )
+
+            sample_limit = 5 if max_items is None or max_items == 30 else max_items
+            sample_consumers = direct_consumers[:sample_limit]
+            test_names = [t["module"] for t in tests_covering]
+            sample_tests = test_names[:sample_limit]
+
+            warnings = []
+            layer = "unknown"
+            if engine:
+                cached_analytics = getattr(engine.state, "cached_analytics", {}) or {}
+                cached_state = getattr(engine.state, "cached_analytics_state", "deferred")
+                if cached_state == "fresh":
+                    module_layers = cached_analytics.get("module_layers", {}) if isinstance(cached_analytics, dict) else {}
+                    if module_name in module_layers:
+                        layer = module_layers[module_name]
+                    else:
+                        warnings.append(f"Canonical module_layers entry not found for '{module_name}'.")
+
+            risk_score = None
+            if engine:
+                topo = getattr(engine.state, "topology_analytics", {}) or {}
+                topo_state = getattr(engine.state, "topology_metrics_state", "deferred")
+                if topo_state == "fresh":
+                    module_risk_map = topo.get("module_risk", {}) if isinstance(topo, dict) else {}
+                    if module_name in module_risk_map:
+                        risk_score = module_risk_map[module_name]
+                    else:
+                        warnings.append(f"Canonical module_risk not computed for '{module_name}'.")
+
+            live_revision = _live_engine_revisions.get(str(root)) if engine else None
+
+            return json.dumps(
+                {
+                    "target": query_input,
+                    "resolved_as": "module",
+                    "module": module_name,
+                    "module_id": module_id,
+                    "file": file_path_resolved,
+                    "live_revision": live_revision,
+                    "layer": layer,
+                    "risk_score": risk_score,
+                    "consumers": {
+                        "direct_count": len(direct_consumers),
+                        "transitive_count": transitive_count,
+                        "sample": sample_consumers,
+                        "truncated": len(direct_consumers) > len(sample_consumers),
+                    },
+                    "tests_covering": {
+                        "count": len(test_names),
+                        "sample": sample_tests,
+                        "truncated": len(test_names) > len(sample_tests),
+                    },
+                    "warnings": warnings,
+                },
+                indent=2,
+            )
+        except Exception as e:
+            return json.dumps({"error": f"Error in minimal pre-edit context: {e}"}, indent=2)
+
+    # -------------------------------------------------------------------------
+    # LEGACY GET_FILE_EDIT_CONTEXT PATH (mode is None or unsupported mode)
+    # -------------------------------------------------------------------------
     # Deriving module name from file path
-    target_path = Path(file_path).expanduser()
+    target_path = Path(query_input).expanduser()
     if target_path.is_absolute():
         try:
             rel_path = target_path.relative_to(root)
@@ -2322,7 +2701,7 @@ def get_file_edit_context(
         parts[-1] = parts[-1][:-3]
         if parts[-1] == "__init__":
             parts.pop()
-    
+
     module_name = ".".join(parts)
     
     ga_path = _get_canonical_report(root, f"{repo_name}_graph_analytics.json")
