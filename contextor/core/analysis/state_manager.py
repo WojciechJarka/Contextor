@@ -95,7 +95,15 @@ class RepositoryAnalysisState:
     collision_facts: Dict[str, list] = field(default_factory=dict)
     collisions: list = field(default_factory=list)
     collisions_state: str = "deferred"
-    
+
+    # Canonical derived analytics: Dependency Matrix
+    dependency_matrix: Dict[str, Any] = field(default_factory=dict)
+    dependency_matrix_state: str = "deferred"
+
+    # Canonical derived analytics: Shared Usage Clusters
+    shared_usage_clusters: list = field(default_factory=list)
+    shared_usage_clusters_state: str = "deferred"
+
     # Required for canonical graph edge resolution
 
 

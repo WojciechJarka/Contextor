@@ -220,6 +220,26 @@ def load_snapshot(
                         setattr(state_obj, "collisions_state", "deferred")
                     except AttributeError:
                         pass
+                if not hasattr(state_obj, "dependency_matrix"):
+                    try:
+                        setattr(state_obj, "dependency_matrix", {})
+                    except AttributeError:
+                        pass
+                if not hasattr(state_obj, "dependency_matrix_state"):
+                    try:
+                        setattr(state_obj, "dependency_matrix_state", "deferred")
+                    except AttributeError:
+                        pass
+                if not hasattr(state_obj, "shared_usage_clusters"):
+                    try:
+                        setattr(state_obj, "shared_usage_clusters", [])
+                    except AttributeError:
+                        pass
+                if not hasattr(state_obj, "shared_usage_clusters_state"):
+                    try:
+                        setattr(state_obj, "shared_usage_clusters_state", "deferred")
+                    except AttributeError:
+                        pass
             return state_obj, embedded_metadata
         if payload is not None and hasattr(payload, "__dict__"):
             if not hasattr(payload, "module_usages"):
@@ -270,6 +290,26 @@ def load_snapshot(
             if not hasattr(payload, "collisions_state"):
                 try:
                     setattr(payload, "collisions_state", "deferred")
+                except AttributeError:
+                    pass
+            if not hasattr(payload, "dependency_matrix"):
+                try:
+                    setattr(payload, "dependency_matrix", {})
+                except AttributeError:
+                    pass
+            if not hasattr(payload, "dependency_matrix_state"):
+                try:
+                    setattr(payload, "dependency_matrix_state", "deferred")
+                except AttributeError:
+                    pass
+            if not hasattr(payload, "shared_usage_clusters"):
+                try:
+                    setattr(payload, "shared_usage_clusters", [])
+                except AttributeError:
+                    pass
+            if not hasattr(payload, "shared_usage_clusters_state"):
+                try:
+                    setattr(payload, "shared_usage_clusters_state", "deferred")
                 except AttributeError:
                     pass
         return payload, metadata

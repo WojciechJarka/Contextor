@@ -384,11 +384,17 @@ class ContextorFacade:
         if analysis_result:
             from contextor.core.analysis.state_manager import (
                 RepositoryAnalysisState,
+                artifact_consumption_is_fresh,
                 build_canonical_artifact_consumption,
                 save_engine_state,
+                validate_canonical_artifact_consumption_coverage,
             )
             from contextor.core.paths import repo_cache_dir
-            from contextor.core.reporting_engine.graph_analytics import compute_topology_analytics
+            from contextor.core.reporting_engine.graph_analytics import (
+                compute_dependency_matrix_from_state,
+                compute_shared_usage_clusters_from_state,
+                compute_topology_analytics,
+            )
 
             graph = getattr(analysis_result, "graph", None)
             hard_edges = getattr(graph, "hard_edges", {}) if graph else {}
@@ -413,6 +419,12 @@ class ContextorFacade:
             raw_artifacts = getattr(analysis_result, "artifacts", {}) or {}
             canonical_consumption = build_canonical_artifact_consumption(raw_artifacts)
 
+            # Exact canonical coverage trust gate (no truthiness)
+            consumption_valid = validate_canonical_artifact_consumption_coverage(
+                canonical_consumption,
+                raw_artifacts,
+            )
+
             state = RepositoryAnalysisState(
                 modules=getattr(analysis_result, "modules", {}),
                 artifacts=raw_artifacts,
@@ -420,7 +432,7 @@ class ContextorFacade:
                 trie=getattr(analysis_result, "trie", None),
                 package_root=getattr(analysis_result, "package_root", ""),
                 artifact_consumption=canonical_consumption,
-                artifact_consumption_state="fresh",
+                artifact_consumption_state="fresh" if consumption_valid else "stale",
                 metrics=metrics,
                 topology_analytics=topology_analytics,
                 topology_metrics_state="fresh",
@@ -435,7 +447,38 @@ class ContextorFacade:
                     "debt": getattr(analysis_result, "debt", {}),
                     "summary_data": getattr(analysis_result, "summary_data", {}),
                 },
+                dependency_matrix={},
+                dependency_matrix_state="deferred",
+                shared_usage_clusters=[],
+                shared_usage_clusters_state="deferred",
             )
+
+            if getattr(analysis_result, "resync_required", False):
+                state.resync_required = True
+
+            if artifact_consumption_is_fresh(state):
+                # Compute Dependency Matrix from canonical state (independent failure)
+                try:
+                    _dm_candidate = compute_dependency_matrix_from_state(state)
+                except Exception:
+                    state.dependency_matrix_state = "stale"
+                else:
+                    state.dependency_matrix = _dm_candidate
+                    state.dependency_matrix_state = "fresh"
+
+                # Compute Shared Usage Clusters from canonical state (independent failure)
+                try:
+                    _suc_candidate = compute_shared_usage_clusters_from_state(state)
+                except Exception:
+                    state.shared_usage_clusters_state = "stale"
+                else:
+                    state.shared_usage_clusters = _suc_candidate
+                    state.shared_usage_clusters_state = "fresh"
+            else:
+                # Prerequisite is untrusted in full analysis -> fail-closed (stale)
+                state.dependency_matrix_state = "stale"
+                state.shared_usage_clusters_state = "stale"
+
             save_engine_state(
                 state,
                 str(repo_cache_dir(path)),

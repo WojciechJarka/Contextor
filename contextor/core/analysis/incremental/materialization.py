@@ -308,6 +308,135 @@ def ensure_artifact_consumption(state: RepositoryAnalysisState) -> None:
     state.artifact_consumption_state = "stale"
 
 
+def ensure_dependency_matrix(state: RepositoryAnalysisState) -> None:
+    """
+    Ensures state.dependency_matrix is fresh from canonical RAM facts.
+    Lifecycle rules:
+    A. resync_required -> stale (fail-closed)
+    B. artifact_consumption_state == 'stale' or not artifact_consumption_is_fresh(state) (when not deferred):
+       -> stale (fail-closed, prerequisite untrusted)
+    C. artifact_consumption_state == 'deferred':
+       -> if own state is 'fresh', degrade to 'deferred' (cannot be fresh with deferred prerequisite)
+       -> return (cannot compute yet)
+    D. artifact_consumption genuinely fresh:
+       - own stale: preserve stale (no auto-heal)
+       - own fresh: preserve payload / no recompute
+       - own deferred: compute from RAM -> success -> fresh, failure -> stale
+    RAM ONLY — ZERO source I/O.
+    """
+    if not hasattr(state, "dependency_matrix_state") or state.dependency_matrix_state is None:
+        state.dependency_matrix_state = "deferred"
+
+    if not hasattr(state, "dependency_matrix") or state.dependency_matrix is None:
+        state.dependency_matrix = {}
+
+    # A. Resync required: mark stale, no computation
+    if getattr(state, "resync_required", False):
+        state.dependency_matrix_state = "stale"
+        return
+
+    from contextor.core.analysis.state_manager import artifact_consumption_is_fresh
+
+    ac_state = getattr(state, "artifact_consumption_state", None)
+
+    # B. Prerequisite explicitly stale: mark stale, no computation
+    if ac_state == "stale":
+        state.dependency_matrix_state = "stale"
+        return
+
+    # C. Prerequisite deferred: cannot be fresh
+    if ac_state == "deferred":
+        if state.dependency_matrix_state == "fresh":
+            state.dependency_matrix_state = "deferred"
+        return
+
+    # Prerequisite not genuinely fresh (invalid coverage / corrupted) -> fail-closed
+    if not artifact_consumption_is_fresh(state):
+        state.dependency_matrix_state = "stale"
+        return
+
+    # D. Prerequisite genuinely fresh: own lifecycle
+    if state.dependency_matrix_state == "stale":
+        return
+
+    if state.dependency_matrix_state == "fresh":
+        return
+
+    try:
+        from contextor.core.reporting_engine.graph_analytics import compute_dependency_matrix_from_state
+
+        candidate = compute_dependency_matrix_from_state(state)
+    except Exception:
+        state.dependency_matrix_state = "stale"
+    else:
+        state.dependency_matrix = candidate
+        state.dependency_matrix_state = "fresh"
+
+
+def ensure_shared_usage_clusters(state: RepositoryAnalysisState) -> None:
+    """
+    Ensures state.shared_usage_clusters is fresh from canonical RAM facts.
+    Lifecycle rules:
+    A. resync_required -> stale (fail-closed)
+    B. artifact_consumption_state == 'stale' or not artifact_consumption_is_fresh(state) (when not deferred):
+       -> stale (fail-closed, prerequisite untrusted)
+    C. artifact_consumption_state == 'deferred':
+       -> if own state is 'fresh', degrade to 'deferred' (cannot be fresh with deferred prerequisite)
+       -> return (cannot compute yet)
+    D. artifact_consumption genuinely fresh:
+       - own stale: preserve stale (no auto-heal)
+       - own fresh: preserve payload / no recompute
+       - own deferred: compute from RAM -> success -> fresh, failure -> stale
+    RAM ONLY — ZERO source I/O.
+    """
+    if not hasattr(state, "shared_usage_clusters_state") or state.shared_usage_clusters_state is None:
+        state.shared_usage_clusters_state = "deferred"
+
+    if not hasattr(state, "shared_usage_clusters") or state.shared_usage_clusters is None:
+        state.shared_usage_clusters = []
+
+    # A. Resync required: mark stale, no computation
+    if getattr(state, "resync_required", False):
+        state.shared_usage_clusters_state = "stale"
+        return
+
+    from contextor.core.analysis.state_manager import artifact_consumption_is_fresh
+
+    ac_state = getattr(state, "artifact_consumption_state", None)
+
+    # B. Prerequisite explicitly stale: mark stale, no computation
+    if ac_state == "stale":
+        state.shared_usage_clusters_state = "stale"
+        return
+
+    # C. Prerequisite deferred: cannot be fresh
+    if ac_state == "deferred":
+        if state.shared_usage_clusters_state == "fresh":
+            state.shared_usage_clusters_state = "deferred"
+        return
+
+    # Prerequisite not genuinely fresh (invalid coverage / corrupted) -> fail-closed
+    if not artifact_consumption_is_fresh(state):
+        state.shared_usage_clusters_state = "stale"
+        return
+
+    # D. Prerequisite genuinely fresh: own lifecycle
+    if state.shared_usage_clusters_state == "stale":
+        return
+
+    if state.shared_usage_clusters_state == "fresh":
+        return
+
+    try:
+        from contextor.core.reporting_engine.graph_analytics import compute_shared_usage_clusters_from_state
+
+        candidate = compute_shared_usage_clusters_from_state(state)
+    except Exception:
+        state.shared_usage_clusters_state = "stale"
+    else:
+        state.shared_usage_clusters = candidate
+        state.shared_usage_clusters_state = "fresh"
+
 
 def materialize_incremental_state(state: RepositoryAnalysisState) -> None:
     """
@@ -318,6 +447,8 @@ def materialize_incremental_state(state: RepositoryAnalysisState) -> None:
     4. ensure_cached_analytics (RAM-only)
     5. ensure_cycles (RAM-only)
     6. ensure_collisions (RAM-only)
+    7. ensure_dependency_matrix (RAM-only, after artifact_consumption is resolved)
+    8. ensure_shared_usage_clusters (RAM-only, after artifact_consumption is resolved)
     """
     ensure_artifact_consumption(state)
     ensure_module_usages(state)
@@ -325,5 +456,5 @@ def materialize_incremental_state(state: RepositoryAnalysisState) -> None:
     ensure_cached_analytics(state)
     ensure_cycles(state)
     ensure_collisions(state)
-
-
+    ensure_dependency_matrix(state)
+    ensure_shared_usage_clusters(state)
