@@ -61,6 +61,67 @@ Patch — MCP Pre-Edit Ergonomics & GUI Operation Timing] - 2026-08-19
 - Existing consumers of `run_with_progress` that do not provide an operation name preserve the previous success-message contract exactly.
 - Failure, cancellation, progress and ETA semantics remain unchanged.
 
+LLM-friendly MCP target resolution
+
+- Hardened `get_module_context` for natural LLM input by adding a backward-compatible `module` alias alongside the existing `module_name` parameter.
+- Module inputs are now compared through canonical identity rather than raw text, allowing equivalent forms such as dotted module names and persistent module IDs to resolve safely to the same target.
+- Conflicting `module_name` and `module` inputs now return a structured validation error instead of silently selecting one value.
+- Passing an artifact or symbol to `get_module_context` now returns a structured diagnostic containing:
+  - canonical artifact identity,
+  - persistent artifact ID,
+  - defining module,
+  - `get_artifact_blast_radius` as the suggested next tool.
+- Hardened `get_artifact_blast_radius` when a module name or module ID is supplied instead of an artifact.
+- Module targets are now recognized through the existing canonical resolver and return:
+  - canonical module identity,
+  - persistent module ID,
+  - `get_module_context` as the suggested next tool,
+  - a bounded deterministic list of artifact candidates defined by the module,
+  - total candidate count and truncation state.
+- Existing valid artifact names, qualified symbols and persistent artifact IDs retain their previous behavior.
+- No implicit semantic switching was introduced: module tools and artifact tools continue to perform their own responsibilities while providing useful routing diagnostics for mismatched target types.
+- Full MCP regression coverage for these routing changes passed: `56/56`.
+
+### Canonical LIVE layer provenance
+
+- Fixed `get_file_edit_context(mode="minimal")` returning `layer: "unknown"` despite fresh cached LIVE analytics.
+- Minimal pre-edit context now reads module layers exclusively from:
+  `RepositoryAnalysisState.cached_analytics["module_layers"]`.
+- Layer values are exposed only when `cached_analytics_state == "fresh"`.
+- `deferred`, `stale`, or missing canonical entries remain unavailable rather than falling back to report files or package-name heuristics.
+- Direct LIVE verification confirmed canonical layers for representative modules:
+  - `contextor.ui.gui` → `ui`
+  - `contextor.core.api.facade` → `contract`
+  - `contextor.ui.exclude_check` → `ui`
+
+### Persistent LIVE revision restoration
+
+- Fixed `get_file_edit_context(mode="minimal")` returning `live_revision: null` after MCP hydration from persisted LIVE state.
+- Canonical revision remains lifecycle metadata rather than becoming part of `RepositoryAnalysisState`.
+- `_get_or_init_engine` now restores the persisted `LiveStateMetadata.revision` into the existing MCP revision cache after successful state validation and hydration.
+- Minimal pre-edit context now reads revision from the same revision cache used by active IPC, snapshot refresh and LIVE publication.
+- Invalid or rejected hydration explicitly clears stale engine and revision cache entries.
+- Revision lifecycle was verified across:
+  - persisted snapshot hydration,
+  - active IPC `ping` / `snapshot`,
+  - subsequent LIVE publication,
+  - independent repository roots.
+- Existing manual `update_file` revision invalidation using `remote_revision - 1` was audited and confirmed to intentionally force immediate snapshot refresh without producing a final off-by-one revision.
+- Direct verification after MCP restart confirmed:
+  - active LIVE revision: `374`
+  - `get_file_edit_context(..., mode="minimal")` revision: `374`
+  - persisted hydration correctly restored revision `373` without incrementing it.
+
+### Verification
+
+- Running MCP verification confirmed correct target routing for dotted module names, module IDs, artifacts and symbols.
+- Canonical conflict detection was verified for equivalent and genuinely different target representations.
+- Minimal pre-edit context now consistently exposes canonical:
+  - `layer`,
+  - `risk_score`,
+  - `live_revision`,
+  from their respective LIVE state sources.
+
 ### Regression and contract verification
 
 - Added deterministic GUI progress-widget regression coverage for named-operation durations and legacy success-message compatibility.

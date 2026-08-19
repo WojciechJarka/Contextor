@@ -2405,8 +2405,12 @@ def test_artifact_blast_radius_module_aware_diagnostic(tmp_path, monkeypatch):
             modules={"pkg.module": SimpleNamespace(layer="core")},
             artifacts={
                 "pkg.module": {
-                    "own_symbols": ["hello", "WorldClass"],
-                    "symbols": {"functions": ["hello"], "classes": ["WorldClass"]},
+                    "own_symbols": ["hello", "WorldClass", "WorldClass.analyze", "WorldClass._add_row", "WorldClass.__init__"],
+                    "symbols": {
+                        "functions": ["hello"],
+                        "classes": ["WorldClass"],
+                        "methods": ["WorldClass.analyze", "WorldClass._add_row", "WorldClass.__init__"],
+                    },
                     "consumers": {"hello": {"consumers": ["consumer.mod"]}},
                 }
             },
@@ -2420,8 +2424,20 @@ def test_artifact_blast_radius_module_aware_diagnostic(tmp_path, monkeypatch):
         lambda _root: (
             {"pkg.module": "10/1"},
             {"10/1": "pkg.module"},
-            {"pkg.module::hello": "A1/1", "pkg.module::WorldClass": "A2/1"},
-            {"A1/1": "pkg.module::hello", "A2/1": "pkg.module::WorldClass"},
+            {
+                "pkg.module::hello": "A1/1",
+                "pkg.module::WorldClass": "A2/1",
+                "pkg.module::WorldClass.analyze": "A3/1",
+                "pkg.module::WorldClass._add_row": "A4/1",
+                "pkg.module::WorldClass.__init__": "A5/1",
+            },
+            {
+                "A1/1": "pkg.module::hello",
+                "A2/1": "pkg.module::WorldClass",
+                "A3/1": "pkg.module::WorldClass.analyze",
+                "A4/1": "pkg.module::WorldClass._add_row",
+                "A5/1": "pkg.module::WorldClass.__init__",
+            },
         ),
     )
 
@@ -2444,7 +2460,7 @@ def test_artifact_blast_radius_module_aware_diagnostic(tmp_path, monkeypatch):
     )
     assert id_res["artifact_id"] == "A1/1"
 
-    # 9. Module dotted name -> module diagnostic with candidates
+    # 9. Module dotted name -> module diagnostic with public-first ranked candidates
     mod_diag = json.loads(
         mcp_server.get_artifact_blast_radius.fn(
             repo_path=str(root),
@@ -2455,9 +2471,19 @@ def test_artifact_blast_radius_module_aware_diagnostic(tmp_path, monkeypatch):
     assert mod_diag["module"] == "pkg.module"
     assert mod_diag["module_id"] == "10/1"
     assert mod_diag["suggested_next_tool"] == "get_module_context"
-    assert mod_diag["artifact_candidates"]["total"] == 2
-    assert len(mod_diag["artifact_candidates"]["items"]) == 2
+    assert mod_diag["artifact_candidates"]["total"] == 5
+    assert len(mod_diag["artifact_candidates"]["items"]) == 5
     assert mod_diag["artifact_candidates"]["truncated"] is False
+
+    # Verify public class & method precede dunder and private methods
+    candidate_names = [item["artifact"] for item in mod_diag["artifact_candidates"]["items"]]
+    assert candidate_names == [
+        "pkg.module::WorldClass",
+        "pkg.module::hello",
+        "pkg.module::WorldClass.analyze",
+        "pkg.module::WorldClass.__init__",
+        "pkg.module::WorldClass._add_row",
+    ]
 
     # 10. Module ID -> module diagnostic with candidates
     mod_id_diag = json.loads(
@@ -2474,12 +2500,16 @@ def test_artifact_blast_radius_module_aware_diagnostic(tmp_path, monkeypatch):
         mcp_server.get_artifact_blast_radius.fn(
             repo_path=str(root),
             artifact_name="pkg.module",
-            max_items=1,
+            max_items=2,
         )
     )
-    assert bounded_diag["artifact_candidates"]["total"] == 2
-    assert len(bounded_diag["artifact_candidates"]["items"]) == 1
+    assert bounded_diag["artifact_candidates"]["total"] == 5
+    assert len(bounded_diag["artifact_candidates"]["items"]) == 2
     assert bounded_diag["artifact_candidates"]["truncated"] is True
+    assert [item["artifact"] for item in bounded_diag["artifact_candidates"]["items"]] == [
+        "pkg.module::WorldClass",
+        "pkg.module::hello",
+    ]
 
     # 12. Truly unknown target -> not found
     unknown_res = mcp_server.get_artifact_blast_radius.fn(

@@ -1529,6 +1529,10 @@ def get_module_context(
     before another global report refreshes expensive metrics. Deferred metrics
     are labelled explicitly instead of hiding the module.
 
+    Dependency & degree metrics definitions:
+      - ``metrics.fan_in``: Direct inbound module degree from hard dependency/import edges only.
+      - ``dependencies_inbound_who_calls_me``: All direct inbound dependencies (both hard AST imports and soft reachability edges).
+
     Accepts ``module_name`` or LLM-friendly alias ``module`` (or module ID).
     If an artifact/symbol identity is passed, returns a structured diagnostic
     redirecting to ``get_artifact_blast_radius``.
@@ -1835,6 +1839,10 @@ def get_artifact_blast_radius(
     compact artifact report. It does not claim that dynamic Python usage can
     be proven exact.
 
+    Candidate & consumer semantics:
+      - If a module name or module ID is passed, returns a structured diagnostic with deterministic public-first ranked artifact candidates defined by that module.
+      - ``consumers``: Direct static symbol consumers with confirmed references.
+
     ``consumers`` always contains ``total`` and ``truncated``. The default
     compact response omits ``items``; set ``compact=False`` for bounded static
     evidence. ``max_items`` controls returned consumers; pass ``None`` for all
@@ -1982,6 +1990,39 @@ def get_artifact_blast_radius(
                             )
                             seen_artifacts.add(local_name)
 
+                    from contextor.core.api.public_api import extract_public_api
+
+                    canonical_public_api = set(extract_public_api(symbols)) if symbols else set()
+
+                    def _candidate_rank_key(item: dict) -> tuple:
+                        full_name = item.get("artifact", "")
+                        kind = item.get("kind", "symbol")
+                        local = str(full_name).split("::", 1)[-1].split("(", 1)[0]
+                        parts = local.split(".")
+                        leaf = parts[-1]
+                        is_dunder = leaf.startswith("__") and leaf.endswith("__")
+                        is_private_leaf = leaf.startswith("_") and not is_dunder
+                        has_priv_parent = any(
+                            p.startswith("_") and not (p.startswith("__") and p.endswith("__"))
+                            for p in parts[:-1]
+                        )
+                        is_canonical_public = local in canonical_public_api
+
+                        if is_canonical_public:
+                            kind_order = {"class": 0, "function": 1, "method": 2, "global": 3}.get(kind, 4)
+                            tier = (0, kind_order)
+                        elif not has_priv_parent and not is_private_leaf and not is_dunder:
+                            kind_order = {"class": 0, "function": 1, "method": 2, "global": 3}.get(kind, 4)
+                            tier = (1, kind_order)
+                        elif not has_priv_parent and is_dunder:
+                            tier = (2, 0)
+                        elif not has_priv_parent and is_private_leaf:
+                            tier = (3, 0)
+                        else:
+                            tier = (4, 0)
+                        return (tier, local)
+
+                    candidates_list.sort(key=_candidate_rank_key)
                     items, total, truncated = _bounded_items(candidates_list, max_items)
                     return json.dumps(
                         {
@@ -2442,6 +2483,10 @@ def get_file_edit_context(
     """
     [OPTIMIZED] Specialized single-shot context pill for LLMs prior to editing a file or module.
     Combines LIVE module/API/dependency state in one response.
+
+    Consumer & dependency semantics:
+      - ``direct_count`` / ``direct consumer``: Unique module directly referencing/importing the target through a hard or soft dependency edge.
+      - ``transitive_count`` / ``transitive consumer``: Unique module reachable through reverse hard-or-soft dependency traversal, excluding the target itself.
 
     Modes:
       - ``mode=None`` (default): Legacy behavior. When ``compact=True`` (default), returns
