@@ -89,6 +89,8 @@ def execute_global_pipeline(
         build_global_git_section,
     )
     from contextor.core.validator.collisions import (
+        extract_module_collision_facts,
+        compute_collisions_from_facts,
         validate_name_collisions,
     )
 
@@ -111,11 +113,43 @@ def execute_global_pipeline(
     # BASIC GRAPH / VALIDATION DATA
     # ------------------------------------------------------
 
-    all_collisions = (
-        collisions
-        if collisions is not None
-        else validate_name_collisions(modules)
-    )
+    parsed_facts = {}
+    incomplete_domain = False
+
+    for module_path, module in modules.items():
+        file_path = getattr(module, "absolute_path", None) or getattr(module, "path", None)
+        if not file_path:
+            incomplete_domain = True
+            continue
+        tree = getattr(module, "ast_tree", None)
+        if tree is None:
+            path = Path(file_path)
+            if not path.exists():
+                incomplete_domain = True
+                continue
+            try:
+                tree = parse_source(path)
+            except SourceError:
+                incomplete_domain = True
+                continue
+        facts = extract_module_collision_facts(
+            tree,
+            module_path,
+            str(file_path),
+        )
+        parsed_facts[module_path] = facts
+
+    # Snapshot-visible report collisions: match 1:1 legacy validate_name_collisions across all parseable modules
+    if collisions is not None:
+        all_collisions = collisions
+    else:
+        all_collisions = compute_collisions_from_facts(parsed_facts)
+
+    # Canonical LIVE collision_facts: strictly paired on 100% complete coverage
+    if not incomplete_domain and set(parsed_facts.keys()) == set(modules.keys()):
+        canonical_collision_facts = parsed_facts
+    else:
+        canonical_collision_facts = None
 
     hotspots = detect_hotspots(
         graph.hard_edges
@@ -536,6 +570,7 @@ def execute_global_pipeline(
         report_header=report_header,
         trie=trie,
         package_root=package_root,
+        collision_facts=canonical_collision_facts,
     )
 
     # ------------------------------------------------------

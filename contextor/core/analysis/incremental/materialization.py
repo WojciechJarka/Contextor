@@ -155,6 +155,106 @@ def ensure_cycles(state: RepositoryAnalysisState) -> None:
                 state.cycles_state = "deferred"
 
 
+VALID_COLLISION_TYPES = {"class", "function", "variable"}
+REQUIRED_FACT_KEYS = {
+    "name",
+    "type",
+    "file",
+    "file_path",
+    "code",
+    "line_start",
+    "line_end",
+    "col_start",
+    "col_end",
+}
+
+
+def _is_int_or_none(val: Any) -> bool:
+    return val is None or (isinstance(val, int) and not isinstance(val, bool))
+
+
+def _validate_collision_facts_dict(facts: Any, modules: Any) -> bool:
+    """Validates structural integrity and canonical fact schema."""
+    if not isinstance(facts, dict) or not isinstance(modules, dict):
+        return False
+    if set(facts.keys()) != set(modules.keys()):
+        return False
+    for mod_key, fact_list in facts.items():
+        if not isinstance(fact_list, list):
+            return False
+        for fact in fact_list:
+            if not isinstance(fact, dict):
+                return False
+            if not REQUIRED_FACT_KEYS.issubset(fact.keys()):
+                return False
+            if fact.get("type") not in VALID_COLLISION_TYPES:
+                return False
+            if fact.get("file") != mod_key:
+                return False
+            if not isinstance(fact.get("name"), str) or not isinstance(fact.get("code"), str):
+                return False
+            if not isinstance(fact.get("file_path"), str):
+                return False
+            if not _is_int_or_none(fact.get("line_start")) or not _is_int_or_none(fact.get("line_end")):
+                return False
+            if not _is_int_or_none(fact.get("col_start")) or not _is_int_or_none(fact.get("col_end")):
+                return False
+    return True
+
+
+def collision_facts_complete(state: RepositoryAnalysisState) -> bool:
+    """
+    Returns True if and only if every canonical module in state.modules
+    has a corresponding valid list of extracted facts in state.collision_facts.
+    Validates fact schema, type domain, and module key integrity.
+    An empty repository ({} == {}) is valid complete coverage.
+    """
+    if not hasattr(state, "collision_facts") or not hasattr(state, "modules"):
+        return False
+    return _validate_collision_facts_dict(state.collision_facts, state.modules)
+
+
+def ensure_collisions(state: RepositoryAnalysisState) -> None:
+    """
+    Ensures state.collisions is fresh and computed from complete collision_facts.
+    Recomputes in RAM when state is deferred/missing and collision_facts is complete.
+    Preserves stale state when canonical source facts are untrusted.
+    Preserves fresh state without recomputation when complete.
+    RAM ONLY — ZERO source I/O.
+    """
+    if not hasattr(state, "collisions_state") or state.collisions_state is None:
+        state.collisions_state = "deferred"
+
+    if not hasattr(state, "collisions") or state.collisions is None:
+        state.collisions = []
+
+    if not hasattr(state, "collision_facts") or state.collision_facts is None:
+        state.collision_facts = {}
+
+    # A. Stale state: untrusted/desynced source facts -> do NOT auto-heal
+    if state.collisions_state == "stale":
+        return
+
+    # B. Fresh state: verify completeness! Incomplete coverage degrades to deferred
+    if state.collisions_state == "fresh":
+        if collision_facts_complete(state):
+            return
+        state.collisions_state = "deferred"
+
+    # C. Deferred / missing collisions + complete collision_facts: atomic in-memory recomputation
+    if collision_facts_complete(state):
+        try:
+            from contextor.core.validator.collisions import compute_collisions_from_facts
+
+            computed = compute_collisions_from_facts(state.collision_facts)
+            state.collisions = computed
+            state.collisions_state = "fresh"
+        except Exception:
+            # Fail-safe continuation: preserve existing collisions, do not leave false fresh
+            if state.collisions_state == "fresh":
+                state.collisions_state = "deferred"
+
+
 def materialize_incremental_state(state: RepositoryAnalysisState) -> None:
     """
     Orchestrates complete materialization of incremental state in exact required lifecycle order:
@@ -162,9 +262,11 @@ def materialize_incremental_state(state: RepositoryAnalysisState) -> None:
     2. ensure_topology_analytics (RAM-only)
     3. ensure_cached_analytics (RAM-only)
     4. ensure_cycles (RAM-only)
+    5. ensure_collisions (RAM-only)
     """
     ensure_module_usages(state)
     ensure_topology_analytics(state)
     ensure_cached_analytics(state)
     ensure_cycles(state)
+    ensure_collisions(state)
 

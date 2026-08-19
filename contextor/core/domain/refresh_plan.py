@@ -21,6 +21,8 @@ VALID_PATCH_FAMILIES = {
     "dependency_graph",
     "identity_registry",
     "cached_analytics",
+    "collision_facts",
+    "collisions",
 }
 
 

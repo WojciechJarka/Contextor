@@ -28,6 +28,8 @@ class PreparedSourceUpdate:
     new_usage: Optional[ModuleUsageFacts]
     delta: FileDelta
     usage_delta: Optional[Any]
+    new_collision_facts: Optional[List[Dict[str, Any]]] = None
+    collision_facts_changed: bool = False
     error_status: Optional[str] = None
     error_message: Optional[str] = None
     line_number: Optional[int] = None
@@ -95,17 +97,18 @@ def prepare_source_update(
     old_artifacts: Optional[Dict[str, Any]],
     old_usage: Optional[ModuleUsageFacts],
     persistent_id: Optional[str] = None,
+    old_collision_facts: Optional[List[Dict[str, Any]]] = None,
 ) -> PreparedSourceUpdate:
     """
     Parses and extracts all necessary facts from a changed/added source file,
-    computes structural FileDelta and behavioral UsageDelta without mutating canonical state.
+    computes structural FileDelta, behavioral UsageDelta, and collision facts without mutating canonical state.
     """
     path = Path(file_path)
 
     # 1. Syntax validation and source reading
     try:
         source_text = path.read_text(encoding="utf-8")
-        ast.parse(source_text, filename=str(path))
+        parsed_tree = ast.parse(source_text, filename=str(path))
     except SyntaxError as exc:
         return PreparedSourceUpdate(
             module_path=module_path,
@@ -115,6 +118,8 @@ def prepare_source_update(
             new_usage=None,
             delta=FileDelta(module_path=module_path, is_new=is_new),
             usage_delta=None,
+            new_collision_facts=None,
+            collision_facts_changed=True if old_collision_facts is not None else False,
             error_status="SYNTAX_ERROR",
             error_message=exc.msg,
             line_number=exc.lineno,
@@ -129,6 +134,8 @@ def prepare_source_update(
             new_usage=None,
             delta=FileDelta(module_path=module_path, is_new=is_new),
             usage_delta=None,
+            new_collision_facts=None,
+            collision_facts_changed=True if old_collision_facts is not None else False,
             error_status="ERROR",
             error_message=str(exc),
         )
@@ -146,6 +153,8 @@ def prepare_source_update(
                 new_usage=None,
                 delta=FileDelta(module_path=module_path, is_new=is_new),
                 usage_delta=None,
+                new_collision_facts=None,
+                collision_facts_changed=True if old_collision_facts is not None else False,
                 error_status="SYNTAX_ERROR",
                 error_message=str(error),
             )
@@ -158,6 +167,8 @@ def prepare_source_update(
             new_usage=None,
             delta=FileDelta(module_path=module_path, is_new=is_new),
             usage_delta=None,
+            new_collision_facts=None,
+            collision_facts_changed=True if old_collision_facts is not None else False,
             error_status="ERROR",
             error_message=str(exc),
         )
@@ -180,7 +191,19 @@ def prepare_source_update(
         old_consumers = (old_artifacts or {}).get("consumers", {})
         new_artifacts = {"symbols": {}, "own_symbols": set(), "consumers": old_consumers}
 
-    # 4. Calculate FileDelta
+    # 4. Extract collision facts
+    from contextor.core.validator.collisions import extract_module_collision_facts
+    new_collision_facts = extract_module_collision_facts(
+        parsed_tree,
+        module_path,
+        str(path.resolve()),
+    )
+    if old_collision_facts is None:
+        collision_facts_changed = True
+    else:
+        collision_facts_changed = (old_collision_facts != new_collision_facts)
+
+    # 5. Calculate FileDelta
     delta = calculate_file_delta(
         module_path=module_path,
         persistent_id=persistent_id,
@@ -191,7 +214,7 @@ def prepare_source_update(
         new_artifacts_dict=new_artifacts,
     )
 
-    # 5. Extract Usage facts & UsageDelta
+    # 6. Extract Usage facts & UsageDelta
     from contextor.core.reference.engine import extract_module_usage_facts
     new_usage = extract_module_usage_facts(
         module_path,
@@ -201,7 +224,6 @@ def prepare_source_update(
     curr_old_usage = old_usage if old_usage is not None else ModuleUsageFacts()
     usage_delta = diff_usage_facts(module_path, curr_old_usage, new_usage)
 
-
     return PreparedSourceUpdate(
         module_path=module_path,
         is_new=is_new,
@@ -210,6 +232,8 @@ def prepare_source_update(
         new_usage=new_usage,
         delta=delta,
         usage_delta=usage_delta,
+        new_collision_facts=new_collision_facts,
+        collision_facts_changed=collision_facts_changed,
     )
 
 
@@ -218,8 +242,9 @@ def prepare_deleted_module_update(
     old_module: Optional[Any],
     old_artifacts: Optional[Dict[str, Any]],
     old_usage: Optional[ModuleUsageFacts],
-) -> Tuple[FileDelta, Any]:
-    """Prepares FileDelta and UsageDelta for a deleted module (Zero source I/O, Zero AST parse)."""
+    old_collision_facts: Optional[List[Dict[str, Any]]] = None,
+) -> Tuple[FileDelta, Any, bool]:
+    """Prepares FileDelta, UsageDelta, and collision facts invalidation for a deleted module."""
     delta = FileDelta(
         module_path=module_path,
         is_deleted=True,
@@ -234,4 +259,5 @@ def prepare_deleted_module_update(
     )
     curr_old_usage = old_usage if old_usage is not None else ModuleUsageFacts()
     usage_delta = diff_usage_facts(module_path, curr_old_usage, ModuleUsageFacts())
-    return delta, usage_delta
+    collision_facts_changed = bool(old_collision_facts) if old_collision_facts is not None else True
+    return delta, usage_delta, collision_facts_changed

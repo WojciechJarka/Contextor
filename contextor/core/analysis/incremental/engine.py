@@ -45,6 +45,7 @@ class IncrementalUpdateResult:
     topology_metrics_state: str = "stale"
     cached_analytics_state: str = "stale"
     cycles_state: str = "stale"
+    collisions_state: str = "stale"
     artifact_consumption_state: str = "stale"
 
     error: str | None = None
@@ -90,6 +91,10 @@ class IncrementalAnalysisEngine:
         """Compatibility wrapper delegating to materialization.ensure_cycles."""
         ensure_cycles(self.state)
 
+    def _ensure_collisions(self) -> None:
+        """Compatibility wrapper delegating to materialization.ensure_collisions."""
+        ensure_collisions(self.state)
+
     def update_file(self, file_path: str) -> IncrementalUpdateResult:
         """
         Updates the canonical state incrementally for a single changed file.
@@ -108,6 +113,7 @@ class IncrementalAnalysisEngine:
                     topology_metrics_state=getattr(self.state, "topology_metrics_state", "fresh" if bool(getattr(self.state, "topology_analytics", None)) else "deferred"),
                     cached_analytics_state=getattr(self.state, "cached_analytics_state", "fresh" if bool(getattr(self.state, "cached_analytics", None)) else "deferred"),
                     cycles_state=getattr(self.state, "cycles_state", "fresh" if hasattr(self.state, "cycles") else "deferred"),
+                    collisions_state=getattr(self.state, "collisions_state", "deferred"),
                     artifact_consumption_state="fresh" if self.state.artifact_consumption is not None else "stale",
                 )
 
@@ -121,17 +127,24 @@ class IncrementalAnalysisEngine:
                 old_module = self.state.modules.get(module_path)
                 old_artifacts = self.state.artifacts.get(module_path, {})
                 old_usage = self.state.module_usages.get(module_path, ModuleUsageFacts()) if hasattr(self.state, "module_usages") and self.state.module_usages else ModuleUsageFacts()
-                delta, usage_delta = prepare_deleted_module_update(
+                old_collision_facts = self.state.collision_facts.get(module_path) if hasattr(self.state, "collision_facts") and self.state.collision_facts else None
+                delta, usage_delta, collision_facts_changed = prepare_deleted_module_update(
                     module_path,
                     old_module=old_module,
                     old_artifacts=old_artifacts,
                     old_usage=old_usage,
+                    old_collision_facts=old_collision_facts,
                 )
 
                 from contextor.core.analysis.refresh_planner import RefreshPlanner
-                plan = RefreshPlanner.plan_refresh(delta, usage_delta=usage_delta, module_usages=self.state.module_usages)
+                plan = RefreshPlanner.plan_refresh(
+                    delta,
+                    usage_delta=usage_delta,
+                    module_usages=self.state.module_usages,
+                    collision_facts_changed=collision_facts_changed,
+                )
                 affected_set, blast_radius_complete, execution_trace = self._apply_delta_and_commit(
-                    file_path, delta, usage_delta, plan, [], {}, ModuleUsageFacts()
+                    file_path, delta, usage_delta, plan, [], {}, ModuleUsageFacts(), new_collision_facts=None
                 )
                 blast_radius_state = "fresh" if blast_radius_complete else "deferred"
                 affected_modules = sorted(affected_set) if blast_radius_complete else []
@@ -147,6 +160,7 @@ class IncrementalAnalysisEngine:
                     topology_metrics_state="fresh",
                     cached_analytics_state="fresh",
                     cycles_state="fresh",
+                    collisions_state=getattr(self.state, "collisions_state", "deferred"),
                     artifact_consumption_state="fresh",
                     affected_modules=affected_modules,
                     shadow_plan=plan,
@@ -159,6 +173,7 @@ class IncrementalAnalysisEngine:
             old_module = self.state.modules.get(module_path)
             old_artifacts = self.state.artifacts.get(module_path, {})
             old_usage = self.state.module_usages.get(module_path, ModuleUsageFacts()) if hasattr(self.state, "module_usages") and self.state.module_usages else ModuleUsageFacts()
+            old_collision_facts = self.state.collision_facts.get(module_path) if hasattr(self.state, "collision_facts") and self.state.collision_facts else None
 
             prep = prepare_source_update(
                 file_path=file_path,
@@ -168,6 +183,7 @@ class IncrementalAnalysisEngine:
                 old_artifacts=old_artifacts,
                 old_usage=old_usage,
                 persistent_id=module_id,
+                old_collision_facts=old_collision_facts,
             )
 
             if prep.has_error:
@@ -184,9 +200,15 @@ class IncrementalAnalysisEngine:
             new_imports = prep.new_imports
             new_artifacts = prep.new_artifacts
             new_usage = prep.new_usage
+            new_collision_facts = prep.new_collision_facts
 
             from contextor.core.analysis.refresh_planner import RefreshPlanner
-            plan = RefreshPlanner.plan_refresh(delta, usage_delta=usage_delta, module_usages=self.state.module_usages)
+            plan = RefreshPlanner.plan_refresh(
+                delta,
+                usage_delta=usage_delta,
+                module_usages=self.state.module_usages,
+                collision_facts_changed=prep.collision_facts_changed,
+            )
 
             # Check if true no-op
             if plan.is_empty and not is_new and not delta.is_deleted:
@@ -202,6 +224,7 @@ class IncrementalAnalysisEngine:
                     topology_metrics_state=getattr(self.state, "topology_metrics_state", "fresh" if bool(getattr(self.state, "topology_analytics", None)) else "deferred"),
                     cached_analytics_state=getattr(self.state, "cached_analytics_state", "fresh" if bool(getattr(self.state, "cached_analytics", None)) else "deferred"),
                     cycles_state=getattr(self.state, "cycles_state", "fresh" if hasattr(self.state, "cycles") else "deferred"),
+                    collisions_state=getattr(self.state, "collisions_state", "deferred"),
                     artifact_consumption_state="fresh",
                     affected_modules=[],
                     shadow_plan=plan,
@@ -215,7 +238,7 @@ class IncrementalAnalysisEngine:
 
             # 3. Apply and Commit driven by RefreshPlan
             affected_set, blast_radius_complete, execution_trace = self._apply_delta_and_commit(
-                file_path, delta, usage_delta, plan, new_imports, new_artifacts, new_usage
+                file_path, delta, usage_delta, plan, new_imports, new_artifacts, new_usage, new_collision_facts=new_collision_facts
             )
 
             if plan.refresh_completeness == "requires_resync":
@@ -225,6 +248,7 @@ class IncrementalAnalysisEngine:
                 topology_metrics_state = "stale"
                 cached_analytics_state = "stale"
                 cycles_state = "stale"
+                collisions_state = "stale"
                 artifact_consumption_state = "stale"
             else:
                 graph_state = "fresh" if ("dependency_graph" in plan.patch_families or self.state.dependency_graph is not None) else "stale"
@@ -242,6 +266,7 @@ class IncrementalAnalysisEngine:
                     cycles_state = "fresh"
                 else:
                     cycles_state = getattr(self.state, "cycles_state", "fresh" if hasattr(self.state, "cycles") else "deferred")
+                collisions_state = getattr(self.state, "collisions_state", "deferred")
                 artifact_consumption_state = "fresh" if ("artifact_consumption" in plan.patch_families or self.state.artifact_consumption is not None) else "stale"
 
             affected_modules = sorted(affected_set) if blast_radius_complete else []
@@ -258,6 +283,7 @@ class IncrementalAnalysisEngine:
                 topology_metrics_state=topology_metrics_state,
                 cached_analytics_state=cached_analytics_state,
                 cycles_state=cycles_state,
+                collisions_state=collisions_state,
                 artifact_consumption_state=artifact_consumption_state,
                 affected_modules=affected_modules,
                 shadow_plan=plan,
@@ -297,6 +323,7 @@ class IncrementalAnalysisEngine:
         new_imports: list,
         mod_artifacts: dict,
         new_usage: Any,
+        new_collision_facts: Optional[List[Dict[str, Any]]] = None,
     ) -> tuple[Set[str], bool, dict]:
         """
         Executes planned RefreshPlan phases and performs atomic persistent & RAM commit.
@@ -311,6 +338,7 @@ class IncrementalAnalysisEngine:
             new_usage=new_usage,
             root_path=self.root_path,
             file_path=file_path,
+            new_collision_facts=new_collision_facts,
         )
 
         # Persistent Identity Registry Commit
@@ -330,6 +358,9 @@ class IncrementalAnalysisEngine:
         self.state.cached_analytics_state = candidate.cached_analytics_state
         self.state.cycles = candidate.cycles
         self.state.cycles_state = candidate.cycles_state
+        self.state.collision_facts = candidate.collision_facts
+        self.state.collisions = candidate.collisions
+        self.state.collisions_state = candidate.collisions_state
         self.state.artifact_consumption = candidate.artifact_consumption
         self.state.module_usages = candidate.module_usages
         self.state.trie = candidate.trie

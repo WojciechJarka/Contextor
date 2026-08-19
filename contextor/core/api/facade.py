@@ -392,6 +392,20 @@ class ContextorFacade:
             metrics = getattr(analysis_result, "metrics", {})
             topology_analytics = compute_topology_analytics(hard_edges, soft_edges, metrics) if hard_edges else {}
 
+            from contextor.core.analysis.incremental.materialization import _validate_collision_facts_dict
+            from contextor.core.validator.collisions import compute_collisions_from_facts
+
+            cf = getattr(analysis_result, "collision_facts", None)
+            mods = getattr(analysis_result, "modules", {})
+            is_collision_complete = _validate_collision_facts_dict(cf, mods)
+
+            if is_collision_complete:
+                canonical_collisions = compute_collisions_from_facts(cf)
+                collisions_state = "fresh"
+            else:
+                canonical_collisions = []
+                collisions_state = "deferred"
+
             state = RepositoryAnalysisState(
                 modules=getattr(analysis_result, "modules", {}),
                 artifacts=getattr(analysis_result, "artifacts", {}),
@@ -404,6 +418,9 @@ class ContextorFacade:
                 topology_metrics_state="fresh",
                 cycles=getattr(analysis_result, "cycles", []),
                 cycles_state="fresh",
+                collision_facts=cf if isinstance(cf, dict) else {},
+                collisions=canonical_collisions,
+                collisions_state=collisions_state,
                 layer_information={
                     "layer_index": getattr(analysis_result, "layer_index", []),
                     "hotspots": getattr(analysis_result, "hotspots", []),

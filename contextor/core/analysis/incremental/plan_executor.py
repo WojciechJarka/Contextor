@@ -48,6 +48,9 @@ class CandidateState:
     cached_analytics_state: str
     cycles: list
     cycles_state: str
+    collision_facts: Dict[str, list]
+    collisions: list
+    collisions_state: str
 
 
 @dataclass(frozen=True)
@@ -101,6 +104,9 @@ def _prepare_candidate_state(state: RepositoryAnalysisState) -> CandidateState:
         cached_analytics_state=getattr(state, "cached_analytics_state", "deferred"),
         cycles=list(getattr(state, "cycles", []) or []),
         cycles_state=getattr(state, "cycles_state", "deferred"),
+        collision_facts=dict(getattr(state, "collision_facts", {}) or {}),
+        collisions=list(getattr(state, "collisions", []) or []),
+        collisions_state=getattr(state, "collisions_state", "deferred"),
     )
 
 
@@ -114,6 +120,7 @@ def execute_refresh_plan(
     new_usage: Optional[ModuleUsageFacts],
     root_path: Path,
     file_path: str,
+    new_collision_facts: Optional[List[Dict[str, Any]]] = None,
 ) -> PlanExecutionOutcome:
     """
     Executes the phases of a RefreshPlan (REPARSE, RECOMPUTE, PATCH, GRAPH)
@@ -305,6 +312,34 @@ def execute_refresh_plan(
             )
             executed_patch_families.append("cached_analytics")
 
+        elif family == "collision_facts":
+            if delta.is_deleted:
+                candidate.collision_facts.pop(delta.module_path, None)
+            else:
+                if new_collision_facts is None:
+                    raise ValueError(
+                        f"Planned collision_facts patch for '{delta.module_path}' requires non-None new_collision_facts."
+                    )
+                candidate.collision_facts[delta.module_path] = new_collision_facts
+            executed_patch_families.append("collision_facts")
+
+        elif family == "collisions":
+            from contextor.core.analysis.incremental.materialization import _validate_collision_facts_dict
+            from contextor.core.validator.collisions import compute_collisions_from_facts
+
+            if candidate.collisions_state == "stale":
+                pass
+            elif _validate_collision_facts_dict(candidate.collision_facts, candidate.modules):
+                try:
+                    computed = compute_collisions_from_facts(candidate.collision_facts)
+                    candidate.collisions = computed
+                    candidate.collisions_state = "fresh"
+                except Exception:
+                    candidate.collisions_state = "deferred"
+            else:
+                candidate.collisions_state = "deferred"
+            executed_patch_families.append("collisions")
+
         else:
             raise ValueError(f"Unsupported patch family: {family}")
 
@@ -367,6 +402,7 @@ def execute_refresh_plan(
         candidate.topology_metrics_state = "stale"
         candidate.cached_analytics_state = "stale"
         candidate.cycles_state = "stale"
+        candidate.collisions_state = "stale"
     else:
         if "advanced_graph_metrics" in plan.graph_recomputations:
             candidate.topology_metrics_state = "fresh"

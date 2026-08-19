@@ -237,47 +237,37 @@ class PublicSymbolCollector(ast.NodeVisitor):
             )
 
 
-def validate_name_collisions(
-    modules: dict[str, Module],
+def extract_module_collision_facts(
+    tree: ast.AST,
+    module_path: str,
+    absolute_path: str = "",
+) -> list[dict]:
+    """
+    Extract public API symbol facts from one parsed AST for collision analysis.
+    """
+    collector = PublicSymbolCollector(
+        module_path,
+        absolute_path=str(absolute_path),
+    )
+    collector.visit(tree)
+    return collector.symbols
+
+
+def compute_collisions_from_facts(
+    collision_facts: dict[str, list[dict]],
 ) -> list[ValidationError]:
     """
-    Detect public API collisions.
+    Pure aggregation of module collision facts into ValidationError collision results.
     """
-
     errors: list[ValidationError] = []
-
     registry = defaultdict(list)
 
-    for module_path, module in modules.items():
-        file_path = getattr(module, "absolute_path", None) or getattr(module, "path", None)
-
-        if not file_path:
-            continue
-
-        tree = getattr(module, "ast_tree", None)
-
-        if tree is None:
-            path = Path(file_path)
-            if not path.exists():
-                continue
-            try:
-                tree = parse_source(path)
-            except SourceError:
-                continue
-
-        collector = PublicSymbolCollector(
-            module_path,
-            absolute_path=str(file_path),
-        )
-
-        collector.visit(tree)
-
-        for symbol in collector.symbols:
+    for module_path, symbols in collision_facts.items():
+        for symbol in symbols:
             key = (
                 symbol["name"],
                 symbol["type"],
             )
-
             registry[key].append(symbol)
 
     for (
@@ -354,3 +344,37 @@ def validate_name_collisions(
             errors.append(error)
 
     return errors
+
+
+def validate_name_collisions(
+    modules: dict[str, Module],
+) -> list[ValidationError]:
+    """
+    Detect public API collisions across repository modules.
+    """
+    facts = {}
+
+    for module_path, module in modules.items():
+        file_path = getattr(module, "absolute_path", None) or getattr(module, "path", None)
+
+        if not file_path:
+            continue
+
+        tree = getattr(module, "ast_tree", None)
+
+        if tree is None:
+            path = Path(file_path)
+            if not path.exists():
+                continue
+            try:
+                tree = parse_source(path)
+            except SourceError:
+                continue
+
+        facts[module_path] = extract_module_collision_facts(
+            tree,
+            module_path,
+            str(file_path),
+        )
+
+    return compute_collisions_from_facts(facts)

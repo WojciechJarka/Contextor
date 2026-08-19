@@ -71,6 +71,7 @@ class AnalysisResult:
     report_header: Dict[str, Any]
     trie: Optional[Any] = None
     package_root: str = ""
+    collision_facts: Optional[Dict[str, Any]] = None
 
 
 @dataclass
@@ -90,6 +91,9 @@ class RepositoryAnalysisState:
     cached_analytics_state: str = "deferred"
     cycles: list = field(default_factory=list)
     cycles_state: str = "deferred"
+    collision_facts: Dict[str, list] = field(default_factory=dict)
+    collisions: list = field(default_factory=list)
+    collisions_state: str = "deferred"
     
     # Required for canonical graph edge resolution
 

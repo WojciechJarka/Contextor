@@ -23,15 +23,20 @@ class RefreshPlanner:
 
     @staticmethod
     def plan_refresh(
-        delta: FileDelta,
+        delta: Optional[FileDelta],
         usage_delta: Optional[UsageDelta] = None,
         module_usages: Optional[Mapping[str, ModuleUsageFacts]] = None,
+        collision_facts_changed: bool = False,
     ) -> RefreshPlan:
 
         """
         Pure planning function mapping canonical/delta facts to a RefreshPlan.
         """
-        if not delta and (usage_delta is None or usage_delta.is_empty):
+        if (
+            (delta is None or delta.is_empty)
+            and (usage_delta is None or usage_delta.is_empty)
+            and not collision_facts_changed
+        ):
             return RefreshPlan(
                 reparse_modules=(),
                 recompute_modules=(),
@@ -44,7 +49,6 @@ class RefreshPlanner:
 
         module_path = delta.module_path if delta else (usage_delta.module_path if usage_delta else "")
         usages = module_usages if module_usages is not None else {}
-
 
         # 1. Module Deletion
         if delta and delta.is_deleted:
@@ -71,19 +75,22 @@ class RefreshPlanner:
                         ):
                             recompute_set.add(c_path)
 
+            patch_families = [
+                "modules",
+                "definitions",
+                "identity_registry",
+                "module_usages",
+                "dependency_graph",
+                "artifact_consumption",
+                "cached_analytics",
+                "collision_facts",
+                "collisions",
+            ]
+
             return RefreshPlan(
                 reparse_modules=(),
                 recompute_modules=tuple(sorted(recompute_set)),
-                patch_families=(
-                    "modules",
-                    "definitions",
-                    "identity_registry",
-                    "module_usages",
-                    "dependency_graph",
-                    "artifact_consumption",
-                    "cached_analytics",
-                ),
-
+                patch_families=tuple(patch_families),
                 graph_recomputations=("macro_metrics", "reverse_blast_radius", "advanced_graph_metrics", "cycles"),
                 refresh_completeness="complete",
                 semantic_certainty="statically_resolved",
@@ -92,19 +99,21 @@ class RefreshPlanner:
 
         # 2. Module Addition
         if delta and delta.is_new:
+            patch_families = [
+                "modules",
+                "definitions",
+                "identity_registry",
+                "module_usages",
+                "dependency_graph",
+                "artifact_consumption",
+                "cached_analytics",
+                "collision_facts",
+                "collisions",
+            ]
             return RefreshPlan(
                 reparse_modules=(),
                 recompute_modules=(),
-                patch_families=(
-                    "modules",
-                    "definitions",
-                    "identity_registry",
-                    "module_usages",
-                    "dependency_graph",
-                    "artifact_consumption",
-                    "cached_analytics",
-                ),
-
+                patch_families=tuple(patch_families),
                 graph_recomputations=("macro_metrics", "reverse_blast_radius", "advanced_graph_metrics", "cycles"),
                 refresh_completeness="complete",
                 semantic_certainty="statically_resolved",
@@ -112,7 +121,7 @@ class RefreshPlanner:
             )
 
         # 3. Pure Semantic No-op
-        if (delta is None or delta.is_empty) and (usage_delta is None or usage_delta.is_empty):
+        if (delta is None or delta.is_empty) and (usage_delta is None or usage_delta.is_empty) and not collision_facts_changed:
             return RefreshPlan(
                 reparse_modules=(),
                 recompute_modules=(),
@@ -150,7 +159,8 @@ class RefreshPlanner:
                 patch_families.extend(["modules", "dependency_graph"])
                 graph_recomputations.extend(["macro_metrics", "reverse_blast_radius", "advanced_graph_metrics", "cycles"])
             patch_families.append("cached_analytics")
-
+            if collision_facts_changed:
+                patch_families.extend(["collision_facts", "collisions"])
 
             return RefreshPlan(
                 reparse_modules=(),
@@ -162,29 +172,30 @@ class RefreshPlanner:
                 reason=f"Alias/re-export change in '{module_path}'.",
             )
 
-        # 4. Generic Import Changes (without alias changes)
+        # 5. Generic Import Changes (without alias changes)
         if has_import_changes:
+            patch_families = [
+                "modules",
+                "definitions",
+                "module_usages",
+                "dependency_graph",
+                "artifact_consumption",
+                "cached_analytics",
+            ]
+            if collision_facts_changed:
+                patch_families.extend(["collision_facts", "collisions"])
+
             return RefreshPlan(
                 reparse_modules=(),
                 recompute_modules=(),
-                patch_families=(
-                    "modules",
-                    "definitions",
-                    "module_usages",
-                    "dependency_graph",
-                    "artifact_consumption",
-                    "cached_analytics",
-                ),
-
+                patch_families=tuple(patch_families),
                 graph_recomputations=("macro_metrics", "reverse_blast_radius", "advanced_graph_metrics", "cycles"),
                 refresh_completeness="complete",
                 semantic_certainty="statically_resolved",
                 reason=f"Import changes in '{module_path}'.",
             )
 
-
-
-        # 5. Symbol Add / Remove / Change
+        # 6. Symbol Add / Remove / Change
         if delta and (delta.artifacts_added or delta.artifacts_removed or delta.artifacts_changed):
             recompute_set = set()
             if delta.artifacts_removed and usages:
@@ -199,6 +210,8 @@ class RefreshPlanner:
             patch_families = ["definitions", "identity_registry", "module_usages", "artifact_consumption"]
             if bool(delta.artifacts_added or delta.artifacts_removed) or (usage_delta and not usage_delta.is_empty):
                 patch_families.append("cached_analytics")
+            if collision_facts_changed:
+                patch_families.extend(["collision_facts", "collisions"])
 
             return RefreshPlan(
                 reparse_modules=(),
@@ -210,10 +223,15 @@ class RefreshPlanner:
                 reason=f"Artifact definitions change in '{module_path}'.",
             )
 
-        # 6. Default: Body-only Usage Change
+        # 7. Default: Body-only Usage Change or Collision-only change
+        has_usage = bool(usage_delta and not usage_delta.is_empty)
         patch_families = []
-        if usage_delta and not usage_delta.is_empty:
+        if has_usage:
             patch_families = ["module_usages", "artifact_consumption", "cached_analytics"]
+        if collision_facts_changed:
+            patch_families.extend(["collision_facts", "collisions"])
+
+        reason = f"Body-only usage change in '{module_path}'." if has_usage else f"Collision facts update for '{module_path}'."
 
         return RefreshPlan(
             reparse_modules=(),
@@ -222,8 +240,9 @@ class RefreshPlanner:
             graph_recomputations=(),
             refresh_completeness="complete",
             semantic_certainty="statically_resolved",
-            reason=f"Body-only usage change in '{module_path}'.",
+            reason=reason,
         )
+
 
 
 

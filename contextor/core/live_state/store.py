@@ -205,6 +205,21 @@ def load_snapshot(
                         setattr(state_obj, "cycles_state", "deferred")
                     except AttributeError:
                         pass
+                if not hasattr(state_obj, "collision_facts"):
+                    try:
+                        setattr(state_obj, "collision_facts", {})
+                    except AttributeError:
+                        pass
+                if not hasattr(state_obj, "collisions"):
+                    try:
+                        setattr(state_obj, "collisions", [])
+                    except AttributeError:
+                        pass
+                if not hasattr(state_obj, "collisions_state"):
+                    try:
+                        setattr(state_obj, "collisions_state", "deferred")
+                    except AttributeError:
+                        pass
             return state_obj, embedded_metadata
         if payload is not None and hasattr(payload, "__dict__"):
             if not hasattr(payload, "module_usages"):
@@ -240,6 +255,21 @@ def load_snapshot(
             if not hasattr(payload, "cycles_state"):
                 try:
                     setattr(payload, "cycles_state", "deferred")
+                except AttributeError:
+                    pass
+            if not hasattr(payload, "collision_facts"):
+                try:
+                    setattr(payload, "collision_facts", {})
+                except AttributeError:
+                    pass
+            if not hasattr(payload, "collisions"):
+                try:
+                    setattr(payload, "collisions", [])
+                except AttributeError:
+                    pass
+            if not hasattr(payload, "collisions_state"):
+                try:
+                    setattr(payload, "collisions_state", "deferred")
                 except AttributeError:
                     pass
         return payload, metadata
