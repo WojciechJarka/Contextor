@@ -46,6 +46,8 @@ class CandidateState:
     cached_analytics: Dict[str, Any]
     topology_metrics_state: str
     cached_analytics_state: str
+    cycles: list
+    cycles_state: str
 
 
 @dataclass(frozen=True)
@@ -97,6 +99,8 @@ def _prepare_candidate_state(state: RepositoryAnalysisState) -> CandidateState:
         cached_analytics=dict(getattr(state, "cached_analytics", {}) or {}),
         topology_metrics_state=getattr(state, "topology_metrics_state", "deferred"),
         cached_analytics_state=getattr(state, "cached_analytics_state", "deferred"),
+        cycles=list(getattr(state, "cycles", []) or []),
+        cycles_state=getattr(state, "cycles_state", "deferred"),
     )
 
 
@@ -348,6 +352,12 @@ def execute_refresh_plan(
                 )
             executed_graph_recomputations.append("advanced_graph_metrics")
 
+        elif graph_item == "cycles":
+            if candidate.dependency_graph is not None:
+                from contextor.core.graph.cycles import detect_cycles
+                hard_edges = getattr(candidate.dependency_graph, "hard_edges", {}) or {}
+                candidate.cycles = detect_cycles(hard_edges)
+            executed_graph_recomputations.append("cycles")
 
         else:
             raise ValueError(f"Unsupported graph recomputation: {graph_item}")
@@ -356,11 +366,14 @@ def execute_refresh_plan(
     if plan.refresh_completeness == "requires_resync":
         candidate.topology_metrics_state = "stale"
         candidate.cached_analytics_state = "stale"
+        candidate.cycles_state = "stale"
     else:
         if "advanced_graph_metrics" in plan.graph_recomputations:
             candidate.topology_metrics_state = "fresh"
         if "cached_analytics" in plan.patch_families:
             candidate.cached_analytics_state = "fresh"
+        if "cycles" in plan.graph_recomputations:
+            candidate.cycles_state = "fresh"
 
     # 7. PREPARE registry payload if required
     all_modules = set(candidate.modules.keys())

@@ -88,6 +88,8 @@ class RepositoryAnalysisState:
     topology_metrics_state: str = "deferred"
     cached_analytics: Dict[str, Any] = field(default_factory=dict)
     cached_analytics_state: str = "deferred"
+    cycles: list = field(default_factory=list)
+    cycles_state: str = "deferred"
     
     # Required for canonical graph edge resolution
 

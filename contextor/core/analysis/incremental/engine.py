@@ -17,6 +17,7 @@ from contextor.core.analysis.incremental.materialization import (
     ensure_module_usages,
     ensure_topology_analytics,
     ensure_cached_analytics,
+    ensure_cycles,
     materialize_incremental_state,
 )
 from contextor.core.analysis.incremental.preparation import (
@@ -43,6 +44,7 @@ class IncrementalUpdateResult:
     global_metrics_state: str = "stale"
     topology_metrics_state: str = "stale"
     cached_analytics_state: str = "stale"
+    cycles_state: str = "stale"
     artifact_consumption_state: str = "stale"
 
     error: str | None = None
@@ -84,6 +86,10 @@ class IncrementalAnalysisEngine:
         """Compatibility wrapper delegating to materialization.ensure_module_usages."""
         ensure_module_usages(self.state)
 
+    def _ensure_cycles(self) -> None:
+        """Compatibility wrapper delegating to materialization.ensure_cycles."""
+        ensure_cycles(self.state)
+
     def update_file(self, file_path: str) -> IncrementalUpdateResult:
         """
         Updates the canonical state incrementally for a single changed file.
@@ -101,6 +107,7 @@ class IncrementalAnalysisEngine:
                     global_metrics_state="deferred",
                     topology_metrics_state=getattr(self.state, "topology_metrics_state", "fresh" if bool(getattr(self.state, "topology_analytics", None)) else "deferred"),
                     cached_analytics_state=getattr(self.state, "cached_analytics_state", "fresh" if bool(getattr(self.state, "cached_analytics", None)) else "deferred"),
+                    cycles_state=getattr(self.state, "cycles_state", "fresh" if hasattr(self.state, "cycles") else "deferred"),
                     artifact_consumption_state="fresh" if self.state.artifact_consumption is not None else "stale",
                 )
 
@@ -139,6 +146,7 @@ class IncrementalAnalysisEngine:
                     global_metrics_state="deferred",
                     topology_metrics_state="fresh",
                     cached_analytics_state="fresh",
+                    cycles_state="fresh",
                     artifact_consumption_state="fresh",
                     affected_modules=affected_modules,
                     shadow_plan=plan,
@@ -193,6 +201,7 @@ class IncrementalAnalysisEngine:
                     global_metrics_state="deferred",
                     topology_metrics_state=getattr(self.state, "topology_metrics_state", "fresh" if bool(getattr(self.state, "topology_analytics", None)) else "deferred"),
                     cached_analytics_state=getattr(self.state, "cached_analytics_state", "fresh" if bool(getattr(self.state, "cached_analytics", None)) else "deferred"),
+                    cycles_state=getattr(self.state, "cycles_state", "fresh" if hasattr(self.state, "cycles") else "deferred"),
                     artifact_consumption_state="fresh",
                     affected_modules=[],
                     shadow_plan=plan,
@@ -215,6 +224,7 @@ class IncrementalAnalysisEngine:
                 blast_radius_state = "deferred"
                 topology_metrics_state = "stale"
                 cached_analytics_state = "stale"
+                cycles_state = "stale"
                 artifact_consumption_state = "stale"
             else:
                 graph_state = "fresh" if ("dependency_graph" in plan.patch_families or self.state.dependency_graph is not None) else "stale"
@@ -228,6 +238,10 @@ class IncrementalAnalysisEngine:
                     cached_analytics_state = "fresh"
                 else:
                     cached_analytics_state = getattr(self.state, "cached_analytics_state", "fresh" if bool(getattr(self.state, "cached_analytics", None)) else "deferred")
+                if "cycles" in plan.graph_recomputations:
+                    cycles_state = "fresh"
+                else:
+                    cycles_state = getattr(self.state, "cycles_state", "fresh" if hasattr(self.state, "cycles") else "deferred")
                 artifact_consumption_state = "fresh" if ("artifact_consumption" in plan.patch_families or self.state.artifact_consumption is not None) else "stale"
 
             affected_modules = sorted(affected_set) if blast_radius_complete else []
@@ -243,6 +257,7 @@ class IncrementalAnalysisEngine:
                 global_metrics_state="deferred",
                 topology_metrics_state=topology_metrics_state,
                 cached_analytics_state=cached_analytics_state,
+                cycles_state=cycles_state,
                 artifact_consumption_state=artifact_consumption_state,
                 affected_modules=affected_modules,
                 shadow_plan=plan,
@@ -313,6 +328,8 @@ class IncrementalAnalysisEngine:
         self.state.cached_analytics = candidate.cached_analytics
         self.state.topology_metrics_state = candidate.topology_metrics_state
         self.state.cached_analytics_state = candidate.cached_analytics_state
+        self.state.cycles = candidate.cycles
+        self.state.cycles_state = candidate.cycles_state
         self.state.artifact_consumption = candidate.artifact_consumption
         self.state.module_usages = candidate.module_usages
         self.state.trie = candidate.trie

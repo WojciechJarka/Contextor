@@ -38,6 +38,7 @@ def test_2_import_add():
     assert plan.recompute_modules == ()
     assert "dependency_graph" in plan.patch_families
     assert "macro_metrics" in plan.graph_recomputations
+    assert "cycles" in plan.graph_recomputations
     assert plan.refresh_completeness == "complete"
 
 
@@ -48,6 +49,7 @@ def test_3_import_remove():
     assert plan.reparse_modules == ()
     assert "dependency_graph" in plan.patch_families
     assert "macro_metrics" in plan.graph_recomputations
+    assert "cycles" in plan.graph_recomputations
 
 
 def test_4_symbol_add():
@@ -58,6 +60,7 @@ def test_4_symbol_add():
     assert plan.recompute_modules == ()
     assert "definitions" in plan.patch_families
     assert "identity_registry" in plan.patch_families
+    assert "cycles" not in plan.graph_recomputations
 
 
 def test_5_symbol_remove():
@@ -71,6 +74,7 @@ def test_5_symbol_remove():
     assert plan.reparse_modules == ()
     assert plan.recompute_modules == ("consumer",)
     assert "definitions" in plan.patch_families
+    assert "cycles" not in plan.graph_recomputations
 
 
 
@@ -85,6 +89,7 @@ def test_6_alias_retarget():
 
     assert plan.reparse_modules == ()
     assert "module_usages" in plan.patch_families
+    assert "cycles" not in plan.graph_recomputations
 
 
 def test_7_reexport_retarget():
@@ -93,6 +98,7 @@ def test_7_reexport_retarget():
 
     assert plan.reparse_modules == ()
     assert "dependency_graph" in plan.patch_families
+    assert "cycles" in plan.graph_recomputations
 
 
 def test_8_module_add():
@@ -103,6 +109,7 @@ def test_8_module_add():
     assert "modules" in plan.patch_families
     assert "definitions" in plan.patch_families
     assert "macro_metrics" in plan.graph_recomputations
+    assert "cycles" in plan.graph_recomputations
 
 
 def test_9_module_delete():
@@ -116,6 +123,7 @@ def test_9_module_delete():
     assert plan.reparse_modules == ()
     assert plan.recompute_modules == ("consumer",)
     assert "modules" in plan.patch_families
+    assert "cycles" in plan.graph_recomputations
 
 
 

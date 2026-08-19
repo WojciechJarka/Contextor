@@ -57,7 +57,9 @@ def _assert_state_parity(incremental_state: RepositoryAnalysisState, oracle_stat
         assert sorted(inc_entry.get("consumers", [])) == sorted(ora_entry.get("consumers", []))
         inc_channels = inc_entry.get("channels", {})
         ora_channels = ora_entry.get("channels", {})
-        assert inc_channels == ora_channels
+    # Cycles parity
+    assert incremental_state.cycles == oracle_state.cycles
+    assert incremental_state.cycles_state == oracle_state.cycles_state
 
 
 def test_case_a_body_only_retarget(tmp_path):
@@ -127,6 +129,7 @@ def test_case_b_import_change(tmp_path):
     assert "dependency_graph" in trace["patch_families"]
     assert "macro_metrics" in trace["graph_recomputations"]
     assert "reverse_blast_radius" in trace["graph_recomputations"]
+    assert "cycles" in trace["graph_recomputations"]
 
     oracle = _build_full_static_state(tmp_path)
     _assert_state_parity(engine.state, oracle)
@@ -216,6 +219,7 @@ def test_case_e_module_add(tmp_path):
     assert trace["reparse_modules"] == ()
     assert "modules" in trace["patch_families"]
     assert "macro_metrics" in trace["graph_recomputations"]
+    assert "cycles" in trace["graph_recomputations"]
 
     oracle = _build_full_static_state(tmp_path)
     _assert_state_parity(engine.state, oracle)
@@ -246,6 +250,7 @@ def test_case_f_module_delete(tmp_path):
     assert trace["reparse_modules"] == ()
     assert "consumer" in trace["recompute_modules"]
     assert "modules" in trace["patch_families"]
+    assert "cycles" in trace["graph_recomputations"]
 
     oracle = _build_full_static_state(tmp_path)
     _assert_state_parity(engine.state, oracle)

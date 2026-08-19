@@ -402,6 +402,8 @@ class ContextorFacade:
                 metrics=metrics,
                 topology_analytics=topology_analytics,
                 topology_metrics_state="fresh",
+                cycles=getattr(analysis_result, "cycles", []),
+                cycles_state="fresh",
                 layer_information={
                     "layer_index": getattr(analysis_result, "layer_index", []),
                     "hotspots": getattr(analysis_result, "hotspots", []),

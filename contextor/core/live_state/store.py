@@ -195,6 +195,16 @@ def load_snapshot(
                         setattr(state_obj, "cached_analytics_state", "deferred")
                     except AttributeError:
                         pass
+                if not hasattr(state_obj, "cycles"):
+                    try:
+                        setattr(state_obj, "cycles", [])
+                    except AttributeError:
+                        pass
+                if not hasattr(state_obj, "cycles_state"):
+                    try:
+                        setattr(state_obj, "cycles_state", "deferred")
+                    except AttributeError:
+                        pass
             return state_obj, embedded_metadata
         if payload is not None and hasattr(payload, "__dict__"):
             if not hasattr(payload, "module_usages"):
@@ -220,6 +230,16 @@ def load_snapshot(
             if not hasattr(payload, "cached_analytics_state"):
                 try:
                     setattr(payload, "cached_analytics_state", "deferred")
+                except AttributeError:
+                    pass
+            if not hasattr(payload, "cycles"):
+                try:
+                    setattr(payload, "cycles", [])
+                except AttributeError:
+                    pass
+            if not hasattr(payload, "cycles_state"):
+                try:
+                    setattr(payload, "cycles_state", "deferred")
                 except AttributeError:
                     pass
         return payload, metadata

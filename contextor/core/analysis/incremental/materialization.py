@@ -118,13 +118,53 @@ def ensure_cached_analytics(state: RepositoryAnalysisState) -> None:
         state.cached_analytics_state = "fresh"
 
 
+def ensure_cycles(state: RepositoryAnalysisState) -> None:
+    """
+    Ensures state.cycles is fresh and computed from canonical graph.
+    Recomputes in RAM when state is deferred/missing and dependency_graph is present.
+    Preserves stale state when graph is untrusted.
+    Preserves fresh state without recomputation (even if empty).
+    RAM ONLY — ZERO source I/O.
+    """
+    if not hasattr(state, "cycles_state") or state.cycles_state is None:
+        state.cycles_state = "deferred"
+
+    if not hasattr(state, "cycles") or state.cycles is None:
+        state.cycles = []
+
+    # A. Fresh state: preserve, zero recomputation (even if cycles == [])
+    if state.cycles_state == "fresh":
+        return
+
+    # B. Stale state: untrusted/desynced graph -> do NOT auto-heal
+    if state.cycles_state == "stale":
+        return
+
+    # C. Deferred / missing cycles + valid graph: atomic in-memory recomputation
+    if getattr(state, "dependency_graph", None) is not None:
+        try:
+            from contextor.core.graph.cycles import detect_cycles
+
+            hard_edges = getattr(state.dependency_graph, "hard_edges", {}) or {}
+            computed = detect_cycles(hard_edges)
+            state.cycles = computed
+            state.cycles_state = "fresh"
+        except Exception:
+            # Fail-safe continuation: preserve existing cycles, do not leave false fresh
+            if state.cycles_state == "fresh":
+                state.cycles_state = "deferred"
+
+
 def materialize_incremental_state(state: RepositoryAnalysisState) -> None:
     """
     Orchestrates complete materialization of incremental state in exact required lifecycle order:
     1. ensure_module_usages (legacy source-backed reconstruction if needed)
     2. ensure_topology_analytics (RAM-only)
     3. ensure_cached_analytics (RAM-only)
+    4. ensure_cycles (RAM-only)
     """
     ensure_module_usages(state)
     ensure_topology_analytics(state)
     ensure_cached_analytics(state)
+    ensure_cycles(state)
+

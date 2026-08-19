@@ -84,7 +84,7 @@ class RefreshPlanner:
                     "cached_analytics",
                 ),
 
-                graph_recomputations=("macro_metrics", "reverse_blast_radius", "advanced_graph_metrics"),
+                graph_recomputations=("macro_metrics", "reverse_blast_radius", "advanced_graph_metrics", "cycles"),
                 refresh_completeness="complete",
                 semantic_certainty="statically_resolved",
                 reason=f"Module DELETE for '{module_path}'.",
@@ -105,7 +105,7 @@ class RefreshPlanner:
                     "cached_analytics",
                 ),
 
-                graph_recomputations=("macro_metrics", "reverse_blast_radius", "advanced_graph_metrics"),
+                graph_recomputations=("macro_metrics", "reverse_blast_radius", "advanced_graph_metrics", "cycles"),
                 refresh_completeness="complete",
                 semantic_certainty="statically_resolved",
                 reason=f"Module ADD for '{module_path}'.",
@@ -148,7 +148,7 @@ class RefreshPlanner:
             graph_recomputations = []
             if has_import_changes:
                 patch_families.extend(["modules", "dependency_graph"])
-                graph_recomputations.extend(["macro_metrics", "reverse_blast_radius", "advanced_graph_metrics"])
+                graph_recomputations.extend(["macro_metrics", "reverse_blast_radius", "advanced_graph_metrics", "cycles"])
             patch_families.append("cached_analytics")
 
 
@@ -176,7 +176,7 @@ class RefreshPlanner:
                     "cached_analytics",
                 ),
 
-                graph_recomputations=("macro_metrics", "reverse_blast_radius", "advanced_graph_metrics"),
+                graph_recomputations=("macro_metrics", "reverse_blast_radius", "advanced_graph_metrics", "cycles"),
                 refresh_completeness="complete",
                 semantic_certainty="statically_resolved",
                 reason=f"Import changes in '{module_path}'.",
