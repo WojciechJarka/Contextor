@@ -162,6 +162,23 @@ LLM-friendly MCP target resolution
 - LIVE verification confirmed correct behavior for both restricted and unrestricted layers, including canonical `layer`, `risk_score`, `live_revision` and layer-rule state.
 - Targeted MCP regression verification passed: `14/14`.
 
+### Cross-Layer Artifact Blast Radius
+
+- Extended `get_artifact_blast_radius` with an architectural projection for direct symbol consumers.
+- Added canonical classification of consumers into:
+  - same-module consumers,
+  - same-layer consumers,
+  - production cross-layer consumers,
+  - test consumers,
+  - unknown-layer consumers.
+- Added `definer_layer`, unique `consumer_layers`, `cross_layer_consumer_count`, `cross_layer_consumers`, `test_consumer_count`, and a bounded production-only `cross_layer_sample`.
+- Test consumers are tracked separately from production cross-layer dependencies so test impact does not inflate architectural blast radius.
+- Architecture counts are derived from the exact same unique direct consumer set as the existing artifact blast radius and preserve a tested count invariant.
+- Layer classification uses fresh canonical LIVE `module_layers` only; stale, deferred, or report-only states return the architecture projection as unavailable rather than guessing.
+- The projection performs no source reads, report generation, graph recomputation or LIVE mutation.
+- MCP tool descriptions were updated to expose the exact semantics directly to coding agents.
+- LIVE verification confirmed correct same-layer, cross-layer and test-impact classification for real Contextor artifacts.
+
 ### Regression and contract verification
 
 - Added deterministic GUI progress-widget regression coverage for named-operation durations and legacy success-message compatibility.

@@ -2793,3 +2793,250 @@ def test_file_edit_context_layer_guard(monkeypatch, tmp_path):
     assert res_stale["layer_guard"]["available"] is False
     assert "stale" in res_stale["layer_guard"]["reason"]
 
+
+def test_artifact_blast_radius_architecture_projection(monkeypatch, tmp_path):
+    root = tmp_path / "repo"
+    root.mkdir()
+
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(
+        mcp_server,
+        "_read_registries",
+        lambda _root: (
+            {
+                "pkg.core": "1/1",
+                "pkg.same_layer": "2/1",
+                "pkg.cross_ui": "3/1",
+                "pkg.cross_cli": "4/1",
+                "tests.test_pkg": "5/1",
+                "pkg.unclassified": "6/1",
+            },
+            {
+                "1/1": "pkg.core",
+                "2/1": "pkg.same_layer",
+                "3/1": "pkg.cross_ui",
+                "4/1": "pkg.cross_cli",
+                "5/1": "tests.test_pkg",
+                "6/1": "pkg.unclassified",
+            },
+            {
+                "pkg.core::func_clean": "A1/1",
+                "pkg.core::func_mixed": "A2/1",
+                "pkg.core::func_duplicate": "A3/1",
+                "pkg.core::func_test_only": "A4/1",
+            },
+            {
+                "A1/1": "pkg.core::func_clean",
+                "A2/1": "pkg.core::func_mixed",
+                "A3/1": "pkg.core::func_duplicate",
+                "A4/1": "pkg.core::func_test_only",
+            },
+        ),
+    )
+
+    # 1. Fresh state with mixed consumers
+    engine_fresh = SimpleNamespace(
+        state=SimpleNamespace(
+            artifacts={
+                "pkg.core": {
+                    "own_symbols": ["func_clean", "func_mixed", "func_duplicate", "func_test_only"],
+                    "symbols": {"functions": ["func_clean", "func_mixed", "func_duplicate", "func_test_only"]},
+                    "consumers": {
+                        "func_clean": {
+                            "consumers": ["pkg.core", "pkg.same_layer"],
+                        },
+                        "func_mixed": {
+                            "consumers": [
+                                "pkg.core",             # same-module (layer: core)
+                                "pkg.same_layer",       # same-layer (layer: core)
+                                "pkg.cross_ui",         # cross-layer (layer: ui)
+                                "pkg.cross_cli",        # cross-layer (layer: cli)
+                                "tests.test_pkg",       # test consumer (layer: tests)
+                                "pkg.unclassified",     # unknown layer
+                            ],
+                        },
+                        "func_duplicate": {
+                            "consumers": [
+                                "pkg.cross_ui",
+                                "pkg.cross_ui",         # duplicated channel
+                                "tests.test_pkg",
+                                "tests.test_pkg",       # duplicated test channel
+                                "pkg.core",
+                            ],
+                        },
+                        "func_test_only": {
+                            "consumers": ["tests.test_pkg"],
+                        },
+                    },
+                }
+            },
+            cached_analytics={
+                "module_layers": {
+                    "pkg.core": "core",
+                    "pkg.same_layer": "core",
+                    "pkg.cross_ui": "ui",
+                    "pkg.cross_cli": "cli",
+                    "tests.test_pkg": "tests",
+                    # pkg.unclassified omitted
+                },
+            },
+            cached_analytics_state="fresh",
+        )
+    )
+    monkeypatch.setattr(mcp_server, "_get_or_init_engine", lambda _root: engine_fresh)
+
+    # A. Clean artifact: same-module & same-layer only
+    res_clean = json.loads(
+        mcp_server.get_artifact_blast_radius.fn(
+            repo_path=str(root),
+            artifact_name="pkg.core::func_clean",
+            compact=False,
+        )
+    )
+    arch_clean = res_clean["architecture"]
+    assert arch_clean["available"] is True
+    assert arch_clean["definer_layer"] == "core"
+    assert arch_clean["consumer_layers"] == ["core"]
+    assert arch_clean["same_module_consumer_count"] == 1
+    assert arch_clean["same_layer_consumer_count"] == 1
+    assert arch_clean["cross_layer_consumer_count"] == 0
+    assert arch_clean["test_consumer_count"] == 0
+    assert arch_clean["cross_layer_consumers"] is False
+    assert "unknown_layer_consumer_count" not in arch_clean
+    # Invariant: 1 + 1 + 0 + 0 + 0 == 2
+    assert (
+        arch_clean["same_module_consumer_count"]
+        + arch_clean["same_layer_consumer_count"]
+        + arch_clean["cross_layer_consumer_count"]
+        + arch_clean["test_consumer_count"]
+        + arch_clean.get("unknown_layer_consumer_count", 0)
+    ) == res_clean["consumers"]["total"]
+
+    # B. Mixed artifact: same-mod, same-layer, cross-layer, test, unknown
+    res_mixed = json.loads(
+        mcp_server.get_artifact_blast_radius.fn(
+            repo_path=str(root),
+            artifact_name="pkg.core::func_mixed",
+            compact=False,
+        )
+    )
+    arch_mixed = res_mixed["architecture"]
+    assert arch_mixed["available"] is True
+    assert arch_mixed["definer_layer"] == "core"
+    assert arch_mixed["consumer_layers"] == ["cli", "core", "tests", "ui"]
+    assert arch_mixed["same_module_consumer_count"] == 1
+    assert arch_mixed["same_layer_consumer_count"] == 1
+    assert arch_mixed["cross_layer_consumer_count"] == 2
+    assert arch_mixed["test_consumer_count"] == 1
+    assert arch_mixed["cross_layer_consumers"] is True
+    assert arch_mixed["unknown_layer_consumer_count"] == 1
+    assert len(arch_mixed["cross_layer_sample"]["items"]) == 2
+    # Ensure cross_layer_sample contains ONLY non-test modules
+    assert all(it["layer"] != "tests" for it in arch_mixed["cross_layer_sample"]["items"])
+    # Invariant: 1 + 1 + 2 + 1 + 1 == 6
+    assert (
+        arch_mixed["same_module_consumer_count"]
+        + arch_mixed["same_layer_consumer_count"]
+        + arch_mixed["cross_layer_consumer_count"]
+        + arch_mixed["test_consumer_count"]
+        + arch_mixed.get("unknown_layer_consumer_count", 0)
+    ) == res_mixed["consumers"]["total"]
+
+    # C. Test only artifact: test_consumer_count > 0, cross_layer_consumers is False
+    res_test_only = json.loads(
+        mcp_server.get_artifact_blast_radius.fn(
+            repo_path=str(root),
+            artifact_name="pkg.core::func_test_only",
+            compact=False,
+        )
+    )
+    arch_test_only = res_test_only["architecture"]
+    assert arch_test_only["same_module_consumer_count"] == 0
+    assert arch_test_only["same_layer_consumer_count"] == 0
+    assert arch_test_only["cross_layer_consumer_count"] == 0
+    assert arch_test_only["test_consumer_count"] == 1
+    assert arch_test_only["cross_layer_consumers"] is False
+    assert "cross_layer_sample" not in arch_test_only
+
+    # D. Duplicate consumers in channels -> counted exactly once
+    res_dup = json.loads(
+        mcp_server.get_artifact_blast_radius.fn(
+            repo_path=str(root),
+            artifact_name="pkg.core::func_duplicate",
+            compact=False,
+        )
+    )
+    arch_dup = res_dup["architecture"]
+    assert res_dup["consumers"]["total"] == 3  # pkg.core, pkg.cross_ui, tests.test_pkg (deduplicated)
+    assert arch_dup["same_module_consumer_count"] == 1
+    assert arch_dup["cross_layer_consumer_count"] == 1
+    assert arch_dup["test_consumer_count"] == 1
+    assert (
+        arch_dup["same_module_consumer_count"]
+        + arch_dup["same_layer_consumer_count"]
+        + arch_dup["cross_layer_consumer_count"]
+        + arch_dup["test_consumer_count"]
+        + arch_dup.get("unknown_layer_consumer_count", 0)
+    ) == 3
+
+    # 2. Missing definer layer + known consumer layers
+    engine_no_definer_layer = SimpleNamespace(
+        state=SimpleNamespace(
+            artifacts=engine_fresh.state.artifacts,
+            cached_analytics={
+                "module_layers": {
+                    # pkg.core omitted!
+                    "pkg.same_layer": "core",
+                    "pkg.cross_ui": "ui",
+                    "tests.test_pkg": "tests",
+                },
+            },
+            cached_analytics_state="fresh",
+        )
+    )
+    monkeypatch.setattr(mcp_server, "_get_or_init_engine", lambda _root: engine_no_definer_layer)
+    res_no_def = json.loads(
+        mcp_server.get_artifact_blast_radius.fn(
+            repo_path=str(root),
+            artifact_name="pkg.core::func_mixed",
+            compact=False,
+        )
+    )
+    arch_no_def = res_no_def["architecture"]
+    assert arch_no_def["available"] is True
+    assert arch_no_def["definer_layer"] is None
+    assert arch_no_def["same_module_consumer_count"] == 1  # pkg.core == definer_module still counts as same_module!
+    assert arch_no_def["test_consumer_count"] == 1         # tests.test_pkg (layer == "tests") counted as test!
+    assert arch_no_def["same_layer_consumer_count"] == 0   # cannot be confirmed without definer layer
+    assert arch_no_def["cross_layer_consumer_count"] == 0  # cannot be confirmed without definer layer
+    assert arch_no_def["unknown_layer_consumer_count"] == 4 # remaining non-self, non-test consumers
+    # Invariant: 1 + 0 + 0 + 1 + 4 == 6
+    assert (
+        arch_no_def["same_module_consumer_count"]
+        + arch_no_def["same_layer_consumer_count"]
+        + arch_no_def["cross_layer_consumer_count"]
+        + arch_no_def["test_consumer_count"]
+        + arch_no_def["unknown_layer_consumer_count"]
+    ) == res_no_def["consumers"]["total"]
+
+    # 3. Deferred / Stale cached analytics state -> available = False
+    engine_deferred = SimpleNamespace(
+        state=SimpleNamespace(
+            artifacts=engine_fresh.state.artifacts,
+            cached_analytics={},
+            cached_analytics_state="deferred",
+        )
+    )
+    monkeypatch.setattr(mcp_server, "_get_or_init_engine", lambda _root: engine_deferred)
+    res_def = json.loads(
+        mcp_server.get_artifact_blast_radius.fn(
+            repo_path=str(root),
+            artifact_name="pkg.core::func_clean",
+        )
+    )
+    assert res_def["architecture"]["available"] is False
+    assert "deferred" in res_def["architecture"]["reason"]
+    assert res_def["consumers"]["total"] == 2  # consumers contract remains fully functional
+
+

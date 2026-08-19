@@ -1839,16 +1839,25 @@ def get_artifact_blast_radius(
     compact artifact report. It does not claim that dynamic Python usage can
     be proven exact.
 
-    Candidate & consumer semantics:
+    Candidate, consumer & architecture semantics:
       - If a module name or module ID is passed, returns a structured diagnostic with deterministic public-first ranked artifact candidates defined by that module.
       - ``consumers``: Direct static symbol consumers with confirmed references.
+      - ``architecture``:
+          * ``definer_layer``: Canonical architectural layer of the defining module.
+          * ``consumer_layers``: Sorted list of unique known canonical layers of direct consumers.
+          * ``same_module_consumer_count``: Unique direct consumers in the same module.
+          * ``same_layer_consumer_count``: Unique direct consumers in the same layer (excluding same-module).
+          * ``cross_layer_consumer_count``: Unique direct NON-TEST consumers whose canonical layer differs from ``definer_layer``.
+          * ``test_consumer_count``: Unique direct consumers whose canonical layer is "tests".
+          * ``cross_layer_consumers``: Boolean indicating if ``cross_layer_consumer_count > 0``.
+          * ``cross_layer_sample``: Bounded sample of cross-layer production consumers (excluding tests).
 
     ``consumers`` always contains ``total`` and ``truncated``. The default
     compact response omits ``items``; set ``compact=False`` for bounded static
     evidence. ``max_items`` controls returned consumers; pass ``None`` for all
     consumers without truncation. ``fields`` projects top-level
     keys after compact shaping. Allowed values are ``artifact``, ``artifact_id``,
-    ``kind``, ``definer``, ``consumers``, ``evidence_scope``, and ``data_source``.
+    ``kind``, ``definer``, ``architecture``, ``consumers``, ``evidence_scope``, and ``data_source``.
 
     LLM use: call before changing or removing a public symbol. Treat consumers
     as confirmed static evidence, not proof that dynamic Python has no callers.
@@ -1900,11 +1909,83 @@ def get_artifact_blast_radius(
                     )
             if live_matches:
                 selected = sorted(live_matches, key=lambda item: item["artifact"])[0]
+                raw_consumer_items = list(selected.pop("consumer_items"))
+                unique_direct_consumers = sorted(set(raw_consumer_items))
                 consumer_items, consumer_total, consumer_truncated = _bounded_items(
-                    selected.pop("consumer_items"), max_items
+                    unique_direct_consumers, max_items
                 )
+
+                architecture = {"available": False}
+                cached_analytics = getattr(engine.state, "cached_analytics", {}) or {}
+                cached_state = getattr(engine.state, "cached_analytics_state", "deferred")
+                if cached_state == "fresh" and isinstance(cached_analytics, dict):
+                    module_layers = cached_analytics.get("module_layers", {}) or {}
+                    definer_module = selected.get("definer", "")
+                    definer_layer = module_layers.get(definer_module)
+
+                    same_module_consumers = []
+                    same_layer_consumers = []
+                    cross_layer_consumers_list = []
+                    test_consumers = []
+                    unknown_layer_consumers = []
+                    known_consumer_layers_set = set()
+
+                    for c_mod in unique_direct_consumers:
+                        if c_mod == definer_module:
+                            same_module_consumers.append(c_mod)
+                            continue
+
+                        c_layer = module_layers.get(c_mod)
+                        if c_layer is not None:
+                            known_consumer_layers_set.add(c_layer)
+
+                        if c_layer == "tests":
+                            test_consumers.append(c_mod)
+                        elif definer_layer is None:
+                            unknown_layer_consumers.append(c_mod)
+                        elif c_layer is None:
+                            unknown_layer_consumers.append(c_mod)
+                        elif c_layer == definer_layer:
+                            same_layer_consumers.append(c_mod)
+                        else:
+                            cross_layer_consumers_list.append({"module": c_mod, "layer": c_layer})
+
+                    same_mod_count = len(same_module_consumers)
+                    same_layer_count = len(same_layer_consumers)
+                    cross_layer_count = len(cross_layer_consumers_list)
+                    test_count = len(test_consumers)
+                    unknown_count = len(unknown_layer_consumers)
+
+                    architecture = {
+                        "available": True,
+                        "definer_layer": definer_layer,
+                        "consumer_layers": sorted(known_consumer_layers_set),
+                        "same_module_consumer_count": same_mod_count,
+                        "same_layer_consumer_count": same_layer_count,
+                        "cross_layer_consumer_count": cross_layer_count,
+                        "test_consumer_count": test_count,
+                        "cross_layer_consumers": cross_layer_count > 0,
+                    }
+                    if unknown_count > 0:
+                        architecture["unknown_layer_consumer_count"] = unknown_count
+                    if cross_layer_count > 0:
+                        cross_sample, cross_total, cross_trunc = _bounded_items(
+                            cross_layer_consumers_list, 5
+                        )
+                        architecture["cross_layer_sample"] = {
+                            "total": cross_total,
+                            "items": cross_sample,
+                            "truncated": cross_trunc,
+                        }
+                else:
+                    architecture = {
+                        "available": False,
+                        "reason": f"Cached analytics state is '{cached_state}'.",
+                    }
+
                 result = {
                     **selected,
+                    "architecture": architecture,
                     "consumers": {
                         "total": consumer_total,
                         "truncated": consumer_truncated,
@@ -2066,6 +2147,10 @@ def get_artifact_blast_radius(
             "artifact_id": art_id,
             "kind": art_data.get("kind"),
             "definer": mod_id_to_path.get(definer_id, definer_id),
+            "architecture": {
+                "available": False,
+                "reason": "Live canonical analytics unavailable in report-only mode.",
+            },
             "evidence_scope": "direct_static_artifact_consumption",
             "data_source": "current_artifacts_compact",
         }
