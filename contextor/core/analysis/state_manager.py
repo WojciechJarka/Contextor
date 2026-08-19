@@ -327,6 +327,91 @@ def validate_canonical_artifact_consumption(consumption: Any) -> bool:
     return True
 
 
+def canonical_artifact_consumption_targets(
+    artifacts: dict[str, Any] | None,
+) -> set[str]:
+    """
+    Computes the exact set of expected canonical target keys (f"{module_path}::{symbol}")
+    from defined symbols in artifacts fact dictionaries.
+    """
+    targets: set[str] = set()
+    if not isinstance(artifacts, dict):
+        return targets
+
+    for module_path, module_data in artifacts.items():
+        if not isinstance(module_path, str) or not isinstance(module_data, dict):
+            continue
+
+        # 1. Check own_symbols if available
+        own_symbols = module_data.get("own_symbols")
+        if isinstance(own_symbols, (list, set, tuple)) and own_symbols:
+            for sym in own_symbols:
+                if isinstance(sym, str) and sym:
+                    targets.add(f"{module_path}::{sym}")
+            continue
+
+        # 2. Check symbols dict if available
+        symbols = module_data.get("symbols")
+        if isinstance(symbols, dict):
+            has_syms = False
+            for cat in ("classes", "functions", "methods", "globals"):
+                cat_syms = symbols.get(cat, [])
+                if isinstance(cat_syms, (list, set, tuple)):
+                    for sym in cat_syms:
+                        if isinstance(sym, str) and sym:
+                            targets.add(f"{module_path}::{sym}")
+                            has_syms = True
+            if has_syms:
+                continue
+
+        # 3. Fallback for legacy format where only consumers dict is present
+        consumers_by_symbol = module_data.get("consumers", {})
+        if isinstance(consumers_by_symbol, dict):
+            for symbol, entry in consumers_by_symbol.items():
+                if isinstance(symbol, str) and symbol and isinstance(entry, dict):
+                    targets.add(f"{module_path}::{symbol}")
+
+    return targets
+
+
+def validate_canonical_artifact_consumption_coverage(
+    consumption: Any,
+    artifacts: Any,
+) -> bool:
+    """
+    Validates that consumption contains exactly the expected set of canonical targets
+    derived from artifacts:
+    - consumption must be structurally valid (validate_canonical_artifact_consumption)
+    - set(consumption.keys()) == canonical_artifact_consumption_targets(artifacts)
+    """
+    if not validate_canonical_artifact_consumption(consumption):
+        return False
+
+    expected = canonical_artifact_consumption_targets(artifacts)
+    actual = set(consumption.keys()) if isinstance(consumption, dict) else set()
+
+    return actual == expected
+
+
+def artifact_consumption_is_fresh(state: Any) -> bool:
+    """
+    Determines if state.artifact_consumption is genuinely fresh:
+    - state must not have resync_required == True
+    - state.artifact_consumption_state must not be 'stale'
+    - state.artifact_consumption must pass validate_canonical_artifact_consumption_coverage(state.artifact_consumption, state.artifacts)
+    """
+    if getattr(state, "resync_required", False):
+        return False
+
+    if getattr(state, "artifact_consumption_state", None) == "stale":
+        return False
+
+    consumption = getattr(state, "artifact_consumption", None)
+    artifacts = getattr(state, "artifacts", {}) or {}
+
+    return validate_canonical_artifact_consumption_coverage(consumption, artifacts)
+
+
 def build_canonical_artifact_consumption(
     artifacts: dict[str, Any],
 ) -> dict[str, dict[str, Any]]:
@@ -347,6 +432,10 @@ def build_canonical_artifact_consumption(
     result: dict[str, dict[str, Any]] = {}
     if not isinstance(artifacts, dict):
         return result
+
+    # Pre-populate all expected canonical targets with empty consumers/channels
+    for target in canonical_artifact_consumption_targets(artifacts):
+        result[target] = {"consumers": [], "channels": {}}
 
     for module_path, module_data in artifacts.items():
         if not isinstance(module_data, dict):

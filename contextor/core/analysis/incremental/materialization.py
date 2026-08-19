@@ -261,9 +261,11 @@ def ensure_artifact_consumption(state: RepositoryAnalysisState) -> None:
     Lifecycle rules:
     1. If state requires resync or is already marked stale: fail-closed (preserve stale marker).
     2. If consumption is a recognized LEGACY shape (e.g. {"_report": ...}):
-       safely migrates in RAM from state.artifacts and marks state as fresh.
-    3. If consumption is a VALID canonical structure: marks fresh (if not already set) and preserves.
-    4. If consumption is an INVALID modern canonical structure:
+       safely migrates in RAM from state.artifacts. If migrated candidate passes both
+       structural validation and coverage validation, marks state fresh; otherwise stale.
+    3. If consumption is a VALID canonical structure AND has COMPLETE COVERAGE:
+       marks fresh (if not already set) and preserves.
+    4. If consumption is an INVALID modern canonical structure or has INCOMPLETE COVERAGE:
        DO NOT auto-heal from state.artifacts; set state.artifact_consumption_state = "stale" (fail-closed).
     """
     if getattr(state, "resync_required", False) or getattr(state, "artifact_consumption_state", None) == "stale":
@@ -274,25 +276,37 @@ def ensure_artifact_consumption(state: RepositoryAnalysisState) -> None:
         build_canonical_artifact_consumption,
         is_legacy_artifact_consumption,
         validate_canonical_artifact_consumption,
+        validate_canonical_artifact_consumption_coverage,
     )
 
     consumption = getattr(state, "artifact_consumption", None)
+    artifacts = getattr(state, "artifacts", {}) or {}
 
     # A. Explicit Legacy Migration
     if is_legacy_artifact_consumption(consumption):
-        raw_artifacts = getattr(state, "artifacts", {}) or {}
-        state.artifact_consumption = build_canonical_artifact_consumption(raw_artifacts)
-        state.artifact_consumption_state = "fresh"
+        candidate = build_canonical_artifact_consumption(artifacts)
+        if (
+            validate_canonical_artifact_consumption(candidate)
+            and validate_canonical_artifact_consumption_coverage(candidate, artifacts)
+        ):
+            state.artifact_consumption = candidate
+            state.artifact_consumption_state = "fresh"
+        else:
+            state.artifact_consumption_state = "stale"
         return
 
-    # B. Valid Canonical State
-    if validate_canonical_artifact_consumption(consumption):
+    # B. Valid Canonical State with Complete Coverage
+    if (
+        validate_canonical_artifact_consumption(consumption)
+        and validate_canonical_artifact_consumption_coverage(consumption, artifacts)
+    ):
         if not hasattr(state, "artifact_consumption_state") or state.artifact_consumption_state == "deferred":
             state.artifact_consumption_state = "fresh"
         return
 
-    # C. Invalid Modern Canonical State -> Fail Closed
+    # C. Invalid Modern Canonical State OR Incomplete Coverage -> Fail Closed
     state.artifact_consumption_state = "stale"
+
 
 
 def materialize_incremental_state(state: RepositoryAnalysisState) -> None:

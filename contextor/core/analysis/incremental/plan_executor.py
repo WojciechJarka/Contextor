@@ -14,7 +14,12 @@ from pathlib import Path
 from typing import Optional, List, Set, Dict, Tuple, Any, Mapping
 
 from contextor.core.analysis.incremental.graph_ops import calculate_affected_set
-from contextor.core.analysis.state_manager import FileDelta, RepositoryAnalysisState
+from contextor.core.analysis.state_manager import (
+    FileDelta,
+    RepositoryAnalysisState,
+    canonical_artifact_consumption_targets,
+    validate_canonical_artifact_consumption_coverage,
+)
 from contextor.core.domain.graph import ProjectGraph
 from contextor.core.domain.module import Module
 from contextor.core.domain.refresh_plan import RefreshPlan
@@ -51,6 +56,7 @@ class CandidateState:
     collision_facts: Dict[str, list]
     collisions: list
     collisions_state: str
+    artifact_consumption_state: str = "deferred"
 
 
 @dataclass(frozen=True)
@@ -78,13 +84,55 @@ def _get_copy_of_entry(raw_entry: dict) -> dict:
     return {"consumers": consumers, "channels": channels}
 
 
-def _is_valid_target(t: str, candidate_modules: Mapping[str, Any]) -> bool:
-    """Validates whether a target symbol/module belongs to known candidate modules."""
-    if not t:
-        return False
-    mod_prefix = t.rsplit(".", 1)[0] if "." in t else t
-    top_prefix = t.split(".")[0] if "." in t else t
-    return mod_prefix in candidate_modules or top_prefix in candidate_modules or t in candidate_modules
+def _resolve_canonical_target_key(
+    target: Optional[str],
+    candidate_consumption: Mapping[str, Any],
+    candidate_artifacts: Mapping[str, Any],
+) -> Tuple[Optional[str], str]:
+    """
+    Resolves a target string against the canonical target domain.
+    Returns (canonical_key, status) where status is:
+    - 'resolved': exactly 1 match in canonical domain
+    - 'ambiguous': >1 matches in canonical domain (fail-closed)
+    - 'unresolved': 0 matches in canonical domain (unknown / external)
+    """
+    if not target:
+        return None, "unresolved"
+
+    expected_targets = canonical_artifact_consumption_targets(candidate_artifacts)
+
+    # Already canonical format
+    if "::" in target:
+        if target in expected_targets:
+            return target, "resolved"
+        return None, "unresolved"
+
+    # Exact dotted representation match against real canonical targets
+    matches: List[str] = []
+    for canonical in expected_targets:
+        definer, sep, symbol = canonical.partition("::")
+        if not sep:
+            continue
+
+        if f"{definer}.{symbol}" == target:
+            matches.append(canonical)
+
+    if len(matches) == 1:
+        return matches[0], "resolved"
+
+    if len(matches) > 1:
+        return None, "ambiguous"
+
+    return None, "unresolved"
+
+
+def _to_canonical_target_key(
+    target: Optional[str],
+    candidate_consumption: Mapping[str, Any],
+    candidate_artifacts: Mapping[str, Any],
+) -> Optional[str]:
+    key, _status = _resolve_canonical_target_key(target, candidate_consumption, candidate_artifacts)
+    return key
 
 
 def _prepare_candidate_state(state: RepositoryAnalysisState) -> CandidateState:
@@ -107,6 +155,7 @@ def _prepare_candidate_state(state: RepositoryAnalysisState) -> CandidateState:
         collision_facts=dict(getattr(state, "collision_facts", {}) or {}),
         collisions=list(getattr(state, "collisions", []) or []),
         collisions_state=getattr(state, "collisions_state", "deferred"),
+        artifact_consumption_state=getattr(state, "artifact_consumption_state", "deferred"),
     )
 
 
@@ -132,6 +181,8 @@ def execute_refresh_plan(
 
     # 1. PREPARE candidate state
     candidate = _prepare_candidate_state(state)
+    if getattr(state, "resync_required", False):
+        candidate.artifact_consumption_state = "stale"
 
     # Pre-populate candidate module in candidate.modules so RECOMPUTE re-export resolution
     # observes the updated module structure before PATCH
@@ -152,6 +203,7 @@ def execute_refresh_plan(
         executed_reparse.append(reparse_mod)
 
     # 3. RECOMPUTE - re-evaluate planned cached modules in RAM without source I/O
+    artifact_consumption_failed = False
     executed_recompute: List[str] = []
     if plan.recompute_modules:
         old_reexports = _build_reexport_map(state.modules)
@@ -160,9 +212,15 @@ def execute_refresh_plan(
             consumer_facts = candidate.module_usages.get(consumer_path)
             if consumer_facts:
                 c_aliases = dict(consumer_facts.aliases)
-                for call in (consumer_facts.direct_calls + consumer_facts.qualified_refs):
-                    old_t = _resolve_reexport(_resolve_alias(call, c_aliases), old_reexports)
-                    new_t = _resolve_reexport(_resolve_alias(call, c_aliases), new_reexports)
+                c_calls = tuple(consumer_facts.direct_calls or ()) + tuple(consumer_facts.qualified_refs or ())
+                for call in c_calls:
+                    raw_old = _resolve_reexport(_resolve_alias(call, c_aliases), old_reexports)
+                    raw_new = _resolve_reexport(_resolve_alias(call, c_aliases), new_reexports)
+                    old_t, old_status = _resolve_canonical_target_key(raw_old, candidate.artifact_consumption, state.artifacts)
+                    new_t, new_status = _resolve_canonical_target_key(raw_new, candidate.artifact_consumption, candidate.artifacts)
+                    if old_status == "ambiguous" or new_status == "ambiguous":
+                        artifact_consumption_failed = True
+                        candidate.artifact_consumption_state = "stale"
                     if old_t and old_t != new_t and old_t in candidate.artifact_consumption:
                         entry = _get_copy_of_entry(candidate.artifact_consumption[old_t])
                         if consumer_path in entry["consumers"]:
@@ -170,7 +228,7 @@ def execute_refresh_plan(
                         entry["channels"].pop(consumer_path, None)
                         entry["consumers"] = sorted(set(entry["consumers"]))
                         candidate.artifact_consumption[old_t] = entry
-                    if new_t and _is_valid_target(new_t, candidate.modules):
+                    if new_t:
                         entry = _get_copy_of_entry(candidate.artifact_consumption.get(new_t, {}))
                         if consumer_path not in entry["consumers"]:
                             entry["consumers"].append(consumer_path)
@@ -238,8 +296,23 @@ def execute_refresh_plan(
                         or art_key == delta.module_path
                         or art_key.startswith(mod_id + ".")
                         or art_key.startswith(delta.module_path + ".")
+                        or art_key.startswith(mod_id + "::")
+                        or art_key.startswith(delta.module_path + "::")
                     ):
                         candidate.artifact_consumption.pop(art_key, None)
+            else:
+                mod_art = candidate.artifacts.get(delta.module_path, {})
+                if isinstance(mod_art, dict):
+                    current_targets = canonical_artifact_consumption_targets({delta.module_path: mod_art})
+                    for t_key in current_targets:
+                        if t_key not in candidate.artifact_consumption:
+                            candidate.artifact_consumption[t_key] = {"consumers": [], "channels": {}}
+                    for art_key in list(candidate.artifact_consumption.keys()):
+                        if (
+                            art_key.startswith(f"{delta.module_path}::")
+                            or art_key.startswith(f"{mod_id}::")
+                        ) and art_key not in current_targets:
+                            candidate.artifact_consumption.pop(art_key, None)
 
             reexports = _build_reexport_map(candidate.modules)
 
@@ -255,8 +328,39 @@ def execute_refresh_plan(
                 [(sym, "api_imports") for sym in usage_delta.removed_imports] +
                 [(item[1], "inheritance") for item in usage_delta.removed_inheritance_refs if len(item) >= 2 and item[1]]
             )
+            current_consumed_targets: Set[str] = set()
+            if new_usage:
+                new_aliases = dict(new_usage.aliases)
+                cur_tagged = (
+                    [(sym, "direct_calls") for sym in new_usage.direct_calls] +
+                    [(sym, "runtime_calls") for sym in new_usage.runtime_calls] +
+                    [(sym, "qualified_refs") for sym in new_usage.qualified_refs] +
+                    [(sym, "callback_calls") for sym in new_usage.callback_calls] +
+                    [(sym, "event_bindings") for sym in new_usage.event_bindings] +
+                    [(sym, "api_imports") for sym in new_usage.imports] +
+                    [(item[1], "inheritance") for item in new_usage.inheritance_refs if len(item) >= 2 and item[1]]
+                )
+                for add_symbol, ch_name in cur_tagged:
+                    raw_t = _resolve_reexport(_resolve_alias(add_symbol, new_aliases), reexports)
+                    target, status = _resolve_canonical_target_key(raw_t, candidate.artifact_consumption, candidate.artifacts)
+                    if status == "ambiguous":
+                        artifact_consumption_failed = True
+                    if target:
+                        current_consumed_targets.add(target)
+                        entry = _get_copy_of_entry(candidate.artifact_consumption.get(target, {}))
+                        if delta.module_path not in entry["consumers"]:
+                            entry["consumers"].append(delta.module_path)
+                        entry["consumers"] = sorted(set(entry["consumers"]))
+                        ch_list = set(entry["channels"].get(delta.module_path, []))
+                        ch_list.add(ch_name)
+                        entry["channels"][delta.module_path] = sorted(ch_list)
+                        candidate.artifact_consumption[target] = entry
+
             for rem_symbol, ch_name in rem_tagged:
-                target = _resolve_reexport(_resolve_alias(rem_symbol, old_aliases), reexports)
+                raw_t = _resolve_reexport(_resolve_alias(rem_symbol, old_aliases), reexports)
+                target, status = _resolve_canonical_target_key(raw_t, candidate.artifact_consumption, candidate.artifacts)
+                if status == "ambiguous":
+                    artifact_consumption_failed = True
                 if target and target in candidate.artifact_consumption:
                     entry = _get_copy_of_entry(candidate.artifact_consumption[target])
                     ch_list = entry["channels"].get(delta.module_path, [])
@@ -271,29 +375,24 @@ def execute_refresh_plan(
                     entry["consumers"] = sorted(set(entry["consumers"]))
                     candidate.artifact_consumption[target] = entry
 
-            # Register current usages
-            if new_usage:
-                new_aliases = dict(new_usage.aliases)
-                cur_tagged = (
-                    [(sym, "direct_calls") for sym in new_usage.direct_calls] +
-                    [(sym, "runtime_calls") for sym in new_usage.runtime_calls] +
-                    [(sym, "qualified_refs") for sym in new_usage.qualified_refs] +
-                    [(sym, "callback_calls") for sym in new_usage.callback_calls] +
-                    [(sym, "event_bindings") for sym in new_usage.event_bindings] +
-                    [(sym, "api_imports") for sym in new_usage.imports] +
-                    [(item[1], "inheritance") for item in new_usage.inheritance_refs if len(item) >= 2 and item[1]]
-                )
-                for add_symbol, ch_name in cur_tagged:
-                    target = _resolve_reexport(_resolve_alias(add_symbol, new_aliases), reexports)
-                    if target and _is_valid_target(target, candidate.modules):
-                        entry = _get_copy_of_entry(candidate.artifact_consumption.get(target, {}))
-                        if delta.module_path not in entry["consumers"]:
-                            entry["consumers"].append(delta.module_path)
-                        entry["consumers"] = sorted(set(entry["consumers"]))
-                        ch_list = set(entry["channels"].get(delta.module_path, []))
-                        ch_list.add(ch_name)
-                        entry["channels"][delta.module_path] = sorted(ch_list)
-                        candidate.artifact_consumption[target] = entry
+            # Purge delta.module_path from any target it no longer consumes
+            for t_key, entry in list(candidate.artifact_consumption.items()):
+                if t_key not in current_consumed_targets:
+                    if delta.module_path in entry.get("channels", {}):
+                        entry["channels"].pop(delta.module_path, None)
+                    if delta.module_path in entry.get("consumers", []):
+                        entry["consumers"].remove(delta.module_path)
+                    entry["consumers"] = sorted(set(entry["consumers"]))
+                    candidate.artifact_consumption[t_key] = entry
+
+            if (
+                not artifact_consumption_failed
+                and not getattr(state, "resync_required", False)
+                and validate_canonical_artifact_consumption_coverage(candidate.artifact_consumption, candidate.artifacts)
+            ):
+                candidate.artifact_consumption_state = "fresh"
+            else:
+                candidate.artifact_consumption_state = "stale"
 
             executed_patch_families.append("artifact_consumption")
 
@@ -398,12 +497,15 @@ def execute_refresh_plan(
             raise ValueError(f"Unsupported graph recomputation: {graph_item}")
 
     # 6. FRESHNESS ASSIGNMENT
-    if plan.refresh_completeness == "requires_resync":
+    if plan.refresh_completeness == "requires_resync" or getattr(state, "resync_required", False):
         candidate.topology_metrics_state = "stale"
         candidate.cached_analytics_state = "stale"
         candidate.cycles_state = "stale"
         candidate.collisions_state = "stale"
+        candidate.artifact_consumption_state = "stale"
     else:
+        if artifact_consumption_failed:
+            candidate.artifact_consumption_state = "stale"
         if "advanced_graph_metrics" in plan.graph_recomputations:
             candidate.topology_metrics_state = "fresh"
         if "cached_analytics" in plan.patch_families:

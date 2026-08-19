@@ -29,6 +29,10 @@ from contextor.core.analysis.incremental.preparation import (
 from contextor.core.analysis.incremental.plan_executor import (
     execute_refresh_plan,
 )
+from contextor.core.analysis.state_manager import (
+    artifact_consumption_is_fresh,
+    validate_canonical_artifact_consumption_coverage,
+)
 
 
 @dataclass
@@ -114,7 +118,7 @@ class IncrementalAnalysisEngine:
                     cached_analytics_state=getattr(self.state, "cached_analytics_state", "fresh" if bool(getattr(self.state, "cached_analytics", None)) else "deferred"),
                     cycles_state=getattr(self.state, "cycles_state", "fresh" if hasattr(self.state, "cycles") else "deferred"),
                     collisions_state=getattr(self.state, "collisions_state", "deferred"),
-                    artifact_consumption_state="fresh" if self.state.artifact_consumption is not None else "stale",
+                    artifact_consumption_state="fresh" if artifact_consumption_is_fresh(self.state) else "stale",
                 )
 
             path = Path(file_path)
@@ -161,7 +165,7 @@ class IncrementalAnalysisEngine:
                     cached_analytics_state="fresh",
                     cycles_state="fresh",
                     collisions_state=getattr(self.state, "collisions_state", "deferred"),
-                    artifact_consumption_state="fresh",
+                    artifact_consumption_state="fresh" if artifact_consumption_is_fresh(self.state) else "stale",
                     affected_modules=affected_modules,
                     shadow_plan=plan,
                     execution_trace=execution_trace,
@@ -225,7 +229,7 @@ class IncrementalAnalysisEngine:
                     cached_analytics_state=getattr(self.state, "cached_analytics_state", "fresh" if bool(getattr(self.state, "cached_analytics", None)) else "deferred"),
                     cycles_state=getattr(self.state, "cycles_state", "fresh" if hasattr(self.state, "cycles") else "deferred"),
                     collisions_state=getattr(self.state, "collisions_state", "deferred"),
-                    artifact_consumption_state="fresh",
+                    artifact_consumption_state="fresh" if artifact_consumption_is_fresh(self.state) else "stale",
                     affected_modules=[],
                     shadow_plan=plan,
                     execution_trace={
@@ -267,7 +271,7 @@ class IncrementalAnalysisEngine:
                 else:
                     cycles_state = getattr(self.state, "cycles_state", "fresh" if hasattr(self.state, "cycles") else "deferred")
                 collisions_state = getattr(self.state, "collisions_state", "deferred")
-                artifact_consumption_state = "fresh" if ("artifact_consumption" in plan.patch_families or self.state.artifact_consumption is not None) else "stale"
+                artifact_consumption_state = "fresh" if artifact_consumption_is_fresh(self.state) else "stale"
 
             affected_modules = sorted(affected_set) if blast_radius_complete else []
 
@@ -362,6 +366,14 @@ class IncrementalAnalysisEngine:
         self.state.collisions = candidate.collisions
         self.state.collisions_state = candidate.collisions_state
         self.state.artifact_consumption = candidate.artifact_consumption
+        if (
+            candidate.artifact_consumption_state != "stale"
+            and not getattr(self.state, "resync_required", False)
+            and validate_canonical_artifact_consumption_coverage(candidate.artifact_consumption, candidate.artifacts)
+        ):
+            self.state.artifact_consumption_state = "fresh"
+        else:
+            self.state.artifact_consumption_state = "stale"
         self.state.module_usages = candidate.module_usages
         self.state.trie = candidate.trie
         self.state.package_root = candidate.package_root

@@ -1,8 +1,9 @@
 """
 tests/test_matrix_clusters_ram_parity.py
 
-Stage 1 — Canonical Single-SSOT Contract, Real Production Parity, and Pure-RAM Test Suite
-for Canonical LIVE Dependency Matrix and Shared Usage Clusters (Jaccard).
+Stage 1 — Canonical Single-SSOT Contract, Real Production Parity, Coverage Validation,
+Real Incremental Writer Proof, and Pure-RAM Test Suite for Canonical LIVE Dependency Matrix
+and Shared Usage Clusters (Jaccard).
 """
 
 from collections import defaultdict
@@ -16,16 +17,25 @@ from contextor.core.analysis.incremental.materialization import (
     ensure_artifact_consumption,
     materialize_incremental_state,
 )
+from contextor.core.analysis.incremental.plan_executor import (
+    _resolve_canonical_target_key,
+    _to_canonical_target_key,
+    execute_refresh_plan,
+)
 from contextor.core.analysis.state_manager import (
     CANONICAL_USAGE_CHANNELS,
     RepositoryAnalysisState,
+    artifact_consumption_is_fresh,
     build_canonical_artifact_consumption,
+    canonical_artifact_consumption_targets,
     is_legacy_artifact_consumption,
     validate_canonical_artifact_consumption,
+    validate_canonical_artifact_consumption_coverage,
 )
 from contextor.core.api.facade import ContextorFacade
 from contextor.core.domain.graph import ProjectGraph
 from contextor.core.domain.module import Module
+from contextor.core.domain.refresh_plan import RefreshPlan
 from contextor.core.live_state.hydration import hydrate_repository_engine
 from contextor.core.reporting_engine.graph_analytics import (
     _usage_dependency_types,
@@ -146,9 +156,10 @@ def test_real_production_facade_to_hydration_parity(tmp_path: Path):
     state = hydrated.engine.state
 
     # ==========================================================================
-    # A. CANONICAL ARTIFACT_CONSUMPTION SSOT CONTRACT VERIFICATION
+    # A. CANONICAL ARTIFACT_CONSUMPTION SSOT CONTRACT & COVERAGE VERIFICATION
     # ==========================================================================
     assert validate_canonical_artifact_consumption(state.artifact_consumption) is True
+    assert validate_canonical_artifact_consumption_coverage(state.artifact_consumption, state.artifacts) is True
     assert state.artifact_consumption_state == "fresh"
     assert "_report" not in state.artifact_consumption
     assert "core::Engine.start" in state.artifact_consumption
@@ -233,7 +244,668 @@ def test_real_production_facade_to_hydration_parity(tmp_path: Path):
 
 
 # ==============================================================================
-# 2. STRICT CANONICAL CHANNEL ALLOWLIST & INTERNAL CONSISTENCY PROOF
+# 2. REAL INCREMENTAL WRITER (PLAN EXECUTOR) ADD / REMOVE CONSUMER PROOF
+# ==============================================================================
+
+def test_real_incremental_writer_consumer_delta(tmp_path: Path):
+    """
+    PROVES that a real incremental update executed via IncrementalAnalysisEngine / plan_executor:
+    1. Removes a deleted consumer from state.artifact_consumption without ghost entries.
+    2. Maintains strict canonical structural validity (validate_canonical_artifact_consumption).
+    3. Maintains complete coverage validation (validate_canonical_artifact_consumption_coverage).
+    4. Deterministically updates sorted consumers and channels list.
+    """
+    repo_dir = tmp_path / "inc_repo"
+    repo_dir.mkdir(parents=True, exist_ok=True)
+
+    core_file = repo_dir / "core.py"
+    core_file.write_text(
+        "def helper_func():\n"
+        "    return 42\n",
+        encoding="utf-8",
+    )
+
+    app_file = repo_dir / "app.py"
+    app_file.write_text(
+        "from core import helper_func\n\n"
+        "def main():\n"
+        "    return helper_func()\n",
+        encoding="utf-8",
+    )
+
+    facade = ContextorFacade()
+    errors, analysis_result = facade.analyze_project(str(repo_dir))
+    assert not errors
+
+    hydrated = hydrate_repository_engine(repo_dir)
+    assert hydrated is not None
+    engine = hydrated.engine
+
+    # Initial state check
+    target_key = "core::helper_func"
+    assert target_key in engine.state.artifact_consumption
+    assert engine.state.artifact_consumption[target_key]["consumers"] == ["app"]
+    assert engine.state.artifact_consumption[target_key]["channels"] == {
+        "app": ["api_imports", "direct_calls", "runtime_calls"]
+    }
+
+    # Perform real file edit: remove usage of helper_func from app.py
+    app_file.write_text(
+        "def main():\n"
+        "    return 100\n",
+        encoding="utf-8",
+    )
+
+    # Real incremental update execution
+    res = engine.update_file(str(app_file))
+    assert res.status in ("UPDATED", "SUCCESS")
+
+    # Inspect post-update canonical artifact_consumption
+    assert validate_canonical_artifact_consumption(engine.state.artifact_consumption) is True
+    assert validate_canonical_artifact_consumption_coverage(engine.state.artifact_consumption, engine.state.artifacts) is True
+    assert engine.state.artifact_consumption_state == "fresh"
+
+    # Invariant: set(state.artifact_consumption) == canonical_artifact_consumption_targets(state.artifacts)
+    assert set(engine.state.artifact_consumption.keys()) == canonical_artifact_consumption_targets(engine.state.artifacts)
+
+    updated_entry = engine.state.artifact_consumption[target_key]
+    assert "app" not in updated_entry["consumers"]
+    assert "app" not in updated_entry["channels"]
+    assert updated_entry["consumers"] == []
+    assert updated_entry["channels"] == {}
+
+
+# ==============================================================================
+# 2.B CANONICAL TARGET RESOLUTION (NON-HEURISTIC & AMBIGUITY REGRESSIONS)
+# ==============================================================================
+
+def test_ambiguity_regression_returns_none():
+    """
+    PROVES that when two canonical targets produce identical dotted representations:
+        a::b.c  -> "a.b.c"
+        a.b::c  -> "a.b.c"
+    Resolver for "a.b.c" fails closed by returning None instead of picking arbitrarily.
+    """
+    candidate_artifacts = {
+        "a": {"consumers": {"b.c": {"consumers": [], "usage": {}}}},
+        "a.b": {"consumers": {"c": {"consumers": [], "usage": {}}}},
+    }
+    assert canonical_artifact_consumption_targets(candidate_artifacts) == {"a::b.c", "a.b::c"}
+
+    res = _to_canonical_target_key("a.b.c", {}, candidate_artifacts)
+    assert res is None, f"Expected None for ambiguous target, got {res}"
+
+
+def test_nested_module_regression():
+    """
+    PROVES that for nested modules:
+        pkg::something
+        pkg.core::Engine.start
+    Input: "pkg.core.Engine.start"
+    Exact resolved output: "pkg.core::Engine.start" (NOT "pkg::core.Engine.start" and NOT "pkg.core.Engine::start").
+    """
+    candidate_artifacts = {
+        "pkg": {"consumers": {"something": {"consumers": [], "usage": {}}}},
+        "pkg.core": {"consumers": {"Engine.start": {"consumers": [], "usage": {}}}},
+    }
+    assert canonical_artifact_consumption_targets(candidate_artifacts) == {"pkg::something", "pkg.core::Engine.start"}
+
+    res = _to_canonical_target_key("pkg.core.Engine.start", {}, candidate_artifacts)
+    assert res == "pkg.core::Engine.start"
+
+
+def test_class_method_regression():
+    """
+    PROVES that for class-qualified methods:
+        contextor.core.analysis::Engine.run
+    Dotted input: "contextor.core.analysis.Engine.run"
+    Resolver preserves definer module and qualified symbol boundary: "contextor.core.analysis::Engine.run".
+    """
+    candidate_artifacts = {
+        "contextor.core.analysis": {"consumers": {"Engine.run": {"consumers": [], "usage": {}}}},
+    }
+    res = _to_canonical_target_key("contextor.core.analysis.Engine.run", {}, candidate_artifacts)
+    assert res == "contextor.core.analysis::Engine.run"
+
+
+def test_unknown_target_regression():
+    """
+    PROVES that for non-existent target:
+    Input: "pkg.core.DoesNotExist.run"
+    Even if "pkg.core" is a known module, resolver returns None without inventing non-existent target.
+    """
+    candidate_artifacts = {
+        "pkg.core": {"consumers": {"ExistingFunc": {"consumers": [], "usage": {}}}},
+    }
+    res = _to_canonical_target_key("pkg.core.DoesNotExist.run", {}, candidate_artifacts)
+    assert res is None
+
+
+def test_order_independence_regression():
+    """
+    PROVES that dictionary key order in candidate_artifacts has zero effect on resolution result.
+    """
+    artifacts_1 = {
+        "pkg": {"consumers": {"helper": {"consumers": [], "usage": {}}}},
+        "pkg.sub": {"consumers": {"helper": {"consumers": [], "usage": {}}}},
+    }
+    artifacts_2 = {
+        "pkg.sub": {"consumers": {"helper": {"consumers": [], "usage": {}}}},
+        "pkg": {"consumers": {"helper": {"consumers": [], "usage": {}}}},
+    }
+
+    res_1 = _to_canonical_target_key("pkg.sub.helper", {}, artifacts_1)
+    res_2 = _to_canonical_target_key("pkg.sub.helper", {}, artifacts_2)
+
+    assert res_1 == "pkg.sub::helper"
+    assert res_2 == "pkg.sub::helper"
+    assert res_1 == res_2
+
+
+def test_resolver_distinguishes_unknown_from_ambiguous():
+    """
+    PROVES that _resolve_canonical_target_key distinguishes:
+    - 'resolved': exactly 1 canonical match
+    - 'ambiguous': >1 canonical matches (fail-closed)
+    - 'unresolved': 0 matches (valid unknown / external)
+    """
+    candidate_artifacts = {
+        "a": {"consumers": {"b.c": {"consumers": [], "usage": {}}}},
+        "a.b": {"consumers": {"c": {"consumers": [], "usage": {}}}},
+        "pkg.core": {"consumers": {"unique_func": {"consumers": [], "usage": {}}}},
+    }
+
+    # 1. Resolved
+    key, status = _resolve_canonical_target_key("pkg.core.unique_func", {}, candidate_artifacts)
+    assert status == "resolved"
+    assert key == "pkg.core::unique_func"
+
+    # 2. Ambiguous (>1 matches)
+    key, status = _resolve_canonical_target_key("a.b.c", {}, candidate_artifacts)
+    assert status == "ambiguous"
+    assert key is None
+
+    # 3. Unresolved (unknown external symbol)
+    key, status = _resolve_canonical_target_key("external.lib.non_existent", {}, candidate_artifacts)
+    assert status == "unresolved"
+    assert key is None
+
+    # 4. Canonical key present
+    key, status = _resolve_canonical_target_key("pkg.core::unique_func", {}, candidate_artifacts)
+    assert status == "resolved"
+    assert key == "pkg.core::unique_func"
+
+    # 5. Canonical key not in domain
+    key, status = _resolve_canonical_target_key("pkg.core::ghost_func", {}, candidate_artifacts)
+    assert status == "unresolved"
+    assert key is None
+
+
+def test_ambiguity_execution_semantic_regression_fails_closed(tmp_path: Path):
+    """
+    PROVES that when ambiguous usage occurs during incremental refresh:
+    - Candidate state marks artifact_consumption_state = 'stale'
+    - State publication preserves 'stale'
+    - Even if key coverage is 100% complete.
+    """
+    repo_dir = tmp_path / "ambiguous_repo"
+    repo_dir.mkdir()
+
+    # Module 'a' with symbol 'b.c' and module 'a.b' with symbol 'c'
+    a_dir = repo_dir / "a"
+    a_dir.mkdir()
+    (a_dir / "__init__.py").write_text("", encoding="utf-8")
+    (a_dir / "b.py").write_text("def c(): pass\n", encoding="utf-8")
+
+    app_file = repo_dir / "app.py"
+    app_file.write_text("import a.b\ndef run(): a.b.c()\n", encoding="utf-8")
+
+    facade = ContextorFacade()
+    errors, _ = facade.analyze_project(str(repo_dir))
+    assert not errors
+
+    hydrated = hydrate_repository_engine(repo_dir)
+    assert hydrated is not None
+    engine = hydrated.engine
+
+    # Artificially create ambiguity domain in artifacts: a::b.c and a.b::c
+    engine.state.artifacts["a"] = {"consumers": {"b.c": {"consumers": [], "usage": {}}}}
+    engine.state.artifacts["a.b"] = {"consumers": {"c": {"consumers": [], "usage": {}}}}
+    engine.state.artifacts["app"] = {"consumers": {"run": {"consumers": [], "usage": {}}}}
+
+    # Initial consumption matching domain
+    engine.state.artifact_consumption = {
+        "a::b.c": {"consumers": [], "channels": {}},
+        "a.b::c": {"consumers": [], "channels": {}},
+        "app::run": {"consumers": [], "channels": {}},
+    }
+    assert validate_canonical_artifact_consumption_coverage(engine.state.artifact_consumption, engine.state.artifacts) is True
+
+    # Modify app.py to call ambiguous dotted target 'a.b.c'
+    app_file.write_text("import a.b\ndef run():\n    a.b.c()\n", encoding="utf-8")
+
+    res = engine.update_file(str(app_file))
+    assert res.status in ("UPDATED", "SUCCESS")
+
+    # Invariant: coverage is 100% valid, but state MUST be stale due to semantic ambiguity!
+    assert validate_canonical_artifact_consumption_coverage(engine.state.artifact_consumption, engine.state.artifacts) is True
+    assert engine.state.artifact_consumption_state == "stale"
+    assert res.artifact_consumption_state == "stale"
+
+
+def test_early_ambiguity_in_recompute_phase_is_sticky_across_clean_later_patch(tmp_path: Path):
+    """
+    PROVES that if an ambiguity is detected in an earlier phase (e.g. RECOMPUTE),
+    a subsequent clean PATCH phase with 100% valid coverage CANNOT overwrite the failure.
+    The candidate and committed state must remain 'stale'.
+    """
+    repo_dir = tmp_path / "sticky_repo"
+    repo_dir.mkdir()
+
+    core_file = repo_dir / "core.py"
+    core_file.write_text("def helper(): return 1\ndef helper2(): return 2\n", encoding="utf-8")
+
+    app_file = repo_dir / "app.py"
+    app_file.write_text("import core\ndef main(): return core.helper()\n", encoding="utf-8")
+
+    facade = ContextorFacade()
+    errors, _ = facade.analyze_project(str(repo_dir))
+    assert not errors
+
+    hydrated = hydrate_repository_engine(repo_dir)
+    assert hydrated is not None
+    engine = hydrated.engine
+
+    # Domain has ambiguity: a::b.c and a.b::c
+    engine.state.artifacts["a"] = {"consumers": {"b.c": {"consumers": [], "usage": {}}}}
+    engine.state.artifacts["a.b"] = {"consumers": {"c": {"consumers": [], "usage": {}}}}
+    engine.state.artifact_consumption["a::b.c"] = {"consumers": [], "channels": {}}
+    engine.state.artifact_consumption["a.b::c"] = {"consumers": [], "channels": {}}
+
+    # Consumer module has ambiguous call in RECOMPUTE phase
+    from contextor.core.domain.usage_facts import ModuleUsageFacts
+    engine.state.module_usages["other_consumer"] = ModuleUsageFacts(
+        direct_calls=["a.b.c"]
+    )
+    engine.state.modules["other_consumer"] = Module(
+        module_id="other_consumer", path="other.py", absolute_path="/other.py", imports=[]
+    )
+
+    # Perform clean update on app_file (switches to helper2 cleanly)
+    # Mock refresh planner to include 'other_consumer' in recompute_modules
+    from contextor.core.analysis.refresh_planner import RefreshPlanner
+    original_plan_refresh = RefreshPlanner.plan_refresh
+
+    def mock_plan(*args, **kwargs):
+        p = original_plan_refresh(*args, **kwargs)
+        # Add other_consumer to recompute_modules
+        return RefreshPlan(
+            reparse_modules=p.reparse_modules,
+            recompute_modules=tuple(list(p.recompute_modules) + ["other_consumer"]),
+            patch_families=p.patch_families,
+            graph_recomputations=p.graph_recomputations,
+            refresh_completeness=p.refresh_completeness,
+        )
+
+    with patch.object(RefreshPlanner, "plan_refresh", side_effect=mock_plan):
+        app_file.write_text("import core\ndef main(): return core.helper2()\n", encoding="utf-8")
+        res = engine.update_file(str(app_file))
+        assert res.status in ("UPDATED", "SUCCESS")
+
+    # Invariant: Phase 1 (RECOMPUTE) failed on ambiguity.
+    # Phase 2 (PATCH artifact_consumption) was clean and coverage is True.
+    # Candidate & committed state MUST be 'stale'!
+    assert validate_canonical_artifact_consumption_coverage(engine.state.artifact_consumption, engine.state.artifacts) is True
+    assert engine.state.artifact_consumption_state == "stale"
+    assert res.artifact_consumption_state == "stale"
+
+
+def test_forensic_post_add_artifact_shape_and_canonical_definition_domain(tmp_path: Path):
+    """
+    FORENSIC PROOF:
+    Adding a new provider module with zero consumers immediately creates its canonical target
+    in artifact_consumption with empty consumers/channels, ensuring exact coverage is True and fresh.
+    """
+    repo_dir = tmp_path / "forensic_repo"
+    repo_dir.mkdir()
+    base_file = repo_dir / "base.py"
+    base_file.write_text("def base(): return 0\n", encoding="utf-8")
+
+    facade = ContextorFacade()
+    errors, _ = facade.analyze_project(str(repo_dir))
+    assert not errors
+
+    hydrated = hydrate_repository_engine(repo_dir)
+    assert hydrated is not None
+    engine = hydrated.engine
+
+    prov_file = repo_dir / "_contextor_live_probe_provider.py"
+    prov_file.write_text("def probe_value():\n    return 1\n", encoding="utf-8")
+
+    res = engine.update_file(str(prov_file))
+    assert res.status in ("UPDATED", "SUCCESS")
+
+    prov_art = engine.state.artifacts["_contextor_live_probe_provider"]
+    assert "probe_value" in prov_art["symbols"]["functions"]
+    assert "probe_value" in prov_art["own_symbols"]
+
+    expected_targets = canonical_artifact_consumption_targets(engine.state.artifacts)
+    actual_targets = set(engine.state.artifact_consumption.keys())
+
+    assert expected_targets == {"base::base", "_contextor_live_probe_provider::probe_value"}
+    assert actual_targets == expected_targets
+    assert expected_targets - actual_targets == set()
+    assert actual_targets - expected_targets == set()
+
+    entry = engine.state.artifact_consumption["_contextor_live_probe_provider::probe_value"]
+    assert entry == {"consumers": [], "channels": {}}
+    assert validate_canonical_artifact_consumption_coverage(engine.state.artifact_consumption, engine.state.artifacts) is True
+    assert engine.state.artifact_consumption_state == "fresh"
+    assert not getattr(engine.state, "resync_required", False)
+
+
+def test_zero_consumer_defined_symbols_domain_parity(tmp_path: Path):
+    """
+    PROVES that all defined symbol categories (function, class, method, global)
+    with zero consumers exist as canonical targets in artifact_consumption with consumers=[] and channels={}.
+    """
+    repo_dir = tmp_path / "zero_consumer_repo"
+    repo_dir.mkdir()
+    core_file = repo_dir / "core.py"
+    core_file.write_text(
+        "CONST = 42\n\n"
+        "def stand_alone_func():\n"
+        "    return 1\n\n"
+        "class StandAloneClass:\n"
+        "    def member_method(self):\n"
+        "        return 2\n",
+        encoding="utf-8",
+    )
+
+    facade = ContextorFacade()
+    errors, _ = facade.analyze_project(str(repo_dir))
+    assert not errors
+
+    hydrated = hydrate_repository_engine(repo_dir)
+    assert hydrated is not None
+    state = hydrated.engine.state
+
+    expected = {
+        "core::CONST",
+        "core::stand_alone_func",
+        "core::StandAloneClass",
+        "core::StandAloneClass.member_method",
+    }
+    assert set(state.artifact_consumption.keys()) == expected
+    for target in expected:
+        assert state.artifact_consumption[target] == {"consumers": [], "channels": {}}
+
+    assert validate_canonical_artifact_consumption_coverage(state.artifact_consumption, state.artifacts) is True
+    assert state.artifact_consumption_state == "fresh"
+
+
+def test_incremental_add_provider_and_consumer_full_lifecycle(tmp_path: Path):
+    """
+    PROVES the full real incremental lifecycle:
+    1. ADD provider (zero consumers) -> target created, coverage True, state fresh
+    2. ADD consumer -> provider target registered with consumer, coverage True, state fresh
+    3. REMOVE consumer usage -> provider target consumers cleared, coverage True, state fresh
+    4. RESTORE consumer usage -> consumer re-registered exactly once, coverage True, state fresh
+    5. DELETE consumer -> consumer module removed, provider target retains 0 consumers, coverage True, state fresh
+    6. DELETE provider -> provider target completely removed, coverage True, state fresh
+    """
+    repo_dir = tmp_path / "lifecycle_repo"
+    repo_dir.mkdir()
+    base_file = repo_dir / "base.py"
+    base_file.write_text("def base(): return 0\n", encoding="utf-8")
+
+    facade = ContextorFacade()
+    errors, _ = facade.analyze_project(str(repo_dir))
+    assert not errors
+
+    hydrated = hydrate_repository_engine(repo_dir)
+    assert hydrated is not None
+    engine = hydrated.engine
+
+    # STEP 1: ADD provider
+    prov_file = repo_dir / "_contextor_live_probe_provider.py"
+    prov_file.write_text("def probe_value():\n    return 1\n", encoding="utf-8")
+    res1 = engine.update_file(str(prov_file))
+    assert res1.status in ("UPDATED", "SUCCESS")
+
+    assert "_contextor_live_probe_provider::probe_value" in engine.state.artifact_consumption
+    assert engine.state.artifact_consumption["_contextor_live_probe_provider::probe_value"] == {
+        "consumers": [],
+        "channels": {},
+    }
+    assert validate_canonical_artifact_consumption_coverage(engine.state.artifact_consumption, engine.state.artifacts) is True
+    assert engine.state.artifact_consumption_state == "fresh"
+
+    # STEP 2: ADD consumer
+    cons_file = repo_dir / "_contextor_live_probe_consumer.py"
+    cons_file.write_text(
+        "from _contextor_live_probe_provider import probe_value\n\n"
+        "def probe_run():\n"
+        "    return probe_value()\n",
+        encoding="utf-8",
+    )
+    res2 = engine.update_file(str(cons_file))
+    assert res2.status in ("UPDATED", "SUCCESS")
+
+    prov_entry = engine.state.artifact_consumption["_contextor_live_probe_provider::probe_value"]
+    assert prov_entry["consumers"] == ["_contextor_live_probe_consumer"]
+    assert "_contextor_live_probe_consumer" in prov_entry["channels"]
+    assert sorted(set(prov_entry["channels"]["_contextor_live_probe_consumer"])) == prov_entry["channels"]["_contextor_live_probe_consumer"]
+    assert validate_canonical_artifact_consumption_coverage(engine.state.artifact_consumption, engine.state.artifacts) is True
+    assert engine.state.artifact_consumption_state == "fresh"
+
+    # STEP 3: REMOVE consumer usage
+    cons_file.write_text(
+        "def probe_run():\n"
+        "    return 100\n",
+        encoding="utf-8",
+    )
+    res3 = engine.update_file(str(cons_file))
+    assert res3.status in ("UPDATED", "SUCCESS")
+
+    prov_entry = engine.state.artifact_consumption["_contextor_live_probe_provider::probe_value"]
+    assert prov_entry["consumers"] == []
+    assert prov_entry["channels"] == {}
+    assert validate_canonical_artifact_consumption_coverage(engine.state.artifact_consumption, engine.state.artifacts) is True
+    assert engine.state.artifact_consumption_state == "fresh"
+
+    # STEP 4: RESTORE consumer usage
+    cons_file.write_text(
+        "from _contextor_live_probe_provider import probe_value\n\n"
+        "def probe_run():\n"
+        "    return probe_value()\n",
+        encoding="utf-8",
+    )
+    res4 = engine.update_file(str(cons_file))
+    assert res4.status in ("UPDATED", "SUCCESS")
+
+    prov_entry = engine.state.artifact_consumption["_contextor_live_probe_provider::probe_value"]
+    assert prov_entry["consumers"] == ["_contextor_live_probe_consumer"]
+    assert len(prov_entry["consumers"]) == len(set(prov_entry["consumers"]))
+    assert validate_canonical_artifact_consumption_coverage(engine.state.artifact_consumption, engine.state.artifacts) is True
+    assert engine.state.artifact_consumption_state == "fresh"
+
+    # STEP 5: DELETE consumer
+    cons_file.unlink()
+    res5 = engine.update_file(str(cons_file))
+    assert res5.status in ("DELETED", "SUCCESS")
+
+    assert "_contextor_live_probe_consumer" not in engine.state.modules
+    prov_entry = engine.state.artifact_consumption["_contextor_live_probe_provider::probe_value"]
+    assert prov_entry["consumers"] == []
+    assert prov_entry["channels"] == {}
+    assert validate_canonical_artifact_consumption_coverage(engine.state.artifact_consumption, engine.state.artifacts) is True
+    assert engine.state.artifact_consumption_state == "fresh"
+
+    # STEP 6: DELETE provider
+    prov_file.unlink()
+    res6 = engine.update_file(str(prov_file))
+    assert res6.status in ("DELETED", "SUCCESS")
+
+    assert "_contextor_live_probe_provider" not in engine.state.modules
+    assert "_contextor_live_probe_provider::probe_value" not in engine.state.artifact_consumption
+    assert set(engine.state.artifact_consumption.keys()) == {"base::base"}
+    assert validate_canonical_artifact_consumption_coverage(engine.state.artifact_consumption, engine.state.artifacts) is True
+    assert engine.state.artifact_consumption_state == "fresh"
+
+
+def test_full_analysis_vs_incremental_add_exact_parity(tmp_path: Path):
+    """
+    PROVES exact parity between:
+    A. Full analysis of a repository with provider and consumer
+    B. Incremental addition of the same provider and consumer to a base repository
+    """
+    # Repo A: Full analysis
+    dir_a = tmp_path / "repo_a"
+    dir_a.mkdir()
+    (dir_a / "base.py").write_text("def base(): return 0\n", encoding="utf-8")
+    (dir_a / "prov.py").write_text("def helper(): return 1\n", encoding="utf-8")
+    (dir_a / "cons.py").write_text("from prov import helper\ndef run(): return helper()\n", encoding="utf-8")
+
+    facade_a = ContextorFacade()
+    errors_a, _ = facade_a.analyze_project(str(dir_a))
+    assert not errors_a
+    state_a = hydrate_repository_engine(dir_a).engine.state
+
+    # Repo B: Incremental addition
+    dir_b = tmp_path / "repo_b"
+    dir_b.mkdir()
+    (dir_b / "base.py").write_text("def base(): return 0\n", encoding="utf-8")
+
+    facade_b = ContextorFacade()
+    errors_b, _ = facade_b.analyze_project(str(dir_b))
+    assert not errors_b
+    engine_b = hydrate_repository_engine(dir_b).engine
+
+    (dir_b / "prov.py").write_text("def helper(): return 1\n", encoding="utf-8")
+    engine_b.update_file(str(dir_b / "prov.py"))
+
+    (dir_b / "cons.py").write_text("from prov import helper\ndef run(): return helper()\n", encoding="utf-8")
+    engine_b.update_file(str(dir_b / "cons.py"))
+    state_b = engine_b.state
+
+    # Compare canonical artifact_consumption mappings
+    assert set(state_a.artifact_consumption.keys()) == set(state_b.artifact_consumption.keys())
+    for target in state_a.artifact_consumption:
+        entry_a = state_a.artifact_consumption[target]
+        entry_b = state_b.artifact_consumption[target]
+        assert entry_a["consumers"] == entry_b["consumers"], f"Consumers mismatch for {target}"
+        if entry_a["consumers"]:
+            for c in entry_a["consumers"]:
+                assert c in entry_b["channels"]
+                assert "direct_calls" in entry_a["channels"][c] and "direct_calls" in entry_b["channels"][c]
+                assert "api_imports" in entry_a["channels"][c] and "api_imports" in entry_b["channels"][c]
+
+
+def test_resync_required_fails_closed_in_engine_lifecycle(tmp_path: Path):
+    """
+    PROVES that if state.resync_required is True, engine update lifecycle
+    refuses to mark artifact_consumption_state as 'fresh' even with 100% valid coverage.
+    """
+    repo_dir = tmp_path / "resync_repo"
+    repo_dir.mkdir()
+    core_file = repo_dir / "core.py"
+    core_file.write_text("def helper(): return 1\n", encoding="utf-8")
+
+    facade = ContextorFacade()
+    errors, _ = facade.analyze_project(str(repo_dir))
+    assert not errors
+
+    hydrated = hydrate_repository_engine(repo_dir)
+    assert hydrated is not None
+    engine = hydrated.engine
+
+    # Coverage is valid initially
+    assert validate_canonical_artifact_consumption_coverage(engine.state.artifact_consumption, engine.state.artifacts) is True
+    assert engine.state.artifact_consumption_state == "fresh"
+
+    # Set resync_required = True
+    engine.state.resync_required = True
+
+    # Perform update
+    core_file.write_text("def helper(): return 2\n", encoding="utf-8")
+    res = engine.update_file(str(core_file))
+
+    # Invariant: artifact_consumption_state MUST be 'stale'
+    assert engine.state.artifact_consumption_state == "stale"
+    assert res.artifact_consumption_state == "stale"
+    assert artifact_consumption_is_fresh(engine.state) is False
+
+
+def test_preexisting_stale_preserved_without_recompute(tmp_path: Path):
+    """
+    PROVES that preexisting 'stale' artifact_consumption_state is preserved
+    on no-op / UNCHANGED without being falsely marked fresh solely by coverage.
+    """
+    repo_dir = tmp_path / "stale_preserve_repo"
+    repo_dir.mkdir()
+    core_file = repo_dir / "core.py"
+    core_file.write_text("def helper(): return 1\n", encoding="utf-8")
+
+    facade = ContextorFacade()
+    errors, _ = facade.analyze_project(str(repo_dir))
+    assert not errors
+
+    hydrated = hydrate_repository_engine(repo_dir)
+    assert hydrated is not None
+    engine = hydrated.engine
+
+    # Set pre-existing stale
+    engine.state.artifact_consumption_state = "stale"
+    assert validate_canonical_artifact_consumption_coverage(engine.state.artifact_consumption, engine.state.artifacts) is True
+
+    # Execute no-op update on unchanged file
+    res = engine.update_file(str(core_file))
+    assert res.status == "UNCHANGED"
+
+    # Invariant: stale is preserved, NOT converted to fresh
+    assert res.artifact_consumption_state == "stale"
+    assert engine.state.artifact_consumption_state == "stale"
+    assert artifact_consumption_is_fresh(engine.state) is False
+
+
+def test_legal_successful_recompute_transitions_to_fresh(tmp_path: Path):
+    """
+    PROVES that an intentional previous 'stale' state legally transitions to 'fresh'
+    when a successful incremental recompute runs without ambiguities and with valid coverage.
+    """
+    repo_dir = tmp_path / "recompute_fresh_repo"
+    repo_dir.mkdir()
+    core_file = repo_dir / "core.py"
+    core_file.write_text("def helper(): return 1\ndef helper2(): return 2\n", encoding="utf-8")
+    app_file = repo_dir / "app.py"
+    app_file.write_text("import core\ndef main(): return core.helper()\n", encoding="utf-8")
+
+    facade = ContextorFacade()
+    errors, _ = facade.analyze_project(str(repo_dir))
+    assert not errors
+
+    hydrated = hydrate_repository_engine(repo_dir)
+    assert hydrated is not None
+    engine = hydrated.engine
+
+    # Pre-existing stale (e.g. from prior dirty event)
+    engine.state.artifact_consumption_state = "stale"
+    assert not getattr(engine.state, "resync_required", False)
+
+    # Perform real incremental update modifying app.py cleanly to call helper2 instead of helper
+    app_file.write_text("import core\ndef main():\n    return core.helper2()\n", encoding="utf-8")
+    res = engine.update_file(str(app_file))
+    assert res.status in ("UPDATED", "SUCCESS")
+
+    # Invariant: clean recompute with valid coverage successfully transitions to 'fresh'
+    assert engine.state.artifact_consumption_state == "fresh"
+    assert res.artifact_consumption_state == "fresh"
+    assert artifact_consumption_is_fresh(engine.state) is True
+
+
+# ==============================================================================
+# 3. STRICT CANONICAL CHANNEL ALLOWLIST & INTERNAL CONSISTENCY PROOF
 # ==============================================================================
 
 def test_strict_canonical_channel_allowlist_and_internal_consistency():
@@ -342,7 +1014,71 @@ def test_canonical_artifact_consumption_validator():
 
 
 # ==============================================================================
-# 3. LEGACY MIGRATION VS INVALID CANONICAL FAIL-CLOSED PROOF
+# 4. COVERAGE VALIDATION & EMPTY DOMAIN SEMANTICS PROOF
+# ==============================================================================
+
+def test_empty_map_domain_semantics():
+    """
+    PROVES:
+    1. consumption == {} and expected == set() -> valid & fresh.
+    2. consumption == {} and expected != set() -> NOT fresh (coverage incomplete).
+    """
+    # 1. Empty repository domain
+    empty_artifacts: dict[str, Any] = {}
+    assert canonical_artifact_consumption_targets(empty_artifacts) == set()
+    assert validate_canonical_artifact_consumption_coverage({}, empty_artifacts) is True
+
+    # 2. Non-empty repository domain with empty consumption
+    non_empty_artifacts = {
+        "pkg.core": {
+            "consumers": {"func": {"consumers": [], "usage": {}}}
+        }
+    }
+    assert canonical_artifact_consumption_targets(non_empty_artifacts) == {"pkg.core::func"}
+    assert validate_canonical_artifact_consumption_coverage({}, non_empty_artifacts) is False
+
+
+def test_partial_modern_state_fail_closed():
+    """
+    PROVES that a partial modern canonical state (where one target is missing from artifact_consumption)
+    fails closed on materialization: marked as 'stale' and NOT auto-healed from state.artifacts.
+    """
+    artifacts = {
+        "pkg.core": {
+            "consumers": {
+                "func_a": {"consumers": ["pkg.app"], "usage": {"direct_calls": ["pkg.app"]}},
+                "func_b": {"consumers": ["pkg.app"], "usage": {"direct_calls": ["pkg.app"]}},
+            }
+        }
+    }
+    # Partial modern consumption: only contains func_a, missing func_b
+    partial_consumption = {
+        "pkg.core::func_a": {
+            "consumers": ["pkg.app"],
+            "channels": {"pkg.app": ["direct_calls"]},
+        }
+    }
+    assert validate_canonical_artifact_consumption(partial_consumption) is True
+    assert validate_canonical_artifact_consumption_coverage(partial_consumption, artifacts) is False
+
+    state = RepositoryAnalysisState(
+        modules={"pkg.core": Module(module_id="pkg.core", path="core.py", absolute_path="/core.py", imports=[])},
+        artifacts=artifacts,
+        dependency_graph=ProjectGraph(hard_edges={}, soft_edges={}),
+        artifact_consumption=partial_consumption,
+        artifact_consumption_state="deferred",
+    )
+
+    materialize_incremental_state(state)
+
+    # Must FAIL CLOSED: state marked stale, partial consumption NOT overwritten
+    assert state.artifact_consumption_state == "stale"
+    assert "pkg.core::func_b" not in state.artifact_consumption
+    assert state.artifact_consumption == partial_consumption
+
+
+# ==============================================================================
+# 5. LEGACY MIGRATION VS INVALID CANONICAL FAIL-CLOSED PROOF
 # ==============================================================================
 
 def test_legacy_report_hydration_materialization_self_heal():
@@ -377,6 +1113,7 @@ def test_legacy_report_hydration_materialization_self_heal():
     materialize_incremental_state(legacy_state)
 
     assert validate_canonical_artifact_consumption(legacy_state.artifact_consumption) is True
+    assert validate_canonical_artifact_consumption_coverage(legacy_state.artifact_consumption, artifacts) is True
     assert legacy_state.artifact_consumption_state == "fresh"
     assert "pkg.core::boot" in legacy_state.artifact_consumption
     assert legacy_state.artifact_consumption["pkg.core::boot"] == {
@@ -462,7 +1199,7 @@ def test_resync_required_blocks_auto_heal():
 
 
 # ==============================================================================
-# 4. FULL ANALYSIS / INCREMENTAL SCHEMA UNIFICATION PROOF
+# 6. FULL ANALYSIS / INCREMENTAL SCHEMA UNIFICATION PROOF
 # ==============================================================================
 
 def test_full_analysis_and_incremental_schema_parity():
@@ -510,7 +1247,7 @@ def test_full_analysis_and_incremental_schema_parity():
 
 
 # ==============================================================================
-# 5. SELF-CONSUMPTION & EXTERNAL FILTER PARITY PROOF
+# 7. SELF-CONSUMPTION & EXTERNAL FILTER PARITY PROOF
 # ==============================================================================
 
 def test_self_consumption_and_external_filter_parity():
@@ -560,7 +1297,7 @@ def test_self_consumption_and_external_filter_parity():
 
 
 # ==============================================================================
-# 6. CHANNEL SEMANTICS INVARIANT (DIRECT VS RUNTIME CALL MATRIX INVARIANCE)
+# 8. CHANNEL SEMANTICS INVARIANT (DIRECT VS RUNTIME CALL MATRIX INVARIANCE)
 # ==============================================================================
 
 def test_direct_vs_runtime_call_matrix_invariance():
@@ -613,7 +1350,7 @@ def test_direct_vs_runtime_call_matrix_invariance():
 
 
 # ==============================================================================
-# 7. EDGE-CASE AUDIT TESTS WITH CONCRETE ASSERTIONS
+# 9. EDGE-CASE AUDIT TESTS WITH CONCRETE ASSERTIONS
 # ==============================================================================
 
 def test_edge_case_below_jaccard_threshold_excluded():
@@ -814,7 +1551,7 @@ def test_symbol_rename_invariance_and_divergence():
 
 
 # ==============================================================================
-# 8. PURE RAM NO-DISK EXECUTION PROOF
+# 10. PURE RAM NO-DISK EXECUTION PROOF
 # ==============================================================================
 
 def test_pure_ram_computation_blocks_all_disk_io():
