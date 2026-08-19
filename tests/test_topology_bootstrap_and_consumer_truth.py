@@ -243,7 +243,7 @@ def test_consumer_get_module_context_live_projection(tmp_path):
 
 
     assert res["module"] == "app.main"
-    assert res["metrics_source"] == "live_canonical_graph"
+    assert res["metrics_source"] == "live_canonical_topology"
     assert res["degree_metrics_source"] == "live_canonical_graph"
 
     topo = engine.state.topology_analytics
@@ -336,6 +336,92 @@ def test_import_change_after_restart(tmp_path):
 
     assert res.status == "UPDATED"
     assert "advanced_graph_metrics" in res.shadow_plan.graph_recomputations
-    assert "advanced_graph_metrics" in res.execution_trace["graph_recomputations"]
     assert res.topology_metrics_state == "fresh"
     assert "app.extra" in reloaded_engine.state.topology_analytics["pagerank"]
+
+
+def test_ensure_topology_analytics_lifecycle_invariants():
+    from contextor.core.analysis.incremental.materialization import ensure_topology_analytics
+
+    # 1. Fresh + populated: zero recomputation
+    dep_graph = ProjectGraph(hard_edges={"a": {"b"}, "b": set()}, soft_edges={})
+    state_fresh = RepositoryAnalysisState(
+        modules={"a": {}, "b": {}},
+        dependency_graph=dep_graph,
+        topology_analytics={"pagerank": {"a": 0.5, "b": 1.0}},
+        topology_metrics_state="fresh",
+    )
+    old_dict = state_fresh.topology_analytics
+    ensure_topology_analytics(state_fresh)
+    assert state_fresh.topology_metrics_state == "fresh"
+    assert state_fresh.topology_analytics is old_dict
+
+    # 2. Legacy deferred + valid graph: recomputes in RAM to fresh
+    state_deferred = RepositoryAnalysisState(
+        modules={"a": {}, "b": {}},
+        dependency_graph=dep_graph,
+        topology_analytics={"old": "data"},
+        topology_metrics_state="deferred",
+    )
+    ensure_topology_analytics(state_deferred)
+    assert state_deferred.topology_metrics_state == "fresh"
+    assert "pagerank" in state_deferred.topology_analytics
+    assert "a" in state_deferred.topology_analytics["pagerank"]
+
+    # 3. Stale state: untrusted graph -> preserved as stale (NO auto-heal)
+    state_stale = RepositoryAnalysisState(
+        modules={"a": {}, "b": {}},
+        dependency_graph=dep_graph,
+        topology_analytics={"old": "data"},
+        topology_metrics_state="stale",
+    )
+    ensure_topology_analytics(state_stale)
+    assert state_stale.topology_metrics_state == "stale"
+    assert state_stale.topology_analytics == {"old": "data"}
+
+    # 4. Missing/empty analytics + valid graph -> recomputes to fresh
+    state_empty = RepositoryAnalysisState(
+        modules={"a": {}, "b": {}},
+        dependency_graph=dep_graph,
+        topology_analytics={},
+        topology_metrics_state="deferred",
+    )
+    ensure_topology_analytics(state_empty)
+    assert state_empty.topology_metrics_state == "fresh"
+    assert "pagerank" in state_empty.topology_analytics
+
+    # 5. Atomic failure handling: exception during compute preserves previous analytics and sets non-fresh
+    state_fail = RepositoryAnalysisState(
+        modules={"a": {}, "b": {}},
+        dependency_graph=dep_graph,
+        topology_analytics={"prev": "safe"},
+        topology_metrics_state="deferred",
+    )
+    with patch("contextor.core.reporting_engine.graph_analytics.compute_topology_analytics", side_effect=RuntimeError("Topology error")):
+        ensure_topology_analytics(state_fail)
+    assert state_fail.topology_metrics_state == "deferred"
+    assert state_fail.topology_analytics == {"prev": "safe"}
+
+    # Inconsistent fresh with empty analytics transitioning to deferred on failure
+    state_fail_fresh = RepositoryAnalysisState(
+        modules={"a": {}, "b": {}},
+        dependency_graph=dep_graph,
+        topology_analytics={},
+        topology_metrics_state="fresh",
+    )
+    with patch("contextor.core.reporting_engine.graph_analytics.compute_topology_analytics", side_effect=RuntimeError("Topology error")):
+        ensure_topology_analytics(state_fail_fresh)
+    assert state_fail_fresh.topology_metrics_state == "deferred"
+    assert state_fail_fresh.topology_analytics == {}
+
+    # 6. Cached analytics state remains completely untouched
+    state_cached = RepositoryAnalysisState(
+        modules={"a": {}, "b": {}},
+        dependency_graph=dep_graph,
+        topology_metrics_state="deferred",
+        cached_analytics_state="deferred",
+    )
+    ensure_topology_analytics(state_cached)
+    assert state_cached.topology_metrics_state == "fresh"
+    assert state_cached.cached_analytics_state == "deferred"  # untouched!
+

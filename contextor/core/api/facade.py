@@ -401,6 +401,7 @@ class ContextorFacade:
                 artifact_consumption={"_report": getattr(analysis_result, "compact_artifacts", {})},
                 metrics=metrics,
                 topology_analytics=topology_analytics,
+                topology_metrics_state="fresh",
                 layer_information={
                     "layer_index": getattr(analysis_result, "layer_index", []),
                     "hotspots": getattr(analysis_result, "hotspots", []),

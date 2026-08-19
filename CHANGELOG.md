@@ -202,6 +202,25 @@ LLM-friendly MCP target resolution
 - LIVE verification confirmed real downstream expansion for facade and incremental-analysis symbols, including production/test separation and zero-result behavior for locally unused symbols.
 - Targeted MCP regression verification passed: `16/16`.
 
+### Canonical LIVE Topology Metrics & Lifecycle Hardening
+
+- Hardened `get_module_context` so advanced graph metrics now prefer canonical LIVE `topology_analytics` whenever the LIVE engine is available.
+- `pagerank`, `betweenness`, HITS hub/authority scores, bridge score and module risk are now sourced from their dedicated canonical LIVE maps instead of saved graph-analysis snapshots.
+- Preserved `fan_in` and `fan_out` as direct LIVE measurements from the current hard dependency graph.
+- Removed silent fallback to stale `_graph_analytics.json` values when canonical topology state is `stale` or `deferred`.
+- Missing topology entries are treated as unavailable rather than replaced with misleading `0.0` defaults, with each topology metric resolved independently.
+- Report-only operation remains backward-compatible and explicitly identifies `saved_graph_analytics` as its provenance.
+- Completed the canonical LIVE lifecycle for topology analytics across bootstrap, persistence, hydration and incremental updates.
+- Full repository analysis now explicitly marks successfully computed `topology_analytics` as `fresh` instead of persisting valid metrics with the default `deferred` state.
+- Legacy persisted `deferred` topology states are safely rematerialized in RAM from the canonical dependency graph during hydration, without a full repository source scan.
+- `stale` topology state remains protected from automatic healing because it represents `requires_resync` / an untrusted dependency graph.
+- Topology recomputation is atomic: newly computed analytics are committed only after successful completion, preserving previous state on failure.
+- Fresh topology state survives persistence and restart without being downgraded to `deferred`.
+- Body-only edits preserve fresh topology metrics without unnecessary recomputation, while graph-changing edits continue to trigger the existing `advanced_graph_metrics` in-memory refresh path.
+- `cached_analytics` and its independent freshness lifecycle remain unchanged.
+- LIVE verification confirmed `get_module_context` serving PageRank, betweenness, HITS, bridge and risk metrics from `live_canonical_topology`.
+- Targeted topology lifecycle tests passed `7/7`, with the related MCP regression set passing `17/17`.
+
 ### Regression and contract verification
 
 - Added deterministic GUI progress-widget regression coverage for named-operation durations and legacy success-message compatibility.
