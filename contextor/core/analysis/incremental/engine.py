@@ -31,6 +31,8 @@ from contextor.core.analysis.incremental.plan_executor import (
 )
 from contextor.core.analysis.state_manager import (
     artifact_consumption_is_fresh,
+    clear_module_parse_failure,
+    mark_module_parse_failure,
     validate_canonical_artifact_consumption_coverage,
 )
 
@@ -128,6 +130,7 @@ class IncrementalAnalysisEngine:
             # 1. Handle Deletion
             current_state = self.state_manager.get_current_file_state(file_path, compute_hash=False)
             if not current_state:
+                clear_module_parse_failure(self.state, module_path)
                 old_module = self.state.modules.get(module_path)
                 old_artifacts = self.state.artifacts.get(module_path, {})
                 old_usage = self.state.module_usages.get(module_path, ModuleUsageFacts()) if hasattr(self.state, "module_usages") and self.state.module_usages else ModuleUsageFacts()
@@ -191,6 +194,13 @@ class IncrementalAnalysisEngine:
             )
 
             if prep.has_error:
+                mark_module_parse_failure(
+                    self.state,
+                    module_path,
+                    error=prep.error_message,
+                    line_number=prep.line_number,
+                    column_number=prep.column_number,
+                )
                 return IncrementalUpdateResult(
                     status=prep.error_status,
                     file_path=file_path,
@@ -198,6 +208,10 @@ class IncrementalAnalysisEngine:
                     line_number=prep.line_number,
                     column_number=prep.column_number,
                 )
+
+            recovered_from_parse_failure = clear_module_parse_failure(
+                self.state, module_path
+            )
 
             delta = prep.delta
             usage_delta = prep.usage_delta
@@ -217,7 +231,7 @@ class IncrementalAnalysisEngine:
             # Check if true no-op
             if plan.is_empty and not is_new and not delta.is_deleted:
                 return IncrementalUpdateResult(
-                    status="UNCHANGED",
+                    status="RECOVERED" if recovered_from_parse_failure else "UNCHANGED",
                     file_path=file_path,
                     delta=delta,
                     graph_state="fresh",
@@ -276,7 +290,7 @@ class IncrementalAnalysisEngine:
             affected_modules = sorted(affected_set) if blast_radius_complete else []
 
             return IncrementalUpdateResult(
-                status="UPDATED",
+                status="RECOVERED" if recovered_from_parse_failure else "UPDATED",
                 file_path=file_path,
                 delta=delta,
                 graph_state=graph_state,

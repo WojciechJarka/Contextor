@@ -147,6 +147,8 @@ class DesktopLiveWatcher(_PollingLiveWorker):
                 error = getattr(result, "error", "syntax error")
                 position = f" line {line}, column {column}" if line and column else ""
                 self._emit(f"LIVE syntax error: {Path(path).name}{position}: {error}")
+            elif result_status == "RECOVERED":
+                self._emit(f"LIVE syntax recovery: {Path(path).name}")
             elif result_status in {"UPDATED", "DELETED", "UNCHANGED"}:
                 self._emit(f"LIVE update successful: {Path(path).name}")
             else:

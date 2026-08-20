@@ -17,6 +17,7 @@ from .contract import (
     CANONICAL_QUERY_SCHEMA_VERSION,
 )
 from .projection import RECORD_BUILDERS
+from contextor.core.analysis.state_manager import module_current_truth
 
 
 def _error(code: str, message: str, path: str, **details: Any) -> dict[str, Any]:
@@ -329,6 +330,29 @@ def execute_projection(state: Any, request: Any) -> dict[str, Any]:
         for record in records
         if all(_matches(record, filter_item) for filter_item in normalized["filters"])
     ]
+    affected_modules = set()
+    for record in matches:
+        if normalized["root"] == "dependencies":
+            candidates = (record["source"], record["target"])
+        else:
+            candidates = (record["module_name"],)
+        affected_modules.update(
+            module_name
+            for module_name in candidates
+            if not module_current_truth(state, module_name)["available"]
+        )
+    if affected_modules:
+        details = {
+            module_name: module_current_truth(state, module_name)
+            for module_name in sorted(affected_modules)
+        }
+        return {
+            "status": "stale",
+            "available": False,
+            "root": normalized["root"],
+            "provenance": "last_known_good",
+            "affected_modules": details,
+        }
     limit = normalized["limit"]
     selected = normalized["select"]
     results = [{field: record[field] for field in selected} for record in matches[:limit]]

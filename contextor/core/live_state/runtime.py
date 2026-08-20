@@ -158,6 +158,32 @@ def connect(repo_path: str | Path) -> LiveStateClient | None:
         return None
 
 
+def connect_existing_with_status(
+    repo_path: str | Path,
+    *,
+    attempts: int = 3,
+    retry_delay: float = 0.05,
+) -> tuple[LiveStateClient | None, str]:
+    """Reconnect briefly to an existing owner without starting a service."""
+    root = Path(repo_path).resolve()
+    total_attempts = max(1, attempts)
+    for attempt in range(total_attempts):
+        client = connect(root)
+        if client is not None:
+            return client, "connected"
+        if attempt + 1 < total_attempts:
+            time.sleep(max(0.0, retry_delay))
+
+    endpoint = _read_endpoint(root)
+    if (
+        endpoint is not None
+        and endpoint.pid is not None
+        and _is_pid_alive(endpoint.pid)
+    ):
+        return None, "transient_connection_failure"
+    return None, "no_live_service"
+
+
 CREATE_BREAKAWAY_FROM_JOB = 0x01000000
 
 

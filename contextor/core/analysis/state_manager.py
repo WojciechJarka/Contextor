@@ -85,6 +85,7 @@ class RepositoryAnalysisState:
     layer_information: Dict[str, Any] = field(default_factory=dict)
     metrics: Dict[str, Any] = field(default_factory=dict)
     file_state: Dict[str, FileState] = field(default_factory=dict)
+    module_parse_freshness: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     module_usages: Dict[str, Any] = field(default_factory=dict)
     topology_analytics: Dict[str, Any] = field(default_factory=dict)
     topology_metrics_state: str = "deferred"
@@ -109,6 +110,59 @@ class RepositoryAnalysisState:
 
     trie: Optional[Any] = None
     package_root: str = ""
+
+
+def module_current_truth(state: RepositoryAnalysisState, module_name: str) -> Dict[str, Any]:
+    """Return authoritative per-module parse freshness and provenance."""
+    freshness = getattr(state, "module_parse_freshness", {}) or {}
+    entry = freshness.get(module_name)
+    if not isinstance(entry, dict) or entry.get("state") != "stale":
+        return {"available": True, "state": "fresh", "provenance": "current"}
+    return {
+        "available": False,
+        "state": "stale",
+        "provenance": "last_known_good",
+        "reason": "Current source could not be parsed; canonical facts are last-known-good.",
+        "parse_failure": {
+            key: entry.get(key)
+            for key in ("error", "line_number", "column_number")
+            if entry.get(key) is not None
+        },
+    }
+
+
+def mark_module_parse_failure(
+    state: RepositoryAnalysisState,
+    module_name: str,
+    *,
+    error: str | None,
+    line_number: int | None,
+    column_number: int | None,
+) -> None:
+    """Mark retained module facts as last-known-good after a parse failure."""
+    freshness = getattr(state, "module_parse_freshness", None)
+    if not isinstance(freshness, dict):
+        freshness = {}
+        state.module_parse_freshness = freshness
+    freshness[module_name] = {
+        "state": "stale",
+        "error": error,
+        "line_number": line_number,
+        "column_number": column_number,
+    }
+
+
+def clear_module_parse_failure(
+    state: RepositoryAnalysisState, module_name: str
+) -> bool:
+    """Clear parse failure and report whether this is a recovery transition."""
+    freshness = getattr(state, "module_parse_freshness", None)
+    if not isinstance(freshness, dict):
+        return False
+    entry = freshness.get(module_name)
+    recovered = isinstance(entry, dict) and entry.get("state") == "stale"
+    freshness.pop(module_name, None)
+    return recovered
 
 
 

@@ -184,6 +184,7 @@ from contextor.core.api.facade import ContextorFacade
 from contextor.core.analysis.state_manager import (
     artifact_consumption_is_fresh,
     canonical_artifact_consumption_targets,
+    module_current_truth,
 )
 from contextor.core.canonical_state_query import (
     describe_contract as _describe_canonical_contract,
@@ -815,6 +816,31 @@ def _canonical_symbol_consumers(state, module_name: str, symbol: str) -> list[st
     return sorted({str(item) for item in consumers})
 
 
+def _module_truth_unavailable(state, module_name: str) -> dict | None:
+    """Shape the authoritative canonical parse-freshness contract for MCP."""
+    truth = module_current_truth(state, module_name)
+    if truth["available"]:
+        return None
+    return {
+        "status": "stale",
+        "available": False,
+        "module": module_name,
+        **{key: value for key, value in truth.items() if key != "available"},
+    }
+
+
+def _stale_module_truths(state) -> dict[str, dict]:
+    """Return parse-stale canonical modules using the shared core contract."""
+    module_names = set(getattr(state, "modules", {}) or {}) | set(
+        getattr(state, "artifacts", {}) or {}
+    )
+    return {
+        module_name: truth
+        for module_name in sorted(module_names)
+        if not (truth := module_current_truth(state, module_name))["available"]
+    }
+
+
 def _canonical_symbol_catalog(module_data: dict) -> dict[str, str]:
     """Project canonical symbol names to kinds without report enrichment."""
     targets = canonical_artifact_consumption_targets({"module": module_data})
@@ -942,6 +968,9 @@ def _symbol_static_context(root: Path, candidate: dict) -> dict:
     }
     if not engine:
         return context
+    unavailable = _module_truth_unavailable(engine.state, module_path)
+    if unavailable:
+        return unavailable
     module_artifacts = getattr(engine.state, "artifacts", {}).get(module_path, {})
     raw_consumers = module_artifacts.get("consumers", {}).get(candidate["symbol"], [])
     if isinstance(raw_consumers, dict):
@@ -1317,10 +1346,22 @@ def get_live_events(
         isinstance(limit, bool) or not isinstance(limit, int) or limit < 1
     ):
         return json.dumps({"status": "error", "error": "invalid_limit"}, indent=2)
-    from contextor.core.live_state import connect
+    from contextor.core.live_state.runtime import connect_existing_with_status
 
-    client = connect(root)
+    client, connection_status = connect_existing_with_status(root)
     if client is None:
+        if connection_status == "transient_connection_failure":
+            return json.dumps(
+                {
+                    "status": "transient_connection_failure",
+                    "repo_path": str(root),
+                    "reason": "Existing LIVE owner is temporarily unreachable.",
+                    "events": [],
+                    "total": 0,
+                    "truncated": False,
+                },
+                indent=2,
+            )
         return json.dumps(
             {"status": "no_live_service", "repo_path": str(root), "events": [], "total": 0, "truncated": False},
             indent=2,
@@ -1501,6 +1542,18 @@ def get_project_architecture(
             return "Error: No usable canonical LIVE state. Run analyze_project first."
 
         state = engine.state
+        stale_modules = _stale_module_truths(state)
+        if stale_modules:
+            return json.dumps(
+                {
+                    "status": "stale",
+                    "available": False,
+                    "scope": "project",
+                    "provenance": "last_known_good",
+                    "affected_modules": stale_modules,
+                },
+                indent=2,
+            )
         unavailable = {
             "available": False,
             "state": "deferred",
@@ -1677,6 +1730,9 @@ def get_module_context(
     if not engine or getattr(engine.state, "resync_required", False):
         return "Error: No usable canonical LIVE state. Run analyze_project first."
     state = engine.state
+    unavailable = _module_truth_unavailable(state, module_name)
+    if unavailable:
+        return json.dumps(unavailable, indent=2)
     live_modules = set(getattr(state, "modules", {})) | set(
         getattr(state, "artifacts", {})
     )
@@ -1897,6 +1953,11 @@ def get_artifact_blast_radius(
                         and full_name != target_art
                     ):
                         continue
+                    unavailable = _module_truth_unavailable(
+                        engine.state, module_name
+                    )
+                    if unavailable:
+                        return json.dumps(unavailable, indent=2)
                     live_matches.append(
                         {
                             "artifact": full_name,
@@ -2260,8 +2321,11 @@ def search_artifacts(
             | set(engine.state.artifacts)
         )
         for mod_path in module_paths:
+            unavailable = _module_truth_unavailable(engine.state, mod_path)
             module_leaf = mod_path.rsplit(".", 1)[-1]
             if search_term.casefold() in mod_path.casefold():
+                if unavailable:
+                    return json.dumps(unavailable, indent=2)
                 graph = engine.state.dependency_graph
                 inbound = []
                 outbound = []
@@ -2315,6 +2379,7 @@ def search_artifacts(
                     )
                 )
         for mod_path, mod_arts in engine.state.artifacts.items():
+            unavailable = _module_truth_unavailable(engine.state, mod_path)
             symbols = mod_arts.get("symbols", {})
             for category, kind in kind_by_category.items():
                 raw_names = symbols.get(category, [])
@@ -2322,6 +2387,8 @@ def search_artifacts(
                 for raw_name in names:
                     name = str(raw_name)
                     if search_term.lower() in name.lower():
+                        if unavailable:
+                            return json.dumps(unavailable, indent=2)
                         definer_mod = engine.registry.get_module_id(mod_path)
                         consumers_dict = mod_arts.get("consumers", {}).get(name, {})
                         if isinstance(consumers_dict, dict):
@@ -2749,6 +2816,9 @@ def get_file_edit_context(
                     },
                     indent=2,
                 )
+            unavailable = _module_truth_unavailable(engine.state, module_name)
+            if unavailable:
+                return json.dumps(unavailable, indent=2)
             live_graph = getattr(engine.state, "dependency_graph", None)
             if live_graph is None:
                 return json.dumps(
@@ -2956,6 +3026,9 @@ def get_file_edit_context(
         
     try:
         state = engine.state
+        unavailable = _module_truth_unavailable(state, module_name)
+        if unavailable:
+            return json.dumps(unavailable, indent=2)
         state_metrics = getattr(state, "metrics", {}) or {}
         candidate_metrics = state_metrics.get(module_name, {}) if isinstance(state_metrics, dict) else {}
         mod_info = candidate_metrics if isinstance(candidate_metrics, dict) else {}
@@ -3718,6 +3791,9 @@ def get_artifacts_for_module(
         if not engine or getattr(engine.state, "resync_required", False):
             return "Error: No usable canonical LIVE state. Run analyze_project first."
         state = engine.state
+        unavailable = _module_truth_unavailable(state, module_name)
+        if unavailable:
+            return json.dumps(unavailable, indent=2)
         live_modules = getattr(state, "modules", {}) or {}
         live_artifact_catalog = getattr(state, "artifacts", {}) or {}
         live_artifacts = live_artifact_catalog.get(module_name, {})
@@ -3839,9 +3915,12 @@ def lookup_artifact_by_symbol(
         term = symbol_name.casefold()
         candidates = []
         for module_name, module_data in sorted((state.artifacts or {}).items()):
+            unavailable = _module_truth_unavailable(state, module_name)
             for symbol, kind in _canonical_symbol_catalog(module_data).items():
                 if term not in symbol.casefold():
                     continue
+                if unavailable:
+                    return json.dumps(unavailable, indent=2)
                 full_name = f"{module_name}::{symbol}"
                 artifact_id = art_path_to_id.get(full_name)
                 key = artifact_id or full_name
