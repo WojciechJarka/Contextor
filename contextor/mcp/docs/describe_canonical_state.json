@@ -1,0 +1,18 @@
+{
+  "version": "1.0.0",
+  "tool": "describe_canonical_state",
+  "purpose": [
+    "Return the complete versioned contract for safe canonical LIVE queries."
+  ],
+  "parameters": [],
+  "behavior": [
+    "This endpoint is passive discovery only: it returns ``SCHEMA_V1`` and\n``LANGUAGE_V1`` from the same constants used by query validation. It does\nnot read repository data, execute expressions, reflect over Python objects,\nor fetch records. The response documents the three roots (``modules``,\n``artifacts``, ``dependencies``), every selectable field, per-field\noperators, null semantics, canonical ordering and hard request limits."
+  ],
+  "freshness": [],
+  "errors": [],
+  "usage_notes": [
+    "LLM use: call this before composing a projection request or when a\nstructural validation error reports an unfamiliar field/operator. Cache by\n``schema_version`` and ``language_version``; do not treat it as repository\ndata or use it in place of ``query_canonical_projection``."
+  ],
+  "examples": []
+}
+

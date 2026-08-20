@@ -1,0 +1,24 @@
+{
+  "version": "1.0.0",
+  "tool": "get_module_context",
+  "purpose": [
+    "[OPTIMIZED] Retrieve a compressed context pill for one module."
+  ],
+  "parameters": [
+    "Accepts ``module_name`` or LLM-friendly alias ``module`` (or module ID).\nIf an artifact/symbol identity is passed, returns a structured diagnostic\nredirecting to ``get_artifact_blast_radius``."
+  ],
+  "behavior": [
+    "Dependency & degree metrics definitions:\n  - ``metrics.fan_in``: Direct inbound module degree from hard dependency/import edges only.\n  - ``dependencies_inbound_who_calls_me``: All direct inbound dependencies (both hard AST imports and soft reachability edges)."
+  ],
+  "freshness": [
+    "Full-report metrics are combined with the canonical LIVE dependency graph.\nA file added through update_file is therefore immediately queryable, even\nbefore another global report refreshes expensive metrics. Deferred metrics\nare labelled explicitly instead of hiding the module."
+  ],
+  "errors": [
+    "Available dependency collections expose ``total`` and ``truncated``. The\ndefault compact response omits edge ``items``; set ``compact=False`` for\nbounded evidence. ``max_items`` applies independently to inbound and\noutbound edges; pass ``None`` to return every edge. ``compact`` shapes the\nresponse before ``fields`` projects it. Allowed values are ``module``, ``metrics``,\n``metrics_source``, ``degree_metrics_source``, ``dependency_data_source``,\n``dependencies_inbound_who_calls_me``, and\n``dependencies_outbound_who_i_call``. Invalid projections return a\nstructured error with the current allowlist."
+  ],
+  "usage_notes": [
+    "LLM use: call immediately before editing a known module. Trust LIVE\ninbound/outbound edges for current structure; treat metrics marked\ndeferred as unavailable until the next full analysis."
+  ],
+  "examples": []
+}
+

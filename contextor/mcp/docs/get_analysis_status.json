@@ -1,0 +1,21 @@
+{
+  "version": "1.0.0",
+  "tool": "get_analysis_status",
+  "purpose": [
+    "Return durable status for a non-blocking MCP analysis job."
+  ],
+  "parameters": [],
+  "behavior": [],
+  "freshness": [
+    "Every job also exposes durable LIVE publication state. Project jobs move\nfrom ``live_publish_status='pending'`` to ``success``, ``timed_out`` or\n``failed``; an analysis failure before publication reports\n``not_attempted``. Successful publication includes\n``live_publish_revision``. Publication failures preserve\n``live_publish_warning`` even though the report job itself may complete.\nLayer and single-file jobs report ``not_applicable`` because their shared\nfacade updates canonical state incrementally rather than publishing a new\nglobal baseline here."
+  ],
+  "errors": [
+    "Omit ``job_id`` to inspect the repository's most recently updated job.\nTerminal states are ``completed``, ``failed`` and ``interrupted``. A job\nleft running by a previous MCP server process is marked ``interrupted``\nrather than remaining permanently ambiguous.",
+    "A completed global project job includes ``analysis_coverage`` when its\nindexer finished: ``skipped_python_files`` reports files that could not be\nstatically analyzed, their parser/read reason, structured ``line_number``\nand ``column_number`` when parser coordinates exist, and\n``syntax_error_count``.\n``max_skipped_files`` bounds returned entries (default 10); pass ``None``\nfor every skipped file. ``total`` and ``truncated`` make the coverage gap\nexplicit. Layer and single-file jobs do not claim global coverage."
+  ],
+  "usage_notes": [
+    "LLM use: poll this after an analyze tool returns. Do not start another\nanalysis while status is ``queued`` or ``running``; repeated analyze calls\nalready return the same active job ID. Before assuming a completed global\ngraph covers the whole repository, inspect ``analysis_coverage``."
+  ],
+  "examples": []
+}
+

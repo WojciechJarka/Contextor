@@ -1,0 +1,16 @@
+{
+  "version": "1.0.0",
+  "tool": "get_report_diff",
+  "purpose": [
+    "[OPTIMIZED] Returns architectural regression analysis between the last two analysis runs.\nShows delta in hotspot count, debt score, cycle count, and lists new/resolved hotspots.\nConsecutive runs are compared before the canonical summary is overwritten,\nincluding different working-tree states on the same commit.\nLayer changes are returned as a collection with ``total`` and ``truncated``;\nset ``compact=False`` for bounded ``items``. ``max_items=None`` returns all\nchanged layers. ``fields`` projects top-level keys after compact shaping;\ncurrent reports expose ``classification``, ``report_diff``, ``baseline``,\n``current``, and ``comparison_basis``."
+  ],
+  "parameters": [],
+  "behavior": [],
+  "freshness": [],
+  "errors": [],
+  "usage_notes": [
+    "LLM use: run analysis once before and once after a change, then inspect the\nclassification and metric deltas here. An empty diff means no tracked\narchitectural metric changed; it does not mean source text was identical."
+  ],
+  "examples": []
+}
+

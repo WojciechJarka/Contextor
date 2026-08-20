@@ -1,0 +1,19 @@
+{
+  "version": "1.0.0",
+  "tool": "get_file_edit_context",
+  "purpose": [
+    "[OPTIMIZED] Specialized single-shot context pill for LLMs prior to editing a file or module.\nCombines LIVE module/API/dependency state in one response."
+  ],
+  "parameters": [
+    "Modes:\n  - ``mode=None`` (default): Legacy behavior. When ``compact=True`` (default), returns\n    top-level collection metadata (counts and truncated flags). When ``compact=False``,\n    returns bounded lists of items/tests (using legacy ``max_items``, default 30). Supports ``fields`` projection.\n  - ``mode='minimal'``: Ultra-lightweight pre-edit projection designed for rapid LLM\n    decision-making. Accepts a forgiving ``target`` (relative path, absolute path,\n    dotted module name, or module ID). Returns direct and transitive consumer counts,\n    bounded samples (capped at at most 5 items by default, regardless of legacy ``max_items=30`` default),\n    and covering tests in 100% in-memory RAM without disk reads. Sample collections explicitly provide\n    both total count and a ``truncated`` boolean flag."
+  ],
+  "behavior": [
+    "Consumer & dependency semantics:\n  - ``direct_count`` / ``direct consumer``: Unique module directly referencing/importing the target through a hard or soft dependency edge.\n  - ``transitive_count`` / ``transitive consumer``: Unique module reachable through reverse hard-or-soft dependency traversal, excluding the target itself.",
+    "If an artifact/symbol identity is passed as target in minimal mode, returns a structured\ndiagnostic indicating the definer module and suggesting ``get_artifact_blast_radius``."
+  ],
+  "freshness": [],
+  "errors": [],
+  "usage_notes": [],
+  "examples": []
+}
+

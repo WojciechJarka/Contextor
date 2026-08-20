@@ -3033,6 +3033,7 @@ def test_file_edit_context_layer_guard(monkeypatch, tmp_path):
     root.mkdir()
 
     from types import SimpleNamespace
+    empty_graph = SimpleNamespace(hard_edges={}, soft_edges={})
 
     # Mock registries
     monkeypatch.setattr(
@@ -3061,7 +3062,7 @@ def test_file_edit_context_layer_guard(monkeypatch, tmp_path):
             cached_analytics_state="fresh",
             topology_analytics={},
             topology_metrics_state="fresh",
-            dependency_graph=None,
+            dependency_graph=empty_graph,
         )
     )
     monkeypatch.setattr(mcp_server, "_get_or_init_engine", lambda _root: engine_fresh_clean)
@@ -3103,7 +3104,7 @@ def test_file_edit_context_layer_guard(monkeypatch, tmp_path):
             cached_analytics_state="fresh",
             topology_analytics={},
             topology_metrics_state="fresh",
-            dependency_graph=None,
+            dependency_graph=empty_graph,
         )
     )
     monkeypatch.setattr(mcp_server, "_get_or_init_engine", lambda _root: engine_with_v)
@@ -3141,7 +3142,7 @@ def test_file_edit_context_layer_guard(monkeypatch, tmp_path):
             cached_analytics_state="fresh",
             topology_analytics={},
             topology_metrics_state="fresh",
-            dependency_graph=None,
+            dependency_graph=empty_graph,
         )
     )
     monkeypatch.setattr(mcp_server, "_get_or_init_engine", lambda _root: engine_inbound_core)
@@ -3159,7 +3160,7 @@ def test_file_edit_context_layer_guard(monkeypatch, tmp_path):
             cached_analytics_state="deferred",
             topology_analytics={},
             topology_metrics_state="deferred",
-            dependency_graph=None,
+            dependency_graph=empty_graph,
         )
     )
     monkeypatch.setattr(mcp_server, "_get_or_init_engine", lambda _root: engine_deferred)
@@ -3175,7 +3176,7 @@ def test_file_edit_context_layer_guard(monkeypatch, tmp_path):
             cached_analytics_state="stale",
             topology_analytics={},
             topology_metrics_state="stale",
-            dependency_graph=None,
+            dependency_graph=empty_graph,
         )
     )
     monkeypatch.setattr(mcp_server, "_get_or_init_engine", lambda _root: engine_stale)

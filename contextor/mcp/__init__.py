@@ -1,0 +1,2 @@
+"""Shared MCP support package."""
+

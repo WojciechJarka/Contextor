@@ -1,0 +1,21 @@
+{
+  "version": "1.0.0",
+  "tool": "extract_indexed_report_context",
+  "purpose": [
+    "[OPTIMIZED] Extracts complete matching blocks from an indexed artifact report."
+  ],
+  "parameters": [
+    "Set ``public_api_only=True`` to mirror the GUI checkbox: private names are\nexcluded, but zero detected consumers do not make an artifact private."
+  ],
+  "behavior": [],
+  "freshness": [],
+  "errors": [
+    "Resolution is index-first and shared with the GUI parser. Queries may use an\nartifact/module ID, a ``.py`` path, a full ``module::symbol`` key, or explicit\n``file:``, ``module:``, ``symbol:`` and ``artifact:`` prefixes. Exact matches\nare never replaced by fuzzy guesses; ambiguous and missing queries remain\nexplicit. Active dictionaries fall back to both recovery dictionaries, while\nblocks with unresolved artifact or definer IDs are omitted with diagnostics.",
+    "Omit ``report_path`` to read the current compact artifact report. Every\nselected block is returned complete, including nested objects. ``max_items``\ncontrols the number of complete artifact blocks (default 20); pass ``None``\nfor every match. ``total_artifact_count`` and ``truncated`` expose omitted\nmatches. ``fields`` projects top-level keys after bounding; accepted names\nare the keys returned by the shared indexed-query resolver plus\n``total_artifact_count``, ``truncated``, and ``data_source``. Invalid\nprojections return the exact current allowlist."
+  ],
+  "usage_notes": [
+    "LLM use: prefer this over reading a whole compact JSON when one file, symbol, or\nID is relevant. Inspect resolution/diagnostics and narrow an ambiguous query;\ndo not treat suggestions as confirmed matches."
+  ],
+  "examples": []
+}
+

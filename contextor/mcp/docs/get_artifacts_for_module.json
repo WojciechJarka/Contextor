@@ -1,0 +1,22 @@
+{
+  "version": "1.0.0",
+  "tool": "get_artifacts_for_module",
+  "purpose": [
+    "[OPTIMIZED] Returns all artifacts exported by a module with consumer info."
+  ],
+  "parameters": [
+    "``module_name`` can be:\n- A full dotted module name: 'contextor.ui.gui_parser'\n- A file path relative to the repo root: 'contextor/ui/gui_parser.py'",
+    "Set ``include_consumers=False`` for a signatures-only view. When included,\neach ``consumers`` object always exposes ``total`` and ``truncated``;\n``compact=False`` adds ``items``. ``limit`` controls artifact matches and\n``evidence_limit`` controls consumers per artifact; pass ``None`` for all\nmatches or all nested evidence. ``fields`` projects top-level keys after\ncompact shaping. Allowed values are ``module``, ``module_id``,\n``artifact_count``, ``total_artifact_count``, ``truncated``,\n``symbol_filter``, ``data_sources``, ``complete_symbol_catalog``, and\n``artifacts``.",
+    "Use ``symbol_filter`` to select a name substring and ``limit`` to bound the\nresult. ``total_artifact_count`` reports matches before limiting and\n``truncated`` tells the LLM whether a narrower follow-up query is useful.\nCanonical LIVE state is the source of truth for symbol and artifact facts.\nPersistent registries provide identity/index mappings only. Output reports\nare not read by this operation."
+  ],
+  "behavior": [
+    "Equivalent to the GUI parser window — shows what a module defines and\nwho uses each artifact across the project."
+  ],
+  "freshness": [],
+  "errors": [],
+  "usage_notes": [
+    "LLM use: call before changing one module's API. Disable consumers for the\ncheapest signature inventory; enable them only for impact analysis."
+  ],
+  "examples": []
+}
+

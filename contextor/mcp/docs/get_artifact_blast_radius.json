@@ -1,0 +1,20 @@
+{
+  "version": "1.0.0",
+  "tool": "get_artifact_blast_radius",
+  "purpose": [
+    "[OPTIMIZED] Resolves direct, evidence-backed consumers of an artifact.\nUses canonical LIVE artifact and symbol-consumption facts. It does not\nread output reports and does not claim that dynamic Python usage can be\nproven exact."
+  ],
+  "parameters": [
+    "``consumers`` always contains ``total`` and ``truncated``. The default\ncompact response omits ``items``; set ``compact=False`` for bounded static\nevidence. ``max_items`` controls returned consumers; pass ``None`` for all\nconsumers without truncation. ``fields`` projects top-level\nkeys after compact shaping. Allowed values are ``artifact``, ``artifact_id``,\n``kind``, ``definer``, ``architecture``, ``downstream_module_reachability``, ``consumers``, ``evidence_scope``, and ``data_source``."
+  ],
+  "behavior": [
+    "Candidate, consumer & reachability semantics:\n  - If a module name or module ID is passed, returns a structured diagnostic with deterministic public-first ranked artifact candidates defined by that module.\n  - ``consumers``: Direct static symbol consumers with confirmed references.\n  - ``architecture``:\n      * ``definer_layer``: Canonical architectural layer of the defining module.\n      * ``consumer_layers``: Sorted list of unique known canonical layers of direct consumers.\n      * ``same_module_consumer_count``: Unique direct consumers in the same module.\n      * ``same_layer_consumer_count``: Unique direct consumers in the same layer (excluding same-module).\n      * ``cross_layer_consumer_count``: Unique direct NON-TEST consumers whose canonical layer differs from ``definer_layer``.\n      * ``test_consumer_count``: Unique direct consumers whose canonical layer is \"tests\".\n      * ``cross_layer_consumers``: Boolean indicating if ``cross_layer_consumer_count > 0``.\n      * ``cross_layer_sample``: Bounded sample of cross-layer production consumers (excluding tests).\n  - ``downstream_module_reachability``:\n      Conservative module-level downstream reachability seeded by confirmed direct symbol consumer modules.\n      It does not represent transitive symbol-to-symbol consumption."
+  ],
+  "freshness": [],
+  "errors": [],
+  "usage_notes": [
+    "LLM use: call before changing or removing a public symbol. Treat consumers\nas confirmed static evidence, not proof that dynamic Python has no callers."
+  ],
+  "examples": []
+}
+

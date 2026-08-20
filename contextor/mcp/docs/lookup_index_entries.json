@@ -1,0 +1,19 @@
+{
+  "version": "1.0.0",
+  "tool": "lookup_index_entries",
+  "purpose": [
+    "[OPTIMIZED] Resolves a specific list of compact IDs to their full names."
+  ],
+  "parameters": [],
+  "behavior": [],
+  "freshness": [],
+  "errors": [],
+  "usage_notes": [
+    "LLM use: pass only IDs visible in the current result instead of loading the\nfull project dictionary. Recovery means a known historical identity and\nmust not be presented as an active symbol; missing means no known identity.\nOutput size is controlled directly by the number of IDs supplied; split a\nlarge set when one response would not fit the context window."
+  ],
+  "examples": [
+    "Use this instead of get_project_index when you only need to decode a\nhandful of IDs found in a report (e.g. from module_dependency_matrix or\nshared_usage_clusters).  Much cheaper than loading the entire registry.",
+    "Accepts both module IDs (e.g. '124/1') and artifact IDs (e.g. 'A35/1').\nEach ID resolves to ``{\"name\": ..., \"status\": \"active|recovery|missing\"}``\nso stale identities are distinguishable from malformed or unknown IDs."
+  ]
+}
+

@@ -1,0 +1,20 @@
+{
+  "version": "1.0.0",
+  "tool": "get_live_events",
+  "purpose": [
+    "Return revisioned desktop/MCP LIVE events since a known revision."
+  ],
+  "parameters": [],
+  "behavior": [
+    "MCP cannot push unsolicited messages into an idle model; this bounded,\nrevisioned feed is the reliable pull mechanism for continuous LIVE state."
+  ],
+  "freshness": [],
+  "errors": [
+    "Events are retained in RAM by the shared LIVE owner (most recent 100).\nEach event identifies its ``origin`` (``desktop_watcher``,\n``mcp_analysis`` or ``mcp``), operation, status and file path. Update\nevents additionally expose ``blast_radius_state`` and a bounded\n``affected_modules`` collection (hard limit of 20 items in journal). Syntax\nfailures additionally expose ``error``, ``line_number`` and\n``column_number``. The response always includes the current ``revision``,\n``total`` and ``truncated``; ``limit`` defaults to 20 and may be ``None``\nfor all retained events."
+  ],
+  "usage_notes": [
+    "LLM workflow after every file edit:\n- If the desktop app is running, do *not* call ``update_file``. Its watcher\n  owns the update. Poll this tool with the last observed revision until the\n  desktop event arrives, then react to its status before further edits.\n- If the desktop app is not running, call ``update_file`` after every edit,\n  then call this tool to confirm the revision and diagnostics."
+  ],
+  "examples": []
+}
+

@@ -1,0 +1,20 @@
+{
+  "version": "1.0.0",
+  "tool": "query_canonical_projection",
+  "purpose": [
+    "Execute a safe, bounded JSON query over normalized canonical LIVE data."
+  ],
+  "parameters": [
+    "``request`` must explicitly include ``schema_version``,\n``language_version``, ``root``, ``filters`` and ``select``. It may include\n``limit`` (default 20, maximum 200). Filters are a flat AND and use only the\noperators declared for each field by ``describe_canonical_state``. Empty\n``filters`` matches all records; empty ``select`` returns every selectable\nfield. Results always report ``total_matches``, ``returned``, ``limit`` and\n``truncated``."
+  ],
+  "behavior": [],
+  "freshness": [],
+  "errors": [
+    "The executor first converts LIVE state to read-only JSON-safe records. It\nnever uses ``eval``, accepts no Python expressions, exposes no arbitrary\nattributes and omits local absolute paths. Artifacts preserve the\ndistinction between confirmed zero consumers and unavailable consumption\ndata via ``consumer_data_available`` plus nullable consumer fields.\nStructural errors return one deterministic error with ``code``, ``path``\nand repair details."
+  ],
+  "usage_notes": [
+    "LLM use: discover the contract first, request the smallest useful field\nselection, and narrow filters when ``truncated`` is true."
+  ],
+  "examples": []
+}
+

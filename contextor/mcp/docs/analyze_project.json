@@ -1,0 +1,18 @@
+{
+  "version": "1.0.0",
+  "tool": "analyze_project",
+  "purpose": [
+    "Starts a non-blocking global architectural analysis and returns a job ID.\nPoll ``get_analysis_status`` until it reports ``completed`` or ``failed``."
+  ],
+  "parameters": [],
+  "behavior": [],
+  "freshness": [],
+  "errors": [],
+  "usage_notes": [
+    "LLM use: choose this for a repository-wide baseline, then poll the returned\njob instead of repeating the call. Exclude ``tests`` when production\narchitecture is the only concern; keep it when later queries need test\ncoverage or ``tests_covering`` evidence. After a completed global job,\ninspect ``get_analysis_status(...).analysis_coverage`` before assuming the\ngraph covers every Python file; it reports files skipped for syntax or read\nerrors."
+  ],
+  "examples": [
+    "``exclude_paths`` lets an LLM narrow this run without changing the saved\nGUI exclude configuration. Use repository-relative Python files or\ndirectory prefixes, for example ``[\"tests\", \"legacy/adapter.py\"]``.\nContextor already ignores non-Python files. Per-run and GUI excludes are\ncombined before AST indexing."
+  ]
+}
+

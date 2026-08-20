@@ -1,0 +1,18 @@
+{
+  "version": "1.0.0",
+  "tool": "update_file",
+  "purpose": [
+    "[OPTIMIZED] Incremental architectural update for a modified file.\nUpdates the canonical state and graph structure in real-time. When the\nshared LIVE service is available, the update executes in its owner process\nso desktop and MCP observe the same revision; otherwise the hydrated local\nengine remains a fallback. Requires a completed project analysis."
+  ],
+  "parameters": [],
+  "behavior": [],
+  "freshness": [],
+  "errors": [
+    "Semantic-diff and affected-modules collections always expose ``total`` and\n``truncated``. The default compact response omits ``items``; set\n``compact=False`` for bounded symbol/signature/affected-module evidence.\n``max_items`` is the per-collection limit; pass ``None`` to return all\nrequested evidence without truncation. ``fields`` projects top-level\nresponse keys after compact shaping. Stable fields include ``status``,\n``file_path``, graph/metrics state fields, ``affected_modules`` (containing\nthe module-level reverse blast radius when ``blast_radius_state == \"fresh\"``),\n``live_state_persisted``, ``semantic_diff`` and\n``runtime_restart_required``; ``delta`` and runtime warning fields are\nconditional. Invalid projections return the current allowlist."
+  ],
+  "usage_notes": [
+    "LLM use after every file edit: if the desktop app is running, its watcher\nowns the update. Do not call this tool; poll ``get_live_events`` from the\nlast revision until the ``desktop_watcher`` event reports the result. If\ndesktop is not running, call this tool after every edit, then poll\n``get_live_events`` to confirm the shared revision and any syntax\ndiagnostic. Read ``semantic_diff`` for added/removed symbols and signature\nchanges, then use normal code diff for line-level meaning. ``bodies_changed``\nuses normalized AST fingerprints to flag body-only edits without sending\nbody text; it does not explain their meaning. Consumption/global metrics\nmay be deferred.\nEditing this MCP server file updates disk and canonical state, but not the\ncode already loaded by the running MCP process; restart the server whenever\n``runtime_restart_required`` is true, then verify the tool live."
+  ],
+  "examples": []
+}
+

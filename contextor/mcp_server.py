@@ -206,6 +206,10 @@ from contextor.mcp_process_registry import (
     remove_record,
     terminate_registered_process,
 )
+from contextor.mcp.documentation import (
+    query_documentation,
+    short_description,
+)
 
 # Initialize FastMCP Server
 mcp = FastMCP("Contextor")
@@ -1145,28 +1149,10 @@ def _resolve_cluster_ids(
 # 1. ANALYSIS TRIGGER TOOLS
 # ==========================================================
 
-@mcp.tool()
+@mcp.tool(description=short_description('analyze_project'))
 async def analyze_project(
     repo_path: str, exclude_paths: list[str] | None = None
 ) -> str:
-    """
-    Starts a non-blocking global architectural analysis and returns a job ID.
-    Poll ``get_analysis_status`` until it reports ``completed`` or ``failed``.
-
-    ``exclude_paths`` lets an LLM narrow this run without changing the saved
-    GUI exclude configuration. Use repository-relative Python files or
-    directory prefixes, for example ``["tests", "legacy/adapter.py"]``.
-    Contextor already ignores non-Python files. Per-run and GUI excludes are
-    combined before AST indexing.
-
-    LLM use: choose this for a repository-wide baseline, then poll the returned
-    job instead of repeating the call. Exclude ``tests`` when production
-    architecture is the only concern; keep it when later queries need test
-    coverage or ``tests_covering`` evidence. After a completed global job,
-    inspect ``get_analysis_status(...).analysis_coverage`` before assuming the
-    graph covers every Python file; it reports files skipped for syntax or read
-    errors.
-    """
     root = Path(repo_path).expanduser().resolve()
     if not root.is_dir():
         return f"Error: Repository path '{root}' does not exist."
@@ -1176,25 +1162,12 @@ async def analyze_project(
         indent=2,
     )
 
-@mcp.tool()
+@mcp.tool(description=short_description('analyze_layer'))
 async def analyze_layer(
     repo_path: str,
     layer_name: str,
     exclude_paths: list[str] | None = None,
 ) -> str:
-    """
-    Starts non-blocking analysis isolated to a specific layer (directory).
-    Poll ``get_analysis_status`` with the returned job ID.
-
-    ``exclude_paths`` contains repository-relative Python files or directory
-    prefixes to omit from this run. It is merged with, but never persisted to,
-    the GUI exclude list. Non-Python files are ignored automatically.
-
-    LLM use: prefer this over a global run when the decision is confined to one
-    package, then poll its job instead of repeating the call. Exclude unrelated
-    Python trees to reduce report size, but retain tests when boundary or
-    coverage evidence matters.
-    """
     root = Path(repo_path).expanduser().resolve()
     layer = root / layer_name
     if not layer.is_dir():
@@ -1207,25 +1180,12 @@ async def analyze_layer(
         indent=2,
     )
 
-@mcp.tool()
+@mcp.tool(description=short_description('analyze_single_file'))
 async def analyze_single_file(
     repo_path: str,
     file_path: str,
     exclude_paths: list[str] | None = None,
 ) -> str:
-    """
-    Starts non-blocking deep analysis on a single Python file.
-    Poll ``get_analysis_status`` with the returned job ID.
-
-    ``exclude_paths`` narrows the surrounding project context for this run.
-    Entries are repository-relative Python files or directory prefixes and are
-    combined with the saved GUI excludes without modifying them. Do not exclude
-    the target file itself.
-
-    LLM use: choose this for a focused symbol/API decision, then poll its job
-    instead of repeating the call. Exclude unrelated packages to save tokens;
-    retain relevant tests when test discovery is part of the question.
-    """
     root = Path(repo_path).expanduser().resolve()
     target_file = Path(file_path).expanduser()
     if not target_file.is_absolute():
@@ -1242,43 +1202,12 @@ async def analyze_single_file(
     )
 
 
-@mcp.tool()
+@mcp.tool(description=short_description('get_analysis_status'))
 def get_analysis_status(
     repo_path: str,
     job_id: str | None = None,
     max_skipped_files: int | None = 10,
 ) -> str:
-    """Return durable status for a non-blocking MCP analysis job.
-
-    Omit ``job_id`` to inspect the repository's most recently updated job.
-    Terminal states are ``completed``, ``failed`` and ``interrupted``. A job
-    left running by a previous MCP server process is marked ``interrupted``
-    rather than remaining permanently ambiguous.
-
-    A completed global project job includes ``analysis_coverage`` when its
-    indexer finished: ``skipped_python_files`` reports files that could not be
-    statically analyzed, their parser/read reason, structured ``line_number``
-    and ``column_number`` when parser coordinates exist, and
-    ``syntax_error_count``.
-    ``max_skipped_files`` bounds returned entries (default 10); pass ``None``
-    for every skipped file. ``total`` and ``truncated`` make the coverage gap
-    explicit. Layer and single-file jobs do not claim global coverage.
-
-    Every job also exposes durable LIVE publication state. Project jobs move
-    from ``live_publish_status='pending'`` to ``success``, ``timed_out`` or
-    ``failed``; an analysis failure before publication reports
-    ``not_attempted``. Successful publication includes
-    ``live_publish_revision``. Publication failures preserve
-    ``live_publish_warning`` even though the report job itself may complete.
-    Layer and single-file jobs report ``not_applicable`` because their shared
-    facade updates canonical state incrementally rather than publishing a new
-    global baseline here.
-
-    LLM use: poll this after an analyze tool returns. Do not start another
-    analysis while status is ``queued`` or ``running``; repeated analyze calls
-    already return the same active job ID. Before assuming a completed global
-    graph covers the whole repository, inspect ``analysis_coverage``.
-    """
 
     root = Path(repo_path).expanduser().resolve()
     if not root.is_dir():
@@ -1309,34 +1238,12 @@ def get_analysis_status(
     )
 
 
-@mcp.tool()
+@mcp.tool(description=short_description('get_live_events'))
 def get_live_events(
     repo_path: str,
     after_revision: int | None = None,
     limit: int | None = 20,
 ) -> str:
-    """Return revisioned desktop/MCP LIVE events since a known revision.
-
-    Events are retained in RAM by the shared LIVE owner (most recent 100).
-    Each event identifies its ``origin`` (``desktop_watcher``,
-    ``mcp_analysis`` or ``mcp``), operation, status and file path. Update
-    events additionally expose ``blast_radius_state`` and a bounded
-    ``affected_modules`` collection (hard limit of 20 items in journal). Syntax
-    failures additionally expose ``error``, ``line_number`` and
-    ``column_number``. The response always includes the current ``revision``,
-    ``total`` and ``truncated``; ``limit`` defaults to 20 and may be ``None``
-    for all retained events.
-
-    LLM workflow after every file edit:
-    - If the desktop app is running, do *not* call ``update_file``. Its watcher
-      owns the update. Poll this tool with the last observed revision until the
-      desktop event arrives, then react to its status before further edits.
-    - If the desktop app is not running, call ``update_file`` after every edit,
-      then call this tool to confirm the revision and diagnostics.
-
-    MCP cannot push unsolicited messages into an idle model; this bounded,
-    revisioned feed is the reliable pull mechanism for continuous LIVE state.
-    """
     root = Path(repo_path).expanduser().resolve()
     if after_revision is not None and (
         isinstance(after_revision, bool) or after_revision < 0
@@ -1362,6 +1269,21 @@ def get_live_events(
                 },
                 indent=2,
             )
+        if connection_status in {
+            "owner_identity_changed",
+            "endpoint_identity_unverified",
+        }:
+            return json.dumps(
+                {
+                    "status": connection_status,
+                    "repo_path": str(root),
+                    "reason": "LIVE endpoint identity no longer proves the same repository owner instance.",
+                    "events": [],
+                    "total": 0,
+                    "truncated": False,
+                },
+                indent=2,
+            )
         return json.dumps(
             {"status": "no_live_service", "repo_path": str(root), "events": [], "total": 0, "truncated": False},
             indent=2,
@@ -1372,7 +1294,7 @@ def get_live_events(
         return json.dumps({"status": "error", "error": str(exc)}, indent=2)
 
 
-@mcp.tool()
+@mcp.tool(description=short_description('update_file'))
 def update_file(
     repo_path: str,
     file_path: str,
@@ -1380,39 +1302,6 @@ def update_file(
     compact: bool = True,
     fields: list[str] | None = None,
 ) -> str:
-    """
-    [OPTIMIZED] Incremental architectural update for a modified file.
-    Updates the canonical state and graph structure in real-time. When the
-    shared LIVE service is available, the update executes in its owner process
-    so desktop and MCP observe the same revision; otherwise the hydrated local
-    engine remains a fallback. Requires a completed project analysis.
-
-    Semantic-diff and affected-modules collections always expose ``total`` and
-    ``truncated``. The default compact response omits ``items``; set
-    ``compact=False`` for bounded symbol/signature/affected-module evidence.
-    ``max_items`` is the per-collection limit; pass ``None`` to return all
-    requested evidence without truncation. ``fields`` projects top-level
-    response keys after compact shaping. Stable fields include ``status``,
-    ``file_path``, graph/metrics state fields, ``affected_modules`` (containing
-    the module-level reverse blast radius when ``blast_radius_state == "fresh"``),
-    ``live_state_persisted``, ``semantic_diff`` and
-    ``runtime_restart_required``; ``delta`` and runtime warning fields are
-    conditional. Invalid projections return the current allowlist.
-
-    LLM use after every file edit: if the desktop app is running, its watcher
-    owns the update. Do not call this tool; poll ``get_live_events`` from the
-    last revision until the ``desktop_watcher`` event reports the result. If
-    desktop is not running, call this tool after every edit, then poll
-    ``get_live_events`` to confirm the shared revision and any syntax
-    diagnostic. Read ``semantic_diff`` for added/removed symbols and signature
-    changes, then use normal code diff for line-level meaning. ``bodies_changed``
-    uses normalized AST fingerprints to flag body-only edits without sending
-    body text; it does not explain their meaning. Consumption/global metrics
-    may be deferred.
-    Editing this MCP server file updates disk and canonical state, but not the
-    code already loaded by the running MCP process; restart the server whenever
-    ``runtime_restart_required`` is true, then verify the tool live.
-    """
     root = Path(repo_path).expanduser().resolve()
     target_file = Path(file_path).expanduser()
     if not target_file.is_absolute():
@@ -1512,29 +1401,13 @@ def update_file(
 # 2. QUERY LAYER (OPTIMIZED FOR LLM)
 # ==========================================================
 
-@mcp.tool()
+@mcp.tool(description=short_description('get_project_architecture'))
 def get_project_architecture(
     repo_path: str,
     max_items: int | None = 10,
     compact: bool = True,
     fields: list[str] | None = None,
 ) -> str:
-    """
-    [OPTIMIZED] The highest-level architectural summary of the project.
-    Returns global action items, debt summary, layer index, and hotspots.
-    Each analytics family is an explicit union: available collections expose
-    ``available=true``, ``total`` and ``truncated``; unavailable families expose
-    ``available=false``, ``state`` and ``reason`` without fabricated counts.
-    The compact default omits ``items``; set ``compact=False`` for evidence.
-    ``max_items`` applies independently to available collections. ``fields``
-    projects top-level keys after compact shaping. Allowed values are
-    ``action_items``, ``debt_summary``, ``layer_index``,
-    ``top_global_hotspots``, ``module_count``, and ``data_source``.
-
-    LLM use: start compact with the default limit. Increase it only when a
-    relevant collection is truncated, or pass ``None`` after explicitly
-    deciding that the complete collection is worth the token cost.
-    """
     root = Path(repo_path).expanduser().resolve()
     try:
         engine = _get_or_init_engine(root)
@@ -1615,7 +1488,7 @@ def get_project_architecture(
         return f"Error reading project architecture: {e}"
 
 
-@mcp.tool()
+@mcp.tool(description=short_description('get_module_context'))
 def get_module_context(
     repo_path: str,
     module_name: str = "",
@@ -1624,36 +1497,6 @@ def get_module_context(
     fields: list[str] | None = None,
     module: str | None = None,
 ) -> str:
-    """
-    [OPTIMIZED] Retrieve a compressed context pill for one module.
-
-    Full-report metrics are combined with the canonical LIVE dependency graph.
-    A file added through update_file is therefore immediately queryable, even
-    before another global report refreshes expensive metrics. Deferred metrics
-    are labelled explicitly instead of hiding the module.
-
-    Dependency & degree metrics definitions:
-      - ``metrics.fan_in``: Direct inbound module degree from hard dependency/import edges only.
-      - ``dependencies_inbound_who_calls_me``: All direct inbound dependencies (both hard AST imports and soft reachability edges).
-
-    Accepts ``module_name`` or LLM-friendly alias ``module`` (or module ID).
-    If an artifact/symbol identity is passed, returns a structured diagnostic
-    redirecting to ``get_artifact_blast_radius``.
-
-    Available dependency collections expose ``total`` and ``truncated``. The
-    default compact response omits edge ``items``; set ``compact=False`` for
-    bounded evidence. ``max_items`` applies independently to inbound and
-    outbound edges; pass ``None`` to return every edge. ``compact`` shapes the
-    response before ``fields`` projects it. Allowed values are ``module``, ``metrics``,
-    ``metrics_source``, ``degree_metrics_source``, ``dependency_data_source``,
-    ``dependencies_inbound_who_calls_me``, and
-    ``dependencies_outbound_who_i_call``. Invalid projections return a
-    structured error with the current allowlist.
-
-    LLM use: call immediately before editing a known module. Trust LIVE
-    inbound/outbound edges for current structure; treat metrics marked
-    deferred as unavailable until the next full analysis.
-    """
     root = Path(repo_path).expanduser().resolve()
     from contextor.core.report_query import IndexCatalog, catalog_from_registry, resolve_index_query
 
@@ -1893,7 +1736,7 @@ def get_module_context(
 
     return json.dumps(result, indent=2)
 
-@mcp.tool()
+@mcp.tool(description=short_description('get_artifact_blast_radius'))
 def get_artifact_blast_radius(
     repo_path: str,
     artifact_name: str,
@@ -1901,38 +1744,6 @@ def get_artifact_blast_radius(
     compact: bool = True,
     fields: list[str] | None = None,
 ) -> str:
-    """
-    [OPTIMIZED] Resolves direct, evidence-backed consumers of an artifact.
-    Uses canonical LIVE artifact and symbol-consumption facts. It does not
-    read output reports and does not claim that dynamic Python usage can be
-    proven exact.
-
-    Candidate, consumer & reachability semantics:
-      - If a module name or module ID is passed, returns a structured diagnostic with deterministic public-first ranked artifact candidates defined by that module.
-      - ``consumers``: Direct static symbol consumers with confirmed references.
-      - ``architecture``:
-          * ``definer_layer``: Canonical architectural layer of the defining module.
-          * ``consumer_layers``: Sorted list of unique known canonical layers of direct consumers.
-          * ``same_module_consumer_count``: Unique direct consumers in the same module.
-          * ``same_layer_consumer_count``: Unique direct consumers in the same layer (excluding same-module).
-          * ``cross_layer_consumer_count``: Unique direct NON-TEST consumers whose canonical layer differs from ``definer_layer``.
-          * ``test_consumer_count``: Unique direct consumers whose canonical layer is "tests".
-          * ``cross_layer_consumers``: Boolean indicating if ``cross_layer_consumer_count > 0``.
-          * ``cross_layer_sample``: Bounded sample of cross-layer production consumers (excluding tests).
-      - ``downstream_module_reachability``:
-          Conservative module-level downstream reachability seeded by confirmed direct symbol consumer modules.
-          It does not represent transitive symbol-to-symbol consumption.
-
-    ``consumers`` always contains ``total`` and ``truncated``. The default
-    compact response omits ``items``; set ``compact=False`` for bounded static
-    evidence. ``max_items`` controls returned consumers; pass ``None`` for all
-    consumers without truncation. ``fields`` projects top-level
-    keys after compact shaping. Allowed values are ``artifact``, ``artifact_id``,
-    ``kind``, ``definer``, ``architecture``, ``downstream_module_reachability``, ``consumers``, ``evidence_scope``, and ``data_source``.
-
-    LLM use: call before changing or removing a public symbol. Treat consumers
-    as confirmed static evidence, not proof that dynamic Python has no callers.
-    """
     root = Path(repo_path).expanduser().resolve()
     try:
         mod_path_to_id, mod_id_to_path, art_path_to_id, art_id_to_path = _read_registries(root)
@@ -2274,7 +2085,7 @@ def get_artifact_blast_radius(
         return f"Error calculating artifact blast radius: {e}"
 
 
-@mcp.tool()
+@mcp.tool(description=short_description('search_artifacts'))
 def search_artifacts(
     repo_path: str,
     search_term: str,
@@ -2283,23 +2094,6 @@ def search_artifacts(
     compact: bool = True,
     fields: list[str] | None = None,
 ) -> str:
-    """
-    [OPTIMIZED] Searches the canonical live state for an artifact, module, or symbol matching 'search_term'.
-    Returns its properties and all its dependencies and consumers (blast radius).
-    Use this to extract arbitrary context about any symbol from the current architectural state.
-    Exact symbol matches are preferred. ``limit``, ``total_matches`` and
-    ``truncated`` bound broad searches without hiding their cardinality.
-    Nested module dependencies and artifact consumers are independently bounded
-    by ``evidence_limit``. They always expose ``total`` and ``truncated``;
-    set ``compact=False`` to include ``items``. Pass ``None`` for either limit
-    to return every match or every nested evidence item. ``fields``
-    projects ``query``, ``match_count``, ``total_matches``, ``truncated``,
-    ``modules`` or ``artifacts`` after compact shaping.
-
-    LLM use: start here when only a partial symbol/module name is known. Keep
-    the default limit, inspect ``truncated``, and narrow the term before raising
-    the limit to avoid loading irrelevant canonical state.
-    """
     root = Path(repo_path).expanduser().resolve()
     repo_name = root.name
     
@@ -2458,7 +2252,7 @@ def search_artifacts(
         return f"Error extracting artifact context from live state: {e}"
 
 
-@mcp.tool()
+@mcp.tool(description=short_description('get_symbol_implementation'))
 def get_symbol_implementation(
     repo_path: str,
     symbol: str,
@@ -2468,39 +2262,6 @@ def get_symbol_implementation(
     methods: list[str] | None = None,
     member_limit: int | None = 50,
 ) -> str:
-    """
-    [OPTIMIZED] Resolves one class, function, or method from explicit source
-    files and returns its exact AST-bounded implementation on demand.
-
-    This is a two-phase, LLM-first tool. ``mode='preview'`` is the default and
-    returns no source code: it resolves the symbol, reports its exact line
-    range, and estimates UTF-8 JSON response sizes in bytes and decimal KB for
-    complete fetch plans. For classes it also lists selectable methods with
-    their individual complete-source costs. ``member_limit`` bounds that method
-    catalogue only; pass ``None`` to see every method. ``total`` and
-    ``truncated`` make omitted methods explicit.
-
-    Use ``mode='fetch'`` only after preview. ``include`` is required and may
-    contain ``signature``, ``docstring``, ``implementation``,
-    ``static_context``, or (for a class) ``methods``. ``implementation``
-    returns the entire resolved AST symbol, including decorators and its
-    docstring when present; it is never split into line chunks. To fetch class
-    methods instead of the whole class, choose ``include=['methods']`` and pass
-    their names in ``methods``. Each selected method is returned whole, never
-    partially. ``implementation`` and ``methods`` are mutually exclusive so a
-    caller cannot accidentally duplicate a whole class and its methods.
-
-    Symbol matching is exact and Python case-sensitive. Supply one or more
-    repository-relative or absolute ``file_paths``; ambiguous matches return
-    candidate metadata only, and no implementation is guessed. Source is read
-    from disk at request time and is not stored in canonical state. The compact
-    ``static_context`` contains the current static consumer total when live
-    state is available; use the blast-radius tool for consumer evidence.
-
-    LLM use: preview first, compare the planned payload sizes, then fetch the
-    smallest complete combination that answers the implementation question.
-    This complements source-file reading; it does not infer historical intent.
-    """
     root = Path(repo_path).expanduser().resolve()
     if not root.is_dir():
         return json.dumps({"status": "error", "error": f"Repository path '{root}' does not exist."}, indent=2)
@@ -2647,7 +2408,7 @@ def get_symbol_implementation(
     return json.dumps(result, indent=2, ensure_ascii=False)
 
 
-@mcp.tool()
+@mcp.tool(description=short_description('get_file_edit_context'))
 def get_file_edit_context(
     repo_path: str,
     file_path: str = "",
@@ -2657,28 +2418,6 @@ def get_file_edit_context(
     mode: str | None = None,
     target: str | None = None,
 ) -> str:
-    """
-    [OPTIMIZED] Specialized single-shot context pill for LLMs prior to editing a file or module.
-    Combines LIVE module/API/dependency state in one response.
-
-    Consumer & dependency semantics:
-      - ``direct_count`` / ``direct consumer``: Unique module directly referencing/importing the target through a hard or soft dependency edge.
-      - ``transitive_count`` / ``transitive consumer``: Unique module reachable through reverse hard-or-soft dependency traversal, excluding the target itself.
-
-    Modes:
-      - ``mode=None`` (default): Legacy behavior. When ``compact=True`` (default), returns
-        top-level collection metadata (counts and truncated flags). When ``compact=False``,
-        returns bounded lists of items/tests (using legacy ``max_items``, default 30). Supports ``fields`` projection.
-      - ``mode='minimal'``: Ultra-lightweight pre-edit projection designed for rapid LLM
-        decision-making. Accepts a forgiving ``target`` (relative path, absolute path,
-        dotted module name, or module ID). Returns direct and transitive consumer counts,
-        bounded samples (capped at at most 5 items by default, regardless of legacy ``max_items=30`` default),
-        and covering tests in 100% in-memory RAM without disk reads. Sample collections explicitly provide
-        both total count and a ``truncated`` boolean flag.
-
-    If an artifact/symbol identity is passed as target in minimal mode, returns a structured
-    diagnostic indicating the definer module and suggesting ``get_artifact_blast_radius``.
-    """
     root = Path(repo_path).expanduser().resolve()
     repo_name = root.name
 
@@ -3236,7 +2975,7 @@ def get_file_edit_context(
         return f"Error extracting file edit context: {e}"
 
 
-@mcp.tool()
+@mcp.tool(description=short_description('get_layer_isolation'))
 def get_layer_isolation(
     repo_path: str,
     layer_name: str,
@@ -3245,25 +2984,6 @@ def get_layer_isolation(
     compact: bool = True,
     fields: list[str] | None = None,
 ) -> str:
-    """
-    [OPTIMIZED] Extracts isolation metrics, clusters, and leaks for a specific architectural layer.
-    Use this before refactoring a large component to understand its internal cohesion.
-
-    Uses a dedicated layer report when present and otherwise derives bounded
-    boundary evidence from canonical LIVE state. Reports enrich clusters and
-    metrics but are not required for structural isolation.
-
-    ``max_clusters`` and ``max_boundary_violations`` bound verbose evidence.
-    Collections always expose ``total`` and ``truncated``. The compact default
-    omits ``items``; set ``compact=False`` for evidence. Increase either limit
-    or pass ``None`` for the complete corresponding collection. ``fields``
-    projects top-level keys after compact shaping. Allowed values are ``layer``,
-    ``report_layer``, ``data_source``, ``module_count``, ``clusters``,
-    ``dependency_types``, and ``boundary_violations``.
-
-    LLM use: call before moving modules or changing layer boundaries. Resolve a
-    truncated tail only when the planned edit touches that omitted evidence.
-    """
     root = Path(repo_path).expanduser().resolve()
     repo_name = root.name
     
@@ -3459,28 +3179,13 @@ def get_layer_isolation(
         return f"Error extracting layer isolation: {e}"
 
 
-@mcp.tool()
+@mcp.tool(description=short_description('get_report_diff'))
 def get_report_diff(
     repo_path: str,
     max_items: int | None = 20,
     compact: bool = True,
     fields: list[str] | None = None,
 ) -> str:
-    """
-    [OPTIMIZED] Returns architectural regression analysis between the last two analysis runs.
-    Shows delta in hotspot count, debt score, cycle count, and lists new/resolved hotspots.
-    Consecutive runs are compared before the canonical summary is overwritten,
-    including different working-tree states on the same commit.
-    Layer changes are returned as a collection with ``total`` and ``truncated``;
-    set ``compact=False`` for bounded ``items``. ``max_items=None`` returns all
-    changed layers. ``fields`` projects top-level keys after compact shaping;
-    current reports expose ``classification``, ``report_diff``, ``baseline``,
-    ``current``, and ``comparison_basis``.
-
-    LLM use: run analysis once before and once after a change, then inspect the
-    classification and metric deltas here. An empty diff means no tracked
-    architectural metric changed; it does not mean source text was identical.
-    """
     root = Path(repo_path).expanduser().resolve()
     repo_name = root.name
 
@@ -3517,48 +3222,13 @@ def get_report_diff(
         return f"Error reading diff report: {e}"
 
 
-@mcp.tool()
+@mcp.tool(description=short_description('describe_canonical_state'))
 def describe_canonical_state() -> str:
-    """Return the complete versioned contract for safe canonical LIVE queries.
-
-    This endpoint is passive discovery only: it returns ``SCHEMA_V1`` and
-    ``LANGUAGE_V1`` from the same constants used by query validation. It does
-    not read repository data, execute expressions, reflect over Python objects,
-    or fetch records. The response documents the three roots (``modules``,
-    ``artifacts``, ``dependencies``), every selectable field, per-field
-    operators, null semantics, canonical ordering and hard request limits.
-
-    LLM use: call this before composing a projection request or when a
-    structural validation error reports an unfamiliar field/operator. Cache by
-    ``schema_version`` and ``language_version``; do not treat it as repository
-    data or use it in place of ``query_canonical_projection``.
-    """
     return json.dumps(_describe_canonical_contract(), indent=2, ensure_ascii=False)
 
 
-@mcp.tool()
+@mcp.tool(description=short_description('query_canonical_projection'))
 def query_canonical_projection(repo_path: str, request: dict[str, Any]) -> str:
-    """Execute a safe, bounded JSON query over normalized canonical LIVE data.
-
-    ``request`` must explicitly include ``schema_version``,
-    ``language_version``, ``root``, ``filters`` and ``select``. It may include
-    ``limit`` (default 20, maximum 200). Filters are a flat AND and use only the
-    operators declared for each field by ``describe_canonical_state``. Empty
-    ``filters`` matches all records; empty ``select`` returns every selectable
-    field. Results always report ``total_matches``, ``returned``, ``limit`` and
-    ``truncated``.
-
-    The executor first converts LIVE state to read-only JSON-safe records. It
-    never uses ``eval``, accepts no Python expressions, exposes no arbitrary
-    attributes and omits local absolute paths. Artifacts preserve the
-    distinction between confirmed zero consumers and unavailable consumption
-    data via ``consumer_data_available`` plus nullable consumer fields.
-    Structural errors return one deterministic error with ``code``, ``path``
-    and repair details.
-
-    LLM use: discover the contract first, request the smallest useful field
-    selection, and narrow filters when ``truncated`` is true.
-    """
     root = Path(repo_path).expanduser().resolve()
     engine = _get_or_init_engine(root)
     if not engine:
@@ -3585,7 +3255,7 @@ def query_canonical_projection(repo_path: str, request: dict[str, Any]) -> str:
 # 3. TARGETED INDEX / ARTIFACT QUERY TOOLS
 # ==========================================================
 
-@mcp.tool()
+@mcp.tool(description=short_description('extract_indexed_report_context'))
 def extract_indexed_report_context(
     repo_path: str,
     query: str,
@@ -3595,32 +3265,6 @@ def extract_indexed_report_context(
     max_items: int | None = 20,
     fields: list[str] | None = None,
 ) -> str:
-    """
-    [OPTIMIZED] Extracts complete matching blocks from an indexed artifact report.
-
-    Resolution is index-first and shared with the GUI parser. Queries may use an
-    artifact/module ID, a ``.py`` path, a full ``module::symbol`` key, or explicit
-    ``file:``, ``module:``, ``symbol:`` and ``artifact:`` prefixes. Exact matches
-    are never replaced by fuzzy guesses; ambiguous and missing queries remain
-    explicit. Active dictionaries fall back to both recovery dictionaries, while
-    blocks with unresolved artifact or definer IDs are omitted with diagnostics.
-
-    Omit ``report_path`` to read the current compact artifact report. Every
-    selected block is returned complete, including nested objects. ``max_items``
-    controls the number of complete artifact blocks (default 20); pass ``None``
-    for every match. ``total_artifact_count`` and ``truncated`` expose omitted
-    matches. ``fields`` projects top-level keys after bounding; accepted names
-    are the keys returned by the shared indexed-query resolver plus
-    ``total_artifact_count``, ``truncated``, and ``data_source``. Invalid
-    projections return the exact current allowlist.
-
-    Set ``public_api_only=True`` to mirror the GUI checkbox: private names are
-    excluded, but zero detected consumers do not make an artifact private.
-
-    LLM use: prefer this over reading a whole compact JSON when one file, symbol, or
-    ID is relevant. Inspect resolution/diagnostics and narrow an ambiguous query;
-    do not treat suggestions as confirmed matches.
-    """
     root = Path(repo_path).expanduser().resolve()
     try:
         if report_path:
@@ -3678,25 +3322,8 @@ def extract_indexed_report_context(
         return f"Error extracting indexed report context: {e}"
 
 
-@mcp.tool()
+@mcp.tool(description=short_description('lookup_index_entries'))
 def lookup_index_entries(repo_path: str, ids: list[str]) -> str:
-    """
-    [OPTIMIZED] Resolves a specific list of compact IDs to their full names.
-
-    Use this instead of get_project_index when you only need to decode a
-    handful of IDs found in a report (e.g. from module_dependency_matrix or
-    shared_usage_clusters).  Much cheaper than loading the entire registry.
-
-    Accepts both module IDs (e.g. '124/1') and artifact IDs (e.g. 'A35/1').
-    Each ID resolves to ``{"name": ..., "status": "active|recovery|missing"}``
-    so stale identities are distinguishable from malformed or unknown IDs.
-
-    LLM use: pass only IDs visible in the current result instead of loading the
-    full project dictionary. Recovery means a known historical identity and
-    must not be presented as an active symbol; missing means no known identity.
-    Output size is controlled directly by the number of IDs supplied; split a
-    large set when one response would not fit the context window.
-    """
     root = Path(repo_path).expanduser().resolve()
     try:
         catalog = catalog_from_registry(str(root))
@@ -3722,7 +3349,7 @@ def lookup_index_entries(repo_path: str, ids: list[str]) -> str:
         return f"Error resolving index entries: {e}"
 
 
-@mcp.tool()
+@mcp.tool(description=short_description('get_artifacts_for_module'))
 def get_artifacts_for_module(
     repo_path: str,
     module_name: str,
@@ -3733,36 +3360,6 @@ def get_artifacts_for_module(
     compact: bool = True,
     fields: list[str] | None = None,
 ) -> str:
-    """
-    [OPTIMIZED] Returns all artifacts exported by a module with consumer info.
-
-    Equivalent to the GUI parser window — shows what a module defines and
-    who uses each artifact across the project.
-
-    ``module_name`` can be:
-    - A full dotted module name: 'contextor.ui.gui_parser'
-    - A file path relative to the repo root: 'contextor/ui/gui_parser.py'
-
-    Set ``include_consumers=False`` for a signatures-only view. When included,
-    each ``consumers`` object always exposes ``total`` and ``truncated``;
-    ``compact=False`` adds ``items``. ``limit`` controls artifact matches and
-    ``evidence_limit`` controls consumers per artifact; pass ``None`` for all
-    matches or all nested evidence. ``fields`` projects top-level keys after
-    compact shaping. Allowed values are ``module``, ``module_id``,
-    ``artifact_count``, ``total_artifact_count``, ``truncated``,
-    ``symbol_filter``, ``data_sources``, ``complete_symbol_catalog``, and
-    ``artifacts``.
-
-    Use ``symbol_filter`` to select a name substring and ``limit`` to bound the
-    result. ``total_artifact_count`` reports matches before limiting and
-    ``truncated`` tells the LLM whether a narrower follow-up query is useful.
-    Canonical LIVE state is the source of truth for symbol and artifact facts.
-    Persistent registries provide identity/index mappings only. Output reports
-    are not read by this operation.
-
-    LLM use: call before changing one module's API. Disable consumers for the
-    cheapest signature inventory; enable them only for impact analysis.
-    """
     root = Path(repo_path).expanduser().resolve()
     repo_name = root.name
 
@@ -3875,7 +3472,7 @@ def get_artifacts_for_module(
         return f"Error reading artifacts for module: {e}"
 
 
-@mcp.tool()
+@mcp.tool(description=short_description('lookup_artifact_by_symbol'))
 def lookup_artifact_by_symbol(
     repo_path: str,
     symbol_name: str,
@@ -3884,26 +3481,6 @@ def lookup_artifact_by_symbol(
     compact: bool = True,
     fields: list[str] | None = None,
 ) -> str:
-    """
-    [OPTIMIZED] Finds artifacts matching a symbol name and returns their details.
-
-    Searches by partial, case-insensitive match against the symbol part of
-    the artifact's full name (the part after '::', e.g. 'generate_graph'
-    matches 'generate_graph_analytics_report').
-
-    Works on canonical LIVE artifact facts.
-    Returns defining module, kind, consumer count, and consumer module list.
-    Exact matches are preferred over partial matches. ``limit`` bounds the
-    response while ``total_matches`` and ``truncated`` describe omitted data.
-    Consumers within every match are bounded independently by
-    ``evidence_limit``, always expose ``total`` and ``truncated``, and include
-    ``items`` only when ``compact=False``. Pass ``None`` for all matches or all
-    consumers. ``fields`` projects top-level keys after compact shaping.
-    Allowed values are ``query``, ``match_count``, ``total_matches``,
-    ``truncated``, ``data_source``, and ``artifacts``.
-
-    LLM use: narrow ambiguous names before increasing ``limit``.
-    """
     root = Path(repo_path).expanduser().resolve()
     try:
         _, _, art_path_to_id, _ = _read_registries(root)
@@ -3999,6 +3576,19 @@ def lookup_artifact_by_symbol(
         return json.dumps(result, indent=2)
     except Exception as e:
         return f"Error searching artifacts by symbol: {e}"
+
+
+@mcp.tool(description=short_description("get_mcp_documentation"))
+def get_mcp_documentation(
+    tool: str | None = None,
+    tools: list[str] | None = None,
+    sections: list[str] | None = None,
+) -> str:
+    return json.dumps(
+        query_documentation(tool=tool, tools=tools, sections=sections),
+        ensure_ascii=False,
+        indent=2,
+    )
 
 
 def main():

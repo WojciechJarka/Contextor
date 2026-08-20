@@ -1,0 +1,20 @@
+{
+  "version": "1.0.0",
+  "tool": "get_layer_isolation",
+  "purpose": [
+    "[OPTIMIZED] Extracts isolation metrics, clusters, and leaks for a specific architectural layer.\nUse this before refactoring a large component to understand its internal cohesion."
+  ],
+  "parameters": [
+    "``max_clusters`` and ``max_boundary_violations`` bound verbose evidence.\nCollections always expose ``total`` and ``truncated``. The compact default\nomits ``items``; set ``compact=False`` for evidence. Increase either limit\nor pass ``None`` for the complete corresponding collection. ``fields``\nprojects top-level keys after compact shaping. Allowed values are ``layer``,\n``report_layer``, ``data_source``, ``module_count``, ``clusters``,\n``dependency_types``, and ``boundary_violations``."
+  ],
+  "behavior": [
+    "Uses a dedicated layer report when present and otherwise derives bounded\nboundary evidence from canonical LIVE state. Reports enrich clusters and\nmetrics but are not required for structural isolation."
+  ],
+  "freshness": [],
+  "errors": [],
+  "usage_notes": [
+    "LLM use: call before moving modules or changing layer boundaries. Resolve a\ntruncated tail only when the planned edit touches that omitted evidence."
+  ],
+  "examples": []
+}
+

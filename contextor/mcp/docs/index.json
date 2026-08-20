@@ -1,0 +1,111 @@
+{
+  "version": "1.0.0",
+  "tools": [
+    {
+      "tool": "analyze_project",
+      "filename": "analyze_project.json",
+      "short_description": "Start a non-blocking repository-wide architectural analysis and return its job ID. Use get_analysis_status to poll completion and coverage."
+    },
+    {
+      "tool": "analyze_layer",
+      "filename": "analyze_layer.json",
+      "short_description": "Start non-blocking analysis limited to one directory layer and return its job ID. Use this instead of a global run when the decision is package-scoped."
+    },
+    {
+      "tool": "analyze_single_file",
+      "filename": "analyze_single_file.json",
+      "short_description": "Start non-blocking deep analysis for one Python file and return its job ID. Do not exclude the target file."
+    },
+    {
+      "tool": "get_analysis_status",
+      "filename": "get_analysis_status.json",
+      "short_description": "Return durable status, coverage, and LIVE publication state for an analysis job. Do not start another analysis while the current job is queued or running."
+    },
+    {
+      "tool": "get_live_events",
+      "filename": "get_live_events.json",
+      "short_description": "Return revisioned desktop/MCP LIVE events after a known revision. When desktop watcher runs, poll this instead of calling update_file."
+    },
+    {
+      "tool": "update_file",
+      "filename": "update_file.json",
+      "short_description": "Apply one incremental architectural update when desktop watcher is not running. Requires a completed analysis and may report deferred analytics."
+    },
+    {
+      "tool": "get_project_architecture",
+      "filename": "get_project_architecture.json",
+      "short_description": "Return the highest-level canonical architecture summary with explicit availability per analytics family. Unavailable families never fabricate zero counts."
+    },
+    {
+      "tool": "get_module_context",
+      "filename": "get_module_context.json",
+      "short_description": "Return compact canonical metrics and dependency context for one module. Artifact identities are redirected to get_artifact_blast_radius."
+    },
+    {
+      "tool": "get_artifact_blast_radius",
+      "filename": "get_artifact_blast_radius.json",
+      "short_description": "Resolve confirmed direct static consumers and downstream module reachability for one artifact. Dynamic Python usage is not claimed as complete."
+    },
+    {
+      "tool": "search_artifacts",
+      "filename": "search_artifacts.json",
+      "short_description": "Search canonical LIVE modules and artifacts by a partial term with bounded dependency and consumer evidence. Narrow broad truncated matches before raising limits."
+    },
+    {
+      "tool": "get_symbol_implementation",
+      "filename": "get_symbol_implementation.json",
+      "short_description": "Preview or fetch one exact AST-bounded symbol implementation from explicit source files. Ambiguous matches are never guessed."
+    },
+    {
+      "tool": "get_file_edit_context",
+      "filename": "get_file_edit_context.json",
+      "short_description": "Return canonical API, dependency, consumer, and test context before editing one file or module. Minimal mode is an in-memory decision projection."
+    },
+    {
+      "tool": "get_layer_isolation",
+      "filename": "get_layer_isolation.json",
+      "short_description": "Return isolation metrics, clusters, and boundary leaks for one architectural layer. Reports may enrich results but canonical LIVE state supplies structural fallback."
+    },
+    {
+      "tool": "get_report_diff",
+      "filename": "get_report_diff.json",
+      "short_description": "Compare architectural metrics from the last two analysis runs. An empty diff means no tracked metric changed, not identical source."
+    },
+    {
+      "tool": "describe_canonical_state",
+      "filename": "describe_canonical_state.json",
+      "short_description": "Return the passive versioned schema and language contract for safe canonical queries. It reads no repository data."
+    },
+    {
+      "tool": "query_canonical_projection",
+      "filename": "query_canonical_projection.json",
+      "short_description": "Execute a safe bounded query over normalized canonical LIVE data. Only the declared versioned query language is accepted."
+    },
+    {
+      "tool": "extract_indexed_report_context",
+      "filename": "extract_indexed_report_context.json",
+      "short_description": "Resolve and return complete matching blocks from an indexed artifact report. Ambiguous or missing identities remain explicit."
+    },
+    {
+      "tool": "lookup_index_entries",
+      "filename": "lookup_index_entries.json",
+      "short_description": "Resolve selected compact module or artifact IDs without loading the whole registry. Recovery identities are historical, not active."
+    },
+    {
+      "tool": "get_artifacts_for_module",
+      "filename": "get_artifacts_for_module.json",
+      "short_description": "Return canonical artifacts exported by one module, optionally with bounded consumer evidence. Persistent registries provide identity only."
+    },
+    {
+      "tool": "lookup_artifact_by_symbol",
+      "filename": "lookup_artifact_by_symbol.json",
+      "short_description": "Find canonical artifacts by exact-preferred partial symbol matching with bounded consumer evidence. Narrow ambiguous names before increasing the limit."
+    },
+    {
+      "tool": "get_mcp_documentation",
+      "filename": "get_mcp_documentation.json",
+      "short_description": "Return centralized MCP documentation, optionally filtered by tool names and sections. This passive tool reads no repository, LIVE state, or output reports."
+    }
+  ]
+}
+

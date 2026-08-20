@@ -12,7 +12,10 @@ import time
 from pathlib import Path
 
 from contextor.core.paths import repo_cache_dir
-from contextor.core.repository_identity import require_repository_identity
+from contextor.core.repository_identity import (
+    read_repository_identity,
+    require_repository_identity,
+)
 
 from .ipc import CanonicalLiveServer, LIVE_PROTOCOL_VERSION, LiveEndpoint, LiveStateClient
 from .store import load_snapshot, migrate_legacy_snapshot, read_metadata, save_snapshot
@@ -129,6 +132,8 @@ def _read_endpoint(repo_path: str | Path) -> LiveEndpoint | None:
         pid = int(payload["pid"]) if "pid" in payload and payload["pid"] is not None else None
         owner_pid = int(payload["owner_pid"]) if "owner_pid" in payload and payload["owner_pid"] is not None else None
         owner_token = str(payload["owner_token"]) if "owner_token" in payload and payload["owner_token"] is not None else None
+        repo_id = str(payload["repo_id"]) if payload.get("repo_id") else None
+        root_path = str(payload["root_path"]) if payload.get("root_path") else None
         return LiveEndpoint(
             payload["host"],
             int(payload["port"]),
@@ -136,6 +141,8 @@ def _read_endpoint(repo_path: str | Path) -> LiveEndpoint | None:
             pid=pid,
             owner_pid=owner_pid,
             owner_token=owner_token,
+            repo_id=repo_id,
+            root_path=root_path,
         )
     except (OSError, ValueError, KeyError, TypeError):
         return None
@@ -166,15 +173,32 @@ def connect_existing_with_status(
 ) -> tuple[LiveStateClient | None, str]:
     """Reconnect briefly to an existing owner without starting a service."""
     root = Path(repo_path).resolve()
+    expected = _read_endpoint(root)
+    if expected is None:
+        return None, "no_live_service"
+    identity = read_repository_identity(root)
+    if (
+        identity is None
+        or expected.repo_id != identity.repo_id
+        or not expected.root_path
+        or Path(expected.root_path).expanduser().resolve() != root
+    ):
+        return None, "endpoint_identity_unverified"
+
     total_attempts = max(1, attempts)
     for attempt in range(total_attempts):
         client = connect(root)
         if client is not None:
+            current = _read_endpoint(root)
+            if current != expected or client.endpoint != expected:
+                return None, "owner_identity_changed"
             return client, "connected"
         if attempt + 1 < total_attempts:
             time.sleep(max(0.0, retry_delay))
 
     endpoint = _read_endpoint(root)
+    if endpoint != expected:
+        return None, "owner_identity_changed"
     if (
         endpoint is not None
         and endpoint.pid is not None
@@ -546,6 +570,8 @@ def run_service(
         "port": server.endpoint.port,
         "authkey_hex": server.endpoint.authkey_hex,
         "pid": os.getpid(),
+        "repo_id": identity.repo_id,
+        "root_path": identity.root_path,
     }
     if owner_pid is not None:
         payload["owner_pid"] = int(owner_pid)

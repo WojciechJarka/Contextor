@@ -1,0 +1,18 @@
+{
+  "version": "1.0.0",
+  "tool": "analyze_layer",
+  "purpose": [
+    "Starts non-blocking analysis isolated to a specific layer (directory).\nPoll ``get_analysis_status`` with the returned job ID."
+  ],
+  "parameters": [
+    "``exclude_paths`` contains repository-relative Python files or directory\nprefixes to omit from this run. It is merged with, but never persisted to,\nthe GUI exclude list. Non-Python files are ignored automatically."
+  ],
+  "behavior": [],
+  "freshness": [],
+  "errors": [],
+  "usage_notes": [
+    "LLM use: prefer this over a global run when the decision is confined to one\npackage, then poll its job instead of repeating the call. Exclude unrelated\nPython trees to reduce report size, but retain tests when boundary or\ncoverage evidence matters."
+  ],
+  "examples": []
+}
+

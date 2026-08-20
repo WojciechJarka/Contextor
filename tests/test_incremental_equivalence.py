@@ -373,5 +373,5 @@ def test_incremental_successful_modify_after_failed_modify(tmp_path):
     # 2. Successful Modify
     file_a.write_text("def foo_new():\n    pass\n")
     res = engine.update_file(str(file_a))
-    assert res.status == "UPDATED"
+    assert res.status == "RECOVERED"
     assert "foo_new" in engine.state.artifacts["a"]["own_symbols"]

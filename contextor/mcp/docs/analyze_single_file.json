@@ -1,0 +1,18 @@
+{
+  "version": "1.0.0",
+  "tool": "analyze_single_file",
+  "purpose": [
+    "Starts non-blocking deep analysis on a single Python file.\nPoll ``get_analysis_status`` with the returned job ID."
+  ],
+  "parameters": [
+    "``exclude_paths`` narrows the surrounding project context for this run.\nEntries are repository-relative Python files or directory prefixes and are\ncombined with the saved GUI excludes without modifying them. Do not exclude\nthe target file itself."
+  ],
+  "behavior": [],
+  "freshness": [],
+  "errors": [],
+  "usage_notes": [
+    "LLM use: choose this for a focused symbol/API decision, then poll its job\ninstead of repeating the call. Exclude unrelated packages to save tokens;\nretain relevant tests when test discovery is part of the question."
+  ],
+  "examples": []
+}
+

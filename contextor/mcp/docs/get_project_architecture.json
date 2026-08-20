@@ -1,0 +1,16 @@
+{
+  "version": "1.0.0",
+  "tool": "get_project_architecture",
+  "purpose": [
+    "[OPTIMIZED] The highest-level architectural summary of the project.\nReturns global action items, debt summary, layer index, and hotspots.\nEach analytics family is an explicit union: available collections expose\n``available=true``, ``total`` and ``truncated``; unavailable families expose\n``available=false``, ``state`` and ``reason`` without fabricated counts.\nThe compact default omits ``items``; set ``compact=False`` for evidence.\n``max_items`` applies independently to available collections. ``fields``\nprojects top-level keys after compact shaping. Allowed values are\n``action_items``, ``debt_summary``, ``layer_index``,\n``top_global_hotspots``, ``module_count``, and ``data_source``."
+  ],
+  "parameters": [],
+  "behavior": [],
+  "freshness": [],
+  "errors": [],
+  "usage_notes": [
+    "LLM use: start compact with the default limit. Increase it only when a\nrelevant collection is truncated, or pass ``None`` after explicitly\ndeciding that the complete collection is worth the token cost."
+  ],
+  "examples": []
+}
+

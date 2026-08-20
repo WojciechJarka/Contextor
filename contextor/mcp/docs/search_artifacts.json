@@ -1,0 +1,16 @@
+{
+  "version": "1.0.0",
+  "tool": "search_artifacts",
+  "purpose": [
+    "[OPTIMIZED] Searches the canonical live state for an artifact, module, or symbol matching 'search_term'.\nReturns its properties and all its dependencies and consumers (blast radius).\nUse this to extract arbitrary context about any symbol from the current architectural state.\nExact symbol matches are preferred. ``limit``, ``total_matches`` and\n``truncated`` bound broad searches without hiding their cardinality.\nNested module dependencies and artifact consumers are independently bounded\nby ``evidence_limit``. They always expose ``total`` and ``truncated``;\nset ``compact=False`` to include ``items``. Pass ``None`` for either limit\nto return every match or every nested evidence item. ``fields``\nprojects ``query``, ``match_count``, ``total_matches``, ``truncated``,\n``modules`` or ``artifacts`` after compact shaping."
+  ],
+  "parameters": [],
+  "behavior": [],
+  "freshness": [],
+  "errors": [],
+  "usage_notes": [
+    "LLM use: start here when only a partial symbol/module name is known. Keep\nthe default limit, inspect ``truncated``, and narrow the term before raising\nthe limit to avoid loading irrelevant canonical state."
+  ],
+  "examples": []
+}
+

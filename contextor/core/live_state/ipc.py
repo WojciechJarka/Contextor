@@ -20,6 +20,8 @@ class LiveEndpoint:
     pid: int | None = None
     owner_pid: int | None = None
     owner_token: str | None = None
+    repo_id: str | None = None
+    root_path: str | None = None
 
     @property
     def address(self) -> tuple[str, int]:

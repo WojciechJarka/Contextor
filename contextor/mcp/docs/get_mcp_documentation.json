@@ -1,0 +1,26 @@
+{
+  "version": "1.0.0",
+  "tool": "get_mcp_documentation",
+  "purpose": [
+    "Return centralized documentation for MCP tools without reading repository data, LIVE state, or output reports."
+  ],
+  "parameters": [
+    "Omit both filters for the versioned tool index and minimal summaries. Pass ``tools`` to select tool names and ``sections`` to select documentation sections; selecting tools without sections returns their complete documentation."
+  ],
+  "behavior": [
+    "Results use deterministic legacy registration order followed by the documentation endpoint. Passing ``sections`` with no tools applies the section projection to every documented tool."
+  ],
+  "freshness": [
+    "Documentation is packaged static data and has no repository freshness lifecycle."
+  ],
+  "errors": [
+    "Unknown tools or sections return ``invalid_documentation_query`` with deterministic unknown and available lists."
+  ],
+  "usage_notes": [
+    "Use the default index for discovery, then request complete documentation only for tools relevant to the current task."
+  ],
+  "examples": [
+    "Use ``tools=['get_module_context']`` for one complete tool document, or pass selected ``sections`` for a narrower response."
+  ]
+}
+
