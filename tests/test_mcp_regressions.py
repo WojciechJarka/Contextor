@@ -206,6 +206,195 @@ def test_stale_layer_snapshot_is_not_presented_after_incremental_update(
     assert edit_context["tests_covering"]["tests"][0]["module"] == "quality.scenario"
 
 
+def test_minimal_file_context_fails_closed_without_usable_live_graph(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(
+        mcp_server,
+        "_read_registries",
+        lambda _root: ({"provider": "1/1"}, {"1/1": "provider"}, {}, {}),
+    )
+    monkeypatch.setattr(
+        "contextor.core.report_query.catalog_from_registry",
+        lambda _root: IndexCatalog(
+            modules={"1/1": "provider"},
+            artifacts={},
+            module_paths={"provider": "provider.py"},
+            recovered_modules={},
+            recovered_artifacts={},
+        ),
+    )
+    monkeypatch.setattr(mcp_server, "_get_or_init_engine", lambda _root: None)
+    missing = json.loads(
+        mcp_server.get_file_edit_context.fn(
+            repo_path=str(tmp_path), target="1/1", mode="minimal"
+        )
+    )
+
+    state = RepositoryAnalysisState(modules={"provider": object()})
+    monkeypatch.setattr(
+        mcp_server, "_get_or_init_engine", lambda _root: SimpleNamespace(state=state)
+    )
+    missing_graph = json.loads(
+        mcp_server.get_file_edit_context.fn(
+            repo_path=str(tmp_path), target="1/1", mode="minimal"
+        )
+    )
+
+    assert missing["status"] == "unavailable"
+    assert missing_graph["status"] == "unavailable"
+    assert "consumers" not in missing
+    assert "tests_covering" not in missing_graph
+
+
+def test_module_context_fails_closed_when_canonical_graph_is_missing(
+    tmp_path, monkeypatch
+):
+    state = RepositoryAnalysisState(modules={"provider": object()})
+    monkeypatch.setattr(
+        mcp_server, "_get_or_init_engine", lambda _root: SimpleNamespace(state=state)
+    )
+    monkeypatch.setattr(
+        mcp_server,
+        "_read_registries",
+        lambda _root: ({"provider": "1/1"}, {"1/1": "provider"}, {}, {}),
+    )
+
+    result = mcp_server.get_module_context.fn(str(tmp_path), "provider")
+
+    assert "dependency graph is unavailable" in result
+    assert "live_canonical_graph" not in result
+
+
+def test_project_architecture_requires_present_complete_module_layers(
+    tmp_path, monkeypatch
+):
+    state = RepositoryAnalysisState(
+        modules={"provider": object()},
+        cached_analytics_state="fresh",
+        cached_analytics={},
+    )
+    monkeypatch.setattr(
+        mcp_server, "_get_or_init_engine", lambda _root: SimpleNamespace(state=state)
+    )
+
+    missing = json.loads(mcp_server.get_project_architecture.fn(str(tmp_path)))
+    state.cached_analytics = {"module_layers": {}}
+    incomplete = json.loads(mcp_server.get_project_architecture.fn(str(tmp_path)))
+    state.modules = {}
+    fresh_empty = json.loads(mcp_server.get_project_architecture.fn(str(tmp_path)))
+
+    assert missing["layer_index"]["available"] is False
+    assert incomplete["layer_index"]["available"] is False
+    assert fresh_empty["layer_index"] == {
+        "available": True,
+        "total": 0,
+        "truncated": False,
+    }
+
+
+def test_project_architecture_rejects_extra_deleted_module_layer(
+    tmp_path, monkeypatch
+):
+    state = RepositoryAnalysisState(
+        modules={"a": object(), "b": object()},
+        cached_analytics_state="fresh",
+        cached_analytics={
+            "module_layers": {"a": "core", "b": "api", "deleted": "legacy"}
+        },
+    )
+    monkeypatch.setattr(
+        mcp_server, "_get_or_init_engine", lambda _root: SimpleNamespace(state=state)
+    )
+
+    result = json.loads(mcp_server.get_project_architecture.fn(str(tmp_path)))
+
+    assert result["layer_index"]["available"] is False
+
+
+def test_lookup_returns_symbol_facts_when_consumers_are_stale(tmp_path, monkeypatch):
+    state = RepositoryAnalysisState(
+        artifacts={
+            "provider": {
+                "own_symbols": ["foo"],
+                "symbols": {"functions": ["foo"]},
+            }
+        },
+        artifact_consumption_state="stale",
+    )
+    monkeypatch.setattr(
+        mcp_server, "_get_or_init_engine", lambda _root: SimpleNamespace(state=state)
+    )
+    _patch_empty_registries(monkeypatch)
+
+    result = json.loads(mcp_server.lookup_artifact_by_symbol.fn(str(tmp_path), "foo"))
+    artifact = result["artifacts"]["provider::foo"]
+
+    assert artifact["full_name"] == "provider::foo"
+    assert artifact["kind"] == "function"
+    assert artifact["consumers"]["available"] is False
+    assert artifact["consumers"]["state"] == "stale"
+
+
+def test_blast_radius_rejects_ambiguous_textual_leaf(tmp_path, monkeypatch):
+    state = RepositoryAnalysisState(
+        artifacts={
+            "alpha": {"own_symbols": ["foo"], "symbols": {"functions": ["foo"]}},
+            "beta": {"own_symbols": ["foo"], "symbols": {"functions": ["foo"]}},
+        },
+        artifact_consumption={
+            "alpha::foo": {"consumers": [], "channels": {}},
+            "beta::foo": {"consumers": [], "channels": {}},
+        },
+        artifact_consumption_state="fresh",
+    )
+    monkeypatch.setattr(
+        mcp_server, "_get_or_init_engine", lambda _root: SimpleNamespace(state=state)
+    )
+    _patch_empty_registries(monkeypatch)
+
+    ambiguous = json.loads(
+        mcp_server.get_artifact_blast_radius.fn(str(tmp_path), "foo")
+    )
+    exact = json.loads(
+        mcp_server.get_artifact_blast_radius.fn(str(tmp_path), "alpha::foo")
+    )
+
+    assert ambiguous["error"] == "Ambiguous canonical artifact identity."
+    assert ambiguous["candidates"] == ["alpha::foo", "beta::foo"]
+    assert exact["artifact"] == "alpha::foo"
+
+
+def test_full_file_context_public_api_uses_canonical_symbol_domain(
+    tmp_path, monkeypatch
+):
+    target = tmp_path / "provider.py"
+    target.write_text("def foo():\n    pass\n", encoding="utf-8")
+    state = RepositoryAnalysisState(
+        modules={"provider": SimpleNamespace(module_id="1/1")},
+        artifacts={
+            "provider": {
+                "own_symbols": ["foo"],
+                "symbols": {"functions": ["foo", "legacy_old"]},
+            }
+        },
+        dependency_graph=SimpleNamespace(hard_edges={}, soft_edges={}),
+    )
+    monkeypatch.setattr(
+        mcp_server, "_get_or_init_engine", lambda _root: SimpleNamespace(state=state)
+    )
+    _patch_empty_registries(monkeypatch)
+
+    result = json.loads(
+        mcp_server.get_file_edit_context.fn(
+            repo_path=str(tmp_path), file_path="provider.py", compact=False
+        )
+    )
+
+    assert result["public_api"]["items"] == {"provider::foo": "provider::foo"}
+    assert "legacy_old" not in json.dumps(result["public_api"])
+
+
 def test_live_first_tools_work_without_any_saved_reports(tmp_path, monkeypatch):
     repo = tmp_path / "repo"
     target = repo / "pkg" / "module.py"

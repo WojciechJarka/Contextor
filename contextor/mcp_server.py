@@ -1481,9 +1481,11 @@ def get_project_architecture(
     """
     [OPTIMIZED] The highest-level architectural summary of the project.
     Returns global action items, debt summary, layer index, and hotspots.
-    Collections always expose ``total`` and ``truncated``. The compact default
-    omits ``items``; set ``compact=False`` for evidence. ``max_items`` applies
-    independently to every collection; pass ``None`` for all items. ``fields``
+    Each analytics family is an explicit union: available collections expose
+    ``available=true``, ``total`` and ``truncated``; unavailable families expose
+    ``available=false``, ``state`` and ``reason`` without fabricated counts.
+    The compact default omits ``items``; set ``compact=False`` for evidence.
+    ``max_items`` applies independently to available collections. ``fields``
     projects top-level keys after compact shaping. Allowed values are
     ``action_items``, ``debt_summary``, ``layer_index``,
     ``top_global_hotspots``, ``module_count``, and ``data_source``.
@@ -1512,11 +1514,17 @@ def get_project_architecture(
 
         cached_analytics = getattr(state, "cached_analytics", {}) or {}
         cached_state = getattr(state, "cached_analytics_state", "deferred")
-        module_layers = (
-            cached_analytics.get("module_layers", {})
-            if cached_state == "fresh" and isinstance(cached_analytics, dict)
-            else None
-        )
+        canonical_modules = set(getattr(state, "modules", {}) or {})
+        module_layers = None
+        if (
+            cached_state == "fresh"
+            and isinstance(cached_analytics, dict)
+            and "module_layers" in cached_analytics
+            and isinstance(cached_analytics["module_layers"], dict)
+        ):
+            candidate_layers = cached_analytics["module_layers"]
+            if set(candidate_layers) == canonical_modules:
+                module_layers = candidate_layers
         if isinstance(module_layers, dict):
             layer_counts: dict[str, int] = {}
             for layer in module_layers.values():
@@ -1579,7 +1587,7 @@ def get_module_context(
     If an artifact/symbol identity is passed, returns a structured diagnostic
     redirecting to ``get_artifact_blast_radius``.
 
-    Dependency collections always expose ``total`` and ``truncated``. The
+    Available dependency collections expose ``total`` and ``truncated``. The
     default compact response omits edge ``items``; set ``compact=False`` for
     bounded evidence. ``max_items`` applies independently to inbound and
     outbound edges; pass ``None`` to return every edge. ``compact`` shapes the
@@ -1679,6 +1687,8 @@ def get_module_context(
     outbound = {}
     dependency_source = "live_canonical_graph"
     graph = getattr(state, "dependency_graph", None)
+    if graph is None:
+        return "Error: Canonical LIVE dependency graph is unavailable. Run analyze_project first."
     hard_edges = getattr(graph, "hard_edges", {}) if graph else {}
     soft_edges = getattr(graph, "soft_edges", {}) if graph else {}
 
@@ -1837,9 +1847,9 @@ def get_artifact_blast_radius(
 ) -> str:
     """
     [OPTIMIZED] Resolves direct, evidence-backed consumers of an artifact.
-    Uses canonical LIVE symbol consumption first and falls back to the current
-    compact artifact report. It does not claim that dynamic Python usage can
-    be proven exact.
+    Uses canonical LIVE artifact and symbol-consumption facts. It does not
+    read output reports and does not claim that dynamic Python usage can be
+    proven exact.
 
     Candidate, consumer & reachability semantics:
       - If a module name or module ID is passed, returns a structured diagnostic with deterministic public-first ranked artifact candidates defined by that module.
@@ -1899,7 +1909,18 @@ def get_artifact_blast_radius(
                         }
                     )
             if live_matches:
-                selected = sorted(live_matches, key=lambda item: item["artifact"])[0]
+                ordered_matches = sorted(live_matches, key=lambda item: item["artifact"])
+                if len(ordered_matches) > 1:
+                    return json.dumps(
+                        {
+                            "error": "Ambiguous canonical artifact identity.",
+                            "query": artifact_name,
+                            "candidates": [item["artifact"] for item in ordered_matches],
+                            "data_source": "live_canonical_state",
+                        },
+                        indent=2,
+                    )
+                selected = ordered_matches[0]
                 raw_consumer_items = list(selected.pop("consumer_items"))
                 unique_direct_consumers = sorted(set(raw_consumer_items))
                 consumer_items, consumer_total, consumer_truncated = _bounded_items(
@@ -2720,7 +2741,23 @@ def get_file_edit_context(
             file_path_resolved = (catalog.module_paths or {}).get(module_name) or module_name.replace(".", "/") + ".py"
 
             engine = _get_or_init_engine(root)
-            live_graph = getattr(engine.state, "dependency_graph", None) if engine else None
+            if not engine or getattr(engine.state, "resync_required", False):
+                return json.dumps(
+                    {
+                        "status": "unavailable",
+                        "reason": "No usable canonical LIVE state. Run analyze_project first.",
+                    },
+                    indent=2,
+                )
+            live_graph = getattr(engine.state, "dependency_graph", None)
+            if live_graph is None:
+                return json.dumps(
+                    {
+                        "status": "unavailable",
+                        "reason": "Canonical LIVE dependency graph is unavailable. Run analyze_project first.",
+                    },
+                    indent=2,
+                )
 
             direct_consumers = []
             transitive_count = 0
@@ -2979,11 +3016,8 @@ def get_file_edit_context(
         if module_name in state.artifacts:
             prefix = module_name + "::"
             module_artifacts = state.artifacts[module_name]
-            live_symbols = set(module_artifacts.get("own_symbols", []) or [])
             symbols = module_artifacts.get("symbols", {}) or {}
-            for category in ("classes", "functions", "methods", "globals"):
-                live_symbols.update(symbols.get(category, []) or [])
-            for local_name in sorted(str(name) for name in live_symbols):
+            for local_name in sorted(_canonical_symbol_catalog(module_artifacts)):
                 leaf = local_name.rsplit(".", 1)[-1]
                 if leaf.startswith("_") and not (
                     leaf.startswith("__") and leaf.endswith("__")
@@ -3649,10 +3683,9 @@ def get_artifacts_for_module(
     Use ``symbol_filter`` to select a name substring and ``limit`` to bound the
     result. ``total_artifact_count`` reports matches before limiting and
     ``truncated`` tells the LLM whether a narrower follow-up query is useful.
-    Canonical LIVE state is sufficient on its own and is the source of truth
-    for the symbol catalogue. A compact artifact report, when present, only
-    enriches symbols with saved consumer evidence. ``data_sources`` reports
-    which sources were actually available; no global report is required.
+    Canonical LIVE state is the source of truth for symbol and artifact facts.
+    Persistent registries provide identity/index mappings only. Output reports
+    are not read by this operation.
 
     LLM use: call before changing one module's API. Disable consumers for the
     cheapest signature inventory; enable them only for impact analysis.
@@ -3839,24 +3872,31 @@ def lookup_artifact_by_symbol(
         results: dict = {}
         for _, _, full_name, key, kind in candidates:
             module_name, symbol = full_name.split("::", 1)
-            resolved_consumers = _canonical_symbol_consumers(
-                state, module_name, symbol
-            )
-            consumer_items, consumer_total, consumer_truncated = _bounded_items(
-                resolved_consumers, evidence_limit
-            )
             entry = {
                 "symbol": symbol,
                 "full_name": full_name,
                 "kind": kind,
                 "definer_module": module_name,
-                "consumers": {
+            }
+            if artifact_consumption_is_fresh(state):
+                resolved_consumers = _canonical_symbol_consumers(
+                    state, module_name, symbol
+                )
+                consumer_items, consumer_total, consumer_truncated = _bounded_items(
+                    resolved_consumers, evidence_limit
+                )
+                entry["consumers"] = {
                     "total": consumer_total,
                     "truncated": consumer_truncated,
-                },
-            }
-            if not compact:
-                entry["consumers"]["items"] = consumer_items
+                }
+                if not compact:
+                    entry["consumers"]["items"] = consumer_items
+            else:
+                entry["consumers"] = {
+                    "available": False,
+                    "state": getattr(state, "artifact_consumption_state", "deferred"),
+                    "reason": "Canonical artifact consumption is unavailable or stale.",
+                }
             results[key] = entry
 
         result = {
