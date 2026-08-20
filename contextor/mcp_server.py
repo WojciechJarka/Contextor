@@ -181,6 +181,10 @@ warnings.filterwarnings("ignore")
 
 from fastmcp import FastMCP
 from contextor.core.api.facade import ContextorFacade
+from contextor.core.analysis.state_manager import (
+    artifact_consumption_is_fresh,
+    canonical_artifact_consumption_targets,
+)
 from contextor.core.canonical_state_query import (
     describe_contract as _describe_canonical_contract,
     execute_projection as _execute_canonical_projection,
@@ -798,6 +802,36 @@ def _bounded_items(items: list, limit: int | None) -> tuple[list, int, bool]:
     safe_limit = max(0, int(limit))
     selected = items[:safe_limit]
     return selected, total, total > len(selected)
+
+
+def _canonical_symbol_consumers(state, module_name: str, symbol: str) -> list[str]:
+    """Return deterministic consumer facts from canonical RAM only."""
+    if not artifact_consumption_is_fresh(state):
+        raise ValueError("Canonical artifact consumption is unavailable or stale.")
+    target = f"{module_name}::{symbol}"
+    consumption = getattr(state, "artifact_consumption", {}) or {}
+    entry = consumption.get(target, {}) if isinstance(consumption, dict) else {}
+    consumers = entry.get("consumers", []) if isinstance(entry, dict) else []
+    return sorted({str(item) for item in consumers})
+
+
+def _canonical_symbol_catalog(module_data: dict) -> dict[str, str]:
+    """Project canonical symbol names to kinds without report enrichment."""
+    targets = canonical_artifact_consumption_targets({"module": module_data})
+    result = {target.split("::", 1)[1]: "unknown" for target in targets}
+    symbols = module_data.get("symbols", {}) or {}
+    for category, kind in (
+        ("classes", "class"),
+        ("functions", "function"),
+        ("methods", "method"),
+        ("globals", "global"),
+    ):
+        raw_names = symbols.get(category, []) or []
+        names = raw_names.keys() if isinstance(raw_names, dict) else raw_names
+        for name in names:
+            if str(name) in result:
+                result[str(name)] = kind
+    return result
 
 
 def _resolve_symbol_source_paths(root: Path, file_paths: list[str]) -> list[Path]:
@@ -1459,43 +1493,51 @@ def get_project_architecture(
     deciding that the complete collection is worth the token cost.
     """
     root = Path(repo_path).expanduser().resolve()
-    repo_name = root.name
-    
     try:
-        summary_path = _get_canonical_report(root, f"{repo_name}_summary.json")
         engine = _get_or_init_engine(root)
-        if summary_path:
-            summary = json.loads(summary_path.read_text(encoding="utf-8"))
-            data_source = "current_summary_report"
-        elif engine:
-            layer_info = engine.state.layer_information or {}
-            summary = dict(layer_info.get("summary_data", {}) or {})
-            summary.setdefault("layer_index", layer_info.get("layer_index", []))
-            summary.setdefault("top_hotspots", layer_info.get("hotspots", []))
-            summary.setdefault("debt_summary", layer_info.get("debt", {}))
-            summary.setdefault("metrics", {"nodes": len(engine.state.modules)})
-            data_source = "live_canonical_state"
-        else:
-            return f"Error: No LIVE state or summary report found for {repo_name}. Run analyze_project first."
-        
-        collections = {}
-        for key, source_key in (
-            ("action_items", "action_items"),
-            ("layer_index", "layer_index"),
-            ("top_global_hotspots", "top_hotspots"),
-        ):
-            items, total, truncated = _bounded_items(
-                summary.get(source_key, []), max_items
-            )
-            collection = {"total": total, "truncated": truncated}
+        if not engine or getattr(engine.state, "resync_required", False):
+            return "Error: No usable canonical LIVE state. Run analyze_project first."
+
+        state = engine.state
+        unavailable = {
+            "available": False,
+            "state": "deferred",
+            "reason": "No fresh canonical LIVE producer is available for this analytics family.",
+        }
+        collections = {
+            "action_items": dict(unavailable),
+            "top_global_hotspots": dict(unavailable),
+        }
+        debt_summary = dict(unavailable)
+
+        cached_analytics = getattr(state, "cached_analytics", {}) or {}
+        cached_state = getattr(state, "cached_analytics_state", "deferred")
+        module_layers = (
+            cached_analytics.get("module_layers", {})
+            if cached_state == "fresh" and isinstance(cached_analytics, dict)
+            else None
+        )
+        if isinstance(module_layers, dict):
+            layer_counts: dict[str, int] = {}
+            for layer in module_layers.values():
+                layer_name = str(layer)
+                layer_counts[layer_name] = layer_counts.get(layer_name, 0) + 1
+            layer_items = [
+                {"layer": layer, "module_count": count}
+                for layer, count in sorted(layer_counts.items())
+            ]
+            items, total, truncated = _bounded_items(layer_items, max_items)
+            layer_index = {"available": True, "total": total, "truncated": truncated}
             if not compact:
-                collection["items"] = items
-            collections[key] = collection
+                layer_index["items"] = items
+        else:
+            layer_index = dict(unavailable)
+        collections["layer_index"] = layer_index
         result = {
             **collections,
-            "debt_summary": summary.get("debt_summary", {}),
-            "module_count": summary.get("metrics", {}).get("nodes", 0),
-            "data_source": data_source,
+            "debt_summary": debt_summary,
+            "module_count": len(getattr(state, "modules", {}) or {}),
+            "data_source": "live_canonical_state",
         }
         if fields is not None:
             allowed_fields = set(result)
@@ -1552,8 +1594,6 @@ def get_module_context(
     deferred as unavailable until the next full analysis.
     """
     root = Path(repo_path).expanduser().resolve()
-    repo_name = root.name
-
     from contextor.core.report_query import IndexCatalog, catalog_from_registry, resolve_index_query
 
     mod_path_to_id, mod_id_to_path, art_path_to_id, art_id_to_path = _read_registries(root)
@@ -1625,100 +1665,61 @@ def get_module_context(
     else:
         module_name = input_query
 
-    ga = {}
-    ga_path = _get_canonical_report(root, f"{repo_name}_graph_analytics.json")
-    if ga_path:
-        try:
-            ga = json.loads(ga_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            ga = {}
-
-    saved_modules = ga.get("modules", {})
     engine = _get_or_init_engine(root)
-    live_modules = set()
-    if engine:
-        live_modules = set(getattr(engine.state, "modules", {})) | set(
-            getattr(engine.state, "artifacts", {})
-        )
-
-    if module_name not in saved_modules and module_name not in live_modules:
-        if not ga_path and not engine:
-            return "Error: No graph state found. Run analyze_project first."
+    if not engine or getattr(engine.state, "resync_required", False):
+        return "Error: No usable canonical LIVE state. Run analyze_project first."
+    state = engine.state
+    live_modules = set(getattr(state, "modules", {})) | set(
+        getattr(state, "artifacts", {})
+    )
+    if module_name not in live_modules:
         return f"Module '{module_name}' not found in the project graph."
 
     inbound = {}
     outbound = {}
-    dependency_source = "saved_graph_analytics"
+    dependency_source = "live_canonical_graph"
+    graph = getattr(state, "dependency_graph", None)
+    hard_edges = getattr(graph, "hard_edges", {}) if graph else {}
+    soft_edges = getattr(graph, "soft_edges", {}) if graph else {}
 
-    if module_name in live_modules:
-        graph = getattr(engine.state, "dependency_graph", None)
-        hard_edges = getattr(graph, "hard_edges", {}) if graph else {}
-        soft_edges = getattr(graph, "soft_edges", {}) if graph else {}
-
-        def relationship(source: str, target: str) -> dict:
-            classes = []
-            if target in set(hard_edges.get(source, set())):
-                classes.append("hard_dependency")
-            if target in set(soft_edges.get(source, set())):
-                classes.append("soft_dependency")
-            return {
-                "dep_types": classes,
-                "weight": 1,
-                "data_source": "live_canonical_graph",
-            }
-
-        targets = set(hard_edges.get(module_name, set())) | set(
-            soft_edges.get(module_name, set())
-        )
-        outbound = {
-            target: relationship(module_name, target)
-            for target in sorted(targets)
+    def relationship(source: str, target: str) -> dict:
+        classes = []
+        if target in set(hard_edges.get(source, set())):
+            classes.append("hard_dependency")
+        if target in set(soft_edges.get(source, set())):
+            classes.append("soft_dependency")
+        return {
+            "dep_types": classes,
+            "weight": 1,
+            "data_source": "live_canonical_graph",
         }
-        sources = set(hard_edges) | set(soft_edges)
-        inbound = {
-            source: relationship(source, module_name)
-            for source in sorted(sources)
-            if module_name
-            in (
-                set(hard_edges.get(source, set()))
-                | set(soft_edges.get(source, set()))
-            )
-        }
-        dependency_source = "live_canonical_graph"
-    else:
-        matrix = ga.get("module_dependency_matrix", {})
-        from contextor.core.reporting_engine.persistent_registry import (
-            PersistentIdentityRegistry,
-        )
 
-        registry = PersistentIdentityRegistry(str(root))
-        with registry.transaction():
-            mod_id = registry.get_module_id(module_name)
-            if mod_id and str(mod_id) in matrix:
-                for target_id, dep_data in matrix[str(mod_id)].items():
-                    target_name = registry.get_module_path(target_id) or target_id
-                    outbound[target_name] = dep_data
-            for src_id, targets in matrix.items():
-                if str(mod_id) in targets:
-                    src_name = registry.get_module_path(src_id) or src_id
-                    inbound[src_name] = targets[str(mod_id)]
-
-    saved_record = saved_modules.get(module_name)
-    has_live_graph = (
-        module_name in live_modules
-        and engine is not None
-        and getattr(engine.state, "dependency_graph", None) is not None
+    targets = set(hard_edges.get(module_name, set())) | set(
+        soft_edges.get(module_name, set())
     )
+    outbound = {
+        target: relationship(module_name, target)
+        for target in sorted(targets)
+    }
+    sources = set(hard_edges) | set(soft_edges)
+    inbound = {
+        source: relationship(source, module_name)
+        for source in sorted(sources)
+        if module_name
+        in (
+            set(hard_edges.get(source, set()))
+            | set(soft_edges.get(source, set()))
+        )
+    }
 
-    if has_live_graph:
-        graph = engine.state.dependency_graph
+    if graph is not None:
         hard_edges = getattr(graph, "hard_edges", {}) or {}
         live_fan_out = len(hard_edges.get(module_name, set()))
         live_fan_in = sum(
             1 for _, targets in hard_edges.items() if module_name in targets
         )
-        topo = getattr(engine.state, "topology_analytics", {}) or {}
-        topo_freshness = getattr(engine.state, "topology_metrics_state", "deferred")
+        topo = getattr(state, "topology_analytics", {}) or {}
+        topo_freshness = getattr(state, "topology_metrics_state", "deferred")
 
         metrics = {
             "fan_in": live_fan_in,
@@ -1753,8 +1754,8 @@ def get_module_context(
         if mod_path_to_id.get(module_name):
             metrics["module_idx"] = mod_path_to_id[module_name]
 
-        cached_analytics = getattr(engine.state, "cached_analytics", {}) or {}
-        cached_freshness = getattr(engine.state, "cached_analytics_state", "deferred")
+        cached_analytics = getattr(state, "cached_analytics", {}) or {}
+        cached_freshness = getattr(state, "cached_analytics_state", "deferred")
         if cached_freshness == "fresh" and isinstance(cached_analytics, dict):
             if "module_layers" in cached_analytics and module_name in cached_analytics["module_layers"]:
                 metrics["layer"] = cached_analytics["module_layers"][module_name]
@@ -1764,17 +1765,12 @@ def get_module_context(
                 metrics["export_degree"] = cached_analytics["export_degree"][module_name]
 
     else:
-        if saved_record is not None:
-            metrics = dict(saved_record)
-            metrics_source = "saved_graph_analytics"
-            degree_metrics_source = "saved_graph_analytics"
-        else:
-            metrics = {
-                "fan_in": len(inbound),
-                "fan_out": len(outbound),
-            }
-            metrics_source = "deferred_topology_analytics"
-            degree_metrics_source = "saved_graph_analytics"
+        metrics = {"fan_in": len(inbound), "fan_out": len(outbound)}
+        canonical_metrics = getattr(state, "metrics", {}) or {}
+        if isinstance(canonical_metrics.get(module_name), dict):
+            metrics.update(canonical_metrics[module_name])
+        metrics_source = "deferred_topology_analytics"
+        degree_metrics_source = "canonical_module_metrics"
 
     inbound_items, inbound_total, inbound_truncated = _bounded_items(
         sorted(inbound.items()), max_items
@@ -1872,16 +1868,16 @@ def get_artifact_blast_radius(
     as confirmed static evidence, not proof that dynamic Python has no callers.
     """
     root = Path(repo_path).expanduser().resolve()
-    repo_name = root.name
-    
     try:
         mod_path_to_id, mod_id_to_path, art_path_to_id, art_id_to_path = _read_registries(root)
         engine = _get_or_init_engine(root)
+        if not engine or getattr(engine.state, "resync_required", False):
+            return "Error: No usable canonical LIVE state. Run analyze_project first."
         target_art = art_id_to_path.get(artifact_name, artifact_name)
         if engine:
             live_matches = []
             for module_name, artifact_state in engine.state.artifacts.items():
-                for local_name in artifact_state.get("own_symbols", []) or []:
+                for local_name, kind in _canonical_symbol_catalog(artifact_state).items():
                     full_name = f"{module_name}::{local_name}"
                     art_id = str(art_path_to_id.get(full_name, ""))
                     if (
@@ -1891,28 +1887,14 @@ def get_artifact_blast_radius(
                         and full_name != target_art
                     ):
                         continue
-                    symbols = artifact_state.get("symbols", {}) or {}
-                    kinds = [
-                        kind
-                        for category, kind in (
-                            ("classes", "class"),
-                            ("functions", "function"),
-                            ("methods", "method"),
-                            ("globals", "global"),
-                        )
-                        if local_name in (symbols.get(category, []) or [])
-                    ]
-                    consumer_state = (artifact_state.get("consumers", {}) or {}).get(
-                        local_name, {}
-                    )
                     live_matches.append(
                         {
                             "artifact": full_name,
                             "artifact_id": art_path_to_id.get(full_name),
-                            "kind": kinds[0] if len(kinds) == 1 else "ambiguous",
+                            "kind": kind,
                             "definer": module_name,
-                            "consumer_items": sorted(
-                                consumer_state.get("consumers", []) or []
+                            "consumer_items": _canonical_symbol_consumers(
+                                engine.state, module_name, str(local_name)
                             ),
                         }
                     )
@@ -2205,68 +2187,7 @@ def get_artifact_blast_radius(
                     )
             return f"Artifact '{artifact_name}' not found in the registry."
 
-        art_path = _get_canonical_report(root, f"{repo_name}_artifacts_compact.json")
-        if not art_path:
-            return "Error: No current artifacts_compact report. Run analyze_project first."
-        artifacts = json.loads(art_path.read_text(encoding="utf-8")).get("artifacts", {})
-        current = [item for item in candidates if item[0] in artifacts]
-        if not current:
-            return f"Artifact '{artifact_name}' is not present in the current artifact report."
-        art_id, full_name = sorted(current, key=lambda item: item[1])[0]
-        art_data = artifacts[art_id]
-        definer_id = str(art_data.get("definer_module", ""))
-        consumer_ids = art_data.get("consumer_module_indices", [])
-
-        resolved_consumers = [mod_id_to_path.get(item, item) for item in consumer_ids]
-        consumer_items, consumer_total, consumer_truncated = _bounded_items(
-            resolved_consumers, max_items
-        )
-        common_result = {
-            "artifact": full_name,
-            "artifact_id": art_id,
-            "kind": art_data.get("kind"),
-            "definer": mod_id_to_path.get(definer_id, definer_id),
-            "architecture": {
-                "available": False,
-                "reason": "Live canonical analytics unavailable in report-only mode.",
-            },
-            "downstream_module_reachability": {
-                "available": False,
-                "reason": "Live dependency graph is not available in report-only mode.",
-            },
-            "evidence_scope": "direct_static_artifact_consumption",
-            "data_source": "current_artifacts_compact",
-        }
-        full_result = {
-            **common_result,
-            "consumers": {
-                "items": consumer_items,
-                "total": consumer_total,
-                "truncated": consumer_truncated,
-            },
-        }
-        compact_result = {
-            **common_result,
-            "consumers": {
-                "total": consumer_total,
-                "truncated": consumer_truncated,
-            },
-        }
-        result = compact_result if compact else full_result
-        if fields is not None:
-            allowed_fields = set(result)
-            unknown_fields = sorted(set(fields) - allowed_fields)
-            if unknown_fields:
-                return json.dumps(
-                    {
-                        "error": "Unsupported fields for get_artifact_blast_radius",
-                        "unknown_fields": unknown_fields,
-                        "allowed_fields": sorted(allowed_fields),
-                    },
-                    indent=2,
-                )
-            result = {field: result[field] for field in fields}
-        return json.dumps(result, indent=2)
+        return f"Artifact '{artifact_name}' not found in canonical LIVE state."
     except Exception as e:
         return f"Error calculating artifact blast radius: {e}"
 
@@ -2827,6 +2748,12 @@ def get_file_edit_context(
                 for name in graph_modules
                 if name.startswith("tests.") or name == "tests" or name.rsplit(".", 1)[-1].startswith("test_")
             }
+            if engine and getattr(engine.state, "cached_analytics_state", "deferred") == "fresh":
+                cached = getattr(engine.state, "cached_analytics", {}) or {}
+                canonical_layers = cached.get("module_layers", {}) if isinstance(cached, dict) else {}
+                test_modules.update(
+                    name for name, layer in canonical_layers.items() if layer == "tests"
+                )
 
             mod_path_to_id = {name: mid for mid, name in catalog.modules.items()}
             tests_covering = _static_test_reachability(
@@ -2986,134 +2913,85 @@ def get_file_edit_context(
 
     module_name = ".".join(parts)
     
-    ga_path = _get_canonical_report(root, f"{repo_name}_graph_analytics.json")
-    art_path = _get_canonical_report(root, f"{repo_name}_artifacts_compact.json")
     engine = _get_or_init_engine(root)
-
-    if not (ga_path and art_path) and not engine:
-        return "Error: No canonical LIVE state or required reports. Run analyze_project first."
+    if not engine or getattr(engine.state, "resync_required", False):
+        return "Error: No usable canonical LIVE state. Run analyze_project first."
         
     try:
-        ga = json.loads(ga_path.read_text(encoding="utf-8")) if ga_path else {}
-        art_comp = json.loads(art_path.read_text(encoding="utf-8")) if art_path else {}
+        state = engine.state
+        state_metrics = getattr(state, "metrics", {}) or {}
+        candidate_metrics = state_metrics.get(module_name, {}) if isinstance(state_metrics, dict) else {}
+        mod_info = candidate_metrics if isinstance(candidate_metrics, dict) else {}
+        cached_analytics = getattr(state, "cached_analytics", {}) or {}
+        if getattr(state, "cached_analytics_state", "deferred") == "fresh":
+            module_layers = cached_analytics.get("module_layers", {}) or {}
+            if module_name in module_layers:
+                mod_info = {**mod_info, "layer": module_layers[module_name]}
         
-        mod_info = ga.get("modules", {}).get(module_name, {})
-        if not mod_info and engine:
-            state_metrics = getattr(engine.state, "metrics", {}) or {}
-            candidate_metrics = state_metrics.get(module_name, {}) if isinstance(state_metrics, dict) else {}
-            mod_info = candidate_metrics if isinstance(candidate_metrics, dict) else {}
-        
-        # Prefer real hotspot score from summary.json, fall back to centrality proxy
-        risk_score = 0.0
-        summary_path = _get_canonical_report(root, f"{repo_name}_summary.json")
-        if summary_path:
-            try:
-                summary = json.loads(summary_path.read_text(encoding="utf-8"))
-                for h in summary.get("top_hotspots", []):
-                    if h.get("module") == module_name:
-                        risk_score = h.get("score", 0.0)
-                        break
-            except Exception:
-                pass
-        if risk_score == 0.0:
-            risk_score = round(
-                (mod_info.get("betweenness", 0) + mod_info.get("hub_score", 0)) / 2, 4
-            )
-        if risk_score == 0.0 and engine:
-            for hotspot in (getattr(engine.state, "layer_information", {}) or {}).get("hotspots", []) or []:
-                if hotspot.get("module") == module_name:
-                    risk_score = hotspot.get("score", 0.0)
-                    break
+        risk_score = None
+        topology = getattr(state, "topology_analytics", {}) or {}
+        if getattr(state, "topology_metrics_state", "deferred") == "fresh":
+            risk_score = (topology.get("module_risk", {}) or {}).get(module_name)
         
         # We must read registries OUTSIDE the transaction block to avoid Resource Deadlock
         mod_path_to_id, mod_id_to_path, art_path_to_id, art_id_to_path = _read_registries(root)
-        live_module = engine.state.modules.get(module_name) if engine else None
+        module_to_id = {
+            **{path: module_id for module_id, path in mod_id_to_path.items()},
+            **mod_path_to_id,
+        }
+        artifact_name_to_id = {
+            **{name: artifact_id for artifact_id, name in art_id_to_path.items()},
+            **art_path_to_id,
+        }
+        live_module = state.modules.get(module_name)
         mod_id = mod_path_to_id.get(module_name) or getattr(live_module, "module_id", None)
         if not mod_id:
             if live_module is None:
-                if ga_path or art_path:
-                    return f"Error: Module '{module_name}' is not present in the current registry."
                 return f"Error: Module '{module_name}' is not present in canonical LIVE state."
             mod_id = module_name
             
         imports = []
         consumers = []
-        dependency_data_source = "saved_graph_analytics"
-        artifact_data_source = "saved_artifacts_compact"
-        matrix = ga.get("module_dependency_matrix", {})
-        live_graph = engine.state.dependency_graph if engine else None
+        dependency_data_source = "live_canonical_graph"
+        artifact_data_source = "live_registry_and_symbol_state"
+        live_graph = state.dependency_graph
         reachability_hard = {}
         reachability_soft = {}
-        if engine and module_name in engine.state.modules and live_graph:
+        if module_name in state.modules and live_graph:
             reachability_hard = live_graph.hard_edges
             reachability_soft = live_graph.soft_edges
             target_modules = set(live_graph.hard_edges.get(module_name, set()))
             target_modules.update(live_graph.soft_edges.get(module_name, set()))
-            imports = [mod_path_to_id.get(target, target) for target in sorted(target_modules)]
+            imports = [module_to_id.get(target, target) for target in sorted(target_modules)]
             consumer_modules = {
                 source
                 for edge_map in (live_graph.hard_edges, live_graph.soft_edges)
                 for source, targets in edge_map.items()
                 if module_name in targets
             }
-            consumers = [mod_path_to_id.get(source, source) for source in sorted(consumer_modules)]
+            consumers = [module_to_id.get(source, source) for source in sorted(consumer_modules)]
             dependency_data_source = "live_canonical_graph"
-        else:
-            if mod_id in matrix:
-                imports.extend(matrix[mod_id].keys())
-            for src_id, targets in matrix.items():
-                if mod_id in targets:
-                    consumers.append(src_id)
-            reachability_hard = {
-                mod_id_to_path.get(src_id, src_id): {
-                    mod_id_to_path.get(target_id, target_id)
-                    for target_id in targets
-                }
-                for src_id, targets in matrix.items()
-            }
                         
         # Resolve public API artifact IDs to human-readable names so an
         # LLM does not need a separate lookup_index_entries call.
         public_api = {}
         unresolved_public_api_ids = []
-        if engine and module_name in engine.state.artifacts:
+        if module_name in state.artifacts:
             prefix = module_name + "::"
-            for full_name, art_id in sorted(art_path_to_id.items()):
-                if not full_name.startswith(prefix):
-                    continue
-                local_name = full_name.split("::", 1)[-1]
+            module_artifacts = state.artifacts[module_name]
+            live_symbols = set(module_artifacts.get("own_symbols", []) or [])
+            symbols = module_artifacts.get("symbols", {}) or {}
+            for category in ("classes", "functions", "methods", "globals"):
+                live_symbols.update(symbols.get(category, []) or [])
+            for local_name in sorted(str(name) for name in live_symbols):
                 leaf = local_name.rsplit(".", 1)[-1]
                 if leaf.startswith("_") and not (
                     leaf.startswith("__") and leaf.endswith("__")
                 ):
                     continue
-                public_api[str(art_id)] = full_name
-            live_symbols = engine.state.artifacts[module_name].get("own_symbols", []) or []
-            for local_name in sorted(live_symbols):
-                leaf = str(local_name).rsplit(".", 1)[-1]
-                if leaf.startswith("_") and not (
-                    leaf.startswith("__") and leaf.endswith("__")
-                ):
-                    continue
-                full_name = prefix + str(local_name)
-                artifact_key = str(art_path_to_id.get(full_name, full_name))
-                public_api.setdefault(artifact_key, full_name)
-            artifact_data_source = "live_registry_and_symbol_state"
-        elif "module_artifacts" in art_comp and mod_id in art_comp["module_artifacts"]:
-            for art_id in art_comp["module_artifacts"][mod_id]:
-                resolved = art_id_to_path.get(str(art_id))
-                if resolved:
-                    public_api[str(art_id)] = resolved
-                else:
-                    unresolved_public_api_ids.append(str(art_id))
-        else:
-            for art_id, art_data in art_comp.get("artifacts", {}).items():
-                if str(art_data.get("definer_module")) == mod_id:
-                    resolved = art_id_to_path.get(str(art_id))
-                    if resolved:
-                        public_api[str(art_id)] = resolved
-                    else:
-                        unresolved_public_api_ids.append(str(art_id))
+                full_name = prefix + local_name
+                artifact_key = str(artifact_name_to_id.get(full_name, full_name))
+                public_api[artifact_key] = full_name
         
         graph_modules = set(reachability_hard) | set(reachability_soft)
         graph_modules.update(
@@ -3128,8 +3006,12 @@ def get_file_edit_context(
             if name.startswith("tests.")
             or name == "tests"
             or name.rsplit(".", 1)[-1].startswith("test_")
-            or ga.get("modules", {}).get(name, {}).get("layer") == "tests"
         }
+        if getattr(state, "cached_analytics_state", "deferred") == "fresh":
+            canonical_layers = cached_analytics.get("module_layers", {}) if isinstance(cached_analytics, dict) else {}
+            test_modules.update(
+                name for name, layer in canonical_layers.items() if layer == "tests"
+            )
         tests_covering = _static_test_reachability(
             module_name,
             reachability_hard,
@@ -3800,10 +3682,11 @@ def get_artifacts_for_module(
     try:
         mod_path_to_id, mod_id_to_path, art_path_to_id, art_id_to_path = _read_registries(root)
         engine = _get_or_init_engine(root)
-        live_modules = getattr(engine.state, "modules", {}) if engine else {}
-        live_artifact_catalog = (
-            getattr(engine.state, "artifacts", {}) if engine else {}
-        )
+        if not engine or getattr(engine.state, "resync_required", False):
+            return "Error: No usable canonical LIVE state. Run analyze_project first."
+        state = engine.state
+        live_modules = getattr(state, "modules", {}) or {}
+        live_artifact_catalog = getattr(state, "artifacts", {}) or {}
         live_artifacts = live_artifact_catalog.get(module_name, {})
         mod_compact_id = mod_path_to_id.get(module_name)
         live_module = live_modules.get(module_name)
@@ -3817,39 +3700,24 @@ def get_artifacts_for_module(
                 "Check the module name or run an analysis."
             )
 
-        art_path = _get_canonical_report(
-            root, f"{repo_name}_artifacts_compact.json"
-        )
-        artifacts_raw = {}
-        data_sources = ["live_symbol_state"] if engine else []
-        if art_path:
-            art_comp = json.loads(art_path.read_text(encoding="utf-8"))
-            artifacts_raw = art_comp.get("artifacts", {})
-            data_sources.append("artifacts_compact")
-
         result_artifacts: dict = {}
-        for art_id, art_data in artifacts_raw.items():
-            if str(art_data.get("definer_module")) != str(mod_compact_id):
-                continue
-
-            full_name = art_id_to_path.get(art_id, art_id)
-            # Strip the module prefix from the name for readability.
-            symbol = full_name.split("::", 1)[-1] if "::" in full_name else full_name
-
-            entry: dict = {
-                "artifact_id": art_id,
+        live_symbols = live_artifacts.get("symbols", {})
+        signatures = live_symbols.get("signatures", {}) or {}
+        for symbol, kind in _canonical_symbol_catalog(live_artifacts).items():
+            full_name = f"{module_name}::{symbol}"
+            artifact_id = art_path_to_id.get(full_name)
+            key = artifact_id or full_name
+            entry = {
+                "artifact_id": artifact_id,
                 "symbol": symbol,
                 "full_name": full_name,
-                "kind": art_data.get("kind"),
+                "kind": kind,
+                "signature": signatures.get(symbol),
             }
-
             if include_consumers:
-                consumer_ids = art_data.get("consumer_module_indices", [])
-                resolved_consumers = [
-                    mod_id_to_path.get(c, c) for c in consumer_ids
-                ]
+                consumers = _canonical_symbol_consumers(state, module_name, symbol)
                 consumer_items, consumer_total, consumer_truncated = _bounded_items(
-                    resolved_consumers, evidence_limit
+                    consumers, evidence_limit
                 )
                 entry["consumers"] = {
                     "total": consumer_total,
@@ -3857,36 +3725,7 @@ def get_artifacts_for_module(
                 }
                 if not compact:
                     entry["consumers"]["items"] = consumer_items
-
-            result_artifacts[art_id] = entry
-
-        live_symbols = live_artifacts.get("symbols", {})
-        signatures = live_symbols.get("signatures", {}) or {}
-        kind_by_category = {
-            "classes": "class",
-            "functions": "function",
-            "methods": "method",
-            "globals": "global",
-        }
-        for category, kind in kind_by_category.items():
-            for raw_symbol in live_symbols.get(category, []):
-                symbol = str(raw_symbol)
-                full_name = f"{module_name}::{symbol}"
-                artifact_id = art_path_to_id.get(full_name)
-                key = artifact_id or full_name
-                existing = result_artifacts.get(artifact_id, {}) if artifact_id else {}
-                entry = {
-                    "artifact_id": artifact_id,
-                    "symbol": symbol,
-                    "full_name": full_name,
-                    "kind": existing.get("kind", kind),
-                    "signature": signatures.get(symbol),
-                }
-                if include_consumers:
-                    entry["consumers"] = existing.get(
-                        "consumers", {"total": 0, "truncated": False}
-                    )
-                result_artifacts[key] = entry
+            result_artifacts[key] = entry
 
         entries = sorted(
             result_artifacts.items(),
@@ -3908,8 +3747,8 @@ def get_artifacts_for_module(
                 "total_artifact_count": total_count,
                 "truncated": truncated,
                 "symbol_filter": symbol_filter or None,
-                "data_sources": data_sources,
-                "complete_symbol_catalog": bool(engine),
+                "data_sources": ["live_symbol_state"],
+                "complete_symbol_catalog": True,
                 "artifacts": dict(selected),
             }
         if fields is not None:
@@ -3943,7 +3782,7 @@ def lookup_artifact_by_symbol(
     the artifact's full name (the part after '::', e.g. 'generate_graph'
     matches 'generate_graph_analytics_report').
 
-    Works on the saved compact report — no active analysis session required.
+    Works on canonical LIVE artifact facts.
     Returns defining module, kind, consumer count, and consumer module list.
     Exact matches are preferred over partial matches. ``limit`` bounds the
     response while ``total_matches`` and ``truncated`` describe omitted data.
@@ -3954,39 +3793,42 @@ def lookup_artifact_by_symbol(
     Allowed values are ``query``, ``match_count``, ``total_matches``,
     ``truncated``, ``data_source``, and ``artifacts``.
 
-    LLM use: choose this when no live session is available and a saved report is
-    sufficient. Narrow ambiguous names before increasing ``limit``.
+    LLM use: narrow ambiguous names before increasing ``limit``.
     """
     root = Path(repo_path).expanduser().resolve()
-    repo_name = root.name
-
-    art_path = _get_canonical_report(root, f"{repo_name}_artifacts_compact.json")
-    if not art_path:
-        return "Error: No artifacts_compact report found. Run analyze_project first."
-
     try:
-        _, mod_id_to_path, _, art_id_to_path = _read_registries(root)
+        _, _, art_path_to_id, _ = _read_registries(root)
+        engine = _get_or_init_engine(root)
+        if not engine or getattr(engine.state, "resync_required", False):
+            return "Error: No usable canonical LIVE state. Run analyze_project first."
 
-        term = symbol_name.lower()
-
-        # Search artifact registry: keys are "module::symbol" strings.
-        art_comp = json.loads(art_path.read_text(encoding="utf-8"))
-        artifacts_raw = art_comp.get("artifacts", {})
-
+        state = engine.state
+        term = symbol_name.casefold()
         candidates = []
-        for art_id in artifacts_raw:
-            full_name = art_id_to_path.get(str(art_id))
-            if not full_name or "::" not in full_name:
-                continue
-            symbol_part = full_name.split("::", 1)[1]
-            if term in symbol_part.lower():
+        for module_name, module_data in sorted((state.artifacts or {}).items()):
+            for symbol, kind in _canonical_symbol_catalog(module_data).items():
+                if term not in symbol.casefold():
+                    continue
+                full_name = f"{module_name}::{symbol}"
+                artifact_id = art_path_to_id.get(full_name)
+                key = artifact_id or full_name
                 candidates.append(
-                    (symbol_part.lower() != term, symbol_part.lower(), art_id, full_name)
+                    (symbol.casefold() != term, symbol.casefold(), full_name, key, kind)
                 )
 
         candidates.sort()
         if candidates and not candidates[0][0]:
             candidates = [item for item in candidates if not item[0]]
+        if len(candidates) > 1 and not candidates[0][0]:
+            return json.dumps(
+                {
+                    "error": "Ambiguous canonical symbol identity.",
+                    "query": symbol_name,
+                    "candidates": [item[2] for item in candidates],
+                    "data_source": "live_canonical_state",
+                },
+                indent=2,
+            )
         candidates, total_matches, matches_truncated = _bounded_items(
             candidates, limit
         )
@@ -3995,20 +3837,19 @@ def lookup_artifact_by_symbol(
             return f"No current artifacts found matching '{symbol_name}'."
 
         results: dict = {}
-        for _, _, art_id, full_name in candidates:
-            art_data = artifacts_raw[art_id]
-            definer_id = str(art_data.get("definer_module", ""))
-            consumer_ids = art_data.get("consumer_module_indices", [])
-
-            resolved_consumers = [mod_id_to_path.get(c, c) for c in consumer_ids]
+        for _, _, full_name, key, kind in candidates:
+            module_name, symbol = full_name.split("::", 1)
+            resolved_consumers = _canonical_symbol_consumers(
+                state, module_name, symbol
+            )
             consumer_items, consumer_total, consumer_truncated = _bounded_items(
                 resolved_consumers, evidence_limit
             )
             entry = {
-                "symbol": full_name.split("::", 1)[-1] if "::" in full_name else full_name,
+                "symbol": symbol,
                 "full_name": full_name,
-                "kind": art_data.get("kind", "unknown"),
-                "definer_module": mod_id_to_path.get(definer_id, definer_id),
+                "kind": kind,
+                "definer_module": module_name,
                 "consumers": {
                     "total": consumer_total,
                     "truncated": consumer_truncated,
@@ -4016,14 +3857,14 @@ def lookup_artifact_by_symbol(
             }
             if not compact:
                 entry["consumers"]["items"] = consumer_items
-            results[art_id] = entry
+            results[key] = entry
 
         result = {
                 "query": symbol_name,
                 "match_count": len(results),
                 "total_matches": total_matches,
                 "truncated": matches_truncated,
-                "data_source": "current_artifacts_compact",
+                "data_source": "live_canonical_state",
                 "artifacts": results,
             }
         if fields is not None:

@@ -47,6 +47,13 @@ def _live_engine_fixture():
             }
         },
         dependency_graph=graph,
+        artifact_consumption={
+            "pkg.module::api": {
+                "consumers": ["tests.test_module"],
+                "channels": {"tests.test_module": ["direct_calls"]},
+            }
+        },
+        artifact_consumption_state="fresh",
         metrics={"pkg.module": {"layer": "domain", "hub_score": 0.4}},
         layer_information={
             "layer_index": [{"layer": "pkg", "module_count": 2}],
@@ -58,13 +65,157 @@ def _live_engine_fixture():
     return SimpleNamespace(state=state)
 
 
+def _patch_empty_registries(monkeypatch):
+    monkeypatch.setattr(mcp_server, "_read_registries", lambda _root: ({}, {}, {}, {}))
+
+
+def test_canonical_empty_consumers_do_not_fall_back_to_legacy_artifact_state():
+    state = RepositoryAnalysisState(
+        artifacts={
+            "provider": {
+                "own_symbols": ["foo"],
+                "symbols": {"functions": ["foo"]},
+                "consumers": {"foo": {"consumers": ["stale.consumer"]}},
+            }
+        },
+        artifact_consumption={"provider::foo": {"consumers": [], "channels": {}}},
+        artifact_consumption_state="fresh",
+    )
+
+    assert mcp_server._canonical_symbol_consumers(state, "provider", "foo") == []
+
+
+@pytest.mark.parametrize("freshness", ["stale", "deferred"])
+def test_consumer_queries_fail_closed_when_artifact_consumption_is_not_fresh(
+    tmp_path, monkeypatch, freshness
+):
+    state = RepositoryAnalysisState(
+        artifacts={
+            "provider": {
+                "own_symbols": ["foo"],
+                "symbols": {"functions": ["foo"]},
+            }
+        },
+        artifact_consumption={"provider::foo": {"consumers": ["stale.consumer"]}},
+        artifact_consumption_state=freshness,
+    )
+    monkeypatch.setattr(
+        mcp_server, "_get_or_init_engine", lambda _root: SimpleNamespace(state=state)
+    )
+    _patch_empty_registries(monkeypatch)
+
+    artifacts = mcp_server.get_artifacts_for_module.fn(
+        str(tmp_path), "provider", include_consumers=True
+    )
+    lookup = mcp_server.lookup_artifact_by_symbol.fn(str(tmp_path), "foo")
+    blast = mcp_server.get_artifact_blast_radius.fn(str(tmp_path), "provider::foo")
+
+    assert "unavailable or stale" in artifacts
+    assert "unavailable or stale" in lookup
+    assert "unavailable or stale" in blast
+    assert "stale.consumer" not in artifacts + lookup + blast
+
+
+def test_own_symbols_excludes_legacy_category_symbols_from_artifact_queries(
+    tmp_path, monkeypatch
+):
+    state = RepositoryAnalysisState(
+        artifacts={
+            "provider": {
+                "own_symbols": ["foo"],
+                "symbols": {"functions": ["foo", "legacy_old"]},
+            }
+        },
+        artifact_consumption={"provider::foo": {"consumers": [], "channels": {}}},
+        artifact_consumption_state="fresh",
+    )
+    monkeypatch.setattr(
+        mcp_server, "_get_or_init_engine", lambda _root: SimpleNamespace(state=state)
+    )
+    _patch_empty_registries(monkeypatch)
+
+    assert mcp_server._canonical_symbol_catalog(state.artifacts["provider"]) == {
+        "foo": "function"
+    }
+    artifacts = mcp_server.get_artifacts_for_module.fn(str(tmp_path), "provider")
+    lookup = mcp_server.lookup_artifact_by_symbol.fn(str(tmp_path), "legacy_old")
+    blast = mcp_server.get_artifact_blast_radius.fn(str(tmp_path), "legacy_old")
+
+    assert "legacy_old" not in artifacts
+    assert "No current artifacts" in lookup
+    assert "not found" in blast
+
+
+def test_stale_layer_snapshot_is_not_presented_after_incremental_update(
+    tmp_path, monkeypatch
+):
+    from contextor.core.domain.graph import ProjectGraph
+
+    state = RepositoryAnalysisState(
+        modules={
+            "provider": SimpleNamespace(module_id="1/1", path="provider.py"),
+            "quality.scenario": SimpleNamespace(module_id="2/1", path="quality/scenario.py"),
+        },
+        artifacts={"provider": {"own_symbols": []}},
+        metrics={"provider": {"betweenness": 0.9, "hub_score": 0.8}},
+        topology_analytics={"module_risk": {"provider": 0.95}},
+        topology_metrics_state="stale",
+        cached_analytics={
+            "module_layers": {"provider": "core", "quality.scenario": "tests"}
+        },
+        cached_analytics_state="fresh",
+        dependency_graph=ProjectGraph(
+            hard_edges={"quality.scenario": {"provider"}, "provider": set()},
+            soft_edges={},
+        ),
+        layer_information={
+            "summary_data": {"action_items": ["old action"]},
+            "layer_index": [{"layer": "legacy", "module_count": 99}],
+            "hotspots": [{"module": "provider", "score": 0.99}],
+            "debt": {"score": 99},
+        },
+    )
+    monkeypatch.setattr(
+        mcp_server, "_get_or_init_engine", lambda _root: SimpleNamespace(state=state)
+    )
+    _patch_empty_registries(monkeypatch)
+
+    architecture = json.loads(
+        mcp_server.get_project_architecture.fn(str(tmp_path), compact=False)
+    )
+    edit_context = json.loads(
+        mcp_server.get_file_edit_context.fn(
+            repo_path=str(tmp_path), file_path="provider.py", compact=False
+        )
+    )
+
+    assert architecture["action_items"]["available"] is False
+    assert architecture["top_global_hotspots"]["available"] is False
+    assert architecture["debt_summary"]["available"] is False
+    assert architecture["layer_index"] == {
+        "available": True,
+        "items": [
+            {"layer": "core", "module_count": 1},
+            {"layer": "tests", "module_count": 1},
+        ],
+        "total": 2,
+        "truncated": False,
+    }
+    assert "legacy" not in json.dumps(architecture)
+    assert edit_context["risk_score"] is None
+    assert edit_context["tests_covering"]["tests"][0]["module"] == "quality.scenario"
+
+
 def test_live_first_tools_work_without_any_saved_reports(tmp_path, monkeypatch):
     repo = tmp_path / "repo"
     target = repo / "pkg" / "module.py"
     target.parent.mkdir(parents=True)
     target.write_text("def api():\n    return 1\n", encoding="utf-8")
     engine = _live_engine_fixture()
-    monkeypatch.setattr(mcp_server, "_get_canonical_report", lambda *_args: None)
+    def reject_report_resolution(*_args, **_kwargs):
+        raise AssertionError("normal MCP query must not resolve output reports")
+
+    monkeypatch.setattr(mcp_server, "_get_canonical_report", reject_report_resolution)
     monkeypatch.setattr(mcp_server, "_get_or_init_engine", lambda _root: engine)
     monkeypatch.setattr(
         mcp_server,
@@ -78,6 +229,8 @@ def test_live_first_tools_work_without_any_saved_reports(tmp_path, monkeypatch):
     )
 
     architecture = json.loads(mcp_server.get_project_architecture.fn(str(repo)))
+    assert architecture["top_global_hotspots"]["available"] is False
+    assert architecture["debt_summary"]["available"] is False
     blast = json.loads(
         mcp_server.get_artifact_blast_radius.fn(str(repo), "pkg.module::api", compact=False)
     )
@@ -86,7 +239,13 @@ def test_live_first_tools_work_without_any_saved_reports(tmp_path, monkeypatch):
             str(repo), "pkg/module.py", compact=False, max_items=10
         )
     )
-    layer = json.loads(mcp_server.get_layer_isolation.fn(str(repo), "pkg", compact=False))
+    module = json.loads(mcp_server.get_module_context.fn(str(repo), "pkg.module"))
+    artifacts = json.loads(
+        mcp_server.get_artifacts_for_module.fn(str(repo), "pkg.module", compact=False)
+    )
+    lookup = json.loads(
+        mcp_server.lookup_artifact_by_symbol.fn(str(repo), "api", compact=False)
+    )
 
     assert architecture["data_source"] == "live_canonical_state"
     assert architecture["module_count"] == 3
@@ -95,8 +254,14 @@ def test_live_first_tools_work_without_any_saved_reports(tmp_path, monkeypatch):
     assert edit["dependency_data_source"] == "live_canonical_graph"
     assert edit["public_api"]["total"] == 1
     assert edit["tests_covering"]["available"] is True
-    assert layer["data_source"] == "live_canonical_graph"
-    assert layer["module_count"] == 2
+    assert module["dependency_data_source"] == "live_canonical_graph"
+    assert artifacts["artifacts"]["A1/1"]["consumers"]["items"] == [
+        "tests.test_module"
+    ]
+    assert lookup["data_source"] == "live_canonical_state"
+    assert lookup["artifacts"]["A1/1"]["consumers"]["items"] == [
+        "tests.test_module"
+    ]
 
 
 def test_analysis_endpoint_returns_reusable_job_and_pollable_completion(
@@ -1088,23 +1253,20 @@ def test_semantic_diff_view_is_compact_bounded_and_schema_stable():
 
 
 def test_artifact_lookup_ignores_stale_registry_entries(tmp_path, monkeypatch):
-    report = tmp_path / "artifacts.json"
-    report.write_text(
-        json.dumps(
-            {
-                "artifacts": {
-                    "A1/1": {
-                        "kind": "function",
-                        "definer_module": "1/1",
-                        "consumer_module_indices": ["2/1", "3/1"],
-                        "consumer_count": 2,
-                    }
-                }
+    engine = SimpleNamespace(state=RepositoryAnalysisState(
+        artifacts={"pkg.module": {
+            "symbols": {"functions": ["target"]},
+            "own_symbols": ["target"],
+        }},
+        artifact_consumption={
+            "pkg.module::target": {
+                "consumers": ["pkg.first", "pkg.second"],
+                "channels": {},
             }
-        ),
-        encoding="utf-8",
-    )
-    monkeypatch.setattr(mcp_server, "_get_canonical_report", lambda *_: report)
+        },
+        artifact_consumption_state="fresh",
+    ))
+    monkeypatch.setattr(mcp_server, "_get_or_init_engine", lambda _root: engine)
     monkeypatch.setattr(
         mcp_server,
         "_read_registries",
@@ -1135,7 +1297,7 @@ def test_artifact_lookup_ignores_stale_registry_entries(tmp_path, monkeypatch):
         "total": 2,
         "truncated": True,
     }
-    assert result["data_source"] == "current_artifacts_compact"
+    assert result["data_source"] == "live_canonical_state"
 
     full = json.loads(mcp_server.lookup_artifact_by_symbol.fn(
         repo_path=str(tmp_path), symbol_name="target", evidence_limit=1,
@@ -1214,6 +1376,31 @@ def test_file_edit_context_decodes_modules_and_marks_unresolved_api(
     import contextor.core.reporting_engine.persistent_registry as registry_module
 
     monkeypatch.setattr(registry_module, "PersistentIdentityRegistry", FakeRegistry)
+    from contextor.core.domain.graph import ProjectGraph
+
+    engine = SimpleNamespace(state=RepositoryAnalysisState(
+        modules={
+            "pkg.module": SimpleNamespace(module_id="1/1"),
+            "pkg.dep": object(),
+            "pkg.other": object(),
+            "tests.test_module": object(),
+            "tests.test_other": object(),
+        },
+        artifacts={"pkg.module": {
+            "own_symbols": ["api", "other"],
+            "symbols": {"functions": ["api", "other"]},
+        }},
+        dependency_graph=ProjectGraph(
+            hard_edges={
+                "pkg.module": {"pkg.dep", "pkg.other"},
+                "tests.test_module": {"pkg.module"},
+                "tests.test_other": {"pkg.module"},
+            },
+            soft_edges={},
+        ),
+        metrics={"pkg.module": {"layer": "domain"}},
+    ))
+    monkeypatch.setattr(mcp_server, "_get_or_init_engine", lambda _root: engine)
 
     result = json.loads(
         mcp_server.get_file_edit_context.fn(
@@ -1233,8 +1420,8 @@ def test_file_edit_context_decodes_modules_and_marks_unresolved_api(
     assert result["public_api"]["items"] == {"A1/1": "pkg.module::api"}
     assert result["public_api"]["total"] == 2
     assert result["public_api"]["truncated"] is True
-    assert result["public_api"]["unresolved_ids"] == ["A2/1"]
-    assert result["public_api"]["unresolved_total"] == 1
+    assert result["public_api"]["unresolved_ids"] == []
+    assert result["public_api"]["unresolved_total"] == 0
     assert result["imports"]["total"] == 2
     assert result["imports"]["truncated"] is True
     assert result["consumers"]["total"] == 2
@@ -1264,7 +1451,7 @@ def test_file_edit_context_decodes_modules_and_marks_unresolved_api(
     assert compact["public_api"] == {
         "total": 2,
         "truncated": True,
-        "unresolved_total": 1,
+        "unresolved_total": 0,
     }
     assert compact["tests_covering"]["total"] == 2
     assert "tests" not in compact["tests_covering"]
@@ -1330,6 +1517,8 @@ def test_artifacts_for_module_includes_live_zero_consumer_signature(
                 }
             }
         }
+        artifact_consumption = {"pkg.module::unused": {"consumers": [], "channels": {}}}
+        artifact_consumption_state = "fresh"
 
     class Engine:
         state = State()
@@ -1384,6 +1573,8 @@ def test_artifacts_for_module_uses_live_state_without_compact_report(
                 }
             }
         }
+        artifact_consumption = {"pkg.module::run": {"consumers": [], "channels": {}}}
+        artifact_consumption_state = "fresh"
 
     class Engine:
         state = State()
@@ -1409,14 +1600,23 @@ def test_artifacts_for_module_uses_live_state_without_compact_report(
 
 
 def test_artifacts_for_module_bounds_nested_consumers(tmp_path, monkeypatch):
-    report = tmp_path / "artifacts.json"
-    report.write_text(json.dumps({"artifacts": {"A1/1": {
-        "kind": "function",
-        "definer_module": "1/1",
-        "consumer_module_indices": ["2/1", "3/1"],
-    }}}), encoding="utf-8")
-    monkeypatch.setattr(mcp_server, "_get_canonical_report", lambda *_: report)
-    monkeypatch.setattr(mcp_server, "_get_or_init_engine", lambda _root: None)
+    state = RepositoryAnalysisState(
+        modules={"pkg.module": object()},
+        artifacts={"pkg.module": {
+            "own_symbols": ["run"],
+            "symbols": {"functions": ["run"]},
+        }},
+        artifact_consumption={
+            "pkg.module::run": {
+                "consumers": ["pkg.first", "pkg.second"],
+                "channels": {},
+            }
+        },
+        artifact_consumption_state="fresh",
+    )
+    monkeypatch.setattr(
+        mcp_server, "_get_or_init_engine", lambda _root: SimpleNamespace(state=state)
+    )
     monkeypatch.setattr(
         mcp_server,
         "_read_registries",
@@ -1913,15 +2113,27 @@ def test_project_architecture_and_report_diff_offer_optional_bounds(
         return None
 
     monkeypatch.setattr(mcp_server, "_get_canonical_report", canonical)
+    state = RepositoryAnalysisState(
+        modules={"a": object(), "b": object()},
+        layer_information={
+            "summary_data": {"action_items": ["a", "b"]},
+            "layer_index": [{"layer": "a"}, {"layer": "b"}],
+            "hotspots": [{"module": "a"}, {"module": "b"}],
+            "debt": {"total_score": 1},
+        },
+    )
+    monkeypatch.setattr(
+        mcp_server,
+        "_get_or_init_engine",
+        lambda _root: SimpleNamespace(state=state),
+    )
 
     architecture = json.loads(mcp_server.get_project_architecture.fn(
         repo_path=str(tmp_path), max_items=1, compact=False,
         fields=["action_items", "top_global_hotspots"],
     ))
-    assert architecture["action_items"] == {
-        "items": ["a"], "total": 2, "truncated": True,
-    }
-    assert architecture["top_global_hotspots"]["total"] == 2
+    assert architecture["action_items"]["available"] is False
+    assert architecture["top_global_hotspots"]["available"] is False
 
     diff = json.loads(mcp_server.get_report_diff.fn(
         repo_path=str(tmp_path), max_items=1, compact=False,
@@ -1997,10 +2209,10 @@ def test_file_edit_context_missing_module_does_not_open_registry_transaction(
         repo_path=str(repo), file_path="missing.py"
     )
 
-    assert "not present in the current registry" in result
+    assert "No usable canonical LIVE state" in result
 
 
-def test_artifact_blast_radius_uses_only_current_compact_report(
+def test_artifact_blast_radius_does_not_fallback_to_compact_report(
     tmp_path, monkeypatch
 ):
     report = tmp_path / "artifacts.json"
@@ -2027,32 +2239,13 @@ def test_artifact_blast_radius_uses_only_current_compact_report(
         ),
     )
 
-    result = json.loads(
-        mcp_server.get_artifact_blast_radius.fn(
-            repo_path=str(tmp_path), artifact_name="target", max_items=0
-        )
+    monkeypatch.setattr(mcp_server, "_get_or_init_engine", lambda _root: None)
+
+    result = mcp_server.get_artifact_blast_radius.fn(
+        repo_path=str(tmp_path), artifact_name="target", max_items=0
     )
 
-    assert result["artifact_id"] == "A1/1"
-    assert result["definer"] == "pkg.module"
-    assert result["consumers"] == {"total": 1, "truncated": True}
-    assert result["evidence_scope"] == "direct_static_artifact_consumption"
-
-    full = json.loads(
-        mcp_server.get_artifact_blast_radius.fn(
-            repo_path=str(tmp_path),
-            artifact_name="target",
-            compact=False,
-            fields=["consumers"],
-        )
-    )
-    assert full == {
-        "consumers": {
-            "items": ["tests.test_module"],
-            "total": 1,
-            "truncated": False,
-        }
-    }
+    assert "No usable canonical LIVE state" in result
 
 
 def test_file_edit_context_minimal_mode_and_target_resolution(tmp_path, monkeypatch):
@@ -2415,6 +2608,14 @@ def test_artifact_blast_radius_module_aware_diagnostic(tmp_path, monkeypatch):
                 }
             },
             dependency_graph=None,
+            artifact_consumption={
+                "pkg.module::hello": {"consumers": ["consumer.mod"], "channels": {}},
+                "pkg.module::WorldClass": {"consumers": [], "channels": {}},
+                "pkg.module::WorldClass.analyze": {"consumers": [], "channels": {}},
+                "pkg.module::WorldClass._add_row": {"consumers": [], "channels": {}},
+                "pkg.module::WorldClass.__init__": {"consumers": [], "channels": {}},
+            },
+            artifact_consumption_state="fresh",
         )
     )
     monkeypatch.setattr(mcp_server, "_get_or_init_engine", lambda _root: engine)
@@ -2882,6 +3083,13 @@ def test_artifact_blast_radius_architecture_projection(monkeypatch, tmp_path):
                 },
             },
             cached_analytics_state="fresh",
+            artifact_consumption={
+                "pkg.core::func_clean": {"consumers": ["pkg.core", "pkg.same_layer"], "channels": {}},
+                "pkg.core::func_mixed": {"consumers": ["pkg.core", "pkg.cross_cli", "pkg.cross_ui", "pkg.same_layer", "pkg.unclassified", "tests.test_pkg"], "channels": {}},
+                "pkg.core::func_duplicate": {"consumers": ["pkg.core", "pkg.cross_ui", "tests.test_pkg"], "channels": {}},
+                "pkg.core::func_test_only": {"consumers": ["tests.test_pkg"], "channels": {}},
+            },
+            artifact_consumption_state="fresh",
         )
     )
     monkeypatch.setattr(mcp_server, "_get_or_init_engine", lambda _root: engine_fresh)
@@ -2993,6 +3201,8 @@ def test_artifact_blast_radius_architecture_projection(monkeypatch, tmp_path):
                 },
             },
             cached_analytics_state="fresh",
+            artifact_consumption=engine_fresh.state.artifact_consumption,
+            artifact_consumption_state="fresh",
         )
     )
     monkeypatch.setattr(mcp_server, "_get_or_init_engine", lambda _root: engine_no_definer_layer)
@@ -3026,6 +3236,8 @@ def test_artifact_blast_radius_architecture_projection(monkeypatch, tmp_path):
             artifacts=engine_fresh.state.artifacts,
             cached_analytics={},
             cached_analytics_state="deferred",
+            artifact_consumption=engine_fresh.state.artifact_consumption,
+            artifact_consumption_state="fresh",
         )
     )
     monkeypatch.setattr(mcp_server, "_get_or_init_engine", lambda _root: engine_deferred)
@@ -3127,6 +3339,12 @@ def test_artifact_blast_radius_downstream_module_reachability(monkeypatch, tmp_p
             },
             cached_analytics_state="fresh",
             dependency_graph=dep_graph,
+            artifact_consumption={
+                "pkg.definer::sym_zero": {"consumers": [], "channels": {}},
+                "pkg.definer::sym_chain": {"consumers": ["pkg.direct_a"], "channels": {}},
+                "pkg.definer::sym_self": {"consumers": ["pkg.definer"], "channels": {}},
+            },
+            artifact_consumption_state="fresh",
         )
     )
     monkeypatch.setattr(mcp_server, "_get_or_init_engine", lambda _root: engine_fresh)
@@ -3204,6 +3422,8 @@ def test_artifact_blast_radius_downstream_module_reachability(monkeypatch, tmp_p
             cached_analytics={"module_layers": {}},
             cached_analytics_state="stale",
             dependency_graph=dep_graph,
+            artifact_consumption=engine_fresh.state.artifact_consumption,
+            artifact_consumption_state="fresh",
         )
     )
     monkeypatch.setattr(mcp_server, "_get_or_init_engine", lambda _root: engine_stale)
@@ -3368,13 +3588,9 @@ def test_module_context_topology_provenance_and_freshness(monkeypatch, tmp_path)
     assert res_def["metrics_source"] == "deferred_topology_analytics"
     assert res_def["degree_metrics_source"] == "live_canonical_graph"
 
-    # 4. Engine absent (report-only fallback) -> saved report behavior preserved
+    # 4. Engine absent -> fail closed without report fallback.
     monkeypatch.setattr(mcp_server, "_get_or_init_engine", lambda _root: None)
-    res_report = json.loads(mcp_server.get_module_context.fn(repo_path=str(root), module_name="pkg.mod_a"))
-    assert res_report["metrics"]["pagerank"] == 0.999
-    assert res_report["metrics_source"] == "saved_graph_analytics"
-    assert res_report["degree_metrics_source"] == "saved_graph_analytics"
-
-
-
-
+    res_report = mcp_server.get_module_context.fn(
+        repo_path=str(root), module_name="pkg.mod_a"
+    )
+    assert "No usable canonical LIVE state" in res_report
