@@ -2,10 +2,11 @@
 contextor/core/reference/visitor.py
 
 AST visitor detecting symbol usage facts:
-calls, imports, callbacks, event bindings, and inheritance.
+calls, imports, callbacks, event bindings, inheritance, and non-call qualified attribute refs.
 """
 
 import ast
+from typing import Optional
 
 from .resolution import (
     _attribute_name,
@@ -14,6 +15,19 @@ from .resolution import (
     _resolve_alias,
     _resolve_reexport,
 )
+
+
+EVENT_BINDING_METHODS = {
+    "bind",
+    "subscribe",
+    "on",
+}
+
+
+def _is_event_binding_call(called_name: Optional[str]) -> bool:
+    if not called_name:
+        return False
+    return called_name.rsplit(".", 1)[-1] in EVENT_BINDING_METHODS
 
 
 class SymbolReferenceVisitor(ast.NodeVisitor):
@@ -32,6 +46,8 @@ class SymbolReferenceVisitor(ast.NodeVisitor):
         short-name fallback matches without confirmed resolution
     - inherited:
         class inheritance relationships
+    - qualified_refs:
+        non-call qualified attribute references
     """
 
     def __init__(self, target_symbols, reexports=None, current_module=None):
@@ -42,7 +58,9 @@ class SymbolReferenceVisitor(ast.NodeVisitor):
         self.called_ambiguous = set()
         self.event_bound = set()
         self.inherited = []
+        self.qualified_refs = set()
 
+        self._call_funcs = set()
         self.aliases = {}
         self.instances = {}
         self.context_stack = []
@@ -232,14 +250,50 @@ class SymbolReferenceVisitor(ast.NodeVisitor):
         self.generic_visit(node)
 
     # ======================================================
+    # QUALIFIED ATTRIBUTE REFERENCES (NON-CALL)
+    # ======================================================
+
+    def visit_Attribute(self, node):
+        if node not in self._call_funcs:
+            name = _attribute_name(node)
+            if name and "." in name:
+                resolved = self._resolve_name(name)
+                classification, match = _classify_match(
+                    name,
+                    resolved,
+                    self.target_symbols,
+                    self.aliases,
+                )
+                if classification == "confirmed" and match:
+                    self.qualified_refs.add(
+                        (
+                            match,
+                            getattr(node, "lineno", None),
+                            self._current_context(),
+                        )
+                    )
+
+        self.generic_visit(node)
+
+    # ======================================================
     # CALL DETECTION
     # ======================================================
 
-    def visit_Call(self, node):
-        self._detect_callback_arguments(node)
-        self._detect_positional_callbacks(node)
+    def _mark_call_func_tree(self, func):
+        for child in ast.walk(func):
+            if isinstance(child, ast.Attribute):
+                self._call_funcs.add(child)
 
+    def visit_Call(self, node):
+        self._mark_call_func_tree(node.func)
         called_name = _attribute_name(node.func)
+        is_event_binding = _is_event_binding_call(called_name)
+
+        if is_event_binding:
+            self._detect_positional_callbacks(node)
+        else:
+            self._detect_callback_arguments(node)
+            self._detect_positional_callbacks(node)
 
         # --------------------------------------------------
         # Dynamic getattr(obj, "name")
@@ -279,29 +333,30 @@ class SymbolReferenceVisitor(ast.NodeVisitor):
         # not a direct runtime call.
         #
 
-        for arg in node.args:
-            arg_name = _attribute_name(arg)
+        if not is_event_binding:
+            for arg in node.args:
+                arg_name = _attribute_name(arg)
 
-            if not arg_name:
-                continue
+                if not arg_name:
+                    continue
 
-            resolved_arg = self._resolve_name(arg_name)
+                resolved_arg = self._resolve_name(arg_name)
 
-            classification, arg_match = _classify_match(
-                arg_name,
-                resolved_arg,
-                self.target_symbols,
-                self.aliases,
-            )
-
-            if classification == "confirmed" and arg_match:
-                self.callback_called.add(
-                    (
-                        arg_match,
-                        getattr(node, "lineno", None),
-                        self._current_context(),
-                    )
+                classification, arg_match = _classify_match(
+                    arg_name,
+                    resolved_arg,
+                    self.target_symbols,
+                    self.aliases,
                 )
+
+                if classification == "confirmed" and arg_match:
+                    self.callback_called.add(
+                        (
+                            arg_match,
+                            getattr(node, "lineno", None),
+                            self._current_context(),
+                        )
+                    )
 
         # --------------------------------------------------
         # Direct call

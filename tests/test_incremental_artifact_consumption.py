@@ -34,7 +34,7 @@ def test_case_1_add_consumer(tmp_path):
 
     state = RepositoryAnalysisState(
         modules={"target": m_target},
-        artifacts={"target": {"symbols": {"functions": ["foo"]}}},
+        artifacts={"target": {"symbols": {"functions": ["foo"]}, "own_symbols": ["foo"]}},
     )
     cache_dir = tmp_path / "cache"
     cache_dir.mkdir()
@@ -46,12 +46,14 @@ def test_case_1_add_consumer(tmp_path):
         str(tmp_path),
     )
 
+    engine.update_file(str(f_target))
+
     # Perform ADD of consumer
     res = engine.update_file(str(f_consumer))
     assert res.status == "UPDATED"
     assert res.artifact_consumption_state == "fresh"
 
-    target_entry = engine.state.artifact_consumption.get("target.foo")
+    target_entry = engine.state.artifact_consumption.get("target::foo")
     assert target_entry is not None
     assert "consumer" in target_entry["consumers"]
 
@@ -63,13 +65,11 @@ def test_case_2_modify_call_target(tmp_path):
     f_consumer = tmp_path / "consumer.py"
     f_consumer.write_text("from target import foo, bar\nfoo()\n", encoding="utf-8")
 
-    imp_c = ImportRef(module="target", level=0, names=["foo", "bar"], is_from_import=True)
     m_target = Module(module_id="target", path="target.py", absolute_path=str(f_target), imports=[])
-    m_consumer = Module(module_id="consumer", path="consumer.py", absolute_path=str(f_consumer), imports=[imp_c])
 
     state = RepositoryAnalysisState(
-        modules={"target": m_target, "consumer": m_consumer},
-        artifacts={"target": {"symbols": {"functions": ["foo", "bar"]}}},
+        modules={"target": m_target},
+        artifacts={"target": {"symbols": {"functions": ["foo", "bar"]}, "own_symbols": ["foo", "bar"]}},
     )
     cache_dir = tmp_path / "cache"
     cache_dir.mkdir()
@@ -80,21 +80,22 @@ def test_case_2_modify_call_target(tmp_path):
         FileStateManager(str(cache_dir)),
         str(tmp_path),
     )
+    engine.update_file(str(f_target))
+
     # First update to populate initial consumer state
     engine.update_file(str(f_consumer))
 
-    assert "consumer" in engine.state.artifact_consumption["target.foo"]["consumers"]
+    assert "consumer" in engine.state.artifact_consumption["target::foo"]["consumers"]
 
     # Modify consumer.py: foo() -> bar()
     f_consumer.write_text("from target import foo, bar\nbar()\n", encoding="utf-8")
     engine.update_file(str(f_consumer))
 
-    foo_channels = engine.state.artifact_consumption.get("target.foo", {}).get("channels", {}).get("consumer", [])
-    bar_channels = engine.state.artifact_consumption.get("target.bar", {}).get("channels", {}).get("consumer", [])
+    foo_channels = engine.state.artifact_consumption.get("target::foo", {}).get("channels", {}).get("consumer", [])
+    bar_channels = engine.state.artifact_consumption.get("target::bar", {}).get("channels", {}).get("consumer", [])
 
     assert "direct_calls" not in foo_channels
     assert "direct_calls" in bar_channels
-
 
 
 def test_case_3_delete_consumer(tmp_path):
@@ -105,10 +106,9 @@ def test_case_3_delete_consumer(tmp_path):
     f_consumer.write_text("from target import foo\nfoo()\n", encoding="utf-8")
 
     m_target = Module(module_id="target", path="target.py", absolute_path=str(f_target), imports=[])
-    m_consumer = Module(module_id="consumer", path="consumer.py", absolute_path=str(f_consumer), imports=[])
 
     state = RepositoryAnalysisState(
-        modules={"target": m_target, "consumer": m_consumer},
+        modules={"target": m_target},
     )
     cache_dir = tmp_path / "cache"
     cache_dir.mkdir()
@@ -119,14 +119,15 @@ def test_case_3_delete_consumer(tmp_path):
         FileStateManager(str(cache_dir)),
         str(tmp_path),
     )
+    engine.update_file(str(f_target))
     engine.update_file(str(f_consumer))
-    assert "consumer" in engine.state.artifact_consumption.get("target.foo", {}).get("consumers", [])
+    assert "consumer" in engine.state.artifact_consumption.get("target::foo", {}).get("consumers", [])
 
     # Delete consumer file
     f_consumer.unlink()
     engine.update_file(str(f_consumer))
 
-    foo_consumers = engine.state.artifact_consumption.get("target.foo", {}).get("consumers", [])
+    foo_consumers = engine.state.artifact_consumption.get("target::foo", {}).get("consumers", [])
     assert "consumer" not in foo_consumers
 
 
@@ -148,8 +149,9 @@ def test_case_4_alias_resolution(tmp_path):
         FileStateManager(str(cache_dir)),
         str(tmp_path),
     )
+    engine.update_file(str(f_target))
     engine.update_file(str(f_consumer))
-    assert "consumer" in engine.state.artifact_consumption.get("target.foo", {}).get("consumers", [])
+    assert "consumer" in engine.state.artifact_consumption.get("target::foo", {}).get("consumers", [])
 
 
 def test_case_5_qualified_call(tmp_path):
@@ -170,8 +172,9 @@ def test_case_5_qualified_call(tmp_path):
         FileStateManager(str(cache_dir)),
         str(tmp_path),
     )
+    engine.update_file(str(f_target))
     engine.update_file(str(f_consumer))
-    assert "consumer" in engine.state.artifact_consumption.get("target.foo", {}).get("consumers", [])
+    assert "consumer" in engine.state.artifact_consumption.get("target::foo", {}).get("consumers", [])
 
 
 def test_case_6_name_collision(tmp_path):
@@ -196,10 +199,12 @@ def test_case_6_name_collision(tmp_path):
         FileStateManager(str(cache_dir)),
         str(tmp_path),
     )
+    engine.update_file(str(f_a))
+    engine.update_file(str(f_b))
     engine.update_file(str(f_consumer))
 
-    a_consumers = engine.state.artifact_consumption.get("mod_a.foo", {}).get("consumers", [])
-    b_consumers = engine.state.artifact_consumption.get("mod_b.foo", {}).get("consumers", [])
+    a_consumers = engine.state.artifact_consumption.get("mod_a::foo", {}).get("consumers", [])
+    b_consumers = engine.state.artifact_consumption.get("mod_b::foo", {}).get("consumers", [])
 
     assert "consumer" in a_consumers
     assert "consumer" not in b_consumers
@@ -239,9 +244,12 @@ def test_case_7_reexport_retarget_no_reread(tmp_path):
         FileStateManager(str(cache_dir)),
         str(tmp_path),
     )
+    engine.update_file(str(f_impl_a))
+    engine.update_file(str(f_impl_b))
+    engine.update_file(str(f_init))
     engine.update_file(str(f_consumer))
 
-    assert "consumer" in engine.state.artifact_consumption.get("pkg.impl_a.foo", {}).get("consumers", [])
+    assert "consumer" in engine.state.artifact_consumption.get("pkg.impl_a::foo", {}).get("consumers", [])
 
     # Retarget re-export in pkg/__init__.py
     f_init.write_text("from .impl_b import foo\n", encoding="utf-8")
@@ -255,9 +263,8 @@ def test_case_7_reexport_retarget_no_reread(tmp_path):
         assert "consumer" not in extracted_modules
         assert "pkg.__init__" in extracted_modules
 
-
-    impl_a_consumers = engine.state.artifact_consumption.get("pkg.impl_a.foo", {}).get("consumers", [])
-    impl_b_consumers = engine.state.artifact_consumption.get("pkg.impl_b.foo", {}).get("consumers", [])
+    impl_a_consumers = engine.state.artifact_consumption.get("pkg.impl_a::foo", {}).get("consumers", [])
+    impl_b_consumers = engine.state.artifact_consumption.get("pkg.impl_b::foo", {}).get("consumers", [])
 
     assert "consumer" not in impl_a_consumers
     assert "consumer" in impl_b_consumers

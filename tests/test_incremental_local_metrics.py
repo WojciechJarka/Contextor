@@ -354,7 +354,7 @@ def _setup_engine(tmp_path):
     provider = tmp_path / "provider.py"
     provider.write_text("def run():\n    return 1\n", encoding="utf-8")
     target = tmp_path / "target.py"
-    target.write_text("def target():\n    return 2\n", encoding="utf-8")
+    target.write_text("def target_fn():\n    return 2\n", encoding="utf-8")
 
     modules = index_repository(str(tmp_path)).modules
     artifacts, _ = collect_module_artifacts(modules, str(tmp_path))

@@ -405,19 +405,43 @@ def artifact_consumption_is_fresh(state: Any) -> bool:
     """
     Determines if state.artifact_consumption is genuinely fresh:
     - state must not have resync_required == True
-    - state.artifact_consumption_state must not be 'stale'
+    - state.artifact_consumption_state must be exactly 'fresh'
     - state.artifact_consumption must pass validate_canonical_artifact_consumption_coverage(state.artifact_consumption, state.artifacts)
     """
     if getattr(state, "resync_required", False):
         return False
 
-    if getattr(state, "artifact_consumption_state", None) == "stale":
+    if getattr(state, "artifact_consumption_state", None) != "fresh":
         return False
 
     consumption = getattr(state, "artifact_consumption", None)
     artifacts = getattr(state, "artifacts", {}) or {}
 
     return validate_canonical_artifact_consumption_coverage(consumption, artifacts)
+
+
+def dependency_matrix_inputs_are_fresh(state: Any) -> bool:
+    """
+    Determines if canonical inputs required for Dependency Matrix are genuinely fresh:
+    - state must not have resync_required == True
+    - artifact_consumption must be genuinely fresh (artifact_consumption_is_fresh(state))
+    - dependency_graph must be available and valid (not None, has hard_edges dict mapping)
+    """
+    if getattr(state, "resync_required", False):
+        return False
+
+    if not artifact_consumption_is_fresh(state):
+        return False
+
+    graph = getattr(state, "dependency_graph", None)
+    if graph is None:
+        return False
+
+    hard_edges = getattr(graph, "hard_edges", None)
+    if not isinstance(hard_edges, dict):
+        return False
+
+    return True
 
 
 def build_canonical_artifact_consumption(

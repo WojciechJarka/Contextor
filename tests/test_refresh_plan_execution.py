@@ -12,29 +12,22 @@ import pytest
 
 from contextor.core.analysis.incremental_engine import IncrementalAnalysisEngine
 from contextor.core.analysis.state_manager import FileStateManager, RepositoryAnalysisState
+from contextor.core.api.facade import ContextorFacade
 from contextor.core.domain.module import Module
+from contextor.core.live_state.hydration import hydrate_repository_engine
 from contextor.core.reporting_engine.persistent_registry import PersistentIdentityRegistry
 
 
 def _build_full_static_state(repo_dir: Path) -> RepositoryAnalysisState:
-    """Canonical Oracle: builds fresh full static RepositoryAnalysisState by analyzing all files from clean state."""
-    state = RepositoryAnalysisState(modules={})
-    cache_dir = repo_dir / "cache_oracle"
-    cache_dir.mkdir(exist_ok=True)
-    reg_dir = repo_dir / "reg_oracle"
-    reg_dir.mkdir(exist_ok=True)
-    engine = IncrementalAnalysisEngine(
-        state,
-        PersistentIdentityRegistry(str(reg_dir)),
-        FileStateManager(str(cache_dir)),
-        str(repo_dir),
-    )
-    for py_file in sorted(repo_dir.rglob("*.py")):
-        if any(part in {".git", ".venv", "__pycache__", "cache", "cache_oracle", "reg_oracle"} for part in py_file.parts):
-            continue
-        engine.update_file(str(py_file))
-    return engine.state
+    """Canonical Oracle: builds fresh full static RepositoryAnalysisState via real production ContextorFacade."""
+    facade = ContextorFacade()
+    errors, _ = facade.analyze_project(str(repo_dir))
+    assert not errors, errors
 
+    hydrated = hydrate_repository_engine(repo_dir)
+    assert hydrated is not None
+
+    return hydrated.engine.state
 
 
 def _assert_state_parity(incremental_state: RepositoryAnalysisState, oracle_state: RepositoryAnalysisState):
@@ -51,12 +44,22 @@ def _assert_state_parity(incremental_state: RepositoryAnalysisState, oracle_stat
         assert inc_facts.imports == ora_facts.imports
         assert inc_facts.aliases == ora_facts.aliases
 
-    # Artifact consumption parity
+    # Artifact consumption parity (exact target set, exact consumers, and exact channel sets)
+    assert set(incremental_state.artifact_consumption.keys()) == set(oracle_state.artifact_consumption.keys())
     for target, ora_entry in oracle_state.artifact_consumption.items():
         inc_entry = incremental_state.artifact_consumption.get(target, {})
         assert sorted(inc_entry.get("consumers", [])) == sorted(ora_entry.get("consumers", []))
         inc_channels = inc_entry.get("channels", {})
         ora_channels = ora_entry.get("channels", {})
+        assert set(inc_channels.keys()) == set(ora_channels.keys()), (
+            f"Target '{target}' channel consumers mismatch: inc={inc_channels} vs ora={ora_channels}"
+        )
+        for consumer in ora_channels.keys():
+            assert set(inc_channels[consumer]) == set(ora_channels[consumer]), (
+                f"Target '{target}', Consumer '{consumer}' channel mismatch: "
+                f"incremental={inc_channels.get(consumer)} vs full={ora_channels.get(consumer)}"
+            )
+
     # Cycles parity
     assert incremental_state.cycles == oracle_state.cycles
     assert incremental_state.cycles_state == oracle_state.cycles_state
@@ -93,7 +96,6 @@ def test_case_a_body_only_retarget(tmp_path):
     assert set(trace["patch_families"]) == set(res.shadow_plan.patch_families) == {"module_usages", "artifact_consumption", "cached_analytics"}
 
     assert trace["graph_recomputations"] == res.shadow_plan.graph_recomputations == ()
-
 
     # Full rebuild parity
     oracle = _build_full_static_state(tmp_path)
@@ -139,11 +141,11 @@ def test_case_c_reexport_retarget(tmp_path):
     pkg_dir = tmp_path / "pkg"
     pkg_dir.mkdir()
     f_init = pkg_dir / "__init__.py"
-    f_init.write_text("from pkg.impl_a import foo\n", encoding="utf-8")
+    f_init.write_text("from pkg.impl_a import foo_a as foo\n", encoding="utf-8")
     f_impl_a = pkg_dir / "impl_a.py"
-    f_impl_a.write_text("def foo(): pass\n", encoding="utf-8")
+    f_impl_a.write_text("def foo_a(): return 'impl_a'\n", encoding="utf-8")
     f_impl_b = pkg_dir / "impl_b.py"
-    f_impl_b.write_text("def foo(): pass\n", encoding="utf-8")
+    f_impl_b.write_text("def foo_b(): return 'impl_b'\n", encoding="utf-8")
     f_consumer = tmp_path / "consumer.py"
     f_consumer.write_text("from pkg import foo\nfoo()\n", encoding="utf-8")
 
@@ -160,8 +162,8 @@ def test_case_c_reexport_retarget(tmp_path):
     engine.update_file(str(f_init))
     engine.update_file(str(f_consumer))
 
-    # Retarget re-export: impl_a.foo -> impl_b.foo
-    f_init.write_text("from pkg.impl_b import foo\n", encoding="utf-8")
+    # Retarget re-export: impl_a.foo_a -> impl_b.foo_b
+    f_init.write_text("from pkg.impl_b import foo_b as foo\n", encoding="utf-8")
     res = engine.update_file(str(f_init))
 
     trace = res.execution_trace

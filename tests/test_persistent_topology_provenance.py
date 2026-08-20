@@ -149,7 +149,7 @@ def test_fresh_snapshot_restart_preservation(tmp_path):
     fn = getattr(get_module_context, "fn", get_module_context)
     res_raw = fn(str(tmp_path), "app.main", compact=True)
     res = json.loads(res_raw)
-    assert res["metrics_source"] == "live_canonical_graph"
+    assert res["metrics_source"] == "live_canonical_topology"
     assert res["metrics"]["pagerank"] == topo["pagerank"]["app.main"]
 
 

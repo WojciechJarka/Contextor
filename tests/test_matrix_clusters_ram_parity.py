@@ -286,7 +286,7 @@ def test_real_incremental_writer_consumer_delta(tmp_path: Path):
     assert target_key in engine.state.artifact_consumption
     assert engine.state.artifact_consumption[target_key]["consumers"] == ["app"]
     assert engine.state.artifact_consumption[target_key]["channels"] == {
-        "app": ["api_imports", "direct_calls", "runtime_calls"]
+        "app": ["api_imports", "direct_calls"]
     }
 
     # Perform real file edit: remove usage of helper_func from app.py

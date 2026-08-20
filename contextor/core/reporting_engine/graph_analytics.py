@@ -188,18 +188,47 @@ def _artifact_id(
     return key
 
 
+
+# ---------------------------------------------------------------------------
+# Canonical channel-to-dependency-type mapping
+# ---------------------------------------------------------------------------
+
+_CALL_USAGE_CHANNELS: frozenset = frozenset(
+    {
+        "direct_calls",
+        "runtime_calls",
+        "callback_calls",
+        "event_bindings",
+    }
+)
+
+_IMPORT_USAGE_CHANNELS: frozenset = frozenset(
+    {
+        "api_imports",
+        "qualified_refs",
+    }
+)
+
+_INHERITANCE_USAGE_CHANNELS: frozenset = frozenset(
+    {
+        "inheritance",
+    }
+)
+
+
 def _usage_dependency_types(usage: dict) -> set[str]:
     """
     Infer dependency types from usage categories.
 
     This is intentionally conservative. Categories are mapped to the
-    three graph-level dependency types:
+    three graph-level dependency types via exact canonical channel identity:
 
-        call
-        inheritance
-        import
+        call        <- direct_calls | runtime_calls | callback_calls | event_bindings
+        import      <- api_imports | qualified_refs
+        inheritance <- inheritance
 
     Unknown categories do not create a dependency type.
+    No substring matching or fuzzy heuristics are used.
     """
     result: set[str] = set()
 
@@ -210,25 +239,15 @@ def _usage_dependency_types(usage: dict) -> set[str]:
         if not values:
             continue
 
-        category_lower = str(category).lower()
-
-        if "inherit" in category_lower:
+        if category in _CALL_USAGE_CHANNELS:
+            result.add("call")
+        elif category in _IMPORT_USAGE_CHANNELS:
+            result.add("import")
+        elif category in _INHERITANCE_USAGE_CHANNELS:
             result.add("inheritance")
 
-        if (
-            "call" in category_lower
-            or "runtime" in category_lower
-            or "callback" in category_lower
-        ):
-            result.add("call")
-
-        if (
-            "import" in category_lower
-            or "api_import" in category_lower
-        ):
-            result.add("import")
-
     return result
+
 
 
 def _fallback_dependency_type(artifact: dict) -> str:

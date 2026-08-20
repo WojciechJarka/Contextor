@@ -10,7 +10,7 @@ Proves:
 - Legacy absence -> deferred
 - Deferred -> RAM materialization (pure RAM, no I/O)
 - Stale/resync no-heal
-- Empty valid result can be fresh
+- Empty valid result can be fresh (with explicit empty graph)
 - Persisted fresh no recompute
 - Recompute failure fails closed (independent per family)
 - Independent freshness (matrix stale + clusters fresh, and vice versa)
@@ -19,7 +19,11 @@ Proves:
 - False-fresh coverage regression (state="fresh" but invalid coverage -> stale derived)
 - Deferred prerequisite degrades derived fresh to deferred
 - Legacy deferred recovery via materialize_incremental_state
-- Full analysis untrusted/resync input fails closed to stale
+- Graph prerequisite trust for Matrix (missing graph -> Matrix stale, Clusters fresh)
+- Real Facade bootstrap resync fails closed to stale
+- Real Facade bootstrap Matrix failure isolation (Matrix stale, Clusters fresh)
+- Real Facade bootstrap Clusters failure isolation (Matrix fresh, Clusters stale)
+- artifact_consumption_is_fresh and dependency_matrix_inputs_are_fresh contract tables
 """
 
 from __future__ import annotations
@@ -43,9 +47,11 @@ from contextor.core.analysis.incremental.materialization import (
 from contextor.core.analysis.state_manager import (
     RepositoryAnalysisState,
     artifact_consumption_is_fresh,
+    dependency_matrix_inputs_are_fresh,
     validate_canonical_artifact_consumption_coverage,
 )
 from contextor.core.api.facade import ContextorFacade
+from contextor.core.domain.graph import ProjectGraph
 from contextor.core.live_state import hydrate_repository_engine
 from contextor.core.live_state.store import load_snapshot, save_snapshot
 from contextor.core.reporting_engine.graph_analytics import (
@@ -59,15 +65,16 @@ from contextor.core.reporting_engine.graph_analytics import (
 # ---------------------------------------------------------------------------
 
 def _make_minimal_fresh_state() -> RepositoryAnalysisState:
-    """Minimal state with fresh artifact_consumption so matrix/clusters can materialize."""
+    """Minimal state with fresh artifact_consumption and valid empty graph."""
     st = RepositoryAnalysisState()
     st.artifact_consumption = {}
     st.artifact_consumption_state = "fresh"
+    st.dependency_graph = ProjectGraph(hard_edges={}, soft_edges={})
     return st
 
 
 def _make_nontrivial_fresh_state() -> RepositoryAnalysisState:
-    """Fresh state with a concrete artifact + consumption entry."""
+    """Fresh state with a concrete artifact + consumption entry and valid graph."""
     st = RepositoryAnalysisState()
     st.artifacts = {
         "mod_a": {
@@ -80,6 +87,7 @@ def _make_nontrivial_fresh_state() -> RepositoryAnalysisState:
         "mod_a::foo": {"consumers": [], "channels": {}}
     }
     st.artifact_consumption_state = "fresh"
+    st.dependency_graph = ProjectGraph(hard_edges={}, soft_edges={})
     return st
 
 
@@ -163,9 +171,7 @@ def test_save_hydrate_exact_parity(tmp_path: Path):
 
 def test_legacy_absence_gives_deferred(tmp_path: Path):
     """Loading a pickle without new fields yields deferred defaults."""
-    # Build old-style state without new fields
     old_st = RepositoryAnalysisState()
-    # Simulate a pre-ETAP2A pickle that lacks the new fields
     old_dict = {k: v for k, v in old_st.__dict__.items()
                 if k not in ("dependency_matrix", "dependency_matrix_state",
                               "shared_usage_clusters", "shared_usage_clusters_state")}
@@ -272,12 +278,12 @@ def test_resync_forces_stale():
 
 
 # ---------------------------------------------------------------------------
-# 8. Empty valid result can be fresh
+# 8. Empty valid result can be fresh (with explicit empty graph)
 # ---------------------------------------------------------------------------
 
 def test_empty_result_is_fresh():
-    """Empty repo produces {} matrix and [] clusters, both marked fresh."""
-    st = _make_minimal_fresh_state()  # artifact_consumption = {}, artifact_consumption_state = "fresh"
+    """Empty repo with explicit valid empty graph produces {} matrix and [] clusters, both marked fresh."""
+    st = _make_minimal_fresh_state()  # artifact_consumption = {}, graph = ProjectGraph({}, {})
 
     ensure_dependency_matrix(st)
     ensure_shared_usage_clusters(st)
@@ -453,8 +459,6 @@ def test_materialize_incremental_state_calls_both_families():
     st = _make_nontrivial_fresh_state()
     st.dependency_matrix_state = "deferred"
     st.shared_usage_clusters_state = "deferred"
-
-    # module_usages must not require source reconstruction
     st.module_usages = {}
 
     materialize_incremental_state(st)
@@ -464,7 +468,7 @@ def test_materialize_incremental_state_calls_both_families():
 
 
 # ---------------------------------------------------------------------------
-# 14. Prerequisite Stale Propagation (Section 1, 3B, 5A, 5B, 9)
+# 14. Prerequisite Stale Propagation
 # ---------------------------------------------------------------------------
 
 def test_prerequisite_stale_propagates_to_derived_fresh_direct_ensure():
@@ -507,7 +511,7 @@ def test_prerequisite_stale_propagates_to_derived_fresh_materialize():
 
 
 # ---------------------------------------------------------------------------
-# 15. False-Fresh Coverage Regression (Section 5C, 10)
+# 15. False-Fresh Coverage Regression
 # ---------------------------------------------------------------------------
 
 def test_prerequisite_false_fresh_invalid_coverage_direct_ensure():
@@ -518,16 +522,16 @@ def test_prerequisite_false_fresh_invalid_coverage_direct_ensure():
     st = RepositoryAnalysisState()
     st.artifacts = {
         "mod_a": {
-            "own_symbols": ["foo", "bar"],  # "bar" is missing from consumption!
+            "own_symbols": ["foo", "bar"],
             "symbols": {"functions": ["foo", "bar"], "classes": [], "methods": [], "globals": []},
             "consumers": {},
         }
     }
     st.artifact_consumption = {
         "mod_a::foo": {"consumers": [], "channels": {}}
-        # mod_a::bar missing -> invalid coverage!
     }
     st.artifact_consumption_state = "fresh"  # false fresh!
+    st.dependency_graph = ProjectGraph(hard_edges={}, soft_edges={})
     st.dependency_matrix = {"cached": {}}
     st.dependency_matrix_state = "fresh"
     st.shared_usage_clusters = [{"cached": True}]
@@ -560,6 +564,7 @@ def test_prerequisite_false_fresh_invalid_coverage_materialize():
         "mod_a::foo": {"consumers": [], "channels": {}}
     }
     st.artifact_consumption_state = "fresh"
+    st.dependency_graph = ProjectGraph(hard_edges={}, soft_edges={})
     st.dependency_matrix_state = "fresh"
     st.shared_usage_clusters_state = "fresh"
     st.module_usages = {}
@@ -572,7 +577,7 @@ def test_prerequisite_false_fresh_invalid_coverage_materialize():
 
 
 # ---------------------------------------------------------------------------
-# 16. Deferred Prerequisite Degradation (Section 3C, 5D)
+# 16. Deferred Prerequisite Degradation
 # ---------------------------------------------------------------------------
 
 def test_prerequisite_deferred_degrades_derived_fresh_to_deferred():
@@ -593,12 +598,12 @@ def test_prerequisite_deferred_degrades_derived_fresh_to_deferred():
 
 
 # ---------------------------------------------------------------------------
-# 17. Legacy Deferred Recovery (Section 4, 11)
+# 17. Legacy Deferred Recovery
 # ---------------------------------------------------------------------------
 
 def test_legacy_deferred_artifact_consumption_recovers_to_fresh():
     """
-    Legacy _report artifact_consumption in deferred state:
+    Legacy _report artifact_consumption in deferred state with valid graph:
     materialize_incremental_state migrates artifact_consumption to fresh,
     then materializes dependency_matrix and shared_usage_clusters to fresh.
     """
@@ -612,9 +617,9 @@ def test_legacy_deferred_artifact_consumption_recovers_to_fresh():
             },
         }
     }
-    # Legacy shape
     st.artifact_consumption = {"_report": {"some": "legacy"}}
     st.artifact_consumption_state = "deferred"
+    st.dependency_graph = ProjectGraph(hard_edges={"mod_b": {"mod_a"}}, soft_edges={})
     st.dependency_matrix_state = "deferred"
     st.shared_usage_clusters_state = "deferred"
     st.module_usages = {}
@@ -630,29 +635,189 @@ def test_legacy_deferred_artifact_consumption_recovers_to_fresh():
 
 
 # ---------------------------------------------------------------------------
-# 18. Full Analysis Untrusted / Resync Bootstrap (Section 6, 7, 8)
+# 18. Helper Contract Table Tests (Requirement 11)
 # ---------------------------------------------------------------------------
 
-def test_full_analysis_bootstrap_resync_fails_closed(tmp_path: Path):
+@pytest.mark.parametrize(
+    "ac_state, coverage_valid, resync, expected_ac_fresh, expected_dm_fresh",
+    [
+        ("fresh", True, False, True, True),
+        ("fresh", False, False, False, False),
+        ("deferred", True, False, False, False),
+        ("stale", True, False, False, False),
+        (None, True, False, False, False),
+        ("fresh", True, True, False, False),
+    ],
+)
+def test_helper_contract_table(ac_state, coverage_valid, resync, expected_ac_fresh, expected_dm_fresh):
+    """Verifies the exact truth table for artifact_consumption_is_fresh and dependency_matrix_inputs_are_fresh."""
+    st = RepositoryAnalysisState()
+    if coverage_valid:
+        st.artifacts = {
+            "m": {"own_symbols": ["s"], "symbols": {"functions": ["s"], "classes": [], "methods": [], "globals": []}, "consumers": {}}
+        }
+        st.artifact_consumption = {"m::s": {"consumers": [], "channels": {}}}
+    else:
+        st.artifacts = {
+            "m": {"own_symbols": ["s", "missing"], "symbols": {"functions": ["s", "missing"], "classes": [], "methods": [], "globals": []}, "consumers": {}}
+        }
+        st.artifact_consumption = {"m::s": {"consumers": [], "channels": {}}}
+
+    st.artifact_consumption_state = ac_state
+    st.resync_required = resync
+    st.dependency_graph = ProjectGraph(hard_edges={}, soft_edges={})
+
+    assert artifact_consumption_is_fresh(st) is expected_ac_fresh
+    assert dependency_matrix_inputs_are_fresh(st) is expected_dm_fresh
+
+
+# ---------------------------------------------------------------------------
+# 19. Graph Prerequisite Tests (Requirement 12)
+# ---------------------------------------------------------------------------
+
+def test_graph_prerequisite_explicit_empty_graph():
+    """Explicit valid empty graph + fresh AC -> Matrix fresh {}."""
+    st = _make_minimal_fresh_state()
+    st.dependency_graph = ProjectGraph(hard_edges={}, soft_edges={})
+
+    assert dependency_matrix_inputs_are_fresh(st)
+    ensure_dependency_matrix(st)
+    assert st.dependency_matrix_state == "fresh"
+    assert st.dependency_matrix == {}
+
+
+def test_graph_prerequisite_missing_graph_gives_stale_matrix_clusters_fresh():
+    """Missing graph (dependency_graph=None) -> Matrix stale, Clusters can be fresh."""
+    st = _make_nontrivial_fresh_state()
+    st.dependency_graph = None  # Graph is absent!
+    st.dependency_matrix_state = "deferred"
+    st.shared_usage_clusters_state = "deferred"
+
+    assert not dependency_matrix_inputs_are_fresh(st)
+    assert artifact_consumption_is_fresh(st)
+
+    ensure_dependency_matrix(st)
+    ensure_shared_usage_clusters(st)
+
+    assert st.dependency_matrix_state == "stale"
+    assert st.shared_usage_clusters_state == "fresh"
+
+
+def test_graph_prerequisite_empty_hard_edges_not_treated_as_missing():
+    """Graph with hard_edges={} must NOT be treated as missing."""
+    st = _make_nontrivial_fresh_state()
+    st.dependency_graph = ProjectGraph(hard_edges={}, soft_edges={})
+
+    assert dependency_matrix_inputs_are_fresh(st)
+
+
+def test_graph_prerequisite_resync_with_valid_graph_gives_stale_matrix():
+    """resync_required=True with valid graph -> Matrix stale."""
+    st = _make_nontrivial_fresh_state()
+    st.dependency_graph = ProjectGraph(hard_edges={}, soft_edges={})
+    st.resync_required = True
+
+    assert not dependency_matrix_inputs_are_fresh(st)
+    ensure_dependency_matrix(st)
+    assert st.dependency_matrix_state == "stale"
+
+
+# ---------------------------------------------------------------------------
+# 20. Real Facade Bootstrap Resync & Failure Isolation (Requirements 9, 10)
+# ---------------------------------------------------------------------------
+
+def test_real_facade_resync_bootstrap_fails_closed(tmp_path: Path):
     """
-    If analyze_project encounters resync_required or invalid input,
-    derived families must be initialized as 'stale' (fail-closed, not deferred).
+    Real execution through ContextorFacade.analyze_project when pipeline result
+    contains resync_required=True -> persisted and hydrated state has stale matrix and clusters.
     """
     (tmp_path / "mod_a.py").write_text("def foo():\n    return 1\n", encoding="utf-8")
 
-    facade = ContextorFacade()
-    errors, _ = facade.analyze_project(str(tmp_path))
-    assert not errors
+    from contextor.core.reporting_engine import pipeline as pipeline_mod
+    real_execute = pipeline_mod.execute_global_pipeline
+
+    def _execute_with_resync(*args, **kwargs):
+        res = real_execute(*args, **kwargs)
+        analysis_res = res.get("_analysis_result")
+        if analysis_res is not None:
+            analysis_res.resync_required = True
+        return res
+
+    with unittest.mock.patch(
+        "contextor.core.api.facade.execute_global_pipeline",
+        side_effect=_execute_with_resync,
+    ):
+        facade = ContextorFacade()
+        errors, _ = facade.analyze_project(str(tmp_path))
+        assert not errors
 
     hydrated = hydrate_repository_engine(tmp_path)
     assert hydrated is not None
     st = hydrated.engine.state
-    assert st.dependency_matrix_state == "fresh"
+
+    assert getattr(st, "resync_required", False) is True
+    assert not artifact_consumption_is_fresh(st)
+    assert not dependency_matrix_inputs_are_fresh(st)
+    assert st.dependency_matrix_state == "stale"
+    assert st.shared_usage_clusters_state == "stale"
+
+
+def test_real_facade_matrix_failure_isolation(tmp_path: Path):
+    """
+    Real execution through ContextorFacade.analyze_project when Matrix compute fails:
+    Matrix is marked stale, while Clusters is marked fresh and persisted.
+    """
+    (tmp_path / "mod_a.py").write_text("def foo():\n    return 1\n", encoding="utf-8")
+
+    def _matrix_raise(s, **kw):
+        raise RuntimeError("simulated matrix computation error in facade")
+
+    with unittest.mock.patch(
+        "contextor.core.reporting_engine.graph_analytics.compute_dependency_matrix_from_state",
+        side_effect=_matrix_raise,
+    ):
+        facade = ContextorFacade()
+        errors, _ = facade.analyze_project(str(tmp_path))
+        assert not errors
+
+    hydrated = hydrate_repository_engine(tmp_path)
+    assert hydrated is not None
+    st = hydrated.engine.state
+
+    assert st.dependency_matrix_state == "stale"
     assert st.shared_usage_clusters_state == "fresh"
+    assert isinstance(st.shared_usage_clusters, list)
+
+
+def test_real_facade_clusters_failure_isolation(tmp_path: Path):
+    """
+    Real execution through ContextorFacade.analyze_project when Clusters compute fails:
+    Matrix is marked fresh, while Clusters is marked stale and persisted.
+    """
+    (tmp_path / "mod_a.py").write_text("def foo():\n    return 1\n", encoding="utf-8")
+
+    def _clusters_raise(s, **kw):
+        raise RuntimeError("simulated clusters computation error in facade")
+
+    with unittest.mock.patch(
+        "contextor.core.reporting_engine.graph_analytics.compute_shared_usage_clusters_from_state",
+        side_effect=_clusters_raise,
+    ):
+        facade = ContextorFacade()
+        errors, _ = facade.analyze_project(str(tmp_path))
+        assert not errors
+
+    hydrated = hydrate_repository_engine(tmp_path)
+    assert hydrated is not None
+    st = hydrated.engine.state
+
+    assert st.dependency_matrix_state == "fresh"
+    assert st.shared_usage_clusters_state == "stale"
+    assert isinstance(st.dependency_matrix, dict)
 
 
 # ---------------------------------------------------------------------------
-# 19. Acceptance Matrix Scenarios
+# 21. Acceptance Matrix Scenarios
 # ---------------------------------------------------------------------------
 
 def test_acceptance_matrix_full_analysis(tmp_path: Path):
@@ -709,3 +874,86 @@ def test_acceptance_matrix_matrix_fresh_clusters_stale():
     ensure_shared_usage_clusters(st)
     assert st.dependency_matrix_state == "fresh"
     assert st.shared_usage_clusters_state == "stale"
+
+
+def test_acceptance_matrix_prerequisite_stale_derived_fresh():
+    """artifact_consumption stale, derived previously fresh -> stale / stale."""
+    st = _make_nontrivial_fresh_state()
+    st.artifact_consumption_state = "stale"
+    st.dependency_matrix_state = "fresh"
+    st.shared_usage_clusters_state = "fresh"
+    ensure_dependency_matrix(st)
+    ensure_shared_usage_clusters(st)
+    assert st.dependency_matrix_state == "stale"
+    assert st.shared_usage_clusters_state == "stale"
+
+
+def test_acceptance_matrix_false_fresh_invalid_coverage():
+    """artifact_consumption false-fresh (state fresh, coverage invalid) -> stale / stale."""
+    st = RepositoryAnalysisState()
+    st.artifacts = {
+        "mod_a": {
+            "own_symbols": ["foo", "missing_sym"],
+            "symbols": {"functions": ["foo", "missing_sym"], "classes": [], "methods": [], "globals": []},
+            "consumers": {},
+        }
+    }
+    st.artifact_consumption = {
+        "mod_a::foo": {"consumers": [], "channels": {}}
+    }
+    st.artifact_consumption_state = "fresh"
+    st.dependency_graph = ProjectGraph(hard_edges={}, soft_edges={})
+    st.dependency_matrix_state = "fresh"
+    st.shared_usage_clusters_state = "fresh"
+    ensure_dependency_matrix(st)
+    ensure_shared_usage_clusters(st)
+    assert st.dependency_matrix_state == "stale"
+    assert st.shared_usage_clusters_state == "stale"
+
+
+def test_acceptance_matrix_prerequisite_deferred_before_materialization():
+    """artifact_consumption deferred before prerequisite materialization -> not fresh."""
+    st = _make_nontrivial_fresh_state()
+    st.artifact_consumption_state = "deferred"
+    st.dependency_matrix_state = "fresh"
+    st.shared_usage_clusters_state = "fresh"
+    ensure_dependency_matrix(st)
+    ensure_shared_usage_clusters(st)
+    assert st.dependency_matrix_state != "fresh"
+    assert st.shared_usage_clusters_state != "fresh"
+    assert st.dependency_matrix_state == "deferred"
+    assert st.shared_usage_clusters_state == "deferred"
+
+
+def test_acceptance_matrix_legacy_deferred_to_fresh_materialization():
+    """artifact_consumption deferred -> successful canonical materialization -> derived fresh."""
+    st = RepositoryAnalysisState()
+    st.artifacts = {
+        "mod_a": {
+            "own_symbols": ["foo"],
+            "symbols": {"functions": ["foo"], "classes": [], "methods": [], "globals": []},
+            "consumers": {},
+        }
+    }
+    st.artifact_consumption = {"_report": {}}
+    st.artifact_consumption_state = "deferred"
+    st.dependency_graph = ProjectGraph(hard_edges={}, soft_edges={})
+    st.dependency_matrix_state = "deferred"
+    st.shared_usage_clusters_state = "deferred"
+    st.module_usages = {}
+    materialize_incremental_state(st)
+    assert st.artifact_consumption_state == "fresh"
+    assert st.dependency_matrix_state == "fresh"
+    assert st.shared_usage_clusters_state == "fresh"
+
+
+def test_acceptance_matrix_missing_graph_gives_stale_matrix_and_fresh_clusters():
+    """AC fresh + valid coverage + dependency_graph missing -> Matrix stale, Clusters fresh."""
+    st = _make_nontrivial_fresh_state()
+    st.dependency_graph = None  # Missing graph
+    st.dependency_matrix_state = "deferred"
+    st.shared_usage_clusters_state = "deferred"
+    ensure_dependency_matrix(st)
+    ensure_shared_usage_clusters(st)
+    assert st.dependency_matrix_state == "stale"
+    assert st.shared_usage_clusters_state == "fresh"

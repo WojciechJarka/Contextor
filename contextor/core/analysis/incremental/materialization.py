@@ -313,12 +313,14 @@ def ensure_dependency_matrix(state: RepositoryAnalysisState) -> None:
     Ensures state.dependency_matrix is fresh from canonical RAM facts.
     Lifecycle rules:
     A. resync_required -> stale (fail-closed)
-    B. artifact_consumption_state == 'stale' or not artifact_consumption_is_fresh(state) (when not deferred):
+    B. artifact_consumption_state == 'stale':
        -> stale (fail-closed, prerequisite untrusted)
     C. artifact_consumption_state == 'deferred':
        -> if own state is 'fresh', degrade to 'deferred' (cannot be fresh with deferred prerequisite)
        -> return (cannot compute yet)
-    D. artifact_consumption genuinely fresh:
+    D. dependency_matrix_inputs_are_fresh(state) is False (graph missing/untrusted or AC not fresh):
+       -> stale (fail-closed)
+    E. All prerequisites genuinely fresh:
        - own stale: preserve stale (no auto-heal)
        - own fresh: preserve payload / no recompute
        - own deferred: compute from RAM -> success -> fresh, failure -> stale
@@ -335,7 +337,10 @@ def ensure_dependency_matrix(state: RepositoryAnalysisState) -> None:
         state.dependency_matrix_state = "stale"
         return
 
-    from contextor.core.analysis.state_manager import artifact_consumption_is_fresh
+    from contextor.core.analysis.state_manager import (
+        artifact_consumption_is_fresh,
+        dependency_matrix_inputs_are_fresh,
+    )
 
     ac_state = getattr(state, "artifact_consumption_state", None)
 
@@ -350,12 +355,12 @@ def ensure_dependency_matrix(state: RepositoryAnalysisState) -> None:
             state.dependency_matrix_state = "deferred"
         return
 
-    # Prerequisite not genuinely fresh (invalid coverage / corrupted) -> fail-closed
-    if not artifact_consumption_is_fresh(state):
+    # D. Prerequisite graph missing/untrusted or AC not genuinely fresh -> fail-closed
+    if not dependency_matrix_inputs_are_fresh(state):
         state.dependency_matrix_state = "stale"
         return
 
-    # D. Prerequisite genuinely fresh: own lifecycle
+    # E. Prerequisites genuinely fresh: own lifecycle
     if state.dependency_matrix_state == "stale":
         return
 

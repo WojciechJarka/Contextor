@@ -11,6 +11,51 @@ from contextor.core.domain.refresh_plan import RefreshPlan
 from contextor.core.domain.usage_facts import UsageDelta, ModuleUsageFacts
 
 
+def _find_dependent_consumers(
+    module_path: str,
+    usages: Mapping[str, ModuleUsageFacts],
+) -> Set[str]:
+    """
+    Identifies existing consumers in RAM that reference module_path or any of its definitions.
+    Uses semantic alias resolution and exact module dot/colon separation (no broad stem guessing).
+    Inspects all usage families: imports, aliases targets, direct_calls, runtime_calls,
+    qualified_refs, callback_calls, event_bindings, inheritance_refs.
+    """
+    from contextor.core.reference.resolution import _resolve_alias
+
+    recompute_set: Set[str] = set()
+    if not usages:
+        return recompute_set
+
+    for c_path, c_facts in usages.items():
+        if c_path == module_path:
+            continue
+        c_aliases = dict(c_facts.aliases)
+
+        raw_refs = (
+            list(c_facts.direct_calls)
+            + list(c_facts.runtime_calls)
+            + list(c_facts.qualified_refs)
+            + list(c_facts.callback_calls)
+            + list(c_facts.event_bindings)
+            + list(c_facts.imports)
+            + [base for _, base in c_facts.inheritance_refs if base]
+            + [tgt for _, tgt in c_facts.aliases if tgt]
+        )
+
+        for ref in raw_refs:
+            resolved = _resolve_alias(ref, c_aliases)
+            if (
+                resolved == module_path
+                or resolved.startswith(f"{module_path}.")
+                or resolved.startswith(f"{module_path}::")
+            ):
+                recompute_set.add(c_path)
+                break
+
+    return recompute_set
+
+
 class RefreshPlanner:
     """
     Pure, deterministic planner that computes an explicit RefreshPlan
@@ -52,28 +97,7 @@ class RefreshPlanner:
 
         # 1. Module Deletion
         if delta and delta.is_deleted:
-            from contextor.core.reference.resolution import _resolve_alias
-            recompute_set = set()
-            if usages:
-                mod_stem = module_path.rsplit(".", 1)[0] if "." in module_path else module_path
-                for c_path, c_facts in usages.items():
-                    if c_path == module_path:
-                        continue
-                    c_aliases = dict(c_facts.aliases)
-                    for call in tuple(c_facts.direct_calls) + tuple(c_facts.qualified_refs) + tuple(c_facts.runtime_calls):
-                        resolved = _resolve_alias(call, c_aliases)
-
-                        if (
-                            call == module_path
-                            or call.startswith(module_path + ".")
-                            or call == mod_stem
-                            or call.startswith(mod_stem + ".")
-                            or resolved == module_path
-                            or resolved.startswith(module_path + ".")
-                            or resolved == mod_stem
-                            or resolved.startswith(mod_stem + ".")
-                        ):
-                            recompute_set.add(c_path)
+            recompute_set = _find_dependent_consumers(module_path, usages)
 
             patch_families = [
                 "modules",
@@ -99,6 +123,8 @@ class RefreshPlanner:
 
         # 2. Module Addition
         if delta and delta.is_new:
+            recompute_set = _find_dependent_consumers(module_path, usages)
+
             patch_families = [
                 "modules",
                 "definitions",
@@ -112,7 +138,7 @@ class RefreshPlanner:
             ]
             return RefreshPlan(
                 reparse_modules=(),
-                recompute_modules=(),
+                recompute_modules=tuple(sorted(recompute_set)),
                 patch_families=tuple(patch_families),
                 graph_recomputations=("macro_metrics", "reverse_blast_radius", "advanced_graph_metrics", "cycles"),
                 refresh_completeness="complete",
@@ -197,15 +223,7 @@ class RefreshPlanner:
 
         # 6. Symbol Add / Remove / Change
         if delta and (delta.artifacts_added or delta.artifacts_removed or delta.artifacts_changed):
-            recompute_set = set()
-            if delta.artifacts_removed and usages:
-                removed_set = set(delta.artifacts_removed)
-                for c_path, c_facts in usages.items():
-                    if c_path == module_path:
-                        continue
-                    for call in tuple(c_facts.direct_calls) + tuple(c_facts.qualified_refs):
-                        if call in removed_set or any(call.endswith("." + r) for r in removed_set):
-                            recompute_set.add(c_path)
+            recompute_set = _find_dependent_consumers(module_path, usages)
 
             patch_families = ["definitions", "identity_registry", "module_usages", "artifact_consumption"]
             if bool(delta.artifacts_added or delta.artifacts_removed) or (usage_delta and not usage_delta.is_empty):
@@ -242,7 +260,3 @@ class RefreshPlanner:
             semantic_certainty="statically_resolved",
             reason=reason,
         )
-
-
-
-

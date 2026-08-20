@@ -386,6 +386,7 @@ class ContextorFacade:
                 RepositoryAnalysisState,
                 artifact_consumption_is_fresh,
                 build_canonical_artifact_consumption,
+                dependency_matrix_inputs_are_fresh,
                 save_engine_state,
                 validate_canonical_artifact_consumption_coverage,
             )
@@ -456,8 +457,8 @@ class ContextorFacade:
             if getattr(analysis_result, "resync_required", False):
                 state.resync_required = True
 
-            if artifact_consumption_is_fresh(state):
-                # Compute Dependency Matrix from canonical state (independent failure)
+            # Compute Dependency Matrix from canonical state (independent failure & graph trust)
+            if dependency_matrix_inputs_are_fresh(state):
                 try:
                     _dm_candidate = compute_dependency_matrix_from_state(state)
                 except Exception:
@@ -465,8 +466,11 @@ class ContextorFacade:
                 else:
                     state.dependency_matrix = _dm_candidate
                     state.dependency_matrix_state = "fresh"
+            else:
+                state.dependency_matrix_state = "stale"
 
-                # Compute Shared Usage Clusters from canonical state (independent failure)
+            # Compute Shared Usage Clusters from canonical state (independent failure & AC trust)
+            if artifact_consumption_is_fresh(state):
                 try:
                     _suc_candidate = compute_shared_usage_clusters_from_state(state)
                 except Exception:
@@ -475,8 +479,6 @@ class ContextorFacade:
                     state.shared_usage_clusters = _suc_candidate
                     state.shared_usage_clusters_state = "fresh"
             else:
-                # Prerequisite is untrusted in full analysis -> fail-closed (stale)
-                state.dependency_matrix_state = "stale"
                 state.shared_usage_clusters_state = "stale"
 
             save_engine_state(

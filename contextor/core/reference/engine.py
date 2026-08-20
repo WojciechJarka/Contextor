@@ -237,6 +237,9 @@ def _empty_reference():
         "imported_from": [],
         "inherited_by": [],
         "inherited_by_detail": [],
+        "qualified_refs": [],
+        "qualified_refs_detail": [],
+        "runtime_calls": [],
     }
 
 
@@ -339,6 +342,9 @@ def build_symbol_references(
 
         inherited_by
             Confirmed inheritance relationships.
+
+        qualified_refs
+            Confirmed non-call qualified attribute references.
 
     Ambiguous matches never become confirmed consumers.
     """
@@ -565,6 +571,37 @@ def build_symbol_references(
             )
 
         # --------------------------------------------------
+        # QUALIFIED REFS (non-call qualified attributes)
+        # --------------------------------------------------
+
+        for item in visitor.qualified_refs:
+            if isinstance(item, tuple):
+                symbol, lineno, context = item
+            else:
+                symbol = item
+                lineno = None
+                context = None
+
+            if symbol not in references:
+                continue
+
+            references[symbol][
+                "qualified_refs"
+            ].append(
+                module_id
+            )
+
+            references[symbol][
+                "qualified_refs_detail"
+            ].append(
+                {
+                    "module": module_id,
+                    "line": lineno,
+                    "context": context,
+                }
+            )
+
+        # --------------------------------------------------
         # IMPORTS
         # --------------------------------------------------
 
@@ -724,14 +761,23 @@ def extract_module_usage_facts(
 
     direct_calls = tuple(sorted(all_calls))
 
-    runtime_calls = tuple(
-        sorted(
-            set(
-                item[0] if isinstance(item, tuple) else item
-                for item in visitor.called_ambiguous
-            )
-        )
+    dyn_calls = set(
+        item[0] if isinstance(item, tuple) else item
+        for item in visitor.called_ambiguous
     )
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            from .resolution import _attribute_name
+            name = _attribute_name(node.func)
+            if (
+                name == "getattr"
+                and len(node.args) >= 2
+                and isinstance(node.args[1], ast.Constant)
+                and isinstance(node.args[1].value, str)
+            ):
+                dyn_calls.add(node.args[1].value)
+
+    runtime_calls = tuple(sorted(dyn_calls))
     cb_set = set(
         item[0] if isinstance(item, tuple) else item
         for item in visitor.callback_called
@@ -783,9 +829,16 @@ def extract_module_usage_facts(
         )
     )
 
+    call_funcs = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            for child in ast.walk(node.func):
+                if isinstance(child, ast.Attribute):
+                    call_funcs.add(child)
+
     qual_refs = set()
     for node in ast.walk(tree):
-        if isinstance(node, ast.Attribute):
+        if isinstance(node, ast.Attribute) and node not in call_funcs:
             from .resolution import _attribute_name
             name = _attribute_name(node)
             if name and "." in name:

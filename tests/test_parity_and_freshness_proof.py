@@ -48,10 +48,11 @@ def test_scenario_a_add_consumer(tmp_path):
         FileStateManager(str(cache_dir)),
         str(tmp_path),
     )
+    engine.update_file(str(f_target))
     engine.update_file(str(f_consumer))
 
     inc_relations = normalize_consumption(engine.state.artifact_consumption)
-    assert ("target.foo", "consumer") in inc_relations
+    assert ("target::foo", "consumer") in inc_relations
 
 
 def test_scenario_b_modify_body_only(tmp_path):
@@ -72,8 +73,9 @@ def test_scenario_b_modify_body_only(tmp_path):
         FileStateManager(str(cache_dir)),
         str(tmp_path),
     )
+    engine.update_file(str(f_target))
     engine.update_file(str(f_consumer))
-    assert ("target.foo", "consumer") in normalize_consumption(engine.state.artifact_consumption)
+    assert ("target::foo", "consumer") in normalize_consumption(engine.state.artifact_consumption)
 
     # Modify body: foo() -> bar()
     f_consumer.write_text("from target import foo, bar\nbar()\n", encoding="utf-8")
@@ -85,9 +87,8 @@ def test_scenario_b_modify_body_only(tmp_path):
             for ch in chs:
                 triples.add((target, cons, ch))
 
-    assert ("target.foo", "consumer", "direct_calls") not in triples
-    assert ("target.bar", "consumer", "direct_calls") in triples
-
+    assert ("target::foo", "consumer", "direct_calls") not in triples
+    assert ("target::bar", "consumer", "direct_calls") in triples
 
 
 def test_scenario_c_delete_consumer(tmp_path):
@@ -108,12 +109,13 @@ def test_scenario_c_delete_consumer(tmp_path):
         FileStateManager(str(cache_dir)),
         str(tmp_path),
     )
+    engine.update_file(str(f_target))
     engine.update_file(str(f_consumer))
-    assert ("target.foo", "consumer") in normalize_consumption(engine.state.artifact_consumption)
+    assert ("target::foo", "consumer") in normalize_consumption(engine.state.artifact_consumption)
 
     f_consumer.unlink()
     engine.update_file(str(f_consumer))
-    assert ("target.foo", "consumer") not in normalize_consumption(engine.state.artifact_consumption)
+    assert ("target::foo", "consumer") not in normalize_consumption(engine.state.artifact_consumption)
 
 
 def test_scenario_h_inheritance_usage(tmp_path):
@@ -133,8 +135,9 @@ def test_scenario_h_inheritance_usage(tmp_path):
         FileStateManager(str(cache_dir)),
         str(tmp_path),
     )
+    engine.update_file(str(f_base))
     engine.update_file(str(f_child))
-    assert ("base.BaseWidget", "child") in normalize_consumption(engine.state.artifact_consumption)
+    assert ("base::BaseWidget", "child") in normalize_consumption(engine.state.artifact_consumption)
 
 
 def test_definer_deletion_parity(tmp_path):
@@ -155,13 +158,14 @@ def test_definer_deletion_parity(tmp_path):
         FileStateManager(str(cache_dir)),
         str(tmp_path),
     )
+    engine.update_file(str(f_target))
     engine.update_file(str(f_consumer))
-    assert ("target.foo", "consumer") in normalize_consumption(engine.state.artifact_consumption)
+    assert ("target::foo", "consumer") in normalize_consumption(engine.state.artifact_consumption)
 
     # Delete target.py
     f_target.unlink()
     engine.update_file(str(f_target))
-    assert "target.foo" not in engine.state.artifact_consumption
+    assert "target::foo" not in engine.state.artifact_consumption
 
 
 def test_copy_on_write_atomicity(tmp_path):
@@ -181,10 +185,14 @@ def test_copy_on_write_atomicity(tmp_path):
         FileStateManager(str(cache_dir)),
         str(tmp_path),
     )
+    engine.update_file(str(f_target))
 
     old_consumption_obj = engine.state.artifact_consumption
+    assert "consumer" not in old_consumption_obj.get("target::foo", {}).get("consumers", [])
+
     engine.update_file(str(f_consumer))
 
-    # Old reference must remain untouched/empty
-    assert old_consumption_obj == {}
-    assert engine.state.artifact_consumption != {}
+    # Old reference must remain untouched by consumer addition (COW immutability)
+    assert engine.state.artifact_consumption is not old_consumption_obj
+    assert "consumer" not in old_consumption_obj.get("target::foo", {}).get("consumers", [])
+    assert "consumer" in engine.state.artifact_consumption.get("target::foo", {}).get("consumers", [])

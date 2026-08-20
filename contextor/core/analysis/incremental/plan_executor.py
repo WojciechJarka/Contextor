@@ -32,7 +32,6 @@ from contextor.core.reporting_layer.artifact_usage_report import (
 )
 
 
-
 @dataclass
 class CandidateState:
     """
@@ -135,6 +134,102 @@ def _to_canonical_target_key(
     return key
 
 
+def _rebuild_consumer_slice(
+    consumer: str,
+    consumer_facts: ModuleUsageFacts,
+    candidate_consumption: Dict[str, Any],
+    candidate_artifacts: Mapping[str, Any],
+    reexports: Mapping[str, str],
+) -> Tuple[Dict[str, Any], bool]:
+    """
+    Rebuilds the entire artifact_consumption slice for a single consumer in Copy-On-Write fashion.
+    Inspects all canonical usage families: direct_calls, runtime_calls, qualified_refs,
+    callback_calls, event_bindings, api_imports, inheritance.
+    Returns (updated_consumption_dict, is_ambiguous). If is_ambiguous is True, returns original container.
+    """
+    c_aliases = dict(consumer_facts.aliases)
+    c_tagged = (
+        [(sym, "direct_calls") for sym in consumer_facts.direct_calls]
+        + [(sym, "runtime_calls") for sym in consumer_facts.runtime_calls]
+        + [(sym, "qualified_refs") for sym in consumer_facts.qualified_refs]
+        + [(sym, "callback_calls") for sym in consumer_facts.callback_calls]
+        + [(sym, "event_bindings") for sym in consumer_facts.event_bindings]
+        + [(sym, "api_imports") for sym in consumer_facts.imports]
+        + [(item[1], "inheritance") for item in consumer_facts.inheritance_refs if len(item) >= 2 and item[1]]
+    )
+
+    rebuilt_targets: Dict[str, Set[str]] = {}
+    is_ambiguous = False
+
+    for sym, ch_name in c_tagged:
+        raw_t = _resolve_reexport(_resolve_alias(sym, c_aliases), reexports)
+        target, status = _resolve_canonical_target_key(raw_t, candidate_consumption, candidate_artifacts)
+        if status == "ambiguous":
+            is_ambiguous = True
+        elif status == "resolved" and target:
+            if target not in rebuilt_targets:
+                rebuilt_targets[target] = set()
+            rebuilt_targets[target].add(ch_name)
+
+    if is_ambiguous:
+        return candidate_consumption, True
+
+    # Copy-on-Write update of candidate_consumption container and entries
+    new_consumption = dict(candidate_consumption)
+
+    # 1. Remove consumer from all previous target entries
+    for t_key, entry in list(new_consumption.items()):
+        if consumer in entry.get("consumers", []) or consumer in entry.get("channels", {}):
+            copied_entry = _get_copy_of_entry(entry)
+            if consumer in copied_entry["consumers"]:
+                copied_entry["consumers"].remove(consumer)
+            copied_entry["channels"].pop(consumer, None)
+            new_consumption[t_key] = copied_entry
+
+    # 2. Install rebuilt exact slice
+    for target, channels in rebuilt_targets.items():
+        entry = _get_copy_of_entry(new_consumption.get(target, {"consumers": [], "channels": {}}))
+        if consumer not in entry["consumers"]:
+            entry["consumers"].append(consumer)
+        entry["consumers"] = sorted(set(entry["consumers"]))
+        entry["channels"][consumer] = sorted(channels)
+        new_consumption[target] = entry
+
+    return new_consumption, False
+
+
+def _remove_consumer_slice(
+    consumption: Mapping[str, Any],
+    consumer: str,
+) -> Dict[str, Any]:
+    """
+    Fail-closed sanitization helper: completely removes a consumer's slice
+    from the candidate artifact_consumption container when resolution becomes ambiguous.
+    """
+    sanitized = dict(consumption)
+
+    for target, raw_entry in consumption.items():
+        if (
+            consumer not in raw_entry.get("consumers", ())
+            and consumer not in raw_entry.get("channels", {})
+        ):
+            continue
+
+        entry = _get_copy_of_entry(raw_entry)
+
+        entry["consumers"] = sorted(
+            c
+            for c in entry.get("consumers", ())
+            if c != consumer
+        )
+
+        entry["channels"].pop(consumer, None)
+
+        sanitized[target] = entry
+
+    return sanitized
+
+
 def _prepare_candidate_state(state: RepositoryAnalysisState) -> CandidateState:
     """Initializes Copy-on-Write candidate state from current canonical state."""
     return CandidateState(
@@ -184,18 +279,50 @@ def execute_refresh_plan(
     if getattr(state, "resync_required", False):
         candidate.artifact_consumption_state = "stale"
 
-    # Pre-populate candidate module in candidate.modules so RECOMPUTE re-export resolution
-    # observes the updated module structure before PATCH
+    # Pre-populate candidate modules, artifacts, and usages before RECOMPUTE
     if delta.is_deleted:
         candidate.modules.pop(mod_id, None)
         candidate.modules.pop(delta.module_path, None)
-    elif "modules" in plan.patch_families:
-        candidate.modules[delta.module_path] = Module(
-            module_id=delta.module_path,
-            path=str(path.relative_to(root_path)),
-            absolute_path=str(path.resolve()),
-            imports=new_imports or [],
-        )
+        candidate.artifacts.pop(mod_id, None)
+        candidate.artifacts.pop(delta.module_path, None)
+        candidate.module_usages.pop(delta.module_path, None)
+        # Purge deleted targets
+        for art_key in list(candidate.artifact_consumption.keys()):
+            if (
+                art_key == mod_id
+                or art_key == delta.module_path
+                or art_key.startswith(mod_id + ".")
+                or art_key.startswith(delta.module_path + ".")
+                or art_key.startswith(mod_id + "::")
+                or art_key.startswith(delta.module_path + "::")
+            ):
+                candidate.artifact_consumption.pop(art_key, None)
+    else:
+        if "modules" in plan.patch_families:
+            candidate.modules[delta.module_path] = Module(
+                module_id=delta.module_path,
+                path=str(path.relative_to(root_path)),
+                absolute_path=str(path.resolve()),
+                imports=new_imports or [],
+            )
+        if "definitions" in plan.patch_families and new_artifacts is not None:
+            candidate.artifacts[delta.module_path] = new_artifacts
+        if "module_usages" in plan.patch_families and new_usage is not None:
+            candidate.module_usages[delta.module_path] = new_usage
+
+        # Ensure canonical targets for delta.module_path exist in candidate.artifact_consumption
+        mod_art = candidate.artifacts.get(delta.module_path, {})
+        if isinstance(mod_art, dict):
+            current_targets = canonical_artifact_consumption_targets({delta.module_path: mod_art})
+            for t_key in current_targets:
+                if t_key not in candidate.artifact_consumption:
+                    candidate.artifact_consumption[t_key] = {"consumers": [], "channels": {}}
+            for art_key in list(candidate.artifact_consumption.keys()):
+                if (
+                    art_key.startswith(f"{delta.module_path}::")
+                    or art_key.startswith(f"{mod_id}::")
+                ) and art_key not in current_targets:
+                    candidate.artifact_consumption.pop(art_key, None)
 
     # 2. REPARSE - record planned reparse modules (trace-only, no secondary source I/O)
     executed_reparse: List[str] = []
@@ -206,36 +333,26 @@ def execute_refresh_plan(
     artifact_consumption_failed = False
     executed_recompute: List[str] = []
     if plan.recompute_modules:
-        old_reexports = _build_reexport_map(state.modules)
         new_reexports = _build_reexport_map(candidate.modules)
         for consumer_path in plan.recompute_modules:
             consumer_facts = candidate.module_usages.get(consumer_path)
             if consumer_facts:
-                c_aliases = dict(consumer_facts.aliases)
-                c_calls = tuple(consumer_facts.direct_calls or ()) + tuple(consumer_facts.qualified_refs or ())
-                for call in c_calls:
-                    raw_old = _resolve_reexport(_resolve_alias(call, c_aliases), old_reexports)
-                    raw_new = _resolve_reexport(_resolve_alias(call, c_aliases), new_reexports)
-                    old_t, old_status = _resolve_canonical_target_key(raw_old, candidate.artifact_consumption, state.artifacts)
-                    new_t, new_status = _resolve_canonical_target_key(raw_new, candidate.artifact_consumption, candidate.artifacts)
-                    if old_status == "ambiguous" or new_status == "ambiguous":
-                        artifact_consumption_failed = True
-                        candidate.artifact_consumption_state = "stale"
-                    if old_t and old_t != new_t and old_t in candidate.artifact_consumption:
-                        entry = _get_copy_of_entry(candidate.artifact_consumption[old_t])
-                        if consumer_path in entry["consumers"]:
-                            entry["consumers"].remove(consumer_path)
-                        entry["channels"].pop(consumer_path, None)
-                        entry["consumers"] = sorted(set(entry["consumers"]))
-                        candidate.artifact_consumption[old_t] = entry
-                    if new_t:
-                        entry = _get_copy_of_entry(candidate.artifact_consumption.get(new_t, {}))
-                        if consumer_path not in entry["consumers"]:
-                            entry["consumers"].append(consumer_path)
-                        entry["consumers"] = sorted(set(entry["consumers"]))
-                        ch_list = set(entry["channels"].get(consumer_path, ["direct_calls"]))
-                        entry["channels"][consumer_path] = sorted(ch_list)
-                        candidate.artifact_consumption[new_t] = entry
+                rebuilt_consumption, is_ambig = _rebuild_consumer_slice(
+                    consumer=consumer_path,
+                    consumer_facts=consumer_facts,
+                    candidate_consumption=candidate.artifact_consumption,
+                    candidate_artifacts=candidate.artifacts,
+                    reexports=new_reexports,
+                )
+                if is_ambig:
+                    candidate.artifact_consumption = _remove_consumer_slice(
+                        candidate.artifact_consumption,
+                        consumer_path,
+                    )
+                    artifact_consumption_failed = True
+                    candidate.artifact_consumption_state = "stale"
+                    break
+                candidate.artifact_consumption = rebuilt_consumption
                 executed_recompute.append(consumer_path)
 
     # 4. PATCH - apply fact families listed in plan.patch_families
@@ -244,31 +361,12 @@ def execute_refresh_plan(
 
     for family in plan.patch_families:
         if family == "modules":
-            if delta.is_deleted:
-                candidate.modules.pop(mod_id, None)
-                candidate.modules.pop(delta.module_path, None)
-            else:
-                candidate.modules[delta.module_path] = Module(
-                    module_id=delta.module_path,
-                    path=str(path.relative_to(root_path)),
-                    absolute_path=str(path.resolve()),
-                    imports=new_imports or [],
-                )
             executed_patch_families.append("modules")
 
         elif family == "definitions":
-            if delta.is_deleted:
-                candidate.artifacts.pop(mod_id, None)
-                candidate.artifacts.pop(delta.module_path, None)
-            else:
-                candidate.artifacts[delta.module_path] = new_artifacts or {}
             executed_patch_families.append("definitions")
 
         elif family == "module_usages":
-            if delta.is_deleted:
-                candidate.module_usages.pop(delta.module_path, None)
-            else:
-                candidate.module_usages[delta.module_path] = new_usage or ModuleUsageFacts()
             executed_patch_families.append("module_usages")
 
         elif family == "dependency_graph":
@@ -289,107 +387,42 @@ def execute_refresh_plan(
             executed_patch_families.append("dependency_graph")
 
         elif family == "artifact_consumption":
+            new_reexports = _build_reexport_map(candidate.modules)
             if delta.is_deleted:
-                for art_key in list(candidate.artifact_consumption.keys()):
-                    if (
-                        art_key == mod_id
-                        or art_key == delta.module_path
-                        or art_key.startswith(mod_id + ".")
-                        or art_key.startswith(delta.module_path + ".")
-                        or art_key.startswith(mod_id + "::")
-                        or art_key.startswith(delta.module_path + "::")
-                    ):
-                        candidate.artifact_consumption.pop(art_key, None)
-            else:
-                mod_art = candidate.artifacts.get(delta.module_path, {})
-                if isinstance(mod_art, dict):
-                    current_targets = canonical_artifact_consumption_targets({delta.module_path: mod_art})
-                    for t_key in current_targets:
-                        if t_key not in candidate.artifact_consumption:
-                            candidate.artifact_consumption[t_key] = {"consumers": [], "channels": {}}
-                    for art_key in list(candidate.artifact_consumption.keys()):
-                        if (
-                            art_key.startswith(f"{delta.module_path}::")
-                            or art_key.startswith(f"{mod_id}::")
-                        ) and art_key not in current_targets:
-                            candidate.artifact_consumption.pop(art_key, None)
-
-            reexports = _build_reexport_map(candidate.modules)
-
-            # Unregister removed usages
-            old_mod_usage = getattr(state, "module_usages", {}).get(delta.module_path, ModuleUsageFacts()) if hasattr(state, "module_usages") and state.module_usages else ModuleUsageFacts()
-            old_aliases = dict(old_mod_usage.aliases)
-            rem_tagged = (
-                [(sym, "direct_calls") for sym in usage_delta.removed_direct_calls] +
-                [(sym, "runtime_calls") for sym in usage_delta.removed_runtime_calls] +
-                [(sym, "qualified_refs") for sym in usage_delta.removed_qualified_refs] +
-                [(sym, "callback_calls") for sym in usage_delta.removed_callback_calls] +
-                [(sym, "event_bindings") for sym in usage_delta.removed_event_bindings] +
-                [(sym, "api_imports") for sym in usage_delta.removed_imports] +
-                [(item[1], "inheritance") for item in usage_delta.removed_inheritance_refs if len(item) >= 2 and item[1]]
-            )
-            current_consumed_targets: Set[str] = set()
-            if new_usage:
-                new_aliases = dict(new_usage.aliases)
-                cur_tagged = (
-                    [(sym, "direct_calls") for sym in new_usage.direct_calls] +
-                    [(sym, "runtime_calls") for sym in new_usage.runtime_calls] +
-                    [(sym, "qualified_refs") for sym in new_usage.qualified_refs] +
-                    [(sym, "callback_calls") for sym in new_usage.callback_calls] +
-                    [(sym, "event_bindings") for sym in new_usage.event_bindings] +
-                    [(sym, "api_imports") for sym in new_usage.imports] +
-                    [(item[1], "inheritance") for item in new_usage.inheritance_refs if len(item) >= 2 and item[1]]
+                # Remove delta.module_path from all remaining targets
+                for t_key, entry in list(candidate.artifact_consumption.items()):
+                    if delta.module_path in entry.get("consumers", []) or delta.module_path in entry.get("channels", {}):
+                        copied_entry = _get_copy_of_entry(entry)
+                        if delta.module_path in copied_entry["consumers"]:
+                            copied_entry["consumers"].remove(delta.module_path)
+                        copied_entry["channels"].pop(delta.module_path, None)
+                        candidate.artifact_consumption[t_key] = copied_entry
+            elif new_usage:
+                rebuilt_consumption, is_ambig = _rebuild_consumer_slice(
+                    consumer=delta.module_path,
+                    consumer_facts=new_usage,
+                    candidate_consumption=candidate.artifact_consumption,
+                    candidate_artifacts=candidate.artifacts,
+                    reexports=new_reexports,
                 )
-                for add_symbol, ch_name in cur_tagged:
-                    raw_t = _resolve_reexport(_resolve_alias(add_symbol, new_aliases), reexports)
-                    target, status = _resolve_canonical_target_key(raw_t, candidate.artifact_consumption, candidate.artifacts)
-                    if status == "ambiguous":
-                        artifact_consumption_failed = True
-                    if target:
-                        current_consumed_targets.add(target)
-                        entry = _get_copy_of_entry(candidate.artifact_consumption.get(target, {}))
-                        if delta.module_path not in entry["consumers"]:
-                            entry["consumers"].append(delta.module_path)
-                        entry["consumers"] = sorted(set(entry["consumers"]))
-                        ch_list = set(entry["channels"].get(delta.module_path, []))
-                        ch_list.add(ch_name)
-                        entry["channels"][delta.module_path] = sorted(ch_list)
-                        candidate.artifact_consumption[target] = entry
-
-            for rem_symbol, ch_name in rem_tagged:
-                raw_t = _resolve_reexport(_resolve_alias(rem_symbol, old_aliases), reexports)
-                target, status = _resolve_canonical_target_key(raw_t, candidate.artifact_consumption, candidate.artifacts)
-                if status == "ambiguous":
+                if is_ambig:
+                    candidate.artifact_consumption = _remove_consumer_slice(
+                        candidate.artifact_consumption,
+                        delta.module_path,
+                    )
                     artifact_consumption_failed = True
-                if target and target in candidate.artifact_consumption:
-                    entry = _get_copy_of_entry(candidate.artifact_consumption[target])
-                    ch_list = entry["channels"].get(delta.module_path, [])
-                    if ch_name in ch_list:
-                        ch_list.remove(ch_name)
-                    if ch_list:
-                        entry["channels"][delta.module_path] = sorted(set(ch_list))
-                    else:
-                        entry["channels"].pop(delta.module_path, None)
-                        if delta.module_path in entry["consumers"]:
-                            entry["consumers"].remove(delta.module_path)
-                    entry["consumers"] = sorted(set(entry["consumers"]))
-                    candidate.artifact_consumption[target] = entry
+                    candidate.artifact_consumption_state = "stale"
+                else:
+                    candidate.artifact_consumption = rebuilt_consumption
 
-            # Purge delta.module_path from any target it no longer consumes
-            for t_key, entry in list(candidate.artifact_consumption.items()):
-                if t_key not in current_consumed_targets:
-                    if delta.module_path in entry.get("channels", {}):
-                        entry["channels"].pop(delta.module_path, None)
-                    if delta.module_path in entry.get("consumers", []):
-                        entry["consumers"].remove(delta.module_path)
-                    entry["consumers"] = sorted(set(entry["consumers"]))
-                    candidate.artifact_consumption[t_key] = entry
-
-            if (
-                not artifact_consumption_failed
-                and not getattr(state, "resync_required", False)
-                and validate_canonical_artifact_consumption_coverage(candidate.artifact_consumption, candidate.artifacts)
+            if artifact_consumption_failed:
+                candidate.artifact_consumption_state = "stale"
+            elif (
+                getattr(state, "resync_required", False)
+                or plan.refresh_completeness == "requires_resync"
             ):
+                candidate.artifact_consumption_state = "stale"
+            elif validate_canonical_artifact_consumption_coverage(candidate.artifact_consumption, candidate.artifacts):
                 candidate.artifact_consumption_state = "fresh"
             else:
                 candidate.artifact_consumption_state = "stale"
