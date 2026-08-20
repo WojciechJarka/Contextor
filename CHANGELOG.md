@@ -221,6 +221,25 @@ LLM-friendly MCP target resolution
 - LIVE verification confirmed `get_module_context` serving PageRank, betweenness, HITS, bridge and risk metrics from `live_canonical_topology`.
 - Targeted topology lifecycle tests passed `7/7`, with the related MCP regression set passing `17/17`.
 
+Canonical Artifact Consumption Channels & Reference Semantics
+Extended canonical artifact-consumption tracking with explicit qualified_refs, runtime_calls, callback_calls and event_bindings channels while preserving exact <module>::<qualified_symbol> identities.
+Added non-call qualified attribute reference detection and prevented callee attribute subtrees from being double-classified as both calls and qualified references.
+Hardened callback and event semantics with a disjoint contract: callback arguments remain callback_calls, while bind, subscribe and on registrations are classified exclusively as event_bindings.
+Preserved unresolved dynamic reflection as runtime_calls facts without inventing arbitrary canonical target bindings.
+Added full-vs-incremental parity coverage for qualified references, nested qualified calls, callbacks, event bindings and dynamic runtime usage.
+Hardened dependent-consumer selection across all canonical usage families, including imports, aliases, inheritance, callbacks, events, runtime calls and qualified references.
+Verified re-export retargeting so incremental state moves consumers between canonical providers without retaining stale bindings.
+Replaced fuzzy graph dependency classification with an exact canonical channel mapping: call channels map to call, import/qualified-reference channels to import, and inheritance to inheritance.
+Canonical LIVE Artifact Consumption Lifecycle & Ambiguity Hardening
+Added natural dotted-identity ambiguity handling for cases where distinct canonical targets collapse to the same dotted reference, such as pkg.a::B.foo and pkg.a.B::foo.
+Incremental late-provider updates now discover affected consumers from persisted in-memory usage facts and recompute their artifact-consumption slices without rereading unchanged consumer source files.
+Canonical target resolution now fails closed on multiple valid matches instead of selecting an arbitrary provider.
+Added copy-on-write consumer-slice sanitization: when resolution becomes ambiguous, the affected consumer is removed from all candidate target bindings while unrelated artifact-consumption entries remain unchanged.
+Ambiguous incremental updates explicitly transition artifact_consumption_state to stale, preventing uncertain relations from being exposed as trusted LIVE state.
+Preserved the previous canonical artifact-consumption container without in-place mutation during failed or ambiguous recomputation.
+Added lifecycle proofs for late-provider ambiguity, consumer-added-after-providers ambiguity, unchanged-source no-reread behavior and unaffected-slice preservation.
+Verified that both full reporting and RAM/LIVE dependency-matrix paths use the same authoritative exact channel mapper, preserving parity between canonical repository analysis and incremental materialization.
+
 ### Regression and contract verification
 
 - Added deterministic GUI progress-widget regression coverage for named-operation durations and legacy success-message compatibility.
