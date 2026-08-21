@@ -10,7 +10,7 @@ from contextor.mcp.tools.lookup_artifact_by_symbol import lookup_artifact_by_sym
 from contextor.mcp.tools.search_artifacts import search_artifacts
 
 
-EXPECTED_ORDER = [
+_EXPECTED_ORDER = [
     "analyze_project", "analyze_layer", "analyze_single_file",
     "get_analysis_status", "get_live_events", "update_file",
     "get_project_architecture", "get_module_context",
@@ -22,14 +22,14 @@ EXPECTED_ORDER = [
     "lookup_artifact_by_symbol", "get_mcp_documentation",
 ]
 
-IMPLEMENTATIONS = {
+_IMPLEMENTATIONS = {
     "get_artifact_blast_radius": get_artifact_blast_radius,
     "search_artifacts": search_artifacts,
     "get_artifacts_for_module": get_artifacts_for_module,
     "lookup_artifact_by_symbol": lookup_artifact_by_symbol,
 }
 
-EXPECTED_SIGNATURES = {
+_EXPECTED_SIGNATURES = {
     "get_artifact_blast_radius": "(repo_path: str, artifact_name: str, max_items: int | None = 30, compact: bool = True, fields: list[str] | None = None) -> str",
     "search_artifacts": "(repo_path: str, search_term: str, limit: int | None = 20, evidence_limit: int | None = 20, compact: bool = True, fields: list[str] | None = None) -> str",
     "get_artifacts_for_module": "(repo_path: str, module_name: str, include_consumers: bool = True, symbol_filter: str = '', limit: int | None = 50, evidence_limit: int | None = 20, compact: bool = True, fields: list[str] | None = None) -> str",
@@ -44,13 +44,13 @@ def test_s2c_registration_order_bindings_signatures_and_descriptions():
         for entry in load_documentation_index()["tools"]
     }
 
-    assert list(registered) == EXPECTED_ORDER
-    for name, implementation in IMPLEMENTATIONS.items():
+    assert list(registered) == _EXPECTED_ORDER
+    for name, implementation in _IMPLEMENTATIONS.items():
         tool = registered[name]
         assert getattr(mcp_server, name) is tool
         assert tool.fn is implementation
         assert tool.fn.__module__ == f"contextor.mcp.tools.{name}"
-        assert str(inspect.signature(tool.fn)) == EXPECTED_SIGNATURES[name]
+        assert str(inspect.signature(tool.fn)) == _EXPECTED_SIGNATURES[name]
         assert tool.description == descriptions[name]
 
 
@@ -65,9 +65,9 @@ def test_s2c_ownership_import_graph_and_shared_helper_uniqueness():
         and any(ast.unparse(item).startswith("mcp.tool") for item in node.decorator_list)
     ]
     assert len(decorated) == 8
-    assert set(IMPLEMENTATIONS).isdisjoint(decorated)
+    assert set(_IMPLEMENTATIONS).isdisjoint(decorated)
 
-    for name in IMPLEMENTATIONS:
+    for name in _IMPLEMENTATIONS:
         path = root / "contextor" / "mcp" / "tools" / f"{name}.py"
         source = path.read_text(encoding="utf-8")
         tree = ast.parse(source)
@@ -106,7 +106,7 @@ def test_s2c_has_no_registration_dependency_binding_or_report_io():
     root = Path(__file__).parents[1]
     server_source = Path(mcp_server.__file__).read_text(encoding="utf-8")
     assert "bind_" not in server_source
-    for name in IMPLEMENTATIONS:
+    for name in _IMPLEMENTATIONS:
         source = (
             root / "contextor" / "mcp" / "tools" / f"{name}.py"
         ).read_text(encoding="utf-8")

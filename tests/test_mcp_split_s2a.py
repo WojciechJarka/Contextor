@@ -18,7 +18,7 @@ from contextor.mcp.tools.query_canonical_projection import (
 )
 
 
-EXPECTED_ORDER = [
+_EXPECTED_ORDER = [
     "analyze_project",
     "analyze_layer",
     "analyze_single_file",
@@ -42,14 +42,14 @@ EXPECTED_ORDER = [
     "get_mcp_documentation",
 ]
 
-IMPLEMENTATIONS = {
+_IMPLEMENTATIONS = {
     "get_mcp_documentation": get_mcp_documentation_impl,
     "describe_canonical_state": describe_canonical_state_impl,
     "lookup_index_entries": lookup_index_entries_impl,
     "query_canonical_projection": query_canonical_projection_impl,
 }
 
-EXPECTED_SIGNATURES = {
+_EXPECTED_SIGNATURES = {
     "get_mcp_documentation": "(tool: str | None = None, tools: list[str] | None = None, sections: list[str] | None = None) -> str",
     "describe_canonical_state": "() -> str",
     "lookup_index_entries": "(repo_path: str, ids: list[str]) -> str",
@@ -104,13 +104,13 @@ def test_s2a_registration_order_owners_signatures_schemas_and_descriptions():
         for entry in load_documentation_index()["tools"]
     }
 
-    assert list(registered) == EXPECTED_ORDER
-    for name, implementation in IMPLEMENTATIONS.items():
+    assert list(registered) == _EXPECTED_ORDER
+    for name, implementation in _IMPLEMENTATIONS.items():
         tool = registered[name]
         assert getattr(mcp_server, name) is tool
         assert tool.fn is implementation
         assert tool.fn.__module__ == f"contextor.mcp.tools.{name}"
-        assert str(inspect.signature(tool.fn)) == EXPECTED_SIGNATURES[name]
+        assert str(inspect.signature(tool.fn)) == _EXPECTED_SIGNATURES[name]
         assert tool.parameters == EXPECTED_PARAMETERS[name]
         assert tool.description == descriptions[name]
 
@@ -119,7 +119,7 @@ def test_s2a_tool_modules_have_no_registration_or_forbidden_import_edges():
     tools_dir = Path(__file__).parents[1] / "contextor" / "mcp" / "tools"
     before = list(mcp_server.mcp._tool_manager._tools)
 
-    for name in IMPLEMENTATIONS:
+    for name in _IMPLEMENTATIONS:
         path = tools_dir / f"{name}.py"
         tree = ast.parse(path.read_text(encoding="utf-8"))
         imported_modules = {
@@ -150,7 +150,7 @@ def test_s2a_implementations_remain_moved_after_later_slices():
     ]
 
     assert len(decorated) == 8
-    assert set(IMPLEMENTATIONS).isdisjoint(decorated)
+    assert set(_IMPLEMENTATIONS).isdisjoint(decorated)
 
 
 def test_s2a_query_projection_uses_single_shared_runtime_owner():

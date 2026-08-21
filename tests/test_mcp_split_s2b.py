@@ -15,7 +15,7 @@ from contextor.mcp.tools.get_analysis_status import get_analysis_status
 from contextor.mcp.tools.get_live_events import get_live_events
 
 
-EXPECTED_ORDER = [
+_EXPECTED_ORDER = [
     "analyze_project", "analyze_layer", "analyze_single_file",
     "get_analysis_status", "get_live_events", "update_file",
     "get_project_architecture", "get_module_context",
@@ -27,7 +27,7 @@ EXPECTED_ORDER = [
     "lookup_artifact_by_symbol", "get_mcp_documentation",
 ]
 
-IMPLEMENTATIONS = {
+_IMPLEMENTATIONS = {
     "analyze_project": analyze_project,
     "analyze_layer": analyze_layer,
     "analyze_single_file": analyze_single_file,
@@ -35,7 +35,7 @@ IMPLEMENTATIONS = {
     "get_live_events": get_live_events,
 }
 
-EXPECTED_SIGNATURES = {
+_EXPECTED_SIGNATURES = {
     "analyze_project": "(repo_path: str, exclude_paths: list[str] | None = None) -> str",
     "analyze_layer": "(repo_path: str, layer_name: str, exclude_paths: list[str] | None = None) -> str",
     "analyze_single_file": "(repo_path: str, file_path: str, exclude_paths: list[str] | None = None) -> str",
@@ -56,13 +56,13 @@ def test_s2b_registration_contract_and_implementation_owners():
         for entry in load_documentation_index()["tools"]
     }
 
-    assert list(registered) == EXPECTED_ORDER
-    for name, implementation in IMPLEMENTATIONS.items():
+    assert list(registered) == _EXPECTED_ORDER
+    for name, implementation in _IMPLEMENTATIONS.items():
         tool = registered[name]
         assert getattr(mcp_server, name) is tool
         assert tool.fn is implementation
         assert tool.fn.__module__ == f"contextor.mcp.tools.{name}"
-        assert str(inspect.signature(tool.fn)) == EXPECTED_SIGNATURES[name]
+        assert str(inspect.signature(tool.fn)) == _EXPECTED_SIGNATURES[name]
         assert tool.description == descriptions[name]
 
 
@@ -80,7 +80,7 @@ def test_s2b_import_graph_state_owner_and_remaining_tool_count():
     assert JOB_STATE.isdisjoint(vars(mcp_server))
     assert JOB_STATE <= vars(analysis_jobs).keys()
 
-    for name in IMPLEMENTATIONS:
+    for name in _IMPLEMENTATIONS:
         path = root / "contextor" / "mcp" / "tools" / f"{name}.py"
         source = path.read_text(encoding="utf-8")
         tree = ast.parse(source)
