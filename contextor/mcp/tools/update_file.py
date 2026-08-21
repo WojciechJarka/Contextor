@@ -6,10 +6,68 @@ from contextor.mcp import query_helpers
 from contextor.mcp import runtime as mcp_runtime
 
 
-_MCP_SERVER_SOURCE_PATH = Path(__file__).resolve().parents[2] / "mcp_server.py"
-_MCP_SERVER_SOURCE_FINGERPRINT = hashlib.sha256(
-    _MCP_SERVER_SOURCE_PATH.read_bytes()
-).hexdigest()
+_MCP_PACKAGE_SOURCE_ROOT = Path(__file__).resolve().parents[1]
+_CONTEXTOR_PACKAGE_ROOT = _MCP_PACKAGE_SOURCE_ROOT.parent
+
+_TOP_LEVEL_MCP_SOURCES: tuple[Path, ...] = (
+    _CONTEXTOR_PACKAGE_ROOT / "mcp_server.py",
+    _CONTEXTOR_PACKAGE_ROOT / "mcp_main.py",
+    _CONTEXTOR_PACKAGE_ROOT / "mcp_process_registry.py",
+)
+
+
+def _mcp_runtime_source_paths() -> tuple[Path, ...]:
+    """Return all Python source paths that define this running MCP server."""
+    sources: set[Path] = set(_TOP_LEVEL_MCP_SOURCES)
+    if _MCP_PACKAGE_SOURCE_ROOT.is_dir():
+        sources.update(_MCP_PACKAGE_SOURCE_ROOT.rglob("*.py"))
+    return tuple(sorted(p.resolve() for p in sources if p.is_file()))
+
+
+def _source_fingerprint(path: Path) -> str | None:
+    """Compute sha256 fingerprint of a source file if accessible."""
+    try:
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+    except OSError:
+        return None
+
+
+_MCP_RUNTIME_SOURCE_FINGERPRINTS: dict[Path, str | None] = {
+    path: _source_fingerprint(path)
+    for path in _mcp_runtime_source_paths()
+}
+
+
+def _is_mcp_runtime_source_path(path: Path) -> bool:
+    """Determine whether a path is within the running MCP process source domain."""
+    resolved = path.resolve()
+    if resolved in {p.resolve() for p in _TOP_LEVEL_MCP_SOURCES}:
+        return True
+    if resolved.suffix == ".py":
+        try:
+            resolved.relative_to(_MCP_PACKAGE_SOURCE_ROOT)
+            return True
+        except ValueError:
+            return False
+    return False
+
+
+def _mcp_runtime_restart_required(target_file: Path) -> bool:
+    """Check if target_file is an MCP runtime source whose content/presence changed since MCP startup."""
+    resolved = target_file.resolve()
+    if not _is_mcp_runtime_source_path(resolved):
+        return False
+    if resolved in _MCP_RUNTIME_SOURCE_FINGERPRINTS:
+        baseline = _MCP_RUNTIME_SOURCE_FINGERPRINTS[resolved]
+        if baseline is None:
+            return True
+        if not resolved.is_file():
+            return True
+        current = _source_fingerprint(resolved)
+        if current is None:
+            return True
+        return current != baseline
+    return resolved.is_file()
 
 
 def _persist_live_engine(root: Path, engine) -> bool:
@@ -163,11 +221,7 @@ def update_file(
             "live_state_persisted": live_state_persisted,
             "semantic_diff": _semantic_diff_view(semantic_diff, max_items, compact),
         }
-        runtime_restart_required = (
-            target_file == _MCP_SERVER_SOURCE_PATH
-            and hashlib.sha256(target_file.read_bytes()).hexdigest()
-            != _MCP_SERVER_SOURCE_FINGERPRINT
-        )
+        runtime_restart_required = _mcp_runtime_restart_required(target_file)
         result["runtime_restart_required"] = runtime_restart_required
         if runtime_restart_required:
             result["runtime_state"] = "stale_until_mcp_server_restart"

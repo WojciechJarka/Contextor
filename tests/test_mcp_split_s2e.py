@@ -95,6 +95,10 @@ def test_s2e_helper_ownership_and_report_contract_sharing():
         "_semantic_diff_view",
         "_resolve_cluster_ids",
         "get_canonical_report",
+        "_mcp_runtime_source_paths",
+        "_source_fingerprint",
+        "_is_mcp_runtime_source_path",
+        "_mcp_runtime_restart_required",
     }
     owners = {name: [] for name in helper_names}
     for path in root.rglob("*.py"):
@@ -108,5 +112,107 @@ def test_s2e_helper_ownership_and_report_contract_sharing():
     }
     assert owners["get_canonical_report"][0].name == "report_helpers.py"
     assert owners["_resolve_cluster_ids"][0].name == "get_layer_isolation.py"
-    for name in ("_persist_live_engine", "_semantic_artifact_diff", "_semantic_diff_view"):
+    for name in (
+        "_persist_live_engine",
+        "_semantic_artifact_diff",
+        "_semantic_diff_view",
+        "_mcp_runtime_source_paths",
+        "_source_fingerprint",
+        "_is_mcp_runtime_source_path",
+        "_mcp_runtime_restart_required",
+    ):
         assert owners[name][0].name == "update_file.py"
+
+
+def test_s2e_update_file_mcp_restart_domain_detection(tmp_path, monkeypatch):
+    from contextor.mcp.tools import update_file as update_file_module
+
+    contextor_pkg = tmp_path / "contextor"
+    mcp_pkg = contextor_pkg / "mcp"
+    tools_pkg = mcp_pkg / "tools"
+    tools_pkg.mkdir(parents=True)
+
+    server_py = contextor_pkg / "mcp_server.py"
+    main_py = contextor_pkg / "mcp_main.py"
+    reg_py = contextor_pkg / "mcp_process_registry.py"
+    worker_py = contextor_pkg / "mcp_worker.py"
+    runtime_py = mcp_pkg / "runtime.py"
+    tool_py = tools_pkg / "get_module_context.py"
+    repo_file = tmp_path / "user_repo" / "app.py"
+    repo_file.parent.mkdir(parents=True)
+
+    server_py.write_text("server_v1", encoding="utf-8")
+    main_py.write_text("main_v1", encoding="utf-8")
+    reg_py.write_text("reg_v1", encoding="utf-8")
+    worker_py.write_text("worker_v1", encoding="utf-8")
+    runtime_py.write_text("runtime_v1", encoding="utf-8")
+    tool_py.write_text("tool_v1", encoding="utf-8")
+    repo_file.write_text("repo_v1", encoding="utf-8")
+
+    top_levels = (server_py, main_py, reg_py)
+    monkeypatch.setattr(update_file_module, "_CONTEXTOR_PACKAGE_ROOT", contextor_pkg)
+    monkeypatch.setattr(update_file_module, "_MCP_PACKAGE_SOURCE_ROOT", mcp_pkg)
+    monkeypatch.setattr(update_file_module, "_TOP_LEVEL_MCP_SOURCES", top_levels)
+
+    startup_fingerprints = {
+        server_py.resolve(): update_file_module._source_fingerprint(server_py),
+        main_py.resolve(): update_file_module._source_fingerprint(main_py),
+        reg_py.resolve(): update_file_module._source_fingerprint(reg_py),
+        runtime_py.resolve(): update_file_module._source_fingerprint(runtime_py),
+        tool_py.resolve(): update_file_module._source_fingerprint(tool_py),
+    }
+    monkeypatch.setattr(
+        update_file_module, "_MCP_RUNTIME_SOURCE_FINGERPRINTS", startup_fingerprints
+    )
+
+    # 1. Unchanged startup-known MCP source -> False
+    assert not update_file_module._mcp_runtime_restart_required(server_py)
+    assert not update_file_module._mcp_runtime_restart_required(tool_py)
+
+    # 2. Ordinary repo file outside MCP domain -> False
+    assert not update_file_module._mcp_runtime_restart_required(repo_file)
+
+    # 3. mcp_worker.py (explicitly excluded) -> False
+    assert not update_file_module._mcp_runtime_restart_required(worker_py)
+
+    # 4. Modified startup-known mcp_server.py -> True
+    server_py.write_text("server_v2", encoding="utf-8")
+    assert update_file_module._mcp_runtime_restart_required(server_py)
+
+    # 5. Modified startup-known mcp_main.py -> True
+    main_py.write_text("main_v2", encoding="utf-8")
+    assert update_file_module._mcp_runtime_restart_required(main_py)
+
+    # 6. Modified startup-known mcp_process_registry.py -> True
+    reg_py.write_text("reg_v2", encoding="utf-8")
+    assert update_file_module._mcp_runtime_restart_required(reg_py)
+
+    # 7. Modified startup-known mcp/tools/*.py -> True
+    tool_py.write_text("tool_v2", encoding="utf-8")
+    assert update_file_module._mcp_runtime_restart_required(tool_py)
+
+    # 8. Modified startup-known mcp/runtime.py -> True
+    runtime_py.write_text("runtime_v2", encoding="utf-8")
+    assert update_file_module._mcp_runtime_restart_required(runtime_py)
+
+    # 9. Deleted startup-known MCP source -> True
+    deleted_py = mcp_pkg / "deleted_helper.py"
+    deleted_py.write_text("del_v1", encoding="utf-8")
+    startup_fingerprints[deleted_py.resolve()] = update_file_module._source_fingerprint(deleted_py)
+    deleted_py.unlink()
+    assert update_file_module._mcp_runtime_restart_required(deleted_py)
+
+    # 10. New .py created under contextor/mcp/ -> True
+    new_tool = tools_pkg / "new_tool.py"
+    new_tool.write_text("new_tool_v1", encoding="utf-8")
+    assert update_file_module._mcp_runtime_restart_required(new_tool)
+
+    # 11. Baseline fingerprint None -> True
+    none_baseline_py = mcp_pkg / "none_baseline.py"
+    none_baseline_py.write_text("content", encoding="utf-8")
+    startup_fingerprints[none_baseline_py.resolve()] = None
+    assert update_file_module._mcp_runtime_restart_required(none_baseline_py)
+
+    # 12. Current fingerprint read failure -> True
+    monkeypatch.setattr(update_file_module, "_source_fingerprint", lambda _p: None)
+    assert update_file_module._mcp_runtime_restart_required(reg_py)

@@ -1009,6 +1009,11 @@ def test_update_file_marks_running_mcp_server_as_requiring_restart(monkeypatch):
     )
     monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: engine)
     monkeypatch.setattr(update_file_module, "_persist_live_engine", lambda *_args: True)
+    monkeypatch.setattr(
+        update_file_module,
+        "_mcp_runtime_restart_required",
+        lambda _path: False,
+    )
 
     current = json.loads(
         mcp_server.update_file.fn(repo_path=str(repo), file_path=str(server_path))
@@ -1016,7 +1021,11 @@ def test_update_file_marks_running_mcp_server_as_requiring_restart(monkeypatch):
     assert current["runtime_restart_required"] is False
     assert "runtime_state" not in current
 
-    monkeypatch.setattr(update_file_module, "_MCP_SERVER_SOURCE_FINGERPRINT", "stale")
+    monkeypatch.setattr(
+        update_file_module,
+        "_mcp_runtime_restart_required",
+        lambda _path: True,
+    )
     result = json.loads(
         mcp_server.update_file.fn(repo_path=str(repo), file_path=str(server_path))
     )
