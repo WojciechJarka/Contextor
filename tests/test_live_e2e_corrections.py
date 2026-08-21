@@ -4,6 +4,10 @@ from types import SimpleNamespace
 import pytest
 
 from contextor import mcp_server
+from contextor.mcp import runtime as mcp_runtime
+from contextor.mcp.tools import (
+    query_canonical_projection as query_canonical_projection_tool,
+)
 from contextor.core.analysis.incremental_engine import IncrementalAnalysisEngine
 from contextor.core.analysis.state_manager import (
     FileStateManager,
@@ -121,7 +125,7 @@ def test_affected_mcp_queries_fail_closed_on_parse_stale_state(
 ):
     state = _stale_mcp_state(tmp_path)
     engine = SimpleNamespace(state=state)
-    monkeypatch.setattr(mcp_server, "_get_or_init_engine", lambda _root: engine)
+    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: engine)
     monkeypatch.setattr(
         mcp_server,
         "_read_registries",
@@ -193,8 +197,8 @@ def test_affected_mcp_queries_fail_closed_on_parse_stale_state(
 def test_canonical_projections_reject_stale_module_facts(tmp_path, monkeypatch):
     state = _stale_mcp_state(tmp_path)
     monkeypatch.setattr(
-        mcp_server,
-        "_get_or_init_engine",
+        mcp_runtime,
+        "get_or_init_engine",
         lambda _root: SimpleNamespace(state=state),
     )
     base = {
@@ -220,7 +224,7 @@ def test_minimal_valid_syntax_error_query_repair_query_flow(
     tmp_path, monkeypatch
 ):
     source, engine = _engine_for_file(tmp_path)
-    monkeypatch.setattr(mcp_server, "_get_or_init_engine", lambda _root: engine)
+    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: engine)
     monkeypatch.setattr(
         mcp_server,
         "_read_registries",
@@ -373,7 +377,7 @@ def test_global_search_and_static_context_do_not_leak_parse_stale_truth(
             get_module_path=lambda value: "provider",
         ),
     )
-    monkeypatch.setattr(mcp_server, "_get_or_init_engine", lambda _root: engine)
+    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: engine)
 
     architecture = json.loads(
         mcp_server.get_project_architecture.fn(str(tmp_path))

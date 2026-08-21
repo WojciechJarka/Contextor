@@ -186,10 +186,6 @@ from contextor.core.analysis.state_manager import (
     canonical_artifact_consumption_targets,
     module_current_truth,
 )
-from contextor.core.canonical_state_query import (
-    describe_contract as _describe_canonical_contract,
-    execute_projection as _execute_canonical_projection,
-)
 from contextor.core.paths import output_dir as resolve_output_dir
 from contextor.core.source import SourceError, read_source
 from contextor.core.report_query import (
@@ -206,9 +202,19 @@ from contextor.mcp_process_registry import (
     remove_record,
     terminate_registered_process,
 )
-from contextor.mcp.documentation import (
-    query_documentation,
-    short_description,
+from contextor.mcp.documentation import short_description
+from contextor.mcp import runtime as mcp_runtime
+from contextor.mcp.tools.describe_canonical_state import (
+    describe_canonical_state as _describe_canonical_state_impl,
+)
+from contextor.mcp.tools.get_mcp_documentation import (
+    get_mcp_documentation as _get_mcp_documentation_impl,
+)
+from contextor.mcp.tools.lookup_index_entries import (
+    lookup_index_entries as _lookup_index_entries_impl,
+)
+from contextor.mcp.tools.query_canonical_projection import (
+    query_canonical_projection as _query_canonical_projection_impl,
 )
 
 # Initialize FastMCP Server
@@ -216,9 +222,6 @@ mcp = FastMCP("Contextor")
 
 _MCP_OWNER_TOKEN: str = uuid4().hex
 
-# Global state to maintain incremental engines across MCP sessions
-_live_engines: dict[str, Any] = {}
-_live_engine_revisions: dict[str, int] = {}
 _analysis_lock = threading.Lock()
 _analysis_job_lock = threading.RLock()
 _analysis_tasks: dict[str, threading.Thread] = {}
@@ -401,21 +404,14 @@ async def _run_analysis_worker(
     exclude_paths: list[str] | None = None,
     log=None,
 ) -> dict:
-    """Run analysis in-process without blocking the FastMCP event loop.
-
-    Codex Desktop can start the child interpreter but leaves it stalled before
-    Python reaches ``contextor.mcp_worker.main``.  The MCP-only sequential mode
-    avoids both that child interpreter and nested process pools.
-    """
+    """Run analysis in-process without blocking the FastMCP event loop."""
     import asyncio
     effective_log = log or _stderr_log
 
     def run() -> dict:
         with _analysis_lock:
-            previous_pool_setting = os.environ.get("CONTEXTOR_DISABLE_PROCESS_POOL")
             previous_cache = os.environ.get("CONTEXTOR_CACHE_DIR")
             previous_registry = os.environ.get("CONTEXTOR_MCP_PROCESS_REGISTRY")
-            os.environ["CONTEXTOR_DISABLE_PROCESS_POOL"] = "1"
             os.environ["CONTEXTOR_CACHE_DIR"] = str(_mcp_cache_root(root))
             os.environ["CONTEXTOR_MCP_PROCESS_REGISTRY"] = str(registry_dir(root))
             try:
@@ -450,10 +446,6 @@ async def _run_analysis_worker(
                     raise ValueError(f"Unsupported analysis operation: {operation}")
                 return {}
             finally:
-                if previous_pool_setting is None:
-                    os.environ.pop("CONTEXTOR_DISABLE_PROCESS_POOL", None)
-                else:
-                    os.environ["CONTEXTOR_DISABLE_PROCESS_POOL"] = previous_pool_setting
                 if previous_cache is None:
                     os.environ.pop("CONTEXTOR_CACHE_DIR", None)
                 else:
@@ -497,8 +489,8 @@ async def _execute_analysis_job(
             log=job_log,
         )
         if job["operation"] == "project":
-            _live_engines.pop(str(root), None)
-            engine = _get_or_init_engine(root)
+            mcp_runtime._live_engines.pop(str(root), None)
+            engine = mcp_runtime.get_or_init_engine(root)
             if engine is None:
                 raise RuntimeError(
                     "Analysis completed but canonical state could not be loaded."
@@ -520,7 +512,7 @@ async def _execute_analysis_job(
                     engine_state, origin="mcp_analysis", timeout=10.0
                 )
                 revision = int(published["revision"])
-                _live_engine_revisions[str(root)] = revision
+                mcp_runtime._live_engine_revisions[str(root)] = revision
                 job = {
                     **job,
                     "live_publish_status": "success",
@@ -644,67 +636,6 @@ def _get_canonical_report(repo_path: Path, filename: str) -> Path | None:
             if sub_target.is_file():
                 return sub_target
     return None
-
-def _get_or_init_engine(root: Path):
-    """
-    Returns the live engine from RAM. If absent, HYDRATES from the .contextor cache.
-    Does NOT silently trigger analyze_project.
-    """
-    from contextor.core.live_state import connect
-
-    engine = _live_engines.get(str(root))
-    client = connect(root)
-    if client:
-        remote = client.ping()
-        remote_revision = int(remote.get("revision", 0))
-        if remote_revision > _live_engine_revisions.get(str(root), -1):
-            snapshot = client.snapshot()
-            state = snapshot.get("state")
-            if state is not None:
-                from contextor.core.analysis.state_manager import FileStateManager
-                from contextor.core.analysis.incremental_engine import IncrementalAnalysisEngine
-                from contextor.core.paths import repo_cache_dir
-                from contextor.core.reporting_engine.persistent_registry import PersistentIdentityRegistry
-
-                manager = FileStateManager(str(repo_cache_dir(root)))
-                engine = IncrementalAnalysisEngine(
-                    state,
-                    PersistentIdentityRegistry(str(root)),
-                    manager,
-                    str(root),
-                )
-                _live_engines[str(root)] = engine
-                _live_engine_revisions[str(root)] = remote_revision
-    if not engine:
-        from contextor.core.analysis.state_manager import load_engine_state, FileStateManager
-        from contextor.core.analysis.incremental_engine import IncrementalAnalysisEngine
-        from contextor.core.live_state import migrate_legacy_snapshot, read_metadata
-        from contextor.core.repository_identity import read_repository_identity
-        from contextor.core.reporting_engine.persistent_registry import PersistentIdentityRegistry
-
-        identity = read_repository_identity(root)
-        if identity is None:
-            return None
-        cache_dir = str(migrate_legacy_snapshot(root))
-        metadata = read_metadata(cache_dir)
-        state = load_engine_state(
-            cache_dir,
-            metadata.state_id if metadata else "",
-            expected_repo_id=identity.repo_id,
-            expected_root_path=identity.root_path,
-        )
-        if state:
-            state_mgr = FileStateManager(cache_dir)
-            registry = PersistentIdentityRegistry(str(root))
-            engine = IncrementalAnalysisEngine(state, registry, state_mgr, str(root))
-            _live_engines[str(root)] = engine
-            if metadata and metadata.revision is not None:
-                _live_engine_revisions[str(root)] = int(metadata.revision)
-        else:
-            _live_engines.pop(str(root), None)
-            _live_engine_revisions.pop(str(root), None)
-    return engine
-
 
 def _persist_live_engine(root: Path, engine) -> bool:
     """Persist incremental canonical state so the next MCP process can hydrate it."""
@@ -963,7 +894,7 @@ def _module_path_for_source(root: Path, path: Path) -> str:
 
 def _symbol_static_context(root: Path, candidate: dict) -> dict:
     """Return compact current consumer evidence when a live engine is available."""
-    engine = _get_or_init_engine(root)
+    engine = mcp_runtime.get_or_init_engine(root)
     module_path = _module_path_for_source(root, Path(candidate["file_path"]))
     context = {
         "module": module_path,
@@ -1308,7 +1239,7 @@ def update_file(
         target_file = root / target_file
     target_file = target_file.resolve()
     
-    engine = _get_or_init_engine(root)
+    engine = mcp_runtime.get_or_init_engine(root)
             
     if not engine:
         return json.dumps({"status": "NO_SESSION", "file_path": str(target_file), "error": "Run analyze_project first to initialize the session."}, indent=2)
@@ -1325,8 +1256,8 @@ def update_file(
             if remote.get("status") != "ok":
                 raise RuntimeError(remote.get("error", "Shared LIVE update failed."))
             res = remote["result"]
-            _live_engine_revisions[str(root)] = int(remote["revision"]) - 1
-            engine = _get_or_init_engine(root)
+            mcp_runtime._live_engine_revisions[str(root)] = int(remote["revision"]) - 1
+            engine = mcp_runtime.get_or_init_engine(root)
             live_state_persisted = True
         else:
             res = engine.update_file(str(target_file))
@@ -1410,7 +1341,7 @@ def get_project_architecture(
 ) -> str:
     root = Path(repo_path).expanduser().resolve()
     try:
-        engine = _get_or_init_engine(root)
+        engine = mcp_runtime.get_or_init_engine(root)
         if not engine or getattr(engine.state, "resync_required", False):
             return "Error: No usable canonical LIVE state. Run analyze_project first."
 
@@ -1569,7 +1500,7 @@ def get_module_context(
     else:
         module_name = input_query
 
-    engine = _get_or_init_engine(root)
+    engine = mcp_runtime.get_or_init_engine(root)
     if not engine or getattr(engine.state, "resync_required", False):
         return "Error: No usable canonical LIVE state. Run analyze_project first."
     state = engine.state
@@ -1747,7 +1678,7 @@ def get_artifact_blast_radius(
     root = Path(repo_path).expanduser().resolve()
     try:
         mod_path_to_id, mod_id_to_path, art_path_to_id, art_id_to_path = _read_registries(root)
-        engine = _get_or_init_engine(root)
+        engine = mcp_runtime.get_or_init_engine(root)
         if not engine or getattr(engine.state, "resync_required", False):
             return "Error: No usable canonical LIVE state. Run analyze_project first."
         target_art = art_id_to_path.get(artifact_name, artifact_name)
@@ -2097,7 +2028,7 @@ def search_artifacts(
     root = Path(repo_path).expanduser().resolve()
     repo_name = root.name
     
-    engine = _get_or_init_engine(root)
+    engine = mcp_runtime.get_or_init_engine(root)
     if not engine:
         return "Error: No live canonical state found. Run analyze_project first."
         
@@ -2546,7 +2477,7 @@ def get_file_edit_context(
             module_id = top["id"]
             file_path_resolved = (catalog.module_paths or {}).get(module_name) or module_name.replace(".", "/") + ".py"
 
-            engine = _get_or_init_engine(root)
+            engine = mcp_runtime.get_or_init_engine(root)
             if not engine or getattr(engine.state, "resync_required", False):
                 return json.dumps(
                     {
@@ -2706,7 +2637,7 @@ def get_file_edit_context(
                         "reason": f"Cached analytics state is '{cached_state}'.",
                     }
 
-            live_revision = _live_engine_revisions.get(str(root)) if engine else None
+            live_revision = mcp_runtime._live_engine_revisions.get(str(root)) if engine else None
 
             return json.dumps(
                 {
@@ -2759,7 +2690,7 @@ def get_file_edit_context(
 
     module_name = ".".join(parts)
     
-    engine = _get_or_init_engine(root)
+    engine = mcp_runtime.get_or_init_engine(root)
     if not engine or getattr(engine.state, "resync_required", False):
         return "Error: No usable canonical LIVE state. Run analyze_project first."
         
@@ -3000,7 +2931,7 @@ def get_layer_isolation(
     # Try to find layer-specific report in high_risk_layers
     ga_path = _get_canonical_report(root, f"{repo_name}_{normalized_layer_name}_graph_analytics.json")
     if not ga_path:
-        engine = _get_or_init_engine(root)
+        engine = mcp_runtime.get_or_init_engine(root)
         if engine and engine.state.dependency_graph:
             graph = engine.state.dependency_graph
             layer_modules = {
@@ -3222,33 +3153,14 @@ def get_report_diff(
         return f"Error reading diff report: {e}"
 
 
-@mcp.tool(description=short_description('describe_canonical_state'))
-def describe_canonical_state() -> str:
-    return json.dumps(_describe_canonical_contract(), indent=2, ensure_ascii=False)
+describe_canonical_state = mcp.tool(
+    description=short_description("describe_canonical_state")
+)(_describe_canonical_state_impl)
 
 
-@mcp.tool(description=short_description('query_canonical_projection'))
-def query_canonical_projection(repo_path: str, request: dict[str, Any]) -> str:
-    root = Path(repo_path).expanduser().resolve()
-    engine = _get_or_init_engine(root)
-    if not engine:
-        return json.dumps(
-            {
-                "status": "error",
-                "error": {
-                    "code": "canonical_state_unavailable",
-                    "message": "No live canonical state is available. Run analyze_project first.",
-                    "path": "repo_path",
-                    "details": {"repo_path": str(root)},
-                },
-            },
-            indent=2,
-        )
-    return json.dumps(
-        _execute_canonical_projection(engine.state, request),
-        indent=2,
-        ensure_ascii=False,
-    )
+query_canonical_projection = mcp.tool(
+    description=short_description("query_canonical_projection")
+)(_query_canonical_projection_impl)
 
 
 # ==========================================================
@@ -3280,7 +3192,7 @@ def extract_indexed_report_context(
             return "Error: No indexed artifact report found. Run analysis or pass report_path."
 
         report = json.loads(selected_path.read_text(encoding="utf-8"))
-        engine = _get_or_init_engine(root)
+        engine = mcp_runtime.get_or_init_engine(root)
         module_paths = None
         if engine:
             module_paths = {
@@ -3322,31 +3234,9 @@ def extract_indexed_report_context(
         return f"Error extracting indexed report context: {e}"
 
 
-@mcp.tool(description=short_description('lookup_index_entries'))
-def lookup_index_entries(repo_path: str, ids: list[str]) -> str:
-    root = Path(repo_path).expanduser().resolve()
-    try:
-        catalog = catalog_from_registry(str(root))
-        result = {}
-        for id_ in ids:
-            normalized_id = str(id_)
-            if normalized_id.upper().startswith("A"):
-                normalized_id = normalized_id.upper()
-                active = catalog.artifacts
-                recovery = catalog.recovered_artifacts or {}
-            else:
-                active = catalog.modules
-                recovery = catalog.recovered_modules or {}
-            if normalized_id in active:
-                entry = {"name": active[normalized_id], "status": "active"}
-            elif normalized_id in recovery:
-                entry = {"name": recovery[normalized_id], "status": "recovery"}
-            else:
-                entry = {"name": None, "status": "missing"}
-            result[str(id_)] = entry
-        return json.dumps(result, indent=2)
-    except Exception as e:
-        return f"Error resolving index entries: {e}"
+lookup_index_entries = mcp.tool(
+    description=short_description("lookup_index_entries")
+)(_lookup_index_entries_impl)
 
 
 @mcp.tool(description=short_description('get_artifacts_for_module'))
@@ -3384,7 +3274,7 @@ def get_artifacts_for_module(
 
     try:
         mod_path_to_id, mod_id_to_path, art_path_to_id, art_id_to_path = _read_registries(root)
-        engine = _get_or_init_engine(root)
+        engine = mcp_runtime.get_or_init_engine(root)
         if not engine or getattr(engine.state, "resync_required", False):
             return "Error: No usable canonical LIVE state. Run analyze_project first."
         state = engine.state
@@ -3484,7 +3374,7 @@ def lookup_artifact_by_symbol(
     root = Path(repo_path).expanduser().resolve()
     try:
         _, _, art_path_to_id, _ = _read_registries(root)
-        engine = _get_or_init_engine(root)
+        engine = mcp_runtime.get_or_init_engine(root)
         if not engine or getattr(engine.state, "resync_required", False):
             return "Error: No usable canonical LIVE state. Run analyze_project first."
 
@@ -3578,17 +3468,9 @@ def lookup_artifact_by_symbol(
         return f"Error searching artifacts by symbol: {e}"
 
 
-@mcp.tool(description=short_description("get_mcp_documentation"))
-def get_mcp_documentation(
-    tool: str | None = None,
-    tools: list[str] | None = None,
-    sections: list[str] | None = None,
-) -> str:
-    return json.dumps(
-        query_documentation(tool=tool, tools=tools, sections=sections),
-        ensure_ascii=False,
-        indent=2,
-    )
+get_mcp_documentation = mcp.tool(
+    description=short_description("get_mcp_documentation")
+)(_get_mcp_documentation_impl)
 
 
 def main():

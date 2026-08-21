@@ -22,6 +22,7 @@ from contextor.core.reporting_layer.artifact_usage_report import (
 )
 from contextor.core.symbol_engine.indexer import index_repository
 from contextor import mcp_server
+from contextor.mcp import runtime as mcp_runtime
 
 
 # =========================================================================
@@ -429,7 +430,7 @@ def test_stage2c_add_module_with_hard_import_macro_metrics(tmp_path, monkeypatch
     assert engine.state.metrics["in_degree_max"] == 1
 
     # MCP overlay verification
-    monkeypatch.setattr(mcp_server, "_get_or_init_engine", lambda _root: engine)
+    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: engine)
     monkeypatch.setattr(mcp_server, "_get_canonical_report", lambda _root, _name: None)
 
     resp_consumer = json.loads(
@@ -599,7 +600,7 @@ def test_stage2c_get_module_context_behavior_preserved(tmp_path, monkeypatch):
     provider.write_text("import target\n", encoding="utf-8")
     engine.update_file(str(provider))
 
-    monkeypatch.setattr(mcp_server, "_get_or_init_engine", lambda _root: engine)
+    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: engine)
     monkeypatch.setattr(mcp_server, "_get_canonical_report", lambda _root, _name: None)
 
     resp_provider = json.loads(

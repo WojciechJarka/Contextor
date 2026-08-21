@@ -6,6 +6,10 @@ from types import SimpleNamespace
 import pytest
 
 from contextor import mcp_server
+from contextor.mcp import runtime as mcp_runtime
+from contextor.mcp.tools import (
+    query_canonical_projection as query_canonical_projection_tool,
+)
 from contextor.core.canonical_state_query import (
     LANGUAGE_VERSION,
     CANONICAL_QUERY_SCHEMA_VERSION,
@@ -188,7 +192,11 @@ def test_validation_rejects_duplicate_and_wrong_typed_in_values():
 
 def test_mcp_describe_and_query_tools_share_the_contract(tmp_path, monkeypatch):
     engine = SimpleNamespace(state=_state())
-    monkeypatch.setattr(mcp_server, "_get_or_init_engine", lambda _root: engine)
+    monkeypatch.setattr(
+        mcp_runtime,
+        "get_or_init_engine",
+        lambda _root: engine,
+    )
 
     described = json.loads(mcp_server.describe_canonical_state.fn())
     queried = json.loads(
@@ -216,7 +224,11 @@ def test_expression_based_canonical_query_tools_are_not_exposed():
 
 
 def test_mcp_projection_returns_structured_unavailable_state(tmp_path, monkeypatch):
-    monkeypatch.setattr(mcp_server, "_get_or_init_engine", lambda _root: None)
+    monkeypatch.setattr(
+        mcp_runtime,
+        "get_or_init_engine",
+        lambda _root: None,
+    )
 
     result = json.loads(
         mcp_server.query_canonical_projection.fn(

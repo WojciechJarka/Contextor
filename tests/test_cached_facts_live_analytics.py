@@ -37,7 +37,8 @@ from contextor.core.reporting_engine.graph_analytics import (
 )
 from contextor.core.validator.layers import validate_layer_rules
 from contextor.core.reporting_engine.persistent_registry import PersistentIdentityRegistry
-from contextor.mcp_server import get_module_context, _live_engines
+from contextor.mcp_server import get_module_context
+from contextor.mcp.runtime import _live_engines
 
 
 def _setup_multi_layer_repo(tmp_path: Path):
@@ -631,4 +632,3 @@ def test_stage3d3c_call_retarget_minimal_execution_counts_and_parity(tmp_path):
     assert set(engine.state.artifacts.keys()) == set(oracle_engine.state.artifacts.keys())
     assert engine.state.cached_analytics == oracle_engine.state.cached_analytics
     assert engine.state.cached_analytics_state == oracle_engine.state.cached_analytics_state == "fresh"
-

@@ -6,6 +6,7 @@ import pytest
 import threading
 
 from contextor import mcp_server
+from contextor.mcp import runtime as mcp_runtime
 from contextor.core.analysis.incremental_engine import IncrementalAnalysisEngine
 from contextor.core.analysis.state_manager import FileStateManager, RepositoryAnalysisState
 from contextor.core.graph.graph import build_graph, build_trie, detect_package_root
@@ -29,8 +30,8 @@ def test_mcp_refreshes_its_engine_from_a_newer_shared_live_revision(tmp_path, mo
     thread.start()
     client = LiveStateClient(server.endpoint)
     monkeypatch.setattr("contextor.core.live_state.connect", lambda _root: client)
-    monkeypatch.setattr(mcp_server, "_live_engines", {})
-    monkeypatch.setattr(mcp_server, "_live_engine_revisions", {})
+    monkeypatch.setattr(mcp_runtime, "_live_engines", {})
+    monkeypatch.setattr(mcp_runtime, "_live_engine_revisions", {})
 
     class FakeManager:
         state_id = ""
@@ -45,11 +46,11 @@ def test_mcp_refreshes_its_engine_from_a_newer_shared_live_revision(tmp_path, mo
     monkeypatch.setattr("contextor.core.analysis.state_manager.FileStateManager", FakeManager)
     monkeypatch.setattr("contextor.core.analysis.incremental_engine.IncrementalAnalysisEngine", FakeEngine)
     try:
-        initial = mcp_server._get_or_init_engine(tmp_path)
+        initial = mcp_runtime.get_or_init_engine(tmp_path)
         assert set(initial.state.modules) == {"old"}
 
         client.publish(second)
-        refreshed = mcp_server._get_or_init_engine(tmp_path)
+        refreshed = mcp_runtime.get_or_init_engine(tmp_path)
         assert set(refreshed.state.modules) == {"new"}
         assert refreshed is not initial
     finally:
@@ -86,7 +87,7 @@ def test_update_persist_restart_hydrate_keeps_live_reverse_context(tmp_path, mon
     state_manager = FileStateManager(str(cache_dir))
     state_manager.update_state(str(provider))
     engine = IncrementalAnalysisEngine(state, registry, state_manager, str(repo))
-    monkeypatch.setattr(mcp_server, "_live_engines", {str(repo.resolve()): engine})
+    monkeypatch.setattr(mcp_runtime, "_live_engines", {str(repo.resolve()): engine})
 
     graph_report = tmp_path / "graph.json"
     artifact_report = tmp_path / "artifacts.json"
@@ -118,8 +119,8 @@ def test_update_persist_restart_hydrate_keeps_live_reverse_context(tmp_path, mon
     assert update["live_state_persisted"] is True
     assert update["runtime_restart_required"] is False
 
-    mcp_server._live_engines.clear()
-    hydrated = mcp_server._get_or_init_engine(repo.resolve())
+    mcp_runtime._live_engines.clear()
+    hydrated = mcp_runtime.get_or_init_engine(repo.resolve())
     assert hydrated is not None
     context = json.loads(
         mcp_server.get_file_edit_context.fn(

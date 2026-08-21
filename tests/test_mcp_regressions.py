@@ -15,6 +15,8 @@ import pytest
 pytestmark = pytest.mark.live
 
 from contextor import mcp_process_registry, mcp_server
+from contextor.mcp import runtime as mcp_runtime
+from contextor.mcp.tools import lookup_index_entries as lookup_index_entries_tool
 from contextor.core.analysis import git_context
 from contextor.core.api.facade import ContextorFacade
 from contextor.core.analysis.state_manager import (
@@ -100,7 +102,7 @@ def test_consumer_queries_fail_closed_when_artifact_consumption_is_not_fresh(
         artifact_consumption_state=freshness,
     )
     monkeypatch.setattr(
-        mcp_server, "_get_or_init_engine", lambda _root: SimpleNamespace(state=state)
+        mcp_runtime, "get_or_init_engine", lambda _root: SimpleNamespace(state=state)
     )
     _patch_empty_registries(monkeypatch)
 
@@ -130,7 +132,7 @@ def test_own_symbols_excludes_legacy_category_symbols_from_artifact_queries(
         artifact_consumption_state="fresh",
     )
     monkeypatch.setattr(
-        mcp_server, "_get_or_init_engine", lambda _root: SimpleNamespace(state=state)
+        mcp_runtime, "get_or_init_engine", lambda _root: SimpleNamespace(state=state)
     )
     _patch_empty_registries(monkeypatch)
 
@@ -176,7 +178,7 @@ def test_stale_layer_snapshot_is_not_presented_after_incremental_update(
         },
     )
     monkeypatch.setattr(
-        mcp_server, "_get_or_init_engine", lambda _root: SimpleNamespace(state=state)
+        mcp_runtime, "get_or_init_engine", lambda _root: SimpleNamespace(state=state)
     )
     _patch_empty_registries(monkeypatch)
 
@@ -224,7 +226,7 @@ def test_minimal_file_context_fails_closed_without_usable_live_graph(
             recovered_artifacts={},
         ),
     )
-    monkeypatch.setattr(mcp_server, "_get_or_init_engine", lambda _root: None)
+    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: None)
     missing = json.loads(
         mcp_server.get_file_edit_context.fn(
             repo_path=str(tmp_path), target="1/1", mode="minimal"
@@ -233,7 +235,7 @@ def test_minimal_file_context_fails_closed_without_usable_live_graph(
 
     state = RepositoryAnalysisState(modules={"provider": object()})
     monkeypatch.setattr(
-        mcp_server, "_get_or_init_engine", lambda _root: SimpleNamespace(state=state)
+        mcp_runtime, "get_or_init_engine", lambda _root: SimpleNamespace(state=state)
     )
     missing_graph = json.loads(
         mcp_server.get_file_edit_context.fn(
@@ -252,7 +254,7 @@ def test_module_context_fails_closed_when_canonical_graph_is_missing(
 ):
     state = RepositoryAnalysisState(modules={"provider": object()})
     monkeypatch.setattr(
-        mcp_server, "_get_or_init_engine", lambda _root: SimpleNamespace(state=state)
+        mcp_runtime, "get_or_init_engine", lambda _root: SimpleNamespace(state=state)
     )
     monkeypatch.setattr(
         mcp_server,
@@ -275,7 +277,7 @@ def test_project_architecture_requires_present_complete_module_layers(
         cached_analytics={},
     )
     monkeypatch.setattr(
-        mcp_server, "_get_or_init_engine", lambda _root: SimpleNamespace(state=state)
+        mcp_runtime, "get_or_init_engine", lambda _root: SimpleNamespace(state=state)
     )
 
     missing = json.loads(mcp_server.get_project_architecture.fn(str(tmp_path)))
@@ -304,7 +306,7 @@ def test_project_architecture_rejects_extra_deleted_module_layer(
         },
     )
     monkeypatch.setattr(
-        mcp_server, "_get_or_init_engine", lambda _root: SimpleNamespace(state=state)
+        mcp_runtime, "get_or_init_engine", lambda _root: SimpleNamespace(state=state)
     )
 
     result = json.loads(mcp_server.get_project_architecture.fn(str(tmp_path)))
@@ -323,7 +325,7 @@ def test_lookup_returns_symbol_facts_when_consumers_are_stale(tmp_path, monkeypa
         artifact_consumption_state="stale",
     )
     monkeypatch.setattr(
-        mcp_server, "_get_or_init_engine", lambda _root: SimpleNamespace(state=state)
+        mcp_runtime, "get_or_init_engine", lambda _root: SimpleNamespace(state=state)
     )
     _patch_empty_registries(monkeypatch)
 
@@ -349,7 +351,7 @@ def test_blast_radius_rejects_ambiguous_textual_leaf(tmp_path, monkeypatch):
         artifact_consumption_state="fresh",
     )
     monkeypatch.setattr(
-        mcp_server, "_get_or_init_engine", lambda _root: SimpleNamespace(state=state)
+        mcp_runtime, "get_or_init_engine", lambda _root: SimpleNamespace(state=state)
     )
     _patch_empty_registries(monkeypatch)
 
@@ -381,7 +383,7 @@ def test_full_file_context_public_api_uses_canonical_symbol_domain(
         dependency_graph=SimpleNamespace(hard_edges={}, soft_edges={}),
     )
     monkeypatch.setattr(
-        mcp_server, "_get_or_init_engine", lambda _root: SimpleNamespace(state=state)
+        mcp_runtime, "get_or_init_engine", lambda _root: SimpleNamespace(state=state)
     )
     _patch_empty_registries(monkeypatch)
 
@@ -405,7 +407,7 @@ def test_live_first_tools_work_without_any_saved_reports(tmp_path, monkeypatch):
         raise AssertionError("normal MCP query must not resolve output reports")
 
     monkeypatch.setattr(mcp_server, "_get_canonical_report", reject_report_resolution)
-    monkeypatch.setattr(mcp_server, "_get_or_init_engine", lambda _root: engine)
+    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: engine)
     monkeypatch.setattr(
         mcp_server,
         "_read_registries",
@@ -471,7 +473,7 @@ def test_analysis_endpoint_returns_reusable_job_and_pollable_completion(
         ) or {"revision": 1}
     )
     monkeypatch.setattr(mcp_server, "_run_analysis_worker", fake_worker)
-    monkeypatch.setattr(mcp_server, "_get_or_init_engine", lambda _root: engine)
+    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: engine)
     monkeypatch.setattr(
         "contextor.core.live_state.connect_or_start",
         lambda _root, *args, **kwargs: client,
@@ -550,7 +552,7 @@ def test_analysis_job_preserves_live_publish_timeout_status(tmp_path, monkeypatc
             raise TimeoutError("simulated LIVE timeout")
 
     monkeypatch.setattr(mcp_server, "_run_analysis_worker", fake_worker)
-    monkeypatch.setattr(mcp_server, "_get_or_init_engine", lambda _root: engine)
+    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: engine)
     monkeypatch.setattr(
         "contextor.core.live_state.connect_or_start",
         lambda _root, *args, **kwargs: Client(),
@@ -722,7 +724,7 @@ def test_analysis_status_exposes_latest_worker_progress(tmp_path, monkeypatch):
         await asyncio.to_thread(release.wait)
 
     monkeypatch.setattr(mcp_server, "_run_analysis_worker", fake_worker)
-    monkeypatch.setattr(mcp_server, "_get_or_init_engine", lambda _root: object())
+    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: object())
     mcp_server._analysis_tasks.clear()
     mcp_server._analysis_jobs_by_repo.clear()
 
@@ -751,7 +753,11 @@ def test_lookup_index_entries_distinguishes_active_recovery_and_missing(
         recovered_modules={"2/1": "pkg.removed"},
         recovered_artifacts={"A2/1": "pkg.removed::old"},
     )
-    monkeypatch.setattr(mcp_server, "catalog_from_registry", lambda _root: catalog)
+    monkeypatch.setattr(
+        lookup_index_entries_tool,
+        "catalog_from_registry",
+        lambda _root: catalog,
+    )
 
     result = json.loads(
         mcp_server.lookup_index_entries.fn(
@@ -790,7 +796,7 @@ def test_extract_indexed_report_context_returns_every_shared_resolver_block(tmp_
     report_path = tmp_path / "report.json"
     report_path.write_text(json.dumps(report), encoding="utf-8")
     monkeypatch.setattr(mcp_server, "catalog_from_registry", lambda *_args, **_kwargs: catalog)
-    monkeypatch.setattr(mcp_server, "_get_or_init_engine", lambda _root: None)
+    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: None)
 
     raw = mcp_server.extract_indexed_report_context.fn(
         repo_path=str(tmp_path),
@@ -846,7 +852,7 @@ def test_extract_indexed_report_context_can_filter_to_public_api(tmp_path, monke
     report_path = tmp_path / "report.json"
     report_path.write_text(json.dumps(report), encoding="utf-8")
     monkeypatch.setattr(mcp_server, "catalog_from_registry", lambda *_args, **_kwargs: catalog)
-    monkeypatch.setattr(mcp_server, "_get_or_init_engine", lambda _root: None)
+    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: None)
 
     all_artifacts = json.loads(
         mcp_server.extract_indexed_report_context.fn(
@@ -918,7 +924,7 @@ def test_file_edit_context_prefers_fresh_live_graph_over_stale_saved_matrix(
             dependency_graph=graph,
         )
     )
-    monkeypatch.setattr(mcp_server, "_get_or_init_engine", lambda _root: engine)
+    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: engine)
     (tmp_path / "provider.py").write_text("def run(): pass\n", encoding="utf-8")
 
     result = json.loads(
@@ -997,7 +1003,7 @@ def test_update_file_marks_running_mcp_server_as_requiring_restart(monkeypatch):
             delta=None,
         ),
     )
-    monkeypatch.setattr(mcp_server, "_get_or_init_engine", lambda _root: engine)
+    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: engine)
     monkeypatch.setattr(mcp_server, "_persist_live_engine", lambda *_args: True)
 
     current = json.loads(
@@ -1035,7 +1041,7 @@ def test_mcp_update_file_shapes_affected_modules_compact_full_and_fields(tmp_pat
             delta=None,
         ),
     )
-    monkeypatch.setattr(mcp_server, "_get_or_init_engine", lambda _root: engine)
+    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: engine)
     monkeypatch.setattr(mcp_server, "_persist_live_engine", lambda *_args: True)
 
     compact = json.loads(
@@ -1264,7 +1270,7 @@ def test_shutdown_cleanup_stops_only_children_owned_by_server(tmp_path, monkeypa
     assert foreign.exists()
 
 
-def test_mcp_single_file_worker_uses_registry_and_restores_environment(
+def test_mcp_worker_preserves_pool_policy_and_restores_environment(
     tmp_path, monkeypatch
 ):
     repo = tmp_path / "repo"
@@ -1276,8 +1282,15 @@ def test_mcp_single_file_worker_uses_registry_and_restores_environment(
     def fake_analysis(
         file_path, repo_path, log=None, additional_excludes=None
     ):
-        calls.append((file_path, repo_path, log, additional_excludes))
-        assert os.environ["CONTEXTOR_DISABLE_PROCESS_POOL"] == "1"
+        calls.append(
+            (
+                file_path,
+                repo_path,
+                log,
+                additional_excludes,
+                os.environ.get("CONTEXTOR_DISABLE_PROCESS_POOL"),
+            )
+        )
         assert os.environ["CONTEXTOR_MCP_PROCESS_REGISTRY"] == str(
             mcp_process_registry.registry_dir(repo)
         )
@@ -1289,10 +1302,21 @@ def test_mcp_single_file_worker_uses_registry_and_restores_environment(
 
     asyncio.run(mcp_server._run_analysis_worker("single_file", repo, target))
 
-    assert calls == [(str(target), str(repo), mcp_server._stderr_log, None)]
+    assert calls == [(str(target), str(repo), mcp_server._stderr_log, None, None)]
     assert os.environ["CONTEXTOR_CACHE_DIR"] == "original-cache"
     assert "CONTEXTOR_DISABLE_PROCESS_POOL" not in os.environ
     assert "CONTEXTOR_MCP_PROCESS_REGISTRY" not in os.environ
+
+    monkeypatch.setenv("CONTEXTOR_DISABLE_PROCESS_POOL", "1")
+    asyncio.run(mcp_server._run_analysis_worker("single_file", repo, target))
+    assert os.environ["CONTEXTOR_DISABLE_PROCESS_POOL"] == "1"
+    assert calls[-1] == (
+        str(target),
+        str(repo),
+        mcp_server._stderr_log,
+        None,
+        "1",
+    )
 
 
 def test_mcp_analysis_worker_forwards_per_run_excludes(tmp_path, monkeypatch):
@@ -1455,7 +1479,7 @@ def test_artifact_lookup_ignores_stale_registry_entries(tmp_path, monkeypatch):
         },
         artifact_consumption_state="fresh",
     ))
-    monkeypatch.setattr(mcp_server, "_get_or_init_engine", lambda _root: engine)
+    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: engine)
     monkeypatch.setattr(
         mcp_server,
         "_read_registries",
@@ -1589,7 +1613,7 @@ def test_file_edit_context_decodes_modules_and_marks_unresolved_api(
         ),
         metrics={"pkg.module": {"layer": "domain"}},
     ))
-    monkeypatch.setattr(mcp_server, "_get_or_init_engine", lambda _root: engine)
+    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: engine)
 
     result = json.loads(
         mcp_server.get_file_edit_context.fn(
@@ -1712,7 +1736,7 @@ def test_artifacts_for_module_includes_live_zero_consumer_signature(
     class Engine:
         state = State()
 
-    monkeypatch.setattr(mcp_server, "_get_or_init_engine", lambda _root: Engine())
+    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: Engine())
 
     result = json.loads(
         mcp_server.get_artifacts_for_module.fn(
@@ -1768,7 +1792,7 @@ def test_artifacts_for_module_uses_live_state_without_compact_report(
     class Engine:
         state = State()
 
-    monkeypatch.setattr(mcp_server, "_get_or_init_engine", lambda _root: Engine())
+    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: Engine())
 
     result = json.loads(
         mcp_server.get_artifacts_for_module.fn(
@@ -1804,7 +1828,7 @@ def test_artifacts_for_module_bounds_nested_consumers(tmp_path, monkeypatch):
         artifact_consumption_state="fresh",
     )
     monkeypatch.setattr(
-        mcp_server, "_get_or_init_engine", lambda _root: SimpleNamespace(state=state)
+        mcp_runtime, "get_or_init_engine", lambda _root: SimpleNamespace(state=state)
     )
     monkeypatch.setattr(
         mcp_server,
@@ -1886,7 +1910,7 @@ def test_live_artifact_search_handles_list_based_symbol_state(
         state = State()
         registry = Registry()
 
-    monkeypatch.setattr(mcp_server, "_get_or_init_engine", lambda _root: Engine())
+    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: Engine())
 
     result = json.loads(
         mcp_server.search_artifacts.fn(
@@ -1945,7 +1969,7 @@ def test_live_artifact_search_also_returns_matching_modules(tmp_path, monkeypatc
         state = State()
         registry = Registry()
 
-    monkeypatch.setattr(mcp_server, "_get_or_init_engine", lambda _root: Engine())
+    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: Engine())
 
     result = json.loads(
         mcp_server.search_artifacts.fn(
@@ -2008,7 +2032,7 @@ def test_module_context_exposes_new_live_module_before_full_report(
         state = State()
         registry = Registry()
 
-    monkeypatch.setattr(mcp_server, "_get_or_init_engine", lambda _root: Engine())
+    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: Engine())
     monkeypatch.setattr(
         mcp_server, "_get_canonical_report", lambda _root, _name: report
     )
@@ -2191,7 +2215,7 @@ def standalone(value: int) -> int:
 """,
         encoding="utf-8",
     )
-    monkeypatch.setattr(mcp_server, "_get_or_init_engine", lambda _root: None)
+    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: None)
 
     preview = json.loads(
         mcp_server.get_symbol_implementation.fn(
@@ -2240,7 +2264,7 @@ def test_symbol_implementation_refuses_ambiguous_source_without_guessing(
     second = tmp_path / "two.py"
     first.write_text("def same():\n    return 1\n", encoding="utf-8")
     second.write_text("def same():\n    return 2\n", encoding="utf-8")
-    monkeypatch.setattr(mcp_server, "_get_or_init_engine", lambda _root: None)
+    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: None)
 
     result = json.loads(
         mcp_server.get_symbol_implementation.fn(
@@ -2260,7 +2284,7 @@ def test_symbol_implementation_uses_contextor_source_reader_for_utf8_bom(
 ):
     source = tmp_path / "bom.py"
     source.write_bytes(b"\xef\xbb\xbfdef readable():\n    return 1\n")
-    monkeypatch.setattr(mcp_server, "_get_or_init_engine", lambda _root: None)
+    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: None)
 
     result = json.loads(
         mcp_server.get_symbol_implementation.fn(
@@ -2312,8 +2336,8 @@ def test_project_architecture_and_report_diff_offer_optional_bounds(
         },
     )
     monkeypatch.setattr(
-        mcp_server,
-        "_get_or_init_engine",
+        mcp_runtime,
+        "get_or_init_engine",
         lambda _root: SimpleNamespace(state=state),
     )
 
@@ -2428,7 +2452,7 @@ def test_artifact_blast_radius_does_not_fallback_to_compact_report(
         ),
     )
 
-    monkeypatch.setattr(mcp_server, "_get_or_init_engine", lambda _root: None)
+    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: None)
 
     result = mcp_server.get_artifact_blast_radius.fn(
         repo_path=str(tmp_path), artifact_name="target", max_items=0
@@ -2461,8 +2485,8 @@ def test_file_edit_context_minimal_mode_and_target_resolution(tmp_path, monkeypa
             cached_analytics={"module_layers": {"pkg.module": "core"}},
         )
     )
-    mcp_server._live_engine_revisions[str(root)] = 42
-    monkeypatch.setattr(mcp_server, "_get_or_init_engine", lambda _root: engine)
+    mcp_runtime._live_engine_revisions[str(root)] = 42
+    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: engine)
     monkeypatch.setattr(
         mcp_server,
         "_read_registries",
@@ -2706,7 +2730,7 @@ def test_module_context_forgiving_input_and_artifact_redirect(tmp_path, monkeypa
             topology_analytics={"module_risk": {"pkg.module": 0.15}, "pagerank": {"pkg.module": 0.1}, "betweenness": {}, "hub_scores": {}, "authority_scores": {}, "bridge_scores": {}},
         )
     )
-    monkeypatch.setattr(mcp_server, "_get_or_init_engine", lambda _root: engine)
+    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: engine)
     monkeypatch.setattr(
         mcp_server,
         "_read_registries",
@@ -2807,7 +2831,7 @@ def test_artifact_blast_radius_module_aware_diagnostic(tmp_path, monkeypatch):
             artifact_consumption_state="fresh",
         )
     )
-    monkeypatch.setattr(mcp_server, "_get_or_init_engine", lambda _root: engine)
+    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: engine)
     monkeypatch.setattr(
         mcp_server,
         "_read_registries",
@@ -2949,8 +2973,8 @@ def test_file_edit_context_live_revision_lifecycle(tmp_path, monkeypatch):
     import contextor.core.analysis.state_manager as core_state_mgr
 
     # Clear revision dictionary
-    mcp_server._live_engine_revisions.clear()
-    mcp_server._live_engines.clear()
+    mcp_runtime._live_engine_revisions.clear()
+    mcp_runtime._live_engines.clear()
 
     # 1. Hydrated metadata revision -> minimal pre-edit returns exact persisted revision
     monkeypatch.setattr(core_live_state, "connect", lambda _r: None)
@@ -2968,11 +2992,11 @@ def test_file_edit_context_live_revision_lifecycle(tmp_path, monkeypatch):
         )
     )
     assert res1["live_revision"] == 366
-    assert mcp_server._live_engine_revisions[str(root1)] == 366
+    assert mcp_runtime._live_engine_revisions[str(root1)] == 366
 
     # 2. No metadata / revision -> null
-    mcp_server._live_engine_revisions.clear()
-    mcp_server._live_engines.clear()
+    mcp_runtime._live_engine_revisions.clear()
+    mcp_runtime._live_engines.clear()
     monkeypatch.setattr(core_live_state, "read_metadata", lambda _c: None)
     res_no_meta = json.loads(
         mcp_server.get_file_edit_context.fn(
@@ -2984,7 +3008,7 @@ def test_file_edit_context_live_revision_lifecycle(tmp_path, monkeypatch):
     assert res_no_meta["live_revision"] is None
 
     # 3. Active / newer revision in _live_engine_revisions -> exact newer revision
-    mcp_server._live_engine_revisions[str(root1)] = 367
+    mcp_runtime._live_engine_revisions[str(root1)] = 367
     res_active = json.loads(
         mcp_server.get_file_edit_context.fn(
             repo_path=str(root1),
@@ -2995,34 +3019,34 @@ def test_file_edit_context_live_revision_lifecycle(tmp_path, monkeypatch):
     assert res_active["live_revision"] == 367
 
     # 4. Hydration does not increment revision
-    assert mcp_server._live_engine_revisions[str(root1)] == 367
+    assert mcp_runtime._live_engine_revisions[str(root1)] == 367
 
     # 5. Two repo roots retain independent revision values
     monkeypatch.setattr(core_live_state, "read_metadata", lambda c: LiveStateMetadata(revision=500, state_id="s500") if "repo2" in str(c) else LiveStateMetadata(revision=366, state_id="s366"))
     monkeypatch.setattr(core_state_mgr, "load_engine_state", lambda c, _sid, **_kw: engine2.state if "repo2" in str(c) else engine1.state)
     monkeypatch.setattr(mcp_server, "_read_registries", lambda r: ({"r2.mod": "2/1"}, {"2/1": "r2.mod"}, {}, {}) if "repo2" in str(r) else ({"r1.mod": "1/1"}, {"1/1": "r1.mod"}, {}, {}))
 
-    mcp_server._live_engine_revisions.clear()
-    mcp_server._live_engines.clear()
+    mcp_runtime._live_engine_revisions.clear()
+    mcp_runtime._live_engines.clear()
 
     res_r1 = json.loads(mcp_server.get_file_edit_context.fn(repo_path=str(root1), target="r1.mod", mode="minimal"))
     res_r2 = json.loads(mcp_server.get_file_edit_context.fn(repo_path=str(root2), target="r2.mod", mode="minimal"))
     assert res_r1["live_revision"] == 366
     assert res_r2["live_revision"] == 500
-    assert mcp_server._live_engine_revisions[str(root1)] == 366
-    assert mcp_server._live_engine_revisions[str(root2)] == 500
+    assert mcp_runtime._live_engine_revisions[str(root1)] == 366
+    assert mcp_runtime._live_engine_revisions[str(root2)] == 500
 
     # 6. Rejected / invalid hydration does not publish invalid revision
-    mcp_server._live_engine_revisions[str(root1)] = 999
+    mcp_runtime._live_engine_revisions[str(root1)] = 999
     monkeypatch.setattr(core_state_mgr, "load_engine_state", lambda _c, _sid, **_kw: None)
-    mcp_server._live_engines.clear()
-    engine_rejected = mcp_server._get_or_init_engine(root1)
+    mcp_runtime._live_engines.clear()
+    engine_rejected = mcp_runtime.get_or_init_engine(root1)
     assert engine_rejected is None
-    assert str(root1) not in mcp_server._live_engine_revisions
+    assert str(root1) not in mcp_runtime._live_engine_revisions
 
     # 7. Legacy get_file_edit_context contract unchanged
     monkeypatch.setattr(core_state_mgr, "load_engine_state", lambda _c, _sid, **_kw: engine1.state)
-    mcp_server._live_engine_revisions[str(root1)] = 366
+    mcp_runtime._live_engine_revisions[str(root1)] = 366
     legacy_res = json.loads(mcp_server.get_file_edit_context.fn(repo_path=str(root1), file_path="r1/mod.py"))
     assert "public_api" in legacy_res
     assert "live_revision" not in legacy_res
@@ -3065,7 +3089,7 @@ def test_file_edit_context_layer_guard(monkeypatch, tmp_path):
             dependency_graph=empty_graph,
         )
     )
-    monkeypatch.setattr(mcp_server, "_get_or_init_engine", lambda _root: engine_fresh_clean)
+    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: engine_fresh_clean)
 
     res_clean_ui = json.loads(mcp_server.get_file_edit_context.fn(repo_path=str(root), target="pkg.ui_mod", mode="minimal"))
     assert res_clean_ui["layer_guard"]["available"] is True
@@ -3107,7 +3131,7 @@ def test_file_edit_context_layer_guard(monkeypatch, tmp_path):
             dependency_graph=empty_graph,
         )
     )
-    monkeypatch.setattr(mcp_server, "_get_or_init_engine", lambda _root: engine_with_v)
+    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: engine_with_v)
 
     # For pkg.ui_mod (source of 2 violations -> 2 outbound)
     res_ui_v = json.loads(mcp_server.get_file_edit_context.fn(repo_path=str(root), target="pkg.ui_mod", mode="minimal"))
@@ -3145,7 +3169,7 @@ def test_file_edit_context_layer_guard(monkeypatch, tmp_path):
             dependency_graph=empty_graph,
         )
     )
-    monkeypatch.setattr(mcp_server, "_get_or_init_engine", lambda _root: engine_inbound_core)
+    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: engine_inbound_core)
     res_inbound_core = json.loads(mcp_server.get_file_edit_context.fn(repo_path=str(root), target="pkg.core_mod", mode="minimal"))
     assert res_inbound_core["layer_guard"]["outbound_rules_defined"] is False
     assert res_inbound_core["layer_guard"]["outbound_violation_count"] == 0
@@ -3163,7 +3187,7 @@ def test_file_edit_context_layer_guard(monkeypatch, tmp_path):
             dependency_graph=empty_graph,
         )
     )
-    monkeypatch.setattr(mcp_server, "_get_or_init_engine", lambda _root: engine_deferred)
+    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: engine_deferred)
     res_deferred = json.loads(mcp_server.get_file_edit_context.fn(repo_path=str(root), target="pkg.ui_mod", mode="minimal"))
     assert res_deferred["layer_guard"]["available"] is False
     assert "deferred" in res_deferred["layer_guard"]["reason"]
@@ -3179,7 +3203,7 @@ def test_file_edit_context_layer_guard(monkeypatch, tmp_path):
             dependency_graph=empty_graph,
         )
     )
-    monkeypatch.setattr(mcp_server, "_get_or_init_engine", lambda _root: engine_stale)
+    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: engine_stale)
     res_stale = json.loads(mcp_server.get_file_edit_context.fn(repo_path=str(root), target="pkg.ui_mod", mode="minimal"))
     assert res_stale["layer_guard"]["available"] is False
     assert "stale" in res_stale["layer_guard"]["reason"]
@@ -3282,7 +3306,7 @@ def test_artifact_blast_radius_architecture_projection(monkeypatch, tmp_path):
             artifact_consumption_state="fresh",
         )
     )
-    monkeypatch.setattr(mcp_server, "_get_or_init_engine", lambda _root: engine_fresh)
+    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: engine_fresh)
 
     # A. Clean artifact: same-module & same-layer only
     res_clean = json.loads(
@@ -3395,7 +3419,7 @@ def test_artifact_blast_radius_architecture_projection(monkeypatch, tmp_path):
             artifact_consumption_state="fresh",
         )
     )
-    monkeypatch.setattr(mcp_server, "_get_or_init_engine", lambda _root: engine_no_definer_layer)
+    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: engine_no_definer_layer)
     res_no_def = json.loads(
         mcp_server.get_artifact_blast_radius.fn(
             repo_path=str(root),
@@ -3430,7 +3454,7 @@ def test_artifact_blast_radius_architecture_projection(monkeypatch, tmp_path):
             artifact_consumption_state="fresh",
         )
     )
-    monkeypatch.setattr(mcp_server, "_get_or_init_engine", lambda _root: engine_deferred)
+    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: engine_deferred)
     res_def = json.loads(
         mcp_server.get_artifact_blast_radius.fn(
             repo_path=str(root),
@@ -3537,7 +3561,7 @@ def test_artifact_blast_radius_downstream_module_reachability(monkeypatch, tmp_p
             artifact_consumption_state="fresh",
         )
     )
-    monkeypatch.setattr(mcp_server, "_get_or_init_engine", lambda _root: engine_fresh)
+    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: engine_fresh)
 
     # 1. Zero direct consumers -> downstream total = 0
     res_zero = json.loads(
@@ -3616,7 +3640,7 @@ def test_artifact_blast_radius_downstream_module_reachability(monkeypatch, tmp_p
             artifact_consumption_state="fresh",
         )
     )
-    monkeypatch.setattr(mcp_server, "_get_or_init_engine", lambda _root: engine_stale)
+    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: engine_stale)
     res_stale = json.loads(
         mcp_server.get_artifact_blast_radius.fn(
             repo_path=str(root),
@@ -3707,7 +3731,7 @@ def test_module_context_topology_provenance_and_freshness(monkeypatch, tmp_path)
             cached_analytics_state="fresh",
         )
     )
-    monkeypatch.setattr(mcp_server, "_get_or_init_engine", lambda _root: engine_fresh)
+    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: engine_fresh)
 
     # For pkg.mod_a: LIVE topology metrics override saved report
     res_a = json.loads(mcp_server.get_module_context.fn(repo_path=str(root), module_name="pkg.mod_a"))
@@ -3746,7 +3770,7 @@ def test_module_context_topology_provenance_and_freshness(monkeypatch, tmp_path)
             cached_analytics_state="fresh",
         )
     )
-    monkeypatch.setattr(mcp_server, "_get_or_init_engine", lambda _root: engine_stale)
+    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: engine_stale)
     res_stale = json.loads(mcp_server.get_module_context.fn(repo_path=str(root), module_name="pkg.mod_a"))
     metrics_stale = res_stale["metrics"]
     assert metrics_stale["fan_in"] == 1
@@ -3769,7 +3793,7 @@ def test_module_context_topology_provenance_and_freshness(monkeypatch, tmp_path)
             cached_analytics_state="deferred",
         )
     )
-    monkeypatch.setattr(mcp_server, "_get_or_init_engine", lambda _root: engine_deferred)
+    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: engine_deferred)
     res_def = json.loads(mcp_server.get_module_context.fn(repo_path=str(root), module_name="pkg.mod_a"))
     metrics_def = res_def["metrics"]
     assert metrics_def["fan_in"] == 1
@@ -3779,7 +3803,7 @@ def test_module_context_topology_provenance_and_freshness(monkeypatch, tmp_path)
     assert res_def["degree_metrics_source"] == "live_canonical_graph"
 
     # 4. Engine absent -> fail closed without report fallback.
-    monkeypatch.setattr(mcp_server, "_get_or_init_engine", lambda _root: None)
+    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: None)
     res_report = mcp_server.get_module_context.fn(
         repo_path=str(root), module_name="pkg.mod_a"
     )

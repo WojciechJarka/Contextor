@@ -1,125 +1,56 @@
-# PRE-SPLIT FULL SUITE - 4 FAILURE CLOSURE
+# S2A CORRECTION - SHARED MCP RUNTIME OWNER
 
-## FAILURE_1_ROOT_CAUSE
+## SUMMARY
 
-Classification: TEST_DRIFT
-
-The test expected UPDATED after:
-
-    valid source -> syntax-invalid source -> valid source
-
-The authoritative incremental contract records the parse-invalid module in canonical per-module freshness state. The first subsequent valid parse is an explicit recovery transition and returns RECOVERED even when normal semantic update work also occurs.
-
-Correction:
-
-- changed only the expected status from UPDATED to RECOVERED;
-- retained assertions proving the recovered symbol facts are current;
-- production RECOVERED behavior was not changed.
-
-## FAILURE_2_ROOT_CAUSE
-
-Classification: FIXTURE_DRIFT
-
-The retry-success fixture mocked connect() but provided no persisted endpoint identity and its fake client exposed no endpoint. The hardened contract requires:
-
-- owner_token;
-- authkey;
-- repo_id;
-- root_path;
-- stable endpoint identity before and after retry.
-
-Correction:
-
-- fixture now uses the existing full-identity endpoint helper;
-- fake client exposes the same endpoint;
-- _read_endpoint returns that endpoint;
-- canonical repository identity matches repo_id/root_path;
-- connect_or_start remains forbidden.
-
-Journal revision 42 remains unchanged after retry.
-
-## FAILURE_3_ROOT_CAUSE
-
-Classification: FIXTURE_DRIFT
-
-The transient-owner fixture supplied PID/token only. The production gate correctly returned endpoint_identity_unverified because repo_id and root_path were absent.
-
-Correction:
-
-- fixture now provides full endpoint and repository identity;
-- same identity plus live service PID still yields transient_connection_failure;
-- removing endpoint metadata still yields no_live_service;
-- PID-only semantics were not restored.
-
-## FAILURE_4_ROOT_CAUSE
-
-Classification: FIXTURE_DRIFT
-
-Exact returned payload before correction:
-
-    {
-      "status": "unavailable",
-      "reason": "Canonical LIVE dependency graph is unavailable. Run analyze_project first."
-    }
-
-Path:
-
-    get_file_edit_context(mode="minimal")
-    -> usable engine
-    -> module freshness gate passes
-    -> dependency_graph is None
-    -> fail-closed unavailable return
-
-layer_guard did not disappear from a valid full response. The fixture stopped before layer_guard construction because dependency_graph=None represents missing canonical graph, not a fresh graph with zero edges.
-
-The public current-truth contract requires no-graph minimal context to fail closed; returning layer_guard together with fabricated zero dependency/test evidence would regress that contract.
-
-Correction:
-
-- the layer_guard fixture now supplies one shared fresh empty graph with hard_edges={} and soft_edges={};
-- cached layer analytics remain unchanged;
-- all layer_guard cases now exercise their intended branch;
-- production code and unavailable gate were not changed.
+The temporary registration-time engine injection was removed. `contextor.mcp.runtime` now owns the engine resolver and both mutable runtime maps. All production consumers in `mcp_server.py` resolve engines through that owner.
 
 ## FILES_CHANGED
 
-- C:\Temp\Contextor_Repo\tests\test_incremental_equivalence.py
-- C:\Temp\Contextor_Repo\tests\test_live_e2e_corrections.py
-- C:\Temp\Contextor_Repo\tests\test_mcp_regressions.py
-- C:\Temp\Contextor_Repo\walkthrough.md
+- `C:\Temp\Contextor_Repo\contextor\mcp\runtime.py` (created)
+- `C:\Temp\Contextor_Repo\contextor\mcp\tools\query_canonical_projection.py`
+- `C:\Temp\Contextor_Repo\contextor\mcp_server.py`
+- `C:\Temp\Contextor_Repo\tests\test_mcp_split_s2a.py`
+- `C:\Temp\Contextor_Repo\tests\test_mcp_incremental_hydration.py`
+- focused tests whose monkeypatch targets moved from the former owner to `contextor.mcp.runtime`
 
-No production file changed in this closure.
+## IMPLEMENTATION
 
-## TARGETED_RESULT
+- moved `get_or_init_engine`, `_live_engines` and `_live_engine_revisions` as one dependency closure to `contextor.mcp.runtime`;
+- preserved resolver hydration, LIVE connection, revision and persistence logic;
+- changed `query_canonical_projection` to import the runtime owner directly;
+- changed every production resolver consumer in `mcp_server.py` to call `mcp_runtime.get_or_init_engine`;
+- removed `bind_engine_resolver`, the injected callable global and registration-time binding;
+- retained FastMCP registration, public signatures, schemas and order.
+
+SINGLE_RUNTIME_STATE_OWNER: true
+
+BIND_ENGINE_RESOLVER_EXISTS: false
+
+REGISTRATION_DEPENDENCY_BINDING: false
+
+PUBLIC_CONTRACT_CHANGED: false
+
+## TARGETED_TESTS
 
 Command:
 
-    python -m pytest -q +      tests/test_incremental_equivalence.py::test_incremental_successful_modify_after_failed_modify +      tests/test_live_e2e_corrections.py::test_live_events_retries_same_owner_and_preserves_journal +      tests/test_live_e2e_corrections.py::test_live_events_distinguishes_transient_owner_from_absence +      tests/test_mcp_regressions.py::test_file_edit_context_layer_guard
+    .venv\Scripts\python.exe -m pytest -q --disable-warnings tests/test_mcp_incremental_hydration.py tests/test_mcp_split_s2a.py tests/test_canonical_state_contract.py::test_mcp_describe_and_query_tools_share_the_contract tests/test_canonical_state_contract.py::test_mcp_projection_returns_structured_unavailable_state tests/test_live_e2e_corrections.py::test_canonical_projections_reject_stale_module_facts tests/test_mcp_regressions.py::test_file_edit_context_live_revision_lifecycle
 
-Result:
+Result: 10 passed, 0 failed, 1 warning in 16.04s.
 
-- 4 passed
-- 0 failed
-- 1 third-party FastMCP/Authlib deprecation warning
-- duration: 8.34s
+Syntax verification:
 
-The 748-test suite was not repeated.
+    .venv\Scripts\python.exe -m py_compile contextor/mcp_server.py contextor/mcp/runtime.py contextor/mcp/tools/query_canonical_projection.py
 
-## LIVE_VERIFICATION
-
-- revision 858: test_incremental_equivalence.py UPDATED by desktop_watcher
-- revision 859: test_live_e2e_corrections.py UPDATED by desktop_watcher
-- revision 860: test_mcp_regressions.py UPDATED by desktop_watcher
+Result: passed.
 
 ## CONTEXTOR_POST_CHANGE_AUDIT
 
-- recovery contract remains RECOVERED for parse-invalid -> valid;
-- owner identity remains exact and repository-bound, never PID-only;
-- no-graph file-edit context remains fail-closed;
-- layer_guard remains available for usable graph plus fresh cached analytics;
-- production implementations and consumers are unchanged;
-- no scope leakage into structural split.
+- pre-change Contextor evidence identified the exact resolver closure: the two runtime maps, LIVE connect/ping/snapshot hydration, persistent-state hydration and revision tracking;
+- source verification confirms no `bind_engine_resolver`, registration binding or private resolver compatibility alias remains;
+- post-change Contextor query returned `owner_identity_changed`; therefore its current canonical graph has not incorporated the new `contextor.mcp.runtime` module and still reports the previous graph;
+- code and targeted structural tests prove the intended dependency direction, but architectural visibility requires the current Contextor LIVE owner to reconnect/re-index after restart.
 
 ## FINAL_VERDICT
 
-PRE_SPLIT_FAILURES_CLOSED
+S2A_ARCHITECTURE_CLOSED

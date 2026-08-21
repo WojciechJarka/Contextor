@@ -27,7 +27,8 @@ from contextor.core.graph.metrics import compute_graph_metrics
 from contextor.core.live_state.store import save_snapshot, load_snapshot
 from contextor.core.reporting_engine.graph_analytics import compute_topology_analytics
 from contextor.core.reporting_engine.persistent_registry import PersistentIdentityRegistry
-from contextor.mcp_server import get_module_context, _live_engines
+from contextor.mcp_server import get_module_context
+from contextor.mcp.runtime import _live_engines
 
 
 def _create_sample_repo(tmp_path: Path):
