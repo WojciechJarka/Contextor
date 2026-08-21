@@ -1,89 +1,125 @@
-# MCP SPLIT FINAL AUDIT — STEP 8: FINAL MCP SPLIT CERTIFICATION
+# TOKEN EFFICIENCY — STEP A1.2: BOUNDED_ITEMS & CURRENT COMPLETENESS SEMANTICS
 
 ## FILES_CHANGED=NONE
 
 ---
 
-## CERTIFICATION_SCOPE
+## BOUNDED_ITEMS_IMPLEMENTATION
 
-Zakres końcowej certyfikacji obejmuje:
-- Pełną modularizację monolitu `contextor/mcp_server.py` na 21 dedykowanych modułów narzędzi pod `contextor/mcp/tools/*.py` (etapy S2A–S2E).
-- Wyodrębnienie modułów współdzielonych warstwy MCP (`contextor/mcp/runtime.py`, `analysis_jobs.py`, `query_helpers.py`, `report_helpers.py`, `documentation.py`).
-- Rozwiązanie defektu kontraktu restartu **F-01 (P1)**: implementacja tool-local restart domain detection w `contextor/mcp/tools/update_file.py` i pomyślna certyfikacja runtime post-restart.
-- Rozwiązanie test driftu **F-02 (P2)**: aktualizacja testu `test_update_file_marks_running_mcp_server_as_requiring_restart` w `tests/test_mcp_regressions.py`.
-- Weryfikacja regresyjna kontraktów modularności, hydratacji, fail-closed SSOT, RECOVERED flow i projekcji kanonicznej.
+Kompletna implementacja symbolu `contextor.mcp.query_helpers::bounded_items` (linie 10–16 w `contextor/mcp/query_helpers.py`):
 
-*(Niniejsza certyfikacja dotyczy ściśle architektury MCP Server Split i nie stanowi certyfikacji całego Contextora ani wydania 1.2.0-beta).*
-
----
-
-## INVARIANT_MATRIX
-
-| # | Badany Obszar / Inwariant Architektoniczny | Stan Faktyczny / Dowód | Werdykt |
-|---|---|---|---|
-| 1 | **PUBLIC TOOL EXTRACTION** | Dokładnie 21 publicznych narzędzi wyekstrahowanych do `contextor.mcp.tools.*`; każdemu odpowiada dokładnie 1 rejestracja; 0 ciał narzędzi w `mcp_server.py`. | **PASS** |
-| 2 | **MCP_SERVER THINNESS** | `contextor/mcp_server.py` zawiera wyłącznie FastMCP setup, rejestracje narzędzi, bootstrap venv, czyszczenie osieroconych procesów i `main()`. Zero zduplikowanych ciał i helperów. | **PASS** |
-| 3 | **IMPORT DAG & ISOLATION** | Kierunek: `mcp_main -> mcp_server -> tools/* -> shared MCP -> core`. `TOOL_TO_SERVER=0`, `TOOL_TO_TOOL=0`, `SHARED_TO_TOOLS=0`, `CORE_TO_MCP=0` (poza neutralnym adapterem `contextor.mcp_process_registry`). | **PASS** |
-| 4 | **SHARED OWNERSHIP** | Moduły `runtime`, `analysis_jobs`, `query_helpers`, `report_helpers` mają unikalnych pojedynczych właścicieli odpowiedzialności; 0 zduplikowanego stanu mutowalnego. | **PASS** |
-| 5 | **CANONICAL QUERY SSOT** | Wszystkie 10 narzędzi Canonical Query pobierają bieżącą prawdę z `engine.state` (RAM) lub bezpośredniego odczytu AST repozytorium (`get_symbol_implementation`); brak fallbacków do generowanych raportów JSON. | **PASS** |
-| 6 | **FRESHNESS & RECOVERY** | Błędy parsowania (stale) fail-closed z oznaczeniem `provenance: "last_known_good"`; po naprawie zdarzenie `RECOVERED`; świeżość konsumpcji artefaktów weryfikowana autorytatywnie. | **PASS** |
-| 7 | **LIVE LIFECYCLE** | Ciągłość rewizji i dziennika zdarzeń (journal), sprawdzanie tożsamości właściciela (PID, repo_id), brak duplikatów menedżera cyklu życia i idempotencja restartu. | **PASS** |
-| 8 | **F-01 RESTART DOMAIN GAP** | Domknięta domena: `mcp_server.py`, `mcp_main.py`, `mcp_process_registry.py` oraz rekurencyjnie `contextor/mcp/**/*.py`. `mcp_worker.py` poprawnie wykluczony. Fail-closed I/O. Certyfikacja post-restart potwierdzona. | **PASS** |
-| 9 | **F-02 TEST RESTART DRIFT** | Test `test_update_file_marks_running_mcp_server_as_requiring_restart` zaktualizowany do patchowania `_mcp_runtime_restart_required` bez compatibility aliases. | **PASS** |
-| 10 | **DEAD & LEGACY AUDIT** | 0 martwych importów, 0 starych odwołań do `_MCP_SERVER_SOURCE_PATH`/`_MCP_SERVER_SOURCE_FINGERPRINT`/`_get_canonical_report`, 0 ghost implementations. | **PASS** |
-
----
-
-## CLOSED_FINDINGS
-
-1. **F-01 (Severity P1): `UPDATE_FILE_MCP_RESTART_DOMAIN_GAP`** -> **CLOSED**
-   - Implementacja tool-local w `contextor/mcp/tools/update_file.py` z pełnym pokryciem domeny i fail-closed I/O.
-2. **F-02 (Severity P2): `STALE_TEST_RESTART_MONKEYPATCH`** -> **CLOSED**
-   - Poprawka w `tests/test_mcp_regressions.py` usuwająca odwołanie do wycofanego atrybutu.
-
----
-
-## OPEN_FINDINGS
-
-- `OPEN_P0`: **0**
-- `OPEN_P1`: **0**
-- `OPEN_P2`: **0**
-- `OPEN_P3`: **0**
-
----
-
-## TEST_EVIDENCE
-
-Wyniki wykonania finalnych etapów regresji MCP split (łącznie 127 testów):
-- **STEP 7A (Structural Split Suite S2A–S2E):** `18 passed` w 9.62s (`test_mcp_split_s2a.py` .. `test_mcp_split_s2e.py`)
-- **STEP 7B (MCP Regressions & Hydration):** `74 passed` w 25.09s (`test_mcp_regressions.py`, `test_mcp_incremental_hydration.py`)
-- **STEP 7D (Selected Remaining Regressions):** `35 passed` w 13.23s (`test_live_e2e_corrections.py`, `test_mcp_documentation.py`, `test_canonical_state_contract.py`, `test_incremental_local_metrics.py`)
-- **Łącznie:** **127 passed, 0 failed, 0 errors**.
-
----
-
-## KNOWN_POSTPONED_NONBLOCKERS
-
-- **R4/R5 `get_layer_isolation` report-backed cleanup:** Świadomie zaplanowana migracja narzędzia `get_layer_isolation` z odczytu raportów analityki grafowej do stanu kanonicznego RAM w ramach kolejnych etapów ewolucji silnika (nie stanowi defektu splitu architektonicznego MCP).
-
----
-
-## FINAL_CERTIFICATION
-
-```text
-MCP_SPLIT_FINAL_CERTIFICATION=PASS
-S2A_S2E=COMPLETE
-PUBLIC_TOOLS=21/21
-OPEN_P0=0
-OPEN_P1=0
-OPEN_P2=0
-OPEN_P3=0
-F01=CLOSED
-F02=CLOSED
+```python
+def bounded_items(items: list, limit: int | None) -> tuple[list, int, bool]:
+    total = len(items)
+    if limit is None:
+        return items, total, False
+    safe_limit = max(0, int(limit))
+    selected = items[:safe_limit]
+    return selected, total, total > len(selected)
 ```
+
+---
+
+## MAX_ITEMS_NONE_SEMANTICS
+
+- Gdy `limit is None`:
+  - Funkcja natychmiast zwraca `items, total, False`.
+  - Zwracana jest **pełna, nieobcięta kolekcja**, dokładna liczba elementów `total = len(items)` oraz flaga `truncated = False`.
+  - Jest to w 100% bezstratna ścieżka (lossless).
+
+---
+
+## MAX_ITEMS_ZERO_SEMANTICS
+
+- Gdy `limit == 0`:
+  - `safe_limit = max(0, int(0)) -> 0`.
+  - `selected = items[:0] -> []`.
+  - Zwraca `([], total, total > 0)`:
+    - Jeśli `total > 0`: zwraca pustą listę elementów oraz `truncated = True`.
+    - Jeśli `total == 0`: zwraca pustą listę elementów oraz `truncated = False`.
+
+---
+
+## CURRENT_LOSSLESS_PATH
+
+- Wywołanie `get_module_context(repo_path, module_name, compact=False, max_items=None)` stanowi w obecnym kodzie **istniejącą ścieżkę bezstratną (lossless complete)**:
+  - `compact=False` włącza gałąź `full_result` z kluczem `"items"`.
+  - `max_items=None` przekazuje `limit=None` do `bounded_items`, co skutkuje zwróceniem wszystkich elementów bez obcinania (`truncated=False`).
+
+---
+
+## COMPACT_COMPLETENESS_SEMANTICS
+
+- W `get_module_context`:
+  - Gdy `compact=True` (wartość domyślna): zwracany jest słownik `compact_result`, który **zawsze usuwa klucz `items`**, niezależnie od wartości `total` czy `max_items`.
+  - W efekcie, gdy np. moduł posiada 1 zależność wejściową (`total = 1`), a `max_items = 30`, odpowiedź przyjmuje postać:
+    ```json
+    "dependencies_inbound_who_calls_me": {
+      "total": 1,
+      "truncated": false
+    }
+    ```
+  - **`SEMANTIC_GAP_COMPACT_COMPLETENESS`:** Odpowiedź deklaruje `truncated: false` (ponieważ kolekcja nie przekroczyła `max_items`), ale jednocześnie nie udostępnia żadnego elementu (brak klucza `items`). Flaga `truncated` oznacza obecnie jedynie stan obcięcia przez `bounded_items`, a nie obecność kompletnych danych w payloadzie.
+
+---
+
+## EXISTING_TEST_CONTRACTS
+
+1. **Brak klucza `items` przy `compact=True`:**
+   - Test `tests/test_mcp_regressions.py::test_mcp_canonical_queries_support_fields_filtering` (l. 2057–2064):
+     ```python
+     assert result["dependencies_inbound_who_calls_me"] == {
+         "total": 1,
+         "truncated": False,
+     }
+     assert result["dependencies_outbound_who_i_call"] == {
+         "total": 2,
+         "truncated": False,
+     }
+     ```
+     Asertuje dokładną strukturę słownika bez klucza `items`.
+
+2. **Obecność klucza `items` i `truncated=True` przy `compact=False`:**
+   - `tests/test_mcp_regressions.py::test_mcp_canonical_queries_support_fields_filtering` (l. 2078–2085):
+     ```python
+     assert set(full["dependencies_inbound_who_calls_me"]["items"]) == {"pkg.caller"}
+     assert full["dependencies_inbound_who_calls_me"]["total"] == 1
+     assert full["dependencies_inbound_who_calls_me"]["truncated"] is False
+     assert len(full["dependencies_outbound_who_i_call"]["items"]) == 1
+     assert full["dependencies_outbound_who_i_call"]["total"] == 2
+     assert full["dependencies_outbound_who_i_call"]["truncated"] is True
+     ```
+
+3. **Zachowanie metryk i źródeł:**
+   - `tests/test_incremental_local_metrics.py::test_stage2c_get_module_context_behavior_preserved` (l. 605–617):
+     Weryfikuje wartości `fan_in`, `fan_out` oraz `degree_metrics_source: "live_canonical_graph"` w domyślnym trybie compact.
+
+---
+
+## SEMANTIC_GAPS
+
+1. **`SEMANTIC_GAP_COMPACT_COMPLETENESS`:** W `compact=True` klient otrzymuje `truncated: false`, ale 0 elementów `items`.
+2. **`SEMANTIC_GAP_BINARY_COMPACT`:** Brak poziomu pośredniego `summary` z ograniczoną próbką relacji (bounded evidence top N w zwięzłej formie token-efficient).
+3. **`SEMANTIC_GAP_EXPANSION_DISCOVERY`:** Payload obcięty (`truncated: true`) nie zawiera jawnego pola sugerującego sposób pobrania pełnej listy (np. `next_offset` lub `expand_via: {"compact": false, "max_items": null}`).
+
+---
+
+## NEXT_SMALLEST_DESIGN_DECISION
+
+- Zdefiniować docelowy model wielopoziomowego disclosure dla `get_module_context`:
+  1. Domyślny widok summary (zwięzłe metryki + bounded evidence bez powielania metadanych per-item).
+  2. Widok pełny/rozszerzony (lossless z `items`, zachowujący wsteczną kompatybilność z istniejącymi asercjami `compact=False`).
+
+---
+
+## STEP_VERDICT
+
+`PASS`
 
 ---
 
 ## NEXT_STEP_PROPOSAL
 
-RETURN TO FULL ANALYSIS SCALABILITY AUDIT — STEP 1.
+**TOKEN EFFICIENCY — STEP A1.3: GET_MODULE_CONTEXT TOKEN-OPTIMIZED RESPONSE SPECIFICATION**
+- Opracować dokładną specyfikację formatu JSON dla `get_module_context` (summary vs full vs fields).
+- Zaprezentować kalkulację oszczędności tokenów (before/after) na realnych danych repozytorium.
