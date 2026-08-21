@@ -1,3 +1,92 @@
+## [1.2.0-beta Patch — LIVE Hardening, MCP Modularization & Token Efficiency] - 2026-08-21
+
+### Canonical LIVE truth and recovery semantics
+
+- Hardened canonical LIVE state against syntax-invalid source updates. Modules with parse failures now retain last-known-good structural facts only as explicitly stale data instead of being exposed as current truth.
+- Added persistent per-module parse freshness tracking and authoritative current-truth helpers shared by LIVE updates and MCP query paths.
+- Added explicit recovery semantics: a successfully reparsed stale module now emits `RECOVERED`, even when its semantic payload matches the previous valid version.
+- Preserved parse-freshness state across canonical persistence and hydration.
+- Extended stale/fail-closed handling across architecture, module-context, file-edit, artifact search, symbol lookup and canonical projection paths.
+- Hardened LIVE reconnect handling against transient IPC failures without starting competing owners.
+- Strengthened owner identity validation with repository identity, root path, PID, endpoint, owner token and authentication identity checks.
+- Preserved journal and revision continuity across transient reconnects and desktop/MCP restarts.
+
+### LIVE incremental correctness and restart reconciliation
+
+- Fixed incremental ADD handling when persisted file fingerprints were ahead of canonical state. An unchanged fingerprint can no longer suppress materialization of a module missing from canonical RAM.
+- `UNCHANGED` is now valid only when the current file fingerprint matches and the module already exists in authoritative canonical state.
+- Added canonical ADD/DELETE verification for modules, artifacts and dependency-graph nodes without requiring a Full Analysis.
+- Added startup reconciliation for files added, modified or deleted while the desktop watcher was offline.
+- Startup reconciliation compares current filesystem state, persisted file fingerprints and canonical module membership, then routes only proven differences through the normal incremental COW/update pipeline.
+- Preserved exclusions as authoritative during startup reconciliation.
+- Added restart-idempotence guarantees: restarting LIVE without repository changes no longer produces repeated no-op updates or revision churn.
+- Semantic `UNCHANGED` updates now acknowledge the current file fingerprint so the same file is not redispatched on subsequent restarts.
+- Added pre-dispatch revalidation of startup candidates to prevent stale reconciliation queues from producing unnecessary `update_file` journal events.
+- Verified offline ADD, MODIFY and DELETE recovery, canonical cleanup/materialization and zero-change restart idempotence.
+
+### MCP discovery and documentation token reduction
+
+- Moved public MCP documentation out of Python tool docstrings into `contextor/mcp/docs`.
+- Added a compact documentation index with per-tool short descriptions and one JSON document per public MCP tool.
+- Added `get_mcp_documentation` for progressive documentation disclosure: index-only, selected tools and selected sections can be requested without loading the complete documentation corpus.
+- FastMCP tool descriptions are now sourced from the compact documentation index.
+- Reduced existing MCP tool-description payload from 24,544 bytes to 2,770 bytes and the complete 21-tool description payload to 2,925 bytes.
+- Reduced the serialized FastMCP discovery catalog from 36,961 bytes to 15,517 bytes, a 58.02% reduction, while preserving public tool schemas and behavior.
+- Removed public documentation docstrings from tool implementations to keep discovery payloads independent from full operational documentation.
+
+### MCP server modularization
+
+- Split the former monolithic `contextor/mcp_server.py` into one implementation module per public MCP tool under `contextor/mcp/tools`.
+- All 21 public MCP tools now have dedicated implementation owners; `mcp_server.py` contains zero public tool implementation bodies.
+- Preserved the complete public MCP surface, including exact tool names, order, signatures, defaults, annotations, short descriptions and `contextor.mcp_server.<tool>.fn` compatibility bindings.
+- Centralized registration remains explicit and exactly-once; tool modules contain no FastMCP instances, decorators or registration side effects.
+- Enforced dependency direction:
+  `mcp_main -> mcp_server -> tools/* -> shared MCP modules -> core`.
+- Removed tool-to-server and tool-to-tool imports, registration-time dependency injection, temporary resolver bindings and private compatibility bridges.
+- Added dedicated shared MCP owners:
+  - `contextor.mcp.runtime` for canonical engine/runtime state and LIVE status publication;
+  - `contextor.mcp.analysis_jobs` for analysis-job lifecycle, locks, durable status, worker execution, hydration and LIVE publication orchestration;
+  - `contextor.mcp.query_helpers` for shared canonical query projections, registry access, freshness handling and artifact catalog/consumer helpers;
+  - `contextor.mcp.report_helpers` for shared historical/report resolution.
+- Kept single-consumer helpers local to their tool owners instead of creating unnecessary shared abstractions.
+- Migrated tests and monkeypatches to actual implementation owners and removed obsolete test dependencies on private `mcp_server` symbols.
+
+### MCP analysis execution and Windows multiprocessing
+
+- Removed the obsolete MCP-specific `CONTEXTOR_DISABLE_PROCESS_POOL=1` override that forced full repository analysis into sequential artifact processing.
+- Restored the same internal ProcessPool execution policy used by desktop analysis while retaining an explicitly inherited sequential fallback when requested by the environment.
+- Preserved analysis-job deduplication, status persistence, canonical hydration, LIVE publication, exclusions and shared facade semantics.
+- Added lightweight `contextor.mcp_main` startup entrypoint so Windows multiprocessing children no longer bootstrap FastMCP, register all MCP tools or initialize unnecessary server dependencies.
+- Kept `multiprocessing.freeze_support()` and heavy MCP imports behind the protected runtime startup path.
+- Eliminated the previously observed MCP-specific ~2x full-analysis slowdown caused by forced sequential artifact analysis.
+- Controlled desktop/MCP measurements now show equivalent global-pipeline execution, with only bounded MCP process/bootstrap overhead.
+
+### Canonical MCP query ownership and SSOT cleanup
+
+- Completed migration of current architecture, module-context, file-edit, artifact-search and symbol-implementation queries to canonical `RepositoryAnalysisState` ownership.
+- Preserved fail-closed parse freshness, exact canonical artifact domains, zero-consumer artifacts, ambiguity handling, freshness/provenance and bounded response semantics through the MCP split.
+- Kept historical/report-oriented access only where it is part of the explicit contract, including report diff and indexed report context.
+- `get_layer_isolation` remains intentionally report-backed pending its separate canonical R4/R5 cleanup.
+- Preserved complete AST-scoped symbol implementation retrieval with signatures, source resolution, ambiguity refusal and static context after modularization.
+
+### Validation and regression coverage
+
+- Added structural regression coverage for all MCP split stages, including tool ownership, registration parity, dependency direction, shared-helper uniqueness and absence of monolithic tool bodies.
+- Added Windows spawn regressions proving multiprocessing children do not bootstrap FastMCP or MCP registration.
+- Added focused LIVE regressions for stale parse truth, recovery, new-module materialization, startup reconciliation and restart idempotence.
+- Removed obsolete and inert test monkeypatches left behind by MCP ownership changes; tests now patch the actual runtime lookup sites.
+- Verified incremental materialization of newly created MCP modules through desktop LIVE without using Full Analysis as a repair mechanism.
+- Full-suite checkpoints during the refactor identified only expected test/fixture drift from deliberate ownership and contract changes; affected tests were migrated without restoring legacy compatibility paths.
+
+### Performance characterization
+
+- Controlled OLD-vs-CURRENT Full Analysis benchmarking found no performance regression from the MCP/LIVE refactors.
+- Current code processed a larger repository snapshot faster than the older comparison revision under identical execution conditions.
+- `collect_module_artifacts` showed healthy scaling: module count increased by ~14% while stage duration increased by ~8%, reducing average cost per module.
+- Graph analytics helpers, including PageRank, HITS, betweenness, dependency matrices and Jaccard clustering, remain sub-second in aggregate at the current repository size.
+- Large historical Full Analysis timing variance was classified as environmental/runtime variance rather than a deterministic code regression.
+- Remaining Full Analysis cost is now treated as a scalability concern for larger repositories rather than a regression introduced by the current refactor.
+
 Patch — MCP Pre-Edit Ergonomics & GUI Operation Timing] - 2026-08-19
 
 ### Lightweight pre-edit context for coding agents
