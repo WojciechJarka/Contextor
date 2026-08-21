@@ -4370,3 +4370,155 @@ def test_blast_radius_consumer_representation_and_progressive_disclosure(
     assert res_r["artifact"] == "pkg.core::target_func"
     assert res_r["kind"] == "function"
 
+    # S. Compact expand preserves fields
+    res_s_named = json.loads(
+        blast_tool.get_artifact_blast_radius(
+            str(tmp_path), "pkg.core::target_func", compact=True, fields=["consumers"]
+        )
+    )["consumers"]
+    assert res_s_named["expand"] == {
+        "compact": False,
+        "max_items": None,
+        "representation": "named",
+        "fields": ["consumers"],
+    }
+
+    res_s_indexed = json.loads(
+        blast_tool.get_artifact_blast_radius(
+            str(tmp_path), "pkg.core::target_func", compact=True, representation="indexed", fields=["consumers"]
+        )
+    )["consumers"]
+    assert res_s_indexed["expand"] == {
+        "compact": False,
+        "max_items": None,
+        "representation": "indexed",
+        "fields": ["consumers"],
+    }
+
+    res_s_auto = json.loads(
+        blast_tool.get_artifact_blast_radius(
+            str(tmp_path), "pkg.core::target_func", compact=True, representation="auto", fields=["consumers"]
+        )
+    )["consumers"]
+    assert res_s_auto["expand"] == {
+        "compact": False,
+        "max_items": None,
+        "representation": "auto",
+        "fields": ["consumers"],
+    }
+
+    # T. Decision options preserve consumers-only projection
+    monkeypatch.setattr(blast_tool, "_AUTO_NEGOTIATION_MIN_BYTES_SAVED", 5)
+    res_t = json.loads(
+        blast_tool.get_artifact_blast_radius(
+            str(tmp_path), "pkg.core::target_func", compact=False, max_items=None, representation="auto", fields=["consumers"]
+        )
+    )
+    assert set(res_t.keys()) == {"consumers"}
+    c_t = res_t["consumers"]
+    assert c_t["status"] == "representation_decision_required"
+    assert c_t["options"]["named"]["fields"] == ["consumers"]
+    assert c_t["options"]["indexed"]["fields"] == ["consumers"]
+    assert c_t["options"]["bounded_named"]["fields"] == ["consumers"]
+
+    # Execute options.indexed directly
+    retry_t = json.loads(
+        blast_tool.get_artifact_blast_radius(
+            str(tmp_path),
+            "pkg.core::target_func",
+            **c_t["options"]["indexed"],
+        )
+    )
+    assert set(retry_t.keys()) == {"consumers"}
+    expected_explicit_t = json.loads(
+        blast_tool.get_artifact_blast_radius(
+            str(tmp_path),
+            "pkg.core::target_func",
+            compact=False,
+            max_items=None,
+            representation="indexed",
+            fields=["consumers"],
+        )
+    )
+    assert retry_t == expected_explicit_t
+
+    # U. Multi-field projection preserved in retry descriptor
+    res_u = json.loads(
+        blast_tool.get_artifact_blast_radius(
+            str(tmp_path), "pkg.core::target_func", compact=False, max_items=None, representation="auto", fields=["artifact", "consumers"]
+        )
+    )
+    assert set(res_u.keys()) == {"artifact", "consumers"}
+    assert res_u["artifact"] == "pkg.core::target_func"
+    c_u = res_u["consumers"]
+    assert c_u["options"]["named"]["fields"] == ["artifact", "consumers"]
+    assert c_u["options"]["indexed"]["fields"] == ["artifact", "consumers"]
+    assert c_u["options"]["bounded_named"]["fields"] == ["artifact", "consumers"]
+
+    retry_u = json.loads(
+        blast_tool.get_artifact_blast_radius(
+            str(tmp_path),
+            "pkg.core::target_func",
+            **c_u["options"]["indexed"],
+        )
+    )
+    assert set(retry_u.keys()) == {"artifact", "consumers"}
+    assert retry_u["artifact"] == "pkg.core::target_func"
+    assert retry_u["consumers"] == res_j
+
+    # V. Bounded expand + exact sizing with fields
+    res_v = json.loads(
+        blast_tool.get_artifact_blast_radius(
+            str(tmp_path), "pkg.core::target_func", compact=False, max_items=12, representation="auto", fields=["consumers"]
+        )
+    )["consumers"]
+    assert res_v["status"] == "representation_decision_required"
+    assert res_v["decision_scope_count"] == 12
+    assert res_v["expand"] == {
+        "compact": False,
+        "max_items": None,
+        "representation": "auto",
+        "fields": ["consumers"],
+    }
+    assert res_v["options"]["named"]["fields"] == ["consumers"]
+    assert res_v["options"]["indexed"]["fields"] == ["consumers"]
+    assert res_v["options"]["bounded_named"]["fields"] == ["consumers"]
+
+    # Exact candidate sizing with fields in expand
+    named_candidate_v = {
+        "total": 15,
+        "truncated": True,
+        "items": consumer_names[:12],
+        "expand": {
+            "compact": False,
+            "max_items": None,
+            "representation": "named",
+            "fields": ["consumers"],
+        },
+    }
+    indexed_candidate_v = {
+        "representation": "indexed",
+        "index_kind": "module",
+        "resolve_via": "lookup_index_entries",
+        "total": 15,
+        "truncated": True,
+        "items": [f"{100+i}/1" for i in range(1, 13)],
+        "expand": {
+            "compact": False,
+            "max_items": None,
+            "representation": "indexed",
+            "fields": ["consumers"],
+        },
+    }
+    expected_named_bytes_v = len(json.dumps(named_candidate_v, indent=2, ensure_ascii=False).encode("utf-8"))
+    expected_indexed_bytes_v = len(json.dumps(indexed_candidate_v, indent=2, ensure_ascii=False).encode("utf-8"))
+    expected_bytes_saved_v = expected_named_bytes_v - expected_indexed_bytes_v
+    expected_percent_saved_v = round((expected_bytes_saved_v / expected_named_bytes_v) * 100, 1)
+
+    assert res_v["sizes"] == {
+        "named_bytes": expected_named_bytes_v,
+        "indexed_bytes": expected_indexed_bytes_v,
+        "bytes_saved": expected_bytes_saved_v,
+        "percent_saved": expected_percent_saved_v,
+    }
+

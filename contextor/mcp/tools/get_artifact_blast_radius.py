@@ -16,8 +16,19 @@ def _consumers_collection_view(
     compact: bool,
     representation: str,
     mod_path_to_id: dict[str, str],
+    fields: list[str] | None = None,
 ) -> dict:
     total = len(unique_direct_consumers)
+
+    def _make_expand(rep: str) -> dict:
+        exp = {
+            "compact": False,
+            "max_items": None,
+            "representation": rep,
+        }
+        if fields is not None:
+            exp["fields"] = list(fields)
+        return exp
 
     if compact:
         if max_items is None:
@@ -39,11 +50,7 @@ def _consumers_collection_view(
             data_key: list(selected),
         }
         if truncated:
-            result["expand"] = {
-                "compact": False,
-                "max_items": None,
-                "representation": "named",
-            }
+            result["expand"] = _make_expand("named")
         return result
 
     if representation == "indexed":
@@ -64,11 +71,7 @@ def _consumers_collection_view(
             data_key: indexed_items,
         }
         if truncated:
-            result["expand"] = {
-                "compact": False,
-                "max_items": None,
-                "representation": "indexed",
-            }
+            result["expand"] = _make_expand("indexed")
         return result
 
     # representation == "auto"
@@ -81,11 +84,7 @@ def _consumers_collection_view(
             "evidence": list(selected),
         }
         if truncated:
-            result["expand"] = {
-                "compact": False,
-                "max_items": None,
-                "representation": "auto",
-            }
+            result["expand"] = _make_expand("auto")
         return result
 
     # compact is False and representation == "auto"
@@ -101,11 +100,7 @@ def _consumers_collection_view(
             "items": list(selected),
         }
         if truncated:
-            result["expand"] = {
-                "compact": False,
-                "max_items": None,
-                "representation": "auto",
-            }
+            result["expand"] = _make_expand("auto")
         return result
 
     named_candidate = {
@@ -114,11 +109,7 @@ def _consumers_collection_view(
         "items": list(selected),
     }
     if truncated:
-        named_candidate["expand"] = {
-            "compact": False,
-            "max_items": None,
-            "representation": "named",
-        }
+        named_candidate["expand"] = _make_expand("named")
 
     indexed_items = [str(mod_path_to_id[m]) for m in selected]
     indexed_candidate = {
@@ -130,11 +121,7 @@ def _consumers_collection_view(
         "items": indexed_items,
     }
     if truncated:
-        indexed_candidate["expand"] = {
-            "compact": False,
-            "max_items": None,
-            "representation": "indexed",
-        }
+        indexed_candidate["expand"] = _make_expand("indexed")
 
     named_bytes = len(json.dumps(named_candidate, indent=2, ensure_ascii=False).encode("utf-8"))
     indexed_bytes = len(json.dumps(indexed_candidate, indent=2, ensure_ascii=False).encode("utf-8"))
@@ -150,11 +137,7 @@ def _consumers_collection_view(
             "items": list(selected),
         }
         if truncated:
-            result["expand"] = {
-                "compact": False,
-                "max_items": None,
-                "representation": "auto",
-            }
+            result["expand"] = _make_expand("auto")
         return result
 
     evidence = selected[:_COMPACT_EVIDENCE_LIMIT]
@@ -171,12 +154,17 @@ def _consumers_collection_view(
             "max_items": max_items,
         },
     }
+    if fields is not None:
+        options["named"]["fields"] = list(fields)
+        options["indexed"]["fields"] = list(fields)
     if len(selected) > 10:
         options["bounded_named"] = {
             "representation": "named",
             "compact": False,
             "max_items": 10,
         }
+        if fields is not None:
+            options["bounded_named"]["fields"] = list(fields)
 
     decision_res = {
         "status": "representation_decision_required",
@@ -194,11 +182,7 @@ def _consumers_collection_view(
         "options": options,
     }
     if len(selected) < total:
-        decision_res["expand"] = {
-            "compact": False,
-            "max_items": None,
-            "representation": "auto",
-        }
+        decision_res["expand"] = _make_expand("auto")
     return decision_res
 
 
@@ -417,6 +401,7 @@ def get_artifact_blast_radius(
                         compact=compact,
                         representation=representation,
                         mod_path_to_id=mod_path_to_id,
+                        fields=fields,
                     )
                     if isinstance(consumers_view, dict) and "error" in consumers_view:
                         return json.dumps(consumers_view, indent=2)
