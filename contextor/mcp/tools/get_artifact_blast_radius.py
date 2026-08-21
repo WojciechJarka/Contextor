@@ -5,13 +5,220 @@ from contextor.mcp import runtime as mcp_runtime
 from contextor.mcp import query_helpers
 
 
+_COMPACT_EVIDENCE_LIMIT = 3
+_AUTO_NEGOTIATION_MIN_BYTES_SAVED = 512
+_ALLOWED_REPRESENTATIONS = {"auto", "indexed", "named"}
+
+
+def _consumers_collection_view(
+    unique_direct_consumers: list[str],
+    max_items: int | None,
+    compact: bool,
+    representation: str,
+    mod_path_to_id: dict[str, str],
+) -> dict:
+    total = len(unique_direct_consumers)
+
+    if compact:
+        if max_items is None:
+            limit = _COMPACT_EVIDENCE_LIMIT
+        else:
+            limit = min(_COMPACT_EVIDENCE_LIMIT, max(0, int(max_items)))
+        selected = unique_direct_consumers[:limit]
+        data_key = "evidence"
+    else:
+        selected, total, _ = query_helpers.bounded_items(unique_direct_consumers, max_items)
+        data_key = "items"
+
+    truncated = total > len(selected)
+
+    if representation == "named":
+        result = {
+            "total": total,
+            "truncated": truncated,
+            data_key: list(selected),
+        }
+        if truncated:
+            result["expand"] = {
+                "compact": False,
+                "max_items": None,
+                "representation": "named",
+            }
+        return result
+
+    if representation == "indexed":
+        missing = [m for m in selected if m not in mod_path_to_id]
+        if missing:
+            return {
+                "error": "Cannot fulfill indexed representation: missing module IDs for some consumers.",
+                "missing_modules": missing,
+                "suggested_action": "Use representation='named' or re-run analysis.",
+            }
+        indexed_items = [str(mod_path_to_id[m]) for m in selected]
+        result = {
+            "representation": "indexed",
+            "index_kind": "module",
+            "resolve_via": "lookup_index_entries",
+            "total": total,
+            "truncated": truncated,
+            data_key: indexed_items,
+        }
+        if truncated:
+            result["expand"] = {
+                "compact": False,
+                "max_items": None,
+                "representation": "indexed",
+            }
+        return result
+
+    # representation == "auto"
+    if compact:
+        result = {
+            "representation": "named",
+            "requested_representation": "auto",
+            "total": total,
+            "truncated": truncated,
+            "evidence": list(selected),
+        }
+        if truncated:
+            result["expand"] = {
+                "compact": False,
+                "max_items": None,
+                "representation": "auto",
+            }
+        return result
+
+    # compact is False and representation == "auto"
+    missing = [m for m in selected if m not in mod_path_to_id]
+    if missing:
+        result = {
+            "representation": "named",
+            "requested_representation": "auto",
+            "indexed_representation_available": False,
+            "reason": "missing_module_ids",
+            "total": total,
+            "truncated": truncated,
+            "items": list(selected),
+        }
+        if truncated:
+            result["expand"] = {
+                "compact": False,
+                "max_items": None,
+                "representation": "auto",
+            }
+        return result
+
+    named_candidate = {
+        "total": total,
+        "truncated": truncated,
+        "items": list(selected),
+    }
+    if truncated:
+        named_candidate["expand"] = {
+            "compact": False,
+            "max_items": None,
+            "representation": "named",
+        }
+
+    indexed_items = [str(mod_path_to_id[m]) for m in selected]
+    indexed_candidate = {
+        "representation": "indexed",
+        "index_kind": "module",
+        "resolve_via": "lookup_index_entries",
+        "total": total,
+        "truncated": truncated,
+        "items": indexed_items,
+    }
+    if truncated:
+        indexed_candidate["expand"] = {
+            "compact": False,
+            "max_items": None,
+            "representation": "indexed",
+        }
+
+    named_bytes = len(json.dumps(named_candidate, indent=2, ensure_ascii=False).encode("utf-8"))
+    indexed_bytes = len(json.dumps(indexed_candidate, indent=2, ensure_ascii=False).encode("utf-8"))
+    bytes_saved = named_bytes - indexed_bytes
+    percent_saved = round((bytes_saved / named_bytes) * 100, 1) if named_bytes > 0 else 0.0
+
+    if bytes_saved < _AUTO_NEGOTIATION_MIN_BYTES_SAVED:
+        result = {
+            "representation": "named",
+            "requested_representation": "auto",
+            "total": total,
+            "truncated": truncated,
+            "items": list(selected),
+        }
+        if truncated:
+            result["expand"] = {
+                "compact": False,
+                "max_items": None,
+                "representation": "auto",
+            }
+        return result
+
+    evidence = selected[:_COMPACT_EVIDENCE_LIMIT]
+    decision_truncated = total > len(evidence)
+    options = {
+        "named": {
+            "representation": "named",
+            "compact": False,
+            "max_items": max_items,
+        },
+        "indexed": {
+            "representation": "indexed",
+            "compact": False,
+            "max_items": max_items,
+        },
+    }
+    if len(selected) > 10:
+        options["bounded_named"] = {
+            "representation": "named",
+            "compact": False,
+            "max_items": 10,
+        }
+
+    decision_res = {
+        "status": "representation_decision_required",
+        "requested_representation": "auto",
+        "total": total,
+        "truncated": decision_truncated,
+        "decision_scope_count": len(selected),
+        "evidence": list(evidence),
+        "sizes": {
+            "named_bytes": named_bytes,
+            "indexed_bytes": indexed_bytes,
+            "bytes_saved": bytes_saved,
+            "percent_saved": percent_saved,
+        },
+        "options": options,
+    }
+    if len(selected) < total:
+        decision_res["expand"] = {
+            "compact": False,
+            "max_items": None,
+            "representation": "auto",
+        }
+    return decision_res
+
+
 def get_artifact_blast_radius(
     repo_path: str,
     artifact_name: str,
     max_items: int | None = 30,
     compact: bool = True,
     fields: list[str] | None = None,
+    representation: str = "named",
 ) -> str:
+    if representation not in _ALLOWED_REPRESENTATIONS:
+        return json.dumps(
+            {
+                "error": "Unsupported representation for get_artifact_blast_radius",
+                "representation": representation,
+                "allowed_representations": sorted(_ALLOWED_REPRESENTATIONS),
+            },
+            indent=2,
+        )
     root = Path(repo_path).expanduser().resolve()
     try:
         mod_path_to_id, mod_id_to_path, art_path_to_id, art_id_to_path = query_helpers.read_registries(root)
@@ -63,9 +270,6 @@ def get_artifact_blast_radius(
                 selected = ordered_matches[0]
                 raw_consumer_items = list(selected.pop("consumer_items"))
                 unique_direct_consumers = sorted(set(raw_consumer_items))
-                consumer_items, consumer_total, consumer_truncated = query_helpers.bounded_items(
-                    unique_direct_consumers, max_items
-                )
 
                 architecture = {"available": False}
                 cached_analytics = getattr(engine.state, "cached_analytics", {}) or {}
@@ -204,19 +408,27 @@ def get_artifact_blast_radius(
                         "reason": "Live dependency graph is not available.",
                     }
 
+                if fields is not None and "consumers" not in fields:
+                    consumers_view = {"total": len(unique_direct_consumers), "truncated": False}
+                else:
+                    consumers_view = _consumers_collection_view(
+                        unique_direct_consumers=unique_direct_consumers,
+                        max_items=max_items,
+                        compact=compact,
+                        representation=representation,
+                        mod_path_to_id=mod_path_to_id,
+                    )
+                    if isinstance(consumers_view, dict) and "error" in consumers_view:
+                        return json.dumps(consumers_view, indent=2)
+
                 result = {
                     **selected,
                     "architecture": architecture,
                     "downstream_module_reachability": downstream_reachability,
-                    "consumers": {
-                        "total": consumer_total,
-                        "truncated": consumer_truncated,
-                    },
+                    "consumers": consumers_view,
                     "evidence_scope": "direct_static_artifact_consumption",
                     "data_source": "live_canonical_state",
                 }
-                if not compact:
-                    result["consumers"]["items"] = consumer_items
                 if fields is not None:
                     unknown_fields = sorted(set(fields) - set(result))
                     if unknown_fields:

@@ -3993,3 +3993,380 @@ def test_module_context_topology_provenance_and_freshness(monkeypatch, tmp_path)
         repo_path=str(root), module_name="pkg.mod_a"
     )
     assert "No usable canonical LIVE state" in res_report
+
+
+def test_blast_radius_consumer_representation_and_progressive_disclosure(
+    tmp_path, monkeypatch
+):
+    import inspect
+    from types import SimpleNamespace
+    from contextor.mcp.tools import get_artifact_blast_radius as blast_tool
+
+    # A. Public signature preserves existing args, representation is last with default "named"
+    sig = inspect.signature(blast_tool.get_artifact_blast_radius)
+    param_names = list(sig.parameters.keys())
+    assert param_names == ["repo_path", "artifact_name", "max_items", "compact", "fields", "representation"]
+    assert sig.parameters["representation"].default == "named"
+
+    # Setup state with 15 consumers for pkg.core::target_func
+    consumer_names = [f"pkg.consumer_{i:02d}" for i in range(1, 16)]
+    mod_path_to_id = {f"pkg.consumer_{i:02d}": f"{100+i}/1" for i in range(1, 16)}
+    mod_path_to_id["pkg.core"] = "1/1"
+    mod_id_to_path = {v: k for k, v in mod_path_to_id.items()}
+    art_path_to_id = {"pkg.core::target_func": "A100/1"}
+    art_id_to_path = {"A100/1": "pkg.core::target_func"}
+
+    state = SimpleNamespace(
+        artifacts={
+            "pkg.core": {
+                "symbols": {"functions": ["target_func"]},
+                "own_symbols": ["target_func"],
+            }
+        },
+        artifact_consumption={
+            "pkg.core::target_func": {
+                "consumers": consumer_names,
+                "channels": {},
+            }
+        },
+        artifact_consumption_state="fresh",
+        cached_analytics={},
+        cached_analytics_state="deferred",
+        resync_required=False,
+    )
+    monkeypatch.setattr(
+        mcp_runtime, "get_or_init_engine", lambda _root: SimpleNamespace(state=state)
+    )
+    monkeypatch.setattr(
+        query_helpers,
+        "read_registries",
+        lambda _root: (mod_path_to_id, mod_id_to_path, art_path_to_id, art_id_to_path),
+    )
+
+    # B. Default compact named: max 3 evidence, truthful truncated, named-preserving expand
+    res_b = json.loads(
+        blast_tool.get_artifact_blast_radius(str(tmp_path), "pkg.core::target_func")
+    )
+    c_b = res_b["consumers"]
+    assert c_b["total"] == 15
+    assert c_b["truncated"] is True
+    assert len(c_b["evidence"]) == 3
+    assert c_b["evidence"] == consumer_names[:3]
+    assert c_b["expand"] == {"compact": False, "max_items": None, "representation": "named"}
+    assert "items" not in c_b
+
+    # C. Compact max_items=1, 0, None
+    res_c1 = json.loads(
+        blast_tool.get_artifact_blast_radius(
+            str(tmp_path), "pkg.core::target_func", compact=True, max_items=1
+        )
+    )["consumers"]
+    assert len(res_c1["evidence"]) == 1
+    assert res_c1["truncated"] is True
+
+    res_c0 = json.loads(
+        blast_tool.get_artifact_blast_radius(
+            str(tmp_path), "pkg.core::target_func", compact=True, max_items=0
+        )
+    )["consumers"]
+    assert len(res_c0["evidence"]) == 0
+    assert res_c0["truncated"] is True
+
+    res_cn = json.loads(
+        blast_tool.get_artifact_blast_radius(
+            str(tmp_path), "pkg.core::target_func", compact=True, max_items=None
+        )
+    )["consumers"]
+    assert len(res_cn["evidence"]) == 3
+    assert res_cn["truncated"] is True
+
+    # D. Compact indexed: ID evidence + metadata + indexed-preserving expand
+    res_d = json.loads(
+        blast_tool.get_artifact_blast_radius(
+            str(tmp_path), "pkg.core::target_func", compact=True, representation="indexed"
+        )
+    )["consumers"]
+    assert res_d["representation"] == "indexed"
+    assert res_d["index_kind"] == "module"
+    assert res_d["resolve_via"] == "lookup_index_entries"
+    assert res_d["total"] == 15
+    assert res_d["truncated"] is True
+    assert res_d["evidence"] == ["101/1", "102/1", "103/1"]
+    assert res_d["expand"] == {"compact": False, "max_items": None, "representation": "indexed"}
+
+    # E. Compact indexed missing mapping -> structured fail-closed
+    incomplete_mod_path_to_id = dict(mod_path_to_id)
+    del incomplete_mod_path_to_id["pkg.consumer_02"]
+    monkeypatch.setattr(
+        query_helpers,
+        "read_registries",
+        lambda _root: (incomplete_mod_path_to_id, mod_id_to_path, art_path_to_id, art_id_to_path),
+    )
+    res_e = json.loads(
+        blast_tool.get_artifact_blast_radius(
+            str(tmp_path), "pkg.core::target_func", compact=True, representation="indexed"
+        )
+    )
+    assert "error" in res_e
+    assert res_e["missing_modules"] == ["pkg.consumer_02"]
+    assert res_e["suggested_action"] == "Use representation='named' or re-run analysis."
+
+    # Restore complete mapping
+    monkeypatch.setattr(
+        query_helpers,
+        "read_registries",
+        lambda _root: (mod_path_to_id, mod_id_to_path, art_path_to_id, art_id_to_path),
+    )
+
+    # F. Compact auto -> direct named evidence, requested auto, zero decision
+    res_f = json.loads(
+        blast_tool.get_artifact_blast_radius(
+            str(tmp_path), "pkg.core::target_func", compact=True, representation="auto"
+        )
+    )["consumers"]
+    assert res_f["representation"] == "named"
+    assert res_f["requested_representation"] == "auto"
+    assert len(res_f["evidence"]) == 3
+    assert res_f["evidence"] == consumer_names[:3]
+    assert res_f["truncated"] is True
+    assert res_f["expand"] == {"compact": False, "max_items": None, "representation": "auto"}
+    assert "status" not in res_f
+
+    # G. Full bounded named -> existing items semantics + truthful expand
+    res_g = json.loads(
+        blast_tool.get_artifact_blast_radius(
+            str(tmp_path), "pkg.core::target_func", compact=False, max_items=5, representation="named"
+        )
+    )["consumers"]
+    assert res_g["total"] == 15
+    assert res_g["truncated"] is True
+    assert res_g["items"] == consumer_names[:5]
+    assert res_g["expand"] == {"compact": False, "max_items": None, "representation": "named"}
+
+    # H. Full lossless named -> all names, truncated false, no expand
+    res_h = json.loads(
+        blast_tool.get_artifact_blast_radius(
+            str(tmp_path), "pkg.core::target_func", compact=False, max_items=None, representation="named"
+        )
+    )["consumers"]
+    assert res_h["total"] == 15
+    assert res_h["truncated"] is False
+    assert res_h["items"] == consumer_names
+    assert "expand" not in res_h
+
+    # I. Full bounded indexed -> same selected semantic identities as named after resolving IDs
+    res_i = json.loads(
+        blast_tool.get_artifact_blast_radius(
+            str(tmp_path), "pkg.core::target_func", compact=False, max_items=5, representation="indexed"
+        )
+    )["consumers"]
+    assert res_i["representation"] == "indexed"
+    assert res_i["items"] == [f"{100+i}/1" for i in range(1, 6)]
+    assert res_i["total"] == 15
+    assert res_i["truncated"] is True
+    assert res_i["expand"] == {"compact": False, "max_items": None, "representation": "indexed"}
+
+    # J. Full lossless indexed -> all IDs, truncated false
+    res_j = json.loads(
+        blast_tool.get_artifact_blast_radius(
+            str(tmp_path), "pkg.core::target_func", compact=False, max_items=None, representation="indexed"
+        )
+    )["consumers"]
+    assert res_j["representation"] == "indexed"
+    assert res_j["items"] == [f"{100+i}/1" for i in range(1, 16)]
+    assert res_j["total"] == 15
+    assert res_j["truncated"] is False
+    assert "expand" not in res_j
+
+    # K. Full auto incomplete mapping -> named fallback, no mixed identities
+    monkeypatch.setattr(
+        query_helpers,
+        "read_registries",
+        lambda _root: (incomplete_mod_path_to_id, mod_id_to_path, art_path_to_id, art_id_to_path),
+    )
+    res_k = json.loads(
+        blast_tool.get_artifact_blast_radius(
+            str(tmp_path), "pkg.core::target_func", compact=False, max_items=5, representation="auto"
+        )
+    )["consumers"]
+    assert res_k["representation"] == "named"
+    assert res_k["requested_representation"] == "auto"
+    assert res_k["indexed_representation_available"] is False
+    assert res_k["reason"] == "missing_module_ids"
+    assert res_k["items"] == consumer_names[:5]
+    assert res_k["truncated"] is True
+
+    # Restore complete mapping
+    monkeypatch.setattr(
+        query_helpers,
+        "read_registries",
+        lambda _root: (mod_path_to_id, mod_id_to_path, art_path_to_id, art_id_to_path),
+    )
+
+    # L. Full auto below threshold -> direct named
+    # With default 512 B threshold, synthetic short names have saving < 512 B -> direct named
+    res_l = json.loads(
+        blast_tool.get_artifact_blast_radius(
+            str(tmp_path), "pkg.core::target_func", compact=False, max_items=None, representation="auto"
+        )
+    )["consumers"]
+    assert res_l["representation"] == "named"
+    assert res_l["requested_representation"] == "auto"
+    assert res_l["items"] == consumer_names
+    assert "status" not in res_l
+    assert "sizes" not in res_l
+
+    # M. Full auto above threshold -> exact decision_required union
+    # Lower threshold to trigger decision branch deterministically with short synthetic names
+    monkeypatch.setattr(blast_tool, "_AUTO_NEGOTIATION_MIN_BYTES_SAVED", 5)
+    res_m = json.loads(
+        blast_tool.get_artifact_blast_radius(
+            str(tmp_path), "pkg.core::target_func", compact=False, max_items=None, representation="auto"
+        )
+    )["consumers"]
+    assert res_m["status"] == "representation_decision_required"
+    assert res_m["requested_representation"] == "auto"
+    assert res_m["total"] == 15
+    assert res_m["decision_scope_count"] == 15
+    assert len(res_m["evidence"]) == 3
+    assert res_m["evidence"] == consumer_names[:3]
+    assert res_m["truncated"] is True  # 15 > 3
+    assert "items" not in res_m
+
+    # Exact final-shape candidate calculation for full scope
+    named_candidate_m = {
+        "total": 15,
+        "truncated": False,
+        "items": consumer_names,
+    }
+    indexed_candidate_m = {
+        "representation": "indexed",
+        "index_kind": "module",
+        "resolve_via": "lookup_index_entries",
+        "total": 15,
+        "truncated": False,
+        "items": [f"{100+i}/1" for i in range(1, 16)],
+    }
+    expected_named_bytes_m = len(json.dumps(named_candidate_m, indent=2, ensure_ascii=False).encode("utf-8"))
+    expected_indexed_bytes_m = len(json.dumps(indexed_candidate_m, indent=2, ensure_ascii=False).encode("utf-8"))
+    expected_bytes_saved_m = expected_named_bytes_m - expected_indexed_bytes_m
+    expected_percent_saved_m = round((expected_bytes_saved_m / expected_named_bytes_m) * 100, 1)
+
+    assert res_m["sizes"] == {
+        "named_bytes": expected_named_bytes_m,
+        "indexed_bytes": expected_indexed_bytes_m,
+        "bytes_saved": expected_bytes_saved_m,
+        "percent_saved": expected_percent_saved_m,
+    }
+    assert "named" in res_m["options"]
+    assert "indexed" in res_m["options"]
+    assert "bounded_named" in res_m["options"]
+    assert res_m["options"]["named"] == {"representation": "named", "compact": False, "max_items": None}
+    assert res_m["options"]["indexed"] == {"representation": "indexed", "compact": False, "max_items": None}
+    assert res_m["options"]["bounded_named"] == {"representation": "named", "compact": False, "max_items": 10}
+
+    # Direct execution of retry descriptor kwargs gives exact lossless indexed result
+    indexed_retry_kwargs_m = res_m["options"]["indexed"]
+    retry_result_m = json.loads(
+        blast_tool.get_artifact_blast_radius(
+            str(tmp_path),
+            "pkg.core::target_func",
+            **indexed_retry_kwargs_m,
+        )
+    )
+    assert retry_result_m["consumers"] == res_j
+
+    # N. Decision full scope -> no expand
+    assert "expand" not in res_m
+
+    # O. Decision bounded scope (max_items=12 < total=15) -> expand present to full auto
+    res_o = json.loads(
+        blast_tool.get_artifact_blast_radius(
+            str(tmp_path), "pkg.core::target_func", compact=False, max_items=12, representation="auto"
+        )
+    )["consumers"]
+    assert res_o["status"] == "representation_decision_required"
+    assert res_o["decision_scope_count"] == 12
+    assert res_o["expand"] == {"compact": False, "max_items": None, "representation": "auto"}
+    assert "bounded_named" in res_o["options"]
+    assert res_o["options"]["indexed"] == {"representation": "indexed", "compact": False, "max_items": 12}
+
+    # Direct execution of bounded retry descriptor kwargs gives exact bounded indexed result
+    indexed_retry_kwargs_o = res_o["options"]["indexed"]
+    retry_result_o = json.loads(
+        blast_tool.get_artifact_blast_radius(
+            str(tmp_path),
+            "pkg.core::target_func",
+            **indexed_retry_kwargs_o,
+        )
+    )
+    expected_bounded_indexed_o = json.loads(
+        blast_tool.get_artifact_blast_radius(
+            str(tmp_path),
+            "pkg.core::target_func",
+            compact=False,
+            max_items=12,
+            representation="indexed",
+        )
+    )["consumers"]
+    assert retry_result_o["consumers"] == expected_bounded_indexed_o
+
+    # Exact final-shape candidate calculation for bounded scope including expand
+    named_candidate_o = {
+        "total": 15,
+        "truncated": True,
+        "items": consumer_names[:12],
+        "expand": {"compact": False, "max_items": None, "representation": "named"},
+    }
+    indexed_candidate_o = {
+        "representation": "indexed",
+        "index_kind": "module",
+        "resolve_via": "lookup_index_entries",
+        "total": 15,
+        "truncated": True,
+        "items": [f"{100+i}/1" for i in range(1, 13)],
+        "expand": {"compact": False, "max_items": None, "representation": "indexed"},
+    }
+    expected_named_bytes_o = len(json.dumps(named_candidate_o, indent=2, ensure_ascii=False).encode("utf-8"))
+    expected_indexed_bytes_o = len(json.dumps(indexed_candidate_o, indent=2, ensure_ascii=False).encode("utf-8"))
+    expected_bytes_saved_o = expected_named_bytes_o - expected_indexed_bytes_o
+    expected_percent_saved_o = round((expected_bytes_saved_o / expected_named_bytes_o) * 100, 1)
+
+    assert res_o["sizes"] == {
+        "named_bytes": expected_named_bytes_o,
+        "indexed_bytes": expected_indexed_bytes_o,
+        "bytes_saved": expected_bytes_saved_o,
+        "percent_saved": expected_percent_saved_o,
+    }
+
+    # P. bounded_named option only when decision_scope_count > 10
+    monkeypatch.setattr(blast_tool, "_AUTO_NEGOTIATION_MIN_BYTES_SAVED", -50)
+    res_p = json.loads(
+        blast_tool.get_artifact_blast_radius(
+            str(tmp_path), "pkg.core::target_func", compact=False, max_items=8, representation="auto"
+        )
+    )["consumers"]
+    assert res_p["status"] == "representation_decision_required"
+    assert res_p["decision_scope_count"] == 8
+    assert "bounded_named" not in res_p["options"]
+
+    # Q. Invalid representation deterministic error
+    res_q = json.loads(
+        blast_tool.get_artifact_blast_radius(
+            str(tmp_path), "pkg.core::target_func", representation="xml"
+        )
+    )
+    assert res_q["error"] == "Unsupported representation for get_artifact_blast_radius"
+    assert res_q["representation"] == "xml"
+    assert res_q["allowed_representations"] == ["auto", "indexed", "named"]
+
+    # R. Fields excluding consumers does not trigger decision/sizing and preserves projection
+    res_r = json.loads(
+        blast_tool.get_artifact_blast_radius(
+            str(tmp_path), "pkg.core::target_func", compact=False, max_items=None, representation="auto", fields=["artifact", "kind"]
+        )
+    )
+    assert set(res_r.keys()) == {"artifact", "kind"}
+    assert res_r["artifact"] == "pkg.core::target_func"
+    assert res_r["kind"] == "function"
+
