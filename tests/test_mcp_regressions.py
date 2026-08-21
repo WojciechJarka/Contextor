@@ -17,7 +17,10 @@ pytestmark = pytest.mark.live
 from contextor import mcp_process_registry, mcp_server
 from contextor.mcp import analysis_jobs
 from contextor.mcp import query_helpers
+from contextor.mcp import report_helpers
 from contextor.mcp import runtime as mcp_runtime
+from contextor.mcp.tools import get_layer_isolation as get_layer_isolation_module
+from contextor.mcp.tools import update_file as update_file_module
 from contextor.mcp.tools.get_file_edit_context import _static_test_reachability
 from contextor.mcp.tools import lookup_index_entries as lookup_index_entries_tool
 from contextor.core.analysis import git_context
@@ -405,7 +408,7 @@ def test_live_first_tools_work_without_any_saved_reports(tmp_path, monkeypatch):
     def reject_report_resolution(*_args, **_kwargs):
         raise AssertionError("normal MCP query must not resolve output reports")
 
-    monkeypatch.setattr(mcp_server, "_get_canonical_report", reject_report_resolution)
+    monkeypatch.setattr(report_helpers, "get_canonical_report", reject_report_resolution)
     monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: engine)
     monkeypatch.setattr(query_helpers, "read_registries",
         lambda _root: (
@@ -792,7 +795,10 @@ def test_extract_indexed_report_context_returns_every_shared_resolver_block(tmp_
     }
     report_path = tmp_path / "report.json"
     report_path.write_text(json.dumps(report), encoding="utf-8")
-    monkeypatch.setattr(mcp_server, "catalog_from_registry", lambda *_args, **_kwargs: catalog)
+    monkeypatch.setattr(
+        "contextor.core.report_query.catalog_from_registry",
+        lambda *_args, **_kwargs: catalog,
+    )
     monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: None)
 
     raw = mcp_server.extract_indexed_report_context.fn(
@@ -848,7 +854,10 @@ def test_extract_indexed_report_context_can_filter_to_public_api(tmp_path, monke
     }
     report_path = tmp_path / "report.json"
     report_path.write_text(json.dumps(report), encoding="utf-8")
-    monkeypatch.setattr(mcp_server, "catalog_from_registry", lambda *_args, **_kwargs: catalog)
+    monkeypatch.setattr(
+        "contextor.core.report_query.catalog_from_registry",
+        lambda *_args, **_kwargs: catalog,
+    )
     monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: None)
 
     all_artifacts = json.loads(
@@ -894,8 +903,8 @@ def test_file_edit_context_prefers_fresh_live_graph_over_stale_saved_matrix(
         "summary.json": summary_report,
     }
     monkeypatch.setattr(
-        mcp_server,
-        "_get_canonical_report",
+        report_helpers,
+        "get_canonical_report",
         lambda _root, name: next(
             (path for suffix, path in reports.items() if name.endswith(suffix)), None
         ),
@@ -955,7 +964,7 @@ def test_incremental_live_state_persistence_roundtrips_for_restart(
         state_manager=SimpleNamespace(state_id="after-incremental-update"),
     )
 
-    persisted = mcp_server._persist_live_engine(tmp_path, engine)
+    persisted = update_file_module._persist_live_engine(tmp_path, engine)
 
     from contextor.core.paths import repo_cache_dir
 
@@ -999,7 +1008,7 @@ def test_update_file_marks_running_mcp_server_as_requiring_restart(monkeypatch):
         ),
     )
     monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: engine)
-    monkeypatch.setattr(mcp_server, "_persist_live_engine", lambda *_args: True)
+    monkeypatch.setattr(update_file_module, "_persist_live_engine", lambda *_args: True)
 
     current = json.loads(
         mcp_server.update_file.fn(repo_path=str(repo), file_path=str(server_path))
@@ -1007,7 +1016,7 @@ def test_update_file_marks_running_mcp_server_as_requiring_restart(monkeypatch):
     assert current["runtime_restart_required"] is False
     assert "runtime_state" not in current
 
-    monkeypatch.setattr(mcp_server, "_MCP_SERVER_SOURCE_FINGERPRINT", "stale")
+    monkeypatch.setattr(update_file_module, "_MCP_SERVER_SOURCE_FINGERPRINT", "stale")
     result = json.loads(
         mcp_server.update_file.fn(repo_path=str(repo), file_path=str(server_path))
     )
@@ -1037,7 +1046,7 @@ def test_mcp_update_file_shapes_affected_modules_compact_full_and_fields(tmp_pat
         ),
     )
     monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: engine)
-    monkeypatch.setattr(mcp_server, "_persist_live_engine", lambda *_args: True)
+    monkeypatch.setattr(update_file_module, "_persist_live_engine", lambda *_args: True)
 
     compact = json.loads(
         mcp_server.update_file.fn(repo_path=str(tmp_path), file_path=str(target), compact=True)
@@ -1391,7 +1400,7 @@ def test_semantic_artifact_diff_reports_signature_changes():
         }
     }
 
-    result = mcp_server._semantic_artifact_diff(old, new)
+    result = update_file_module._semantic_artifact_diff(old, new)
 
     assert result["symbols_added"] == ["added"]
     assert result["symbols_removed"] == ["removed"]
@@ -1421,7 +1430,7 @@ def test_semantic_artifact_diff_flags_body_only_change_without_body_text(tmp_pat
     )
     new = {"symbols": extract_file_symbols(source)}
 
-    result = mcp_server._semantic_artifact_diff(old, new)
+    result = update_file_module._semantic_artifact_diff(old, new)
 
     assert result["symbols_added"] == []
     assert result["symbols_removed"] == []
@@ -1447,8 +1456,8 @@ def test_semantic_diff_view_is_compact_bounded_and_schema_stable():
         "body_only_changes_tracked": True,
     }
 
-    compact = mcp_server._semantic_diff_view(diff, max_items=1, compact=True)
-    full = mcp_server._semantic_diff_view(diff, max_items=1, compact=False)
+    compact = update_file_module._semantic_diff_view(diff, max_items=1, compact=True)
+    full = update_file_module._semantic_diff_view(diff, max_items=1, compact=False)
 
     assert compact["symbols_added"] == {"total": 2, "truncated": True}
     assert "items" not in compact["signatures_changed"]
@@ -1548,8 +1557,8 @@ def test_file_edit_context_decodes_modules_and_marks_unresolved_api(
         paths[name] = path
 
     monkeypatch.setattr(
-        mcp_server,
-        "_get_canonical_report",
+        report_helpers,
+        "get_canonical_report",
         lambda _root, name: paths.get(name),
     )
     monkeypatch.setattr(query_helpers, "read_registries",
@@ -1697,7 +1706,7 @@ def test_artifacts_for_module_includes_live_zero_consumer_signature(
 ):
     report = tmp_path / "artifacts.json"
     report.write_text(json.dumps({"artifacts": {}}), encoding="utf-8")
-    monkeypatch.setattr(mcp_server, "_get_canonical_report", lambda *_: report)
+    monkeypatch.setattr(report_helpers, "get_canonical_report", lambda *_: report)
     monkeypatch.setattr(query_helpers, "read_registries",
         lambda _root: (
             {"pkg.module": "1/1"},
@@ -1750,7 +1759,7 @@ def test_artifacts_for_module_includes_live_zero_consumer_signature(
 def test_artifacts_for_module_uses_live_state_without_compact_report(
     tmp_path, monkeypatch
 ):
-    monkeypatch.setattr(mcp_server, "_get_canonical_report", lambda *_: None)
+    monkeypatch.setattr(report_helpers, "get_canonical_report", lambda *_: None)
     monkeypatch.setattr(query_helpers, "read_registries",
         lambda _root: (
             {"pkg.module": "1/1"},
@@ -1857,7 +1866,7 @@ def test_bounded_mcp_collections_report_truncation():
 
 
 def test_layer_cluster_ids_are_resolved_without_an_extra_lookup():
-    result = mcp_server._resolve_cluster_ids(
+    result = get_layer_isolation_module._resolve_cluster_ids(
         {"modules": ["1/1", "2/1"], "shared_artifact_keys": ["A1/1"]},
         {"1/1": "pkg.first", "2/1": "pkg.second"},
         {"A1/1": "pkg.first::shared"},
@@ -2019,7 +2028,7 @@ def test_module_context_exposes_new_live_module_before_full_report(
 
     monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: Engine())
     monkeypatch.setattr(
-        mcp_server, "_get_canonical_report", lambda _root, _name: report
+        report_helpers, "get_canonical_report", lambda _root, _name: report
     )
 
     result = json.loads(
@@ -2103,7 +2112,7 @@ def test_layer_isolation_addresses_nested_dotted_and_path_layers(
         requested.append(filename)
         return report if filename.endswith("_reporting_engine_graph_analytics.json") else None
 
-    monkeypatch.setattr(mcp_server, "_get_canonical_report", canonical)
+    monkeypatch.setattr(report_helpers, "get_canonical_report", canonical)
     monkeypatch.setattr(query_helpers, "read_registries",
         lambda _root: ({}, {}, {}, {}),
     )
@@ -2138,7 +2147,7 @@ def test_layer_isolation_reads_report_from_shared_output_dir(tmp_path, monkeypat
         ),
         encoding="utf-8",
     )
-    monkeypatch.setattr(mcp_server, "resolve_output_dir", lambda: reports)
+    monkeypatch.setattr(report_helpers, "resolve_output_dir", lambda: reports)
     monkeypatch.setattr(query_helpers, "read_registries",
         lambda _root: ({}, {}, {}, {}),
     )
@@ -2156,7 +2165,7 @@ def test_layer_isolation_handles_missing_shared_output_dir(tmp_path, monkeypatch
     repo = tmp_path / "sample_repo"
     repo.mkdir()
     monkeypatch.setattr(
-        mcp_server,
+        report_helpers,
         "resolve_output_dir",
         lambda: tmp_path / "missing_reports",
     )
@@ -2306,7 +2315,7 @@ def test_project_architecture_and_report_diff_offer_optional_bounds(
             return diff_path
         return None
 
-    monkeypatch.setattr(mcp_server, "_get_canonical_report", canonical)
+    monkeypatch.setattr(report_helpers, "get_canonical_report", canonical)
     state = RepositoryAnalysisState(
         modules={"a": object(), "b": object()},
         layer_information={
@@ -2395,7 +2404,7 @@ def test_file_edit_context_missing_module_does_not_open_registry_transaction(
         path.write_text(json.dumps(payload), encoding="utf-8")
         reports[name] = path
     monkeypatch.setattr(
-        mcp_server, "_get_canonical_report", lambda _root, name: reports.get(name)
+        report_helpers, "get_canonical_report", lambda _root, name: reports.get(name)
     )
     monkeypatch.setattr(query_helpers, "read_registries", lambda _root: ({}, {}, {}, {}))
 
@@ -2418,7 +2427,7 @@ def test_artifact_blast_radius_does_not_fallback_to_compact_report(
         }}}),
         encoding="utf-8",
     )
-    monkeypatch.setattr(mcp_server, "_get_canonical_report", lambda *_: report)
+    monkeypatch.setattr(report_helpers, "get_canonical_report", lambda *_: report)
     monkeypatch.setattr(query_helpers, "read_registries",
         lambda _root: (
             {},
@@ -3651,7 +3660,7 @@ def test_module_context_topology_provenance_and_freshness(monkeypatch, tmp_path)
         }),
         encoding="utf-8",
     )
-    monkeypatch.setattr(mcp_server, "_get_canonical_report", lambda _root, _name: report)
+    monkeypatch.setattr(report_helpers, "get_canonical_report", lambda _root, _name: report)
 
     monkeypatch.setattr(query_helpers, "read_registries",
         lambda _root: (

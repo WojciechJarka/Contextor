@@ -149,12 +149,7 @@ def test_s2a_implementations_remain_moved_after_later_slices():
         and any(ast.unparse(item).startswith("mcp.tool") for item in node.decorator_list)
     ]
 
-    assert decorated == [
-        "update_file",
-        "get_layer_isolation",
-        "get_report_diff",
-        "extract_indexed_report_context",
-    ]
+    assert decorated == []
     assert set(_IMPLEMENTATIONS).isdisjoint(decorated)
 
 

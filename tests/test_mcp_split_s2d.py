@@ -62,7 +62,7 @@ def test_s2d_ownership_and_import_graph():
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
         and any(ast.unparse(item).startswith("mcp.tool") for item in node.decorator_list)
     ]
-    assert len(decorated) == 4
+    assert decorated == []
     assert set(_IMPLEMENTATIONS).isdisjoint(decorated)
     for name in _IMPLEMENTATIONS:
         path = root / "contextor" / "mcp" / "tools" / f"{name}.py"

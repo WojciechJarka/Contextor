@@ -6,6 +6,7 @@ import pytest
 import threading
 
 from contextor import mcp_server
+from contextor.mcp import report_helpers
 from contextor.mcp import runtime as mcp_runtime
 from contextor.core.analysis.incremental_engine import IncrementalAnalysisEngine
 from contextor.core.analysis.state_manager import FileStateManager, RepositoryAnalysisState
@@ -103,8 +104,8 @@ def test_update_persist_restart_hydrate_keeps_live_reverse_context(tmp_path, mon
         "summary.json": summary_report,
     }
     monkeypatch.setattr(
-        mcp_server,
-        "_get_canonical_report",
+        report_helpers,
+        "get_canonical_report",
         lambda _root, name: next(
             (path for suffix, path in reports.items() if name.endswith(suffix)), None
         ),
