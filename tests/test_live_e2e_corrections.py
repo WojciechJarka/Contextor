@@ -136,7 +136,7 @@ def test_affected_mcp_queries_fail_closed_on_parse_stale_state(
         ),
     )
     monkeypatch.setattr(
-        mcp_server,
+        report_query,
         "catalog_from_registry",
         lambda _root: IndexCatalog(
             modules={"1/1": "provider"},
@@ -233,7 +233,7 @@ def test_minimal_valid_syntax_error_query_repair_query_flow(
         ),
     )
     monkeypatch.setattr(
-        mcp_server,
+        report_query,
         "catalog_from_registry",
         lambda _root: IndexCatalog(
             modules={"1/1": "provider"},

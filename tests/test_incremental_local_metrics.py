@@ -431,7 +431,6 @@ def test_stage2c_add_module_with_hard_import_macro_metrics(tmp_path, monkeypatch
 
     # MCP overlay verification
     monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: engine)
-    monkeypatch.setattr(mcp_server, "_get_canonical_report", lambda _root, _name: None)
 
     resp_consumer = json.loads(
         mcp_server.get_module_context.fn(repo_path=str(tmp_path), module_name="consumer")
@@ -601,7 +600,6 @@ def test_stage2c_get_module_context_behavior_preserved(tmp_path, monkeypatch):
     engine.update_file(str(provider))
 
     monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: engine)
-    monkeypatch.setattr(mcp_server, "_get_canonical_report", lambda _root, _name: None)
 
     resp_provider = json.loads(
         mcp_server.get_module_context.fn(repo_path=str(tmp_path), module_name="provider")
