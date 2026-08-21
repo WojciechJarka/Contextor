@@ -16,6 +16,7 @@ pytestmark = pytest.mark.live
 
 from contextor import mcp_process_registry, mcp_server
 from contextor.mcp import analysis_jobs
+from contextor.mcp import query_helpers
 from contextor.mcp import runtime as mcp_runtime
 from contextor.mcp.tools import lookup_index_entries as lookup_index_entries_tool
 from contextor.core.analysis import git_context
@@ -69,7 +70,7 @@ def _live_engine_fixture():
 
 
 def _patch_empty_registries(monkeypatch):
-    monkeypatch.setattr(mcp_server, "_read_registries", lambda _root: ({}, {}, {}, {}))
+    monkeypatch.setattr(query_helpers, "read_registries", lambda _root: ({}, {}, {}, {}))
 
 
 def test_canonical_empty_consumers_do_not_fall_back_to_legacy_artifact_state():
@@ -85,7 +86,7 @@ def test_canonical_empty_consumers_do_not_fall_back_to_legacy_artifact_state():
         artifact_consumption_state="fresh",
     )
 
-    assert mcp_server._canonical_symbol_consumers(state, "provider", "foo") == []
+    assert query_helpers.canonical_symbol_consumers(state, "provider", "foo") == []
 
 
 @pytest.mark.parametrize("freshness", ["stale", "deferred"])
@@ -137,7 +138,7 @@ def test_own_symbols_excludes_legacy_category_symbols_from_artifact_queries(
     )
     _patch_empty_registries(monkeypatch)
 
-    assert mcp_server._canonical_symbol_catalog(state.artifacts["provider"]) == {
+    assert query_helpers.canonical_symbol_catalog(state.artifacts["provider"]) == {
         "foo": "function"
     }
     artifacts = mcp_server.get_artifacts_for_module.fn(str(tmp_path), "provider")
@@ -212,9 +213,7 @@ def test_stale_layer_snapshot_is_not_presented_after_incremental_update(
 def test_minimal_file_context_fails_closed_without_usable_live_graph(
     tmp_path, monkeypatch
 ):
-    monkeypatch.setattr(
-        mcp_server,
-        "_read_registries",
+    monkeypatch.setattr(query_helpers, "read_registries",
         lambda _root: ({"provider": "1/1"}, {"1/1": "provider"}, {}, {}),
     )
     monkeypatch.setattr(
@@ -257,9 +256,7 @@ def test_module_context_fails_closed_when_canonical_graph_is_missing(
     monkeypatch.setattr(
         mcp_runtime, "get_or_init_engine", lambda _root: SimpleNamespace(state=state)
     )
-    monkeypatch.setattr(
-        mcp_server,
-        "_read_registries",
+    monkeypatch.setattr(query_helpers, "read_registries",
         lambda _root: ({"provider": "1/1"}, {"1/1": "provider"}, {}, {}),
     )
 
@@ -409,9 +406,7 @@ def test_live_first_tools_work_without_any_saved_reports(tmp_path, monkeypatch):
 
     monkeypatch.setattr(mcp_server, "_get_canonical_report", reject_report_resolution)
     monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: engine)
-    monkeypatch.setattr(
-        mcp_server,
-        "_read_registries",
+    monkeypatch.setattr(query_helpers, "read_registries",
         lambda _root: (
             {"pkg.module": "1/1", "pkg.dep": "2/1", "tests.test_module": "3/1"},
             {"1/1": "pkg.module", "2/1": "pkg.dep", "3/1": "tests.test_module"},
@@ -904,9 +899,7 @@ def test_file_edit_context_prefers_fresh_live_graph_over_stale_saved_matrix(
             (path for suffix, path in reports.items() if name.endswith(suffix)), None
         ),
     )
-    monkeypatch.setattr(
-        mcp_server,
-        "_read_registries",
+    monkeypatch.setattr(query_helpers, "read_registries",
         lambda _root: (
             {"provider": "1/1", "consumer": "2/1"},
             {"1/1": "provider", "2/1": "consumer"},
@@ -1481,9 +1474,7 @@ def test_artifact_lookup_ignores_stale_registry_entries(tmp_path, monkeypatch):
         artifact_consumption_state="fresh",
     ))
     monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: engine)
-    monkeypatch.setattr(
-        mcp_server,
-        "_read_registries",
+    monkeypatch.setattr(query_helpers, "read_registries",
         lambda _root: (
             {},
             {"1/1": "pkg.module", "2/1": "pkg.first", "3/1": "pkg.second"},
@@ -1560,9 +1551,7 @@ def test_file_edit_context_decodes_modules_and_marks_unresolved_api(
         "_get_canonical_report",
         lambda _root, name: paths.get(name),
     )
-    monkeypatch.setattr(
-        mcp_server,
-        "_read_registries",
+    monkeypatch.setattr(query_helpers, "read_registries",
         lambda _root: (
             {"pkg.module": "1/1"},
             {
@@ -1708,9 +1697,7 @@ def test_artifacts_for_module_includes_live_zero_consumer_signature(
     report = tmp_path / "artifacts.json"
     report.write_text(json.dumps({"artifacts": {}}), encoding="utf-8")
     monkeypatch.setattr(mcp_server, "_get_canonical_report", lambda *_: report)
-    monkeypatch.setattr(
-        mcp_server,
-        "_read_registries",
+    monkeypatch.setattr(query_helpers, "read_registries",
         lambda _root: (
             {"pkg.module": "1/1"},
             {"1/1": "pkg.module"},
@@ -1763,9 +1750,7 @@ def test_artifacts_for_module_uses_live_state_without_compact_report(
     tmp_path, monkeypatch
 ):
     monkeypatch.setattr(mcp_server, "_get_canonical_report", lambda *_: None)
-    monkeypatch.setattr(
-        mcp_server,
-        "_read_registries",
+    monkeypatch.setattr(query_helpers, "read_registries",
         lambda _root: (
             {"pkg.module": "1/1"},
             {"1/1": "pkg.module"},
@@ -1831,9 +1816,7 @@ def test_artifacts_for_module_bounds_nested_consumers(tmp_path, monkeypatch):
     monkeypatch.setattr(
         mcp_runtime, "get_or_init_engine", lambda _root: SimpleNamespace(state=state)
     )
-    monkeypatch.setattr(
-        mcp_server,
-        "_read_registries",
+    monkeypatch.setattr(query_helpers, "read_registries",
         lambda _root: (
             {"pkg.module": "1/1"},
             {"1/1": "pkg.module", "2/1": "pkg.first", "3/1": "pkg.second"},
@@ -1856,7 +1839,7 @@ def test_artifacts_for_module_bounds_nested_consumers(tmp_path, monkeypatch):
 
 
 def test_bounded_mcp_collections_report_truncation():
-    selected, total, truncated = mcp_server._bounded_items(
+    selected, total, truncated = query_helpers.bounded_items(
         ["first", "second", "third"], 2
     )
 
@@ -1864,7 +1847,7 @@ def test_bounded_mcp_collections_report_truncation():
     assert total == 3
     assert truncated is True
 
-    unbounded, unbounded_total, unbounded_truncated = mcp_server._bounded_items(
+    unbounded, unbounded_total, unbounded_truncated = query_helpers.bounded_items(
         ["first", "second", "third"], None
     )
     assert unbounded == ["first", "second", "third"]
@@ -2120,9 +2103,7 @@ def test_layer_isolation_addresses_nested_dotted_and_path_layers(
         return report if filename.endswith("_reporting_engine_graph_analytics.json") else None
 
     monkeypatch.setattr(mcp_server, "_get_canonical_report", canonical)
-    monkeypatch.setattr(
-        mcp_server,
-        "_read_registries",
+    monkeypatch.setattr(query_helpers, "read_registries",
         lambda _root: ({}, {}, {}, {}),
     )
 
@@ -2157,9 +2138,7 @@ def test_layer_isolation_reads_report_from_shared_output_dir(tmp_path, monkeypat
         encoding="utf-8",
     )
     monkeypatch.setattr(mcp_server, "resolve_output_dir", lambda: reports)
-    monkeypatch.setattr(
-        mcp_server,
-        "_read_registries",
+    monkeypatch.setattr(query_helpers, "read_registries",
         lambda _root: ({}, {}, {}, {}),
     )
 
@@ -2417,7 +2396,7 @@ def test_file_edit_context_missing_module_does_not_open_registry_transaction(
     monkeypatch.setattr(
         mcp_server, "_get_canonical_report", lambda _root, name: reports.get(name)
     )
-    monkeypatch.setattr(mcp_server, "_read_registries", lambda _root: ({}, {}, {}, {}))
+    monkeypatch.setattr(query_helpers, "read_registries", lambda _root: ({}, {}, {}, {}))
 
     result = mcp_server.get_file_edit_context.fn(
         repo_path=str(repo), file_path="missing.py"
@@ -2439,9 +2418,7 @@ def test_artifact_blast_radius_does_not_fallback_to_compact_report(
         encoding="utf-8",
     )
     monkeypatch.setattr(mcp_server, "_get_canonical_report", lambda *_: report)
-    monkeypatch.setattr(
-        mcp_server,
-        "_read_registries",
+    monkeypatch.setattr(query_helpers, "read_registries",
         lambda _root: (
             {},
             {"1/1": "pkg.module", "2/1": "tests.test_module"},
@@ -2488,9 +2465,7 @@ def test_file_edit_context_minimal_mode_and_target_resolution(tmp_path, monkeypa
     )
     mcp_runtime._live_engine_revisions[str(root)] = 42
     monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: engine)
-    monkeypatch.setattr(
-        mcp_server,
-        "_read_registries",
+    monkeypatch.setattr(query_helpers, "read_registries",
         lambda _root: (
             {"pkg.module": "10/1", "consumer.mod": "20/1", "tests.test_pkg": "30/1"},
             {"10/1": "pkg.module", "20/1": "consumer.mod", "30/1": "tests.test_pkg"},
@@ -2732,9 +2707,7 @@ def test_module_context_forgiving_input_and_artifact_redirect(tmp_path, monkeypa
         )
     )
     monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: engine)
-    monkeypatch.setattr(
-        mcp_server,
-        "_read_registries",
+    monkeypatch.setattr(query_helpers, "read_registries",
         lambda _root: (
             {"pkg.module": "10/1", "consumer.mod": "20/1", "dep.mod": "30/1"},
             {"10/1": "pkg.module", "20/1": "consumer.mod", "30/1": "dep.mod"},
@@ -2833,9 +2806,7 @@ def test_artifact_blast_radius_module_aware_diagnostic(tmp_path, monkeypatch):
         )
     )
     monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: engine)
-    monkeypatch.setattr(
-        mcp_server,
-        "_read_registries",
+    monkeypatch.setattr(query_helpers, "read_registries",
         lambda _root: (
             {"pkg.module": "10/1"},
             {"10/1": "pkg.module"},
@@ -2983,7 +2954,7 @@ def test_file_edit_context_live_revision_lifecycle(tmp_path, monkeypatch):
     monkeypatch.setattr(core_live_state, "migrate_legacy_snapshot", lambda r: str(r / ".contextor"))
     monkeypatch.setattr(core_live_state, "read_metadata", lambda _c: LiveStateMetadata(revision=366, state_id="s366"))
     monkeypatch.setattr(core_state_mgr, "load_engine_state", lambda _c, _sid, **_kw: engine1.state)
-    monkeypatch.setattr(mcp_server, "_read_registries", lambda _r: ({"r1.mod": "1/1"}, {"1/1": "r1.mod"}, {}, {}))
+    monkeypatch.setattr(query_helpers, "read_registries", lambda _r: ({"r1.mod": "1/1"}, {"1/1": "r1.mod"}, {}, {}))
 
     res1 = json.loads(
         mcp_server.get_file_edit_context.fn(
@@ -3025,7 +2996,7 @@ def test_file_edit_context_live_revision_lifecycle(tmp_path, monkeypatch):
     # 5. Two repo roots retain independent revision values
     monkeypatch.setattr(core_live_state, "read_metadata", lambda c: LiveStateMetadata(revision=500, state_id="s500") if "repo2" in str(c) else LiveStateMetadata(revision=366, state_id="s366"))
     monkeypatch.setattr(core_state_mgr, "load_engine_state", lambda c, _sid, **_kw: engine2.state if "repo2" in str(c) else engine1.state)
-    monkeypatch.setattr(mcp_server, "_read_registries", lambda r: ({"r2.mod": "2/1"}, {"2/1": "r2.mod"}, {}, {}) if "repo2" in str(r) else ({"r1.mod": "1/1"}, {"1/1": "r1.mod"}, {}, {}))
+    monkeypatch.setattr(query_helpers, "read_registries", lambda r: ({"r2.mod": "2/1"}, {"2/1": "r2.mod"}, {}, {}) if "repo2" in str(r) else ({"r1.mod": "1/1"}, {"1/1": "r1.mod"}, {}, {}))
 
     mcp_runtime._live_engine_revisions.clear()
     mcp_runtime._live_engines.clear()
@@ -3061,9 +3032,7 @@ def test_file_edit_context_layer_guard(monkeypatch, tmp_path):
     empty_graph = SimpleNamespace(hard_edges={}, soft_edges={})
 
     # Mock registries
-    monkeypatch.setattr(
-        mcp_server,
-        "_read_registries",
+    monkeypatch.setattr(query_helpers, "read_registries",
         lambda _root: (
             {"pkg.ui_mod": "1/1", "pkg.cli_mod": "2/1", "pkg.core_mod": "3/1"},
             {"1/1": "pkg.ui_mod", "2/1": "pkg.cli_mod", "3/1": "pkg.core_mod"},
@@ -3216,9 +3185,7 @@ def test_artifact_blast_radius_architecture_projection(monkeypatch, tmp_path):
 
     from types import SimpleNamespace
 
-    monkeypatch.setattr(
-        mcp_server,
-        "_read_registries",
+    monkeypatch.setattr(query_helpers, "read_registries",
         lambda _root: (
             {
                 "pkg.core": "1/1",
@@ -3474,9 +3441,7 @@ def test_artifact_blast_radius_downstream_module_reachability(monkeypatch, tmp_p
     from types import SimpleNamespace
     from contextor.core.domain.graph import ProjectGraph
 
-    monkeypatch.setattr(
-        mcp_server,
-        "_read_registries",
+    monkeypatch.setattr(query_helpers, "read_registries",
         lambda _root: (
             {
                 "pkg.definer": "1/1",
@@ -3687,9 +3652,7 @@ def test_module_context_topology_provenance_and_freshness(monkeypatch, tmp_path)
     )
     monkeypatch.setattr(mcp_server, "_get_canonical_report", lambda _root, _name: report)
 
-    monkeypatch.setattr(
-        mcp_server,
-        "_read_registries",
+    monkeypatch.setattr(query_helpers, "read_registries",
         lambda _root: (
             {"pkg.mod_a": "1/1", "pkg.mod_b": "2/1", "pkg.mod_c": "3/1"},
             {"1/1": "pkg.mod_a", "2/1": "pkg.mod_b", "3/1": "pkg.mod_c"},

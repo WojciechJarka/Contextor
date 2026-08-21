@@ -5,6 +5,7 @@ import pytest
 
 from contextor import mcp_server
 from contextor.mcp import runtime as mcp_runtime
+from contextor.mcp import query_helpers
 from contextor.mcp.tools import (
     query_canonical_projection as query_canonical_projection_tool,
 )
@@ -126,9 +127,7 @@ def test_affected_mcp_queries_fail_closed_on_parse_stale_state(
     state = _stale_mcp_state(tmp_path)
     engine = SimpleNamespace(state=state)
     monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: engine)
-    monkeypatch.setattr(
-        mcp_server,
-        "_read_registries",
+    monkeypatch.setattr(query_helpers, "read_registries",
         lambda _root: (
             {"provider": "1/1"},
             {"1/1": "provider"},
@@ -225,9 +224,7 @@ def test_minimal_valid_syntax_error_query_repair_query_flow(
 ):
     source, engine = _engine_for_file(tmp_path)
     monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: engine)
-    monkeypatch.setattr(
-        mcp_server,
-        "_read_registries",
+    monkeypatch.setattr(query_helpers, "read_registries",
         lambda _root: (
             {"provider": "1/1"},
             {"1/1": "provider"},

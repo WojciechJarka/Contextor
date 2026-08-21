@@ -9,6 +9,7 @@ from uuid import uuid4
 
 from contextor.core.api.facade import ContextorFacade
 from contextor.mcp import runtime as mcp_runtime
+from contextor.mcp.query_helpers import bounded_items
 from contextor.mcp_process_registry import registry_dir
 
 
@@ -80,13 +81,6 @@ def _latest_analysis_job(root: Path) -> dict | None:
     return None
 
 
-def _bounded_items(items: list, limit: int | None) -> tuple[list, int, bool]:
-    total = len(items)
-    if limit is None:
-        return items, total, False
-    safe_limit = max(0, int(limit))
-    selected = items[:safe_limit]
-    return selected, total, total > len(selected)
 
 
 def _public_job(
@@ -106,7 +100,7 @@ def _public_job(
     }
     if "skipped_python_files" in job:
         skipped_files = list(job["skipped_python_files"])
-        selected, total, truncated = _bounded_items(skipped_files, max_skipped_files)
+        selected, total, truncated = bounded_items(skipped_files, max_skipped_files)
         visible["analysis_coverage"] = {
             "skipped_python_files": {
                 "total": total,

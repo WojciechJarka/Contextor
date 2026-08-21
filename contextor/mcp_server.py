@@ -200,7 +200,17 @@ from contextor.mcp_process_registry import (
 )
 from contextor.mcp.documentation import short_description
 from contextor.mcp import runtime as mcp_runtime
-from contextor.mcp.analysis_jobs import _bounded_items
+from contextor.mcp import query_helpers
+from contextor.mcp.tools.get_artifact_blast_radius import (
+    get_artifact_blast_radius as _get_artifact_blast_radius_impl,
+)
+from contextor.mcp.tools.search_artifacts import search_artifacts as _search_artifacts_impl
+from contextor.mcp.tools.get_artifacts_for_module import (
+    get_artifacts_for_module as _get_artifacts_for_module_impl,
+)
+from contextor.mcp.tools.lookup_artifact_by_symbol import (
+    lookup_artifact_by_symbol as _lookup_artifact_by_symbol_impl,
+)
 from contextor.mcp.tools.analyze_project import analyze_project as _analyze_project_impl
 from contextor.mcp.tools.analyze_layer import analyze_layer as _analyze_layer_impl
 from contextor.mcp.tools.analyze_single_file import (
@@ -303,29 +313,6 @@ def _persist_live_engine(root: Path, engine) -> bool:
     )
 
 
-def _read_registries(
-    root: Path,
-) -> tuple[dict, dict, dict, dict]:
-    """
-    Reads module and artifact registries from the persistent identity store.
-
-    Returns:
-        (mod_path_to_id, mod_id_to_path, art_path_to_id, art_id_to_path)
-    """
-    from contextor.core.reporting_engine.persistent_registry import (
-        PersistentIdentityRegistry,
-    )
-
-    registry = PersistentIdentityRegistry(str(root))
-    with registry.transaction():
-        mod_reg = registry._state.get("module_registry", {})
-        art_reg = registry._state.get("artifact_registry", {})
-    return (
-        mod_reg.get("path_to_id", {}),
-        mod_reg.get("id_to_path", {}),
-        art_reg.get("path_to_id", {}),
-        art_reg.get("id_to_path", {}),
-    )
 
 
 def _semantic_artifact_diff(old_artifacts: dict, new_artifacts: dict) -> dict:
@@ -374,28 +361,8 @@ def _semantic_artifact_diff(old_artifacts: dict, new_artifacts: dict) -> dict:
     }
 
 
-def _canonical_symbol_consumers(state, module_name: str, symbol: str) -> list[str]:
-    """Return deterministic consumer facts from canonical RAM only."""
-    if not artifact_consumption_is_fresh(state):
-        raise ValueError("Canonical artifact consumption is unavailable or stale.")
-    target = f"{module_name}::{symbol}"
-    consumption = getattr(state, "artifact_consumption", {}) or {}
-    entry = consumption.get(target, {}) if isinstance(consumption, dict) else {}
-    consumers = entry.get("consumers", []) if isinstance(entry, dict) else []
-    return sorted({str(item) for item in consumers})
 
 
-def _module_truth_unavailable(state, module_name: str) -> dict | None:
-    """Shape the authoritative canonical parse-freshness contract for MCP."""
-    truth = module_current_truth(state, module_name)
-    if truth["available"]:
-        return None
-    return {
-        "status": "stale",
-        "available": False,
-        "module": module_name,
-        **{key: value for key, value in truth.items() if key != "available"},
-    }
 
 
 def _stale_module_truths(state) -> dict[str, dict]:
@@ -410,23 +377,6 @@ def _stale_module_truths(state) -> dict[str, dict]:
     }
 
 
-def _canonical_symbol_catalog(module_data: dict) -> dict[str, str]:
-    """Project canonical symbol names to kinds without report enrichment."""
-    targets = canonical_artifact_consumption_targets({"module": module_data})
-    result = {target.split("::", 1)[1]: "unknown" for target in targets}
-    symbols = module_data.get("symbols", {}) or {}
-    for category, kind in (
-        ("classes", "class"),
-        ("functions", "function"),
-        ("methods", "method"),
-        ("globals", "global"),
-    ):
-        raw_names = symbols.get(category, []) or []
-        names = raw_names.keys() if isinstance(raw_names, dict) else raw_names
-        for name in names:
-            if str(name) in result:
-                result[str(name)] = kind
-    return result
 
 
 def _resolve_symbol_source_paths(root: Path, file_paths: list[str]) -> list[Path]:
@@ -537,7 +487,7 @@ def _symbol_static_context(root: Path, candidate: dict) -> dict:
     }
     if not engine:
         return context
-    unavailable = _module_truth_unavailable(engine.state, module_path)
+    unavailable = query_helpers.module_truth_unavailable(engine.state, module_path)
     if unavailable:
         return unavailable
     module_artifacts = getattr(engine.state, "artifacts", {}).get(module_path, {})
@@ -616,7 +566,7 @@ def _symbol_preview(root: Path, candidate: dict, member_limit: int | None) -> di
                     "docstring": _json_size({"docstring": ast.get_docstring(child, clean=False) or ""}),
                 }
             )
-        selected, total, truncated = _bounded_items(members, member_limit)
+        selected, total, truncated = query_helpers.bounded_items(members, member_limit)
         preview["available_sections"].append("methods")
         preview["methods"] = {"total": total, "truncated": truncated, "items": selected}
         preview["method_selection_contract"] = (
@@ -642,7 +592,7 @@ def _semantic_diff_view(diff: dict, max_items: int | None, compact: bool) -> dic
     ):
         value = diff.get(key, {}) if key == "signatures_changed" else diff.get(key, [])
         entries = sorted(value.items()) if isinstance(value, dict) else list(value)
-        selected, total, truncated = _bounded_items(entries, max_items)
+        selected, total, truncated = query_helpers.bounded_items(entries, max_items)
         collection = {"total": total, "truncated": truncated}
         if not compact:
             collection["items"] = dict(selected) if isinstance(value, dict) else selected
@@ -774,7 +724,7 @@ def update_file(
             )
         new_artifacts = engine.state.artifacts.get(module_path, {})
         semantic_diff = _semantic_artifact_diff(old_artifacts, new_artifacts)
-        affected_items, affected_total, affected_truncated = _bounded_items(
+        affected_items, affected_total, affected_truncated = query_helpers.bounded_items(
             getattr(res, "affected_modules", []) or [], max_items
         )
         affected_view = {"total": affected_total, "truncated": affected_truncated}
@@ -897,7 +847,7 @@ def get_project_architecture(
                 {"layer": layer, "module_count": count}
                 for layer, count in sorted(layer_counts.items())
             ]
-            items, total, truncated = _bounded_items(layer_items, max_items)
+            items, total, truncated = query_helpers.bounded_items(layer_items, max_items)
             layer_index = {"available": True, "total": total, "truncated": truncated}
             if not compact:
                 layer_index["items"] = items
@@ -937,7 +887,7 @@ def get_module_context(
     root = Path(repo_path).expanduser().resolve()
     from contextor.core.report_query import IndexCatalog, catalog_from_registry, resolve_index_query
 
-    mod_path_to_id, mod_id_to_path, art_path_to_id, art_id_to_path = _read_registries(root)
+    mod_path_to_id, mod_id_to_path, art_path_to_id, art_id_to_path = query_helpers.read_registries(root)
     catalog = catalog_from_registry(str(root))
     if not catalog.modules and mod_id_to_path:
         catalog = IndexCatalog(
@@ -1010,7 +960,7 @@ def get_module_context(
     if not engine or getattr(engine.state, "resync_required", False):
         return "Error: No usable canonical LIVE state. Run analyze_project first."
     state = engine.state
-    unavailable = _module_truth_unavailable(state, module_name)
+    unavailable = query_helpers.module_truth_unavailable(state, module_name)
     if unavailable:
         return json.dumps(unavailable, indent=2)
     live_modules = set(getattr(state, "modules", {})) | set(
@@ -1118,10 +1068,10 @@ def get_module_context(
         metrics_source = "deferred_topology_analytics"
         degree_metrics_source = "canonical_module_metrics"
 
-    inbound_items, inbound_total, inbound_truncated = _bounded_items(
+    inbound_items, inbound_total, inbound_truncated = query_helpers.bounded_items(
         sorted(inbound.items()), max_items
     )
-    outbound_items, outbound_total, outbound_truncated = _bounded_items(
+    outbound_items, outbound_total, outbound_truncated = query_helpers.bounded_items(
         sorted(outbound.items()), max_items
     )
     common_result = {
@@ -1173,520 +1123,14 @@ def get_module_context(
 
     return json.dumps(result, indent=2)
 
-@mcp.tool(description=short_description('get_artifact_blast_radius'))
-def get_artifact_blast_radius(
-    repo_path: str,
-    artifact_name: str,
-    max_items: int | None = 30,
-    compact: bool = True,
-    fields: list[str] | None = None,
-) -> str:
-    root = Path(repo_path).expanduser().resolve()
-    try:
-        mod_path_to_id, mod_id_to_path, art_path_to_id, art_id_to_path = _read_registries(root)
-        engine = mcp_runtime.get_or_init_engine(root)
-        if not engine or getattr(engine.state, "resync_required", False):
-            return "Error: No usable canonical LIVE state. Run analyze_project first."
-        target_art = art_id_to_path.get(artifact_name, artifact_name)
-        if engine:
-            live_matches = []
-            for module_name, artifact_state in engine.state.artifacts.items():
-                for local_name, kind in _canonical_symbol_catalog(artifact_state).items():
-                    full_name = f"{module_name}::{local_name}"
-                    art_id = str(art_path_to_id.get(full_name, ""))
-                    if (
-                        full_name != artifact_name
-                        and local_name != artifact_name
-                        and art_id != artifact_name
-                        and full_name != target_art
-                    ):
-                        continue
-                    unavailable = _module_truth_unavailable(
-                        engine.state, module_name
-                    )
-                    if unavailable:
-                        return json.dumps(unavailable, indent=2)
-                    live_matches.append(
-                        {
-                            "artifact": full_name,
-                            "artifact_id": art_path_to_id.get(full_name),
-                            "kind": kind,
-                            "definer": module_name,
-                            "consumer_items": _canonical_symbol_consumers(
-                                engine.state, module_name, str(local_name)
-                            ),
-                        }
-                    )
-            if live_matches:
-                ordered_matches = sorted(live_matches, key=lambda item: item["artifact"])
-                if len(ordered_matches) > 1:
-                    return json.dumps(
-                        {
-                            "error": "Ambiguous canonical artifact identity.",
-                            "query": artifact_name,
-                            "candidates": [item["artifact"] for item in ordered_matches],
-                            "data_source": "live_canonical_state",
-                        },
-                        indent=2,
-                    )
-                selected = ordered_matches[0]
-                raw_consumer_items = list(selected.pop("consumer_items"))
-                unique_direct_consumers = sorted(set(raw_consumer_items))
-                consumer_items, consumer_total, consumer_truncated = _bounded_items(
-                    unique_direct_consumers, max_items
-                )
-
-                architecture = {"available": False}
-                cached_analytics = getattr(engine.state, "cached_analytics", {}) or {}
-                cached_state = getattr(engine.state, "cached_analytics_state", "deferred")
-                if cached_state == "fresh" and isinstance(cached_analytics, dict):
-                    module_layers = cached_analytics.get("module_layers", {}) or {}
-                    definer_module = selected.get("definer", "")
-                    definer_layer = module_layers.get(definer_module)
-
-                    same_module_consumers = []
-                    same_layer_consumers = []
-                    cross_layer_consumers_list = []
-                    test_consumers = []
-                    unknown_layer_consumers = []
-                    known_consumer_layers_set = set()
-
-                    for c_mod in unique_direct_consumers:
-                        if c_mod == definer_module:
-                            same_module_consumers.append(c_mod)
-                            continue
-
-                        c_layer = module_layers.get(c_mod)
-                        if c_layer is not None:
-                            known_consumer_layers_set.add(c_layer)
-
-                        if c_layer == "tests":
-                            test_consumers.append(c_mod)
-                        elif definer_layer is None:
-                            unknown_layer_consumers.append(c_mod)
-                        elif c_layer is None:
-                            unknown_layer_consumers.append(c_mod)
-                        elif c_layer == definer_layer:
-                            same_layer_consumers.append(c_mod)
-                        else:
-                            cross_layer_consumers_list.append({"module": c_mod, "layer": c_layer})
-
-                    same_mod_count = len(same_module_consumers)
-                    same_layer_count = len(same_layer_consumers)
-                    cross_layer_count = len(cross_layer_consumers_list)
-                    test_count = len(test_consumers)
-                    unknown_count = len(unknown_layer_consumers)
-
-                    architecture = {
-                        "available": True,
-                        "definer_layer": definer_layer,
-                        "consumer_layers": sorted(known_consumer_layers_set),
-                        "same_module_consumer_count": same_mod_count,
-                        "same_layer_consumer_count": same_layer_count,
-                        "cross_layer_consumer_count": cross_layer_count,
-                        "test_consumer_count": test_count,
-                        "cross_layer_consumers": cross_layer_count > 0,
-                    }
-                    if unknown_count > 0:
-                        architecture["unknown_layer_consumer_count"] = unknown_count
-                    if cross_layer_count > 0:
-                        cross_sample, cross_total, cross_trunc = _bounded_items(
-                            cross_layer_consumers_list, 5
-                        )
-                        architecture["cross_layer_sample"] = {
-                            "total": cross_total,
-                            "items": cross_sample,
-                            "truncated": cross_trunc,
-                        }
-                else:
-                    architecture = {
-                        "available": False,
-                        "reason": f"Cached analytics state is '{cached_state}'.",
-                    }
-
-                # 2. Downstream module reachability (Model B)
-                from contextor.core.analysis.incremental.graph_ops import calculate_affected_set
-
-                dep_graph = getattr(engine.state, "dependency_graph", None) if engine else None
-                definer_module = selected.get("definer", "")
-
-                if dep_graph is not None:
-                    all_reachable: set[str] = set()
-                    for seed_mod in unique_direct_consumers:
-                        all_reachable.update(calculate_affected_set(seed_mod, old_graph=dep_graph))
-
-                    downstream_set = all_reachable - set(unique_direct_consumers) - {definer_module}
-                    sorted_downstream = sorted(downstream_set)
-                    total_downstream = len(sorted_downstream)
-
-                    downstream_reachability = {
-                        "available": True,
-                        "total_downstream_count": total_downstream,
-                    }
-
-                    if cached_state == "fresh" and isinstance(cached_analytics, dict):
-                        module_layers = cached_analytics.get("module_layers", {}) or {}
-                        prod_downstream = []
-                        test_downstream = []
-                        unknown_downstream = []
-
-                        for d_mod in sorted_downstream:
-                            d_layer = module_layers.get(d_mod)
-                            if d_layer == "tests":
-                                test_downstream.append(d_mod)
-                            elif d_layer is not None:
-                                prod_downstream.append(d_mod)
-                            else:
-                                unknown_downstream.append(d_mod)
-
-                        prod_sample, prod_total, prod_trunc = _bounded_items(prod_downstream, 5)
-                        test_sample, test_total, test_trunc = _bounded_items(test_downstream, 5)
-
-                        downstream_reachability.update(
-                            {
-                                "layer_classification_available": True,
-                                "production_downstream_count": len(prod_downstream),
-                                "test_downstream_count": len(test_downstream),
-                                "unknown_layer_downstream_count": len(unknown_downstream),
-                                "production_downstream_sample": {
-                                    "total": prod_total,
-                                    "items": prod_sample,
-                                    "truncated": prod_trunc,
-                                },
-                                "test_downstream_sample": {
-                                    "total": test_total,
-                                    "items": test_sample,
-                                    "truncated": test_trunc,
-                                },
-                            }
-                        )
-                    else:
-                        downstream_reachability.update(
-                            {
-                                "layer_classification_available": False,
-                                "reason": f"Cached analytics state is '{cached_state}'.",
-                            }
-                        )
-                else:
-                    downstream_reachability = {
-                        "available": False,
-                        "reason": "Live dependency graph is not available.",
-                    }
-
-                result = {
-                    **selected,
-                    "architecture": architecture,
-                    "downstream_module_reachability": downstream_reachability,
-                    "consumers": {
-                        "total": consumer_total,
-                        "truncated": consumer_truncated,
-                    },
-                    "evidence_scope": "direct_static_artifact_consumption",
-                    "data_source": "live_canonical_state",
-                }
-                if not compact:
-                    result["consumers"]["items"] = consumer_items
-                if fields is not None:
-                    unknown_fields = sorted(set(fields) - set(result))
-                    if unknown_fields:
-                        return json.dumps(
-                            {
-                                "error": "Unsupported fields for get_artifact_blast_radius",
-                                "unknown_fields": unknown_fields,
-                                "allowed_fields": sorted(result),
-                            },
-                            indent=2,
-                        )
-                    result = {field: result[field] for field in fields}
-                return json.dumps(result, indent=2)
-
-        candidates = [
-            (art_id, full_name)
-            for art_id, full_name in art_id_to_path.items()
-            if full_name == artifact_name
-            or full_name.endswith("::" + artifact_name)
-        ]
-        if not candidates:
-            from contextor.core.report_query import IndexCatalog, catalog_from_registry, resolve_index_query
-
-            catalog = catalog_from_registry(str(root))
-            if not catalog.modules and mod_id_to_path:
-                catalog = IndexCatalog(
-                    modules=mod_id_to_path,
-                    artifacts=art_id_to_path,
-                    module_paths={name: name.replace(".", "/") + ".py" for name in mod_path_to_id},
-                    recovered_modules={},
-                    recovered_artifacts={},
-                )
-            resolution = resolve_index_query(artifact_name, catalog, repo_root=str(root))
-            if resolution.get("matches"):
-                top = resolution["matches"][0]
-                if top.get("kind") == "module":
-                    target_module = top["name"]
-                    target_module_id = top["id"]
-                    prefix = target_module + "::"
-                    art_state = (getattr(engine.state, "artifacts", {}) or {}).get(target_module, {}) if engine else {}
-                    symbols = art_state.get("symbols", {}) or {}
-                    kind_map = {}
-                    for category, kind_label in [
-                        ("classes", "class"),
-                        ("functions", "function"),
-                        ("methods", "method"),
-                        ("globals", "global"),
-                    ]:
-                        for s in symbols.get(category, []) or []:
-                            kind_map[str(s)] = kind_label
-
-                    candidates_list = []
-                    seen_artifacts = set()
-                    for full_name, art_id in sorted(art_path_to_id.items()):
-                        if full_name.startswith(prefix):
-                            local_name = full_name.split("::", 1)[-1]
-                            seen_artifacts.add(local_name)
-                            candidates_list.append(
-                                {
-                                    "artifact_id": str(art_id),
-                                    "artifact": full_name,
-                                    "kind": kind_map.get(local_name, "symbol"),
-                                }
-                            )
-                    for local_name in sorted(art_state.get("own_symbols", []) or []):
-                        if local_name not in seen_artifacts:
-                            full_name = f"{target_module}::{local_name}"
-                            candidates_list.append(
-                                {
-                                    "artifact_id": str(art_path_to_id.get(full_name, "")),
-                                    "artifact": full_name,
-                                    "kind": kind_map.get(str(local_name), "symbol"),
-                                }
-                            )
-                            seen_artifacts.add(local_name)
-
-                    from contextor.core.api.public_api import extract_public_api
-
-                    canonical_public_api = set(extract_public_api(symbols)) if symbols else set()
-
-                    def _candidate_rank_key(item: dict) -> tuple:
-                        full_name = item.get("artifact", "")
-                        kind = item.get("kind", "symbol")
-                        local = str(full_name).split("::", 1)[-1].split("(", 1)[0]
-                        parts = local.split(".")
-                        leaf = parts[-1]
-                        is_dunder = leaf.startswith("__") and leaf.endswith("__")
-                        is_private_leaf = leaf.startswith("_") and not is_dunder
-                        has_priv_parent = any(
-                            p.startswith("_") and not (p.startswith("__") and p.endswith("__"))
-                            for p in parts[:-1]
-                        )
-                        is_canonical_public = local in canonical_public_api
-
-                        if is_canonical_public:
-                            kind_order = {"class": 0, "function": 1, "method": 2, "global": 3}.get(kind, 4)
-                            tier = (0, kind_order)
-                        elif not has_priv_parent and not is_private_leaf and not is_dunder:
-                            kind_order = {"class": 0, "function": 1, "method": 2, "global": 3}.get(kind, 4)
-                            tier = (1, kind_order)
-                        elif not has_priv_parent and is_dunder:
-                            tier = (2, 0)
-                        elif not has_priv_parent and is_private_leaf:
-                            tier = (3, 0)
-                        else:
-                            tier = (4, 0)
-                        return (tier, local)
-
-                    candidates_list.sort(key=_candidate_rank_key)
-                    items, total, truncated = _bounded_items(candidates_list, max_items)
-                    return json.dumps(
-                        {
-                            "target": artifact_name,
-                            "resolved_as": "module",
-                            "module": target_module,
-                            "module_id": target_module_id,
-                            "suggested_next_tool": "get_module_context",
-                            "artifact_candidates": {
-                                "total": total,
-                                "items": items,
-                                "truncated": truncated,
-                            },
-                            "warnings": [
-                                "Target resolved to a module rather than an artifact. "
-                                "Use get_module_context for module-level context or choose one of the artifact candidates."
-                            ],
-                        },
-                        indent=2,
-                    )
-            return f"Artifact '{artifact_name}' not found in the registry."
-
-        return f"Artifact '{artifact_name}' not found in canonical LIVE state."
-    except Exception as e:
-        return f"Error calculating artifact blast radius: {e}"
+get_artifact_blast_radius = mcp.tool(description=short_description("get_artifact_blast_radius"))(
+    _get_artifact_blast_radius_impl
+)
 
 
-@mcp.tool(description=short_description('search_artifacts'))
-def search_artifacts(
-    repo_path: str,
-    search_term: str,
-    limit: int | None = 20,
-    evidence_limit: int | None = 20,
-    compact: bool = True,
-    fields: list[str] | None = None,
-) -> str:
-    root = Path(repo_path).expanduser().resolve()
-    repo_name = root.name
-    
-    engine = mcp_runtime.get_or_init_engine(root)
-    if not engine:
-        return "Error: No live canonical state found. Run analyze_project first."
-        
-    try:
-        found_artifacts = []
-        found_modules = []
-        kind_by_category = {
-            "functions": "function",
-            "classes": "class",
-            "methods": "method",
-            "globals": "global",
-        }
-        module_paths = sorted(
-            set(getattr(engine.state, "modules", {}))
-            | set(engine.state.artifacts)
-        )
-        for mod_path in module_paths:
-            unavailable = _module_truth_unavailable(engine.state, mod_path)
-            module_leaf = mod_path.rsplit(".", 1)[-1]
-            if search_term.casefold() in mod_path.casefold():
-                if unavailable:
-                    return json.dumps(unavailable, indent=2)
-                graph = engine.state.dependency_graph
-                inbound = []
-                outbound = []
-                if graph is not None:
-                    hard_edges = getattr(graph, "hard_edges", {})
-                    soft_edges = getattr(graph, "soft_edges", {})
-                    outbound = sorted(
-                        set(hard_edges.get(mod_path, set()))
-                        | set(soft_edges.get(mod_path, set()))
-                    )
-                    inbound = sorted(
-                        source
-                        for source in set(hard_edges) | set(soft_edges)
-                        if mod_path
-                        in (
-                            set(hard_edges.get(source, set()))
-                            | set(soft_edges.get(source, set()))
-                        )
-                    )
-                exact_module = search_term.casefold() in {
-                    mod_path.casefold(),
-                    module_leaf.casefold(),
-                }
-                inbound_items, inbound_total, inbound_truncated = _bounded_items(
-                    inbound, evidence_limit
-                )
-                outbound_items, outbound_total, outbound_truncated = _bounded_items(
-                    outbound, evidence_limit
-                )
-                module_entry = {
-                    "kind": "module",
-                    "module_id": engine.registry.get_module_id(mod_path),
-                    "dependencies_inbound": {
-                        "total": inbound_total,
-                        "truncated": inbound_truncated,
-                    },
-                    "dependencies_outbound": {
-                        "total": outbound_total,
-                        "truncated": outbound_truncated,
-                    },
-                }
-                if not compact:
-                    module_entry["dependencies_inbound"]["items"] = inbound_items
-                    module_entry["dependencies_outbound"]["items"] = outbound_items
-                found_modules.append(
-                    (
-                        not exact_module,
-                        mod_path.casefold(),
-                        mod_path,
-                        module_entry,
-                    )
-                )
-        for mod_path, mod_arts in engine.state.artifacts.items():
-            unavailable = _module_truth_unavailable(engine.state, mod_path)
-            symbols = mod_arts.get("symbols", {})
-            for category, kind in kind_by_category.items():
-                raw_names = symbols.get(category, [])
-                names = raw_names.keys() if isinstance(raw_names, dict) else raw_names
-                for raw_name in names:
-                    name = str(raw_name)
-                    if search_term.lower() in name.lower():
-                        if unavailable:
-                            return json.dumps(unavailable, indent=2)
-                        definer_mod = engine.registry.get_module_id(mod_path)
-                        consumers_dict = mod_arts.get("consumers", {}).get(name, {})
-                        if isinstance(consumers_dict, dict):
-                            consumers = consumers_dict.get("consumers", [])
-                        else:
-                            consumers = consumers_dict if isinstance(consumers_dict, list) else []
-
-                        consumer_paths = [
-                            engine.registry.get_module_path(str(c)) or str(c)
-                            for c in consumers
-                        ]
-
-                        consumer_items, consumer_total, consumer_truncated = _bounded_items(
-                            consumer_paths, evidence_limit
-                        )
-                        artifact_entry = {
-                            "kind": kind,
-                            "definer_module_path": mod_path,
-                            "definer_module_id": definer_mod,
-                            "consumers": {
-                                "total": consumer_total,
-                                "truncated": consumer_truncated,
-                            },
-                        }
-                        if not compact:
-                            artifact_entry["consumers"]["items"] = consumer_items
-                        found_artifacts.append((name.lower() != search_term.lower(), name.lower(), f"{mod_path}::{name}", artifact_entry))
-
-        if not found_artifacts and not found_modules:
-            return f"No live modules or artifacts found matching '{search_term}'."
-
-        found_artifacts.sort()
-        found_modules.sort()
-        all_found = [
-            (item[0], item[1], "artifact", item[2], item[3])
-            for item in found_artifacts
-        ] + [
-            (item[0], item[1], "module", item[2], item[3])
-            for item in found_modules
-        ]
-        all_found.sort()
-        if not all_found[0][0]:
-            all_found = [item for item in all_found if not item[0]]
-        selected, total, truncated = _bounded_items(all_found, limit)
-        selected_artifacts = [item for item in selected if item[2] == "artifact"]
-        selected_modules = [item for item in selected if item[2] == "module"]
-        result = {
-            "query": search_term,
-            "match_count": len(selected),
-            "total_matches": total,
-            "truncated": truncated,
-            "modules": {item[3]: item[4] for item in selected_modules},
-            "artifacts": {item[3]: item[4] for item in selected_artifacts},
-        }
-        if fields is not None:
-            allowed_fields = set(result)
-            unknown_fields = sorted(set(fields) - allowed_fields)
-            if unknown_fields:
-                return json.dumps({
-                    "error": "Unsupported fields for search_artifacts",
-                    "unknown_fields": unknown_fields,
-                    "allowed_fields": sorted(allowed_fields),
-                }, indent=2)
-            result = {field: result[field] for field in fields}
-        return json.dumps(result, indent=2)
-    except Exception as e:
-        return f"Error extracting artifact context from live state: {e}"
+search_artifacts = mcp.tool(description=short_description("search_artifacts"))(
+    _search_artifacts_impl
+)
 
 
 @mcp.tool(description=short_description('get_symbol_implementation'))
@@ -1871,7 +1315,7 @@ def get_file_edit_context(
     # Read registries & catalog for canonical resolution
     from contextor.core.report_query import IndexCatalog, catalog_from_registry, resolve_index_query
 
-    mod_path_to_id, mod_id_to_path, art_path_to_id, art_id_to_path = _read_registries(root)
+    mod_path_to_id, mod_id_to_path, art_path_to_id, art_id_to_path = query_helpers.read_registries(root)
     catalog = catalog_from_registry(str(root))
     if not catalog.modules and mod_id_to_path:
         catalog = IndexCatalog(
@@ -1992,7 +1436,7 @@ def get_file_edit_context(
                     },
                     indent=2,
                 )
-            unavailable = _module_truth_unavailable(engine.state, module_name)
+            unavailable = query_helpers.module_truth_unavailable(engine.state, module_name)
             if unavailable:
                 return json.dumps(unavailable, indent=2)
             live_graph = getattr(engine.state, "dependency_graph", None)
@@ -2116,7 +1560,7 @@ def get_file_edit_context(
                             }
                         )
 
-                    sample_violations, total_v, truncated_v = _bounded_items(
+                    sample_violations, total_v, truncated_v = query_helpers.bounded_items(
                         all_module_violations, 5
                     )
 
@@ -2202,7 +1646,7 @@ def get_file_edit_context(
         
     try:
         state = engine.state
-        unavailable = _module_truth_unavailable(state, module_name)
+        unavailable = query_helpers.module_truth_unavailable(state, module_name)
         if unavailable:
             return json.dumps(unavailable, indent=2)
         state_metrics = getattr(state, "metrics", {}) or {}
@@ -2220,7 +1664,7 @@ def get_file_edit_context(
             risk_score = (topology.get("module_risk", {}) or {}).get(module_name)
         
         # We must read registries OUTSIDE the transaction block to avoid Resource Deadlock
-        mod_path_to_id, mod_id_to_path, art_path_to_id, art_id_to_path = _read_registries(root)
+        mod_path_to_id, mod_id_to_path, art_path_to_id, art_id_to_path = query_helpers.read_registries(root)
         module_to_id = {
             **{path: module_id for module_id, path in mod_id_to_path.items()},
             **mod_path_to_id,
@@ -2266,7 +1710,7 @@ def get_file_edit_context(
             prefix = module_name + "::"
             module_artifacts = state.artifacts[module_name]
             symbols = module_artifacts.get("symbols", {}) or {}
-            for local_name in sorted(_canonical_symbol_catalog(module_artifacts)):
+            for local_name in sorted(query_helpers.canonical_symbol_catalog(module_artifacts)):
                 leaf = local_name.rsplit(".", 1)[-1]
                 if leaf.startswith("_") and not (
                     leaf.startswith("__") and leaf.endswith("__")
@@ -2306,16 +1750,16 @@ def get_file_edit_context(
             },
         )
 
-        public_api_items, public_api_total, public_api_truncated = _bounded_items(
+        public_api_items, public_api_total, public_api_truncated = query_helpers.bounded_items(
             sorted(public_api.items()), max_items
         )
-        import_items, imports_total, imports_truncated = _bounded_items(
+        import_items, imports_total, imports_truncated = query_helpers.bounded_items(
             sorted(imports), max_items
         )
-        consumer_items, consumers_total, consumers_truncated = _bounded_items(
+        consumer_items, consumers_total, consumers_truncated = query_helpers.bounded_items(
             sorted(consumers), max_items
         )
-        test_items, tests_total, tests_truncated = _bounded_items(
+        test_items, tests_total, tests_truncated = query_helpers.bounded_items(
             tests_covering, max_items
         )
         
@@ -2467,7 +1911,7 @@ def get_layer_isolation(
                                         "direction": "outbound" if source_inside else "inbound",
                                     }
                                 )
-                items, total, truncated = _bounded_items(
+                items, total, truncated = query_helpers.bounded_items(
                     sorted(
                         boundary_edges,
                         key=lambda item: (
@@ -2530,7 +1974,7 @@ def get_layer_isolation(
         ga = json.loads(ga_path.read_text(encoding="utf-8"))
         
         # Resolve only the IDs exposed by this bounded response.
-        _, id_to_name, _, artifact_id_to_name = _read_registries(root)
+        _, id_to_name, _, artifact_id_to_name = query_helpers.read_registries(root)
         
         modules = ga.get("modules", {})
         matrix = ga.get("module_dependency_matrix", {})
@@ -2571,14 +2015,14 @@ def get_layer_isolation(
                         "to_layer": tgt_layer,
                     })
         
-        clusters, cluster_count, clusters_truncated = _bounded_items(
+        clusters, cluster_count, clusters_truncated = query_helpers.bounded_items(
             ga.get("shared_usage_clusters", []), max_clusters
         )
         clusters = [
             _resolve_cluster_ids(cluster, id_to_name, artifact_id_to_name)
             for cluster in clusters
         ]
-        violations, violation_count, violations_truncated = _bounded_items(
+        violations, violation_count, violations_truncated = query_helpers.bounded_items(
             boundary_violations, max_boundary_violations
         )
         cluster_collection = {
@@ -2637,7 +2081,7 @@ def get_report_diff(
         diff_data = json.loads(diff_path.read_text(encoding="utf-8"))
         report_diff = diff_data.get("report_diff", {})
         layers = report_diff.get("layers", {})
-        layer_items, layer_total, layer_truncated = _bounded_items(
+        layer_items, layer_total, layer_truncated = query_helpers.bounded_items(
             sorted(layers.items()), max_items
         )
         layer_collection = {"total": layer_total, "truncated": layer_truncated}
@@ -2717,7 +2161,7 @@ def extract_indexed_report_context(
             resolve_indices=resolve_indices,
         )
         artifact_entries = sorted(result.get("artifacts", {}).items())
-        selected_entries, total_artifacts, artifacts_truncated = _bounded_items(
+        selected_entries, total_artifacts, artifacts_truncated = query_helpers.bounded_items(
             artifact_entries, max_items
         )
         result["artifacts"] = dict(selected_entries)
@@ -2745,233 +2189,14 @@ lookup_index_entries = mcp.tool(
 )(_lookup_index_entries_impl)
 
 
-@mcp.tool(description=short_description('get_artifacts_for_module'))
-def get_artifacts_for_module(
-    repo_path: str,
-    module_name: str,
-    include_consumers: bool = True,
-    symbol_filter: str = "",
-    limit: int | None = 50,
-    evidence_limit: int | None = 20,
-    compact: bool = True,
-    fields: list[str] | None = None,
-) -> str:
-    root = Path(repo_path).expanduser().resolve()
-    repo_name = root.name
-
-    # Normalise file-path input to dotted module name.
-    target_path = Path(module_name)
-    if target_path.is_absolute() or module_name.endswith(".py") or "/" in module_name or "\\" in module_name:
-        if target_path.is_absolute():
-            try:
-                rel_path = target_path.relative_to(root)
-            except ValueError:
-                rel_path = target_path
-        else:
-            rel_path = target_path
-
-        parts = list(rel_path.parts)
-        if parts and parts[-1].endswith(".py"):
-            parts[-1] = parts[-1][:-3]
-            if parts[-1] == "__init__":
-                parts.pop()
-
-        module_name = ".".join(parts)
-
-    try:
-        mod_path_to_id, mod_id_to_path, art_path_to_id, art_id_to_path = _read_registries(root)
-        engine = mcp_runtime.get_or_init_engine(root)
-        if not engine or getattr(engine.state, "resync_required", False):
-            return "Error: No usable canonical LIVE state. Run analyze_project first."
-        state = engine.state
-        unavailable = _module_truth_unavailable(state, module_name)
-        if unavailable:
-            return json.dumps(unavailable, indent=2)
-        live_modules = getattr(state, "modules", {}) or {}
-        live_artifact_catalog = getattr(state, "artifacts", {}) or {}
-        live_artifacts = live_artifact_catalog.get(module_name, {})
-        mod_compact_id = mod_path_to_id.get(module_name)
-        live_module = live_modules.get(module_name)
-        if not mod_compact_id and live_module is not None:
-            mod_compact_id = getattr(live_module, "module_id", None)
-            if mod_compact_id is None and isinstance(live_module, dict):
-                mod_compact_id = live_module.get("module_id")
-        if not mod_compact_id and live_module is None and not live_artifacts:
-            return (
-                f"Module '{module_name}' not found in registry or canonical LIVE state. "
-                "Check the module name or run an analysis."
-            )
-
-        result_artifacts: dict = {}
-        live_symbols = live_artifacts.get("symbols", {})
-        signatures = live_symbols.get("signatures", {}) or {}
-        for symbol, kind in _canonical_symbol_catalog(live_artifacts).items():
-            full_name = f"{module_name}::{symbol}"
-            artifact_id = art_path_to_id.get(full_name)
-            key = artifact_id or full_name
-            entry = {
-                "artifact_id": artifact_id,
-                "symbol": symbol,
-                "full_name": full_name,
-                "kind": kind,
-                "signature": signatures.get(symbol),
-            }
-            if include_consumers:
-                consumers = _canonical_symbol_consumers(state, module_name, symbol)
-                consumer_items, consumer_total, consumer_truncated = _bounded_items(
-                    consumers, evidence_limit
-                )
-                entry["consumers"] = {
-                    "total": consumer_total,
-                    "truncated": consumer_truncated,
-                }
-                if not compact:
-                    entry["consumers"]["items"] = consumer_items
-            result_artifacts[key] = entry
-
-        entries = sorted(
-            result_artifacts.items(),
-            key=lambda item: item[1].get("symbol", "").lower(),
-        )
-        if symbol_filter:
-            term = symbol_filter.lower()
-            entries = [
-                item
-                for item in entries
-                if term in item[1].get("symbol", "").lower()
-            ]
-        selected, total_count, truncated = _bounded_items(entries, limit)
-
-        result = {
-                "module": module_name,
-                "module_id": mod_compact_id,
-                "artifact_count": len(selected),
-                "total_artifact_count": total_count,
-                "truncated": truncated,
-                "symbol_filter": symbol_filter or None,
-                "data_sources": ["live_symbol_state"],
-                "complete_symbol_catalog": True,
-                "artifacts": dict(selected),
-            }
-        if fields is not None:
-            allowed_fields = set(result)
-            unknown_fields = sorted(set(fields) - allowed_fields)
-            if unknown_fields:
-                return json.dumps({
-                    "error": "Unsupported fields for get_artifacts_for_module",
-                    "unknown_fields": unknown_fields,
-                    "allowed_fields": sorted(allowed_fields),
-                }, indent=2)
-            result = {field: result[field] for field in fields}
-        return json.dumps(result, indent=2)
-    except Exception as e:
-        return f"Error reading artifacts for module: {e}"
+get_artifacts_for_module = mcp.tool(description=short_description("get_artifacts_for_module"))(
+    _get_artifacts_for_module_impl
+)
 
 
-@mcp.tool(description=short_description('lookup_artifact_by_symbol'))
-def lookup_artifact_by_symbol(
-    repo_path: str,
-    symbol_name: str,
-    limit: int | None = 20,
-    evidence_limit: int | None = 20,
-    compact: bool = True,
-    fields: list[str] | None = None,
-) -> str:
-    root = Path(repo_path).expanduser().resolve()
-    try:
-        _, _, art_path_to_id, _ = _read_registries(root)
-        engine = mcp_runtime.get_or_init_engine(root)
-        if not engine or getattr(engine.state, "resync_required", False):
-            return "Error: No usable canonical LIVE state. Run analyze_project first."
-
-        state = engine.state
-        term = symbol_name.casefold()
-        candidates = []
-        for module_name, module_data in sorted((state.artifacts or {}).items()):
-            unavailable = _module_truth_unavailable(state, module_name)
-            for symbol, kind in _canonical_symbol_catalog(module_data).items():
-                if term not in symbol.casefold():
-                    continue
-                if unavailable:
-                    return json.dumps(unavailable, indent=2)
-                full_name = f"{module_name}::{symbol}"
-                artifact_id = art_path_to_id.get(full_name)
-                key = artifact_id or full_name
-                candidates.append(
-                    (symbol.casefold() != term, symbol.casefold(), full_name, key, kind)
-                )
-
-        candidates.sort()
-        if candidates and not candidates[0][0]:
-            candidates = [item for item in candidates if not item[0]]
-        if len(candidates) > 1 and not candidates[0][0]:
-            return json.dumps(
-                {
-                    "error": "Ambiguous canonical symbol identity.",
-                    "query": symbol_name,
-                    "candidates": [item[2] for item in candidates],
-                    "data_source": "live_canonical_state",
-                },
-                indent=2,
-            )
-        candidates, total_matches, matches_truncated = _bounded_items(
-            candidates, limit
-        )
-
-        if not candidates:
-            return f"No current artifacts found matching '{symbol_name}'."
-
-        results: dict = {}
-        for _, _, full_name, key, kind in candidates:
-            module_name, symbol = full_name.split("::", 1)
-            entry = {
-                "symbol": symbol,
-                "full_name": full_name,
-                "kind": kind,
-                "definer_module": module_name,
-            }
-            if artifact_consumption_is_fresh(state):
-                resolved_consumers = _canonical_symbol_consumers(
-                    state, module_name, symbol
-                )
-                consumer_items, consumer_total, consumer_truncated = _bounded_items(
-                    resolved_consumers, evidence_limit
-                )
-                entry["consumers"] = {
-                    "total": consumer_total,
-                    "truncated": consumer_truncated,
-                }
-                if not compact:
-                    entry["consumers"]["items"] = consumer_items
-            else:
-                entry["consumers"] = {
-                    "available": False,
-                    "state": getattr(state, "artifact_consumption_state", "deferred"),
-                    "reason": "Canonical artifact consumption is unavailable or stale.",
-                }
-            results[key] = entry
-
-        result = {
-                "query": symbol_name,
-                "match_count": len(results),
-                "total_matches": total_matches,
-                "truncated": matches_truncated,
-                "data_source": "live_canonical_state",
-                "artifacts": results,
-            }
-        if fields is not None:
-            allowed_fields = set(result)
-            unknown_fields = sorted(set(fields) - allowed_fields)
-            if unknown_fields:
-                return json.dumps({
-                    "error": "Unsupported fields for lookup_artifact_by_symbol",
-                    "unknown_fields": unknown_fields,
-                    "allowed_fields": sorted(allowed_fields),
-                }, indent=2)
-            result = {field: result[field] for field in fields}
-        return json.dumps(result, indent=2)
-    except Exception as e:
-        return f"Error searching artifacts by symbol: {e}"
+lookup_artifact_by_symbol = mcp.tool(description=short_description("lookup_artifact_by_symbol"))(
+    _lookup_artifact_by_symbol_impl
+)
 
 
 get_mcp_documentation = mcp.tool(
