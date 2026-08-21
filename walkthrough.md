@@ -1,115 +1,99 @@
-# MCP SERVER SPLIT - STAGE S2D
+# LIVE STARTUP RECONCILIATION - REAL IDEMPOTENCE FIX
+
+## EXACT_FALSE_CANDIDATE_CAUSE
+
+`tests/test_live_watcher_startup_reconciliation.py` was canonically present, but absent from persisted `FileStateManager`. Startup selection therefore correctly treated it as changed. Later, `IncrementalAnalysisEngine` parsed it and found an empty semantic refresh plan, returning `UNCHANGED`.
+
+The no-op branch did not acknowledge the current fingerprint. Consequently, the file remained absent from persisted file state and was queued again on every restart.
+
+## STARTUP_ORDERING
+
+Observed ordering:
+
+1. Watcher constructs startup queue from canonical membership and persisted fingerprints.
+2. Desktop publishes hydrated canonical state.
+3. First poll consumes the previously built queue.
+4. Candidate may become stale before consumption.
+5. IPC `update_file` increments revision even when the engine eventually returns `UNCHANGED`.
+
+The real incident was primarily missing fingerprint acknowledgement; stale queue ordering was an additional uncovered race.
+
+## FIX_OWNER
+
+- `IncrementalAnalysisEngine.update_file`: semantic no-op parsing now acknowledges the current file fingerprint before returning `UNCHANGED`.
+- `DesktopLiveWatcher.poll_once`: startup-only candidates are revalidated against fresh canonical membership and persisted fingerprints immediately before IPC dispatch.
+
+Normal filesystem events are not filtered by this startup revalidation.
 
 ## FILES_CHANGED
 
-- `C:\Temp\Contextor_Repo\contextor\mcp_server.py`
-- `C:\Temp\Contextor_Repo\contextor\mcp\tools\get_project_architecture.py` (created)
-- `C:\Temp\Contextor_Repo\contextor\mcp\tools\get_module_context.py` (created)
-- `C:\Temp\Contextor_Repo\contextor\mcp\tools\get_file_edit_context.py` (created)
-- `C:\Temp\Contextor_Repo\contextor\mcp\tools\get_symbol_implementation.py` (created)
-- `C:\Temp\Contextor_Repo\tests\test_mcp_regressions.py`
-- `C:\Temp\Contextor_Repo\tests\test_mcp_split_s2d.py` (created)
+- `C:\Temp\Contextor_Repo\contextor\core\analysis\incremental\engine.py`
+- `C:\Temp\Contextor_Repo\contextor\core\live_state\watcher.py`
+- `C:\Temp\Contextor_Repo\tests\test_live_watcher_startup_reconciliation.py`
 
-## DEPENDENCY_CLOSURE
+## REVALIDATION_OR_SELECTION_RULE
 
-- `get_project_architecture`: `mcp_runtime`, `query_helpers`, `module_current_truth`; local `_stale_module_truths`.
-- `get_module_context`: `mcp_runtime`, `query_helpers`, local imports from `contextor.core.report_query`; no moved private helper.
-- `get_file_edit_context`: `mcp_runtime`, `query_helpers`, existing core graph/rule imports; local `_static_test_reachability`.
-- `get_symbol_implementation`: `mcp_runtime`, `query_helpers`, `read_source` and `SourceError`; its seven AST/source helpers.
+- Canonical module absent: ADD remains required regardless of fingerprint.
+- Persisted fingerprint differs: MODIFY remains required.
+- Tracked path absent on disk: DELETE remains required.
+- Canonical module present and persisted fingerprint equals current file: stale startup candidate is discarded before `client.update_file`.
+- Excluded paths remain outside scan and reconciliation.
+- No time/debounce heuristic or duplicated fingerprint algorithm was introduced.
 
-## HELPER_OWNERSHIP
+## REGRESSION_REPRODUCTION
 
-- `_stale_module_truths` moved to the sole production consumer `get_project_architecture.py`.
-- `_static_test_reachability` moved to the sole production consumer `get_file_edit_context.py`.
-- `_resolve_symbol_source_paths`, `_symbol_signature`, `_ast_symbol_candidates`, `_module_path_for_source`, `_symbol_static_context`, `_json_size`, `_symbol_preview` moved with their sole public owner `get_symbol_implementation.py`.
-- No private compatibility aliases remain in `mcp_server.py`; the direct test binding now imports the real helper owner.
+Added ordering regression:
 
-## TOOLS_MOVED
+`persisted canonical state + missing fingerprint -> watcher startup queue -> fingerprint/state refresh -> first poll`
 
-- `get_project_architecture`
-- `get_module_context`
-- `get_file_edit_context`
-- `get_symbol_implementation`
+Expected and observed:
 
-`TOOLS_MOVED_THIS_STAGE=4`  
-`TOTAL_TOOLS_MOVED=17`  
-`TOOLS_REMAINING_IN_MONOLITH=4`
+- candidate exists in initial queue;
+- revalidation proves it current;
+- `update_file` is never called;
+- no revision-producing operation occurs.
 
-AST-normalized comparison against the pre-move `HEAD:contextor/mcp_server.py`, ignoring only FastMCP decorators, returned `True` for all four implementation bodies and all moved helpers.
-
-## SSOT_INVARIANTS
-
-- Canonical architecture/module/file-edit bodies were moved unchanged.
-- No output report resolver, `resolve_output_dir`, `_get_canonical_report`, or `json.load` exists in the four new modules.
-- Existing freshness, exact module-layer coverage, parse-truth gating, dependency evidence, availability, provenance, totals and truncation paths are unchanged.
-- `GENERATED_REPORT_SSOT_REINTRODUCED=false`
-- `PUBLIC_CONTRACT_CHANGED=false`
-- `TOOL_BODY_SEMANTIC_CHANGES=0`
-
-## SYMBOL_SOURCE_CONTRACT
-
-Explicit repository-bounded file resolution, Contextor source reader, AST candidate selection, ambiguity refusal, preview/fetch selection, signatures, method extraction, static context and response-size semantics moved unchanged.
-
-## FILE_EDIT_CONTEXT_CONTRACT
-
-Canonical module/artifact/dependency context and static test reachability moved unchanged. The test-reachability helper has one production owner; its focused regression remains passing.
-
-## TEST_BINDINGS_MIGRATED
-
-`tests/test_mcp_regressions.py::test_test_reachability_finds_direct_alias_and_reexport_paths` now imports `_static_test_reachability` from its real owner. No private bridge was retained.
-
-## IMPORT_GRAPH
-
-`mcp_server -> tools/* -> mcp runtime/query_helpers/core`
-
-- `TOOL_TO_SERVER_IMPORTS=0`
-- `TOOL_TO_TOOL_IMPORTS=0`
-- `REGISTRATION_DEPENDENCY_BINDING=false`
-- `DUPLICATE_HELPERS=0`
-
-## REGISTRATION_PARITY
-
-Structural regression confirms exact 21-tool names/order, direct `.fn` owners, signatures and centralized short descriptions. All four functions are plain undecorated implementations with no public docstrings or registration side effects.
+Added engine regression proves a semantic `UNCHANGED` result records the previously missing fingerprint.
 
 ## TARGETED_TEST_RESULT
 
-Focused contracts plus S2D structure:
-
 ```text
-18 passed, 57 deselected, 1 warning in 20.82s
+7 passed in 6.37s
 ```
 
-Post-import cleanup structural recheck:
+Scope:
 
-```text
-3 passed, 1 warning in 3.43s
-```
+- all startup reconciliation regressions;
+- existing watcher create/modify/delete behavior;
+- first-run no-snapshot behavior;
+- watcher reconnect behavior.
 
-The warning is the external FastMCP/Authlib deprecation warning.
+No Full Analysis, full suite or S2D test rerun was performed.
 
-## CONTEXTOR_POST_CHANGE_AUDIT
+## REAL_RESTART_PROOF
 
-- Source-bounded Contextor resolution confirms all four implementations exist completely in their new files with no public docstrings.
-- Desktop watcher revision `1030` classified the monolith update as `UNCHANGED`; revision `1032` materialized the new S2D structural test.
-- Four new production tool modules were not present in canonical module context after their creation.
-- Subsequent LIVE checks returned `transient_connection_failure`, then `owner_identity_changed`; therefore current implementations/consumers/blast radius cannot be certified from hydrated canonical state.
-- Textual and AST checks prove no old definitions, duplicate helper paths, report fallback, reverse imports, or registration binding in source.
+Pending one LIVE restart. Before restart, persisted fingerprints are present for:
 
-## LIVE_NEW_MODULE_EVIDENCE
+- `tests/test_live_watcher_startup_reconciliation.py`
+- `contextor/core/live_state/watcher.py`
+- `contextor/core/analysis/incremental/engine.py`
 
-`get_module_context` returned “not found in the project graph” for each of:
+This removes the previous missing-fingerprint precondition. Final proof requires comparing the journal revision immediately after restart and confirming that only expected desktop publication occurs, with no startup `UNCHANGED update_file`.
 
-- `contextor.mcp.tools.get_project_architecture`
-- `contextor.mcp.tools.get_module_context`
-- `contextor.mcp.tools.get_file_edit_context`
-- `contextor.mcp.tools.get_symbol_implementation`
+## ADD_MODIFY_DELETE_INVARIANTS
 
-No Full Analysis or manual `update_file` was used. This is an unresolved LIVE incremental materialization/owner-state failure, not masked by a workaround.
+- ADD absent from canonical remains queued.
+- Offline MODIFY remains fingerprint-driven.
+- Offline DELETE remains tracked-domain-driven.
+- Exclusions remain authoritative.
+- All candidates still use the existing incremental COW/refresh/publication pipeline.
+
+## S2D_STATUS
+
+S2D architecture remains unchanged and canonical. No S2D tool implementation was modified.
 
 ## FINAL_VERDICT
 
-`MCP_SPLIT_S2D_FIX_REQUIRED`
+`FIX_REQUIRED` until the requested real restart sanity confirms zero reconciliation revision churn.
 
-The code move and targeted contracts pass, but the mandatory LIVE new-module invariant and final canonical architectural audit are not closed.
-
-RESTART OBU
+RESTART LIVE

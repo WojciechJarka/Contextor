@@ -233,6 +233,10 @@ class IncrementalAnalysisEngine:
 
             # Check if true no-op
             if plan.is_empty and not is_new and not delta.is_deleted:
+                # Parsing proved the tracked source is semantically unchanged.
+                # Acknowledge its current fingerprint so restart reconciliation
+                # does not repeatedly queue the same canonical module.
+                self.state_manager.update_state(file_path)
                 return IncrementalUpdateResult(
                     status="RECOVERED" if recovered_from_parse_failure else "UNCHANGED",
                     file_path=file_path,

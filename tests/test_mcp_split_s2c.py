@@ -64,7 +64,12 @@ def test_s2c_ownership_import_graph_and_shared_helper_uniqueness():
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
         and any(ast.unparse(item).startswith("mcp.tool") for item in node.decorator_list)
     ]
-    assert len(decorated) == 8
+    assert decorated == [
+        "update_file",
+        "get_layer_isolation",
+        "get_report_diff",
+        "extract_indexed_report_context",
+    ]
     assert set(_IMPLEMENTATIONS).isdisjoint(decorated)
 
     for name in _IMPLEMENTATIONS:

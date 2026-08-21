@@ -1110,7 +1110,7 @@ def test_mcp_bootstrap_reexecs_outside_venv_with_preserved_stdio(monkeypatch):
                 str(interpreter),
                 "-u",
                 "-m",
-                "contextor.mcp_server",
+                "contextor.mcp_main",
                 "--flag",
             ],
         )

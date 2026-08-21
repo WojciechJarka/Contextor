@@ -70,7 +70,9 @@ class DesktopLiveWatcher(_PollingLiveWorker):
         super().__init__(interval=interval, thread_name="contextor-live-watcher")
         self.on_status = on_status
         self.on_reconnect = on_reconnect
+        self._excluded_paths, self._ignored_dirs = self._load_watch_filters()
         self._snapshot = self._scan()
+        self._startup_pending = self._startup_reconciliation_paths(self._snapshot)
 
     def _emit(self, message: str) -> None:
         """Forward a compact status message without assuming a GUI exists."""
@@ -99,7 +101,15 @@ class DesktopLiveWatcher(_PollingLiveWorker):
     def _scan(self) -> dict[str, tuple[int, int]]:
         result = {}
         for path in self.root.rglob("*.py"):
-            if any(part in {".git", ".venv", "__pycache__"} for part in path.parts):
+            relative = path.relative_to(self.root)
+            if any(part in self._ignored_dirs for part in relative.parts):
+                continue
+            relative_path = relative.as_posix()
+            if any(
+                relative_path == excluded
+                or relative_path.startswith(excluded + "/")
+                for excluded in self._excluded_paths
+            ):
                 continue
             try:
                 stat = path.stat()
@@ -107,6 +117,68 @@ class DesktopLiveWatcher(_PollingLiveWorker):
             except OSError:
                 continue
         return result
+
+    def _load_watch_filters(self) -> tuple[tuple[str, ...], frozenset[str]]:
+        from contextor.core.api.facade import _analysis_filters
+
+        excluded, ignored_dirs = _analysis_filters(str(self.root))
+        normalized = tuple(
+            sorted(
+                str(item).replace("\\", "/").removeprefix("./").strip("/")
+                for item in excluded
+                if str(item).strip()
+            )
+        )
+        return normalized, frozenset(ignored_dirs)
+
+    def _startup_reconciliation_paths(
+        self, current: dict[str, tuple[int, int]]
+    ) -> list[str]:
+        try:
+            response = self.client.snapshot()
+        except (OSError, EOFError, TimeoutError, ConnectionError):
+            return []
+        if response.get("status") != "ok" or response.get("state") is None:
+            return []
+
+        state = response["state"]
+        modules = getattr(state, "modules", None)
+        if not isinstance(modules, dict):
+            return []
+
+        from contextor.core.analysis.state_manager import FileStateManager
+        from contextor.core.paths import repo_cache_dir
+
+        manager = FileStateManager(str(repo_cache_dir(self.root)))
+        pending = {
+            path
+            for path in current
+            if manager.has_changed(path)
+            or self._module_name(Path(path)) not in modules
+        }
+        for tracked_path in manager.tracked_paths():
+            path = Path(tracked_path)
+            try:
+                relative = path.resolve().relative_to(self.root)
+            except ValueError:
+                continue
+            relative_path = relative.as_posix()
+            if (
+                path.suffix == ".py"
+                and tracked_path not in current
+                and not any(part in self._ignored_dirs for part in relative.parts)
+                and not any(
+                    relative_path == excluded
+                    or relative_path.startswith(excluded + "/")
+                    for excluded in self._excluded_paths
+                )
+            ):
+                pending.add(tracked_path)
+        return sorted(pending)
+
+    def _module_name(self, path: Path) -> str:
+        relative = path.resolve().relative_to(self.root).with_suffix("")
+        return ".".join(relative.parts)
 
     def poll_once(self) -> list[str]:
         current = self._scan()
@@ -122,9 +194,16 @@ class DesktopLiveWatcher(_PollingLiveWorker):
             self._snapshot = current
             self._emit("LIVE: no snapshot; waiting for analysis")
             return []
+        startup_pending = set(self._startup_pending)
+        if startup_pending:
+            startup_pending &= set(self._startup_reconciliation_paths(current))
         changed = sorted(
-            path for path in set(self._snapshot) | set(current)
-            if self._snapshot.get(path) != current.get(path)
+            startup_pending
+            | {
+                path
+                for path in set(self._snapshot) | set(current)
+                if self._snapshot.get(path) != current.get(path)
+            }
         )
         for path in changed:
             self._emit(f"Updating LIVE: {Path(path).name}")
@@ -154,6 +233,7 @@ class DesktopLiveWatcher(_PollingLiveWorker):
             else:
                 self._emit(f"LIVE update error: {Path(path).name}: {result_status}")
         self._snapshot = current
+        self._startup_pending = []
         return changed
 
     def _handle_poll_error(self, exc: OSError | RuntimeError | EOFError) -> None:

@@ -244,6 +244,10 @@ class FileStateManager:
         current_hash = self._compute_hash(file_path)
         return tracked.sha256 != current_hash
 
+    def tracked_paths(self) -> set[str]:
+        """Return the persisted file domain used by incremental analysis."""
+        return set(self._state)
+
     def update_state(self, file_path: str):
         """
         Updates the tracked state for a given file in RAM.
