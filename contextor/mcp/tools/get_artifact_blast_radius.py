@@ -3,11 +3,12 @@ from pathlib import Path
 
 from contextor.mcp import runtime as mcp_runtime
 from contextor.mcp import query_helpers
+from contextor.mcp import representation as mcp_rep
 
 
 _COMPACT_EVIDENCE_LIMIT = 3
-_AUTO_NEGOTIATION_MIN_BYTES_SAVED = 512
-_ALLOWED_REPRESENTATIONS = {"auto", "indexed", "named"}
+_AUTO_NEGOTIATION_MIN_BYTES_SAVED = mcp_rep.AUTO_NEGOTIATION_MIN_BYTES_SAVED
+_ALLOWED_REPRESENTATIONS = mcp_rep.ALLOWED_REPRESENTATIONS
 
 
 def _consumers_collection_view(
@@ -123,10 +124,11 @@ def _consumers_collection_view(
     if truncated:
         indexed_candidate["expand"] = _make_expand("indexed")
 
-    named_bytes = len(json.dumps(named_candidate, indent=2, ensure_ascii=False).encode("utf-8"))
-    indexed_bytes = len(json.dumps(indexed_candidate, indent=2, ensure_ascii=False).encode("utf-8"))
-    bytes_saved = named_bytes - indexed_bytes
-    percent_saved = round((bytes_saved / named_bytes) * 100, 1) if named_bytes > 0 else 0.0
+    sizes = mcp_rep.representation_size_stats(named_candidate, indexed_candidate)
+    named_bytes = sizes["named_bytes"]
+    indexed_bytes = sizes["indexed_bytes"]
+    bytes_saved = sizes["bytes_saved"]
+    percent_saved = sizes["percent_saved"]
 
     if bytes_saved < _AUTO_NEGOTIATION_MIN_BYTES_SAVED:
         result = {

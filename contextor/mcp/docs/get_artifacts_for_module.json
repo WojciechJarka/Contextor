@@ -2,21 +2,32 @@
   "version": "1.0.0",
   "tool": "get_artifacts_for_module",
   "purpose": [
-    "[OPTIMIZED] Returns all artifacts exported by a module with consumer info."
+    "[OPTIMIZED] Returns artifacts exported by a module with consumer information and progressive disclosure."
   ],
   "parameters": [
     "``module_name`` can be:\n- A full dotted module name: 'contextor.ui.gui_parser'\n- A file path relative to the repo root: 'contextor/ui/gui_parser.py'",
-    "Set ``include_consumers=False`` for a signatures-only view. When included,\neach ``consumers`` object always exposes ``total`` and ``truncated``;\n``compact=False`` adds ``items``. ``limit`` controls artifact matches and\n``evidence_limit`` controls consumers per artifact; pass ``None`` for all\nmatches or all nested evidence. ``fields`` projects top-level keys after\ncompact shaping. Allowed values are ``module``, ``module_id``,\n``artifact_count``, ``total_artifact_count``, ``truncated``,\n``symbol_filter``, ``data_sources``, ``complete_symbol_catalog``, and\n``artifacts``.",
-    "Use ``symbol_filter`` to select a name substring and ``limit`` to bound the\nresult. ``total_artifact_count`` reports matches before limiting and\n``truncated`` tells the LLM whether a narrower follow-up query is useful.\nCanonical LIVE state is the source of truth for symbol and artifact facts.\nPersistent registries provide identity/index mappings only. Output reports\nare not read by this operation."
+    "``include_consumers=True`` includes consumer counts and evidence. Set ``include_consumers=False`` for signatures-only view.",
+    "``symbol_filter`` filters candidate artifacts by symbol name substring before limits and ranking.",
+    "``limit`` bounds the maximum number of artifacts returned (default 50, pass ``None`` for unbounded). In default compact mode, output is capped at 10 salience-ranked artifacts.",
+    "``evidence_limit`` bounds consumer identities per artifact (default 20, pass ``None`` for unbounded). In compact mode, evidence is capped at 3 samples.",
+    "``compact=True`` (default) returns a progressive-disclosure summary: up to 10 artifacts selected by salience (high consumer fan-in first) with up to 3 consumer evidence items each.",
+    "``compact=False`` returns full artifact details ordered alphabetically.",
+    "``fields`` projects top-level domain keys: ``module``, ``module_id``, ``artifact_count``, ``total_artifact_count``, ``truncated``, ``symbol_filter``, ``data_sources``, ``complete_symbol_catalog``, and ``artifacts``. Protocol metadata (such as ``consumer_representation`` and ``expand``) is attached independently when required by the representation.",
+    "``representation`` controls nested consumer encoding: ``named`` (default module names), ``indexed`` (compact module IDs resolved via ``lookup_index_entries``), or ``auto`` (stateless negotiation returning decision prompt when identity compression yields substantial token savings)."
   ],
   "behavior": [
-    "Equivalent to the GUI parser window — shows what a module defines and\nwho uses each artifact across the project."
+    "In default compact mode (``compact=True``), returns up to 10 artifacts prioritized by consumer salience (``consumers.total DESC``, then alphabetical) with up to 3 nested consumer evidence items per artifact.",
+    "Top-level ``truncated`` is truthful (``artifact_count < total_artifact_count``). When output is truncated by internal compact presentation cap, an executable ``expand`` descriptor is included preserving original requested limits.",
+    "For complete lossless views, use ``compact=False, limit=None, evidence_limit=None`` with ``representation='named'`` or ``representation='indexed'``.",
+    "Artifact dictionary entries preserve ``full_name`` alongside ``artifact_id``/symbol metadata; representation options (including indexed) apply exclusively to nested consumer identities without modifying artifact dictionary keys or full_name fields.",
+    "When ``representation='indexed'`` is used with active consumer identities, a top-level ``consumer_representation`` object is included (``index_kind: 'module'``, ``resolve_via: 'lookup_index_entries'``).",
+    "In ``auto`` mode with ``compact=False``, large consumer payloads trigger a ``representation_decision_required`` protocol union response with executable retry options."
   ],
   "freshness": [],
   "errors": [],
   "usage_notes": [
-    "LLM use: call before changing one module's API. Disable consumers for the\ncheapest signature inventory; enable them only for impact analysis."
+    "LLM use: call before changing a module API. Use default compact for instant visibility of highest-impact symbols; expand or request indexed representation for complete blast-radius analysis.",
+    "Resolve indexed consumer module IDs in batch via ``lookup_index_entries``."
   ],
   "examples": []
 }
-

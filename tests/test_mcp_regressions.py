@@ -1874,7 +1874,7 @@ def test_artifacts_for_module_includes_live_zero_consumer_signature(
         "full_name": "pkg.module::unused",
         "kind": "function",
         "signature": "def unused(value: int) -> None",
-        "consumers": {"total": 0, "truncated": False},
+        "consumers": {"total": 0, "truncated": False, "evidence": []},
     }
 
 
@@ -1926,7 +1926,7 @@ def test_artifacts_for_module_uses_live_state_without_compact_report(
         "full_name": "pkg.module::run",
         "kind": "function",
         "signature": "def run() -> None",
-        "consumers": {"total": 0, "truncated": False},
+        "consumers": {"total": 0, "truncated": False, "evidence": []},
     }
 
 
@@ -4521,4 +4521,377 @@ def test_blast_radius_consumer_representation_and_progressive_disclosure(
         "bytes_saved": expected_bytes_saved_v,
         "percent_saved": expected_percent_saved_v,
     }
+
+
+def test_get_artifacts_for_module_representation_and_progressive_disclosure(
+    tmp_path, monkeypatch
+):
+    from contextor.mcp.tools import get_artifacts_for_module as gam_tool
+    from contextor.mcp.tools import get_artifact_blast_radius as blast_tool
+    from contextor.mcp import representation as mcp_rep
+    import inspect
+
+    # 1. Signature check: representation is last parameter, default 'named'
+    sig = inspect.signature(gam_tool.get_artifacts_for_module)
+    params = list(sig.parameters.values())
+    assert params[-1].name == "representation"
+    assert params[-1].default == "named"
+
+    # Unsupported representation error
+    unsupported = json.loads(
+        gam_tool.get_artifacts_for_module(str(tmp_path), "pkg.core", representation="xml")
+    )
+    assert unsupported == {
+        "error": "Unsupported representation for get_artifacts_for_module",
+        "representation": "xml",
+        "allowed_representations": ["auto", "indexed", "named"],
+    }
+
+    # Setup state with 15 symbols and consumer relationships
+    # Symbols: s01..s15
+    # s01..s05 have high fan-in (consumers: mod_01..mod_20)
+    # s06..s15 have 0 consumers
+    symbols_list = [f"s{i:02d}" for i in range(1, 16)]
+    consumer_map = {}
+    for i in range(1, 6):
+        sym = f"s{i:02d}"
+        consumer_map[f"pkg.core::{sym}"] = [f"consumer.pkg_{j:02d}" for j in range(1, 10 + i * 2 + 1)]
+    for i in range(6, 16):
+        sym = f"s{i:02d}"
+        consumer_map[f"pkg.core::{sym}"] = []
+
+    signatures_dict = {s: f"def {s}() -> None" for s in symbols_list}
+
+    state = RepositoryAnalysisState(
+        modules={"pkg.core": SimpleNamespace(module_id="10/1", path="pkg/core.py")},
+        artifacts={
+            "pkg.core": {
+                "own_symbols": symbols_list,
+                "symbols": {
+                    "functions": symbols_list,
+                    "signatures": signatures_dict,
+                },
+            }
+        },
+        artifact_consumption={
+            k: {"consumers": v, "channels": {}} for k, v in consumer_map.items()
+        },
+        artifact_consumption_state="fresh",
+    )
+
+    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: SimpleNamespace(state=state))
+
+    # Registries: all consumers have module IDs 101/1..130/1
+    mod_path_to_id = {"pkg.core": "10/1"}
+    mod_id_to_path = {"10/1": "pkg.core"}
+    for j in range(1, 30):
+        c_name = f"consumer.pkg_{j:02d}"
+        c_id = f"{100+j}/1"
+        mod_path_to_id[c_name] = c_id
+        mod_id_to_path[c_id] = c_name
+
+    art_path_to_id = {}
+    art_id_to_path = {}
+    for idx, s in enumerate(symbols_list, 1):
+        full = f"pkg.core::{s}"
+        aid = f"A{idx}/1"
+        art_path_to_id[full] = aid
+        art_id_to_path[aid] = full
+
+    monkeypatch.setattr(
+        query_helpers,
+        "read_registries",
+        lambda _root: (mod_path_to_id, mod_id_to_path, art_path_to_id, art_id_to_path),
+    )
+
+    # 2. Compact limits (0, 1, 5, 10, 50, None) and evidence_limits (0, 1, 3, 20, None)
+    # Default compact (limit=50, evidence_limit=20): capped at 10 salience items, 3 evidence items each
+    res_default = json.loads(
+        gam_tool.get_artifacts_for_module(str(tmp_path), "pkg.core")
+    )
+    assert res_default["artifact_count"] == 10
+    assert res_default["total_artifact_count"] == 15
+    assert res_default["truncated"] is True
+    assert "expand" in res_default
+    assert res_default["expand"] == {
+        "compact": False,
+        "limit": 50,
+        "evidence_limit": 20,
+        "include_consumers": True,
+        "symbol_filter": "",
+        "representation": "named",
+    }
+    # 5. Salience ordering: top 5 high-fan-in symbols (s05, s04, s03, s02, s01) are in first 5 slots!
+    selected_keys = list(res_default["artifacts"].keys())
+    assert [res_default["artifacts"][k]["symbol"] for k in selected_keys[:5]] == ["s05", "s04", "s03", "s02", "s01"]
+    # 4. Nested truthful truncation and max 3 evidence
+    art_s05 = res_default["artifacts"]["A5/1"]
+    assert art_s05["consumers"]["total"] == 20
+    assert art_s05["consumers"]["truncated"] is True
+    assert len(art_s05["consumers"]["evidence"]) == 3
+
+    # compact limit=0
+    res_lim0 = json.loads(gam_tool.get_artifacts_for_module(str(tmp_path), "pkg.core", limit=0))
+    assert res_lim0["artifact_count"] == 0
+    assert res_lim0["truncated"] is True
+    assert "expand" not in res_lim0  # requested 0, returned 0 -> presentation_truncated=False
+
+    # compact limit=1
+    res_lim1 = json.loads(gam_tool.get_artifacts_for_module(str(tmp_path), "pkg.core", limit=1))
+    assert res_lim1["artifact_count"] == 1
+    assert "expand" not in res_lim1  # requested 1, returned 1 -> presentation_truncated=False
+
+    # compact limit=5
+    res_lim5 = json.loads(gam_tool.get_artifacts_for_module(str(tmp_path), "pkg.core", limit=5))
+    assert res_lim5["artifact_count"] == 5
+    assert "expand" not in res_lim5  # requested 5, returned 5 -> presentation_truncated=False
+
+    # compact limit=None
+    res_lim_none = json.loads(gam_tool.get_artifacts_for_module(str(tmp_path), "pkg.core", limit=None))
+    assert res_lim_none["artifact_count"] == 10
+    assert res_lim_none["expand"]["limit"] is None
+
+    # evidence_limit=0
+    res_ev0 = json.loads(gam_tool.get_artifacts_for_module(str(tmp_path), "pkg.core", evidence_limit=0))
+    assert res_ev0["artifacts"]["A5/1"]["consumers"] == {"total": 20, "truncated": True, "evidence": []}
+
+    # 6. include_consumers=False: alphabetical + zero consumer lookup
+    lookup_calls = []
+    real_consumers = query_helpers.canonical_symbol_consumers
+    def tracked_consumers(*args):
+        lookup_calls.append(args)
+        return real_consumers(*args)
+    monkeypatch.setattr(query_helpers, "canonical_symbol_consumers", tracked_consumers)
+
+    res_no_cons = json.loads(
+        gam_tool.get_artifacts_for_module(str(tmp_path), "pkg.core", include_consumers=False)
+    )
+    assert len(lookup_calls) == 0
+    # Alphabetical order: s01..s10
+    assert [item["symbol"] for item in res_no_cons["artifacts"].values()] == [f"s{i:02d}" for i in range(1, 11)]
+
+    # 7. symbol_filter before total/ranking
+    res_filtered = json.loads(
+        gam_tool.get_artifacts_for_module(str(tmp_path), "pkg.core", symbol_filter="s05")
+    )
+    assert res_filtered["total_artifact_count"] == 1
+    assert res_filtered["artifact_count"] == 1
+    assert res_filtered["truncated"] is False
+    assert "expand" not in res_filtered
+
+    # 8. Presentation-truncated expand eligibility cases A-E:
+    # Case A: total=15, compact=True, limit=50 -> artifact_count=10, expand present
+    res_a = json.loads(gam_tool.get_artifacts_for_module(str(tmp_path), "pkg.core", compact=True, limit=50))
+    assert res_a["artifact_count"] == 10 and res_a["truncated"] is True and "expand" in res_a
+    # Case B: total=15, compact=True, limit=None -> artifact_count=10, expand present
+    res_b = json.loads(gam_tool.get_artifacts_for_module(str(tmp_path), "pkg.core", compact=True, limit=None))
+    assert res_b["artifact_count"] == 10 and res_b["truncated"] is True and "expand" in res_b
+    # Case C: total=15, compact=True, limit=5 -> artifact_count=5, truncated=True, NO expand
+    res_c = json.loads(gam_tool.get_artifacts_for_module(str(tmp_path), "pkg.core", compact=True, limit=5))
+    assert res_c["artifact_count"] == 5 and res_c["truncated"] is True and "expand" not in res_c
+    # Case D: total=15, compact=False, limit=5 -> artifact_count=5, truncated=True, NO expand
+    res_d = json.loads(gam_tool.get_artifacts_for_module(str(tmp_path), "pkg.core", compact=False, limit=5))
+    assert res_d["artifact_count"] == 5 and res_d["truncated"] is True and "expand" not in res_d
+    # Case E: total=2 (small module), compact=True, limit=50 -> artifact_count=2, truncated=False, NO expand
+    state_small = RepositoryAnalysisState(
+        modules={"pkg.small": SimpleNamespace(module_id="20/1", path="pkg/small.py")},
+        artifacts={"pkg.small": {"symbols": {"functions": ["f1", "f2"]}}},
+        artifact_consumption={"pkg.small::f1": {"consumers": [], "channels": {}}, "pkg.small::f2": {"consumers": [], "channels": {}}},
+        artifact_consumption_state="fresh",
+    )
+    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: SimpleNamespace(state=state_small))
+    res_e = json.loads(gam_tool.get_artifacts_for_module(str(tmp_path), "pkg.small", compact=True, limit=50))
+    assert res_e["artifact_count"] == 2 and res_e["truncated"] is False and "expand" not in res_e
+
+    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: SimpleNamespace(state=state))
+
+    # 9. Direct executable expand
+    expanded = json.loads(
+        gam_tool.get_artifacts_for_module(str(tmp_path), "pkg.core", **res_a["expand"])
+    )
+    assert expanded["artifact_count"] == 15
+    assert expanded["truncated"] is False
+
+    # 10. Lossless named
+    res_lossless_named = json.loads(
+        gam_tool.get_artifacts_for_module(str(tmp_path), "pkg.core", compact=False, limit=None, evidence_limit=None, representation="named")
+    )
+    assert res_lossless_named["artifact_count"] == 15
+    assert "consumer_representation" not in res_lossless_named
+    assert res_lossless_named["artifacts"]["A5/1"]["consumers"]["items"] == consumer_map["pkg.core::s05"]
+
+    # 11. Lossless indexed + 12. M2 consumer_representation metadata
+    res_lossless_indexed = json.loads(
+        gam_tool.get_artifacts_for_module(str(tmp_path), "pkg.core", compact=False, limit=None, evidence_limit=None, representation="indexed")
+    )
+    assert res_lossless_indexed["consumer_representation"] == {
+        "representation": "indexed",
+        "index_kind": "module",
+        "resolve_via": "lookup_index_entries",
+    }
+    assert res_lossless_indexed["artifacts"]["A5/1"]["consumers"]["items"] == [
+        mod_path_to_id[m] for m in consumer_map["pkg.core::s05"]
+    ]
+
+    # 13. Zero-consumer indexed/auto no-op: no metadata
+    state_zero_cons = RepositoryAnalysisState(
+        modules={"pkg.zero": SimpleNamespace(module_id="30/1", path="pkg/zero.py")},
+        artifacts={"pkg.zero": {"symbols": {"functions": ["z1", "z2"]}}},
+        artifact_consumption={"pkg.zero::z1": {"consumers": [], "channels": {}}, "pkg.zero::z2": {"consumers": [], "channels": {}}},
+        artifact_consumption_state="fresh",
+    )
+    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: SimpleNamespace(state=state_zero_cons))
+    res_zero_idx = json.loads(gam_tool.get_artifacts_for_module(str(tmp_path), "pkg.zero", compact=False, representation="indexed"))
+    assert "consumer_representation" not in res_zero_idx
+    res_zero_auto = json.loads(gam_tool.get_artifacts_for_module(str(tmp_path), "pkg.zero", compact=False, representation="auto"))
+    assert "consumer_representation" not in res_zero_auto
+
+    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: SimpleNamespace(state=state))
+
+    # 14. Selected-scope-only missing mapping & 15. Missing mapping outside scope does not fail & 16. Exact missing-ID error shape
+    # Remove mapping for consumer.pkg_19 (only in s05, which is outside limit=1 for symbol s01)
+    mod_path_incomplete = dict(mod_path_to_id)
+    del mod_path_incomplete["consumer.pkg_19"]
+    monkeypatch.setattr(query_helpers, "read_registries", lambda _root: (mod_path_incomplete, mod_id_to_path, art_path_to_id, art_id_to_path))
+
+    # Query s01 (does not contain consumer.pkg_19) -> succeeds!
+    res_s01 = json.loads(gam_tool.get_artifacts_for_module(str(tmp_path), "pkg.core", symbol_filter="s01", compact=False, representation="indexed"))
+    assert "consumer_representation" in res_s01
+
+    # Query s05 (contains consumer.pkg_19) -> exact error shape!
+    res_s05_err = json.loads(gam_tool.get_artifacts_for_module(str(tmp_path), "pkg.core", symbol_filter="s05", compact=False, representation="indexed"))
+    assert res_s05_err == {
+        "error": "Cannot fulfill indexed representation for get_artifacts_for_module",
+        "reason": "missing_module_ids",
+        "missing_module_names": ["consumer.pkg_19"],
+        "representation": "indexed",
+    }
+    assert "missing_modules" not in res_s05_err
+    assert "suggested_action" not in res_s05_err
+
+    monkeypatch.setattr(query_helpers, "read_registries", lambda _root: (mod_path_to_id, mod_id_to_path, art_path_to_id, art_id_to_path))
+
+    # 17. fields excluding artifacts zero artifact/signature/consumer shaping
+    lookup_calls.clear()
+    res_fields_mod = json.loads(
+        gam_tool.get_artifacts_for_module(str(tmp_path), "pkg.core", fields=["module", "module_id"], representation="auto")
+    )
+    assert res_fields_mod == {"module": "pkg.core", "module_id": "10/1"}
+    assert len(lookup_calls) == 0
+
+    # 18. Compact auto: zero byte sizing, returns named compact evidence
+    res_compact_auto = json.loads(
+        gam_tool.get_artifacts_for_module(str(tmp_path), "pkg.core", compact=True, representation="auto")
+    )
+    assert res_compact_auto["consumer_representation"] == {
+        "representation": "named",
+        "requested_representation": "auto",
+    }
+    assert res_compact_auto["artifacts"]["A5/1"]["consumers"]["evidence"] == consumer_map["pkg.core::s05"][:3]
+
+    # 19. Full auto below-threshold direct named (small consumer payload)
+    # Query with symbol_filter="s01" (total 12 consumers)
+    res_below = json.loads(
+        gam_tool.get_artifacts_for_module(str(tmp_path), "pkg.core", symbol_filter="s01", compact=False, representation="auto")
+    )
+    assert res_below["consumer_representation"] == {
+        "representation": "named",
+        "requested_representation": "auto",
+    }
+
+    # 20. Full auto decision branch (15 symbols with large consumer payload, bytes_saved >= 512)
+    # 21. Exact final candidate sizes & 22. Decision exact mandatory key set
+    res_dec = json.loads(
+        gam_tool.get_artifacts_for_module(str(tmp_path), "pkg.core", compact=False, limit=None, evidence_limit=None, representation="auto")
+    )
+    assert res_dec["status"] == "representation_decision_required"
+    assert res_dec["requested_representation"] == "auto"
+    assert res_dec["module"] == "pkg.core"
+    assert res_dec["module_id"] == "10/1"
+    assert res_dec["total_artifact_count"] == 15
+    assert res_dec["decision_scope_count"] == 15
+    assert res_dec["scope_truncated"] is False
+    assert res_dec["truncated"] is True
+    # 23. Evidence max 3 and exact salience symbols
+    assert len(res_dec["evidence"]) == 3
+    assert [item["symbol"] for item in res_dec["evidence"]] == ["s05", "s04", "s03"]
+    # Key set verification (11 mandatory keys)
+    assert set(res_dec.keys()) == {
+        "status", "requested_representation", "module", "module_id",
+        "total_artifact_count", "truncated", "decision_scope_count",
+        "scope_truncated", "evidence", "sizes", "options",
+    }
+    assert "artifacts" not in res_dec
+    assert "artifact_count" not in res_dec
+    assert "expand" not in res_dec
+
+    # Exact sizing calculations
+    expected_named_cand = json.loads(gam_tool.get_artifacts_for_module(str(tmp_path), "pkg.core", compact=False, limit=None, evidence_limit=None, representation="named"))
+    expected_indexed_cand = json.loads(gam_tool.get_artifacts_for_module(str(tmp_path), "pkg.core", compact=False, limit=None, evidence_limit=None, representation="indexed"))
+    calc_sizes = mcp_rep.representation_size_stats(expected_named_cand, expected_indexed_cand)
+    assert res_dec["sizes"] == calc_sizes
+    assert res_dec["sizes"]["bytes_saved"] >= mcp_rep.AUTO_NEGOTIATION_MIN_BYTES_SAVED
+
+    # 25. Options named / indexed exact executable kwargs & 26. bounded_named
+    assert "named" in res_dec["options"]
+    assert "indexed" in res_dec["options"]
+    assert "bounded_named" in res_dec["options"]
+    assert res_dec["options"]["bounded_named"]["limit"] == 10
+    assert res_dec["options"]["bounded_named"]["evidence_limit"] == 5
+
+    # Direct retry execution
+    retry_named = json.loads(gam_tool.get_artifacts_for_module(str(tmp_path), "pkg.core", **res_dec["options"]["named"]))
+    assert retry_named["artifact_count"] == 15
+    assert "consumer_representation" not in retry_named
+
+    retry_indexed = json.loads(gam_tool.get_artifacts_for_module(str(tmp_path), "pkg.core", **res_dec["options"]["indexed"]))
+    assert retry_indexed["artifact_count"] == 15
+    assert retry_indexed["consumer_representation"]["representation"] == "indexed"
+
+    # 27. fields=["artifacts"] decision + direct retries
+    res_dec_f = json.loads(
+        gam_tool.get_artifacts_for_module(str(tmp_path), "pkg.core", compact=False, limit=None, evidence_limit=None, representation="auto", fields=["artifacts"])
+    )
+    assert res_dec_f["status"] == "representation_decision_required"
+    assert res_dec_f["options"]["named"]["fields"] == ["artifacts"]
+    assert res_dec_f["options"]["indexed"]["fields"] == ["artifacts"]
+
+    retry_named_f = json.loads(gam_tool.get_artifacts_for_module(str(tmp_path), "pkg.core", **res_dec_f["options"]["named"]))
+    assert list(retry_named_f.keys()) == ["artifacts"]
+
+    retry_indexed_f = json.loads(gam_tool.get_artifacts_for_module(str(tmp_path), "pkg.core", **res_dec_f["options"]["indexed"]))
+    assert set(retry_indexed_f.keys()) == {"artifacts", "consumer_representation"}
+
+    # 28. fields=["artifacts"] compact protocol metadata preservation
+    res_f_named_comp = json.loads(
+        gam_tool.get_artifacts_for_module(str(tmp_path), "pkg.core", compact=True, limit=50, fields=["artifacts"], representation="named")
+    )
+    assert set(res_f_named_comp.keys()) == {"artifacts", "expand"}
+    assert res_f_named_comp["expand"]["fields"] == ["artifacts"]
+
+    res_f_idx_comp = json.loads(
+        gam_tool.get_artifacts_for_module(str(tmp_path), "pkg.core", compact=True, limit=50, fields=["artifacts"], representation="indexed")
+    )
+    assert set(res_f_idx_comp.keys()) == {"artifacts", "expand", "consumer_representation"}
+    assert res_f_idx_comp["expand"]["fields"] == ["artifacts"]
+
+    res_f_bnd_comp = json.loads(
+        gam_tool.get_artifacts_for_module(str(tmp_path), "pkg.core", compact=True, limit=5, fields=["artifacts"], representation="named")
+    )
+    assert set(res_f_bnd_comp.keys()) == {"artifacts"}
+
+    res_f_expanded = json.loads(
+        gam_tool.get_artifacts_for_module(str(tmp_path), "pkg.core", **res_f_named_comp["expand"])
+    )
+    assert list(res_f_expanded.keys()) == ["artifacts"]
+    assert len(res_f_expanded["artifacts"]) == 15
+
+    # 29. Helper sizing used by get_artifacts_for_module confirmed via calc_sizes
+    # 30. A3 blast-radius regression protection
+    blast_res = json.loads(
+        blast_tool.get_artifact_blast_radius(str(tmp_path), "pkg.core::s05", compact=False, max_items=None, representation="named")
+    )
+    assert blast_res["consumers"]["total"] == 20
+    assert len(blast_res["consumers"]["items"]) == 20
+
 
