@@ -18,6 +18,7 @@ from contextor import mcp_process_registry, mcp_server
 from contextor.mcp import analysis_jobs
 from contextor.mcp import query_helpers
 from contextor.mcp import runtime as mcp_runtime
+from contextor.mcp.tools.get_file_edit_context import _static_test_reachability
 from contextor.mcp.tools import lookup_index_entries as lookup_index_entries_tool
 from contextor.core.analysis import git_context
 from contextor.core.api.facade import ContextorFacade
@@ -2354,7 +2355,7 @@ def test_test_reachability_finds_direct_alias_and_reexport_paths():
         "pkg.facade": {"pkg.public_api"},
     }
 
-    result = mcp_server._static_test_reachability(
+    result = _static_test_reachability(
         "pkg.target",
         hard_edges,
         {},

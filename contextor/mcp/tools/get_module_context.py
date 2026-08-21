@@ -1,0 +1,253 @@
+import json
+from pathlib import Path
+
+from contextor.mcp import query_helpers
+from contextor.mcp import runtime as mcp_runtime
+
+
+def get_module_context(
+    repo_path: str,
+    module_name: str = "",
+    max_items: int | None = 30,
+    compact: bool = True,
+    fields: list[str] | None = None,
+    module: str | None = None,
+) -> str:
+    root = Path(repo_path).expanduser().resolve()
+    from contextor.core.report_query import IndexCatalog, catalog_from_registry, resolve_index_query
+
+    mod_path_to_id, mod_id_to_path, art_path_to_id, art_id_to_path = query_helpers.read_registries(root)
+    catalog = catalog_from_registry(str(root))
+    if not catalog.modules and mod_id_to_path:
+        catalog = IndexCatalog(
+            modules=mod_id_to_path,
+            artifacts=art_id_to_path,
+            module_paths={name: name.replace(".", "/") + ".py" for name in mod_path_to_id},
+            recovered_modules={},
+            recovered_artifacts={},
+        )
+
+    effective_name = (module_name or "").strip()
+    effective_alias = (module or "").strip()
+
+    if effective_name and effective_alias:
+        res_name = resolve_index_query(effective_name, catalog, repo_root=str(root))
+        res_alias = resolve_index_query(effective_alias, catalog, repo_root=str(root))
+        matches_name = res_name.get("matches", [])
+        matches_alias = res_alias.get("matches", [])
+        if matches_name and matches_alias:
+            m_n = matches_name[0]
+            m_a = matches_alias[0]
+            if (
+                (m_n.get("id") != m_a.get("id"))
+                or (m_n.get("name") != m_a.get("name"))
+                or (m_n.get("kind") != m_a.get("kind"))
+            ):
+                return json.dumps(
+                    {
+                        "error": "Conflicting 'module_name' and 'module' arguments provided. Resolved to different canonical targets.",
+                        "module_name": effective_name,
+                        "module_name_resolved": {"id": m_n.get("id"), "name": m_n.get("name"), "kind": m_n.get("kind")},
+                        "module": effective_alias,
+                        "module_resolved": {"id": m_a.get("id"), "name": m_a.get("name"), "kind": m_a.get("kind")},
+                    },
+                    indent=2,
+                )
+
+    input_query = effective_alias or effective_name
+    if not input_query:
+        return json.dumps({"error": "Either 'module_name' or 'module' must be provided."}, indent=2)
+
+    resolution = resolve_index_query(input_query, catalog, repo_root=str(root))
+    if resolution.get("matches"):
+        top = resolution["matches"][0]
+        if top.get("kind") == "artifact":
+            art_name = top["name"]
+            art_id = top["id"]
+            definer_mod = art_name.split("::", 1)[0]
+            return json.dumps(
+                {
+                    "target": input_query,
+                    "resolved_as": "artifact",
+                    "artifact": art_name,
+                    "artifact_id": art_id,
+                    "definer_module": definer_mod,
+                    "suggested_next_tool": "get_artifact_blast_radius",
+                    "warnings": [
+                        "Target resolved to an artifact/symbol rather than a module. "
+                        "Use get_artifact_blast_radius for symbol-level consumption."
+                    ],
+                },
+                indent=2,
+            )
+        elif top.get("kind") == "module":
+            module_name = top["name"]
+    else:
+        module_name = input_query
+
+    engine = mcp_runtime.get_or_init_engine(root)
+    if not engine or getattr(engine.state, "resync_required", False):
+        return "Error: No usable canonical LIVE state. Run analyze_project first."
+    state = engine.state
+    unavailable = query_helpers.module_truth_unavailable(state, module_name)
+    if unavailable:
+        return json.dumps(unavailable, indent=2)
+    live_modules = set(getattr(state, "modules", {})) | set(
+        getattr(state, "artifacts", {})
+    )
+    if module_name not in live_modules:
+        return f"Module '{module_name}' not found in the project graph."
+
+    inbound = {}
+    outbound = {}
+    dependency_source = "live_canonical_graph"
+    graph = getattr(state, "dependency_graph", None)
+    if graph is None:
+        return "Error: Canonical LIVE dependency graph is unavailable. Run analyze_project first."
+    hard_edges = getattr(graph, "hard_edges", {}) if graph else {}
+    soft_edges = getattr(graph, "soft_edges", {}) if graph else {}
+
+    def relationship(source: str, target: str) -> dict:
+        classes = []
+        if target in set(hard_edges.get(source, set())):
+            classes.append("hard_dependency")
+        if target in set(soft_edges.get(source, set())):
+            classes.append("soft_dependency")
+        return {
+            "dep_types": classes,
+            "weight": 1,
+            "data_source": "live_canonical_graph",
+        }
+
+    targets = set(hard_edges.get(module_name, set())) | set(
+        soft_edges.get(module_name, set())
+    )
+    outbound = {
+        target: relationship(module_name, target)
+        for target in sorted(targets)
+    }
+    sources = set(hard_edges) | set(soft_edges)
+    inbound = {
+        source: relationship(source, module_name)
+        for source in sorted(sources)
+        if module_name
+        in (
+            set(hard_edges.get(source, set()))
+            | set(soft_edges.get(source, set()))
+        )
+    }
+
+    if graph is not None:
+        hard_edges = getattr(graph, "hard_edges", {}) or {}
+        live_fan_out = len(hard_edges.get(module_name, set()))
+        live_fan_in = sum(
+            1 for _, targets in hard_edges.items() if module_name in targets
+        )
+        topo = getattr(state, "topology_analytics", {}) or {}
+        topo_freshness = getattr(state, "topology_metrics_state", "deferred")
+
+        metrics = {
+            "fan_in": live_fan_in,
+            "fan_out": live_fan_out,
+        }
+        degree_metrics_source = "live_canonical_graph"
+
+        if topo_freshness == "fresh" and isinstance(topo, dict):
+            has_any_topo = False
+            for topo_key, metric_field in [
+                ("pagerank", "pagerank"),
+                ("betweenness", "betweenness"),
+                ("hub_scores", "hub_score"),
+                ("authority_scores", "authority_score"),
+                ("bridge_scores", "bridge_score"),
+            ]:
+                val_map = topo.get(topo_key, {})
+                if isinstance(val_map, dict) and module_name in val_map:
+                    metrics[metric_field] = val_map[module_name]
+                    has_any_topo = True
+
+            if "module_risk" in topo and isinstance(topo["module_risk"], dict) and module_name in topo["module_risk"]:
+                metrics["risk_score"] = topo["module_risk"][module_name]
+                has_any_topo = True
+
+            metrics_source = "live_canonical_topology" if has_any_topo else "live_canonical_graph"
+        elif topo_freshness == "stale":
+            metrics_source = "stale_topology_analytics"
+        else:
+            metrics_source = "deferred_topology_analytics"
+
+        if mod_path_to_id.get(module_name):
+            metrics["module_idx"] = mod_path_to_id[module_name]
+
+        cached_analytics = getattr(state, "cached_analytics", {}) or {}
+        cached_freshness = getattr(state, "cached_analytics_state", "deferred")
+        if cached_freshness == "fresh" and isinstance(cached_analytics, dict):
+            if "module_layers" in cached_analytics and module_name in cached_analytics["module_layers"]:
+                metrics["layer"] = cached_analytics["module_layers"][module_name]
+            if "visibility" in cached_analytics and module_name in cached_analytics["visibility"]:
+                metrics["visibility"] = cached_analytics["visibility"][module_name]
+            if "export_degree" in cached_analytics and module_name in cached_analytics["export_degree"]:
+                metrics["export_degree"] = cached_analytics["export_degree"][module_name]
+
+    else:
+        metrics = {"fan_in": len(inbound), "fan_out": len(outbound)}
+        canonical_metrics = getattr(state, "metrics", {}) or {}
+        if isinstance(canonical_metrics.get(module_name), dict):
+            metrics.update(canonical_metrics[module_name])
+        metrics_source = "deferred_topology_analytics"
+        degree_metrics_source = "canonical_module_metrics"
+
+    inbound_items, inbound_total, inbound_truncated = query_helpers.bounded_items(
+        sorted(inbound.items()), max_items
+    )
+    outbound_items, outbound_total, outbound_truncated = query_helpers.bounded_items(
+        sorted(outbound.items()), max_items
+    )
+    common_result = {
+        "module": module_name,
+        "metrics": metrics,
+        "metrics_source": metrics_source,
+        "degree_metrics_source": degree_metrics_source,
+        "dependency_data_source": dependency_source,
+    }
+    full_result = {
+        **common_result,
+        "dependencies_inbound_who_calls_me": {
+            "items": dict(inbound_items),
+            "total": inbound_total,
+            "truncated": inbound_truncated,
+        },
+        "dependencies_outbound_who_i_call": {
+            "items": dict(outbound_items),
+            "total": outbound_total,
+            "truncated": outbound_truncated,
+        },
+    }
+    compact_result = {
+        **common_result,
+        "dependencies_inbound_who_calls_me": {
+            "total": inbound_total,
+            "truncated": inbound_truncated,
+        },
+        "dependencies_outbound_who_i_call": {
+            "total": outbound_total,
+            "truncated": outbound_truncated,
+        },
+    }
+    result = compact_result if compact else full_result
+
+    if fields is not None:
+        allowed_fields = set(result)
+        unknown_fields = sorted(set(fields) - allowed_fields)
+        if unknown_fields:
+            return json.dumps(
+                {
+                    "error": "Unsupported fields for get_module_context",
+                    "unknown_fields": unknown_fields,
+                    "allowed_fields": sorted(allowed_fields),
+                },
+                indent=2,
+            )
+        result = {field: result[field] for field in fields}
+
+    return json.dumps(result, indent=2)
