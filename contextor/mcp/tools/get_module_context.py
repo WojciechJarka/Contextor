@@ -4,6 +4,46 @@ from pathlib import Path
 from contextor.mcp import query_helpers
 from contextor.mcp import runtime as mcp_runtime
 
+_COMPACT_EVIDENCE_LIMIT = 3
+
+
+def _dependency_collection_view(
+    items: list[tuple[str, dict]],
+    max_items: int | None,
+    compact: bool,
+) -> dict:
+    total = len(items)
+    if compact:
+        if max_items is None:
+            evidence_limit = _COMPACT_EVIDENCE_LIMIT
+        else:
+            evidence_limit = min(
+                _COMPACT_EVIDENCE_LIMIT,
+                max(0, int(max_items)),
+            )
+        selected = items[:evidence_limit]
+        result = {
+            "evidence": {
+                module_name: list(details.get("dep_types", []))
+                for module_name, details in selected
+            },
+            "total": total,
+            "truncated": total > len(selected),
+        }
+    else:
+        selected, _, truncated = query_helpers.bounded_items(items, max_items)
+        result = {
+            "items": dict(selected),
+            "total": total,
+            "truncated": truncated,
+        }
+    if result["truncated"]:
+        result["expand"] = {
+            "compact": False,
+            "max_items": None,
+        }
+    return result
+
 
 def get_module_context(
     repo_path: str,
@@ -197,12 +237,6 @@ def get_module_context(
         metrics_source = "deferred_topology_analytics"
         degree_metrics_source = "canonical_module_metrics"
 
-    inbound_items, inbound_total, inbound_truncated = query_helpers.bounded_items(
-        sorted(inbound.items()), max_items
-    )
-    outbound_items, outbound_total, outbound_truncated = query_helpers.bounded_items(
-        sorted(outbound.items()), max_items
-    )
     common_result = {
         "module": module_name,
         "metrics": metrics,
@@ -210,31 +244,19 @@ def get_module_context(
         "degree_metrics_source": degree_metrics_source,
         "dependency_data_source": dependency_source,
     }
-    full_result = {
+    result = {
         **common_result,
-        "dependencies_inbound_who_calls_me": {
-            "items": dict(inbound_items),
-            "total": inbound_total,
-            "truncated": inbound_truncated,
-        },
-        "dependencies_outbound_who_i_call": {
-            "items": dict(outbound_items),
-            "total": outbound_total,
-            "truncated": outbound_truncated,
-        },
+        "dependencies_inbound_who_calls_me": _dependency_collection_view(
+            sorted(inbound.items()),
+            max_items,
+            compact,
+        ),
+        "dependencies_outbound_who_i_call": _dependency_collection_view(
+            sorted(outbound.items()),
+            max_items,
+            compact,
+        ),
     }
-    compact_result = {
-        **common_result,
-        "dependencies_inbound_who_calls_me": {
-            "total": inbound_total,
-            "truncated": inbound_truncated,
-        },
-        "dependencies_outbound_who_i_call": {
-            "total": outbound_total,
-            "truncated": outbound_truncated,
-        },
-    }
-    result = compact_result if compact else full_result
 
     if fields is not None:
         allowed_fields = set(result)

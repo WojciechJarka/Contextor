@@ -292,6 +292,7 @@ def test_project_architecture_requires_present_complete_module_layers(
     assert incomplete["layer_index"]["available"] is False
     assert fresh_empty["layer_index"] == {
         "available": True,
+        "distribution": {},
         "total": 0,
         "truncated": False,
     }
@@ -314,6 +315,118 @@ def test_project_architecture_rejects_extra_deleted_module_layer(
     result = json.loads(mcp_server.get_project_architecture.fn(str(tmp_path)))
 
     assert result["layer_index"]["available"] is False
+
+
+def test_project_architecture_compact_layer_distribution_respects_max_items(
+    tmp_path, monkeypatch
+):
+    state = RepositoryAnalysisState(
+        modules={
+            "pkg.adapter_a": object(),
+            "pkg.adapter_b": object(),
+            "pkg.engine": object(),
+            "pkg.runtime": object(),
+        },
+        cached_analytics_state="fresh",
+        cached_analytics={
+            "module_layers": {
+                "pkg.adapter_a": "adapter",
+                "pkg.adapter_b": "adapter",
+                "pkg.engine": "engine",
+                "pkg.runtime": "runtime",
+            }
+        },
+    )
+    monkeypatch.setattr(
+        mcp_runtime, "get_or_init_engine", lambda _root: SimpleNamespace(state=state)
+    )
+
+    call1 = json.loads(
+        mcp_server.get_project_architecture.fn(
+            repo_path=str(tmp_path),
+            compact=True,
+            max_items=10,
+            fields=["layer_index"],
+        )
+    )
+    assert call1 == {
+        "layer_index": {
+            "available": True,
+            "distribution": {
+                "adapter": 2,
+                "engine": 1,
+                "runtime": 1,
+            },
+            "total": 3,
+            "truncated": False,
+        }
+    }
+
+    call2 = json.loads(
+        mcp_server.get_project_architecture.fn(
+            repo_path=str(tmp_path),
+            compact=True,
+            max_items=2,
+            fields=["layer_index"],
+        )
+    )
+    assert call2 == {
+        "layer_index": {
+            "available": True,
+            "distribution": {
+                "adapter": 2,
+                "engine": 1,
+            },
+            "total": 3,
+            "truncated": True,
+            "expand": {
+                "compact": False,
+                "max_items": None,
+            },
+        }
+    }
+
+    call3 = json.loads(
+        mcp_server.get_project_architecture.fn(
+            repo_path=str(tmp_path),
+            compact=True,
+            max_items=0,
+            fields=["layer_index"],
+        )
+    )
+    assert call3 == {
+        "layer_index": {
+            "available": True,
+            "distribution": {},
+            "total": 3,
+            "truncated": True,
+            "expand": {
+                "compact": False,
+                "max_items": None,
+            },
+        }
+    }
+
+    call4 = json.loads(
+        mcp_server.get_project_architecture.fn(
+            repo_path=str(tmp_path),
+            compact=False,
+            max_items=None,
+            fields=["layer_index"],
+        )
+    )
+    assert call4 == {
+        "layer_index": {
+            "available": True,
+            "items": [
+                {"layer": "adapter", "module_count": 2},
+                {"layer": "engine", "module_count": 1},
+                {"layer": "runtime", "module_count": 1},
+            ],
+            "total": 3,
+            "truncated": False,
+        }
+    }
 
 
 def test_lookup_returns_symbol_facts_when_consumers_are_stale(tmp_path, monkeypatch):
@@ -2055,10 +2168,15 @@ def test_module_context_exposes_new_live_module_before_full_report(
     assert result["degree_metrics_source"] == "live_canonical_graph"
     assert result["dependency_data_source"] == "live_canonical_graph"
     assert result["dependencies_inbound_who_calls_me"] == {
+        "evidence": {"pkg.caller": ["hard_dependency"]},
         "total": 1,
         "truncated": False,
     }
     assert result["dependencies_outbound_who_i_call"] == {
+        "evidence": {
+            "pkg.dependency": ["hard_dependency"],
+            "pkg.optional": ["soft_dependency"],
+        },
         "total": 2,
         "truncated": False,
     }
@@ -2083,6 +2201,47 @@ def test_module_context_exposes_new_live_module_before_full_report(
     assert len(full["dependencies_outbound_who_i_call"]["items"]) == 1
     assert full["dependencies_outbound_who_i_call"]["total"] == 2
     assert full["dependencies_outbound_who_i_call"]["truncated"] is True
+    assert "expand" not in full["dependencies_inbound_who_calls_me"]
+    assert full["dependencies_outbound_who_i_call"]["expand"] == {
+        "compact": False,
+        "max_items": None,
+    }
+
+    compact_limited = json.loads(
+        mcp_server.get_module_context.fn(
+            repo_path=str(tmp_path),
+            module_name="pkg.new",
+            max_items=1,
+            fields=["dependencies_outbound_who_i_call"],
+        )
+    )
+    assert compact_limited["dependencies_outbound_who_i_call"] == {
+        "evidence": {"pkg.dependency": ["hard_dependency"]},
+        "total": 2,
+        "truncated": True,
+        "expand": {
+            "compact": False,
+            "max_items": None,
+        },
+    }
+
+    compact_zero = json.loads(
+        mcp_server.get_module_context.fn(
+            repo_path=str(tmp_path),
+            module_name="pkg.new",
+            max_items=0,
+            fields=["dependencies_outbound_who_i_call"],
+        )
+    )
+    assert compact_zero["dependencies_outbound_who_i_call"] == {
+        "evidence": {},
+        "total": 2,
+        "truncated": True,
+        "expand": {
+            "compact": False,
+            "max_items": None,
+        },
+    }
 
     invalid = json.loads(
         mcp_server.get_module_context.fn(
@@ -2093,6 +2252,49 @@ def test_module_context_exposes_new_live_module_before_full_report(
     )
     assert invalid["error"] == "Unsupported fields for get_module_context"
     assert invalid["unknown_fields"] == ["unknown_field"]
+
+
+def test_module_context_compact_max_items_none_caps_evidence_to_three(
+    tmp_path, monkeypatch
+):
+    class Graph:
+        hard_edges = {
+            "pkg.mod": {"pkg.a", "pkg.b", "pkg.c", "pkg.d"},
+        }
+        soft_edges = {}
+
+    class State:
+        modules = {"pkg.mod": object()}
+        artifacts = {}
+        dependency_graph = Graph()
+
+    class Engine:
+        state = State()
+
+    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: Engine())
+
+    result = json.loads(
+        mcp_server.get_module_context.fn(
+            repo_path=str(tmp_path),
+            module_name="pkg.mod",
+            compact=True,
+            max_items=None,
+            fields=["dependencies_outbound_who_i_call"],
+        )
+    )
+    assert result["dependencies_outbound_who_i_call"] == {
+        "evidence": {
+            "pkg.a": ["hard_dependency"],
+            "pkg.b": ["hard_dependency"],
+            "pkg.c": ["hard_dependency"],
+        },
+        "total": 4,
+        "truncated": True,
+        "expand": {
+            "compact": False,
+            "max_items": None,
+        },
+    }
 
 
 @pytest.mark.parametrize(

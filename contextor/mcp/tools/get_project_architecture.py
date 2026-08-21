@@ -18,6 +18,37 @@ def _stale_module_truths(state) -> dict[str, dict]:
     }
 
 
+def _layer_index_view(
+    layer_items: list[dict],
+    max_items: int | None,
+    compact: bool,
+) -> dict:
+    selected, total, truncated = query_helpers.bounded_items(layer_items, max_items)
+    if compact:
+        result = {
+            "available": True,
+            "distribution": {
+                str(item["layer"]): int(item["module_count"])
+                for item in selected
+            },
+            "total": total,
+            "truncated": truncated,
+        }
+    else:
+        result = {
+            "available": True,
+            "items": selected,
+            "total": total,
+            "truncated": truncated,
+        }
+    if truncated:
+        result["expand"] = {
+            "compact": False,
+            "max_items": None,
+        }
+    return result
+
+
 def get_project_architecture(
     repo_path: str,
     max_items: int | None = 10,
@@ -76,10 +107,11 @@ def get_project_architecture(
                 {"layer": layer, "module_count": count}
                 for layer, count in sorted(layer_counts.items())
             ]
-            items, total, truncated = query_helpers.bounded_items(layer_items, max_items)
-            layer_index = {"available": True, "total": total, "truncated": truncated}
-            if not compact:
-                layer_index["items"] = items
+            layer_index = _layer_index_view(
+                layer_items,
+                max_items,
+                compact,
+            )
         else:
             layer_index = dict(unavailable)
         collections["layer_index"] = layer_index
