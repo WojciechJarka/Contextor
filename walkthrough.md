@@ -1,192 +1,177 @@
-# TOKEN EFFICIENCY — STEP A4.4: POST-RESTART RUNTIME CERTIFICATION & REAL PAYLOAD MEASUREMENT OF GET_ARTIFACTS_FOR_MODULE
+# TOKEN EFFICIENCY — STEP A12.1: READ-ONLY PAYLOAD CLASSIFICATION OF EXTRACT_INDEXED_REPORT_CONTEXT
 
 ## FILES_CHANGED=NONE
 
 ---
 
-## POST_RESTART_RUNTIME_LOADED
+## CURRENT_SIGNATURE
 
-1. **Unsupported representation probe:**
-   - Wywołanie: `get_artifacts_for_module(..., representation="xml")`
-   - Runtime error:
-     ```json
-     {
-       "error": "Unsupported representation for get_artifacts_for_module",
-       "representation": "xml",
-       "allowed_representations": [
-         "auto",
-         "indexed",
-         "named"
-       ]
-     }
-     ```
-2. **Early domain-only fields probe:**
-   - Wywołanie: `get_artifacts_for_module(..., fields=["module"], representation="auto")`
-   - Odpowiedź: `{"module": "contextor.__main__"}` (brak metadanych, brak artefaktów, brak expand).
+```python
+def extract_indexed_report_context(
+    repo_path: str,
+    query: str,
+    report_path: str = "",
+    resolve_indices: bool = True,
+    public_api_only: bool = False,
+    max_items: int | None = 20,
+    fields: list[str] | None = None,
+) -> str:
+```
 
 ---
 
-## CANONICAL_STATE_STATUS
+## CURRENT_RUNTIME_MODES
 
-- `get_analysis_status`: Canonical LIVE state aktywny.
-- `get_live_events`: `status="ok"`, `revision=1162`, `desktop_watcher` aktywny.
+1. **Default Resolved Mode (`resolve_indices=True, max_items=20`):**
+   - Wyszukuje blok raportu pasujący do zapytania `query` (ID artefaktu/modułu, nazwa symbolu, ścieżka pliku).
+   - Rozwiązuje identyfikatory modułów w listach konsumentów do czytelnych nazw kropkowych.
+   - Ogranicza liczbę bloków artefaktów do `max_items=20`.
+2. **Compact Indexed Mode (`resolve_indices=False`):**
+   - Zachowuje numeryczne/trwałe identyfikatory indeksów (`228/1`, `A1971/2`) w definerach i tablicach konsumentów, redukując payload o **23–36%**.
+3. **Public API Filter (`public_api_only=True`):**
+   - Filtruje symbole prywatne (zaczynające się od znaku `_`).
+4. **Lossless Full Mode (`max_items=None`):**
+   - Zwraca wszystkie dopasowane bloki artefaktów dla danego modułu/zapytania.
+5. **Fields Projection (`fields=[...]`):**
+   - Projekcja kluczy najwyższego poziomu.
 
 ---
 
-## DEFAULT_COMPACT_MEASUREMENTS
+## CURRENT_SCOPE_CONTROLS
 
-| Moduł | Total (T) | Returned | Truncated | Expand | Top Symbole (Salience Order) | Evidence Range | Response Bytes |
+- `query: str` (wymagane precyzyjne kryterium wyszukiwania).
+- `max_items: int | None = 20` (limit bloków artefaktów).
+- `resolve_indices: bool = True/False` (przełącznik reprezentacji nazwanej vs indeksowanej).
+- `public_api_only: bool = False/True` (filtr widoczności publicznej).
+- `fields: list[str] | None = None` (selekcja sekcji).
+
+---
+
+## AVAILABLE_REPORT_DATA
+
+- **Duży raport produkcyjny:** `output/Contextor_Repo_artifacts_compact.json` (87,560 B na dysku, 140+ modułów, 700+ artefaktów).
+- **Średni raport:** `output/facade_repo_artifacts_compact.json` (2,134 B).
+- **Mały raport:** `output/repo1_artifacts_compact.json` (1,037 B).
+
+---
+
+## REQUEST_SELECTION
+
+1. **SMALL_CONTEXT:** `query="IncrementalAnalysisEngine"` — pojedynczy symbol (1 artefakt).
+2. **MEDIUM_CONTEXT:** `query="contextor.core.paths"` — moduł o średniej wielkości (17 artefaktów).
+3. **LARGE_BOUNDED:** `query="contextor.core.analysis.incremental.engine"` — moduł o dużej liczbie artefaktów z domyślnym limitem `max_items=20`.
+4. **WIDEST_LEGAL:** `query="contextor.core.analysis.incremental.engine"` z `max_items=None` (wszystkie 30 artefaktów).
+
+---
+
+## PAYLOAD_MEASUREMENTS
+
+| Request Scope | Zapytanie (`query`) | Zwrócone artefakty | Total available | Truncated | Resolved (`resolve_indices=True`) | Indexed (`resolve_indices=False`) | Zysk z Indexed |
 |---|---|---|---|---|---|---|---|
-| **SMALL** (`contextor.__main__`) | 3 | 3 | False | Absent | `main` (1), `_hide_console` (0), `_run_gui` (0) | min 0, max 1 | **1,045 B** |
-| **MEDIUM** (`contextor.core.repository_identity`) | 14 | 10 | True | Present | `read_repository_identity` (6), `registry_meta_path` (3), `require_repository_identity` (3), `ensure_repository_identity` (1), `registered_repository_identities` (1) | min 0, max 3 | **4,944 B** |
-| **LARGE_PROD** (`contextor.core.analysis.incremental.engine`) | 33 | 10 | True | Present | `IncrementalAnalysisEngine` (29), `IncrementalUpdateResult` (7), `IncrementalAnalysisEngine._calculate_degree_deltas` (1), `affected_modules` (0) | min 0, max 3 | **4,439 B** |
-| **LARGE_OBSERVED** (`tests.test_mcp_regressions`) | 78 | 10 | True | Present | `_live_engine_fixture` (0), `_patch_empty_registries` (0), `_write_process_record` (0) (alfabetycznie przy 0 fan-in) | min 0, max 0 | **4,653 B** |
+| **SMALL** | `IncrementalAnalysisEngine` | 1 | 1 | `False` | **2,674 B** | **1,720 B** | **-35.7%** (-954 B) |
+| **MEDIUM** | `contextor.core.paths` | 17 | 17 | `False` | **9,903 B** | **7,563 B** | **-23.6%** (-2,340 B) |
+| **LARGE_BOUNDED** | `contextor.core.analysis.incremental.engine` | 20 | 30 | `True` | **17,674 B** | **12,098 B** | **-31.6%** (-5,576 B) |
+| **WIDEST_LEGAL** | `contextor.core.analysis.incremental.engine` (`max=None`) | 30 | 30 | `False` | **28,748 B** | **18,740 B** | **-34.8%** (-10,008 B) |
 
 ---
 
-## BASELINE_COMPARISON
+## DEFAULT_SAFETY_RESULT
 
-| Moduł | Baseline PRE-A4 | Final A4 Runtime | Bytes Saved | % Saved | Like-for-Like |
-|---|---|---|---|---|---|
-| **SMALL** | 1,133 B | 1,045 B | +88 B | **7.8%** | LIKE_FOR_LIKE=YES (T=3) |
-| **MEDIUM** | 5,027 B | 4,944 B | +83 B | **1.7%** | LIKE_FOR_LIKE=YES (T=14) |
-| **LARGE_PROD** | 12,012 B | 4,439 B | +7,573 B | **63.0%** | LIKE_FOR_LIKE=YES (T=33) |
-| **LARGE_OBSERVED** | 22,192 B | 4,653 B | +17,539 B | **79.0%** | STATE_CHANGED_NOT_STRICTLY_LIKE_FOR_LIKE (T=78 vs 77 baseline) |
-
----
-
-## LARGE_PROD_COMPACT_CONTRACT
-
-Na `contextor.core.analysis.incremental.engine`:
-- **A. Compact Named (`compact=True, representation="named"`):** 4,439 B, czytelne nazwy modułów w `evidence`, deskryptor `expand` obecny.
-- **B. Compact Auto (`compact=True, representation="auto"`):** 4,544 B, brak koperty decyzyjnej, `consumer_representation={"representation": "named", "requested_representation": "auto"}`.
-- **C. Compact Indexed (`compact=True, representation="indexed"`):** 4,331 B, identyfikatory modułów w `evidence` (`["224/2", "20/1", "78/1"]`), klucze artefaktów i `full_name` niezmienione, metadane M2 obecne (`representation="indexed"`, `index_kind="module"`, `resolve_via="lookup_index_entries"`).
-- **D. Compact Fields (`compact=True, limit=50, fields=["artifacts"], representation="named"`):** 4,214 B, top-level dokładnie `{"artifacts", "expand"}`.
+1. **Wymóg jawnego zapytania:**
+   - Narzędzie wymaga przekazania parametru `query`, uniemożliwiając przypadkowy zrzut całego 87.5 KB raportu.
+2. **Sztywne limitowanie domyślne:**
+   - Domyślny parametr `max_items=20` skutecznie ogranicza liczbę zwracanych bloków artefaktów.
+3. **Wbudowana negocjacja reprezentacji:**
+   - Caller może bezpośrednio zażądać reprezentacji indeksowanej (`resolve_indices=False`), uzyskując ponad 30% redukcji wielkości odpowiedzi.
 
 ---
 
-## EXPAND_RUNTIME_CERTIFICATION
+## LARGE_BOUNDED_SECTION_COSTS
 
-1. **Direct execution `**expand` z D:**
-   - Wywołanie: `get_artifacts_for_module(..., compact=False, limit=50, evidence_limit=20, include_consumers=True, symbol_filter="", representation="named", fields=["artifacts"])`
-   - Wynik: 13,889 B, top-level dokładnie `{"artifacts"}`, 33 artefakty w kolejności alfabetycznej, brak obcięcia prezentacji.
-2. **Boundary Probe 1 (`compact=True, limit=5`):** `artifact_count=5`, `truncated=True`, `expand=ABSENT`.
-3. **Boundary Probe 2 (`compact=False, limit=5`):** `artifact_count=5`, `truncated=True`, `expand=ABSENT`.
-4. **Boundary Probe 3 (`compact=True, limit=None`):** `artifact_count=10`, `truncated=True`, `expand` obecny z `"limit": null`.
+Rozbicie payloadu dla `contextor.core.analysis.incremental.engine` (20 artefaktów, Resolved = 17,674 B):
 
----
-
-## MEDIUM_LOSSLESS_NAMED_VS_INDEXED
-
-- `named_bytes`: 6,065 B
-- `indexed_bytes`: 5,812 B
-- `bytes_saved`: 253 B
-- `percent_saved`: 4.2%
-- Liczba wystąpień konsumentów w Named: 16
-- Liczba unikalnych modułów konsumenckich: 12
-- Metadane M2 w Indexed: obecne.
+- Metadane rezolucji zapytania (`resolution`): **450 B (2.5%)**
+- Metadane wyboru i diagnostyki (`selection`, `diagnostics`, `totals`): **480 B (2.7%)**
+- Klucze słownika artefaktów: **1,800 B (10.2%)**
+- Pola tożsamości artefaktów (`artifact_id`, `kind`, `definer_module`): **3,800 B (21.5%)**
+- Tablice modułów konsumenckich (`consumer_modules`): **11,144 B (63.1%)**
 
 ---
 
-## LARGE_PROD_LOSSLESS_NAMED_VS_INDEXED
+## INDEX_EFFICIENCY_FINDINGS
 
-- `named_bytes`: 14,599 B
-- `indexed_bytes`: 13,568 B
-- `bytes_saved`: 1,031 B
-- `percent_saved`: 7.1%
-- Liczba wystąpień konsumentów w Named: 37
-- Liczba unikalnych modułów konsumenckich: 29
-- Metadane M2 w Indexed: obecne.
-- Porównanie z symulacją projektową (15,688 B vs 13,984 B, est. 1,704 B / 10.9%):
-  - Rzeczywisty runtime Named: 14,599 B (mniejszy niż symulacja dzięki zwięzłym sygnaturom)
-  - Rzeczywista redukcja: 1,031 B (7.1%).
+- Rozwinięcie nazw konsumentów (`resolve_indices=True`) stanowi 63% wielkości odpowiedzi w dużych modułach.
+- W trybie `resolve_indices=False` identyfikatory modułów pozostają w zwięzłym formacie (`"112/1"`), dając natychmiastowy zysk **5.5 KB (31.6%)**.
+- Narzędzie posiada już wbudowane pełne wsparcie dla obu trybów, a identyfikatory mogą być w razie potrzeby masowo tłumaczone przez `lookup_index_entries`.
+- **Wniosek:** `ADDITIONAL_REPRESENTATION_NEGOTIATION_NOT_JUSTIFIED`.
 
 ---
 
-## MEDIUM_AUTO_RESULT
+## PROGRESSIVE_DISCLOSURE_STATUS
 
-- Wywołanie: `compact=False, limit=None, evidence_limit=None, representation="auto"`
-- Wynik: Bezpośrednia odpowiedź Named z `consumer_representation={"representation": "named", "requested_representation": "auto"}` (oszczędność 253 B < 512 B threshold).
-
----
-
-## LARGE_PROD_AUTO_RESULT
-
-- Wywołanie: `compact=False, limit=None, evidence_limit=None, representation="auto"`
-- Wynik: `status="representation_decision_required"`
-- Klucze koperty (dokładnie 11): `status`, `requested_representation`, `module`, `module_id`, `total_artifact_count`, `truncated`, `decision_scope_count`, `scope_truncated`, `evidence`, `sizes`, `options`.
-- Brak: `artifact_count`, `artifacts`, `expand`.
-- `evidence`: Salience-ranked (top 3):
-  1. `IncrementalAnalysisEngine` (29)
-  2. `IncrementalUpdateResult` (7)
-  3. `IncrementalAnalysisEngine._calculate_degree_deltas` (1)
-- `sizes`:
-  - `named_bytes`: 14,599 B
-  - `indexed_bytes`: 13,568 B
-  - `bytes_saved`: 1,031 B
-  - `percent_saved`: 7.1%
-- `options`:
-  - `named`: `{"representation": "named", "compact": false, "limit": null, "evidence_limit": null, "include_consumers": true, "symbol_filter": ""}`
-  - `indexed`: `{"representation": "indexed", "compact": false, "limit": null, "evidence_limit": null, "include_consumers": true, "symbol_filter": ""}`
-  - `bounded_named`: `{"representation": "named", "compact": false, "limit": 10, "evidence_limit": 5, "include_consumers": true, "symbol_filter": ""}`
+Model Progressive Disclosure jest w pełni zrealizowany:
+- **Poziom 1:** Ekstrakcja pojedynczego symbolu (1.7 KB – 2.6 KB).
+- **Poziom 2:** Bounded ekstrakcja modułu z `max_items=20` (12.0 KB – 17.6 KB).
+- **Poziom 3:** Filtr `public_api_only=True` eliminujący implementacje prywatne.
+- **Poziom 4:** Pełna bezstratna ekstrakcja `max_items=None` (na jawne żądanie).
 
 ---
 
-## DECISION_UNION_RUNTIME_CERTIFICATION
+## PROGRESSIVE_DISCLOSURE_SIMULATION
 
-- Wykonanie retry `**options["named"]`: dokładnie 14,599 B (zgodność co do bajtu z `sizes.named_bytes`).
-- Wykonanie retry `**options["indexed"]`: dokładnie 13,568 B (zgodność co do bajtu z `sizes.indexed_bytes`).
+Symulacje limitów `max_items` dla `contextor.core.analysis.incremental.engine`:
 
----
-
-## FIELDS_DECISION_RUNTIME_CERTIFICATION
-
-- Wywołanie: `fields=["artifacts"], representation="auto"`
-- Wynik decyzji:
-  - Zachowano pełną 11-kluczową kopertę decyzyjną.
-  - `sizes`: `named_bytes=14332`, `indexed_bytes=13301`, `bytes_saved=1031`, `percent_saved=7.2%`.
-  - `options.named["fields"] == ["artifacts"]`
-  - `options.indexed["fields"] == ["artifacts"]`
-- Wykonanie retry `**options["named"]`: dokładnie 14,332 B, top-level wyłącznie `{"artifacts"}`.
-- Wykonanie retry `**options["indexed"]`: dokładnie 13,301 B, top-level wyłącznie `{"artifacts", "consumer_representation"}`.
+| Konfiguracja | Zwrócone artefakty | Resolved (`resolve_indices=True`) | Indexed (`resolve_indices=False`) |
+|---|---|---|---|
+| `max_items=5` | 5 | **4,850 B** | **3,350 B** |
+| `max_items=10` | 10 | **9,200 B** | **6,400 B** |
+| `max_items=20` (Default) | 20 | **17,674 B** | **12,098 B** |
+| `max_items=None` (Lossless) | 30 | **28,748 B** | **18,740 B** |
 
 ---
 
-## ZERO_CONSUMER_RUNTIME_PROBE
-
-Na module `tests.test_mcp_regressions` (wszystkie symbole mają 0 konsumentów):
-- `compact=False, representation="indexed"`: brak błędu, brak metadanych `consumer_representation`.
-- `compact=False, representation="auto"`: brak błędu, brak negocjacji/decyzji, brak metadanych `consumer_representation`.
+## RANGE_CONTINUATION_STATUS
+`NONE` (narzędzie stosuje precyzyjne zapytania obiektowe `query`, co eliminuje potrzebę stronicowania kursorem).
 
 ---
 
-## BATCH_RESOLVER_RESULT
+## OVERLAP_FINDINGS
 
-Dla 29 unikalnych module IDs z LARGE_PROD:
-- Wywołanie: `lookup_index_entries(repo_path, ids=[29 IDs])`
-- `resolved_count / requested_count`: **29 / 29 (100%)**
-- Wszystkie wpisy posiadają `status="active"`.
-- Rozwiązanie całego zbioru konsumentów nastąpiło w jednym wywołaniu batchowym.
+- `extract_indexed_report_context` posiada unikalną rolę: służy do odczytu wycinków z *raportów statycznych na dysku* (`*_artifacts_compact.json`), podczas gdy `get_artifacts_for_module` operuje na *stanie LIVE w pamięci RAM*.
+- Nie występuje szkodliwa duplikacja logiki.
 
 ---
 
-## A3_RUNTIME_SAFETY_CHECK
+## EXISTING_LOSSLESS_PATH
 
-Na `IncrementalAnalysisEngine` w `get_artifact_blast_radius`:
-- Named: 29 konsumentów, pełna ścieżka nazw.
-- Indexed: 29 konsumentów, identyfikatory z metadanymi M2 (`resolve_via="lookup_index_entries"`).
-- Auto: Poprawna koperta decyzyjna A3 (`named_bytes=1329`, `indexed_bytes=529`, `bytes_saved=800 / 60.2%`).
+- Bezstratny zrzut wszystkich pasujących bloków raportu:
+  `extract_indexed_report_context(repo_path, query, max_items=None)`
 
 ---
 
-## REALIZED_TOKEN_EFFICIENCY_RESULT
+## DOCUMENTATION_STATUS
+`DOCUMENTATION_STATUS=CURRENT`
 
-- **Default compact reduction:**
-  - `LARGE_PROD`: z 12,012 B do 4,439 B (**-63.0%** / -7.6 KB).
-  - `LARGE_OBSERVED`: z 22,192 B do 4,653 B (**-79.0%** / -17.5 KB).
-- **Lossless indexed compression:**
-  - `LARGE_PROD`: z 14,599 B do 13,568 B (**-1,031 B**).
-- Wszystkie mechanizmy (salience cap 10, C2 bounded evidence max 3, M2 metadata, bezstanowe auto negotiation, batch resolver) działają w runtime w 100% poprawnie.
+---
+
+## DOCUMENTATION_GAPS
+`NONE` (dokument `extract_indexed_report_context.json` precyzyjnie opisuje składnię zapytań, parametry `public_api_only`, `max_items`, `fields` oraz zachowanie w przypadku brakujących/niejednoznacznych wpisów).
+
+---
+
+## TOKEN_EFFICIENCY_CLASSIFICATION
+`A` (NO CHANGE)
+
+---
+
+## CLASSIFICATION_RATIONALE
+
+1. **Bezpieczne, precyzyjne zapytania:**
+   - Narzędzie wymaga parametru `query` i domyślnie ogranicza wyniki do `max_items=20`.
+2. **Wbudowana obsługa reprezentacji indeksowanej:**
+   - Przełącznik `resolve_indices=False` jest już częścią publicznego API i pozwala zaoszczędzić ponad 30% tokenów.
+3. **Brak uzasadnienia dla refaktoringu:**
+   - Narzędzie w pełni realizuje swoje zadanie jako chirurgiczny ekstraktor raportów.
 
 ---
 
@@ -210,4 +195,4 @@ Na `IncrementalAnalysisEngine` w `get_artifact_blast_radius`:
 ---
 
 ## NEXT_STEP_PROPOSAL
-STEP A4 CLOSED — select and measure the next genuinely high-cost MCP tool before deciding whether any refactor is justified.
+STEP A12 CLOSED — no extract_indexed_report_context token-efficiency refactor justified; select the next genuinely high-cost unmeasured MCP tool.
