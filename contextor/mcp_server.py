@@ -57,7 +57,7 @@ or MCP server does not expose tools:
 
 7. Verify MCP server starts:
 
-    python -m contextor.mcp_server
+    python -m contextor.mcp_main
 
 
 8. Restart Antigravity IDE.
@@ -116,12 +116,9 @@ import hashlib
 import json
 import os
 import sys
-import threading
 import warnings
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
-from uuid import uuid4
 
 
 _MCP_SERVER_SOURCE_FINGERPRINT = hashlib.sha256(
@@ -169,7 +166,7 @@ def _ensure_virtual_environment() -> None:
 
     os.execv(
         str(interpreter),
-        [str(interpreter), "-u", "-m", "contextor.mcp_server", *sys.argv[1:]],
+        [str(interpreter), "-u", "-m", "contextor.mcp_main", *sys.argv[1:]],
     )
     raise RuntimeError("Contextor MCP virtual-environment re-exec returned unexpectedly.")
 
@@ -180,7 +177,6 @@ _ensure_virtual_environment()
 warnings.filterwarnings("ignore")
 
 from fastmcp import FastMCP
-from contextor.core.api.facade import ContextorFacade
 from contextor.core.analysis.state_manager import (
     artifact_consumption_is_fresh,
     canonical_artifact_consumption_targets,
@@ -204,6 +200,16 @@ from contextor.mcp_process_registry import (
 )
 from contextor.mcp.documentation import short_description
 from contextor.mcp import runtime as mcp_runtime
+from contextor.mcp.analysis_jobs import _bounded_items
+from contextor.mcp.tools.analyze_project import analyze_project as _analyze_project_impl
+from contextor.mcp.tools.analyze_layer import analyze_layer as _analyze_layer_impl
+from contextor.mcp.tools.analyze_single_file import (
+    analyze_single_file as _analyze_single_file_impl,
+)
+from contextor.mcp.tools.get_analysis_status import (
+    get_analysis_status as _get_analysis_status_impl,
+)
+from contextor.mcp.tools.get_live_events import get_live_events as _get_live_events_impl
 from contextor.mcp.tools.describe_canonical_state import (
     describe_canonical_state as _describe_canonical_state_impl,
 )
@@ -219,145 +225,6 @@ from contextor.mcp.tools.query_canonical_projection import (
 
 # Initialize FastMCP Server
 mcp = FastMCP("Contextor")
-
-_MCP_OWNER_TOKEN: str = uuid4().hex
-
-_analysis_lock = threading.Lock()
-_analysis_job_lock = threading.RLock()
-_analysis_tasks: dict[str, threading.Thread] = {}
-_analysis_jobs_by_repo: dict[str, str] = {}
-
-
-def _mcp_cache_root(root: Path) -> Path:
-    """Shared application cache root used by desktop and MCP."""
-    from contextor.core.paths import app_cache_dir
-
-    return app_cache_dir()
-
-
-def _publish_mcp_live_status(root: Path, message: str) -> None:
-    """Best-effort status for the desktop LIVE bar; never fails a tool call."""
-    try:
-        from contextor.core.live_state import connect
-
-        client = connect(root)
-        if client is not None:
-            client.status(message, origin="mcp")
-    except (OSError, EOFError, RuntimeError):
-        pass
-
-
-def _analysis_job_dir(root: Path) -> Path:
-    """Return the persistent MCP analysis-job directory for one repository."""
-
-    return root / ".contextor" / "analysis_jobs"
-
-
-def _utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()
-
-
-def _job_path(root: Path, job_id: str) -> Path:
-    if len(job_id) != 32 or any(char not in "0123456789abcdef" for char in job_id):
-        raise ValueError("Invalid analysis job ID.")
-    return _analysis_job_dir(root) / f"{job_id}.json"
-
-
-def _write_analysis_job(root: Path, job: dict) -> None:
-    """Atomically persist one job so client disconnects cannot lose its status."""
-
-    directory = _analysis_job_dir(root)
-    directory.mkdir(parents=True, exist_ok=True)
-    target = _job_path(root, str(job["job_id"]))
-    # Job progress is written from worker threads and can also be observed by
-    # another MCP process. A per-write sibling avoids collisions on Windows.
-    temporary = target.with_name(f"{target.name}.{uuid4().hex}.tmp")
-    payload = {**job, "updated_at": _utc_now()}
-    with _analysis_job_lock:
-        temporary.write_text(
-            json.dumps(payload, indent=2, ensure_ascii=False),
-            encoding="utf-8",
-        )
-        os.replace(temporary, target)
-
-
-def _read_analysis_job(root: Path, job_id: str) -> dict | None:
-    try:
-        path = _job_path(root, job_id)
-    except ValueError:
-        return None
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return None
-
-
-def _latest_analysis_job(root: Path) -> dict | None:
-    directory = _analysis_job_dir(root)
-    if not directory.is_dir():
-        return None
-    candidates = sorted(
-        directory.glob("*.json"),
-        key=lambda path: path.stat().st_mtime_ns,
-        reverse=True,
-    )
-    for path in candidates:
-        job = _read_analysis_job(root, path.stem)
-        if job is not None:
-            return job
-    return None
-
-
-def _public_job(
-    job: dict,
-    *,
-    reused: bool = False,
-    max_skipped_files: int | None = 10,
-) -> dict:
-    """Return a stable, JSON-safe job view intended for an MCP client."""
-
-    visible = {
-        key: job.get(key)
-        for key in (
-            "job_id",
-            "operation",
-            "repo_path",
-            "target",
-            "status",
-            "created_at",
-            "started_at",
-            "completed_at",
-            "updated_at",
-            "message",
-            "error",
-            "live_publish_status",
-            "live_publish_revision",
-            "live_publish_warning",
-        )
-    }
-    if "skipped_python_files" in job:
-        skipped_files = list(job["skipped_python_files"])
-        selected, total, truncated = _bounded_items(skipped_files, max_skipped_files)
-        visible["analysis_coverage"] = {
-            "skipped_python_files": {
-                "total": total,
-                "syntax_error_count": sum(
-                    "not valid Python" in str(item.get("reason", ""))
-                    for item in skipped_files
-                ),
-                "truncated": truncated,
-                "items": selected,
-            }
-        }
-    visible["reused"] = reused
-    return visible
-
-
-
-def _stderr_log(msg: str) -> None:
-    """Redirects progress logs to stderr to protect JSON-RPC on stdout."""
-    print(msg, file=sys.stderr, flush=True)
-
 
 def _cleanup_orphaned_processes(directory: Path) -> None:
     """Stop only registered MCP/Git processes whose recorded parent is gone."""
@@ -395,229 +262,6 @@ def _cleanup_owned_processes(directory: Path, owner_pid: int) -> None:
         if is_child:
             terminate_registered_process(record)
             remove_record(record_path)
-
-
-async def _run_analysis_worker(
-    operation: str,
-    root: Path,
-    target: Path | None = None,
-    exclude_paths: list[str] | None = None,
-    log=None,
-) -> dict:
-    """Run analysis in-process without blocking the FastMCP event loop."""
-    import asyncio
-    effective_log = log or _stderr_log
-
-    def run() -> dict:
-        with _analysis_lock:
-            previous_cache = os.environ.get("CONTEXTOR_CACHE_DIR")
-            previous_registry = os.environ.get("CONTEXTOR_MCP_PROCESS_REGISTRY")
-            os.environ["CONTEXTOR_CACHE_DIR"] = str(_mcp_cache_root(root))
-            os.environ["CONTEXTOR_MCP_PROCESS_REGISTRY"] = str(registry_dir(root))
-            try:
-                if operation == "project":
-                    _, result = ContextorFacade.analyze_project(
-                        str(root),
-                        log=effective_log,
-                        additional_excludes=exclude_paths,
-                    )
-                    if result is None:
-                        raise RuntimeError("Analysis returned no canonical state.")
-                    summary_data = getattr(result, "summary_data", {}) or {}
-                    skipped_files = summary_data.get("skipped_files", [])
-                    if not isinstance(skipped_files, list):
-                        skipped_files = []
-                    return {"skipped_python_files": skipped_files}
-                elif operation == "layer":
-                    ContextorFacade.analyze_layer(
-                        str(root),
-                        str(target),
-                        log=effective_log,
-                        additional_excludes=exclude_paths,
-                    )
-                elif operation == "single_file":
-                    ContextorFacade.analyze_single_file(
-                        str(target),
-                        str(root),
-                        log=effective_log,
-                        additional_excludes=exclude_paths,
-                    )
-                else:
-                    raise ValueError(f"Unsupported analysis operation: {operation}")
-                return {}
-            finally:
-                if previous_cache is None:
-                    os.environ.pop("CONTEXTOR_CACHE_DIR", None)
-                else:
-                    os.environ["CONTEXTOR_CACHE_DIR"] = previous_cache
-                if previous_registry is None:
-                    os.environ.pop("CONTEXTOR_MCP_PROCESS_REGISTRY", None)
-                else:
-                    os.environ["CONTEXTOR_MCP_PROCESS_REGISTRY"] = previous_registry
-
-    return await asyncio.to_thread(run)
-
-
-async def _execute_analysis_job(
-    root: Path,
-    job: dict,
-    target: Path | None,
-    exclude_paths: list[str] | None,
-) -> None:
-    """Execute one accepted analysis and leave a durable terminal status."""
-
-    job = {
-        **job,
-        "status": "running",
-        "started_at": _utc_now(),
-        "message": "Analysis started.",
-    }
-    _write_analysis_job(root, job)
-
-    def job_log(message: str) -> None:
-        nonlocal job
-        _stderr_log(message)
-        job = {**job, "message": str(message)}
-        _write_analysis_job(root, job)
-
-    try:
-        analysis_outcome = await _run_analysis_worker(
-            str(job["operation"]),
-            root,
-            target,
-            exclude_paths,
-            log=job_log,
-        )
-        if job["operation"] == "project":
-            mcp_runtime._live_engines.pop(str(root), None)
-            engine = mcp_runtime.get_or_init_engine(root)
-            if engine is None:
-                raise RuntimeError(
-                    "Analysis completed but canonical state could not be loaded."
-                )
-            # Validate the hydrated engine before opening or starting the LIVE
-            # IPC service. Besides failing faster on corrupt hydration, this
-            # avoids starting a service for an unusable canonical state.
-            engine_state = engine.state
-            from contextor.core.live_state import connect_or_start
-
-            try:
-                live_client = connect_or_start(
-                    root,
-                    owner_pid=os.getpid(),
-                    owner_token=_MCP_OWNER_TOKEN,
-                    timeout=10.0,
-                )
-                published = live_client.publish(
-                    engine_state, origin="mcp_analysis", timeout=10.0
-                )
-                revision = int(published["revision"])
-                mcp_runtime._live_engine_revisions[str(root)] = revision
-                job = {
-                    **job,
-                    "live_publish_status": "success",
-                    "live_publish_revision": revision,
-                    "live_publish_warning": None,
-                }
-            except (TimeoutError, OSError, EOFError, ConnectionError, RuntimeError) as live_exc:
-                publish_status = (
-                    "timed_out" if isinstance(live_exc, TimeoutError) else "failed"
-                )
-                warning = f"{type(live_exc).__name__}: {live_exc}"
-                _stderr_log(f"Warning: Live state publish {publish_status}: {warning}")
-                job = {
-                    **job,
-                    "live_publish_status": publish_status,
-                    "live_publish_revision": None,
-                    "live_publish_warning": warning,
-                }
-        publish_status = job.get("live_publish_status")
-        completed_message = "Analysis completed successfully."
-        if job["operation"] == "project" and publish_status != "success":
-            completed_message = (
-                "Analysis completed, but canonical LIVE publish "
-                f"{publish_status or 'failed'}."
-            )
-        job = {
-            **job,
-            **(analysis_outcome or {}),
-            "status": "completed",
-            "completed_at": _utc_now(),
-            "message": completed_message,
-            "error": None,
-        }
-        _write_analysis_job(root, job)
-    except Exception as exc:
-        live_publish_status = job.get("live_publish_status")
-        if job.get("operation") == "project" and live_publish_status == "pending":
-            live_publish_status = "not_attempted"
-        job = {
-            **job,
-            "status": "failed",
-            "completed_at": _utc_now(),
-            "message": "Analysis failed.",
-            "error": f"{type(exc).__name__}: {exc}",
-            "live_publish_status": live_publish_status,
-        }
-        _write_analysis_job(root, job)
-    finally:
-        with _analysis_job_lock:
-            _analysis_tasks.pop(str(job["job_id"]), None)
-            if _analysis_jobs_by_repo.get(str(root)) == job["job_id"]:
-                _analysis_jobs_by_repo.pop(str(root), None)
-
-
-def _start_analysis_job(
-    operation: str,
-    root: Path,
-    target: Path | None = None,
-    exclude_paths: list[str] | None = None,
-) -> dict:
-    """Accept a non-blocking analysis, deduplicating an active job per repo."""
-
-    repo_key = str(root)
-    with _analysis_job_lock:
-        active_id = _analysis_jobs_by_repo.get(repo_key)
-        active_task = _analysis_tasks.get(active_id) if active_id else None
-        if active_id and active_task is not None and active_task.is_alive():
-            existing = _read_analysis_job(root, active_id)
-            if existing is not None:
-                return _public_job(existing, reused=True)
-
-        job_id = uuid4().hex
-        job = {
-            "job_id": job_id,
-            "operation": operation,
-            "repo_path": repo_key,
-            "target": str(target) if target is not None else None,
-            "exclude_paths": list(exclude_paths or []),
-            "status": "queued",
-            "created_at": _utc_now(),
-            "started_at": None,
-            "completed_at": None,
-            "message": "Analysis accepted.",
-            "error": None,
-            "live_publish_status": (
-                "pending" if operation == "project" else "not_applicable"
-            ),
-            "live_publish_revision": None,
-            "live_publish_warning": None,
-            "owner_pid": os.getpid(),
-        }
-        _write_analysis_job(root, job)
-        def run_job() -> None:
-            """Own a dedicated loop; FastMCP may close a tool-call loop early."""
-            asyncio.run(_execute_analysis_job(root, job, target, exclude_paths))
-
-        task = threading.Thread(
-            target=run_job,
-            name=f"contextor-analysis-{job_id}",
-            daemon=True,
-        )
-        _analysis_jobs_by_repo[repo_key] = job_id
-        _analysis_tasks[job_id] = task
-        task.start()
-        return _public_job(job)
 
 
 def _get_canonical_report(repo_path: Path, filename: str) -> Path | None:
@@ -728,16 +372,6 @@ def _semantic_artifact_diff(old_artifacts: dict, new_artifacts: dict) -> dict:
         "changed_symbol_count": len(affected),
         "body_only_changes_tracked": True,
     }
-
-
-def _bounded_items(items: list, limit: int | None) -> tuple[list, int, bool]:
-    """Optionally bound an MCP collection while preserving its cardinality."""
-    total = len(items)
-    if limit is None:
-        return items, total, False
-    safe_limit = max(0, int(limit))
-    selected = items[:safe_limit]
-    return selected, total, total > len(selected)
 
 
 def _canonical_symbol_consumers(state, module_name: str, symbol: str) -> list[str]:
@@ -1080,149 +714,21 @@ def _resolve_cluster_ids(
 # 1. ANALYSIS TRIGGER TOOLS
 # ==========================================================
 
-@mcp.tool(description=short_description('analyze_project'))
-async def analyze_project(
-    repo_path: str, exclude_paths: list[str] | None = None
-) -> str:
-    root = Path(repo_path).expanduser().resolve()
-    if not root.is_dir():
-        return f"Error: Repository path '{root}' does not exist."
-    _publish_mcp_live_status(root, "MCP: analyzing full repository")
-    return json.dumps(
-        _start_analysis_job("project", root, exclude_paths=exclude_paths),
-        indent=2,
-    )
-
-@mcp.tool(description=short_description('analyze_layer'))
-async def analyze_layer(
-    repo_path: str,
-    layer_name: str,
-    exclude_paths: list[str] | None = None,
-) -> str:
-    root = Path(repo_path).expanduser().resolve()
-    layer = root / layer_name
-    if not layer.is_dir():
-        return f"Error: Layer path '{layer}' does not exist."
-    _publish_mcp_live_status(root, f"MCP: analyzing layer {layer_name}")
-    return json.dumps(
-        _start_analysis_job(
-            "layer", root, layer, exclude_paths=exclude_paths
-        ),
-        indent=2,
-    )
-
-@mcp.tool(description=short_description('analyze_single_file'))
-async def analyze_single_file(
-    repo_path: str,
-    file_path: str,
-    exclude_paths: list[str] | None = None,
-) -> str:
-    root = Path(repo_path).expanduser().resolve()
-    target_file = Path(file_path).expanduser()
-    if not target_file.is_absolute():
-        target_file = root / target_file
-    target_file = target_file.resolve()
-    if not target_file.is_file():
-        return f"Error: Target file '{target_file}' does not exist."
-    _publish_mcp_live_status(root, f"MCP: analyzing file {target_file.name}")
-    return json.dumps(
-        _start_analysis_job(
-            "single_file", root, target_file, exclude_paths=exclude_paths
-        ),
-        indent=2,
-    )
-
-
-@mcp.tool(description=short_description('get_analysis_status'))
-def get_analysis_status(
-    repo_path: str,
-    job_id: str | None = None,
-    max_skipped_files: int | None = 10,
-) -> str:
-
-    root = Path(repo_path).expanduser().resolve()
-    if not root.is_dir():
-        return json.dumps(
-            {"status": "missing_repository", "repo_path": str(root)}, indent=2
-        )
-    job = (
-        _read_analysis_job(root, job_id)
-        if job_id is not None
-        else _latest_analysis_job(root)
-    )
-    if job is None:
-        return json.dumps(
-            {"status": "not_found", "job_id": job_id, "repo_path": str(root)},
-            indent=2,
-        )
-    if job.get("status") in {"queued", "running"} and job.get("owner_pid") != os.getpid():
-        job = {
-            **job,
-            "status": "interrupted",
-            "completed_at": _utc_now(),
-            "message": "The MCP server process that owned this job is no longer active.",
-            "error": "owner_process_changed",
-        }
-        _write_analysis_job(root, job)
-    return json.dumps(
-        _public_job(job, max_skipped_files=max_skipped_files), indent=2
-    )
-
-
-@mcp.tool(description=short_description('get_live_events'))
-def get_live_events(
-    repo_path: str,
-    after_revision: int | None = None,
-    limit: int | None = 20,
-) -> str:
-    root = Path(repo_path).expanduser().resolve()
-    if after_revision is not None and (
-        isinstance(after_revision, bool) or after_revision < 0
-    ):
-        return json.dumps({"status": "error", "error": "invalid_after_revision"}, indent=2)
-    if limit is not None and (
-        isinstance(limit, bool) or not isinstance(limit, int) or limit < 1
-    ):
-        return json.dumps({"status": "error", "error": "invalid_limit"}, indent=2)
-    from contextor.core.live_state.runtime import connect_existing_with_status
-
-    client, connection_status = connect_existing_with_status(root)
-    if client is None:
-        if connection_status == "transient_connection_failure":
-            return json.dumps(
-                {
-                    "status": "transient_connection_failure",
-                    "repo_path": str(root),
-                    "reason": "Existing LIVE owner is temporarily unreachable.",
-                    "events": [],
-                    "total": 0,
-                    "truncated": False,
-                },
-                indent=2,
-            )
-        if connection_status in {
-            "owner_identity_changed",
-            "endpoint_identity_unverified",
-        }:
-            return json.dumps(
-                {
-                    "status": connection_status,
-                    "repo_path": str(root),
-                    "reason": "LIVE endpoint identity no longer proves the same repository owner instance.",
-                    "events": [],
-                    "total": 0,
-                    "truncated": False,
-                },
-                indent=2,
-            )
-        return json.dumps(
-            {"status": "no_live_service", "repo_path": str(root), "events": [], "total": 0, "truncated": False},
-            indent=2,
-        )
-    try:
-        return json.dumps(client.get_events(after_revision=after_revision, limit=limit), indent=2)
-    except (OSError, EOFError, RuntimeError) as exc:
-        return json.dumps({"status": "error", "error": str(exc)}, indent=2)
+analyze_project = mcp.tool(description=short_description("analyze_project"))(
+    _analyze_project_impl
+)
+analyze_layer = mcp.tool(description=short_description("analyze_layer"))(
+    _analyze_layer_impl
+)
+analyze_single_file = mcp.tool(description=short_description("analyze_single_file"))(
+    _analyze_single_file_impl
+)
+get_analysis_status = mcp.tool(description=short_description("get_analysis_status"))(
+    _get_analysis_status_impl
+)
+get_live_events = mcp.tool(description=short_description("get_live_events"))(
+    _get_live_events_impl
+)
 
 
 @mcp.tool(description=short_description('update_file'))
@@ -2196,7 +1702,7 @@ def get_symbol_implementation(
     root = Path(repo_path).expanduser().resolve()
     if not root.is_dir():
         return json.dumps({"status": "error", "error": f"Repository path '{root}' does not exist."}, indent=2)
-    _publish_mcp_live_status(root, f"MCP: reading symbol {symbol}")
+    mcp_runtime.publish_live_status(root, f"MCP: reading symbol {symbol}")
     normalized_mode = mode.strip().lower()
     if normalized_mode not in {"preview", "fetch"}:
         return json.dumps(

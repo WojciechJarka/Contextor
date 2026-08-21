@@ -139,7 +139,7 @@ def test_s2a_tool_modules_have_no_registration_or_forbidden_import_edges():
     assert list(mcp_server.mcp._tool_manager._tools) == before
 
 
-def test_s2a_exactly_four_moved_and_seventeen_decorated_tools_remain():
+def test_s2a_implementations_remain_moved_after_later_slices():
     server_path = Path(mcp_server.__file__)
     tree = ast.parse(server_path.read_text(encoding="utf-8"))
     decorated = [
@@ -149,7 +149,7 @@ def test_s2a_exactly_four_moved_and_seventeen_decorated_tools_remain():
         and any(ast.unparse(item).startswith("mcp.tool") for item in node.decorator_list)
     ]
 
-    assert len(decorated) == 17
+    assert len(decorated) == 12
     assert set(IMPLEMENTATIONS).isdisjoint(decorated)
 
 

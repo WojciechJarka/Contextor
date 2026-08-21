@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from contextor import mcp_server
+from contextor.mcp import analysis_jobs
 from contextor.core.live_state import (
     load_snapshot,
     migrate_legacy_snapshot,
@@ -103,4 +103,4 @@ def test_concurrent_writers_publish_complete_monotonic_snapshots(tmp_path):
 def test_mcp_and_desktop_resolve_the_same_repository_cache(monkeypatch, tmp_path):
     monkeypatch.setattr("contextor.core.paths.app_cache_dir", lambda: tmp_path)
 
-    assert mcp_server._mcp_cache_root(tmp_path / "repo") == tmp_path
+    assert analysis_jobs._mcp_cache_root(tmp_path / "repo") == tmp_path

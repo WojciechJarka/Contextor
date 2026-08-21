@@ -15,6 +15,7 @@ import pytest
 pytestmark = pytest.mark.live
 
 from contextor import mcp_process_registry, mcp_server
+from contextor.mcp import analysis_jobs
 from contextor.mcp import runtime as mcp_runtime
 from contextor.mcp.tools import lookup_index_entries as lookup_index_entries_tool
 from contextor.core.analysis import git_context
@@ -472,14 +473,14 @@ def test_analysis_endpoint_returns_reusable_job_and_pollable_completion(
             (state, origin, timeout)
         ) or {"revision": 1}
     )
-    monkeypatch.setattr(mcp_server, "_run_analysis_worker", fake_worker)
+    monkeypatch.setattr(analysis_jobs, "_run_analysis_worker", fake_worker)
     monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: engine)
     monkeypatch.setattr(
         "contextor.core.live_state.connect_or_start",
         lambda _root, *args, **kwargs: client,
     )
-    mcp_server._analysis_tasks.clear()
-    mcp_server._analysis_jobs_by_repo.clear()
+    analysis_jobs._analysis_tasks.clear()
+    analysis_jobs._analysis_jobs_by_repo.clear()
 
     async def scenario():
         first = json.loads(await mcp_server.analyze_project.fn(str(repo)))
@@ -493,7 +494,7 @@ def test_analysis_endpoint_returns_reusable_job_and_pollable_completion(
         )
         assert running["status"] in {"queued", "running"}
 
-        task = mcp_server._analysis_tasks[first["job_id"]]
+        task = analysis_jobs._analysis_tasks[first["job_id"]]
         release.set()
         task.join(timeout=5)
         assert not task.is_alive()
@@ -517,13 +518,13 @@ def test_analysis_job_persists_failure_for_later_polling(tmp_path, monkeypatch):
     async def broken_worker(*_args, **_kwargs):
         raise RuntimeError("simulated analysis failure")
 
-    monkeypatch.setattr(mcp_server, "_run_analysis_worker", broken_worker)
-    mcp_server._analysis_tasks.clear()
-    mcp_server._analysis_jobs_by_repo.clear()
+    monkeypatch.setattr(analysis_jobs, "_run_analysis_worker", broken_worker)
+    analysis_jobs._analysis_tasks.clear()
+    analysis_jobs._analysis_jobs_by_repo.clear()
 
     async def scenario():
         accepted = json.loads(await mcp_server.analyze_project.fn(str(repo)))
-        task = mcp_server._analysis_tasks[accepted["job_id"]]
+        task = analysis_jobs._analysis_tasks[accepted["job_id"]]
         task.join(timeout=5)
         assert not task.is_alive()
         failed = json.loads(
@@ -551,18 +552,18 @@ def test_analysis_job_preserves_live_publish_timeout_status(tmp_path, monkeypatc
             assert timeout == 10.0
             raise TimeoutError("simulated LIVE timeout")
 
-    monkeypatch.setattr(mcp_server, "_run_analysis_worker", fake_worker)
+    monkeypatch.setattr(analysis_jobs, "_run_analysis_worker", fake_worker)
     monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: engine)
     monkeypatch.setattr(
         "contextor.core.live_state.connect_or_start",
         lambda _root, *args, **kwargs: Client(),
     )
-    mcp_server._analysis_tasks.clear()
-    mcp_server._analysis_jobs_by_repo.clear()
+    analysis_jobs._analysis_tasks.clear()
+    analysis_jobs._analysis_jobs_by_repo.clear()
 
     async def scenario():
         accepted = json.loads(await mcp_server.analyze_project.fn(str(repo)))
-        task = mcp_server._analysis_tasks[accepted["job_id"]]
+        task = analysis_jobs._analysis_tasks[accepted["job_id"]]
         task.join(timeout=5)
         assert not task.is_alive()
 
@@ -582,7 +583,7 @@ def test_analysis_status_marks_previous_server_job_interrupted(tmp_path):
     repo = tmp_path / "repo"
     repo.mkdir()
     job_id = "a" * 32
-    mcp_server._write_analysis_job(
+    analysis_jobs._write_analysis_job(
         repo,
         {
             "job_id": job_id,
@@ -620,12 +621,12 @@ def test_project_worker_carries_indexer_skips_into_durable_job_status(
         return [], SimpleNamespace(summary_data={"skipped_files": skipped})
 
     monkeypatch.setattr(
-        mcp_server.ContextorFacade,
+        analysis_jobs.ContextorFacade,
         "analyze_project",
         staticmethod(fake_analyze_project),
     )
 
-    outcome = asyncio.run(mcp_server._run_analysis_worker("project", repo))
+    outcome = asyncio.run(analysis_jobs._run_analysis_worker("project", repo))
 
     assert outcome == {"skipped_python_files": skipped}
 
@@ -634,7 +635,7 @@ def test_analysis_status_bounds_and_exposes_skipped_python_files(tmp_path):
     repo = tmp_path / "repo"
     repo.mkdir()
     job_id = "b" * 32
-    mcp_server._write_analysis_job(
+    analysis_jobs._write_analysis_job(
         repo,
         {
             "job_id": job_id,
@@ -687,7 +688,7 @@ def test_layer_and_single_file_tools_submit_nonblocking_jobs(tmp_path, monkeypat
         calls.append((operation, root, submitted_target, exclude_paths))
         return {"job_id": operation, "status": "queued"}
 
-    monkeypatch.setattr(mcp_server, "_start_analysis_job", fake_start)
+    monkeypatch.setattr(analysis_jobs, "_start_analysis_job", fake_start)
 
     layer_result = json.loads(
         asyncio.run(
@@ -723,10 +724,10 @@ def test_analysis_status_exposes_latest_worker_progress(tmp_path, monkeypatch):
         progress_written.set()
         await asyncio.to_thread(release.wait)
 
-    monkeypatch.setattr(mcp_server, "_run_analysis_worker", fake_worker)
+    monkeypatch.setattr(analysis_jobs, "_run_analysis_worker", fake_worker)
     monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: object())
-    mcp_server._analysis_tasks.clear()
-    mcp_server._analysis_jobs_by_repo.clear()
+    analysis_jobs._analysis_tasks.clear()
+    analysis_jobs._analysis_jobs_by_repo.clear()
 
     async def scenario():
         accepted = json.loads(await mcp_server.analyze_project.fn(str(repo)))
@@ -737,7 +738,7 @@ def test_analysis_status_exposes_latest_worker_progress(tmp_path, monkeypatch):
         assert running["status"] == "running"
         assert running["message"] == "Indexing 42 modules..."
         release.set()
-        task = mcp_server._analysis_tasks[accepted["job_id"]]
+        task = analysis_jobs._analysis_tasks[accepted["job_id"]]
         task.join(timeout=5)
         assert not task.is_alive()
 
@@ -1300,20 +1301,20 @@ def test_mcp_worker_preserves_pool_policy_and_restores_environment(
     monkeypatch.delenv("CONTEXTOR_DISABLE_PROCESS_POOL", raising=False)
     monkeypatch.delenv("CONTEXTOR_MCP_PROCESS_REGISTRY", raising=False)
 
-    asyncio.run(mcp_server._run_analysis_worker("single_file", repo, target))
+    asyncio.run(analysis_jobs._run_analysis_worker("single_file", repo, target))
 
-    assert calls == [(str(target), str(repo), mcp_server._stderr_log, None, None)]
+    assert calls == [(str(target), str(repo), analysis_jobs._stderr_log, None, None)]
     assert os.environ["CONTEXTOR_CACHE_DIR"] == "original-cache"
     assert "CONTEXTOR_DISABLE_PROCESS_POOL" not in os.environ
     assert "CONTEXTOR_MCP_PROCESS_REGISTRY" not in os.environ
 
     monkeypatch.setenv("CONTEXTOR_DISABLE_PROCESS_POOL", "1")
-    asyncio.run(mcp_server._run_analysis_worker("single_file", repo, target))
+    asyncio.run(analysis_jobs._run_analysis_worker("single_file", repo, target))
     assert os.environ["CONTEXTOR_DISABLE_PROCESS_POOL"] == "1"
     assert calls[-1] == (
         str(target),
         str(repo),
-        mcp_server._stderr_log,
+        analysis_jobs._stderr_log,
         None,
         "1",
     )
@@ -1333,7 +1334,7 @@ def test_mcp_analysis_worker_forwards_per_run_excludes(tmp_path, monkeypatch):
     monkeypatch.setattr(ContextorFacade, "analyze_project", fake_analysis)
 
     asyncio.run(
-        mcp_server._run_analysis_worker(
+        analysis_jobs._run_analysis_worker(
             "project", repo, exclude_paths=["tests", "legacy/adapter.py"]
         )
     )

@@ -13,12 +13,41 @@ import pytest
 from contextor.core.analysis.incremental_engine import IncrementalAnalysisEngine
 from contextor.core.analysis.state_manager import FileStateManager, RepositoryAnalysisState
 from contextor.core.domain.imports import ImportRef
+from contextor.core.domain.graph import ProjectGraph
 from contextor.core.domain.module import Module
 from contextor.core.domain.usage_facts import ModuleUsageFacts
 from contextor.core.reference.engine import extract_module_usage_facts
 
 from contextor.core.reference.engine import _build_reexport_map
 from contextor.core.reporting_engine.persistent_registry import PersistentIdentityRegistry
+
+
+def test_tracked_file_absent_from_canonical_state_is_materialized_as_add(tmp_path):
+    source = tmp_path / "new_module.py"
+    source.write_text("def added_symbol():\n    return 1\n", encoding="utf-8")
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir()
+    manager = FileStateManager(str(cache_dir))
+    manager.update_state(str(source))
+    state = RepositoryAnalysisState(
+        modules={},
+        artifacts={},
+        dependency_graph=ProjectGraph(hard_edges={}, soft_edges={}),
+    )
+    engine = IncrementalAnalysisEngine(
+        state,
+        PersistentIdentityRegistry(str(tmp_path)),
+        manager,
+        str(tmp_path),
+    )
+
+    result = engine.update_file(str(source))
+
+    assert result.status == "UPDATED"
+    assert result.delta is not None and result.delta.is_new is True
+    assert "new_module" in engine.state.modules
+    assert "added_symbol" in engine.state.artifacts["new_module"]["own_symbols"]
+    assert "new_module" in engine.state.dependency_graph.hard_edges
 
 
 def test_case_1_add_consumer(tmp_path):

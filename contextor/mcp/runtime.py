@@ -6,6 +6,17 @@ _live_engines: dict[str, Any] = {}
 _live_engine_revisions: dict[str, int] = {}
 
 
+def publish_live_status(root: Path, message: str) -> None:
+    try:
+        from contextor.core.live_state import connect
+
+        client = connect(root)
+        if client is not None:
+            client.status(message, origin="mcp")
+    except (OSError, EOFError, RuntimeError):
+        pass
+
+
 def get_or_init_engine(root: Path):
     """
     Returns the live engine from RAM. If absent, HYDRATES from the .contextor cache.

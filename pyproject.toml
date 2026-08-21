@@ -19,7 +19,7 @@ dev = [
 
 [project.scripts]
 contextor = "contextor.__main__:main"
-contextor-mcp = "contextor.mcp_server:main"
+contextor-mcp = "contextor.mcp_main:main"
 
 [build-system]
 requires = ["setuptools>=68"]

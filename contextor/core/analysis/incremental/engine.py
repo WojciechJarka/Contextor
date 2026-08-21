@@ -107,7 +107,14 @@ class IncrementalAnalysisEngine:
         Returns the update status and the freshness of the architectural model.
         """
         with self._lock:
-            if not self.state_manager.has_changed(file_path):
+            path = Path(file_path)
+            rel_path = path.relative_to(self.root_path)
+            module_path = ".".join(rel_path.with_suffix("").parts)
+
+            if (
+                not self.state_manager.has_changed(file_path)
+                and module_path in self.state.modules
+            ):
                 return IncrementalUpdateResult(
                     status="UNCHANGED",
                     file_path=file_path,
@@ -122,10 +129,6 @@ class IncrementalAnalysisEngine:
                     collisions_state=getattr(self.state, "collisions_state", "deferred"),
                     artifact_consumption_state="fresh" if artifact_consumption_is_fresh(self.state) else "stale",
                 )
-
-            path = Path(file_path)
-            rel_path = path.relative_to(self.root_path)
-            module_path = ".".join(rel_path.with_suffix("").parts)
 
             # 1. Handle Deletion
             current_state = self.state_manager.get_current_file_state(file_path, compute_hash=False)
