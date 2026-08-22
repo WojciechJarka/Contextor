@@ -79,10 +79,9 @@ def canonical_symbol_catalog(module_data: dict) -> dict[str, str]:
     return result
 
 
-def _is_module_id(query: str) -> bool:
-    if "/" not in query or query.startswith(("A", "a")):
-        return False
-    parts = query.split("/")
+def is_module_id(query: str) -> bool:
+    raw = query.strip()
+    parts = raw.split("/")
     return len(parts) == 2 and parts[0].isdigit() and parts[1].isdigit()
 
 
@@ -107,7 +106,7 @@ def resolve_module_identity(
         }
 
     # 1. Module ID lookup
-    if _is_module_id(raw):
+    if is_module_id(raw):
         exact_name = mod_id_to_path.get(raw)
         if exact_name:
             return {

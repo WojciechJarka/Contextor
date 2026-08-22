@@ -5,6 +5,7 @@ import pytest
 from contextor.mcp.query_helpers import (
     FUZZY_MIN_SCORE,
     FUZZY_MAX_CANDIDATES,
+    is_module_id,
     resolve_module_identity,
     resolve_artifact_identity,
 )
@@ -385,3 +386,20 @@ def test_resolver_signatures_locked():
     ]
     for param in art_sig.parameters.values():
         assert param.default is inspect.Parameter.empty
+
+
+def test_is_module_id():
+    # True
+    assert is_module_id("259/1") is True
+    assert is_module_id(" 259/1 ") is True
+    assert is_module_id("10/1") is True
+    assert is_module_id("0/0") is True
+
+    # False
+    assert is_module_id("A259/1") is False
+    assert is_module_id("259") is False
+    assert is_module_id("259/abc") is False
+    assert is_module_id("pkg/mod.py") is False
+    assert is_module_id("pkg.mod") is False
+    assert is_module_id("") is False
+    assert is_module_id("259/1/2") is False

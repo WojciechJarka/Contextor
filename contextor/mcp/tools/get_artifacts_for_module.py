@@ -76,21 +76,24 @@ def get_artifacts_for_module(
 
     try:
         mod_path_to_id, mod_id_to_path, art_path_to_id, art_id_to_path = query_helpers.read_registries(root)
+        engine = mcp_runtime.get_or_init_engine(root)
+        if not engine or getattr(engine.state, "resync_required", False):
+            return "Error: No usable canonical LIVE state. Run analyze_project first."
 
-        # 1. RAW Module ID resolution
-        raw_resolution = query_helpers.resolve_module_identity(
-            effective_module,
-            mod_path_to_id,
-            mod_id_to_path,
-        )
-
-        if raw_resolution["status"] == "resolved" and raw_resolution.get("resolution") == "exact_id":
-            module_name = raw_resolution["module"]
-        elif raw_resolution["status"] == "not_found" and raw_resolution.get("query_kind") == "module_id":
-            return (
-                f"Module '{effective_module}' not found in registry or canonical LIVE state. "
-                "Check the module name or run an analysis."
+        # 1. RAW Module ID resolution via shared classifier
+        if query_helpers.is_module_id(effective_module):
+            raw_resolution = query_helpers.resolve_module_identity(
+                effective_module,
+                mod_path_to_id,
+                mod_id_to_path,
             )
+            if raw_resolution["status"] == "resolved" and raw_resolution.get("resolution") == "exact_id":
+                module_name = raw_resolution["module"]
+            elif raw_resolution["status"] == "not_found" and raw_resolution.get("query_kind") == "module_id":
+                return (
+                    f"Module '{effective_module}' not found in registry or canonical LIVE state. "
+                    "Check the module name or run an analysis."
+                )
         else:
             # 2. Textual Module Flow: Normalise file-path input to dotted module name.
             target_path = Path(module_name)
@@ -111,9 +114,6 @@ def get_artifacts_for_module(
 
                 module_name = ".".join(parts)
 
-        engine = mcp_runtime.get_or_init_engine(root)
-        if not engine or getattr(engine.state, "resync_required", False):
-            return "Error: No usable canonical LIVE state. Run analyze_project first."
         state = engine.state
         unavailable = query_helpers.module_truth_unavailable(state, module_name)
         if unavailable:

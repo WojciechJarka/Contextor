@@ -295,14 +295,11 @@ def test_exact_module_id_respects_presentation_controls(tmp_path, monkeypatch):
 
 def test_valid_dotted_lookup_does_not_call_fuzzy_fallback(tmp_path, monkeypatch):
     _setup_test_state(monkeypatch)
-    orig_resolve = query_helpers.resolve_module_identity
-    calls = []
 
-    def tracking_resolver(query, p2i, i2p):
-        calls.append(query)
-        return orig_resolve(query, p2i, i2p)
+    def fail_if_called(*_args, **_kwargs):
+        raise AssertionError("resolve_module_identity should NOT have been called for valid dotted module!")
 
-    monkeypatch.setattr(query_helpers, "resolve_module_identity", tracking_resolver)
+    monkeypatch.setattr(query_helpers, "resolve_module_identity", fail_if_called)
 
     raw = get_artifacts_for_module(
         repo_path=str(tmp_path),
@@ -310,12 +307,25 @@ def test_valid_dotted_lookup_does_not_call_fuzzy_fallback(tmp_path, monkeypatch)
     )
     res = json.loads(raw)
     assert res["module"] == "pkg.mod_a"
-    # RAW ID check is called once with "pkg.mod_a", but fuzzy fallback is NOT called
-    assert len(calls) == 1
-    assert calls[0] == "pkg.mod_a"
 
 
 def test_valid_path_lookup_does_not_call_fuzzy_fallback(tmp_path, monkeypatch):
+    _setup_test_state(monkeypatch)
+
+    def fail_if_called(*_args, **_kwargs):
+        raise AssertionError("resolve_module_identity should NOT have been called for valid path lookup!")
+
+    monkeypatch.setattr(query_helpers, "resolve_module_identity", fail_if_called)
+
+    raw = get_artifacts_for_module(
+        repo_path=str(tmp_path),
+        module="pkg/mod_a.py",
+    )
+    res = json.loads(raw)
+    assert res["module"] == "pkg.mod_a"
+
+
+def test_fuzzy_miss_calls_resolver_with_normalized_query(tmp_path, monkeypatch):
     _setup_test_state(monkeypatch)
     orig_resolve = query_helpers.resolve_module_identity
     calls = []
@@ -328,13 +338,59 @@ def test_valid_path_lookup_does_not_call_fuzzy_fallback(tmp_path, monkeypatch):
 
     raw = get_artifacts_for_module(
         repo_path=str(tmp_path),
-        module="pkg/mod_a.py",
+        module="pkg/servces/auth.py",
     )
     res = json.loads(raw)
-    assert res["module"] == "pkg.mod_a"
-    # RAW ID check is called once with "pkg/mod_a.py", but fuzzy fallback is NOT called
+    assert res["status"] == "not_found"
+    assert res["query"] == "pkg/servces/auth.py"
     assert len(calls) == 1
-    assert calls[0] == "pkg/mod_a.py"
+    assert calls[0] == "pkg.servces.auth"
+
+
+def test_missing_id_with_no_engine_returns_global_error(tmp_path, monkeypatch):
+    _setup_test_state(monkeypatch)
+    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: None)
+
+    raw = get_artifacts_for_module(
+        repo_path=str(tmp_path),
+        module="9999/1",
+    )
+    assert raw == "Error: No usable canonical LIVE state. Run analyze_project first."
+
+
+def test_missing_id_with_resync_required_returns_global_error(tmp_path, monkeypatch):
+    _setup_test_state(monkeypatch)
+    monkeypatch.setattr(
+        mcp_runtime,
+        "get_or_init_engine",
+        lambda _root: SimpleNamespace(state=SimpleNamespace(resync_required=True)),
+    )
+
+    raw = get_artifacts_for_module(
+        repo_path=str(tmp_path),
+        module="9999/1",
+    )
+    assert raw == "Error: No usable canonical LIVE state. Run analyze_project first."
+
+
+def test_existing_id_with_no_engine_returns_global_error(tmp_path, monkeypatch):
+    _setup_test_state(monkeypatch)
+    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: None)
+
+    raw = get_artifacts_for_module(
+        repo_path=str(tmp_path),
+        module="10/1",
+    )
+    assert raw == "Error: No usable canonical LIVE state. Run analyze_project first."
+
+
+def test_usable_live_with_missing_id_preserves_legacy_not_found(tmp_path, monkeypatch):
+    _setup_test_state(monkeypatch)
+    raw = get_artifacts_for_module(
+        repo_path=str(tmp_path),
+        module="9999/1",
+    )
+    assert raw == "Module '9999/1' not found in registry or canonical LIVE state. Check the module name or run an analysis."
 
 
 def test_original_query_preserved_and_candidate_structure(tmp_path, monkeypatch):
