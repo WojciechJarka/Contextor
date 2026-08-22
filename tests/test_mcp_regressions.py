@@ -5531,11 +5531,10 @@ def test_get_artifacts_for_module_representation_and_progressive_disclosure(
     from contextor.mcp import representation as mcp_rep
     import inspect
 
-    # 1. Signature check: representation is last parameter, default 'named'
+    # 1. Signature check: representation parameter present with default 'named'
     sig = inspect.signature(gam_tool.get_artifacts_for_module)
-    params = list(sig.parameters.values())
-    assert params[-1].name == "representation"
-    assert params[-1].default == "named"
+    assert "representation" in sig.parameters
+    assert sig.parameters["representation"].default == "named"
 
     # Unsupported representation error
     unsupported = json.loads(

@@ -166,8 +166,14 @@ def _setup_lookup_state(monkeypatch):
         },
         artifact_consumption_state="fresh",
     )
+    art_path_to_id = {
+        "pkg.mod_a::my_func": "A1/1",
+        "pkg.mod_a::ambig_symbol": "A2/1",
+        "pkg.mod_b::ambig_symbol": "A3/1",
+    }
+    art_id_to_path = {v: k for k, v in art_path_to_id.items()}
     monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: SimpleNamespace(state=state))
-    monkeypatch.setattr(query_helpers, "read_registries", lambda _root: ({}, {}, {}, {}))
+    monkeypatch.setattr(query_helpers, "read_registries", lambda _root: ({}, {}, art_path_to_id, art_id_to_path))
     return state
 
 
@@ -181,7 +187,8 @@ def test_lookup_artifact_by_symbol_legacy_symbol_name(tmp_path, monkeypatch):
     res = json.loads(raw)
     assert res["query"] == "my_func"
     assert res["match_count"] == 1
-    assert "pkg.mod_a::my_func" in res["artifacts"]
+    assert "A1/1" in res["artifacts"]
+    assert res["artifacts"]["A1/1"]["full_name"] == "pkg.mod_a::my_func"
 
 
 def test_lookup_artifact_by_symbol_alias_symbol(tmp_path, monkeypatch):
@@ -194,7 +201,21 @@ def test_lookup_artifact_by_symbol_alias_symbol(tmp_path, monkeypatch):
     res = json.loads(raw)
     assert res["query"] == "my_func"
     assert res["match_count"] == 1
-    assert "pkg.mod_a::my_func" in res["artifacts"]
+    assert "A1/1" in res["artifacts"]
+    assert res["artifacts"]["A1/1"]["full_name"] == "pkg.mod_a::my_func"
+
+
+def test_lookup_artifact_by_symbol_substring_matching(tmp_path, monkeypatch):
+    import json
+    _setup_lookup_state(monkeypatch)
+    raw = lookup_artifact_by_symbol(
+        repo_path=str(tmp_path),
+        symbol="my_",
+    )
+    res = json.loads(raw)
+    assert res["query"] == "my_"
+    assert res["match_count"] == 1
+    assert "A1/1" in res["artifacts"]
 
 
 def test_lookup_artifact_by_symbol_missing_both_returns_controlled_error(tmp_path):
@@ -211,9 +232,9 @@ def test_lookup_artifact_by_symbol_not_found_uses_effective_symbol(tmp_path, mon
     _setup_lookup_state(monkeypatch)
     raw = lookup_artifact_by_symbol(
         repo_path=str(tmp_path),
-        symbol="missing_sym",
+        symbol="missing_sym_completely_unrelated",
     )
-    assert raw == "No current artifacts found matching 'missing_sym'."
+    assert raw == "No current artifacts found matching 'missing_sym_completely_unrelated'."
 
 
 def test_lookup_artifact_by_symbol_ambiguity_uses_effective_symbol(tmp_path, monkeypatch):
@@ -239,10 +260,217 @@ def test_lookup_artifact_by_symbol_preserves_limit_and_compact_semantics(tmp_pat
         evidence_limit=1,
     )
     res = json.loads(raw)
-    entry = res["artifacts"]["pkg.mod_a::my_func"]
+    entry = res["artifacts"]["A1/1"]
     assert entry["consumers"]["total"] == 2
     assert entry["consumers"]["truncated"] is True
     assert len(entry["consumers"]["items"]) == 1
+
+
+def test_lookup_artifact_by_symbol_existing_match_limit_zero_does_not_call_resolver(tmp_path, monkeypatch):
+    import json
+    from contextor.mcp import query_helpers
+    _setup_lookup_state(monkeypatch)
+
+    def fail_if_called(*_args, **_kwargs):
+        raise AssertionError("resolve_artifact_identity should NOT have been called for an existing match!")
+
+    monkeypatch.setattr(query_helpers, "resolve_artifact_identity", fail_if_called)
+
+    raw = lookup_artifact_by_symbol(
+        repo_path=str(tmp_path),
+        symbol="my_func",
+        limit=0,
+    )
+    res = json.loads(raw)
+    assert res["query"] == "my_func"
+    assert res["match_count"] == 0
+    assert res["total_matches"] == 1
+    assert res["truncated"] is True
+    assert res["artifacts"] == {}
+
+
+def test_lookup_artifact_by_symbol_substring_match_limit_zero_does_not_call_resolver(tmp_path, monkeypatch):
+    import json
+    from contextor.mcp import query_helpers
+    _setup_lookup_state(monkeypatch)
+
+    def fail_if_called(*_args, **_kwargs):
+        raise AssertionError("resolve_artifact_identity should NOT have been called for a substring match!")
+
+    monkeypatch.setattr(query_helpers, "resolve_artifact_identity", fail_if_called)
+
+    raw = lookup_artifact_by_symbol(
+        repo_path=str(tmp_path),
+        symbol="my_",
+        limit=0,
+    )
+    res = json.loads(raw)
+    assert res["query"] == "my_"
+    assert res["match_count"] == 0
+    assert res["total_matches"] == 1
+    assert res["truncated"] is True
+    assert res["artifacts"] == {}
+
+
+def test_lookup_artifact_by_symbol_resolved_artifact_id_honors_limit_zero(tmp_path, monkeypatch):
+    import json
+    _setup_lookup_state(monkeypatch)
+
+    raw = lookup_artifact_by_symbol(
+        repo_path=str(tmp_path),
+        symbol="A1/1",
+        limit=0,
+    )
+    res = json.loads(raw)
+    assert res["query"] == "A1/1"
+    assert res["match_count"] == 0
+    assert res["total_matches"] == 1
+    assert res["truncated"] is True
+    assert res["artifacts"] == {}
+
+
+def test_lookup_artifact_by_symbol_exact_artifact_id(tmp_path, monkeypatch):
+    import json
+    _setup_lookup_state(monkeypatch)
+    raw = lookup_artifact_by_symbol(
+        repo_path=str(tmp_path),
+        symbol="A1/1",
+    )
+    res = json.loads(raw)
+    assert res["query"] == "A1/1"
+    assert res["match_count"] == 1
+    assert "A1/1" in res["artifacts"]
+    assert res["artifacts"]["A1/1"]["full_name"] == "pkg.mod_a::my_func"
+    assert res["artifacts"]["A1/1"]["consumers"]["total"] == 2
+
+
+def test_lookup_artifact_by_symbol_exact_full_canonical_identity(tmp_path, monkeypatch):
+    import json
+    _setup_lookup_state(monkeypatch)
+    raw = lookup_artifact_by_symbol(
+        repo_path=str(tmp_path),
+        symbol="pkg.mod_a::my_func",
+    )
+    res = json.loads(raw)
+    assert res["query"] == "pkg.mod_a::my_func"
+    assert res["match_count"] == 1
+    assert "A1/1" in res["artifacts"]
+    assert res["artifacts"]["A1/1"]["full_name"] == "pkg.mod_a::my_func"
+
+
+def test_lookup_artifact_by_symbol_fuzzy_leaf_typo(tmp_path, monkeypatch):
+    import json
+    _setup_lookup_state(monkeypatch)
+    raw = lookup_artifact_by_symbol(
+        repo_path=str(tmp_path),
+        symbol="my_fnc",
+    )
+    res = json.loads(raw)
+    assert res["status"] == "not_found"
+    assert res["query"] == "my_fnc"
+    assert res["data_source"] == "active_artifact_registry"
+    assert len(res["similar_candidates"]) > 0
+    top = res["similar_candidates"][0]
+    assert top["artifact"] == "pkg.mod_a::my_func"
+    assert top["artifact_id"] == "A1/1"
+    assert top["score"] >= 0.75
+    assert "artifacts" not in res
+
+
+def test_lookup_artifact_by_symbol_fuzzy_full_identity_typo(tmp_path, monkeypatch):
+    import json
+    _setup_lookup_state(monkeypatch)
+    raw = lookup_artifact_by_symbol(
+        repo_path=str(tmp_path),
+        symbol="pkg.mod_a::my_fnc",
+    )
+    res = json.loads(raw)
+    assert res["status"] == "not_found"
+    assert res["query"] == "pkg.mod_a::my_fnc"
+    assert len(res["similar_candidates"]) > 0
+    top = res["similar_candidates"][0]
+    assert top["artifact"] == "pkg.mod_a::my_func"
+    assert top["artifact_id"] == "A1/1"
+
+
+def test_lookup_artifact_by_symbol_fuzzy_never_auto_resolves(tmp_path, monkeypatch):
+    import json
+    _setup_lookup_state(monkeypatch)
+    raw = lookup_artifact_by_symbol(
+        repo_path=str(tmp_path),
+        symbol="my_funcc",
+    )
+    res = json.loads(raw)
+    assert res["status"] == "not_found"
+    assert "artifacts" not in res
+    assert len(res["similar_candidates"]) > 0
+
+
+def test_lookup_artifact_by_symbol_max_five_candidates(tmp_path, monkeypatch):
+    import json
+    from types import SimpleNamespace
+    from contextor.core.analysis.state_manager import RepositoryAnalysisState
+    from contextor.mcp import query_helpers, runtime as mcp_runtime
+
+    state = RepositoryAnalysisState(
+        artifacts={
+            "pkg.mod": {
+                "own_symbols": [f"func_{i}" for i in range(10)],
+                "symbols": {
+                    "functions": [f"func_{i}" for i in range(10)],
+                },
+            }
+        },
+        artifact_consumption={},
+        artifact_consumption_state="fresh",
+    )
+    art_p2i = {f"pkg.mod::func_{i}": f"A{100+i}/1" for i in range(10)}
+    art_i2p = {v: k for k, v in art_p2i.items()}
+
+    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: SimpleNamespace(state=state))
+    monkeypatch.setattr(query_helpers, "read_registries", lambda _root: ({}, {}, art_p2i, art_i2p))
+
+    raw = lookup_artifact_by_symbol(
+        repo_path=str(tmp_path),
+        symbol="func",
+    )
+    # Note: 'func' matches substring in existing search, so let's use a typo that does not substring match all
+    raw_typo = lookup_artifact_by_symbol(
+        repo_path=str(tmp_path),
+        symbol="fnc_",
+    )
+    res = json.loads(raw_typo)
+    assert res["status"] == "not_found"
+    assert len(res["similar_candidates"]) <= 5
+
+
+def test_lookup_artifact_by_symbol_nonexistent_artifact_id_no_fuzzy(tmp_path, monkeypatch):
+    _setup_lookup_state(monkeypatch)
+    raw = lookup_artifact_by_symbol(
+        repo_path=str(tmp_path),
+        symbol="A9999/1",
+    )
+    assert raw == "No current artifacts found matching 'A9999/1'."
+
+
+def test_lookup_artifact_by_symbol_stale_module_fails_closed(tmp_path, monkeypatch):
+    import json
+    from contextor.mcp import query_helpers
+    _setup_lookup_state(monkeypatch)
+
+    monkeypatch.setattr(
+        query_helpers,
+        "module_truth_unavailable",
+        lambda _state, mod: {"status": "stale", "module": mod} if mod == "pkg.mod_a" else None,
+    )
+
+    raw = lookup_artifact_by_symbol(
+        repo_path=str(tmp_path),
+        symbol="A1/1",
+    )
+    res = json.loads(raw)
+    assert res["status"] == "stale"
+    assert res["module"] == "pkg.mod_a"
 
 
 def test_lookup_artifact_by_symbol_matching_both_symbol_name_and_symbol(tmp_path, monkeypatch):
@@ -255,7 +483,8 @@ def test_lookup_artifact_by_symbol_matching_both_symbol_name_and_symbol(tmp_path
     )
     res = json.loads(raw)
     assert res["query"] == "my_func"
-    assert "pkg.mod_a::my_func" in res["artifacts"]
+    assert "A1/1" in res["artifacts"]
+    assert res["artifacts"]["A1/1"]["full_name"] == "pkg.mod_a::my_func"
 
 
 def test_lookup_artifact_by_symbol_conflicting_symbol_name_and_symbol_returns_error(tmp_path, monkeypatch):
@@ -276,7 +505,7 @@ def _setup_module_artifacts_state(monkeypatch):
     from contextor.core.analysis.state_manager import RepositoryAnalysisState
     from contextor.mcp import query_helpers, runtime as mcp_runtime
 
-    module_obj = SimpleNamespace(module_id="M1", path="pkg/mod_a.py", imports=[])
+    module_obj = SimpleNamespace(module_id="10/1", path="pkg/mod_a.py", imports=[])
     state = RepositoryAnalysisState(
         modules={"pkg.mod_a": module_obj},
         artifacts={
@@ -296,6 +525,18 @@ def _setup_module_artifacts_state(monkeypatch):
                     },
                 },
             },
+            "pkg.services.auth": {
+                "own_symbols": ["login"],
+                "symbols": {
+                    "functions": ["login"],
+                },
+                "consumers": {
+                    "login": {
+                        "consumer_count": {"total": 1},
+                        "consumers": ["tests.test_1"],
+                    }
+                },
+            },
         },
         artifact_consumption={
             "pkg.mod_a::my_func": {
@@ -306,11 +547,17 @@ def _setup_module_artifacts_state(monkeypatch):
                 "consumers": ["tests.test_1"],
                 "channels": {"tests.test_1": ["direct_calls"]},
             },
+            "pkg.services.auth::login": {
+                "consumers": ["tests.test_1"],
+                "channels": {"tests.test_1": ["direct_calls"]},
+            },
         },
         artifact_consumption_state="fresh",
     )
+    mod_path_to_id = {"pkg.mod_a": "10/1", "pkg.services.auth": "13/1"}
+    mod_id_to_path = {v: k for k, v in mod_path_to_id.items()}
     monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: SimpleNamespace(state=state))
-    monkeypatch.setattr(query_helpers, "read_registries", lambda _root: ({"pkg.mod_a": "M1"}, {"M1": "pkg.mod_a"}, {}, {}))
+    monkeypatch.setattr(query_helpers, "read_registries", lambda _root: (mod_path_to_id, mod_id_to_path, {}, {}))
     return state
 
 

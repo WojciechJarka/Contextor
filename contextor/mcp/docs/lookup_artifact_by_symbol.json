@@ -5,16 +5,18 @@
     "[OPTIMIZED] Finds artifacts matching a symbol name and returns their details."
   ],
   "parameters": [
-    "Works on canonical LIVE artifact facts.\nReturns defining module, kind, consumer count, and consumer module list.\nSupply ``symbol_name`` or alias ``symbol``. Exact matches are preferred\nover partial matches. ``limit`` bounds the response while ``total_matches``\nand ``truncated`` describe omitted data. Consumers within every match are\nbounded independently by ``evidence_limit``, always expose ``total`` and\n``truncated``, and include ``items`` only when ``compact=False``. Pass\n``None`` for all matches or all consumers. ``fields`` projects top-level keys\nafter compact shaping. Allowed values are ``query``, ``match_count``,\n``total_matches``, ``truncated``, ``data_source``, and ``artifacts``."
+    "Works on canonical LIVE artifact facts.\nReturns defining module, kind, consumer count, and consumer module list.\nSupply ``symbol_name`` or alias ``symbol``. Input may be a symbol leaf name, exact active artifact ID (e.g. ``A855/4``), or exact full canonical artifact identity (e.g. ``pkg.mod::symbol``). Exact matches are preferred over partial matches. When a query is not found, bounded fuzzy suggestions from the active artifact registry may be returned in ``similar_candidates`` (up to 5 candidates with canonical identity, artifact ID, and similarity score). Fuzzy suggestions are suggestion-only and never auto-resolved; if no candidates meet the threshold, the legacy not-found fallback is preserved.\n``limit`` bounds the response while ``total_matches``\nand ``truncated`` describe omitted data. Consumers within every match are\nbounded independently by ``evidence_limit``, always expose ``total`` and\n``truncated``, and include ``items`` only when ``compact=False``. Pass\n``None`` for all matches or all consumers. ``fields`` projects top-level keys\nafter compact shaping. Allowed values are ``query``, ``match_count``,\n``total_matches``, ``truncated``, ``data_source``, and ``artifacts``."
   ],
-  "behavior": [],
+  "behavior": [
+    "Resolution order:\n1. Existing live symbol search (exact & partial substring matching).\n2. Exact active artifact ID or full canonical identity via active registry.\n3. Bounded fuzzy suggestions (score >= 0.75, max 5) on textual not-found.\n4. Legacy not-found string fallback when no fuzzy candidates qualify."
+  ],
   "freshness": [],
   "errors": [],
   "usage_notes": [
     "LLM use: narrow ambiguous names before increasing ``limit``."
   ],
   "examples": [
-    "Searches by partial, case-insensitive match against the symbol part of\nthe artifact's full name (the part after '::', e.g. 'generate_graph'\nmatches 'generate_graph_analytics_report')."
+    "Searches by partial, case-insensitive match against the symbol part of\nthe artifact's full name (the part after '::', e.g. 'generate_graph'\nmatches 'generate_graph_analytics_report'), by exact artifact ID ('A855/4'), or by full canonical identity."
   ]
 }
 

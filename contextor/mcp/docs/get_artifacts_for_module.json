@@ -5,7 +5,7 @@
     "[OPTIMIZED] Returns artifacts exported by a module with consumer information and progressive disclosure."
   ],
   "parameters": [
-    "``module_name`` (or alias ``module``) can be:\n- A full dotted module name: 'contextor.ui.gui_parser'\n- A file path relative to the repo root: 'contextor/ui/gui_parser.py'",
+    "``module_name`` (or alias ``module``) can be:\n- An exact active module ID: '259/1'\n- A full dotted module name: 'contextor.ui.gui_parser'\n- A file path relative to the repo root: 'contextor/ui/gui_parser.py'",
     "``include_consumers=True`` includes consumer counts and evidence. Set ``include_consumers=False`` for signatures-only view.",
     "``symbol_filter`` filters candidate artifacts by symbol name substring before limits and ranking.",
     "``limit`` bounds the maximum number of artifacts returned (default 50, pass ``None`` for unbounded). In default compact mode, output is capped at 10 salience-ranked artifacts.",
@@ -16,6 +16,7 @@
     "``representation`` controls nested consumer encoding: ``named`` (default module names), ``indexed`` (compact module IDs resolved via ``lookup_index_entries``), or ``auto`` (stateless negotiation returning decision prompt when identity compression yields substantial token savings)."
   ],
   "behavior": [
+    "Resolution order:\n1. Exact active module ID via active module registry.\n2. Path-to-dotted normalization and canonical LIVE state lookup.\n3. Bounded fuzzy module suggestions (score >= 0.75, max 5) from active module registry on textual not-found.\n4. Legacy not-found string fallback when query is not found or is a nonexistent module ID.",
     "In default compact mode (``compact=True``), returns up to 10 artifacts prioritized by consumer salience (``consumers.total DESC``, then alphabetical) with up to 3 nested consumer evidence items per artifact.",
     "Top-level ``truncated`` is truthful (``artifact_count < total_artifact_count``). When output is truncated by internal compact presentation cap, an executable ``expand`` descriptor is included preserving original requested limits.",
     "For complete lossless views, use ``compact=False, limit=None, evidence_limit=None`` with ``representation='named'`` or ``representation='indexed'``.",

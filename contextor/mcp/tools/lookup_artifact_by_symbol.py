@@ -39,7 +39,7 @@ def lookup_artifact_by_symbol(
         )
 
     try:
-        _, _, art_path_to_id, _ = query_helpers.read_registries(root)
+        _, _, art_path_to_id, art_id_to_path = query_helpers.read_registries(root)
         engine = mcp_runtime.get_or_init_engine(root)
         if not engine or getattr(engine.state, "resync_required", False):
             return "Error: No usable canonical LIVE state. Run analyze_project first."
@@ -74,12 +74,74 @@ def lookup_artifact_by_symbol(
                 },
                 indent=2,
             )
-        candidates, total_matches, matches_truncated = query_helpers.bounded_items(
-            candidates, limit
-        )
+
+        if not candidates:
+            identity_resolution = query_helpers.resolve_artifact_identity(
+                effective_symbol,
+                art_path_to_id,
+                art_id_to_path,
+            )
+            if identity_resolution["status"] == "resolved":
+                resolved_full_name = identity_resolution["artifact"]
+                resolved_module, resolved_symbol = (
+                    resolved_full_name.split("::", 1)
+                    if "::" in resolved_full_name
+                    else ("", resolved_full_name)
+                )
+                if (
+                    resolved_module in (state.artifacts or {})
+                    and resolved_symbol
+                    in query_helpers.canonical_symbol_catalog(
+                        state.artifacts[resolved_module]
+                    )
+                ):
+                    unavailable = query_helpers.module_truth_unavailable(
+                        state, resolved_module
+                    )
+                    if unavailable:
+                        return json.dumps(unavailable, indent=2)
+
+                    kind = query_helpers.canonical_symbol_catalog(
+                        state.artifacts[resolved_module]
+                    )[resolved_symbol]
+                    artifact_id = art_path_to_id.get(resolved_full_name)
+                    key = artifact_id or resolved_full_name
+                    candidates = [
+                        (False, resolved_symbol.casefold(), resolved_full_name, key, kind)
+                    ]
+            elif (
+                identity_resolution["status"] == "not_found"
+                and identity_resolution.get("similar_candidates")
+            ):
+                return json.dumps(
+                    {
+                        "status": "not_found",
+                        "query": effective_symbol,
+                        "similar_candidates": identity_resolution["similar_candidates"],
+                        "data_source": "active_artifact_registry",
+                    },
+                    indent=2,
+                )
+            elif identity_resolution["status"] == "ambiguous":
+                return json.dumps(
+                    {
+                        "error": "Ambiguous canonical symbol identity.",
+                        "query": effective_symbol,
+                        "candidates": [
+                            c["artifact"]
+                            for c in identity_resolution.get("candidates", [])
+                        ],
+                        "data_source": "active_artifact_registry",
+                    },
+                    indent=2,
+                )
 
         if not candidates:
             return f"No current artifacts found matching '{effective_symbol}'."
+
+        candidates, total_matches, matches_truncated = query_helpers.bounded_items(
+            candidates, limit
+        )
 
         results: dict = {}
         for _, _, full_name, key, kind in candidates:

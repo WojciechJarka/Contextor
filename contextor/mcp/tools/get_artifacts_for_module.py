@@ -72,27 +72,45 @@ def get_artifacts_for_module(
             indent=2,
         )
 
-    # Normalise file-path input to dotted module name.
-    target_path = Path(module_name)
-    if target_path.is_absolute() or module_name.endswith(".py") or "/" in module_name or "\\" in module_name:
-        if target_path.is_absolute():
-            try:
-                rel_path = target_path.relative_to(root)
-            except ValueError:
-                rel_path = target_path
-        else:
-            rel_path = target_path
-
-        parts = list(rel_path.parts)
-        if parts and parts[-1].endswith(".py"):
-            parts[-1] = parts[-1][:-3]
-            if parts[-1] == "__init__":
-                parts.pop()
-
-        module_name = ".".join(parts)
+    effective_module = module_name
 
     try:
         mod_path_to_id, mod_id_to_path, art_path_to_id, art_id_to_path = query_helpers.read_registries(root)
+
+        # 1. RAW Module ID resolution
+        raw_resolution = query_helpers.resolve_module_identity(
+            effective_module,
+            mod_path_to_id,
+            mod_id_to_path,
+        )
+
+        if raw_resolution["status"] == "resolved" and raw_resolution.get("resolution") == "exact_id":
+            module_name = raw_resolution["module"]
+        elif raw_resolution["status"] == "not_found" and raw_resolution.get("query_kind") == "module_id":
+            return (
+                f"Module '{effective_module}' not found in registry or canonical LIVE state. "
+                "Check the module name or run an analysis."
+            )
+        else:
+            # 2. Textual Module Flow: Normalise file-path input to dotted module name.
+            target_path = Path(module_name)
+            if target_path.is_absolute() or module_name.endswith(".py") or "/" in module_name or "\\" in module_name:
+                if target_path.is_absolute():
+                    try:
+                        rel_path = target_path.relative_to(root)
+                    except ValueError:
+                        rel_path = target_path
+                else:
+                    rel_path = target_path
+
+                parts = list(rel_path.parts)
+                if parts and parts[-1].endswith(".py"):
+                    parts[-1] = parts[-1][:-3]
+                    if parts[-1] == "__init__":
+                        parts.pop()
+
+                module_name = ".".join(parts)
+
         engine = mcp_runtime.get_or_init_engine(root)
         if not engine or getattr(engine.state, "resync_required", False):
             return "Error: No usable canonical LIVE state. Run analyze_project first."
@@ -109,9 +127,44 @@ def get_artifacts_for_module(
             mod_compact_id = getattr(live_module, "module_id", None)
             if mod_compact_id is None and isinstance(live_module, dict):
                 mod_compact_id = live_module.get("module_id")
+
+        if not mod_compact_id and live_module is None and not live_artifacts:
+            # 3. Textual Not-Found: shared fuzzy suggestions fallback
+            identity_resolution = query_helpers.resolve_module_identity(
+                module_name,
+                mod_path_to_id,
+                mod_id_to_path,
+            )
+            if identity_resolution["status"] == "resolved":
+                resolved_module = identity_resolution["module"]
+                unavailable = query_helpers.module_truth_unavailable(state, resolved_module)
+                if unavailable:
+                    return json.dumps(unavailable, indent=2)
+                resolved_artifacts = live_artifact_catalog.get(resolved_module, {})
+                resolved_id = mod_path_to_id.get(resolved_module)
+                resolved_live_module = live_modules.get(resolved_module)
+                if resolved_id or resolved_live_module is not None or resolved_artifacts:
+                    module_name = resolved_module
+                    mod_compact_id = resolved_id
+                    live_module = resolved_live_module
+                    live_artifacts = resolved_artifacts
+            elif (
+                identity_resolution["status"] == "not_found"
+                and identity_resolution.get("similar_candidates")
+            ):
+                return json.dumps(
+                    {
+                        "status": "not_found",
+                        "query": effective_module,
+                        "similar_candidates": identity_resolution["similar_candidates"],
+                        "data_source": "active_module_registry",
+                    },
+                    indent=2,
+                )
+
         if not mod_compact_id and live_module is None and not live_artifacts:
             return (
-                f"Module '{module_name}' not found in registry or canonical LIVE state. "
+                f"Module '{effective_module}' not found in registry or canonical LIVE state. "
                 "Check the module name or run an analysis."
             )
 
