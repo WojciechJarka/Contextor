@@ -6,6 +6,7 @@ from contextor.mcp.query_helpers import (
     FUZZY_MIN_SCORE,
     FUZZY_MAX_CANDIDATES,
     is_module_id,
+    is_artifact_id,
     resolve_module_identity,
     resolve_artifact_identity,
 )
@@ -403,3 +404,20 @@ def test_is_module_id():
     assert is_module_id("pkg.mod") is False
     assert is_module_id("") is False
     assert is_module_id("259/1/2") is False
+
+
+def test_is_artifact_id():
+    # True
+    assert is_artifact_id("A855/4") is True
+    assert is_artifact_id("a855/4") is True
+    assert is_artifact_id(" A855/4 ") is True
+    assert is_artifact_id("A0/0") is True
+
+    # False
+    assert is_artifact_id("855/4") is False
+    assert is_artifact_id("A855") is False
+    assert is_artifact_id("A855/x") is False
+    assert is_artifact_id("pkg.mod::symbol") is False
+    assert is_artifact_id("artifact/name") is False
+    assert is_artifact_id("") is False
+    assert is_artifact_id("B100/1") is False

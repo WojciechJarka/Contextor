@@ -234,12 +234,31 @@ def get_artifact_blast_radius(
             indent=2,
         )
 
+    effective_artifact = artifact_name
+
     try:
         mod_path_to_id, mod_id_to_path, art_path_to_id, art_id_to_path = query_helpers.read_registries(root)
         engine = mcp_runtime.get_or_init_engine(root)
         if not engine or getattr(engine.state, "resync_required", False):
             return "Error: No usable canonical LIVE state. Run analyze_project first."
-        target_art = art_id_to_path.get(artifact_name, artifact_name)
+
+        # 1. Exact active artifact ID resolution via shared classifier
+        if query_helpers.is_artifact_id(effective_artifact):
+            identity = query_helpers.resolve_artifact_identity(
+                effective_artifact,
+                art_path_to_id,
+                art_id_to_path,
+            )
+            if identity["status"] == "resolved" and identity.get("resolution") == "exact_id":
+                target_art = identity["artifact"]
+                artifact_name = target_art
+            elif identity["status"] == "not_found" and identity.get("query_kind") == "artifact_id":
+                return f"Artifact '{effective_artifact}' not found in the registry."
+            else:
+                target_art = art_id_to_path.get(artifact_name, artifact_name)
+        else:
+            target_art = art_id_to_path.get(artifact_name, artifact_name)
+
         if engine:
             live_matches = []
             for module_name, artifact_state in engine.state.artifacts.items():
@@ -579,8 +598,38 @@ def get_artifact_blast_radius(
                         },
                         indent=2,
                     )
-            return f"Artifact '{artifact_name}' not found in the registry."
+            # Shared artifact fuzzy suggestions fallback (only after artifact lookup miss AND module diagnosis miss)
+            identity_resolution = query_helpers.resolve_artifact_identity(
+                effective_artifact,
+                art_path_to_id,
+                art_id_to_path,
+            )
+            if identity_resolution["status"] == "ambiguous":
+                return json.dumps(
+                    {
+                        "error": "Ambiguous canonical artifact identity.",
+                        "query": effective_artifact,
+                        "candidates": [item["artifact"] for item in identity_resolution.get("candidates", [])],
+                        "data_source": "active_artifact_registry",
+                    },
+                    indent=2,
+                )
+            elif (
+                identity_resolution["status"] == "not_found"
+                and identity_resolution.get("similar_candidates")
+            ):
+                return json.dumps(
+                    {
+                        "status": "not_found",
+                        "query": effective_artifact,
+                        "similar_candidates": identity_resolution["similar_candidates"],
+                        "data_source": "active_artifact_registry",
+                    },
+                    indent=2,
+                )
 
-        return f"Artifact '{artifact_name}' not found in canonical LIVE state."
+            return f"Artifact '{effective_artifact}' not found in the registry."
+
+        return f"Artifact '{effective_artifact}' not found in canonical LIVE state."
     except Exception as e:
         return f"Error calculating artifact blast radius: {e}"

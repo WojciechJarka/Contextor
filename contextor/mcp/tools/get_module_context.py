@@ -54,7 +54,12 @@ def get_module_context(
     module: str | None = None,
 ) -> str:
     root = Path(repo_path).expanduser().resolve()
-    from contextor.core.report_query import IndexCatalog, catalog_from_registry, resolve_index_query
+    from contextor.core.report_query import (
+        IndexCatalog,
+        catalog_from_registry,
+        normalize_module_path_to_dotted,
+        resolve_index_query,
+    )
 
     mod_path_to_id, mod_id_to_path, art_path_to_id, art_id_to_path = query_helpers.read_registries(root)
     catalog = catalog_from_registry(str(root))
@@ -98,45 +103,95 @@ def get_module_context(
     if not input_query:
         return json.dumps({"error": "Either 'module_name' or 'module' must be provided."}, indent=2)
 
-    resolution = resolve_index_query(input_query, catalog, repo_root=str(root))
-    if resolution.get("matches"):
-        top = resolution["matches"][0]
-        if top.get("kind") == "artifact":
-            art_name = top["name"]
-            art_id = top["id"]
-            definer_mod = art_name.split("::", 1)[0]
-            return json.dumps(
-                {
-                    "target": input_query,
-                    "resolved_as": "artifact",
-                    "artifact": art_name,
-                    "artifact_id": art_id,
-                    "definer_module": definer_mod,
-                    "suggested_next_tool": "get_artifact_blast_radius",
-                    "warnings": [
-                        "Target resolved to an artifact/symbol rather than a module. "
-                        "Use get_artifact_blast_radius for symbol-level consumption."
-                    ],
-                },
-                indent=2,
-            )
-        elif top.get("kind") == "module":
-            module_name = top["name"]
-    else:
-        module_name = input_query
+    is_id = query_helpers.is_module_id(input_query)
+
+    if not is_id:
+        resolution = resolve_index_query(input_query, catalog, repo_root=str(root))
+        if resolution.get("matches"):
+            top = resolution["matches"][0]
+            if top.get("kind") == "artifact":
+                art_name = top["name"]
+                art_id = top["id"]
+                definer_mod = art_name.split("::", 1)[0]
+                return json.dumps(
+                    {
+                        "target": input_query,
+                        "resolved_as": "artifact",
+                        "artifact": art_name,
+                        "artifact_id": art_id,
+                        "definer_module": definer_mod,
+                        "suggested_next_tool": "get_artifact_blast_radius",
+                        "warnings": [
+                            "Target resolved to an artifact/symbol rather than a module. "
+                            "Use get_artifact_blast_radius for symbol-level consumption."
+                        ],
+                    },
+                    indent=2,
+                )
+            elif top.get("kind") == "module":
+                module_name = top["name"]
+        else:
+            module_name = input_query
 
     engine = mcp_runtime.get_or_init_engine(root)
     if not engine or getattr(engine.state, "resync_required", False):
         return "Error: No usable canonical LIVE state. Run analyze_project first."
+
     state = engine.state
-    unavailable = query_helpers.module_truth_unavailable(state, module_name)
-    if unavailable:
-        return json.dumps(unavailable, indent=2)
     live_modules = set(getattr(state, "modules", {})) | set(
         getattr(state, "artifacts", {})
     )
+
+    if is_id:
+        identity = query_helpers.resolve_module_identity(
+            input_query,
+            mod_path_to_id,
+            mod_id_to_path,
+        )
+        if identity["status"] == "resolved" and identity.get("resolution") == "exact_id":
+            module_name = identity["module"]
+        elif identity["status"] == "not_found" and identity.get("query_kind") == "module_id":
+            return f"Module '{input_query}' not found in the project graph."
+        else:
+            module_name = input_query
+
+    unavailable = query_helpers.module_truth_unavailable(state, module_name)
+    if unavailable:
+        return json.dumps(unavailable, indent=2)
+
     if module_name not in live_modules:
-        return f"Module '{module_name}' not found in the project graph."
+        # Textual Not-Found: shared fuzzy suggestions fallback
+        normalized_for_resolver = normalize_module_path_to_dotted(input_query, repo_root=str(root))
+
+        identity_resolution = query_helpers.resolve_module_identity(
+            normalized_for_resolver,
+            mod_path_to_id,
+            mod_id_to_path,
+        )
+        if identity_resolution["status"] == "resolved":
+            resolved_module = identity_resolution["module"]
+            unavailable = query_helpers.module_truth_unavailable(state, resolved_module)
+            if unavailable:
+                return json.dumps(unavailable, indent=2)
+            if resolved_module in live_modules:
+                module_name = resolved_module
+            else:
+                return f"Module '{input_query}' not found in the project graph."
+        elif (
+            identity_resolution["status"] == "not_found"
+            and identity_resolution.get("similar_candidates")
+        ):
+            return json.dumps(
+                {
+                    "status": "not_found",
+                    "query": input_query,
+                    "similar_candidates": identity_resolution["similar_candidates"],
+                    "data_source": "active_module_registry",
+                },
+                indent=2,
+            )
+        else:
+            return f"Module '{input_query}' not found in the project graph."
 
     inbound = {}
     outbound = {}

@@ -75,7 +75,7 @@ def _setup_test_state(monkeypatch):
     return state
 
 
-def test_legacy_dotted_module_success(tmp_path, monkeypatch):
+def test_get_artifacts_for_module__legacy_dotted_module_success(tmp_path, monkeypatch):
     _setup_test_state(monkeypatch)
     raw = get_artifacts_for_module(
         repo_path=str(tmp_path),
@@ -86,7 +86,7 @@ def test_legacy_dotted_module_success(tmp_path, monkeypatch):
     assert "A1/1" in res["artifacts"]
 
 
-def test_legacy_path_normalization_success(tmp_path, monkeypatch):
+def test_get_artifacts_for_module__legacy_path_normalization_success(tmp_path, monkeypatch):
     _setup_test_state(monkeypatch)
     raw = get_artifacts_for_module(
         repo_path=str(tmp_path),
@@ -97,7 +97,7 @@ def test_legacy_path_normalization_success(tmp_path, monkeypatch):
     assert "A1/1" in res["artifacts"]
 
 
-def test_module_alias_success(tmp_path, monkeypatch):
+def test_get_artifacts_for_module__module_alias_success(tmp_path, monkeypatch):
     _setup_test_state(monkeypatch)
     raw = get_artifacts_for_module(
         repo_path=str(tmp_path),
@@ -108,7 +108,7 @@ def test_module_alias_success(tmp_path, monkeypatch):
     assert "A1/1" in res["artifacts"]
 
 
-def test_module_name_legacy_success(tmp_path, monkeypatch):
+def test_get_artifacts_for_module__module_name_legacy_success(tmp_path, monkeypatch):
     _setup_test_state(monkeypatch)
     raw = get_artifacts_for_module(
         repo_path=str(tmp_path),
@@ -119,7 +119,7 @@ def test_module_name_legacy_success(tmp_path, monkeypatch):
     assert "A1/1" in res["artifacts"]
 
 
-def test_both_aliases_identical_success(tmp_path, monkeypatch):
+def test_get_artifacts_for_module__both_aliases_identical_success(tmp_path, monkeypatch):
     _setup_test_state(monkeypatch)
     raw = get_artifacts_for_module(
         repo_path=str(tmp_path),
@@ -131,7 +131,7 @@ def test_both_aliases_identical_success(tmp_path, monkeypatch):
     assert "A1/1" in res["artifacts"]
 
 
-def test_alias_conflict_controlled_error(tmp_path, monkeypatch):
+def test_get_artifacts_for_module__alias_conflict_controlled_error(tmp_path, monkeypatch):
     _setup_test_state(monkeypatch)
     raw = get_artifacts_for_module(
         repo_path=str(tmp_path),
@@ -143,7 +143,7 @@ def test_alias_conflict_controlled_error(tmp_path, monkeypatch):
     assert res["error"] == "module_name and module must match when both are provided."
 
 
-def test_missing_both_controlled_error(tmp_path):
+def test_get_artifacts_for_module__missing_both_controlled_error(tmp_path):
     raw = get_artifacts_for_module(
         repo_path=str(tmp_path),
     )
@@ -152,7 +152,7 @@ def test_missing_both_controlled_error(tmp_path):
     assert res["error"] == "module_name or module is required."
 
 
-def test_exact_module_id_via_module_alias(tmp_path, monkeypatch):
+def test_get_artifacts_for_module__exact_module_id_via_module_alias(tmp_path, monkeypatch):
     _setup_test_state(monkeypatch)
     raw = get_artifacts_for_module(
         repo_path=str(tmp_path),
@@ -164,7 +164,7 @@ def test_exact_module_id_via_module_alias(tmp_path, monkeypatch):
     assert "A1/1" in res["artifacts"]
 
 
-def test_exact_module_id_via_legacy_module_name(tmp_path, monkeypatch):
+def test_get_artifacts_for_module__exact_module_id_via_legacy_module_name(tmp_path, monkeypatch):
     _setup_test_state(monkeypatch)
     raw = get_artifacts_for_module(
         repo_path=str(tmp_path),
@@ -176,7 +176,7 @@ def test_exact_module_id_via_legacy_module_name(tmp_path, monkeypatch):
     assert "A1/1" in res["artifacts"]
 
 
-def test_nonexistent_module_id_never_fuzzy(tmp_path, monkeypatch):
+def test_get_artifacts_for_module__nonexistent_module_id_never_fuzzy(tmp_path, monkeypatch):
     _setup_test_state(monkeypatch)
     raw = get_artifacts_for_module(
         repo_path=str(tmp_path),
@@ -185,7 +185,7 @@ def test_nonexistent_module_id_never_fuzzy(tmp_path, monkeypatch):
     assert raw == "Module '9999/1' not found in registry or canonical LIVE state. Check the module name or run an analysis."
 
 
-def test_fuzzy_dotted_typo_suggestions(tmp_path, monkeypatch):
+def test_get_artifacts_for_module__fuzzy_dotted_typo_suggestions(tmp_path, monkeypatch):
     _setup_test_state(monkeypatch)
     raw = get_artifacts_for_module(
         repo_path=str(tmp_path),
@@ -203,7 +203,7 @@ def test_fuzzy_dotted_typo_suggestions(tmp_path, monkeypatch):
     assert "artifacts" not in res
 
 
-def test_fuzzy_path_typo_suggestions(tmp_path, monkeypatch):
+def test_get_artifacts_for_module__fuzzy_path_typo_suggestions(tmp_path, monkeypatch):
     _setup_test_state(monkeypatch)
     raw = get_artifacts_for_module(
         repo_path=str(tmp_path),
@@ -219,7 +219,7 @@ def test_fuzzy_path_typo_suggestions(tmp_path, monkeypatch):
     assert top["score"] >= 0.75
 
 
-def test_fuzzy_never_auto_resolves(tmp_path, monkeypatch):
+def test_get_artifacts_for_module__fuzzy_never_auto_resolves(tmp_path, monkeypatch):
     _setup_test_state(monkeypatch)
     raw = get_artifacts_for_module(
         repo_path=str(tmp_path),
@@ -231,7 +231,7 @@ def test_fuzzy_never_auto_resolves(tmp_path, monkeypatch):
     assert len(res["similar_candidates"]) > 0
 
 
-def test_fuzzy_max_five_candidates(tmp_path, monkeypatch):
+def test_get_artifacts_for_module__fuzzy_max_five_candidates(tmp_path, monkeypatch):
     state = RepositoryAnalysisState(
         artifacts={f"pkg.module_{i}": {"symbols": {}} for i in range(10)},
         artifact_consumption={},
@@ -252,7 +252,7 @@ def test_fuzzy_max_five_candidates(tmp_path, monkeypatch):
     assert len(res["similar_candidates"]) <= 5
 
 
-def test_unrelated_query_exact_legacy_fallback(tmp_path, monkeypatch):
+def test_get_artifacts_for_module__unrelated_query_exact_legacy_fallback(tmp_path, monkeypatch):
     _setup_test_state(monkeypatch)
     raw = get_artifacts_for_module(
         repo_path=str(tmp_path),
@@ -261,7 +261,7 @@ def test_unrelated_query_exact_legacy_fallback(tmp_path, monkeypatch):
     assert raw == "Module 'completely_unrelated_xyz' not found in registry or canonical LIVE state. Check the module name or run an analysis."
 
 
-def test_exact_module_id_currentness_fail_closed(tmp_path, monkeypatch):
+def test_get_artifacts_for_module__exact_module_id_currentness_fail_closed(tmp_path, monkeypatch):
     _setup_test_state(monkeypatch)
     monkeypatch.setattr(
         query_helpers,
@@ -278,7 +278,7 @@ def test_exact_module_id_currentness_fail_closed(tmp_path, monkeypatch):
     assert res["module"] == "pkg.mod_a"
 
 
-def test_exact_module_id_respects_presentation_controls(tmp_path, monkeypatch):
+def test_get_artifacts_for_module__exact_module_id_respects_presentation_controls(tmp_path, monkeypatch):
     _setup_test_state(monkeypatch)
     raw = get_artifacts_for_module(
         repo_path=str(tmp_path),
@@ -293,7 +293,7 @@ def test_exact_module_id_respects_presentation_controls(tmp_path, monkeypatch):
     assert res["truncated"] is True
 
 
-def test_valid_dotted_lookup_does_not_call_fuzzy_fallback(tmp_path, monkeypatch):
+def test_get_artifacts_for_module__valid_dotted_lookup_does_not_call_fuzzy_fallback(tmp_path, monkeypatch):
     _setup_test_state(monkeypatch)
 
     def fail_if_called(*_args, **_kwargs):
@@ -309,7 +309,7 @@ def test_valid_dotted_lookup_does_not_call_fuzzy_fallback(tmp_path, monkeypatch)
     assert res["module"] == "pkg.mod_a"
 
 
-def test_valid_path_lookup_does_not_call_fuzzy_fallback(tmp_path, monkeypatch):
+def test_get_artifacts_for_module__valid_path_lookup_does_not_call_fuzzy_fallback(tmp_path, monkeypatch):
     _setup_test_state(monkeypatch)
 
     def fail_if_called(*_args, **_kwargs):
@@ -325,7 +325,7 @@ def test_valid_path_lookup_does_not_call_fuzzy_fallback(tmp_path, monkeypatch):
     assert res["module"] == "pkg.mod_a"
 
 
-def test_fuzzy_miss_calls_resolver_with_normalized_query(tmp_path, monkeypatch):
+def test_get_artifacts_for_module__fuzzy_miss_calls_resolver_with_normalized_query(tmp_path, monkeypatch):
     _setup_test_state(monkeypatch)
     orig_resolve = query_helpers.resolve_module_identity
     calls = []
@@ -347,7 +347,7 @@ def test_fuzzy_miss_calls_resolver_with_normalized_query(tmp_path, monkeypatch):
     assert calls[0] == "pkg.servces.auth"
 
 
-def test_missing_id_with_no_engine_returns_global_error(tmp_path, monkeypatch):
+def test_get_artifacts_for_module__missing_id_with_no_engine_returns_global_error(tmp_path, monkeypatch):
     _setup_test_state(monkeypatch)
     monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: None)
 
@@ -358,7 +358,7 @@ def test_missing_id_with_no_engine_returns_global_error(tmp_path, monkeypatch):
     assert raw == "Error: No usable canonical LIVE state. Run analyze_project first."
 
 
-def test_missing_id_with_resync_required_returns_global_error(tmp_path, monkeypatch):
+def test_get_artifacts_for_module__missing_id_with_resync_required_returns_global_error(tmp_path, monkeypatch):
     _setup_test_state(monkeypatch)
     monkeypatch.setattr(
         mcp_runtime,
@@ -373,7 +373,7 @@ def test_missing_id_with_resync_required_returns_global_error(tmp_path, monkeypa
     assert raw == "Error: No usable canonical LIVE state. Run analyze_project first."
 
 
-def test_existing_id_with_no_engine_returns_global_error(tmp_path, monkeypatch):
+def test_get_artifacts_for_module__existing_id_with_no_engine_returns_global_error(tmp_path, monkeypatch):
     _setup_test_state(monkeypatch)
     monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: None)
 
@@ -384,7 +384,7 @@ def test_existing_id_with_no_engine_returns_global_error(tmp_path, monkeypatch):
     assert raw == "Error: No usable canonical LIVE state. Run analyze_project first."
 
 
-def test_usable_live_with_missing_id_preserves_legacy_not_found(tmp_path, monkeypatch):
+def test_get_artifacts_for_module__usable_live_with_missing_id_preserves_legacy_not_found(tmp_path, monkeypatch):
     _setup_test_state(monkeypatch)
     raw = get_artifacts_for_module(
         repo_path=str(tmp_path),
@@ -393,7 +393,7 @@ def test_usable_live_with_missing_id_preserves_legacy_not_found(tmp_path, monkey
     assert raw == "Module '9999/1' not found in registry or canonical LIVE state. Check the module name or run an analysis."
 
 
-def test_original_query_preserved_and_candidate_structure(tmp_path, monkeypatch):
+def test_get_artifacts_for_module__original_query_preserved_and_candidate_structure(tmp_path, monkeypatch):
     _setup_test_state(monkeypatch)
     raw = get_artifacts_for_module(
         repo_path=str(tmp_path),

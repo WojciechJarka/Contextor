@@ -85,10 +85,11 @@ def is_module_id(query: str) -> bool:
     return len(parts) == 2 and parts[0].isdigit() and parts[1].isdigit()
 
 
-def _is_artifact_id(query: str) -> bool:
-    if not (query.startswith(("A", "a")) and "/" in query):
+def is_artifact_id(query: str) -> bool:
+    raw = query.strip()
+    if not (raw.startswith(("A", "a")) and "/" in raw):
         return False
-    parts = query[1:].split("/")
+    parts = raw[1:].split("/")
     return len(parts) == 2 and parts[0].isdigit() and parts[1].isdigit()
 
 
@@ -172,7 +173,7 @@ def resolve_artifact_identity(
         }
 
     # 1. Artifact ID lookup
-    if _is_artifact_id(raw):
+    if is_artifact_id(raw):
         normalized_id = raw[0].upper() + raw[1:]
         exact_identity = art_id_to_path.get(normalized_id)
         if exact_identity:

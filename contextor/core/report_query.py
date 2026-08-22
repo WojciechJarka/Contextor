@@ -188,6 +188,20 @@ def _normalize_relative_path(value: str, repo_root: str | None) -> tuple[str | N
     return normalized, None
 
 
+def normalize_module_path_to_dotted(value: str, repo_root: str | None = None) -> str:
+    """Canonical conversion of a module path, relative path, or dotted name to dotted module format."""
+    normalized, error = _normalize_relative_path(value, repo_root)
+    raw = normalized if (normalized and not error) else value.strip().replace("\\", "/")
+    while raw.startswith("./"):
+        raw = raw[2:]
+    parts = list(PurePosixPath(raw).parts)
+    if parts and parts[-1].endswith(".py"):
+        parts[-1] = parts[-1][:-3]
+        if parts[-1] == "__init__":
+            parts.pop()
+    return ".".join(parts)
+
+
 def _candidate(
     obj_id: str,
     name: str,
