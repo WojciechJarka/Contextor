@@ -460,7 +460,7 @@ def test_desktop_watcher_recovers_after_live_service_death(tmp_path):
     watcher._recover_client = mock_recover
 
     # Modify file so that watcher detects a change
-    py_file.write_text("x = 2\n", encoding="utf-8")
+    py_file.write_text("x = 2000\n", encoding="utf-8")
 
     # poll_once should recover and succeed
     changed = watcher.poll_once()
