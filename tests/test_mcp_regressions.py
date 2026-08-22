@@ -886,6 +886,80 @@ def test_lookup_index_entries_distinguishes_active_recovery_and_missing(
     assert result["999/1"] == {"name": None, "status": "missing"}
 
 
+def test_lookup_index_entries_large_output_preflight_gate(tmp_path, monkeypatch):
+    # Construct a catalog where 200 modules generate ~18 KB of formatted JSON
+    modules = {f"{i}/1": f"pkg.submodule.very_long_component_name_number_{i}" for i in range(200)}
+    catalog = IndexCatalog(
+        modules=modules,
+        artifacts={},
+    )
+    monkeypatch.setattr(
+        lookup_index_entries_tool,
+        "catalog_from_registry",
+        lambda _root: catalog,
+    )
+
+    ids = [f"{i}/1" for i in range(200)]
+    ids_with_dup = ids + ["0/1", "1/1"]
+
+    # 1. Above threshold with default allow_large_output=False -> confirmation_required without echoed IDs
+    raw_warn = mcp_server.lookup_index_entries.fn(
+        repo_path=str(tmp_path),
+        ids=ids_with_dup,
+    )
+    warn = json.loads(raw_warn)
+    assert warn["status"] == "confirmation_required"
+    assert warn["reason"] == "Estimated lookup output exceeds the recommended context size."
+    assert warn["requested_count"] == 202
+    assert warn["warning_threshold_bytes"] == 15360
+    assert warn["warning_threshold_kib"] == 15.0
+    assert warn["estimated_output_bytes"] > 15360
+    assert warn["estimated_output_kib"] == warn["estimated_output_bytes"] / 1024
+    assert warn["retry"] == {
+        "allow_large_output": True,
+    }
+    assert "ids" not in warn["retry"]
+    assert "ids" not in warn
+    assert "repo_path" not in warn["retry"]
+    assert "repo_path" not in warn
+    assert "retry_instruction" in warn
+    assert "same repo_path and ids" in warn["retry_instruction"]
+    assert "pkg.submodule" not in raw_warn
+    # Warning response itself must remain compact and well below 15 KiB
+    assert len(raw_warn.encode("utf-8")) < 1024
+
+    # 2. Above threshold with allow_large_output=True -> full normal mapping
+    raw_override = mcp_server.lookup_index_entries.fn(
+        repo_path=str(tmp_path),
+        ids=ids_with_dup,
+        allow_large_output=True,
+    )
+    override = json.loads(raw_override)
+    assert "status" not in override or override.get("status") != "confirmation_required"
+    assert len(override) == 200
+    assert override["0/1"] == {"name": "pkg.submodule.very_long_component_name_number_0", "status": "active"}
+    assert len(raw_override.encode("utf-8")) == warn["estimated_output_bytes"]
+
+    # 3. Below threshold (<15 KiB) with allow_large_output=False -> normal mapping directly
+    small_ids = ["0/1", "1/1", "2/1"]
+    raw_small_def = mcp_server.lookup_index_entries.fn(
+        repo_path=str(tmp_path),
+        ids=small_ids,
+    )
+    small_def = json.loads(raw_small_def)
+    assert "status" not in small_def
+
+    # 4. Below threshold with allow_large_output=True is semantically identical
+    raw_small_override = mcp_server.lookup_index_entries.fn(
+        repo_path=str(tmp_path),
+        ids=small_ids,
+        allow_large_output=True,
+    )
+    small_override = json.loads(raw_small_override)
+    assert small_def == small_override
+
+
+
 def test_extract_indexed_report_context_returns_every_shared_resolver_block(tmp_path, monkeypatch):
     catalog = IndexCatalog(
         modules={"1/1": "main", "2/1": "pkg.cli"},

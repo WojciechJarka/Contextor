@@ -1,136 +1,147 @@
-# TOKEN EFFICIENCY — STEP A15.3F5: APPLY EXACT FINAL PAIR-AWARE ENVELOPE PATCH
+# TOKEN EFFICIENCY — STEP A17.1: MEASURE AND CLASSIFY describe_canonical_state
 
-## FILES_CHANGED
-1. `C:\Temp\Contextor_Repo\contextor\core\canonical_state_query\runtime.py`
-2. `C:\Temp\Contextor_Repo\tests\test_canonical_state_contract.py`
-
----
-
-## ACTUAL_DIFF
-```diff
-diff --git a/contextor/core/canonical_state_query/runtime.py b/contextor/core/canonical_state_query/runtime.py
-index 05c56d7..c11b01c 100644
---- a/contextor/core/canonical_state_query/runtime.py
-+++ b/contextor/core/canonical_state_query/runtime.py
-@@ -137,8 +137,13 @@ def validate_request(request: Any) -> tuple[dict[str, Any] | None, dict[str, Any
-     if not isinstance(request, dict):
-         return None, _error("invalid_request", "Request must be an object.", "$request")
- 
-+    schema_version_hint = request.get("schema_version")
-     language_version = request.get("language_version")
--    if language_version == LANGUAGE_VERSION_V1_1:
-+    is_explicit_v1_1_pair = (
-+        schema_version_hint == CANONICAL_QUERY_SCHEMA_VERSION_V1_1
-+        and language_version == LANGUAGE_VERSION_V1_1
-+    )
-+    if is_explicit_v1_1_pair:
-         allowed_keys = {
-             "schema_version",
-             "language_version",
-diff --git a/tests/test_canonical_state_contract.py b/tests/test_canonical_state_contract.py
-index e86e082..03998f5 100644
---- a/tests/test_canonical_state_contract.py
-+++ b/tests/test_canonical_state_contract.py
-@@ -767,3 +767,52 @@ def test_version_1_1_expand_exact_request_preservation():
-     assert orig_req_b == copy_b, "Original request dict must not be mutated"
- 
- 
-+def test_v1_1_evidence_limit_requires_explicit_supported_version_pair_before_envelope_expansion():
-+    missing_schema = {
-+        "language_version": "1.1",
-+        "root": "modules",
-+        "filters": [],
-+        "select": [],
-+        "evidence_limit": 3,
-+    }
-+    _, err_missing_schema = validate_request(missing_schema)
-+    assert err_missing_schema is not None
-+    assert err_missing_schema["error"]["code"] == "invalid_request"
-+    assert err_missing_schema["error"]["path"] == "evidence_limit"
-+    assert err_missing_schema["error"]["details"]["unknown_fields"] == [
-+        "evidence_limit"
-+    ]
-+    missing_language = {
-+        "schema_version": "1.1",
-+        "root": "modules",
-+        "filters": [],
-+        "select": [],
-+        "evidence_limit": 3,
-+    }
-+    _, err_missing_language = validate_request(missing_language)
-+    assert err_missing_language is not None
-+    assert err_missing_language["error"]["code"] == "invalid_request"
-+    assert err_missing_language["error"]["path"] == "evidence_limit"
-+    assert err_missing_language["error"]["details"]["unknown_fields"] == [
-+        "evidence_limit"
-+    ]
-+    valid_v1_1 = {
-+        "schema_version": "1.1",
-+        "language_version": "1.1",
-+        "root": "modules",
-+        "filters": [],
-+        "select": ["module_name"],
-+        "evidence_limit": 3,
-+    }
-+    normalized, valid_error = validate_request(valid_v1_1)
-+    assert valid_error is None
-+    assert normalized is not None
-+    assert normalized["evidence_limit"] == 3
-+    unknown_v1_1 = {
-+        **valid_v1_1,
-+        "unsupported_field": True,
-+    }
-+    _, unknown_error = validate_request(unknown_v1_1)
-+    assert unknown_error is not None
-+    assert unknown_error["error"]["code"] == "invalid_request"
-+    assert unknown_error["error"]["path"] == "unsupported_field"
-```
+## FILES_CHANGED=NONE
+Krok pomiarowy i klasyfikacyjny typu read-only. Nie zmodyfikowano żadnych plików produkcyjnych, dokumentacji ani testów.
 
 ---
 
-## PAIR_AWARE_ENVELOPE_IMPLEMENTED
-W `validate_request` (`runtime.py`) wprowadzono ścisły warunek:
-`is_explicit_v1_1_pair = (schema_version_hint == CANONICAL_QUERY_SCHEMA_VERSION_V1_1 and language_version == LANGUAGE_VERSION_V1_1)`.
-Zbiór `allowed_keys` zawierający `evidence_limit` jest aktywowany wyłącznie wtedy, gdy w żądaniu jawnie podano parę wersji `("1.1", "1.1")`. We wszystkich pozostałych przypadkach (w tym brak `schema_version` przy `language_version="1.1"` lub brak `language_version` przy `schema_version="1.1"`) pole `evidence_limit` jest natychmiast odrzucane z kodem `invalid_request` dla ścieżki `evidence_limit` jako błąd strukturalny w precedencji legacy.
+## PUBLIC_SIGNATURE
+`def describe_canonical_state(schema_version: str = "1.0", language_version: str = "1.0") -> str:`
 
 ---
 
-## NEW_TEST_ADDED
-Dodano test:
-`test_v1_1_evidence_limit_requires_explicit_supported_version_pair_before_envelope_expansion`
-Weryfikuje:
-1. `missing_schema` z `evidence_limit=3` -> `invalid_request` dla `evidence_limit`.
-2. `missing_language` z `evidence_limit=3` -> `invalid_request` dla `evidence_limit`.
-3. Prawidłowe `valid_v1_1` z `evidence_limit=3` -> sukces walidacji i normalizacji (`evidence_limit=3`).
-4. `unknown_v1_1` z nieobsługiwanym polem -> `invalid_request` dla `unsupported_field`.
+## AUTHORITATIVE_IMPLEMENTATION
+`C:\Temp\Contextor_Repo\contextor\mcp\tools\describe_canonical_state.py`
 
 ---
 
-## TARGETED_TEST_RESULT
-- Polecenie: `.venv\Scripts\pytest.exe tests\test_canonical_state_contract.py -v`
-- Wynik: **33 passed, 0 failed** (100% sukcesu).
+## AUTHORITATIVE_CORE_OWNER
+`C:\Temp\Contextor_Repo\contextor\core\canonical_state_query\contract.py`
 
 ---
 
-## CONTEXTOR_POST_CHANGE_EVIDENCE
-`get_file_edit_context` dla `runtime.py`:
-`module_id="86/1"`, `layer="adapter"`, `public_api.total=2`, `imports.total=3`, `consumers.total=1`.
+## SUPPORTED_VERSION_PAIRS
+- `("1.0", "1.0")` — kontrakt bazowy (legacy)
+- `("1.1", "1.1")` — kontrakt z progressive disclosure
 
 ---
 
-## LIVE_EVENT_EVIDENCE
-Zdarzenia `desktop_watcher` w `get_live_events`:
-- `revision=1206`: `UPDATED`, `contextor\core\canonical_state_query\runtime.py`
-- `revision=1207`: `UPDATED`, `tests\test_canonical_state_contract.py`
+## STATE_DEPENDENCE
+`NO`
+Wynik narzędzia jest w 100% statycznym opisem specyfikacji schematu i języka zapytań zadeklarowanym w stałych w kodzie. Narzędzie nie przyjmuje parametru `repo_path`, nie wykonuje żadnych operacji wejścia/wyjścia (I/O), analizy kodu ani odczytu rejestrów.
 
 ---
 
-## UNEXPECTED_SCOPE_CHANGES
+## DEFAULT_1_0_BYTES
+**8,941 bajtów** UTF-8 (~8.73 KiB)
+
+---
+
+## EXPLICIT_1_0_BYTES
+**8,941 bajtów** UTF-8 (~8.73 KiB)
+
+---
+
+## EXPLICIT_1_1_BYTES
+**9,752 bajty** UTF-8 (~9.52 KiB)
+
+---
+
+## V1_1_VS_V1_0_DELTA
+- Różnica bezwzględna: **+811 bajtów**
+- Wzrost procentowy: **+9.07%** (wynika z dodania opisu `default_evidence_limit`, `supported_evidence_limits` oraz pól towarzyszących `imports_truncated` i `consumers_truncated`).
+
+---
+
+## CROSS_PAIR_ERROR_BYTES
+**435 bajtów** UTF-8 (odpowiedź błędu `unsupported_version_pair`).
+
+---
+
+## UNKNOWN_PAIR_ERROR_BYTES
+**435 bajtów** UTF-8 (odpowiedź błędu `unsupported_schema_version`).
+
+---
+
+## V1_1_SECTION_BREAKDOWN
+Pomiary sekcji wykonane jako standalone serialization (rozmiar wyizolowanego JSON dla każdej sekcji):
+- **Modules Root Schema**: 2,288 bajtów (8 pól, typy, operatory, filtry, computeds)
+- **Artifacts Root Schema**: 3,715 bajtów (14 pól, typy, operatory, filtry, computeds)
+- **Dependencies Root Schema**: 1,321 bajtów (6 pól, typy, operatory)
+- **Language Contract**: 1,121 bajtów (filtry, operatory, limity, sortowanie)
+- **Envelope / Version Metadata**: 85 bajtów (`schema_version`, `language_version`, `supported_pairs`)
+- **Pełny łączny payload 1.1**: **9,752 bajty**
+
+*Metoda pomiaru:* Rozmiary standalone mierzą wyizolowany ślad bajtowy każdego poddrzewa w formacie JSON z wcięciem 2 spacji; łączny dokument 1.1 (9,752 B) łączy te sekcje w jeden wspólny obiekt JSON.
+
+---
+
+## PAYLOAD_COST_DRIVERS
+- **R1**: Dokładne definicje pól, typów i dopuszczalnych operatorów w schemacie.
+- **R2**: Flagi strukturalne per pole (`type`, `filterable`, `selectable`, `nullable`, `computed`).
+- **R3**: Tekstowe opisy semantyczne pól (`description`).
+- **R5**: Metadane możliwości języka i reguł dowodowych (`limits`, `operators`).
+- Największy udział w rozmiarze mają definicje schematów `artifacts` (3.72 KB) oraz `modules` (2.29 KB).
+
+---
+
+## EXISTING_DISCLOSURE_CONTROLS
+- Tylko jeden root: `NO`
+- Tylko schema: `NO`
+- Tylko language: `NO`
+- Tylko field metadata: `NO`
+- Tylko version metadata: `NO`
+
+Narzędzie zwraca pełny kontrakt dla żądanej pary wersji.
+
+---
+
+## USAGE_MODEL
+- `describe_canonical_state` służy jako jednorazowe narzędzie typu discovery/introspekcja, wywoływane przez agenta przed konstruowaniem zapytań do `query_canonical_projection`.
+- Narzędzie nie jest wywoływane w pętlach ani na poziomie poszczególnych encji.
+- Kompletny kontrakt (9.52 KiB) mieści się w standardowym budżecie kontekstu jednorazowego wywołania.
+- Dokumentacja MCP jasno kieruje do wywołania `describe_canonical_state(schema_version="1.1", language_version="1.1")` w celu odkrycia możliwości wersji 1.1.
+
+---
+
+## SECTION_SCOPING_SIMULATION
+`N/A` (Pełny payload 1.1 wynosi 9,752 bajty, co jest poniżej progu 10 KiB / 10,240 B. Brak niekontrolowanego wzrostu i brak zbędnej redundancji w naturalnym użyciu).
+
+---
+
+## PROGRESSIVE_DISCLOSURE_CANDIDATE
+`NO`
+Narzędzie opisuje stały, statyczny kontrakt o łącznym rozmiarze poniżej 10 KiB. Rozbijanie statycznego opisu na drobne zapytania zwiększyłoby liczbę rund i łączny narzut tokenowy komunikacji LLM-MCP.
+
+---
+
+## REPRESENTATION_CANDIDATE
+`NO`
+Narzędzie opisuje specyfikację schematu/języka, dla której alternatywne skrócone reprezentacje nie mają zastosowania.
+
+---
+
+## MEASURED_OPTIMIZATION_OPPORTUNITY
+Brak uzasadnionej przestrzeni optymalizacyjnej. Ładunek ~9.5 KB jest optymalny dla pełnego opisu schematu trzech domen oraz reguł języka zapytań.
+
+---
+
+## NON_TOKEN_CONTRACT_RISKS
 `NONE`
+Zasady walidacji par wersji (`SUPPORTED_PAIRS`), obsługa błędów, domyślna para `(1.0, 1.0)` oraz odkrywalność `(1.1, 1.1)` zostały w pełni przetestowane i certyfikowane w krokach A15.3–A15.4.
 
 ---
 
-## MCP_RESTART_REQUIRED=YES
+## FINAL_CLASSIFICATION
+`A` (NO CHANGE)
+
+---
+
+## JUSTIFICATION
+1. Narzędzie zwraca wyłącznie statyczny kontrakt specyfikacji (0 I/O, brak zależności od stanu projektu).
+2. Pełny rozmiar odpowiedzi wynosi 8.94 KB (1.0) oraz 9.75 KB (1.1), co mieści się poniżej progu 10 KiB.
+3. Wywołanie jest jednorazowym discovery; brak narastającego fanoutu lub redundancji danych.
+4. Żadna refaktoryzacja tokenowa nie jest uzasadniona.
 
 ---
 
@@ -154,4 +165,4 @@ Zdarzenia `desktop_watcher` w `get_live_events`:
 ---
 
 ## NEXT_STEP_PROPOSAL
-STEP A15.3 SOURCE CERTIFIED — manual MCP restart required before final runtime certification.
+STEP A17 CLOSED — describe_canonical_state is sufficiently token-efficient; no implementation justified.

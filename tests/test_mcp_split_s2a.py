@@ -51,8 +51,8 @@ _IMPLEMENTATIONS = {
 
 _EXPECTED_SIGNATURES = {
     "get_mcp_documentation": "(tool: str | None = None, tools: list[str] | None = None, sections: list[str] | None = None) -> str",
-    "describe_canonical_state": "() -> str",
-    "lookup_index_entries": "(repo_path: str, ids: list[str]) -> str",
+    "describe_canonical_state": "(schema_version: str = '1.0', language_version: str = '1.0') -> str",
+    "lookup_index_entries": "(repo_path: str, ids: list[str], allow_large_output: bool = False) -> str",
     "query_canonical_projection": "(repo_path: str, request: dict[str, typing.Any]) -> str",
 }
 
@@ -77,11 +77,18 @@ EXPECTED_PARAMETERS = {
         },
         "type": "object",
     },
-    "describe_canonical_state": {"properties": {}, "type": "object"},
+    "describe_canonical_state": {
+        "properties": {
+            "schema_version": {"default": "1.0", "type": "string"},
+            "language_version": {"default": "1.0", "type": "string"},
+        },
+        "type": "object",
+    },
     "lookup_index_entries": {
         "properties": {
             "repo_path": {"type": "string"},
             "ids": {"items": {"type": "string"}, "type": "array"},
+            "allow_large_output": {"default": False, "type": "boolean"},
         },
         "required": ["repo_path", "ids"],
         "type": "object",
