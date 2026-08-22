@@ -1,0 +1,28 @@
+{
+  "version": "1.0.0",
+  "tool": "get_source_range",
+  "purpose": [
+    "Fetch one complete normalized caller-selected line range from a Python file already present in canonical LIVE scope."
+  ],
+  "parameters": [
+    "repo_path (string, required): canonical repository root.",
+    "file_path (string, required): exact repository-relative canonical Python path returned by search_source.",
+    "start_line (positive integer, required) and end_line (integer >= start_line, required): inclusive exact range.",
+    "allow_large_output (boolean, default false): approve output above 15360 UTF-8 bytes after confirmation preflight."
+  ],
+  "behavior": [
+    "Returns the exact inclusive source range, module identity, requested range size and complete file line count. It never searches, guesses a symbol, walks the repository or reads a file outside canonical scope."
+  ],
+  "freshness": [
+    "Uses current canonical scope and fails closed for unavailable or stale module truth. It is read-only and does not mutate LIVE state."
+  ],
+  "errors": [
+    "Invalid paths/ranges and files outside canonical scope return controlled JSON errors. Outputs above 15360 UTF-8 bytes require allow_large_output=true retry."
+  ],
+  "usage_notes": [
+    "Use the exact expand metadata returned by search_source line_map results."
+  ],
+  "examples": [
+    "get_source_range(repo_path, \"pkg/module.py\", 145, 160) returns exactly lines 145-160."
+  ]
+}

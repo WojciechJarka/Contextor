@@ -1,0 +1,33 @@
+{
+  "version": "1.0.0",
+  "tool": "search_source",
+  "purpose": [
+    "Search literal source text across Python files currently present in canonical LIVE state. This is repository-content discovery; search_artifacts remains architectural entity discovery."
+  ],
+  "parameters": [
+    "repo_path (string, required): canonical repository root.",
+    "search_term (non-empty string, required): single-line literal substring; newline (\\n) and carriage return (\\r) are invalid input; no regex, fuzzy, semantic or vector matching.",
+    "limit (positive integer or null, default 20): maximum logical matches returned; null returns all matches in canonical Python scope.",
+    "case_sensitive (boolean, default false): false uses Unicode casefold matching; true requires exact casing.",
+    "allow_large_output (boolean, default false): approve output above 15360 UTF-8 bytes after confirmation preflight."
+  ],
+  "behavior": [
+    "Only canonical Python modules are enumerated; excluded and non-canonical files are never walked or searched. Comments, docstrings, string/numeric literals and ordinary code are searchable because matching operates on source text read through contextor.core.source.read_source.",
+    "Results are ordered deterministically by repository-relative path and logical span. Repeated hits in one logical span produce one result with matched_lines.",
+    "A logical span of at most 20 lines returns content_mode=full and its complete normalized text. Larger spans return content_mode=line_map: every line number, full matched lines, and non-match previews capped at four tokens and 60 characters.",
+    "Large line maps include expand metadata for get_source_range with the exact file and span. total_matches is counted before limit and truncated means fewer logical matches were returned than total_matches."
+  ],
+  "freshness": [
+    "Search fails closed when canonical state is unavailable, requires resync, or a selected canonical module is parse-stale. It does not mutate LIVE state."
+  ],
+  "errors": [
+    "Empty or multi-line search_term (containing \\n or \\r), invalid limit (including boolean, zero or negative), or non-boolean flags return controlled JSON errors.",
+    "Outputs above 15360 UTF-8 bytes return compact confirmation_required without echoing the query or results; repeat the same call with allow_large_output=true."
+  ],
+  "usage_notes": [
+    "Use for finding hardcoded values, messages, comments or docstrings when the defining file or symbol is unknown. Start with the default limit and expand only the relevant large logical span."
+  ],
+  "examples": [
+    "search_source(repo_path, \"109.9\") finds the literal text only inside canonical Python files."
+  ]
+}

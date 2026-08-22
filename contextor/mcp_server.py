@@ -182,6 +182,8 @@ from contextor.mcp.tools.get_artifact_blast_radius import (
     get_artifact_blast_radius as _get_artifact_blast_radius_impl,
 )
 from contextor.mcp.tools.search_artifacts import search_artifacts as _search_artifacts_impl
+from contextor.mcp.tools.search_source import search_source as _search_source_impl
+from contextor.mcp.tools.get_source_range import get_source_range as _get_source_range_impl
 from contextor.mcp.tools.get_artifacts_for_module import (
     get_artifacts_for_module as _get_artifacts_for_module_impl,
 )
@@ -366,6 +368,13 @@ get_artifacts_for_module = mcp.tool(description=short_description("get_artifacts
 
 lookup_artifact_by_symbol = mcp.tool(description=short_description("lookup_artifact_by_symbol"))(
     _lookup_artifact_by_symbol_impl
+)
+
+search_source = mcp.tool(description=short_description("search_source"))(
+    _search_source_impl
+)
+get_source_range = mcp.tool(description=short_description("get_source_range"))(
+    _get_source_range_impl
 )
 
 
