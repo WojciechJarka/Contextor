@@ -770,3 +770,132 @@ def test_watchdog_keeps_runtime_alive_while_owner_lives(tmp_path, monkeypatch):
     finally:
         client.request("shutdown")
 
+
+def test_get_events_continuity_gap_detection_and_retention_contract():
+    server = CanonicalLiveServer(state=None, revision=0)
+
+    # Case 1: Initial empty buffer
+    r_empty_none = server._dispatch({"operation": "get_events", "after_revision": None})
+    assert r_empty_none["status"] == "ok"
+    assert r_empty_none["latest_revision"] == 0
+    assert r_empty_none["earliest_retained_revision"] is None
+    assert r_empty_none["continuity"] == "not_requested"
+    assert r_empty_none["resync_required"] is False
+    assert r_empty_none["resync_reason"] is None
+    assert r_empty_none["events"] == []
+    assert r_empty_none["total"] == 0
+    assert r_empty_none["truncated"] is False
+
+    # Empty buffer with after_revision == 0 (latest)
+    r_empty_zero = server._dispatch({"operation": "get_events", "after_revision": 0})
+    assert r_empty_zero["continuity"] == "continuous"
+    assert r_empty_zero["resync_required"] is False
+    assert r_empty_zero["resync_reason"] is None
+
+    # Empty buffer with after_revision < latest_revision (simulating buffer cleared with latest=150)
+    server_cleared = CanonicalLiveServer(state=None, revision=150)
+    r_cleared_gap = server_cleared._dispatch({"operation": "get_events", "after_revision": 120})
+    assert r_cleared_gap["latest_revision"] == 150
+    assert r_cleared_gap["earliest_retained_revision"] is None
+    assert r_cleared_gap["continuity"] == "gap"
+    assert r_cleared_gap["resync_required"] is True
+    assert r_cleared_gap["resync_reason"] == "event_retention_gap"
+
+    # Populate 150 events to test retention cap (100) and eviction of 1..50
+    for i in range(1, 151):
+        server._revision += 1
+        server._record_event(
+            "update_file",
+            {"origin": "desktop_watcher", "file_path": f"src/mod_{i}.py"},
+            type(
+                "Result",
+                (),
+                {
+                    "status": "UPDATED",
+                    "file_path": f"src/mod_{i}.py",
+                    "affected_modules": [f"pkg.consumer_{j}" for j in range(30)],
+                },
+            )(),
+        )
+
+    assert len(server._events) == 100
+    assert server._revision == 150
+    assert server._events[0]["revision"] == 51
+    assert server._events[-1]["revision"] == 150
+
+    # 1. after_revision=None -> continuity="not_requested", resync_required=False
+    r_none = server._dispatch({"operation": "get_events", "after_revision": None, "limit": 20})
+    assert r_none["latest_revision"] == 150
+    assert r_none["earliest_retained_revision"] == 51
+    assert r_none["continuity"] == "not_requested"
+    assert r_none["resync_required"] is False
+    assert r_none["resync_reason"] is None
+    assert len(r_none["events"]) == 20
+    assert r_none["total"] == 100
+    assert r_none["truncated"] is True
+
+    # 2. after_revision=50 (earliest - 1) -> continuity="continuous", resync_required=False
+    r_cont = server._dispatch({"operation": "get_events", "after_revision": 50, "limit": 20})
+    assert r_cont["continuity"] == "continuous"
+    assert r_cont["resync_required"] is False
+    assert r_cont["resync_reason"] is None
+    assert r_cont["events"][0]["revision"] == 51
+
+    # 3. after_revision=20 (gap: events 21..50 evicted) -> continuity="gap", resync_required=True
+    r_gap = server._dispatch({"operation": "get_events", "after_revision": 20, "limit": 20})
+    assert r_gap["continuity"] == "gap"
+    assert r_gap["resync_required"] is True
+    assert r_gap["resync_reason"] == "event_retention_gap"
+    assert r_gap["earliest_retained_revision"] == 51
+
+    # 4. Same gap with limit=1 -> gap is still detected against buffer, not first slice
+    r_gap_l1 = server._dispatch({"operation": "get_events", "after_revision": 20, "limit": 1})
+    assert r_gap_l1["continuity"] == "gap"
+    assert r_gap_l1["resync_required"] is True
+    assert r_gap_l1["resync_reason"] == "event_retention_gap"
+    assert len(r_gap_l1["events"]) == 1
+    assert r_gap_l1["total"] == 100
+    assert r_gap_l1["truncated"] is True
+
+    # 5. after_revision=150 (latest) -> continuous, empty events
+    r_uptodate = server._dispatch({"operation": "get_events", "after_revision": 150})
+    assert r_uptodate["continuity"] == "continuous"
+    assert r_uptodate["resync_required"] is False
+    assert r_uptodate["resync_reason"] is None
+    assert r_uptodate["events"] == []
+    assert r_uptodate["total"] == 0
+    assert r_uptodate["truncated"] is False
+
+    # 8. after_revision > latest_revision (e.g. 155 > 150) -> gap + revision_discontinuity
+    r_regr = server._dispatch({"operation": "get_events", "after_revision": 155})
+    assert r_regr["continuity"] == "gap"
+    assert r_regr["resync_required"] is True
+    assert r_regr["resync_reason"] == "revision_discontinuity"
+
+    # 10. limit=None -> returns all 100 retained events (max 100)
+    r_all = server._dispatch({"operation": "get_events", "after_revision": None, "limit": None})
+    assert len(r_all["events"]) == 100
+    assert r_all["total"] == 100
+    assert r_all["truncated"] is False
+
+    # 11. affected_modules completeness disclosure preserved
+    first_event = r_none["events"][0]
+    assert first_event["affected_modules"]["total"] == 30
+    assert first_event["affected_modules"]["truncated"] is True
+    assert len(first_event["affected_modules"]["items"]) == 20
+
+    # 12. Invalid non-integer or bool after_revision values return controlled error without exception
+    for invalid_val in ["1", 1.5, True, False, [1], {"rev": 1}]:
+        err_res = server._dispatch({"operation": "get_events", "after_revision": invalid_val})
+        assert err_res == {"status": "error", "error": "invalid_after_revision"}
+
+    # 13. Negative after_revision is a valid integer cursor (evaluated against retained window)
+    r_neg = server._dispatch({"operation": "get_events", "after_revision": -1})
+    assert r_neg["status"] == "ok"
+    assert r_neg["continuity"] == "gap"
+    assert r_neg["resync_required"] is True
+    assert r_neg["resync_reason"] == "event_retention_gap"
+    assert len(r_neg["events"]) == 20
+
+
+

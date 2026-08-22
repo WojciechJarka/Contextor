@@ -144,14 +144,56 @@ class CanonicalLiveServer:
             if operation == "get_events":
                 after_revision = request.get("after_revision")
                 limit = request.get("limit", 20)
+
+                if after_revision is not None and (
+                    isinstance(after_revision, bool)
+                    or not isinstance(after_revision, int)
+                ):
+                    return {"status": "error", "error": "invalid_after_revision"}
+
+                earliest_retained_revision = self._events[0]["revision"] if self._events else None
+                latest_revision = self._revision
+
+                if after_revision is None:
+                    continuity = "not_requested"
+                    resync_required = False
+                    resync_reason = None
+                elif after_revision > latest_revision:
+                    continuity = "gap"
+                    resync_required = True
+                    resync_reason = "revision_discontinuity"
+                elif not self._events:
+                    if after_revision == latest_revision:
+                        continuity = "continuous"
+                        resync_required = False
+                        resync_reason = None
+                    else:
+                        continuity = "gap"
+                        resync_required = True
+                        resync_reason = "event_retention_gap"
+                else:
+                    if after_revision < earliest_retained_revision - 1:
+                        continuity = "gap"
+                        resync_required = True
+                        resync_reason = "event_retention_gap"
+                    else:
+                        continuity = "continuous"
+                        resync_required = False
+                        resync_reason = None
+
                 events = self._events
-                if isinstance(after_revision, int) and not isinstance(after_revision, bool):
+                if after_revision is not None:
                     events = [event for event in events if event["revision"] > after_revision]
                 total = len(events)
                 selected = events if limit is None else events[:max(0, int(limit))]
                 return {
                     "status": "ok",
                     "revision": self._revision,
+                    "latest_revision": latest_revision,
+                    "earliest_retained_revision": earliest_retained_revision,
+                    "continuity": continuity,
+                    "resync_required": resync_required,
+                    "resync_reason": resync_reason,
                     "events": selected,
                     "total": total,
                     "truncated": len(selected) < total,
