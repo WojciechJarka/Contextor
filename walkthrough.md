@@ -1,106 +1,93 @@
-# Issue 1 — closure audit
+# ISSUE 2 / STAGE A — legacy `symbol_calls` backfill
 
 ## Summary
 
-Świeżo zrestartowany runtime publicznie udostępnia `search_source` i `get_source_range`, a dokumentacja MCP jednoznacznie rozdziela role: `search_artifacts` wyszukuje kanoniczne entities, `search_source` wykonuje canonical-scoped textual discovery, a `get_source_range` rozwija dokładnie wskazany zakres. Historyczny brak Contextora jako całości został zamknięty osobną capability, bez zmiany semantyki `search_artifacts`.
+Implemented an explicit per-`ModuleUsageFacts` compatibility marker: `symbol_calls_materialized`. New/full/incremental extraction produces `True` even when `symbol_calls == ()`; legacy instances and legacy dictionaries without the stored marker resolve to `False`. Empty data is therefore never used as a proxy for missing materialization.
 
-Na aktualnym repo `search_source` znalazł komplet realnych wystąpień auditowanych literalów, stringów i tekstu docstringu względem niezależnego `rg` oracle ograniczonego do plików Python. Agent może rozpocząć od samego tekstu, dostać logiczne evidence, zawężać przez `limit`, a następnie jawnie rozwinąć wybrany zakres. `grep` nie jest już wymagany w normalnym workflow refaktoru canonical Python source; pozostaje opcjonalnym zewnętrznym verifierem.
+The existing incremental materialization owner now rebuilds only missing usage slices and slices whose marker is absent/false, using `extract_module_usage_facts`. LIVE startup invokes this narrow backfill after loading a snapshot and persists it once. A subsequent startup sees materialized markers and performs no repeat backfill or snapshot write.
+
+The previous `_LegacySymbolCallFact` unpickling compatibility remains intact. Its normalization now also preserves whether the marker was genuinely stored; compatibility objects never enter canonical state.
+
+## Implementation
+
+- `contextor/core/domain/usage_facts.py`: added the persisted marker, legacy-instance false behavior, and dictionary round-trip support. Default `True` makes all current producers materialized, including valid empty graphs.
+- `contextor/core/analysis/incremental/materialization.py`: added a materialization-needed predicate and extended `ensure_module_usages` to rebuild missing or explicitly legacy slices only.
+- `contextor/core/live_state/store.py`: retained legacy class-to-tuple migration and carried the real stored marker through normalization; marker absence remains false.
+- `contextor/core/live_state/runtime.py`: normal LIVE startup performs and atomically saves the narrow legacy backfill before publishing canonical state.
+- `tests/test_symbol_call_facts.py`: added regressions for legacy backfill, real local edge extraction, idempotent materialized-empty handling, snapshot persistence, incremental create/update, graph-analytics edges, unrelated-slice preservation, and the existing artifact-consumption contract.
+
+No MCP contract, standalone index, identity registry, or artifact-consumption semantics changed.
 
 ## Evidence
 
-### Runtime and ownership
+Targeted validation:
 
-- Publiczny runtime expose'uje `search_source(repo_path, search_term, limit=20, case_sensitive=False, allow_large_output=False)` oraz `get_source_range(repo_path, file_path, start_line, end_line, allow_large_output=False)`.
-- Centralne docs trzech tooli były dostępne przez runtime. `search_source` dokumentuje single-line literal substring, canonical Python scope, `read_source`, logical spans, `total_matches/truncated`, progressive line map i exact expansion.
-- `search_artifacts("search_source")` -> `total_matches=3`, `truncated=false`: module `contextor.mcp.tools.search_source`, funkcja oraz binding w `contextor.mcp_server`. Entity control przechodzi.
-- Contextor topology: `search_artifacts` zależy tylko od runtime/query helpers; `search_source` i `get_source_range` zależą od `contextor.core.source`, output guard, runtime/query helpers i wspólnego `source_helpers`. Consumers obu nowych tooli obejmują `mcp_server` i targeted tests. Brak tool-to-tool dependency.
+`C:\Temp\Contextor_Repo\.venv\Scripts\python.exe -m pytest -q tests/test_symbol_call_facts.py tests/test_module_usage_facts.py tests/test_reference_regressions.py`
 
-### Static contract
+Result: `28 passed in 4.85s`.
 
-- `search_artifacts.py` porównuje query z canonical module/artifact names (`functions/classes/methods/globals`); nie czyta source.
-- `search_source.py` enumeruje wyłącznie `canonical_python_sources(root, engine.state)` i odczytuje każdy plik przez `contextor.core.source.read_source`.
-- `canonical_python_sources` iteruje `state.modules`; brak `os.walk`, `rglob`, filesystem discovery i persistent text indexu. Ścieżki spoza repo oraz non-Python są odrzucane.
-- Matching jest literalny, single-line, case-controlled; komentarze, docstringi, string/numeric literals i kod są zwykłym searchable source text.
-- Resolver jest przejściowy per-file; nie mutuje canonical/LIVE state. Targeted regression dodatkowo potwierdza brak state mutation i wykluczenie pliku nieobecnego w canonical state.
-- Zakresy >20 linii używają `line_map`; matched lines pozostają pełne, pozostałe previews mają maksymalnie 4 tokeny i 60 znaków. Metadata wskazuje dokładny `get_source_range`.
+Owning LIVE snapshot validation:
 
-### Real-repo completeness
+`C:\Temp\Contextor_Repo\.venv\Scripts\python.exe -m pytest -q tests/test_live_state_consistency.py`
 
-1. Literal `8765`:
-   - `rg` Python oracle -> `contextor/mcp_server.py:416`, `tests/test_live_state_store.py:54`.
-   - `search_source(limit=None)` -> dokładnie te dwa canonical pliki i `matched_lines=[416]`, `[54]`; oba jako właściwe statement spans.
-   - `COMPLETENESS=COMPLETE`.
-2. Docstring text `stdout MUST contain only JSON-RPC messages`:
-   - `rg` Python oracle -> `contextor/mcp_server.py:10`.
-   - `search_source(limit=None)` -> ten sam plik i linia, `match_kind=docstring`, span `1-111`, matched line 10 w całości.
-   - `COMPLETENESS=COMPLETE`.
-3. Unikalny runtime message `Source search output exceeds the recommended context size.`:
-   - `rg` Python oracle -> `contextor/mcp/tools/search_source.py:109`.
-   - `search_source(limit=None)` -> ten sam plik i linia, statement span `105-113`.
-   - `COMPLETENESS=COMPLETE`.
-- Negative query `__CONTEXTOR_ISSUE_1_NEGATIVE_8f34d__` -> `status=ok`, `total_matches=0`, `matches=[]`, `truncated=false`.
-- `search_artifacts("109.9")` i `search_artifacts(docstring text)` nadal zwracają brak entity — zgodnie z kontraktem, nie jest to bug.
+Result: `13 passed in 55.55s`.
 
-### Bounding, preview and expansion
+Authoritative LIVE certification after required restart:
 
-- Multi-hit `SourceError`, `limit=1` -> `total_matches=36`, jeden result, `truncated=true`.
-- Ten sam query z `limit=None` bez zgody -> `confirmation_required`, `requested_count=36`, `estimated_output_bytes=15683`, threshold `15360`.
-- Jawny retry `allow_large_output=true` -> `status=ok`, wszystkie 36 logical matches, `truncated=false`.
-- Docstring span `1-111` -> `content_mode=line_map`, pełna matched line 10, bounded previews wszystkich pozostałych linii, exact expand metadata.
-- `get_source_range(contextor/mcp_server.py, 1, 20)` -> dokładnie linie 1-20 wraz z tekstem trafienia.
-- Duże świadome rozwinięcie `graph_analytics.py:1-2295` -> `confirmation_required`, `estimated_output_bytes=65030`; module jest potwierdzonym canonical entity.
+- `ping.available=true`
+- `graph_analytics.symbol_calls_materialized=true`
+- canonical graph-analytics call facts: 54
+- required edges present with canonical line/call kind:
+  - `generate_graph_analytics_report -> _compute_pagerank`, line 1648, `direct`
+  - `_compute_pagerank -> _normalized_edges`, line 737, `direct`
+  - `compute_topology_analytics -> _compute_pagerank`, line 1930, `direct`
+- subsequent save/restart/load: revision remained `1314 -> 1314`, proving startup did not save/rebuild again
+- 157 correctly materialized modules with `symbol_calls == ()` remained materialized-empty after restart
 
-### Old workflow comparison
+## Verdict
 
-- A. Start od samego query text: **YES**.
-- B. Wszystkie canonical Python locations: **YES**, kompletność potwierdzona dla literal/string oraz docstring.
-- C. Logical evidence bez czytania całych plików: **YES**.
-- D. Jawne rozwinięcie wybranego exact range: **YES**.
-- E. Grep wymagany: **NO**; w audycie użyty wyłącznie jako niezależny oracle.
+`LEGACY_SYMBOL_CALLS_BACKFILL=PASS`
 
-Naturalny excluded/non-canonical Python fixture nie był potrzebny ani tworzony w READ ONLY audit. Canonical scope control opiera się na runtime ownership, static enumeration z `state.modules` oraz przechodzącym targeted regression wykluczającym non-canonical plik.
+`MATERIALIZED_EMPTY_DISTINGUISHED=PASS`
 
-## Tests
+`BACKFILL_OWNER=ensure_module_usages`
 
-- `python -m pytest -q tests/test_search_source.py tests/test_mcp_split_s2c.py tests/test_mcp_documentation.py` -> `27 passed, 1 warning in 13.02s`.
-- `python -m pytest -q tests/test_mcp_regressions.py::test_live_artifact_search_handles_list_based_symbol_state` -> `1 passed, 1 warning in 10.63s`.
-- Full pytest nie został uruchomiony.
-- Warning to istniejąca deprecacja FastMCP/Authlib, niezwiązana z Issue 1.
+`AUTHORITATIVE_EXTRACTOR=extract_module_usage_facts`
 
-## Decision
+`GRAPH_ANALYTICS_REQUIRED_EDGES=PASS`
 
-`HISTORICAL_SEARCH_ARTIFACTS_CRITIQUE_STATUS=CLOSED_BY_SEPARATE_CAPABILITY`
+`BACKFILL_IDEMPOTENT_ACROSS_RESTART=PASS`
 
-`SEARCH_ARTIFACTS_ENTITY_ROLE=PASS`
+`INCREMENTAL_CURRENT_FACTS_MARKED=PASS`
 
-`SOURCE_DISCOVERY=PASS`
+`UNRELATED_MODULE_USAGES_PRESERVED=PASS`
 
-`REAL_REPO_LITERAL_COMPLETENESS=PASS`
+`ARTIFACT_CONSUMPTION_UNCHANGED=PASS`
 
-`REAL_REPO_COMMENT_DOCSTRING_COMPLETENESS=PASS`
+`IDENTITY_REGISTRY_CHANGED=NO`
 
-`CANONICAL_SCOPE_INVARIANT=PASS`
+`CURRENT_SYMBOL_CALL_REPRESENTATION=PRIMITIVE_TUPLES`
 
-`PROGRESSIVE_CONTEXT_CONTROL=PASS`
+`MCP_RESTART_REQUIRED=NO`
 
-`EXACT_EXPANSION=PASS`
+`LIVE_RESTART_REQUIRED=DONE`
 
-`GREP_REQUIRED_FOR_NORMAL_CANONICAL_PYTHON_TEXT_DISCOVERY=NO`
-
-`OPEN_P0=NONE`
-
-`OPEN_P1=NONE`
-
-`OPEN_P2=NONE`
-
-`ISSUE_1_FINAL_VERDICT=CLOSED`
-
-Zdanie „musisz fallbackować na grep” nie jest już prawdziwe: `search_source` rozpoczyna workflow od nieznanego tekstu, znajduje komplet canonical Python locations i daje bounded logical evidence, a `get_source_range` zapewnia kontrolowane exact expansion.
+`ISSUE_2_STAGE_A_VERDICT=CLOSED`
 
 ## Diffs
 
-Audyt był READ ONLY. Nie zmieniono kodu, dokumentacji produkcyjnej, testów ani canonical/LIVE state. `walkthrough.md` jest wymaganym automatycznym artefaktem raportowym i nie jest liczony jako modyfikacja repozytorium produkcyjnego.
+`FILES_CHANGED=contextor/core/domain/usage_facts.py,contextor/core/analysis/incremental/materialization.py,contextor/core/live_state/store.py,contextor/core/live_state/runtime.py,tests/test_symbol_call_facts.py`
 
-`FILES_CHANGED=NONE`
+```diff
++ ModuleUsageFacts.symbol_calls_materialized: bool = True
++ legacy marker absence resolves and serializes as false
++ ModuleUsageFacts dictionary round-trip persists the marker
++ module_usages_require_materialization(state)
+- ensure_module_usages rebuilds only missing entries
++ ensure_module_usages rebuilds missing entries and legacy unmaterialized slices
++ snapshot normalization preserves stored marker provenance
++ LIVE startup backfills and saves only when required
++ targeted compatibility, idempotence, incremental, graph, isolation, and contract regressions
+```
 
-`DIFFS=NONE`
+No other production/test files were changed by this task. `walkthrough.md` is the required reporting artifact and is excluded from `FILES_CHANGED`.

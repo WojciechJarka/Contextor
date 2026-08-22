@@ -12,6 +12,18 @@ from typing import Optional, Any
 from contextor.core.analysis.state_manager import RepositoryAnalysisState
 
 
+def module_usages_require_materialization(state: RepositoryAnalysisState) -> bool:
+    """Return whether a missing or legacy usage slice needs canonical extraction."""
+    usages = getattr(state, "module_usages", None)
+    if not isinstance(usages, dict):
+        return bool(getattr(state, "modules", {}))
+    return any(
+        module_name not in usages
+        or not bool(vars(usages[module_name]).get("symbol_calls_materialized", False))
+        for module_name in getattr(state, "modules", {})
+    )
+
+
 def ensure_module_usages(state: RepositoryAnalysisState) -> None:
     """
     Initializes state.module_usages for pre-existing state.modules if missing.
@@ -21,10 +33,17 @@ def ensure_module_usages(state: RepositoryAnalysisState) -> None:
         state.module_usages = {}
 
     missing_modules = set(state.modules.keys()) - set(state.module_usages.keys())
-    if missing_modules:
+    legacy_symbol_call_modules = {
+        module_name
+        for module_name, facts in state.module_usages.items()
+        if module_name in state.modules
+        and not bool(vars(facts).get("symbol_calls_materialized", False))
+    }
+    modules_to_materialize = missing_modules | legacy_symbol_call_modules
+    if modules_to_materialize:
         from contextor.core.reference.engine import extract_module_usage_facts
 
-        for mod_path in missing_modules:
+        for mod_path in modules_to_materialize:
             mod = state.modules[mod_path]
             mod_abs = getattr(mod, "absolute_path", None) or getattr(mod, "path", None)
             source_text = None

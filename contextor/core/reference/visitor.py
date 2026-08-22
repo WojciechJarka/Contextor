@@ -50,7 +50,13 @@ class SymbolReferenceVisitor(ast.NodeVisitor):
         non-call qualified attribute references
     """
 
-    def __init__(self, target_symbols, reexports=None, current_module=None):
+    def __init__(
+        self,
+        target_symbols,
+        reexports=None,
+        current_module=None,
+        local_symbols=None,
+    ):
         self.target_symbols = set(target_symbols)
 
         self.called = set()
@@ -64,14 +70,26 @@ class SymbolReferenceVisitor(ast.NodeVisitor):
         self.aliases = {}
         self.instances = {}
         self.context_stack = []
+        self.canonical_context_stack = []
+        self.class_stack = []
+        self.symbol_called = set()
         self.reexports = dict(reexports or {})
         self.current_module = current_module
+        self.local_symbols = dict(local_symbols or {})
 
     def _resolve_name(self, name):
-        return _resolve_reexport(
+        resolved = _resolve_reexport(
             _resolve_alias(name, self.aliases),
             self.reexports,
         )
+        if resolved != name:
+            return resolved
+        if name in self.local_symbols:
+            return self.local_symbols[name]
+        if name and name.startswith(("self.", "cls.")) and self.class_stack:
+            local_method = f"{self.class_stack[-1]}.{name.split('.', 1)[1]}"
+            return self.local_symbols.get(local_method, resolved)
+        return resolved
 
     # ======================================================
     # CONTEXT
@@ -83,10 +101,56 @@ class SymbolReferenceVisitor(ast.NodeVisitor):
 
         return self.context_stack[-1]
 
+    def _current_canonical_context(self):
+        if not self.canonical_context_stack:
+            return None
+        return self.canonical_context_stack[-1]
+
+    def _visit_function_definition_expressions(self, node):
+        for decorator in node.decorator_list:
+            self.visit(decorator)
+        for default in (*node.args.defaults, *node.args.kw_defaults):
+            if default is not None:
+                self.visit(default)
+        arguments = (
+            *getattr(node.args, "posonlyargs", ()),
+            *node.args.args,
+            *node.args.kwonlyargs,
+        )
+        for argument in arguments:
+            if argument.annotation is not None:
+                self.visit(argument.annotation)
+        for argument in (node.args.vararg, node.args.kwarg):
+            if argument is not None and argument.annotation is not None:
+                self.visit(argument.annotation)
+        if node.returns is not None:
+            self.visit(node.returns)
+        for type_parameter in getattr(node, "type_params", ()):
+            self.visit(type_parameter)
+
     def visit_FunctionDef(self, node):
+        self._visit_function_definition_expressions(node)
+        is_nested = bool(self.context_stack)
+        canonical_caller = None
+        if not is_nested:
+            local_name = (
+                f"{self.class_stack[-1]}.{node.name}"
+                if self.class_stack
+                else node.name
+            )
+            canonical_caller = (
+                f"{self.current_module}::{local_name}"
+                if self.current_module and local_name in self.local_symbols
+                else None
+            )
         self.context_stack.append(node.name)
-        self.generic_visit(node)
-        self.context_stack.pop()
+        self.canonical_context_stack.append(canonical_caller)
+        try:
+            for statement in node.body:
+                self.visit(statement)
+        finally:
+            self.canonical_context_stack.pop()
+            self.context_stack.pop()
 
     def visit_AsyncFunctionDef(self, node):
         self.visit_FunctionDef(node)
@@ -372,6 +436,15 @@ class SymbolReferenceVisitor(ast.NodeVisitor):
                     self._current_context(),
                 )
             )
+            canonical_caller = self._current_canonical_context()
+            if canonical_caller is not None:
+                self.symbol_called.add(
+                    (
+                        resolved,
+                        getattr(node, "lineno", None),
+                        canonical_caller,
+                    )
+                )
 
             self.generic_visit(node)
             return
@@ -390,6 +463,15 @@ class SymbolReferenceVisitor(ast.NodeVisitor):
                     self._current_context(),
                 )
             )
+            canonical_caller = self._current_canonical_context()
+            if canonical_caller is not None:
+                self.symbol_called.add(
+                    (
+                        candidate,
+                        getattr(node, "lineno", None),
+                        canonical_caller,
+                    )
+                )
 
             self.generic_visit(node)
             return
@@ -453,7 +535,7 @@ class SymbolReferenceVisitor(ast.NodeVisitor):
     # ======================================================
 
     def visit_ClassDef(self, node):
-        self.context_stack.append(node.name)
+        self.class_stack.append(node.name)
 
         for base in node.bases:
             base_name = _attribute_name(base)
@@ -477,4 +559,4 @@ class SymbolReferenceVisitor(ast.NodeVisitor):
                 )
 
         self.generic_visit(node)
-        self.context_stack.pop()
+        self.class_stack.pop()

@@ -700,7 +700,7 @@ def extract_module_usage_facts(
     Canonical producer of per-module outbound usage facts.
     REUSES production SymbolReferenceVisitor - zero duplicate AST visitors created.
     """
-    from contextor.core.domain.usage_facts import ModuleUsageFacts
+    from contextor.core.domain.usage_facts import ModuleUsageFacts, SymbolCallFact
 
     if source_or_tree is None:
         raw_imports = tuple(
@@ -731,10 +731,21 @@ def extract_module_usage_facts(
     else:
         tree = source_or_tree
 
+    local_symbols = {}
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            local_symbols[node.name] = f"{module_path}.{node.name}"
+        elif isinstance(node, ast.ClassDef):
+            for member in node.body:
+                if isinstance(member, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    local_name = f"{node.name}.{member.name}"
+                    local_symbols[local_name] = f"{module_path}.{local_name}"
+
     visitor = SymbolReferenceVisitor(
-        target_symbols=target_symbols or set(),
+        target_symbols=set(target_symbols or set()) | set(local_symbols.values()),
         reexports=reexports or {},
         current_module=module_path,
+        local_symbols=local_symbols,
     )
     visitor.visit(tree)
 
@@ -748,9 +759,11 @@ def extract_module_usage_facts(
         if imported_target:
             import_names.add(imported_target)
 
+    local_resolved_names = set(local_symbols.values())
     all_calls = set(
         item[0] if isinstance(item, tuple) else item
         for item in visitor.called
+        if (item[0] if isinstance(item, tuple) else item) not in local_resolved_names
     )
     for node in ast.walk(tree):
         if isinstance(node, ast.Call):
@@ -846,6 +859,25 @@ def extract_module_usage_facts(
 
     qualified_refs = tuple(sorted(qual_refs))
 
+    local_callees = {
+        dotted: f"{module_path}::{local_name}"
+        for local_name, dotted in local_symbols.items()
+    }
+    symbol_calls = tuple(
+        sorted(
+            {
+                (
+                    str(caller),
+                    local_callees[callee],
+                    int(line),
+                    "direct",
+                )
+                for callee, line, caller in visitor.symbol_called
+                if caller and line is not None and callee in local_callees
+            }
+        )
+    )
+
 
     return ModuleUsageFacts(
         imports=tuple(sorted(import_names)),
@@ -856,6 +888,7 @@ def extract_module_usage_facts(
         inheritance_refs=inheritance_refs,
         qualified_refs=qualified_refs,
         aliases=aliases,
+        symbol_calls=symbol_calls,
     )
 
 

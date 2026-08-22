@@ -10,6 +10,9 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, Tuple
 
 
+SymbolCallFact = Tuple[str, str, int, str]
+
+
 @dataclass(frozen=True)
 class ModuleUsageFacts:
     """
@@ -28,6 +31,21 @@ class ModuleUsageFacts:
     inheritance_refs: Tuple[Tuple[str, str], ...] = ()  # (child_class, base_symbol)
     qualified_refs: Tuple[str, ...] = ()
     aliases: Tuple[Tuple[str, str], ...] = ()           # (local_alias, imported_target)
+    symbol_calls: Tuple[SymbolCallFact, ...] = ()
+    symbol_calls_materialized: bool = True
+
+    def __getattribute__(self, name: str):
+        if name == "symbol_calls_materialized":
+            return bool(
+                object.__getattribute__(self, "__dict__").get(name, False)
+            )
+        return object.__getattribute__(self, name)
+
+    def __getattr__(self, name: str):
+        # Pickle restores old dataclass instances without fields added later.
+        if name == "symbol_calls":
+            return ()
+        raise AttributeError(name)
 
     def to_dict(self) -> Dict[str, Any]:
         """Serialize usage facts to a plain dictionary."""
@@ -40,6 +58,18 @@ class ModuleUsageFacts:
             "inheritance_refs": [list(item) for item in self.inheritance_refs],
             "qualified_refs": list(self.qualified_refs),
             "aliases": [list(item) for item in self.aliases],
+            "symbol_calls": [
+                {
+                    "caller": item[0],
+                    "callee": item[1],
+                    "line": item[2],
+                    "call_kind": item[3],
+                }
+                for item in getattr(self, "symbol_calls", ())
+            ],
+            "symbol_calls_materialized": bool(
+                vars(self).get("symbol_calls_materialized", False)
+            ),
         }
 
     @classmethod
@@ -64,6 +94,20 @@ class ModuleUsageFacts:
         aliases = tuple(
             sorted(set(tuple(item) for item in raw_aliases if len(item) == 2))
         )
+        symbol_calls = tuple(
+            sorted(
+                {
+                    (
+                        str(item["caller"]),
+                        str(item["callee"]),
+                        int(item["line"]),
+                        str(item.get("call_kind", "direct")),
+                    )
+                    for item in data.get("symbol_calls", [])
+                    if isinstance(item, dict)
+                }
+            )
+        )
 
         return cls(
             imports=imports,
@@ -74,6 +118,10 @@ class ModuleUsageFacts:
             inheritance_refs=inheritance_refs,
             qualified_refs=qualified_refs,
             aliases=aliases,
+            symbol_calls=symbol_calls,
+            symbol_calls_materialized=bool(
+                data.get("symbol_calls_materialized", False)
+            ),
         )
 
 
@@ -100,6 +148,8 @@ class UsageDelta:
     removed_qualified_refs: Tuple[str, ...] = ()
     added_aliases: Tuple[Tuple[str, str], ...] = ()
     removed_aliases: Tuple[Tuple[str, str], ...] = ()
+    added_symbol_calls: Tuple[SymbolCallFact, ...] = ()
+    removed_symbol_calls: Tuple[SymbolCallFact, ...] = ()
 
     @property
     def is_empty(self) -> bool:
@@ -122,6 +172,8 @@ class UsageDelta:
                 self.removed_qualified_refs,
                 self.added_aliases,
                 self.removed_aliases,
+                self.added_symbol_calls,
+                self.removed_symbol_calls,
             ]
         )
 
@@ -155,6 +207,10 @@ def diff_usage_facts(
     add_inh, rem_inh = _diff_tuples(old_f.inheritance_refs, new_f.inheritance_refs)
     add_qr, rem_qr = _diff_tuples(old_f.qualified_refs, new_f.qualified_refs)
     add_alias, rem_alias = _diff_tuples(old_f.aliases, new_f.aliases)
+    add_symbol_calls, rem_symbol_calls = _diff_tuples(
+        getattr(old_f, "symbol_calls", ()),
+        getattr(new_f, "symbol_calls", ()),
+    )
 
     return UsageDelta(
         module_path=module_path,
@@ -174,6 +230,6 @@ def diff_usage_facts(
         removed_qualified_refs=rem_qr,
         added_aliases=add_alias,
         removed_aliases=rem_alias,
+        added_symbol_calls=add_symbol_calls,
+        removed_symbol_calls=rem_symbol_calls,
     )
-
-

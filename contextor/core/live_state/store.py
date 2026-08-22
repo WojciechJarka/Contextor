@@ -8,11 +8,83 @@ import pickle
 import shutil
 import time
 import uuid
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Any
 
 LIVE_STATE_SCHEMA_VERSION = "1.2"
+
+
+class _LegacySymbolCallFact:
+    """Unpickle-only shape used by a transient pre-tuple snapshot format."""
+
+
+class _SnapshotUnpickler(pickle.Unpickler):
+    def find_class(self, module: str, name: str):
+        if (
+            module == "contextor.core.domain.usage_facts"
+            and name == "SymbolCallFact"
+        ):
+            return _LegacySymbolCallFact
+        return super().find_class(module, name)
+
+
+def _normalize_symbol_call_facts(state: Any) -> Any:
+    """Replace legacy call objects with the current primitive tuple contract."""
+
+    if state is None or not hasattr(state, "module_usages"):
+        return state
+    from contextor.core.domain.usage_facts import ModuleUsageFacts
+
+    module_usages = getattr(state, "module_usages", None)
+    if not isinstance(module_usages, dict):
+        return state
+    normalized_usages = dict(module_usages)
+    for module_name, facts in module_usages.items():
+        if not isinstance(facts, ModuleUsageFacts):
+            continue
+        normalized_calls = []
+        for item in getattr(facts, "symbol_calls", ()):
+            if isinstance(item, _LegacySymbolCallFact):
+                values = vars(item)
+                try:
+                    normalized_calls.append(
+                        (
+                            str(values["caller"]),
+                            str(values["callee"]),
+                            int(values["line"]),
+                            str(values.get("call_kind", "direct")),
+                        )
+                    )
+                except (KeyError, TypeError, ValueError) as exc:
+                    raise pickle.UnpicklingError(
+                        "Invalid legacy SymbolCallFact state."
+                    ) from exc
+            elif isinstance(item, (tuple, list)) and len(item) in {3, 4}:
+                try:
+                    normalized_calls.append(
+                        (
+                            str(item[0]),
+                            str(item[1]),
+                            int(item[2]),
+                            str(item[3]) if len(item) == 4 else "direct",
+                        )
+                    )
+                except (TypeError, ValueError) as exc:
+                    raise pickle.UnpicklingError(
+                        "Invalid primitive symbol call fact."
+                    ) from exc
+            else:
+                raise pickle.UnpicklingError("Unknown symbol call fact shape.")
+        normalized_usages[module_name] = replace(
+            facts,
+            symbol_calls=tuple(sorted(set(normalized_calls))),
+            symbol_calls_materialized=bool(
+                vars(facts).get("symbol_calls_materialized", False)
+            ),
+        )
+    state.module_usages = normalized_usages
+    return state
 
 
 @dataclass(frozen=True)
@@ -157,7 +229,7 @@ def load_snapshot(
         return None
     try:
         with state_file.open("rb") as stream:
-            payload = pickle.load(stream)
+            payload = _SnapshotUnpickler(stream).load()
         if isinstance(payload, dict) and set(payload) == {"metadata", "state"}:
             embedded = payload["metadata"]
             embedded_metadata = LiveStateMetadata(
@@ -168,7 +240,7 @@ def load_snapshot(
                 repo_id=str(embedded.get("repo_id", "")),
                 root_path=str(embedded.get("root_path", "")),
             )
-            state_obj = payload["state"]
+            state_obj = _normalize_symbol_call_facts(payload["state"])
             if state_obj is not None and hasattr(state_obj, "__dict__"):
                 if not hasattr(state_obj, "module_usages"):
                     try:
@@ -241,6 +313,7 @@ def load_snapshot(
                     except AttributeError:
                         pass
             return state_obj, embedded_metadata
+        payload = _normalize_symbol_call_facts(payload)
         if payload is not None and hasattr(payload, "__dict__"):
             if not hasattr(payload, "module_usages"):
                 try:

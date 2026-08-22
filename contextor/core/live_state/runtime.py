@@ -519,6 +519,24 @@ def run_service(
         expected_root_path=identity.root_path,
     )
     state = loaded[0] if loaded else None
+    if state is not None:
+        from contextor.core.analysis.incremental.materialization import (
+            ensure_module_usages,
+            module_usages_require_materialization,
+        )
+
+        if module_usages_require_materialization(state):
+            ensure_module_usages(state)
+            loaded_metadata = loaded[1]
+            save_snapshot(
+                state,
+                cache,
+                loaded_metadata.state_id,
+                writer="live-service-symbol-calls-backfill",
+                repo_id=identity.repo_id,
+                root_path=identity.root_path,
+                revision_floor=loaded_metadata.revision,
+            )
     revision = (read_metadata(cache).revision if read_metadata(cache) else 0)
     server = CanonicalLiveServer(
         state,
