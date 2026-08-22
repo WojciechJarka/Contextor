@@ -9,7 +9,8 @@ def get_live_events(
 ) -> str:
     root = Path(repo_path).expanduser().resolve()
     if after_revision is not None and (
-        isinstance(after_revision, bool) or after_revision < 0
+        isinstance(after_revision, bool)
+        or not isinstance(after_revision, int)
     ):
         return json.dumps(
             {"status": "error", "error": "invalid_after_revision"}, indent=2

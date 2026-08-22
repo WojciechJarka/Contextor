@@ -531,3 +531,41 @@ def test_matching_owner_retry_success_preserves_revision_and_journal(
     assert result["status"] == "ok"
     assert result["revision"] == 77
     assert result["events"][0]["revision"] == 77
+
+
+def test_get_live_events_adapter_after_revision_validation(tmp_path, monkeypatch):
+    class MockClient:
+        def get_events(self, after_revision=None, limit=20):
+            return {
+                "status": "ok",
+                "revision": 10,
+                "latest_revision": 10,
+                "earliest_retained_revision": 1,
+                "continuity": "continuous",
+                "resync_required": False,
+                "resync_reason": None,
+                "events": [],
+                "total": 0,
+                "truncated": False,
+            }
+
+    monkeypatch.setattr(
+        "contextor.core.live_state.runtime.connect_existing_with_status",
+        lambda _root: (MockClient(), "ok"),
+    )
+
+    # 1. Non-integer and bool cursors return invalid_after_revision without exception
+    for invalid in ["1", 1.5, True, False, [1], {"a": 1}]:
+        res = json.loads(mcp_server.get_live_events.fn(str(tmp_path), after_revision=invalid))
+        assert res == {"status": "error", "error": "invalid_after_revision"}
+
+    # 2. Valid integer cursors (0, -1, -999) are passed through to client
+    res_zero = json.loads(mcp_server.get_live_events.fn(str(tmp_path), after_revision=0))
+    assert res_zero["status"] == "ok"
+
+    res_neg = json.loads(mcp_server.get_live_events.fn(str(tmp_path), after_revision=-1))
+    assert res_neg["status"] == "ok"
+
+    res_neg999 = json.loads(mcp_server.get_live_events.fn(str(tmp_path), after_revision=-999))
+    assert res_neg999["status"] == "ok"
+
