@@ -39,7 +39,7 @@ _EXPECTED_SIGNATURES = {
     "analyze_project": "(repo_path: str, exclude_paths: list[str] | None = None) -> str",
     "analyze_layer": "(repo_path: str, layer_name: str, exclude_paths: list[str] | None = None) -> str",
     "analyze_single_file": "(repo_path: str, file_path: str, exclude_paths: list[str] | None = None) -> str",
-    "get_analysis_status": "(repo_path: str, job_id: str | None = None, max_skipped_files: int | None = 10) -> str",
+    "get_analysis_status": "(repo_path: str, job_id: str | None = None, max_skipped_files: int | None = 10, allow_large_output: bool = False) -> str",
     "get_live_events": "(repo_path: str, after_revision: int | None = None, limit: int | None = 20) -> str",
 }
 

@@ -3,12 +3,14 @@ import os
 from pathlib import Path
 
 from contextor.mcp import analysis_jobs
+from contextor.mcp.output_guard import guard_large_output
 
 
 def get_analysis_status(
     repo_path: str,
     job_id: str | None = None,
     max_skipped_files: int | None = 10,
+    allow_large_output: bool = False,
 ) -> str:
     root = Path(repo_path).expanduser().resolve()
     if not root.is_dir():
@@ -37,7 +39,14 @@ def get_analysis_status(
             "error": "owner_process_changed",
         }
         analysis_jobs._write_analysis_job(root, job)
-    return json.dumps(
+    serialized = json.dumps(
         analysis_jobs._public_job(job, max_skipped_files=max_skipped_files),
         indent=2,
+    )
+    return guard_large_output(
+        serialized,
+        allow_large_output=allow_large_output,
+        retry_instruction=(
+            "Repeat the same get_analysis_status call with the same repo_path, job_id, and max_skipped_files and set allow_large_output=true."
+        ),
     )

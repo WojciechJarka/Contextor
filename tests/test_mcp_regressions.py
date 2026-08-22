@@ -857,6 +857,84 @@ def test_analysis_status_exposes_latest_worker_progress(tmp_path, monkeypatch):
     asyncio.run(scenario())
 
 
+def test_output_guard_boundary_and_contract():
+    from contextor.mcp.output_guard import guard_large_output, LARGE_OUTPUT_WARNING_BYTES
+
+    # Exact threshold payload (15360 bytes)
+    exact_payload = " " * LARGE_OUTPUT_WARNING_BYTES
+    assert guard_large_output(exact_payload, allow_large_output=False, retry_instruction="test") == exact_payload
+
+    # Above threshold (15361 bytes)
+    over_payload = " " * (LARGE_OUTPUT_WARNING_BYTES + 1)
+    res_warn = json.loads(guard_large_output(over_payload, allow_large_output=False, retry_instruction="retry now"))
+    assert res_warn["status"] == "confirmation_required"
+    assert res_warn["reason"] == "Estimated output exceeds the recommended context size."
+    assert res_warn["estimated_output_bytes"] == LARGE_OUTPUT_WARNING_BYTES + 1
+    assert res_warn["retry"] == {"allow_large_output": True}
+    assert res_warn["retry_instruction"] == "retry now"
+
+    # Override returns over_payload directly
+    assert guard_large_output(over_payload, allow_large_output=True, retry_instruction="retry now") == over_payload
+
+
+def test_get_analysis_status_large_output_preflight_gate(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    job_id = "a" * 32
+    large_skipped = [
+        {"path": f"pkg/sub/file_{i}.py", "reason": f"Syntax error on file {i}", "line_number": i, "column_number": 1}
+        for i in range(250)
+    ]
+    job_payload = {
+        "job_id": job_id,
+        "operation": "project",
+        "repo_path": str(repo),
+        "target": None,
+        "status": "completed",
+        "created_at": "2026-08-20T00:00:00+00:00",
+        "started_at": "2026-08-20T00:00:01+00:00",
+        "completed_at": "2026-08-20T00:01:00+00:00",
+        "updated_at": "2026-08-20T00:01:00+00:00",
+        "message": "Done",
+        "error": None,
+        "live_publish_status": "success",
+        "live_publish_revision": 1,
+        "live_publish_warning": None,
+        "skipped_python_files": large_skipped,
+    }
+    analysis_jobs._write_analysis_job(repo, job_payload)
+
+    # 1. Default max_skipped_files=10 -> small output below threshold -> returns normally
+    raw_default = mcp_server.get_analysis_status.fn(str(repo), job_id)
+    res_default = json.loads(raw_default)
+    assert res_default["status"] == "completed"
+    assert len(res_default["analysis_coverage"]["skipped_python_files"]["items"]) == 10
+    assert len(raw_default.encode("utf-8")) < 15360
+
+    # 2. Unlimited max_skipped_files=None with allow_large_output=False -> confirmation_required
+    raw_warn = mcp_server.get_analysis_status.fn(str(repo), job_id, max_skipped_files=None)
+    warn = json.loads(raw_warn)
+    assert warn["status"] == "confirmation_required"
+    assert warn["reason"] == "Estimated output exceeds the recommended context size."
+    assert warn["warning_threshold_bytes"] == 15360
+    assert warn["warning_threshold_kib"] == 15.0
+    assert warn["estimated_output_bytes"] > 15360
+    assert warn["estimated_output_kib"] == warn["estimated_output_bytes"] / 1024
+    assert warn["retry"] == {"allow_large_output": True}
+    assert "repo_path" not in warn
+    assert "job_id" not in warn
+    assert "skipped_python_files" not in raw_warn
+    assert "Repeat the same get_analysis_status call" in warn["retry_instruction"]
+    assert len(raw_warn.encode("utf-8")) < 1024
+
+    # 3. Unlimited max_skipped_files=None with allow_large_output=True -> full status
+    raw_override = mcp_server.get_analysis_status.fn(str(repo), job_id, max_skipped_files=None, allow_large_output=True)
+    override = json.loads(raw_override)
+    assert override["status"] == "completed"
+    assert len(override["analysis_coverage"]["skipped_python_files"]["items"]) == 250
+    assert len(raw_override.encode("utf-8")) == warn["estimated_output_bytes"]
+
+
 def test_lookup_index_entries_distinguishes_active_recovery_and_missing(
     tmp_path, monkeypatch
 ):

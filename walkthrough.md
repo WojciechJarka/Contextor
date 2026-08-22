@@ -1,147 +1,132 @@
-# TOKEN EFFICIENCY — STEP A17.1: MEASURE AND CLASSIFY describe_canonical_state
+# A18 OUTPUT PREFLIGHT — FINAL RUNTIME CERTIFICATION
 
 ## FILES_CHANGED=NONE
-Krok pomiarowy i klasyfikacyjny typu read-only. Nie zmodyfikowano żadnych plików produkcyjnych, dokumentacji ani testów.
+Krok certyfikacji runtime typu read-only. Nie zmodyfikowano żadnych plików produkcyjnych, dokumentacji ani testów.
 
 ---
 
-## PUBLIC_SIGNATURE
-`def describe_canonical_state(schema_version: str = "1.0", language_version: str = "1.0") -> str:`
+## RUNTIME_GET_ANALYSIS_STATUS_SIGNATURE
+- Sygnatura Python:
+  `def get_analysis_status(repo_path: str, job_id: str | None = None, max_skipped_files: int | None = 10, allow_large_output: bool = False) -> str:`
+- FastMCP Schema:
+  - `repo_path`: required string
+  - `job_id`: optional string or null (default null)
+  - `max_skipped_files`: optional integer or null (default 10)
+  - `allow_large_output`: optional boolean (default false)
 
 ---
 
-## AUTHORITATIVE_IMPLEMENTATION
-`C:\Temp\Contextor_Repo\contextor\mcp\tools\describe_canonical_state.py`
+## RUNTIME_LOOKUP_SIGNATURE
+- Sygnatura Python:
+  `def lookup_index_entries(repo_path: str, ids: list[str], allow_large_output: bool = False) -> str:`
+- FastMCP Schema:
+  - `repo_path`: required string
+  - `ids`: required array of strings
+  - `allow_large_output`: optional boolean (default false)
 
 ---
 
-## AUTHORITATIVE_CORE_OWNER
-`C:\Temp\Contextor_Repo\contextor\core\canonical_state_query\contract.py`
+## SMALL_STATUS_RESULT
+Dla realnego istniejącego zadania (`7d3854b0f2ce478da61ab50ed8556084`) o rozmiarze 610 B (poniżej progu 15360 B):
+- Wynik zwracany jest bezpośrednio jako standardowy obiekt JSON statusu.
+- Brak statusu `confirmation_required` i brak metadanych bramki preflight.
 
 ---
 
-## SUPPORTED_VERSION_PAIRS
-- `("1.0", "1.0")` — kontrakt bazowy (legacy)
-- `("1.1", "1.1")` — kontrakt z progressive disclosure
+## SMALL_STATUS_OVERRIDE_RESULT
+Wywołanie tej samej operacji z jawnym `allow_large_output=True` zwraca semantycznie i strukturalnie identyczny wynik (`identical_with_override = True`).
 
 ---
 
-## STATE_DEPENDENCE
-`NO`
-Wynik narzędzia jest w 100% statycznym opisem specyfikacji schematu i języka zapytań zadeklarowanym w stałych w kodzie. Narzędzie nie przyjmuje parametru `repo_path`, nie wykonuje żadnych operacji wejścia/wyjścia (I/O), analizy kodu ani odczytu rejestrów.
+## LARGE_STATUS_RUNTIME_CASE
+`N/A_NO_NATURAL_LARGE_JOB`
+Wszystkie 11 istniejących zadań w katalogu `.contextor/analysis_jobs/` mają rozmiar w przedziale 592–716 B (nawet przy `max_skipped_files=None`), ponieważ na bieżącym repozytorium nie występują setki plików z błędami składni. Zgodnie z wytycznymi nie uruchamiano sztucznej pełnej analizy, a certyfikacja dużej gałęzi opiera się na przechodzącym teście jednostkowym `test_get_analysis_status_large_output_preflight_gate`.
 
 ---
 
-## DEFAULT_1_0_BYTES
-**8,941 bajtów** UTF-8 (~8.73 KiB)
+## LARGE_STATUS_PREFLIGHT_RESULT
+W teście z kontrolowaną dużą liczbą pominiętych plików (250 plików > 15 KiB) przy `allow_large_output=False`:
+- `status`: `"confirmation_required"`
+- `reason`: `"Estimated output exceeds the recommended context size."`
+- `warning_threshold_bytes`: 15360
+- `warning_threshold_kib`: 15.0
+- `retry`: `{"allow_large_output": true}`
+- `retry_instruction`: `"Repeat the same get_analysis_status call with the same repo_path, job_id, and max_skipped_files and set allow_large_output=true."`
+- Brak echa `repo_path`, `job_id` ani listy pominiętych plików.
 
 ---
 
-## EXPLICIT_1_0_BYTES
-**8,941 bajtów** UTF-8 (~8.73 KiB)
+## LARGE_STATUS_WARNING_BYTES
+< 1024 bajtów (zwarta odpowiedź ostrzegawcza).
 
 ---
 
-## EXPLICIT_1_1_BYTES
-**9,752 bajty** UTF-8 (~9.52 KiB)
+## LARGE_STATUS_OVERRIDE_RESULT
+Wywołanie z jawnym `allow_large_output=True` zwraca pełny, bezstratny status zadania ze wszystkimi 250 wpisami pominiętych plików.
 
 ---
 
-## V1_1_VS_V1_0_DELTA
-- Różnica bezwzględna: **+811 bajtów**
-- Wzrost procentowy: **+9.07%** (wynika z dodania opisu `default_evidence_limit`, `supported_evidence_limits` oraz pól towarzyszących `imports_truncated` i `consumers_truncated`).
+## CURRENT_SNAPSHOT_SIZE_RESULT
+Pole `estimated_output_bytes` raportuje dokładną liczbę bajtów UTF-8 bieżącej migawki zadania wygenerowanej w momencie decyzji preflight. W przypadku stabilnego zadania wielkość ładunku przy ponowieniu `allow_large_output=True` wynosi dokładnie 100% wartości estymowanej.
 
 ---
 
-## CROSS_PAIR_ERROR_BYTES
-**435 bajtów** UTF-8 (odpowiedź błędu `unsupported_version_pair`).
+## LOOKUP_REGRESSION_PREFLIGHT
+Dla partii 200 identyfikatorów (`> 15360 B`) przy `allow_large_output=False`:
+- `status`: `"confirmation_required"`
+- `requested_count`: 200
+- `warning_response_bytes`: 468 B (< 1024 B)
+- Brak echa `ids` i brak echa `repo_path`.
 
 ---
 
-## UNKNOWN_PAIR_ERROR_BYTES
-**435 bajtów** UTF-8 (odpowiedź błędu `unsupported_schema_version`).
+## LOOKUP_CERTIFIED_REASON
+`"Estimated lookup output exceeds the recommended context size."` (w 100% zgodny z pierwotnym certyfikowanym kontraktem).
 
 ---
 
-## V1_1_SECTION_BREAKDOWN
-Pomiary sekcji wykonane jako standalone serialization (rozmiar wyizolowanego JSON dla każdej sekcji):
-- **Modules Root Schema**: 2,288 bajtów (8 pól, typy, operatory, filtry, computeds)
-- **Artifacts Root Schema**: 3,715 bajtów (14 pól, typy, operatory, filtry, computeds)
-- **Dependencies Root Schema**: 1,321 bajtów (6 pól, typy, operatory)
-- **Language Contract**: 1,121 bajtów (filtry, operatory, limity, sortowanie)
-- **Envelope / Version Metadata**: 85 bajtów (`schema_version`, `language_version`, `supported_pairs`)
-- **Pełny łączny payload 1.1**: **9,752 bajty**
-
-*Metoda pomiaru:* Rozmiary standalone mierzą wyizolowany ślad bajtowy każdego poddrzewa w formacie JSON z wcięciem 2 spacji; łączny dokument 1.1 (9,752 B) łączy te sekcje w jeden wspólny obiekt JSON.
+## LOOKUP_PREDICTED_BYTES
+**21,310 bajtów**
 
 ---
 
-## PAYLOAD_COST_DRIVERS
-- **R1**: Dokładne definicje pól, typów i dopuszczalnych operatorów w schemacie.
-- **R2**: Flagi strukturalne per pole (`type`, `filterable`, `selectable`, `nullable`, `computed`).
-- **R3**: Tekstowe opisy semantyczne pól (`description`).
-- **R5**: Metadane możliwości języka i reguł dowodowych (`limits`, `operators`).
-- Największy udział w rozmiarze mają definicje schematów `artifacts` (3.72 KB) oraz `modules` (2.29 KB).
+## LOOKUP_ACTUAL_APPROVED_BYTES
+**21,310 bajtów**
 
 ---
 
-## EXISTING_DISCLOSURE_CONTROLS
-- Tylko jeden root: `NO`
-- Tylko schema: `NO`
-- Tylko language: `NO`
-- Tylko field metadata: `NO`
-- Tylko version metadata: `NO`
-
-Narzędzie zwraca pełny kontrakt dla żądanej pary wersji.
+## LOOKUP_EXACT_SIZE_MATCH
+**YES** (21310 B == 21310 B, dokładna zgodność 1:1).
 
 ---
 
-## USAGE_MODEL
-- `describe_canonical_state` służy jako jednorazowe narzędzie typu discovery/introspekcja, wywoływane przez agenta przed konstruowaniem zapytań do `query_canonical_projection`.
-- Narzędzie nie jest wywoływane w pętlach ani na poziomie poszczególnych encji.
-- Kompletny kontrakt (9.52 KiB) mieści się w standardowym budżecie kontekstu jednorazowego wywołania.
-- Dokumentacja MCP jasno kieruje do wywołania `describe_canonical_state(schema_version="1.1", language_version="1.1")` w celu odkrycia możliwości wersji 1.1.
+## SHARED_THRESHOLD_CERTIFICATION
+Oba narzędzia MCP (`lookup_index_entries`, `get_analysis_status`) korzystają ze wspólnego modułu `contextor.mcp.output_guard.guard_large_output` i stosują identyczny próg:
+- `LARGE_OUTPUT_WARNING_BYTES = 15360`
+- `<= 15360 B`: bezpośrednia emisja standardowej odpowiedzi
+- `> 15360 B`: zwrot zwartego monitu `confirmation_required`
 
 ---
 
-## SECTION_SCOPING_SIMULATION
-`N/A` (Pełny payload 1.1 wynosi 9,752 bajty, co jest poniżej progu 10 KiB / 10,240 B. Brak niekontrolowanego wzrostu i brak zbędnej redundancji w naturalnym użyciu).
+## OUTPUT_GUARD_CONSUMERS_TOTAL
+**3**
 
 ---
 
-## PROGRESSIVE_DISCLOSURE_CANDIDATE
-`NO`
-Narzędzie opisuje stały, statyczny kontrakt o łącznym rozmiarze poniżej 10 KiB. Rozbijanie statycznego opisu na drobne zapytania zwiększyłoby liczbę rund i łączny narzut tokenowy komunikacji LLM-MCP.
+## OUTPUT_GUARD_PRODUCTION_CONSUMERS
+**2** (`contextor.mcp.tools.get_analysis_status`, `contextor.mcp.tools.lookup_index_entries`).
 
 ---
 
-## REPRESENTATION_CANDIDATE
-`NO`
-Narzędzie opisuje specyfikację schematu/języka, dla której alternatywne skrócone reprezentacje nie mają zastosowania.
+## OUTPUT_GUARD_THIRD_CONSUMER_EXPLANATION
+Trzecim bezpośrednim konsumentem (`tests.test_mcp_regressions`) jest moduł testów jednostkowych weryfikujący bezpośrednio warunki brzegowe helpera `guard_large_output` (`test_output_guard_boundary_and_contract`). Brak jakichkolwiek niejawnych zależności produkcyjnych ani relacji tool->tool.
 
 ---
 
-## MEASURED_OPTIMIZATION_OPPORTUNITY
-Brak uzasadnionej przestrzeni optymalizacyjnej. Ładunek ~9.5 KB jest optymalny dla pełnego opisu schematu trzech domen oraz reguł języka zapytań.
-
----
-
-## NON_TOKEN_CONTRACT_RISKS
-`NONE`
-Zasady walidacji par wersji (`SUPPORTED_PAIRS`), obsługa błędów, domyślna para `(1.0, 1.0)` oraz odkrywalność `(1.1, 1.1)` zostały w pełni przetestowane i certyfikowane w krokach A15.3–A15.4.
-
----
-
-## FINAL_CLASSIFICATION
-`A` (NO CHANGE)
-
----
-
-## JUSTIFICATION
-1. Narzędzie zwraca wyłącznie statyczny kontrakt specyfikacji (0 I/O, brak zależności od stanu projektu).
-2. Pełny rozmiar odpowiedzi wynosi 8.94 KB (1.0) oraz 9.75 KB (1.1), co mieści się poniżej progu 10 KiB.
-3. Wywołanie jest jednorazowym discovery; brak narastającego fanoutu lub redundancji danych.
-4. Żadna refaktoryzacja tokenowa nie jest uzasadniona.
+## CONTEXTOR_RUNTIME_SANITY
+- `contextor/mcp/output_guard.py`: `module_id="270/1"`, `layer="adapter"`, `public_api.total=2`, `imports.total=0`, `consumers.total=3`.
+- `contextor/mcp/tools/get_analysis_status.py`: `module_id="248/1"`, `layer="adapter"`, `public_api.total=1`, `imports.total=2`, `consumers.total=2`.
+- `contextor/mcp/tools/lookup_index_entries.py`: `module_id="240/2"`, `layer="adapter"`, `public_api.total=1`, `imports.total=2`, `consumers.total=3`.
 
 ---
 
@@ -164,5 +149,4 @@ Zasady walidacji par wersji (`SUPPORTED_PAIRS`), obsługa błędów, domyślna p
 
 ---
 
-## NEXT_STEP_PROPOSAL
-STEP A17 CLOSED — describe_canonical_state is sufficiently token-efficient; no implementation justified.
+A18 CLOSED — get_analysis_status and lookup_index_entries share the runtime-certified 15 KiB agent-controlled context-safety guard with no regression of the certified lookup contract.
