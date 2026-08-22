@@ -1,132 +1,167 @@
-# A18 OUTPUT PREFLIGHT — FINAL RUNTIME CERTIFICATION
+# TOKEN EFFICIENCY — STEP A20.1: MEASURE AND CLASSIFY update_file
 
 ## FILES_CHANGED=NONE
-Krok certyfikacji runtime typu read-only. Nie zmodyfikowano żadnych plików produkcyjnych, dokumentacji ani testów.
+Krok pomiarowy i klasyfikacyjny typu read-only. Nie zmodyfikowano żadnych plików produkcyjnych, dokumentacji ani testów.
 
 ---
 
-## RUNTIME_GET_ANALYSIS_STATUS_SIGNATURE
-- Sygnatura Python:
-  `def get_analysis_status(repo_path: str, job_id: str | None = None, max_skipped_files: int | None = 10, allow_large_output: bool = False) -> str:`
-- FastMCP Schema:
-  - `repo_path`: required string
-  - `job_id`: optional string or null (default null)
-  - `max_skipped_files`: optional integer or null (default 10)
-  - `allow_large_output`: optional boolean (default false)
+## PUBLIC_SIGNATURE
+`def update_file(repo_path: str, file_path: str, max_items: int | None = 30, compact: bool = True, fields: list[str] | None = None) -> str:`
 
 ---
 
-## RUNTIME_LOOKUP_SIGNATURE
-- Sygnatura Python:
-  `def lookup_index_entries(repo_path: str, ids: list[str], allow_large_output: bool = False) -> str:`
-- FastMCP Schema:
-  - `repo_path`: required string
-  - `ids`: required array of strings
-  - `allow_large_output`: optional boolean (default false)
+## AUTHORITATIVE_IMPLEMENTATION
+`C:\Temp\Contextor_Repo\contextor\mcp\tools\update_file.py`
 
 ---
 
-## SMALL_STATUS_RESULT
-Dla realnego istniejącego zadania (`7d3854b0f2ce478da61ab50ed8556084`) o rozmiarze 610 B (poniżej progu 15360 B):
-- Wynik zwracany jest bezpośrednio jako standardowy obiekt JSON statusu.
-- Brak statusu `confirmation_required` i brak metadanych bramki preflight.
+## AUTHORITATIVE_LIVE_OWNER
+- `contextor.mcp.runtime` (`get_or_init_engine`)
+- `contextor.core.live_state` (`connect(root).update_file(...)`)
+- `contextor.core.analysis.state_manager` (`save_engine_state`)
 
 ---
 
-## SMALL_STATUS_OVERRIDE_RESULT
-Wywołanie tej samej operacji z jawnym `allow_large_output=True` zwraca semantycznie i strukturalnie identyczny wynik (`identical_with_override = True`).
+## PRECONDITIONS
+Wymaga wcześniejszej inicjalizacji stanu silnika analizy (`analyze_project`). W przypadku braku aktywnej sesji narzędzie zwraca fail-fast obiekt `{"status": "NO_SESSION", ...}`.
 
 ---
 
-## LARGE_STATUS_RUNTIME_CASE
-`N/A_NO_NATURAL_LARGE_JOB`
-Wszystkie 11 istniejących zadań w katalogu `.contextor/analysis_jobs/` mają rozmiar w przedziale 592–716 B (nawet przy `max_skipped_files=None`), ponieważ na bieżącym repozytorium nie występują setki plików z błędami składni. Zgodnie z wytycznymi nie uruchamiano sztucznej pełnej analizy, a certyfikacja dużej gałęzi opiera się na przechodzącym teście jednostkowym `test_get_analysis_status_large_output_preflight_gate`.
+## DESKTOP_WATCHER_WORKFLOW
+Dokumentacja publiczna (`contextor/mcp/docs/update_file.json`) jasno rozróżnia dwa niezależne workflow:
+1. **Desktop App / Watcher aktywny**: Desktop watcher automatycznie aktualizuje stan kanoniczny po edycji pliku. Agent **nie powinien** wywoływać `update_file`, lecz odczytywać zdarzenia przez `get_live_events`.
+2. **Brak aktywnego watchera**: Agent wywołuje `update_file` synchronicznie po edycji pliku w celu natychmiastowej inkrementalnej aktualizacji grafu i silnika analizy.
 
 ---
 
-## LARGE_STATUS_PREFLIGHT_RESULT
-W teście z kontrolowaną dużą liczbą pominiętych plików (250 plików > 15 KiB) przy `allow_large_output=False`:
-- `status`: `"confirmation_required"`
-- `reason`: `"Estimated output exceeds the recommended context size."`
-- `warning_threshold_bytes`: 15360
-- `warning_threshold_kib`: 15.0
-- `retry`: `{"allow_large_output": true}`
-- `retry_instruction`: `"Repeat the same get_analysis_status call with the same repo_path, job_id, and max_skipped_files and set allow_large_output=true."`
-- Brak echa `repo_path`, `job_id` ani listy pominiętych plików.
+## OUTPUT_SHAPE
+Struktura odpowiedzi JSON:
+- **Status i ścieżka**: `status`, `file_path`
+- **Świeżość podsystemów grafu**: `graph_state`, `dependencies_state`, `blast_radius_state`, `local_metrics_state`, `global_metrics_state`, `artifact_consumption_state`
+- **Wpływ na moduły**: `affected_modules` (`total`, `truncated`, `items` [gdy `compact=False`])
+- **Trwałość stanu**: `live_state_persisted`
+- **Różnica semantyczna**: `semantic_diff` (`changed_symbol_count`, `body_change_count`, `body_only_changes_tracked`, `symbols_added`, `symbols_removed`, `signatures_changed`, `bodies_changed`, `affected_symbols`)
+- **Ostrzeżenie restartu procesu**: `runtime_restart_required`, `runtime_state`, `runtime_warning` (opcjonalne, gdy edytowano plik serwera MCP)
+- **Delta modułu**: `delta` (`module_path`, `is_new`, `is_deleted`, `imports_added`, `imports_removed`, `artifacts_added`, `artifacts_removed`) (opcjonalne)
 
 ---
 
-## LARGE_STATUS_WARNING_BYTES
-< 1024 bajtów (zwarta odpowiedź ostrzegawcza).
+## FAIL_FAST_MEASUREMENT
+Stan braku sesji (`status="NO_SESSION"`):
+- **Rozmiar**: **153 bajty** UTF-8
+- **Tryb**: `RUNTIME`
 
 ---
 
-## LARGE_STATUS_OVERRIDE_RESULT
-Wywołanie z jawnym `allow_large_output=True` zwraca pełny, bezstratny status zadania ze wszystkimi 250 wpisami pominiętych plików.
+## MODIFY_MEASUREMENT
+Typowa modyfikacja pliku źródłowego:
+- **Domyślny tryb kompaktowy (`compact=True`)**: **934 bajty** UTF-8 (~0.91 KiB)
+- **Tryb szczegółowy (`compact=False, max_items=30`)**: **1,431 bajtów** UTF-8 (~1.40 KiB)
+- **Tryb**: `SOURCE_SIMULATION`
 
 ---
 
-## CURRENT_SNAPSHOT_SIZE_RESULT
-Pole `estimated_output_bytes` raportuje dokładną liczbę bajtów UTF-8 bieżącej migawki zadania wygenerowanej w momencie decyzji preflight. W przypadku stabilnego zadania wielkość ładunku przy ponowieniu `allow_large_output=True` wynosi dokładnie 100% wartości estymowanej.
+## ADD_MEASUREMENT
+Dodanie nowego pliku (`status="CREATED"`, `compact=True`):
+- **Rozmiar**: **1,243 bajty** UTF-8 (~1.21 KiB)
+- **Tryb**: `SOURCE_SIMULATION`
 
 ---
 
-## LOOKUP_REGRESSION_PREFLIGHT
-Dla partii 200 identyfikatorów (`> 15360 B`) przy `allow_large_output=False`:
-- `status`: `"confirmation_required"`
-- `requested_count`: 200
-- `warning_response_bytes`: 468 B (< 1024 B)
-- Brak echa `ids` i brak echa `repo_path`.
+## DELETE_MEASUREMENT
+Usunięcie pliku (`status="DELETED"`, `compact=True`):
+- **Rozmiar**: **1,222 bajty** UTF-8 (~1.19 KiB)
+- **Tryb**: `SOURCE_SIMULATION`
 
 ---
 
-## LOOKUP_CERTIFIED_REASON
-`"Estimated lookup output exceeds the recommended context size."` (w 100% zgodny z pierwotnym certyfikowanym kontraktem).
+## LARGEST_AVAILABLE_MEASUREMENT
+Ekstremalny przypadek testowy (50 zmodyfikowanych sygnatur, 50 dodanych symboli, 50 dotkniętych modułów, ostrzeżenie restartu MCP, `compact=False, max_items=None`):
+- **Rozmiar**: **13,316 bajtów** UTF-8 (~13.00 KiB <= 15 KiB)
+- **Tryb**: `SOURCE_SIMULATION`
 
 ---
 
-## LOOKUP_PREDICTED_BYTES
-**21,310 bajtów**
+## MEASUREMENT_MODES
+- `FAIL_FAST`: `RUNTIME` (rzeczywiste wywołanie na niezinicjalizowanym repozytorium).
+- `MODIFY / ADD / DELETE / LARGEST`: `SOURCE_SIMULATION` (wierna symulacja generatora odpowiedzi `_semantic_artifact_diff`, `_semantic_diff_view` i `bounded_items` bez niepotrzebnej modyfikacji stanu produkcyjnego).
 
 ---
 
-## LOOKUP_ACTUAL_APPROVED_BYTES
-**21,310 bajtów**
+## NESTED_COLLECTIONS_AND_BOUNDS
+Wszystkie kolekcje zagnieżdżone w odpowiedzi posiadają wbudowane mechanizmy ograniczające:
+1. `affected_modules`: `bounded_items(..., max_items)` (`total`, `truncated`, `items` tylko gdy `compact=False`).
+2. `semantic_diff.symbols_added`: `bounded_items(..., max_items)`.
+3. `semantic_diff.symbols_removed`: `bounded_items(..., max_items)`.
+4. `semantic_diff.signatures_changed`: `bounded_items(..., max_items)`.
+5. `semantic_diff.bodies_changed`: `bounded_items(..., max_items)`.
+6. `semantic_diff.affected_symbols`: `bounded_items(..., max_items)`.
 
 ---
 
-## LOOKUP_EXACT_SIZE_MATCH
-**YES** (21310 B == 21310 B, dokładna zgodność 1:1).
+## CARDINALITY_GROWTH_ANALYSIS
+- **Symbole zmienionego pliku**: `BOUNDED` (omijane przy domyślnym `compact=True`, limitowane przez `max_items=30`).
+- **Importy dodane/usunięte**: `BOUNDED` (lokalne dla pojedynczego pliku).
+- **Dotknięte moduły**: `BOUNDED` (limitowane przez `max_items=30`).
+- **Konsumenci artefaktów**: `NO` (nie są listowani na poziomie encji).
+- **Diagnostyka składniowa**: `NO` (obsługiwana w strumieniu `get_live_events`).
+- **Rozmiar repozytorium**: `NO`.
+- **Historia zdarzeń LIVE**: `NO`.
 
 ---
 
-## SHARED_THRESHOLD_CERTIFICATION
-Oba narzędzia MCP (`lookup_index_entries`, `get_analysis_status`) korzystają ze wspólnego modułu `contextor.mcp.output_guard.guard_large_output` i stosują identyczny próg:
-- `LARGE_OUTPUT_WARNING_BYTES = 15360`
-- `<= 15360 B`: bezpośrednia emisja standardowej odpowiedzi
-- `> 15360 B`: zwrot zwartego monitu `confirmation_required`
+## AGENT_SCOPE_CONTROLS
+Narzędzie posiada wbudowane 3 mechanizmy kontroli zakresu po stronie wywołującego:
+1. `compact: bool = True` (domyślnie pomija tablice elementów i zwraca wyłącznie agregaty liczbowe).
+2. `max_items: int | None = 30` (jawny limit elementów per kolekcja przy `compact=False`).
+3. `fields: list[str] | None = None` (projekcja wybranych kluczy najwyższego poziomu).
 
 ---
 
-## OUTPUT_GUARD_CONSUMERS_TOTAL
-**3**
+## PAYLOAD_GROWTH_DRIVER
+Odpowiedź jest ściśle ograniczona zakresem pojedynczego pliku. Domyślny ładunek wynosi poniżej 1 KiB (~934 B). Nawet przy `compact=False` i `max_items=30` rozmiar wynosi ok. 1.4–3.0 KB.
 
 ---
 
-## OUTPUT_GUARD_PRODUCTION_CONSUMERS
-**2** (`contextor.mcp.tools.get_analysis_status`, `contextor.mcp.tools.lookup_index_entries`).
+## OUTPUT_GUARD_CANDIDATE
+`NO`
+Domyślna odpowiedź (`compact=True`) jest ultra-kompaktowa (< 1 KiB). Parametry `compact`, `max_items` i `fields` w pełni kontrolują rozmiar odpowiedzi bez konieczności narzucania zewnętrznej bramki preflight.
 
 ---
 
-## OUTPUT_GUARD_THIRD_CONSUMER_EXPLANATION
-Trzecim bezpośrednim konsumentem (`tests.test_mcp_regressions`) jest moduł testów jednostkowych weryfikujący bezpośrednio warunki brzegowe helpera `guard_large_output` (`test_output_guard_boundary_and_contract`). Brak jakichkolwiek niejawnych zależności produkcyjnych ani relacji tool->tool.
+## PROGRESSIVE_DISCLOSURE_CANDIDATE
+`NO`
+Narzędzie fabrycznie implementuje progressive disclosure poprzez rozróżnienie `compact=True` (podsumowanie i metryki) oraz `compact=False` (szczegółowe wpisy różnic).
 
 ---
 
-## CONTEXTOR_RUNTIME_SANITY
-- `contextor/mcp/output_guard.py`: `module_id="270/1"`, `layer="adapter"`, `public_api.total=2`, `imports.total=0`, `consumers.total=3`.
-- `contextor/mcp/tools/get_analysis_status.py`: `module_id="248/1"`, `layer="adapter"`, `public_api.total=1`, `imports.total=2`, `consumers.total=2`.
-- `contextor/mcp/tools/lookup_index_entries.py`: `module_id="240/2"`, `layer="adapter"`, `public_api.total=1`, `imports.total=2`, `consumers.total=3`.
+## REPRESENTATION_CANDIDATE
+`NO`
+Narzędzie zwraca lokalną deltę architektoniczną pojedynczego pliku, w której alternatywne reprezentacje indeksowane nie mają zastosowania.
+
+---
+
+## MEASURED_OPTIMIZATION_OPPORTUNITY
+Brak przestrzeni optymalizacyjnej. Domyślna odpowiedź wynosi ok. 0.9–1.2 KB, a tryb rozszerzony ok. 1.4 KB.
+
+---
+
+## NON_TOKEN_CONTRACT_RISKS
+`NONE`
+Logika detekcji modyfikacji kodu serwera MCP (`runtime_restart_required`) oraz precyzyjne rozróżnienie workflow z watcherem i bez watchera działają w pełni poprawnie.
+
+---
+
+## FINAL_CLASSIFICATION
+`A` (NO CHANGE)
+
+---
+
+## JUSTIFICATION
+1. Domyślna odpowiedź w trybie `compact=True` generuje lekki ładunek poniżej 1 KiB (~934 B).
+2. Wszystkie 6 kolekcji zagnieżdżonych jest fabrycznie ograniczonych przez `bounded_items` i `max_items`.
+3. Wywołujący ma pełną kontrolę nad zakresem odpowiedzi za pomocą parametrów `compact`, `max_items` oraz `fields`.
+4. Żadna refaktoryzacja tokenowa nie jest uzasadniona.
 
 ---
 
@@ -149,4 +184,5 @@ Trzecim bezpośrednim konsumentem (`tests.test_mcp_regressions`) jest moduł tes
 
 ---
 
-A18 CLOSED — get_analysis_status and lookup_index_entries share the runtime-certified 15 KiB agent-controlled context-safety guard with no regression of the certified lookup contract.
+## NEXT_STEP_PROPOSAL
+STEP A20 CLOSED — update_file is sufficiently token-efficient; no implementation justified.
