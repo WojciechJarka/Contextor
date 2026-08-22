@@ -922,6 +922,9 @@ def test_extract_indexed_report_context_returns_every_shared_resolver_block(tmp_
     result = json.loads(raw)
     expected = query_indexed_report(report, "pkg/cli.py", catalog, repo_root=str(tmp_path))
 
+    for k, v in expected["artifacts"].items():
+        v["consumer_modules_truncated"] = False
+        v["consumer_count"] = len(v.get("consumer_modules", []))
     assert result["artifacts"] == expected["artifacts"]
     assert result["artifact_count"] == 2
     assert result["total_artifact_count"] == 2
@@ -997,6 +1000,851 @@ def test_extract_indexed_report_context_can_filter_to_public_api(tmp_path, monke
         "pkg.cli::__enter__",
     }
     assert public_only["artifact_count"] == 2
+
+
+def test_extract_indexed_report_context_nested_progressive_disclosure(tmp_path, monkeypatch):
+    catalog = IndexCatalog(
+        modules={
+            "1/1": "main",
+            "2/1": "pkg.c1",
+            "3/1": "pkg.c2",
+            "4/1": "pkg.c3",
+            "5/1": "pkg.c4",
+            "6/1": "pkg.c5",
+        },
+        artifacts={
+            "A1/1": "main::service",
+            "A2/1": "main::isolated",
+        },
+        module_paths={"main": "main.py"},
+    )
+    report = {
+        "_format_version": "3",
+        "artifacts": {
+            "A1/1": {
+                "definer_module": "1/1",
+                "consumer_module_indices": ["2/1", "3/1", "4/1", "5/1", "6/1"],
+                "consumer_count": 5,
+            },
+            "A2/1": {
+                "definer_module": "1/1",
+                "consumer_module_indices": [],
+                "consumer_count": 0,
+            },
+        },
+    }
+    report_path = tmp_path / "report.json"
+    report_path.write_text(json.dumps(report), encoding="utf-8")
+    monkeypatch.setattr(
+        "contextor.core.report_query.catalog_from_registry",
+        lambda *_args, **_kwargs: catalog,
+    )
+    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: None)
+
+    # 1. Default Resolved (cap 3)
+    raw_default = mcp_server.extract_indexed_report_context.fn(
+        repo_path=str(tmp_path),
+        query="main.py",
+        report_path=str(report_path),
+    )
+    res_default = json.loads(raw_default)
+    art1 = res_default["artifacts"]["main::service"]
+    assert art1["consumer_count"] == 5
+    assert art1["consumer_modules"] == ["pkg.c1", "pkg.c2", "pkg.c3"]
+    assert art1["consumer_modules_truncated"] is True
+
+    art2 = res_default["artifacts"]["main::isolated"]
+    assert art2["consumer_count"] == 0
+    assert art2["consumer_modules"] == []
+    assert art2["consumer_modules_truncated"] is False
+
+    # Expand descriptor check
+    assert "expand" in res_default
+    exp = res_default["expand"]
+    assert exp["available"] is True
+    assert exp["retry_with_full_evidence"] == {
+        "query": "main.py",
+        "report_path": str(report_path),
+        "resolve_indices": True,
+        "public_api_only": False,
+        "max_items": 20,
+        "fields": None,
+        "evidence_limit": None,
+    }
+    assert exp["retry_fully_lossless"] == {
+        "query": "main.py",
+        "report_path": str(report_path),
+        "resolve_indices": True,
+        "public_api_only": False,
+        "max_items": None,
+        "fields": None,
+        "evidence_limit": None,
+    }
+
+    # 2. Default Indexed (cap 3)
+    raw_indexed = mcp_server.extract_indexed_report_context.fn(
+        repo_path=str(tmp_path),
+        query="main.py",
+        report_path=str(report_path),
+        resolve_indices=False,
+    )
+    res_indexed = json.loads(raw_indexed)
+    art1_idx = res_indexed["artifacts"]["A1/1"]
+    assert art1_idx["consumer_count"] == 5
+    assert art1_idx["consumer_module_indices"] == ["2/1", "3/1", "4/1"]
+    assert art1_idx["consumer_module_indices_truncated"] is True
+    # Logical parity
+    assert [catalog.modules[m] for m in art1_idx["consumer_module_indices"]] == art1["consumer_modules"]
+
+    # 3. evidence_limit = 0
+    raw_zero = mcp_server.extract_indexed_report_context.fn(
+        repo_path=str(tmp_path),
+        query="main.py",
+        report_path=str(report_path),
+        evidence_limit=0,
+    )
+    res_zero = json.loads(raw_zero)
+    assert res_zero["artifacts"]["main::service"]["consumer_modules"] == []
+    assert res_zero["artifacts"]["main::service"]["consumer_count"] == 5
+    assert res_zero["artifacts"]["main::service"]["consumer_modules_truncated"] is True
+    assert res_zero["artifacts"]["main::isolated"]["consumer_modules_truncated"] is False
+
+    # 4. evidence_limit = None (lossless evidence)
+    raw_full = mcp_server.extract_indexed_report_context.fn(
+        repo_path=str(tmp_path),
+        query="main.py",
+        report_path=str(report_path),
+        evidence_limit=None,
+    )
+    res_full = json.loads(raw_full)
+    assert len(res_full["artifacts"]["main::service"]["consumer_modules"]) == 5
+    assert res_full["artifacts"]["main::service"]["consumer_modules_truncated"] is False
+    assert "expand" not in res_full
+
+    # 5. Fully lossless: max_items=None, evidence_limit=None
+    raw_lossless = mcp_server.extract_indexed_report_context.fn(
+        repo_path=str(tmp_path),
+        query="main.py",
+        report_path=str(report_path),
+        max_items=None,
+        evidence_limit=None,
+    )
+    res_lossless = json.loads(raw_lossless)
+    assert res_lossless["artifact_count"] == 2
+    assert len(res_lossless["artifacts"]["main::service"]["consumer_modules"]) == 5
+    assert res_lossless["truncated"] is False
+    assert "expand" not in res_lossless
+
+    # 6. fields excluding artifacts => no expand descriptor
+    raw_fields_no_art = mcp_server.extract_indexed_report_context.fn(
+        repo_path=str(tmp_path),
+        query="main.py",
+        report_path=str(report_path),
+        fields=["resolution", "total_artifact_count"],
+    )
+    res_fields_no_art = json.loads(raw_fields_no_art)
+    assert "expand" not in res_fields_no_art
+    assert "artifacts" not in res_fields_no_art
+    assert res_fields_no_art["total_artifact_count"] == 2
+
+    # 7. fields including artifacts => expand descriptor is attached
+    raw_fields_with_art = mcp_server.extract_indexed_report_context.fn(
+        repo_path=str(tmp_path),
+        query="main.py",
+        report_path=str(report_path),
+        fields=["artifacts", "artifact_count"],
+    )
+    res_fields_with_art = json.loads(raw_fields_with_art)
+    assert "expand" in res_fields_with_art
+    assert "artifacts" in res_fields_with_art
+
+    # 8. negative evidence_limit (Contextor convention: safe_limit = max(0, limit))
+    raw_neg = mcp_server.extract_indexed_report_context.fn(
+        repo_path=str(tmp_path),
+        query="main.py",
+        report_path=str(report_path),
+        evidence_limit=-1,
+    )
+    res_neg = json.loads(raw_neg)
+    assert res_neg["artifacts"]["main::service"]["consumer_modules"] == []
+    assert res_neg["artifacts"]["main::service"]["consumer_count"] == 5
+    assert res_neg["artifacts"]["main::service"]["consumer_modules_truncated"] is True
+
+    # 9. Non-default parameter preservation in expand retry descriptors
+    raw_nondefault = mcp_server.extract_indexed_report_context.fn(
+        repo_path=str(tmp_path),
+        query="main.py",
+        report_path=str(report_path),
+        resolve_indices=False,
+        public_api_only=True,
+        max_items=1,
+        fields=["artifacts", "artifact_count"],
+    )
+    res_nondefault = json.loads(raw_nondefault)
+    assert "expand" in res_nondefault
+    exp_nd = res_nondefault["expand"]
+    assert exp_nd["available"] is True
+    assert exp_nd["retry_with_full_evidence"] == {
+        "query": "main.py",
+        "report_path": str(report_path),
+        "resolve_indices": False,
+        "public_api_only": True,
+        "max_items": 1,
+        "fields": ["artifacts", "artifact_count"],
+        "evidence_limit": None,
+    }
+    assert exp_nd["retry_fully_lossless"] == {
+        "query": "main.py",
+        "report_path": str(report_path),
+        "resolve_indices": False,
+        "public_api_only": True,
+        "max_items": None,
+        "fields": ["artifacts", "artifact_count"],
+        "evidence_limit": None,
+    }
+
+
+def test_extract_indexed_report_context_representation_negotiation(tmp_path, monkeypatch):
+    # Setup catalog with multiple artifacts to test auto above/below threshold and S2 parity
+    catalog = IndexCatalog(
+        modules={
+            "1/1": "main",
+            "2/1": "pkg.alpha",
+            "3/1": "pkg.beta",
+            "4/1": "pkg.gamma",
+            "5/1": "pkg.delta",
+            "6/1": "pkg.epsilon",
+            "7/1": "pkg.zeta",
+            "8/1": "pkg.eta",
+        },
+        artifacts={
+            "A10/1": "main::art_ten",
+            "A20/1": "main::art_twenty",
+            "A30/1": "main::art_thirty",
+            "A40/1": "main::art_forty",
+            "A50/1": "main::art_fifty",
+        },
+        module_paths={"main": "main.py"},
+    )
+    # 5 artifacts with varying consumers
+    report = {
+        "_format_version": "3",
+        "artifacts": {
+            "A10/1": {
+                "artifact_id": "A10/1",
+                "definer_module": "1/1",
+                "consumer_module_indices": ["2/1", "3/1", "4/1", "5/1", "6/1", "7/1", "8/1"],
+                "consumer_count": 7,
+            },
+            "A20/1": {
+                "artifact_id": "A20/1",
+                "definer_module": "1/1",
+                "consumer_module_indices": ["2/1", "3/1", "4/1", "5/1"],
+                "consumer_count": 4,
+            },
+            "A30/1": {
+                "artifact_id": "A30/1",
+                "definer_module": "1/1",
+                "consumer_module_indices": ["2/1", "3/1"],
+                "consumer_count": 2,
+            },
+            "A40/1": {
+                "artifact_id": "A40/1",
+                "definer_module": "1/1",
+                "consumer_module_indices": ["2/1"],
+                "consumer_count": 1,
+            },
+            "A50/1": {
+                "artifact_id": "A50/1",
+                "definer_module": "1/1",
+                "consumer_module_indices": [],
+                "consumer_count": 0,
+            },
+        },
+    }
+    report_path = tmp_path / "report.json"
+    report_path.write_text(json.dumps(report), encoding="utf-8")
+    monkeypatch.setattr(
+        "contextor.core.report_query.catalog_from_registry",
+        lambda *_args, **_kwargs: catalog,
+    )
+    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: None)
+
+    # 1. Invalid representation -> Fail-closed error
+    raw_invalid = mcp_server.extract_indexed_report_context.fn(
+        repo_path=str(tmp_path),
+        query="main.py",
+        report_path=str(report_path),
+        representation="xml",
+    )
+    res_invalid = json.loads(raw_invalid)
+    assert "error" in res_invalid
+    assert res_invalid["representation"] == "xml"
+    assert res_invalid["allowed_representations"] == ["auto", "indexed", "named"]
+
+    # 2. Legacy representation=None -> 100% legacy A12.3 behavior (no protocol metadata)
+    raw_legacy = mcp_server.extract_indexed_report_context.fn(
+        repo_path=str(tmp_path),
+        query="main.py",
+        report_path=str(report_path),
+        representation=None,
+    )
+    res_legacy = json.loads(raw_legacy)
+    assert "representation" not in res_legacy
+    assert "resolve_via" not in res_legacy
+    assert "artifacts" in res_legacy
+    assert "main::art_ten" in res_legacy["artifacts"]
+
+    # 3. Explicit representation="named" -> Protocol metadata attached
+    raw_named = mcp_server.extract_indexed_report_context.fn(
+        repo_path=str(tmp_path),
+        query="main.py",
+        report_path=str(report_path),
+        representation="named",
+    )
+    res_named = json.loads(raw_named)
+    assert res_named["representation"] == "named"
+    assert "resolve_via" not in res_named
+    assert "main::art_ten" in res_named["artifacts"]
+
+    # 4. Explicit representation="indexed" -> Protocol metadata attached
+    raw_indexed = mcp_server.extract_indexed_report_context.fn(
+        repo_path=str(tmp_path),
+        query="main.py",
+        report_path=str(report_path),
+        representation="indexed",
+    )
+    res_indexed = json.loads(raw_indexed)
+    assert res_indexed["representation"] == "indexed"
+    assert res_indexed["resolve_via"] == "lookup_index_entries"
+    assert "A10/1" in res_indexed["artifacts"]
+
+    # 5. Deterministic Precedence over resolve_indices
+    # representation="named" with resolve_indices=False -> resolved named
+    raw_prec_named = mcp_server.extract_indexed_report_context.fn(
+        repo_path=str(tmp_path),
+        query="main.py",
+        report_path=str(report_path),
+        resolve_indices=False,
+        representation="named",
+    )
+    res_prec_named = json.loads(raw_prec_named)
+    assert res_prec_named["representation"] == "named"
+    assert "main::art_ten" in res_prec_named["artifacts"]
+
+    # representation="indexed" with resolve_indices=True -> indexed
+    raw_prec_indexed = mcp_server.extract_indexed_report_context.fn(
+        repo_path=str(tmp_path),
+        query="main.py",
+        report_path=str(report_path),
+        resolve_indices=True,
+        representation="indexed",
+    )
+    res_prec_indexed = json.loads(raw_prec_indexed)
+    assert res_prec_indexed["representation"] == "indexed"
+    assert res_prec_indexed["resolve_via"] == "lookup_index_entries"
+    assert "A10/1" in res_prec_indexed["artifacts"]
+
+    # 6. S2 Canonical Selection Parity between explicit named and indexed when truncated
+    raw_named_cap2 = mcp_server.extract_indexed_report_context.fn(
+        repo_path=str(tmp_path),
+        query="main.py",
+        report_path=str(report_path),
+        max_items=2,
+        representation="named",
+    )
+    raw_indexed_cap2 = mcp_server.extract_indexed_report_context.fn(
+        repo_path=str(tmp_path),
+        query="main.py",
+        report_path=str(report_path),
+        max_items=2,
+        representation="indexed",
+    )
+    res_named_cap2 = json.loads(raw_named_cap2)
+    res_indexed_cap2 = json.loads(raw_indexed_cap2)
+    named_ids = [entry["artifact_id"] for entry in res_named_cap2["artifacts"].values()]
+    indexed_ids = [entry["artifact_id"] for entry in res_indexed_cap2["artifacts"].values()]
+    assert named_ids == indexed_ids == ["A10/1", "A20/1"]
+
+    # 7. Auto Below Threshold (SMALL payload saves < 512 B) -> Direct Named Result
+    raw_auto_small = mcp_server.extract_indexed_report_context.fn(
+        repo_path=str(tmp_path),
+        query="main.py",
+        report_path=str(report_path),
+        max_items=1,
+        evidence_limit=1,
+        representation="auto",
+    )
+    res_auto_small = json.loads(raw_auto_small)
+    assert res_auto_small["representation"] == "named"
+    assert res_auto_small["requested_representation"] == "auto"
+    assert "status" not in res_auto_small
+    assert "main::art_ten" in res_auto_small["artifacts"]
+    # Expand retains representation="auto" (E1)
+    assert "expand" in res_auto_small
+    assert res_auto_small["expand"]["retry_with_full_evidence"]["representation"] == "auto"
+    assert res_auto_small["expand"]["retry_fully_lossless"]["representation"] == "auto"
+
+    # 8. Auto Above Threshold (LARGE unclipped consumers save >= 512 B) -> Decision Response
+    # Create large report with many consumers to exceed 512 B threshold
+    (tmp_path / "large_main.py").write_text("# main\n", encoding="utf-8")
+    large_catalog_modules = {
+        f"{i}/1": f"deeply.nested.package.consumer_module_number_{i:03d}"
+        for i in range(1, 100)
+    }
+    large_catalog_modules["100/1"] = "large_main"
+    large_catalog = IndexCatalog(
+        modules=large_catalog_modules,
+        artifacts={"A999/1": "large_main::heavy_symbol"},
+        module_paths={"large_main": "large_main.py"},
+    )
+    large_report = {
+        "_format_version": "3",
+        "artifacts": {
+            "A999/1": {
+                "artifact_id": "A999/1",
+                "definer_module": "100/1",
+                "consumer_module_indices": [f"{i}/1" for i in range(1, 80)],
+                "consumer_count": 79,
+            }
+        },
+    }
+    large_report_path = tmp_path / "large_report.json"
+    large_report_path.write_text(json.dumps(large_report), encoding="utf-8")
+    monkeypatch.setattr(
+        "contextor.core.report_query.catalog_from_registry",
+        lambda *_args, **_kwargs: large_catalog,
+    )
+
+    raw_auto_large = mcp_server.extract_indexed_report_context.fn(
+        repo_path=str(tmp_path),
+        query="large_main.py",
+        report_path=str(large_report_path),
+        evidence_limit=80,
+        representation="auto",
+    )
+    res_auto_large = json.loads(raw_auto_large)
+    assert res_auto_large["status"] == "representation_decision_required"
+    assert res_auto_large["requested_representation"] == "auto"
+    assert res_auto_large["total_artifact_count"] == 1
+    assert res_auto_large["artifact_count"] == 1
+    assert "sizes" in res_auto_large
+    assert res_auto_large["sizes"]["bytes_saved"] >= 512
+    assert "evidence" in res_auto_large
+    assert len(res_auto_large["evidence"]) == 1
+    assert res_auto_large["evidence"][0]["artifact_id"] == "A999/1"
+    assert res_auto_large["evidence"][0]["artifact"] == "large_main::heavy_symbol"
+    assert "options" in res_auto_large
+    assert "named" in res_auto_large["options"]
+    assert "indexed" in res_auto_large["options"]
+    assert res_auto_large["options"]["named"]["representation"] == "named"
+    assert res_auto_large["options"]["indexed"]["representation"] == "indexed"
+    assert "expand" not in res_auto_large
+
+    # 9. Executability of decision options and exact candidate sizes parity
+    named_retry_kwargs = dict(res_auto_large["options"]["named"])
+    indexed_retry_kwargs = dict(res_auto_large["options"]["indexed"])
+
+    raw_named_exec = mcp_server.extract_indexed_report_context.fn(
+        repo_path=str(tmp_path), **named_retry_kwargs
+    )
+    raw_indexed_exec = mcp_server.extract_indexed_report_context.fn(
+        repo_path=str(tmp_path), **indexed_retry_kwargs
+    )
+
+    assert len(raw_named_exec.encode("utf-8")) == res_auto_large["sizes"]["named_bytes"]
+    assert len(raw_indexed_exec.encode("utf-8")) == res_auto_large["sizes"]["indexed_bytes"]
+
+    # 10. Fields without artifacts skips negotiation
+    raw_fields_no_art = mcp_server.extract_indexed_report_context.fn(
+        repo_path=str(tmp_path),
+        query="large_main.py",
+        report_path=str(large_report_path),
+        evidence_limit=50,
+        fields=["resolution", "total_artifact_count"],
+        representation="auto",
+    )
+    res_fields_no_art = json.loads(raw_fields_no_art)
+    assert res_fields_no_art["representation"] == "named"
+    assert res_fields_no_art["requested_representation"] == "auto"
+    assert "status" not in res_fields_no_art
+    assert "artifacts" not in res_fields_no_art
+    assert res_fields_no_art["total_artifact_count"] == 1
+
+    # 11. Explicit Lossless Named and Indexed
+    monkeypatch.setattr(
+        "contextor.core.report_query.catalog_from_registry",
+        lambda *_args, **_kwargs: catalog,
+    )
+    raw_lossless_named = mcp_server.extract_indexed_report_context.fn(
+        repo_path=str(tmp_path),
+        query="main.py",
+        report_path=str(report_path),
+        max_items=None,
+        evidence_limit=None,
+        representation="named",
+    )
+    res_lossless_named = json.loads(raw_lossless_named)
+    assert res_lossless_named["representation"] == "named"
+    assert res_lossless_named["artifact_count"] == 5
+    assert res_lossless_named["total_artifact_count"] == 5
+    assert res_lossless_named["truncated"] is False
+    assert len(res_lossless_named["artifacts"]["main::art_ten"]["consumer_modules"]) == 7
+
+    raw_lossless_indexed = mcp_server.extract_indexed_report_context.fn(
+        repo_path=str(tmp_path),
+        query="main.py",
+        report_path=str(report_path),
+        max_items=None,
+        evidence_limit=None,
+        representation="indexed",
+    )
+    res_lossless_indexed = json.loads(raw_lossless_indexed)
+    assert res_lossless_indexed["representation"] == "indexed"
+    assert res_lossless_indexed["resolve_via"] == "lookup_index_entries"
+    assert res_lossless_indexed["artifact_count"] == 5
+    assert len(res_lossless_indexed["artifacts"]["A10/1"]["consumer_module_indices"]) == 7
+
+    # 12. S2 canonical ordering vs legacy symbol-string ordering when truncated
+    # Setup report where symbol-name order differs from artifact-id order:
+    # A10/1 -> "main::zeta_symbol"
+    # A20/1 -> "main::alpha_symbol"
+    ordering_catalog = IndexCatalog(
+        modules={"1/1": "main"},
+        artifacts={"A10/1": "main::zeta_symbol", "A20/1": "main::alpha_symbol"},
+        module_paths={"main": "main.py"},
+    )
+    ordering_report = {
+        "_format_version": "3",
+        "artifacts": {
+            "A10/1": {"artifact_id": "A10/1", "definer_module": "1/1", "consumer_module_indices": [], "consumer_count": 0},
+            "A20/1": {"artifact_id": "A20/1", "definer_module": "1/1", "consumer_module_indices": [], "consumer_count": 0},
+        },
+    }
+    ordering_report_path = tmp_path / "ordering_report.json"
+    ordering_report_path.write_text(json.dumps(ordering_report), encoding="utf-8")
+    monkeypatch.setattr(
+        "contextor.core.report_query.catalog_from_registry",
+        lambda *_args, **_kwargs: ordering_catalog,
+    )
+
+    # Legacy: sorted by symbol string -> "main::alpha_symbol" (A20/1) comes first
+    raw_ord_legacy = mcp_server.extract_indexed_report_context.fn(
+        repo_path=str(tmp_path),
+        query="main.py",
+        report_path=str(ordering_report_path),
+        max_items=1,
+        representation=None,
+    )
+    res_ord_legacy = json.loads(raw_ord_legacy)
+    assert list(res_ord_legacy["artifacts"].keys()) == ["main::alpha_symbol"]
+
+    # Explicit Named: sorted canonically by artifact ID -> "A10/1" ("main::zeta_symbol") comes first
+    raw_ord_explicit_named = mcp_server.extract_indexed_report_context.fn(
+        repo_path=str(tmp_path),
+        query="main.py",
+        report_path=str(ordering_report_path),
+        max_items=1,
+        representation="named",
+    )
+    res_ord_explicit_named = json.loads(raw_ord_explicit_named)
+    assert list(res_ord_explicit_named["artifacts"].keys()) == ["main::zeta_symbol"]
+
+    # Explicit Indexed: sorted canonically by artifact ID -> "A10/1" comes first
+    raw_ord_explicit_indexed = mcp_server.extract_indexed_report_context.fn(
+        repo_path=str(tmp_path),
+        query="main.py",
+        report_path=str(ordering_report_path),
+        max_items=1,
+        representation="indexed",
+    )
+    res_ord_explicit_indexed = json.loads(raw_ord_explicit_indexed)
+    assert list(res_ord_explicit_indexed["artifacts"].keys()) == ["A10/1"]
+
+    # 13. Decision evidence bounding: when max_items=1, evidence must have len=1 and be in selected scope
+    monkeypatch.setattr(
+        "contextor.core.report_query.catalog_from_registry",
+        lambda *_args, **_kwargs: large_catalog,
+    )
+    raw_auto_large_cap1 = mcp_server.extract_indexed_report_context.fn(
+        repo_path=str(tmp_path),
+        query="large_main.py",
+        report_path=str(large_report_path),
+        max_items=1,
+        evidence_limit=80,
+        representation="auto",
+    )
+    res_auto_large_cap1 = json.loads(raw_auto_large_cap1)
+    assert res_auto_large_cap1["status"] == "representation_decision_required"
+    assert res_auto_large_cap1["artifact_count"] == 1
+    assert len(res_auto_large_cap1["evidence"]) == 1
+    assert res_auto_large_cap1["evidence"][0]["artifact_id"] == "A999/1"
+
+    # 14. Auto above threshold on multi-artifact order-mismatch fixture (CHECK 1)
+    (tmp_path / "multi_mismatch.py").write_text("# multi\n", encoding="utf-8")
+    multi_modules = {
+        f"{i}/1": f"deeply.nested.package.consumer_module_number_{i:03d}"
+        for i in range(1, 100)
+    }
+    multi_modules["100/1"] = "multi_mismatch"
+    multi_catalog = IndexCatalog(
+        modules=multi_modules,
+        artifacts={
+            "A10/1": "multi_mismatch::zeta_symbol",
+            "A20/1": "multi_mismatch::beta_symbol",
+            "A30/1": "multi_mismatch::alpha_symbol",
+        },
+        module_paths={"multi_mismatch": "multi_mismatch.py"},
+    )
+    multi_report = {
+        "_format_version": "3",
+        "artifacts": {
+            "A10/1": {
+                "artifact_id": "A10/1",
+                "definer_module": "100/1",
+                "consumer_module_indices": [f"{i}/1" for i in range(1, 40)],
+                "consumer_count": 39,
+            },
+            "A20/1": {
+                "artifact_id": "A20/1",
+                "definer_module": "100/1",
+                "consumer_module_indices": [f"{i}/1" for i in range(40, 80)],
+                "consumer_count": 40,
+            },
+            "A30/1": {
+                "artifact_id": "A30/1",
+                "definer_module": "100/1",
+                "consumer_module_indices": [],
+                "consumer_count": 0,
+            },
+        },
+    }
+    multi_report_path = tmp_path / "multi_report.json"
+    multi_report_path.write_text(json.dumps(multi_report), encoding="utf-8")
+    monkeypatch.setattr(
+        "contextor.core.report_query.catalog_from_registry",
+        lambda *_args, **_kwargs: multi_catalog,
+    )
+
+    raw_auto_mismatch = mcp_server.extract_indexed_report_context.fn(
+        repo_path=str(tmp_path),
+        query="multi_mismatch.py",
+        report_path=str(multi_report_path),
+        max_items=2,
+        evidence_limit=40,
+        representation="auto",
+    )
+    res_auto_mismatch = json.loads(raw_auto_mismatch)
+    assert res_auto_mismatch["status"] == "representation_decision_required"
+    assert res_auto_mismatch["total_artifact_count"] == 3
+    assert res_auto_mismatch["artifact_count"] == 2
+    assert res_auto_mismatch["sizes"]["bytes_saved"] >= 512
+
+    # Options execution verification
+    named_opt_exec = json.loads(
+        mcp_server.extract_indexed_report_context.fn(
+            repo_path=str(tmp_path), **res_auto_mismatch["options"]["named"]
+        )
+    )
+    indexed_opt_exec = json.loads(
+        mcp_server.extract_indexed_report_context.fn(
+            repo_path=str(tmp_path), **res_auto_mismatch["options"]["indexed"]
+        )
+    )
+    assert list(named_opt_exec["artifacts"].keys()) == [
+        "multi_mismatch::zeta_symbol",
+        "multi_mismatch::beta_symbol",
+    ]
+    assert list(indexed_opt_exec["artifacts"].keys()) == ["A10/1", "A20/1"]
+    assert (
+        [e["artifact_id"] for e in named_opt_exec["artifacts"].values()]
+        == [e["artifact_id"] for e in indexed_opt_exec["artifacts"].values()]
+        == ["A10/1", "A20/1"]
+    )
+
+    # 15. Execute E1 auto expansion with stateless renegotiation (CHECK 2)
+    raw_auto_capped_evidence = mcp_server.extract_indexed_report_context.fn(
+        repo_path=str(tmp_path),
+        query="multi_mismatch.py",
+        report_path=str(multi_report_path),
+        max_items=2,
+        evidence_limit=0,
+        representation="auto",
+    )
+    res_auto_capped = json.loads(raw_auto_capped_evidence)
+    assert res_auto_capped["representation"] == "named"
+    assert res_auto_capped["requested_representation"] == "auto"
+    assert "expand" in res_auto_capped
+    assert (
+        res_auto_capped["expand"]["retry_with_full_evidence"]["representation"]
+        == "auto"
+    )
+
+    # Executing retry_with_full_evidence renegotiates into decision response
+    raw_retry_full = mcp_server.extract_indexed_report_context.fn(
+        repo_path=str(tmp_path),
+        **res_auto_capped["expand"]["retry_with_full_evidence"],
+    )
+    res_retry_full = json.loads(raw_retry_full)
+    assert res_retry_full["status"] == "representation_decision_required"
+    assert res_retry_full["sizes"]["bytes_saved"] >= 512
+
+    # Executing retry_fully_lossless under auto
+    raw_retry_lossless = mcp_server.extract_indexed_report_context.fn(
+        repo_path=str(tmp_path),
+        **res_auto_capped["expand"]["retry_fully_lossless"],
+    )
+    res_retry_lossless = json.loads(raw_retry_lossless)
+    assert res_retry_lossless["status"] == "representation_decision_required"
+    assert res_retry_lossless["total_artifact_count"] == 3
+
+    # 16. Explicit expand preserves representation (CHECK 3)
+    raw_named_capped = mcp_server.extract_indexed_report_context.fn(
+        repo_path=str(tmp_path),
+        query="multi_mismatch.py",
+        report_path=str(multi_report_path),
+        max_items=2,
+        evidence_limit=1,
+        representation="named",
+    )
+    res_named_capped = json.loads(raw_named_capped)
+    assert (
+        res_named_capped["expand"]["retry_with_full_evidence"]["representation"]
+        == "named"
+    )
+    assert (
+        res_named_capped["expand"]["retry_fully_lossless"]["representation"]
+        == "named"
+    )
+    named_expanded = json.loads(
+        mcp_server.extract_indexed_report_context.fn(
+            repo_path=str(tmp_path),
+            **res_named_capped["expand"]["retry_with_full_evidence"],
+        )
+    )
+    assert named_expanded["representation"] == "named"
+    assert len(named_expanded["artifacts"]["multi_mismatch::zeta_symbol"]["consumer_modules"]) == 39
+
+    raw_indexed_capped = mcp_server.extract_indexed_report_context.fn(
+        repo_path=str(tmp_path),
+        query="multi_mismatch.py",
+        report_path=str(multi_report_path),
+        max_items=2,
+        evidence_limit=1,
+        representation="indexed",
+    )
+    res_indexed_capped = json.loads(raw_indexed_capped)
+    assert (
+        res_indexed_capped["expand"]["retry_with_full_evidence"]["representation"]
+        == "indexed"
+    )
+    assert (
+        res_indexed_capped["expand"]["retry_fully_lossless"]["representation"]
+        == "indexed"
+    )
+    indexed_expanded = json.loads(
+        mcp_server.extract_indexed_report_context.fn(
+            repo_path=str(tmp_path),
+            **res_indexed_capped["expand"]["retry_with_full_evidence"],
+        )
+    )
+    assert indexed_expanded["representation"] == "indexed"
+    assert indexed_expanded["resolve_via"] == "lookup_index_entries"
+    assert len(indexed_expanded["artifacts"]["A10/1"]["consumer_module_indices"]) == 39
+
+    # 17. Fields with artifacts in auto mode (CHECK 4)
+    raw_auto_fields = mcp_server.extract_indexed_report_context.fn(
+        repo_path=str(tmp_path),
+        query="multi_mismatch.py",
+        report_path=str(multi_report_path),
+        max_items=2,
+        evidence_limit=40,
+        fields=["artifacts", "artifact_count"],
+        representation="auto",
+    )
+    res_auto_fields = json.loads(raw_auto_fields)
+    assert res_auto_fields["status"] == "representation_decision_required"
+    assert res_auto_fields["options"]["named"]["fields"] == ["artifacts", "artifact_count"]
+    assert res_auto_fields["options"]["indexed"]["fields"] == ["artifacts", "artifact_count"]
+    named_f_exec = mcp_server.extract_indexed_report_context.fn(
+        repo_path=str(tmp_path), **res_auto_fields["options"]["named"]
+    )
+    indexed_f_exec = mcp_server.extract_indexed_report_context.fn(
+        repo_path=str(tmp_path), **res_auto_fields["options"]["indexed"]
+    )
+    assert len(named_f_exec.encode("utf-8")) == res_auto_fields["sizes"]["named_bytes"]
+    assert len(indexed_f_exec.encode("utf-8")) == res_auto_fields["sizes"]["indexed_bytes"]
+    named_f_obj = json.loads(named_f_exec)
+    assert set(named_f_obj.keys()) == {"artifacts", "artifact_count", "representation"}
+
+    # 18. Scope mismatch failsafe (CHECK 5)
+    import contextor.core.report_query as rq
+    orig_rewrite = rq.rewrite_selected_indices
+
+    call_count = 0
+
+    def _mismatch_rewrite(blocks, cat, resolve_names=True):
+        nonlocal call_count
+        rewritten, diag = orig_rewrite(blocks, cat, resolve_names=resolve_names)
+        if not resolve_names:
+            call_count += 1
+            # Mutate candidate generation (call 2) to force candidate mismatch
+            if call_count == 2:
+                rewritten = {k: v for k, v in list(rewritten.items())[:1]}
+        return rewritten, diag
+
+    monkeypatch.setattr(rq, "rewrite_selected_indices", _mismatch_rewrite)
+    raw_mismatch_fallback = mcp_server.extract_indexed_report_context.fn(
+        repo_path=str(tmp_path),
+        query="multi_mismatch.py",
+        report_path=str(multi_report_path),
+        max_items=2,
+        evidence_limit=40,
+        representation="auto",
+    )
+    res_mismatch_fallback = json.loads(raw_mismatch_fallback)
+    assert "status" not in res_mismatch_fallback
+    assert res_mismatch_fallback["representation"] == "named"
+    assert res_mismatch_fallback["requested_representation"] == "auto"
+    assert res_mismatch_fallback["artifact_count"] == 2
+    monkeypatch.setattr(rq, "rewrite_selected_indices", orig_rewrite)
+
+    # 19. Diagnostics preservation across query resolution (CHECK 6)
+    diag_catalog = IndexCatalog(
+        modules={"1/1": "main", "2/1": "pkg.c1"},
+        artifacts={"A1/1": "main::art1", "A2/1": "main::art2", "A3/1": "main::art3"},
+        module_paths={"main": "main.py"},
+    )
+    # Report where A3/1 has unknown module '99/1' in consumer_module_indices
+    diag_report = {
+        "_format_version": "3",
+        "artifacts": {
+            "A1/1": {"artifact_id": "A1/1", "definer_module": "1/1", "consumer_module_indices": ["2/1"], "consumer_count": 1},
+            "A2/1": {"artifact_id": "A2/1", "definer_module": "1/1", "consumer_module_indices": [], "consumer_count": 0},
+            "A3/1": {"artifact_id": "A3/1", "definer_module": "1/1", "consumer_module_indices": ["99/1"], "consumer_count": 1},
+        }
+    }
+    diag_report_path = tmp_path / "diag_report.json"
+    diag_report_path.write_text(json.dumps(diag_report), encoding="utf-8")
+    monkeypatch.setattr(
+        "contextor.core.report_query.catalog_from_registry",
+        lambda *_args, **_kwargs: diag_catalog,
+    )
+    # Bounded query (max_items=1 selects only A1/1; A3/1 is outside bounded scope)
+    raw_diag_named = mcp_server.extract_indexed_report_context.fn(
+        repo_path=str(tmp_path),
+        query="main.py",
+        report_path=str(diag_report_path),
+        max_items=1,
+        representation="named",
+    )
+    res_diag_named = json.loads(raw_diag_named)
+    assert res_diag_named["artifact_count"] == 1
+    assert len(res_diag_named["diagnostics"]["dropped_references"]) == 1
+    assert res_diag_named["diagnostics"]["dropped_references"][0]["artifact_id"] == "A3/1"
+
+
+
 
 
 def test_file_edit_context_prefers_fresh_live_graph_over_stale_saved_matrix(

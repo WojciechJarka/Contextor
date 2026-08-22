@@ -23,7 +23,7 @@ LEGACY_SIGNATURES = {
     "get_report_diff": "(repo_path: str, max_items: int | None = 20, compact: bool = True, fields: list[str] | None = None) -> str",
     "describe_canonical_state": "() -> str",
     "query_canonical_projection": "(repo_path: str, request: dict[str, typing.Any]) -> str",
-    "extract_indexed_report_context": "(repo_path: str, query: str, report_path: str = '', resolve_indices: bool = True, public_api_only: bool = False, max_items: int | None = 20, fields: list[str] | None = None) -> str",
+    "extract_indexed_report_context": "(repo_path: str, query: str, report_path: str = '', resolve_indices: bool = True, public_api_only: bool = False, max_items: int | None = 20, fields: list[str] | None = None, evidence_limit: int | None = 3, representation: str | None = None) -> str",
     "lookup_index_entries": "(repo_path: str, ids: list[str]) -> str",
     "get_artifacts_for_module": "(repo_path: str, module_name: str, include_consumers: bool = True, symbol_filter: str = '', limit: int | None = 50, evidence_limit: int | None = 20, compact: bool = True, fields: list[str] | None = None, representation: str = 'named') -> str",
     "lookup_artifact_by_symbol": "(repo_path: str, symbol_name: str, limit: int | None = 20, evidence_limit: int | None = 20, compact: bool = True, fields: list[str] | None = None) -> str",

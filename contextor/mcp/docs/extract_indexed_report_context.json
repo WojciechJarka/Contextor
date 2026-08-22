@@ -2,19 +2,21 @@
   "version": "1.0.0",
   "tool": "extract_indexed_report_context",
   "purpose": [
-    "[OPTIMIZED] Extracts complete matching blocks from an indexed artifact report."
+    "[OPTIMIZED] Extracts matching blocks from an indexed artifact report with progressive disclosure and representation negotiation."
   ],
   "parameters": [
-    "Set ``public_api_only=True`` to mirror the GUI checkbox: private names are\nexcluded, but zero detected consumers do not make an artifact private."
+    "Set ``public_api_only=True`` to mirror the GUI checkbox: private names are\nexcluded, but zero detected consumers do not make an artifact private.",
+    "``evidence_limit`` (default 3) bounds the number of nested consumer identities\nper artifact block (``consumer_modules`` in resolved mode, ``consumer_module_indices``\nin indexed mode). Pass ``None`` for complete nested consumers, or ``0`` for counts\nonly. ``consumer_count`` always reflects the truthful total. When nested evidence\nis truncated, per-block ``consumer_modules_truncated`` or\n``consumer_module_indices_truncated`` is set to ``True`` and an ``expand``\ndescriptor is emitted. Pass ``max_items=None, evidence_limit=None`` for fully\nlossless retrieval.",
+    "``representation`` (default ``None``) selects the serialization format:\n- ``None``: preserves legacy behavior controlled by ``resolve_indices``;\n- ``'named'``: emits human-readable symbol names using representation-independent canonical artifact-ID ordering;\n- ``'indexed'``: emits compact indexed IDs using the same canonical ordering and attaches ``resolve_via: 'lookup_index_entries'``;\n- ``'auto'``: stateless candidate size negotiation. When indexed representation materially reduces serialized payload size, returns a compact decision response with directly executable retry options; otherwise returns a direct named result.\nNon-None ``representation`` takes deterministic precedence over ``resolve_indices``. When ``total > max_items``, explicit representation modes use canonical artifact-ID bounding, which may differ from legacy symbol-string bounding. Under ``representation='auto'``, ``expand`` descriptors in direct-auto results preserve ``representation='auto'`` (E1): ``retry_with_full_evidence`` expands evidence scope but may return a decision response if the expanded payload is material; ``retry_fully_lossless`` requests complete top-level and nested scope under auto. An immediate lossless domain payload is obtained by passing explicit ``representation='named'`` or ``'indexed'`` with ``max_items=None, evidence_limit=None``."
   ],
   "behavior": [],
   "freshness": [],
   "errors": [
     "Resolution is index-first and shared with the GUI parser. Queries may use an\nartifact/module ID, a ``.py`` path, a full ``module::symbol`` key, or explicit\n``file:``, ``module:``, ``symbol:`` and ``artifact:`` prefixes. Exact matches\nare never replaced by fuzzy guesses; ambiguous and missing queries remain\nexplicit. Active dictionaries fall back to both recovery dictionaries, while\nblocks with unresolved artifact or definer IDs are omitted with diagnostics.",
-    "Omit ``report_path`` to read the current compact artifact report. Every\nselected block is returned complete, including nested objects. ``max_items``\ncontrols the number of complete artifact blocks (default 20); pass ``None``\nfor every match. ``total_artifact_count`` and ``truncated`` expose omitted\nmatches. ``fields`` projects top-level keys after bounding; accepted names\nare the keys returned by the shared indexed-query resolver plus\n``total_artifact_count``, ``truncated``, and ``data_source``. Invalid\nprojections return the exact current allowlist."
+    "Omit ``report_path`` to read the current compact artifact report. ``max_items``\ncontrols the number of complete artifact blocks (default 20); pass ``None``\nfor every match. ``total_artifact_count`` and ``truncated`` expose omitted\nmatches. ``fields`` projects top-level keys after bounding; accepted names\nare the keys returned by the shared indexed-query resolver plus\n``total_artifact_count``, ``truncated``, and ``data_source``. Invalid\nprojections return the exact current allowlist."
   ],
   "usage_notes": [
-    "LLM use: prefer this over reading a whole compact JSON when one file, symbol, or\nID is relevant. Inspect resolution/diagnostics and narrow an ambiguous query;\ndo not treat suggestions as confirmed matches."
+    "LLM use: prefer this over reading a whole compact JSON when one file, symbol, or\nID is relevant. Inspect resolution/diagnostics and narrow an ambiguous query;\ndo not treat suggestions as confirmed matches. Use ``lookup_index_entries`` to resolve indexed IDs in batch."
   ],
   "examples": []
 }

@@ -1,177 +1,116 @@
-# TOKEN EFFICIENCY — STEP A12.1: READ-ONLY PAYLOAD CLASSIFICATION OF EXTRACT_INDEXED_REPORT_CONTEXT
+# TOKEN EFFICIENCY — STEP A12.4F3: FINAL DIAGNOSTICS-INVARIANCE PROOF AND PUBLIC SIZE-TERMINOLOGY CORRECTION
 
-## FILES_CHANGED=NONE
+## FILES_CHANGED
+- `C:\Temp\Contextor_Repo\contextor\mcp\docs\extract_indexed_report_context.json`
 
 ---
 
-## CURRENT_SIGNATURE
+## F3_ACTUAL_DIFF
 
-```python
-def extract_indexed_report_context(
-    repo_path: str,
-    query: str,
-    report_path: str = "",
-    resolve_indices: bool = True,
-    public_api_only: bool = False,
-    max_items: int | None = 20,
-    fields: list[str] | None = None,
-) -> str:
+```diff
+diff --git a/contextor/mcp/docs/extract_indexed_report_context.json b/contextor/mcp/docs/extract_indexed_report_context.json
+index 42f65ab..ebe6178 100644
+--- a/contextor/mcp/docs/extract_indexed_report_context.json
++++ b/contextor/mcp/docs/extract_indexed_report_context.json
+@@ -10,3 +10,3 @@
+     "``representation`` (default ``None``) selects the serialization format:\n- ``None``: preserves legacy behavior controlled by ``resolve_indices``;\n- ``'named'``: emits human-readable symbol names using representation-independent canonical artifact-ID ordering;\n- ``'indexed'``: emits compact indexed IDs using the same canonical ordering and attaches ``resolve_via: 'lookup_index_entries'``;\n- ``'auto'``: stateless candidate size negotiation. When indexed representation materially reduces serialized payload size, returns a compact decision response with directly executable retry options; otherwise returns a direct named result.\nNon-None ``representation`` takes deterministic precedence over ``resolve_indices``. When ``total > max_items``, explicit representation modes use canonical artifact-ID bounding, which may differ from legacy symbol-string bounding. Under ``representation='auto'``, ``expand`` descriptors in direct-auto results preserve ``representation='auto'`` (E1): ``retry_with_full_evidence`` expands evidence scope but may return a decision response if the expanded payload is material; ``retry_fully_lossless`` requests complete top-level and nested scope under auto. An immediate lossless domain payload is obtained by passing explicit ``representation='named'`` or ``'indexed'`` with ``max_items=None, evidence_limit=None``."
 ```
 
 ---
 
-## CURRENT_RUNTIME_MODES
+## OMITTED_BLOCKS_REPRESENTATION_INVARIANT
+`YES`
 
-1. **Default Resolved Mode (`resolve_indices=True, max_items=20`):**
-   - Wyszukuje blok raportu pasujący do zapytania `query` (ID artefaktu/modułu, nazwa symbolu, ścieżka pliku).
-   - Rozwiązuje identyfikatory modułów w listach konsumentów do czytelnych nazw kropkowych.
-   - Ogranicza liczbę bloków artefaktów do `max_items=20`.
-2. **Compact Indexed Mode (`resolve_indices=False`):**
-   - Zachowuje numeryczne/trwałe identyfikatory indeksów (`228/1`, `A1971/2`) w definerach i tablicach konsumentów, redukując payload o **23–36%**.
-3. **Public API Filter (`public_api_only=True`):**
-   - Filtruje symbole prywatne (zaczynające się od znaku `_`).
-4. **Lossless Full Mode (`max_items=None`):**
-   - Zwraca wszystkie dopasowane bloki artefaktów dla danego modułu/zapytania.
-5. **Fields Projection (`fields=[...]`):**
-   - Projekcja kluczy najwyższego poziomu.
+## OMITTED_BLOCKS_SOURCE_REASON
+W `contextor/core/report_query.py` (`rewrite_selected_indices`, linie 641, 647, 654) walidacja obecności `artifact_id` i `definer_module` w katalogu (`artifact_name()` i `module_name()`) wykonuje się bezwarunkowo, niezależnie od wartości flagi `resolve_names` (`True` lub `False`). Ponieważ `selected_blocks` jest ścisłym podzbiorem bloków przetworzonych w `res_base = query_indexed_report(..., resolve_indices=False)`, zbiór `omitted_blocks` dla kandydata jest podzbiorem `res_base["diagnostics"]["omitted_blocks"]` i nie może zawierać żadnego nowego wpisu.
 
 ---
 
-## CURRENT_SCOPE_CONTROLS
+## DROPPED_REFERENCES_REPRESENTATION_INVARIANT
+`YES`
 
-- `query: str` (wymagane precyzyjne kryterium wyszukiwania).
-- `max_items: int | None = 20` (limit bloków artefaktów).
-- `resolve_indices: bool = True/False` (przełącznik reprezentacji nazwanej vs indeksowanej).
-- `public_api_only: bool = False/True` (filtr widoczności publicznej).
-- `fields: list[str] | None = None` (selekcja sekcji).
+## DROPPED_REFERENCES_SOURCE_REASON
+W `contextor/core/report_query.py` (`rewrite_selected_indices`, linie 678–686 dla `consumer_module_indices` oraz linie 606–611 dla zagnieżdżonych `usage`) sprawdzenie `module_name(consumer_id)` i ewentualne dołączenie do `diagnostics["dropped_references"]` następuje przed rozgałęzieniem `if resolve_names:`. Zarówno w trybie indeksowanym (`resolve_names=False`), jak i nazwanym (`resolve_names=True`) nieznane identyfikatory modułów są wykrywane i rejestrowane w identyczny sposób.
 
 ---
 
-## AVAILABLE_REPORT_DATA
+## RESOLVED_FROM_RECOVERY_REPRESENTATION_INVARIANT
+`YES`
 
-- **Duży raport produkcyjny:** `output/Contextor_Repo_artifacts_compact.json` (87,560 B na dysku, 140+ modułów, 700+ artefaktów).
-- **Średni raport:** `output/facade_repo_artifacts_compact.json` (2,134 B).
-- **Mały raport:** `output/repo1_artifacts_compact.json` (1,037 B).
-
----
-
-## REQUEST_SELECTION
-
-1. **SMALL_CONTEXT:** `query="IncrementalAnalysisEngine"` — pojedynczy symbol (1 artefakt).
-2. **MEDIUM_CONTEXT:** `query="contextor.core.paths"` — moduł o średniej wielkości (17 artefaktów).
-3. **LARGE_BOUNDED:** `query="contextor.core.analysis.incremental.engine"` — moduł o dużej liczbie artefaktów z domyślnym limitem `max_items=20`.
-4. **WIDEST_LEGAL:** `query="contextor.core.analysis.incremental.engine"` z `max_items=None` (wszystkie 30 artefaktów).
+## RESOLVED_FROM_RECOVERY_SOURCE_REASON
+W `contextor/core/report_query.py` (`rewrite_selected_indices`, linie 665, 669, 690 oraz 612) sprawdzenia `if artifact_source == "recovery":` oraz `if definer_source == "recovery":` / `consumer_source == "recovery"` są wykonywane zarówno dla `resolve_names=False`, jak i `resolve_names=True`. Zatem `res_base["diagnostics"]["resolved_from_recovery"]` zawiera już wszystkie odzyskane wpisy dla całego dopasowanego zakresu zapytania.
 
 ---
 
-## PAYLOAD_MEASUREMENTS
-
-| Request Scope | Zapytanie (`query`) | Zwrócone artefakty | Total available | Truncated | Resolved (`resolve_indices=True`) | Indexed (`resolve_indices=False`) | Zysk z Indexed |
-|---|---|---|---|---|---|---|---|
-| **SMALL** | `IncrementalAnalysisEngine` | 1 | 1 | `False` | **2,674 B** | **1,720 B** | **-35.7%** (-954 B) |
-| **MEDIUM** | `contextor.core.paths` | 17 | 17 | `False` | **9,903 B** | **7,563 B** | **-23.6%** (-2,340 B) |
-| **LARGE_BOUNDED** | `contextor.core.analysis.incremental.engine` | 20 | 30 | `True` | **17,674 B** | **12,098 B** | **-31.6%** (-5,576 B) |
-| **WIDEST_LEGAL** | `contextor.core.analysis.incremental.engine` (`max=None`) | 30 | 30 | `False` | **28,748 B** | **18,740 B** | **-34.8%** (-10,008 B) |
+## CURRENT_MERGE_CORRECT
+`YES` (wszystkie rodzaje diagnostyk są representation-invariant na poziomie kodu źródłowego; obecna implementacja inicjalizująca `merged_diagnostics` z pełnego `res_base["diagnostics"]` i deduplikująca ewentualne wpisy recovery jest w 100% poprawna i kompletna).
 
 ---
 
-## DEFAULT_SAFETY_RESULT
-
-1. **Wymóg jawnego zapytania:**
-   - Narzędzie wymaga przekazania parametru `query`, uniemożliwiając przypadkowy zrzut całego 87.5 KB raportu.
-2. **Sztywne limitowanie domyślne:**
-   - Domyślny parametr `max_items=20` skutecznie ogranicza liczbę zwracanych bloków artefaktów.
-3. **Wbudowana negocjacja reprezentacji:**
-   - Caller może bezpośrednio zażądać reprezentacji indeksowanej (`resolve_indices=False`), uzyskując ponad 30% redukcji wielkości odpowiedzi.
+## DIAGNOSTICS_FIX
+`NONE_REQUIRED` (kod produkcyjny poprawnie zachowuje diagnostyki zapytania i nie wymaga zmian).
 
 ---
 
-## LARGE_BOUNDED_SECTION_COSTS
-
-Rozbicie payloadu dla `contextor.core.analysis.incremental.engine` (20 artefaktów, Resolved = 17,674 B):
-
-- Metadane rezolucji zapytania (`resolution`): **450 B (2.5%)**
-- Metadane wyboru i diagnostyki (`selection`, `diagnostics`, `totals`): **480 B (2.7%)**
-- Klucze słownika artefaktów: **1,800 B (10.2%)**
-- Pola tożsamości artefaktów (`artifact_id`, `kind`, `definer_module`): **3,800 B (21.5%)**
-- Tablice modułów konsumenckich (`consumer_modules`): **11,144 B (63.1%)**
+## FULL_SCOPE_DIAGNOSTICS_PRESERVED
+`YES` (pełne diagnostyki zapytania dla całego zakresu dopasowań są zachowane w odpowiedzi pomimo ograniczenia `max_items`).
 
 ---
 
-## INDEX_EFFICIENCY_FINDINGS
-
-- Rozwinięcie nazw konsumentów (`resolve_indices=True`) stanowi 63% wielkości odpowiedzi w dużych modułach.
-- W trybie `resolve_indices=False` identyfikatory modułów pozostają w zwięzłym formacie (`"112/1"`), dając natychmiastowy zysk **5.5 KB (31.6%)**.
-- Narzędzie posiada już wbudowane pełne wsparcie dla obu trybów, a identyfikatory mogą być w razie potrzeby masowo tłumaczone przez `lookup_index_entries`.
-- **Wniosek:** `ADDITIONAL_REPRESENTATION_NEGOTIATION_NOT_JUSTIFIED`.
+## CANDIDATE_SPECIFIC_DIAGNOSTICS_PRESERVED
+`YES` (diagnostyki generowane podczas budowania odpowiedzi kandydata są w pełni reprezentowane w zwracanym obiekcie).
 
 ---
 
-## PROGRESSIVE_DISCLOSURE_STATUS
-
-Model Progressive Disclosure jest w pełni zrealizowany:
-- **Poziom 1:** Ekstrakcja pojedynczego symbolu (1.7 KB – 2.6 KB).
-- **Poziom 2:** Bounded ekstrakcja modułu z `max_items=20` (12.0 KB – 17.6 KB).
-- **Poziom 3:** Filtr `public_api_only=True` eliminujący implementacje prywatne.
-- **Poziom 4:** Pełna bezstratna ekstrakcja `max_items=None` (na jawne żądanie).
+## AUTO_SIZE_EXACTNESS_PRESERVED
+`YES` (wartości `sizes.named_bytes` i `sizes.indexed_bytes` w odpowiedzi decyzyjnej `auto` dokładnie odpowiadają zserializowanym bajtom UTF-8 wykonywalnych opcji `options["named"]` i `options["indexed"]`).
 
 ---
 
-## PROGRESSIVE_DISCLOSURE_SIMULATION
-
-Symulacje limitów `max_items` dla `contextor.core.analysis.incremental.engine`:
-
-| Konfiguracja | Zwrócone artefakty | Resolved (`resolve_indices=True`) | Indexed (`resolve_indices=False`) |
-|---|---|---|---|
-| `max_items=5` | 5 | **4,850 B** | **3,350 B** |
-| `max_items=10` | 10 | **9,200 B** | **6,400 B** |
-| `max_items=20` (Default) | 20 | **17,674 B** | **12,098 B** |
-| `max_items=None` (Lossless) | 30 | **28,748 B** | **18,740 B** |
+## DOC_SIZE_TERMINOLOGY_CORRECTED
+`YES` (sformułowanie w `extract_indexed_report_context.json` zmieniono z `saves material payload tokens` na `materially reduces serialized payload size`).
 
 ---
 
-## RANGE_CONTINUATION_STATUS
-`NONE` (narzędzie stosuje precyzyjne zapytania obiektowe `query`, co eliminuje potrzebę stronicowania kursorem).
+## LEGACY_REPRESENTATION_NONE_UNCHANGED
+`YES`
 
 ---
 
-## OVERLAP_FINDINGS
-
-- `extract_indexed_report_context` posiada unikalną rolę: służy do odczytu wycinków z *raportów statycznych na dysku* (`*_artifacts_compact.json`), podczas gdy `get_artifacts_for_module` operuje na *stanie LIVE w pamięci RAM*.
-- Nie występuje szkodliwa duplikacja logiki.
+## A12_3_SEMANTICS_UNCHANGED
+`YES`
 
 ---
 
-## EXISTING_LOSSLESS_PATH
-
-- Bezstratny zrzut wszystkich pasujących bloków raportu:
-  `extract_indexed_report_context(repo_path, query, max_items=None)`
-
----
-
-## DOCUMENTATION_STATUS
-`DOCUMENTATION_STATUS=CURRENT`
+## TARGETED_TEST_COMMANDS
+```powershell
+.venv\Scripts\pytest.exe tests/test_mcp_split_s2e.py tests/test_mcp_documentation.py tests/test_mcp_regressions.py -k "extract_indexed_report_context or test_documentation_has_exact_public_tool_file_coverage or test_s2e_registration_order_bindings_signatures_and_descriptions" -v
+```
 
 ---
 
-## DOCUMENTATION_GAPS
-`NONE` (dokument `extract_indexed_report_context.json` precyzyjnie opisuje składnię zapytań, parametry `public_api_only`, `max_items`, `fields` oraz zachowanie w przypadku brakujących/niejednoznacznych wpisów).
+## TARGETED_TEST_RESULTS
+- `tests/test_mcp_split_s2e.py::test_s2e_registration_order_bindings_signatures_and_descriptions` **PASSED**
+- `tests/test_mcp_documentation.py::test_documentation_has_exact_public_tool_file_coverage` **PASSED**
+- `tests/test_mcp_regressions.py::test_extract_indexed_report_context_returns_every_shared_resolver_block` **PASSED**
+- `tests/test_mcp_regressions.py::test_extract_indexed_report_context_can_filter_to_public_api` **PASSED**
+- `tests/test_mcp_regressions.py::test_extract_indexed_report_context_nested_progressive_disclosure` **PASSED**
+- `tests/test_mcp_regressions.py::test_extract_indexed_report_context_representation_negotiation` **PASSED**
+- **Wynik:** **6 passed, 84 deselected in 3.57s** (100% PASS).
 
 ---
 
-## TOKEN_EFFICIENCY_CLASSIFICATION
-`A` (NO CHANGE)
+## REPRESENTATION_HELPER_MODIFIED
+`NO` (`contextor/mcp/representation.py` nie był modyfikowany).
 
 ---
 
-## CLASSIFICATION_RATIONALE
+## UNEXPECTED_SCOPE_CHANGES
+`NONE`
 
-1. **Bezpieczne, precyzyjne zapytania:**
-   - Narzędzie wymaga parametru `query` i domyślnie ogranicza wyniki do `max_items=20`.
-2. **Wbudowana obsługa reprezentacji indeksowanej:**
-   - Przełącznik `resolve_indices=False` jest już częścią publicznego API i pozwala zaoszczędzić ponad 30% tokenów.
-3. **Brak uzasadnienia dla refaktoringu:**
-   - Narzędzie w pełni realizuje swoje zadanie jako chirurgiczny ekstraktor raportów.
+---
+
+## MCP_RESTART_REQUIRED=YES
 
 ---
 
@@ -195,4 +134,4 @@ Symulacje limitów `max_items` dla `contextor.core.analysis.incremental.engine`:
 ---
 
 ## NEXT_STEP_PROPOSAL
-STEP A12 CLOSED — no extract_indexed_report_context token-efficiency refactor justified; select the next genuinely high-cost unmeasured MCP tool.
+STEP A12.4 CERTIFIED IN SOURCE — manual MCP restart required for final runtime certification; no further source-design steps required.
