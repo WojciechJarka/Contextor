@@ -777,6 +777,7 @@ def extract_module_usage_facts(
     dyn_calls = set(
         item[0] if isinstance(item, tuple) else item
         for item in visitor.called_ambiguous
+        if (item[0] if isinstance(item, tuple) else item) not in local_resolved_names
     )
     for node in ast.walk(tree):
         if isinstance(node, ast.Call):

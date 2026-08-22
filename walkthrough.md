@@ -1,77 +1,67 @@
-# ISSUE 2 / STAGE A — final materialization marker fix
+# Regression fix — event callback full/incremental parity
 
-## Summary
+## Result
 
-The domain default now means “not proven materialized”: `ModuleUsageFacts.symbol_calls_materialized=False`. Only successful authoritative extraction from a valid source/AST sets it to `True`. Missing source and syntax-error paths retain `False`; a valid module retains `True` even when its correct graph is empty.
+`ROOT_CAUSE=Stage A added local methods to SymbolReferenceVisitor.target_symbols so canonical intra-module calls could be captured. For e.subscribe/e.on/e.bind, unresolved instance-method matching classified the local method (for example consumer.Emitter.subscribe) as called_ambiguous. extract_module_usage_facts promoted that local-only ambiguous fact into runtime_calls. The incremental artifact-consumption refresh then resolved it to consumer::Emitter.subscribe and installed consumer as its own ordinary runtime consumer. Full analysis correctly excluded this self-consumer. The actual event_fn fact remained correctly and disjointly classified as event_bindings in both paths.`
 
-No backfill policy, LIVE startup ownership, tuple representation, snapshot schema, legacy migration, identity registry, artifact consumption, MCP contract, or documentation changed.
+`AUTHORITATIVE_SEMANTICS=Event callback arguments remain event_bindings, not callback_calls or ordinary direct/runtime calls. Local intra-module method identities belong to symbol_calls when confirmed; they must not leak into outbound runtime_calls through ambiguous fallback.`
 
-## Implementation
+`WHY_INCREMENTAL_ADDED_CONSUMER=plan_executor rebuilds artifact consumption from every ModuleUsageFacts usage channel. The spurious runtime_calls=('consumer.Emitter.subscribe',) therefore created consumer::Emitter.subscribe -> consumer, while the full oracle had no such consumer.`
 
-- `contextor/core/domain/usage_facts.py`: changed the marker default from `True` to `False`.
-- `contextor/core/reference/engine.py`: the successful final `extract_module_usage_facts` return explicitly sets `symbol_calls_materialized=True`; early `None` and `SyntaxError` returns use the false domain default.
-- `tests/test_symbol_call_facts.py`: added direct regressions for missing source, invalid source, valid materialized-empty source, valid source with an edge, and preserved snapshot/restart behavior.
+`FIX=Filter local_resolved_names out of visitor.called_ambiguous when materializing runtime_calls, matching the existing local-name exclusion already applied to direct_calls. Event binding extraction and symbol_called were not changed.`
 
-## Evidence
+This was a regression introduced by the Stage A local-symbol target expansion, not an older parity defect exposed by backfill. No changes were required in `visitor.py`, `usage_facts.py`, materialization, snapshot compatibility, or LIVE startup.
 
-Required targeted tests:
+## Validation
 
-`C:\Temp\Contextor_Repo\.venv\Scripts\python.exe -m pytest -q tests/test_symbol_call_facts.py tests/test_module_usage_facts.py`
+Targeted parity selector:
 
-Result: `25 passed in 4.38s`.
+`C:\Temp\Contextor_Repo\.venv\Scripts\python.exe -m pytest -q tests/test_completeness_freshness_parity_proof.py -k "event_callback_disjoint_contract_e1_all_event_forms or full_static_channel_domain_all_six_channels_parity"`
 
-Owning LIVE-state tests:
+Result: `4 passed, 27 deselected in 12.55s`.
 
-`C:\Temp\Contextor_Repo\.venv\Scripts\python.exe -m pytest -q tests/test_live_state_consistency.py`
+Stage A/reference regressions:
 
-Result: `13 passed in 51.82s`.
+`C:\Temp\Contextor_Repo\.venv\Scripts\python.exe -m pytest -q tests/test_symbol_call_facts.py tests/test_reference_regressions.py tests/test_module_usage_facts.py`
 
-Post-change LIVE restart certification:
+Result: `29 passed in 4.22s`.
 
-- `ping.available=true`, revision 1317
+Current LIVE canonical control:
+
 - `graph_analytics.symbol_calls_materialized=true`
-- all three required canonical edges remain present:
-  - `generate_graph_analytics_report -> _compute_pagerank`, line 1648, `direct`
-  - `_compute_pagerank -> _normalized_edges`, line 737, `direct`
-  - `compute_topology_analytics -> _compute_pagerank`, line 1930, `direct`
-- 157 correctly materialized-empty modules remain marked `True`
-- restart metadata revision remained `1317 -> 1317`; no unnecessary backfill/save occurred
+- canonical facts: 54
+- all three required graph-analytics edges remain present
 
 ## Verdict
 
-`MISSING_SOURCE_MATERIALIZED=FALSE`
+`EVENT_CALLBACK_PARITY=PASS`
 
-`SYNTAX_ERROR_MATERIALIZED=FALSE`
+`SIX_CHANNEL_PARITY=PASS`
 
-`VALID_EMPTY_MATERIALIZED=TRUE`
+`SYMBOL_CALL_GRAPH_REGRESSION=PASS`
 
-`VALID_EDGE_MATERIALIZED=TRUE`
+`OPEN_P0=NONE`
 
-`PERSISTED_MATERIALIZED_EMPTY_PRESERVED=PASS`
+`OPEN_P1=NONE`
 
-`LEGACY_BACKFILL_REGRESSIONS=PASS`
+`OPEN_P2=NONE`
 
-`LIVE_RESTART_REQUIRED=DONE`
+`VERDICT=PASS`
 
-`MCP_RESTART_REQUIRED=NO`
-
-`ISSUE_2_STAGE_A_VERDICT=CLOSED`
+Stage B runtime certification was not resumed.
 
 ## Diffs
 
-`FILES_CHANGED=contextor/core/domain/usage_facts.py,contextor/core/reference/engine.py,tests/test_symbol_call_facts.py`
+`FILES_CHANGED=contextor/core/reference/engine.py`
+
+`ACTUAL_DIFF=`
 
 ```diff
-- symbol_calls_materialized: bool = True
-+ symbol_calls_materialized: bool = False
-
-  return ModuleUsageFacts(
-      ...
-      symbol_calls=symbol_calls,
-+     symbol_calls_materialized=True,
-  )
-
-+ targeted marker-semantics and persistence regressions
+ dyn_calls = set(
+     item[0] if isinstance(item, tuple) else item
+     for item in visitor.called_ambiguous
++    if (item[0] if isinstance(item, tuple) else item) not in local_resolved_names
+ )
 ```
 
-No other production/test files were changed by this task. `walkthrough.md` is the required reporting artifact and is excluded from `FILES_CHANGED`.
+`walkthrough.md` is the required reporting artifact and is excluded from `FILES_CHANGED`.
