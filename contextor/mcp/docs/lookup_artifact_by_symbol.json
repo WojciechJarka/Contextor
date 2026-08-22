@@ -5,7 +5,7 @@
     "[OPTIMIZED] Finds artifacts matching a symbol name and returns their details."
   ],
   "parameters": [
-    "Works on canonical LIVE artifact facts.\nReturns defining module, kind, consumer count, and consumer module list.\nExact matches are preferred over partial matches. ``limit`` bounds the\nresponse while ``total_matches`` and ``truncated`` describe omitted data.\nConsumers within every match are bounded independently by\n``evidence_limit``, always expose ``total`` and ``truncated``, and include\n``items`` only when ``compact=False``. Pass ``None`` for all matches or all\nconsumers. ``fields`` projects top-level keys after compact shaping.\nAllowed values are ``query``, ``match_count``, ``total_matches``,\n``truncated``, ``data_source``, and ``artifacts``."
+    "Works on canonical LIVE artifact facts.\nReturns defining module, kind, consumer count, and consumer module list.\nSupply ``symbol_name`` or alias ``symbol``. Exact matches are preferred\nover partial matches. ``limit`` bounds the response while ``total_matches``\nand ``truncated`` describe omitted data. Consumers within every match are\nbounded independently by ``evidence_limit``, always expose ``total`` and\n``truncated``, and include ``items`` only when ``compact=False``. Pass\n``None`` for all matches or all consumers. ``fields`` projects top-level keys\nafter compact shaping. Allowed values are ``query``, ``match_count``,\n``total_matches``, ``truncated``, ``data_source``, and ``artifacts``."
   ],
   "behavior": [],
   "freshness": [],

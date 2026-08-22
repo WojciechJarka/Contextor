@@ -41,7 +41,7 @@ _EXPECTED_SIGNATURES = {
     "search_source": "(repo_path: str, search_term: str, limit: int | None = 20, case_sensitive: bool = False, allow_large_output: bool = False) -> str",
     "get_source_range": "(repo_path: str, file_path: str, start_line: int, end_line: int, allow_large_output: bool = False) -> str",
     "get_artifacts_for_module": "(repo_path: str, module_name: str, include_consumers: bool = True, symbol_filter: str = '', limit: int | None = 50, evidence_limit: int | None = 20, compact: bool = True, fields: list[str] | None = None, representation: str = 'named') -> str",
-    "lookup_artifact_by_symbol": "(repo_path: str, symbol_name: str, limit: int | None = 20, evidence_limit: int | None = 20, compact: bool = True, fields: list[str] | None = None) -> str",
+    "lookup_artifact_by_symbol": "(repo_path: str, symbol_name: str = '', limit: int | None = 20, evidence_limit: int | None = 20, compact: bool = True, fields: list[str] | None = None, symbol: str | None = None) -> str",
 }
 
 
@@ -121,3 +121,151 @@ def test_s2c_has_no_registration_dependency_binding_or_report_io():
         assert "resolve_output_dir" not in source
         assert "_get_canonical_report" not in source
         assert "json.load" not in source
+
+
+def _setup_lookup_state(monkeypatch):
+    import json
+    from types import SimpleNamespace
+    from contextor.core.analysis.state_manager import RepositoryAnalysisState
+    from contextor.mcp import query_helpers, runtime as mcp_runtime
+
+    state = RepositoryAnalysisState(
+        artifacts={
+            "pkg.mod_a": {
+                "own_symbols": ["my_func", "ambig_symbol"],
+                "symbols": {
+                    "functions": ["my_func", "ambig_symbol"],
+                },
+                "consumers": {
+                    "my_func": {
+                        "consumer_count": {"total": 2},
+                        "consumers": ["tests.test_1", "tests.test_2"],
+                    }
+                },
+            },
+            "pkg.mod_b": {
+                "own_symbols": ["ambig_symbol"],
+                "symbols": {
+                    "functions": ["ambig_symbol"],
+                },
+            },
+        },
+        artifact_consumption={
+            "pkg.mod_a::my_func": {
+                "consumers": ["tests.test_1", "tests.test_2"],
+                "channels": {"tests.test_1": ["direct_calls"], "tests.test_2": ["direct_calls"]},
+            },
+            "pkg.mod_a::ambig_symbol": {
+                "consumers": [],
+                "channels": {},
+            },
+            "pkg.mod_b::ambig_symbol": {
+                "consumers": [],
+                "channels": {},
+            },
+        },
+        artifact_consumption_state="fresh",
+    )
+    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: SimpleNamespace(state=state))
+    monkeypatch.setattr(query_helpers, "read_registries", lambda _root: ({}, {}, {}, {}))
+    return state
+
+
+def test_lookup_artifact_by_symbol_legacy_symbol_name(tmp_path, monkeypatch):
+    import json
+    _setup_lookup_state(monkeypatch)
+    raw = lookup_artifact_by_symbol(
+        repo_path=str(tmp_path),
+        symbol_name="my_func",
+    )
+    res = json.loads(raw)
+    assert res["query"] == "my_func"
+    assert res["match_count"] == 1
+    assert "pkg.mod_a::my_func" in res["artifacts"]
+
+
+def test_lookup_artifact_by_symbol_alias_symbol(tmp_path, monkeypatch):
+    import json
+    _setup_lookup_state(monkeypatch)
+    raw = lookup_artifact_by_symbol(
+        repo_path=str(tmp_path),
+        symbol="my_func",
+    )
+    res = json.loads(raw)
+    assert res["query"] == "my_func"
+    assert res["match_count"] == 1
+    assert "pkg.mod_a::my_func" in res["artifacts"]
+
+
+def test_lookup_artifact_by_symbol_missing_both_returns_controlled_error(tmp_path):
+    import json
+    raw = lookup_artifact_by_symbol(
+        repo_path=str(tmp_path),
+    )
+    res = json.loads(raw)
+    assert res["status"] == "error"
+    assert res["error"] == "symbol_name or symbol is required."
+
+
+def test_lookup_artifact_by_symbol_not_found_uses_effective_symbol(tmp_path, monkeypatch):
+    _setup_lookup_state(monkeypatch)
+    raw = lookup_artifact_by_symbol(
+        repo_path=str(tmp_path),
+        symbol="missing_sym",
+    )
+    assert raw == "No current artifacts found matching 'missing_sym'."
+
+
+def test_lookup_artifact_by_symbol_ambiguity_uses_effective_symbol(tmp_path, monkeypatch):
+    import json
+    _setup_lookup_state(monkeypatch)
+    raw = lookup_artifact_by_symbol(
+        repo_path=str(tmp_path),
+        symbol="ambig_symbol",
+    )
+    res = json.loads(raw)
+    assert res["error"] == "Ambiguous canonical symbol identity."
+    assert res["query"] == "ambig_symbol"
+    assert res["candidates"] == ["pkg.mod_a::ambig_symbol", "pkg.mod_b::ambig_symbol"]
+
+
+def test_lookup_artifact_by_symbol_preserves_limit_and_compact_semantics(tmp_path, monkeypatch):
+    import json
+    _setup_lookup_state(monkeypatch)
+    raw = lookup_artifact_by_symbol(
+        repo_path=str(tmp_path),
+        symbol="my_func",
+        compact=False,
+        evidence_limit=1,
+    )
+    res = json.loads(raw)
+    entry = res["artifacts"]["pkg.mod_a::my_func"]
+    assert entry["consumers"]["total"] == 2
+    assert entry["consumers"]["truncated"] is True
+    assert len(entry["consumers"]["items"]) == 1
+
+
+def test_lookup_artifact_by_symbol_matching_both_symbol_name_and_symbol(tmp_path, monkeypatch):
+    import json
+    _setup_lookup_state(monkeypatch)
+    raw = lookup_artifact_by_symbol(
+        repo_path=str(tmp_path),
+        symbol_name="my_func",
+        symbol="my_func",
+    )
+    res = json.loads(raw)
+    assert res["query"] == "my_func"
+    assert "pkg.mod_a::my_func" in res["artifacts"]
+
+
+def test_lookup_artifact_by_symbol_conflicting_symbol_name_and_symbol_returns_error(tmp_path, monkeypatch):
+    import json
+    _setup_lookup_state(monkeypatch)
+    raw = lookup_artifact_by_symbol(
+        repo_path=str(tmp_path),
+        symbol_name="my_func",
+        symbol="different",
+    )
+    res = json.loads(raw)
+    assert res["status"] == "error"
+    assert res["error"] == "symbol_name and symbol must match when both are provided."

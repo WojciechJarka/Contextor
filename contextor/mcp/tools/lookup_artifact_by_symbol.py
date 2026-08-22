@@ -8,13 +8,36 @@ from contextor.mcp import query_helpers
 
 def lookup_artifact_by_symbol(
     repo_path: str,
-    symbol_name: str,
+    symbol_name: str = "",
     limit: int | None = 20,
     evidence_limit: int | None = 20,
     compact: bool = True,
     fields: list[str] | None = None,
+    symbol: str | None = None,
 ) -> str:
     root = Path(repo_path).expanduser().resolve()
+    normalized_symbol_name = symbol_name.strip()
+    normalized_symbol = symbol.strip() if symbol is not None else ""
+
+    if normalized_symbol_name and normalized_symbol and normalized_symbol_name != normalized_symbol:
+        return json.dumps(
+            {
+                "status": "error",
+                "error": "symbol_name and symbol must match when both are provided.",
+            },
+            indent=2,
+        )
+
+    effective_symbol = normalized_symbol or normalized_symbol_name
+    if not effective_symbol:
+        return json.dumps(
+            {
+                "status": "error",
+                "error": "symbol_name or symbol is required.",
+            },
+            indent=2,
+        )
+
     try:
         _, _, art_path_to_id, _ = query_helpers.read_registries(root)
         engine = mcp_runtime.get_or_init_engine(root)
@@ -22,20 +45,20 @@ def lookup_artifact_by_symbol(
             return "Error: No usable canonical LIVE state. Run analyze_project first."
 
         state = engine.state
-        term = symbol_name.casefold()
+        term = effective_symbol.casefold()
         candidates = []
         for module_name, module_data in sorted((state.artifacts or {}).items()):
             unavailable = query_helpers.module_truth_unavailable(state, module_name)
-            for symbol, kind in query_helpers.canonical_symbol_catalog(module_data).items():
-                if term not in symbol.casefold():
+            for s, kind in query_helpers.canonical_symbol_catalog(module_data).items():
+                if term not in s.casefold():
                     continue
                 if unavailable:
                     return json.dumps(unavailable, indent=2)
-                full_name = f"{module_name}::{symbol}"
+                full_name = f"{module_name}::{s}"
                 artifact_id = art_path_to_id.get(full_name)
                 key = artifact_id or full_name
                 candidates.append(
-                    (symbol.casefold() != term, symbol.casefold(), full_name, key, kind)
+                    (s.casefold() != term, s.casefold(), full_name, key, kind)
                 )
 
         candidates.sort()
@@ -45,7 +68,7 @@ def lookup_artifact_by_symbol(
             return json.dumps(
                 {
                     "error": "Ambiguous canonical symbol identity.",
-                    "query": symbol_name,
+                    "query": effective_symbol,
                     "candidates": [item[2] for item in candidates],
                     "data_source": "live_canonical_state",
                 },
@@ -56,20 +79,20 @@ def lookup_artifact_by_symbol(
         )
 
         if not candidates:
-            return f"No current artifacts found matching '{symbol_name}'."
+            return f"No current artifacts found matching '{effective_symbol}'."
 
         results: dict = {}
         for _, _, full_name, key, kind in candidates:
-            module_name, symbol = full_name.split("::", 1)
+            module_name, s = full_name.split("::", 1)
             entry = {
-                "symbol": symbol,
+                "symbol": s,
                 "full_name": full_name,
                 "kind": kind,
                 "definer_module": module_name,
             }
             if artifact_consumption_is_fresh(state):
                 resolved_consumers = query_helpers.canonical_symbol_consumers(
-                    state, module_name, symbol
+                    state, module_name, s
                 )
                 consumer_items, consumer_total, consumer_truncated = query_helpers.bounded_items(
                     resolved_consumers, evidence_limit
@@ -89,7 +112,7 @@ def lookup_artifact_by_symbol(
             results[key] = entry
 
         result = {
-                "query": symbol_name,
+                "query": effective_symbol,
                 "match_count": len(results),
                 "total_matches": total_matches,
                 "truncated": matches_truncated,

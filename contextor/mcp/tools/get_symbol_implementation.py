@@ -7,6 +7,8 @@ from contextor.core.source import SourceError, read_source
 from contextor.mcp import query_helpers
 from contextor.mcp import runtime as mcp_runtime
 
+DEFAULT_AUTO_FETCH_THRESHOLD_BYTES = 5120
+
 
 def _resolve_symbol_source_paths(root: Path, file_paths: list[str]) -> list[Path]:
     """Resolve explicit Python source paths while retaining repository scope."""
@@ -208,25 +210,30 @@ def _symbol_preview(root: Path, candidate: dict, member_limit: int | None) -> di
 def get_symbol_implementation(
     repo_path: str,
     symbol: str,
-    file_paths: list[str],
-    mode: str = "preview",
+    file_paths: list[str] | None = None,
+    mode: str = "auto",
     include: list[str] | None = None,
     methods: list[str] | None = None,
     member_limit: int | None = 50,
+    file_path: str | None = None,
 ) -> str:
     root = Path(repo_path).expanduser().resolve()
     if not root.is_dir():
         return json.dumps({"status": "error", "error": f"Repository path '{root}' does not exist."}, indent=2)
     mcp_runtime.publish_live_status(root, f"MCP: reading symbol {symbol}")
     normalized_mode = mode.strip().lower()
-    if normalized_mode not in {"preview", "fetch"}:
+    if normalized_mode not in {"auto", "preview", "fetch"}:
         return json.dumps(
-            {"status": "error", "error": "mode must be 'preview' or 'fetch'."},
+            {"status": "error", "error": "mode must be 'auto', 'preview', or 'fetch'."},
             indent=2,
         )
+    effective_file_paths = list(file_paths or [])
+    if file_path and file_path not in effective_file_paths:
+        effective_file_paths.append(file_path)
+
     try:
         candidates = []
-        for path in _resolve_symbol_source_paths(root, file_paths):
+        for path in _resolve_symbol_source_paths(root, effective_file_paths):
             candidates.extend(_ast_symbol_candidates(path, symbol))
     except (OSError, SyntaxError, UnicodeDecodeError, SourceError, ValueError) as exc:
         return json.dumps({"status": "error", "error": str(exc)}, indent=2)
@@ -236,7 +243,7 @@ def get_symbol_implementation(
             {
                 "status": "not_found",
                 "symbol": symbol,
-                "searched_files": file_paths,
+                "searched_files": effective_file_paths,
                 "message": "No exact class, function, or method match was found.",
             },
             indent=2,
@@ -267,7 +274,9 @@ def get_symbol_implementation(
         return json.dumps(preview, indent=2, ensure_ascii=False)
 
     allowed_sections = set(preview["available_sections"])
-    selected_sections = list(include or [])
+    selected_sections = (
+        ["implementation"] if normalized_mode == "auto" else list(include or [])
+    )
     if not selected_sections:
         return json.dumps(
             {
@@ -357,4 +366,21 @@ def get_symbol_implementation(
             )
         result["methods"] = complete_methods
     result["actual_response_size"] = _json_size(result)
-    return json.dumps(result, indent=2, ensure_ascii=False)
+    serialized_result = json.dumps(result, indent=2, ensure_ascii=False)
+
+    if normalized_mode == "auto":
+        response_bytes = len(serialized_result.encode("utf-8"))
+        if response_bytes > DEFAULT_AUTO_FETCH_THRESHOLD_BYTES:
+            preview["auto_fetch"] = {
+                "threshold_bytes": DEFAULT_AUTO_FETCH_THRESHOLD_BYTES,
+                "candidate_response_bytes": response_bytes,
+                "decision": "preview",
+                "message": (
+                    "Automatic implementation fetch was not returned because the "
+                    "candidate response exceeds the 5120-byte default threshold. "
+                    "Use mode='fetch' with an explicit include selection to fetch it."
+                ),
+            }
+            return json.dumps(preview, indent=2, ensure_ascii=False)
+
+    return serialized_result

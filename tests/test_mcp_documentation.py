@@ -17,7 +17,7 @@ LEGACY_SIGNATURES = {
     "get_module_context": "(repo_path: str, module_name: str = '', max_items: int | None = 30, compact: bool = True, fields: list[str] | None = None, module: str | None = None) -> str",
     "get_artifact_blast_radius": "(repo_path: str, artifact_name: str, max_items: int | None = 30, compact: bool = True, fields: list[str] | None = None, representation: str = 'named') -> str",
     "search_artifacts": "(repo_path: str, search_term: str, limit: int | None = 20, evidence_limit: int | None = 20, compact: bool = True, fields: list[str] | None = None) -> str",
-    "get_symbol_implementation": "(repo_path: str, symbol: str, file_paths: list[str], mode: str = 'preview', include: list[str] | None = None, methods: list[str] | None = None, member_limit: int | None = 50) -> str",
+    "get_symbol_implementation": "(repo_path: str, symbol: str, file_paths: list[str] | None = None, mode: str = 'auto', include: list[str] | None = None, methods: list[str] | None = None, member_limit: int | None = 50, file_path: str | None = None) -> str",
     "get_file_edit_context": "(repo_path: str, file_path: str = '', max_items: int | None = 30, compact: bool = True, fields: list[str] | None = None, mode: str | None = None, target: str | None = None) -> str",
     "get_layer_isolation": "(repo_path: str, layer_name: str, max_clusters: int | None = 8, max_boundary_violations: int | None = 10, compact: bool = True, fields: list[str] | None = None) -> str",
     "get_report_diff": "(repo_path: str, max_items: int | None = 20, compact: bool = True, fields: list[str] | None = None) -> str",
@@ -26,7 +26,7 @@ LEGACY_SIGNATURES = {
     "extract_indexed_report_context": "(repo_path: str, query: str, report_path: str = '', resolve_indices: bool = True, public_api_only: bool = False, max_items: int | None = 20, fields: list[str] | None = None, evidence_limit: int | None = 3, representation: str | None = None) -> str",
     "lookup_index_entries": "(repo_path: str, ids: list[str], allow_large_output: bool = False) -> str",
     "get_artifacts_for_module": "(repo_path: str, module_name: str, include_consumers: bool = True, symbol_filter: str = '', limit: int | None = 50, evidence_limit: int | None = 20, compact: bool = True, fields: list[str] | None = None, representation: str = 'named') -> str",
-    "lookup_artifact_by_symbol": "(repo_path: str, symbol_name: str, limit: int | None = 20, evidence_limit: int | None = 20, compact: bool = True, fields: list[str] | None = None) -> str",
+    "lookup_artifact_by_symbol": "(repo_path: str, symbol_name: str = '', limit: int | None = 20, evidence_limit: int | None = 20, compact: bool = True, fields: list[str] | None = None, symbol: str | None = None) -> str",
 }
 
 

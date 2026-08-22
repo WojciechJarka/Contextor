@@ -33,7 +33,7 @@ _IMPLEMENTATIONS = {
 _EXPECTED_SIGNATURES = {
     "get_project_architecture": "(repo_path: str, max_items: int | None = 10, compact: bool = True, fields: list[str] | None = None) -> str",
     "get_module_context": "(repo_path: str, module_name: str = '', max_items: int | None = 30, compact: bool = True, fields: list[str] | None = None, module: str | None = None) -> str",
-    "get_symbol_implementation": "(repo_path: str, symbol: str, file_paths: list[str], mode: str = 'preview', include: list[str] | None = None, methods: list[str] | None = None, member_limit: int | None = 50) -> str",
+    "get_symbol_implementation": "(repo_path: str, symbol: str, file_paths: list[str] | None = None, mode: str = 'auto', include: list[str] | None = None, methods: list[str] | None = None, member_limit: int | None = 50, file_path: str | None = None) -> str",
     "get_file_edit_context": "(repo_path: str, file_path: str = '', max_items: int | None = 30, compact: bool = True, fields: list[str] | None = None, mode: str | None = None, target: str | None = None) -> str",
 }
 
@@ -94,3 +94,267 @@ def test_s2d_has_no_dependency_binding_or_report_ssot():
         assert "resolve_output_dir" not in source
         assert "_get_canonical_report" not in source
         assert "json.load" not in source
+
+
+def test_get_symbol_implementation_auto_small_returns_implementation(tmp_path):
+    import json
+    src = tmp_path / "small_mod.py"
+    src.write_text("def helper():\n    return 42\n", encoding="utf-8")
+    res_raw = get_symbol_implementation(
+        repo_path=str(tmp_path),
+        symbol="helper",
+        file_paths=["small_mod.py"],
+    )
+    res = json.loads(res_raw)
+    assert res["status"] == "resolved"
+    assert res["mode"] == "fetch"
+    assert "implementation" in res
+    assert "def helper():" in res["implementation"]
+    assert "auto_fetch" not in res
+
+
+def test_get_symbol_implementation_auto_large_returns_preview_with_auto_fetch(tmp_path):
+    import json
+    # Create a function that exceeds 5120 bytes in serialized JSON
+    large_body = "\n".join(f"    x_{i} = {i} * 1000" for i in range(300))
+    src = tmp_path / "large_mod.py"
+    src.write_text(f"def large_func():\n{large_body}\n    return True\n", encoding="utf-8")
+    res_raw = get_symbol_implementation(
+        repo_path=str(tmp_path),
+        symbol="large_func",
+        file_paths=["large_mod.py"],
+    )
+    res = json.loads(res_raw)
+    assert res["status"] == "resolved"
+    assert res["mode"] == "preview"
+    assert "implementation" not in res
+    assert "auto_fetch" in res
+    assert res["auto_fetch"]["threshold_bytes"] == 5120
+    assert res["auto_fetch"]["candidate_response_bytes"] > 5120
+    assert res["auto_fetch"]["decision"] == "preview"
+    assert "mode='fetch'" in res["auto_fetch"]["message"]
+
+
+def test_get_symbol_implementation_explicit_preview_small_returns_preview(tmp_path):
+    import json
+    src = tmp_path / "small_mod.py"
+    src.write_text("def helper():\n    return 42\n", encoding="utf-8")
+    res_raw = get_symbol_implementation(
+        repo_path=str(tmp_path),
+        symbol="helper",
+        file_paths=["small_mod.py"],
+        mode="preview",
+    )
+    res = json.loads(res_raw)
+    assert res["status"] == "resolved"
+    assert res["mode"] == "preview"
+    assert "implementation" not in res
+    assert "auto_fetch" not in res
+
+
+def test_get_symbol_implementation_explicit_fetch_large_returns_implementation(tmp_path):
+    import json
+    large_body = "\n".join(f"    x_{i} = {i} * 1000" for i in range(300))
+    src = tmp_path / "large_mod.py"
+    src.write_text(f"def large_func():\n{large_body}\n    return True\n", encoding="utf-8")
+    res_raw = get_symbol_implementation(
+        repo_path=str(tmp_path),
+        symbol="large_func",
+        file_paths=["large_mod.py"],
+        mode="fetch",
+        include=["implementation"],
+    )
+    res = json.loads(res_raw)
+    assert res["status"] == "resolved"
+    assert res["mode"] == "fetch"
+    assert "implementation" in res
+    assert "def large_func():" in res["implementation"]
+    assert "auto_fetch" not in res
+
+
+def test_get_symbol_implementation_explicit_fetch_without_include_returns_selection_required(tmp_path):
+    import json
+    src = tmp_path / "small_mod.py"
+    src.write_text("def helper():\n    return 42\n", encoding="utf-8")
+    res_raw = get_symbol_implementation(
+        repo_path=str(tmp_path),
+        symbol="helper",
+        file_paths=["small_mod.py"],
+        mode="fetch",
+    )
+    res = json.loads(res_raw)
+    assert res["status"] == "selection_required"
+    assert "Fetch requires an explicit include selection" in res["message"]
+
+
+def test_get_symbol_implementation_invalid_mode(tmp_path):
+    import json
+    src = tmp_path / "small_mod.py"
+    src.write_text("def helper():\n    return 42\n", encoding="utf-8")
+    res_raw = get_symbol_implementation(
+        repo_path=str(tmp_path),
+        symbol="helper",
+        file_paths=["small_mod.py"],
+        mode="invalid_mode",
+    )
+    res = json.loads(res_raw)
+    assert res["status"] == "error"
+    assert "mode must be 'auto', 'preview', or 'fetch'." in res["error"]
+
+
+def _generate_exact_candidate_source(target_bytes: int, tmp_path: Path, filename: str) -> Path:
+    src = tmp_path / filename
+    base_pad = 2000
+    src.write_text(f"def exact_func():\n    # {'X' * base_pad}\n    return 42\n", encoding="utf-8")
+    probe_raw = get_symbol_implementation(
+        repo_path=str(tmp_path),
+        symbol="exact_func",
+        file_paths=[filename],
+        mode="fetch",
+        include=["implementation"],
+    )
+    diff = target_bytes - len(probe_raw.encode("utf-8"))
+    final_pad = base_pad + diff
+    src.write_text(f"def exact_func():\n    # {'X' * final_pad}\n    return 42\n", encoding="utf-8")
+    verify_raw = get_symbol_implementation(
+        repo_path=str(tmp_path),
+        symbol="exact_func",
+        file_paths=[filename],
+        mode="fetch",
+        include=["implementation"],
+    )
+    assert len(verify_raw.encode("utf-8")) == target_bytes
+    return src
+
+
+def test_get_symbol_implementation_auto_exact_threshold_5120_bytes_returns_implementation(tmp_path):
+    import json
+    _generate_exact_candidate_source(5120, tmp_path, "mod_5120.py")
+    res_raw = get_symbol_implementation(
+        repo_path=str(tmp_path),
+        symbol="exact_func",
+        file_paths=["mod_5120.py"],
+    )
+    res = json.loads(res_raw)
+    assert res["status"] == "resolved"
+    assert res["mode"] == "fetch"
+    assert "implementation" in res
+    assert len(res_raw.encode("utf-8")) == 5120
+    assert "auto_fetch" not in res
+
+
+def test_get_symbol_implementation_auto_exact_threshold_5121_bytes_returns_preview(tmp_path):
+    import json
+    _generate_exact_candidate_source(5121, tmp_path, "mod_5121.py")
+    res_raw = get_symbol_implementation(
+        repo_path=str(tmp_path),
+        symbol="exact_func",
+        file_paths=["mod_5121.py"],
+    )
+    res = json.loads(res_raw)
+    assert res["status"] == "resolved"
+    assert res["mode"] == "preview"
+    assert "implementation" not in res
+    assert "auto_fetch" in res
+    assert res["auto_fetch"]["threshold_bytes"] == 5120
+    assert res["auto_fetch"]["candidate_response_bytes"] == 5121
+    assert res["auto_fetch"]["decision"] == "preview"
+
+
+def test_get_symbol_implementation_file_paths_list_works(tmp_path):
+    import json
+    src = tmp_path / "mod_list.py"
+    src.write_text("def fn_list():\n    return 1\n", encoding="utf-8")
+    res_raw = get_symbol_implementation(
+        repo_path=str(tmp_path),
+        symbol="fn_list",
+        file_paths=["mod_list.py"],
+    )
+    res = json.loads(res_raw)
+    assert res["status"] == "resolved"
+    assert res["mode"] == "fetch"
+    assert "def fn_list():" in res["implementation"]
+
+
+def test_get_symbol_implementation_file_path_singular_works(tmp_path):
+    import json
+    src = tmp_path / "mod_single.py"
+    src.write_text("def fn_single():\n    return 2\n", encoding="utf-8")
+    res_raw = get_symbol_implementation(
+        repo_path=str(tmp_path),
+        symbol="fn_single",
+        file_path="mod_single.py",
+    )
+    res = json.loads(res_raw)
+    assert res["status"] == "resolved"
+    assert res["mode"] == "fetch"
+    assert "def fn_single():" in res["implementation"]
+
+
+def test_get_symbol_implementation_file_paths_and_file_path_deduplication(tmp_path):
+    import json
+    src = tmp_path / "mod_dedup.py"
+    src.write_text("def fn_dedup():\n    return 3\n", encoding="utf-8")
+    # Same file path passed in both file_paths and file_path
+    res_raw = get_symbol_implementation(
+        repo_path=str(tmp_path),
+        symbol="fn_dedup",
+        file_paths=["mod_dedup.py"],
+        file_path="mod_dedup.py",
+    )
+    res = json.loads(res_raw)
+    assert res["status"] == "resolved"
+    assert res["mode"] == "fetch"
+    assert "def fn_dedup():" in res["implementation"]
+
+    # Not found search diagnostic should show deduplicated list of 1 file
+    not_found_raw = get_symbol_implementation(
+        repo_path=str(tmp_path),
+        symbol="non_existent",
+        file_paths=["mod_dedup.py"],
+        file_path="mod_dedup.py",
+    )
+    not_found = json.loads(not_found_raw)
+    assert not_found["status"] == "not_found"
+    assert not_found["searched_files"] == ["mod_dedup.py"]
+
+
+def test_get_symbol_implementation_file_paths_and_file_path_merging(tmp_path):
+    import json
+    src_a = tmp_path / "mod_a.py"
+    src_a.write_text("def fn_a():\n    return 'a'\n", encoding="utf-8")
+    src_b = tmp_path / "mod_b.py"
+    src_b.write_text("def fn_b():\n    return 'b'\n", encoding="utf-8")
+
+    # Symbol in file_path (b) while file_paths contains (a)
+    res_raw = get_symbol_implementation(
+        repo_path=str(tmp_path),
+        symbol="fn_b",
+        file_paths=["mod_a.py"],
+        file_path="mod_b.py",
+    )
+    res = json.loads(res_raw)
+    assert res["status"] == "resolved"
+    assert "def fn_b():" in res["implementation"]
+
+    # Not found search diagnostic should show both merged files
+    not_found_raw = get_symbol_implementation(
+        repo_path=str(tmp_path),
+        symbol="non_existent",
+        file_paths=["mod_a.py"],
+        file_path="mod_b.py",
+    )
+    not_found = json.loads(not_found_raw)
+    assert not_found["status"] == "not_found"
+    assert not_found["searched_files"] == ["mod_a.py", "mod_b.py"]
+
+
+def test_get_symbol_implementation_no_file_paths_or_file_path_returns_error(tmp_path):
+    import json
+    res_raw = get_symbol_implementation(
+        repo_path=str(tmp_path),
+        symbol="any_symbol",
+    )
+    res = json.loads(res_raw)
+    assert res["status"] == "error"
+    assert res["error"] == "At least one Python source file is required."
