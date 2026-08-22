@@ -4,14 +4,19 @@
   "purpose": [
     "Return the complete versioned contract for safe canonical LIVE queries."
   ],
-  "parameters": [],
+  "parameters": [
+    "``schema_version`` (string, default ``'1.0'``): requested schema version contract (``'1.0'`` or ``'1.1'``).",
+    "``language_version`` (string, default ``'1.0'``): requested language version contract (``'1.0'`` or ``'1.1'``)."
+  ],
   "behavior": [
-    "This endpoint is passive discovery only: it returns ``SCHEMA_V1`` and\n``LANGUAGE_V1`` from the same constants used by query validation. It does\nnot read repository data, execute expressions, reflect over Python objects,\nor fetch records. The response documents the three roots (``modules``,\n``artifacts``, ``dependencies``), every selectable field, per-field\noperators, null semantics, canonical ordering and hard request limits."
+    "This endpoint is passive discovery only: it returns the versioned schema and\nlanguage contract constants used by query validation. By default, it returns\n``(schema_version='1.0', language_version='1.0')`` for exact backward\ncompatibility. Call with ``schema_version='1.1', language_version='1.1'`` to\ndiscover the 1.1 contract containing ``SCHEMA_V1_1`` (including companion\n``imports_truncated`` and ``consumers_truncated`` metadata declarations) and\n``LANGUAGE_V1_1`` (including ``evidence_limit`` parameter and limits)."
   ],
   "freshness": [],
-  "errors": [],
+  "errors": [
+    "Unsupported version pairs or cross-pairs (such as ``('1.0', '1.1')`` or\n``('1.1', '1.0')``) return a deterministic structured error with\n``code: 'unsupported_version_pair'``."
+  ],
   "usage_notes": [
-    "LLM use: call this before composing a projection request or when a\nstructural validation error reports an unfamiliar field/operator. Cache by\n``schema_version`` and ``language_version``; do not treat it as repository\ndata or use it in place of ``query_canonical_projection``."
+    "LLM use: call ``describe_canonical_state(schema_version='1.1', language_version='1.1')``\nbefore composing a 1.1 progressive disclosure projection request. Cache by\n``(schema_version, language_version)``."
   ],
   "examples": []
 }

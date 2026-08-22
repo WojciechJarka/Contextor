@@ -5,7 +5,8 @@
     "Execute a safe, bounded JSON query over normalized canonical LIVE data."
   ],
   "parameters": [
-    "``request`` must explicitly include ``schema_version``,\n``language_version``, ``root``, ``filters`` and ``select``. It may include\n``limit`` (default 20, maximum 200). Filters are a flat AND and use only the\noperators declared for each field by ``describe_canonical_state``. Empty\n``filters`` matches all records; empty ``select`` returns every selectable\nfield. Results always report ``total_matches``, ``returned``, ``limit`` and\n``truncated``."
+    "``request`` must explicitly include supported ``(schema_version, language_version)``\npair (``('1.0', '1.0')`` for exact legacy or ``('1.1', '1.1')`` for progressive\ndisclosure), ``root``, ``filters`` and ``select``. It may include ``limit``\n(default 20, maximum 200) and in 1.1 optional ``evidence_limit`` (default 3,\n``None`` for full selected nested evidence, ``0`` for counts only). Cross-version\npairs fail closed. Filters are a flat AND and use only the operators declared for\neach field by ``describe_canonical_state``. Empty ``filters`` matches all\nrecords; empty ``select`` returns every selectable field. Results always report\n``total_matches``, ``returned``, ``limit`` and ``truncated``.",
+    "In language 1.1, emitted ``imports`` and ``consumers`` are bounded by\n``evidence_limit`` and accompanied by ``imports_truncated`` or\n``consumers_truncated`` metadata. Companion truncation fields exist in schema 1.1\nbut are not independently selectable (explicit selection returns\n``field_not_selectable``). When nested evidence is truncated, a response-level\n``expand`` descriptor with ``retry_with_full_evidence`` is emitted. Pass\n``evidence_limit=None`` for selected-scope lossless nested retrieval; full-root\nretrieval remains bounded by ``max_limit=200`` without continuation tokens."
   ],
   "behavior": [],
   "freshness": [],
@@ -13,7 +14,7 @@
     "The executor first converts LIVE state to read-only JSON-safe records. It\nnever uses ``eval``, accepts no Python expressions, exposes no arbitrary\nattributes and omits local absolute paths. Artifacts preserve the\ndistinction between confirmed zero consumers and unavailable consumption\ndata via ``consumer_data_available`` plus nullable consumer fields.\nStructural errors return one deterministic error with ``code``, ``path``\nand repair details."
   ],
   "usage_notes": [
-    "LLM use: discover the contract first, request the smallest useful field\nselection, and narrow filters when ``truncated`` is true."
+    "LLM use: discover the contract first via ``describe_canonical_state(schema_version='1.1', language_version='1.1')``,\nrequest the smallest useful field selection, and narrow filters when ``truncated`` is\ntrue. Use ``evidence_limit=None`` only when complete nested evidence is required."
   ],
   "examples": []
 }

@@ -6,15 +6,22 @@ import json
 from typing import Any
 
 from .contract import (
+    DEFAULT_EVIDENCE_LIMIT,
     DEFAULT_LIMIT,
     LANGUAGE_VERSION,
+    LANGUAGE_VERSION_V1_1,
     MAX_FILTERS,
     MAX_IN_VALUES,
     MAX_LIMIT,
     MAX_REQUEST_BYTES,
     MAX_SELECT_FIELDS,
     SCHEMA_V1,
+    SCHEMA_V1_1,
     CANONICAL_QUERY_SCHEMA_VERSION,
+    CANONICAL_QUERY_SCHEMA_VERSION_V1_1,
+    SUPPORTED_PAIRS,
+    SUPPORTED_SCHEMA_VERSIONS,
+    SUPPORTED_LANGUAGE_VERSIONS,
 )
 from .projection import RECORD_BUILDERS
 from contextor.core.analysis.state_manager import module_current_truth
@@ -125,43 +132,92 @@ def _validate_operator_value(
 
 
 def validate_request(request: Any) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
-    """Validate one v1 request and return its normalized form or first error."""
+    """Validate one v1 or v1.1 request and return its normalized form or first error."""
 
     if not isinstance(request, dict):
         return None, _error("invalid_request", "Request must be an object.", "$request")
-    allowed_keys = {"schema_version", "language_version", "root", "filters", "select", "limit"}
+
+    schema_version_hint = request.get("schema_version")
+    language_version = request.get("language_version")
+    is_explicit_v1_1_pair = (
+        schema_version_hint == CANONICAL_QUERY_SCHEMA_VERSION_V1_1
+        and language_version == LANGUAGE_VERSION_V1_1
+    )
+    if is_explicit_v1_1_pair:
+        allowed_keys = {
+            "schema_version",
+            "language_version",
+            "root",
+            "filters",
+            "select",
+            "limit",
+            "evidence_limit",
+        }
+    else:
+        allowed_keys = {
+            "schema_version",
+            "language_version",
+            "root",
+            "filters",
+            "select",
+            "limit",
+        }
+
     unknown = sorted(str(key) for key in request if key not in allowed_keys)
     if unknown:
         return None, _error(
-            "invalid_request", "Request contains unsupported fields.", unknown[0], unknown_fields=unknown
+            "invalid_request",
+            "Request contains unsupported fields.",
+            unknown[0],
+            unknown_fields=unknown,
         )
+
     for required in ("schema_version", "language_version", "root", "filters", "select"):
         if required not in request:
             return None, _error(
                 "missing_required_field", f"Required field '{required}' is missing.", required
             )
-    if request["schema_version"] != CANONICAL_QUERY_SCHEMA_VERSION:
+
+    schema_version = request["schema_version"]
+    assert language_version is not None
+
+    if schema_version not in SUPPORTED_SCHEMA_VERSIONS:
         return None, _error(
             "unsupported_schema_version",
             "Unsupported schema version.",
             "schema_version",
-            supported_versions=[CANONICAL_QUERY_SCHEMA_VERSION],
+            supported_versions=sorted(SUPPORTED_SCHEMA_VERSIONS),
         )
-    if request["language_version"] != LANGUAGE_VERSION:
+
+    if language_version not in SUPPORTED_LANGUAGE_VERSIONS:
         return None, _error(
             "unsupported_language_version",
             "Unsupported language version.",
             "language_version",
-            supported_versions=[LANGUAGE_VERSION],
+            supported_versions=sorted(SUPPORTED_LANGUAGE_VERSIONS),
         )
+
+    if (schema_version, language_version) not in SUPPORTED_PAIRS:
+        return None, _error(
+            "unsupported_version_pair",
+            "schema_version and language_version must be a supported contract pair.",
+            "$request",
+            supported_pairs=[
+                {"schema_version": s, "language_version": l}
+                for s, l in sorted(SUPPORTED_PAIRS)
+            ],
+        )
+
+    schema = SCHEMA_V1 if schema_version == CANONICAL_QUERY_SCHEMA_VERSION else SCHEMA_V1_1
     root = request["root"]
-    if not isinstance(root, str) or root not in SCHEMA_V1["roots"]:
+    if not isinstance(root, str) or root not in schema["roots"]:
         return None, _error(
             "unknown_root",
             "Unknown canonical projection root.",
             "root",
-            allowed_roots=sorted(SCHEMA_V1["roots"]),
+            allowed_roots=sorted(schema["roots"]),
         )
+
     filters = request["filters"]
     select = request["select"]
     if not isinstance(filters, list):
@@ -202,7 +258,25 @@ def validate_request(request: Any) -> tuple[dict[str, Any] | None, dict[str, Any
             "limit",
             max_limit=MAX_LIMIT,
         )
-    fields = SCHEMA_V1["roots"][root]["fields"]
+
+    evidence_limit: int | None = None
+    if language_version == LANGUAGE_VERSION_V1_1:
+        if "evidence_limit" not in request:
+            evidence_limit = DEFAULT_EVIDENCE_LIMIT
+        else:
+            raw_ev = request["evidence_limit"]
+            if raw_ev is None:
+                evidence_limit = None
+            elif isinstance(raw_ev, int) and not isinstance(raw_ev, bool) and raw_ev >= 0:
+                evidence_limit = raw_ev
+            else:
+                return None, _error(
+                    "invalid_evidence_limit",
+                    "evidence_limit must be a non-negative integer or null.",
+                    "evidence_limit",
+                )
+
+    fields = schema["roots"][root]["fields"]
     seen_select: set[str] = set()
     for index, name in enumerate(select):
         if not isinstance(name, str):
@@ -211,7 +285,7 @@ def validate_request(request: Any) -> tuple[dict[str, Any] | None, dict[str, Any
                 "Select field names must be strings.",
                 f"select[{index}]",
                 field=name,
-                allowed_fields=sorted(fields),
+                allowed_fields=sorted(name for name, d in fields.items() if d["selectable"]),
             )
         if name in seen_select:
             return None, _error(
@@ -221,6 +295,7 @@ def validate_request(request: Any) -> tuple[dict[str, Any] | None, dict[str, Any
                 field=name,
             )
         seen_select.add(name)
+
     selected = select or [name for name, definition in fields.items() if definition["selectable"]]
     for index, name in enumerate(selected):
         if name not in fields:
@@ -229,12 +304,13 @@ def validate_request(request: Any) -> tuple[dict[str, Any] | None, dict[str, Any
                 "Unknown select field.",
                 f"select[{index}]",
                 field=name,
-                allowed_fields=sorted(fields),
+                allowed_fields=sorted(name for name, d in fields.items() if d["selectable"]),
             )
         if not fields[name]["selectable"]:
             return None, _error(
                 "field_not_selectable", "Field is not selectable.", f"select[{index}]", field=name
             )
+
     for index, item in enumerate(filters):
         path = f"filters[{index}]"
         if not isinstance(item, dict):
@@ -279,13 +355,16 @@ def validate_request(request: Any) -> tuple[dict[str, Any] | None, dict[str, Any
         value_error = _validate_operator_value(item, definition, path)
         if value_error:
             return None, value_error
+
     return {
-        "schema_version": CANONICAL_QUERY_SCHEMA_VERSION,
-        "language_version": LANGUAGE_VERSION,
+        "schema_version": schema_version,
+        "language_version": language_version,
         "root": root,
         "filters": filters,
         "select": selected,
+        "original_select": list(select),
         "limit": limit,
+        "evidence_limit": evidence_limit,
     }, None
 
 
@@ -355,15 +434,67 @@ def execute_projection(state: Any, request: Any) -> dict[str, Any]:
         }
     limit = normalized["limit"]
     selected = normalized["select"]
-    results = [{field: record[field] for field in selected} for record in matches[:limit]]
-    return {
+    schema_version = normalized["schema_version"]
+    language_version = normalized["language_version"]
+    evidence_limit = normalized.get("evidence_limit")
+    root = normalized["root"]
+
+    results = []
+    has_nested_truncation = False
+
+    for record in matches[:limit]:
+        row = {field: record[field] for field in selected}
+        if language_version == LANGUAGE_VERSION_V1_1:
+            if root == "modules" and "imports" in selected:
+                raw_imports = record["imports"]
+                import_count = record["import_count"]
+                if evidence_limit is not None:
+                    row["imports"] = raw_imports[:evidence_limit]
+                    truncated = len(row["imports"]) < import_count
+                else:
+                    row["imports"] = raw_imports
+                    truncated = False
+                row["imports_truncated"] = truncated
+                if truncated:
+                    has_nested_truncation = True
+            elif root == "artifacts" and "consumers" in selected:
+                raw_consumers = record["consumers"]
+                available = record["consumer_data_available"]
+                consumer_count = record["consumer_count"]
+                if not available or raw_consumers is None or consumer_count is None:
+                    row["consumers"] = None
+                    row["consumers_truncated"] = None
+                else:
+                    if evidence_limit is not None:
+                        row["consumers"] = raw_consumers[:evidence_limit]
+                        truncated = len(row["consumers"]) < consumer_count
+                    else:
+                        row["consumers"] = raw_consumers
+                        truncated = False
+                    row["consumers_truncated"] = truncated
+                    if truncated:
+                        has_nested_truncation = True
+        results.append(row)
+
+    response: dict[str, Any] = {
         "status": "ok",
-        "schema_version": CANONICAL_QUERY_SCHEMA_VERSION,
-        "language_version": LANGUAGE_VERSION,
-        "root": normalized["root"],
+        "schema_version": schema_version,
+        "language_version": language_version,
+        "root": root,
         "total_matches": len(matches),
         "returned": len(results),
         "limit": limit,
         "truncated": len(results) < len(matches),
-        "results": results,
     }
+
+    if language_version == LANGUAGE_VERSION_V1_1 and has_nested_truncation:
+        retry_request = dict(request)
+        retry_request["evidence_limit"] = None
+        response["expand"] = {
+            "available": True,
+            "reason": "Nested evidence truncated by evidence_limit.",
+            "retry_with_full_evidence": retry_request,
+        }
+
+    response["results"] = results
+    return response

@@ -1,107 +1,127 @@
-# TOKEN EFFICIENCY — STEP A12.4F3: FINAL DIAGNOSTICS-INVARIANCE PROOF AND PUBLIC SIZE-TERMINOLOGY CORRECTION
+# TOKEN EFFICIENCY — STEP A15.3F5: APPLY EXACT FINAL PAIR-AWARE ENVELOPE PATCH
 
 ## FILES_CHANGED
-- `C:\Temp\Contextor_Repo\contextor\mcp\docs\extract_indexed_report_context.json`
+1. `C:\Temp\Contextor_Repo\contextor\core\canonical_state_query\runtime.py`
+2. `C:\Temp\Contextor_Repo\tests\test_canonical_state_contract.py`
 
 ---
 
-## F3_ACTUAL_DIFF
-
+## ACTUAL_DIFF
 ```diff
-diff --git a/contextor/mcp/docs/extract_indexed_report_context.json b/contextor/mcp/docs/extract_indexed_report_context.json
-index 42f65ab..ebe6178 100644
---- a/contextor/mcp/docs/extract_indexed_report_context.json
-+++ b/contextor/mcp/docs/extract_indexed_report_context.json
-@@ -10,3 +10,3 @@
-     "``representation`` (default ``None``) selects the serialization format:\n- ``None``: preserves legacy behavior controlled by ``resolve_indices``;\n- ``'named'``: emits human-readable symbol names using representation-independent canonical artifact-ID ordering;\n- ``'indexed'``: emits compact indexed IDs using the same canonical ordering and attaches ``resolve_via: 'lookup_index_entries'``;\n- ``'auto'``: stateless candidate size negotiation. When indexed representation materially reduces serialized payload size, returns a compact decision response with directly executable retry options; otherwise returns a direct named result.\nNon-None ``representation`` takes deterministic precedence over ``resolve_indices``. When ``total > max_items``, explicit representation modes use canonical artifact-ID bounding, which may differ from legacy symbol-string bounding. Under ``representation='auto'``, ``expand`` descriptors in direct-auto results preserve ``representation='auto'`` (E1): ``retry_with_full_evidence`` expands evidence scope but may return a decision response if the expanded payload is material; ``retry_fully_lossless`` requests complete top-level and nested scope under auto. An immediate lossless domain payload is obtained by passing explicit ``representation='named'`` or ``'indexed'`` with ``max_items=None, evidence_limit=None``."
+diff --git a/contextor/core/canonical_state_query/runtime.py b/contextor/core/canonical_state_query/runtime.py
+index 05c56d7..c11b01c 100644
+--- a/contextor/core/canonical_state_query/runtime.py
++++ b/contextor/core/canonical_state_query/runtime.py
+@@ -137,8 +137,13 @@ def validate_request(request: Any) -> tuple[dict[str, Any] | None, dict[str, Any
+     if not isinstance(request, dict):
+         return None, _error("invalid_request", "Request must be an object.", "$request")
+ 
++    schema_version_hint = request.get("schema_version")
+     language_version = request.get("language_version")
+-    if language_version == LANGUAGE_VERSION_V1_1:
++    is_explicit_v1_1_pair = (
++        schema_version_hint == CANONICAL_QUERY_SCHEMA_VERSION_V1_1
++        and language_version == LANGUAGE_VERSION_V1_1
++    )
++    if is_explicit_v1_1_pair:
+         allowed_keys = {
+             "schema_version",
+             "language_version",
+diff --git a/tests/test_canonical_state_contract.py b/tests/test_canonical_state_contract.py
+index e86e082..03998f5 100644
+--- a/tests/test_canonical_state_contract.py
++++ b/tests/test_canonical_state_contract.py
+@@ -767,3 +767,52 @@ def test_version_1_1_expand_exact_request_preservation():
+     assert orig_req_b == copy_b, "Original request dict must not be mutated"
+ 
+ 
++def test_v1_1_evidence_limit_requires_explicit_supported_version_pair_before_envelope_expansion():
++    missing_schema = {
++        "language_version": "1.1",
++        "root": "modules",
++        "filters": [],
++        "select": [],
++        "evidence_limit": 3,
++    }
++    _, err_missing_schema = validate_request(missing_schema)
++    assert err_missing_schema is not None
++    assert err_missing_schema["error"]["code"] == "invalid_request"
++    assert err_missing_schema["error"]["path"] == "evidence_limit"
++    assert err_missing_schema["error"]["details"]["unknown_fields"] == [
++        "evidence_limit"
++    ]
++    missing_language = {
++        "schema_version": "1.1",
++        "root": "modules",
++        "filters": [],
++        "select": [],
++        "evidence_limit": 3,
++    }
++    _, err_missing_language = validate_request(missing_language)
++    assert err_missing_language is not None
++    assert err_missing_language["error"]["code"] == "invalid_request"
++    assert err_missing_language["error"]["path"] == "evidence_limit"
++    assert err_missing_language["error"]["details"]["unknown_fields"] == [
++        "evidence_limit"
++    ]
++    valid_v1_1 = {
++        "schema_version": "1.1",
++        "language_version": "1.1",
++        "root": "modules",
++        "filters": [],
++        "select": ["module_name"],
++        "evidence_limit": 3,
++    }
++    normalized, valid_error = validate_request(valid_v1_1)
++    assert valid_error is None
++    assert normalized is not None
++    assert normalized["evidence_limit"] == 3
++    unknown_v1_1 = {
++        **valid_v1_1,
++        "unsupported_field": True,
++    }
++    _, unknown_error = validate_request(unknown_v1_1)
++    assert unknown_error is not None
++    assert unknown_error["error"]["code"] == "invalid_request"
++    assert unknown_error["error"]["path"] == "unsupported_field"
 ```
 
 ---
 
-## OMITTED_BLOCKS_REPRESENTATION_INVARIANT
-`YES`
-
-## OMITTED_BLOCKS_SOURCE_REASON
-W `contextor/core/report_query.py` (`rewrite_selected_indices`, linie 641, 647, 654) walidacja obecności `artifact_id` i `definer_module` w katalogu (`artifact_name()` i `module_name()`) wykonuje się bezwarunkowo, niezależnie od wartości flagi `resolve_names` (`True` lub `False`). Ponieważ `selected_blocks` jest ścisłym podzbiorem bloków przetworzonych w `res_base = query_indexed_report(..., resolve_indices=False)`, zbiór `omitted_blocks` dla kandydata jest podzbiorem `res_base["diagnostics"]["omitted_blocks"]` i nie może zawierać żadnego nowego wpisu.
-
----
-
-## DROPPED_REFERENCES_REPRESENTATION_INVARIANT
-`YES`
-
-## DROPPED_REFERENCES_SOURCE_REASON
-W `contextor/core/report_query.py` (`rewrite_selected_indices`, linie 678–686 dla `consumer_module_indices` oraz linie 606–611 dla zagnieżdżonych `usage`) sprawdzenie `module_name(consumer_id)` i ewentualne dołączenie do `diagnostics["dropped_references"]` następuje przed rozgałęzieniem `if resolve_names:`. Zarówno w trybie indeksowanym (`resolve_names=False`), jak i nazwanym (`resolve_names=True`) nieznane identyfikatory modułów są wykrywane i rejestrowane w identyczny sposób.
+## PAIR_AWARE_ENVELOPE_IMPLEMENTED
+W `validate_request` (`runtime.py`) wprowadzono ścisły warunek:
+`is_explicit_v1_1_pair = (schema_version_hint == CANONICAL_QUERY_SCHEMA_VERSION_V1_1 and language_version == LANGUAGE_VERSION_V1_1)`.
+Zbiór `allowed_keys` zawierający `evidence_limit` jest aktywowany wyłącznie wtedy, gdy w żądaniu jawnie podano parę wersji `("1.1", "1.1")`. We wszystkich pozostałych przypadkach (w tym brak `schema_version` przy `language_version="1.1"` lub brak `language_version` przy `schema_version="1.1"`) pole `evidence_limit` jest natychmiast odrzucane z kodem `invalid_request` dla ścieżki `evidence_limit` jako błąd strukturalny w precedencji legacy.
 
 ---
 
-## RESOLVED_FROM_RECOVERY_REPRESENTATION_INVARIANT
-`YES`
-
-## RESOLVED_FROM_RECOVERY_SOURCE_REASON
-W `contextor/core/report_query.py` (`rewrite_selected_indices`, linie 665, 669, 690 oraz 612) sprawdzenia `if artifact_source == "recovery":` oraz `if definer_source == "recovery":` / `consumer_source == "recovery"` są wykonywane zarówno dla `resolve_names=False`, jak i `resolve_names=True`. Zatem `res_base["diagnostics"]["resolved_from_recovery"]` zawiera już wszystkie odzyskane wpisy dla całego dopasowanego zakresu zapytania.
-
----
-
-## CURRENT_MERGE_CORRECT
-`YES` (wszystkie rodzaje diagnostyk są representation-invariant na poziomie kodu źródłowego; obecna implementacja inicjalizująca `merged_diagnostics` z pełnego `res_base["diagnostics"]` i deduplikująca ewentualne wpisy recovery jest w 100% poprawna i kompletna).
+## NEW_TEST_ADDED
+Dodano test:
+`test_v1_1_evidence_limit_requires_explicit_supported_version_pair_before_envelope_expansion`
+Weryfikuje:
+1. `missing_schema` z `evidence_limit=3` -> `invalid_request` dla `evidence_limit`.
+2. `missing_language` z `evidence_limit=3` -> `invalid_request` dla `evidence_limit`.
+3. Prawidłowe `valid_v1_1` z `evidence_limit=3` -> sukces walidacji i normalizacji (`evidence_limit=3`).
+4. `unknown_v1_1` z nieobsługiwanym polem -> `invalid_request` dla `unsupported_field`.
 
 ---
 
-## DIAGNOSTICS_FIX
-`NONE_REQUIRED` (kod produkcyjny poprawnie zachowuje diagnostyki zapytania i nie wymaga zmian).
+## TARGETED_TEST_RESULT
+- Polecenie: `.venv\Scripts\pytest.exe tests\test_canonical_state_contract.py -v`
+- Wynik: **33 passed, 0 failed** (100% sukcesu).
 
 ---
 
-## FULL_SCOPE_DIAGNOSTICS_PRESERVED
-`YES` (pełne diagnostyki zapytania dla całego zakresu dopasowań są zachowane w odpowiedzi pomimo ograniczenia `max_items`).
+## CONTEXTOR_POST_CHANGE_EVIDENCE
+`get_file_edit_context` dla `runtime.py`:
+`module_id="86/1"`, `layer="adapter"`, `public_api.total=2`, `imports.total=3`, `consumers.total=1`.
 
 ---
 
-## CANDIDATE_SPECIFIC_DIAGNOSTICS_PRESERVED
-`YES` (diagnostyki generowane podczas budowania odpowiedzi kandydata są w pełni reprezentowane w zwracanym obiekcie).
-
----
-
-## AUTO_SIZE_EXACTNESS_PRESERVED
-`YES` (wartości `sizes.named_bytes` i `sizes.indexed_bytes` w odpowiedzi decyzyjnej `auto` dokładnie odpowiadają zserializowanym bajtom UTF-8 wykonywalnych opcji `options["named"]` i `options["indexed"]`).
-
----
-
-## DOC_SIZE_TERMINOLOGY_CORRECTED
-`YES` (sformułowanie w `extract_indexed_report_context.json` zmieniono z `saves material payload tokens` na `materially reduces serialized payload size`).
-
----
-
-## LEGACY_REPRESENTATION_NONE_UNCHANGED
-`YES`
-
----
-
-## A12_3_SEMANTICS_UNCHANGED
-`YES`
-
----
-
-## TARGETED_TEST_COMMANDS
-```powershell
-.venv\Scripts\pytest.exe tests/test_mcp_split_s2e.py tests/test_mcp_documentation.py tests/test_mcp_regressions.py -k "extract_indexed_report_context or test_documentation_has_exact_public_tool_file_coverage or test_s2e_registration_order_bindings_signatures_and_descriptions" -v
-```
-
----
-
-## TARGETED_TEST_RESULTS
-- `tests/test_mcp_split_s2e.py::test_s2e_registration_order_bindings_signatures_and_descriptions` **PASSED**
-- `tests/test_mcp_documentation.py::test_documentation_has_exact_public_tool_file_coverage` **PASSED**
-- `tests/test_mcp_regressions.py::test_extract_indexed_report_context_returns_every_shared_resolver_block` **PASSED**
-- `tests/test_mcp_regressions.py::test_extract_indexed_report_context_can_filter_to_public_api` **PASSED**
-- `tests/test_mcp_regressions.py::test_extract_indexed_report_context_nested_progressive_disclosure` **PASSED**
-- `tests/test_mcp_regressions.py::test_extract_indexed_report_context_representation_negotiation` **PASSED**
-- **Wynik:** **6 passed, 84 deselected in 3.57s** (100% PASS).
-
----
-
-## REPRESENTATION_HELPER_MODIFIED
-`NO` (`contextor/mcp/representation.py` nie był modyfikowany).
+## LIVE_EVENT_EVIDENCE
+Zdarzenia `desktop_watcher` w `get_live_events`:
+- `revision=1206`: `UPDATED`, `contextor\core\canonical_state_query\runtime.py`
+- `revision=1207`: `UPDATED`, `tests\test_canonical_state_contract.py`
 
 ---
 
@@ -134,4 +154,4 @@ W `contextor/core/report_query.py` (`rewrite_selected_indices`, linie 665, 669, 
 ---
 
 ## NEXT_STEP_PROPOSAL
-STEP A12.4 CERTIFIED IN SOURCE — manual MCP restart required for final runtime certification; no further source-design steps required.
+STEP A15.3 SOURCE CERTIFIED — manual MCP restart required before final runtime certification.

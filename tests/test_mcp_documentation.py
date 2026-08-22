@@ -21,7 +21,7 @@ LEGACY_SIGNATURES = {
     "get_file_edit_context": "(repo_path: str, file_path: str = '', max_items: int | None = 30, compact: bool = True, fields: list[str] | None = None, mode: str | None = None, target: str | None = None) -> str",
     "get_layer_isolation": "(repo_path: str, layer_name: str, max_clusters: int | None = 8, max_boundary_violations: int | None = 10, compact: bool = True, fields: list[str] | None = None) -> str",
     "get_report_diff": "(repo_path: str, max_items: int | None = 20, compact: bool = True, fields: list[str] | None = None) -> str",
-    "describe_canonical_state": "() -> str",
+    "describe_canonical_state": "(schema_version: str = '1.0', language_version: str = '1.0') -> str",
     "query_canonical_projection": "(repo_path: str, request: dict[str, typing.Any]) -> str",
     "extract_indexed_report_context": "(repo_path: str, query: str, report_path: str = '', resolve_indices: bool = True, public_api_only: bool = False, max_items: int | None = 20, fields: list[str] | None = None, evidence_limit: int | None = 3, representation: str | None = None) -> str",
     "lookup_index_entries": "(repo_path: str, ids: list[str]) -> str",
