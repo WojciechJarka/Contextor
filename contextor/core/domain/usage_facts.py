@@ -32,7 +32,7 @@ class ModuleUsageFacts:
     qualified_refs: Tuple[str, ...] = ()
     aliases: Tuple[Tuple[str, str], ...] = ()           # (local_alias, imported_target)
     symbol_calls: Tuple[SymbolCallFact, ...] = ()
-    symbol_calls_materialized: bool = True
+    symbol_calls_materialized: bool = False
 
     def __getattribute__(self, name: str):
         if name == "symbol_calls_materialized":

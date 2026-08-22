@@ -24,7 +24,8 @@ _EXPECTED_ORDER = [
     "get_layer_isolation", "get_report_diff", "describe_canonical_state",
     "query_canonical_projection", "extract_indexed_report_context",
     "lookup_index_entries", "get_artifacts_for_module",
-    "lookup_artifact_by_symbol", "get_mcp_documentation",
+    "lookup_artifact_by_symbol", "search_source", "get_source_range",
+    "get_symbol_call_context", "get_mcp_documentation",
 ]
 
 _IMPLEMENTATIONS = {

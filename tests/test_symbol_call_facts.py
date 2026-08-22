@@ -207,6 +207,24 @@ def run(obj):
     assert facts.symbol_calls == ()
 
 
+def test_symbol_call_materialization_requires_successful_authoritative_extraction():
+    missing = extract_module_usage_facts("sample", None)
+    invalid = extract_module_usage_facts("sample", "def broken(:\n")
+    valid_empty = extract_module_usage_facts("sample", "def empty():\n    pass\n")
+    valid_edge = extract_module_usage_facts(
+        "sample", "def caller():\n    callee()\ndef callee(): pass\n"
+    )
+
+    assert missing.symbol_calls_materialized is False
+    assert invalid.symbol_calls_materialized is False
+    assert valid_empty.symbol_calls == ()
+    assert valid_empty.symbol_calls_materialized is True
+    assert valid_edge.symbol_calls == (
+        _edge("sample::caller", "sample::callee", 2),
+    )
+    assert valid_edge.symbol_calls_materialized is True
+
+
 def test_incremental_replace_remove_delete_and_unrelated_preservation(tmp_path):
     first = tmp_path / "first.py"
     second = tmp_path / "second.py"
@@ -395,7 +413,9 @@ def test_materialized_empty_symbol_calls_survive_snapshot_without_rebuild(tmp_pa
     source.write_text("def empty():\n    pass\n", encoding="utf-8")
     state = RepositoryAnalysisState(
         modules={"empty": Module("empty", "empty.py", str(source), [])},
-        module_usages={"empty": ModuleUsageFacts(symbol_calls=())},
+        module_usages={
+            "empty": extract_module_usage_facts("empty", "def empty():\n    pass\n")
+        },
     )
     cache = tmp_path / "snapshot-materialized"
     save_snapshot(state, cache, "materialized-empty")

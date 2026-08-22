@@ -889,6 +889,7 @@ def extract_module_usage_facts(
         qualified_refs=qualified_refs,
         aliases=aliases,
         symbol_calls=symbol_calls,
+        symbol_calls_materialized=True,
     )
 
 

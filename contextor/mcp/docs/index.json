@@ -112,6 +112,11 @@
       "short_description": "Fetch one exact line range from a canonical Python source file with large-output confirmation."
     },
     {
+      "tool": "get_symbol_call_context",
+      "filename": "get_symbol_call_context.json",
+      "short_description": "Return a bounded callers/callees neighborhood from current canonical intra-module symbol-call facts without reading source."
+    },
+    {
       "tool": "get_mcp_documentation",
       "filename": "get_mcp_documentation.json",
       "short_description": "Return centralized MCP documentation, optionally filtered by tool names and sections. This passive tool reads no repository, LIVE state, or output reports."

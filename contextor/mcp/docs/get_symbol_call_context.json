@@ -1,0 +1,38 @@
+{
+  "version": "1.0.0",
+  "tool": "get_symbol_call_context",
+  "purpose": [
+    "Return a bounded caller/callee neighborhood for one exact qualified symbol from the LIVE canonical RepositoryAnalysisState.module_usages[module].symbol_calls channel."
+  ],
+  "parameters": [
+    "repo_path (string, required): canonical repository root.",
+    "symbol (string, required): exact canonical module::symbol identity; ambiguous, partial, and unqualified names are never guessed.",
+    "direction (callers|callees|both, default both): graph direction to traverse.",
+    "depth (integer 1-3, default 1): deterministic breadth-first traversal depth; booleans are invalid.",
+    "max_items (positive integer or null, default 20): global maximum emitted unique edges across the requested neighborhood; null requests every relevant edge before output protection.",
+    "representation (named|indexed|auto, default auto): control qualified names versus existing persistent artifact IDs.",
+    "allow_large_output (boolean, default false): explicitly approve the selected final payload when exact UTF-8 preflight exceeds 15360 bytes."
+  ],
+  "behavior": [
+    "The graph is intra-module only. It does not claim inter-module symbol-call completeness or promote dynamic/ambiguous calls.",
+    "Traversal is deterministic BFS: nearer facts precede deeper facts, and canonical edge identities are deduplicated.",
+    "Named output is permitted only when the complete named candidate is at most 51200 UTF-8 bytes. Larger named candidates automatically select indexed output.",
+    "Auto selects indexed below the 51200-byte boundary only when existing shared representation policy saves at least 512 serialized bytes; otherwise it emits named output.",
+    "Indexed edges use existing persistent artifact IDs only and expose lookup_index_entries as the batch resolver. No new IDs or graph registry are created.",
+    "After scope, depth, global max_items, and representation selection, the exact final JSON is measured. A payload strictly above 15360 UTF-8 bytes returns compact confirmation_required without graph edges unless allow_large_output is true."
+  ],
+  "freshness": [
+    "Reads only current LIVE canonical module_usages symbol_calls. It performs no ast.parse, source read, grep, report parsing, or query-time graph reconstruction.",
+    "Fails closed when module truth is stale/unavailable or symbol_calls_materialized is false. A valid materialized-empty graph returns status ok with zero totals."
+  ],
+  "errors": [
+    "Unknown or non-exact symbols, invalid direction/depth/max_items/representation, missing indexed identities, stale truth, and unmaterialized call facts return controlled responses."
+  ],
+  "usage_notes": [
+    "Start with direction, depth=1, and a small max_items. Use expand metadata or retry with a larger bound only when the refactor needs more context.",
+    "For confirmation_required, reduce max_items/depth, narrow direction, select indexed, or repeat the identical request with allow_large_output=true."
+  ],
+  "examples": [
+    "get_symbol_call_context(repo_path, \"pkg.module::handler\", direction=\"callees\", depth=1, max_items=20, representation=\"auto\")"
+  ]
+}

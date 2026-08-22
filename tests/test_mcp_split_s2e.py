@@ -7,6 +7,7 @@ from contextor.mcp.documentation import load_documentation_index
 from contextor.mcp.tools.extract_indexed_report_context import extract_indexed_report_context
 from contextor.mcp.tools.get_layer_isolation import get_layer_isolation
 from contextor.mcp.tools.get_report_diff import get_report_diff
+from contextor.mcp.tools.get_symbol_call_context import get_symbol_call_context
 from contextor.mcp.tools.update_file import update_file
 
 
@@ -19,7 +20,8 @@ _EXPECTED_ORDER = [
     "get_layer_isolation", "get_report_diff", "describe_canonical_state",
     "query_canonical_projection", "extract_indexed_report_context",
     "lookup_index_entries", "get_artifacts_for_module",
-    "lookup_artifact_by_symbol", "get_mcp_documentation",
+    "lookup_artifact_by_symbol", "search_source", "get_source_range",
+    "get_symbol_call_context", "get_mcp_documentation",
 ]
 
 _IMPLEMENTATIONS = {
@@ -27,6 +29,7 @@ _IMPLEMENTATIONS = {
     "get_layer_isolation": get_layer_isolation,
     "get_report_diff": get_report_diff,
     "extract_indexed_report_context": extract_indexed_report_context,
+    "get_symbol_call_context": get_symbol_call_context,
 }
 
 _EXPECTED_SIGNATURES = {
@@ -34,6 +37,7 @@ _EXPECTED_SIGNATURES = {
     "get_layer_isolation": "(repo_path: str, layer_name: str, max_clusters: int | None = 8, max_boundary_violations: int | None = 10, compact: bool = True, fields: list[str] | None = None) -> str",
     "get_report_diff": "(repo_path: str, max_items: int | None = 20, compact: bool = True, fields: list[str] | None = None) -> str",
     "extract_indexed_report_context": "(repo_path: str, query: str, report_path: str = '', resolve_indices: bool = True, public_api_only: bool = False, max_items: int | None = 20, fields: list[str] | None = None, evidence_limit: int | None = 3, representation: str | None = None) -> str",
+    "get_symbol_call_context": "(repo_path: str, symbol: str, direction: str = 'both', depth: int = 1, max_items: int | None = 20, representation: str = 'auto', allow_large_output: bool = False) -> str",
 }
 
 
