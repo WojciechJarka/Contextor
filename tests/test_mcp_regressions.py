@@ -5005,7 +5005,7 @@ def test_blast_radius_consumer_representation_and_progressive_disclosure(
     # A. Public signature preserves existing args, representation is last with default "named"
     sig = inspect.signature(blast_tool.get_artifact_blast_radius)
     param_names = list(sig.parameters.keys())
-    assert param_names == ["repo_path", "artifact_name", "max_items", "compact", "fields", "representation"]
+    assert param_names == ["repo_path", "artifact_name", "max_items", "compact", "fields", "representation", "artifact"]
     assert sig.parameters["representation"].default == "named"
 
     # Setup state with 15 consumers for pkg.core::target_func

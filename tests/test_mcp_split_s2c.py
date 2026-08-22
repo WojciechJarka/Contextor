@@ -36,11 +36,11 @@ _IMPLEMENTATIONS = {
 }
 
 _EXPECTED_SIGNATURES = {
-    "get_artifact_blast_radius": "(repo_path: str, artifact_name: str, max_items: int | None = 30, compact: bool = True, fields: list[str] | None = None, representation: str = 'named') -> str",
+    "get_artifact_blast_radius": "(repo_path: str, artifact_name: str = '', max_items: int | None = 30, compact: bool = True, fields: list[str] | None = None, representation: str = 'named', artifact: str | None = None) -> str",
     "search_artifacts": "(repo_path: str, search_term: str, limit: int | None = 20, evidence_limit: int | None = 20, compact: bool = True, fields: list[str] | None = None) -> str",
     "search_source": "(repo_path: str, search_term: str, limit: int | None = 20, case_sensitive: bool = False, allow_large_output: bool = False) -> str",
     "get_source_range": "(repo_path: str, file_path: str, start_line: int, end_line: int, allow_large_output: bool = False) -> str",
-    "get_artifacts_for_module": "(repo_path: str, module_name: str, include_consumers: bool = True, symbol_filter: str = '', limit: int | None = 50, evidence_limit: int | None = 20, compact: bool = True, fields: list[str] | None = None, representation: str = 'named') -> str",
+    "get_artifacts_for_module": "(repo_path: str, module_name: str = '', include_consumers: bool = True, symbol_filter: str = '', limit: int | None = 50, evidence_limit: int | None = 20, compact: bool = True, fields: list[str] | None = None, representation: str = 'named', module: str | None = None) -> str",
     "lookup_artifact_by_symbol": "(repo_path: str, symbol_name: str = '', limit: int | None = 20, evidence_limit: int | None = 20, compact: bool = True, fields: list[str] | None = None, symbol: str | None = None) -> str",
 }
 
@@ -269,3 +269,277 @@ def test_lookup_artifact_by_symbol_conflicting_symbol_name_and_symbol_returns_er
     res = json.loads(raw)
     assert res["status"] == "error"
     assert res["error"] == "symbol_name and symbol must match when both are provided."
+
+
+def _setup_module_artifacts_state(monkeypatch):
+    from types import SimpleNamespace
+    from contextor.core.analysis.state_manager import RepositoryAnalysisState
+    from contextor.mcp import query_helpers, runtime as mcp_runtime
+
+    module_obj = SimpleNamespace(module_id="M1", path="pkg/mod_a.py", imports=[])
+    state = RepositoryAnalysisState(
+        modules={"pkg.mod_a": module_obj},
+        artifacts={
+            "pkg.mod_a": {
+                "own_symbols": ["my_func", "extra_func"],
+                "symbols": {
+                    "functions": ["my_func", "extra_func"],
+                },
+                "consumers": {
+                    "my_func": {
+                        "consumer_count": {"total": 2},
+                        "consumers": ["tests.test_1", "tests.test_2"],
+                    },
+                    "extra_func": {
+                        "consumer_count": {"total": 1},
+                        "consumers": ["tests.test_1"],
+                    },
+                },
+            },
+        },
+        artifact_consumption={
+            "pkg.mod_a::my_func": {
+                "consumers": ["tests.test_1", "tests.test_2"],
+                "channels": {"tests.test_1": ["direct_calls"], "tests.test_2": ["direct_calls"]},
+            },
+            "pkg.mod_a::extra_func": {
+                "consumers": ["tests.test_1"],
+                "channels": {"tests.test_1": ["direct_calls"]},
+            },
+        },
+        artifact_consumption_state="fresh",
+    )
+    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: SimpleNamespace(state=state))
+    monkeypatch.setattr(query_helpers, "read_registries", lambda _root: ({"pkg.mod_a": "M1"}, {"M1": "pkg.mod_a"}, {}, {}))
+    return state
+
+
+def test_get_artifacts_for_module_legacy_module_name(tmp_path, monkeypatch):
+    import json
+    _setup_module_artifacts_state(monkeypatch)
+    raw = get_artifacts_for_module(
+        repo_path=str(tmp_path),
+        module_name="pkg.mod_a",
+    )
+    res = json.loads(raw)
+    assert res["module"] == "pkg.mod_a"
+    assert "pkg.mod_a::my_func" in res["artifacts"]
+
+
+def test_get_artifacts_for_module_alias_module(tmp_path, monkeypatch):
+    import json
+    _setup_module_artifacts_state(monkeypatch)
+    raw = get_artifacts_for_module(
+        repo_path=str(tmp_path),
+        module="pkg.mod_a",
+    )
+    res = json.loads(raw)
+    assert res["module"] == "pkg.mod_a"
+    assert "pkg.mod_a::my_func" in res["artifacts"]
+
+
+def test_get_artifacts_for_module_matching_both(tmp_path, monkeypatch):
+    import json
+    _setup_module_artifacts_state(monkeypatch)
+    raw = get_artifacts_for_module(
+        repo_path=str(tmp_path),
+        module_name="pkg.mod_a",
+        module="pkg.mod_a",
+    )
+    res = json.loads(raw)
+    assert res["module"] == "pkg.mod_a"
+    assert "pkg.mod_a::my_func" in res["artifacts"]
+
+
+def test_get_artifacts_for_module_conflicting_alias_returns_error(tmp_path, monkeypatch):
+    import json
+    _setup_module_artifacts_state(monkeypatch)
+    raw = get_artifacts_for_module(
+        repo_path=str(tmp_path),
+        module_name="pkg.mod_a",
+        module="pkg.mod_b",
+    )
+    res = json.loads(raw)
+    assert res["status"] == "error"
+    assert res["error"] == "module_name and module must match when both are provided."
+
+
+def test_get_artifacts_for_module_missing_both_returns_error(tmp_path):
+    import json
+    raw = get_artifacts_for_module(
+        repo_path=str(tmp_path),
+    )
+    res = json.loads(raw)
+    assert res["status"] == "error"
+    assert res["error"] == "module_name or module is required."
+
+
+def test_get_artifacts_for_module_file_path_normalization(tmp_path, monkeypatch):
+    import json
+    _setup_module_artifacts_state(monkeypatch)
+    raw = get_artifacts_for_module(
+        repo_path=str(tmp_path),
+        module="pkg/mod_a.py",
+    )
+    res = json.loads(raw)
+    assert res["module"] == "pkg.mod_a"
+    assert "pkg.mod_a::my_func" in res["artifacts"]
+
+
+def test_get_artifacts_for_module_preserves_limit_compact_and_representation(tmp_path, monkeypatch):
+    import json
+    _setup_module_artifacts_state(monkeypatch)
+    raw = get_artifacts_for_module(
+        repo_path=str(tmp_path),
+        module="pkg.mod_a",
+        compact=False,
+        limit=1,
+        representation="named",
+    )
+    res = json.loads(raw)
+    assert res["module"] == "pkg.mod_a"
+    assert res["artifact_count"] == 1
+    assert res["truncated"] is True
+
+
+def _setup_blast_radius_state(monkeypatch):
+    from types import SimpleNamespace
+    from contextor.core.analysis.state_manager import RepositoryAnalysisState
+    from contextor.mcp import query_helpers, runtime as mcp_runtime
+
+    state = RepositoryAnalysisState(
+        artifacts={
+            "pkg.mod_a": {
+                "own_symbols": ["my_func"],
+                "symbols": {
+                    "functions": ["my_func"],
+                },
+                "consumers": {
+                    "my_func": {
+                        "consumer_count": {"total": 2},
+                        "consumers": ["tests.test_1", "tests.test_2"],
+                    }
+                },
+            },
+        },
+        artifact_consumption={
+            "pkg.mod_a::my_func": {
+                "consumers": ["tests.test_1", "tests.test_2"],
+                "channels": {"tests.test_1": ["direct_calls"], "tests.test_2": ["direct_calls"]},
+            }
+        },
+        artifact_consumption_state="fresh",
+    )
+    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: SimpleNamespace(state=state))
+    monkeypatch.setattr(
+        query_helpers,
+        "read_registries",
+        lambda _root: ({"pkg.mod_a": "M1"}, {"M1": "pkg.mod_a"}, {"pkg.mod_a::my_func": "A1"}, {"A1": "pkg.mod_a::my_func"}),
+    )
+    return state
+
+
+def test_get_artifact_blast_radius_legacy_artifact_name(tmp_path, monkeypatch):
+    import json
+    _setup_blast_radius_state(monkeypatch)
+    raw = get_artifact_blast_radius(
+        repo_path=str(tmp_path),
+        artifact_name="pkg.mod_a::my_func",
+    )
+    res = json.loads(raw)
+    assert res["artifact"] == "pkg.mod_a::my_func"
+
+
+def test_get_artifact_blast_radius_alias_artifact(tmp_path, monkeypatch):
+    import json
+    _setup_blast_radius_state(monkeypatch)
+    raw = get_artifact_blast_radius(
+        repo_path=str(tmp_path),
+        artifact="pkg.mod_a::my_func",
+    )
+    res = json.loads(raw)
+    assert res["artifact"] == "pkg.mod_a::my_func"
+
+
+def test_get_artifact_blast_radius_matching_both(tmp_path, monkeypatch):
+    import json
+    _setup_blast_radius_state(monkeypatch)
+    raw = get_artifact_blast_radius(
+        repo_path=str(tmp_path),
+        artifact_name="pkg.mod_a::my_func",
+        artifact="pkg.mod_a::my_func",
+    )
+    res = json.loads(raw)
+    assert res["artifact"] == "pkg.mod_a::my_func"
+
+
+def test_get_artifact_blast_radius_conflicting_alias_returns_error(tmp_path, monkeypatch):
+    import json
+    _setup_blast_radius_state(monkeypatch)
+    raw = get_artifact_blast_radius(
+        repo_path=str(tmp_path),
+        artifact_name="pkg.mod_a::my_func",
+        artifact="different",
+    )
+    res = json.loads(raw)
+    assert res["status"] == "error"
+    assert res["error"] == "artifact_name and artifact must match when both are provided."
+
+
+def test_get_artifact_blast_radius_missing_both_returns_error(tmp_path):
+    import json
+    raw = get_artifact_blast_radius(
+        repo_path=str(tmp_path),
+    )
+    res = json.loads(raw)
+    assert res["status"] == "error"
+    assert res["error"] == "artifact_name or artifact is required."
+
+
+def test_get_artifact_blast_radius_module_redirect_preserves_structure_and_suggested_next_call(tmp_path, monkeypatch):
+    import json
+    _setup_blast_radius_state(monkeypatch)
+    raw = get_artifact_blast_radius(
+        repo_path=str(tmp_path),
+        artifact="pkg.mod_a",
+    )
+    res = json.loads(raw)
+    assert res["resolved_as"] == "module"
+    assert res["module"] == "pkg.mod_a"
+    assert res["module_id"] == "M1"
+    assert res["suggested_next_tool"] == "get_module_context"
+    assert res["suggested_next_call"] == {
+        "tool": "get_module_context",
+        "arguments": {"module": "pkg.mod_a"},
+    }
+    assert "artifact_candidates" in res
+    assert res["artifact_candidates"]["total"] == 1
+
+
+def test_get_artifact_blast_radius_regular_artifact_does_not_contain_module_redirect(tmp_path, monkeypatch):
+    import json
+    _setup_blast_radius_state(monkeypatch)
+    raw = get_artifact_blast_radius(
+        repo_path=str(tmp_path),
+        artifact="pkg.mod_a::my_func",
+    )
+    res = json.loads(raw)
+    assert "resolved_as" not in res
+    assert "suggested_next_tool" not in res
+    assert "suggested_next_call" not in res
+
+
+def test_get_artifact_blast_radius_preserves_max_items_compact_and_representation(tmp_path, monkeypatch):
+    import json
+    _setup_blast_radius_state(monkeypatch)
+    raw = get_artifact_blast_radius(
+        repo_path=str(tmp_path),
+        artifact="pkg.mod_a::my_func",
+        compact=False,
+        max_items=1,
+        representation="named",
+    )
+    res = json.loads(raw)
+    assert res["consumers"]["total"] == 2
+    assert res["consumers"]["truncated"] is True
+    assert len(res["consumers"]["items"]) == 1

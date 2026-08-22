@@ -190,11 +190,12 @@ def _consumers_collection_view(
 
 def get_artifact_blast_radius(
     repo_path: str,
-    artifact_name: str,
+    artifact_name: str = "",
     max_items: int | None = 30,
     compact: bool = True,
     fields: list[str] | None = None,
     representation: str = "named",
+    artifact: str | None = None,
 ) -> str:
     if representation not in _ALLOWED_REPRESENTATIONS:
         return json.dumps(
@@ -206,6 +207,33 @@ def get_artifact_blast_radius(
             indent=2,
         )
     root = Path(repo_path).expanduser().resolve()
+
+    normalized_artifact_name = artifact_name.strip()
+    normalized_artifact = artifact.strip() if artifact is not None else ""
+
+    if (
+        normalized_artifact_name
+        and normalized_artifact
+        and normalized_artifact_name != normalized_artifact
+    ):
+        return json.dumps(
+            {
+                "status": "error",
+                "error": "artifact_name and artifact must match when both are provided.",
+            },
+            indent=2,
+        )
+
+    artifact_name = normalized_artifact or normalized_artifact_name
+    if not artifact_name:
+        return json.dumps(
+            {
+                "status": "error",
+                "error": "artifact_name or artifact is required.",
+            },
+            indent=2,
+        )
+
     try:
         mod_path_to_id, mod_id_to_path, art_path_to_id, art_id_to_path = query_helpers.read_registries(root)
         engine = mcp_runtime.get_or_init_engine(root)
@@ -533,6 +561,12 @@ def get_artifact_blast_radius(
                             "module": target_module,
                             "module_id": target_module_id,
                             "suggested_next_tool": "get_module_context",
+                            "suggested_next_call": {
+                                "tool": "get_module_context",
+                                "arguments": {
+                                    "module": target_module,
+                                },
+                            },
                             "artifact_candidates": {
                                 "total": total,
                                 "items": items,

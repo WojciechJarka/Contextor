@@ -5,7 +5,7 @@
     "[OPTIMIZED] Returns artifacts exported by a module with consumer information and progressive disclosure."
   ],
   "parameters": [
-    "``module_name`` can be:\n- A full dotted module name: 'contextor.ui.gui_parser'\n- A file path relative to the repo root: 'contextor/ui/gui_parser.py'",
+    "``module_name`` (or alias ``module``) can be:\n- A full dotted module name: 'contextor.ui.gui_parser'\n- A file path relative to the repo root: 'contextor/ui/gui_parser.py'",
     "``include_consumers=True`` includes consumer counts and evidence. Set ``include_consumers=False`` for signatures-only view.",
     "``symbol_filter`` filters candidate artifacts by symbol name substring before limits and ranking.",
     "``limit`` bounds the maximum number of artifacts returned (default 50, pass ``None`` for unbounded). In default compact mode, output is capped at 10 salience-ranked artifacts.",

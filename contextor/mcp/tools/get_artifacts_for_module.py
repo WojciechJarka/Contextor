@@ -23,7 +23,7 @@ _DOMAIN_FIELDS = {
 
 def get_artifacts_for_module(
     repo_path: str,
-    module_name: str,
+    module_name: str = "",
     include_consumers: bool = True,
     symbol_filter: str = "",
     limit: int | None = 50,
@@ -31,6 +31,7 @@ def get_artifacts_for_module(
     compact: bool = True,
     fields: list[str] | None = None,
     representation: str = "named",
+    module: str | None = None,
 ) -> str:
     if not mcp_rep.is_supported_representation(representation):
         return json.dumps(
@@ -44,6 +45,32 @@ def get_artifacts_for_module(
 
     root = Path(repo_path).expanduser().resolve()
     repo_name = root.name
+
+    normalized_module_name = module_name.strip()
+    normalized_module = module.strip() if module is not None else ""
+
+    if (
+        normalized_module_name
+        and normalized_module
+        and normalized_module_name != normalized_module
+    ):
+        return json.dumps(
+            {
+                "status": "error",
+                "error": "module_name and module must match when both are provided.",
+            },
+            indent=2,
+        )
+
+    module_name = normalized_module or normalized_module_name
+    if not module_name:
+        return json.dumps(
+            {
+                "status": "error",
+                "error": "module_name or module is required.",
+            },
+            indent=2,
+        )
 
     # Normalise file-path input to dotted module name.
     target_path = Path(module_name)
