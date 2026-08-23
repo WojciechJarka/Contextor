@@ -1,103 +1,108 @@
-# CONTEXTOR — F2D MCP RUNTIME CERTIFICATION
+# CONTEXTOR — F2E1 get_symbol_implementation — RUNTIME CERTIFICATION
 **Date:** 2026-08-23  
 **Mode:** READ-ONLY (LIVE MCP RUNTIME CERTIFICATION)  
-**Target:** `get_module_context`  
+**Target:** `get_symbol_implementation`  
 **Files Changed By This Step:** NONE  
-**Status:** CERTIFIED & VERIFIED (14/14 PASS)
+**Status:** CERTIFIED & VERIFIED (PASS)
 
 ---
 
 ## 1. RUNTIME CERTIFICATION EVIDENCE (LIVE MCP EXECUTIONS)
 
 ### 1. Runtime Freshness & Documentation (`get_mcp_documentation`)
-- **Call:** `get_mcp_documentation(tool="get_module_context")`
-- **Output:** Dokumentacja potwierdza exact active module ID, dotted/path formaty, artifact redirect do `get_artifact_blast_radius`, bounded fuzzy module suggestions (score >= 0.75, max 5, suggestion-only) z `active_module_registry` oraz legacy not-found string fallback dla nieistniejących module ID.
+- **Call:** `get_mcp_documentation(tool="get_symbol_implementation")`
+- **Output:** Potwierdzono aktualną sygnaturę i dokumentację:
+  - Obsługa exact active artifact ID (`A2496/1`), canonical qualified identity (`module::symbol`), plain leaf.
+  - Zasada pierwszeństwa ograniczenia plikowego (`file_paths` / `file_path` wins).
+  - Wyprowadzanie kanonicznej ścieżki ze stanu modułów LIVE w przypadku braku ograniczenia plikowego dla ID i qualified identity.
+  - Bounded scoped fuzzy suggestions (max 5, score >= 0.75, suggestion-only) z `active_artifact_registry`.
+  - Missing artifact ID never returns fuzzy suggestions.
+  - Progi smart auto: `<=5120 B` fetch / `>5120 B` preview.
 
-### 2. Legacy Dotted Module
-- **Call:** `get_module_context(repo_path="C:\\Temp\\Contextor_Repo", module="contextor.mcp.query_helpers")`
-- **Output:** Normalny sukces modułowy: `module: "contextor.mcp.query_helpers"`, `module_idx: "252/2"`, pełne sekcje `metrics`, `dependencies_inbound_who_calls_me`, `dependencies_outbound_who_i_call`.
+### 2. Real Active Artifact Identification
+- **Artifact:** `contextor.mcp.query_helpers::resolve_module_identity`
+- **Active ID:** `A2496/1`
+- **Definer Module:** `contextor.mcp.query_helpers`
+- **Canonical Source Path:** `contextor/mcp/query_helpers.py`
 
-### 3. Legacy POSIX Path Normalization
-- **Call:** `get_module_context(repo_path="C:\\Temp\\Contextor_Repo", module="contextor/mcp/query_helpers.py")`
-- **Output:** Identyczny canonical moduł `contextor.mcp.query_helpers` (`252/2`).
+### 3. Exact Artifact ID + Explicit Correct File
+- **Call:** `get_symbol_implementation(symbol="A2496/1", file_path="contextor/mcp/query_helpers.py")`
+- **Output:**
+  ```json
+  {
+    "status": "resolved",
+    "mode": "fetch",
+    "resolution": {
+      "symbol": "resolve_module_identity",
+      "file_path": "C:\\Temp\\Contextor_Repo\\contextor\\mcp\\query_helpers.py",
+      "kind": "function",
+      "lines": {
+        "start": 96,
+        "end": 159
+      }
+    },
+    "implementation": "def resolve_module_identity(..."
+  }
+  ```
 
-### 4. Windows Path Normalization
-- **Call:** `get_module_context(repo_path="C:\\Temp\\Contextor_Repo", module=r"contextor\mcp\query_helpers.py")`
-- **Output:** Identyczny canonical moduł `contextor.mcp.query_helpers` (`252/2`).
+### 4. Lowercase Artifact ID
+- **Call:** `get_symbol_implementation(symbol="a2496/1", file_path="contextor/mcp/query_helpers.py")`
+- **Output:** Identyczny kanoniczny sukces `status: "resolved"`, symbol `resolve_module_identity`.
 
-### 5. Exact Active Module ID (`252/2`)
-- **Call 1 (alias `module`):** `get_module_context(repo_path="C:\\Temp\\Contextor_Repo", module="252/2")`
-- **Call 2 (parametr `module_name`):** `get_module_context(repo_path="C:\\Temp\\Contextor_Repo", module_name="252/2")`
-- **Output:** W obu wywołaniach poprawny canonical module `contextor.mcp.query_helpers` z pełnym payloadem.
+### 5. Exact Artifact ID Without File Constraint (Inferred Canonical LIVE Path)
+- **Call:** `get_symbol_implementation(symbol="A2496/1")`
+- **Output:** Narzędzie automatycznie wyznaczyło ścieżkę źródłową `contextor/mcp/query_helpers.py` ze stanu kanonicznego LIVE i zwróciło pełną implementację bez konieczności ręcznego podawania `file_path`.
 
-### 6. Missing Syntactic Module ID (`99999/1`)
-- **Call:** `get_module_context(repo_path="C:\\Temp\\Contextor_Repo", module="99999/1")`
-- **Output:** `Module '99999/1' not found in the project graph.` (dokładny legacy string, brak fuzzy).
-
-### 7. Fuzzy Dotted Typo
-- **Call:** `get_module_context(repo_path="C:\\Temp\\Contextor_Repo", module="contextor.mcp.quey_helpers")`
+### 6. Exact Artifact ID + Wrong Explicit File
+- **Call:** `get_symbol_implementation(symbol="A2496/1", file_path="contextor/core/source.py")`
 - **Output:**
   ```json
   {
     "status": "not_found",
-    "query": "contextor.mcp.quey_helpers",
-    "similar_candidates": [
-      {
-        "module": "contextor.mcp.query_helpers",
-        "module_id": "252/2",
-        "score": 0.9811
-      },
-      {
-        "module": "contextor.mcp.source_helpers",
-        "module_id": "271/1",
-        "score": 0.8889
-      },
-      {
-        "module": "contextor.mcp.report_helpers",
-        "module_id": "263/1",
-        "score": 0.8519
-      }
+    "symbol": "A2496/1",
+    "searched_files": [
+      "contextor/core/source.py"
     ],
-    "data_source": "active_module_registry"
-  }
-  ```
-
-### 8. Fuzzy POSIX Path Typo
-- **Call:** `get_module_context(repo_path="C:\\Temp\\Contextor_Repo", module="contextor/mcp/quey_helpers.py")`
-- **Output:** Bounded fuzzy suggestions z zachowanym oryginalnym `query: "contextor/mcp/quey_helpers.py"` oraz top kandydatem `contextor.mcp.query_helpers` (`score: 0.9811`).
-
-### 9. Fuzzy Windows Path Typo
-- **Call:** `get_module_context(repo_path="C:\\Temp\\Contextor_Repo", module=r"contextor\mcp\quey_helpers.py")`
-- **Output:** Bounded fuzzy suggestions z top kandydatem `contextor.mcp.query_helpers` (`score: 0.9811`).
-
-### 10. Artifact Redirect
-- **Call:** `get_module_context(repo_path="C:\\Temp\\Contextor_Repo", module="contextor.mcp.query_helpers::resolve_module_identity")`
-- **Output:**
-  ```json
-  {
-    "target": "contextor.mcp.query_helpers::resolve_module_identity",
-    "resolved_as": "artifact",
-    "artifact": "contextor.mcp.query_helpers::resolve_module_identity",
+    "message": "Resolved artifact is outside the requested file constraints.",
+    "resolved_artifact": "contextor.mcp.query_helpers::resolve_module_identity",
     "artifact_id": "A2496/1",
-    "definer_module": "contextor.mcp.query_helpers",
-    "suggested_next_tool": "get_artifact_blast_radius",
-    "warnings": [
-      "Target resolved to an artifact/symbol rather than a module. Use get_artifact_blast_radius for symbol-level consumption."
-    ]
+    "definer_module": "contextor.mcp.query_helpers"
   }
   ```
 
-### 11. Alias Contract
-- `module` only: PASS
-- `module_name` only: PASS
-- Oba identyczne: PASS (`contextor.mcp.query_helpers`)
-- Oba różne: PASS (`error: "Conflicting 'module_name' and 'module' arguments provided..."`)
-- Brak obu: PASS (`error: "Either 'module_name' or 'module' must be provided."`)
+### 7. Missing Syntactic Artifact ID
+- **Call:** `get_symbol_implementation(symbol="A99999/1", file_path="contextor/mcp/query_helpers.py")`
+- **Output:** `{"status": "not_found", "symbol": "A99999/1", "message": "Artifact 'A99999/1' not found in the active registry."}` (brak fuzzy, brak pobierania implementacji).
 
-### 12. Downstream Equivalence (Dotted vs ID)
-- **Call A (Dotted):** `get_module_context(repo_path="...", module="contextor.mcp.query_helpers", compact=False, max_items=1, fields=["module", "metrics"])`
-- **Call B (ID):** `get_module_context(repo_path="...", module="252/2", compact=False, max_items=1, fields=["module", "metrics"])`
-- **Output:** Payload identyczny 1:1.
+### 8. Qualified Canonical Identity (`module::symbol`)
+- **Call A (bez pliku):** `get_symbol_implementation(symbol="contextor.mcp.query_helpers::resolve_module_identity")` -> `status: "resolved"`, inferred path.
+- **Call B (z poprawnym plikiem):** `get_symbol_implementation(symbol="contextor.mcp.query_helpers::resolve_module_identity", file_path="contextor/mcp/query_helpers.py")` -> `status: "resolved"`.
+
+### 9. Wrong Qualified Module Prefix (Identity Enforcement)
+- **Call:** `get_symbol_implementation(symbol="wrong.module::resolve_module_identity", file_path="contextor/mcp/query_helpers.py")`
+- **Output:** `status: "not_found"` z sugestią fuzzy; narzędzie **nie** zwróciło fałszywego sukcesu z podanego pliku.
+
+### 10. Plain Leaf Legacy & Missing Files Fail-Closed
+- **Call A (z plikiem):** `get_symbol_implementation(symbol="resolve_module_identity", file_path="contextor/mcp/query_helpers.py")` -> `status: "resolved"`.
+- **Call B (bez pliku):** `get_symbol_implementation(symbol="resolve_module_identity")` -> `{"status": "error", "error": "At least one Python source file is required."}`.
+
+### 11. Scoped Fuzzy Typo with Explicit File
+- **Call:** `get_symbol_implementation(symbol="resolve_modul_identity", file_path="contextor/mcp/query_helpers.py")`
+- **Output:** `status: "not_found"`, `similar_candidates: [{"artifact": "contextor.mcp.query_helpers::resolve_module_identity", "artifact_id": "A2496/1", "score": 0.9778}]`, `data_source: "active_artifact_registry"`.
+
+### 12. Qualified Fuzzy Without File
+- **Call:** `get_symbol_implementation(symbol="contextor.mcp.query_helpers::resolve_modul_identity")`
+- **Output:** `status: "not_found"` z globalnymi sugestiami z aktywnego rejestru (score >= 0.75, max 5, suggestion-only).
+
+### 13. Auto Pipeline (Preview & Fetch Modes on Artifact ID)
+- **Auto (<=5120 B):** Zwraca pełny kod (`mode: "fetch"`).
+- **Preview:** `get_symbol_implementation(symbol="A2496/1", mode="preview")` -> `mode: "preview"`, metadane i `fetch_plans`.
+- **Explicit Fetch:** `get_symbol_implementation(symbol="A2496/1", mode="fetch", include=["signature"])` -> `mode: "fetch"`, `signature` only.
+
+### 14. File Alias Contract
+- `file_path`: PASS
+- `file_paths`: PASS
+- `file_path` + `file_paths` (merge/dedupe): PASS
 
 ---
 
@@ -109,32 +114,43 @@ TOOL_RUNTIME_VERSION_CURRENT=YES
 TOOL_SCHEMA_CURRENT=YES
 TOOL_DOCUMENTATION_CURRENT=YES
 
-LEGACY_DOTTED_RUNTIME=PASS
-LEGACY_PATH_RUNTIME=PASS
-WINDOWS_PATH_RUNTIME=PASS
+TEST_ARTIFACT=contextor.mcp.query_helpers::resolve_module_identity
+TEST_ARTIFACT_ID=A2496/1
+TEST_SOURCE_PATH=contextor/mcp/query_helpers.py
 
-EXACT_MODULE_ID_RUNTIME=PASS
-EXACT_MODULE_ID_LEGACY_PARAM_RUNTIME=PASS
-MISSING_MODULE_ID_NEVER_FUZZY_RUNTIME=PASS
+EXACT_ID_EXPLICIT_FILE_RUNTIME=PASS
+LOWERCASE_ID_RUNTIME=PASS
+EXACT_ID_NO_FILE_RUNTIME=PASS
+ID_WRONG_FILE_FAIL_CLOSED_RUNTIME=PASS
+MISSING_ID_NEVER_FUZZY_RUNTIME=PASS
 
-FUZZY_DOTTED_RUNTIME=PASS
-FUZZY_PATH_RUNTIME=PASS
-FUZZY_WINDOWS_PATH_RUNTIME=PASS
+QUALIFIED_IDENTITY_NO_FILE_RUNTIME=PASS
+QUALIFIED_IDENTITY_EXPLICIT_FILE_RUNTIME=PASS
+WRONG_MODULE_PREFIX_NO_FALSE_SUCCESS_RUNTIME=PASS
+
+PLAIN_LEAF_EXPLICIT_FILE_RUNTIME=PASS
+PLAIN_LEAF_NO_FILE_LEGACY_RUNTIME=PASS
+
+SCOPED_FUZZY_RUNTIME=PASS
+SCOPED_FUZZY_OUT_OF_SCOPE_EXCLUDED_RUNTIME=PASS
+QUALIFIED_FUZZY_NO_FILE_RUNTIME=PASS
 FUZZY_MAX_5_RUNTIME=PASS
 FUZZY_NEVER_AUTO_RESOLVES_RUNTIME=PASS
-ORIGINAL_QUERY_PRESERVED_RUNTIME=PASS
 
-ARTIFACT_REDIRECT_RUNTIME=PASS
-ALIAS_CONTRACT_RUNTIME=PASS
-EXACT_ID_DOWNSTREAM_EQUIVALENCE_RUNTIME=PASS
+AMBIGUITY_RUNTIME=NOT_EXERCISED
 
-GLOBAL_GUARD_RUNTIME=NOT_EXERCISED
+AUTO_SMALL_ID_RUNTIME=PASS
+EXPLICIT_PREVIEW_ID_RUNTIME=PASS
+EXPLICIT_FETCH_ID_RUNTIME=PASS
+AUTO_BOUNDARY_RUNTIME=UNIT_CERTIFIED_5120_5121
+
+FILE_ALIAS_RUNTIME=PASS
+
 CURRENTNESS_RUNTIME=NOT_EXERCISED
-
-COLLISION_CERTIFICATION=DEFERRED
-FULL_ANALYSIS_EXECUTED=NO
+NO_ENGINE_RUNTIME=NOT_EXERCISED
 
 FILES_CHANGED=NONE
 DIFFS=NONE
+
 VERDICT=PASS
 ```

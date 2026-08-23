@@ -231,23 +231,259 @@ def get_symbol_implementation(
     if file_path and file_path not in effective_file_paths:
         effective_file_paths.append(file_path)
 
+    from contextor.core.report_query import normalize_module_path_to_dotted
+
+    raw_symbol = symbol.strip()
+    is_id = query_helpers.is_artifact_id(raw_symbol)
+    is_qualified = "::" in raw_symbol
+
+    _registries: tuple[dict, dict, dict, dict] | None = None
+
+    def _get_registries() -> tuple[dict, dict, dict, dict]:
+        nonlocal _registries
+        if _registries is None:
+            _registries = query_helpers.read_registries(root)
+        return _registries
+
+    target_symbol = raw_symbol
+    search_paths: list[Path] = []
+    canonical_artifact: str | None = None
+
+    if is_id:
+        mod_path_to_id, mod_id_to_path, art_path_to_id, art_id_to_path = _get_registries()
+        identity = query_helpers.resolve_artifact_identity(raw_symbol, art_path_to_id, art_id_to_path)
+        if identity["status"] == "resolved" and identity.get("resolution") == "exact_id":
+            canonical_artifact = identity["artifact"]
+            definer_mod, target_symbol = canonical_artifact.split("::", 1)
+            if effective_file_paths:
+                try:
+                    explicit_paths = _resolve_symbol_source_paths(root, effective_file_paths)
+                except ValueError as exc:
+                    return json.dumps({"status": "error", "error": str(exc)}, indent=2)
+                explicit_modules = {
+                    normalize_module_path_to_dotted(str(p.relative_to(root)), repo_root=str(root))
+                    for p in explicit_paths
+                }
+                if definer_mod not in explicit_modules:
+                    return json.dumps(
+                        {
+                            "status": "not_found",
+                            "symbol": symbol,
+                            "searched_files": effective_file_paths,
+                            "message": "Resolved artifact is outside the requested file constraints.",
+                            "resolved_artifact": canonical_artifact,
+                            "artifact_id": identity["artifact_id"],
+                            "definer_module": definer_mod,
+                        },
+                        indent=2,
+                    )
+                search_paths = [
+                    p for p in explicit_paths
+                    if normalize_module_path_to_dotted(str(p.relative_to(root)), repo_root=str(root)) == definer_mod
+                ] or explicit_paths
+            else:
+                engine = mcp_runtime.get_or_init_engine(root)
+                if not engine or getattr(engine.state, "resync_required", False):
+                    return json.dumps({"status": "error", "error": "Error: No usable canonical LIVE state. Run analyze_project first."}, indent=2)
+                state = engine.state
+                unavailable = query_helpers.module_truth_unavailable(state, definer_mod)
+                if unavailable:
+                    return json.dumps(unavailable, indent=2)
+                module_obj = getattr(state, "modules", {}).get(definer_mod)
+                canonical_rel_path = getattr(module_obj, "path", None)
+                if not canonical_rel_path:
+                    return json.dumps({"status": "error", "error": f"Cannot determine canonical source path for module '{definer_mod}'."}, indent=2)
+                try:
+                    search_paths = _resolve_symbol_source_paths(root, [canonical_rel_path])
+                except ValueError as exc:
+                    return json.dumps({"status": "error", "error": str(exc)}, indent=2)
+        elif identity["status"] == "not_found" and identity.get("query_kind") == "artifact_id":
+            return json.dumps(
+                {
+                    "status": "not_found",
+                    "symbol": symbol,
+                    "message": f"Artifact '{symbol}' not found in the active registry.",
+                },
+                indent=2,
+            )
+        else:
+            return json.dumps(
+                {
+                    "status": "not_found",
+                    "symbol": symbol,
+                    "message": f"Artifact '{symbol}' not found in the active registry.",
+                },
+                indent=2,
+            )
+    elif is_qualified:
+        mod_path_to_id, mod_id_to_path, art_path_to_id, art_id_to_path = _get_registries()
+        identity = query_helpers.resolve_artifact_identity(raw_symbol, art_path_to_id, art_id_to_path)
+        if identity["status"] == "resolved" and identity.get("resolution") == "exact_identity":
+            canonical_artifact = identity["artifact"]
+            definer_mod, target_symbol = canonical_artifact.split("::", 1)
+            if effective_file_paths:
+                try:
+                    explicit_paths = _resolve_symbol_source_paths(root, effective_file_paths)
+                except ValueError as exc:
+                    return json.dumps({"status": "error", "error": str(exc)}, indent=2)
+                explicit_modules = {
+                    normalize_module_path_to_dotted(str(p.relative_to(root)), repo_root=str(root))
+                    for p in explicit_paths
+                }
+                if definer_mod not in explicit_modules:
+                    return json.dumps(
+                        {
+                            "status": "not_found",
+                            "symbol": symbol,
+                            "searched_files": effective_file_paths,
+                            "message": "Resolved artifact is outside the requested file constraints.",
+                            "resolved_artifact": canonical_artifact,
+                            "artifact_id": identity["artifact_id"],
+                            "definer_module": definer_mod,
+                        },
+                        indent=2,
+                    )
+                search_paths = [
+                    p for p in explicit_paths
+                    if normalize_module_path_to_dotted(str(p.relative_to(root)), repo_root=str(root)) == definer_mod
+                ] or explicit_paths
+            else:
+                engine = mcp_runtime.get_or_init_engine(root)
+                if not engine or getattr(engine.state, "resync_required", False):
+                    return json.dumps({"status": "error", "error": "Error: No usable canonical LIVE state. Run analyze_project first."}, indent=2)
+                state = engine.state
+                unavailable = query_helpers.module_truth_unavailable(state, definer_mod)
+                if unavailable:
+                    return json.dumps(unavailable, indent=2)
+                module_obj = getattr(state, "modules", {}).get(definer_mod)
+                canonical_rel_path = getattr(module_obj, "path", None)
+                if not canonical_rel_path:
+                    return json.dumps({"status": "error", "error": f"Cannot determine canonical source path for module '{definer_mod}'."}, indent=2)
+                try:
+                    search_paths = _resolve_symbol_source_paths(root, [canonical_rel_path])
+                except ValueError as exc:
+                    return json.dumps({"status": "error", "error": str(exc)}, indent=2)
+        else:
+            if effective_file_paths:
+                try:
+                    explicit_paths = _resolve_symbol_source_paths(root, effective_file_paths)
+                except ValueError as exc:
+                    return json.dumps({"status": "error", "error": str(exc)}, indent=2)
+                explicit_modules = {
+                    normalize_module_path_to_dotted(str(p.relative_to(root)), repo_root=str(root))
+                    for p in explicit_paths
+                }
+                scoped_art_path_to_id = {
+                    k: v for k, v in art_path_to_id.items()
+                    if k.split("::", 1)[0] in explicit_modules
+                }
+                scoped_art_id_to_path = {v: k for k, v in scoped_art_path_to_id.items()}
+                fuzzy_identity = query_helpers.resolve_artifact_identity(
+                    raw_symbol, scoped_art_path_to_id, scoped_art_id_to_path
+                )
+                if fuzzy_identity.get("similar_candidates"):
+                    return json.dumps(
+                        {
+                            "status": "not_found",
+                            "symbol": symbol,
+                            "searched_files": effective_file_paths,
+                            "similar_candidates": fuzzy_identity["similar_candidates"],
+                            "data_source": "active_artifact_registry",
+                        },
+                        indent=2,
+                    )
+                return json.dumps(
+                    {
+                        "status": "not_found",
+                        "symbol": symbol,
+                        "searched_files": effective_file_paths,
+                        "message": "No exact class, function, or method match was found.",
+                    },
+                    indent=2,
+                )
+            else:
+                if identity.get("similar_candidates"):
+                    return json.dumps(
+                        {
+                            "status": "not_found",
+                            "symbol": symbol,
+                            "similar_candidates": identity["similar_candidates"],
+                            "data_source": "active_artifact_registry",
+                        },
+                        indent=2,
+                    )
+                return json.dumps(
+                    {
+                        "status": "not_found",
+                        "symbol": symbol,
+                        "message": "No exact class, function, or method match was found.",
+                    },
+                    indent=2,
+                )
+    else:
+        if not effective_file_paths:
+            return json.dumps({"status": "error", "error": "At least one Python source file is required."}, indent=2)
+        try:
+            search_paths = _resolve_symbol_source_paths(root, effective_file_paths)
+        except ValueError as exc:
+            return json.dumps({"status": "error", "error": str(exc)}, indent=2)
+
     try:
         candidates = []
-        for path in _resolve_symbol_source_paths(root, effective_file_paths):
-            candidates.extend(_ast_symbol_candidates(path, symbol))
+        for path in search_paths:
+            candidates.extend(_ast_symbol_candidates(path, target_symbol))
     except (OSError, SyntaxError, UnicodeDecodeError, SourceError, ValueError) as exc:
         return json.dumps({"status": "error", "error": str(exc)}, indent=2)
 
     if not candidates:
-        return json.dumps(
-            {
-                "status": "not_found",
-                "symbol": symbol,
-                "searched_files": effective_file_paths,
-                "message": "No exact class, function, or method match was found.",
-            },
-            indent=2,
-        )
+        if effective_file_paths:
+            try:
+                explicit_paths = _resolve_symbol_source_paths(root, effective_file_paths)
+            except ValueError:
+                explicit_paths = search_paths
+            explicit_modules = {
+                normalize_module_path_to_dotted(str(p.relative_to(root)), repo_root=str(root))
+                for p in explicit_paths
+            }
+            _, _, art_path_to_id, _ = _get_registries()
+            scoped_art_path_to_id = {
+                k: v for k, v in art_path_to_id.items()
+                if k.split("::", 1)[0] in explicit_modules
+            }
+            scoped_art_id_to_path = {v: k for k, v in scoped_art_path_to_id.items()}
+            fuzzy_identity = query_helpers.resolve_artifact_identity(
+                raw_symbol, scoped_art_path_to_id, scoped_art_id_to_path
+            )
+            if fuzzy_identity.get("similar_candidates"):
+                return json.dumps(
+                    {
+                        "status": "not_found",
+                        "symbol": symbol,
+                        "searched_files": effective_file_paths,
+                        "similar_candidates": fuzzy_identity["similar_candidates"],
+                        "data_source": "active_artifact_registry",
+                    },
+                    indent=2,
+                )
+            return json.dumps(
+                {
+                    "status": "not_found",
+                    "symbol": symbol,
+                    "searched_files": effective_file_paths,
+                    "message": "No exact class, function, or method match was found.",
+                },
+                indent=2,
+            )
+        else:
+            return json.dumps(
+                {
+                    "status": "not_found",
+                    "symbol": symbol,
+                    "searched_files": [str(p.relative_to(root)) if p.is_relative_to(root) else str(p) for p in search_paths],
+                    "message": "No exact class, function, or method match was found.",
+                },
+                indent=2,
+            )
     if len(candidates) != 1:
         return json.dumps(
             {
