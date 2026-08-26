@@ -82,6 +82,15 @@
 - Runtime round-trip ergonomics certification: 5/5 passing.
 - Open code, contract and runtime findings: none.
 
+### Canonical single-file reference projection
+Replaced single-file repository-wide reference rescans with canonical in-memory reference projection backed by `artifact_consumption` and per-module `reference_evidence`, while preserving exact legacy reference, consumer, ambiguity, and detail semantics.
+
+### Legacy reference-evidence hydration
+Added fail-closed one-time materialization of legacy reference evidence during normal repository hydration, allowing existing snapshots to upgrade through the authoritative usage extraction path so subsequent hydrations and single-file queries avoid repository-wide source and AST rescans.
+
+### Desktop LIVE startup hardening
+Hardened Desktop LIVE startup against transient service initialization delays with bounded non-blocking GUI retries, duplicate-watcher prevention, and shutdown-safe retry cancellation, without changing canonical LIVE runtime behavior or MCP connection timeout semantics.
+
 ## [1.2.0-beta Patch — LIVE Hardening, MCP Modularization & Token Efficiency] - 2026-08-21
 
 ### Canonical LIVE truth and recovery semantics
