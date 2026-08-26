@@ -1,0 +1,496 @@
+import json
+from types import SimpleNamespace
+
+import pytest
+
+from contextor.core.analysis.state_manager import RepositoryAnalysisState
+from contextor.core.domain.usage_facts import ModuleUsageFacts
+from contextor.mcp import query_helpers
+from contextor.mcp import runtime as mcp_runtime
+from contextor.mcp.tools import get_symbol_call_context as call_tool
+
+
+MODULE = "pkg.graph"
+ROOT = f"{MODULE}::root"
+
+
+def _edge(module, caller, callee, line=2):
+    return (f"{module}::{caller}", f"{module}::{callee}", line, "direct")
+
+
+def _install(
+    monkeypatch,
+    *,
+    modules=None,
+    registry=None,
+):
+    module_specs = modules or {
+        MODULE: {
+            "edges": [_edge(MODULE, "root", "callee")],
+            "symbols": {"root", "callee"},
+            "materialized": True,
+            "stale": False,
+        }
+    }
+    state = RepositoryAnalysisState(
+        modules={module: object() for module in module_specs},
+        artifacts={
+            module: {"own_symbols": sorted(spec["symbols"])}
+            for module, spec in module_specs.items()
+        },
+        module_usages={
+            module: ModuleUsageFacts(
+                symbol_calls=tuple(spec["edges"]),
+                symbol_calls_materialized=spec.get("materialized", True),
+            )
+            for module, spec in module_specs.items()
+        },
+    )
+    for module, spec in module_specs.items():
+        if spec.get("stale"):
+            state.module_parse_freshness[module] = {
+                "state": "stale",
+                "error": "invalid syntax",
+                "line_number": 1,
+            }
+    monkeypatch.setattr(
+        mcp_runtime,
+        "get_or_init_engine",
+        lambda _root: SimpleNamespace(state=state),
+    )
+    if registry is None:
+        identities = sorted(
+            f"{module}::{symbol}"
+            for module, spec in module_specs.items()
+            for symbol in spec["symbols"]
+        )
+        registry = {
+            identity: f"A{index}/1"
+            for index, identity in enumerate(identities, 1)
+        }
+    reads = {"count": 0}
+
+    def read_registries(_root):
+        reads["count"] += 1
+        return ({}, {}, registry, {value: key for key, value in registry.items()})
+
+    monkeypatch.setattr(query_helpers, "read_registries", read_registries)
+    return state, registry, reads
+
+
+def _call(symbol=ROOT, **kwargs):
+    return json.loads(
+        call_tool.get_symbol_call_context(
+            "C:/repo",
+            symbol,
+            representation=kwargs.pop("representation", "named"),
+            **kwargs,
+        )
+    )
+
+
+def test_get_symbol_call_context__active_artifact_id_matches_canonical(monkeypatch):
+    _state, registry, _reads = _install(monkeypatch)
+    artifact_id = registry[ROOT]
+
+    canonical = _call(ROOT, direction="callees")
+    by_id = _call(artifact_id, direction="callees")
+
+    assert by_id == canonical
+
+
+def test_get_symbol_call_context__lowercase_artifact_id(monkeypatch):
+    _state, registry, _reads = _install(monkeypatch)
+
+    result = _call(registry[ROOT].lower(), direction="callees")
+
+    assert result["status"] == "ok"
+    assert result["symbol"] == ROOT
+
+
+def test_get_symbol_call_context__missing_artifact_id_is_exact_not_found(monkeypatch):
+    _install(monkeypatch)
+    monkeypatch.setattr(call_tool, "_walk", lambda *_args: pytest.fail("BFS called"))
+
+    result = _call("A999999/1")
+
+    assert result == {
+        "status": "not_found",
+        "query": "A999999/1",
+        "query_kind": "artifact_id",
+        "similar_candidates": [],
+    }
+
+
+def test_get_symbol_call_context__missing_artifact_id_does_not_require_live_state(
+    monkeypatch,
+):
+    _install(monkeypatch)
+    monkeypatch.setattr(
+        mcp_runtime,
+        "get_or_init_engine",
+        lambda *_args: pytest.fail("LIVE engine accessed"),
+    )
+    monkeypatch.setattr(call_tool, "_walk", lambda *_args: pytest.fail("BFS called"))
+
+    result = _call("A999999/1")
+
+    assert result == {
+        "status": "not_found",
+        "query": "A999999/1",
+        "query_kind": "artifact_id",
+        "similar_candidates": [],
+    }
+
+
+def test_get_symbol_call_context__resolved_artifact_id_missing_module_never_fuzzy(
+    monkeypatch,
+):
+    missing_identity = "pkg.missing::root"
+    _state, _registry, reads = _install(
+        monkeypatch,
+        registry={
+            ROOT: "A1/1",
+            missing_identity: "A2/1",
+        },
+    )
+    real_resolver = query_helpers.resolve_artifact_identity
+    resolver_calls = {"count": 0}
+
+    def resolve_once(query, path_to_id, id_to_path):
+        resolver_calls["count"] += 1
+        if resolver_calls["count"] > 1:
+            pytest.fail("fuzzy resolver called after exact artifact ID resolution")
+        return real_resolver(query, path_to_id, id_to_path)
+
+    monkeypatch.setattr(query_helpers, "resolve_artifact_identity", resolve_once)
+    monkeypatch.setattr(call_tool, "_walk", lambda *_args: pytest.fail("BFS called"))
+
+    result = _call("A2/1")
+
+    assert result == {
+        "status": "error",
+        "error": "unknown_symbol",
+        "symbol": missing_identity,
+    }
+    assert resolver_calls["count"] == 1
+    assert reads["count"] == 1
+
+
+def test_get_symbol_call_context__resolved_artifact_id_unknown_symbol_never_fuzzy(
+    monkeypatch,
+):
+    unknown_identity = f"{MODULE}::ghost"
+    _state, _registry, reads = _install(
+        monkeypatch,
+        registry={
+            ROOT: "A1/1",
+            f"{MODULE}::callee": "A2/1",
+            unknown_identity: "A3/1",
+        },
+    )
+    real_resolver = query_helpers.resolve_artifact_identity
+    resolver_calls = {"count": 0}
+
+    def resolve_once(query, path_to_id, id_to_path):
+        resolver_calls["count"] += 1
+        if resolver_calls["count"] > 1:
+            pytest.fail("fuzzy resolver called after exact artifact ID resolution")
+        return real_resolver(query, path_to_id, id_to_path)
+
+    monkeypatch.setattr(query_helpers, "resolve_artifact_identity", resolve_once)
+    monkeypatch.setattr(call_tool, "_walk", lambda *_args: pytest.fail("BFS called"))
+
+    result = _call("A3/1")
+
+    assert result == {
+        "status": "error",
+        "error": "unknown_symbol",
+        "symbol": unknown_identity,
+    }
+    assert resolver_calls["count"] == 1
+    assert reads["count"] == 1
+
+
+def test_get_symbol_call_context__plain_leaf_remains_rejected(monkeypatch):
+    _install(monkeypatch)
+    monkeypatch.setattr(
+        query_helpers,
+        "resolve_artifact_identity",
+        lambda *_args: pytest.fail("resolver called"),
+    )
+
+    result = _call("root")
+
+    assert result == {
+        "status": "error",
+        "error": "exact_qualified_symbol_required",
+        "expected": "module::symbol",
+    }
+
+
+def test_get_symbol_call_context__canonical_success_uses_no_identity_resolver(monkeypatch):
+    _state, _registry, reads = _install(monkeypatch)
+    monkeypatch.setattr(
+        query_helpers,
+        "resolve_artifact_identity",
+        lambda *_args: pytest.fail("resolver called"),
+    )
+
+    result = _call(ROOT, direction="callees")
+
+    assert result["status"] == "ok"
+    assert reads["count"] == 1
+
+
+def test_get_symbol_call_context__artifact_id_reuses_registry_snapshot(monkeypatch):
+    _state, registry, reads = _install(monkeypatch)
+
+    result = _call(registry[ROOT], direction="callees", representation="auto")
+
+    assert result["status"] == "ok"
+    assert reads["count"] == 1
+
+
+def test_get_symbol_call_context__qualified_typo_is_suggestion_only(monkeypatch):
+    _install(monkeypatch)
+    monkeypatch.setattr(call_tool, "_walk", lambda *_args: pytest.fail("BFS called"))
+
+    result = _call(f"{MODULE}::rooot")
+
+    assert result["status"] == "error"
+    assert result["error"] == "unknown_symbol"
+    assert result["similar_candidates"]
+    assert result["similar_candidates"][0]["artifact"] == ROOT
+
+
+def test_get_symbol_call_context__valid_module_typo_prefilters_before_ranking(monkeypatch):
+    other = "pkg.other"
+    modules = {
+        MODULE: {"edges": [], "symbols": {"root"}, "materialized": True},
+        other: {"edges": [], "symbols": {"rooot"}, "materialized": True},
+    }
+    _install(monkeypatch, modules=modules)
+    captured = {}
+    real_resolver = query_helpers.resolve_artifact_identity
+
+    def capture(query, path_to_id, id_to_path):
+        captured["identities"] = set(path_to_id)
+        return real_resolver(query, path_to_id, id_to_path)
+
+    monkeypatch.setattr(query_helpers, "resolve_artifact_identity", capture)
+
+    _call(f"{MODULE}::rooot")
+
+    assert captured["identities"] == {ROOT}
+
+
+def test_get_symbol_call_context__global_typo_scope_is_active_current_materialized_queryable(monkeypatch):
+    modules = {
+        "pkg.good": {"edges": [], "symbols": {"target"}, "materialized": True},
+        "pkg.stale": {"edges": [], "symbols": {"target"}, "materialized": True, "stale": True},
+        "pkg.unmaterialized": {"edges": [], "symbols": {"target"}, "materialized": False},
+        "pkg.nonqueryable": {"edges": [], "symbols": set(), "materialized": True},
+    }
+    registry = {
+        "pkg.good::target": "A1/1",
+        "pkg.stale::target": "A2/1",
+        "pkg.unmaterialized::target": "A3/1",
+        "pkg.nonqueryable::target": "A4/1",
+        "pkg.recovery::target": "A5/1",
+    }
+    _install(monkeypatch, modules=modules, registry=registry)
+    captured = {}
+    real_resolver = query_helpers.resolve_artifact_identity
+
+    def capture(query, path_to_id, id_to_path):
+        captured["identities"] = set(path_to_id)
+        return real_resolver(query, path_to_id, id_to_path)
+
+    monkeypatch.setattr(query_helpers, "resolve_artifact_identity", capture)
+    monkeypatch.setattr(call_tool, "_walk", lambda *_args: pytest.fail("BFS called"))
+
+    result = _call("pkg.god::target")
+
+    assert result["status"] == "error"
+    assert result["error"] == "unknown_symbol"
+    assert captured["identities"] == {"pkg.good::target"}
+
+
+def test_get_symbol_call_context__ambiguity_fails_closed_without_traversal(monkeypatch):
+    _install(monkeypatch)
+    monkeypatch.setattr(
+        query_helpers,
+        "resolve_artifact_identity",
+        lambda *_args: {
+            "status": "ambiguous",
+            "resolution": "exact_leaf",
+            "query": f"{MODULE}::rooot",
+            "candidates": [{"artifact": ROOT, "artifact_id": "A1/1"}],
+        },
+    )
+    monkeypatch.setattr(call_tool, "_walk", lambda *_args: pytest.fail("BFS called"))
+
+    result = _call(f"{MODULE}::rooot")
+
+    assert result["status"] == "ambiguous"
+    assert result["candidates"] == [{"artifact": ROOT, "artifact_id": "A1/1"}]
+
+
+def test_get_symbol_call_context__method_artifact_id_uses_normal_traversal(monkeypatch):
+    method = f"{MODULE}::Worker.run"
+    finish = f"{MODULE}::Worker.finish"
+    modules = {
+        MODULE: {
+            "edges": [(method, finish, 9, "direct")],
+            "symbols": {"Worker.run", "Worker.finish"},
+            "materialized": True,
+        }
+    }
+    _state, registry, _reads = _install(monkeypatch, modules=modules)
+
+    result = _call(registry[method], direction="callees")
+
+    assert result["status"] == "ok"
+    assert result["symbol"] == method
+    assert result["callees"]["items"][0]["callee"] == finish
+
+
+def test_get_symbol_call_context__zero_edge_artifact_id_is_successful(monkeypatch):
+    modules = {
+        MODULE: {"edges": [], "symbols": {"root"}, "materialized": True}
+    }
+    _state, registry, _reads = _install(monkeypatch, modules=modules)
+
+    result = _call(registry[ROOT])
+
+    assert result["status"] == "ok"
+    assert result["total_edges"] == result["returned_edges"] == 0
+
+
+def test_get_symbol_call_context__artifact_id_keeps_unmaterialized_gate(monkeypatch):
+    modules = {
+        MODULE: {"edges": [], "symbols": {"root"}, "materialized": False}
+    }
+    _state, registry, _reads = _install(monkeypatch, modules=modules)
+
+    result = _call(registry[ROOT])
+
+    assert result["error"] == "symbol_calls_unmaterialized"
+    assert result["available"] is False
+
+
+def test_get_symbol_call_context__artifact_id_keeps_stale_gate(monkeypatch):
+    modules = {
+        MODULE: {
+            "edges": [],
+            "symbols": {"root"},
+            "materialized": True,
+            "stale": True,
+        }
+    }
+    _state, registry, _reads = _install(monkeypatch, modules=modules)
+
+    result = _call(registry[ROOT])
+
+    assert result["status"] == "stale"
+    assert result["available"] is False
+
+
+def test_get_symbol_call_context__named_force_boundary_51200_vs_51201(monkeypatch):
+    _install(monkeypatch)
+
+    def run(named_bytes):
+        monkeypatch.setattr(
+            call_tool.mcp_rep,
+            "serialized_json_bytes",
+            lambda candidate: named_bytes
+            if candidate["representation"] == "named"
+            else 100,
+        )
+        return _call(ROOT, direction="callees", representation="named")
+
+    assert run(51200)["representation"] == "named"
+    forced = run(51201)
+    assert forced["representation"] == "indexed"
+    assert forced["representation_decision"]["reason"] == "named_candidate_exceeded_51200_bytes"
+
+
+def test_get_symbol_call_context__auto_savings_boundary_511_vs_512(monkeypatch):
+    _install(monkeypatch)
+
+    def run(indexed_bytes):
+        monkeypatch.setattr(
+            call_tool.mcp_rep,
+            "serialized_json_bytes",
+            lambda candidate: 1000
+            if candidate["representation"] == "named"
+            else indexed_bytes,
+        )
+        return _call(ROOT, direction="callees", representation="auto")
+
+    assert run(489)["representation"] == "named"
+    assert run(488)["representation"] == "indexed"
+
+
+def _install_padded_shape(monkeypatch, padding):
+    def shape(**kwargs):
+        return {
+            "status": "ok",
+            "symbol": kwargs["symbol"],
+            "module": kwargs["module"],
+            "representation": kwargs["selected_representation"],
+            "returned_edges": 0,
+            "total_edges": 0,
+            "padding": "x" * padding["value"],
+        }
+
+    monkeypatch.setattr(call_tool, "_shape", shape)
+
+
+def _calibrate_selected_payload(monkeypatch, target_bytes):
+    padding = {"value": max(0, target_bytes - 500)}
+    _install_padded_shape(monkeypatch, padding)
+    for _attempt in range(10):
+        raw = call_tool.get_symbol_call_context(
+            "C:/repo",
+            ROOT,
+            representation="named",
+            allow_large_output=True,
+        )
+        difference = target_bytes - len(raw.encode("utf-8"))
+        if difference == 0:
+            return raw
+        padding["value"] += difference
+    raise AssertionError(f"could not calibrate payload to {target_bytes} bytes")
+
+
+def test_get_symbol_call_context__output_guard_boundary_15360_vs_15361(monkeypatch):
+    _install(monkeypatch)
+    raw_15360 = _calibrate_selected_payload(monkeypatch, 15360)
+
+    allowed = _call(ROOT, representation="named")
+
+    assert len(raw_15360.encode("utf-8")) == 15360
+    assert allowed["status"] == "ok"
+
+    _calibrate_selected_payload(monkeypatch, 15361)
+    blocked = _call(ROOT, representation="named")
+
+    assert blocked["status"] == "confirmation_required"
+    assert blocked["estimated_output_bytes"] == 15361
+
+
+def test_get_symbol_call_context__allow_large_output_approves_15361(monkeypatch):
+    _install(monkeypatch)
+    raw = _calibrate_selected_payload(monkeypatch, 15361)
+
+    approved = call_tool.get_symbol_call_context(
+        "C:/repo",
+        ROOT,
+        representation="named",
+        allow_large_output=True,
+    )
+
+    assert len(raw.encode("utf-8")) == 15361
+    assert approved == raw

@@ -3423,6 +3423,7 @@ def standalone(value: int) -> int:
             repo_path=str(tmp_path),
             symbol="Service",
             file_paths=["pkg/service.py"],
+            mode="preview",
             member_limit=1,
         )
     )

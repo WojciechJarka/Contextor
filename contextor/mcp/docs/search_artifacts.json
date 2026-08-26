@@ -2,15 +2,28 @@
   "version": "1.0.0",
   "tool": "search_artifacts",
   "purpose": [
-    "[OPTIMIZED] Searches the canonical live state for an artifact, module, or symbol matching 'search_term'.\nReturns its properties and all its dependencies and consumers (blast radius).\nUse this to extract arbitrary context about any symbol from the current architectural state.\nExact symbol matches are preferred. ``limit``, ``total_matches`` and\n``truncated`` bound broad searches without hiding their cardinality.\nNested module dependencies and artifact consumers are independently bounded\nby ``evidence_limit``. They always expose ``total`` and ``truncated``;\nset ``compact=False`` to include ``items``. Pass ``None`` for either limit\nto return every match or every nested evidence item. ``fields``\nprojects ``query``, ``match_count``, ``total_matches``, ``truncated``,\n``modules`` or ``artifacts`` after compact shaping."
+    "[OPTIMIZED] Searches the canonical live state for an artifact, module, or symbol matching 'search_term' (or alias 'query').\nReturns its properties and all its dependencies and consumers (blast radius).\nUse this to extract arbitrary context about any symbol from the current architectural state.\nExact symbol matches are preferred. ``limit``, ``total_matches`` and\n``truncated`` bound broad searches without hiding their cardinality.\nNested module dependencies and artifact consumers are independently bounded\nby ``evidence_limit``. They always expose ``total`` and ``truncated``;\nset ``compact=False`` to include ``items``. Pass ``None`` for either limit\nto return every match or every nested evidence item. ``fields``\nprojects ``query``, ``match_count``, ``total_matches``, ``truncated``,\n``modules`` or ``artifacts`` after compact shaping."
   ],
-  "parameters": [],
-  "behavior": [],
+  "parameters": [
+    "``search_term`` (string, optional): Search query matching modules or symbols. An empty string (``\"\"``) performs a match-all search. Leading and trailing whitespace is not trimmed.",
+    "``query`` (string, optional): Alias for ``search_term``. At least one of ``search_term`` or ``query`` must be provided. If both are supplied, they must match exactly.",
+    "``limit`` (integer or null, default 20): Maximum number of top-level matches to return. Pass ``None`` for unbounded results. ``max_items`` is not supported.",
+    "``evidence_limit`` (integer or null, default 20): Maximum number of nested dependencies and consumers per item.",
+    "``compact`` (boolean, default true): When true, omits detailed item lists in dependencies and consumers.",
+    "``fields`` (array of strings or null, default null): Optional field projection filter."
+  ],
+  "behavior": [
+    "1. Requires either ``search_term`` or alias ``query`` (or both matching exactly).\n2. Empty string ``\"\"`` returns all live modules and artifacts bounded by ``limit``.\n3. Whitespace strings are preserved as literal substring queries without trimming.\n4. Case-insensitive substring matching over live module paths and artifact symbol names.\n5. When exact matches exist, results are narrowed to exact matches only.\n6. Results are sorted and bounded by ``limit`` (default 20, ``None`` for unbounded)."
+  ],
   "freshness": [],
-  "errors": [],
+  "errors": [
+    "Returns a controlled error response if neither ``search_term`` nor ``query`` is supplied, or if both are provided with conflicting values."
+  ],
   "usage_notes": [
     "LLM use: start here when only a partial symbol/module name is known. Keep\nthe default limit, inspect ``truncated``, and narrow the term before raising\nthe limit to avoid loading irrelevant canonical state."
   ],
-  "examples": []
+  "examples": [
+    "search_artifacts(repo_path, search_term=\"query_helpers\")",
+    "search_artifacts(repo_path, query=\"resolve_module_identity\", limit=10)"
+  ]
 }
-

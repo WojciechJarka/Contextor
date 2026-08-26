@@ -7,12 +7,37 @@ from contextor.mcp import query_helpers
 
 def search_artifacts(
     repo_path: str,
-    search_term: str,
+    search_term: str | None = None,
     limit: int | None = 20,
     evidence_limit: int | None = 20,
     compact: bool = True,
     fields: list[str] | None = None,
+    query: str | None = None,
 ) -> str:
+    if search_term is None and query is None:
+        return json.dumps(
+            {
+                "status": "error",
+                "error": "search_term or query is required.",
+            },
+            indent=2,
+        )
+
+    if (
+        search_term is not None
+        and query is not None
+        and search_term != query
+    ):
+        return json.dumps(
+            {
+                "status": "error",
+                "error": "search_term and query must match when both are provided.",
+            },
+            indent=2,
+        )
+
+    effective_term = search_term if search_term is not None else query
+
     root = Path(repo_path).expanduser().resolve()
     repo_name = root.name
     
@@ -36,7 +61,7 @@ def search_artifacts(
         for mod_path in module_paths:
             unavailable = query_helpers.module_truth_unavailable(engine.state, mod_path)
             module_leaf = mod_path.rsplit(".", 1)[-1]
-            if search_term.casefold() in mod_path.casefold():
+            if effective_term.casefold() in mod_path.casefold():
                 if unavailable:
                     return json.dumps(unavailable, indent=2)
                 graph = engine.state.dependency_graph
@@ -58,7 +83,7 @@ def search_artifacts(
                             | set(soft_edges.get(source, set()))
                         )
                     )
-                exact_module = search_term.casefold() in {
+                exact_module = effective_term.casefold() in {
                     mod_path.casefold(),
                     module_leaf.casefold(),
                 }
@@ -99,7 +124,7 @@ def search_artifacts(
                 names = raw_names.keys() if isinstance(raw_names, dict) else raw_names
                 for raw_name in names:
                     name = str(raw_name)
-                    if search_term.lower() in name.lower():
+                    if effective_term.lower() in name.lower():
                         if unavailable:
                             return json.dumps(unavailable, indent=2)
                         definer_mod = engine.registry.get_module_id(mod_path)
@@ -128,10 +153,10 @@ def search_artifacts(
                         }
                         if not compact:
                             artifact_entry["consumers"]["items"] = consumer_items
-                        found_artifacts.append((name.lower() != search_term.lower(), name.lower(), f"{mod_path}::{name}", artifact_entry))
+                        found_artifacts.append((name.lower() != effective_term.lower(), name.lower(), f"{mod_path}::{name}", artifact_entry))
 
         if not found_artifacts and not found_modules:
-            return f"No live modules or artifacts found matching '{search_term}'."
+            return f"No live modules or artifacts found matching '{effective_term}'."
 
         found_artifacts.sort()
         found_modules.sort()
@@ -149,7 +174,7 @@ def search_artifacts(
         selected_artifacts = [item for item in selected if item[2] == "artifact"]
         selected_modules = [item for item in selected if item[2] == "module"]
         result = {
-            "query": search_term,
+            "query": effective_term,
             "match_count": len(selected),
             "total_matches": total,
             "truncated": truncated,

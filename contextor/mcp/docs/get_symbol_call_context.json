@@ -6,7 +6,7 @@
   ],
   "parameters": [
     "repo_path (string, required): canonical repository root.",
-    "symbol (string, required): exact canonical module::symbol identity; ambiguous, partial, and unqualified names are never guessed.",
+    "symbol (string, required): exact canonical module::symbol identity or active artifact ID (A/a prefix); plain unqualified leaves are rejected.",
     "direction (callers|callees|both, default both): graph direction to traverse.",
     "depth (integer 1-3, default 1): deterministic breadth-first traversal depth; booleans are invalid.",
     "max_items (positive integer or null, default 20): global maximum emitted unique edges across the requested neighborhood; null requests every relevant edge before output protection.",
@@ -15,6 +15,9 @@
   ],
   "behavior": [
     "The graph is intra-module only. It does not claim inter-module symbol-call completeness or promote dynamic/ambiguous calls.",
+    "Active artifact IDs, including lowercase a-prefixed IDs, resolve exactly through the shared active canonical registry and then enter the unchanged canonical module::symbol pipeline. Missing syntactic IDs never use fuzzy matching.",
+    "A successful canonical module::symbol remains the first and cheapest textual path. Qualified textual misses may return bounded suggestion-only candidates from current, materialized, queryable active artifacts; fuzzy candidates never execute traversal and recovery identities are excluded.",
+    "Plain leaves remain unsupported even when a globally unique exact leaf exists in the shared resolver.",
     "Traversal is deterministic BFS: nearer facts precede deeper facts, and canonical edge identities are deduplicated.",
     "Named output is permitted only when the complete named candidate is at most 51200 UTF-8 bytes. Larger named candidates automatically select indexed output.",
     "Auto selects indexed below the 51200-byte boundary only when existing shared representation policy saves at least 512 serialized bytes; otherwise it emits named output.",
@@ -26,13 +29,14 @@
     "Fails closed when module truth is stale/unavailable or symbol_calls_materialized is false. A valid materialized-empty graph returns status ok with zero totals."
   ],
   "errors": [
-    "Unknown or non-exact symbols, invalid direction/depth/max_items/representation, missing indexed identities, stale truth, and unmaterialized call facts return controlled responses."
+    "Unknown qualified symbols return controlled unknown_symbol or ambiguity responses with bounded suggestion-only candidates. Non-exact plain leaves, missing artifact IDs, invalid direction/depth/max_items/representation, missing indexed identities, stale truth, and unmaterialized call facts return controlled responses."
   ],
   "usage_notes": [
     "Start with direction, depth=1, and a small max_items. Use expand metadata or retry with a larger bound only when the refactor needs more context.",
     "For confirmation_required, reduce max_items/depth, narrow direction, select indexed, or repeat the identical request with allow_large_output=true."
   ],
   "examples": [
-    "get_symbol_call_context(repo_path, \"pkg.module::handler\", direction=\"callees\", depth=1, max_items=20, representation=\"auto\")"
+    "get_symbol_call_context(repo_path, \"pkg.module::handler\", direction=\"callees\", depth=1, max_items=20, representation=\"auto\")",
+    "get_symbol_call_context(repo_path, \"A2496/1\", direction=\"both\", depth=1, max_items=20, representation=\"auto\")"
   ]
 }

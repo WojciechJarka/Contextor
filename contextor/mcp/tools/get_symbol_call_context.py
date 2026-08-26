@@ -19,6 +19,16 @@ def _error(code: str, **details) -> str:
     return json.dumps({"status": "error", "error": code, **details}, indent=2)
 
 
+def _textual_miss_response(symbol: str, resolution: dict) -> str:
+    if resolution.get("status") == "ambiguous":
+        return json.dumps(resolution, indent=2)
+    return _error(
+        "unknown_symbol",
+        symbol=symbol,
+        similar_candidates=resolution.get("similar_candidates", []),
+    )
+
+
 def _edge_key(edge: tuple[str, str, int, str]) -> tuple:
     return edge[0], edge[1], edge[2], edge[3]
 
@@ -84,6 +94,48 @@ def _ordered_union(callers: list[dict], callees: list[dict]) -> list[dict]:
         by_identity.values(),
         key=lambda item: (item["depth"], *_identity(item)),
     )
+
+
+def _known_symbols_for_module(state, module: str) -> set[str]:
+    usage = (getattr(state, "module_usages", {}) or {}).get(module)
+    if usage is None:
+        return set()
+    facts = tuple(getattr(usage, "symbol_calls", ()) or ())
+    known_symbols = {
+        endpoint for edge in facts for endpoint in (str(edge[0]), str(edge[1]))
+    }
+    known_symbols.update(
+        canonical_artifact_consumption_targets(
+            {module: (getattr(state, "artifacts", {}) or {}).get(module, {})}
+        )
+    )
+    return known_symbols
+
+
+def _queryable_artifact_registry(
+    state,
+    artifact_path_to_id: dict[str, str],
+    *,
+    module: str | None,
+) -> tuple[dict[str, str], dict[str, str]]:
+    usages = getattr(state, "module_usages", {}) or {}
+    modules = [module] if module in usages else sorted(usages)
+    queryable: set[str] = set()
+    for candidate_module in modules:
+        truth = module_current_truth(state, candidate_module)
+        usage = usages[candidate_module]
+        if not truth["available"] or not usage.symbol_calls_materialized:
+            continue
+        queryable.update(_known_symbols_for_module(state, candidate_module))
+    scoped_path_to_id = {
+        identity: str(artifact_path_to_id[identity])
+        for identity in sorted(queryable)
+        if identity in artifact_path_to_id
+    }
+    return scoped_path_to_id, {
+        artifact_id: identity
+        for identity, artifact_id in scoped_path_to_id.items()
+    }
 
 
 def _shape(
@@ -163,10 +215,10 @@ def get_symbol_call_context(
     representation: str = "auto",
     allow_large_output: bool = False,
 ) -> str:
-    if not isinstance(symbol, str) or symbol.count("::") != 1:
+    if not isinstance(symbol, str):
         return _error("exact_qualified_symbol_required", expected="module::symbol")
-    module, local_symbol = symbol.split("::", 1)
-    if not module or not local_symbol:
+    artifact_id_input = query_helpers.is_artifact_id(symbol)
+    if not artifact_id_input and symbol.count("::") != 1:
         return _error("exact_qualified_symbol_required", expected="module::symbol")
     if direction not in _DIRECTIONS:
         return _error("invalid_direction", allowed=sorted(_DIRECTIONS))
@@ -187,13 +239,47 @@ def get_symbol_call_context(
 
     root = Path(repo_path).expanduser().resolve()
     try:
+        registry_snapshot: tuple[dict, dict, dict, dict] | None = None
+        if artifact_id_input:
+            registry_snapshot = query_helpers.read_registries(root)
+            _, _, artifact_path_to_id, artifact_id_to_path = registry_snapshot
+            resolution = query_helpers.resolve_artifact_identity(
+                symbol,
+                artifact_path_to_id,
+                artifact_id_to_path,
+            )
+            if resolution.get("status") != "resolved":
+                return json.dumps(resolution, indent=2)
+            symbol = str(resolution["artifact"])
+
         engine = mcp_runtime.get_or_init_engine(root)
         if not engine or getattr(engine.state, "resync_required", False):
             return _error("canonical_live_state_unavailable")
         state = engine.state
         usages = getattr(state, "module_usages", {}) or {}
+
+        if symbol.count("::") != 1:
+            return _error("exact_qualified_symbol_required", expected="module::symbol")
+        module, local_symbol = symbol.split("::", 1)
+        if not module or not local_symbol:
+            return _error("exact_qualified_symbol_required", expected="module::symbol")
         if module not in usages:
-            return _error("unknown_symbol", symbol=symbol)
+            if artifact_id_input:
+                return _error("unknown_symbol", symbol=symbol)
+            if registry_snapshot is None:
+                registry_snapshot = query_helpers.read_registries(root)
+            _, _, artifact_path_to_id, _ = registry_snapshot
+            scoped_path_to_id, scoped_id_to_path = _queryable_artifact_registry(
+                state,
+                artifact_path_to_id,
+                module=None,
+            )
+            resolution = query_helpers.resolve_artifact_identity(
+                symbol,
+                scoped_path_to_id,
+                scoped_id_to_path,
+            )
+            return _textual_miss_response(symbol, resolution)
         truth = module_current_truth(state, module)
         if not truth["available"]:
             return json.dumps(
@@ -215,16 +301,24 @@ def get_symbol_call_context(
                 available=False,
             )
         facts = tuple(getattr(usage, "symbol_calls", ()) or ())
-        known_symbols = {
-            endpoint for edge in facts for endpoint in (str(edge[0]), str(edge[1]))
-        }
-        known_symbols.update(
-            canonical_artifact_consumption_targets(
-                {module: (getattr(state, "artifacts", {}) or {}).get(module, {})}
-            )
-        )
+        known_symbols = _known_symbols_for_module(state, module)
         if symbol not in known_symbols:
-            return _error("unknown_symbol", symbol=symbol)
+            if artifact_id_input:
+                return _error("unknown_symbol", symbol=symbol)
+            if registry_snapshot is None:
+                registry_snapshot = query_helpers.read_registries(root)
+            _, _, artifact_path_to_id, _ = registry_snapshot
+            scoped_path_to_id, scoped_id_to_path = _queryable_artifact_registry(
+                state,
+                artifact_path_to_id,
+                module=module,
+            )
+            resolution = query_helpers.resolve_artifact_identity(
+                symbol,
+                scoped_path_to_id,
+                scoped_id_to_path,
+            )
+            return _textual_miss_response(symbol, resolution)
 
         callers = _walk(facts, symbol, "callers", depth) if direction in {"callers", "both"} else []
         callees = _walk(facts, symbol, "callees", depth) if direction in {"callees", "both"} else []
@@ -232,7 +326,9 @@ def get_symbol_call_context(
         selected = complete if max_items is None else complete[:max_items]
         selected_identities = {_identity(item) for item in selected}
 
-        _, _, artifact_path_to_id, _ = query_helpers.read_registries(root)
+        if registry_snapshot is None:
+            registry_snapshot = query_helpers.read_registries(root)
+        _, _, artifact_path_to_id, _ = registry_snapshot
         needed_symbols = {
             endpoint
             for item in selected
