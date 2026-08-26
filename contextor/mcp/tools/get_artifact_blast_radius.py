@@ -462,6 +462,9 @@ def get_artifact_blast_radius(
                     "consumers": consumers_view,
                     "evidence_scope": "direct_static_artifact_consumption",
                     "data_source": "live_canonical_state",
+                    "state_freshness": query_helpers.build_state_freshness(
+                        root, engine.state, target_module=selected.get("definer"), engine=engine
+                    ),
                 }
                 if fields is not None:
                     unknown_fields = sorted(set(fields) - set(result))

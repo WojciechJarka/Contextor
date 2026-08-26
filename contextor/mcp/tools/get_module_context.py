@@ -298,6 +298,9 @@ def get_module_context(
         "metrics_source": metrics_source,
         "degree_metrics_source": degree_metrics_source,
         "dependency_data_source": dependency_source,
+        "state_freshness": query_helpers.build_state_freshness(
+            root, state, target_module=module_name, engine=engine
+        ),
     }
     result = {
         **common_result,

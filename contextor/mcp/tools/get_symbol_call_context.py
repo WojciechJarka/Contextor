@@ -411,6 +411,9 @@ def get_symbol_call_context(
             result = named_candidate
             reason = "explicit_named" if representation == "named" else "auto_named"
         assert result is not None
+        result["state_freshness"] = query_helpers.build_state_freshness(
+            root, engine.state, target_module=module, engine=engine
+        )
         result["representation_decision"] = {
             "selected": result["representation"],
             "named_candidate_bytes": named_bytes,

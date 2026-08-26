@@ -1,5 +1,6 @@
 import difflib
 from pathlib import Path
+from typing import Any
 
 from contextor.core.analysis.state_manager import (
     artifact_consumption_is_fresh,
@@ -258,3 +259,152 @@ def resolve_artifact_identity(
         "query": raw,
         "similar_candidates": candidates,
     }
+
+
+def build_state_freshness(
+    root: Path,
+    state: Any,
+    target_module: str | None = None,
+    target_file: Path | str | None = None,
+    engine: Any = None,
+) -> dict:
+    """Workspace↔canonical freshness envelope. O(1) fingerprint check — no repo scan, no AST parse."""
+    from contextor.core.paths import repo_cache_dir
+    from contextor.core.analysis.state_manager import FileStateManager, module_current_truth
+    from contextor.mcp import runtime as mcp_runtime
+    from contextor.mcp import analysis_jobs
+
+    root_path = Path(root).expanduser().resolve()
+    repo_key = str(root_path)
+
+    # 1. Canonical Revision + Provenance
+    # Authoritative source: _live_engine_revisions and _live_engine_provenance are set in the
+    # SAME get_or_init_engine() call that hydrated the engine/state.
+    # We do NOT call connect(root) here — daemon reachability ≠ state provenance.
+    provenance = mcp_runtime._live_engine_provenance.get(repo_key, "snapshot")
+    canonical_revision = mcp_runtime._live_engine_revisions.get(repo_key)
+    if canonical_revision is None:
+        canonical_revision = getattr(state, "revision", None)
+
+    if canonical_revision is not None:
+        try:
+            canonical_revision = int(canonical_revision)
+        except (ValueError, TypeError):
+            canonical_revision = None
+
+    # 2. Canonical State Internal Health
+    resync_required = getattr(state, "resync_required", False)
+    if resync_required:
+        canonical_state = "stale"
+    elif target_module:
+        truth = module_current_truth(state, target_module)
+        canonical_state = truth.get("state", "fresh")
+    else:
+        canonical_state = "fresh"
+
+    # 3. Workspace Sync — exact content fingerprint when available
+    # Resolution strategy:
+    #   a) If tracked.sha256 is non-empty AND mtime+size match → exact content verified
+    #   b) If tracked.sha256 is non-empty AND mtime+size DON'T match → must hash to confirm
+    #      (target-local read allowed per contract — single file, not repo scan)
+    #   c) If tracked.sha256 is empty → only metadata available → "metadata_match" (not "verified")
+    #   d) File deleted / not tracked → "out_of_sync" / "unverified"
+    resolved_file: Path | None = None
+    if target_file is not None:
+        cand = Path(target_file)
+        resolved_file = cand if cand.is_absolute() else (root_path / cand).resolve()
+    elif target_module is not None:
+        mod_obj = getattr(state, "modules", {}).get(target_module)
+        if mod_obj and getattr(mod_obj, "path", None):
+            cand = Path(mod_obj.path)
+            resolved_file = cand if cand.is_absolute() else (root_path / cand).resolve()
+
+    workspace_sync = "unverified"
+    if resolved_file is not None:
+        file_path_str = str(resolved_file)
+        state_mgr = getattr(engine, "state_manager", None)
+        if state_mgr is None:
+            try:
+                cache_dir = repo_cache_dir(root_path)
+                state_mgr = FileStateManager(str(cache_dir))
+            except Exception:
+                state_mgr = None
+
+        tracked = None
+        if state_mgr is not None:
+            tracked = state_mgr._state.get(file_path_str)
+            if not tracked:
+                try:
+                    rel = str(resolved_file.relative_to(root_path))
+                    tracked = state_mgr._state.get(rel)
+                except ValueError:
+                    tracked = None
+
+        if tracked is not None:
+            if not resolved_file.is_file():
+                workspace_sync = "out_of_sync"
+            else:
+                try:
+                    stat = resolved_file.stat()
+                    mtime_match = stat.st_mtime_ns == tracked.mtime_ns
+                    size_match = stat.st_size == tracked.size
+
+                    if tracked.sha256:
+                        # Exact target-local content verification (QUERY_REPO_SCAN=0, QUERY_AST_PARSE=0).
+                        import hashlib
+                        try:
+                            with open(resolved_file, "rb") as fh:
+                                current_sha = hashlib.sha256(fh.read()).hexdigest()
+                            if current_sha == tracked.sha256:
+                                workspace_sync = "verified"
+                            else:
+                                workspace_sync = "out_of_sync"
+                        except OSError:
+                            workspace_sync = "unverified"
+                    else:
+                        # No stored sha256 — metadata only, cannot guarantee content equality.
+                        if mtime_match and size_match:
+                            workspace_sync = "metadata_match"
+                        else:
+                            workspace_sync = "out_of_sync"
+                except OSError:
+                    workspace_sync = "unverified"
+        else:
+            workspace_sync = "unverified"
+
+    # 4. Families
+    families = {
+        "module": module_current_truth(state, target_module)["state"] if target_module else "fresh",
+        "graph": "fresh" if getattr(state, "dependency_graph", None) is not None else "unavailable",
+        "topology": getattr(state, "topology_metrics_state", "deferred"),
+        "artifact_consumption": getattr(state, "artifact_consumption_state", "deferred"),
+        "cycles": getattr(state, "cycles_state", "deferred"),
+        "collisions": getattr(state, "collisions_state", "deferred"),
+    }
+
+    # 5. Advisory Warning
+    advisory_warning: str | None = None
+    if workspace_sync in {"out_of_sync", "metadata_match"}:
+        if workspace_sync == "out_of_sync":
+            advisory_warning = "Target file on disk has been modified since canonical state revision was generated."
+        else:
+            advisory_warning = (
+                "Canonical state fingerprint (sha256) is absent; "
+                "metadata (mtime+size) matches but content equality cannot be guaranteed."
+            )
+    else:
+        latest_job = analysis_jobs._latest_analysis_job(root_path)
+        if latest_job and latest_job.get("status") in {"interrupted", "failed"}:
+            if latest_job.get("live_publish_status") != "success":
+                rev_str = f"revision {canonical_revision}" if canonical_revision is not None else "an earlier snapshot"
+                advisory_warning = f"The last analysis job was {latest_job.get('status')}. Canonical state reflects {rev_str}."
+
+    return {
+        "canonical_state": canonical_state,
+        "workspace_sync": workspace_sync,
+        "canonical_revision": canonical_revision,
+        "provenance": provenance,
+        "families": families,
+        "advisory_warning": advisory_warning,
+    }
+

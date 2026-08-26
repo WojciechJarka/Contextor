@@ -209,6 +209,8 @@ def search_artifacts(
             "match_count": len(selected),
             "total_matches": total,
             "truncated": truncated,
+            "data_source": "live_canonical_state",
+            "state_freshness": query_helpers.build_state_freshness(root, engine.state, engine=engine),
             "modules": {item[3]: item[4] for item in selected_modules},
             "artifacts": {item[3]: item[4] for item in selected_artifacts},
         }

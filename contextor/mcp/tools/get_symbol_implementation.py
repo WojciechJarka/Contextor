@@ -152,7 +152,38 @@ def _symbol_preview(root: Path, candidate: dict, member_limit: int | None) -> di
     }
     signature = _symbol_signature(node)
     static_context = _symbol_static_context(root, candidate)
-    base = {"status": "resolved", "resolution": resolution}
+    engine = mcp_runtime.get_or_init_engine(root)
+    module_path = _module_path_for_source(root, Path(candidate["file_path"]))
+    state_freshness = query_helpers.build_state_freshness(
+        root, engine.state if engine else None, target_file=candidate["file_path"], target_module=module_path, engine=engine
+    )
+    base = {
+        "status": "resolved",
+        "resolution": resolution,
+        "state_freshness": state_freshness,
+    }
+
+    # BLOCKER 4 — fail closed: if the source file on disk is out of sync with the
+    # canonical state that produced the T0 line locations, returning source would
+    # risk delivering a stale/misaligned fragment. Surface this as a first-class
+    # stale status instead. metadata_match (no sha256) is treated conservatively.
+    source_unreliable = state_freshness.get("workspace_sync") in {"out_of_sync", "metadata_match"}
+    if source_unreliable:
+        return {
+            **base,
+            "status": "stale_source",
+            "mode": "preview",
+            "stale_reason": (
+                "Source file on disk has diverged from canonical T0 state. "
+                "Re-run analyze_project or update_file to refresh canonical state before fetching implementation."
+            ),
+            "source_contract": {
+                "implementation_is_complete": False,
+                "implementation_includes_docstring": False,
+                "no_partial_symbol_source": False,
+            },
+        }
+
     signature_section = {**base, "signature": signature, "docstring": candidate["docstring"]}
     implementation_section = {**base, "implementation": candidate["source"]}
     full_section = {**implementation_section, "static_context": static_context}
@@ -562,6 +593,19 @@ def get_symbol_implementation(
     if normalized_mode == "preview":
         return json.dumps(preview, indent=2, ensure_ascii=False)
 
+    if preview.get("status") == "stale_source":
+        return json.dumps(
+            {
+                "status": "stale_source",
+                "mode": normalized_mode,
+                "resolution": preview["resolution"],
+                "state_freshness": preview["state_freshness"],
+                "stale_reason": preview.get("stale_reason"),
+                "source_contract": preview["source_contract"],
+            },
+            indent=2,
+        )
+
     allowed_sections = set(preview["available_sections"])
     selected_sections = (
         ["implementation"] if normalized_mode == "auto" else list(include or [])
@@ -604,10 +648,13 @@ def get_symbol_implementation(
         )
 
     resolution = preview["resolution"]
+    state_freshness = preview["state_freshness"]
+
     result: dict[str, Any] = {
         "status": "resolved",
         "mode": "fetch",
         "resolution": resolution,
+        "state_freshness": state_freshness,
         "source_contract": preview["source_contract"],
     }
     node = candidate["node"]

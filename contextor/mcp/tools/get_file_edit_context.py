@@ -395,7 +395,9 @@ def get_file_edit_context(
             parts.pop()
 
     module_name = ".".join(parts)
-    
+    effective_file_or_target = query_input
+    target_kind = "module"
+
     engine = mcp_runtime.get_or_init_engine(root)
     if not engine or getattr(engine.state, "resync_required", False):
         return "Error: No usable canonical LIVE state. Run analyze_project first."
@@ -518,10 +520,23 @@ def get_file_edit_context(
         test_items, tests_total, tests_truncated = query_helpers.bounded_items(
             tests_covering, max_items
         )
-        
+
+        if not isinstance(locals().get("warnings"), list):
+            warnings = []
+        state_freshness = query_helpers.build_state_freshness(
+            root, engine.state if engine else None, target_module=module_name, target_file=file_path, engine=engine
+        )
+        if state_freshness.get("workspace_sync") == "out_of_sync":
+            warnings.append(
+                f"Target file on disk is out of sync with canonical state (revision {state_freshness.get('canonical_revision')})."
+            )
+
         common_result = {
-            "file": file_path,
+            "file": file_path or str(target_path),
             "file_exists": target_path.is_file(),
+            "target": effective_file_or_target,
+            "target_kind": target_kind,
+            "status": "available",
             "module": module_name,
             "module_id": mod_id,
             "layer": mod_info.get("layer", "unknown"),
@@ -529,6 +544,8 @@ def get_file_edit_context(
             "risk_score": risk_score,
             "dependency_data_source": dependency_data_source,
             "artifact_data_source": artifact_data_source,
+            "state_freshness": state_freshness,
+            "warnings": warnings,
         }
         full_result = {
             **common_result,
@@ -568,7 +585,7 @@ def get_file_edit_context(
                 "evidence_scope": "static_dependency_reachability",
                 "max_depth": 6,
                 "tests": test_items,
-            }
+            },
         }
 
         _ev_limit = 3 if max_items is None else min(3, max_items)

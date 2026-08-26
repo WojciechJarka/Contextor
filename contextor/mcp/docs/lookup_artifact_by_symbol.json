@@ -2,26 +2,29 @@
   "version": "1.0.0",
   "tool": "lookup_artifact_by_symbol",
   "purpose": [
-    "[OPTIMIZED] Finds artifacts matching a symbol name and returns their details."
+    "[OPTIMIZED] Find a canonical artifact in LIVE state by symbol name, module-qualified identity, or artifact ID."
   ],
   "parameters": [
     "repo_path (string, required): canonical repository root.",
-    "symbol_name (string, optional, default \"\"): target symbol name, exact active artifact ID (e.g. 'A855/4'), or full canonical identity ('pkg.mod::symbol').",
-    "limit (integer or null, default 20): maximum number of matching artifacts returned; pass null for all matches.",
-    "evidence_limit (integer or null, default 20): maximum number of consumer identities per artifact.",
-    "compact (boolean, default true): when true, returns up to 3 bounded consumer evidence items per artifact with total, truncated, and expand metadata; set to false for full consumer lists.",
-    "fields (array of strings or null, default null): optional projection list of top-level keys to return; null returns full response.",
-    "symbol (string or null, optional, default null): alias for symbol_name."
+    "symbol (string, optional, default \"\"): symbol to look up (accepts active artifact ID, full canonical identity 'module::symbol', or leaf symbol name).",
+    "max_items (integer or null, default 30): maximum number of matching artifacts returned; pass null for all.",
+    "fields (array of strings or null, default null): optional projection list; null returns full response.",
+    "artifact (string or null, optional, default null): alias for symbol."
   ],
   "behavior": [
-    "Resolution order:\n1. Existing live symbol search (exact & partial substring matching).\n2. Exact active artifact ID or full canonical identity via active registry.\n3. Bounded fuzzy suggestions (score >= 0.75, max 5) on textual not-found.\n4. Legacy not-found string fallback when no fuzzy candidates qualify."
+    "Searches the active artifact registry for exact and fuzzy symbol matches.\nReturns a bounded collection of resolved artifact entries with definer, consumers, and signature facts."
   ],
-  "freshness": [],
+  "freshness": [
+    "The response includes a ``state_freshness`` envelope. Because this tool resolves across the full artifact registry (repo-wide scope), ``workspace_sync`` is always ``unverified`` — the tool cannot cheaply verify all matched source files without a repo scan.",
+    "- ``canonical_state``: Internal state freshness flag (fresh/stale).",
+    "- ``workspace_sync``: ``unverified`` (repo-wide search does not perform per-file disk stat/hash without a scoped target).",
+    "- ``canonical_revision``: Exact revision of the canonical state used to answer this query.",
+    "- ``provenance``: live or snapshot.",
+    "- ``advisory_warning``: Non-null if the last analysis job was interrupted/failed."
+  ],
   "errors": [],
   "usage_notes": [
-    "LLM use: narrow ambiguous names before increasing ``limit``."
+    "LLM use: use to resolve a symbol to its canonical identity before calling get_artifact_blast_radius.\nThe state_freshness.workspace_sync='unverified' is expected here; call a scoped tool for exact file verification."
   ],
-  "examples": [
-    "Searches by partial, case-insensitive match against the symbol part of\nthe artifact's full name (the part after '::', e.g. 'generate_graph'\nmatches 'generate_graph_analytics_report'), by exact artifact ID ('A855/4'), or by full canonical identity."
-  ]
+  "examples": []
 }

@@ -19,10 +19,17 @@
     "3. Consumer semantics: direct_count measures unique modules directly importing the target; transitive_count measures all unique modules reachable via reverse dependency traversal.",
     "4. Exposes stale or unavailable canonical truth explicitly. Does not dump whole source files."
   ],
-  "freshness": [],
+  "freshness": [
+    "The response includes a ``state_freshness`` envelope scoped to the queried target file or module.",
+    "- ``workspace_sync``: ``verified`` (sha256 matches disk), ``metadata_match`` (mtime+size match but sha256 absent), ``out_of_sync`` (file modified on disk since canonical state generation), or ``unverified``.",
+    "- DOUBLE WARNING: When ``workspace_sync`` is ``out_of_sync``, a warning message is also added to the top-level ``warnings`` array in the response so legacy consumers see it.",
+    "- ``canonical_revision``: Revision of the canonical state used to answer this query.",
+    "- ``provenance``: ``live`` or ``snapshot``.",
+    "- ``advisory_warning``: Warning message when out of sync or if the last analysis job was interrupted/failed."
+  ],
   "errors": [],
   "usage_notes": [
-    "LLM use: in minimal mode, pass target (file path or module name) prior to editing a file to quickly gauge blast radius and relevant test targets."
+    "LLM use: in minimal mode, pass target (file path or module name) prior to editing a file to quickly gauge blast radius and relevant test targets.\nAlways inspect state_freshness and warnings array before editing."
   ],
   "examples": []
 }

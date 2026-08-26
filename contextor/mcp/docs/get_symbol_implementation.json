@@ -17,13 +17,20 @@
   "behavior": [
     "Resolution & file constraints:\n1. Exact active artifact ID: resolved via active artifact registry. If ``file_paths`` is omitted, the source file is derived from canonical LIVE module state. If ``file_paths`` is supplied, the definer module must be in the specified file scope (explicit file constraint wins).\n2. Canonical qualified identity ('module::symbol'): verified against active registry. If ``file_paths`` is omitted, source file is derived from canonical LIVE module state.\n3. Plain leaf symbol: when ``file_paths`` is omitted, resolves through active artifact registry (exact unique leaf resolves to canonical LIVE source; ambiguity returns controlled candidate metadata without guessing; miss returns fuzzy suggestions). When ``file_paths`` is supplied, searches via exact AST in explicit file scope first.\n4. Bounded fuzzy suggestions (score >= 0.75, max 5, suggestion-only) from active artifact registry on textual miss (scoped to explicit file constraints when provided).\n5. Missing artifact ID never returns fuzzy suggestions."
   ],
-  "freshness": [],
-  "errors": [
-    "Symbol matching is exact and Python case-sensitive. When ``file_paths`` is omitted, plain leaf symbols resolve globally; ambiguous matches return candidate metadata only, and no implementation is guessed. Source is read from disk at request time and is not stored in canonical state. The compact ``static_context`` contains the current static consumer total when live state is available; use the blast-radius tool for consumer evidence."
+  "freshness": [
+    "Every resolved response includes a ``state_freshness`` envelope scoped to the source file of the resolved symbol.",
+    "``workspace_sync`` values and their meaning:\n- ``verified``: sha256 fingerprint confirmed — disk content identical to canonical T0. Source is safe to use.\n- ``metadata_match``: mtime+size match but sha256 absent from FileStateManager. Content equality unconfirmed.\n- ``out_of_sync``: File on disk differs from canonical snapshot (mtime, size, or sha256 mismatch).\n- ``unverified``: File could not be resolved or FileStateManager has no tracking entry.",
+    "FAIL-CLOSED BEHAVIOR: When ``workspace_sync`` is ``out_of_sync`` or ``metadata_match``, the tool DOES NOT return source, implementation, or signature fragments. Instead it returns ``status='stale_source'`` with ``stale_reason`` and the full ``state_freshness`` envelope. This prevents delivering T0 canonical line locations applied to a T1 disk file — a misaligned, potentially incorrect source fragment.",
+    "``canonical_revision``: Revision of the engine used to answer this query — hydration-bound, not daemon reachability.",
+    "``provenance``: live or snapshot derived from engine hydration path.",
+    "``advisory_warning``: Non-null when workspace_sync is out_of_sync/metadata_match or last job was interrupted/failed."
   ],
-
+  "errors": [
+    "Symbol matching is exact and Python case-sensitive. When ``file_paths`` is omitted, plain leaf symbols resolve globally; ambiguous matches return candidate metadata only, and no implementation is guessed. Source is read from disk at request time. The compact ``static_context`` contains the current static consumer total when live state is available; use the blast-radius tool for consumer evidence.",
+    "When workspace_sync is out_of_sync or metadata_match, both preview and fetch return status='stale_source' without any source fragment. Re-run analyze_project or update_file to refresh canonical state."
+  ],
   "usage_notes": [
-    "LLM use: preview first, compare the planned payload sizes, then fetch the\nsmallest complete combination that answers the implementation question.\nThis complements source-file reading; it does not infer historical intent."
+    "LLM use: preview first, compare the planned payload sizes, then fetch the\nsmallest complete combination that answers the implementation question.\nAlways check state_freshness.workspace_sync in the preview response before calling fetch.\nIf status='stale_source', do not proceed with implementation reading — refresh canonical state first."
   ],
   "examples": []
 }

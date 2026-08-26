@@ -16,7 +16,13 @@
   "behavior": [
     "1. Requires either ``search_term`` or alias ``query`` (or both matching exactly).\n2. Empty string ``\"\"`` returns all live modules and artifacts bounded by ``limit``.\n3. Whitespace strings are preserved as literal substring queries without trimming.\n4. Case-insensitive substring matching over live module paths and artifact symbol names.\n5. When exact matches exist, results are narrowed to exact matches only.\n6. Results are sorted and bounded by ``limit`` (default 20, ``None`` for unbounded)."
   ],
-  "freshness": [],
+  "freshness": [
+    "The response includes a ``state_freshness`` envelope. Because search_artifacts resolves across the full artifact registry (repo-wide scope), ``workspace_sync`` is always ``unverified`` — individual matched source files are not stat-checked without a repo scan.",
+    "- ``canonical_revision``: Revision of the engine used to answer this query.",
+    "- ``provenance``: live or snapshot.",
+    "- ``advisory_warning``: Non-null if last job was interrupted/failed.",
+    "- ``unverified`` workspace_sync: To verify freshness of a specific matched artifact, follow up with ``get_artifact_blast_radius`` or ``get_symbol_implementation`` using its resolved ID."
+  ],
   "errors": [
     "Returns a controlled error response if neither ``search_term`` nor ``query`` is supplied, or if both are provided with conflicting values."
   ],

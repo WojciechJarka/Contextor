@@ -27,7 +27,8 @@
   ],
   "freshness": [
     "Reads only current LIVE canonical module_usages symbol_calls. It performs no ast.parse, source read, grep, report parsing, or query-time graph reconstruction.",
-    "Fails closed when module truth is stale/unavailable or symbol_calls_materialized is false. A valid materialized-empty graph returns status ok with zero totals."
+    "Fails closed when module truth is stale/unavailable or symbol_calls_materialized is false. A valid materialized-empty graph returns status ok with zero totals.",
+    "The response includes a ``state_freshness`` envelope scoped to the module containing the queried symbol:\n- ``workspace_sync``: ``verified`` (sha256 matches), ``metadata_match`` (mtime+size only), ``out_of_sync`` (disk modified), or ``unverified``.\n- ``canonical_revision``: Exact revision of the canonical state used to answer this query.\n- ``provenance``: ``live`` or ``snapshot`` derived from engine hydration path.\n- ``advisory_warning``: Non-null if the file is out of sync or the last analysis job was interrupted/failed."
   ],
   "errors": [
     "Unknown qualified symbols return controlled unknown_symbol or ambiguity responses with bounded suggestion-only candidates. Non-exact plain leaves, missing artifact IDs, invalid direction/depth/max_items/representation, missing indexed identities, stale truth, and unmaterialized call facts return controlled responses."

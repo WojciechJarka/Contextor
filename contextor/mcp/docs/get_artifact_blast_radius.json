@@ -17,7 +17,15 @@
     "Resolution order:\n1. Exact active artifact ID via active artifact registry.\n2. Canonical LIVE state lookup by full identity or unique symbol leaf.\n3. Module-input diagnosis / redirect (takes absolute precedence before fuzzy suggestions).\n4. Bounded fuzzy artifact suggestions (score >= 0.75, max 5) from active artifact registry on textual artifact not-found.\n5. Legacy not-found string fallback when query is not found or is a nonexistent artifact ID.",
     "Candidate, consumer & reachability semantics:\n  - If a module name or module ID is passed, returns a structured diagnostic with deterministic public-first ranked artifact candidates defined by that module and ``suggested_next_call`` to ``get_module_context``.\n  - ``consumers``: Direct static symbol consumers with confirmed references.\n  - ``architecture``:\n      * ``definer_layer``: Canonical architectural layer of the defining module.\n      * ``consumer_layers``: Sorted list of unique known canonical layers of direct consumers.\n      * ``same_module_consumer_count``: Unique direct consumers in the same module.\n      * ``same_layer_consumer_count``: Unique direct consumers in the same layer (excluding same-module).\n      * ``cross_layer_consumer_count``: Unique direct NON-TEST consumers whose canonical layer differs from ``definer_layer``.\n      * ``test_consumer_count``: Unique direct consumers whose canonical layer is \"tests\".\n      * ``cross_layer_consumers``: Boolean indicating if ``cross_layer_consumer_count > 0``.\n      * ``cross_layer_sample``: Bounded sample of cross-layer production consumers (excluding tests).\n  - ``downstream_module_reachability``:\n      Conservative module-level downstream reachability seeded by confirmed direct symbol consumer modules.\n      It does not represent transitive symbol-to-symbol consumption."
   ],
-  "freshness": [],
+  "freshness": [
+    "Includes a ``state_freshness`` envelope scoped to the definer module of the resolved artifact:",
+    "- ``canonical_state``: fresh, stale, or deferred.",
+    "- ``workspace_sync``: verified (sha256 matches disk), metadata_match (mtime+size match only), out_of_sync (disk modified since canonical generation), or unverified.",
+    "- ``canonical_revision``: Revision of the hydrated state answering this query (hydration-bound, not daemon reachability).",
+    "- ``provenance``: live or snapshot.",
+    "- ``families``: Per-family freshness flags.",
+    "- ``advisory_warning``: Non-null if out_of_sync, metadata_match, or last job was interrupted/failed."
+  ],
   "errors": [],
   "usage_notes": [
     "LLM use: call before changing or removing a public symbol. Treat consumers\nas confirmed static evidence, not proof that dynamic Python has no callers.\nFor large consumer collections, use representation='auto' or representation='indexed'\nto materially reduce response payload."

@@ -4,6 +4,7 @@ from typing import Any
 
 _live_engines: dict[str, Any] = {}
 _live_engine_revisions: dict[str, int] = {}
+_live_engine_provenance: dict[str, str] = {}
 
 
 def publish_live_status(root: Path, message: str) -> None:
@@ -47,6 +48,7 @@ def get_or_init_engine(root: Path):
                 )
                 _live_engines[str(root)] = engine
                 _live_engine_revisions[str(root)] = remote_revision
+                _live_engine_provenance[str(root)] = "live"
     if not engine:
         from contextor.core.analysis.state_manager import load_engine_state, FileStateManager
         from contextor.core.analysis.incremental_engine import IncrementalAnalysisEngine
@@ -70,9 +72,11 @@ def get_or_init_engine(root: Path):
             registry = PersistentIdentityRegistry(str(root))
             engine = IncrementalAnalysisEngine(state, registry, state_mgr, str(root))
             _live_engines[str(root)] = engine
+            _live_engine_provenance[str(root)] = "snapshot"
             if metadata and metadata.revision is not None:
                 _live_engine_revisions[str(root)] = int(metadata.revision)
         else:
             _live_engines.pop(str(root), None)
             _live_engine_revisions.pop(str(root), None)
+            _live_engine_provenance.pop(str(root), None)
     return engine

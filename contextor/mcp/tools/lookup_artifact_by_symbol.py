@@ -185,13 +185,14 @@ def lookup_artifact_by_symbol(
             results[key] = entry
 
         result = {
-                "query": effective_symbol,
-                "match_count": len(results),
-                "total_matches": total_matches,
-                "truncated": matches_truncated,
-                "data_source": "live_canonical_state",
-                "artifacts": results,
-            }
+            "query": effective_symbol,
+            "match_count": len(results),
+            "total_matches": total_matches,
+            "truncated": matches_truncated,
+            "data_source": "live_canonical_state",
+            "state_freshness": query_helpers.build_state_freshness(root, state, engine=engine),
+            "artifacts": results,
+        }
         if fields is not None:
             allowed_fields = set(result)
             unknown_fields = sorted(set(fields) - allowed_fields)
