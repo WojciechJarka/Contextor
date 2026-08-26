@@ -4,8 +4,19 @@
   "purpose": [
     "[OPTIMIZED] Incremental architectural update for a modified file.\nUpdates the canonical state and graph structure in real-time. When the\nshared LIVE service is available, the update executes in its owner process\nso desktop and MCP observe the same revision; otherwise the hydrated local\nengine remains a fallback. Requires a completed project analysis."
   ],
-  "parameters": [],
-  "behavior": [],
+  "parameters": [
+    "repo_path (string, required): canonical repository root.",
+    "file_path (string, required): repository-relative or accepted absolute target file path processed by the existing incremental/LIVE update path.",
+    "max_items (integer or null, default 30): maximum number of bounded semantic-diff items emitted where applicable; null preserves existing unbounded semantics.",
+    "compact (boolean, default true): controls existing compact semantic-diff/result shaping.",
+    "fields (array of strings or null, default null): optional existing response projection; null returns the normal response shape."
+  ],
+  "behavior": [
+    "1. When the desktop app is running, its file watcher owns the update workflow. Do not call update_file directly; instead, poll get_live_events from the previous revision and confirm the corresponding desktop_watcher event.",
+    "2. When the desktop app / shared LIVE watcher is not running, update_file serves as the manual incremental publication path following a file edit.",
+    "3. Incremental analysis updates the in-memory canonical state and emits semantic_diff for added/removed symbols, signature changes, and AST body fingerprints (bodies_changed). Semantic-diff describes architectural delta and does not replace line-level code diffs.",
+    "4. If the update modifies running MCP server implementation files and signals runtime_restart_required: true, the MCP server process requires a manual restart before runtime certification."
+  ],
   "freshness": [],
   "errors": [
     "Semantic-diff and affected-modules collections always expose ``total`` and\n``truncated``. The default compact response omits ``items``; set\n``compact=False`` for bounded symbol/signature/affected-module evidence.\n``max_items`` is the per-collection limit; pass ``None`` to return all\nrequested evidence without truncation. ``fields`` projects top-level\nresponse keys after compact shaping. Stable fields include ``status``,\n``file_path``, graph/metrics state fields, ``affected_modules`` (containing\nthe module-level reverse blast radius when ``blast_radius_state == \"fresh\"``),\n``live_state_persisted``, ``semantic_diff`` and\n``runtime_restart_required``; ``delta`` and runtime warning fields are\nconditional. Invalid projections return the current allowlist."
@@ -15,4 +26,3 @@
   ],
   "examples": []
 }
-

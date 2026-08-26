@@ -15,16 +15,41 @@ from contextor.mcp.source_helpers import (
 
 def search_source(
     repo_path: str,
-    search_term: str,
+    search_term: str | None = None,
     limit: int | None = 20,
     case_sensitive: bool = False,
     allow_large_output: bool = False,
+    query: str | None = None,
 ) -> str:
+    if search_term is None and query is None:
+        return json.dumps(
+            {
+                "status": "error",
+                "error": "search_term or query is required.",
+            },
+            indent=2,
+        )
+
     if (
-        not isinstance(search_term, str)
-        or not search_term
-        or "\n" in search_term
-        or "\r" in search_term
+        search_term is not None
+        and query is not None
+        and search_term != query
+    ):
+        return json.dumps(
+            {
+                "status": "error",
+                "error": "search_term and query must match when both are provided.",
+            },
+            indent=2,
+        )
+
+    effective_term = search_term if search_term is not None else query
+
+    if (
+        not isinstance(effective_term, str)
+        or not effective_term
+        or "\n" in effective_term
+        or "\r" in effective_term
     ):
         return json.dumps({"status": "error", "error": "invalid_search_term"}, indent=2)
     if limit is not None and (
@@ -42,7 +67,7 @@ def search_source(
         return json.dumps({"status": "error", "error": "canonical_state_unavailable"}, indent=2)
 
     matches = []
-    needle = search_term if case_sensitive else search_term.casefold()
+    needle = effective_term if case_sensitive else effective_term.casefold()
     for file_path, module_name, absolute_path in canonical_python_sources(root, engine.state):
         unavailable = query_helpers.module_truth_unavailable(engine.state, module_name)
         if unavailable:
@@ -72,7 +97,7 @@ def search_source(
                 continue
             seen_spans.add(identity)
             matched = matched_line_numbers(
-                lines, search_term, start, end, case_sensitive=case_sensitive
+                lines, effective_term, start, end, case_sensitive=case_sensitive
             )
             matches.append(
                 {
@@ -95,7 +120,7 @@ def search_source(
     selected = matches if limit is None else matches[:limit]
     result = {
         "status": "ok",
-        "search_term": search_term,
+        "search_term": effective_term,
         "case_sensitive": case_sensitive,
         "total_matches": total,
         "matches": selected,

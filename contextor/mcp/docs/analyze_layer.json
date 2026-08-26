@@ -5,9 +5,13 @@
     "Starts non-blocking analysis isolated to a specific layer (directory).\nPoll ``get_analysis_status`` with the returned job ID."
   ],
   "parameters": [
-    "``exclude_paths`` contains repository-relative Python files or directory\nprefixes to omit from this run. It is merged with, but never persisted to,\nthe GUI exclude list. Non-Python files are ignored automatically."
+    "repo_path (string, required): canonical repository root.",
+    "layer_name (string, required): layer/path selector accepted by the existing layer-analysis implementation.",
+    "exclude_paths (array of strings or null, optional, default null): additional exclusions; null preserves existing default behavior."
   ],
-  "behavior": [],
+  "behavior": [
+    "1. Starts layer-scoped analysis asynchronously and returns job identity and status immediately.\n2. Progress, status, and results are polled through get_analysis_status.\n3. Only the requested layer scope is analyzed according to existing implementation.\n4. Exclusions are merged with existing configuration for this run only without altering persistent defaults."
+  ],
   "freshness": [],
   "errors": [],
   "usage_notes": [
@@ -15,4 +19,3 @@
   ],
   "examples": []
 }
-

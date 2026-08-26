@@ -4,8 +4,13 @@
   "purpose": [
     "Starts a non-blocking global architectural analysis and returns a job ID.\nPoll ``get_analysis_status`` until it reports ``completed`` or ``failed``."
   ],
-  "parameters": [],
-  "behavior": [],
+  "parameters": [
+    "repo_path (string, required): canonical repository root to analyze.",
+    "exclude_paths (array of strings or null, optional, default null): repository-relative or accepted existing exclusion paths forwarded to project analysis; null means no additional exclusions supplied by this request."
+  ],
+  "behavior": [
+    "1. Starts global architectural analysis asynchronously/non-blocking and immediately returns job identity and initial status.\n2. An active queued or running equivalent request may be reused according to existing job-owner semantics.\n3. Progress, completion, and coverage metrics are read through get_analysis_status.\n4. Tool does not require the LLM to poll source files directly."
+  ],
   "freshness": [],
   "errors": [],
   "usage_notes": [
@@ -15,4 +20,3 @@
     "``exclude_paths`` lets an LLM narrow this run without changing the saved\nGUI exclude configuration. Use repository-relative Python files or\ndirectory prefixes, for example ``[\"tests\", \"legacy/adapter.py\"]``.\nContextor already ignores non-Python files. Per-run and GUI excludes are\ncombined before AST indexing."
   ]
 }
-

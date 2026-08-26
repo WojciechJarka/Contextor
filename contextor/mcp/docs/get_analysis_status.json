@@ -5,9 +5,10 @@
     "Return durable status for a non-blocking MCP analysis job."
   ],
   "parameters": [
-    "``job_id`` (string or null, default ``null``): specific 32-character job identifier or omit to inspect the latest job.",
-    "``max_skipped_files`` (integer or null, default ``10``): maximum skipped file entries in analysis_coverage; pass ``null`` for unlimited.",
-    "``allow_large_output`` (boolean, default ``false``): override to approve emission of outputs exceeding the 15 KiB warning threshold."
+    "repo_path (string, required): canonical repository root.",
+    "job_id (string or null, optional, default null): specific 32-character job identifier or omit to inspect the latest job.",
+    "max_skipped_files (integer or null, optional, default 10): maximum skipped file entries in analysis_coverage; pass null for unlimited.",
+    "allow_large_output (boolean, optional, default false): override to approve emission of outputs exceeding the 15 KiB warning threshold."
   ],
   "behavior": [
     "Returns durable status for the specified or latest analysis job without any cardinality hard limit.\nOutput <= 15 KiB (15360 UTF-8 bytes) returns the status payload normally.\nOutput > 15 KiB with ``allow_large_output=false`` acts as an agent-controlled context\nsafety preflight and returns ``status: 'confirmation_required'`` with exact current-snapshot\npredicted UTF-8 byte size and retry instructions.\nPassing ``allow_large_output=true`` returns the complete lossless status response.\nFor running jobs, note that status and progress may advance between preflight and retry."
@@ -24,4 +25,3 @@
   ],
   "examples": []
 }
-

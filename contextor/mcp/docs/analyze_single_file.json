@@ -5,9 +5,13 @@
     "Starts non-blocking deep analysis on a single Python file.\nPoll ``get_analysis_status`` with the returned job ID."
   ],
   "parameters": [
-    "``exclude_paths`` narrows the surrounding project context for this run.\nEntries are repository-relative Python files or directory prefixes and are\ncombined with the saved GUI excludes without modifying them. Do not exclude\nthe target file itself."
+    "repo_path (string, required): canonical repository root.",
+    "file_path (string, required): target Python file accepted by existing single-file analysis path resolution.",
+    "exclude_paths (array of strings or null, optional, default null): additional exclusions; null preserves existing default behavior."
   ],
-  "behavior": [],
+  "behavior": [
+    "1. Starts deep analysis for a single Python file asynchronously and returns job identity and initial status.\n2. Deep analysis semantics match existing single-file analysis implementation.\n3. Progress, status, and completion are polled through get_analysis_status.\n4. Tool triggers architectural analysis and does not replace bounded implementation retrieval (get_symbol_implementation) or textual search (search_source)."
+  ],
   "freshness": [],
   "errors": [],
   "usage_notes": [
@@ -15,4 +19,3 @@
   ],
   "examples": []
 }
-
