@@ -1,5 +1,10 @@
 from typing import Any
 from .registry import ContextBuilder, ContextPayload, BuildState
+from contextor.core.reference.engine import (
+    CanonicalReferenceEvidenceUnavailable,
+    build_symbol_references,
+    build_symbol_references_from_canonical,
+)
 
 class ModuleIntentBuilder:
     name = "ModuleIntentBuilder"
@@ -207,12 +212,6 @@ class SymbolContextBuilder:
         # REFERENCES & CANONICAL PROJECTION
         # --------------------------------------------------
 
-        from contextor.core.reference.engine import (
-            CanonicalReferenceEvidenceUnavailable,
-            build_symbol_references,
-            build_symbol_references_from_canonical,
-        )
-
         canonical_reference_eligible = bool(
             canonical_current
             and getattr(payload.engine_state, "artifact_consumption_state", "deferred") == "fresh"
@@ -221,9 +220,12 @@ class SymbolContextBuilder:
 
         references = None
         if canonical_reference_eligible:
-            current_consumer_modules = {
+            canonical_modules = getattr(payload.engine_state, "modules", None)
+            module_universe = canonical_modules if isinstance(canonical_modules, dict) else payload.modules
+
+            current_reference_modules = {
                 mod_id
-                for mod_id in payload.engine_state.module_usages
+                for mod_id in module_universe
                 if _canonical_state_module_is_current(payload.engine_state, mod_id)
             }
             try:
@@ -232,7 +234,7 @@ class SymbolContextBuilder:
                     symbols=all_symbols,
                     artifact_consumption=payload.engine_state.artifact_consumption or {},
                     module_usages=payload.engine_state.module_usages,
-                    current_modules=current_consumer_modules,
+                    current_modules=current_reference_modules,
                 )
             except CanonicalReferenceEvidenceUnavailable:
                 references = None

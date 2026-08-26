@@ -907,6 +907,7 @@ def extract_module_usage_facts(
         symbol_calls=symbol_calls,
         symbol_calls_materialized=True,
         reference_evidence=reference_evidence,
+        reference_evidence_materialized=True,
     )
 
 
@@ -962,7 +963,33 @@ def build_symbol_references_from_canonical(
     """
     Pure in-memory projection of symbol references from canonical artifact_consumption and module_usages facts.
     Produces the exact same dict shape and content as build_symbol_references without any file I/O or AST parsing.
+
+    Confirmed references (imports, direct_calls, callbacks, events, qualified_refs, inheritance, runtime)
+    are strictly artifact_consumption-gated inbound edges.
+    Ambiguous candidates (called_by_ambiguous) are scanned from canonical current module_usages evidence
+    and are intentionally unconfirmed.
     """
+    candidate_modules = (
+        current_modules
+        if current_modules is not None
+        else set(module_usages)
+    )
+
+    for module_id in candidate_modules:
+        facts = module_usages.get(module_id)
+        if facts is None:
+            raise CanonicalReferenceEvidenceUnavailable(
+                f"Missing module_usages for current module {module_id}"
+            )
+        if not getattr(
+            facts,
+            "reference_evidence_materialized",
+            False,
+        ):
+            raise CanonicalReferenceEvidenceUnavailable(
+                f"Reference evidence not materialized for current module {module_id}"
+            )
+
     result: dict[str, Any] = {}
 
     for symbol in symbols:
@@ -970,11 +997,9 @@ def build_symbol_references_from_canonical(
 
         target_key = f"{definer_module}::{symbol}"
         consumption = artifact_consumption.get(target_key)
-        if not consumption:
-            continue
 
-        confirmed_consumers = consumption.get("consumers", ())
-        channels_by_consumer = consumption.get("channels", {})
+        confirmed_consumers = consumption.get("consumers", ()) if consumption else ()
+        channels_by_consumer = consumption.get("channels", {}) if consumption else {}
 
         for consumer in confirmed_consumers:
             if current_modules is not None and consumer not in current_modules:
@@ -986,6 +1011,15 @@ def build_symbol_references_from_canonical(
             if facts is None:
                 raise CanonicalReferenceEvidenceUnavailable(
                     f"Missing module_usages for confirmed consumer {consumer}"
+                )
+
+            if not getattr(
+                facts,
+                "reference_evidence_materialized",
+                False,
+            ):
+                raise CanonicalReferenceEvidenceUnavailable(
+                    f"Reference evidence not materialized for confirmed consumer {consumer}"
                 )
 
             channels = channels_by_consumer.get(consumer, ())
@@ -1069,14 +1103,18 @@ def build_symbol_references_from_canonical(
                 elif channel == "runtime_calls":
                     result[symbol]["runtime_calls"].append(consumer)
 
-            for item in reference_evidence:
+        # Ambiguous calls can come from any module
+        for mod in candidate_modules:
+            mod_facts = module_usages[mod]
+            mod_aliases = getattr(mod_facts, "aliases", ())
+            for item in getattr(mod_facts, "reference_evidence", ()):
                 if item[1] == "called_ambiguous" and _usage_fact_contains_target(
-                    item[0], definer_module, symbol, aliases
+                    item[0], definer_module, symbol, mod_aliases
                 ):
-                    result[symbol]["called_by_ambiguous"].append(consumer)
+                    result[symbol]["called_by_ambiguous"].append(mod)
                     result[symbol]["called_by_ambiguous_detail"].append(
                         {
-                            "module": consumer,
+                            "module": mod,
                             "reason": "short_name_match_no_confirmed_import",
                             "line": item[3] if item[3] else None,
                             "context": item[2] if item[2] else None,

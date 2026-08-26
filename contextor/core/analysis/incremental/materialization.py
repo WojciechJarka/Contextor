@@ -19,27 +19,51 @@ def module_usages_require_materialization(state: RepositoryAnalysisState) -> boo
         return bool(getattr(state, "modules", {}))
     return any(
         module_name not in usages
-        or not bool(vars(usages[module_name]).get("symbol_calls_materialized", False))
+        or not bool(
+            vars(usages[module_name]).get(
+                "symbol_calls_materialized",
+                False,
+            )
+        )
+        or not bool(
+            vars(usages[module_name]).get(
+                "reference_evidence_materialized",
+                False,
+            )
+        )
         for module_name in getattr(state, "modules", {})
     )
 
 
 def ensure_module_usages(state: RepositoryAnalysisState) -> None:
     """
-    Initializes state.module_usages for pre-existing state.modules if missing.
-    Source-backed legacy reconstruction: only missing modules read source from disk.
+    Initializes state.module_usages for pre-existing state.modules if missing or legacy.
+    Source-backed legacy reconstruction: only missing or unmaterialized modules read source from disk.
     """
     if not hasattr(state, "module_usages") or state.module_usages is None:
         state.module_usages = {}
 
     missing_modules = set(state.modules.keys()) - set(state.module_usages.keys())
-    legacy_symbol_call_modules = {
+    legacy_usage_modules = {
         module_name
         for module_name, facts in state.module_usages.items()
         if module_name in state.modules
-        and not bool(vars(facts).get("symbol_calls_materialized", False))
+        and (
+            not bool(
+                vars(facts).get(
+                    "symbol_calls_materialized",
+                    False,
+                )
+            )
+            or not bool(
+                vars(facts).get(
+                    "reference_evidence_materialized",
+                    False,
+                )
+            )
+        )
     }
-    modules_to_materialize = missing_modules | legacy_symbol_call_modules
+    modules_to_materialize = missing_modules | legacy_usage_modules
     if modules_to_materialize:
         from contextor.core.reference.engine import extract_module_usage_facts
 

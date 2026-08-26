@@ -304,7 +304,7 @@ def test_promoted_fields_bypass_legacy_extractors(tmp_path):
         extract_symbols.assert_not_called()
         find_usage.assert_not_called()
         build_index.assert_not_called()
-        spy_refs.assert_called_once()
+        spy_refs.assert_not_called()
 
     assert "compute" in result["symbol_context"]["all_symbols"]
 

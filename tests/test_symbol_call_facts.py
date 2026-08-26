@@ -4,7 +4,11 @@ from pathlib import Path
 from unittest.mock import patch
 
 from contextor.core.analysis.incremental_engine import IncrementalAnalysisEngine
-from contextor.core.analysis.incremental.materialization import ensure_module_usages
+from contextor.core.analysis.incremental.materialization import (
+    ensure_module_usages,
+    materialize_incremental_state,
+    module_usages_require_materialization,
+)
 from contextor.core.analysis.state_manager import (
     FileStateManager,
     RepositoryAnalysisState,
@@ -476,3 +480,296 @@ def test_graph_analytics_legacy_usage_backfills_required_edges(tmp_path):
     assert _edge(f"{module_name}::_compute_pagerank", f"{module_name}::_normalized_edges", 737) in calls
     assert _edge(f"{module_name}::compute_topology_analytics", f"{module_name}::_compute_pagerank", 1930) in calls
     assert state.module_usages["unrelated"] is unrelated
+
+
+def test_module_usages_require_materialization_for_reference_evidence():
+    # Case A: Both materialized -> False
+    state_a = RepositoryAnalysisState(
+        modules={"sample": Module("sample", "sample.py", "/path/sample.py", [])},
+        module_usages={
+            "sample": ModuleUsageFacts(
+                symbol_calls_materialized=True,
+                reference_evidence_materialized=True,
+            )
+        },
+    )
+    assert module_usages_require_materialization(state_a) is False
+
+    # Case B: symbol_calls True, reference_evidence False -> True
+    state_b = RepositoryAnalysisState(
+        modules={"sample": Module("sample", "sample.py", "/path/sample.py", [])},
+        module_usages={
+            "sample": ModuleUsageFacts(
+                symbol_calls_materialized=True,
+                reference_evidence_materialized=False,
+            )
+        },
+    )
+    assert module_usages_require_materialization(state_b) is True
+
+    # Case C: symbol_calls False, reference_evidence True -> True
+    state_c = RepositoryAnalysisState(
+        modules={"sample": Module("sample", "sample.py", "/path/sample.py", [])},
+        module_usages={
+            "sample": ModuleUsageFacts(
+                symbol_calls_materialized=False,
+                reference_evidence_materialized=True,
+            )
+        },
+    )
+    assert module_usages_require_materialization(state_c) is True
+
+    # Case D: Missing module_usages entry -> True
+    state_d = RepositoryAnalysisState(
+        modules={"sample": Module("sample", "sample.py", "/path/sample.py", [])},
+        module_usages={},
+    )
+    assert module_usages_require_materialization(state_d) is True
+
+
+def test_legacy_reference_evidence_upgrade(tmp_path):
+    consumer_file = tmp_path / "consumer.py"
+    consumer_code = """
+from provider import target
+
+def run():
+    target()
+"""
+    consumer_file.write_text(consumer_code, encoding="utf-8")
+
+    state = RepositoryAnalysisState(
+        modules={
+            "consumer": Module("consumer", "consumer.py", str(consumer_file), ["provider"]),
+        },
+        module_usages={
+            "consumer": ModuleUsageFacts(
+                symbol_calls_materialized=True,
+                reference_evidence=(),
+                reference_evidence_materialized=False,
+            )
+        },
+    )
+
+    ensure_module_usages(state)
+
+    facts = state.module_usages["consumer"]
+    assert facts.symbol_calls_materialized is True
+    assert facts.reference_evidence_materialized is True
+    assert len(facts.reference_evidence) > 0
+    assert any(ev[0].endswith("target") for ev in facts.reference_evidence)
+
+
+def test_legacy_reference_evidence_triggers_single_extraction(tmp_path):
+    consumer_file = tmp_path / "consumer.py"
+    consumer_file.write_text("def run(): pass\n", encoding="utf-8")
+
+    state = RepositoryAnalysisState(
+        modules={
+            "consumer": Module("consumer", "consumer.py", str(consumer_file), []),
+        },
+        module_usages={
+            "consumer": ModuleUsageFacts(
+                symbol_calls_materialized=True,
+                reference_evidence=(),
+                reference_evidence_materialized=False,
+            )
+        },
+    )
+
+    with patch(
+        "contextor.core.reference.engine.extract_module_usage_facts",
+        wraps=extract_module_usage_facts,
+    ) as extract_spy:
+        ensure_module_usages(state)
+
+    assert extract_spy.call_count == 1
+    assert state.module_usages["consumer"].reference_evidence_materialized is True
+
+
+def test_current_module_usages_untouched_during_legacy_upgrade(tmp_path):
+    legacy_file = tmp_path / "legacy.py"
+    legacy_file.write_text("def leg(): pass\n", encoding="utf-8")
+
+    current_file = tmp_path / "current.py"
+    current_file.write_text("def curr(): pass\n", encoding="utf-8")
+
+    current_facts = ModuleUsageFacts(
+        symbol_calls_materialized=True,
+        reference_evidence=(("current.curr", "direct_calls", "", 1),),
+        reference_evidence_materialized=True,
+    )
+
+    state = RepositoryAnalysisState(
+        modules={
+            "legacy": Module("legacy", "legacy.py", str(legacy_file), []),
+            "current": Module("current", "current.py", str(current_file), []),
+        },
+        module_usages={
+            "legacy": ModuleUsageFacts(
+                symbol_calls_materialized=True,
+                reference_evidence=(),
+                reference_evidence_materialized=False,
+            ),
+            "current": current_facts,
+        },
+    )
+
+    with patch(
+        "contextor.core.reference.engine.extract_module_usage_facts",
+        wraps=extract_module_usage_facts,
+    ) as extract_spy:
+        ensure_module_usages(state)
+
+    assert extract_spy.call_count == 1
+    assert extract_spy.call_args[0][0] == "legacy"
+    assert state.module_usages["current"] is current_facts
+    assert state.module_usages["legacy"].reference_evidence_materialized is True
+
+
+def test_old_pickled_or_dict_shape_detected_and_upgraded(tmp_path):
+    source = tmp_path / "sample.py"
+    source.write_text("from lib import func\ndef caller(): func()\n", encoding="utf-8")
+
+    # Simulate old object where reference_evidence and reference_evidence_materialized are absent in dict
+    old_facts = ModuleUsageFacts(
+        imports=("lib",),
+        direct_calls=("lib.func",),
+        symbol_calls_materialized=True,
+    )
+    object.__delattr__(old_facts, "reference_evidence_materialized")
+    if "reference_evidence" in vars(old_facts):
+        object.__delattr__(old_facts, "reference_evidence")
+
+    state = RepositoryAnalysisState(
+        modules={
+            "sample": Module("sample", "sample.py", str(source), ["lib"]),
+        },
+        module_usages={
+            "sample": old_facts,
+        },
+    )
+
+    assert module_usages_require_materialization(state) is True
+
+    ensure_module_usages(state)
+
+    upgraded = state.module_usages["sample"]
+    assert upgraded.symbol_calls_materialized is True
+    assert upgraded.reference_evidence_materialized is True
+    assert len(upgraded.reference_evidence) > 0
+
+
+def test_hydration_legacy_module_usages_authoritative_upgrade_and_roundtrip(tmp_path):
+    from contextor.core.api.facade import ContextorFacade
+    from contextor.core.live_state.hydration import hydrate_repository_engine
+    from contextor.core.paths import repo_cache_dir
+    from contextor.core.analysis.state_manager import save_engine_state
+    from contextor.core.reporting_engine.persistent_registry import PersistentIdentityRegistry
+    from contextor.core.single_file.single_file_analysis import collect_all_contexts
+
+    repo_root = tmp_path / "repo"
+    pkg = repo_root / "pkg"
+    pkg.mkdir(parents=True)
+    (pkg / "__init__.py").write_text("", encoding="utf-8")
+
+    provider_code = """
+def target():
+    return 42
+"""
+    (pkg / "provider.py").write_text(provider_code, encoding="utf-8")
+
+    consumer_code = """
+from pkg.provider import target
+
+def run():
+    return target()
+"""
+    (pkg / "consumer.py").write_text(consumer_code, encoding="utf-8")
+
+    # Step 1: Initial normal analysis to establish repository identity and valid graph
+    ContextorFacade.analyze_project(str(repo_root))
+    cache_dir = repo_cache_dir(repo_root)
+    registry = PersistentIdentityRegistry(str(repo_root))
+
+    # Hydrate to obtain current state object
+    initial_hydrated = hydrate_repository_engine(str(repo_root))
+    assert initial_hydrated is not None
+    state = initial_hydrated.engine.state
+
+    # Mutate consumer facts to simulate legacy state: symbol_calls_materialized=True, reference_evidence_materialized=False
+    legacy_facts = ModuleUsageFacts(
+        imports=("pkg.provider",),
+        symbol_calls_materialized=True,
+        reference_evidence=(),
+        reference_evidence_materialized=False,
+    )
+    state.module_usages["pkg.consumer"] = legacy_facts
+
+    # Save this legacy snapshot into the canonical live snapshot location
+    save_engine_state(
+        state,
+        str(cache_dir),
+        "legacy_h2b_state",
+        writer="desktop",
+        repo_id=registry.repo_id,
+        root_path=str(repo_root),
+    )
+
+    # Step 2: FIRST PRODUCTION HYDRATION
+    with patch(
+        "contextor.core.reference.engine.extract_module_usage_facts",
+        wraps=extract_module_usage_facts,
+    ) as extract_spy:
+        hydrated_1 = hydrate_repository_engine(str(repo_root))
+
+    assert hydrated_1 is not None
+    assert extract_spy.call_count == 1
+    assert extract_spy.call_args[0][0] == "pkg.consumer"
+
+    facts_1 = hydrated_1.engine.state.module_usages["pkg.consumer"]
+    assert facts_1.symbol_calls_materialized is True
+    assert facts_1.reference_evidence_materialized is True
+    assert len(facts_1.reference_evidence) > 0
+    assert any(ev[0].endswith("target") for ev in facts_1.reference_evidence)
+
+    # Step 3: Persist the upgraded state through normal product contract
+    save_engine_state(
+        hydrated_1.engine.state,
+        str(cache_dir),
+        "upgraded_h2b_state",
+        writer="desktop",
+        repo_id=registry.repo_id,
+        root_path=str(repo_root),
+    )
+
+    # Step 4: SECOND PRODUCTION HYDRATION
+    with patch(
+        "contextor.core.reference.engine.extract_module_usage_facts",
+        wraps=extract_module_usage_facts,
+    ) as extract_spy_2:
+        hydrated_2 = hydrate_repository_engine(str(repo_root))
+
+    assert hydrated_2 is not None
+    assert extract_spy_2.call_count == 0
+
+    facts_2 = hydrated_2.engine.state.module_usages["pkg.consumer"]
+    assert facts_2.reference_evidence_materialized is True
+    assert facts_2.reference_evidence == facts_1.reference_evidence
+    assert module_usages_require_materialization(hydrated_2.engine.state) is False
+
+    # Step 5: AFTER SECOND HYDRATION — SINGLE FILE CANONICAL REFERENCE PATH
+    with patch("contextor.core.single_file.builders.layer0_builders.build_symbol_references") as legacy_ref_spy:
+        provider_file = str(pkg / "provider.py")
+        res = collect_all_contexts(
+            provider_file,
+            hydrated_2.engine.state.modules,
+            hydrated_2.engine.state.dependency_graph,
+            root_path=str(repo_root),
+            engine_state=hydrated_2.engine.state,
+        )
+        assert not legacy_ref_spy.called, "build_symbol_references must NOT be called after hydration upgrade"
+
+    sym_ctx = res.get("symbol_context", {})
+    assert "references" in sym_ctx
+    assert "target" in sym_ctx["references"]
+    assert "pkg.consumer" in sym_ctx["references"]["target"]["called_by"]

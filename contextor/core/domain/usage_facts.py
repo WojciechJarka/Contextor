@@ -35,11 +35,18 @@ class ModuleUsageFacts:
     symbol_calls: Tuple[SymbolCallFact, ...] = ()
     symbol_calls_materialized: bool = False
     reference_evidence: Tuple[ReferenceEvidenceFact, ...] = ()
+    reference_evidence_materialized: bool = False
 
     def __getattribute__(self, name: str):
-        if name == "symbol_calls_materialized":
+        if name in (
+            "symbol_calls_materialized",
+            "reference_evidence_materialized",
+        ):
             return bool(
-                object.__getattribute__(self, "__dict__").get(name, False)
+                object.__getattribute__(self, "__dict__").get(
+                    name,
+                    False,
+                )
             )
         return object.__getattribute__(self, name)
 
@@ -47,6 +54,8 @@ class ModuleUsageFacts:
         # Pickle restores old dataclass instances without fields added later.
         if name in ("symbol_calls", "reference_evidence"):
             return ()
+        if name == "reference_evidence_materialized":
+            return False
         raise AttributeError(name)
 
     def to_dict(self) -> Dict[str, Any]:
@@ -81,6 +90,12 @@ class ModuleUsageFacts:
                 }
                 for item in getattr(self, "reference_evidence", ())
             ],
+            "reference_evidence_materialized": bool(
+                vars(self).get(
+                    "reference_evidence_materialized",
+                    False,
+                )
+            ),
         }
 
     @classmethod
@@ -152,6 +167,12 @@ class ModuleUsageFacts:
                 data.get("symbol_calls_materialized", False)
             ),
             reference_evidence=reference_evidence,
+            reference_evidence_materialized=bool(
+                data.get(
+                    "reference_evidence_materialized",
+                    False,
+                )
+            ),
         )
 
 

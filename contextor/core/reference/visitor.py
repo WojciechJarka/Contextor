@@ -500,7 +500,7 @@ class SymbolReferenceVisitor(ast.NodeVisitor):
         resolved = self._resolve_name(called_name)
 
         if resolved or called_name:
-            candidate = self._resolve_instance_method(resolved)
+            candidate = self._instance_method_candidate(resolved)
             target_to_record = candidate or resolved or called_name
             if target_to_record != "getattr":
                 self.reference_evidence.add(
@@ -582,6 +582,25 @@ class SymbolReferenceVisitor(ast.NodeVisitor):
 
         self.generic_visit(node)
 
+    def _instance_method_candidate(self, resolved):
+        """
+        Extract raw instance method candidate: obj.method() -> Class.method
+        without classifying against target_symbols.
+        """
+        if not resolved:
+            return None
+
+        parts = resolved.split(".")
+        if len(parts) != 2:
+            return None
+
+        instance_name, method = parts
+        constructor = self.instances.get(instance_name)
+        if not constructor:
+            return None
+
+        return f"{constructor}.{method}"
+
     def _resolve_instance_method(self, resolved):
         """
         Resolve calls such as:
@@ -591,28 +610,11 @@ class SymbolReferenceVisitor(ast.NodeVisitor):
         when `obj` was previously assigned from a known
         constructor.
         """
-
-        if not resolved:
-            return None
-
-        parts = resolved.split(".")
-
-        if len(parts) != 2:
-            return None
-
-        instance_name, method = parts
-
-        constructor = self.instances.get(instance_name)
-
-        if not constructor:
-            return None
-
-        candidate = f"{constructor}.{method}"
-
+        candidate = self._instance_method_candidate(resolved)
         if candidate in self.target_symbols:
             return candidate
 
-        return candidate
+        return None
 
     # ======================================================
     # INHERITANCE
