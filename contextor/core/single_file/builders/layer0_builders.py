@@ -392,14 +392,10 @@ class ArchitectureContextBuilder:
                 ):
                     name_collisions.append(error.message)
 
-        # Hotspots (canonicalization deferred)
-        hotspots = []
-        if payload.global_report:
-            hotspots = (
-                payload.global_report
-                .get("llm_signals", {})
-                .get("hotspots", [])
-            )
+        # Hotspots
+        from contextor.core.hotspots import detect_hotspots
+
+        hotspots = detect_hotspots(hard_edges)
 
         return {
             "architecture_context": {
