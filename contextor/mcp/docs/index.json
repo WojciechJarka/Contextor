@@ -96,7 +96,7 @@
     {
       "tool": "get_artifacts_for_module",
       "filename": "get_artifacts_for_module.json",
-      "short_description": "Return canonical artifacts exported by one module, optionally with bounded consumer evidence. Persistent registries provide identity only."
+      "short_description": "Return canonical artifacts for a module directly by dotted name, source path or active module ID, with optional bounded consumer evidence. No prior get_module_context lookup is required."
     },
     {
       "tool": "lookup_artifact_by_symbol",

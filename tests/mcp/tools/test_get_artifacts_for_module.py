@@ -410,3 +410,38 @@ def test_get_artifacts_for_module__original_query_preserved_and_candidate_struct
     assert candidate["module"] == "pkg.services.auth"
     assert candidate["module_id"] == "13/1"
     assert isinstance(candidate["score"], float)
+
+
+def test_get_artifacts_for_module__runtime_description_and_discovery_parity():
+    from contextor import mcp_server
+    from contextor.mcp import documentation
+
+    tool = mcp_server.mcp._tool_manager._tools["get_artifacts_for_module"]
+    index = documentation.load_documentation_index()
+    entry = next(
+        item for item in index["tools"]
+        if item["tool"] == "get_artifacts_for_module"
+    )
+
+    assert tool.description == entry["short_description"]
+    assert tool.fn.__doc__ is None
+    assert len(tool.description.encode("utf-8")) <= 300
+
+    description = tool.description.lower()
+    assert "directly" in description
+    assert "dotted name" in description
+    assert "source path" in description
+    assert "module id" in description
+    assert "no prior get_module_context" in description
+
+    doc = documentation.load_tool_document("get_artifacts_for_module")
+    usage_text = " ".join(doc.get("usage_notes", [])).lower()
+    assert "get_module_context" in usage_text
+    assert "directly" in usage_text
+
+    behavior_text = " ".join(doc.get("behavior", [])).lower()
+    assert "without requiring a prior get_module_context call" in behavior_text
+
+    params_text = " ".join(doc.get("parameters", [])).lower()
+    assert "alias-conflict" in params_text or "conflict" in params_text
+    assert "identical" in params_text

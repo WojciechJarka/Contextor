@@ -1,198 +1,146 @@
-# CONTEXTOR — ROUND-TRIP ERGONOMICS RUNTIME CERTIFICATION H1 — FINAL CLOSURE REPORT
+# CONTEXTOR — GET_ARTIFACTS_FOR_MODULE DISCOVERY H1 — REPORT
 **Date:** 2026-08-26  
-**Mode:** RUNTIME-ONLY VERIFICATION  
+**Mode:** DOC ALIAS SEMANTICS CORRECTION  
 **Target Repository:** `C:\Temp\Contextor_Repo`  
 
 ---
 
-## 1. Registered FastMCP Metadata Evidence (Client-Visible Schemas)
-
-**Registered Metadata Source:** Client-visible tool schemas in `C:\Users\DafoO\.gemini\antigravity-ide\mcp\contextor\`
+## 1. Discovery & Alias Semantics Verdict
 
 ```
-REGISTERED_METADATA_SOURCE=client_registered_tool_schemas (C:\Users\DafoO\.gemini\antigravity-ide\mcp\contextor)
-REGISTERED_DESCRIPTION_QUERY_PROJECTION=PASS
-REGISTERED_DESCRIPTION_SYMBOL_IMPLEMENTATION=PASS
-REGISTERED_DESCRIPTION_ANALYSIS_STATUS=PASS
-REGISTERED_SCHEMAS_FRESH=PASS
-```
+DIRECT_SINGLE_CALL_BEHAVIOR_CHANGED=NO
+PRODUCTION_CODE_CHANGED=NO
+PUBLIC_SIGNATURE_CHANGED=NO
+ALIAS_CONFLICT_SEMANTICS=FAIL_CLOSED
+DOC_ALIAS_SEMANTICS_MATCH_PRODUCTION=PASS
+DISCOVERY_SINGLE_CALL_GUIDANCE_PRESERVED=PASS
 
-### Exact Client-Visible Schema Content
-
-#### 1. `query_canonical_projection.json`
-```json
-{
-  "name": "query_canonical_projection",
-  "description": "Query canonical LIVE data. Basic request: root=modules|artifacts|dependencies, filters=[{field,operator,value}] (flat AND; []=all), select=[...] ([]=all). Omit both version fields for 1.0/1.0; use describe_canonical_state only for full/v1.1 discovery.",
-  "parameters": {
-    "properties": {
-      "repo_path": {"type": "string"},
-      "request": {"additionalProperties": true, "type": "object"}
-    },
-    "required": ["repo_path", "request"],
-    "type": "object"
-  }
-}
-```
-
-#### 2. `get_symbol_implementation.json`
-```json
-{
-  "name": "get_symbol_implementation",
-  "description": "Preview or fetch one exact AST-bounded symbol implementation. Unique plain leaves may resolve through canonical LIVE identity; explicit file scope remains supported. Source is read from disk and ambiguous matches are never guessed.",
-  "parameters": {
-    "properties": {
-      "file_path": {"anyOf": [{"type": "string"}, {"type": "null"}], "default": null},
-      "file_paths": {"anyOf": [{"items": {"type": "string"}, "type": "array"}, {"type": "null"}], "default": null},
-      "include": {"anyOf": [{"items": {"type": "string"}, "type": "array"}, {"type": "null"}], "default": null},
-      "member_limit": {"anyOf": [{"type": "integer"}, {"type": "null"}], "default": 50},
-      "methods": {"anyOf": [{"items": {"type": "string"}, "type": "array"}, {"type": "null"}], "default": null},
-      "mode": {"default": "auto", "type": "string"},
-      "repo_path": {"type": "string"},
-      "symbol": {"type": "string"}
-    },
-    "required": ["repo_path", "symbol"],
-    "type": "object"
-  }
-}
-```
-
-#### 3. `get_analysis_status.json`
-```json
-{
-  "name": "get_analysis_status",
-  "description": "Return durable analysis-job status, coverage and LIVE publication state. Explicit job_id is authoritative; when omitted, multiple queued/running jobs return bounded ambiguous_job candidates instead of guessing.",
-  "parameters": {
-    "properties": {
-      "allow_large_output": {"default": false, "type": "boolean"},
-      "job_id": {"anyOf": [{"type": "string"}, {"type": "null"}], "default": null},
-      "max_skipped_files": {"anyOf": [{"type": "integer"}, {"type": "null"}], "default": 10},
-      "repo_path": {"type": "string"}
-    },
-    "required": ["repo_path"],
-    "type": "object"
-  }
-}
-```
-
----
-
-## 2. R3B — Real Oversized `get_symbol_call_context` Auto-Bounding Evidence
-
-### Setup & Analysis
-- **Temp Repository:** `%TEMP%\contextor_runtime_cert_r3b`
-- **Module:** `sample.py` with 600 intra-module helper calls from `root()`.
-- **Analysis Job ID:** `94db967c51cf49b788754f5edf8c9c1d`
-- **Analysis Status:** `completed` (Live publish status: `success`, revision: 3)
-
-### Metrics Comparison
-
-| Metric | Bounded Call (`allow_large_output=false`) | Full Lossless Call (`allow_large_output=true`) | Status |
-| :--- | :--- | :--- | :--- |
-| **Status** | `ok` | `ok` | MATCH |
-| **Selected Representation** | `indexed` | `indexed` | STABLE |
-| **`_output.auto_bounded`** | `true` | *absent* | PASS |
-| **`_output.warning_threshold_bytes`** | `15360` | *N/A* | PASS |
-| **`_output.bounded_collection`** | `"edges"` | *N/A* | PASS |
-| **Returned Edges** | `98` | `600` | BOUNDED |
-| **Returned Serialized Bytes** | `15273 B` (<= 15360 B) | `87709 B` | PASS |
-| **Full Output Bytes Match** | `_output.full_output_bytes = 87709` | Actual bytes = `87709` | EXACT MATCH |
-| **Deterministic Edge Prefix** | Exact 98/98 prefix | Full 600 items | PASS |
-
-```
-R3B_SELECTED_REPRESENTATION=indexed
-R3B_FULL_OUTPUT_BYTES=87709
-R3B_BOUNDED_OUTPUT_BYTES=15273
-R3B_BOUNDED_RETURNED_EDGES=98
-R3B_FULL_RETURNED_EDGES=600
-R3B_EXACT_EDGE_PREFIX=PASS
-R3B_REPRESENTATION_STABLE_ACROSS_ALLOW_FLAG=PASS
-R3B_FULL_OUTPUT_BYTES_EXACT=PASS
-R3B_AUTO_BOUNDING=PASS
-```
-
----
-
-## 3. R6 — SHA-256 Direct Read-Only Mutation Proof
-
-- **Temp Repository:** `%TEMP%\contextor_runtime_cert_r6_h1`
-- **Job A (queued):** `aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.json`
-  - SHA-256 Before: `c06ade4b716b8535dfd8ec4f83bd3d9959a16fc70c84a60a3f6b39a51924a43c`
-  - SHA-256 After: `c06ade4b716b8535dfd8ec4f83bd3d9959a16fc70c84a60a3f6b39a51924a43c` (EXACT MATCH)
-- **Job B (running):** `bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.json`
-  - SHA-256 Before: `90e0a8c7986439d2c7ff6b5aadacf28ce7befe856b0b22ea4a48aeba8c262a36`
-  - SHA-256 After: `90e0a8c7986439d2c7ff6b5aadacf28ce7befe856b0b22ea4a48aeba8c262a36` (EXACT MATCH)
-
-```
-R6_AMBIGUOUS_JOB=PASS
-R6_JOB_A_FILE_UNCHANGED=PASS
-R6_JOB_B_FILE_UNCHANGED=PASS
-R6_AMBIGUITY_BYTE_MUTATION=NO
-```
-
----
-
-## 4. H1 Public Runtime Call Trace
-
-### `CALL_H1_1`
-- **TOOL:** `analyze_project`
-- **KEY_ARGS:** `{"repo_path": "<temp_repo_r3b>"}`
-- **STATUS:** `queued`
-- **KEY_FIELDS:** `job_id: "94db967c51cf49b788754f5edf8c9c1d"`, `operation: "project"`.
-- **BYTES:** `450 B`
-- **PURPOSE:** Launch non-blocking architectural analysis for temporary 600-helper intra-module repository.
-
-### `CALL_H1_2`
-- **TOOL:** `get_analysis_status`
-- **KEY_ARGS:** `{"repo_path": "<temp_repo_r3b>", "job_id": "94db967c51cf49b788754f5edf8c9c1d"}`
-- **STATUS:** `completed`
-- **KEY_FIELDS:** `status: "completed"`, `live_publish_status: "success"`, `live_publish_revision: 3`.
-- **BYTES:** `530 B`
-- **PURPOSE:** Confirm completion and canonical LIVE state publication for temp repository.
-
-### `CALL_H1_3`
-- **TOOL:** `get_symbol_call_context`
-- **KEY_ARGS:** `{"repo_path": "<temp_repo_r3b>", "symbol": "sample::root", "direction": "both", "depth": 1, "max_items": null, "representation": "auto", "allow_large_output": false}`
-- **STATUS:** `ok`
-- **KEY_FIELDS:** `_output.auto_bounded: true`, `_output.full_output_bytes: 87709`, `_output.warning_threshold_bytes: 15360`, `_output.bounded_collection: "edges"`, `_output.returned_count: 98`, `representation: "indexed"`, `representation_decision.selected: "indexed"`.
-- **BYTES:** `15273 B`
-- **PURPOSE:** Verify real R3B single-shot auto-bounding on >15360 B intra-module symbol-call graph.
-
-### `CALL_H1_4`
-- **TOOL:** `get_symbol_call_context`
-- **KEY_ARGS:** `{"repo_path": "<temp_repo_r3b>", "symbol": "sample::root", "direction": "both", "depth": 1, "max_items": null, "representation": "auto", "allow_large_output": true}`
-- **STATUS:** `ok`
-- **KEY_FIELDS:** `_output` absent, `returned_edges: 600`, `total_edges: 600`, `representation: "indexed"`, `representation_decision.selected: "indexed"`, exact response bytes = `87709 B`.
-- **BYTES:** `87709 B`
-- **PURPOSE:** Verify lossless retrieval under `allow_large_output=true` with stable representation and exact byte parity.
-
-### `CALL_H1_5`
-- **TOOL:** `get_analysis_status`
-- **KEY_ARGS:** `{"repo_path": "<temp_repo_r6_h1>", "job_id": null}`
-- **STATUS:** `ambiguous_job`
-- **KEY_FIELDS:** `status: "ambiguous_job"`, `job_id: null`, `active_job_count: 2`, `len(active_jobs): 2`.
-- **BYTES:** `620 B`
-- **PURPOSE:** Execute ambiguous status call against SHA-256 hashed durable jobs to prove read-only non-mutating behavior.
-
----
-
-## 5. Final Closure Verdict
-
-```
-REGISTERED_MCP_METADATA_FRESH=PASS
-R3B_RUNTIME_AUTO_BOUNDING=PASS
-R3B_REPRESENTATION_STABLE=PASS
-R3B_PREFIX_EXACT=PASS
-R3B_FULL_BYTES_EXACT=PASS
-R6_AMBIGUOUS_DURABLE_STATE_UNCHANGED=PASS
-
-CODE_CHANGED=NO
-CONTEXTOR_REPO_CHANGED=NO
-
-RUNTIME_H1_VERDICT=FINAL_PASS
-OVERALL_RUNTIME_VERDICT=FINAL_PASS
-ROUND_TRIP_ERGONOMICS_RUNTIME=5/5_CERTIFIED
-OPEN_RUNTIME_FINDINGS=[]
-MCP_RUNTIME_FRESH=YES
+MCP_RESTART_REQUIRED=YES
 LIVE_RESTART_REQUIRED=NO
+
+VERDICT=FINAL_PASS
+```
+
+---
+
+## 2. Test Verification
+
+```
+tests/mcp/tools/test_get_artifacts_for_module.py (PASSED: 26/26)
+tests/mcp/tools/test_public_mcp_docs_parity.py (PASSED)
+tests/test_mcp_documentation.py (PASSED)
+```
+
+---
+
+## 3. Complete Raw Unified Diffs
+
+### `contextor/mcp/docs/get_artifacts_for_module.json`
+
+```diff
+diff --git a/contextor/mcp/docs/get_artifacts_for_module.json b/contextor/mcp/docs/get_artifacts_for_module.json
+index def49a0..9790f52 100644
+--- a/contextor/mcp/docs/get_artifacts_for_module.json
++++ b/contextor/mcp/docs/get_artifacts_for_module.json
+@@ -6,7 +6,7 @@
+   ],
+   "parameters": [
+     "repo_path (string, required): canonical repository root.",
+-    "module_name (string, optional, default \"\"): module identifier (accepts module ID e.g. '259/1', dotted module name, or file path).",
++    "module_name (string, optional, default \"\"): module identifier (accepts dotted module name, repository-relative POSIX .py path, Windows .py path, or active module ID).",
+     "include_consumers (boolean, default true): includes consumer counts and evidence when true; signatures-only view when false.",
+     "symbol_filter (string, optional, default \"\"): filters candidate artifacts by symbol name substring before limits and ranking.",
+     "limit (integer or null, default 50): maximum number of artifacts returned; pass null for unbounded (default compact mode caps at 10 items).",
+@@ -14,10 +14,10 @@
+     "compact (boolean, default true): returns progressive-disclosure summary (up to 10 salience-ranked artifacts with 3 evidence items each) when true; full details when false.",
+     "fields (array of strings or null, default null): optional projection list of top-level keys to return; null returns full response.",
+     "representation (string, default \"named\"): nested consumer encoding format (\"named\", \"indexed\", or \"auto\").",
+-    "module (string or null, optional, default null): alias for module_name."
++    "module (string or null, optional, default null): alias for module_name; either may identify the module. If both are non-empty they must be identical, otherwise a controlled alias-conflict error is returned."
+   ],
+   "behavior": [
+-    "Resolution order:\n1. Exact active module ID via active module registry.\n2. Path-to-dotted normalization and canonical LIVE state lookup.\n3. Bounded fuzzy module suggestions (score >= 0.75, max 5) from active module registry on textual not-found.\n4. Legacy not-found string fallback when query is not found or is a nonexistent module ID.",
++    "Resolution order:\n1. Exact active module ID via active module registry.\n2. Dotted module name or repository-relative source path (POSIX or Windows) resolved directly to canonical LIVE module state without requiring a prior get_module_context call.\n3. Bounded fuzzy module suggestions (score >= 0.75, max 5, suggestion-only) from active module registry on textual not-found.\n4. Persistent registries provide identity only; canonical LIVE state supplies architectural truth.\n5. Legacy not-found string fallback when query is not found or is a nonexistent module ID.",
+     "In default compact mode (``compact=True``), returns up to 10 artifacts prioritized by consumer salience (``consumers.total DESC``, then alphabetical) with up to 3 nested consumer evidence items per artifact.",
+     "Top-level ``truncated`` is truthful (``artifact_count < total_artifact_count``). When output is truncated by internal compact presentation cap, an executable ``expand`` descriptor is included preserving original requested limits.",
+     "For complete lossless views, use ``compact=False, limit=None, evidence_limit=None`` with ``representation='named'`` or ``representation='indexed'``.",
+@@ -28,7 +28,7 @@
+   "freshness": [],
+   "errors": [],
+   "usage_notes": [
+-    "LLM use: call before changing a module API. Use default compact for instant visibility of highest-impact symbols; expand or request indexed representation for complete blast-radius analysis.",
++    "Call get_artifacts_for_module directly when artifacts are the goal; get_module_context is only needed when module architecture/context is also required. Use default compact for instant visibility of highest-impact symbols; expand or request indexed representation for complete blast-radius analysis.",
+     "Resolve indexed consumer module IDs in batch via ``lookup_index_entries``."
+   ],
+   "examples": []
+```
+
+---
+
+### `contextor/mcp/docs/index.json`
+
+```diff
+diff --git a/contextor/mcp/docs/index.json b/contextor/mcp/docs/index.json
+index f920057..bfc0d5f 100644
+--- a/contextor/mcp/docs/index.json
++++ b/contextor/mcp/docs/index.json
+@@ -96,7 +96,7 @@
+     {
+       "tool": "get_artifacts_for_module",
+       "filename": "get_artifacts_for_module.json",
+-      "short_description": "Return canonical artifacts exported by one module, optionally with bounded consumer evidence. Persistent registries provide identity only."
++      "short_description": "Return canonical artifacts for a module directly by dotted name, source path or active module ID, with optional bounded consumer evidence. No prior get_module_context lookup is required."
+     },
+     {
+       "tool": "lookup_artifact_by_symbol",
+```
+
+---
+
+### `tests/mcp/tools/test_get_artifacts_for_module.py`
+
+```diff
+diff --git a/tests/mcp/tools/test_get_artifacts_for_module.py b/tests/mcp/tools/test_get_artifacts_for_module.py
+index 81c15d3..cf77c0b 100644
+--- a/tests/mcp/tools/test_get_artifacts_for_module.py
++++ b/tests/mcp/tools/test_get_artifacts_for_module.py
+@@ -410,3 +410,38 @@ def test_get_artifacts_for_module__original_query_preserved_and_candidate_struct
+     assert candidate["module"] == "pkg.services.auth"
+     assert candidate["module_id"] == "13/1"
+     assert isinstance(candidate["score"], float)
++
++
++def test_get_artifacts_for_module__runtime_description_and_discovery_parity():
++    from contextor import mcp_server
++    from contextor.mcp import documentation
++
++    tool = mcp_server.mcp._tool_manager._tools["get_artifacts_for_module"]
++    index = documentation.load_documentation_index()
++    entry = next(
++        item for item in index["tools"]
++        if item["tool"] == "get_artifacts_for_module"
++    )
++
++    assert tool.description == entry["short_description"]
++    assert tool.fn.__doc__ is None
++    assert len(tool.description.encode("utf-8")) <= 300
++
++    description = tool.description.lower()
++    assert "directly" in description
++    assert "dotted name" in description
++    assert "source path" in description
++    assert "module id" in description
++    assert "no prior get_module_context" in description
++
++    doc = documentation.load_tool_document("get_artifacts_for_module")
++    usage_text = " ".join(doc.get("usage_notes", [])).lower()
++    assert "get_module_context" in usage_text
++    assert "directly" in usage_text
++
++    behavior_text = " ".join(doc.get("behavior", [])).lower()
++    assert "without requiring a prior get_module_context call" in behavior_text
++
++    params_text = " ".join(doc.get("parameters", [])).lower()
++    assert "alias-conflict" in params_text or "conflict" in params_text
++    assert "identical" in params_text
 ```

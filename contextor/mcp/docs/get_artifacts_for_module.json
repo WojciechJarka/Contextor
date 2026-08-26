@@ -6,7 +6,7 @@
   ],
   "parameters": [
     "repo_path (string, required): canonical repository root.",
-    "module_name (string, optional, default \"\"): module identifier (accepts module ID e.g. '259/1', dotted module name, or file path).",
+    "module_name (string, optional, default \"\"): module identifier (accepts dotted module name, repository-relative POSIX .py path, Windows .py path, or active module ID).",
     "include_consumers (boolean, default true): includes consumer counts and evidence when true; signatures-only view when false.",
     "symbol_filter (string, optional, default \"\"): filters candidate artifacts by symbol name substring before limits and ranking.",
     "limit (integer or null, default 50): maximum number of artifacts returned; pass null for unbounded (default compact mode caps at 10 items).",
@@ -14,10 +14,10 @@
     "compact (boolean, default true): returns progressive-disclosure summary (up to 10 salience-ranked artifacts with 3 evidence items each) when true; full details when false.",
     "fields (array of strings or null, default null): optional projection list of top-level keys to return; null returns full response.",
     "representation (string, default \"named\"): nested consumer encoding format (\"named\", \"indexed\", or \"auto\").",
-    "module (string or null, optional, default null): alias for module_name."
+    "module (string or null, optional, default null): alias for module_name; either may identify the module. If both are non-empty they must be identical, otherwise a controlled alias-conflict error is returned."
   ],
   "behavior": [
-    "Resolution order:\n1. Exact active module ID via active module registry.\n2. Path-to-dotted normalization and canonical LIVE state lookup.\n3. Bounded fuzzy module suggestions (score >= 0.75, max 5) from active module registry on textual not-found.\n4. Legacy not-found string fallback when query is not found or is a nonexistent module ID.",
+    "Resolution order:\n1. Exact active module ID via active module registry.\n2. Dotted module name or repository-relative source path (POSIX or Windows) resolved directly to canonical LIVE module state without requiring a prior get_module_context call.\n3. Bounded fuzzy module suggestions (score >= 0.75, max 5, suggestion-only) from active module registry on textual not-found.\n4. Persistent registries provide identity only; canonical LIVE state supplies architectural truth.\n5. Legacy not-found string fallback when query is not found or is a nonexistent module ID.",
     "In default compact mode (``compact=True``), returns up to 10 artifacts prioritized by consumer salience (``consumers.total DESC``, then alphabetical) with up to 3 nested consumer evidence items per artifact.",
     "Top-level ``truncated`` is truthful (``artifact_count < total_artifact_count``). When output is truncated by internal compact presentation cap, an executable ``expand`` descriptor is included preserving original requested limits.",
     "For complete lossless views, use ``compact=False, limit=None, evidence_limit=None`` with ``representation='named'`` or ``representation='indexed'``.",
@@ -28,7 +28,7 @@
   "freshness": [],
   "errors": [],
   "usage_notes": [
-    "LLM use: call before changing a module API. Use default compact for instant visibility of highest-impact symbols; expand or request indexed representation for complete blast-radius analysis.",
+    "Call get_artifacts_for_module directly when artifacts are the goal; get_module_context is only needed when module architecture/context is also required. Use default compact for instant visibility of highest-impact symbols; expand or request indexed representation for complete blast-radius analysis.",
     "Resolve indexed consumer module IDs in batch via ``lookup_index_entries``."
   ],
   "examples": []

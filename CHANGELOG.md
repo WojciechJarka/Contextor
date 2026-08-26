@@ -1,3 +1,87 @@
+## [1.2.0-beta Patch — MCP Ergonomics and Round-Trip Runtime Hardening] - 2026-08-26
+
+### Public MCP ergonomics
+
+- Completed an end-to-end ergonomics review of the full public MCP surface. All 24 public tools, their centralized documentation entries and runtime discovery descriptions were audited for parameter consistency, bounded output behavior, identity handling and LLM-oriented usage.
+- Standardized common query ergonomics without breaking existing public contracts. Added or retained compatibility aliases where useful, preserved explicit ambiguity handling and removed unnecessary multi-call workflows where canonical state already contained enough information to answer safely.
+- Hardened shared active-identity resolution across artifact-oriented tools. Persistent module and artifact registries remain identity stores only; canonical LIVE state remains authoritative for current architectural ownership and source location.
+- Kept public FastMCP discovery descriptions centralized in `contextor/mcp/docs/index.json`. Registered tool descriptions remain index-backed, bounded in size and separate from implementation functions.
+
+### Compact evidence without information-free responses
+
+- Reworked compact responses so non-empty collections no longer collapse to counts with no supporting evidence.
+- `compact=True` remains the default, but affected collections now return up to three representative evidence items together with the full `total` and an explicit `truncated` flag.
+- Applied the bounded-evidence contract to artifact consumers, inbound/outbound dependencies, report-diff layers, isolation clusters and violations, edit-context API/import/consumer/test data, affected modules and semantic file-delta symbol collections.
+- Preserved existing non-compact behavior and caller-provided item/evidence limits.
+- Kept mutating `update_file` free from unsafe replay-style expansion semantics; complete evidence must be requested on the original call when required.
+
+### Single-shot large-output handling
+
+- Added deterministic semantic auto-bounding for MCP responses that can safely return a useful prefix instead of forcing an identical second request solely to approve a large payload.
+- Added a shared `largest_fitting_prefix` helper using serialized UTF-8 size and the existing 15 KiB (`15360` byte) warning threshold.
+- `search_source` now returns the largest deterministic match prefix that fits the context budget, together with exact full-output byte metadata and an `allow_large_output=true` retry path for the complete result.
+- `lookup_index_entries` now performs equivalent deterministic prefix bounding while preserving requested ID order and reserved metadata safety.
+- `get_analysis_status` now bounds only skipped-file evidence while preserving all scalar job state and exact durable-job contents.
+- `get_symbol_call_context` now performs output bounding only after normal call-graph traversal and representation negotiation. The selected named/indexed representation is pinned during bounding; no second BFS, registry resolution or representation negotiation is performed.
+- Existing representation rules remain unchanged: material indexed savings are required for automatic switching, and oversized named call-context payloads still use the established forced-indexed contract.
+- `get_source_range` intentionally remains lossless. Oversized exact ranges still require explicit large-output approval rather than semantic truncation.
+
+### Canonical projection single-call quickstart
+
+- Removed the mandatory `describe_canonical_state` prerequisite for basic canonical projection queries.
+- When both `schema_version` and `language_version` are omitted, `query_canonical_projection` now uses the stable `1.0/1.0` contract automatically.
+- Partial version specification remains fail-closed: supplying exactly one version field returns `missing_required_field`.
+- Explicit `1.0/1.0` and `1.1/1.1` behavior, cross-version rejection, field validation, request limits and query-language semantics remain unchanged.
+- Basic requests can now directly specify `root`, `filters` and `select` for `modules`, `artifacts` or `dependencies`; empty filters match all records and an empty selection requests all selectable fields.
+- `describe_canonical_state` remains available for complete versioned schemas, field/operator discovery, v1.1 capabilities, ordering, null semantics, limits and validation repair.
+
+### Single-shot symbol implementation lookup
+
+- Extended `get_symbol_implementation` so a globally unique plain symbol can be resolved without first calling `search_artifacts` or supplying a file path.
+- Plain leaves without explicit file scope now use the shared active artifact resolver. A unique exact leaf resolves to its canonical artifact identity and canonical LIVE module ownership before entering the existing source/AST implementation pipeline.
+- Ambiguous plain leaves fail closed with canonical candidates and artifact IDs; no implementation is guessed or fetched.
+- Textual misses return bounded fuzzy suggestions only. Fuzzy matching remains active-registry-only and never promotes a suggestion into an implementation result.
+- Explicit `file_path` / `file_paths` behavior remains AST-first and scope-constrained, preserving zero-registry-read exact and ambiguous scoped resolution.
+- Artifact IDs, lowercase artifact IDs, canonical `module::symbol` identities, stale/resync protection and the existing `auto` / `preview` / `fetch` modes remain compatible.
+- Canonical LIVE state remains the source of identity, ownership and source location; implementation text continues to be read from the current file on disk.
+- The existing 5120-byte automatic implementation-fetch threshold is unchanged.
+
+### Concurrent analysis-status disambiguation
+
+- Hardened `get_analysis_status(job_id=None)` for durable stores containing multiple queued or running jobs.
+- When more than one active durable job exists, the tool now returns `status="ambiguous_job"` instead of silently selecting one.
+- Ambiguous responses include a deterministic, read-only list of up to five active candidates with job ID, operation, target, status and timestamps.
+- Active candidates are ordered newest-first by durable file modification time with a stable job-ID tie-break.
+- Explicit `job_id` remains authoritative and bypasses active-job enumeration entirely.
+- Existing latest-job behavior is intentionally preserved when zero or one active job exists; a sole active job is not automatically preferred over a newer terminal job.
+- Existing stale-owner interruption, job deduplication, public job shaping and large skipped-file output bounding remain unchanged.
+- The ambiguity branch is strictly read-only and does not rewrite or normalize durable job files.
+
+### Runtime certification
+
+- Restarted the MCP server and independently certified the new behavior against the running FastMCP runtime rather than relying only on source-level tests.
+- Verified fresh client-visible schemas and registered descriptions for canonical projection, symbol implementation and analysis-status tools.
+- Exercised compact evidence against real Contextor repository data and confirmed that non-empty compact collections retain bounded evidence.
+- Verified `search_source` auto-bounding against an oversized real response and confirmed byte-exact parity with the corresponding lossless `allow_large_output=true` response.
+- Verified `get_source_range` retains the lossless confirmation-only exception.
+- Verified `get_analysis_status` auto-bounds large skipped-file evidence while returning the complete durable job unchanged when explicitly approved.
+- Exercised `get_symbol_call_context` against a temporary 600-edge canonical call graph: an 87,709-byte indexed response was automatically reduced to a 15,273-byte deterministic 98-edge prefix while retaining the same representation; the full 600-edge response remained byte-exact under `allow_large_output=true`.
+- Verified canonical projection directly in one call without prior schema discovery, including implicit `1.0/1.0`, partial-version rejection, explicit v1.1 and cross-version rejection.
+- Verified unique plain-symbol implementation retrieval without a preceding artifact lookup, controlled ambiguity, fuzzy suggestion-only behavior and explicit file-scoped resolution.
+- Verified concurrent analysis ambiguity on isolated durable jobs, including the five-item bound, deterministic ordering, explicit-job override and preservation of legacy latest-job semantics.
+- Confirmed the ambiguous analysis-status path is byte-for-byte read-only using SHA-256 checks of durable job files before and after the runtime call.
+
+### Verification status
+
+- Public MCP ergonomics review: 24/24 tools complete.
+- Public MCP documentation and discovery parity: complete.
+- Round-trip ergonomics fixes: 5/5 closed.
+- Targeted regression and contract suites: passing.
+- Large-output regression suite: 22/22 passing.
+- Runtime MCP freshness: verified.
+- Runtime round-trip ergonomics certification: 5/5 passing.
+- Open code, contract and runtime findings: none.
+
 ## [1.2.0-beta Patch — LIVE Hardening, MCP Modularization & Token Efficiency] - 2026-08-21
 
 ### Canonical LIVE truth and recovery semantics
