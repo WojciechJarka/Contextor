@@ -494,3 +494,304 @@ def test_get_symbol_call_context__allow_large_output_approves_15361(monkeypatch)
 
     assert len(raw.encode("utf-8")) == 15361
     assert approved == raw
+
+
+# ---------------------------------------------------------------------------
+# R3B: Single-Shot Auto-Bounding Tests
+# ---------------------------------------------------------------------------
+
+
+def _install_large_graph(monkeypatch, edge_count=100, symbol_prefix="callee_with_a_long_symbol_name_"):
+    edges = [
+        _edge(MODULE, "root", f"{symbol_prefix}{i:03d}", line=i + 1)
+        for i in range(edge_count)
+    ]
+    symbols = {"root"} | {f"{symbol_prefix}{i:03d}" for i in range(edge_count)}
+    modules = {
+        MODULE: {
+            "edges": edges,
+            "symbols": symbols,
+            "materialized": True,
+            "stale": False,
+        }
+    }
+    return _install(monkeypatch, modules=modules)
+
+
+def test_get_symbol_call_context__auto_bounded_named_is_exact_prefix(monkeypatch):
+    _install_large_graph(monkeypatch, edge_count=100)
+
+    raw_bounded = call_tool.get_symbol_call_context(
+        "C:/repo",
+        ROOT,
+        direction="callees",
+        representation="named",
+        allow_large_output=False,
+        max_items=None,
+    )
+    bounded = json.loads(raw_bounded)
+
+    raw_full = call_tool.get_symbol_call_context(
+        "C:/repo",
+        ROOT,
+        direction="callees",
+        representation="named",
+        allow_large_output=True,
+        max_items=None,
+    )
+    full = json.loads(raw_full)
+
+    assert bounded["status"] == "ok"
+    assert bounded["representation"] == "named"
+    assert "_output" in bounded
+    output_meta = bounded["_output"]
+    assert output_meta["auto_bounded"] is True
+    assert output_meta["bounded_collection"] == "edges"
+    assert output_meta["warning_threshold_bytes"] == 15360
+    assert output_meta["full_output_bytes"] == len(raw_full.encode("utf-8"))
+    assert output_meta["full_output_bytes"] > 15360
+    assert output_meta["requested_count"] == 100
+    assert 1 <= output_meta["returned_count"] < 100
+    assert bounded["returned_edges"] == output_meta["returned_count"]
+
+    # Exact deterministic prefix assertion
+    returned_count = output_meta["returned_count"]
+    assert bounded["callees"]["items"] == full["callees"]["items"][:returned_count]
+    assert bounded["representation_decision"] == full["representation_decision"]
+    assert len(raw_bounded.encode("utf-8")) <= 15360
+
+
+def test_get_symbol_call_context__auto_bounded_indexed_is_exact_prefix(monkeypatch):
+    _install_large_graph(monkeypatch, edge_count=150)
+
+    raw_bounded = call_tool.get_symbol_call_context(
+        "C:/repo",
+        ROOT,
+        direction="callees",
+        representation="indexed",
+        allow_large_output=False,
+        max_items=None,
+    )
+    bounded = json.loads(raw_bounded)
+
+    raw_full = call_tool.get_symbol_call_context(
+        "C:/repo",
+        ROOT,
+        direction="callees",
+        representation="indexed",
+        allow_large_output=True,
+        max_items=None,
+    )
+    full = json.loads(raw_full)
+
+    assert bounded["status"] == "ok"
+    assert bounded["representation"] == "indexed"
+    assert "_output" in bounded
+    output_meta = bounded["_output"]
+    assert output_meta["auto_bounded"] is True
+    assert output_meta["bounded_collection"] == "edges"
+    assert output_meta["full_output_bytes"] == len(raw_full.encode("utf-8"))
+    assert output_meta["requested_count"] == 150
+    assert 1 <= output_meta["returned_count"] < 150
+
+    returned_count = output_meta["returned_count"]
+    assert bounded["callees"]["items"] == full["callees"]["items"][:returned_count]
+    assert bounded["representation_decision"] == full["representation_decision"]
+    assert len(raw_bounded.encode("utf-8")) <= 15360
+
+
+def test_get_symbol_call_context__auto_representation_is_not_renegotiated_during_bounding(monkeypatch):
+    _install_large_graph(monkeypatch, edge_count=150)
+
+    raw_full = call_tool.get_symbol_call_context(
+        "C:/repo",
+        ROOT,
+        direction="callees",
+        representation="auto",
+        allow_large_output=True,
+        max_items=None,
+    )
+    full = json.loads(raw_full)
+    assert len(raw_full.encode("utf-8")) > 15360
+
+    raw_bounded = call_tool.get_symbol_call_context(
+        "C:/repo",
+        ROOT,
+        direction="callees",
+        representation="auto",
+        allow_large_output=False,
+        max_items=None,
+    )
+    bounded = json.loads(raw_bounded)
+
+    assert bounded["status"] == "ok"
+    assert bounded["representation"] == full["representation"]
+    assert bounded["_output"]["auto_bounded"] is True
+    assert bounded["representation_decision"] == full["representation_decision"]
+
+
+def test_get_symbol_call_context__explicit_named_is_not_silently_changed_to_indexed_for_size(monkeypatch):
+    _install_large_graph(monkeypatch, edge_count=100)
+
+    raw_bounded = call_tool.get_symbol_call_context(
+        "C:/repo",
+        ROOT,
+        direction="callees",
+        representation="named",
+        allow_large_output=False,
+        max_items=None,
+    )
+    bounded = json.loads(raw_bounded)
+
+    assert bounded["status"] == "ok"
+    assert bounded["representation"] == "named"
+    assert bounded["_output"]["auto_bounded"] is True
+
+
+def test_get_symbol_call_context__forced_indexed_happens_before_auto_bounding(monkeypatch):
+    # Setup graph where named candidate > 51200 bytes (e.g. 350 edges, named ~65 KB)
+    _install_large_graph(monkeypatch, edge_count=350, symbol_prefix="callee_with_a_very_long_symbol_name_")
+
+    raw_bounded = call_tool.get_symbol_call_context(
+        "C:/repo",
+        ROOT,
+        direction="callees",
+        representation="named",
+        allow_large_output=False,
+        max_items=None,
+    )
+    bounded = json.loads(raw_bounded)
+
+    assert bounded["status"] == "ok"
+    # Forced to indexed before auto-bounding!
+    assert bounded["representation"] == "indexed"
+    assert bounded["representation_decision"]["reason"] == "named_candidate_exceeded_51200_bytes"
+    assert bounded["_output"]["auto_bounded"] is True
+    assert len(raw_bounded.encode("utf-8")) <= 15360
+
+
+def test_get_symbol_call_context__auto_bounded_full_output_bytes_matches_allow_large_original(monkeypatch):
+    # Setup graph with long symbol names so 50 items exceed 15360 B
+    _install_large_graph(
+        monkeypatch,
+        edge_count=90,
+        symbol_prefix="callee_with_a_very_long_symbol_name_padding_to_exceed_fifteen_kib_" + ("x" * 250) + "_",
+    )
+
+    raw_bounded = call_tool.get_symbol_call_context(
+        "C:/repo",
+        ROOT,
+        direction="callees",
+        representation="named",
+        allow_large_output=False,
+        max_items=50,
+    )
+    bounded = json.loads(raw_bounded)
+
+    raw_full = call_tool.get_symbol_call_context(
+        "C:/repo",
+        ROOT,
+        direction="callees",
+        representation="named",
+        allow_large_output=True,
+        max_items=50,
+    )
+
+    assert "_output" in bounded
+    assert bounded["_output"]["requested_count"] == 50
+    assert bounded["_output"]["full_output_bytes"] == len(raw_full.encode("utf-8"))
+
+
+
+def test_get_symbol_call_context__auto_bounded_payload_never_exceeds_threshold(monkeypatch):
+    _install_large_graph(monkeypatch, edge_count=200)
+
+    for rep in ("named", "indexed", "auto"):
+        for max_items in (20, 50, None):
+            raw = call_tool.get_symbol_call_context(
+                "C:/repo",
+                ROOT,
+                direction="callees",
+                representation=rep,
+                allow_large_output=False,
+                max_items=max_items,
+            )
+            assert len(raw.encode("utf-8")) <= 15360
+
+
+def test_get_symbol_call_context__auto_bounding_reuses_existing_traversal_and_registry_snapshot(monkeypatch):
+    _state, _registry, reads = _install_large_graph(monkeypatch, edge_count=100)
+
+    walk_calls = {"count": 0}
+    original_walk = call_tool._walk
+
+    def tracking_walk(*args, **kwargs):
+        walk_calls["count"] += 1
+        return original_walk(*args, **kwargs)
+
+    monkeypatch.setattr(call_tool, "_walk", tracking_walk)
+
+    raw = call_tool.get_symbol_call_context(
+        "C:/repo",
+        ROOT,
+        direction="both",
+        representation="named",
+        allow_large_output=False,
+        max_items=None,
+    )
+    res = json.loads(raw)
+
+    assert res["status"] == "ok"
+    assert res["_output"]["auto_bounded"] is True
+    # Registries read exactly once
+    assert reads["count"] == 1
+    # Direction="both" calls _walk exactly twice (once for callers, once for callees), 0 extra calls during binary search
+    assert walk_calls["count"] == 2
+
+
+def test_get_symbol_call_context__one_edge_too_large_still_requires_confirmation(monkeypatch):
+    huge_callee = "callee_" + ("y" * 18000)
+    edges = [_edge(MODULE, "root", huge_callee, line=10)]
+    symbols = {"root", huge_callee}
+    modules = {
+        MODULE: {
+            "edges": edges,
+            "symbols": symbols,
+            "materialized": True,
+            "stale": False,
+        }
+    }
+    _install(monkeypatch, modules=modules)
+
+    raw = call_tool.get_symbol_call_context(
+        "C:/repo",
+        ROOT,
+        direction="callees",
+        representation="named",
+        allow_large_output=False,
+        max_items=None,
+    )
+    res = json.loads(raw)
+
+    assert res["status"] == "confirmation_required"
+    assert res["retry"] == {"allow_large_output": True}
+
+
+def test_get_symbol_call_context__allow_large_output_returns_original_unbounded_selection(monkeypatch):
+    _install_large_graph(monkeypatch, edge_count=100)
+
+    raw = call_tool.get_symbol_call_context(
+        "C:/repo",
+        ROOT,
+        direction="callees",
+        representation="named",
+        allow_large_output=True,
+        max_items=None,
+    )
+    res = json.loads(raw)
+
+    assert res["status"] == "ok"
+    assert "_output" not in res
+    assert len(res["callees"]["items"]) == 100
+    assert len(raw.encode("utf-8")) > 15360
+

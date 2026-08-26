@@ -161,16 +161,19 @@ def test_large_named_candidate_forces_indexed_preflight_and_exact_retry(monkeypa
         edges.append(_edge("root", long_name, index + 2))
     _install(monkeypatch, edges)
 
-    warning = _call(
+    bounded = _call(
         direction="callees",
         depth=1,
         max_items=None,
         representation="named",
     )
-    assert warning["status"] == "confirmation_required"
-    assert warning["selected_representation"] == "indexed"
-    assert warning["named_candidate_bytes"] > 51200
-    assert "callees" not in warning
+    assert bounded["status"] == "ok"
+    assert bounded["representation"] == "indexed"
+    assert bounded["representation_decision"]["reason"] == "named_candidate_exceeded_51200_bytes"
+    assert "_output" in bounded
+    assert bounded["_output"]["auto_bounded"] is True
+    assert bounded["_output"]["warning_threshold_bytes"] == 15360
+    assert bounded["_output"]["full_output_bytes"] > 15360
 
     approved_text = get_symbol_call_context(
         "C:/repo",
@@ -183,7 +186,7 @@ def test_large_named_candidate_forces_indexed_preflight_and_exact_retry(monkeypa
     )
     approved = json.loads(approved_text)
     assert approved["representation"] == "indexed"
-    assert len(approved_text.encode("utf-8")) == warning["estimated_output_bytes"]
+    assert len(approved_text.encode("utf-8")) == bounded["_output"]["full_output_bytes"]
 
 
 def test_query_does_not_parse_or_read_source(monkeypatch):

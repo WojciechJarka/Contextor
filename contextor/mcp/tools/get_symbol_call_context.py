@@ -8,7 +8,11 @@ from contextor.core.analysis.state_manager import (
 from contextor.mcp import query_helpers
 from contextor.mcp import representation as mcp_rep
 from contextor.mcp import runtime as mcp_runtime
-from contextor.mcp.output_guard import LARGE_OUTPUT_WARNING_BYTES, guard_large_output
+from contextor.mcp.output_guard import (
+    LARGE_OUTPUT_WARNING_BYTES,
+    guard_large_output,
+    largest_fitting_prefix,
+)
 
 
 LARGE_NAMED_GRAPH_BYTES = 50 * 1024
@@ -415,6 +419,78 @@ def get_symbol_call_context(
             "reason": reason,
         }
         serialized = json.dumps(result, indent=2, ensure_ascii=False)
+        full_output_bytes = len(serialized.encode("utf-8"))
+
+        if (
+            full_output_bytes > LARGE_OUTPUT_WARNING_BYTES
+            and not allow_large_output
+            and result["returned_edges"] > 0
+        ):
+            selected_representation = result["representation"]
+            requested_edge_count = result["returned_edges"]
+            original_expand = result.get("expand", {})
+            original_representation_decision = dict(result["representation_decision"])
+
+            def _build_bounded(count: int) -> str:
+                bounded_identities = {
+                    _identity(item)
+                    for item in selected[:count]
+                }
+
+                candidate = _shape(
+                    symbol=symbol,
+                    module=module,
+                    direction=direction,
+                    depth=depth,
+                    requested_representation=representation,
+                    selected_representation=selected_representation,
+                    caller_items=callers,
+                    callee_items=callees,
+                    selected_identities=bounded_identities,
+                    total_edges=len(complete),
+                    max_items=max_items,
+                    artifact_ids=(
+                        artifact_ids
+                        if selected_representation == "indexed"
+                        else None
+                    ),
+                )
+
+                # Auto-bounding is only an output-size projection.
+                # Preserve the original caller max_items expansion contract and the
+                # representation decision made for the originally requested candidate.
+                candidate["expand"] = original_expand
+                candidate["representation_decision"] = dict(
+                    original_representation_decision
+                )
+
+                candidate["_output"] = {
+                    "auto_bounded": True,
+                    "full_output_bytes": full_output_bytes,
+                    "warning_threshold_bytes": LARGE_OUTPUT_WARNING_BYTES,
+                    "bounded_collection": "edges",
+                    "requested_count": requested_edge_count,
+                    "returned_count": candidate["returned_edges"],
+                    "retry": {
+                        "allow_large_output": True,
+                    },
+                }
+
+                return json.dumps(
+                    candidate,
+                    indent=2,
+                    ensure_ascii=False,
+                )
+
+            bounded = largest_fitting_prefix(
+                requested_edge_count,
+                _build_bounded,
+                min_count=1,
+            )
+
+            if bounded is not None:
+                return bounded[0]
+
         guarded = guard_large_output(
             serialized,
             allow_large_output=allow_large_output,
