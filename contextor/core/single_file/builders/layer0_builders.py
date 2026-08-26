@@ -204,21 +204,46 @@ class SymbolContextBuilder:
             }
 
         # --------------------------------------------------
-        # REFERENCES
-        #
-        # IMPORTANT:
-        # artifact_consumption is NOT semantically rich enough
-        # yet to replace build_symbol_references.
+        # REFERENCES & CANONICAL PROJECTION
         # --------------------------------------------------
 
-        from contextor.core.reference.engine import build_symbol_references
-
-        references = build_symbol_references(
-            payload.modules,
-            all_symbols,
-            payload.root_path,
-            definer_module=payload.module_id,
+        from contextor.core.reference.engine import (
+            CanonicalReferenceEvidenceUnavailable,
+            build_symbol_references,
+            build_symbol_references_from_canonical,
         )
+
+        canonical_reference_eligible = bool(
+            canonical_current
+            and getattr(payload.engine_state, "artifact_consumption_state", "deferred") == "fresh"
+            and isinstance(getattr(payload.engine_state, "module_usages", None), dict)
+        )
+
+        references = None
+        if canonical_reference_eligible:
+            current_consumer_modules = {
+                mod_id
+                for mod_id in payload.engine_state.module_usages
+                if _canonical_state_module_is_current(payload.engine_state, mod_id)
+            }
+            try:
+                references = build_symbol_references_from_canonical(
+                    definer_module=payload.module_id,
+                    symbols=all_symbols,
+                    artifact_consumption=payload.engine_state.artifact_consumption or {},
+                    module_usages=payload.engine_state.module_usages,
+                    current_modules=current_consumer_modules,
+                )
+            except CanonicalReferenceEvidenceUnavailable:
+                references = None
+
+        if references is None:
+            references = build_symbol_references(
+                payload.modules,
+                all_symbols,
+                payload.root_path,
+                definer_module=payload.module_id,
+            )
 
         consumers = extract_api_consumers(
             all_symbols,

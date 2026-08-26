@@ -880,6 +880,21 @@ def extract_module_usage_facts(
     )
 
 
+    reference_evidence = tuple(
+        sorted(
+            {
+                (
+                    str(t),
+                    str(ch),
+                    str(caller),
+                    int(line),
+                )
+                for t, ch, caller, line in visitor.reference_evidence
+                if t and ch
+            }
+        )
+    )
+
     return ModuleUsageFacts(
         imports=tuple(sorted(import_names)),
         direct_calls=direct_calls,
@@ -891,8 +906,184 @@ def extract_module_usage_facts(
         aliases=aliases,
         symbol_calls=symbol_calls,
         symbol_calls_materialized=True,
+        reference_evidence=reference_evidence,
     )
 
+
+# ==========================================================
+# CANONICAL REFERENCE PROJECTION
+# ==========================================================
+
+
+class CanonicalReferenceEvidenceUnavailable(RuntimeError):
+    """Raised when required canonical reference facts are unavailable, stale, or incomplete."""
+    pass
+
+
+def _usage_fact_contains_target(
+    fact_target: str,
+    definer_module: str,
+    symbol: str,
+    aliases: tuple[tuple[str, str], ...] = (),
+) -> bool:
+    """Check whether an outbound usage fact target matches the requested definer::symbol."""
+    canonical_identity = f"{definer_module}.{symbol}"
+
+    if fact_target == canonical_identity or fact_target == symbol:
+        return True
+
+    for local_alias, target in aliases:
+        if fact_target == local_alias and target == canonical_identity:
+            return True
+        if fact_target.startswith(f"{local_alias}.") and canonical_identity.startswith(f"{target}."):
+            suffix = fact_target[len(local_alias) + 1:]
+            if f"{target}.{suffix}" == canonical_identity:
+                return True
+
+    if fact_target.endswith(f".{symbol}"):
+        if fact_target == canonical_identity or fact_target.endswith(f".{canonical_identity}"):
+            return True
+        prefix = fact_target[:-len(symbol) - 1]
+        for local_alias, target in aliases:
+            if prefix == local_alias and (target == definer_module or target.endswith(definer_module)):
+                return True
+
+    return False
+
+
+def build_symbol_references_from_canonical(
+    *,
+    definer_module: str,
+    symbols: list[str],
+    artifact_consumption: dict[str, Any],
+    module_usages: dict[str, Any],
+    current_modules: set[str] | None = None,
+) -> dict[str, Any]:
+    """
+    Pure in-memory projection of symbol references from canonical artifact_consumption and module_usages facts.
+    Produces the exact same dict shape and content as build_symbol_references without any file I/O or AST parsing.
+    """
+    result: dict[str, Any] = {}
+
+    for symbol in symbols:
+        result[symbol] = _empty_reference()
+
+        target_key = f"{definer_module}::{symbol}"
+        consumption = artifact_consumption.get(target_key)
+        if not consumption:
+            continue
+
+        confirmed_consumers = consumption.get("consumers", ())
+        channels_by_consumer = consumption.get("channels", {})
+
+        for consumer in confirmed_consumers:
+            if current_modules is not None and consumer not in current_modules:
+                raise CanonicalReferenceEvidenceUnavailable(
+                    f"Consumer {consumer} is not current"
+                )
+
+            facts = module_usages.get(consumer)
+            if facts is None:
+                raise CanonicalReferenceEvidenceUnavailable(
+                    f"Missing module_usages for confirmed consumer {consumer}"
+                )
+
+            channels = channels_by_consumer.get(consumer, ())
+            aliases = getattr(facts, "aliases", ())
+            reference_evidence = getattr(facts, "reference_evidence", ())
+
+            for channel in channels:
+                if channel in ("api_imports", "imports"):
+                    result[symbol]["imported_from"].append(consumer)
+
+                elif channel == "direct_calls":
+                    result[symbol]["called_by"].append(consumer)
+                    for item in reference_evidence:
+                        if item[1] == "direct_calls" and _usage_fact_contains_target(
+                            item[0], definer_module, symbol, aliases
+                        ):
+                            result[symbol]["called_by_detail"].append(
+                                {
+                                    "module": consumer,
+                                    "line": item[3] if item[3] else None,
+                                    "context": item[2] if item[2] else None,
+                                }
+                            )
+
+                elif channel == "callback_calls":
+                    result[symbol]["callback_called"].append(consumer)
+                    for item in reference_evidence:
+                        if item[1] == "callback_calls" and _usage_fact_contains_target(
+                            item[0], definer_module, symbol, aliases
+                        ):
+                            result[symbol]["callback_called_detail"].append(
+                                {
+                                    "module": consumer,
+                                    "line": item[3] if item[3] else None,
+                                    "context": item[2] if item[2] else None,
+                                }
+                            )
+
+                elif channel == "event_bindings":
+                    result[symbol]["event_bound_by"].append(consumer)
+                    for item in reference_evidence:
+                        if item[1] == "event_bindings" and _usage_fact_contains_target(
+                            item[0], definer_module, symbol, aliases
+                        ):
+                            result[symbol]["event_bound_by_detail"].append(
+                                {
+                                    "module": consumer,
+                                    "line": item[3] if item[3] else None,
+                                    "context": item[2] if item[2] else None,
+                                }
+                            )
+
+                elif channel == "qualified_refs":
+                    result[symbol]["qualified_refs"].append(consumer)
+                    for item in reference_evidence:
+                        if item[1] == "qualified_refs" and _usage_fact_contains_target(
+                            item[0], definer_module, symbol, aliases
+                        ):
+                            result[symbol]["qualified_refs_detail"].append(
+                                {
+                                    "module": consumer,
+                                    "line": item[3] if item[3] else None,
+                                    "context": item[2] if item[2] else None,
+                                }
+                            )
+
+                elif channel == "inheritance":
+                    result[symbol]["inherited_by"].append(consumer)
+                    for item in reference_evidence:
+                        if item[1] == "inheritance" and _usage_fact_contains_target(
+                            item[0], definer_module, symbol, aliases
+                        ):
+                            result[symbol]["inherited_by_detail"].append(
+                                {
+                                    "module": consumer,
+                                    "child": item[2],
+                                    "line": item[3] if item[3] else None,
+                                }
+                            )
+
+                elif channel == "runtime_calls":
+                    result[symbol]["runtime_calls"].append(consumer)
+
+            for item in reference_evidence:
+                if item[1] == "called_ambiguous" and _usage_fact_contains_target(
+                    item[0], definer_module, symbol, aliases
+                ):
+                    result[symbol]["called_by_ambiguous"].append(consumer)
+                    result[symbol]["called_by_ambiguous_detail"].append(
+                        {
+                            "module": consumer,
+                            "reason": "short_name_match_no_confirmed_import",
+                            "line": item[3] if item[3] else None,
+                            "context": item[2] if item[2] else None,
+                        }
+                    )
+
+    return _normalize_references(result)
 
 
 # ==========================================================
@@ -901,7 +1092,9 @@ def extract_module_usage_facts(
 
 __all__ = [
     "MAX_USAGE_DETAILS",
+    "CanonicalReferenceEvidenceUnavailable",
     "build_symbol_references",
+    "build_symbol_references_from_canonical",
     "extract_module_usage_facts",
     "find_import_users",
     "reset_caches",

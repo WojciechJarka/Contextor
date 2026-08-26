@@ -65,6 +65,7 @@ class SymbolReferenceVisitor(ast.NodeVisitor):
         self.event_bound = set()
         self.inherited = []
         self.qualified_refs = set()
+        self.reference_evidence = set()
 
         self._call_funcs = set()
         self.aliases = {}
@@ -182,8 +183,17 @@ class SymbolReferenceVisitor(ast.NodeVisitor):
                 return
 
             name = _attribute_name(node.args[1])
-
             resolved = self._resolve_name(name)
+
+            if resolved or name:
+                self.reference_evidence.add(
+                    (
+                        resolved or name,
+                        "event_bindings",
+                        self._current_context() or "",
+                        getattr(node, "lineno", 0),
+                    )
+                )
 
             classification, match = _classify_match(
                 name,
@@ -206,8 +216,17 @@ class SymbolReferenceVisitor(ast.NodeVisitor):
                 return
 
             name = _attribute_name(node.args[0])
-
             resolved = self._resolve_name(name)
+
+            if resolved or name:
+                self.reference_evidence.add(
+                    (
+                        resolved or name,
+                        "event_bindings",
+                        self._current_context() or "",
+                        getattr(node, "lineno", 0),
+                    )
+                )
 
             classification, match = _classify_match(
                 name,
@@ -249,8 +268,17 @@ class SymbolReferenceVisitor(ast.NodeVisitor):
                 continue
 
             name = _attribute_name(keyword.value)
-
             resolved = self._resolve_name(name)
+
+            if resolved or name:
+                self.reference_evidence.add(
+                    (
+                        resolved or name,
+                        "callback_calls",
+                        self._current_context() or "",
+                        getattr(node, "lineno", 0),
+                    )
+                )
 
             classification, match = _classify_match(
                 name,
@@ -286,6 +314,14 @@ class SymbolReferenceVisitor(ast.NodeVisitor):
             )
 
             self.aliases[local_name] = imported_name
+            self.reference_evidence.add(
+                (
+                    imported_name,
+                    "api_imports",
+                    "",
+                    getattr(node, "lineno", 0),
+                )
+            )
 
         self.generic_visit(node)
 
@@ -294,6 +330,14 @@ class SymbolReferenceVisitor(ast.NodeVisitor):
             local_name = item.asname or item.name.split(".")[-1]
 
             self.aliases[local_name] = item.name
+            self.reference_evidence.add(
+                (
+                    item.name,
+                    "api_imports",
+                    "",
+                    getattr(node, "lineno", 0),
+                )
+            )
 
         self.generic_visit(node)
 
@@ -322,6 +366,15 @@ class SymbolReferenceVisitor(ast.NodeVisitor):
             name = _attribute_name(node)
             if name and "." in name:
                 resolved = self._resolve_name(name)
+                if resolved or name:
+                    self.reference_evidence.add(
+                        (
+                            resolved or name,
+                            "qualified_refs",
+                            self._current_context() or "",
+                            getattr(node, "lineno", 0),
+                        )
+                    )
                 classification, match = _classify_match(
                     name,
                     resolved,
@@ -370,8 +423,16 @@ class SymbolReferenceVisitor(ast.NodeVisitor):
             and isinstance(node.args[1].value, str)
         ):
             dynamic_name = node.args[1].value
-
             resolved_dyn = self._resolve_name(dynamic_name)
+
+            self.reference_evidence.add(
+                (
+                    resolved_dyn or dynamic_name,
+                    "called_ambiguous",
+                    self._current_context() or "",
+                    getattr(node, "lineno", 0),
+                )
+            )
 
             _, dyn_match = _classify_match(
                 dynamic_name,
@@ -406,6 +467,16 @@ class SymbolReferenceVisitor(ast.NodeVisitor):
 
                 resolved_arg = self._resolve_name(arg_name)
 
+                if resolved_arg or arg_name:
+                    self.reference_evidence.add(
+                        (
+                            resolved_arg or arg_name,
+                            "callback_calls",
+                            self._current_context() or "",
+                            getattr(node, "lineno", 0),
+                        )
+                    )
+
                 classification, arg_match = _classify_match(
                     arg_name,
                     resolved_arg,
@@ -427,6 +498,19 @@ class SymbolReferenceVisitor(ast.NodeVisitor):
         # --------------------------------------------------
 
         resolved = self._resolve_name(called_name)
+
+        if resolved or called_name:
+            candidate = self._resolve_instance_method(resolved)
+            target_to_record = candidate or resolved or called_name
+            if target_to_record != "getattr":
+                self.reference_evidence.add(
+                    (
+                        target_to_record,
+                        "direct_calls",
+                        self._current_context() or "",
+                        getattr(node, "lineno", 0),
+                    )
+                )
 
         if resolved in self.target_symbols:
             self.called.add(
@@ -528,7 +612,7 @@ class SymbolReferenceVisitor(ast.NodeVisitor):
         if candidate in self.target_symbols:
             return candidate
 
-        return None
+        return candidate
 
     # ======================================================
     # INHERITANCE
@@ -539,8 +623,17 @@ class SymbolReferenceVisitor(ast.NodeVisitor):
 
         for base in node.bases:
             base_name = _attribute_name(base)
-
             resolved = self._resolve_name(base_name)
+
+            if resolved or base_name:
+                self.reference_evidence.add(
+                    (
+                        resolved or base_name,
+                        "inheritance",
+                        node.name,
+                        getattr(node, "lineno", 0),
+                    )
+                )
 
             classification, match = _classify_match(
                 base_name,

@@ -11,6 +11,7 @@ from typing import Any, Dict, Tuple
 
 
 SymbolCallFact = Tuple[str, str, int, str]
+ReferenceEvidenceFact = Tuple[str, str, str, int]
 
 
 @dataclass(frozen=True)
@@ -33,6 +34,7 @@ class ModuleUsageFacts:
     aliases: Tuple[Tuple[str, str], ...] = ()           # (local_alias, imported_target)
     symbol_calls: Tuple[SymbolCallFact, ...] = ()
     symbol_calls_materialized: bool = False
+    reference_evidence: Tuple[ReferenceEvidenceFact, ...] = ()
 
     def __getattribute__(self, name: str):
         if name == "symbol_calls_materialized":
@@ -43,7 +45,7 @@ class ModuleUsageFacts:
 
     def __getattr__(self, name: str):
         # Pickle restores old dataclass instances without fields added later.
-        if name == "symbol_calls":
+        if name in ("symbol_calls", "reference_evidence"):
             return ()
         raise AttributeError(name)
 
@@ -70,6 +72,15 @@ class ModuleUsageFacts:
             "symbol_calls_materialized": bool(
                 vars(self).get("symbol_calls_materialized", False)
             ),
+            "reference_evidence": [
+                {
+                    "target": item[0],
+                    "channel": item[1],
+                    "caller": item[2],
+                    "line": item[3],
+                }
+                for item in getattr(self, "reference_evidence", ())
+            ],
         }
 
     @classmethod
@@ -109,6 +120,24 @@ class ModuleUsageFacts:
             )
         )
 
+        raw_ref_ev = data.get("reference_evidence", [])
+        reference_evidence = tuple(
+            sorted(
+                {
+                    (
+                        str(item["target"]),
+                        str(item["channel"]),
+                        str(item.get("caller", "")),
+                        int(item.get("line", 0)),
+                    )
+                    for item in raw_ref_ev
+                    if isinstance(item, dict)
+                    and "target" in item
+                    and "channel" in item
+                }
+            )
+        )
+
         return cls(
             imports=imports,
             direct_calls=direct_calls,
@@ -122,6 +151,7 @@ class ModuleUsageFacts:
             symbol_calls_materialized=bool(
                 data.get("symbol_calls_materialized", False)
             ),
+            reference_evidence=reference_evidence,
         )
 
 
@@ -150,6 +180,8 @@ class UsageDelta:
     removed_aliases: Tuple[Tuple[str, str], ...] = ()
     added_symbol_calls: Tuple[SymbolCallFact, ...] = ()
     removed_symbol_calls: Tuple[SymbolCallFact, ...] = ()
+    added_reference_evidence: Tuple[ReferenceEvidenceFact, ...] = ()
+    removed_reference_evidence: Tuple[ReferenceEvidenceFact, ...] = ()
 
     @property
     def is_empty(self) -> bool:
@@ -174,6 +206,8 @@ class UsageDelta:
                 self.removed_aliases,
                 self.added_symbol_calls,
                 self.removed_symbol_calls,
+                self.added_reference_evidence,
+                self.removed_reference_evidence,
             ]
         )
 
@@ -211,6 +245,10 @@ def diff_usage_facts(
         getattr(old_f, "symbol_calls", ()),
         getattr(new_f, "symbol_calls", ()),
     )
+    add_refev, rem_refev = _diff_tuples(
+        getattr(old_f, "reference_evidence", ()),
+        getattr(new_f, "reference_evidence", ()),
+    )
 
     return UsageDelta(
         module_path=module_path,
@@ -232,4 +270,6 @@ def diff_usage_facts(
         removed_aliases=rem_alias,
         added_symbol_calls=add_symbol_calls,
         removed_symbol_calls=rem_symbol_calls,
+        added_reference_evidence=add_refev,
+        removed_reference_evidence=rem_refev,
     )
