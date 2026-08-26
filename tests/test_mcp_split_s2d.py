@@ -349,12 +349,13 @@ def test_get_symbol_implementation_file_paths_and_file_path_merging(tmp_path):
     assert not_found["searched_files"] == ["mod_a.py", "mod_b.py"]
 
 
-def test_get_symbol_implementation_no_file_paths_or_file_path_returns_error(tmp_path):
+def test_get_symbol_implementation_no_file_paths_or_file_path_returns_not_found(tmp_path):
     import json
     res_raw = get_symbol_implementation(
         repo_path=str(tmp_path),
         symbol="any_symbol",
     )
     res = json.loads(res_raw)
-    assert res["status"] == "error"
-    assert res["error"] == "At least one Python source file is required."
+    assert res["status"] == "not_found"
+    assert res["message"] == "No exact class, function, or method match was found."
+

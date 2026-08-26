@@ -160,15 +160,19 @@ def test_get_symbol_implementation__file_path_alias_merge_dedupe(tmp_path, monke
     assert res["resolution"]["symbol"] == "process_data"
 
 
-def test_get_symbol_implementation__plain_leaf_without_files_required_error(tmp_path, monkeypatch):
+def test_get_symbol_implementation__plain_leaf_without_files_resolves_unique_single_shot(tmp_path, monkeypatch):
     _setup_symbol_implementation_workspace(tmp_path, monkeypatch)
     raw = get_symbol_implementation(
         repo_path=str(tmp_path),
         symbol="process_data",
     )
     res = json.loads(raw)
-    assert res["status"] == "error"
-    assert res["error"] == "At least one Python source file is required."
+    assert res["status"] == "resolved"
+    assert res["mode"] == "fetch"
+    assert res["resolution"]["symbol"] == "process_data"
+    assert "def process_data(x):" in res["implementation"]
+    assert "pkg" in res["resolution"]["file_path"] and "a.py" in res["resolution"]["file_path"]
+
 
 
 def test_get_symbol_implementation__ambiguous_leaf_fail_closed(tmp_path, monkeypatch):
@@ -674,21 +678,25 @@ def test_get_symbol_implementation__plain_leaf_ambiguity_does_not_read_registry(
     assert res["status"] == "ambiguous"
 
 
-def test_get_symbol_implementation__plain_leaf_without_files_does_not_read_registry(tmp_path, monkeypatch):
+def test_get_symbol_implementation__plain_leaf_without_files_reads_registry_and_resolves_exact_leaf(tmp_path, monkeypatch):
     _setup_symbol_implementation_workspace(tmp_path, monkeypatch)
+    reads = []
+    original_read = query_helpers.read_registries
 
-    def fail_if_read(*_args, **_kwargs):
-        raise AssertionError("read_registries MUST NOT be called for plain leaf without files!")
+    def counting_read(root):
+        reads.append(root)
+        return original_read(root)
 
-    monkeypatch.setattr(query_helpers, "read_registries", fail_if_read)
+    monkeypatch.setattr(query_helpers, "read_registries", counting_read)
 
     raw = get_symbol_implementation(
         repo_path=str(tmp_path),
         symbol="process_data",
     )
     res = json.loads(raw)
-    assert res["status"] == "error"
-    assert res["error"] == "At least one Python source file is required."
+    assert res["status"] == "resolved"
+    assert len(reads) == 1
+    assert "def process_data(x):" in res["implementation"]
 
 
 def test_get_symbol_implementation__fuzzy_miss_does_read_registry(tmp_path, monkeypatch):
@@ -711,4 +719,73 @@ def test_get_symbol_implementation__fuzzy_miss_does_read_registry(tmp_path, monk
     assert res["status"] == "not_found"
     assert len(reads) == 1
     assert len(res["similar_candidates"]) >= 1
+
+
+def test_get_symbol_implementation__plain_leaf_no_files_ambiguous_fails_closed(tmp_path, monkeypatch):
+    _setup_symbol_implementation_workspace(tmp_path, monkeypatch)
+    raw = get_symbol_implementation(
+        repo_path=str(tmp_path),
+        symbol="helper_func",
+    )
+    res = json.loads(raw)
+    assert res["status"] == "ambiguous"
+    assert res["candidate_count"] == 2
+    assert len(res["candidates"]) == 2
+    for cand in res["candidates"]:
+        assert "artifact" in cand
+        assert "artifact_id" in cand
+    assert "implementation" not in res
+
+
+def test_get_symbol_implementation__plain_leaf_no_files_fuzzy_suggestion_only(tmp_path, monkeypatch):
+    _setup_symbol_implementation_workspace(tmp_path, monkeypatch)
+    raw = get_symbol_implementation(
+        repo_path=str(tmp_path),
+        symbol="process_dat",
+    )
+    res = json.loads(raw)
+    assert res["status"] == "not_found"
+    assert "similar_candidates" in res
+    assert len(res["similar_candidates"]) >= 1
+    assert "implementation" not in res
+
+
+def test_get_symbol_implementation__plain_leaf_no_files_stale_module_fails_closed(tmp_path, monkeypatch):
+    _setup_symbol_implementation_workspace(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        query_helpers,
+        "module_truth_unavailable",
+        lambda _state, mod: {"status": "stale", "module": mod} if mod == "pkg.a" else None,
+    )
+    raw = get_symbol_implementation(
+        repo_path=str(tmp_path),
+        symbol="process_data",
+    )
+    res = json.loads(raw)
+    assert res["status"] == "stale"
+    assert res["module"] == "pkg.a"
+
+
+def test_get_symbol_implementation__lowercase_artifact_id_success(tmp_path, monkeypatch):
+    _setup_symbol_implementation_workspace(tmp_path, monkeypatch)
+    raw = get_symbol_implementation(
+        repo_path=str(tmp_path),
+        symbol="a10/1",
+    )
+    res = json.loads(raw)
+    assert res["status"] == "resolved"
+    assert "def process_data(x):" in res["implementation"]
+
+
+def test_get_symbol_implementation__runtime_description_parity():
+    from contextor import mcp_server
+
+    tool = mcp_server.mcp._tool_manager._tools["get_symbol_implementation"]
+    assert tool.fn.__doc__ is None
+    desc = tool.description.lower()
+    assert "plain leaves" in desc
+    assert "source is read from disk" in desc
+    assert "ambiguous" in desc
+
+
 

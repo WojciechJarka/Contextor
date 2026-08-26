@@ -7,7 +7,7 @@
   "parameters": [
     "repo_path (string, required): canonical repository root.",
     "symbol (string, required): target symbol identifier (accepts active artifact ID e.g. 'A2496/1', canonical qualified identity 'module::symbol', or leaf symbol).",
-    "file_paths (array of strings or null, optional, default null): explicit candidate file path scope; required when searching by plain leaf symbol.",
+    "file_paths (array of strings or null, optional, default null): explicit candidate file path scope; when omitted, plain leaf symbols resolve through active artifact registry to canonical LIVE module state.",
     "mode (string, default \"auto\"): operation mode (\"auto\", \"preview\", or \"fetch\").",
     "include (array of strings or null, optional, default null): explicit sections to fetch in 'fetch' mode (\"signature\", \"docstring\", \"implementation\", \"static_context\", or \"methods\").",
     "methods (array of strings or null, optional, default null): selected method names to fetch when include contains \"methods\".",
@@ -15,12 +15,13 @@
     "file_path (string or null, optional, default null): singular alias for file_paths."
   ],
   "behavior": [
-    "Resolution & file constraints:\n1. Exact active artifact ID: resolved via active artifact registry. If ``file_paths`` is omitted, the source file is derived from canonical LIVE module state. If ``file_paths`` is supplied, the definer module must be in the specified file scope (explicit file constraint wins).\n2. Canonical qualified identity ('module::symbol'): verified against active registry. If ``file_paths`` is omitted, source file is derived from canonical LIVE module state.\n3. Plain leaf symbol: searched via exact AST in explicit ``file_paths``.\n4. Bounded fuzzy suggestions (score >= 0.75, max 5, suggestion-only) from active artifact registry on textual miss (scoped to explicit file constraints when provided).\n5. Missing artifact ID never returns fuzzy suggestions."
+    "Resolution & file constraints:\n1. Exact active artifact ID: resolved via active artifact registry. If ``file_paths`` is omitted, the source file is derived from canonical LIVE module state. If ``file_paths`` is supplied, the definer module must be in the specified file scope (explicit file constraint wins).\n2. Canonical qualified identity ('module::symbol'): verified against active registry. If ``file_paths`` is omitted, source file is derived from canonical LIVE module state.\n3. Plain leaf symbol: when ``file_paths`` is omitted, resolves through active artifact registry (exact unique leaf resolves to canonical LIVE source; ambiguity returns controlled candidate metadata without guessing; miss returns fuzzy suggestions). When ``file_paths`` is supplied, searches via exact AST in explicit file scope first.\n4. Bounded fuzzy suggestions (score >= 0.75, max 5, suggestion-only) from active artifact registry on textual miss (scoped to explicit file constraints when provided).\n5. Missing artifact ID never returns fuzzy suggestions."
   ],
   "freshness": [],
   "errors": [
-    "Symbol matching is exact and Python case-sensitive. Supply one or more\nrepository-relative or absolute ``file_paths`` (or singular ``file_path``); ambiguous matches return\ncandidate metadata only, and no implementation is guessed. Source is read\nfrom disk at request time and is not stored in canonical state. The compact\n``static_context`` contains the current static consumer total when live\nstate is available; use the blast-radius tool for consumer evidence."
+    "Symbol matching is exact and Python case-sensitive. When ``file_paths`` is omitted, plain leaf symbols resolve globally; ambiguous matches return candidate metadata only, and no implementation is guessed. Source is read from disk at request time and is not stored in canonical state. The compact ``static_context`` contains the current static consumer total when live state is available; use the blast-radius tool for consumer evidence."
   ],
+
   "usage_notes": [
     "LLM use: preview first, compare the planned payload sizes, then fetch the\nsmallest complete combination that answers the implementation question.\nThis complements source-file reading; it does not infer historical intent."
   ],

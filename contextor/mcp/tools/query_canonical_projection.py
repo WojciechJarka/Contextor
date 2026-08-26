@@ -8,6 +8,8 @@ from contextor.mcp import runtime as mcp_runtime
 
 def query_canonical_projection(repo_path: str, request: dict[str, Any]) -> str:
     root = Path(repo_path).expanduser().resolve()
+
+
     engine = mcp_runtime.get_or_init_engine(root)
     if not engine:
         return json.dumps(

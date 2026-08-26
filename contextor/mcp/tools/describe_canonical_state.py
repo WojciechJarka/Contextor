@@ -12,6 +12,8 @@ def describe_canonical_state(
     language_version: str = LANGUAGE_VERSION,
 ) -> str:
     return json.dumps(
+
+
         describe_contract(schema_version=schema_version, language_version=language_version),
         indent=2,
         ensure_ascii=False,

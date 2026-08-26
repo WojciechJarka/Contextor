@@ -165,9 +165,10 @@ def test_validation_returns_first_deterministic_structural_error():
     _, bad_limit = validate_request(_request("modules", limit=True))
 
     assert missing["error"]["code"] == "missing_required_field"
-    assert missing["error"]["path"] == "schema_version"
+    assert missing["error"]["path"] == "root"
     assert bad_null["error"]["code"] == "is_null_on_non_nullable"
     assert bad_limit["error"]["code"] == "invalid_limit"
+
 
 
 def test_validation_rejects_duplicate_and_wrong_typed_in_values():
@@ -776,11 +777,9 @@ def test_v1_1_evidence_limit_requires_explicit_supported_version_pair_before_env
     }
     _, err_missing_schema = validate_request(missing_schema)
     assert err_missing_schema is not None
-    assert err_missing_schema["error"]["code"] == "invalid_request"
-    assert err_missing_schema["error"]["path"] == "evidence_limit"
-    assert err_missing_schema["error"]["details"]["unknown_fields"] == [
-        "evidence_limit"
-    ]
+    assert err_missing_schema["error"]["code"] == "missing_required_field"
+    assert err_missing_schema["error"]["path"] == "schema_version"
+
     missing_language = {
         "schema_version": "1.1",
         "root": "modules",
@@ -790,11 +789,9 @@ def test_v1_1_evidence_limit_requires_explicit_supported_version_pair_before_env
     }
     _, err_missing_language = validate_request(missing_language)
     assert err_missing_language is not None
-    assert err_missing_language["error"]["code"] == "invalid_request"
-    assert err_missing_language["error"]["path"] == "evidence_limit"
-    assert err_missing_language["error"]["details"]["unknown_fields"] == [
-        "evidence_limit"
-    ]
+    assert err_missing_language["error"]["code"] == "missing_required_field"
+    assert err_missing_language["error"]["path"] == "language_version"
+
     valid_v1_1 = {
         "schema_version": "1.1",
         "language_version": "1.1",
@@ -803,6 +800,7 @@ def test_v1_1_evidence_limit_requires_explicit_supported_version_pair_before_env
         "select": ["module_name"],
         "evidence_limit": 3,
     }
+
     normalized, valid_error = validate_request(valid_v1_1)
     assert valid_error is None
     assert normalized is not None

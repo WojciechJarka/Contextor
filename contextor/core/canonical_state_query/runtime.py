@@ -137,8 +137,28 @@ def validate_request(request: Any) -> tuple[dict[str, Any] | None, dict[str, Any
     if not isinstance(request, dict):
         return None, _error("invalid_request", "Request must be an object.", "$request")
 
+    schema_present = "schema_version" in request
+    language_present = "language_version" in request
+
+    if not schema_present and not language_present:
+        request = {
+            **request,
+            "schema_version": CANONICAL_QUERY_SCHEMA_VERSION,
+            "language_version": LANGUAGE_VERSION,
+        }
+    elif schema_present != language_present:
+        missing = (
+            "schema_version"
+            if not schema_present
+            else "language_version"
+        )
+        return None, _error(
+            "missing_required_field", f"Required field '{missing}' is missing.", missing
+        )
+
     schema_version_hint = request.get("schema_version")
     language_version = request.get("language_version")
+
     is_explicit_v1_1_pair = (
         schema_version_hint == CANONICAL_QUERY_SCHEMA_VERSION_V1_1
         and language_version == LANGUAGE_VERSION_V1_1

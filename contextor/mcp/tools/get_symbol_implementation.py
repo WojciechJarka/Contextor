@@ -218,6 +218,8 @@ def get_symbol_implementation(
     file_path: str | None = None,
 ) -> str:
     root = Path(repo_path).expanduser().resolve()
+
+
     if not root.is_dir():
         return json.dumps({"status": "error", "error": f"Repository path '{root}' does not exist."}, indent=2)
     mcp_runtime.publish_live_status(root, f"MCP: reading symbol {symbol}")
@@ -421,12 +423,63 @@ def get_symbol_implementation(
                     indent=2,
                 )
     else:
-        if not effective_file_paths:
-            return json.dumps({"status": "error", "error": "At least one Python source file is required."}, indent=2)
-        try:
-            search_paths = _resolve_symbol_source_paths(root, effective_file_paths)
-        except ValueError as exc:
-            return json.dumps({"status": "error", "error": str(exc)}, indent=2)
+        if effective_file_paths:
+            try:
+                search_paths = _resolve_symbol_source_paths(root, effective_file_paths)
+            except ValueError as exc:
+                return json.dumps({"status": "error", "error": str(exc)}, indent=2)
+        else:
+            mod_path_to_id, mod_id_to_path, art_path_to_id, art_id_to_path = _get_registries()
+            identity = query_helpers.resolve_artifact_identity(raw_symbol, art_path_to_id, art_id_to_path)
+            if identity["status"] == "resolved" and identity.get("resolution") in ("exact_leaf", "exact_identity", "exact_id"):
+                canonical_artifact = identity["artifact"]
+                definer_mod, target_symbol = canonical_artifact.split("::", 1)
+                engine = mcp_runtime.get_or_init_engine(root)
+                if not engine or getattr(engine.state, "resync_required", False):
+                    return json.dumps({"status": "error", "error": "Error: No usable canonical LIVE state. Run analyze_project first."}, indent=2)
+                state = engine.state
+                unavailable = query_helpers.module_truth_unavailable(state, definer_mod)
+                if unavailable:
+                    return json.dumps(unavailable, indent=2)
+                module_obj = getattr(state, "modules", {}).get(definer_mod)
+                canonical_rel_path = getattr(module_obj, "path", None)
+                if not canonical_rel_path:
+                    return json.dumps({"status": "error", "error": f"Cannot determine canonical source path for module '{definer_mod}'."}, indent=2)
+                try:
+                    search_paths = _resolve_symbol_source_paths(root, [canonical_rel_path])
+                except ValueError as exc:
+                    return json.dumps({"status": "error", "error": str(exc)}, indent=2)
+            elif identity["status"] == "ambiguous":
+                return json.dumps(
+                    {
+                        "status": "ambiguous",
+                        "symbol": symbol,
+                        "candidate_count": len(identity.get("candidates", [])),
+                        "candidates": identity.get("candidates", []),
+                        "message": "Symbol is ambiguous across multiple modules; specify file_path or use a qualified module::symbol.",
+                    },
+                    indent=2,
+                )
+            else:
+                if identity.get("similar_candidates"):
+                    return json.dumps(
+                        {
+                            "status": "not_found",
+                            "symbol": symbol,
+                            "similar_candidates": identity["similar_candidates"],
+                            "data_source": "active_artifact_registry",
+                        },
+                        indent=2,
+                    )
+                return json.dumps(
+                    {
+                        "status": "not_found",
+                        "symbol": symbol,
+                        "message": "No exact class, function, or method match was found.",
+                    },
+                    indent=2,
+                )
+
 
     try:
         candidates = []

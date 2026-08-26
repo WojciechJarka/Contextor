@@ -54,7 +54,7 @@
     {
       "tool": "get_symbol_implementation",
       "filename": "get_symbol_implementation.json",
-      "short_description": "Preview or fetch one exact AST-bounded symbol implementation from explicit source files. Ambiguous matches are never guessed."
+      "short_description": "Preview or fetch one exact AST-bounded symbol implementation. Unique plain leaves may resolve through canonical LIVE identity; explicit file scope remains supported. Source is read from disk and ambiguous matches are never guessed."
     },
     {
       "tool": "get_file_edit_context",
@@ -74,13 +74,14 @@
     {
       "tool": "describe_canonical_state",
       "filename": "describe_canonical_state.json",
-      "short_description": "Return the passive versioned schema and language contract for safe canonical queries. It reads no repository data."
+      "short_description": "Discover the full canonical-query schema: roots, selectable fields, per-field operators, null semantics, ordering, limits and v1.1 capabilities. Optional for basic v1.0 query_canonical_projection requests."
     },
     {
       "tool": "query_canonical_projection",
       "filename": "query_canonical_projection.json",
-      "short_description": "Execute a safe bounded query over normalized canonical LIVE data. Only the declared versioned query language is accepted."
+      "short_description": "Query canonical LIVE data. Basic request: root=modules|artifacts|dependencies, filters=[{field,operator,value}] (flat AND; []=all), select=[...] ([]=all). Omit both version fields for 1.0/1.0; use describe_canonical_state only for full/v1.1 discovery."
     },
+
     {
       "tool": "extract_indexed_report_context",
       "filename": "extract_indexed_report_context.json",

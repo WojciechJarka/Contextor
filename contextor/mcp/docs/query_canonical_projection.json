@@ -6,21 +6,27 @@
   ],
   "parameters": [
     "repo_path (string, required): canonical repository root.",
-    "request (object/dict, required): versioned safe canonical-query request payload conforming to the contract discovered via describe_canonical_state. Must explicitly include schema_version, language_version, root, filters, and select. May include limit (default 20, max 200) and evidence_limit (default 3, None for full nested evidence)."
+    "request (object/dict, required): canonical projection query payload. Required basic fields: 'root' (modules|artifacts|dependencies), 'filters' (flat AND array of field/operator/value objects; pass [] to match all), 'select' (array of selectable fields; pass [] for all selectable fields). 'schema_version' and 'language_version' are optional as a pair (omitting both defaults to stable 1.0/1.0; supplying exactly one fails closed; explicit supported pair like 1.1/1.1 selects that version). Optional 'limit' (default 20, max 200). 'evidence_limit' is available in v1.1 only."
   ],
   "behavior": [
     "1. Validates the request against the safe canonical query DSL without arbitrary code execution or eval.",
-    "2. Filters are flat AND clauses using field operators declared by describe_canonical_state. Empty filters match all records; empty select returns all selectable fields.",
-    "3. Language 1.1 supports nested evidence bounding via evidence_limit (default 3) and emits imports_truncated or consumers_truncated metadata.",
-    "4. Responses always include total_matches, returned, limit, and truncated metadata.",
-    "5. Reads authoritative canonical LIVE state. Invalid requests fail closed with structured error diagnostics."
+    "2. Allowed roots: 'modules', 'artifacts', 'dependencies'.",
+    "3. Filters are flat AND clauses in request order: {\"field\": \"...\", \"operator\": \"...\", \"value\": ...}. Empty filters [] match all records. Common operator vocabulary: eq, neq, contains, starts_with, ends_with, in, gt, gte, lt, lte (operator compatibility is field-specific; describe_canonical_state returns the exact matrix).",
+    "4. Select: pass an array of field names (e.g. [\"module_name\", \"layer\"]) for specific fields, or [] to project all selectable fields for the target root.",
+    "5. When both schema_version and language_version are omitted, the request automatically runs as stable version 1.0/1.0 without requiring a preceding describe_canonical_state call.",
+    "6. Language 1.1 explicitly requested via schema_version='1.1' and language_version='1.1' supports nested evidence bounding via evidence_limit (default 3).",
+    "7. Responses always include total_matches, returned, limit, and truncated metadata."
   ],
   "freshness": [],
   "errors": [
     "The executor first converts LIVE state to read-only JSON-safe records. It\nnever uses ``eval``, accepts no Python expressions, exposes no arbitrary\nattributes and omits local absolute paths. Artifacts preserve the\ndistinction between confirmed zero consumers and unavailable consumption\ndata via ``consumer_data_available`` plus nullable consumer fields.\nStructural errors return one deterministic error with ``code``, ``path``\nand repair details."
   ],
   "usage_notes": [
-    "LLM use: discover the contract first via ``describe_canonical_state(schema_version='1.1', language_version='1.1')``,\nrequest the smallest useful field selection, and narrow filters when ``truncated`` is\ntrue. Use ``evidence_limit=None`` only when complete nested evidence is required."
+    "LLM use: basic v1.0 projections can be executed directly without calling describe_canonical_state first. Call ``describe_canonical_state(schema_version='1.1', language_version='1.1')`` when you need the complete versioned field/operator contract, v1.1 capabilities (such as evidence_limit), or help repairing an unfamiliar structural validation error."
   ],
-  "examples": []
+  "examples": [
+    "query_canonical_projection(repo_path, {\"root\": \"modules\", \"filters\": [], \"select\": [\"module_name\", \"layer\"]})",
+    "query_canonical_projection(repo_path, {\"root\": \"modules\", \"filters\": [{\"field\": \"module_name\", \"operator\": \"eq\", \"value\": \"contextor.mcp.tools.query_canonical_projection\"}], \"select\": [\"module_name\", \"layer\"], \"limit\": 20})"
+  ]
 }
+

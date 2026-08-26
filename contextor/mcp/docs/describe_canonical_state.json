@@ -16,7 +16,11 @@
     "Unsupported version pairs or cross-pairs (such as ``('1.0', '1.1')`` or\n``('1.1', '1.0')``) return a deterministic structured error with\n``code: 'unsupported_version_pair'``."
   ],
   "usage_notes": [
-    "LLM use: call ``describe_canonical_state(schema_version='1.1', language_version='1.1')``\nbefore composing a 1.1 progressive disclosure projection request. Cache by\n``(schema_version, language_version)``."
+    "LLM use: basic v1.0 queries can be composed directly in query_canonical_projection without calling this first. Call describe_canonical_state when you need the complete versioned field/operator matrix, v1.1 progressive disclosure capabilities (e.g. evidence_limit), hard limits, or help repairing a structural validation error. Cache by ``(schema_version, language_version)``."
   ],
-  "examples": []
+  "examples": [
+    "describe_canonical_state(schema_version=\"1.0\", language_version=\"1.0\")",
+    "describe_canonical_state(schema_version=\"1.1\", language_version=\"1.1\")"
+  ]
 }
+
