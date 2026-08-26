@@ -48,6 +48,9 @@ from contextor.ui.theme import (
     apply_theme,
 )
 
+LIVE_START_MAX_ATTEMPTS = 4
+LIVE_START_RETRY_DELAYS_MS = (1000, 2000, 5000)
+
 class ContextorGUI:
     """
     Main application controller and view wrapper.
@@ -87,6 +90,8 @@ class ContextorGUI:
         self.live_event_feed = None
         self.live_watchers = {}
         self.live_event_feeds = {}
+        self._live_start_retry_attempt = 0
+        self._live_start_retry_after_id = None
         self.live_status_var = tk.StringVar(value="LIVE: waiting for analysis")
         self.repo_id_var = tk.StringVar(value="Repo ID: unregistered")
         self._live_status_queue: Queue[str] = Queue()
@@ -703,6 +708,21 @@ class ContextorGUI:
         clients = getattr(self, "live_clients", None)
         if clients is None:
             clients = self.live_clients = {}
+
+        existing_watcher = watchers.get(identity.repo_id)
+        if existing_watcher is not None:
+            self.live_watcher = existing_watcher
+            self.live_event_feed = feeds.get(identity.repo_id)
+            if getattr(self, "_live_start_retry_after_id", None) is not None:
+                if hasattr(self, "root") and hasattr(self.root, "after_cancel"):
+                    try:
+                        self.root.after_cancel(self._live_start_retry_after_id)
+                    except Exception:
+                        pass
+                self._live_start_retry_after_id = None
+            self._live_start_retry_attempt = 0
+            return
+
         try:
             from contextor.core.live_state import migrate_legacy_snapshot
 
@@ -714,9 +734,33 @@ class ContextorGUI:
             )
             self.live_client = client
             clients[identity.repo_id] = client
+            if getattr(self, "_live_start_retry_after_id", None) is not None:
+                if hasattr(self, "root") and hasattr(self.root, "after_cancel"):
+                    try:
+                        self.root.after_cancel(self._live_start_retry_after_id)
+                    except Exception:
+                        pass
+                self._live_start_retry_after_id = None
+            self._live_start_retry_attempt = 0
         except (OSError, EOFError, RuntimeError, TimeoutError, RepositoryIdentityError) as exc:
+            current_attempt = getattr(self, "_live_start_retry_attempt", 0) + 1
+            self._live_start_retry_attempt = current_attempt
+            if current_attempt < LIVE_START_MAX_ATTEMPTS:
+                delay_idx = min(current_attempt - 1, len(LIVE_START_RETRY_DELAYS_MS) - 1)
+                delay_ms = LIVE_START_RETRY_DELAYS_MS[delay_idx]
+                self._set_live_status(
+                    f"LIVE connection delayed; retrying ({current_attempt + 1}/{LIVE_START_MAX_ATTEMPTS})..."
+                )
+                if hasattr(self, "root") and hasattr(self.root, "after"):
+                    self._live_start_retry_after_id = self.root.after(
+                        delay_ms, lambda: ContextorGUI._start_live_watcher(self, path)
+                    )
+                return
+            self._live_start_retry_attempt = 0
+            self._live_start_retry_after_id = None
             self._set_live_status(f"LIVE connection error: {exc}")
             return
+
         from contextor.core.analysis.state_manager import load_engine_state
 
         state = load_engine_state(
@@ -905,6 +949,15 @@ class ContextorGUI:
         import time
 
         close_cmd_log()
+
+        if getattr(self, "_live_start_retry_after_id", None) is not None:
+            if hasattr(self, "root") and hasattr(self.root, "after_cancel"):
+                try:
+                    self.root.after_cancel(self._live_start_retry_after_id)
+                except Exception:
+                    pass
+            self._live_start_retry_after_id = None
+        self._live_start_retry_attempt = 0
 
         watchers = list(getattr(self, "live_watchers", {}).values())
         feeds = list(getattr(self, "live_event_feeds", {}).values())
