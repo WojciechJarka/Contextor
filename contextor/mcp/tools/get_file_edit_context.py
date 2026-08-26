@@ -571,24 +571,61 @@ def get_file_edit_context(
             }
         }
 
+        _ev_limit = 3 if max_items is None else min(3, max_items)
+        pa_items = full_result["public_api"]["items"]
+        pa_ev = dict(list(pa_items.items())[:_ev_limit])
+        pa_total = full_result["public_api"]["total"]
+        pa_view = {
+            "total": pa_total,
+            "truncated": pa_total > len(pa_ev),
+            "unresolved_total": full_result["public_api"]["unresolved_total"],
+            "evidence": pa_ev,
+        }
+        if pa_view["truncated"]:
+            pa_view["expand"] = {"compact": False, "max_items": None}
+
+        imp_items = full_result["imports"]["items"]
+        imp_ev = imp_items[:_ev_limit]
+        imp_total = full_result["imports"]["total"]
+        imp_view = {
+            "total": imp_total,
+            "truncated": imp_total > len(imp_ev),
+            "evidence": imp_ev,
+        }
+        if imp_view["truncated"]:
+            imp_view["expand"] = {"compact": False, "max_items": None}
+
+        con_items = full_result["consumers"]["items"]
+        con_ev = con_items[:_ev_limit]
+        con_total = full_result["consumers"]["total"]
+        con_view = {
+            "total": con_total,
+            "truncated": con_total > len(con_ev),
+            "evidence": con_ev,
+        }
+        if con_view["truncated"]:
+            con_view["expand"] = {"compact": False, "max_items": None}
+
+        tc_items = full_result["tests_covering"]["tests"]
+        tc_ev = tc_items[:_ev_limit]
+        tc_total = full_result["tests_covering"]["total"]
+        tc_view = {
+            "available": full_result["tests_covering"]["available"],
+            "total": tc_total,
+            "truncated": tc_total > len(tc_ev),
+            "evidence_scope": full_result["tests_covering"]["evidence_scope"],
+            "max_depth": full_result["tests_covering"]["max_depth"],
+            "evidence": tc_ev,
+        }
+        if tc_view["truncated"]:
+            tc_view["expand"] = {"compact": False, "max_items": None}
+
         compact_result = {
             **common_result,
-            "public_api": {
-                key: full_result["public_api"][key]
-                for key in ("total", "truncated", "unresolved_total")
-            },
-            "imports": {
-                key: full_result["imports"][key]
-                for key in ("total", "truncated")
-            },
-            "consumers": {
-                key: full_result["consumers"][key]
-                for key in ("total", "truncated")
-            },
-            "tests_covering": {
-                key: full_result["tests_covering"][key]
-                for key in ("available", "total", "truncated", "evidence_scope", "max_depth")
-            },
+            "public_api": pa_view,
+            "imports": imp_view,
+            "consumers": con_view,
+            "tests_covering": tc_view,
         }
 
         result = compact_result if compact else full_result

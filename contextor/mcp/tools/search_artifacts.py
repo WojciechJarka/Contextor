@@ -93,21 +93,41 @@ def search_artifacts(
                 outbound_items, outbound_total, outbound_truncated = query_helpers.bounded_items(
                     outbound, evidence_limit
                 )
+                _compact_ev_limit = 3 if evidence_limit is None else min(3, evidence_limit)
+                if compact:
+                    inbound_ev = inbound_items[:_compact_ev_limit]
+                    inbound_dep = {
+                        "total": inbound_total,
+                        "truncated": inbound_total > len(inbound_ev),
+                        "evidence": inbound_ev,
+                    }
+                    if inbound_dep["truncated"]:
+                        inbound_dep["expand"] = {"compact": False, "evidence_limit": None}
+                    outbound_ev = outbound_items[:_compact_ev_limit]
+                    outbound_dep = {
+                        "total": outbound_total,
+                        "truncated": outbound_total > len(outbound_ev),
+                        "evidence": outbound_ev,
+                    }
+                    if outbound_dep["truncated"]:
+                        outbound_dep["expand"] = {"compact": False, "evidence_limit": None}
+                else:
+                    inbound_dep = {
+                        "total": inbound_total,
+                        "truncated": inbound_truncated,
+                        "items": inbound_items,
+                    }
+                    outbound_dep = {
+                        "total": outbound_total,
+                        "truncated": outbound_truncated,
+                        "items": outbound_items,
+                    }
                 module_entry = {
                     "kind": "module",
                     "module_id": engine.registry.get_module_id(mod_path),
-                    "dependencies_inbound": {
-                        "total": inbound_total,
-                        "truncated": inbound_truncated,
-                    },
-                    "dependencies_outbound": {
-                        "total": outbound_total,
-                        "truncated": outbound_truncated,
-                    },
+                    "dependencies_inbound": inbound_dep,
+                    "dependencies_outbound": outbound_dep,
                 }
-                if not compact:
-                    module_entry["dependencies_inbound"]["items"] = inbound_items
-                    module_entry["dependencies_outbound"]["items"] = outbound_items
                 found_modules.append(
                     (
                         not exact_module,
@@ -142,17 +162,28 @@ def search_artifacts(
                         consumer_items, consumer_total, consumer_truncated = query_helpers.bounded_items(
                             consumer_paths, evidence_limit
                         )
+                        _compact_ev_limit = 3 if evidence_limit is None else min(3, evidence_limit)
+                        if compact:
+                            con_ev = consumer_items[:_compact_ev_limit]
+                            consumers_view = {
+                                "total": consumer_total,
+                                "truncated": consumer_total > len(con_ev),
+                                "evidence": con_ev,
+                            }
+                            if consumers_view["truncated"]:
+                                consumers_view["expand"] = {"compact": False, "evidence_limit": None}
+                        else:
+                            consumers_view = {
+                                "total": consumer_total,
+                                "truncated": consumer_truncated,
+                                "items": consumer_items,
+                            }
                         artifact_entry = {
                             "kind": kind,
                             "definer_module_path": mod_path,
                             "definer_module_id": definer_mod,
-                            "consumers": {
-                                "total": consumer_total,
-                                "truncated": consumer_truncated,
-                            },
+                            "consumers": consumers_view,
                         }
-                        if not compact:
-                            artifact_entry["consumers"]["items"] = consumer_items
                         found_artifacts.append((name.lower() != effective_term.lower(), name.lower(), f"{mod_path}::{name}", artifact_entry))
 
         if not found_artifacts and not found_modules:

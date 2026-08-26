@@ -4,7 +4,11 @@ from pathlib import Path
 from contextor.core.source import SourceError, read_source
 from contextor.mcp import query_helpers
 from contextor.mcp import runtime as mcp_runtime
-from contextor.mcp.output_guard import guard_large_output
+from contextor.mcp.output_guard import (
+    LARGE_OUTPUT_WARNING_BYTES,
+    guard_large_output,
+    largest_fitting_prefix,
+)
 from contextor.mcp.source_helpers import (
     canonical_python_sources,
     SourceSpanResolver,
@@ -127,6 +131,38 @@ def search_source(
         "truncated": len(selected) < total,
     }
     serialized = json.dumps(result, indent=2, ensure_ascii=False)
+    full_bytes = len(serialized.encode("utf-8"))
+
+    if (
+        full_bytes > LARGE_OUTPUT_WARNING_BYTES
+        and not allow_large_output
+        and len(selected) > 0
+    ):
+        def _build(count: int) -> str:
+            prefix = selected[:count]
+            cand = {
+                "status": "ok",
+                "search_term": effective_term,
+                "case_sensitive": case_sensitive,
+                "total_matches": total,
+                "matches": prefix,
+                "truncated": len(prefix) < total,
+                "_output": {
+                    "auto_bounded": True,
+                    "full_output_bytes": full_bytes,
+                    "warning_threshold_bytes": LARGE_OUTPUT_WARNING_BYTES,
+                    "requested_count": len(selected),
+                    "returned_count": len(prefix),
+                    "retry": {"allow_large_output": True},
+                },
+            }
+            return json.dumps(cand, indent=2, ensure_ascii=False)
+
+
+        bounded = largest_fitting_prefix(len(selected), _build, min_count=1)
+        if bounded is not None:
+            return bounded[0]
+
     return guard_large_output(
         serialized,
         allow_large_output=allow_large_output,
@@ -136,3 +172,4 @@ def search_source(
             "Repeat the same search_source call with the same repo_path, search_term, limit, and case_sensitive and set allow_large_output=true."
         ),
     )
+

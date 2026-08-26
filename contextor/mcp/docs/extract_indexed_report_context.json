@@ -5,11 +5,23 @@
     "[OPTIMIZED] Extracts matching blocks from an indexed artifact report with progressive disclosure and representation negotiation."
   ],
   "parameters": [
-    "Set ``public_api_only=True`` to mirror the GUI checkbox: private names are\nexcluded, but zero detected consumers do not make an artifact private.",
-    "``evidence_limit`` (default 3) bounds the number of nested consumer identities\nper artifact block (``consumer_modules`` in resolved mode, ``consumer_module_indices``\nin indexed mode). Pass ``None`` for complete nested consumers, or ``0`` for counts\nonly. ``consumer_count`` always reflects the truthful total. When nested evidence\nis truncated, per-block ``consumer_modules_truncated`` or\n``consumer_module_indices_truncated`` is set to ``True`` and an ``expand``\ndescriptor is emitted. Pass ``max_items=None, evidence_limit=None`` for fully\nlossless retrieval.",
-    "``representation`` (default ``None``) selects the serialization format:\n- ``None``: preserves legacy behavior controlled by ``resolve_indices``;\n- ``'named'``: emits human-readable symbol names using representation-independent canonical artifact-ID ordering;\n- ``'indexed'``: emits compact indexed IDs using the same canonical ordering and attaches ``resolve_via: 'lookup_index_entries'``;\n- ``'auto'``: stateless candidate size negotiation. When indexed representation materially reduces serialized payload size, returns a compact decision response with directly executable retry options; otherwise returns a direct named result.\nNon-None ``representation`` takes deterministic precedence over ``resolve_indices``. When ``total > max_items``, explicit representation modes use canonical artifact-ID bounding, which may differ from legacy symbol-string bounding. Under ``representation='auto'``, ``expand`` descriptors in direct-auto results preserve ``representation='auto'`` (E1): ``retry_with_full_evidence`` expands evidence scope but may return a decision response if the expanded payload is material; ``retry_fully_lossless`` requests complete top-level and nested scope under auto. An immediate lossless domain payload is obtained by passing explicit ``representation='named'`` or ``'indexed'`` with ``max_items=None, evidence_limit=None``."
+    "repo_path (string, required): canonical repository root.",
+    "query (string, required): indexed report query or resolution input (accepts artifact ID, module ID, file path, full module::symbol key, or explicit prefix).",
+    "report_path (string, optional, default \"\"): explicit report selection path; empty string uses the canonical default report.",
+    "resolve_indices (boolean, default true): preserves index resolution behavior when representation is None.",
+    "public_api_only (boolean, default false): filters out private symbols when true (private names excluded, zero detected consumers do not make an artifact private).",
+    "max_items (integer or null, default 20): maximum number of matching artifact blocks to return; pass null for all matches.",
+    "fields (array of strings or null, default null): optional projection list of top-level keys to return; null returns full response.",
+    "evidence_limit (integer or null, default 3): maximum number of nested consumer identities per artifact block; pass null for complete nested evidence.",
+    "representation (string or null, default null): serialization format selection (None preserves legacy resolve_indices, 'named' emits human-readable symbol names, 'indexed' emits compact IDs, 'auto' performs candidate size negotiation)."
   ],
-  "behavior": [],
+  "behavior": [
+    "1. Resolution is index-first and shared with the GUI parser. Queries may use an artifact/module ID, a .py path, a full module::symbol key, or explicit prefixes.",
+    "2. When representation is 'auto', performs candidate size negotiation and returns a compact decision response if indexed representation saves significant payload size.",
+    "3. Non-None representation takes deterministic precedence over resolve_indices.",
+    "4. evidence_limit (default 3) bounds nested consumer evidence (consumer_modules or consumer_module_indices) and attaches companion truncation flags and expand retry descriptors.",
+    "5. Read-only report extraction tool; does not mutate state."
+  ],
   "freshness": [],
   "errors": [
     "Resolution is index-first and shared with the GUI parser. Queries may use an\nartifact/module ID, a ``.py`` path, a full ``module::symbol`` key, or explicit\n``file:``, ``module:``, ``symbol:`` and ``artifact:`` prefixes. Exact matches\nare never replaced by fuzzy guesses; ambiguous and missing queries remain\nexplicit. Active dictionaries fall back to both recovery dictionaries, while\nblocks with unresolved artifact or definer IDs are omitted with diagnostics.",
@@ -20,4 +32,3 @@
   ],
   "examples": []
 }
-

@@ -5,7 +5,12 @@
     "[OPTIMIZED] Retrieve a compressed context pill for one module."
   ],
   "parameters": [
-    "Accepts ``module_name`` or LLM-friendly alias ``module`` (or module ID). Can be:\n- An exact active module ID: '259/1'\n- A canonical dotted module name: 'contextor.mcp.tools.get_module_context'\n- A file path: 'contextor/mcp/tools/get_module_context.py'\nIf an artifact/symbol identity is passed, returns a structured diagnostic redirecting to ``get_artifact_blast_radius``."
+    "repo_path (string, required): canonical repository root.",
+    "module_name (string, optional, default \"\"): module identifier (accepts module ID e.g. '259/1', dotted module name, or file path).",
+    "max_items (integer or null, default 30): maximum number of dependency items returned in full mode (compact mode caps evidence at 3 items); pass null for all items.",
+    "compact (boolean, default true): controls compact evidence shaping (bounded evidence) vs verbose items.",
+    "fields (array of strings or null, default null): optional field projection list; null returns the full response.",
+    "module (string or null, optional, default null): alias for module_name."
   ],
   "behavior": [
     "Resolution order:\n1. Exact active module ID via active module registry.\n2. Canonical LIVE state lookup by dotted module name or file path.\n3. Artifact-input diagnosis / redirect to get_artifact_blast_radius.\n4. Bounded fuzzy module suggestions (score >= 0.75, max 5) from active module registry on textual module not-found.\n5. Legacy not-found string fallback when query is not found or is a nonexistent module ID.",
@@ -22,4 +27,3 @@
   ],
   "examples": []
 }
-

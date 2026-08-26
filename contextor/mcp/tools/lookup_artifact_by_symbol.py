@@ -159,12 +159,23 @@ def lookup_artifact_by_symbol(
                 consumer_items, consumer_total, consumer_truncated = query_helpers.bounded_items(
                     resolved_consumers, evidence_limit
                 )
-                entry["consumers"] = {
-                    "total": consumer_total,
-                    "truncated": consumer_truncated,
-                }
-                if not compact:
-                    entry["consumers"]["items"] = consumer_items
+                _compact_ev_limit = 3 if evidence_limit is None else min(3, evidence_limit)
+                if compact:
+                    con_ev = consumer_items[:_compact_ev_limit]
+                    consumers_view = {
+                        "total": consumer_total,
+                        "truncated": consumer_total > len(con_ev),
+                        "evidence": con_ev,
+                    }
+                    if consumers_view["truncated"]:
+                        consumers_view["expand"] = {"compact": False, "evidence_limit": None}
+                else:
+                    consumers_view = {
+                        "total": consumer_total,
+                        "truncated": consumer_truncated,
+                        "items": consumer_items,
+                    }
+                entry["consumers"] = consumers_view
             else:
                 entry["consumers"] = {
                     "available": False,

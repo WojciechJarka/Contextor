@@ -911,28 +911,24 @@ def test_get_analysis_status_large_output_preflight_gate(tmp_path):
     assert len(res_default["analysis_coverage"]["skipped_python_files"]["items"]) == 10
     assert len(raw_default.encode("utf-8")) < 15360
 
-    # 2. Unlimited max_skipped_files=None with allow_large_output=False -> confirmation_required
+    # 2. Unlimited max_skipped_files=None with allow_large_output=False -> auto-bounded
     raw_warn = mcp_server.get_analysis_status.fn(str(repo), job_id, max_skipped_files=None)
     warn = json.loads(raw_warn)
-    assert warn["status"] == "confirmation_required"
-    assert warn["reason"] == "Estimated output exceeds the recommended context size."
-    assert warn["warning_threshold_bytes"] == 15360
-    assert warn["warning_threshold_kib"] == 15.0
-    assert warn["estimated_output_bytes"] > 15360
-    assert warn["estimated_output_kib"] == warn["estimated_output_bytes"] / 1024
-    assert warn["retry"] == {"allow_large_output": True}
-    assert "repo_path" not in warn
-    assert "job_id" not in warn
-    assert "skipped_python_files" not in raw_warn
-    assert "Repeat the same get_analysis_status call" in warn["retry_instruction"]
-    assert len(raw_warn.encode("utf-8")) < 1024
+    assert warn["status"] == "completed"
+    assert "_output" in warn
+    assert warn["_output"]["auto_bounded"] is True
+    assert warn["_output"]["bounded_collection"] == "skipped_files"
+    assert warn["_output"]["warning_threshold_bytes"] == 15360
+    assert warn["_output"]["full_output_bytes"] > 15360
+    assert warn["_output"]["retry"] == {"allow_large_output": True}
+    assert len(raw_warn.encode("utf-8")) <= 15360
 
     # 3. Unlimited max_skipped_files=None with allow_large_output=True -> full status
     raw_override = mcp_server.get_analysis_status.fn(str(repo), job_id, max_skipped_files=None, allow_large_output=True)
     override = json.loads(raw_override)
     assert override["status"] == "completed"
     assert len(override["analysis_coverage"]["skipped_python_files"]["items"]) == 250
-    assert len(raw_override.encode("utf-8")) == warn["estimated_output_bytes"]
+    assert len(raw_override.encode("utf-8")) == warn["_output"]["full_output_bytes"]
 
 
 def test_lookup_index_entries_distinguishes_active_recovery_and_missing(
@@ -980,31 +976,19 @@ def test_lookup_index_entries_large_output_preflight_gate(tmp_path, monkeypatch)
     ids = [f"{i}/1" for i in range(200)]
     ids_with_dup = ids + ["0/1", "1/1"]
 
-    # 1. Above threshold with default allow_large_output=False -> confirmation_required without echoed IDs
+    # 1. Above threshold with default allow_large_output=False -> auto-bounded prefix with _output metadata
     raw_warn = mcp_server.lookup_index_entries.fn(
         repo_path=str(tmp_path),
         ids=ids_with_dup,
     )
     warn = json.loads(raw_warn)
-    assert warn["status"] == "confirmation_required"
-    assert warn["reason"] == "Estimated lookup output exceeds the recommended context size."
-    assert warn["requested_count"] == 202
-    assert warn["warning_threshold_bytes"] == 15360
-    assert warn["warning_threshold_kib"] == 15.0
-    assert warn["estimated_output_bytes"] > 15360
-    assert warn["estimated_output_kib"] == warn["estimated_output_bytes"] / 1024
-    assert warn["retry"] == {
-        "allow_large_output": True,
-    }
-    assert "ids" not in warn["retry"]
-    assert "ids" not in warn
-    assert "repo_path" not in warn["retry"]
-    assert "repo_path" not in warn
-    assert "retry_instruction" in warn
-    assert "same repo_path and ids" in warn["retry_instruction"]
-    assert "pkg.submodule" not in raw_warn
-    # Warning response itself must remain compact and well below 15 KiB
-    assert len(raw_warn.encode("utf-8")) < 1024
+    assert "_output" in warn
+    assert warn["_output"]["auto_bounded"] is True
+    assert warn["_output"]["requested_count"] == 202
+    assert warn["_output"]["warning_threshold_bytes"] == 15360
+    assert warn["_output"]["full_output_bytes"] > 15360
+    assert warn["_output"]["retry"] == {"allow_large_output": True}
+    assert len(raw_warn.encode("utf-8")) <= 15360
 
     # 2. Above threshold with allow_large_output=True -> full normal mapping
     raw_override = mcp_server.lookup_index_entries.fn(
@@ -1013,10 +997,10 @@ def test_lookup_index_entries_large_output_preflight_gate(tmp_path, monkeypatch)
         allow_large_output=True,
     )
     override = json.loads(raw_override)
-    assert "status" not in override or override.get("status") != "confirmation_required"
+    assert "_output" not in override
     assert len(override) == 200
     assert override["0/1"] == {"name": "pkg.submodule.very_long_component_name_number_0", "status": "active"}
-    assert len(raw_override.encode("utf-8")) == warn["estimated_output_bytes"]
+    assert len(raw_override.encode("utf-8")) == warn["_output"]["full_output_bytes"]
 
     # 3. Below threshold (<15 KiB) with allow_large_output=False -> normal mapping directly
     small_ids = ["0/1", "1/1", "2/1"]
@@ -2175,7 +2159,11 @@ def test_mcp_update_file_shapes_affected_modules_compact_full_and_fields(tmp_pat
     )
     assert compact["status"] == "UPDATED"
     assert compact["blast_radius_state"] == "fresh"
-    assert compact["affected_modules"] == {"total": 3, "truncated": False}
+    assert compact["affected_modules"] == {
+        "total": 3,
+        "truncated": False,
+        "evidence": ["consumer_a", "consumer_b", "provider"],
+    }
     assert "items" not in compact["affected_modules"]
 
     full = json.loads(
@@ -2581,7 +2569,11 @@ def test_semantic_diff_view_is_compact_bounded_and_schema_stable():
     compact = update_file_module._semantic_diff_view(diff, max_items=1, compact=True)
     full = update_file_module._semantic_diff_view(diff, max_items=1, compact=False)
 
-    assert compact["symbols_added"] == {"total": 2, "truncated": True}
+    assert compact["symbols_added"] == {
+        "total": 2,
+        "truncated": True,
+        "evidence": ["a"],
+    }
     assert "items" not in compact["signatures_changed"]
     assert full["symbols_added"]["items"] == ["a"]
     assert full["signatures_changed"]["items"] == {
@@ -2633,6 +2625,8 @@ def test_artifact_lookup_ignores_stale_registry_entries(tmp_path, monkeypatch):
     assert result["artifacts"]["A1/1"]["consumers"] == {
         "total": 2,
         "truncated": True,
+        "evidence": ["pkg.first"],
+        "expand": {"compact": False, "evidence_limit": None},
     }
     assert result["data_source"] == "live_canonical_state"
 
@@ -2781,14 +2775,28 @@ def test_file_edit_context_decodes_modules_and_marks_unresolved_api(
             repo_path=str(repo), file_path="pkg/module.py", max_items=1
         )
     )
-    assert compact["consumers"] == {"total": 2, "truncated": True}
-    assert compact["imports"] == {"total": 2, "truncated": True}
+    assert compact["consumers"] == {
+        "total": 2,
+        "truncated": True,
+        "evidence": [{"module": "tests.test_module", "module_id": "3/1"}],
+        "expand": {"compact": False, "max_items": None},
+    }
+    assert compact["imports"] == {
+        "total": 2,
+        "truncated": True,
+        "evidence": [{"module": "pkg.dep", "module_id": "2/1"}],
+        "expand": {"compact": False, "max_items": None},
+    }
     assert compact["public_api"] == {
         "total": 2,
         "truncated": True,
         "unresolved_total": 0,
+        "evidence": {"A1/1": "pkg.module::api"},
+        "expand": {"compact": False, "max_items": None},
     }
     assert compact["tests_covering"]["total"] == 2
+    assert compact["tests_covering"]["truncated"] is True
+    assert len(compact["tests_covering"]["evidence"]) == 1
     assert "tests" not in compact["tests_covering"]
 
     projection = json.loads(
@@ -2800,7 +2808,7 @@ def test_file_edit_context_decodes_modules_and_marks_unresolved_api(
         )
     )
     assert set(projection) == {"risk_score", "consumers"}
-    assert projection["consumers"] == {"total": 2, "truncated": True}
+    assert projection["consumers"] == compact["consumers"]
 
     evidence_projection = json.loads(
         mcp_server.get_file_edit_context.fn(
@@ -3039,6 +3047,7 @@ def test_live_artifact_search_handles_list_based_symbol_state(
     assert result["artifacts"]["pkg.module::target"]["consumers"] == {
         "total": 1,
         "truncated": False,
+        "evidence": ["tests.test_module"],
     }
 
     full = json.loads(
@@ -3097,8 +3106,16 @@ def test_live_artifact_search_also_returns_matching_modules(tmp_path, monkeypatc
     assert result["total_matches"] == 1
     assert result["artifacts"] == {}
     assert module["module_id"] == "7/1"
-    assert module["dependencies_inbound"] == {"total": 2, "truncated": False}
-    assert module["dependencies_outbound"] == {"total": 2, "truncated": False}
+    assert module["dependencies_inbound"] == {
+        "total": 2,
+        "truncated": False,
+        "evidence": ["pkg.caller", "pkg.soft_caller"],
+    }
+    assert module["dependencies_outbound"] == {
+        "total": 2,
+        "truncated": False,
+        "evidence": ["pkg.dependency", "pkg.soft_dependency"],
+    }
 
     full = json.loads(
         mcp_server.search_artifacts.fn(

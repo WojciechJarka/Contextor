@@ -5,10 +5,15 @@
     "[OPTIMIZED] Extracts isolation metrics, clusters, and leaks for a specific architectural layer.\nUse this before refactoring a large component to understand its internal cohesion."
   ],
   "parameters": [
-    "``max_clusters`` and ``max_boundary_violations`` bound verbose evidence.\nCollections always expose ``total`` and ``truncated``. The compact default\nomits ``items``; set ``compact=False`` for evidence. Increase either limit\nor pass ``None`` for the complete corresponding collection. ``fields``\nprojects top-level keys after compact shaping. Allowed values are ``layer``,\n``report_layer``, ``data_source``, ``module_count``, ``clusters``,\n``dependency_types``, and ``boundary_violations``."
+    "repo_path (string, required): canonical repository root.",
+    "layer_name (string, required): target architectural layer name or path selector (accepts dotted layer names and nested layer paths).",
+    "max_clusters (integer or null, default 8): maximum number of cluster entries to return; pass null for unlimited clusters.",
+    "max_boundary_violations (integer or null, default 10): maximum number of boundary violations to return; pass null for unlimited violations.",
+    "compact (boolean, default true): when true, returns up to 3 bounded evidence items per non-empty collection with total, truncated, and expand metadata; set to false for full items.",
+    "fields (array of strings or null, default null): optional projection list of top-level keys to return; null returns the full response."
   ],
   "behavior": [
-    "Uses a dedicated layer report when present and otherwise derives bounded\nboundary evidence from canonical LIVE state. Reports enrich clusters and\nmetrics but are not required for structural isolation."
+    "1. Uses a dedicated layer report when present and otherwise derives bounded boundary evidence from canonical LIVE state.\n2. Clusters and boundary violations are independently bounded by max_clusters and max_boundary_violations.\n3. Collections always expose total and truncated metadata with expand instructions.\n4. Preserves full requested layer identity without imposing artificial hierarchy changes."
   ],
   "freshness": [],
   "errors": [],
@@ -17,4 +22,3 @@
   ],
   "examples": []
 }
-

@@ -2,34 +2,34 @@
   "version": "1.0.0",
   "tool": "search_source",
   "purpose": [
-    "Search literal source text across Python files currently present in canonical LIVE state. This is repository-content discovery; search_artifacts remains architectural entity discovery."
+    "Perform single-line literal substring search strictly within canonical Python files present in the current LIVE state."
   ],
   "parameters": [
     "repo_path (string, required): canonical repository root.",
-    "search_term (string, optional): single-line literal substring; newline (\\n) and carriage return (\\r) are invalid input; no regex, fuzzy, semantic or vector matching.",
+    "search_term (string or null, optional, default null): single-line literal substring; newline (\\n) and carriage return (\\r) are invalid input; no regex, fuzzy, semantic or vector matching.",
     "limit (positive integer or null, default 20): maximum logical matches returned; null returns all matches in canonical Python scope. max_items is not an alias for limit.",
     "case_sensitive (boolean, default false): false uses Unicode casefold matching; true requires exact casing.",
     "allow_large_output (boolean, default false): approve output above 15360 UTF-8 bytes after confirmation preflight.",
-    "query (string, optional): alias for search_term. At least one of search_term or query must be supplied; when both are supplied, they must match exactly."
+    "query (string or null, optional, default null): alias for search_term. At least one of search_term or query must be supplied; when both are supplied, they must match exactly."
   ],
   "behavior": [
-    "Only canonical Python modules are enumerated; excluded and non-canonical files are never walked or searched. Comments, docstrings, string/numeric literals and ordinary code are searchable because matching operates on source text read through contextor.core.source.read_source without persistent source index.",
-    "Results are ordered deterministically by repository-relative path and logical span. Repeated hits in one logical span produce one result with matched_lines.",
-    "A logical span of at most 20 lines returns content_mode=full and its complete normalized text. Larger spans return content_mode=line_map: every line number, full matched lines, and non-match previews capped at four tokens and 60 characters.",
-    "Large line maps include expand metadata for get_source_range with the exact file and span. total_matches is counted before limit and truncated means fewer logical matches were returned than total_matches."
+    "Only canonical Python modules are enumerated; excluded and non-canonical files are never walked or searched.",
+    "Matches are strict line-by-line literal substring occurrences, preserving exact match line numbers and 1-based start/end character spans.",
+    "Exact-offset line maps are provided for single-match results to support deterministic caller expansion.",
+    "The output guard enforces a 15360 UTF-8 byte threshold: when output exceeds 15360 bytes with allow_large_output=false, multi-match results are automatically bounded in a single shot to the largest deterministic match prefix fitting within 15360 bytes (returning _output.auto_bounded=true with full_output_bytes, requested_count, and returned_count). If a single match alone exceeds 15360 bytes, compact confirmation_required is returned.",
+    "Read-only query tool; never modifies repository or LIVE state."
   ],
-  "freshness": [
-    "Search fails closed when canonical state is unavailable, requires resync, or a selected canonical module is parse-stale. It does not mutate LIVE state."
-  ],
+  "freshness": [],
   "errors": [
-    "Empty or multi-line search input supplied through search_term or query (containing \\n or \\r), invalid limit (including boolean, zero or negative), or non-boolean flags return controlled JSON errors.",
-    "Outputs above 15360 UTF-8 bytes return compact confirmation_required without echoing the query or results; repeat the same call with allow_large_output=true."
+    "Returns invalid_search_term for empty search strings or strings containing newline characters.",
+    "Returns controlled error if neither search_term nor query is provided, or if they do not match exactly when both are supplied."
   ],
   "usage_notes": [
-    "Use for finding hardcoded values, messages, comments or docstrings when the defining file or symbol is unknown. Start with the default limit and expand only the relevant large logical span."
+    "Prefer search_artifacts for symbol, artifact, and dependency queries; use search_source solely for literal text occurrences in Python source files.",
+    "When _output.auto_bounded is true or confirmation_required is returned, inspect full_output_bytes and repeat the query with allow_large_output=true to receive the complete requested match set."
   ],
   "examples": [
-    "search_source(repo_path, \"109.9\") finds the literal text only inside canonical Python files.",
-    "search_source(repo_path, query=\"Distinct source fragment\", case_sensitive=True)"
+    "search_source(repo_path, search_term=\"def compute_topology_analytics\")",
+    "search_source(repo_path, query=\"class ASTVisitor\", case_sensitive=True)"
   ]
 }

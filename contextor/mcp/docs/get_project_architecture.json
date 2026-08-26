@@ -4,8 +4,15 @@
   "purpose": [
     "[OPTIMIZED] The highest-level architectural summary of the project.\nReturns global action items, debt summary, layer index, and hotspots.\nEach analytics family is an explicit union: available collections expose\n``available=true``, ``total`` and ``truncated``; unavailable families expose\n``available=false``, ``state`` and ``reason`` without fabricated counts.\nThe default ``compact=True`` response returns ``layer_index.distribution`` as\na concise mapping of layer names to module counts. ``max_items`` bounds the\nreturned layers in compact and full modes; pass ``max_items=None`` to return\nevery layer. Set ``compact=False`` for full ``items`` and\n``compact=False, max_items=None`` for lossless complete data. ``truncated``\nmeans fewer elements are present than ``total``, and truncated collections\ninclude ``expand={\"compact\": false, \"max_items\": null}``. ``fields`` projects\ntop-level keys after compact shaping. Allowed values are ``action_items``,\n``debt_summary``, ``layer_index``, ``top_global_hotspots``, ``module_count``,\nand ``data_source``."
   ],
-  "parameters": [],
-  "behavior": [],
+  "parameters": [
+    "repo_path (string, required): canonical repository root.",
+    "max_items (integer or null, default 10): maximum number of entries to return in bounded collections; pass null for unlimited entries. Does not bound module_count.",
+    "compact (boolean, default true): controls concise summary shaping (such as layer distribution mapping) versus verbose item lists.",
+    "fields (array of strings or null, default null): optional projection list of top-level keys to return; null returns the full response."
+  ],
+  "behavior": [
+    "1. Reads current structure from canonical LIVE state without requiring a full source scan during query execution.\n2. Saved or report-derived analytics expose explicit available=true/false status and reason without fabricated metrics.\n3. Collections expose total and truncated metadata with expand instructions when truncated."
+  ],
   "freshness": [],
   "errors": [],
   "usage_notes": [
@@ -13,4 +20,3 @@
   ],
   "examples": []
 }
-

@@ -36,3 +36,48 @@ def guard_large_output(
         }
     )
     return json.dumps(warning_response, indent=2)
+
+
+def largest_fitting_prefix(
+    max_count: int,
+    build_serialized,
+    *,
+    min_count: int = 1,
+) -> tuple[str, int] | None:
+    """
+    Return the largest deterministic prefix whose serialized UTF-8 payload
+    fits within LARGE_OUTPUT_WARNING_BYTES.
+
+    `build_serialized(count)` must build deterministic prefixes whose
+    serialized byte size is monotonically non-decreasing as `count` grows.
+    This helper has no JSON or domain semantics; it only measures serialized
+    UTF-8 payload size and performs a binary search under that precondition.
+    """
+    if max_count < min_count:
+        return None
+
+    max_candidate = build_serialized(max_count)
+    if len(max_candidate.encode("utf-8")) <= LARGE_OUTPUT_WARNING_BYTES:
+        return max_candidate, max_count
+
+    min_candidate = build_serialized(min_count)
+    if len(min_candidate.encode("utf-8")) > LARGE_OUTPUT_WARNING_BYTES:
+        return None
+
+    low = min_count
+    high = max_count - 1
+    best_candidate = min_candidate
+    best_count = min_count
+
+    while low <= high:
+        mid = (low + high) // 2
+        candidate = build_serialized(mid)
+
+        if len(candidate.encode("utf-8")) <= LARGE_OUTPUT_WARNING_BYTES:
+            best_candidate = candidate
+            best_count = mid
+            low = mid + 1
+        else:
+            high = mid - 1
+
+    return best_candidate, best_count

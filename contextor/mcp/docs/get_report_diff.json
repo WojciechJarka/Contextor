@@ -4,8 +4,15 @@
   "purpose": [
     "[OPTIMIZED] Returns architectural regression analysis between the last two analysis runs.\nShows delta in hotspot count, debt score, cycle count, and lists new/resolved hotspots.\nConsecutive runs are compared before the canonical summary is overwritten,\nincluding different working-tree states on the same commit.\nLayer changes are returned as a collection with ``total`` and ``truncated``;\nset ``compact=False`` for bounded ``items``. ``max_items=None`` returns all\nchanged layers. ``fields`` projects top-level keys after compact shaping;\ncurrent reports expose ``classification``, ``report_diff``, ``baseline``,\n``current``, and ``comparison_basis``."
   ],
-  "parameters": [],
-  "behavior": [],
+  "parameters": [
+    "repo_path (string, required): canonical repository root.",
+    "max_items (integer or null, default 20): maximum number of changed layer or hotspot items to return; pass null for all items.",
+    "compact (boolean, default true): when true, returns up to 3 bounded evidence items per non-empty collection with total, truncated, and expand metadata; pass false for full items.",
+    "fields (array of strings or null, default null): optional projection list of top-level keys to return; null returns the full response."
+  ],
+  "behavior": [
+    "1. Compares the last two consecutive canonical analysis runs before the canonical summary is overwritten.\n2. Compares consecutive runs regardless of Git commit (different working-tree states on the same commit are compared).\n3. An empty tracked diff indicates that no tracked architectural metrics changed, not that the underlying source text was identical.\n4. Changed collections are bounded by max_items.\n5. Read-only query tool; does not execute a new analysis run."
+  ],
   "freshness": [],
   "errors": [],
   "usage_notes": [
@@ -13,4 +20,3 @@
   ],
   "examples": []
 }
-

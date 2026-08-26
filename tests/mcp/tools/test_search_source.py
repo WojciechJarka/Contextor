@@ -156,8 +156,9 @@ def test_search_source__output_guard_behavior_is_identical_for_query_alias(tmp_p
     res_term = json.loads(raw_term)
     res_query = json.loads(raw_query)
     assert res_term == res_query
-    assert res_query["status"] == "confirmation_required"
-    assert res_query["estimated_output_bytes"] > LARGE_OUTPUT_WARNING_BYTES
+    assert res_query["status"] == "ok"
+    assert res_query["_output"]["auto_bounded"] is True
+    assert res_query["_output"]["full_output_bytes"] > LARGE_OUTPUT_WARNING_BYTES
 
 
 def test_search_source__allow_large_output_behavior_is_identical_for_query_alias(tmp_path, monkeypatch):

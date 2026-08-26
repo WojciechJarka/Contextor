@@ -143,6 +143,7 @@ def _semantic_diff_view(diff: dict, max_items: int | None, compact: bool) -> dic
         "body_change_count": diff.get("body_change_count", 0),
         "body_only_changes_tracked": diff.get("body_only_changes_tracked", False),
     }
+    _ev_limit = 3 if max_items is None else min(3, max_items)
     for key in (
         "symbols_added",
         "symbols_removed",
@@ -153,9 +154,20 @@ def _semantic_diff_view(diff: dict, max_items: int | None, compact: bool) -> dic
         value = diff.get(key, {}) if key == "signatures_changed" else diff.get(key, [])
         entries = sorted(value.items()) if isinstance(value, dict) else list(value)
         selected, total, truncated = query_helpers.bounded_items(entries, max_items)
-        collection = {"total": total, "truncated": truncated}
-        if not compact:
-            collection["items"] = dict(selected) if isinstance(value, dict) else selected
+        if compact:
+            ev_items = selected[:_ev_limit]
+            evidence = dict(ev_items) if isinstance(value, dict) else ev_items
+            collection = {
+                "total": total,
+                "truncated": total > len(evidence),
+                "evidence": evidence,
+            }
+        else:
+            collection = {
+                "total": total,
+                "truncated": truncated,
+                "items": dict(selected) if isinstance(value, dict) else selected,
+            }
         result[key] = collection
     return result
 
@@ -205,9 +217,20 @@ def update_file(
         affected_items, affected_total, affected_truncated = query_helpers.bounded_items(
             getattr(res, "affected_modules", []) or [], max_items
         )
-        affected_view = {"total": affected_total, "truncated": affected_truncated}
-        if not compact:
-            affected_view["items"] = affected_items
+        _ev_limit = 3 if max_items is None else min(3, max_items)
+        if compact:
+            affected_ev = affected_items[:_ev_limit]
+            affected_view = {
+                "total": affected_total,
+                "truncated": affected_total > len(affected_ev),
+                "evidence": affected_ev,
+            }
+        else:
+            affected_view = {
+                "total": affected_total,
+                "truncated": affected_truncated,
+                "items": affected_items,
+            }
         result = {
             "status": res.status,
             "file_path": res.file_path,

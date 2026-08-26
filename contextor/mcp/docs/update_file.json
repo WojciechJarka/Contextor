@@ -8,7 +8,7 @@
     "repo_path (string, required): canonical repository root.",
     "file_path (string, required): repository-relative or accepted absolute target file path processed by the existing incremental/LIVE update path.",
     "max_items (integer or null, default 30): maximum number of bounded semantic-diff items emitted where applicable; null preserves existing unbounded semantics.",
-    "compact (boolean, default true): controls existing compact semantic-diff/result shaping.",
+    "compact (boolean, default true): when true, returns up to 3 bounded evidence items per non-empty semantic-diff and affected-modules collection with total and truncated metadata (mutating update_file intentionally does not expose replay-style expand metadata; if complete evidence is required, request compact=false and max_items=null on the initial call); set to false for full items.",
     "fields (array of strings or null, default null): optional existing response projection; null returns the normal response shape."
   ],
   "behavior": [

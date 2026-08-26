@@ -7,7 +7,8 @@
   "parameters": [
     "repo_path (string, required): canonical repository root.",
     "file_path (string, required): exact repository-relative canonical Python path returned by search_source.",
-    "start_line (positive integer, required) and end_line (integer >= start_line, required): inclusive exact range.",
+    "start_line (integer, required): 1-based start line of the inclusive line range.",
+    "end_line (integer, required): 1-based end line of the inclusive line range (must be >= start_line).",
     "allow_large_output (boolean, default false): approve output above 15360 UTF-8 bytes after confirmation preflight."
   ],
   "behavior": [

@@ -5,20 +5,20 @@
     "[OPTIMIZED] Resolves a specific list of compact IDs to their full names."
   ],
   "parameters": [
-    "``ids`` (array of strings, required): specific list of compact module or artifact IDs to decode.",
-    "``allow_large_output`` (boolean, default ``false``): override to approve emission of outputs exceeding the 15 KiB warning threshold."
+    "repo_path (string, required): canonical repository root.",
+    "ids (array of strings, required): specific list of compact module or artifact IDs to decode.",
+    "allow_large_output (boolean, default false): override to approve emission of outputs exceeding the 15 KiB warning threshold."
   ],
   "behavior": [
-    "Resolves a caller-supplied list of compact IDs without any fixed ID-count limit.\nOutput <= 15 KiB (15360 UTF-8 bytes) returns the resolved identity mapping normally.\nOutput > 15 KiB with ``allow_large_output=false`` acts as an agent-controlled context\nsafety preflight and returns ``status: 'confirmation_required'`` with exact predicted\nserialized byte size and retry instructions. The warning deliberately does not echo\nIDs or resolved entries, ensuring the preflight response itself remains compact.\nPassing ``allow_large_output=true`` returns the complete lossless resolved mapping."
+    "Resolves a caller-supplied list of compact IDs without any fixed ID-count limit.\nOutput <= 15 KiB (15360 UTF-8 bytes) returns the resolved identity mapping normally without ``_output`` metadata.\nWhen output > 15 KiB with ``allow_large_output=false``, the response is automatically single-shot bounded to the largest deterministic prefix of input IDs fitting within 15360 UTF-8 bytes, embedding ``_output`` metadata (``auto_bounded=true``, ``full_output_bytes``, ``requested_count``, and ``returned_count``). If a single entry exceeds 15360 bytes, ``status: 'confirmation_required'`` is returned.\nPassing ``allow_large_output=true`` returns the complete lossless resolved mapping without ``_output`` metadata."
   ],
   "freshness": [],
   "errors": [],
   "usage_notes": [
-    "LLM use: pass only IDs visible in the current result instead of loading the\nfull project dictionary. Recovery means a known historical identity and\nmust not be presented as an active symbol; missing means no known identity.\nWhen a request exceeds 15 KiB, inspect ``estimated_output_bytes`` and decide\nwhether the context cost is acceptable; to approve, repeat the same call with the\nsame repo_path and ids and set ``allow_large_output=True``."
+    "LLM use: pass only IDs visible in the current result instead of loading the\nfull project dictionary. Recovery means a known historical identity and\nmust not be presented as an active symbol; missing means no known identity.\nWhen a request exceeds 15 KiB, inspect ``_output`` (or ``confirmation_required``) and decide\nwhether to consume the auto-bounded prefix, request remaining IDs in a follow-up call, or repeat with ``allow_large_output=True`` for the full payload."
   ],
   "examples": [
     "Use this instead of get_project_index when you only need to decode a\nhandful of IDs found in a report (e.g. from module_dependency_matrix or\nshared_usage_clusters).  Much cheaper than loading the entire registry.",
     "Accepts both module IDs (e.g. '124/1') and artifact IDs (e.g. 'A35/1').\nEach ID resolves to ``{\"name\": ..., \"status\": \"active|recovery|missing\"}``\nso stale identities are distinguishable from malformed or unknown IDs."
   ]
 }
-

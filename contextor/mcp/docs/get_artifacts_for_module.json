@@ -5,15 +5,16 @@
     "[OPTIMIZED] Returns artifacts exported by a module with consumer information and progressive disclosure."
   ],
   "parameters": [
-    "``module_name`` (or alias ``module``) can be:\n- An exact active module ID: '259/1'\n- A full dotted module name: 'contextor.ui.gui_parser'\n- A file path relative to the repo root: 'contextor/ui/gui_parser.py'",
-    "``include_consumers=True`` includes consumer counts and evidence. Set ``include_consumers=False`` for signatures-only view.",
-    "``symbol_filter`` filters candidate artifacts by symbol name substring before limits and ranking.",
-    "``limit`` bounds the maximum number of artifacts returned (default 50, pass ``None`` for unbounded). In default compact mode, output is capped at 10 salience-ranked artifacts.",
-    "``evidence_limit`` bounds consumer identities per artifact (default 20, pass ``None`` for unbounded). In compact mode, evidence is capped at 3 samples.",
-    "``compact=True`` (default) returns a progressive-disclosure summary: up to 10 artifacts selected by salience (high consumer fan-in first) with up to 3 consumer evidence items each.",
-    "``compact=False`` returns full artifact details ordered alphabetically.",
-    "``fields`` projects top-level domain keys: ``module``, ``module_id``, ``artifact_count``, ``total_artifact_count``, ``truncated``, ``symbol_filter``, ``data_sources``, ``complete_symbol_catalog``, and ``artifacts``. Protocol metadata (such as ``consumer_representation`` and ``expand``) is attached independently when required by the representation.",
-    "``representation`` controls nested consumer encoding: ``named`` (default module names), ``indexed`` (compact module IDs resolved via ``lookup_index_entries``), or ``auto`` (stateless negotiation returning decision prompt when identity compression yields substantial token savings)."
+    "repo_path (string, required): canonical repository root.",
+    "module_name (string, optional, default \"\"): module identifier (accepts module ID e.g. '259/1', dotted module name, or file path).",
+    "include_consumers (boolean, default true): includes consumer counts and evidence when true; signatures-only view when false.",
+    "symbol_filter (string, optional, default \"\"): filters candidate artifacts by symbol name substring before limits and ranking.",
+    "limit (integer or null, default 50): maximum number of artifacts returned; pass null for unbounded (default compact mode caps at 10 items).",
+    "evidence_limit (integer or null, default 20): maximum consumer identities per artifact; pass null for unbounded (compact mode caps evidence at 3 samples).",
+    "compact (boolean, default true): returns progressive-disclosure summary (up to 10 salience-ranked artifacts with 3 evidence items each) when true; full details when false.",
+    "fields (array of strings or null, default null): optional projection list of top-level keys to return; null returns full response.",
+    "representation (string, default \"named\"): nested consumer encoding format (\"named\", \"indexed\", or \"auto\").",
+    "module (string or null, optional, default null): alias for module_name."
   ],
   "behavior": [
     "Resolution order:\n1. Exact active module ID via active module registry.\n2. Path-to-dotted normalization and canonical LIVE state lookup.\n3. Bounded fuzzy module suggestions (score >= 0.75, max 5) from active module registry on textual not-found.\n4. Legacy not-found string fallback when query is not found or is a nonexistent module ID.",

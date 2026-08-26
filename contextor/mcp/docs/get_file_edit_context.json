@@ -5,15 +5,24 @@
     "[OPTIMIZED] Specialized single-shot context pill for LLMs prior to editing a file or module.\nCombines LIVE module/API/dependency state in one response."
   ],
   "parameters": [
-    "Modes:\n  - ``mode=None`` (default): Legacy behavior. When ``compact=True`` (default), returns\n    top-level collection metadata (counts and truncated flags). When ``compact=False``,\n    returns bounded lists of items/tests (using legacy ``max_items``, default 30). Supports ``fields`` projection.\n  - ``mode='minimal'``: Ultra-lightweight pre-edit projection designed for rapid LLM\n    decision-making. Accepts a forgiving ``target`` (relative path, absolute path,\n    dotted module name, or module ID). Returns direct and transitive consumer counts,\n    bounded samples (capped at at most 5 items by default, regardless of legacy ``max_items=30`` default),\n    and covering tests in 100% in-memory RAM without disk reads. Sample collections explicitly provide\n    both total count and a ``truncated`` boolean flag."
+    "repo_path (string, required): canonical repository root.",
+    "file_path (string, optional, default \"\"): target repository-relative or absolute file path.",
+    "max_items (integer or null, default 30): maximum number of items in bounded legacy collections; pass null for unlimited.",
+    "compact (boolean, default true): when true, returns up to 3 bounded evidence items per non-empty collection with total, truncated, and expand metadata; set to false for full item lists.",
+    "fields (array of strings or null, default null): optional projection list of top-level keys to return; null returns the full response.",
+    "mode (string or null, default null): execution mode; null preserves default context behavior, while 'minimal' returns an ultra-lightweight in-memory decision projection for fast pre-edit assessment.",
+    "target (string or null, default null): flexible target identifier in minimal mode (accepts relative/absolute file path, dotted module name, or module ID)."
   ],
   "behavior": [
-    "Consumer & dependency semantics:\n  - ``direct_count`` / ``direct consumer``: Unique module directly referencing/importing the target through a hard or soft dependency edge.\n  - ``transitive_count`` / ``transitive consumer``: Unique module reachable through reverse hard-or-soft dependency traversal, excluding the target itself.",
-    "If an artifact/symbol identity is passed as target in minimal mode, returns a structured\ndiagnostic indicating the definer module and suggesting ``get_artifact_blast_radius``."
+    "1. mode=null (default): Combines LIVE module, API boundary, direct/transitive consumers, and covering tests. When compact=True, emits collection counts and truncated flags; when compact=False, emits bounded item lists up to max_items.",
+    "2. mode='minimal': Returns an ultra-lightweight in-memory pre-edit decision projection (direct and transitive consumer counts, risk metrics, and covering test sample) without reading file bodies from disk.",
+    "3. Consumer semantics: direct_count measures unique modules directly importing the target; transitive_count measures all unique modules reachable via reverse dependency traversal.",
+    "4. Exposes stale or unavailable canonical truth explicitly. Does not dump whole source files."
   ],
   "freshness": [],
   "errors": [],
-  "usage_notes": [],
+  "usage_notes": [
+    "LLM use: in minimal mode, pass target (file path or module name) prior to editing a file to quickly gauge blast radius and relevant test targets."
+  ],
   "examples": []
 }
-

@@ -27,9 +27,18 @@ def get_report_diff(
         layer_items, layer_total, layer_truncated = query_helpers.bounded_items(
             sorted(layers.items()), max_items
         )
-        layer_collection = {"total": layer_total, "truncated": layer_truncated}
-        if not compact:
-            layer_collection["items"] = dict(layer_items)
+        if compact:
+            _ev_limit = 3 if max_items is None else min(3, max_items)
+            layer_evidence = dict(list(layer_items)[:_ev_limit])
+            layer_collection = {
+                "total": layer_total,
+                "truncated": layer_total > len(layer_evidence),
+                "evidence": layer_evidence,
+            }
+            if layer_collection["truncated"]:
+                layer_collection["expand"] = {"compact": False, "max_items": None}
+        else:
+            layer_collection = {"total": layer_total, "truncated": layer_truncated, "items": dict(layer_items)}
         diff_data["report_diff"] = {**report_diff, "layers": layer_collection}
         if fields is not None:
             allowed_fields = set(diff_data)

@@ -1,207 +1,936 @@
-# CONTEXTOR — REMAINING MCP ERGONOMICS — E2 STATUS / LIVE EVENTS / UPDATE_FILE
+# CONTEXTOR — ROUND-TRIP ERGONOMICS R3A-H1 — REPORT
 **Date:** 2026-08-26  
-**Mode:** IMPLEMENTATION (DOCUMENTATION & CONTRACT TESTS ONLY)  
-**Target Docs:** `contextor/mcp/docs/update_file.json`, `contextor/mcp/docs/get_analysis_status.json`, `contextor/mcp/docs/get_live_events.json`  
-**Test Target:** `tests/mcp/tools/test_status_live_update_contracts.py`  
-**Status:** IMPLEMENTED, VALIDATED & VERIFIED (PASS)
+**Mode:** HARDENING & EXACT PATCH APPLICATION  
 
 ---
 
-## 1. CEL I ZAKRES ZMIAN
+## 1. Ergonomics Verdict & Status
 
-1. **Brak zmian w kodzie produkcyjnym (`PRODUCTION_FILES_CHANGED=NONE`):**
-   - Wszystkie sygnatury runtime pozostają w 100% zachowane:
-     - `get_analysis_status(repo_path: str, job_id: str | None = None, max_skipped_files: int | None = 10, allow_large_output: bool = False) -> str`
-     - `get_live_events(repo_path: str, after_revision: int | None = None, limit: int | None = 20) -> str`
-     - `update_file(repo_path: str, file_path: str, max_items: int | None = 30, compact: bool = True, fields: list[str] | None = None) -> str`
-2. **Dokumentacja Publiczna MCP:**
-   - W `update_file.json`: dodano kompletny opis parametrów (`repo_path`, `file_path`, `max_items`, `compact`, `fields`) oraz opis workflow LIVE (desktop watcher path vs manual incremental publication path, semantykę `semantic_diff` oraz sygnał `runtime_restart_required`).
-   - W `get_analysis_status.json`: jawnie wyeksponowano `repo_path` (required) oraz defaulty parametrów.
-   - W `get_live_events.json`: jawnie wyeksponowano `repo_path` (required) oraz semantykę bufora zdarzeń.
-3. **Nowe Testy Kontraktowe:**
-   - Utworzono `tests/mcp/tools/test_status_live_update_contracts.py` (9 testów weryfikujących sygnatury oraz kompletność dokumentacji parametrów i zachowań).
-
----
-
-## 2. WERYFIKACJA TESTAMI (TEST EXECUTION EVIDENCE)
-
-- Walidacja składni JSON (`python -m json.tool` dla 3 plików docs): **PASS**
-- `tests/mcp/tools/test_status_live_update_contracts.py`: **9 passed**
-- `tests/test_mcp_documentation.py` & `tests/test_mcp_split_s2c.py`: **46 passed** (łącznie 55 passed)
-
----
-
-## 3. DOKŁADNE DIFFY DOKUMENTACJI I TESTÓW (COMPLETE UNIFIED DIFFS)
-
-### 1. `contextor/mcp/docs/update_file.json`
-```diff
---- a/contextor/mcp/docs/update_file.json
-+++ b/contextor/mcp/docs/update_file.json
-@@ -4,8 +4,19 @@
-   "purpose": [
-     "[OPTIMIZED] Incremental architectural update for a modified file.\nUpdates the canonical state and graph structure in real-time. When the\nshared LIVE service is available, the update executes in its owner process\nso desktop and MCP observe the same revision; otherwise the hydrated local\nengine remains a fallback. Requires a completed project analysis."
-   ],
--  "parameters": [],
--  "behavior": [],
-+  "parameters": [
-+    "repo_path (string, required): canonical repository root.",
-+    "file_path (string, required): repository-relative or accepted absolute target file path processed by the existing incremental/LIVE update path.",
-+    "max_items (integer or null, default 30): maximum number of bounded semantic-diff items emitted where applicable; null preserves existing unbounded semantics.",
-+    "compact (boolean, default true): controls existing compact semantic-diff/result shaping.",
-+    "fields (array of strings or null, default null): optional existing response projection; null returns the normal response shape."
-+  ],
-+  "behavior": [
-+    "1. When the desktop app is running, its file watcher owns the update workflow. Do not call update_file directly; instead, poll get_live_events from the previous revision and confirm the corresponding desktop_watcher event.",
-+    "2. When the desktop app / shared LIVE watcher is not running, update_file serves as the manual incremental publication path following a file edit.",
-+    "3. Incremental analysis updates the in-memory canonical state and emits semantic_diff for added/removed symbols, signature changes, and AST body fingerprints (bodies_changed). Semantic-diff describes architectural delta and does not replace line-level code diffs.",
-+    "4. If the update modifies running MCP server implementation files and signals runtime_restart_required: true, the MCP server process requires a manual restart before runtime certification."
-+  ],
-   "freshness": [],
-   "errors": [
-     "Semantic-diff and affected-modules collections always expose ``total`` and\n``truncated``. The default compact response omits ``items``; set\n``compact=False`` for bounded symbol/signature/affected-module evidence.\n``max_items`` is the per-collection limit; pass ``None`` to return all\nrequested evidence without truncation. ``fields`` projects top-level\nresponse keys after compact shaping. Stable fields include ``status``,\n``file_path``, graph/metrics state fields, ``affected_modules`` (containing\nthe module-level reverse blast radius when ``blast_radius_state == \"fresh\"``),\n``live_state_persisted``, ``semantic_diff`` and\n``runtime_restart_required``; ``delta`` and runtime warning fields are\nconditional. Invalid projections return the current allowlist."
 ```
+SEARCH_SOURCE_DOUBLE_ROUNDTRIP=ELIMINATED_WHEN_PREFIX_FITS
+LOOKUP_INDEX_DOUBLE_ROUNDTRIP=ELIMINATED_WHEN_PREFIX_FITS
+ANALYSIS_STATUS_DOUBLE_ROUNDTRIP=ELIMINATED_WHEN_SKIPPED_FILES_BOUNDING_FITS
 
-### 2. `contextor/mcp/docs/get_analysis_status.json`
-```diff
---- a/contextor/mcp/docs/get_analysis_status.json
-+++ b/contextor/mcp/docs/get_analysis_status.json
-@@ -5,9 +5,10 @@
-     "Return durable status for a non-blocking MCP analysis job."
-   ],
-   "parameters": [
--    "``job_id`` (string or null, default ``null``): specific 32-character job identifier or omit to inspect the latest job.",
--    "``max_skipped_files`` (integer or null, default ``10``): maximum skipped file entries in analysis_coverage; pass ``null`` for unlimited.",
--    "``allow_large_output`` (boolean, default ``false``): override to approve emission of outputs exceeding the 15 KiB warning threshold."
-+    "repo_path (string, required): canonical repository root.",
-+    "job_id (string or null, optional, default null): specific 32-character job identifier or omit to inspect the latest job.",
-+    "max_skipped_files (integer or null, optional, default 10): maximum skipped file entries in analysis_coverage; pass null for unlimited.",
-+    "allow_large_output (boolean, optional, default false): override to approve emission of outputs exceeding the 15 KiB warning threshold."
-   ],
-   "behavior": [
-     "Returns durable status for the specified or latest analysis job without any cardinality hard limit.\nOutput <= 15 KiB (15360 UTF-8 bytes) returns the status payload normally.\nOutput > 15 KiB with ``allow_large_output=false`` acts as an agent-controlled context\nsafety preflight and returns ``status: 'confirmation_required'`` with exact current-snapshot\npredicted UTF-8 byte size and retry instructions.\nPassing ``allow_large_output=true`` returns the complete lossless status response.\nFor running jobs, note that status and progress may advance between preflight and retry."
-```
+SOURCE_RANGE_LOSSLESS_GUARD=PRESERVED
+GENERIC_GUARD_CONTRACT_CHANGED=NO
+ALLOW_LARGE_OUTPUT_TRUE_CONTRACT_CHANGED=NO
+THRESHOLD_BYTES=15360
 
-### 3. `contextor/mcp/docs/get_live_events.json`
-```diff
---- a/contextor/mcp/docs/get_live_events.json
-+++ b/contextor/mcp/docs/get_live_events.json
-@@ -5,8 +5,9 @@
-     "Return revisioned desktop/MCP LIVE events since a known revision."
-   ],
-   "parameters": [
--    "``after_revision`` (integer or null, default ``null``): filter events strictly newer than this revision integer; omit for initial/latest polling.",
--    "``limit`` (integer or null, default ``20``): maximum retained events to return; pass ``null`` for all retained events."
-+    "repo_path (string, required): canonical repository root.",
-+    "after_revision (integer or null, optional, default null): filter events strictly newer than this revision integer; omit for initial/latest polling.",
-+    "limit (integer or null, optional, default 20): maximum retained events to return; pass null for all retained events."
-   ],
-   "behavior": [
-     "MCP cannot push unsolicited messages into an idle model; this bounded,\nrevisioned feed is the reliable pull mechanism for continuous LIVE state.\nEvents are an ephemeral in-RAM notification feed (retaining the most recent 100 events),\nnot a full history or append-only source of truth. The canonical LIVE state is authoritative.\nThe response exposes explicit continuity metadata: ``latest_revision``,\n``earliest_retained_revision`` (or ``null`` if buffer empty), ``continuity``\n(``'not_requested'``, ``'continuous'``, or ``'gap'``), ``resync_required`` (boolean),\nand ``resync_reason`` (``'event_retention_gap'``, ``'revision_discontinuity'``, or ``null``).\nWhen ``resync_required=true``, the caller cursor lost continuity with the retained event window;\nthe caller must perform a canonical state resync (e.g. query_canonical_projection or\nget_project_architecture) rather than assuming returned events represent a complete sequential delta.\n``limit=None`` returns all retained matching events (up to 100), not the full history.\n``truncated`` indicates truncation solely due to the requested ``limit``, not retention loss."
-```
+AUTO_BOUNDED_PAYLOAD_ALWAYS_LE_THRESHOLD=PASS
+FULL_OUTPUT_BYTES_EXACT=PASS
+NO_REQUERY_FOR_AUTO_BOUNDING=PASS
+NO_STATE_MUTATION_FOR_AUTO_BOUNDING=PASS
 
-### 4. `tests/mcp/tools/test_status_live_update_contracts.py` (NEW FILE)
-```python
-import inspect
-import json
-from pathlib import Path
+COLLECTED_AUTO_BOUNDED_TESTS=22
+PASSED_AUTO_BOUNDED_TESTS=22
+TARGETED_REGRESSION_TESTS_PASSED=172
 
-from contextor import mcp_server
-from contextor.mcp import documentation
-
-
-def _load_doc(tool_name: str) -> dict:
-    doc_path = documentation.DOCS_DIR / f"{tool_name}.json"
-    return json.loads(doc_path.read_text(encoding="utf-8"))
-
-
-def test_status_live_update_contracts__get_analysis_status_signature():
-    tools = mcp_server.mcp._tool_manager._tools
-    sig = str(inspect.signature(tools["get_analysis_status"].fn))
-    assert sig == "(repo_path: str, job_id: str | None = None, max_skipped_files: int | None = 10, allow_large_output: bool = False) -> str"
-
-
-def test_status_live_update_contracts__get_live_events_signature():
-    tools = mcp_server.mcp._tool_manager._tools
-    sig = str(inspect.signature(tools["get_live_events"].fn))
-    assert sig == "(repo_path: str, after_revision: int | None = None, limit: int | None = 20) -> str"
-
-
-def test_status_live_update_contracts__update_file_signature():
-    tools = mcp_server.mcp._tool_manager._tools
-    sig = str(inspect.signature(tools["update_file"].fn))
-    assert sig == "(repo_path: str, file_path: str, max_items: int | None = 30, compact: bool = True, fields: list[str] | None = None) -> str"
-
-
-def test_status_live_update_contracts__get_analysis_status_docs_complete():
-    doc = _load_doc("get_analysis_status")
-    params_text = "\n".join(doc.get("parameters", []))
-    assert "repo_path (string, required)" in params_text
-    assert "job_id (string or null, optional, default null)" in params_text
-    assert "max_skipped_files (integer or null, optional, default 10)" in params_text
-    assert "allow_large_output (boolean, optional, default false)" in params_text
-
-
-def test_status_live_update_contracts__get_live_events_docs_complete():
-    doc = _load_doc("get_live_events")
-    params_text = "\n".join(doc.get("parameters", []))
-    assert "repo_path (string, required)" in params_text
-    assert "after_revision (integer or null, optional, default null)" in params_text
-    assert "limit (integer or null, optional, default 20)" in params_text
-
-
-def test_status_live_update_contracts__update_file_docs_complete():
-    doc = _load_doc("update_file")
-    params_text = "\n".join(doc.get("parameters", []))
-    assert "repo_path (string, required)" in params_text
-    assert "file_path (string, required)" in params_text
-    assert "max_items (integer or null, default 30)" in params_text
-    assert "compact (boolean, default true)" in params_text
-    assert "fields (array of strings or null, default null)" in params_text
-
-
-def test_status_live_update_contracts__update_file_docs_describe_desktop_watcher_path():
-    doc = _load_doc("update_file")
-    combined = "\n".join(doc.get("behavior", []) + doc.get("usage_notes", []))
-    assert "desktop_watcher" in combined
-    assert "get_live_events" in combined
-
-
-def test_status_live_update_contracts__update_file_docs_describe_manual_incremental_path():
-    doc = _load_doc("update_file")
-    combined = "\n".join(doc.get("behavior", []) + doc.get("usage_notes", []))
-    assert "semantic_diff" in combined
-    assert "bodies_changed" in combined
-
-
-def test_status_live_update_contracts__update_file_docs_describe_runtime_restart_signal():
-    doc = _load_doc("update_file")
-    combined = "\n".join(doc.get("behavior", []) + doc.get("usage_notes", [] + doc.get("errors", [])))
-    assert "runtime_restart_required" in combined
-```
-
----
-
-## 4. STATUS OPERACYJNY
-
-```text
-PRODUCTION_FILES_CHANGED=NONE
-
-FILES_CHANGED:
-- C:\Temp\Contextor_Repo\contextor\mcp\docs\update_file.json
-- C:\Temp\Contextor_Repo\contextor\mcp\docs\get_analysis_status.json
-- C:\Temp\Contextor_Repo\contextor\mcp\docs\get_live_events.json
-- C:\Temp\Contextor_Repo\tests\mcp\tools\test_status_live_update_contracts.py
-
-TESTS:
-- tests/mcp/tools/test_status_live_update_contracts.py: 9 passed
-- tests/test_mcp_documentation.py & tests/test_mcp_split_s2c.py: 46 passed
-
-GET_ANALYSIS_STATUS_ERGONOMICS=PASS
-GET_LIVE_EVENTS_ERGONOMICS=PASS
-UPDATE_FILE_ERGONOMICS=PASS
-
-MCP_RESTART_REQUIRED=NO
+MCP_RESTART_REQUIRED=YES
 LIVE_RESTART_REQUIRED=NO
 
 VERDICT=PASS
+```
+
+---
+
+## 2. Files Summary
+
+```
+PRODUCTION_FILES_CHANGED=[
+  contextor/mcp/output_guard.py,
+  contextor/mcp/tools/search_source.py,
+  contextor/mcp/tools/lookup_index_entries.py,
+  contextor/mcp/tools/get_analysis_status.py,
+]
+
+FILES_CHANGED=[
+  contextor/mcp/output_guard.py,
+  contextor/mcp/tools/search_source.py,
+  contextor/mcp/tools/lookup_index_entries.py,
+  contextor/mcp/tools/get_analysis_status.py,
+  tests/mcp/tools/test_auto_bounded_output.py,
+  tests/test_mcp_regressions.py,
+]
+
+TESTS=[
+  tests/mcp/tools/test_auto_bounded_output.py (PASSED: 22/22),
+  tests/mcp/tools/test_search_source.py (PASSED: 10/10),
+  tests/test_mcp_documentation.py (PASSED: 7/7),
+  tests/mcp/tools/test_public_mcp_docs_parity.py (PASSED: 5/5),
+  tests/mcp/tools/test_status_live_update_contracts.py (PASSED: 22/22),
+  tests/mcp/tools/test_specialized_tool_contracts.py (PASSED: 11/11),
+  tests/test_mcp_regressions.py (PASSED: 77/77),
+  tests/mcp/tools/test_compact_evidence_contract.py (PASSED: 18/18),
+]
+```
+
+---
+
+## 3. Complete Unified Diffs (Relative to HEAD)
+
+### `contextor/mcp/output_guard.py`
+
+```diff
+diff --git a/contextor/mcp/output_guard.py b/contextor/mcp/output_guard.py
+index a54df97..896fa34 100644
+--- a/contextor/mcp/output_guard.py
++++ b/contextor/mcp/output_guard.py
+@@ -36,4 +36,48 @@ def guard_large_output(
+         }
+     )
+     return json.dumps(warning_response, indent=2)
++
++
++def largest_fitting_prefix(
++    max_count: int,
++    build_serialized,
++    *,
++    min_count: int = 1,
++) -> tuple[str, int] | None:
++    """
++    Return the largest deterministic prefix whose serialized UTF-8 payload
++    fits within LARGE_OUTPUT_WARNING_BYTES.
++
++    `build_serialized(count)` must build deterministic prefixes whose
++    serialized byte size is monotonically non-decreasing as `count` grows.
++    This helper has no JSON or domain semantics; it only measures serialized
++    UTF-8 payload size and performs a binary search under that precondition.
++    """
++    if max_count < min_count:
++        return None
++
++    max_candidate = build_serialized(max_count)
++    if len(max_candidate.encode("utf-8")) <= LARGE_OUTPUT_WARNING_BYTES:
++        return max_candidate, max_count
++
++    min_candidate = build_serialized(min_count)
++    if len(min_candidate.encode("utf-8")) > LARGE_OUTPUT_WARNING_BYTES:
++        return None
++
++    low = min_count
++    high = max_count - 1
++    best_candidate = min_candidate
++    best_count = min_count
++
++    while low <= high:
++        mid = (low + high) // 2
++        candidate = build_serialized(mid)
++
++        if len(candidate.encode("utf-8")) <= LARGE_OUTPUT_WARNING_BYTES:
++            best_candidate = candidate
++            best_count = mid
++            low = mid + 1
++        else:
++            high = mid - 1
++
++    return best_candidate, best_count
+```
+
+---
+
+### `contextor/mcp/tools/search_source.py`
+
+```diff
+diff --git a/contextor/mcp/tools/search_source.py b/contextor/mcp/tools/search_source.py
+index dd9a286..4e0ba3e 100644
+--- a/contextor/mcp/tools/search_source.py
++++ b/contextor/mcp/tools/search_source.py
+@@ -4,7 +4,11 @@ from pathlib import Path
+ from contextor.core.source import SourceError, read_source
+ from contextor.mcp import query_helpers
+ from contextor.mcp import runtime as mcp_runtime
+-from contextor.mcp.output_guard import guard_large_output
++from contextor.mcp.output_guard import (
++    LARGE_OUTPUT_WARNING_BYTES,
++    guard_large_output,
++    largest_fitting_prefix,
++)
+ from contextor.mcp.source_helpers import (
+     canonical_python_sources,
+     SourceSpanResolver,
+@@ -127,6 +131,38 @@ def search_source(
+         "truncated": len(selected) < total,
+     }
+     serialized = json.dumps(result, indent=2, ensure_ascii=False)
++    full_bytes = len(serialized.encode("utf-8"))
++
++    if (
++        full_bytes > LARGE_OUTPUT_WARNING_BYTES
++        and not allow_large_output
++        and len(selected) > 0
++    ):
++        def _build(count: int) -> str:
++            prefix = selected[:count]
++            cand = {
++                "status": "ok",
++                "search_term": effective_term,
++                "case_sensitive": case_sensitive,
++                "total_matches": total,
++                "matches": prefix,
++                "truncated": len(prefix) < total,
++                "_output": {
++                    "auto_bounded": True,
++                    "full_output_bytes": full_bytes,
++                    "warning_threshold_bytes": LARGE_OUTPUT_WARNING_BYTES,
++                    "requested_count": len(selected),
++                    "returned_count": len(prefix),
++                    "retry": {"allow_large_output": True},
++                },
++            }
++            return json.dumps(cand, indent=2, ensure_ascii=False)
++
++        bounded = largest_fitting_prefix(len(selected), _build, min_count=1)
++        if bounded is not None:
++            return bounded[0]
++
+     return guard_large_output(
+         serialized,
+         allow_large_output=allow_large_output,
+@@ -136,3 +172,4 @@ def search_source(
+             "Repeat the same search_source call with the same repo_path, search_term, limit, and case_sensitive and set allow_large_output=true."
+         ),
+     )
++
+```
+
+---
+
+### `contextor/mcp/tools/lookup_index_entries.py`
+
+```diff
+diff --git a/contextor/mcp/tools/lookup_index_entries.py b/contextor/mcp/tools/lookup_index_entries.py
+index 28341a7..d873d95 100644
+--- a/contextor/mcp/tools/lookup_index_entries.py
++++ b/contextor/mcp/tools/lookup_index_entries.py
+@@ -2,7 +2,11 @@ import json
+ from pathlib import Path
+ 
+ from contextor.core.report_query import catalog_from_registry
+-from contextor.mcp.output_guard import guard_large_output
++from contextor.mcp.output_guard import (
++    LARGE_OUTPUT_WARNING_BYTES,
++    guard_large_output,
++    largest_fitting_prefix,
++)
+ 
+ 
+ def lookup_index_entries(
+@@ -28,7 +32,32 @@ def lookup_index_entries(
+             else:
+                 entry = {"name": None, "status": "missing"}
+             result[str(id_)] = entry
++        result_items = list(result.items())
+         serialized_output = json.dumps(result, indent=2)
++        full_bytes = len(serialized_output.encode("utf-8"))
++
++        if (
++            full_bytes > LARGE_OUTPUT_WARNING_BYTES
++            and not allow_large_output
++            and len(result_items) > 0
++            and "_output" not in result
++        ):
++            def _build(count: int) -> str:
++                prefix_dict = dict(result_items[:count])
++                prefix_dict["_output"] = {
++                    "auto_bounded": True,
++                    "full_output_bytes": full_bytes,
++                    "warning_threshold_bytes": LARGE_OUTPUT_WARNING_BYTES,
++                    "requested_count": len(ids),
++                    "returned_count": count,
++                    "retry": {"allow_large_output": True},
++                }
++                return json.dumps(prefix_dict, indent=2)
++
++            bounded = largest_fitting_prefix(len(result_items), _build, min_count=1)
++            if bounded is not None:
++                return bounded[0]
++
+         return guard_large_output(
+             serialized_output,
+             allow_large_output=allow_large_output,
+```
+
+---
+
+### `contextor/mcp/tools/get_analysis_status.py`
+
+```diff
+diff --git a/contextor/mcp/tools/get_analysis_status.py b/contextor/mcp/tools/get_analysis_status.py
+index c49f6d5..cd22640 100644
+--- a/contextor/mcp/tools/get_analysis_status.py
++++ b/contextor/mcp/tools/get_analysis_status.py
+@@ -3,7 +3,11 @@ import os
+ from pathlib import Path
+ 
+ from contextor.mcp import analysis_jobs
+-from contextor.mcp.output_guard import guard_large_output
++from contextor.mcp.output_guard import (
++    LARGE_OUTPUT_WARNING_BYTES,
++    guard_large_output,
++    largest_fitting_prefix,
++)
+ 
+ 
+ def get_analysis_status(
+@@ -39,10 +43,39 @@ def get_analysis_status(
+             "error": "owner_process_changed",
+         }
+         analysis_jobs._write_analysis_job(root, job)
+-    serialized = json.dumps(
+-        analysis_jobs._public_job(job, max_skipped_files=max_skipped_files),
+-        indent=2,
+-    )
++    public_job = analysis_jobs._public_job(job, max_skipped_files=max_skipped_files)
++    serialized = json.dumps(public_job, indent=2)
++    full_bytes = len(serialized.encode("utf-8"))
++
++    if full_bytes > LARGE_OUTPUT_WARNING_BYTES and not allow_large_output:
++        curr_skipped_items = (
++            (public_job.get("analysis_coverage", {}).get("skipped_python_files", {}) or {}).get(
++                "items", []
++            )
++        )
++        upper_bound = len(curr_skipped_items)
++
++        def _build(count: int) -> str:
++            cand = analysis_jobs._public_job(job, max_skipped_files=count)
++            emitted = len(
++                (cand.get("analysis_coverage", {}).get("skipped_python_files", {}) or {}).get(
++                    "items", []
++                )
++            )
++            cand["_output"] = {
++                "auto_bounded": True,
++                "full_output_bytes": full_bytes,
++                "warning_threshold_bytes": LARGE_OUTPUT_WARNING_BYTES,
++                "retry": {"allow_large_output": True},
++                "bounded_collection": "skipped_files",
++                "returned_count": emitted,
++            }
++            return json.dumps(cand, indent=2)
++
++        bounded = largest_fitting_prefix(upper_bound, _build, min_count=0)
++        if bounded is not None:
++            return bounded[0]
++
+     return guard_large_output(
+         serialized,
+         allow_large_output=allow_large_output,
+@@ -50,3 +83,4 @@ def get_analysis_status(
+             "Repeat the same get_analysis_status call with the same repo_path, job_id, and max_skipped_files and set allow_large_output=true."
+         ),
+     )
++
+```
+
+---
+
+### `tests/mcp/tools/test_auto_bounded_output.py`
+
+```diff
+--- /dev/null
++++ b/tests/mcp/tools/test_auto_bounded_output.py
+@@ -0,0 +1,447 @@
++import json
++import os
++from pathlib import Path
++import pytest
++
++from contextor.mcp.output_guard import (
++    LARGE_OUTPUT_WARNING_BYTES,
++    guard_large_output,
++    largest_fitting_prefix,
++)
++from contextor.mcp import runtime as mcp_runtime
++from contextor.mcp import analysis_jobs
++from contextor.mcp.tools.search_source import search_source
++from contextor.mcp.tools.lookup_index_entries import lookup_index_entries
++from contextor.mcp.tools.get_analysis_status import get_analysis_status
++from contextor.mcp.tools.get_source_range import get_source_range
++
++
++# ---------------------------------------------------------------------------
++# 1. largest_fitting_prefix helper tests
++# ---------------------------------------------------------------------------
++
++
++def test_auto_bounded_output__largest_fitting_prefix_exact_threshold():
++    # Candidate of exact 15360 bytes fits
++    def build(count: int) -> str:
++        return "x" * 15360
++
++    res = largest_fitting_prefix(10, build, min_count=1)
++    assert res is not None
++    candidate, count = res
++    assert count == 10
++    assert len(candidate.encode("utf-8")) == LARGE_OUTPUT_WARNING_BYTES
++
++
++def test_auto_bounded_output__largest_fitting_prefix_rejects_threshold_plus_one():
++    # 15361 bytes does not fit
++    def build(count: int) -> str:
++        return "x" * 15361
++
++    res = largest_fitting_prefix(10, build, min_count=1)
++    assert res is None
++
++
++def test_auto_bounded_output__largest_fitting_prefix_selects_largest_count():
++    # Each item adds 1000 bytes. With base 360 bytes, count 15 = 15360 bytes (fits), count 16 = 16360 (too large)
++    def build(count: int) -> str:
++        return "a" * (360 + count * 1000)
++
++    res = largest_fitting_prefix(30, build, min_count=1)
++    assert res is not None
++    candidate, count = res
++    assert count == 15
++    assert len(candidate.encode("utf-8")) == 15360
++
++
++def test_auto_bounded_output__largest_fitting_prefix_returns_none_when_minimum_too_large():
++    def build(count: int) -> str:
++        return "x" * (20000 + count * 100)
++
++    res = largest_fitting_prefix(10, build, min_count=1)
++    assert res is None
++
++
++# ---------------------------------------------------------------------------
++# 2. search_source auto-bounding tests
++# ---------------------------------------------------------------------------
++
++
++def _setup_search_source_repo(tmp_path: Path, match_count: int = 50, match_size: int = 500):
++    repo = tmp_path / "search_repo"
++    repo.mkdir(parents=True, exist_ok=True)
++    pkg = repo / "pkg"
++    pkg.mkdir(parents=True, exist_ok=True)
++
++    code_lines = ["# Large file for search_source test"]
++    for i in range(match_count):
++        code_lines.append(f"def func_{i}():")
++        code_lines.append(f"    '''docstring with target symbol {'y' * match_size}'''")
++        code_lines.append(f"    return {i}")
++    target_file = pkg / "large_module.py"
++    target_file.write_text("\n".join(code_lines), encoding="utf-8")
++
++    class Module:
++        path = "pkg/large_module.py"
++        absolute_path = str(target_file)
++
++    class State:
++        resync_required = False
++        canonical_files = ["pkg/large_module.py"]
++        excluded_files = []
++        modules = {"pkg.large_module": Module()}
++
++    class Engine:
++        state = State()
++
++    return repo, Engine()
++
++
++def test_auto_bounded_output__search_source_returns_useful_single_shot_prefix(tmp_path, monkeypatch):
++    repo, engine = _setup_search_source_repo(tmp_path, match_count=50, match_size=500)
++    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda root: engine)
++
+     raw = search_source(str(repo), search_term="target", allow_large_output=False, limit=None)
+     res = json.loads(raw)
+ 
+     assert res["status"] == "ok"
+     assert "_output" in res
+     output_meta = res["_output"]
+     assert output_meta["auto_bounded"] is True
+     assert output_meta["full_output_bytes"] > LARGE_OUTPUT_WARNING_BYTES
+     assert output_meta["warning_threshold_bytes"] == LARGE_OUTPUT_WARNING_BYTES
+     assert output_meta["retry"] == {"allow_large_output": True}
+     assert output_meta["requested_count"] == 50
+     assert 1 <= output_meta["returned_count"] < 50
+     assert len(res["matches"]) == output_meta["returned_count"]
+     assert len(raw.encode("utf-8")) <= LARGE_OUTPUT_WARNING_BYTES
+ 
+ 
+ def test_auto_bounded_output__search_source_prefix_is_exact_deterministic_prefix(tmp_path, monkeypatch):
+     repo, engine = _setup_search_source_repo(tmp_path, match_count=40, match_size=600)
+     monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda root: engine)
+ 
+     raw_auto = search_source(str(repo), search_term="target", allow_large_output=False, limit=None)
+     res_auto = json.loads(raw_auto)
+ 
+     raw_full = search_source(str(repo), search_term="target", allow_large_output=True, limit=None)
+     res_full = json.loads(raw_full)
+ 
+     returned_count = res_auto["_output"]["returned_count"]
+     assert res_auto["matches"] == res_full["matches"][:returned_count]
+ 
+ 
+ def test_auto_bounded_output__search_source_full_output_bytes_refers_to_original_limited_candidate(tmp_path, monkeypatch):
+     repo, engine = _setup_search_source_repo(tmp_path, match_count=60, match_size=400)
+     monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda root: engine)
+ 
+     # With limit=30
+     raw_auto = search_source(str(repo), search_term="target", allow_large_output=False, limit=30)
+     res_auto = json.loads(raw_auto)
+ 
+     raw_full_30 = search_source(str(repo), search_term="target", allow_large_output=True, limit=30)
+     res_full_30 = json.loads(raw_full_30)
+ 
+     assert res_auto["_output"]["requested_count"] == 30
+     assert res_auto["_output"]["full_output_bytes"] == len(raw_full_30.encode("utf-8"))
+ 
+ 
+ def test_auto_bounded_output__search_source_allow_large_output_returns_original_full_candidate(tmp_path, monkeypatch):
+     repo, engine = _setup_search_source_repo(tmp_path, match_count=40, match_size=500)
+     monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda root: engine)
+ 
+     raw_full = search_source(str(repo), search_term="target", allow_large_output=True, limit=None)
+     res_full = json.loads(raw_full)
+ 
+     assert res_full["status"] == "ok"
+     assert "_output" not in res_full
+     assert len(res_full["matches"]) == 40
+     assert len(raw_full.encode("utf-8")) > LARGE_OUTPUT_WARNING_BYTES
+ 
+ 
+ def test_auto_bounded_output__search_source_falls_back_to_confirmation_when_one_match_is_too_large(tmp_path, monkeypatch):
+     repo, engine = _setup_search_source_repo(tmp_path, match_count=1, match_size=18000)
+     monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda root: engine)
+ 
+     raw = search_source(str(repo), search_term="target", allow_large_output=False, limit=None)
+     res = json.loads(raw)
+ 
+     assert res["status"] == "confirmation_required"
+     assert "retry" in res
+     assert res["retry"]["allow_large_output"] is True
+ 
+ 
+ # ---------------------------------------------------------------------------
+ # 3. lookup_index_entries auto-bounding tests
+ # ---------------------------------------------------------------------------
+ 
+ 
+ def _setup_lookup_index_catalog(monkeypatch, total_entries: int = 150):
+     from contextor.core import report_query
+     from contextor.mcp.tools import lookup_index_entries as lookup_tool_module
+ 
+     artifacts = {f"A{i}/1": f"pkg.module_{i}::func_{'z' * 120}_{i}" for i in range(total_entries)}
+     catalog = report_query.IndexCatalog(
+         modules={},
+         artifacts=artifacts,
+         recovered_modules={},
+         recovered_artifacts={},
+     )
+     monkeypatch.setattr(lookup_tool_module, "catalog_from_registry", lambda root: catalog)
+     return [f"A{i}/1" for i in range(total_entries)]
+ 
+ 
+ def test_auto_bounded_output__lookup_index_entries_returns_prefix_and_reserved_metadata(tmp_path, monkeypatch):
+     ids = _setup_lookup_index_catalog(monkeypatch, total_entries=150)
+ 
+     raw = lookup_index_entries(str(tmp_path), ids=ids, allow_large_output=False)
+     res = json.loads(raw)
+ 
+     assert "_output" in res
+     meta = res["_output"]
+     assert meta["auto_bounded"] is True
+     assert meta["full_output_bytes"] > LARGE_OUTPUT_WARNING_BYTES
+     assert meta["warning_threshold_bytes"] == LARGE_OUTPUT_WARNING_BYTES
+     assert meta["requested_count"] == 150
+     assert 1 <= meta["returned_count"] < 150
+     assert meta["retry"] == {"allow_large_output": True}
+ 
+     # Count decoded entries (excluding _output)
+     decoded_ids = [k for k in res if k != "_output"]
+     assert len(decoded_ids) == meta["returned_count"]
+     assert len(raw.encode("utf-8")) <= LARGE_OUTPUT_WARNING_BYTES
+ 
+ 
+ def test_auto_bounded_output__lookup_index_entries_preserves_input_order(tmp_path, monkeypatch):
+     ids = _setup_lookup_index_catalog(monkeypatch, total_entries=100)
+ 
+     raw = lookup_index_entries(str(tmp_path), ids=ids, allow_large_output=False)
+     res = json.loads(raw)
+ 
+     decoded_ids = [k for k in res if k != "_output"]
+     assert decoded_ids == ids[: len(decoded_ids)]
+ 
+ 
+ def test_auto_bounded_output__lookup_index_entries_small_response_has_no_output_metadata(tmp_path, monkeypatch):
+     ids = _setup_lookup_index_catalog(monkeypatch, total_entries=5)
+ 
+     raw = lookup_index_entries(str(tmp_path), ids=ids, allow_large_output=False)
+     res = json.loads(raw)
+ 
+     assert "_output" not in res
+     assert len(res) == 5
+     assert set(res.keys()) == set(ids)
+ 
+ 
+ def test_auto_bounded_output__lookup_index_entries_allow_large_output_is_lossless(tmp_path, monkeypatch):
+     ids = _setup_lookup_index_catalog(monkeypatch, total_entries=150)
+ 
+     raw = lookup_index_entries(str(tmp_path), ids=ids, allow_large_output=True)
+     res = json.loads(raw)
+ 
+     assert "_output" not in res
+     assert len(res) == 150
+     assert set(res.keys()) == set(ids)
+     assert len(raw.encode("utf-8")) > LARGE_OUTPUT_WARNING_BYTES
+ 
+ 
+ def test_auto_bounded_output__lookup_index_entries_single_entry_too_large_confirms(tmp_path, monkeypatch):
+     from contextor.core import report_query
+     from contextor.mcp.tools import lookup_index_entries as lookup_tool_module
+ 
+     huge_name = "pkg.module::" + ("x" * 18000)
+     catalog = report_query.IndexCatalog(
+         modules={},
+         artifacts={"A1/1": huge_name},
+         recovered_modules={},
+         recovered_artifacts={},
+     )
+     monkeypatch.setattr(lookup_tool_module, "catalog_from_registry", lambda root: catalog)
+ 
+     raw = lookup_index_entries(str(tmp_path), ids=["A1/1"], allow_large_output=False)
+     res = json.loads(raw)
+ 
+     assert res["status"] == "confirmation_required"
+     assert res["retry"] == {"allow_large_output": True}
+ 
+ 
+ # ---------------------------------------------------------------------------
+ # 4. get_analysis_status auto-bounding tests
+ # ---------------------------------------------------------------------------
+ 
+ 
+ def _setup_analysis_job_with_skipped(tmp_path: Path, skipped_count: int = 150):
+     repo = tmp_path / "status_repo"
+     repo.mkdir(parents=True, exist_ok=True)
+ 
+     skipped = [
+         {"file": f"pkg/skipped_{i}.py", "reason": f"SyntaxError in generated code line {i}: {'w' * 120}"}
+         for i in range(skipped_count)
+     ]
+     job_payload = {
+         "job_id": "0123456789abcdef0123456789abcdef",
+         "operation": "project",
+         "repo_path": str(repo),
+         "target": None,
+         "status": "completed",
+         "created_at": "2026-08-26T12:00:00Z",
+         "started_at": "2026-08-26T12:00:01Z",
+         "completed_at": "2026-08-26T12:00:05Z",
+         "updated_at": "2026-08-26T12:00:05Z",
+         "message": "Analysis completed successfully.",
+         "error": None,
+         "owner_pid": os.getpid(),
+         "live_publish_status": "success",
+         "live_publish_revision": 1,
+         "live_publish_warning": None,
+         "skipped_python_files": skipped,
+     }
+     analysis_jobs._write_analysis_job(repo, job_payload)
+     return repo, job_payload
+ 
+ 
+ def test_auto_bounded_output__analysis_status_only_bounds_skipped_files(tmp_path):
+     repo, job = _setup_analysis_job_with_skipped(tmp_path, skipped_count=150)
+ 
+     raw = get_analysis_status(str(repo), job_id=job["job_id"], max_skipped_files=None, allow_large_output=False)
+     res = json.loads(raw)
+ 
+     assert res["status"] == "completed"
+     assert "_output" in res
+     meta = res["_output"]
+     assert meta["auto_bounded"] is True
+     assert meta["bounded_collection"] == "skipped_files"
+     assert meta["full_output_bytes"] > LARGE_OUTPUT_WARNING_BYTES
+     assert meta["warning_threshold_bytes"] == LARGE_OUTPUT_WARNING_BYTES
+     assert meta["retry"] == {"allow_large_output": True}
+     assert 0 <= meta["returned_count"] < 150
+     assert len(res["analysis_coverage"]["skipped_python_files"]["items"]) == meta["returned_count"]
+     assert len(raw.encode("utf-8")) <= LARGE_OUTPUT_WARNING_BYTES
+ 
+ 
+ def test_auto_bounded_output__analysis_status_preserves_job_scalars(tmp_path):
+     repo, job = _setup_analysis_job_with_skipped(tmp_path, skipped_count=100)
+ 
+     raw = get_analysis_status(str(repo), job_id=job["job_id"], max_skipped_files=None, allow_large_output=False)
+     res = json.loads(raw)
+     persisted = analysis_jobs._read_analysis_job(repo, job["job_id"])
+ 
+     for field in (
+         "job_id",
+         "operation",
+         "repo_path",
+         "status",
+         "created_at",
+         "started_at",
+         "completed_at",
+         "updated_at",
+         "message",
+         "live_publish_status",
+         "live_publish_revision",
+     ):
+         assert res[field] == persisted[field]
+ 
+ 
+ def test_auto_bounded_output__analysis_status_allow_large_output_is_lossless(tmp_path):
+     repo, job = _setup_analysis_job_with_skipped(tmp_path, skipped_count=150)
+ 
+     raw = get_analysis_status(str(repo), job_id=job["job_id"], max_skipped_files=None, allow_large_output=True)
+     res = json.loads(raw)
+ 
+     assert "_output" not in res
+     assert len(res["analysis_coverage"]["skipped_python_files"]["items"]) == 150
+     assert len(raw.encode("utf-8")) > LARGE_OUTPUT_WARNING_BYTES
+ 
+ 
+ def test_auto_bounded_output__analysis_status_minimal_job_too_large_confirms(tmp_path):
+     repo = tmp_path / "huge_status_repo"
+     repo.mkdir(parents=True, exist_ok=True)
+ 
+     job_payload = {
+         "job_id": "0123456789abcdef0123456789abcdef",
+         "operation": "project",
+         "repo_path": str(repo),
+         "target": None,
+         "status": "failed",
+         "created_at": "2026-08-26T12:00:00Z",
+         "started_at": "2026-08-26T12:00:01Z",
+         "completed_at": "2026-08-26T12:00:05Z",
+         "updated_at": "2026-08-26T12:00:05Z",
+         "message": "Error details: " + ("e" * 18000),
+         "error": "huge_error",
+         "owner_pid": os.getpid(),
+         "live_publish_status": "failed",
+         "live_publish_revision": None,
+         "live_publish_warning": None,
+         "skipped_python_files": [],
+     }
+     analysis_jobs._write_analysis_job(repo, job_payload)
+ 
+     raw = get_analysis_status(str(repo), job_id=job_payload["job_id"], allow_large_output=False)
+     res = json.loads(raw)
+ 
+     assert res["status"] == "confirmation_required"
+     assert res["retry"] == {"allow_large_output": True}
+ 
+ 
+ def test_auto_bounded_output__analysis_status_does_not_mutate_persisted_job(tmp_path):
+     repo, job = _setup_analysis_job_with_skipped(tmp_path, skipped_count=100)
+ 
+     # Run auto-bounded query
+     get_analysis_status(str(repo), job_id=job["job_id"], max_skipped_files=None, allow_large_output=False)
+ 
+     # Read the persisted job from disk and verify it still has all 100 skipped files
+     persisted = analysis_jobs._read_analysis_job(repo, job["job_id"])
+     assert len(persisted["skipped_python_files"]) == 100
+ 
+ 
+ # ---------------------------------------------------------------------------
+ # 5. get_source_range lossless confirmation guard regression test
+ # ---------------------------------------------------------------------------
+ 
+ 
+ def test_auto_bounded_output__source_range_remains_lossless_confirmation_guarded(tmp_path, monkeypatch):
+     repo = tmp_path / "range_repo"
+     repo.mkdir(parents=True, exist_ok=True)
+     target_file = repo / "module.py"
+ 
+     lines = [f"x_{i:04d} = 'value_{i:04d}_{'a' * 40}'" for i in range(500)]
+     target_file.write_text("\n".join(lines), encoding="utf-8")
+ 
+     class Module:
+         path = "module.py"
+         absolute_path = str(target_file)
+ 
+     class State:
+         resync_required = False
+         canonical_files = ["module.py"]
+         excluded_files = []
+         modules = {"module": Module()}
+ 
+     class Engine:
+         state = State()
+ 
+     monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda root: Engine())
+ 
+     # 1. Large range (>15360 bytes) with allow_large_output=False -> confirmation_required
+     raw_guard = get_source_range(str(repo), file_path="module.py", start_line=1, end_line=450, allow_large_output=False)
+     res_guard = json.loads(raw_guard)
+     assert res_guard["status"] == "confirmation_required"
+     assert "_output" not in res_guard
+ 
+     # 2. Large range with allow_large_output=True -> lossless requested range
+     raw_full = get_source_range(str(repo), file_path="module.py", start_line=1, end_line=450, allow_large_output=True)
+     res_full = json.loads(raw_full)
+     assert res_full["status"] == "ok"
+     assert res_full["total_lines"] == 450
+     assert "_output" not in res_full
+     assert len(raw_full.encode("utf-8")) > LARGE_OUTPUT_WARNING_BYTES
+ 
+     # 3. Small range (<=15360 bytes) -> normal output without _output metadata
+     raw_small = get_source_range(str(repo), file_path="module.py", start_line=1, end_line=50, allow_large_output=False)
+     res_small = json.loads(raw_small)
+     assert res_small["status"] == "ok"
+     assert res_small["total_lines"] == 50
+     assert "_output" not in res_small
+     assert len(raw_small.encode("utf-8")) <= LARGE_OUTPUT_WARNING_BYTES
++
++
++def test_auto_bounded_output__lookup_reserved_output_key_is_never_overwritten(
++    tmp_path,
++    monkeypatch,
++):
++    from contextor.core import report_query
++    from contextor.mcp.tools import lookup_index_entries as lookup_tool_module
++
++    huge_name = "pkg.module::" + ("x" * 300)
++
++    artifacts = {
++        f"A{i}/1": f"{huge_name}_{i}"
++        for i in range(150)
++    }
++
++    catalog = report_query.IndexCatalog(
++        modules={},
++        artifacts=artifacts,
++        recovered_modules={},
++        recovered_artifacts={},
++    )
++
++    monkeypatch.setattr(
++        lookup_tool_module,
++        "catalog_from_registry",
++        lambda root: catalog,
++    )
++
++    ids = ["_output"] + [f"A{i}/1" for i in range(150)]
++
++    raw = lookup_index_entries(
++        str(tmp_path),
++        ids=ids,
++        allow_large_output=False,
++    )
++    result = json.loads(raw)
++
++    assert result["status"] == "confirmation_required"
++    assert result["retry"] == {"allow_large_output": True}
++
++    approved = json.loads(
++        lookup_index_entries(
++            str(tmp_path),
++            ids=ids,
++            allow_large_output=True,
++        )
++    )
++
++    assert approved["_output"] == {
++        "name": None,
++        "status": "missing",
++    }
++
++
++def test_auto_bounded_output__shared_warning_threshold_is_15360():
++    assert LARGE_OUTPUT_WARNING_BYTES == 15360
+```
+
+---
+
+### `tests/test_mcp_regressions.py`
+
+```diff
+diff --git a/tests/test_mcp_regressions.py b/tests/test_mcp_regressions.py
+index cdb1904..f7aa4eb 100644
+--- a/tests/test_mcp_regressions.py
++++ b/tests/test_mcp_regressions.py
+@@ -914,21 +914,17 @@ def test_get_analysis_status_large_output_preflight_gate(tmp_path):
+     # 2. Unlimited max_skipped_files=None with allow_large_output=False -> auto-bounded
+     raw_warn = mcp_server.get_analysis_status.fn(str(repo), job_id, max_skipped_files=None)
+     warn = json.loads(raw_warn)
+-    assert warn["status"] == "confirmation_required"
+-    assert warn["reason"] == "Estimated output exceeds the recommended context size."
+-    assert warn["warning_threshold_bytes"] == 15360
+-    assert warn["warning_threshold_kib"] == 15.0
+-    assert warn["estimated_output_bytes"] > 15360
+-    assert warn["estimated_output_kib"] == warn["estimated_output_bytes"] / 1024
+-    assert warn["retry"] == {"allow_large_output": True}
+-    assert "repo_path" not in warn
+-    assert "job_id" not in warn
+-    assert "skipped_python_files" not in raw_warn
+-    assert "Repeat the same get_analysis_status call" in warn["retry_instruction"]
+-    assert len(raw_warn.encode("utf-8")) < 1024
++    assert warn["status"] == "completed"
++    assert "_output" in warn
++    assert warn["_output"]["auto_bounded"] is True
++    assert warn["_output"]["bounded_collection"] == "skipped_files"
++    assert warn["_output"]["warning_threshold_bytes"] == 15360
++    assert warn["_output"]["full_output_bytes"] > 15360
++    assert warn["_output"]["retry"] == {"allow_large_output": True}
++    assert len(raw_warn.encode("utf-8")) <= 15360
+ 
+     # 3. Unlimited max_skipped_files=None with allow_large_output=True -> full status
+     raw_override = mcp_server.get_analysis_status.fn(str(repo), job_id, max_skipped_files=None, allow_large_output=True)
+     override = json.loads(raw_override)
+     assert override["status"] == "completed"
+     assert len(override["analysis_coverage"]["skipped_python_files"]["items"]) == 250
+-    assert len(raw_override.encode("utf-8")) == warn["estimated_output_bytes"]
++    assert len(raw_override.encode("utf-8")) == warn["_output"]["full_output_bytes"]
+ 
+ 
+ def test_lookup_index_entries_distinguishes_active_recovery_and_missing(
+@@ -980,31 +976,19 @@ def test_lookup_index_entries_large_output_preflight_gate(tmp_path, monkeypatch)
+     ids = [f"{i}/1" for i in range(200)]
+     ids_with_dup = ids + ["0/1", "1/1"]
+ 
+-    # 1. Above threshold with default allow_large_output=False -> confirmation_required without echoed IDs
++    # 1. Above threshold with default allow_large_output=False -> auto-bounded prefix with _output metadata
+     raw_warn = mcp_server.lookup_index_entries.fn(
+         repo_path=str(tmp_path),
+         ids=ids_with_dup,
+     )
+     warn = json.loads(raw_warn)
+-    assert warn["status"] == "confirmation_required"
+-    assert warn["reason"] == "Estimated lookup output exceeds the recommended context size."
+-    assert warn["requested_count"] == 202
+-    assert warn["warning_threshold_bytes"] == 15360
+-    assert warn["warning_threshold_kib"] == 15.0
+-    assert warn["estimated_output_bytes"] > 15360
+-    assert warn["estimated_output_kib"] == warn["estimated_output_bytes"] / 1024
+-    assert warn["retry"] == {
+-        "allow_large_output": True,
+-    }
+-    assert "ids" not in warn["retry"]
+-    assert "ids" not in warn
+-    assert "repo_path" not in warn["retry"]
+-    assert "repo_path" not in warn
+-    assert "retry_instruction" in warn
+-    assert "same repo_path and ids" in warn["retry_instruction"]
+-    assert "pkg.submodule" not in raw_warn
+-    # Warning response itself must remain compact and well below 15 KiB
+-    assert len(raw_warn.encode("utf-8")) < 1024
++    assert "_output" in warn
++    assert warn["_output"]["auto_bounded"] is True
++    assert warn["_output"]["requested_count"] == 202
++    assert warn["_output"]["warning_threshold_bytes"] == 15360
++    assert warn["_output"]["full_output_bytes"] > 15360
++    assert warn["_output"]["retry"] == {"allow_large_output": True}
++    assert len(raw_warn.encode("utf-8")) <= 15360
+ 
+     # 2. Above threshold with allow_large_output=True -> full normal mapping
+     raw_override = mcp_server.lookup_index_entries.fn(
+@@ -1013,10 +997,10 @@ def test_lookup_index_entries_large_output_preflight_gate(tmp_path, monkeypatch)
+         allow_large_output=True,
+     )
+     override = json.loads(raw_override)
+-    assert "status" not in override or override.get("status") != "confirmation_required"
++    assert "_output" not in override
+     assert len(override) == 200
+     assert override["0/1"] == {"name": "pkg.submodule.very_long_component_name_number_0", "status": "active"}
+-    assert len(raw_override.encode("utf-8")) == warn["estimated_output_bytes"]
++    assert len(raw_override.encode("utf-8")) == warn["_output"]["full_output_bytes"]
+ 
+     # 3. Below threshold (<15 KiB) with allow_large_output=False -> normal mapping directly
+     small_ids = ["0/1", "1/1", "2/1"]
 ```

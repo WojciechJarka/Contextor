@@ -5,12 +5,13 @@
     "[OPTIMIZED] Searches the canonical live state for an artifact, module, or symbol matching 'search_term' (or alias 'query').\nReturns its properties and all its dependencies and consumers (blast radius).\nUse this to extract arbitrary context about any symbol from the current architectural state.\nExact symbol matches are preferred. ``limit``, ``total_matches`` and\n``truncated`` bound broad searches without hiding their cardinality.\nNested module dependencies and artifact consumers are independently bounded\nby ``evidence_limit``. They always expose ``total`` and ``truncated``;\nset ``compact=False`` to include ``items``. Pass ``None`` for either limit\nto return every match or every nested evidence item. ``fields``\nprojects ``query``, ``match_count``, ``total_matches``, ``truncated``,\n``modules`` or ``artifacts`` after compact shaping."
   ],
   "parameters": [
-    "``search_term`` (string, optional): Search query matching modules or symbols. An empty string (``\"\"``) performs a match-all search. Leading and trailing whitespace is not trimmed.",
-    "``query`` (string, optional): Alias for ``search_term``. At least one of ``search_term`` or ``query`` must be provided. If both are supplied, they must match exactly.",
-    "``limit`` (integer or null, default 20): Maximum number of top-level matches to return. Pass ``None`` for unbounded results. ``max_items`` is not supported.",
-    "``evidence_limit`` (integer or null, default 20): Maximum number of nested dependencies and consumers per item.",
-    "``compact`` (boolean, default true): When true, omits detailed item lists in dependencies and consumers.",
-    "``fields`` (array of strings or null, default null): Optional field projection filter."
+    "repo_path (string, required): canonical repository root.",
+    "search_term (string or null, optional, default null): search query matching modules or symbols. An empty string (\"\") performs a match-all search. Leading and trailing whitespace is not trimmed.",
+    "limit (integer or null, default 20): maximum number of top-level matches to return; pass null for unbounded results.",
+    "evidence_limit (integer or null, default 20): maximum number of nested dependencies and consumers per item.",
+    "compact (boolean, default true): when true, returns up to 3 bounded evidence items per non-empty nested collection with total, truncated, and expand metadata; set to false for full items lists.",
+    "fields (array of strings or null, default null): optional field projection list; null returns full response.",
+    "query (string or null, optional, default null): alias for search_term. At least one of search_term or query must be provided. If both are supplied, they must match exactly."
   ],
   "behavior": [
     "1. Requires either ``search_term`` or alias ``query`` (or both matching exactly).\n2. Empty string ``\"\"`` returns all live modules and artifacts bounded by ``limit``.\n3. Whitespace strings are preserved as literal substring queries without trimming.\n4. Case-insensitive substring matching over live module paths and artifact symbol names.\n5. When exact matches exist, results are narrowed to exact matches only.\n6. Results are sorted and bounded by ``limit`` (default 20, ``None`` for unbounded)."

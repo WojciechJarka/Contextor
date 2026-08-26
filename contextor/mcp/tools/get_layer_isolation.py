@@ -87,26 +87,45 @@ def get_layer_isolation(
                     ),
                     max_boundary_violations,
                 )
+                _bv_ev_limit = 3 if max_boundary_violations is None else min(3, max_boundary_violations)
+                bv_ev = items[:_bv_ev_limit]
+                if compact:
+                    cluster_view = {
+                        "total": 0,
+                        "truncated": False,
+                        "available": False,
+                        "evidence": [],
+                    }
+                    bv_view = {
+                        "total": total,
+                        "truncated": total > len(bv_ev),
+                        "evidence_scope": "cross_boundary_edges_not_policy_violations",
+                        "evidence": bv_ev,
+                    }
+                    if bv_view["truncated"]:
+                        bv_view["expand"] = {"compact": False, "max_boundary_violations": None}
+                else:
+                    cluster_view = {
+                        "total": 0,
+                        "truncated": False,
+                        "available": False,
+                        "items": [],
+                    }
+                    bv_view = {
+                        "total": total,
+                        "truncated": truncated,
+                        "evidence_scope": "cross_boundary_edges_not_policy_violations",
+                        "items": items,
+                    }
                 result = {
                     "layer": requested_layer,
                     "report_layer": normalized_layer_name,
                     "data_source": "live_canonical_graph",
                     "module_count": len(layer_modules),
-                    "clusters": {
-                        "total": 0,
-                        "truncated": False,
-                        "available": False,
-                    },
+                    "clusters": cluster_view,
                     "dependency_types": dependency_types,
-                    "boundary_violations": {
-                        "total": total,
-                        "truncated": truncated,
-                        "evidence_scope": "cross_boundary_edges_not_policy_violations",
-                    },
+                    "boundary_violations": bv_view,
                 }
-                if not compact:
-                    result["clusters"]["items"] = []
-                    result["boundary_violations"]["items"] = items
                 if fields is not None:
                     unknown_fields = sorted(set(fields) - set(result))
                     if unknown_fields:
@@ -183,17 +202,36 @@ def get_layer_isolation(
         violations, violation_count, violations_truncated = query_helpers.bounded_items(
             boundary_violations, max_boundary_violations
         )
-        cluster_collection = {
-            "total": cluster_count,
-            "truncated": clusters_truncated,
-        }
-        violation_collection = {
-            "total": violation_count,
-            "truncated": violations_truncated,
-        }
-        if not compact:
-            cluster_collection["items"] = clusters
-            violation_collection["items"] = violations
+        _cl_ev_limit = 3 if max_clusters is None else min(3, max_clusters)
+        _bv_ev_limit = 3 if max_boundary_violations is None else min(3, max_boundary_violations)
+        if compact:
+            cl_ev = clusters[:_cl_ev_limit]
+            cluster_collection = {
+                "total": cluster_count,
+                "truncated": cluster_count > len(cl_ev),
+                "evidence": cl_ev,
+            }
+            if cluster_collection["truncated"]:
+                cluster_collection["expand"] = {"compact": False, "max_clusters": None}
+            bv_ev = violations[:_bv_ev_limit]
+            violation_collection = {
+                "total": violation_count,
+                "truncated": violation_count > len(bv_ev),
+                "evidence": bv_ev,
+            }
+            if violation_collection["truncated"]:
+                violation_collection["expand"] = {"compact": False, "max_boundary_violations": None}
+        else:
+            cluster_collection = {
+                "total": cluster_count,
+                "truncated": clusters_truncated,
+                "items": clusters,
+            }
+            violation_collection = {
+                "total": violation_count,
+                "truncated": violations_truncated,
+                "items": violations,
+            }
         result = {
             "layer": requested_layer,
             "report_layer": normalized_layer_name,
