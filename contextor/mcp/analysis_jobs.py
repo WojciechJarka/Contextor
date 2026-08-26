@@ -81,6 +81,46 @@ def _latest_analysis_job(root: Path) -> dict | None:
     return None
 
 
+def _active_analysis_jobs(root: Path) -> list[dict]:
+    """Return readable queued/running durable jobs in deterministic newest-first order."""
+    directory = _analysis_job_dir(root)
+    if not directory.is_dir():
+        return []
+
+    candidates: list[tuple[int, str, dict]] = []
+
+    for path in directory.glob("*.json"):
+        job = _read_analysis_job(root, path.stem)
+        if job is None or job.get("status") not in {"queued", "running"}:
+            continue
+
+        try:
+            mtime_ns = path.stat().st_mtime_ns
+        except OSError:
+            continue
+
+        candidates.append(
+            (
+                mtime_ns,
+                path.stem,
+                job,
+            )
+        )
+
+    candidates.sort(
+        key=lambda item: (
+            -item[0],
+            item[1],
+        )
+    )
+
+    return [
+        item[2]
+        for item in candidates
+    ]
+
+
+
 
 
 def _public_job(

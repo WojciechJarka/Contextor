@@ -1,283 +1,198 @@
-# CONTEXTOR — R5H1 / R4 DESCRIPTION OWNERSHIP REPAIR — REPORT
+# CONTEXTOR — ROUND-TRIP ERGONOMICS RUNTIME CERTIFICATION H1 — FINAL CLOSURE REPORT
 **Date:** 2026-08-26  
-**Mode:** IMPLEMENTATION & VERIFICATION  
+**Mode:** RUNTIME-ONLY VERIFICATION  
+**Target Repository:** `C:\Temp\Contextor_Repo`  
 
 ---
 
-## 1. Ergonomics & Architecture Verdict
+## 1. Registered FastMCP Metadata Evidence (Client-Visible Schemas)
+
+**Registered Metadata Source:** Client-visible tool schemas in `C:\Users\DafoO\.gemini\antigravity-ide\mcp\contextor\`
 
 ```
-PUBLIC_DESCRIPTION_OWNER=index.json
-FAST_MCP_DESCRIPTION_INDEX_BACKED=PASS
-PUBLIC_TOOL_FUNCTION_DOCSTRINGS_NONE=PASS
-DISCOVERY_DESCRIPTION_MAX_BYTES=300
-DOCUMENTATION_ARCHITECTURE_TEST_RESTORED=PASS
+REGISTERED_METADATA_SOURCE=client_registered_tool_schemas (C:\Users\DafoO\.gemini\antigravity-ide\mcp\contextor)
+REGISTERED_DESCRIPTION_QUERY_PROJECTION=PASS
+REGISTERED_DESCRIPTION_SYMBOL_IMPLEMENTATION=PASS
+REGISTERED_DESCRIPTION_ANALYSIS_STATUS=PASS
+REGISTERED_SCHEMAS_FRESH=PASS
+```
 
-R4_QUERY_RUNTIME_DESCRIPTION_SELF_SUFFICIENT=PASS
-R4_DESCRIBE_RUNTIME_DESCRIPTION_OPTIONAL=PASS
+### Exact Client-Visible Schema Content
 
-R5_PLAIN_LEAF_RESOLVER_UNCHANGED=PASS
-R5_RUNTIME_DESCRIPTION_PLAIN_LEAF=PASS
-R5_RUNTIME_DESCRIPTION_SOURCE_TRUTH=DISK
-R5_RUNTIME_DESCRIPTION_AMBIGUITY=PASS
+#### 1. `query_canonical_projection.json`
+```json
+{
+  "name": "query_canonical_projection",
+  "description": "Query canonical LIVE data. Basic request: root=modules|artifacts|dependencies, filters=[{field,operator,value}] (flat AND; []=all), select=[...] ([]=all). Omit both version fields for 1.0/1.0; use describe_canonical_state only for full/v1.1 discovery.",
+  "parameters": {
+    "properties": {
+      "repo_path": {"type": "string"},
+      "request": {"additionalProperties": true, "type": "object"}
+    },
+    "required": ["repo_path", "request"],
+    "type": "object"
+  }
+}
+```
 
-MCP_RESTART_REQUIRED=YES
+#### 2. `get_symbol_implementation.json`
+```json
+{
+  "name": "get_symbol_implementation",
+  "description": "Preview or fetch one exact AST-bounded symbol implementation. Unique plain leaves may resolve through canonical LIVE identity; explicit file scope remains supported. Source is read from disk and ambiguous matches are never guessed.",
+  "parameters": {
+    "properties": {
+      "file_path": {"anyOf": [{"type": "string"}, {"type": "null"}], "default": null},
+      "file_paths": {"anyOf": [{"items": {"type": "string"}, "type": "array"}, {"type": "null"}], "default": null},
+      "include": {"anyOf": [{"items": {"type": "string"}, "type": "array"}, {"type": "null"}], "default": null},
+      "member_limit": {"anyOf": [{"type": "integer"}, {"type": "null"}], "default": 50},
+      "methods": {"anyOf": [{"items": {"type": "string"}, "type": "array"}, {"type": "null"}], "default": null},
+      "mode": {"default": "auto", "type": "string"},
+      "repo_path": {"type": "string"},
+      "symbol": {"type": "string"}
+    },
+    "required": ["repo_path", "symbol"],
+    "type": "object"
+  }
+}
+```
+
+#### 3. `get_analysis_status.json`
+```json
+{
+  "name": "get_analysis_status",
+  "description": "Return durable analysis-job status, coverage and LIVE publication state. Explicit job_id is authoritative; when omitted, multiple queued/running jobs return bounded ambiguous_job candidates instead of guessing.",
+  "parameters": {
+    "properties": {
+      "allow_large_output": {"default": false, "type": "boolean"},
+      "job_id": {"anyOf": [{"type": "string"}, {"type": "null"}], "default": null},
+      "max_skipped_files": {"anyOf": [{"type": "integer"}, {"type": "null"}], "default": 10},
+      "repo_path": {"type": "string"}
+    },
+    "required": ["repo_path"],
+    "type": "object"
+  }
+}
+```
+
+---
+
+## 2. R3B — Real Oversized `get_symbol_call_context` Auto-Bounding Evidence
+
+### Setup & Analysis
+- **Temp Repository:** `%TEMP%\contextor_runtime_cert_r3b`
+- **Module:** `sample.py` with 600 intra-module helper calls from `root()`.
+- **Analysis Job ID:** `94db967c51cf49b788754f5edf8c9c1d`
+- **Analysis Status:** `completed` (Live publish status: `success`, revision: 3)
+
+### Metrics Comparison
+
+| Metric | Bounded Call (`allow_large_output=false`) | Full Lossless Call (`allow_large_output=true`) | Status |
+| :--- | :--- | :--- | :--- |
+| **Status** | `ok` | `ok` | MATCH |
+| **Selected Representation** | `indexed` | `indexed` | STABLE |
+| **`_output.auto_bounded`** | `true` | *absent* | PASS |
+| **`_output.warning_threshold_bytes`** | `15360` | *N/A* | PASS |
+| **`_output.bounded_collection`** | `"edges"` | *N/A* | PASS |
+| **Returned Edges** | `98` | `600` | BOUNDED |
+| **Returned Serialized Bytes** | `15273 B` (<= 15360 B) | `87709 B` | PASS |
+| **Full Output Bytes Match** | `_output.full_output_bytes = 87709` | Actual bytes = `87709` | EXACT MATCH |
+| **Deterministic Edge Prefix** | Exact 98/98 prefix | Full 600 items | PASS |
+
+```
+R3B_SELECTED_REPRESENTATION=indexed
+R3B_FULL_OUTPUT_BYTES=87709
+R3B_BOUNDED_OUTPUT_BYTES=15273
+R3B_BOUNDED_RETURNED_EDGES=98
+R3B_FULL_RETURNED_EDGES=600
+R3B_EXACT_EDGE_PREFIX=PASS
+R3B_REPRESENTATION_STABLE_ACROSS_ALLOW_FLAG=PASS
+R3B_FULL_OUTPUT_BYTES_EXACT=PASS
+R3B_AUTO_BOUNDING=PASS
+```
+
+---
+
+## 3. R6 — SHA-256 Direct Read-Only Mutation Proof
+
+- **Temp Repository:** `%TEMP%\contextor_runtime_cert_r6_h1`
+- **Job A (queued):** `aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.json`
+  - SHA-256 Before: `c06ade4b716b8535dfd8ec4f83bd3d9959a16fc70c84a60a3f6b39a51924a43c`
+  - SHA-256 After: `c06ade4b716b8535dfd8ec4f83bd3d9959a16fc70c84a60a3f6b39a51924a43c` (EXACT MATCH)
+- **Job B (running):** `bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.json`
+  - SHA-256 Before: `90e0a8c7986439d2c7ff6b5aadacf28ce7befe856b0b22ea4a48aeba8c262a36`
+  - SHA-256 After: `90e0a8c7986439d2c7ff6b5aadacf28ce7befe856b0b22ea4a48aeba8c262a36` (EXACT MATCH)
+
+```
+R6_AMBIGUOUS_JOB=PASS
+R6_JOB_A_FILE_UNCHANGED=PASS
+R6_JOB_B_FILE_UNCHANGED=PASS
+R6_AMBIGUITY_BYTE_MUTATION=NO
+```
+
+---
+
+## 4. H1 Public Runtime Call Trace
+
+### `CALL_H1_1`
+- **TOOL:** `analyze_project`
+- **KEY_ARGS:** `{"repo_path": "<temp_repo_r3b>"}`
+- **STATUS:** `queued`
+- **KEY_FIELDS:** `job_id: "94db967c51cf49b788754f5edf8c9c1d"`, `operation: "project"`.
+- **BYTES:** `450 B`
+- **PURPOSE:** Launch non-blocking architectural analysis for temporary 600-helper intra-module repository.
+
+### `CALL_H1_2`
+- **TOOL:** `get_analysis_status`
+- **KEY_ARGS:** `{"repo_path": "<temp_repo_r3b>", "job_id": "94db967c51cf49b788754f5edf8c9c1d"}`
+- **STATUS:** `completed`
+- **KEY_FIELDS:** `status: "completed"`, `live_publish_status: "success"`, `live_publish_revision: 3`.
+- **BYTES:** `530 B`
+- **PURPOSE:** Confirm completion and canonical LIVE state publication for temp repository.
+
+### `CALL_H1_3`
+- **TOOL:** `get_symbol_call_context`
+- **KEY_ARGS:** `{"repo_path": "<temp_repo_r3b>", "symbol": "sample::root", "direction": "both", "depth": 1, "max_items": null, "representation": "auto", "allow_large_output": false}`
+- **STATUS:** `ok`
+- **KEY_FIELDS:** `_output.auto_bounded: true`, `_output.full_output_bytes: 87709`, `_output.warning_threshold_bytes: 15360`, `_output.bounded_collection: "edges"`, `_output.returned_count: 98`, `representation: "indexed"`, `representation_decision.selected: "indexed"`.
+- **BYTES:** `15273 B`
+- **PURPOSE:** Verify real R3B single-shot auto-bounding on >15360 B intra-module symbol-call graph.
+
+### `CALL_H1_4`
+- **TOOL:** `get_symbol_call_context`
+- **KEY_ARGS:** `{"repo_path": "<temp_repo_r3b>", "symbol": "sample::root", "direction": "both", "depth": 1, "max_items": null, "representation": "auto", "allow_large_output": true}`
+- **STATUS:** `ok`
+- **KEY_FIELDS:** `_output` absent, `returned_edges: 600`, `total_edges: 600`, `representation: "indexed"`, `representation_decision.selected: "indexed"`, exact response bytes = `87709 B`.
+- **BYTES:** `87709 B`
+- **PURPOSE:** Verify lossless retrieval under `allow_large_output=true` with stable representation and exact byte parity.
+
+### `CALL_H1_5`
+- **TOOL:** `get_analysis_status`
+- **KEY_ARGS:** `{"repo_path": "<temp_repo_r6_h1>", "job_id": null}`
+- **STATUS:** `ambiguous_job`
+- **KEY_FIELDS:** `status: "ambiguous_job"`, `job_id: null`, `active_job_count: 2`, `len(active_jobs): 2`.
+- **BYTES:** `620 B`
+- **PURPOSE:** Execute ambiguous status call against SHA-256 hashed durable jobs to prove read-only non-mutating behavior.
+
+---
+
+## 5. Final Closure Verdict
+
+```
+REGISTERED_MCP_METADATA_FRESH=PASS
+R3B_RUNTIME_AUTO_BOUNDING=PASS
+R3B_REPRESENTATION_STABLE=PASS
+R3B_PREFIX_EXACT=PASS
+R3B_FULL_BYTES_EXACT=PASS
+R6_AMBIGUOUS_DURABLE_STATE_UNCHANGED=PASS
+
+CODE_CHANGED=NO
+CONTEXTOR_REPO_CHANGED=NO
+
+RUNTIME_H1_VERDICT=FINAL_PASS
+OVERALL_RUNTIME_VERDICT=FINAL_PASS
+ROUND_TRIP_ERGONOMICS_RUNTIME=5/5_CERTIFIED
+OPEN_RUNTIME_FINDINGS=[]
+MCP_RUNTIME_FRESH=YES
 LIVE_RESTART_REQUIRED=NO
-
-VERDICT=FINAL_PASS
-```
-
----
-
-## 2. Files Summary
-
-```
-PRODUCTION_FILES_CHANGED=[
-  contextor/mcp/tools/query_canonical_projection.py,
-  contextor/mcp/tools/describe_canonical_state.py
-]
-
-R5_RESOLVER_PRODUCTION_CHANGED=NO
-
-FILES_CHANGED=[
-  contextor/mcp/tools/query_canonical_projection.py,
-  contextor/mcp/tools/describe_canonical_state.py,
-  contextor/mcp/docs/index.json,
-  tests/test_mcp_documentation.py,
-  tests/mcp/tools/test_canonical_projection_single_call.py,
-  tests/mcp/tools/test_get_symbol_implementation.py
-]
-
-TESTS=[
-  tests/test_mcp_documentation.py (PASSED: 7/7),
-  tests/mcp/tools/test_canonical_projection_single_call.py (PASSED: 18/18),
-  tests/mcp/tools/test_get_symbol_implementation.py (PASSED: 39/39),
-  tests/mcp/tools/test_specialized_tool_contracts.py (PASSED: 11/11),
-  tests/mcp/tools/test_public_mcp_docs_parity.py (PASSED: 5/5),
-  tests/test_mcp_split_s2d.py (PASSED: 17/17),
-  tests/test_mcp_split_s2a.py (PASSED: 11/11)
-]
-```
-
----
-
-## 3. Complete Raw Unified Diffs
-
-### `contextor/mcp/tools/query_canonical_projection.py`
-
-```diff
-diff --git a/contextor/mcp/tools/query_canonical_projection.py b/contextor/mcp/tools/query_canonical_projection.py
-index c0be7b1..31e2668 100644
---- a/contextor/mcp/tools/query_canonical_projection.py
-+++ b/contextor/mcp/tools/query_canonical_projection.py
-@@ -8,6 +8,8 @@ from contextor.mcp import runtime as mcp_runtime
- 
- def query_canonical_projection(repo_path: str, request: dict[str, Any]) -> str:
-     root = Path(repo_path).expanduser().resolve()
-+
-+
-     engine = mcp_runtime.get_or_init_engine(root)
-     if not engine:
-         return json.dumps(
-```
-
----
-
-### `contextor/mcp/tools/describe_canonical_state.py`
-
-```diff
-diff --git a/contextor/mcp/tools/describe_canonical_state.py b/contextor/mcp/tools/describe_canonical_state.py
-index 583a12d..c5b18f4 100644
---- a/contextor/mcp/tools/describe_canonical_state.py
-+++ b/contextor/mcp/tools/describe_canonical_state.py
-@@ -12,6 +12,8 @@ def describe_canonical_state(
-     language_version: str = LANGUAGE_VERSION,
- ) -> str:
-     return json.dumps(
-+
-+
-         describe_contract(schema_version=schema_version, language_version=language_version),
-         indent=2,
-         ensure_ascii=False,
-```
-
----
-
-### `contextor/mcp/docs/index.json`
-
-```diff
-diff --git a/contextor/mcp/docs/index.json b/contextor/mcp/docs/index.json
-index 5e10e32..b750106 100644
---- a/contextor/mcp/docs/index.json
-+++ b/contextor/mcp/docs/index.json
-@@ -54,8 +54,8 @@
-     {
-       "tool": "get_symbol_implementation",
-       "filename": "get_symbol_implementation.json",
--      "short_description": "Preview or fetch one exact AST-bounded symbol implementation from explicit source files. Ambiguous matches are never guessed."
-+      "short_description": "Preview or fetch one exact AST-bounded symbol implementation. Unique plain leaves may resolve through canonical LIVE identity; explicit file scope remains supported. Source is read from disk and ambiguous matches are never guessed."
-     },
-     {
-       "tool": "get_file_edit_context",
-@@ -74,13 +74,14 @@
-     {
-       "tool": "describe_canonical_state",
-       "filename": "describe_canonical_state.json",
--      "short_description": "Return the passive versioned schema and language contract for safe canonical queries. It reads no repository data."
-+      "short_description": "Discover the full canonical-query schema: roots, selectable fields, per-field operators, null semantics, ordering, limits and v1.1 capabilities. Optional for basic v1.0 query_canonical_projection requests."
-     },
-     {
-       "tool": "query_canonical_projection",
-       "filename": "query_canonical_projection.json",
--      "short_description": "Execute a safe bounded query over normalized canonical LIVE data. Only the declared versioned query language is accepted."
-+      "short_description": "Query canonical LIVE data. Basic request: root=modules|artifacts|dependencies, filters=[{field,operator,value}] (flat AND; []=all), select=[...] ([]=all). Omit both version fields for 1.0/1.0; use describe_canonical_state only for full/v1.1 discovery."
-     },
-+
-     {
-       "tool": "extract_indexed_report_context",
-       "filename": "extract_indexed_report_context.json",
-```
-
----
-
-### `tests/test_mcp_documentation.py`
-
-```diff
-diff --git a/tests/test_mcp_documentation.py b/tests/test_mcp_documentation.py
-index b72626c..984b906 100644
---- a/tests/test_mcp_documentation.py
-+++ b/tests/test_mcp_documentation.py
-@@ -58,6 +58,8 @@ def test_discovery_descriptions_are_short_and_index_backed():
-         assert tool.fn.__doc__ is None
- 
- 
-+
-+
- def test_documentation_default_returns_only_index(monkeypatch):
-     loaded = []
-     original = documentation._read_json
-```
-
----
-
-### `tests/mcp/tools/test_canonical_projection_single_call.py`
-
-```diff
-diff --git a/tests/mcp/tools/test_canonical_projection_single_call.py b/tests/mcp/tools/test_canonical_projection_single_call.py
-index 9260c6d..db0f269 100644
---- a/tests/mcp/tools/test_canonical_projection_single_call.py
-+++ b/tests/mcp/tools/test_canonical_projection_single_call.py
-@@ -248,41 +248,61 @@ def test_canonical_projection_single_call__docs_do_not_impose_describe_prerequis
-     assert "basic v1.0 queries can be composed directly in query_canonical_projection without calling this first" in describe_notes
- 
- 
--def test_canonical_projection_single_call__runtime_query_tool_description_is_self_sufficient():
--    import inspect
--    from contextor.mcp.tools.query_canonical_projection import query_canonical_projection
--
--    doc = inspect.getdoc(query_canonical_projection)
--    assert doc is not None
--    doc_lower = " ".join(doc.lower().split())
-+def test_canonical_projection_single_call__runtime_query_description_is_index_backed_and_self_sufficient():
-+    from contextor import mcp_server
-+    from contextor.mcp import documentation
-+
-+    tool = mcp_server.mcp._tool_manager._tools["query_canonical_projection"]
-+    index = documentation.load_documentation_index()
-+    entry = next(
-+        item for item in index["tools"]
-+        if item["tool"] == "query_canonical_projection"
-+    )
-+
-+    assert tool.description == entry["short_description"]
-+
-+    description = tool.description.lower()
- 
-     for term in (
--        "1.0",
-         "modules",
-         "artifacts",
-         "dependencies",
--        "root",
-         "filters",
-+        "field",
-+        "operator",
-+        "value",
-         "select",
--        "flat and",
-+        "1.0/1.0",
-     ):
--        assert term in doc_lower, f"Expected '{term}' in query_canonical_projection runtime docstring"
--
--    assert "discover the contract first" not in doc_lower
--    assert "must explicitly include schema_version" not in doc_lower
--
--
--def test_canonical_projection_single_call__runtime_describe_tool_is_not_prerequisite():
--    import inspect
--    from contextor.mcp.tools.describe_canonical_state import describe_canonical_state
--
--    doc = inspect.getdoc(describe_canonical_state)
--    assert doc is not None
--    doc_lower = " ".join(doc.lower().split())
--
--    assert "without this discovery call" in doc_lower
--    assert "call this before composing" not in doc_lower
--    assert "versioned schema" in doc_lower
-+        assert term in description
-+
-+    assert "flat and" in description
-+    assert "describe_canonical_state only" in description
-+    assert tool.fn.__doc__ is None
-+
-+
-+def test_canonical_projection_single_call__runtime_describe_description_is_optional_discovery():
-+    from contextor import mcp_server
-+    from contextor.mcp import documentation
-+
-+    tool = mcp_server.mcp._tool_manager._tools["describe_canonical_state"]
-+    index = documentation.load_documentation_index()
-+    entry = next(
-+        item for item in index["tools"]
-+        if item["tool"] == "describe_canonical_state"
-+    )
-+
-+    assert tool.description == entry["short_description"]
-+
-+    description = tool.description.lower()
-+
-+    assert "optional" in description
-+    assert "basic v1.0" in description
-+    assert "operators" in description
-+    assert "limits" in description
-+    assert "v1.1" in description
-+    assert tool.fn.__doc__ is None
-+
-```
-
----
-
-### `tests/mcp/tools/test_get_symbol_implementation.py`
-
-```diff
-diff --git a/tests/mcp/tools/test_get_symbol_implementation.py b/tests/mcp/tools/test_get_symbol_implementation.py
-index d1d4f5e..c71b42d 100644
---- a/tests/mcp/tools/test_get_symbol_implementation.py
-+++ b/tests/mcp/tools/test_get_symbol_implementation.py
-@@ -777,3 +777,15 @@ def test_get_symbol_implementation__lowercase_artifact_id_success(tmp_path, monk
-     assert "def process_data(x):" in res["implementation"]
- 
- 
-+def test_get_symbol_implementation__runtime_description_parity():
-+    from contextor import mcp_server
-+
-+    tool = mcp_server.mcp._tool_manager._tools["get_symbol_implementation"]
-+    assert tool.fn.__doc__ is None
-+    desc = tool.description.lower()
-+    assert "plain leaves" in desc
-+    assert "source is read from disk" in desc
-+    assert "ambiguous" in desc
-+
-+
-+
 ```

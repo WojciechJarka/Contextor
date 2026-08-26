@@ -21,11 +21,44 @@ def get_analysis_status(
         return json.dumps(
             {"status": "missing_repository", "repo_path": str(root)}, indent=2
         )
-    job = (
-        analysis_jobs._read_analysis_job(root, job_id)
-        if job_id is not None
-        else analysis_jobs._latest_analysis_job(root)
-    )
+    if job_id is None:
+        active_jobs = analysis_jobs._active_analysis_jobs(root)
+
+        if len(active_jobs) > 1:
+            active_job_limit = 5
+            selected_active_jobs = active_jobs[:active_job_limit]
+
+            return json.dumps(
+                {
+                    "status": "ambiguous_job",
+                    "job_id": None,
+                    "repo_path": str(root),
+                    "active_job_count": len(active_jobs),
+                    "active_jobs": [
+                        {
+                            "job_id": job.get("job_id"),
+                            "operation": job.get("operation"),
+                            "target": job.get("target"),
+                            "status": job.get("status"),
+                            "created_at": job.get("created_at"),
+                            "updated_at": job.get("updated_at"),
+                        }
+                        for job in selected_active_jobs
+                    ],
+                    "truncated": len(active_jobs) > active_job_limit,
+                    "message": (
+                        "Multiple queued/running analysis jobs exist. "
+                        "Repeat get_analysis_status with one listed job_id."
+                    ),
+                },
+                indent=2,
+            )
+
+        job = analysis_jobs._latest_analysis_job(root)
+
+    else:
+        job = analysis_jobs._read_analysis_job(root, job_id)
+
     if job is None:
         return json.dumps(
             {"status": "not_found", "job_id": job_id, "repo_path": str(root)},

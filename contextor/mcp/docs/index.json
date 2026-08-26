@@ -19,8 +19,9 @@
     {
       "tool": "get_analysis_status",
       "filename": "get_analysis_status.json",
-      "short_description": "Return durable status, coverage, and LIVE publication state for an analysis job. Do not start another analysis while the current job is queued or running."
+      "short_description": "Return durable analysis-job status, coverage and LIVE publication state. Explicit job_id is authoritative; when omitted, multiple queued/running jobs return bounded ambiguous_job candidates instead of guessing."
     },
+
     {
       "tool": "get_live_events",
       "filename": "get_live_events.json",
