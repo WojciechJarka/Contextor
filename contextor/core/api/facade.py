@@ -751,6 +751,7 @@ class ContextorFacade:
             global_report=global_report,
             root_path=repo_root,
             progress_callback=progress.items,
+            engine_state=hydrated.engine.state if hydrated is not None else None,
         )
 
         if log:

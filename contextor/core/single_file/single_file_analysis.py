@@ -7,6 +7,7 @@ state and architectural analyzers for a given file via a plugin registry.
 """
 
 import ast
+from typing import Any
 
 from contextor.core.context.locator import find_module_id
 from contextor.core.source import SourceError, read_source
@@ -32,6 +33,7 @@ def collect_all_contexts(
     global_report: dict = None,
     root_path: str = None,
     progress_callback=None,
+    engine_state: Any = None,
 ):
     """
     Acts as the master pipeline for a single file. Gathers INTENT, SYMBOL, STATE,
@@ -56,6 +58,7 @@ def collect_all_contexts(
         source=source,
         project_graph=project_graph,
         global_report=global_report,
+        engine_state=engine_state,
     )
 
     results = default_registry.build_all(payload, progress_callback=progress_callback)

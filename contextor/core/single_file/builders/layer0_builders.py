@@ -10,37 +10,222 @@ class ModuleIntentBuilder:
         from contextor.core.analysis.module_intent import extract_module_intent
         return {"module_intent": extract_module_intent(payload.tree, payload.source)}
 
+def _canonical_state_module_is_current(state: Any, module_id: str) -> bool:
+    if state is None:
+        return False
+
+    artifacts = getattr(state, "artifacts", None)
+    if not isinstance(artifacts, dict) or module_id not in artifacts:
+        return False
+
+    from contextor.core.analysis.state_manager import module_current_truth
+
+    truth = module_current_truth(state, module_id)
+    return bool(
+        truth.get("available")
+        and truth.get("state") == "fresh"
+        and truth.get("provenance") == "current"
+    )
+
+
+def _canonical_module_is_current(payload: ContextPayload) -> bool:
+    return _canonical_state_module_is_current(
+        payload.engine_state,
+        payload.module_id,
+    )
+
+
+def _collision_applies_to_module(
+    nodes: Any,
+    module_id: str,
+) -> bool:
+    if not isinstance(module_id, str) or not module_id:
+        return False
+
+    path_form = module_id.replace(".", "/")
+
+    if isinstance(nodes, str):
+        candidates = (nodes,)
+    else:
+        candidates = nodes or ()
+
+    return any(
+        isinstance(node, str)
+        and (
+            module_id in node
+            or node.endswith(path_form)
+        )
+        for node in candidates
+    )
+
 class SymbolContextBuilder:
     name = "SymbolContextBuilder"
     requires = set()
     provides = {"symbol_context"}
-    
-    def build(self, payload: ContextPayload, state: BuildState) -> dict[str, Any]:
-        from contextor.core.symbol_engine import extract_file_symbols, build_symbol_index, find_symbol_usage
+
+    def build(
+        self,
+        payload: ContextPayload,
+        state: BuildState,
+    ) -> dict[str, Any]:
+        from contextor.core.api.api_consumers import (
+            extract_api_consumers,
+            summarize_api_consumers,
+        )
+
+        canonical_current = _canonical_module_is_current(payload)
+
+        # --------------------------------------------------
+        # LOCAL SYMBOL CATALOG
+        # --------------------------------------------------
+
+        if canonical_current:
+            canonical_artifact = payload.engine_state.artifacts[payload.module_id]
+
+            raw_symbols = canonical_artifact.get("symbols", {})
+
+            symbols = {
+                key: list(value) if isinstance(value, (list, tuple, set)) else value
+                for key, value in raw_symbols.items()
+            }
+
+            all_symbols = list(
+                canonical_artifact.get("own_symbols", ())
+            )
+        else:
+            from contextor.core.symbol_engine import extract_file_symbols
+
+            symbols = extract_file_symbols(payload.file_path)
+
+            all_symbols = (
+                symbols.get("classes", [])
+                + symbols.get("functions", [])
+                + symbols.get("methods", [])
+                + symbols.get("globals", [])
+            )
+
+        # --------------------------------------------------
+        # CANONICAL USAGE
+        # --------------------------------------------------
+
+        consumption_fresh = bool(
+            canonical_current
+            and getattr(
+                payload.engine_state,
+                "artifact_consumption_state",
+                "deferred",
+            )
+            == "fresh"
+        )
+
+        if consumption_fresh:
+            canonical_consumption = (
+                payload.engine_state.artifact_consumption or {}
+            )
+
+            usage = {}
+
+            for symbol in all_symbols:
+                record = canonical_consumption.get(
+                    f"{payload.module_id}::{symbol}",
+                    {},
+                )
+
+                consumers = sorted(
+                    set(record.get("consumers", ()))
+                )
+
+                if consumers:
+                    usage[symbol] = consumers
+        else:
+            from contextor.core.symbol_engine import find_symbol_usage
+
+            usage = find_symbol_usage(
+                payload.modules,
+                payload.module_id,
+                all_symbols,
+                payload.root_path,
+            )
+
+        # --------------------------------------------------
+        # CANONICAL SYMBOL ECOSYSTEM
+        # --------------------------------------------------
+
+        if canonical_current:
+            target_symbols = set(all_symbols)
+            ecosystem: dict[str, list[str]] = {}
+
+            for module_id, module_artifacts in (
+                payload.engine_state.artifacts or {}
+            ).items():
+                if not _canonical_state_module_is_current(
+                    payload.engine_state,
+                    module_id,
+                ):
+                    continue
+
+                if not isinstance(module_artifacts, dict):
+                    continue
+
+                for qualified_symbol in module_artifacts.get(
+                    "own_symbols",
+                    (),
+                ):
+                    leaf = qualified_symbol.split(".")[-1]
+
+                    if (
+                        qualified_symbol in target_symbols
+                        or leaf in target_symbols
+                    ):
+                        ecosystem.setdefault(
+                            qualified_symbol,
+                            [],
+                        ).append(module_id)
+
+            ecosystem = {
+                symbol: sorted(set(module_ids))
+                for symbol, module_ids in ecosystem.items()
+            }
+        else:
+            from contextor.core.symbol_engine import build_symbol_index
+
+            raw_ecosystem = build_symbol_index(
+                payload.modules,
+                payload.root_path,
+            )
+
+            ecosystem = {
+                symbol: users
+                for symbol, users in raw_ecosystem.items()
+                if (
+                    symbol in all_symbols
+                    or symbol.split(".")[-1] in all_symbols
+                )
+            }
+
+        # --------------------------------------------------
+        # REFERENCES
+        #
+        # IMPORTANT:
+        # artifact_consumption is NOT semantically rich enough
+        # yet to replace build_symbol_references.
+        # --------------------------------------------------
+
         from contextor.core.reference.engine import build_symbol_references
-        from contextor.core.api.api_consumers import extract_api_consumers, summarize_api_consumers
-        
-        symbols = extract_file_symbols(payload.file_path)
-        all_symbols = (
-            symbols.get("classes", [])
-            + symbols.get("functions", [])
-            + symbols.get("methods", [])
-            + symbols.get("globals", [])
-        )
-        usage = find_symbol_usage(payload.modules, payload.module_id, all_symbols, payload.root_path)
-        ecosystem = build_symbol_index(payload.modules, payload.root_path)
-        ecosystem = {
-            symbol: users
-            for symbol, users in ecosystem.items()
-            if (symbol in all_symbols or symbol.split(".")[-1] in all_symbols)
-        }
+
         references = build_symbol_references(
-            payload.modules, all_symbols, payload.root_path, definer_module=payload.module_id
+            payload.modules,
+            all_symbols,
+            payload.root_path,
+            definer_module=payload.module_id,
         )
+
         consumers = extract_api_consumers(
-            all_symbols, references, signatures=symbols.get("signatures", {})
+            all_symbols,
+            references,
+            signatures=symbols.get("signatures", {}),
         )
-        
+
         return {
             "symbol_context": {
                 "symbols": symbols,
@@ -125,24 +310,70 @@ class ArchitectureContextBuilder:
         
         hard_edges = payload.project_graph.hard_edges
         soft_edges = payload.project_graph.soft_edges
-        cycles = detect_cycles(hard_edges)
+
+        engine_state = payload.engine_state
+
+        # Cycles
+        if (
+            engine_state is not None
+            and getattr(
+                engine_state,
+                "cycles_state",
+                "deferred",
+            ) == "fresh"
+        ):
+            cycles = list(engine_state.cycles)
+        else:
+            cycles = detect_cycles(hard_edges)
+
+        # Metrics (canonicalization deferred to avoid uncontracted assumptions)
         metrics = compute_graph_metrics(hard_edges, soft_edges)
-        thresholds = get_thresholds(metrics["nodes"])
-        
+        thresholds = get_thresholds(metrics.get("nodes", 0)) if isinstance(metrics, dict) and "nodes" in metrics else {}
+
+        # Collisions
         name_collisions = []
-        if payload.modules:
+        if (
+            engine_state is not None
+            and getattr(
+                engine_state,
+                "collisions_state",
+                "deferred",
+            ) == "fresh"
+        ):
+            for error in engine_state.collisions:
+                if isinstance(error, str):
+                    if _collision_applies_to_module(
+                        error,
+                        payload.module_id,
+                    ):
+                        name_collisions.append(error)
+                    continue
+
+                if _collision_applies_to_module(
+                    getattr(error, "nodes", ()),
+                    payload.module_id,
+                ):
+                    name_collisions.append(
+                        getattr(error, "message", str(error))
+                    )
+        elif payload.modules:
             all_collisions = validate_name_collisions(payload.modules)
             for error in all_collisions:
-                if any(
-                    payload.module_id in node or node.endswith(payload.module_id.replace(".", "/"))
-                    for node in error.nodes
+                if _collision_applies_to_module(
+                    getattr(error, "nodes", ()),
+                    payload.module_id,
                 ):
                     name_collisions.append(error.message)
-                    
+
+        # Hotspots (canonicalization deferred)
         hotspots = []
         if payload.global_report:
-            hotspots = payload.global_report.get("llm_signals", {}).get("hotspots", [])
-            
+            hotspots = (
+                payload.global_report
+                .get("llm_signals", {})
+                .get("hotspots", [])
+            )
+
         return {
             "architecture_context": {
                 "hard_dependencies": sorted(hard_edges.get(payload.module_id, [])),
@@ -151,7 +382,7 @@ class ArchitectureContextBuilder:
                 "soft_imported_by": find_soft_dependents(payload.module_id, soft_edges),
                 "cluster": find_cluster(payload.module_id, hard_edges),
                 "signals": architecture_signals(
-                    payload.module_id, hard_edges, soft_edges, hotspots, cycles, metrics["nodes"]
+                    payload.module_id, hard_edges, soft_edges, hotspots, cycles, metrics.get("nodes", 0) if isinstance(metrics, dict) else 0
                 ),
                 "thresholds": thresholds,
                 "cycles": [cycle for cycle in cycles if payload.module_id in cycle],

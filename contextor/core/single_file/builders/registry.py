@@ -15,6 +15,7 @@ class ContextPayload:
     source: str
     project_graph: Any
     global_report: dict | None = None
+    engine_state: Any = None
 
 class BuildState:
     def __init__(self):
