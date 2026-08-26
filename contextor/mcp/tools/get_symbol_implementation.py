@@ -167,16 +167,28 @@ def _symbol_preview(root: Path, candidate: dict, member_limit: int | None) -> di
     # canonical state that produced the T0 line locations, returning source would
     # risk delivering a stale/misaligned fragment. Surface this as a first-class
     # stale status instead. metadata_match (no sha256) is treated conservatively.
-    source_unreliable = state_freshness.get("workspace_sync") in {"out_of_sync", "metadata_match"}
+    # Furthermore, explicit generation mismatch between canonical state and FileState
+    # must fail closed to prevent serving misaligned AST slices.
+    explicit_mismatch = query_helpers.is_explicit_generation_mismatch(
+        root, engine.state if engine else None, engine=engine
+    )
+    source_unreliable = (
+        state_freshness.get("workspace_sync") in {"out_of_sync", "metadata_match"}
+        or explicit_mismatch
+    )
     if source_unreliable:
+        stale_reason = (
+            "Source file on disk has diverged from canonical generation / state. "
+            "Re-run analyze_project or update_file to refresh canonical state before fetching implementation."
+            if explicit_mismatch
+            else "Source file on disk has diverged from canonical T0 state. "
+            "Re-run analyze_project or update_file to refresh canonical state before fetching implementation."
+        )
         return {
             **base,
             "status": "stale_source",
             "mode": "preview",
-            "stale_reason": (
-                "Source file on disk has diverged from canonical T0 state. "
-                "Re-run analyze_project or update_file to refresh canonical state before fetching implementation."
-            ),
+            "stale_reason": stale_reason,
             "source_contract": {
                 "implementation_is_complete": False,
                 "implementation_includes_docstring": False,

@@ -383,6 +383,7 @@ class ContextorFacade:
         progress.begin("Persisting canonical LIVE snapshot")
         if analysis_result:
             from contextor.core.analysis.state_manager import (
+                FileStateManager,
                 RepositoryAnalysisState,
                 artifact_consumption_is_fresh,
                 build_canonical_artifact_consumption,
@@ -481,7 +482,7 @@ class ContextorFacade:
             else:
                 state.shared_usage_clusters_state = "stale"
 
-            save_engine_state(
+            meta = save_engine_state(
                 state,
                 str(repo_cache_dir(path)),
                 datestamp,
@@ -489,6 +490,18 @@ class ContextorFacade:
                 repo_id=registry.repo_id,
                 root_path=path,
             )
+            if meta is not None:
+                sm = FileStateManager(str(repo_cache_dir(path)))
+                sm.save(datestamp or "", revision=meta.revision)
+                from contextor.core.live_state import connect
+
+                try:
+                    client = connect(path)
+                    if client is not None:
+                        client.publish(state, origin="desktop_analysis")
+                except Exception as e:
+                    if log:
+                        log(f"Warning: Failed to publish canonical state to live daemon: {e}")
 
         progress.begin("Finalizing analysis")
         progress.finish()

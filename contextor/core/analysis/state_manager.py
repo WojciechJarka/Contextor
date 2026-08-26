@@ -180,12 +180,14 @@ class FileStateManager:
 
     def _load(self):
         self.state_id = ""
+        self.revision = None
         if self.state_file.exists():
             try:
                 with open(self.state_file, "r", encoding="utf-8") as f:
                     data = json.load(f)
                     if "_meta" in data:
                         self.state_id = data["_meta"].get("state_id", "")
+                        self.revision = data["_meta"].get("revision", None)
                         files_data = data.get("files", {})
                     else:
                         files_data = data
@@ -197,11 +199,16 @@ class FileStateManager:
             except (json.JSONDecodeError, KeyError):
                 self._state = {}
 
-    def save(self, state_id: str = ""):
+    def save(self, state_id: str = "", revision: int | None = None):
         self.state_id = state_id
+        if revision is not None:
+            self.revision = revision
+        meta: Dict[str, Any] = {"state_id": state_id}
+        if getattr(self, "revision", None) is not None:
+            meta["revision"] = self.revision
         with open(self.state_file, "w", encoding="utf-8") as f:
             json.dump({
-                "_meta": {"state_id": state_id},
+                "_meta": meta,
                 "files": {path: fs.to_dict() for path, fs in self._state.items()}
             }, f, indent=2)
 
@@ -273,7 +280,7 @@ def save_engine_state(
 ):
     from contextor.core.live_state import save_snapshot
     try:
-        save_snapshot(
+        return save_snapshot(
             state,
             cache_dir,
             state_id,
@@ -281,11 +288,10 @@ def save_engine_state(
             repo_id=repo_id,
             root_path=root_path,
         )
-        return True
     except Exception as e:
         import sys
         print(f"Failed to save engine state: {e}", file=sys.stderr)
-        return False
+        return None
 
 def load_engine_state(
     cache_dir: str,

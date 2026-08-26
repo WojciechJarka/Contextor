@@ -181,6 +181,12 @@ def save_snapshot(
             repo_id=repo_id,
             root_path=normalized_root,
         )
+        if state is not None and hasattr(state, "__dict__"):
+            try:
+                setattr(state, "state_id", metadata.state_id)
+                setattr(state, "revision", metadata.revision)
+            except AttributeError:
+                pass
         with state_tmp.open("wb") as stream:
             pickle.dump({"metadata": asdict(metadata), "state": state}, stream)
             stream.flush()
@@ -242,6 +248,12 @@ def load_snapshot(
             )
             state_obj = _normalize_symbol_call_facts(payload["state"])
             if state_obj is not None and hasattr(state_obj, "__dict__"):
+                try:
+                    setattr(state_obj, "state_id", embedded_metadata.state_id)
+                    setattr(state_obj, "revision", embedded_metadata.revision)
+                    setattr(state_obj, "provenance", "snapshot")
+                except AttributeError:
+                    pass
                 if not hasattr(state_obj, "module_usages"):
                     try:
                         setattr(state_obj, "module_usages", {})

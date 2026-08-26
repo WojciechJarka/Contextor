@@ -491,14 +491,17 @@ def _repository_updater(root: Path):
             str(root),
         )
         delta = engine.update_file(file_path)
-        manager.save(getattr(manager, "state_id", ""))
-        save_snapshot(
+        meta = save_snapshot(
             engine.state,
             cache,
             getattr(manager, "state_id", ""),
             writer="live-service",
             repo_id=identity.repo_id,
             root_path=identity.root_path,
+        )
+        manager.save(
+            getattr(manager, "state_id", ""),
+            revision=meta.revision if meta else None,
         )
         return delta
 

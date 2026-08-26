@@ -79,16 +79,28 @@ def _persist_live_engine(root: Path, engine) -> bool:
     identity = require_repository_identity(root)
     cache_dir = repo_cache_dir(root)
     cache_dir.mkdir(parents=True, exist_ok=True)
-    return bool(
-        save_engine_state(
-            engine.state,
-            str(cache_dir),
-            getattr(engine.state_manager, "state_id", ""),
-            writer="mcp",
-            repo_id=identity.repo_id,
-            root_path=identity.root_path,
-        )
+    meta = save_engine_state(
+        engine.state,
+        str(cache_dir),
+        getattr(engine.state_manager, "state_id", ""),
+        writer="mcp",
+        repo_id=identity.repo_id,
+        root_path=identity.root_path,
     )
+    if meta is not None:
+        new_rev = int(meta.revision)
+        engine.revision = new_rev
+        if hasattr(engine.state, "revision"):
+            engine.state.revision = new_rev
+        mcp_runtime._live_engine_revisions[str(root)] = new_rev
+        if hasattr(engine, "state_manager") and engine.state_manager:
+            engine.state_manager.revision = new_rev
+            if hasattr(engine.state_manager, "save"):
+                engine.state_manager.save(
+                    getattr(engine.state_manager, "state_id", ""), revision=new_rev
+                )
+        return True
+    return False
 
 
 def _semantic_artifact_diff(old_artifacts: dict, new_artifacts: dict) -> dict:

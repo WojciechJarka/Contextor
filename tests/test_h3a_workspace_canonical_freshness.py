@@ -239,22 +239,24 @@ def test_h3a_case_g_same_size_same_mtime_content_changed_out_of_sync(tmp_path):
 
 
 def test_h3a_case_h_provenance_and_revision_strictly_match_answered_state(tmp_path):
-    """Case H (Blocker 2): Freshness envelope strictly describes the answered state/engine, not ambient daemon."""
+    """Case H (Blocker 2): Freshness envelope strictly describes the answered state/engine, not ambient daemon.
+    
+    Conflict test: answered_state.revision = S (12), ambient runtime cached revision = L (999).
+    Helper receives the answered state. EXPECT: canonical_revision == S (12), not L (999).
+    We do NOT pop _live_engine_revisions before calling.
+    """
     repo, mod_a = _setup_repo(tmp_path)
     ContextorFacade.analyze_project(str(repo))
 
-    # Engine is loaded from snapshot
-    engine = mcp_runtime.get_or_init_engine(repo)
-    assert engine is not None
-
     # Simulate an external live daemon revision recorded in global table
     mcp_runtime._live_engine_revisions[str(repo)] = 999
+    mcp_runtime._live_engine_provenance[str(repo)] = "live"
 
-    # If build_state_freshness is called with engine=None and state having revision 12,
-    # and repo_key removed from live_engine_revisions, it must describe snapshot revision 12.
     from types import SimpleNamespace
     snapshot_state = SimpleNamespace(
         revision=12,
+        provenance="snapshot",
+        state_id="snap_12",
         resync_required=False,
         modules={},
         dependency_graph=None,
@@ -263,8 +265,747 @@ def test_h3a_case_h_provenance_and_revision_strictly_match_answered_state(tmp_pa
         cycles_state="deferred",
         collisions_state="deferred",
     )
-    # Without live engine key, answered state is snapshot
-    mcp_runtime._live_engine_revisions.pop(str(repo), None)
+    # Even though ambient table has revision=999, provenance="live", answered state has revision=12, provenance="snapshot"
     freshness = build_state_freshness(repo, snapshot_state, engine=None)
     assert freshness["provenance"] == "snapshot"
     assert freshness["canonical_revision"] == 12
+
+
+def test_h3a_case_i_crash_window_false_verified_prevented(tmp_path):
+    """Case I (Blocker 1 - Crash Window Regression):
+    T0: canonical snapshot T0, FileState T0
+    T1: target modified on disk, FileState updated to T1 and saved to file_state.json,
+        canonical snapshot T1 NOT published/saved (crash window).
+    Hydration: answered state is T0, disk is T1, FileState is T1.
+    EXPECT:
+      ANSWERED_CANONICAL = T0
+      DISK = T1
+      FILESTATE = T1
+      WORKSPACE_SYNC != 'verified'
+      WORKSPACE_SYNC != 'metadata_match'
+      WORKSPACE_SYNC == 'unverified'
+    """
+    from contextor.core.paths import repo_cache_dir
+    from contextor.core.analysis.state_manager import FileStateManager
+
+    repo, mod_a = _setup_repo(tmp_path)
+    ContextorFacade.analyze_project(str(repo))
+    mcp_runtime._live_engines.pop(str(repo), None)
+
+    # T0 state is persisted
+    cache = repo_cache_dir(repo)
+    sm_t0 = FileStateManager(str(cache))
+    t0_state_id = sm_t0.state_id
+    assert t0_state_id != ""
+
+    # T1: modify target on disk
+    time.sleep(0.05)
+    mod_a.write_text(
+        "def compute_data(x: int) -> int:\n    # T1 content\n    return x * 99\n",
+        encoding="utf-8",
+    )
+
+    # Update FileStateManager to T1 and save with new generation state_id T1
+    sm_t1 = FileStateManager(str(cache))
+    sm_t1.update_state(str(mod_a))
+    t1_state_id = "2026-08-26_T1_CRASHED"
+    sm_t1.save(state_id=t1_state_id, revision=2)
+
+    # CRASH: do NOT save snapshot T1. Snapshot remains T0 (state_id=t0_state_id, revision=1).
+    # Clear all memory caches to simulate process restart / hydration
+    mcp_runtime._live_engines.pop(str(repo), None)
+    mcp_runtime._live_engine_revisions.pop(str(repo), None)
+    mcp_runtime._live_engine_provenance.pop(str(repo), None)
+
+    # Query tool now hydrats canonical state from snapshot (T0) and FileStateManager from file_state.json (T1)
+    res_raw = get_module_context(repo_path=str(repo), module_name="pkg.mod_a")
+    res = json.loads(res_raw)
+    freshness = res.get("state_freshness")
+
+    assert freshness is not None
+    # Verified that generation mismatch fails closed to unverified
+    assert freshness["workspace_sync"] != "verified"
+    assert freshness["workspace_sync"] != "metadata_match"
+    assert freshness["workspace_sync"] == "unverified"
+    assert "generation" in freshness["advisory_warning"].lower() or "crash" in freshness["advisory_warning"].lower()
+
+
+def test_h3a_case_j_local_incremental_mutation_revision_sync(tmp_path):
+    """Case J (Blocker 2 - Incremental Mutation Revision Sync):
+    Snapshot engine revision R0 -> engine.update_file -> canonical state R1.
+    Query on the same cached engine:
+      ANSWERED_STATE_REVISION == R1
+      STATE_FRESHNESS_CANONICAL_REVISION == R1
+    """
+    from contextor.mcp.tools.update_file import update_file
+
+    repo, mod_a = _setup_repo(tmp_path)
+    ContextorFacade.analyze_project(str(repo))
+    mcp_runtime._live_engines.pop(str(repo), None)
+
+    # Hydrate engine at R0
+    engine0 = mcp_runtime.get_or_init_engine(repo)
+    r0 = engine0.revision or 1
+
+    # Modify file and update via MCP update_file tool
+    time.sleep(0.05)
+    mod_a.write_text(
+        "def compute_data(x: int) -> int:\n    # R1 content\n    return x * 50\n",
+        encoding="utf-8",
+    )
+    upd_res_raw = update_file(repo_path=str(repo), file_path=str(mod_a))
+    upd_res = json.loads(upd_res_raw)
+    assert upd_res["status"] == "UPDATED"
+
+    # Query with cached engine
+    query_raw = get_module_context(repo_path=str(repo), module_name="pkg.mod_a")
+    query_res = json.loads(query_raw)
+    freshness = query_res["state_freshness"]
+
+    assert freshness["workspace_sync"] == "verified"
+    assert freshness["canonical_revision"] > r0
+    assert engine0.state.revision == freshness["canonical_revision"]
+
+
+def test_h3a_case_k_real_remote_live_lifecycle_and_journal_separation(tmp_path):
+    """Case K (Blocker 2 - Real Remote LIVE Proof & Journal Separation):
+    1. Bootstrap real canonical snapshot via analyze_project;
+    2. Start real CanonicalLiveServer with updater on background thread;
+    3. Connect real client and verify initial journal revision J0 == snapshot revision (1);
+    4. Execute status event (client.status('Server alive')), incrementing journal revision to J1 (2),
+       WITHOUT modifying canonical source facts;
+    5. Call get_or_init_engine(repo) via MCP runtime to hydrate from remote live server;
+    6. Verify:
+       - state_freshness['canonical_revision'] == 1 (publication revision, not journal revision 2)
+       - state_freshness['provenance'] == 'live'
+       - state_freshness['workspace_sync'] == 'verified'
+    7. Execute real LIVE file update:
+       - modify target file on disk (disk T1)
+       - client.update_file(str(mod_a), origin='test')
+       - re-hydrate and query via get_module_context
+       EXPECT:
+       - workspace_sync == 'verified'
+       - canonical_revision == 2 (matching T1 snapshot publication)
+       - FileState fingerprint matches same publication.
+    """
+    import threading
+    from contextor.core.live_state import CanonicalLiveServer, LiveStateClient
+    from contextor.core.live_state.runtime import _repository_updater, endpoint_file
+    from contextor.core.live_state.store import load_snapshot
+    from contextor.core.paths import repo_cache_dir
+    from contextor.core.repository_identity import require_repository_identity
+
+    repo, mod_a = _setup_repo(tmp_path)
+    ContextorFacade.analyze_project(str(repo))
+    identity = require_repository_identity(repo)
+    cache = repo_cache_dir(repo)
+
+    # Load canonical snapshot from disk
+    loaded = load_snapshot(cache, expected_repo_id=identity.repo_id, expected_root_path=identity.root_path)
+    assert loaded is not None
+    state, metadata = loaded
+
+    # 2. Start real CanonicalLiveServer
+    server = CanonicalLiveServer(state, revision=metadata.revision, updater=_repository_updater(repo))
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+
+    # 3. Register endpoint
+    ep_file = endpoint_file(repo)
+    ep_file.parent.mkdir(parents=True, exist_ok=True)
+    ep_payload = {
+        "host": server.endpoint.host,
+        "port": server.endpoint.port,
+        "authkey_hex": server.endpoint.authkey_hex,
+        "pid": os.getpid(),
+        "repo_id": identity.repo_id,
+        "root_path": identity.root_path,
+    }
+    ep_file.write_text(json.dumps(ep_payload), encoding="utf-8")
+
+    client = LiveStateClient(server.endpoint)
+    try:
+        # Initial ping
+        ping0 = client.ping()
+        assert ping0["status"] == "ok"
+        j0 = ping0["revision"]
+        assert j0 == metadata.revision
+
+        # 4. Status event increments journal revision to J1 without changing source snapshot
+        client.status("Server heartbeat status", origin="test")
+        ping1 = client.ping()
+        j1 = ping1["revision"]
+        assert j1 == j0 + 1
+
+        # 5. MCP runtime hydrates from live daemon
+        mcp_runtime._live_engines.pop(str(repo), None)
+        mcp_runtime._live_engine_revisions.pop(str(repo), None)
+        mcp_runtime._live_engine_provenance.pop(str(repo), None)
+        mcp_runtime._live_journal_revisions.pop(str(repo), None)
+
+        engine_live = mcp_runtime.get_or_init_engine(repo)
+        assert engine_live is not None
+
+        res_raw = get_module_context(repo_path=str(repo), module_name="pkg.mod_a")
+        res = json.loads(res_raw)
+        freshness = res["state_freshness"]
+
+        # 6. Verify publication revision != journal revision
+        assert freshness["provenance"] == "live"
+        assert freshness["canonical_revision"] == metadata.revision  # e.g. 1
+        assert j1 == metadata.revision + 1  # e.g. 2
+        assert freshness["workspace_sync"] == "verified"
+        assert freshness["advisory_warning"] is None
+
+        # 7. Execute real LIVE file update
+        time.sleep(0.05)
+        mod_a.write_text(
+            "def compute_data(x: int) -> int:\n    # T1 remote live update\n    return x * 77\n",
+            encoding="utf-8",
+        )
+        upd = client.update_file(str(mod_a), origin="test")
+        assert upd["status"] == "ok"
+        new_journal_rev = upd["revision"]
+
+        # Clear MCP in-memory cache to force hydration of new live snapshot
+        mcp_runtime._live_engines.pop(str(repo), None)
+        res_t1_raw = get_module_context(repo_path=str(repo), module_name="pkg.mod_a")
+        res_t1 = json.loads(res_t1_raw)
+        freshness_t1 = res_t1["state_freshness"]
+
+        assert freshness_t1["provenance"] == "live"
+        assert freshness_t1["canonical_revision"] == metadata.revision + 1
+        assert freshness_t1["workspace_sync"] == "verified"
+        assert freshness_t1["advisory_warning"] is None
+    finally:
+        server.close()
+
+
+def test_h3a_case_l_legacy_filestate_missing_revision(tmp_path):
+    """Case L (Blocker 1 Regression A):
+    canonical: state_id="X", revision=10, facts=T0
+    file_state: state_id="X", revision=MISSING (None), sha256=T1
+    disk=T1
+    EXPECT: workspace_sync='unverified', NEVER 'verified', NEVER 'metadata_match'.
+    """
+    from contextor.core.paths import repo_cache_dir
+    from contextor.core.analysis.state_manager import FileStateManager
+
+    repo, mod_a = _setup_repo(tmp_path)
+    ContextorFacade.analyze_project(str(repo))
+    mcp_runtime._live_engines.pop(str(repo), None)
+
+    cache = repo_cache_dir(repo)
+    sm = FileStateManager(str(cache))
+    t0_state_id = sm.state_id
+
+    # Modify file on disk to T1
+    time.sleep(0.05)
+    mod_a.write_text("def compute_data(x: int) -> int:\n    return x * 88\n", encoding="utf-8")
+
+    # Update file_state on disk with matching sha256 and matching state_id, but MISSING revision
+    sm.update_state(str(mod_a))
+    # Write file_state.json directly without revision
+    fs_file = cache / "file_state.json"
+    fs_data = {
+        "_meta": {"state_id": t0_state_id},  # No revision key
+        "files": {path: fs.to_dict() for path, fs in sm._state.items()}
+    }
+    fs_file.write_text(json.dumps(fs_data, indent=2), encoding="utf-8")
+
+    mcp_runtime._live_engines.pop(str(repo), None)
+    res = json.loads(get_module_context(repo_path=str(repo), module_name="pkg.mod_a"))
+    freshness = res["state_freshness"]
+
+    assert freshness["workspace_sync"] != "verified"
+    assert freshness["workspace_sync"] != "metadata_match"
+    assert freshness["workspace_sync"] == "unverified"
+    assert "generation" in freshness["advisory_warning"].lower()
+
+
+def test_h3a_case_m_legacy_filestate_missing_state_id(tmp_path):
+    """Case M (Blocker 1 Regression B):
+    canonical: state_id="X", revision=1
+    file_state: state_id="", revision=1, sha256=disk
+    EXPECT: workspace_sync='unverified'.
+    """
+    from contextor.core.paths import repo_cache_dir
+    from contextor.core.analysis.state_manager import FileStateManager
+
+    repo, mod_a = _setup_repo(tmp_path)
+    ContextorFacade.analyze_project(str(repo))
+    mcp_runtime._live_engines.pop(str(repo), None)
+
+    cache = repo_cache_dir(repo)
+    sm = FileStateManager(str(cache))
+
+    # Write file_state.json with empty state_id
+    fs_file = cache / "file_state.json"
+    fs_data = {
+        "_meta": {"state_id": "", "revision": 1},
+        "files": {path: fs.to_dict() for path, fs in sm._state.items()}
+    }
+    fs_file.write_text(json.dumps(fs_data, indent=2), encoding="utf-8")
+
+    mcp_runtime._live_engines.pop(str(repo), None)
+    res = json.loads(get_module_context(repo_path=str(repo), module_name="pkg.mod_a"))
+    freshness = res["state_freshness"]
+
+    assert freshness["workspace_sync"] != "verified"
+    assert freshness["workspace_sync"] != "metadata_match"
+    assert freshness["workspace_sync"] == "unverified"
+
+
+def test_h3a_case_n_filestate_both_generation_fields_missing(tmp_path):
+    """Case N (Blocker 1 Regression C):
+    canonical: state_id="X", revision=1
+    file_state: state_id="", revision=None
+    EXPECT: workspace_sync='unverified'.
+    """
+    from contextor.core.paths import repo_cache_dir
+    from contextor.core.analysis.state_manager import FileStateManager
+
+    repo, mod_a = _setup_repo(tmp_path)
+    ContextorFacade.analyze_project(str(repo))
+    mcp_runtime._live_engines.pop(str(repo), None)
+
+    cache = repo_cache_dir(repo)
+    sm = FileStateManager(str(cache))
+
+    # Write file_state.json without _meta or empty _meta
+    fs_file = cache / "file_state.json"
+    fs_data = {
+        "files": {path: fs.to_dict() for path, fs in sm._state.items()}
+    }
+    fs_file.write_text(json.dumps(fs_data, indent=2), encoding="utf-8")
+
+    mcp_runtime._live_engines.pop(str(repo), None)
+    res = json.loads(get_module_context(repo_path=str(repo), module_name="pkg.mod_a"))
+    freshness = res["state_freshness"]
+
+    assert freshness["workspace_sync"] != "verified"
+    assert freshness["workspace_sync"] != "metadata_match"
+    assert freshness["workspace_sync"] == "unverified"
+
+
+def test_h3a_case_o_live_daemon_restart_cache_invalidation_across_epochs(tmp_path):
+    """Case O (H3A-H4 Blocker - LIVE Daemon Restart Epoch Invalidation):
+    T0: S1 starts from snapshot P0=1.
+    S1 performs 20 status pings -> journal J1=21 >> P0.
+    MCP hydrates engine: cached journal J1=21, cached engine P0=1.
+    S1 stops.
+    S2 starts from snapshot P0: initial journal J_init=1.
+    Target file modified on disk (T1) -> S2 update_file: publication P1=2, journal J2=2 (numerically << J1=21).
+    MCP query runs WITHOUT manual clearing of _live_engines / _live_journal_revisions / _live_sessions.
+    EXPECT:
+      - Live session restart detected (S2 != S1)
+      - Remote snapshot refreshed
+      - Query reflects P1=2
+      - canonical_revision=2
+      - workspace_sync='verified'
+      - Stale P0 engine is NOT returned.
+    """
+    import threading
+    from contextor.core.live_state import CanonicalLiveServer, LiveStateClient
+    from contextor.core.live_state.runtime import _repository_updater, endpoint_file
+    from contextor.core.live_state.store import load_snapshot
+    from contextor.core.paths import repo_cache_dir
+    from contextor.core.repository_identity import require_repository_identity
+
+    repo, mod_a = _setup_repo(tmp_path)
+    ContextorFacade.analyze_project(str(repo))
+    identity = require_repository_identity(repo)
+    cache = repo_cache_dir(repo)
+
+    # 1. Start Server S1
+    loaded = load_snapshot(cache, expected_repo_id=identity.repo_id, expected_root_path=identity.root_path)
+    state, metadata = loaded
+    p0 = metadata.revision  # 1
+
+    server1 = CanonicalLiveServer(state, revision=p0, updater=_repository_updater(repo))
+    t1 = threading.Thread(target=server1.serve_forever, daemon=True)
+    t1.start()
+
+    ep_file = endpoint_file(repo)
+    ep_file.parent.mkdir(parents=True, exist_ok=True)
+    ep_file.write_text(json.dumps({
+        "host": server1.endpoint.host,
+        "port": server1.endpoint.port,
+        "authkey_hex": server1.endpoint.authkey_hex,
+        "pid": os.getpid(),
+        "repo_id": identity.repo_id,
+        "root_path": identity.root_path,
+    }), encoding="utf-8")
+
+    client1 = LiveStateClient(server1.endpoint)
+    # Increment journal revision heavily via status events
+    for i in range(20):
+        client1.status(f"status {i}", origin="test")
+    ping_s1 = client1.ping()
+    j1 = ping_s1["revision"]
+    assert j1 == p0 + 20  # 21
+
+    # Hydrate MCP runtime engine for S1
+    mcp_runtime._live_engines.pop(str(repo), None)
+    mcp_runtime._live_journal_revisions.pop(str(repo), None)
+    mcp_runtime._live_sessions.pop(str(repo), None)
+
+    engine_s1 = mcp_runtime.get_or_init_engine(repo)
+    assert engine_s1 is not None
+    assert mcp_runtime._live_journal_revisions.get(str(repo)) == j1  # 21
+    assert mcp_runtime._live_engine_revisions.get(str(repo)) == p0  # 1
+
+    # 2. Stop S1
+    server1.close()
+
+    # 3. Start Server S2 from disk snapshot (without clearing MCP cache)
+    loaded_s2 = load_snapshot(cache, expected_repo_id=identity.repo_id, expected_root_path=identity.root_path)
+    state_s2, metadata_s2 = loaded_s2
+    server2 = CanonicalLiveServer(state_s2, revision=metadata_s2.revision, updater=_repository_updater(repo))
+    t2 = threading.Thread(target=server2.serve_forever, daemon=True)
+    t2.start()
+
+    ep_file.write_text(json.dumps({
+        "host": server2.endpoint.host,
+        "port": server2.endpoint.port,
+        "authkey_hex": server2.endpoint.authkey_hex,
+        "pid": os.getpid(),
+        "repo_id": identity.repo_id,
+        "root_path": identity.root_path,
+    }), encoding="utf-8")
+
+    client2 = LiveStateClient(server2.endpoint)
+    try:
+        # Initial journal on S2 is 1 (P0)
+        assert client2.ping()["revision"] == p0
+
+        # Modify target file on disk
+        time.sleep(0.05)
+        mod_a.write_text(
+            "def compute_data(x: int) -> int:\n    # S2 P1 update\n    return x * 100\n",
+            encoding="utf-8",
+        )
+        upd = client2.update_file(str(mod_a), origin="test")
+        assert upd["status"] == "ok"
+        j2 = upd["revision"]  # 2
+        assert j2 < j1  # 2 < 21! Numeric comparison would fail, but epoch session tracking succeeds!
+
+        # 4. MCP query WITHOUT manually clearing ANY caches
+        res_raw = get_module_context(repo_path=str(repo), module_name="pkg.mod_a")
+        res = json.loads(res_raw)
+        freshness = res["state_freshness"]
+
+        assert freshness["provenance"] == "live"
+        assert freshness["canonical_revision"] == p0 + 1  # 2
+        assert freshness["workspace_sync"] == "verified"
+        assert freshness["advisory_warning"] is None
+
+        # Verify cached engine is the new S2 engine
+        cached_eng = mcp_runtime._live_engines.get(str(repo))
+        assert cached_eng.revision == p0 + 1
+        assert mcp_runtime._live_journal_revisions.get(str(repo)) == j2
+    finally:
+        server2.close()
+
+
+def test_h3a_case_p_unchanged_session_redundant_snapshot_fetch_zero(tmp_path):
+    """Case P (H3A-H4 - Unchanged Session Redundant Snapshot Fetch is Zero):
+    Within the same LIVE session, repeated MCP engine calls when no journal events occur
+    do NOT fetch the snapshot again from the daemon.
+    """
+    import threading
+    from unittest.mock import patch
+    from contextor.core.live_state import CanonicalLiveServer, LiveStateClient
+    from contextor.core.live_state.runtime import _repository_updater, endpoint_file
+    from contextor.core.live_state.store import load_snapshot
+    from contextor.core.paths import repo_cache_dir
+    from contextor.core.repository_identity import require_repository_identity
+
+    repo, mod_a = _setup_repo(tmp_path)
+    ContextorFacade.analyze_project(str(repo))
+    identity = require_repository_identity(repo)
+    cache = repo_cache_dir(repo)
+
+    loaded = load_snapshot(cache, expected_repo_id=identity.repo_id, expected_root_path=identity.root_path)
+    state, metadata = loaded
+    server = CanonicalLiveServer(state, revision=metadata.revision, updater=_repository_updater(repo))
+    t = threading.Thread(target=server.serve_forever, daemon=True)
+    t.start()
+
+    ep_file = endpoint_file(repo)
+    ep_file.parent.mkdir(parents=True, exist_ok=True)
+    ep_file.write_text(json.dumps({
+        "host": server.endpoint.host,
+        "port": server.endpoint.port,
+        "authkey_hex": server.endpoint.authkey_hex,
+        "pid": os.getpid(),
+        "repo_id": identity.repo_id,
+        "root_path": identity.root_path,
+    }), encoding="utf-8")
+
+    try:
+        mcp_runtime._live_engines.pop(str(repo), None)
+        mcp_runtime._live_journal_revisions.pop(str(repo), None)
+        mcp_runtime._live_sessions.pop(str(repo), None)
+
+        # First call hydrates engine
+        engine1 = mcp_runtime.get_or_init_engine(repo)
+        assert engine1 is not None
+
+        # Subsequent calls in unchanged session
+        orig_snapshot = LiveStateClient.snapshot
+        snapshot_call_count = 0
+
+        def counted_snapshot(self):
+            nonlocal snapshot_call_count
+            snapshot_call_count += 1
+            return orig_snapshot(self)
+
+        with patch.object(LiveStateClient, "snapshot", counted_snapshot):
+            for _ in range(5):
+                engine = mcp_runtime.get_or_init_engine(repo)
+                assert engine is engine1
+
+        # Redundant snapshot fetch count is 0
+        assert snapshot_call_count == 0
+    finally:
+        server.close()
+
+
+def test_h3a_case_q_equal_numeric_revision_cross_session_invalidation(tmp_path):
+    """Case Q (H3A-H4 - Equal Numeric Revision Across Sessions Invalidates Cache):
+    S1: journal=5, publication=1.
+    S2 starts: journal=5, but publication=2.
+    Equal numeric journal revision K=5 across different session identities MUST force snapshot refresh.
+    """
+    import threading
+    from contextor.core.live_state import CanonicalLiveServer
+    from contextor.core.live_state.runtime import _repository_updater, endpoint_file
+    from contextor.core.live_state.store import load_snapshot, save_snapshot
+    from contextor.core.paths import repo_cache_dir
+    from contextor.core.repository_identity import require_repository_identity
+
+    repo, mod_a = _setup_repo(tmp_path)
+    ContextorFacade.analyze_project(str(repo))
+    identity = require_repository_identity(repo)
+    cache = repo_cache_dir(repo)
+
+    # 1. Start Server S1
+    loaded = load_snapshot(cache, expected_repo_id=identity.repo_id, expected_root_path=identity.root_path)
+    state, metadata = loaded
+    server1 = CanonicalLiveServer(state, revision=5, updater=_repository_updater(repo))
+    t1 = threading.Thread(target=server1.serve_forever, daemon=True)
+    t1.start()
+
+    ep_file = endpoint_file(repo)
+    ep_file.parent.mkdir(parents=True, exist_ok=True)
+    ep_file.write_text(json.dumps({
+        "host": server1.endpoint.host,
+        "port": server1.endpoint.port,
+        "authkey_hex": server1.endpoint.authkey_hex,
+        "pid": os.getpid(),
+        "repo_id": identity.repo_id,
+        "root_path": identity.root_path,
+    }), encoding="utf-8")
+
+    mcp_runtime._live_engines.pop(str(repo), None)
+    mcp_runtime._live_journal_revisions.pop(str(repo), None)
+    mcp_runtime._live_sessions.pop(str(repo), None)
+
+    # Hydrate MCP engine for S1 (journal=5, rev=1)
+    engine_s1 = mcp_runtime.get_or_init_engine(repo)
+    assert engine_s1 is not None
+    assert mcp_runtime._live_journal_revisions.get(str(repo)) == 5
+    assert mcp_runtime._live_engine_revisions.get(str(repo)) == 1
+
+    server1.close()
+
+    # 2. Update snapshot on disk to revision 2
+    save_snapshot(state, cache, "state_2", writer="test", repo_id=identity.repo_id, root_path=identity.root_path, revision_floor=1)
+    loaded2 = load_snapshot(cache, expected_repo_id=identity.repo_id, expected_root_path=identity.root_path)
+    state2, metadata2 = loaded2
+    assert metadata2.revision == 2
+
+    # 3. Start S2 with SAME numeric journal revision (5)
+    server2 = CanonicalLiveServer(state2, revision=5, updater=_repository_updater(repo))
+    t2 = threading.Thread(target=server2.serve_forever, daemon=True)
+    t2.start()
+
+    ep_file.write_text(json.dumps({
+        "host": server2.endpoint.host,
+        "port": server2.endpoint.port,
+        "authkey_hex": server2.endpoint.authkey_hex,
+        "pid": os.getpid(),
+        "repo_id": identity.repo_id,
+        "root_path": identity.root_path,
+    }), encoding="utf-8")
+
+    try:
+        # WITHOUT clearing MCP cache:
+        engine_s2 = mcp_runtime.get_or_init_engine(repo)
+        assert engine_s2 is not None
+        # Must have refreshed to revision 2 despite identical journal revision (5)
+        assert engine_s2.revision == 2
+        assert mcp_runtime._live_engine_revisions.get(str(repo)) == 2
+    finally:
+        server2.close()
+
+
+def test_h3a_case_r_full_analysis_same_daemon_live_publication_sync(tmp_path):
+    """Case R (H3A-H5 - Full Analysis Active LIVE Daemon Sync):
+    T0: analyze_project creates P0. Start real CanonicalLiveServer daemon holding P0.
+        MCP hydrates P0.
+    T1: modify file on disk, run ContextorFacade.analyze_project(repo) with SAME daemon active.
+        WITHOUT restarting daemon and WITHOUT manually clearing MCP caches.
+    EXPECT:
+      - DISK_SNAPSHOT = P1 (2)
+      - FILESTATE = P1 (2)
+      - LIVE_DAEMON_STATE = P1 (2)
+      - get_module_context: canonical_revision=2, provenance='live', workspace_sync='verified', advisory_warning=None
+      - get_symbol_implementation: status='resolved', implementation returned
+      - get_file_edit_context: canonical_revision=2, provenance='live', workspace_sync='verified'
+    """
+    import threading
+    from contextor.core.live_state import CanonicalLiveServer, LiveStateClient
+    from contextor.core.live_state.runtime import _repository_updater, endpoint_file
+    from contextor.core.live_state.store import load_snapshot, read_metadata
+    from contextor.core.paths import repo_cache_dir
+    from contextor.core.analysis.state_manager import FileStateManager
+    from contextor.core.repository_identity import require_repository_identity
+    from contextor.mcp.tools.get_symbol_implementation import get_symbol_implementation
+    from contextor.mcp.tools.get_file_edit_context import get_file_edit_context
+
+    repo, mod_a = _setup_repo(tmp_path)
+    ContextorFacade.analyze_project(str(repo))
+    identity = require_repository_identity(repo)
+    cache = repo_cache_dir(repo)
+
+    # 1. Start Server S1 holding P0
+    loaded = load_snapshot(cache, expected_repo_id=identity.repo_id, expected_root_path=identity.root_path)
+    state, metadata = loaded
+    p0 = metadata.revision  # 1
+
+    server = CanonicalLiveServer(state, revision=p0, updater=_repository_updater(repo))
+    t = threading.Thread(target=server.serve_forever, daemon=True)
+    t.start()
+
+    ep_file = endpoint_file(repo)
+    ep_file.parent.mkdir(parents=True, exist_ok=True)
+    ep_file.write_text(json.dumps({
+        "host": server.endpoint.host,
+        "port": server.endpoint.port,
+        "authkey_hex": server.endpoint.authkey_hex,
+        "pid": os.getpid(),
+        "repo_id": identity.repo_id,
+        "root_path": identity.root_path,
+    }), encoding="utf-8")
+
+    try:
+        # Clear MCP caches once before initial hydration
+        mcp_runtime._live_engines.pop(str(repo), None)
+        mcp_runtime._live_journal_revisions.pop(str(repo), None)
+        mcp_runtime._live_sessions.pop(str(repo), None)
+
+        # Hydrate MCP runtime at P0
+        res_t0 = json.loads(get_module_context(repo_path=str(repo), module_name="pkg.mod_a"))
+        assert res_t0["state_freshness"]["canonical_revision"] == p0
+        assert res_t0["state_freshness"]["workspace_sync"] == "verified"
+        assert res_t0["state_freshness"]["provenance"] == "live"
+
+        # T1: modify file on disk
+        time.sleep(0.05)
+        mod_a.write_text(
+            "def compute_data(x: int) -> int:\n    # T1 full analysis modification\n    return x * 123\n",
+            encoding="utf-8",
+        )
+
+        # Run real full analysis while SAME LIVE daemon remains running
+        errors, res = ContextorFacade.analyze_project(str(repo))
+        assert not errors
+
+        # Verify disk snapshot & FileState
+        disk_meta = read_metadata(cache)
+        assert disk_meta is not None
+        p1 = disk_meta.revision
+        assert p1 > p0
+
+        sm = FileStateManager(str(cache))
+        assert sm.revision == p1
+        assert sm.state_id == disk_meta.state_id
+
+        # Verify LIVE daemon state via client
+        client = LiveStateClient(server.endpoint)
+        daemon_snap = client.snapshot()
+        daemon_state = daemon_snap.get("state")
+        assert getattr(daemon_state, "revision", None) == p1
+        assert getattr(daemon_state, "state_id", None) == disk_meta.state_id
+
+        # 4. Execute real MCP queries WITHOUT manual clearing of ANY caches
+        res_t1 = json.loads(get_module_context(repo_path=str(repo), module_name="pkg.mod_a"))
+        freshness_t1 = res_t1["state_freshness"]
+        assert freshness_t1["canonical_revision"] == p1
+        assert freshness_t1["provenance"] == "live"
+        assert freshness_t1["workspace_sync"] == "verified"
+        assert freshness_t1["advisory_warning"] is None
+
+        # get_symbol_implementation
+        sym_res = json.loads(get_symbol_implementation(repo_path=str(repo), symbol="compute_data", mode="fetch", include=["implementation"]))
+        assert sym_res["status"] == "resolved"
+        assert sym_res["source_contract"]["implementation_is_complete"] is True
+        assert "x * 123" in sym_res["implementation"]
+        assert sym_res["state_freshness"]["canonical_revision"] == p1
+        assert sym_res["state_freshness"]["workspace_sync"] == "verified"
+
+        # get_file_edit_context
+        edit_res = json.loads(get_file_edit_context(repo_path=str(repo), file_path=str(mod_a)))
+        assert edit_res["state_freshness"]["canonical_revision"] == p1
+        assert edit_res["state_freshness"]["workspace_sync"] == "verified"
+    finally:
+        server.close()
+
+
+def test_h3a_case_s_explicit_generation_mismatch_symbol_fail_closed(tmp_path):
+    """Case S (H3A-H5 - Explicit Generation Mismatch Symbol Implementation Fail Closed):
+    canonical state: state_id="2026-08-27_P0", revision=1
+    FileState on disk: state_id="2026-08-27_P1", revision=2
+    get_symbol_implementation(symbol="compute_data", mode="fetch", include=["implementation"]) MUST fail closed:
+      - status == "stale_source"
+      - source_contract.implementation_is_complete == False
+      - "implementation" not returned
+    """
+    from contextor.core.paths import repo_cache_dir
+    from contextor.core.analysis.state_manager import FileStateManager
+    from contextor.mcp.tools.get_symbol_implementation import get_symbol_implementation
+
+    repo, mod_a = _setup_repo(tmp_path)
+    ContextorFacade.analyze_project(str(repo))
+    cache = repo_cache_dir(repo)
+
+    # Initial hydration at P0
+    mcp_runtime._live_engines.pop(str(repo), None)
+    mcp_runtime._live_journal_revisions.pop(str(repo), None)
+    mcp_runtime._live_sessions.pop(str(repo), None)
+
+    engine = mcp_runtime.get_or_init_engine(repo)
+    assert engine is not None
+    p0_sid = engine.state.state_id
+    p0_rev = engine.state.revision
+
+    # Mutate FileStateManager on disk to simulate explicit generation mismatch (P1 on disk, P0 in engine)
+    sm = FileStateManager(str(cache))
+    sm.update_state(str(mod_a))
+    sm.save(state_id="2026-08-27_P1_MISMATCH", revision=p0_rev + 1)
+
+    # get_symbol_implementation with cached engine (holding P0) against FileState on disk (holding P1)
+    sym_res = json.loads(get_symbol_implementation(repo_path=str(repo), symbol="compute_data", mode="fetch", include=["implementation"]))
+
+    assert sym_res["status"] == "stale_source"
+    assert "implementation" not in sym_res
+    assert sym_res["source_contract"]["implementation_is_complete"] is False
+    assert sym_res["state_freshness"]["workspace_sync"] == "unverified"
+    assert "generation" in sym_res["state_freshness"]["advisory_warning"].lower()
+    assert "generation" in sym_res["stale_reason"].lower()
+
+
+
+

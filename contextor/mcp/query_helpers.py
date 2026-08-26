@@ -277,20 +277,31 @@ def build_state_freshness(
     root_path = Path(root).expanduser().resolve()
     repo_key = str(root_path)
 
-    # 1. Canonical Revision + Provenance
-    # Authoritative source: _live_engine_revisions and _live_engine_provenance are set in the
-    # SAME get_or_init_engine() call that hydrated the engine/state.
-    # We do NOT call connect(root) here — daemon reachability ≠ state provenance.
-    provenance = mcp_runtime._live_engine_provenance.get(repo_key, "snapshot")
-    canonical_revision = mcp_runtime._live_engine_revisions.get(repo_key)
-    if canonical_revision is None:
-        canonical_revision = getattr(state, "revision", None)
+    # 1. Canonical Revision + Provenance — strictly bound to the answered state / engine
+    canonical_revision = None
+    if state is not None and getattr(state, "revision", None) is not None:
+        canonical_revision = getattr(state, "revision")
+    elif engine is not None and getattr(engine, "revision", None) is not None:
+        canonical_revision = getattr(engine, "revision")
+    else:
+        canonical_revision = mcp_runtime._live_engine_revisions.get(repo_key)
 
     if canonical_revision is not None:
         try:
             canonical_revision = int(canonical_revision)
         except (ValueError, TypeError):
             canonical_revision = None
+
+    provenance = None
+    if state is not None and getattr(state, "provenance", None) is not None:
+        provenance = getattr(state, "provenance")
+    elif engine is not None and getattr(engine, "provenance", None) is not None:
+        provenance = getattr(engine, "provenance")
+    else:
+        provenance = mcp_runtime._live_engine_provenance.get(repo_key, "snapshot")
+
+    if not provenance:
+        provenance = "snapshot"
 
     # 2. Canonical State Internal Health
     resync_required = getattr(state, "resync_required", False)
@@ -302,13 +313,37 @@ def build_state_freshness(
     else:
         canonical_state = "fresh"
 
-    # 3. Workspace Sync — exact content fingerprint when available
-    # Resolution strategy:
-    #   a) If tracked.sha256 is non-empty AND mtime+size match → exact content verified
-    #   b) If tracked.sha256 is non-empty AND mtime+size DON'T match → must hash to confirm
-    #      (target-local read allowed per contract — single file, not repo scan)
-    #   c) If tracked.sha256 is empty → only metadata available → "metadata_match" (not "verified")
-    #   d) File deleted / not tracked → "out_of_sync" / "unverified"
+    # 3. Positive Generation Coherence Proof (Blocker 1 - Fail Closed)
+    state_mgr = getattr(engine, "state_manager", None)
+    if state_mgr is None:
+        try:
+            cache_dir = repo_cache_dir(root_path)
+            state_mgr = FileStateManager(str(cache_dir))
+        except Exception:
+            state_mgr = None
+
+    canonical_state_id = getattr(state, "state_id", None) if state is not None else None
+    filestate_state_id = getattr(state_mgr, "state_id", None) if state_mgr is not None else None
+    canonical_rev = getattr(state, "revision", None) if state is not None else None
+    if canonical_rev is None and engine is not None:
+        canonical_rev = getattr(engine, "revision", None)
+    filestate_rev = getattr(state_mgr, "revision", None) if state_mgr is not None else None
+
+    explicit_disk_mismatch = is_explicit_generation_mismatch(root_path, state, engine=engine)
+
+    generation_coherent = bool(
+        not explicit_disk_mismatch
+        and canonical_state_id
+        and filestate_state_id
+        and str(canonical_state_id).strip() != ""
+        and str(filestate_state_id).strip() != ""
+        and canonical_state_id == filestate_state_id
+        and canonical_rev is not None
+        and filestate_rev is not None
+        and int(canonical_rev) == int(filestate_rev)
+    )
+
+    # 4. Workspace Sync — exact content fingerprint when available
     resolved_file: Path | None = None
     if target_file is not None:
         cand = Path(target_file)
@@ -320,16 +355,8 @@ def build_state_freshness(
             resolved_file = cand if cand.is_absolute() else (root_path / cand).resolve()
 
     workspace_sync = "unverified"
-    if resolved_file is not None:
+    if resolved_file is not None and generation_coherent:
         file_path_str = str(resolved_file)
-        state_mgr = getattr(engine, "state_manager", None)
-        if state_mgr is None:
-            try:
-                cache_dir = repo_cache_dir(root_path)
-                state_mgr = FileStateManager(str(cache_dir))
-            except Exception:
-                state_mgr = None
-
         tracked = None
         if state_mgr is not None:
             tracked = state_mgr._state.get(file_path_str)
@@ -371,8 +398,11 @@ def build_state_freshness(
                     workspace_sync = "unverified"
         else:
             workspace_sync = "unverified"
+    elif resolved_file is not None and not generation_coherent:
+        # Generation mismatch between FileState and canonical snapshot -> fail closed as unverified
+        workspace_sync = "unverified"
 
-    # 4. Families
+    # 5. Families
     families = {
         "module": module_current_truth(state, target_module)["state"] if target_module else "fresh",
         "graph": "fresh" if getattr(state, "dependency_graph", None) is not None else "unavailable",
@@ -382,9 +412,14 @@ def build_state_freshness(
         "collisions": getattr(state, "collisions_state", "deferred"),
     }
 
-    # 5. Advisory Warning
+    # 6. Advisory Warning
     advisory_warning: str | None = None
-    if workspace_sync in {"out_of_sync", "metadata_match"}:
+    if not generation_coherent:
+        advisory_warning = (
+            "Generation proof incomplete or mismatched: FileState fingerprint "
+            "cannot be proven to belong to the answered canonical generation."
+        )
+    elif workspace_sync in {"out_of_sync", "metadata_match"}:
         if workspace_sync == "out_of_sync":
             advisory_warning = "Target file on disk has been modified since canonical state revision was generated."
         else:
@@ -407,4 +442,56 @@ def build_state_freshness(
         "families": families,
         "advisory_warning": advisory_warning,
     }
+
+
+def is_explicit_generation_mismatch(
+    root: str | Path,
+    state: Any = None,
+    *,
+    engine: Any = None,
+) -> bool:
+    """Return True if both canonical state and FileState carry generation metadata that explicitly mismatch."""
+    from contextor.core.paths import repo_cache_dir
+    from contextor.core.analysis.state_manager import FileStateManager
+
+    root_path = Path(root).expanduser().resolve()
+    disk_mgr = None
+    try:
+        cache_dir = repo_cache_dir(root_path)
+        disk_mgr = FileStateManager(str(cache_dir))
+    except Exception:
+        disk_mgr = None
+
+    state_mgr = getattr(engine, "state_manager", None) or disk_mgr
+
+    canonical_state_id = getattr(state, "state_id", None) if state is not None else None
+    canonical_rev = getattr(state, "revision", None) if state is not None else None
+    if canonical_rev is None and engine is not None:
+        canonical_rev = getattr(engine, "revision", None)
+
+    managers_to_check = []
+    if disk_mgr is not None:
+        managers_to_check.append(disk_mgr)
+    if state_mgr is not None and state_mgr is not disk_mgr:
+        managers_to_check.append(state_mgr)
+
+    for mgr in managers_to_check:
+        filestate_state_id = getattr(mgr, "state_id", None)
+        filestate_rev = getattr(mgr, "revision", None)
+        state_id_mismatch = bool(
+            canonical_state_id
+            and filestate_state_id
+            and str(canonical_state_id).strip() != ""
+            and str(filestate_state_id).strip() != ""
+            and str(canonical_state_id).strip() != str(filestate_state_id).strip()
+        )
+        rev_mismatch = bool(
+            canonical_rev is not None
+            and filestate_rev is not None
+            and int(canonical_rev) != int(filestate_rev)
+        )
+        if state_id_mismatch or rev_mismatch:
+            return True
+    return False
+
 
