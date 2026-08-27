@@ -278,41 +278,67 @@ def _cleanup_owned_processes(directory: Path, owner_pid: int) -> None:
             remove_record(record_path)
 
 
+import inspect
+from typing import Any, Callable
+
+
+def _tool_repository_argument(
+    func: Callable[..., Any],
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+) -> Any:
+    try:
+        bound = inspect.signature(func).bind_partial(*args, **kwargs)
+    except (TypeError, ValueError):
+        return None
+
+    for name in ("repo_path", "root_path"):
+        value = bound.arguments.get(name)
+        if value:
+            return value
+
+    return None
+
+
 def _resolve_telemetry_clients(root_path: Any = None) -> list[Any]:
     from pathlib import Path
     from contextor.core.live_state import connect
     from contextor.mcp import runtime as mcp_runtime
 
-    clients = []
-    seen_endpoints = set()
+    clients: list[Any] = []
+    seen_endpoints: set[tuple[Any, ...]] = set()
 
-    def add_client(client):
-        if client is not None:
-            ep = getattr(client, "endpoint", None)
-            ep_key = (ep.host, ep.port) if ep else id(client)
-            if ep_key not in seen_endpoints:
-                seen_endpoints.add(ep_key)
-                clients.append(client)
+    def add_client(client: Any) -> None:
+        if client is None:
+            return
+        ep = getattr(client, "endpoint", None)
+        key = (
+            getattr(ep, "host", None),
+            getattr(ep, "port", None),
+            getattr(ep, "authkey_hex", None),
+        ) if ep is not None else ("object", id(client))
 
-    if root_path:
+        if key in seen_endpoints:
+            return
+
+        seen_endpoints.add(key)
+        clients.append(client)
+
+    if root_path is not None:
         try:
-            p = Path(root_path).expanduser().resolve()
-            add_client(connect(p))
+            root = Path(root_path).expanduser().resolve()
+            add_client(connect(root))
         except Exception:
             pass
 
-    if not clients:
-        for root_str in sorted(mcp_runtime._live_engines.keys()):
-            try:
-                add_client(connect(Path(root_str)))
-            except Exception:
-                pass
+        # CRITICAL: explicit repository ownership never falls through.
+        return clients
 
-        if not clients:
-            try:
-                add_client(connect(Path.cwd()))
-            except Exception:
-                pass
+    for root_str in sorted(mcp_runtime._live_engines):
+        try:
+            add_client(connect(Path(root_str)))
+        except Exception:
+            continue
 
     return clients
 
@@ -344,12 +370,11 @@ def _emit_mcp_call_telemetry(
 def _instrument_mcp_tool(func: Any, tool_name: str) -> Any:
     import functools
     from inspect import iscoroutinefunction
-    from pathlib import Path
 
     if iscoroutinefunction(func):
         @functools.wraps(func)
         async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
-            root_path = kwargs.get("repo_path") or kwargs.get("root_path") or (args[0] if args and isinstance(args[0], (str, Path)) else None)
+            root_path = _tool_repository_argument(func, args, kwargs)
             try:
                 result = await func(*args, **kwargs)
                 _emit_mcp_call_telemetry(tool_name, root_path, success=True)
@@ -361,7 +386,7 @@ def _instrument_mcp_tool(func: Any, tool_name: str) -> Any:
     else:
         @functools.wraps(func)
         def sync_wrapper(*args: Any, **kwargs: Any) -> Any:
-            root_path = kwargs.get("repo_path") or kwargs.get("root_path") or (args[0] if args and isinstance(args[0], (str, Path)) else None)
+            root_path = _tool_repository_argument(func, args, kwargs)
             try:
                 result = func(*args, **kwargs)
                 _emit_mcp_call_telemetry(tool_name, root_path, success=True)

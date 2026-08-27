@@ -255,6 +255,7 @@ class DesktopLiveEventFeed(_PollingLiveWorker):
         self.on_status = on_status
         super().__init__(interval=interval, thread_name="contextor-live-event-feed")
         self._last_seq: int = 0
+        self._poll_lock = threading.Lock()
         if initial_seq is not None:
             self._last_seq = int(initial_seq)
         else:
@@ -263,6 +264,19 @@ class DesktopLiveEventFeed(_PollingLiveWorker):
                 self._last_seq = int(resp.get("latest_seq", 0))
             except (OSError, EOFError, TimeoutError, ConnectionError):
                 self._last_seq = 0
+
+    def _emit_status(self, message: str, event: dict | None = None) -> None:
+        import inspect
+        try:
+            sig = inspect.signature(self.on_status)
+            if len(sig.parameters) >= 2 or any(
+                p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()
+            ):
+                self.on_status(message, event=event)
+            else:
+                self.on_status(message)
+        except (TypeError, ValueError):
+            self.on_status(message)
 
     def _message(self, event: dict) -> str | None:
         category = event.get("category", "LIVE_STATE")
@@ -310,28 +324,43 @@ class DesktopLiveEventFeed(_PollingLiveWorker):
         return None
 
     def poll_once(self) -> None:
+        if not self._poll_lock.acquire(blocking=False):
+            return
         try:
-            response = self.client.get_events(after_seq=self._last_seq, limit=100)
-        except (OSError, EOFError, TimeoutError, ConnectionError):
-            return
-        if response.get("status") != "ok":
-            return
-        events = response.get("events", [])
-        for event in events:
-            message = self._message(event)
-            if message:
-                import inspect
-                try:
-                    sig = inspect.signature(self.on_status)
-                    if len(sig.parameters) >= 2 or any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()):
-                        self.on_status(message, event=event)
-                    else:
-                        self.on_status(message)
-                except (TypeError, ValueError):
-                    self.on_status(message)
-            seq = event.get("seq")
-            if seq is not None and seq > self._last_seq:
-                self._last_seq = seq
-        latest_seq = response.get("latest_seq")
-        if latest_seq is not None and latest_seq > self._last_seq:
-            self._last_seq = latest_seq
+            try:
+                response = self.client.get_events(
+                    after_seq=self._last_seq,
+                    limit=100,
+                )
+            except (OSError, EOFError, TimeoutError, ConnectionError):
+                return
+
+            if response.get("status") != "ok":
+                return
+
+            if response.get("activity_resync_required"):
+                from datetime import datetime, timezone
+                self._emit_status(
+                    "[LIVE] Activity stream gap detected; some status events were not retained",
+                    event={
+                        "category": "ACTIVITY",
+                        "operation": "activity_gap",
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                    },
+                )
+
+            events = response.get("events", [])
+            for event in events:
+                message = self._message(event)
+                if message:
+                    self._emit_status(message, event)
+
+                seq = event.get("seq")
+                if isinstance(seq, int) and seq > self._last_seq:
+                    self._last_seq = seq
+
+            latest_seq = response.get("latest_seq")
+            if isinstance(latest_seq, int) and latest_seq > self._last_seq:
+                self._last_seq = latest_seq
+        finally:
+            self._poll_lock.release()

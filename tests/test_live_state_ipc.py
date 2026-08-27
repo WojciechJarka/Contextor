@@ -772,7 +772,7 @@ def test_watchdog_keeps_runtime_alive_while_owner_lives(tmp_path, monkeypatch):
 
 
 def test_get_events_continuity_gap_detection_and_retention_contract():
-    server = CanonicalLiveServer(state=None, revision=0)
+    server = CanonicalLiveServer(state=None, revision=0, retention=100)
 
     # Case 1: Initial empty buffer
     r_empty_none = server._dispatch({"operation": "get_events", "after_revision": None})

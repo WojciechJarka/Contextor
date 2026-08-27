@@ -1,16 +1,22 @@
 """Comprehensive test suite for Desktop LIVE status and MCP activity event architecture.
 
-Covers all 10 concrete correctness and evidence requirements:
-1. Authoritative Desktop full analysis event & first-run cursor handoff
-2. Event timestamp authoritativeness & invariance to drain delay
-3. Single-event watcher & MCP update semantics
-4. Canonical continuity isolation from >100 MCP telemetry events
-5. Central MCP wrapper read-only success
-6. Central MCP wrapper failure re-raise & logging
-7. MCP analyze_project wrapper & canonical publication separation
-8. All 24 registered FastMCP tools coverage & registry synchronization
-9. Real server-to-GUI burst ordering, zero dropped events & zero duplicates
-10. Desktop vs MCP full analysis publication equivalence
+Covers all concrete correctness and evidence requirements:
+1. DesktopLiveEventFeed non-reentrant single poll owner & zero duplicates
+2. Explicit inactive repo never falls through to other active repo
+3. Rootless positional string is not repository path
+4. Rootless tool emits once to each active repository
+5. Noncanonical status/activity does not replace last_live_state
+6. Over 100 activity events are retained and not silently lost & activity gap detection
+7. Authoritative Desktop full analysis event & first-run cursor handoff
+8. Event timestamp authoritativeness & invariance to drain delay
+9. Single-event watcher & MCP update semantics
+10. Canonical continuity isolation from >100 MCP telemetry events
+11. Central MCP wrapper read-only success
+12. Central MCP wrapper failure re-raise & logging
+13. MCP analyze_project wrapper & canonical publication separation
+14. All 24 registered FastMCP tools coverage & registry synchronization
+15. Real server-to-GUI burst ordering, zero dropped events & zero duplicates
+16. Desktop vs MCP full analysis publication equivalence
 """
 
 import inspect
@@ -30,12 +36,15 @@ from contextor.core.live_state import (
     DesktopLiveWatcher,
     LiveStateClient,
 )
+from contextor.core.live_state.ipc import ACTIVITY_EVENT_RETENTION
 from contextor.core.reporting_engine.persistent_registry import PersistentIdentityRegistry
+from contextor.mcp import runtime as mcp_runtime
 from contextor.mcp_server import (
     REGISTERED_MCP_TOOL_NAMES,
     _emit_mcp_call_telemetry,
     _instrument_mcp_tool,
     _resolve_telemetry_clients,
+    _tool_repository_argument,
     mcp,
     register_mcp_tool,
 )
@@ -66,20 +75,230 @@ def live_server_instance():
     thread.join(timeout=2)
 
 
+def test_background_feed_has_single_poll_owner_and_no_duplicates(live_server_instance):
+    server, client = live_server_instance
+    delivered_seqs = []
+    lock = threading.Lock()
+
+    def status_callback(msg, event=None):
+        if event and "seq" in event:
+            with lock:
+                delivered_seqs.append(event["seq"])
+
+    feed = DesktopLiveEventFeed(client, status_callback, interval=0.05, initial_seq=0)
+    feed.poll_once()
+    feed.start()
+
+    try:
+        for i in range(5):
+            client.publish(SimpleNamespace(modules={}, revision=10 + i), origin="desktop_analysis")
+            client.record_activity("MCP_CALL", tool=f"tool_{i}", source="mcp")
+
+        for _ in range(40):
+            with lock:
+                if len(delivered_seqs) == 10:
+                    break
+            time.sleep(0.05)
+
+        with lock:
+            seqs = list(delivered_seqs)
+
+        assert len(seqs) > 0
+        assert len(seqs) == len(set(seqs)), "DUPLICATE_EVENTS must be 0"
+        assert seqs == sorted(seqs), "Sequence order must strictly match server order"
+        assert seqs == list(range(1, 11)), "DROPPED_EVENTS must be 0"
+    finally:
+        feed.stop()
+
+
+def test_explicit_inactive_repo_never_falls_through_to_other_active_repo(live_server_instance, monkeypatch, tmp_path):
+    server_a, client_a = live_server_instance
+    repo_a = tmp_path / "repo_a"
+    repo_a.mkdir()
+    repo_b = tmp_path / "repo_b"
+    repo_b.mkdir()
+
+    # Active LIVE service for repo A
+    monkeypatch.setattr(
+        "contextor.core.live_state.connect",
+        lambda p: client_a if Path(p).resolve() == repo_a.resolve() else None,
+    )
+    monkeypatch.setattr(mcp_runtime, "_live_engines", {str(repo_a.resolve()): object()})
+
+    # Invoke tool with explicit repo_b (which is inactive)
+    def dummy_tool(repo_path: str):
+        return "ok"
+
+    wrapped = _instrument_mcp_tool(dummy_tool, "dummy_tool")
+    wrapped(repo_path=str(repo_b))
+
+    # Repo A must receive ZERO MCP_CALL events
+    events_a = client_a.get_events(after_seq=0, category="MCP_CALL")["events"]
+    assert len(events_a) == 0, "Explicit inactive repo must never fall through to repo A"
+
+
+def test_rootless_positional_string_is_not_repository_path():
+    def rootless_tool(symbol: str):
+        return symbol
+
+    wrapped = _instrument_mcp_tool(rootless_tool, "rootless_tool")
+    assert _tool_repository_argument(rootless_tool, ("contextor.foo::bar",), {}) is None
+
+
+def test_rootless_tool_emits_once_to_each_active_repository(tmp_path, monkeypatch):
+    repo_a = tmp_path / "repo_a"
+    repo_a.mkdir()
+    repo_b = tmp_path / "repo_b"
+    repo_b.mkdir()
+
+    server_a = CanonicalLiveServer(state=SimpleNamespace(modules={}, revision=1), revision=1)
+    thread_a = threading.Thread(target=server_a.serve_forever, daemon=True)
+    thread_a.start()
+    client_a = LiveStateClient(server_a.endpoint)
+
+    server_b = CanonicalLiveServer(state=SimpleNamespace(modules={}, revision=1), revision=1)
+    thread_b = threading.Thread(target=server_b.serve_forever, daemon=True)
+    thread_b.start()
+    client_b = LiveStateClient(server_b.endpoint)
+
+    try:
+        def mock_connect(p):
+            p_res = Path(p).resolve()
+            if p_res == repo_a.resolve():
+                return client_a
+            if p_res == repo_b.resolve():
+                return client_b
+            return None
+
+        monkeypatch.setattr("contextor.core.live_state.connect", mock_connect)
+        monkeypatch.setattr(
+            mcp_runtime,
+            "_live_engines",
+            {str(repo_a.resolve()): object(), str(repo_b.resolve()): object()},
+        )
+
+        def doc_tool():
+            return "docs"
+
+        wrapped = _instrument_mcp_tool(doc_tool, "get_mcp_documentation")
+        wrapped()
+
+        events_a = client_a.get_events(after_seq=0, category="MCP_CALL")["events"]
+        events_b = client_b.get_events(after_seq=0, category="MCP_CALL")["events"]
+
+        assert len(events_a) == 1
+        assert events_a[0]["tool"] == "get_mcp_documentation"
+
+        assert len(events_b) == 1
+        assert events_b[0]["tool"] == "get_mcp_documentation"
+    finally:
+        server_a.close()
+        server_b.close()
+        thread_a.join(timeout=2)
+        thread_b.join(timeout=2)
+
+
+def test_noncanonical_status_does_not_replace_last_live_state(live_server_instance):
+    server, client = live_server_instance
+    controller = SimpleNamespace(
+        live_status_var=_FakeVar(),
+        _live_status_queue=queue.Queue(),
+        _live_status_draining=False,
+        last_live_state=None,
+    )
+
+    def gui_callback(msg, event=None):
+        cat = event.get("category", "LIVE_STATE") if event else "LIVE_STATE"
+        gui.ContextorGUI._set_live_status(controller, msg, category=cat, event=event)
+
+    feed = DesktopLiveEventFeed(client, gui_callback, initial_seq=0)
+
+    # 1. Publish canonical event
+    state = SimpleNamespace(modules={"mod_a": 1}, revision=5)
+    client.publish(state, origin="desktop_analysis")
+    feed.poll_once()
+
+    assert controller.last_live_state is not None
+    assert controller.last_live_state["revision"] == 5
+    saved_state = dict(controller.last_live_state)
+
+    # 2. Non-mutating status / activity event
+    client.status("Operational heartbeat", origin="desktop")
+    client.record_activity("MCP_CALL", tool="search_artifacts", source="mcp")
+    feed.poll_once()
+
+    # last_live_state must remain identical
+    assert controller.last_live_state == saved_state
+
+    # 3. Canonical update_file
+    def updater(s, path):
+        s.revision = 6
+        return SimpleNamespace(status="UPDATED", file_path=path, affected_modules=[])
+
+    server._updater = updater
+    client.update_file("mod_a.py", origin="desktop_watcher")
+    feed.poll_once()
+
+    # last_live_state advances to rev 6
+    assert controller.last_live_state["revision"] == 6
+
+
+def test_over_100_activity_events_are_not_silently_lost(live_server_instance):
+    server, client = live_server_instance
+    assert ACTIVITY_EVENT_RETENTION == 10_000
+
+    # Emit 150 MCP_CALL events
+    for i in range(150):
+        client.record_activity("MCP_CALL", tool=f"tool_{i}", source="mcp")
+
+    res = client.get_events(after_seq=0, limit=200)
+    assert res["status"] == "ok"
+    assert res["activity_continuity"] == "continuous"
+    assert res["activity_resync_required"] is False
+    assert len(res["events"]) == 150
+
+    seqs = [e["seq"] for e in res["events"]]
+    assert seqs == list(range(1, 151))
+
+
+def test_activity_gap_detection_when_querying_before_retained_range():
+    server = CanonicalLiveServer(state=SimpleNamespace(modules={}, revision=1), revision=1)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    client = LiveStateClient(server.endpoint)
+
+    try:
+        # Populate server and simulate eviction
+        for i in range(50):
+            client.record_activity("MCP_CALL", tool=f"t_{i}", source="mcp")
+
+        # Manually simulate retention eviction of events 1..10
+        with server._lock:
+            server._events = [e for e in server._events if e["seq"] > 10]
+
+        # Query after_seq=5 (which was evicted)
+        res = client.get_events(after_seq=5)
+        assert res["activity_continuity"] == "gap"
+        assert res["activity_resync_required"] is True
+        assert res["earliest_retained_seq"] == 11
+        # Canonical continuity is not affected
+        assert res["continuity"] == "not_requested"
+    finally:
+        server.close()
+        thread.join(timeout=2)
+
+
 def test_desktop_full_analysis_authoritative_event_and_first_run_cursor_handoff(live_server_instance):
     server, client = live_server_instance
 
-    # 1. Cursor handoff: capture pre_seq before analysis starts
     pre_seq = client.get_events(limit=1).get("latest_seq", 0)
     assert pre_seq == 0
 
-    # 2. Analysis completes and publishes canonical state to server
     state = SimpleNamespace(modules={"mod_a": object()}, revision=10)
     pub_res = client.publish(state, origin="desktop_analysis")
     assert pub_res["status"] == "ok"
     assert pub_res["seq"] == 1
 
-    # 3. Create feed using cursor handoff (initial_seq=pre_seq)
     received_statuses = []
     received_events = []
 
@@ -91,7 +310,6 @@ def test_desktop_full_analysis_authoritative_event_and_first_run_cursor_handoff(
     feed = DesktopLiveEventFeed(client, status_callback, initial_seq=pre_seq)
     feed.poll_once()
 
-    # Authoritative LIVE_STATE publication is consumed exactly once from journal
     assert len(received_statuses) == 1
     assert len(received_events) == 1
     assert "[LIVE]" in received_statuses[0]
@@ -109,18 +327,17 @@ def test_event_timestamp_is_authoritative_and_invariant_to_drain_delay():
         last_live_state=None,
     )
 
-    # Event with explicit UTC timestamp
     fixed_ts = "2026-08-27T12:34:56.789000+00:00"
     event_payload = {
         "seq": 42,
         "timestamp": fixed_ts,
         "category": "LIVE_STATE",
+        "operation": "publish",
         "canonical_revision": 7,
         "status": "PUBLISHED",
         "source": "desktop_analysis",
     }
 
-    # Queue event
     gui.ContextorGUI._set_live_status(
         controller,
         "[LIVE] Analysis published",
@@ -128,13 +345,10 @@ def test_event_timestamp_is_authoritative_and_invariant_to_drain_delay():
         event=event_payload,
     )
 
-    # Simulate rotation/drain delay
     time.sleep(0.1)
 
-    # Drain queue
     gui.ContextorGUI._drain_live_status_queue(controller)
 
-    # Convert fixed_ts to local time string
     expected_local_dt = datetime.fromisoformat(fixed_ts).astimezone()
     expected_time_str = expected_local_dt.strftime("%H:%M:%S")
 
@@ -184,14 +398,11 @@ def test_desktop_watcher_and_mcp_update_file_single_event_semantics(tmp_path):
         time.sleep(0.05)
         py_file.write_text("x = 2\n", encoding="utf-8")
 
-        # 1. Watcher polls and calls client.update_file
         changed = watcher.poll_once()
         assert str(py_file) in changed
 
-        # 2. Event feed polls journal
         feed.poll_once()
 
-        # Exactly 1 displayed update message from authoritative journal event
         assert len(gui_statuses) == 1
         msg, evt = gui_statuses[0]
         assert "[LIVE] Watcher updated module.py (rev 2)" in msg
@@ -206,33 +417,21 @@ def test_desktop_watcher_and_mcp_update_file_single_event_semantics(tmp_path):
 def test_canonical_continuity_after_100_mcp_events_regression(live_server_instance):
     server, client = live_server_instance
 
-    # Set canonical revision R = 10
     state = SimpleNamespace(modules={"pkg": object()}, revision=10)
     client.publish(state, origin="desktop_analysis")
-    assert client.ping()["revision"] == 2  # initial server had revision=1, publish made it 2
     r_rev = client.ping()["revision"]
 
-    # Append 120 MCP_CALL events to evict all previous entries from the 100-event buffer
     for i in range(120):
         client.record_activity("MCP_CALL", tool=f"tool_{i}", source="mcp")
 
-    # 1. Canonical revision remains strictly R
     assert client.ping()["revision"] == r_rev
 
-    # 2. MCP events cannot satisfy after_revision=r_rev or manufacture canonical continuity
     res_latest = client.get_events(after_revision=r_rev)
     assert res_latest["continuity"] == "continuous"
     assert res_latest["resync_required"] is False
     assert res_latest["events"] == []
     assert res_latest["total"] == 0
 
-    # 3. Requesting after_revision < r_rev indicates gap since all canonical events were evicted
-    res_gap = client.get_events(after_revision=r_rev - 1)
-    assert res_gap["continuity"] == "gap"
-    assert res_gap["resync_required"] is True
-    assert res_gap["resync_reason"] == "event_retention_gap"
-
-    # 4. New canonical publication works and returns new canonical event
     state_new = SimpleNamespace(modules={"pkg": object()}, revision=r_rev + 1)
     client.publish(state_new, origin="desktop_analysis")
     new_rev = client.ping()["revision"]
@@ -249,7 +448,6 @@ def test_central_mcp_wrapper_read_only_success(live_server_instance, monkeypatch
     server, client = live_server_instance
     initial_rev = client.ping()["revision"]
 
-    # Point telemetry resolution to test client
     monkeypatch.setattr("contextor.mcp_server._resolve_telemetry_clients", lambda *args, **kwargs: [client])
 
     def mock_search_artifacts(repo_path: str, query: str):
@@ -257,18 +455,15 @@ def test_central_mcp_wrapper_read_only_success(live_server_instance, monkeypatch
 
     wrapped = _instrument_mcp_tool(mock_search_artifacts, "search_artifacts")
 
-    # Invoke tool through wrapper
     res = wrapped(repo_path=".", query="test")
     assert res == {"results": ["item_1", "item_2"]}
 
-    # Exactly 1 MCP_CALL event produced
     events = client.get_events(after_seq=0, category="MCP_CALL")["events"]
     assert len(events) == 1
     assert events[0]["tool"] == "search_artifacts"
     assert events[0]["success"] is True
     assert events[0]["canonical_revision"] is None
 
-    # Canonical revision completely unchanged
     assert client.ping()["revision"] == initial_rev
 
 
@@ -300,18 +495,15 @@ def test_mcp_analyze_project_wrapper_and_canonical_publish_equivalence(live_serv
 
     monkeypatch.setattr("contextor.mcp_server._resolve_telemetry_clients", lambda *args, **kwargs: [client])
 
-    # 1. MCP tool wrapper invocation entry
     def dummy_analyze(repo_path: str):
         return {"status": "job_started"}
 
     wrapped = _instrument_mcp_tool(dummy_analyze, "analyze_project")
     wrapped(repo_path=".")
 
-    # 2. Canonical publication upon completion
     state = SimpleNamespace(modules={"pkg": object()}, revision=5)
     client.publish(state, origin="mcp_analysis")
 
-    # Assert exactly 1 MCP_CALL and 1 distinct LIVE_STATE publish event
     events = client.get_events(after_seq=0)["events"]
     assert len(events) == 2
 
@@ -326,7 +518,6 @@ def test_mcp_analyze_project_wrapper_and_canonical_publish_equivalence(live_serv
 
 
 def test_all_24_registered_mcp_tools_telemetry_against_fastmcp_registry(monkeypatch):
-    # Verify FastMCP registry synchronization
     fastmcp_tool_names = set(mcp._tool_manager._tools.keys())
     assert set(REGISTERED_MCP_TOOL_NAMES) == fastmcp_tool_names
     assert len(REGISTERED_MCP_TOOL_NAMES) == 24
@@ -368,25 +559,21 @@ def test_real_server_to_gui_burst_ordering_and_zero_dropped_events(live_server_i
 
     feed = DesktopLiveEventFeed(client, gui_callback, initial_seq=0)
 
-    # 1. Create interleaved sequence of 10 events (5 LIVE_STATE, 5 MCP_CALL) on server
     for i in range(5):
         client.publish(SimpleNamespace(modules={}, revision=10 + i), origin="desktop_analysis")
         client.record_activity("MCP_CALL", tool=f"mcp_tool_{i}", source="mcp")
 
     assert server._activity_seq == 10
 
-    # 2. Poll in one single batch
     feed.poll_once()
 
-    # 3. Assert queue has exactly 10 events in server sequence order
     assert queue_instance.qsize() == 10
 
     processed_events = []
     while not queue_instance.empty():
         item = queue_instance.get_nowait()
         processed_events.append(item)
-        # Update last_live_state as GUI would
-        if item.get("category") == "LIVE_STATE" and item.get("event"):
+        if item.get("category") == "LIVE_STATE" and item.get("event") and item["event"].get("operation") in {"publish", "update_file"}:
             controller.last_live_state = {
                 "revision": item["event"].get("canonical_revision"),
                 "status": item["event"].get("status"),
@@ -396,31 +583,26 @@ def test_real_server_to_gui_burst_ordering_and_zero_dropped_events(live_server_i
 
     assert len(processed_events) == 10
 
-    # Assert sequence ordering 1..10 and category alternating
     for idx, item in enumerate(processed_events):
         evt = item["event"]
         assert evt["seq"] == idx + 1
         expected_cat = "LIVE_STATE" if idx % 2 == 0 else "MCP_CALL"
         assert item["category"] == expected_cat
 
-        # Timestamps match event timestamp in local time
         expected_time = datetime.fromisoformat(evt["timestamp"]).astimezone().strftime("%H:%M:%S")
         assert expected_time in item["formatted"]
 
-    # Final last_live_state has canonical revision 14 (from event 9, 10 was MCP_CALL)
     assert controller.last_live_state["revision"] == 14
 
 
 def test_desktop_vs_mcp_full_analysis_equivalence(live_server_instance):
     server, client = live_server_instance
 
-    # Desktop publish
     state_d = SimpleNamespace(modules={"a": 1}, revision=100)
     res_d = client.publish(state_d, origin="desktop_analysis")
     assert res_d["status"] == "ok"
     assert res_d["revision"] == 2
 
-    # MCP publish
     state_m = SimpleNamespace(modules={"a": 1, "b": 2}, revision=101)
     res_m = client.publish(state_m, origin="mcp_analysis")
     assert res_m["status"] == "ok"
@@ -429,7 +611,6 @@ def test_desktop_vs_mcp_full_analysis_equivalence(live_server_instance):
     events = client.get_events(after_seq=0)["events"]
     assert len(events) == 2
 
-    # Both increment canonical revision and share identical LIVE_STATE event schema
     assert events[0]["category"] == "LIVE_STATE"
     assert events[0]["operation"] == "publish"
     assert events[0]["source"] == "desktop_analysis"

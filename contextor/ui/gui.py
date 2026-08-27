@@ -650,8 +650,6 @@ class ContextorGUI:
 
         def on_success(errors):
             self._start_live_watcher(path, initial_seq=pre_seq)
-            if getattr(self, "live_event_feed", None) is not None:
-                self.live_event_feed.poll_once()
             if not errors:
                 messagebox.showinfo("OK", "No issues found. Repository is healthy!")
                 return
@@ -706,7 +704,13 @@ class ContextorGUI:
 
         formatted = f"{message}  {time_str}"
 
-        if category == "LIVE_STATE" and isinstance(event, dict):
+        canonical_operation = (
+            isinstance(event, dict)
+            and event.get("category", category) == "LIVE_STATE"
+            and event.get("operation") in {"publish", "update_file"}
+        )
+
+        if canonical_operation:
             self.last_live_state = {
                 "revision": event.get("canonical_revision"),
                 "status": event.get("status"),
@@ -781,8 +785,6 @@ class ContextorGUI:
                         pass
                 self._live_start_retry_after_id = None
             self._live_start_retry_attempt = 0
-            if hasattr(self.live_event_feed, "poll_once"):
-                self.live_event_feed.poll_once()
             return
 
         try:
@@ -841,8 +843,6 @@ class ContextorGUI:
         if existing_watcher is not None:
             self.live_watcher = existing_watcher
             self.live_event_feed = feeds.get(identity.repo_id)
-            if hasattr(self.live_event_feed, "poll_once"):
-                self.live_event_feed.poll_once()
             return
 
         def status_callback(message, event=None, name=identity.repo_name):
@@ -875,15 +875,24 @@ class ContextorGUI:
             on_reconnect=on_reconnect,
         )
         if initial_seq is not None:
-            self.live_event_feed = DesktopLiveEventFeed(client, status_callback, initial_seq=initial_seq)
+            feed = DesktopLiveEventFeed(
+                client,
+                status_callback,
+                initial_seq=initial_seq,
+            )
+            if hasattr(feed, "poll_once"):
+                feed.poll_once()
         else:
-            self.live_event_feed = DesktopLiveEventFeed(client, status_callback)
+            feed = DesktopLiveEventFeed(
+                client,
+                status_callback,
+            )
+
+        self.live_event_feed = feed
         watchers[identity.repo_id] = self.live_watcher
-        feeds[identity.repo_id] = self.live_event_feed
+        feeds[identity.repo_id] = feed
         self.live_watcher.start()
-        self.live_event_feed.start()
-        if hasattr(self.live_event_feed, "poll_once"):
-            self.live_event_feed.poll_once()
+        feed.start()
 
     def _refresh_repo_identity(self, path):
         """Refresh the permanent repository identity shown beside LIVE status."""

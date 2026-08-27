@@ -32,8 +32,11 @@ class LiveEndpoint:
         return bytes.fromhex(self.authkey_hex)
 
 
+ACTIVITY_EVENT_RETENTION = 10_000
+
+
 class CanonicalLiveServer:
-    """Own one canonical state instance and expose revisioned operations over IPC."""
+    """In-RAM coordinator for one repository's shared LIVE state."""
 
     def __init__(
         self,
@@ -42,11 +45,13 @@ class CanonicalLiveServer:
         revision: int = 0,
         updater: Callable[[Any, str], Any] | None = None,
         authkey: bytes | None = None,
+        retention: int = ACTIVITY_EVENT_RETENTION,
     ):
         self._state = state
         self._revision = revision
         self._activity_seq = 0
         self._updater = updater
+        self._retention = retention
         self._events: list[dict[str, Any]] = []
         self._lock = threading.RLock()
         self._stop = threading.Event()
@@ -124,7 +129,7 @@ class CanonicalLiveServer:
                 event["message"] = str(request["message"])
 
         self._events.append(event)
-        del self._events[:-100]
+        del self._events[:-self._retention]
         return event
 
     def serve_forever(self) -> None:
@@ -195,6 +200,24 @@ class CanonicalLiveServer:
                 ):
                     return {"status": "error", "error": "invalid_after_seq"}
 
+                earliest_retained_seq = self._events[0]["seq"] if self._events else None
+
+                if after_seq is None:
+                    activity_continuity = "not_requested"
+                    activity_resync_required = False
+                elif after_seq == self._activity_seq:
+                    activity_continuity = "continuous"
+                    activity_resync_required = False
+                elif earliest_retained_seq is None:
+                    activity_continuity = "gap"
+                    activity_resync_required = True
+                elif after_seq < earliest_retained_seq - 1:
+                    activity_continuity = "gap"
+                    activity_resync_required = True
+                else:
+                    activity_continuity = "continuous"
+                    activity_resync_required = False
+
                 canonical_events = [
                     e for e in self._events
                     if e.get("category") == "LIVE_STATE" and e.get("operation") in {"publish", "update_file"}
@@ -263,9 +286,12 @@ class CanonicalLiveServer:
                     "latest_revision": latest_revision,
                     "latest_seq": latest_seq,
                     "earliest_retained_revision": earliest_retained_revision,
+                    "earliest_retained_seq": earliest_retained_seq,
                     "continuity": continuity,
                     "resync_required": resync_required,
                     "resync_reason": resync_reason,
+                    "activity_continuity": activity_continuity,
+                    "activity_resync_required": activity_resync_required,
                     "events": selected,
                     "total": total,
                     "truncated": len(selected) < total,
@@ -282,6 +308,12 @@ class CanonicalLiveServer:
                 self._listener.close()
             except OSError:
                 pass
+
+    def __enter__(self) -> "CanonicalLiveServer":
+        return self
+
+    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+        self.close()
 
 
 class LiveStateClient:
@@ -363,7 +395,7 @@ class LiveStateClient:
         )
 
     def status(self, message: str, *, origin: str = "unknown") -> dict[str, Any]:
-        return self.request("status", message=message, origin=origin, category="LIVE_STATE")
+        return self.request("status", message=message, origin=origin, category="ACTIVITY")
 
     def record_activity(
         self,
