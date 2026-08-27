@@ -12,12 +12,12 @@ from contextor.mcp import runtime as mcp_runtime
 from contextor.mcp.tools.get_symbol_call_context import get_symbol_call_context
 
 
-MODULE = "pkg.graph"
-ROOT = f"{MODULE}::root"
+_MODULE = "pkg.graph"
+_ROOT = f"{_MODULE}::root"
 
 
 def _edge(caller, callee, line):
-    return (f"{MODULE}::{caller}", f"{MODULE}::{callee}", line, "direct")
+    return (f"{_MODULE}::{caller}", f"{_MODULE}::{callee}", line, "direct")
 
 
 def _install(monkeypatch, edges, *, symbols=None, materialized=True, stale=False):
@@ -26,17 +26,17 @@ def _install(monkeypatch, edges, *, symbols=None, materialized=True, stale=False
         names.add(caller.split("::", 1)[1])
         names.add(callee.split("::", 1)[1])
     state = RepositoryAnalysisState(
-        modules={MODULE: object()},
-        artifacts={MODULE: {"own_symbols": sorted(names)}},
+        modules={_MODULE: object()},
+        artifacts={_MODULE: {"own_symbols": sorted(names)}},
         module_usages={
-            MODULE: ModuleUsageFacts(
+            _MODULE: ModuleUsageFacts(
                 symbol_calls=tuple(edges),
                 symbol_calls_materialized=materialized,
             )
         },
     )
     if stale:
-        state.module_parse_freshness[MODULE] = {
+        state.module_parse_freshness[_MODULE] = {
             "state": "stale",
             "error": "invalid syntax",
             "line_number": 1,
@@ -45,7 +45,7 @@ def _install(monkeypatch, edges, *, symbols=None, materialized=True, stale=False
         mcp_runtime, "get_or_init_engine", lambda _root: SimpleNamespace(state=state)
     )
     identities = {
-        f"{MODULE}::{name}": f"A{index}/1"
+        f"{_MODULE}::{name}": f"A{index}/1"
         for index, name in enumerate(sorted(names), 1)
     }
     monkeypatch.setattr(
@@ -57,7 +57,7 @@ def _install(monkeypatch, edges, *, symbols=None, materialized=True, stale=False
 
 
 def _call(**kwargs):
-    return json.loads(get_symbol_call_context("C:/repo", kwargs.pop("symbol", ROOT), **kwargs))
+    return json.loads(get_symbol_call_context("C:/repo", kwargs.pop("symbol", _ROOT), **kwargs))
 
 
 def test_callers_callees_both_and_depth_one(monkeypatch):
@@ -69,8 +69,8 @@ def test_callers_callees_both_and_depth_one(monkeypatch):
     callees = _call(direction="callees", representation="named")
     both = _call(direction="both", representation="named")
 
-    assert [item["caller"] for item in callers["callers"]["items"]] == [f"{MODULE}::left"]
-    assert [item["callee"] for item in callees["callees"]["items"]] == [f"{MODULE}::right"]
+    assert [item["caller"] for item in callers["callers"]["items"]] == [f"{_MODULE}::left"]
+    assert [item["callee"] for item in callees["callees"]["items"]] == [f"{_MODULE}::right"]
     assert both["total_edges"] == both["returned_edges"] == 2
     assert all(item["depth"] == 1 for side in ("callers", "callees") for item in both[side]["items"])
 
@@ -88,11 +88,11 @@ def test_depth_two_three_are_deterministic_bfs_and_deduplicate(monkeypatch):
     depth_three = _call(direction="callees", depth=3, max_items=None, representation="named")
 
     assert [(item["callee"], item["depth"]) for item in depth_two["callees"]["items"]] == [
-        (f"{MODULE}::a", 1),
-        (f"{MODULE}::b", 1),
-        (f"{MODULE}::c", 2),
+        (f"{_MODULE}::a", 1),
+        (f"{_MODULE}::b", 1),
+        (f"{_MODULE}::c", 2),
     ]
-    assert depth_three["callees"]["items"][-1]["callee"] == f"{MODULE}::d"
+    assert depth_three["callees"]["items"][-1]["callee"] == f"{_MODULE}::d"
     assert depth_three["callees"]["items"][-1]["depth"] == 3
     assert _call(direction="callees", depth=3, max_items=None, representation="named") == depth_three
 
@@ -126,7 +126,7 @@ def test_global_max_items_truthful_and_none_is_complete(monkeypatch):
 def test_exact_unknown_and_non_exact_symbol_handling(monkeypatch):
     _install(monkeypatch, [], symbols={"root"})
     assert _call(representation="named")["status"] == "ok"
-    assert _call(symbol=f"{MODULE}::missing")["error"] == "unknown_symbol"
+    assert _call(symbol=f"{_MODULE}::missing")["error"] == "unknown_symbol"
     assert _call(symbol="root")["error"] == "exact_qualified_symbol_required"
 
 
@@ -147,7 +147,7 @@ def test_named_indexed_and_auto_use_existing_ids(monkeypatch):
     indexed = _call(direction="callees", representation="indexed")
     auto = _call(direction="callees", representation="auto")
 
-    assert named["callees"]["items"][0]["caller"] == ROOT
+    assert named["callees"]["items"][0]["caller"] == _ROOT
     assert indexed["callees"]["items"][0]["caller"].startswith("A")
     assert indexed["resolver"]["resolve_via"] == "lookup_index_entries"
     assert auto["representation"] == "named"
@@ -177,7 +177,7 @@ def test_large_named_candidate_forces_indexed_preflight_and_exact_retry(monkeypa
 
     approved_text = get_symbol_call_context(
         "C:/repo",
-        ROOT,
+        _ROOT,
         direction="callees",
         depth=1,
         max_items=None,

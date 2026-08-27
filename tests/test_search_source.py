@@ -243,15 +243,29 @@ def test_search_source_large_output_guard_and_retry(tmp_path, monkeypatch):
     engine = _engine(tmp_path, files)
     monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: engine)
 
-    warning_raw = search_source(str(tmp_path), "guard_needle", limit=None)
-    warning = json.loads(warning_raw)
-    assert warning["status"] == "confirmation_required"
-    assert warning["estimated_output_bytes"] > LARGE_OUTPUT_WARNING_BYTES
-    assert "guard_needle" not in warning_raw
-    assert "matches" not in warning_raw
+    bounded_raw = search_source(str(tmp_path), "guard_needle", limit=None)
+    bounded = json.loads(bounded_raw)
+    assert bounded["status"] == "ok"
+    assert bounded["_output"]["auto_bounded"] is True
+    assert bounded["_output"]["full_output_bytes"] > LARGE_OUTPUT_WARNING_BYTES
+    assert len(bounded_raw.encode("utf-8")) <= LARGE_OUTPUT_WARNING_BYTES
 
     full_raw = search_source(
         str(tmp_path), "guard_needle", limit=None, allow_large_output=True
     )
-    assert len(full_raw.encode("utf-8")) == warning["estimated_output_bytes"]
+    assert len(full_raw.encode("utf-8")) == bounded["_output"]["full_output_bytes"]
     assert json.loads(full_raw)["total_matches"] == 45
+
+
+def test_search_source_single_match_too_large_falls_back_to_confirmation(tmp_path, monkeypatch):
+    files = {
+        "pkg/huge.py": f"VALUE = 'guard_needle_{'x' * 18000}'\n"
+    }
+    engine = _engine(tmp_path, files)
+    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: engine)
+
+    warning_raw = search_source(str(tmp_path), "guard_needle", limit=None)
+    warning = json.loads(warning_raw)
+    assert warning["status"] == "confirmation_required"
+    assert warning["estimated_output_bytes"] > LARGE_OUTPUT_WARNING_BYTES
+    assert "matches" not in warning

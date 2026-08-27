@@ -16,7 +16,7 @@ from contextor.ui.gui import (
 pytestmark = pytest.mark.live
 
 
-class FakeVar:
+class _GuiFakeVar:
     def __init__(self, initial=""):
         self.value = initial
 
@@ -80,10 +80,10 @@ def _make_controller(repo_path, root=None):
         owner_token="test-owner-token",
         _live_start_retry_attempt=0,
         _live_start_retry_after_id=None,
-        repo_id_var=FakeVar("Repo ID: unregistered"),
-        repo_path_var=FakeVar(str(repo_path)),
-        layer_path_var=FakeVar(""),
-        file_path_var=FakeVar(""),
+        repo_id_var=_GuiFakeVar("Repo ID: unregistered"),
+        repo_path_var=_GuiFakeVar(str(repo_path)),
+        layer_path_var=_GuiFakeVar(""),
+        file_path_var=_GuiFakeVar(""),
         theme_mode="light",
         _set_live_status=lambda msg: statuses.append(msg),
         _events=events,

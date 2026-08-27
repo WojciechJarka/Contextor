@@ -6,10 +6,12 @@
   ],
   "parameters": [
     "repo_path (string, required): canonical repository root.",
-    "symbol (string, optional, default \"\"): symbol to look up (accepts active artifact ID, full canonical identity 'module::symbol', or leaf symbol name).",
-    "max_items (integer or null, default 30): maximum number of matching artifacts returned; pass null for all.",
+    "symbol_name (string, optional, default \"\"): symbol name or identity to look up (accepts active artifact ID, full canonical identity 'module::symbol', or leaf symbol name).",
+    "limit (integer or null, default 20): maximum number of matching artifacts returned; pass null for all.",
+    "evidence_limit (integer or null, default 20): maximum number of nested evidence items per candidate.",
+    "compact (boolean, default true): when true, returns bounded evidence items with total and truncated flags; set to false for full items list.",
     "fields (array of strings or null, default null): optional projection list; null returns full response.",
-    "artifact (string or null, optional, default null): alias for symbol."
+    "symbol (string or null, optional, default null): alias for symbol_name."
   ],
   "behavior": [
     "Searches the active artifact registry for exact and fuzzy symbol matches.\nReturns a bounded collection of resolved artifact entries with definer, consumers, and signature facts."

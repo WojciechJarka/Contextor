@@ -13,7 +13,7 @@ from contextor.ui import gui
 pytestmark = pytest.mark.live
 
 
-class FakeVar:
+class _LiveIntegrationFakeVar:
     def __init__(self):
         self.value = None
 
@@ -59,7 +59,7 @@ def test_desktop_publishes_latest_snapshot_and_replaces_existing_watcher(
         live_event_feed=None,
         live_watchers={},
         live_event_feeds={},
-        repo_id_var=FakeVar(),
+        repo_id_var=_LiveIntegrationFakeVar(),
         _set_live_status=lambda message: events.append(("status", message)),
     )
     monkeypatch.setattr(gui, "connect_or_start", lambda *args, **kwargs: Client())
@@ -107,7 +107,7 @@ def test_desktop_refuses_live_for_unregistered_repository(tmp_path, monkeypatch)
         live_event_feed=None,
         live_watchers={},
         live_event_feeds={},
-        repo_id_var=FakeVar(),
+        repo_id_var=_LiveIntegrationFakeVar(),
         _set_live_status=lambda message: events.append(("status", message)),
     )
     monkeypatch.setattr(gui, "connect_or_start", lambda _path: client)
@@ -138,8 +138,8 @@ def test_browse_repository_switches_live_to_selected_registered_repo(
     calls = []
 
     controller = SimpleNamespace(
-        repo_path_var=FakeVar(),
-        layer_path_var=FakeVar(),
+        repo_path_var=_LiveIntegrationFakeVar(),
+        layer_path_var=_LiveIntegrationFakeVar(),
         _start_live_watcher=lambda path: calls.append(path),
     )
     monkeypatch.setattr(gui.filedialog, "askdirectory", lambda: str(second))
@@ -193,7 +193,7 @@ def test_switching_repositories_keeps_previous_watcher_active(tmp_path, monkeypa
         live_event_feed=None,
         live_watchers={},
         live_event_feeds={},
-        repo_id_var=FakeVar(),
+        repo_id_var=_LiveIntegrationFakeVar(),
         _set_live_status=lambda message: events.append(("status", message)),
     )
     monkeypatch.setattr(gui, "connect_or_start", lambda *args, **kwargs: Client())

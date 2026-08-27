@@ -10,8 +10,8 @@ from contextor.mcp import runtime as mcp_runtime
 from contextor.mcp.tools import get_symbol_call_context as call_tool
 
 
-MODULE = "pkg.graph"
-ROOT = f"{MODULE}::root"
+_MODULE = "pkg.graph"
+_ROOT = f"{_MODULE}::root"
 
 
 def _edge(module, caller, callee, line=2):
@@ -25,8 +25,8 @@ def _install(
     registry=None,
 ):
     module_specs = modules or {
-        MODULE: {
-            "edges": [_edge(MODULE, "root", "callee")],
+        _MODULE: {
+            "edges": [_edge(_MODULE, "root", "callee")],
             "symbols": {"root", "callee"},
             "materialized": True,
             "stale": False,
@@ -78,7 +78,7 @@ def _install(
     return state, registry, reads
 
 
-def _call(symbol=ROOT, **kwargs):
+def _call(symbol=_ROOT, **kwargs):
     return json.loads(
         call_tool.get_symbol_call_context(
             "C:/repo",
@@ -91,9 +91,9 @@ def _call(symbol=ROOT, **kwargs):
 
 def test_get_symbol_call_context__active_artifact_id_matches_canonical(monkeypatch):
     _state, registry, _reads = _install(monkeypatch)
-    artifact_id = registry[ROOT]
+    artifact_id = registry[_ROOT]
 
-    canonical = _call(ROOT, direction="callees")
+    canonical = _call(_ROOT, direction="callees")
     by_id = _call(artifact_id, direction="callees")
 
     assert by_id == canonical
@@ -102,10 +102,10 @@ def test_get_symbol_call_context__active_artifact_id_matches_canonical(monkeypat
 def test_get_symbol_call_context__lowercase_artifact_id(monkeypatch):
     _state, registry, _reads = _install(monkeypatch)
 
-    result = _call(registry[ROOT].lower(), direction="callees")
+    result = _call(registry[_ROOT].lower(), direction="callees")
 
     assert result["status"] == "ok"
-    assert result["symbol"] == ROOT
+    assert result["symbol"] == _ROOT
 
 
 def test_get_symbol_call_context__missing_artifact_id_is_exact_not_found(monkeypatch):
@@ -150,7 +150,7 @@ def test_get_symbol_call_context__resolved_artifact_id_missing_module_never_fuzz
     _state, _registry, reads = _install(
         monkeypatch,
         registry={
-            ROOT: "A1/1",
+            _ROOT: "A1/1",
             missing_identity: "A2/1",
         },
     )
@@ -180,12 +180,12 @@ def test_get_symbol_call_context__resolved_artifact_id_missing_module_never_fuzz
 def test_get_symbol_call_context__resolved_artifact_id_unknown_symbol_never_fuzzy(
     monkeypatch,
 ):
-    unknown_identity = f"{MODULE}::ghost"
+    unknown_identity = f"{_MODULE}::ghost"
     _state, _registry, reads = _install(
         monkeypatch,
         registry={
-            ROOT: "A1/1",
-            f"{MODULE}::callee": "A2/1",
+            _ROOT: "A1/1",
+            f"{_MODULE}::callee": "A2/1",
             unknown_identity: "A3/1",
         },
     )
@@ -237,7 +237,7 @@ def test_get_symbol_call_context__canonical_success_uses_no_identity_resolver(mo
         lambda *_args: pytest.fail("resolver called"),
     )
 
-    result = _call(ROOT, direction="callees")
+    result = _call(_ROOT, direction="callees")
 
     assert result["status"] == "ok"
     assert reads["count"] == 1
@@ -246,7 +246,7 @@ def test_get_symbol_call_context__canonical_success_uses_no_identity_resolver(mo
 def test_get_symbol_call_context__artifact_id_reuses_registry_snapshot(monkeypatch):
     _state, registry, reads = _install(monkeypatch)
 
-    result = _call(registry[ROOT], direction="callees", representation="auto")
+    result = _call(registry[_ROOT], direction="callees", representation="auto")
 
     assert result["status"] == "ok"
     assert reads["count"] == 1
@@ -256,18 +256,18 @@ def test_get_symbol_call_context__qualified_typo_is_suggestion_only(monkeypatch)
     _install(monkeypatch)
     monkeypatch.setattr(call_tool, "_walk", lambda *_args: pytest.fail("BFS called"))
 
-    result = _call(f"{MODULE}::rooot")
+    result = _call(f"{_MODULE}::rooot")
 
     assert result["status"] == "error"
     assert result["error"] == "unknown_symbol"
     assert result["similar_candidates"]
-    assert result["similar_candidates"][0]["artifact"] == ROOT
+    assert result["similar_candidates"][0]["artifact"] == _ROOT
 
 
 def test_get_symbol_call_context__valid_module_typo_prefilters_before_ranking(monkeypatch):
     other = "pkg.other"
     modules = {
-        MODULE: {"edges": [], "symbols": {"root"}, "materialized": True},
+        _MODULE: {"edges": [], "symbols": {"root"}, "materialized": True},
         other: {"edges": [], "symbols": {"rooot"}, "materialized": True},
     }
     _install(monkeypatch, modules=modules)
@@ -280,9 +280,9 @@ def test_get_symbol_call_context__valid_module_typo_prefilters_before_ranking(mo
 
     monkeypatch.setattr(query_helpers, "resolve_artifact_identity", capture)
 
-    _call(f"{MODULE}::rooot")
+    _call(f"{_MODULE}::rooot")
 
-    assert captured["identities"] == {ROOT}
+    assert captured["identities"] == {_ROOT}
 
 
 def test_get_symbol_call_context__global_typo_scope_is_active_current_materialized_queryable(monkeypatch):
@@ -325,23 +325,23 @@ def test_get_symbol_call_context__ambiguity_fails_closed_without_traversal(monke
         lambda *_args: {
             "status": "ambiguous",
             "resolution": "exact_leaf",
-            "query": f"{MODULE}::rooot",
-            "candidates": [{"artifact": ROOT, "artifact_id": "A1/1"}],
+            "query": f"{_MODULE}::rooot",
+            "candidates": [{"artifact": _ROOT, "artifact_id": "A1/1"}],
         },
     )
     monkeypatch.setattr(call_tool, "_walk", lambda *_args: pytest.fail("BFS called"))
 
-    result = _call(f"{MODULE}::rooot")
+    result = _call(f"{_MODULE}::rooot")
 
     assert result["status"] == "ambiguous"
-    assert result["candidates"] == [{"artifact": ROOT, "artifact_id": "A1/1"}]
+    assert result["candidates"] == [{"artifact": _ROOT, "artifact_id": "A1/1"}]
 
 
 def test_get_symbol_call_context__method_artifact_id_uses_normal_traversal(monkeypatch):
-    method = f"{MODULE}::Worker.run"
-    finish = f"{MODULE}::Worker.finish"
+    method = f"{_MODULE}::Worker.run"
+    finish = f"{_MODULE}::Worker.finish"
     modules = {
-        MODULE: {
+        _MODULE: {
             "edges": [(method, finish, 9, "direct")],
             "symbols": {"Worker.run", "Worker.finish"},
             "materialized": True,
@@ -358,11 +358,11 @@ def test_get_symbol_call_context__method_artifact_id_uses_normal_traversal(monke
 
 def test_get_symbol_call_context__zero_edge_artifact_id_is_successful(monkeypatch):
     modules = {
-        MODULE: {"edges": [], "symbols": {"root"}, "materialized": True}
+        _MODULE: {"edges": [], "symbols": {"root"}, "materialized": True}
     }
     _state, registry, _reads = _install(monkeypatch, modules=modules)
 
-    result = _call(registry[ROOT])
+    result = _call(registry[_ROOT])
 
     assert result["status"] == "ok"
     assert result["total_edges"] == result["returned_edges"] == 0
@@ -370,11 +370,11 @@ def test_get_symbol_call_context__zero_edge_artifact_id_is_successful(monkeypatc
 
 def test_get_symbol_call_context__artifact_id_keeps_unmaterialized_gate(monkeypatch):
     modules = {
-        MODULE: {"edges": [], "symbols": {"root"}, "materialized": False}
+        _MODULE: {"edges": [], "symbols": {"root"}, "materialized": False}
     }
     _state, registry, _reads = _install(monkeypatch, modules=modules)
 
-    result = _call(registry[ROOT])
+    result = _call(registry[_ROOT])
 
     assert result["error"] == "symbol_calls_unmaterialized"
     assert result["available"] is False
@@ -382,7 +382,7 @@ def test_get_symbol_call_context__artifact_id_keeps_unmaterialized_gate(monkeypa
 
 def test_get_symbol_call_context__artifact_id_keeps_stale_gate(monkeypatch):
     modules = {
-        MODULE: {
+        _MODULE: {
             "edges": [],
             "symbols": {"root"},
             "materialized": True,
@@ -391,7 +391,7 @@ def test_get_symbol_call_context__artifact_id_keeps_stale_gate(monkeypatch):
     }
     _state, registry, _reads = _install(monkeypatch, modules=modules)
 
-    result = _call(registry[ROOT])
+    result = _call(registry[_ROOT])
 
     assert result["status"] == "stale"
     assert result["available"] is False
@@ -408,7 +408,7 @@ def test_get_symbol_call_context__named_force_boundary_51200_vs_51201(monkeypatc
             if candidate["representation"] == "named"
             else 100,
         )
-        return _call(ROOT, direction="callees", representation="named")
+        return _call(_ROOT, direction="callees", representation="named")
 
     assert run(51200)["representation"] == "named"
     forced = run(51201)
@@ -427,7 +427,7 @@ def test_get_symbol_call_context__auto_savings_boundary_511_vs_512(monkeypatch):
             if candidate["representation"] == "named"
             else indexed_bytes,
         )
-        return _call(ROOT, direction="callees", representation="auto")
+        return _call(_ROOT, direction="callees", representation="auto")
 
     assert run(489)["representation"] == "named"
     assert run(488)["representation"] == "indexed"
@@ -454,7 +454,7 @@ def _calibrate_selected_payload(monkeypatch, target_bytes):
     for _attempt in range(10):
         raw = call_tool.get_symbol_call_context(
             "C:/repo",
-            ROOT,
+            _ROOT,
             representation="named",
             allow_large_output=True,
         )
@@ -469,13 +469,13 @@ def test_get_symbol_call_context__output_guard_boundary_15360_vs_15361(monkeypat
     _install(monkeypatch)
     raw_15360 = _calibrate_selected_payload(monkeypatch, 15360)
 
-    allowed = _call(ROOT, representation="named")
+    allowed = _call(_ROOT, representation="named")
 
     assert len(raw_15360.encode("utf-8")) == 15360
     assert allowed["status"] == "ok"
 
     _calibrate_selected_payload(monkeypatch, 15361)
-    blocked = _call(ROOT, representation="named")
+    blocked = _call(_ROOT, representation="named")
 
     assert blocked["status"] == "confirmation_required"
     assert blocked["estimated_output_bytes"] == 15361
@@ -487,7 +487,7 @@ def test_get_symbol_call_context__allow_large_output_approves_15361(monkeypatch)
 
     approved = call_tool.get_symbol_call_context(
         "C:/repo",
-        ROOT,
+        _ROOT,
         representation="named",
         allow_large_output=True,
     )
@@ -503,12 +503,12 @@ def test_get_symbol_call_context__allow_large_output_approves_15361(monkeypatch)
 
 def _install_large_graph(monkeypatch, edge_count=100, symbol_prefix="callee_with_a_long_symbol_name_"):
     edges = [
-        _edge(MODULE, "root", f"{symbol_prefix}{i:03d}", line=i + 1)
+        _edge(_MODULE, "root", f"{symbol_prefix}{i:03d}", line=i + 1)
         for i in range(edge_count)
     ]
     symbols = {"root"} | {f"{symbol_prefix}{i:03d}" for i in range(edge_count)}
     modules = {
-        MODULE: {
+        _MODULE: {
             "edges": edges,
             "symbols": symbols,
             "materialized": True,
@@ -523,7 +523,7 @@ def test_get_symbol_call_context__auto_bounded_named_is_exact_prefix(monkeypatch
 
     raw_bounded = call_tool.get_symbol_call_context(
         "C:/repo",
-        ROOT,
+        _ROOT,
         direction="callees",
         representation="named",
         allow_large_output=False,
@@ -533,7 +533,7 @@ def test_get_symbol_call_context__auto_bounded_named_is_exact_prefix(monkeypatch
 
     raw_full = call_tool.get_symbol_call_context(
         "C:/repo",
-        ROOT,
+        _ROOT,
         direction="callees",
         representation="named",
         allow_large_output=True,
@@ -566,7 +566,7 @@ def test_get_symbol_call_context__auto_bounded_indexed_is_exact_prefix(monkeypat
 
     raw_bounded = call_tool.get_symbol_call_context(
         "C:/repo",
-        ROOT,
+        _ROOT,
         direction="callees",
         representation="indexed",
         allow_large_output=False,
@@ -576,7 +576,7 @@ def test_get_symbol_call_context__auto_bounded_indexed_is_exact_prefix(monkeypat
 
     raw_full = call_tool.get_symbol_call_context(
         "C:/repo",
-        ROOT,
+        _ROOT,
         direction="callees",
         representation="indexed",
         allow_large_output=True,
@@ -605,7 +605,7 @@ def test_get_symbol_call_context__auto_representation_is_not_renegotiated_during
 
     raw_full = call_tool.get_symbol_call_context(
         "C:/repo",
-        ROOT,
+        _ROOT,
         direction="callees",
         representation="auto",
         allow_large_output=True,
@@ -616,7 +616,7 @@ def test_get_symbol_call_context__auto_representation_is_not_renegotiated_during
 
     raw_bounded = call_tool.get_symbol_call_context(
         "C:/repo",
-        ROOT,
+        _ROOT,
         direction="callees",
         representation="auto",
         allow_large_output=False,
@@ -635,7 +635,7 @@ def test_get_symbol_call_context__explicit_named_is_not_silently_changed_to_inde
 
     raw_bounded = call_tool.get_symbol_call_context(
         "C:/repo",
-        ROOT,
+        _ROOT,
         direction="callees",
         representation="named",
         allow_large_output=False,
@@ -654,7 +654,7 @@ def test_get_symbol_call_context__forced_indexed_happens_before_auto_bounding(mo
 
     raw_bounded = call_tool.get_symbol_call_context(
         "C:/repo",
-        ROOT,
+        _ROOT,
         direction="callees",
         representation="named",
         allow_large_output=False,
@@ -680,7 +680,7 @@ def test_get_symbol_call_context__auto_bounded_full_output_bytes_matches_allow_l
 
     raw_bounded = call_tool.get_symbol_call_context(
         "C:/repo",
-        ROOT,
+        _ROOT,
         direction="callees",
         representation="named",
         allow_large_output=False,
@@ -690,7 +690,7 @@ def test_get_symbol_call_context__auto_bounded_full_output_bytes_matches_allow_l
 
     raw_full = call_tool.get_symbol_call_context(
         "C:/repo",
-        ROOT,
+        _ROOT,
         direction="callees",
         representation="named",
         allow_large_output=True,
@@ -710,7 +710,7 @@ def test_get_symbol_call_context__auto_bounded_payload_never_exceeds_threshold(m
         for max_items in (20, 50, None):
             raw = call_tool.get_symbol_call_context(
                 "C:/repo",
-                ROOT,
+                _ROOT,
                 direction="callees",
                 representation=rep,
                 allow_large_output=False,
@@ -733,7 +733,7 @@ def test_get_symbol_call_context__auto_bounding_reuses_existing_traversal_and_re
 
     raw = call_tool.get_symbol_call_context(
         "C:/repo",
-        ROOT,
+        _ROOT,
         direction="both",
         representation="named",
         allow_large_output=False,
@@ -751,10 +751,10 @@ def test_get_symbol_call_context__auto_bounding_reuses_existing_traversal_and_re
 
 def test_get_symbol_call_context__one_edge_too_large_still_requires_confirmation(monkeypatch):
     huge_callee = "callee_" + ("y" * 18000)
-    edges = [_edge(MODULE, "root", huge_callee, line=10)]
+    edges = [_edge(_MODULE, "root", huge_callee, line=10)]
     symbols = {"root", huge_callee}
     modules = {
-        MODULE: {
+        _MODULE: {
             "edges": edges,
             "symbols": symbols,
             "materialized": True,
@@ -765,7 +765,7 @@ def test_get_symbol_call_context__one_edge_too_large_still_requires_confirmation
 
     raw = call_tool.get_symbol_call_context(
         "C:/repo",
-        ROOT,
+        _ROOT,
         direction="callees",
         representation="named",
         allow_large_output=False,
@@ -782,7 +782,7 @@ def test_get_symbol_call_context__allow_large_output_returns_original_unbounded_
 
     raw = call_tool.get_symbol_call_context(
         "C:/repo",
-        ROOT,
+        _ROOT,
         direction="callees",
         representation="named",
         allow_large_output=True,
