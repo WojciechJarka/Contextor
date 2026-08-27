@@ -48,7 +48,7 @@ def test_client_request_timeout_closes_connection(monkeypatch):
 
 @pytest.fixture
 def live_server():
-    server = CanonicalLiveServer({"files": []})
+    server = CanonicalLiveServer(SimpleNamespace(files=[]))
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     yield server, LiveStateClient(server.endpoint)
@@ -65,20 +65,20 @@ def test_two_clients_observe_one_in_ram_state_and_revision(live_server):
         "status": "ok", "protocol_version": LIVE_PROTOCOL_VERSION,
         "revision": 0, "available": True,
     }
-    assert first.publish({"files": ["a.py"]})["revision"] == 1
-    assert second.snapshot() == {
-        "status": "ok",
-        "revision": 1,
-        "state": {"files": ["a.py"]},
-    }
+    assert first.publish(SimpleNamespace(files=["a.py"]))["revision"] == 1
+    snap = second.snapshot()
+    assert snap["status"] == "ok"
+    assert snap["revision"] == 1
+    assert snap["state"].files == ["a.py"]
+    assert snap["state"].revision == 1
 
 
 def test_update_runs_inside_the_live_owner_and_is_visible_to_other_clients():
     def update(state, file_path):
-        state["files"].append(file_path)
+        state.files.append(file_path)
         return {"updated": file_path}
 
-    server = CanonicalLiveServer({"files": []}, updater=update)
+    server = CanonicalLiveServer(SimpleNamespace(files=[]), updater=update)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
@@ -88,7 +88,7 @@ def test_update_runs_inside_the_live_owner_and_is_visible_to_other_clients():
 
         assert response["status"] == "ok"
         assert response["revision"] == 1
-        assert reader.snapshot()["state"] == {"files": ["new.py"]}
+        assert reader.snapshot()["state"].files == ["new.py"]
     finally:
         server.close()
         thread.join(timeout=2)
@@ -202,7 +202,7 @@ def test_updater_failure_does_not_kill_the_service():
     def broken_update(_state, _file_path):
         raise ValueError("broken update")
 
-    server = CanonicalLiveServer({}, updater=broken_update)
+    server = CanonicalLiveServer(SimpleNamespace(), updater=broken_update)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
@@ -221,9 +221,9 @@ def test_desktop_watcher_reports_create_edit_and_delete_without_manual_update(tm
 
     def update(state, file_path):
         updates.append(file_path)
-        state["updates"] += 1
+        state.updates += 1
 
-    server = CanonicalLiveServer({"updates": 0}, updater=update)
+    server = CanonicalLiveServer(SimpleNamespace(updates=0), updater=update)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     watcher = DesktopLiveWatcher(
@@ -241,7 +241,7 @@ def test_desktop_watcher_reports_create_edit_and_delete_without_manual_update(tm
         assert watcher.poll_once() == [str(target)]
         snapshot = LiveStateClient(server.endpoint).snapshot()
         assert snapshot["revision"] == 3
-        assert snapshot["state"] == {"updates": 3}
+        assert snapshot["state"].updates == 3
         assert updates == [str(target)] * 3
         assert statuses == [
             "Updating LIVE: sample.py", "LIVE update successful: sample.py",
@@ -254,7 +254,7 @@ def test_desktop_watcher_reports_create_edit_and_delete_without_manual_update(tm
 
 
 def test_first_run_watcher_waits_for_initial_canonical_state(tmp_path):
-    server = CanonicalLiveServer(updater=lambda state, path: state.update(last_path=path))
+    server = CanonicalLiveServer(updater=lambda state, path: setattr(state, "last_path", path))
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     client = LiveStateClient(server.endpoint)
@@ -269,7 +269,7 @@ def test_first_run_watcher_waits_for_initial_canonical_state(tmp_path):
         }
         assert statuses == ["LIVE: no snapshot; waiting for analysis"]
 
-        client.publish({"ready": True})
+        client.publish(SimpleNamespace(ready=True))
         (tmp_path / "after_analysis.py").write_text("value = 2\n", encoding="utf-8")
         response = watcher.poll_once()
         assert response == [str(tmp_path / "after_analysis.py")]
@@ -287,7 +287,7 @@ def test_desktop_watcher_reports_syntax_location(tmp_path):
         line_number=2,
         column_number=7,
     )
-    server = CanonicalLiveServer({"ready": True}, updater=lambda *_args: result)
+    server = CanonicalLiveServer(SimpleNamespace(ready=True), updater=lambda *_args: result)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     watcher = DesktopLiveWatcher(
@@ -370,7 +370,7 @@ def test_responsive_token_only_endpoint_matching_and_differing_tokens(tmp_path, 
     monkeypatch.setenv("CONTEXTOR_CACHE_DIR", str(cache))
 
     import json
-    server = CanonicalLiveServer({"files": []})
+    server = CanonicalLiveServer(SimpleNamespace(files=[]))
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
 
@@ -415,7 +415,7 @@ def test_post_popen_token_match_with_different_pid_is_not_owner_and_cleans_proc(
 
     import json
     # Start a genuine server with PID 54321 and token "race-token"
-    server = CanonicalLiveServer({"files": []})
+    server = CanonicalLiveServer(SimpleNamespace(files=[]))
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
 
@@ -546,7 +546,7 @@ def test_connect_or_start_preserves_legacy_endpoint_without_owner_pid(tmp_path, 
     monkeypatch.setenv("CONTEXTOR_CACHE_DIR", str(cache))
 
     import json
-    server = CanonicalLiveServer({"files": []})
+    server = CanonicalLiveServer(SimpleNamespace(files=[]))
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
 

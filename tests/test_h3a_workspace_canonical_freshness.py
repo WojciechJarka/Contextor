@@ -775,14 +775,16 @@ def test_h3a_case_p_unchanged_session_redundant_snapshot_fetch_zero(tmp_path):
 
 def test_h3a_case_q_equal_numeric_revision_cross_session_invalidation(tmp_path):
     """Case Q (H3A-H4 - Equal Numeric Revision Across Sessions Invalidates Cache):
-    S1: journal=5, publication=1.
-    S2 starts: journal=5, but publication=2.
-    Equal numeric journal revision K=5 across different session identities MUST force snapshot refresh.
+    S1: canonical revision R=1. MCP hydrates S1 engine and records S1 session identity.
+    S1 stops.
+    S2 starts from SAME persisted canonical state R=1 with a new session/endpoint identity.
+    Equal numeric revision R=1 across different session identities MUST force snapshot refresh and session rebind.
+    Then first canonical mutation on S2 becomes R+1 = 2.
     """
     import threading
-    from contextor.core.live_state import CanonicalLiveServer
+    from contextor.core.live_state import CanonicalLiveServer, LiveStateClient
     from contextor.core.live_state.runtime import _repository_updater, endpoint_file
-    from contextor.core.live_state.store import load_snapshot, save_snapshot
+    from contextor.core.live_state.store import load_snapshot
     from contextor.core.paths import repo_cache_dir
     from contextor.core.repository_identity import require_repository_identity
 
@@ -791,10 +793,11 @@ def test_h3a_case_q_equal_numeric_revision_cross_session_invalidation(tmp_path):
     identity = require_repository_identity(repo)
     cache = repo_cache_dir(repo)
 
-    # 1. Start Server S1
+    # 1. Start Server S1 with canonical state R=1
     loaded = load_snapshot(cache, expected_repo_id=identity.repo_id, expected_root_path=identity.root_path)
     state, metadata = loaded
-    server1 = CanonicalLiveServer(state, revision=metadata.revision, updater=_repository_updater(repo))
+    assert metadata.revision == 1
+    server1 = CanonicalLiveServer(state, revision=1, updater=_repository_updater(repo))
     t1 = threading.Thread(target=server1.serve_forever, daemon=True)
     t1.start()
 
@@ -816,19 +819,20 @@ def test_h3a_case_q_equal_numeric_revision_cross_session_invalidation(tmp_path):
     # Hydrate MCP engine for S1 (rev=1)
     engine_s1 = mcp_runtime.get_or_init_engine(repo)
     assert engine_s1 is not None
-    assert mcp_runtime._live_journal_revisions.get(str(repo)) == 1
+    assert engine_s1.revision == 1
+    session_s1 = mcp_runtime._live_sessions.get(str(repo))
+    assert session_s1 is not None
     assert mcp_runtime._live_engine_revisions.get(str(repo)) == 1
+    assert mcp_runtime._live_journal_revisions.get(str(repo)) == 1
 
     server1.close()
+    t1.join(timeout=2)
 
-    # 2. Update snapshot on disk to revision 2
-    save_snapshot(state, cache, "state_2", writer="test", repo_id=identity.repo_id, root_path=identity.root_path, revision_floor=1)
-    loaded2 = load_snapshot(cache, expected_repo_id=identity.repo_id, expected_root_path=identity.root_path)
-    state2, metadata2 = loaded2
-    assert metadata2.revision == 2
-
-    # 3. Start S2 with revision 2
-    server2 = CanonicalLiveServer(state2, revision=metadata2.revision, updater=_repository_updater(repo))
+    # 2. Start S2 from SAME persisted canonical state R=1 (restart is NOT a canonical mutation)
+    loaded_s2 = load_snapshot(cache, expected_repo_id=identity.repo_id, expected_root_path=identity.root_path)
+    state_s2, metadata_s2 = loaded_s2
+    assert metadata_s2.revision == 1
+    server2 = CanonicalLiveServer(state_s2, revision=1, updater=_repository_updater(repo))
     t2 = threading.Thread(target=server2.serve_forever, daemon=True)
     t2.start()
 
@@ -845,12 +849,31 @@ def test_h3a_case_q_equal_numeric_revision_cross_session_invalidation(tmp_path):
         # WITHOUT clearing MCP cache:
         engine_s2 = mcp_runtime.get_or_init_engine(repo)
         assert engine_s2 is not None
-        # Must have refreshed to revision 2 across sessions
-        assert engine_s2.revision == 2
+        # Numeric canonical revision before and after restart is EQUAL (1 == 1)
+        assert engine_s2.revision == 1
+        # Session identity changed and re-bound to S2
+        session_s2 = mcp_runtime._live_sessions.get(str(repo))
+        assert session_s2 is not None
+        assert session_s2 != session_s1
+        assert mcp_runtime._live_engine_revisions.get(str(repo)) == 1
+        assert mcp_runtime._live_journal_revisions.get(str(repo)) == 1
+
+        # 3. First canonical mutation on S2 -> becomes R+1 = 2
+        client2 = LiveStateClient(server2.endpoint)
+        upd = client2.update_file(str(mod_a), origin="desktop_watcher")
+        assert upd["status"] == "ok"
+        assert upd["revision"] == 2
+
+        # MCP runtime picks up mutation R=2 from S2
+        mcp_runtime._live_engines.pop(str(repo), None)
+        engine_s2_mutated = mcp_runtime.get_or_init_engine(repo)
+        assert engine_s2_mutated is not None
+        assert engine_s2_mutated.revision == 2
         assert mcp_runtime._live_engine_revisions.get(str(repo)) == 2
         assert mcp_runtime._live_journal_revisions.get(str(repo)) == 2
     finally:
         server2.close()
+        t2.join(timeout=2)
 
 
 def test_h3a_case_r_full_analysis_same_daemon_live_publication_sync(tmp_path):

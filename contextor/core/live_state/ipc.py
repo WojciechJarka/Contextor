@@ -35,6 +35,34 @@ class LiveEndpoint:
 ACTIVITY_EVENT_RETENTION = 10_000
 
 
+def _extract_state_revision(state: Any) -> int | None:
+    if state is None:
+        return None
+    if isinstance(state, dict):
+        val = state.get("revision")
+    else:
+        val = getattr(state, "revision", None)
+    if isinstance(val, int) and not isinstance(val, bool):
+        return val
+    return None
+
+
+def _bind_state_revision(state: Any, revision: int) -> bool:
+    if state is None:
+        return False
+    if isinstance(state, dict):
+        try:
+            state["revision"] = revision
+            return state.get("revision") == revision
+        except Exception:
+            return False
+    try:
+        state.revision = revision
+    except Exception:
+        return False
+    return getattr(state, "revision", None) == revision
+
+
 class CanonicalLiveServer:
     """In-RAM coordinator for one repository's shared LIVE state."""
 
@@ -48,28 +76,32 @@ class CanonicalLiveServer:
         retention: int = ACTIVITY_EVENT_RETENTION,
     ):
         self._state = state
-        state_rev = getattr(state, "revision", None) if state is not None else None
+        state_rev = _extract_state_revision(state)
 
         if isinstance(state_rev, int) and state_rev >= 0:
-            if revision is not None and int(revision) != state_rev:
+            if revision is not None and (
+                isinstance(revision, bool)
+                or not isinstance(revision, int)
+                or int(revision) != state_rev
+            ):
                 raise ValueError(
                     f"Constructor canonical revision mismatch: explicit revision={revision} != state.revision={state_rev}"
                 )
             self._revision = state_rev
-        elif revision is not None and int(revision) >= 0:
+        elif revision is not None and isinstance(revision, int) and not isinstance(revision, bool) and int(revision) >= 0:
             self._revision = int(revision)
             if self._state is not None:
-                try:
-                    self._state.revision = self._revision
-                except Exception:
-                    pass
+                if not _bind_state_revision(self._state, self._revision):
+                    raise ValueError(
+                        f"Failed to bind explicit canonical revision={self._revision} into state"
+                    )
         else:
             self._revision = 0
             if self._state is not None:
-                try:
-                    self._state.revision = 0
-                except Exception:
-                    pass
+                if not _bind_state_revision(self._state, 0):
+                    raise ValueError(
+                        "Failed to bind default canonical revision=0 into state"
+                    )
 
         self._activity_seq = 0
         self._updater = updater
@@ -190,22 +222,36 @@ class CanonicalLiveServer:
                 return {"status": "ok", "revision": self._revision, "state": self._state}
             if operation == "publish":
                 state = request.get("state")
-                state_rev = getattr(state, "revision", None)
-                if not isinstance(state_rev, int) or state_rev <= 0:
-                    next_revision = self._revision + 1
-                    if state is not None:
-                        try:
-                            state.revision = next_revision
-                        except Exception:
-                            pass
-                    state_rev = next_revision
-                elif state_rev <= self._revision:
-                    return {
-                        "status": "error",
-                        "error": "non_monotonic_canonical_revision",
-                        "revision": self._revision,
-                        "candidate_revision": state_rev,
-                    }
+                state_rev = _extract_state_revision(state)
+                expected_revision = self._revision + 1
+
+                if state_rev is not None and state_rev > 0:
+                    if state_rev < expected_revision:
+                        return {
+                            "status": "error",
+                            "error": "non_monotonic_canonical_revision",
+                            "revision": self._revision,
+                            "candidate_revision": state_rev,
+                            "expected_revision": expected_revision,
+                        }
+                    if state_rev > expected_revision:
+                        return {
+                            "status": "error",
+                            "error": "canonical_revision_discontinuity",
+                            "revision": self._revision,
+                            "candidate_revision": state_rev,
+                            "expected_revision": expected_revision,
+                        }
+                else:
+                    if not _bind_state_revision(state, expected_revision):
+                        return {
+                            "status": "error",
+                            "error": "canonical_revision_binding_failed",
+                            "revision": self._revision,
+                            "candidate_revision": None,
+                        }
+                    state_rev = expected_revision
+
                 self._state = state
                 self._revision = state_rev
                 evt = self._record_event("publish", request, category="LIVE_STATE")
@@ -218,16 +264,14 @@ class CanonicalLiveServer:
                 if self._state is None or self._updater is None:
                     return {"status": "error", "error": "live_state_unavailable"}
                 result = self._updater(self._state, str(request.get("file_path", "")))
-                state_rev = getattr(self._state, "revision", None)
+                state_rev = _extract_state_revision(self._state)
                 if isinstance(state_rev, int) and state_rev > self._revision:
                     self._revision = state_rev
                 else:
-                    self._revision += 1
+                    next_rev = self._revision + 1
                     if self._state is not None:
-                        try:
-                            self._state.revision = self._revision
-                        except Exception:
-                            pass
+                        _bind_state_revision(self._state, next_rev)
+                    self._revision = next_rev
                 evt = self._record_event("update_file", request, result, category="LIVE_STATE")
                 return {"status": "ok", "revision": self._revision, "result": result, "seq": evt["seq"]}
             if operation == "get_events":

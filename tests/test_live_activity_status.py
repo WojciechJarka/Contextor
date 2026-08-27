@@ -55,6 +55,16 @@ from contextor.ui import gui
 pytestmark = pytest.mark.live
 
 
+class _ReadOnlyRevisionState:
+    @property
+    def revision(self):
+        return None
+
+    @revision.setter
+    def revision(self, value):
+        raise AttributeError("read-only property")
+
+
 class _FakeVar:
     def __init__(self, value=""):
         self.value = value
@@ -93,7 +103,7 @@ def test_background_feed_has_single_poll_owner_and_no_duplicates(live_server_ins
 
     try:
         for i in range(5):
-            client.publish(SimpleNamespace(modules={}, revision=10 + i), origin="desktop_analysis")
+            client.publish(SimpleNamespace(modules={}, revision=2 + i), origin="desktop_analysis")
             client.record_activity("MCP_CALL", tool=f"tool_{i}", source="mcp")
 
         for _ in range(40):
@@ -215,13 +225,13 @@ def test_noncanonical_status_does_not_replace_last_live_state(live_server_instan
 
     feed = DesktopLiveEventFeed(client, gui_callback, initial_seq=0)
 
-    # 1. Publish canonical event
-    state = SimpleNamespace(modules={"mod_a": 1}, revision=5)
+    # 1. Publish canonical event (successor 2)
+    state = SimpleNamespace(modules={"mod_a": 1}, revision=2)
     client.publish(state, origin="desktop_analysis")
     feed.poll_once()
 
     assert controller.last_live_state is not None
-    assert controller.last_live_state["revision"] == 5
+    assert controller.last_live_state["revision"] == 2
     saved_state = dict(controller.last_live_state)
 
     # 2. Non-mutating status / activity event
@@ -232,17 +242,17 @@ def test_noncanonical_status_does_not_replace_last_live_state(live_server_instan
     # last_live_state must remain identical
     assert controller.last_live_state == saved_state
 
-    # 3. Canonical update_file
+    # 3. Canonical update_file (advances to rev 3)
     def updater(s, path):
-        s.revision = 6
+        s.revision = 3
         return SimpleNamespace(status="UPDATED", file_path=path, affected_modules=[])
 
     server._updater = updater
     client.update_file("mod_a.py", origin="desktop_watcher")
     feed.poll_once()
 
-    # last_live_state advances to rev 6
-    assert controller.last_live_state["revision"] == 6
+    # last_live_state advances to rev 3
+    assert controller.last_live_state["revision"] == 3
 
 
 def test_feed_paginates_more_than_100_events_without_loss(live_server_instance):
@@ -257,7 +267,7 @@ def test_feed_paginates_more_than_100_events_without_loss(live_server_instance):
 
     # Create 250 MCP_CALL / LIVE_STATE events before polling
     for i in range(125):
-        client.publish(SimpleNamespace(modules={}, revision=10 + i), origin="desktop_analysis")
+        client.publish(SimpleNamespace(modules={}, revision=2 + i), origin="desktop_analysis")
         client.record_activity("MCP_CALL", tool=f"tool_{i}", source="mcp")
 
     assert server._activity_seq == 250
@@ -368,7 +378,7 @@ def test_desktop_full_analysis_authoritative_event_and_first_run_cursor_handoff(
     pre_seq = client.get_events(limit=1).get("latest_seq", 0)
     assert pre_seq == 0
 
-    state = SimpleNamespace(modules={"mod_a": object()}, revision=10)
+    state = SimpleNamespace(modules={"mod_a": object()}, revision=2)
     pub_res = client.publish(state, origin="desktop_analysis")
     assert pub_res["status"] == "ok"
     assert pub_res["seq"] == 1
@@ -387,8 +397,8 @@ def test_desktop_full_analysis_authoritative_event_and_first_run_cursor_handoff(
     assert len(received_statuses) == 1
     assert len(received_events) == 1
     assert "[LIVE]" in received_statuses[0]
-    assert "(rev 10)" in received_statuses[0]
-    assert received_events[0]["canonical_revision"] == 10
+    assert "(rev 2)" in received_statuses[0]
+    assert received_events[0]["canonical_revision"] == 2
     assert received_events[0]["source"] == "desktop_analysis"
 
 
@@ -575,7 +585,7 @@ def test_mcp_analyze_project_wrapper_and_canonical_publish_equivalence(live_serv
     wrapped = _instrument_mcp_tool(dummy_analyze, "analyze_project")
     wrapped(repo_path=".")
 
-    state = SimpleNamespace(modules={"pkg": object()}, revision=5)
+    state = SimpleNamespace(modules={"pkg": object()}, revision=2)
     client.publish(state, origin="mcp_analysis")
 
     events = client.get_events(after_seq=0)["events"]
@@ -588,7 +598,7 @@ def test_mcp_analyze_project_wrapper_and_canonical_publish_equivalence(live_serv
     assert events[1]["category"] == "LIVE_STATE"
     assert events[1]["operation"] == "publish"
     assert events[1]["source"] == "mcp_analysis"
-    assert events[1]["canonical_revision"] == 5
+    assert events[1]["canonical_revision"] == 2
 
 
 def test_all_24_registered_mcp_tools_telemetry_against_fastmcp_registry(monkeypatch):
@@ -634,7 +644,7 @@ def test_real_server_to_gui_burst_ordering_and_zero_dropped_events(live_server_i
     feed = DesktopLiveEventFeed(client, gui_callback, initial_seq=0)
 
     for i in range(5):
-        client.publish(SimpleNamespace(modules={}, revision=10 + i), origin="desktop_analysis")
+        client.publish(SimpleNamespace(modules={}, revision=2 + i), origin="desktop_analysis")
         client.record_activity("MCP_CALL", tool=f"mcp_tool_{i}", source="mcp")
 
     assert server._activity_seq == 10
@@ -666,36 +676,33 @@ def test_real_server_to_gui_burst_ordering_and_zero_dropped_events(live_server_i
         expected_time = datetime.fromisoformat(evt["timestamp"]).astimezone().strftime("%H:%M:%S")
         assert expected_time in item["formatted"]
 
-    assert controller.last_live_state["revision"] == 14
-
-
+    assert controller.last_live_state["revision"] == 6
 def test_desktop_vs_mcp_full_analysis_equivalence(live_server_instance):
     server, client = live_server_instance
 
-    state_d = SimpleNamespace(modules={"a": 1}, revision=100)
+    state_d = SimpleNamespace(modules={"a": 1}, revision=2)
     res_d = client.publish(state_d, origin="desktop_analysis")
     assert res_d["status"] == "ok"
-    assert res_d["revision"] == 100
+    assert res_d["revision"] == 2
 
-    state_m = SimpleNamespace(modules={"a": 1, "b": 2}, revision=101)
+    state_m = SimpleNamespace(modules={"a": 1, "b": 2}, revision=3)
     res_m = client.publish(state_m, origin="mcp_analysis")
     assert res_m["status"] == "ok"
-    assert res_m["revision"] == 101
+    assert res_m["revision"] == 3
 
     events = client.get_events(after_seq=0)["events"]
     assert len(events) == 2
-
     assert events[0]["category"] == "LIVE_STATE"
     assert events[0]["operation"] == "publish"
     assert events[0]["source"] == "desktop_analysis"
-    assert events[0]["canonical_revision"] == 100
-    assert events[0]["revision"] == 100
+    assert events[0]["canonical_revision"] == 2
+    assert events[0]["revision"] == 2
 
     assert events[1]["category"] == "LIVE_STATE"
     assert events[1]["operation"] == "publish"
     assert events[1]["source"] == "mcp_analysis"
-    assert events[1]["canonical_revision"] == 101
-    assert events[1]["revision"] == 101
+    assert events[1]["canonical_revision"] == 3
+    assert events[1]["revision"] == 3
 
 
 def test_canonical_revision_succession_and_noncanonical_invariance():
@@ -906,64 +913,121 @@ def test_strict_canonical_only_after_revision_filtering():
 
 
 def test_fail_closed_against_non_monotonic_and_stale_publish():
-    """Verify CanonicalLiveServer rejects non-monotonic, equal, or stale publish candidates:
-    - Current R=10
-    - Publish candidate 11 -> success, R=11
-    - Publish candidate 11 again -> fail closed, active state remains previous R=11
-    - Publish stale candidate 10 -> fail closed, active state remains R=11
-    - Prove no failed publish emits a LIVE_STATE event
+    """Verify CanonicalLiveServer enforces exact successor policy (expected = R+1):
+    - Current R=11
+    - publish 12 -> PASS
+    - publish 12 again -> FAIL non_monotonic_canonical_revision
+    - publish 11 -> FAIL non_monotonic_canonical_revision
+    - publish 14 -> FAIL canonical_revision_discontinuity
+    - Prove for all rejected publishes: state, revision, activity_seq unchanged, zero LIVE_STATE event emitted
     """
-    initial_state = SimpleNamespace(modules={"pkg": 1}, revision=10, tag="v10")
-    server = CanonicalLiveServer(state=initial_state, revision=10)
+    initial_state = SimpleNamespace(modules={"pkg": 1}, revision=11, tag="v11")
+    server = CanonicalLiveServer(state=initial_state, revision=11)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     client = LiveStateClient(server.endpoint)
 
     try:
-        assert client.ping()["revision"] == 10
-
-        # 1. Monotonic publish 11 -> success
-        state_11 = SimpleNamespace(modules={"pkg": 1, "pkg.a": 2}, revision=11, tag="v11")
-        res_11 = client.publish(state_11, origin="desktop_analysis")
-        assert res_11["status"] == "ok"
-        assert res_11["revision"] == 11
         assert client.ping()["revision"] == 11
-        assert server._state.tag == "v11"
-        assert server._state.revision == 11
+
+        # 1. Exact successor publish 12 -> PASS
+        state_12 = SimpleNamespace(modules={"pkg": 1, "pkg.a": 2}, revision=12, tag="v12")
+        res_12 = client.publish(state_12, origin="desktop_analysis")
+        assert res_12["status"] == "ok"
+        assert res_12["revision"] == 12
+        assert client.ping()["revision"] == 12
+        assert server._state.tag == "v12"
+        assert server._state.revision == 12
 
         events_before = client.get_events(after_seq=0)["events"]
         assert len(events_before) == 1
+        seq_before = events_before[0]["seq"]
 
-        # 2. Equal publish 11 -> fail closed
-        state_11_dup = SimpleNamespace(modules={"pkg": 99}, revision=11, tag="v11_dup")
-        res_dup = client.publish(state_11_dup, origin="desktop_analysis")
+        # 2. Equal publish 12 -> FAIL
+        state_12_dup = SimpleNamespace(modules={"pkg": 99}, revision=12, tag="v12_dup")
+        res_dup = client.publish(state_12_dup, origin="desktop_analysis")
         assert res_dup["status"] == "error"
         assert res_dup["error"] == "non_monotonic_canonical_revision"
-        assert res_dup["revision"] == 11
-        assert res_dup["candidate_revision"] == 11
+        assert res_dup["revision"] == 12
+        assert res_dup["candidate_revision"] == 12
+        assert res_dup["expected_revision"] == 13
 
-        # State must NOT have changed
-        assert server._state.tag == "v11"
-        assert server._state.revision == 11
-        assert client.ping()["revision"] == 11
+        # State and revision must NOT have changed
+        assert server._state.tag == "v12"
+        assert server._state.revision == 12
+        assert client.ping()["revision"] == 12
 
-        # 3. Stale publish 10 -> fail closed
-        state_stale = SimpleNamespace(modules={"pkg": 0}, revision=10, tag="v10_stale")
+        # 3. Stale publish 11 -> FAIL
+        state_stale = SimpleNamespace(modules={"pkg": 0}, revision=11, tag="v11_stale")
         res_stale = client.publish(state_stale, origin="mcp_analysis")
         assert res_stale["status"] == "error"
         assert res_stale["error"] == "non_monotonic_canonical_revision"
-        assert res_stale["revision"] == 11
-        assert res_stale["candidate_revision"] == 10
+        assert res_stale["revision"] == 12
+        assert res_stale["candidate_revision"] == 11
+        assert res_stale["expected_revision"] == 13
 
-        # State must NOT have changed
-        assert server._state.tag == "v11"
-        assert server._state.revision == 11
-        assert client.ping()["revision"] == 11
+        # State and revision must NOT have changed
+        assert server._state.tag == "v12"
+        assert server._state.revision == 12
+        assert client.ping()["revision"] == 12
 
-        # 4. Prove no failed publish emitted any event
+        # 4. Discontinuous forward publish 14 -> FAIL canonical_revision_discontinuity
+        state_gap = SimpleNamespace(modules={"pkg": 100}, revision=14, tag="v14_gap")
+        res_gap = client.publish(state_gap, origin="desktop_analysis")
+        assert res_gap["status"] == "error"
+        assert res_gap["error"] == "canonical_revision_discontinuity"
+        assert res_gap["revision"] == 12
+        assert res_gap["candidate_revision"] == 14
+        assert res_gap["expected_revision"] == 13
+
+        # State and revision must NOT have changed
+        assert server._state.tag == "v12"
+        assert server._state.revision == 12
+        assert client.ping()["revision"] == 12
+
+        # 5. Prove no failed publish emitted any event and activity_seq is unchanged
         events_after = client.get_events(after_seq=0)["events"]
         assert len(events_after) == 1
-        assert events_after[0]["seq"] == events_before[0]["seq"]
+        assert events_after[0]["seq"] == seq_before
+    finally:
+        server.close()
+        thread.join(timeout=2)
+
+
+def test_fail_closed_when_state_revision_cannot_be_bound():
+    """Verify CanonicalLiveServer fails closed when revision cannot be bound into state:
+    - Immutable / frozen state with read-only revision raises on publish without valid revision
+    - Constructor raises ValueError on unbindable state
+    - Explicit bool revision rejected
+    """
+    # 1. Constructor fails closed on unbindable state with explicit revision
+    with pytest.raises(ValueError, match="Failed to bind explicit canonical revision=5 into state"):
+        CanonicalLiveServer(state=_ReadOnlyRevisionState(), revision=5)
+
+    # 2. Constructor fails closed on unbindable state with default revision=0
+    with pytest.raises(ValueError, match="Failed to bind default canonical revision=0 into state"):
+        CanonicalLiveServer(state=_ReadOnlyRevisionState())
+
+    # 3. Constructor rejects bool revision
+    with pytest.raises(ValueError, match="Constructor canonical revision mismatch"):
+        CanonicalLiveServer(state=SimpleNamespace(modules={}, revision=1), revision=True)
+
+    # 4. Publish fails closed when attempting to allocate revision on unbindable state
+    server = CanonicalLiveServer(state=None, revision=10)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    client = LiveStateClient(server.endpoint)
+
+    try:
+        res = client.publish(_ReadOnlyRevisionState(), origin="desktop_analysis")
+        assert res["status"] == "error"
+        assert res["error"] == "canonical_revision_binding_failed"
+        assert res["revision"] == 10
+        assert res["candidate_revision"] is None
+
+        # Server state remains None, revision remains 10, zero events recorded
+        assert client.ping()["revision"] == 10
+        assert client.get_events(after_seq=0)["events"] == []
     finally:
         server.close()
         thread.join(timeout=2)
