@@ -234,8 +234,15 @@ def _validate_collision_facts_dict(facts: Any, modules: Any) -> bool:
                 return False
             if fact.get("file") != mod_key:
                 return False
-            if not isinstance(fact.get("name"), str) or not isinstance(fact.get("code"), str):
+            if not isinstance(fact.get("name"), str):
                 return False
+            from contextor.core.validator.collisions import CollisionFact
+            if isinstance(fact, CollisionFact):
+                if "code" not in fact:
+                    return False
+            else:
+                if not isinstance(fact.get("code"), str):
+                    return False
             if not isinstance(fact.get("file_path"), str):
                 return False
             if not _is_int_or_none(fact.get("line_start")) or not _is_int_or_none(fact.get("line_end")):

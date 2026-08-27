@@ -672,8 +672,8 @@ def test_canonical_collisions_provenance_independent_of_supplied_report_collisio
 
         real_compute = facade_module._compute_metrics_and_debt
 
-        def fake_compute_metrics_and_debt(modules, graph, progress_callback=None):
-            metrics, cycles, _, debt = real_compute(modules, graph, progress_callback)
+        def fake_compute_metrics_and_debt(modules, graph, progress_callback=None, *args, **kwargs):
+            metrics, cycles, _, debt = real_compute(modules, graph, progress_callback, *args, **kwargs)
             # Inject fake reporting collisions into the pipeline
             return metrics, cycles, [mock_reporting_collision], debt
 

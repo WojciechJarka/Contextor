@@ -372,20 +372,13 @@ class ContextorFacade:
         repo_name = Path(path).name
 
         metrics_progress = progress.begin("Computing metrics, cycles and debt")
-        try:
-            metrics, cycles, all_collisions, debt = _compute_metrics_and_debt(
-                modules,
-                graph,
-                progress_callback=metrics_progress,
-                collisions=all_collisions,
-                collision_facts=collision_facts,
-            )
-        except TypeError:
-            metrics, cycles, all_collisions, debt = _compute_metrics_and_debt(
-                modules,
-                graph,
-                progress_callback=metrics_progress,
-            )
+        metrics, cycles, all_collisions, debt = _compute_metrics_and_debt(
+            modules,
+            graph,
+            progress_callback=metrics_progress,
+            collisions=all_collisions,
+            collision_facts=collision_facts,
+        )
 
         from datetime import datetime
         datestamp = datetime.now().strftime("%Y%m%d_%H%M%S")

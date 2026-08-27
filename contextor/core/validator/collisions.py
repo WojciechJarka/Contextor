@@ -90,6 +90,27 @@ COLLISION_FACT_KEYS = (
 )
 
 
+from collections.abc import ItemsView, KeysView, ValuesView
+
+
+class CollisionFactKeys(KeysView):
+    """View of CollisionFact keys with deterministic legacy order."""
+    def __repr__(self) -> str:
+        return f"dict_keys({list(self._mapping)})"
+
+
+class CollisionFactItems(ItemsView):
+    """View of CollisionFact items with deterministic legacy order."""
+    def __repr__(self) -> str:
+        return f"dict_items({list(self._mapping.items())})"
+
+
+class CollisionFactValues(ValuesView):
+    """View of CollisionFact values with deterministic legacy order."""
+    def __repr__(self) -> str:
+        return f"dict_values({list(self._mapping.values())})"
+
+
 class CollisionFact(dict):
     """
     Collision fact dictionary with lazy AST unparsing for the 'code' field.
@@ -156,16 +177,14 @@ class CollisionFact(dict):
     def __len__(self) -> int:
         return len(COLLISION_FACT_KEYS)
 
-    def keys(self):
-        return list(COLLISION_FACT_KEYS)
+    def keys(self) -> KeysView:
+        return CollisionFactKeys(self)
 
-    def items(self):
-        for k in COLLISION_FACT_KEYS:
-            yield k, self[k]
+    def items(self) -> ItemsView:
+        return CollisionFactItems(self)
 
-    def values(self):
-        for k in COLLISION_FACT_KEYS:
-            yield self[k]
+    def values(self) -> ValuesView:
+        return CollisionFactValues(self)
 
     def __eq__(self, other: Any) -> bool:
         if not isinstance(other, dict):
@@ -183,6 +202,22 @@ class CollisionFact(dict):
 
     def copy(self) -> dict[str, Any]:
         return {k: self[k] for k in COLLISION_FACT_KEYS}
+
+    def __reduce__(self):
+        # Pickles as a standard plain dict with exact schema to eliminate AST node references across persistence/IPC
+        rendered_code = self._rendered_code if self._rendered_code is not None else ""
+        d = {
+            "name": super().__getitem__("name"),
+            "type": super().__getitem__("type"),
+            "file": super().__getitem__("file"),
+            "file_path": super().__getitem__("file_path"),
+            "code": rendered_code,
+            "line_start": super().__getitem__("line_start"),
+            "line_end": super().__getitem__("line_end"),
+            "col_start": super().__getitem__("col_start"),
+            "col_end": super().__getitem__("col_end"),
+        }
+        return (dict, (d,))
 
 
 class PublicSymbolCollector(ast.NodeVisitor):
