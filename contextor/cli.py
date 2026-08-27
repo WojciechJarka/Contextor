@@ -12,6 +12,7 @@ import argparse
 import sys
 from pathlib import Path
 
+from contextor.core.analysis.full_analysis_coordinator import run_full_analysis_exclusive
 from contextor.core.api.facade import ContextorFacade
 from contextor.core.errors import AnalysisCancelled
 from contextor.core.paths import output_dir
@@ -91,7 +92,7 @@ def main(argv: list[str] | None = None) -> int:
     log = None if args.quiet else (lambda message: print(f"[INFO] {message}"))
 
     try:
-        errors, _ = ContextorFacade.analyze_project(root, log=log)
+        errors, _ = run_full_analysis_exclusive(root, owner="cli_analysis", log=log)
 
         if args.layer:
             layer = Path(args.layer).expanduser().resolve()

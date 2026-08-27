@@ -14,6 +14,7 @@ from queue import Empty, Queue
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
+from contextor.core.analysis.full_analysis_coordinator import run_full_analysis_exclusive
 from contextor.core.api.facade import ContextorFacade
 from contextor.core.live_state import DesktopLiveEventFeed, DesktopLiveWatcher, connect_or_start
 from contextor.core.repository_identity import (
@@ -643,8 +644,12 @@ class ContextorGUI:
             pre_seq = 0
 
         def task(log=None, progress_callback=None):
-            errors, _ = ContextorFacade.analyze_project(
-                path, log=log, progress_callback=progress_callback
+            errors, _ = run_full_analysis_exclusive(
+                path,
+                owner="desktop_analysis",
+                log=log,
+                progress_callback=progress_callback,
+                is_cancelled=lambda: getattr(self.progress_bar, "is_cancelled", False),
             )
             return errors
 

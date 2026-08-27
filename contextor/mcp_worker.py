@@ -25,10 +25,15 @@ def main(argv: list[str] | None = None) -> int:
 
     root = Path(args.repo_path).resolve()
     try:
+        from contextor.core.analysis.full_analysis_coordinator import run_full_analysis_exclusive
         from contextor.core.api.facade import ContextorFacade
 
         if args.operation == "project":
-            _, analysis_result = ContextorFacade.analyze_project(str(root), log=_log)
+            _, analysis_result = run_full_analysis_exclusive(
+                str(root),
+                owner="mcp_analysis",
+                log=_log,
+            )
             if analysis_result is None:
                 raise RuntimeError("Analysis returned no canonical state.")
         elif args.operation == "layer":

@@ -1,0 +1,187 @@
+service_tier = "default"
+sandbox_mode = "workspace-write"
+
+
+model = "gpt-5.6-sol"
+model_reasoning_effort = "low"
+personality = "pragmatic"
+model_verbosity = "low"
+notify = [ "C:\\Users\\DafoO\\AppData\\Local\\OpenAI\\Codex\\runtimes\\cua_node\\950613ca46815e82\\bin\\node_modules\\@oai\\sky\\bin\\windows\\codex-computer-use.exe", "turn-ended" ]
+[sandbox_workspace_write]
+writable_roots = [
+    'C:\Temp\Agent-orchestrator_Repo',
+    'C:\Temp\Contextor_Repo',
+    'C:\Temp\Manifest Builder_Repo',
+    'C:\Temp\Spiral-Prophet_Repo',
+]
+network_access = true
+
+[marketplaces.openai-bundled]
+source_type = "local"
+source = '\\?\C:\Users\DafoO\.codex\.tmp\bundled-marketplaces\openai-bundled'
+
+[marketplaces.openai-primary-runtime]
+source_type = "local"
+source = '\\?\C:\Users\DafoO\.cache\codex-runtimes\codex-primary-runtime\plugins\openai-primary-runtime'
+
+[plugins."documents@openai-primary-runtime"]
+enabled = true
+
+[plugins."pdf@openai-primary-runtime"]
+enabled = true
+
+[plugins."spreadsheets@openai-primary-runtime"]
+enabled = true
+
+[plugins."presentations@openai-primary-runtime"]
+enabled = true
+
+[plugins."template-creator@openai-primary-runtime"]
+enabled = true
+
+[plugins."visualize@openai-bundled"]
+enabled = true
+
+[plugins."browser@openai-bundled"]
+enabled = true
+
+[plugins."codex-app-tools@openai-bundled"]
+enabled = true
+
+[plugins."sites@openai-bundled"]
+enabled = true
+
+[features]
+js_repl = false
+memories = true
+
+[mcp_servers.contextor]
+command = 'C:\Temp\Contextor_Repo\.venv\Scripts\python.exe'
+args = ["-u", "-X", "utf8", "-m", "contextor.mcp_server"]
+cwd = 'C:\Temp\Contextor_Repo'
+env = {
+    PYTHONUNBUFFERED = "1",
+    PYTHONIOENCODING = "utf-8",
+}
+required = true
+startup_timeout_sec = 120
+
+[mcp_servers.contextor.tools.get_live_events]
+approval_mode = "approve"
+
+[mcp_servers.contextor.tools.search_artifacts]
+approval_mode = "approve"
+
+[mcp_servers.contextor.tools.get_artifacts_for_module]
+approval_mode = "approve"
+
+[mcp_servers.contextor.tools.lookup_artifact_by_symbol]
+approval_mode = "approve"
+
+[mcp_servers.contextor.tools.get_artifact_blast_radius]
+approval_mode = "approve"
+
+[mcp_servers.contextor.tools.get_file_edit_context]
+approval_mode = "approve"
+
+[mcp_servers.contextor.tools.get_analysis_status]
+approval_mode = "approve"
+
+[mcp_servers.contextor.tools.get_symbol_implementation]
+approval_mode = "approve"
+
+[mcp_servers.contextor.tools.get_project_architecture]
+approval_mode = "approve"
+
+[mcp_servers.contextor.tools.get_module_context]
+approval_mode = "approve"
+
+[mcp_servers.contextor.tools.query_canonical_projection]
+approval_mode = "approve"
+
+[mcp_servers.contextor.tools.get_mcp_documentation]
+approval_mode = "approve"
+
+[mcp_servers.contextor.tools.describe_canonical_state]
+approval_mode = "approve"
+
+[mcp_servers.contextor.tools.lookup_index_entries]
+approval_mode = "approve"
+
+[mcp_servers.contextor.tools.analyze_layer]
+approval_mode = "approve"
+
+[mcp_servers.contextor.tools.analyze_single_file]
+approval_mode = "approve"
+
+[mcp_servers.contextor.tools.analyze_project]
+approval_mode = "approve"
+
+[mcp_servers.contextor.tools.get_layer_isolation]
+approval_mode = "approve"
+
+[mcp_servers.contextor.tools.get_report_diff]
+approval_mode = "approve"
+
+[mcp_servers.contextor.tools.extract_indexed_report_context]
+approval_mode = "approve"
+
+[mcp_servers.contextor.tools.search_source]
+approval_mode = "approve"
+
+[mcp_servers.contextor.tools.get_source_range]
+approval_mode = "approve"
+
+[mcp_servers.contextor.tools.get_symbol_call_context]
+approval_mode = "approve"
+
+[mcp_servers.node_repl]
+args = []
+command = 'C:\Users\DafoO\AppData\Local\OpenAI\Codex\runtimes\cua_node\950613ca46815e82\bin\node_repl.exe'
+startup_timeout_sec = 120
+
+[mcp_servers.node_repl.env]
+NODE_REPL_NATIVE_PIPE_CONNECT_TIMEOUT_MS = "1000"
+NODE_REPL_NODE_MODULE_DIRS = 'C:\Users\DafoO\AppData\Local\OpenAI\Codex\runtimes\cua_node\950613ca46815e82\bin\node_modules'
+NODE_REPL_NODE_PATH = 'C:\Users\DafoO\AppData\Local\OpenAI\Codex\runtimes\cua_node\950613ca46815e82\bin\node.exe'
+NODE_REPL_TRUSTED_CODE_PATHS = 'C:\Users\DafoO\.codex;C:\Users\DafoO\AppData\Local\OpenAI\Codex\runtimes\cua_node\950613ca46815e82\bin\node_modules'
+CODEX_HOME = 'C:\Users\DafoO\.codex'
+BROWSER_USE_AVAILABLE_BACKENDS = "chrome,iab"
+BROWSER_USE_TINYSKY_ENABLED = "0"
+NODE_REPL_INSTRUCTIONS_USE_CASE_BROWSER = "Control the in-app browser in conjunction with the Browser Plugin."
+NODE_REPL_INSTRUCTIONS_USE_CASE_CHROME = "Control the Chrome browser in conjunction with the Chrome Plugin. Prefer this method of controlling Chrome over alternatives (such as Computer Use) unless the user explicitly mentions an alternative."
+BROWSER_USE_CODEX_APP_BUILD_FLAVOR = "prod"
+BROWSER_USE_CODEX_APP_VERSION = "26.820.60940"
+NODE_REPL_TRUSTED_SERVICES = '{"browser":"C:/Users/DafoO/.codex/plugins/cache/openai-bundled/browser/26.820.60940/scripts/browser-service.mjs","sky":"@oai/sky/service"}'
+SKY_CUA_NATIVE_PIPE = "1"
+SKY_CUA_NATIVE_PIPE_DIRECTORY = '\\.\pipe\codex-computer-use-343d40e8-7af0-45a1-a607-7024f64c6ee1'
+CODEX_CLI_PATH = 'C:\Users\DafoO\AppData\Local\OpenAI\Codex\bin\d0097be4feba73d0\codex.exe'
+
+[desktop]
+conversationDetailMode = "STEPS_COMMANDS"
+ambient-suggestions-enabled = true
+followUpQueueMode = "queue"
+appearanceTheme = "dark"
+usePointerCursors = true
+
+[projects.'C:\Temp\Agent-orchestrator_Repo']
+trust_level = "trusted"
+
+[projects.'C:\Temp\Contextor_Repo']
+trust_level = "trusted"
+
+[projects.'C:\Temp\Manifest Builder_Repo']
+trust_level = "trusted"
+
+[projects.'C:\Temp\Spiral-Prophet_Repo']
+trust_level = "trusted"
+
+[shell_environment_policy.set]
+NODE_REPL_TRUSTED_BROWSER_CLIENT_SHA256S = "8e172ec9f458f2e636fc69a1b8c68c217f6bb8d10c41f70a05a0878b73863701"
+
+[windows]
+sandbox = "elevated"
+
+[memories]
+generate_memories = true
+use_memories = true

@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
+from contextor.core.analysis.full_analysis_coordinator import run_full_analysis_exclusive
 from contextor.core.api.facade import ContextorFacade
 from contextor.mcp import runtime as mcp_runtime
 from contextor.mcp.query_helpers import bounded_items
@@ -177,8 +178,11 @@ async def _run_analysis_worker(
             os.environ["CONTEXTOR_MCP_PROCESS_REGISTRY"] = str(registry_dir(root))
             try:
                 if operation == "project":
-                    _, result = ContextorFacade.analyze_project(
-                        str(root), log=effective_log, additional_excludes=exclude_paths
+                    _, result = run_full_analysis_exclusive(
+                        str(root),
+                        owner="mcp_analysis",
+                        log=effective_log,
+                        additional_excludes=exclude_paths,
                     )
                     if result is None:
                         raise RuntimeError("Analysis returned no canonical state.")
@@ -187,7 +191,10 @@ async def _run_analysis_worker(
                     )
                     if not isinstance(skipped_files, list):
                         skipped_files = []
-                    return {"skipped_python_files": skipped_files}
+                    return {
+                        "skipped_python_files": skipped_files,
+                        "_analysis_result": result,
+                    }
                 if operation == "layer":
                     ContextorFacade.analyze_layer(
                         str(root), str(target), log=effective_log,

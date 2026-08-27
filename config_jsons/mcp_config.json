@@ -1,0 +1,20 @@
+{
+  "mcpServers": {
+    "contextor": {
+      "command": "C:\\SpiralProphet\\python\\WPy64-31090\\python-3.10.9.amd64\\python.exe",
+      "args": [
+        "-u",
+        "-X",
+        "utf8",
+        "-m",
+        "contextor.mcp_server"
+      ],
+      "cwd": "C:\\Temp\\Contextor_Repo",
+      "env": {
+        "PYTHONUNBUFFERED": "1",
+        "PYTHONIOENCODING": "utf-8"
+      },
+      "disabled": false
+    }
+  }
+}
