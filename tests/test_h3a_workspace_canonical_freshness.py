@@ -431,11 +431,11 @@ def test_h3a_case_k_real_remote_live_lifecycle_and_journal_separation(tmp_path):
         j0 = ping0["revision"]
         assert j0 == metadata.revision
 
-        # 4. Status event increments journal revision to J1 without changing source snapshot
+        # 4. Status event does not mutate canonical revision
         client.status("Server heartbeat status", origin="test")
         ping1 = client.ping()
         j1 = ping1["revision"]
-        assert j1 == j0 + 1
+        assert j1 == j0
 
         # 5. MCP runtime hydrates from live daemon
         mcp_runtime._live_engines.pop(str(repo), None)
@@ -450,10 +450,10 @@ def test_h3a_case_k_real_remote_live_lifecycle_and_journal_separation(tmp_path):
         res = json.loads(res_raw)
         freshness = res["state_freshness"]
 
-        # 6. Verify publication revision != journal revision
+        # 6. Verify canonical revision parity
         assert freshness["provenance"] == "live"
         assert freshness["canonical_revision"] == metadata.revision  # e.g. 1
-        assert j1 == metadata.revision + 1  # e.g. 2
+        assert j1 == metadata.revision  # e.g. 1
         assert freshness["workspace_sync"] == "verified"
         assert freshness["advisory_warning"] is None
 
@@ -466,6 +466,7 @@ def test_h3a_case_k_real_remote_live_lifecycle_and_journal_separation(tmp_path):
         upd = client.update_file(str(mod_a), origin="test")
         assert upd["status"] == "ok"
         new_journal_rev = upd["revision"]
+        assert new_journal_rev == metadata.revision + 1
 
         # Clear MCP in-memory cache to force hydration of new live snapshot
         mcp_runtime._live_engines.pop(str(repo), None)
@@ -638,12 +639,12 @@ def test_h3a_case_o_live_daemon_restart_cache_invalidation_across_epochs(tmp_pat
     }), encoding="utf-8")
 
     client1 = LiveStateClient(server1.endpoint)
-    # Increment journal revision heavily via status events
+    # Non-canonical status events do not mutate canonical revision
     for i in range(20):
         client1.status(f"status {i}", origin="test")
     ping_s1 = client1.ping()
     j1 = ping_s1["revision"]
-    assert j1 == p0 + 20  # 21
+    assert j1 == p0  # 1
 
     # Hydrate MCP runtime engine for S1
     mcp_runtime._live_engines.pop(str(repo), None)
@@ -652,7 +653,6 @@ def test_h3a_case_o_live_daemon_restart_cache_invalidation_across_epochs(tmp_pat
 
     engine_s1 = mcp_runtime.get_or_init_engine(repo)
     assert engine_s1 is not None
-    assert mcp_runtime._live_journal_revisions.get(str(repo)) == j1  # 21
     assert mcp_runtime._live_engine_revisions.get(str(repo)) == p0  # 1
 
     # 2. Stop S1
@@ -688,7 +688,8 @@ def test_h3a_case_o_live_daemon_restart_cache_invalidation_across_epochs(tmp_pat
         upd = client2.update_file(str(mod_a), origin="test")
         assert upd["status"] == "ok"
         j2 = upd["revision"]  # 2
-        assert j2 < j1  # 2 < 21! Numeric comparison would fail, but epoch session tracking succeeds!
+        assert j2 == p0 + 1
+        assert j1 == p0
 
         # 4. MCP query WITHOUT manually clearing ANY caches
         res_raw = get_module_context(repo_path=str(repo), module_name="pkg.mod_a")
@@ -793,7 +794,7 @@ def test_h3a_case_q_equal_numeric_revision_cross_session_invalidation(tmp_path):
     # 1. Start Server S1
     loaded = load_snapshot(cache, expected_repo_id=identity.repo_id, expected_root_path=identity.root_path)
     state, metadata = loaded
-    server1 = CanonicalLiveServer(state, revision=5, updater=_repository_updater(repo))
+    server1 = CanonicalLiveServer(state, revision=metadata.revision, updater=_repository_updater(repo))
     t1 = threading.Thread(target=server1.serve_forever, daemon=True)
     t1.start()
 
@@ -812,10 +813,10 @@ def test_h3a_case_q_equal_numeric_revision_cross_session_invalidation(tmp_path):
     mcp_runtime._live_journal_revisions.pop(str(repo), None)
     mcp_runtime._live_sessions.pop(str(repo), None)
 
-    # Hydrate MCP engine for S1 (journal=5, rev=1)
+    # Hydrate MCP engine for S1 (rev=1)
     engine_s1 = mcp_runtime.get_or_init_engine(repo)
     assert engine_s1 is not None
-    assert mcp_runtime._live_journal_revisions.get(str(repo)) == 5
+    assert mcp_runtime._live_journal_revisions.get(str(repo)) == 1
     assert mcp_runtime._live_engine_revisions.get(str(repo)) == 1
 
     server1.close()
@@ -826,8 +827,8 @@ def test_h3a_case_q_equal_numeric_revision_cross_session_invalidation(tmp_path):
     state2, metadata2 = loaded2
     assert metadata2.revision == 2
 
-    # 3. Start S2 with SAME numeric journal revision (5)
-    server2 = CanonicalLiveServer(state2, revision=5, updater=_repository_updater(repo))
+    # 3. Start S2 with revision 2
+    server2 = CanonicalLiveServer(state2, revision=metadata2.revision, updater=_repository_updater(repo))
     t2 = threading.Thread(target=server2.serve_forever, daemon=True)
     t2.start()
 
@@ -844,9 +845,10 @@ def test_h3a_case_q_equal_numeric_revision_cross_session_invalidation(tmp_path):
         # WITHOUT clearing MCP cache:
         engine_s2 = mcp_runtime.get_or_init_engine(repo)
         assert engine_s2 is not None
-        # Must have refreshed to revision 2 despite identical journal revision (5)
+        # Must have refreshed to revision 2 across sessions
         assert engine_s2.revision == 2
         assert mcp_runtime._live_engine_revisions.get(str(repo)) == 2
+        assert mcp_runtime._live_journal_revisions.get(str(repo)) == 2
     finally:
         server2.close()
 
@@ -1326,10 +1328,10 @@ def test_h3a_case_x_journal_ahead_canonical_cache_separation(tmp_path):
             res_stat = client.status(f"journal_event_{i}", origin="test")
             assert res_stat.get("status") == "ok"
 
-        # Journal revision is now >= 21
+        # Status events do not mutate canonical revision
         ping_info = client.ping()
         journal_before = int(ping_info["revision"])
-        assert journal_before >= 21
+        assert journal_before == 1
 
         # Modify file and run full analysis
         time.sleep(0.05)
@@ -1351,10 +1353,9 @@ def test_h3a_case_x_journal_ahead_canonical_cache_separation(tmp_path):
         daemon_state = daemon_snap.get("state")
         assert getattr(daemon_state, "revision", None) == 2
 
-        # Publish return revision is journal revision (>= 22)
+        # Publish return revision is canonical revision (2)
         assert res.live_publish_status == "success"
-        assert res.live_publish_revision > 2
-        assert res.live_publish_revision >= journal_before + 1
+        assert res.live_publish_revision == 2
         assert res.live_publish_warning is None
 
         # Without manual cache clear, query get_module_context
@@ -1366,9 +1367,9 @@ def test_h3a_case_x_journal_ahead_canonical_cache_separation(tmp_path):
         assert freshness["workspace_sync"] == "verified"
         assert freshness["provenance"] == "live"
 
-        # Canonical cache is strictly 2, NOT the journal revision
+        # Canonical cache is strictly 2 and unified
         assert mcp_runtime._live_engine_revisions[str(repo)] == 2
-        assert mcp_runtime._live_journal_revisions[str(repo)] >= 22
+        assert mcp_runtime._live_journal_revisions[str(repo)] == 2
     finally:
         server.close()
 

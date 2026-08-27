@@ -160,7 +160,7 @@ def test_desktop_event_feed_forwards_only_mcp_status_messages(live_server):
 
     assert statuses == [
         "MCP: reading symbol demo",
-        "MCP: analysis published shared LIVE state",
+        "MCP: analysis published shared LIVE state (rev 1)",
     ]
 
 

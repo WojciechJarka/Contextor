@@ -42,13 +42,35 @@ class CanonicalLiveServer:
         self,
         state: Any = None,
         *,
-        revision: int = 0,
+        revision: int | None = None,
         updater: Callable[[Any, str], Any] | None = None,
         authkey: bytes | None = None,
         retention: int = ACTIVITY_EVENT_RETENTION,
     ):
         self._state = state
-        self._revision = revision
+        state_rev = getattr(state, "revision", None) if state is not None else None
+
+        if isinstance(state_rev, int) and state_rev >= 0:
+            if revision is not None and int(revision) != state_rev:
+                raise ValueError(
+                    f"Constructor canonical revision mismatch: explicit revision={revision} != state.revision={state_rev}"
+                )
+            self._revision = state_rev
+        elif revision is not None and int(revision) >= 0:
+            self._revision = int(revision)
+            if self._state is not None:
+                try:
+                    self._state.revision = self._revision
+                except Exception:
+                    pass
+        else:
+            self._revision = 0
+            if self._state is not None:
+                try:
+                    self._state.revision = 0
+                except Exception:
+                    pass
+
         self._activity_seq = 0
         self._updater = updater
         self._retention = retention
@@ -74,7 +96,7 @@ class CanonicalLiveServer:
         self._activity_seq += 1
         source = str(request.get("origin") or request.get("source") or "unknown")
 
-        canonical_rev = getattr(self._state, "revision", None) if category == "LIVE_STATE" else None
+        canonical_rev = self._revision if category == "LIVE_STATE" else None
 
         event: dict[str, Any] = {
             "seq": self._activity_seq,
@@ -167,8 +189,25 @@ class CanonicalLiveServer:
             if operation == "snapshot":
                 return {"status": "ok", "revision": self._revision, "state": self._state}
             if operation == "publish":
-                self._state = request.get("state")
-                self._revision += 1
+                state = request.get("state")
+                state_rev = getattr(state, "revision", None)
+                if not isinstance(state_rev, int) or state_rev <= 0:
+                    next_revision = self._revision + 1
+                    if state is not None:
+                        try:
+                            state.revision = next_revision
+                        except Exception:
+                            pass
+                    state_rev = next_revision
+                elif state_rev <= self._revision:
+                    return {
+                        "status": "error",
+                        "error": "non_monotonic_canonical_revision",
+                        "revision": self._revision,
+                        "candidate_revision": state_rev,
+                    }
+                self._state = state
+                self._revision = state_rev
                 evt = self._record_event("publish", request, category="LIVE_STATE")
                 return {"status": "ok", "revision": self._revision, "seq": evt["seq"]}
             if operation in {"status", "record_activity", "mcp_call"}:
@@ -179,7 +218,16 @@ class CanonicalLiveServer:
                 if self._state is None or self._updater is None:
                     return {"status": "error", "error": "live_state_unavailable"}
                 result = self._updater(self._state, str(request.get("file_path", "")))
-                self._revision += 1
+                state_rev = getattr(self._state, "revision", None)
+                if isinstance(state_rev, int) and state_rev > self._revision:
+                    self._revision = state_rev
+                else:
+                    self._revision += 1
+                    if self._state is not None:
+                        try:
+                            self._state.revision = self._revision
+                        except Exception:
+                            pass
                 evt = self._record_event("update_file", request, result, category="LIVE_STATE")
                 return {"status": "ok", "revision": self._revision, "result": result, "seq": evt["seq"]}
             if operation == "get_events":
@@ -222,7 +270,7 @@ class CanonicalLiveServer:
                     e for e in self._events
                     if e.get("category") == "LIVE_STATE" and e.get("operation") in {"publish", "update_file"}
                 ]
-                earliest_retained_revision = canonical_events[0]["revision"] if canonical_events else None
+                earliest_retained_revision = canonical_events[0]["canonical_revision"] if canonical_events else None
                 latest_revision = self._revision
                 latest_seq = self._activity_seq
 
@@ -259,7 +307,16 @@ class CanonicalLiveServer:
                 if after_seq is not None:
                     events = [e for e in events if e.get("seq", 0) > after_seq]
                 elif after_revision is not None:
-                    events = [e for e in events if e.get("category") == "LIVE_STATE" and e.get("revision", 0) > after_revision]
+                    events = [
+                        e
+                        for e in events
+                        if (
+                            e.get("category") == "LIVE_STATE"
+                            and e.get("operation") in {"publish", "update_file"}
+                            and isinstance(e.get("canonical_revision"), int)
+                            and e["canonical_revision"] > after_revision
+                        )
+                    ]
 
                 total = len(events)
                 selected = events if limit is None else events[:max(0, int(limit))]

@@ -675,12 +675,12 @@ def test_desktop_vs_mcp_full_analysis_equivalence(live_server_instance):
     state_d = SimpleNamespace(modules={"a": 1}, revision=100)
     res_d = client.publish(state_d, origin="desktop_analysis")
     assert res_d["status"] == "ok"
-    assert res_d["revision"] == 2
+    assert res_d["revision"] == 100
 
     state_m = SimpleNamespace(modules={"a": 1, "b": 2}, revision=101)
     res_m = client.publish(state_m, origin="mcp_analysis")
     assert res_m["status"] == "ok"
-    assert res_m["revision"] == 3
+    assert res_m["revision"] == 101
 
     events = client.get_events(after_seq=0)["events"]
     assert len(events) == 2
@@ -689,8 +689,360 @@ def test_desktop_vs_mcp_full_analysis_equivalence(live_server_instance):
     assert events[0]["operation"] == "publish"
     assert events[0]["source"] == "desktop_analysis"
     assert events[0]["canonical_revision"] == 100
+    assert events[0]["revision"] == 100
 
     assert events[1]["category"] == "LIVE_STATE"
     assert events[1]["operation"] == "publish"
     assert events[1]["source"] == "mcp_analysis"
     assert events[1]["canonical_revision"] == 101
+    assert events[1]["revision"] == 101
+
+
+def test_canonical_revision_succession_and_noncanonical_invariance():
+    """Prove deterministic revision succession:
+    read-only MCP telemetry -> R (unchanged)
+    ACTIVITY status         -> R (unchanged)
+    update_file             -> R+1 everywhere
+    MCP_CALL                -> R+1 (unchanged)
+    publish                 -> R+2 everywhere
+    """
+    initial_state = SimpleNamespace(modules={"mod_a": object()}, revision=10)
+    server = CanonicalLiveServer(state=initial_state, revision=10)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    client = LiveStateClient(server.endpoint)
+
+    try:
+        # 1. Baseline: R = 10
+        assert client.ping()["revision"] == 10
+        assert server._state.revision == 10
+
+        # 2. Read-only MCP telemetry -> R = 10
+        client.record_activity("MCP_CALL", tool="search_artifacts", source="mcp", success=True)
+        assert client.ping()["revision"] == 10
+        assert server._state.revision == 10
+
+        # 3. ACTIVITY status -> R = 10
+        client.status("Operational heartbeat", origin="desktop")
+        assert client.ping()["revision"] == 10
+        assert server._state.revision == 10
+
+        # 4. update_file -> R+1 = 11 everywhere
+        def mock_updater(s, path):
+            s.revision = 11
+            return SimpleNamespace(status="UPDATED", file_path=path, affected_modules=[])
+
+        server._updater = mock_updater
+        res_upd = client.update_file("src/mod_a.py", origin="desktop_watcher")
+        assert res_upd["status"] == "ok"
+        assert res_upd["revision"] == 11
+        assert client.ping()["revision"] == 11
+        assert server._state.revision == 11
+
+        # Check event
+        events = client.get_events(after_seq=0)["events"]
+        upd_evt = [e for e in events if e.get("operation") == "update_file"][0]
+        assert upd_evt["canonical_revision"] == 11
+        assert upd_evt["revision"] == 11
+
+        # 5. MCP_CALL -> R+1 = 11
+        client.record_activity("MCP_CALL", tool="get_module_context", source="mcp", success=True)
+        assert client.ping()["revision"] == 11
+        assert server._state.revision == 11
+
+        # 6. publish -> R+2 = 12 everywhere
+        new_state = SimpleNamespace(modules={"mod_a": object(), "mod_b": object()}, revision=12)
+        res_pub = client.publish(new_state, origin="mcp_analysis")
+        assert res_pub["status"] == "ok"
+        assert res_pub["revision"] == 12
+        assert client.ping()["revision"] == 12
+        assert server._state.revision == 12
+
+        pub_events = [e for e in client.get_events(after_seq=0)["events"] if e.get("operation") == "publish"]
+        assert len(pub_events) == 1
+        assert pub_events[0]["canonical_revision"] == 12
+        assert pub_events[0]["revision"] == 12
+    finally:
+        server.close()
+        thread.join(timeout=2)
+
+
+def test_desktop_and_mcp_consecutive_publish_revision_parity():
+    """Verify consecutive publishes from MCP and Desktop:
+    before = R
+    MCP publish     -> R+1 everywhere
+    Desktop publish -> R+2 everywhere
+    Only origin/source differs.
+    """
+    server = CanonicalLiveServer(state=None, revision=50)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    client = LiveStateClient(server.endpoint)
+
+    try:
+        assert client.ping()["revision"] == 50
+
+        # MCP publish -> 51
+        state_mcp = SimpleNamespace(modules={"pkg": 1}, revision=51)
+        res_mcp = client.publish(state_mcp, origin="mcp_analysis")
+        assert res_mcp["status"] == "ok"
+        assert res_mcp["revision"] == 51
+        assert client.ping()["revision"] == 51
+        assert server._state.revision == 51
+
+        # Desktop publish -> 52
+        state_dsk = SimpleNamespace(modules={"pkg": 1, "pkg.sub": 2}, revision=52)
+        res_dsk = client.publish(state_dsk, origin="desktop_analysis")
+        assert res_dsk["status"] == "ok"
+        assert res_dsk["revision"] == 52
+        assert client.ping()["revision"] == 52
+        assert server._state.revision == 52
+
+        events = client.get_events(after_seq=0)["events"]
+        assert len(events) == 2
+        assert events[0]["source"] == "mcp_analysis"
+        assert events[0]["canonical_revision"] == 51
+        assert events[0]["revision"] == 51
+
+        assert events[1]["source"] == "desktop_analysis"
+        assert events[1]["canonical_revision"] == 52
+        assert events[1]["revision"] == 52
+    finally:
+        server.close()
+        thread.join(timeout=2)
+
+
+def test_canonical_revision_continuity_across_server_restart(tmp_path):
+    """Verify revision unification survives daemon restart / reconnect:
+    - publish canonical R;
+    - reload / restart server;
+    - server resumes / binds authoritative R;
+    - next canonical mutation becomes correct successor.
+    """
+    state_v1 = SimpleNamespace(modules={"a": 1}, revision=105)
+    server_1 = CanonicalLiveServer(state=state_v1)
+    thread_1 = threading.Thread(target=server_1.serve_forever, daemon=True)
+    thread_1.start()
+    client_1 = LiveStateClient(server_1.endpoint)
+
+    try:
+        assert client_1.ping()["revision"] == 105
+    finally:
+        server_1.close()
+        thread_1.join(timeout=2)
+
+    # Server 2 initialized from resumed canonical state
+    state_resumed = SimpleNamespace(modules={"a": 1}, revision=105)
+    server_2 = CanonicalLiveServer(state=state_resumed)
+    thread_2 = threading.Thread(target=server_2.serve_forever, daemon=True)
+    thread_2.start()
+    client_2 = LiveStateClient(server_2.endpoint)
+
+    try:
+        assert client_2.ping()["revision"] == 105
+
+        # Next mutation is R+1 = 106
+        state_v2 = SimpleNamespace(modules={"a": 1, "b": 2}, revision=106)
+        res = client_2.publish(state_v2, origin="desktop_analysis")
+        assert res["status"] == "ok"
+        assert res["revision"] == 106
+        assert client_2.ping()["revision"] == 106
+    finally:
+        server_2.close()
+        thread_2.join(timeout=2)
+
+
+def test_strict_canonical_only_after_revision_filtering():
+    """Verify after_revision returns strictly canonical mutations, while after_seq returns mixed stream:
+    - Baseline R=10
+    - Canonical update -> R=11
+    - Append MCP_CALL and ACTIVITY status while at R=11
+    - get_events(after_revision=10) returns exactly the 1 canonical mutation at R=11 and 0 MCP_CALL / ACTIVITY
+    - get_events(after_seq=0) returns all 3 events
+    """
+    initial_state = SimpleNamespace(modules={"pkg": 1}, revision=10)
+    server = CanonicalLiveServer(state=initial_state, revision=10)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    client = LiveStateClient(server.endpoint)
+
+    try:
+        assert client.ping()["revision"] == 10
+
+        # 1. Canonical update -> R=11
+        server._updater = lambda s, p: SimpleNamespace(status="UPDATED", file_path=p, revision=11)
+        res_upd = client.update_file("pkg/mod.py", origin="desktop_watcher")
+        assert res_upd["status"] == "ok"
+        assert res_upd["revision"] == 11
+
+        # 2. Append MCP_CALL and ACTIVITY at R=11
+        client.record_activity("MCP_CALL", tool="get_module_context", source="mcp", success=True)
+        client.status("Daemon heartbeat alive", origin="desktop")
+
+        # Check total events in server
+        res_mixed = client.get_events(after_seq=0)
+        assert len(res_mixed["events"]) == 3
+        categories = [e["category"] for e in res_mixed["events"]]
+        assert categories == ["LIVE_STATE", "MCP_CALL", "ACTIVITY"]  # update_file, mcp_call, status
+
+        # 3. Query with after_revision=10
+        res_canonical = client.get_events(after_revision=10)
+        assert res_canonical["continuity"] == "continuous"
+        assert res_canonical["resync_required"] is False
+        assert len(res_canonical["events"]) == 1
+        assert res_canonical["total"] == 1
+        assert res_canonical["events"][0]["operation"] == "update_file"
+        assert res_canonical["events"][0]["revision"] == 11
+
+        # Query with after_revision=11 (latest)
+        res_latest = client.get_events(after_revision=11)
+        assert res_latest["continuity"] == "continuous"
+        assert res_latest["resync_required"] is False
+        assert len(res_latest["events"]) == 0
+        assert res_latest["total"] == 0
+    finally:
+        server.close()
+        thread.join(timeout=2)
+
+
+def test_fail_closed_against_non_monotonic_and_stale_publish():
+    """Verify CanonicalLiveServer rejects non-monotonic, equal, or stale publish candidates:
+    - Current R=10
+    - Publish candidate 11 -> success, R=11
+    - Publish candidate 11 again -> fail closed, active state remains previous R=11
+    - Publish stale candidate 10 -> fail closed, active state remains R=11
+    - Prove no failed publish emits a LIVE_STATE event
+    """
+    initial_state = SimpleNamespace(modules={"pkg": 1}, revision=10, tag="v10")
+    server = CanonicalLiveServer(state=initial_state, revision=10)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    client = LiveStateClient(server.endpoint)
+
+    try:
+        assert client.ping()["revision"] == 10
+
+        # 1. Monotonic publish 11 -> success
+        state_11 = SimpleNamespace(modules={"pkg": 1, "pkg.a": 2}, revision=11, tag="v11")
+        res_11 = client.publish(state_11, origin="desktop_analysis")
+        assert res_11["status"] == "ok"
+        assert res_11["revision"] == 11
+        assert client.ping()["revision"] == 11
+        assert server._state.tag == "v11"
+        assert server._state.revision == 11
+
+        events_before = client.get_events(after_seq=0)["events"]
+        assert len(events_before) == 1
+
+        # 2. Equal publish 11 -> fail closed
+        state_11_dup = SimpleNamespace(modules={"pkg": 99}, revision=11, tag="v11_dup")
+        res_dup = client.publish(state_11_dup, origin="desktop_analysis")
+        assert res_dup["status"] == "error"
+        assert res_dup["error"] == "non_monotonic_canonical_revision"
+        assert res_dup["revision"] == 11
+        assert res_dup["candidate_revision"] == 11
+
+        # State must NOT have changed
+        assert server._state.tag == "v11"
+        assert server._state.revision == 11
+        assert client.ping()["revision"] == 11
+
+        # 3. Stale publish 10 -> fail closed
+        state_stale = SimpleNamespace(modules={"pkg": 0}, revision=10, tag="v10_stale")
+        res_stale = client.publish(state_stale, origin="mcp_analysis")
+        assert res_stale["status"] == "error"
+        assert res_stale["error"] == "non_monotonic_canonical_revision"
+        assert res_stale["revision"] == 11
+        assert res_stale["candidate_revision"] == 10
+
+        # State must NOT have changed
+        assert server._state.tag == "v11"
+        assert server._state.revision == 11
+        assert client.ping()["revision"] == 11
+
+        # 4. Prove no failed publish emitted any event
+        events_after = client.get_events(after_seq=0)["events"]
+        assert len(events_after) == 1
+        assert events_after[0]["seq"] == events_before[0]["seq"]
+    finally:
+        server.close()
+        thread.join(timeout=2)
+
+
+def test_constructor_canonical_revision_parity_and_mismatch_rejection():
+    """Verify constructor enforces strict canonical revision parity:
+    - State with revision=10 and explicit revision=10 -> matches
+    - State with revision=10 and mismatching revision=12 -> raises ValueError
+    - State without revision and explicit revision=7 -> sets server=7 and state.revision=7
+    - State without revision and no explicit revision -> sets server=0 and state.revision=0
+    """
+    # 1. Matching state and explicit revision
+    state_a = SimpleNamespace(modules={}, revision=10)
+    server_a = CanonicalLiveServer(state=state_a, revision=10)
+    assert server_a._revision == 10
+    assert state_a.revision == 10
+    server_a.close()
+
+    # 2. Mismatching explicit revision raises ValueError
+    state_b = SimpleNamespace(modules={}, revision=10)
+    with pytest.raises(ValueError, match="Constructor canonical revision mismatch: explicit revision=12 != state.revision=10"):
+        CanonicalLiveServer(state=state_b, revision=12)
+
+    # 3. State without revision adopts explicit revision
+    state_c = SimpleNamespace(modules={})
+    server_c = CanonicalLiveServer(state=state_c, revision=7)
+    assert server_c._revision == 7
+    assert state_c.revision == 7
+    server_c.close()
+
+    # 4. State without revision and no explicit revision defaults to 0
+    state_d = SimpleNamespace(modules={})
+    server_d = CanonicalLiveServer(state=state_d)
+    assert server_d._revision == 0
+    assert state_d.revision == 0
+    server_d.close()
+
+
+def test_get_events_limit_contract_zero_negative_and_none():
+    """Verify CanonicalLiveServer.get_events limit handling:
+    - limit=None returns all matching events
+    - limit=0 returns empty list with total count preserved and truncated=True
+    - limit=-5 returns empty list with total count preserved and truncated=True
+    - limit=1 returns first event with truncated=True
+    """
+    server = CanonicalLiveServer(state=None, revision=0)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    client = LiveStateClient(server.endpoint)
+
+    try:
+        for i in range(5):
+            client.record_activity("MCP_CALL", tool=f"tool_{i}", source="mcp")
+
+        # limit=None -> all 5
+        res_none = client.get_events(after_seq=0, limit=None)
+        assert len(res_none["events"]) == 5
+        assert res_none["total"] == 5
+        assert res_none["truncated"] is False
+
+        # limit=0 -> 0 events, total=5, truncated=True
+        res_zero = client.get_events(after_seq=0, limit=0)
+        assert len(res_zero["events"]) == 0
+        assert res_zero["total"] == 5
+        assert res_zero["truncated"] is True
+
+        # limit=-5 -> 0 events, total=5, truncated=True
+        res_neg = client.get_events(after_seq=0, limit=-5)
+        assert len(res_neg["events"]) == 0
+        assert res_neg["total"] == 5
+        assert res_neg["truncated"] is True
+
+        # limit=2 -> 2 events, total=5, truncated=True
+        res_two = client.get_events(after_seq=0, limit=2)
+        assert len(res_two["events"]) == 2
+        assert res_two["total"] == 5
+        assert res_two["truncated"] is True
+    finally:
+        server.close()
+        thread.join(timeout=2)
+
