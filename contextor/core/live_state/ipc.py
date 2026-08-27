@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import secrets
 import threading
 from dataclasses import dataclass
@@ -35,16 +36,33 @@ class LiveEndpoint:
 ACTIVITY_EVENT_RETENTION = 10_000
 
 
-def _extract_state_revision(state: Any) -> int | None:
+_MISSING_REVISION = object()
+
+
+def _raw_state_revision(state: Any) -> Any:
     if state is None:
-        return None
+        return _MISSING_REVISION
     if isinstance(state, dict):
-        val = state.get("revision")
-    else:
-        val = getattr(state, "revision", None)
-    if isinstance(val, int) and not isinstance(val, bool):
-        return val
-    return None
+        return state.get("revision", _MISSING_REVISION)
+    return getattr(state, "revision", _MISSING_REVISION)
+
+
+def _extract_state_revision(state: Any) -> int | None:
+    value = _raw_state_revision(state)
+
+    if value is _MISSING_REVISION or value is None:
+        return None
+
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, int)
+        or value < 0
+    ):
+        raise ValueError(
+            f"Invalid canonical state revision: {value!r}"
+        )
+
+    return value
 
 
 def _bind_state_revision(state: Any, revision: int) -> bool:
@@ -63,6 +81,22 @@ def _bind_state_revision(state: Any, revision: int) -> bool:
     return getattr(state, "revision", None) == revision
 
 
+def _clone_state_for_update(state: Any) -> Any:
+    if state is None:
+        raise ValueError("canonical state unavailable")
+
+    clone_method = getattr(state, "clone_for_update", None)
+    if callable(clone_method):
+        candidate = clone_method()
+    else:
+        candidate = copy.deepcopy(state)
+
+    if candidate is state:
+        raise ValueError("canonical state clone returned original object")
+
+    return candidate
+
+
 class CanonicalLiveServer:
     """In-RAM coordinator for one repository's shared LIVE state."""
 
@@ -75,20 +109,25 @@ class CanonicalLiveServer:
         authkey: bytes | None = None,
         retention: int = ACTIVITY_EVENT_RETENTION,
     ):
+        if revision is not None and (
+            isinstance(revision, bool)
+            or not isinstance(revision, int)
+            or revision < 0
+        ):
+            raise ValueError(
+                f"Invalid canonical revision: {revision!r}"
+            )
+
         self._state = state
         state_rev = _extract_state_revision(state)
 
         if isinstance(state_rev, int) and state_rev >= 0:
-            if revision is not None and (
-                isinstance(revision, bool)
-                or not isinstance(revision, int)
-                or int(revision) != state_rev
-            ):
+            if revision is not None and int(revision) != state_rev:
                 raise ValueError(
                     f"Constructor canonical revision mismatch: explicit revision={revision} != state.revision={state_rev}"
                 )
             self._revision = state_rev
-        elif revision is not None and isinstance(revision, int) and not isinstance(revision, bool) and int(revision) >= 0:
+        elif revision is not None:
             self._revision = int(revision)
             if self._state is not None:
                 if not _bind_state_revision(self._state, self._revision):
@@ -222,10 +261,18 @@ class CanonicalLiveServer:
                 return {"status": "ok", "revision": self._revision, "state": self._state}
             if operation == "publish":
                 state = request.get("state")
-                state_rev = _extract_state_revision(state)
+                try:
+                    state_rev = _extract_state_revision(state)
+                except ValueError as exc:
+                    return {
+                        "status": "error",
+                        "error": "invalid_canonical_revision",
+                        "revision": self._revision,
+                        "candidate_revision": _raw_state_revision(state),
+                    }
                 expected_revision = self._revision + 1
 
-                if state_rev is not None and state_rev > 0:
+                if state_rev is not None:
                     if state_rev < expected_revision:
                         return {
                             "status": "error",
@@ -262,18 +309,122 @@ class CanonicalLiveServer:
                 return {"status": "ok", "revision": self._revision, "seq": evt["seq"]}
             if operation == "update_file":
                 if self._state is None or self._updater is None:
-                    return {"status": "error", "error": "live_state_unavailable"}
-                result = self._updater(self._state, str(request.get("file_path", "")))
-                state_rev = _extract_state_revision(self._state)
-                if isinstance(state_rev, int) and state_rev > self._revision:
-                    self._revision = state_rev
-                else:
-                    next_rev = self._revision + 1
-                    if self._state is not None:
-                        _bind_state_revision(self._state, next_rev)
-                    self._revision = next_rev
-                evt = self._record_event("update_file", request, result, category="LIVE_STATE")
-                return {"status": "ok", "revision": self._revision, "result": result, "seq": evt["seq"]}
+                    return {
+                        "status": "error",
+                        "error": "live_state_unavailable",
+                    }
+
+                previous_state = self._state
+                previous_revision = self._revision
+                expected_revision = previous_revision + 1
+                file_path = str(request.get("file_path", ""))
+
+                try:
+                    candidate_state = _clone_state_for_update(previous_state)
+                except Exception as exc:
+                    return {
+                        "status": "error",
+                        "error": "canonical_state_clone_failed",
+                        "revision": previous_revision,
+                        "expected_revision": expected_revision,
+                        "detail": str(exc),
+                    }
+
+                # IMPORTANT: updater operates ONLY on candidate_state.
+                # It must never receive previous_state/self._state directly.
+                result = self._updater(
+                    candidate_state,
+                    file_path,
+                )
+
+                try:
+                    state_rev = _extract_state_revision(candidate_state)
+                except ValueError:
+                    return {
+                        "status": "error",
+                        "error": "invalid_canonical_revision",
+                        "revision": previous_revision,
+                        "candidate_revision": _raw_state_revision(candidate_state),
+                        "expected_revision": expected_revision,
+                    }
+
+                if state_rev is None:
+                    if not _bind_state_revision(candidate_state, expected_revision):
+                        return {
+                            "status": "error",
+                            "error": "canonical_revision_binding_failed",
+                            "revision": previous_revision,
+                            "candidate_revision": None,
+                            "expected_revision": expected_revision,
+                        }
+                    state_rev = expected_revision
+
+                elif state_rev == previous_revision:
+                    if not _bind_state_revision(candidate_state, expected_revision):
+                        return {
+                            "status": "error",
+                            "error": "canonical_revision_binding_failed",
+                            "revision": previous_revision,
+                            "candidate_revision": state_rev,
+                            "expected_revision": expected_revision,
+                        }
+                    state_rev = expected_revision
+
+                elif state_rev < previous_revision:
+                    return {
+                        "status": "error",
+                        "error": "non_monotonic_canonical_revision",
+                        "revision": previous_revision,
+                        "candidate_revision": state_rev,
+                        "expected_revision": expected_revision,
+                    }
+
+                elif state_rev > expected_revision:
+                    return {
+                        "status": "error",
+                        "error": "canonical_revision_discontinuity",
+                        "revision": previous_revision,
+                        "candidate_revision": state_rev,
+                        "expected_revision": expected_revision,
+                    }
+
+                elif state_rev != expected_revision:
+                    return {
+                        "status": "error",
+                        "error": "canonical_revision_discontinuity",
+                        "revision": previous_revision,
+                        "candidate_revision": state_rev,
+                        "expected_revision": expected_revision,
+                    }
+
+                # Final parity proof before commit.
+                if _extract_state_revision(candidate_state) != expected_revision:
+                    return {
+                        "status": "error",
+                        "error": "canonical_revision_binding_failed",
+                        "revision": previous_revision,
+                        "candidate_revision": _raw_state_revision(candidate_state),
+                        "expected_revision": expected_revision,
+                    }
+
+                # ATOMIC COMMIT BOUNDARY.
+                # Nothing above this line may replace/mutate active canonical ownership.
+                self._state = candidate_state
+                self._revision = expected_revision
+
+                evt = self._record_event(
+                    "update_file",
+                    request,
+                    result,
+                    category="LIVE_STATE",
+                )
+
+                return {
+                    "status": "ok",
+                    "revision": self._revision,
+                    "result": result,
+                    "seq": evt["seq"],
+                }
             if operation == "get_events":
                 after_revision = request.get("after_revision")
                 after_seq = request.get("after_seq")

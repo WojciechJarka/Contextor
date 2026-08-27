@@ -1009,7 +1009,7 @@ def test_fail_closed_when_state_revision_cannot_be_bound():
         CanonicalLiveServer(state=_ReadOnlyRevisionState())
 
     # 3. Constructor rejects bool revision
-    with pytest.raises(ValueError, match="Constructor canonical revision mismatch"):
+    with pytest.raises(ValueError, match="Invalid canonical revision: True"):
         CanonicalLiveServer(state=SimpleNamespace(modules={}, revision=1), revision=True)
 
     # 4. Publish fails closed when attempting to allocate revision on unbindable state
@@ -1109,4 +1109,573 @@ def test_get_events_limit_contract_zero_negative_and_none():
     finally:
         server.close()
         thread.join(timeout=2)
+
+
+def test_update_file_exact_successor_and_fail_closed_regressions():
+    """Verify update_file exact successor and fail-closed binding behavior:
+    A. Current R=10, updater leaves state.revision=10: succeeds, binds state revision 11, server 11, event rev 11.
+    B. Current R=10, updater sets state.revision=11: succeeds, parity everywhere 11.
+    C. Current R=10, updater sets state.revision=15: fails canonical_revision_discontinuity, server remains 10, zero event.
+    D. Unbindable/read-only current state where updater leaves revision unchanged: fails canonical_revision_binding_failed, server unchanged, zero event.
+    """
+    # A. Current R=10, updater leaves revision=10 unchanged -> server binds R=11
+    state_a = SimpleNamespace(modules={"a": 1}, revision=10)
+    server_a = CanonicalLiveServer(state=state_a, revision=10, updater=lambda s, p: SimpleNamespace(status="UPDATED", file_path=p))
+    thread_a = threading.Thread(target=server_a.serve_forever, daemon=True)
+    thread_a.start()
+    client_a = LiveStateClient(server_a.endpoint)
+
+    try:
+        res_a = client_a.update_file("src/a.py", origin="desktop_watcher")
+        assert res_a["status"] == "ok"
+        assert res_a["revision"] == 11
+        assert server_a._revision == 11
+        assert server_a._state.revision == 11
+        assert state_a.revision == 10
+        assert client_a.ping()["revision"] == 11
+
+        events_a = client_a.get_events(after_seq=0)["events"]
+        assert len(events_a) == 1
+        assert events_a[0]["canonical_revision"] == 11
+        assert events_a[0]["revision"] == 11
+    finally:
+        server_a.close()
+        thread_a.join(timeout=2)
+
+    # B. Current R=10, updater sets state.revision=11 -> succeeds with parity 11
+    state_b = SimpleNamespace(modules={"b": 1}, revision=10)
+    def updater_b(s, p):
+        s.revision = 11
+        return SimpleNamespace(status="UPDATED", file_path=p)
+
+    server_b = CanonicalLiveServer(state=state_b, revision=10, updater=updater_b)
+    thread_b = threading.Thread(target=server_b.serve_forever, daemon=True)
+    thread_b.start()
+    client_b = LiveStateClient(server_b.endpoint)
+
+    try:
+        res_b = client_b.update_file("src/b.py", origin="mcp")
+        assert res_b["status"] == "ok"
+        assert res_b["revision"] == 11
+        assert server_b._revision == 11
+        assert server_b._state.revision == 11
+        assert state_b.revision == 10
+
+        events_b = client_b.get_events(after_seq=0)["events"]
+        assert len(events_b) == 1
+        assert events_b[0]["canonical_revision"] == 11
+    finally:
+        server_b.close()
+        thread_b.join(timeout=2)
+
+    # C. Current R=10, updater sets state.revision=15 (discontinuous jump) -> fails canonical_revision_discontinuity
+    state_c = SimpleNamespace(modules={"c": 1}, revision=10, tag="v10")
+    def updater_c(s, p):
+        s.revision = 15
+        return SimpleNamespace(status="UPDATED", file_path=p)
+
+    server_c = CanonicalLiveServer(state=state_c, revision=10, updater=updater_c)
+    thread_c = threading.Thread(target=server_c.serve_forever, daemon=True)
+    thread_c.start()
+    client_c = LiveStateClient(server_c.endpoint)
+
+    try:
+        res_c = client_c.update_file("src/c.py", origin="desktop_watcher")
+        assert res_c["status"] == "error"
+        assert res_c["error"] == "canonical_revision_discontinuity"
+        assert res_c["revision"] == 10
+        assert res_c["candidate_revision"] == 15
+        assert res_c["expected_revision"] == 11
+
+        # Server revision remains 10, zero LIVE_STATE events emitted
+        assert server_c._revision == 10
+        assert client_c.ping()["revision"] == 10
+        assert client_c.get_events(after_seq=0)["events"] == []
+    finally:
+        server_c.close()
+        thread_c.join(timeout=2)
+
+    # D. Unbindable/read-only current state where updater leaves revision unchanged -> fails canonical_revision_binding_failed
+    class _CustomReadOnlyState:
+        def __init__(self):
+            self._rev = 10
+        @property
+        def revision(self):
+            return self._rev
+        @revision.setter
+        def revision(self, val):
+            raise AttributeError("read-only revision")
+
+    state_d = _CustomReadOnlyState()
+    # Constructor succeeds since state.revision == 10 matches explicit revision 10
+    server_d = CanonicalLiveServer(state=state_d, revision=10, updater=lambda s, p: SimpleNamespace(status="UPDATED", file_path=p))
+    thread_d = threading.Thread(target=server_d.serve_forever, daemon=True)
+    thread_d.start()
+    client_d = LiveStateClient(server_d.endpoint)
+
+    try:
+        res_d = client_d.update_file("src/d.py", origin="desktop_watcher")
+        assert res_d["status"] == "error"
+        assert res_d["error"] == "canonical_revision_binding_failed"
+        assert res_d["revision"] == 10
+        assert res_d["candidate_revision"] == 10
+        assert res_d["expected_revision"] == 11
+
+        # Server revision remains unchanged (10), zero LIVE_STATE events emitted
+        assert server_d._revision == 10
+        assert client_d.ping()["revision"] == 10
+        assert client_d.get_events(after_seq=0)["events"] == []
+    finally:
+        server_d.close()
+        thread_d.join(timeout=2)
+
+
+def test_invalid_explicit_and_state_revision_rejection():
+    """Verify constructor and publish reject invalid explicit or state revision types (bool, negative, string):
+    - Constructor rejects revision=True, revision=-1, state.revision=True, state.revision="5"
+    - Publish rejects candidates with revision=True, revision=-1, revision="11"
+    - For every case: server revision unchanged, active state unchanged, zero canonical event emitted
+    """
+    # 1. Constructor invalid explicit revision rejection
+    with pytest.raises(ValueError, match="Invalid canonical revision: True"):
+        CanonicalLiveServer(SimpleNamespace(), revision=True)
+
+    with pytest.raises(ValueError, match="Invalid canonical revision: False"):
+        CanonicalLiveServer(SimpleNamespace(), revision=False)
+
+    with pytest.raises(ValueError, match="Invalid canonical revision: -1"):
+        CanonicalLiveServer(SimpleNamespace(), revision=-1)
+
+    with pytest.raises(ValueError, match="Invalid canonical revision: '5'"):
+        CanonicalLiveServer(SimpleNamespace(), revision="5")
+
+    with pytest.raises(ValueError, match="Invalid canonical revision: 1.5"):
+        CanonicalLiveServer(SimpleNamespace(), revision=1.5)
+
+    # 2. Constructor invalid state revision rejection
+    with pytest.raises(ValueError, match="Invalid canonical state revision: True"):
+        CanonicalLiveServer(SimpleNamespace(revision=True))
+
+    with pytest.raises(ValueError, match="Invalid canonical state revision: False"):
+        CanonicalLiveServer(SimpleNamespace(revision=False))
+
+    with pytest.raises(ValueError, match="Invalid canonical state revision: '5'"):
+        CanonicalLiveServer(SimpleNamespace(revision="5"))
+
+    with pytest.raises(ValueError, match="Invalid canonical state revision: -1"):
+        CanonicalLiveServer(SimpleNamespace(revision=-1))
+
+    # 3. Publish invalid candidate revision rejection against server R=10
+    initial_state = SimpleNamespace(modules={"mod": 1}, revision=10, tag="v10")
+    server = CanonicalLiveServer(state=initial_state, revision=10)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    client = LiveStateClient(server.endpoint)
+
+    try:
+        assert client.ping()["revision"] == 10
+
+        # Case A: candidate with revision=True
+        res_true = client.publish(SimpleNamespace(revision=True), origin="desktop_analysis")
+        assert res_true["status"] == "error"
+        assert res_true["error"] == "invalid_canonical_revision"
+        assert res_true["revision"] == 10
+        assert res_true["candidate_revision"] is True
+        assert server._state.tag == "v10"
+        assert server._revision == 10
+        assert client.ping()["revision"] == 10
+        assert client.get_events(after_seq=0)["events"] == []
+
+        # Case B: candidate with revision=-1
+        res_neg = client.publish(SimpleNamespace(revision=-1), origin="desktop_analysis")
+        assert res_neg["status"] == "error"
+        assert res_neg["error"] == "invalid_canonical_revision"
+        assert res_neg["revision"] == 10
+        assert res_neg["candidate_revision"] == -1
+        assert server._state.tag == "v10"
+        assert server._revision == 10
+        assert client.ping()["revision"] == 10
+        assert client.get_events(after_seq=0)["events"] == []
+
+        # Case C: candidate with revision="11"
+        res_str = client.publish(SimpleNamespace(revision="11"), origin="desktop_analysis")
+        assert res_str["status"] == "error"
+        assert res_str["error"] == "invalid_canonical_revision"
+        assert res_str["revision"] == 10
+        assert res_str["candidate_revision"] == "11"
+        assert server._state.tag == "v10"
+        assert server._revision == 10
+        assert client.ping()["revision"] == 10
+        assert client.get_events(after_seq=0)["events"] == []
+    finally:
+        server.close()
+        thread.join(timeout=2)
+
+
+def test_update_file_forward_gap_rolls_back_entire_candidate_state():
+    state = SimpleNamespace(
+        revision=10,
+        modules={"original": 1},
+        marker="original",
+    )
+
+    def updater(candidate, path):
+        candidate.modules["bad"] = 2
+        candidate.marker = "mutated"
+        candidate.revision = 15
+        return SimpleNamespace(
+            status="UPDATED",
+            file_path=path,
+        )
+
+    server = CanonicalLiveServer(
+        state=state,
+        revision=10,
+        updater=updater,
+    )
+    thread = threading.Thread(
+        target=server.serve_forever,
+        daemon=True,
+    )
+    thread.start()
+    client = LiveStateClient(server.endpoint)
+
+    try:
+        pre_seq = server._activity_seq
+
+        res = client.update_file(
+            "src/a.py",
+            origin="desktop_watcher",
+        )
+
+        assert res["status"] == "error"
+        assert res["error"] == "canonical_revision_discontinuity"
+        assert res["revision"] == 10
+        assert res["candidate_revision"] == 15
+        assert res["expected_revision"] == 11
+
+        assert server._state is state
+        assert server._revision == 10
+        assert server._state.revision == 10
+        assert server._state.modules == {"original": 1}
+        assert server._state.marker == "original"
+
+        assert state.revision == 10
+        assert state.modules == {"original": 1}
+        assert state.marker == "original"
+
+        assert server._activity_seq == pre_seq
+        assert client.get_events(after_seq=0)["events"] == []
+    finally:
+        server.close()
+        thread.join(timeout=2)
+
+
+def test_update_file_invalid_revision_rolls_back_entire_candidate_state():
+    state = SimpleNamespace(
+        revision=10,
+        modules={"original": 1},
+        marker="original",
+    )
+
+    def updater(candidate, path):
+        candidate.modules["bad"] = 2
+        candidate.marker = "mutated"
+        candidate.revision = True
+        return SimpleNamespace(
+            status="UPDATED",
+            file_path=path,
+        )
+
+    server = CanonicalLiveServer(
+        state=state,
+        revision=10,
+        updater=updater,
+    )
+    thread = threading.Thread(
+        target=server.serve_forever,
+        daemon=True,
+    )
+    thread.start()
+    client = LiveStateClient(server.endpoint)
+
+    try:
+        pre_seq = server._activity_seq
+
+        res = client.update_file(
+            "src/a.py",
+            origin="desktop_watcher",
+        )
+
+        assert res["status"] == "error"
+        assert res["error"] == "invalid_canonical_revision"
+        assert res["revision"] == 10
+
+        assert server._state is state
+        assert server._revision == 10
+        assert state.revision == 10
+        assert state.modules == {"original": 1}
+        assert state.marker == "original"
+
+        assert server._activity_seq == pre_seq
+        assert client.get_events(after_seq=0)["events"] == []
+    finally:
+        server.close()
+        thread.join(timeout=2)
+
+
+def test_update_file_updater_exception_cannot_mutate_active_state():
+    state = SimpleNamespace(
+        revision=10,
+        modules={"original": 1},
+        marker="original",
+    )
+
+    def updater(candidate, path):
+        candidate.modules["bad"] = 2
+        candidate.marker = "mutated"
+        candidate.revision = 11
+        raise RuntimeError("synthetic updater failure")
+
+    server = CanonicalLiveServer(
+        state=state,
+        revision=10,
+        updater=updater,
+    )
+    thread = threading.Thread(
+        target=server.serve_forever,
+        daemon=True,
+    )
+    thread.start()
+    client = LiveStateClient(server.endpoint)
+
+    try:
+        pre_seq = server._activity_seq
+
+        try:
+            client.update_file(
+                "src/a.py",
+                origin="desktop_watcher",
+            )
+        except Exception:
+            pass
+
+        assert server._state is state
+        assert server._revision == 10
+        assert state.revision == 10
+        assert state.modules == {"original": 1}
+        assert state.marker == "original"
+        assert server._activity_seq == pre_seq
+        assert client.get_events(after_seq=0)["events"] == []
+    finally:
+        server.close()
+        thread.join(timeout=2)
+
+
+def test_update_file_success_commits_candidate_atomically():
+    state = SimpleNamespace(
+        revision=10,
+        modules={"original": 1},
+        marker="original",
+    )
+
+    def updater(candidate, path):
+        candidate.modules["new"] = 2
+        candidate.marker = "updated"
+        candidate.revision = 11
+        return SimpleNamespace(
+            status="UPDATED",
+            file_path=path,
+        )
+
+    server = CanonicalLiveServer(
+        state=state,
+        revision=10,
+        updater=updater,
+    )
+    thread = threading.Thread(
+        target=server.serve_forever,
+        daemon=True,
+    )
+    thread.start()
+    client = LiveStateClient(server.endpoint)
+
+    try:
+        res = client.update_file(
+            "src/a.py",
+            origin="desktop_watcher",
+        )
+
+        assert res["status"] == "ok"
+        assert res["revision"] == 11
+
+        # Active canonical ownership changed to detached committed candidate.
+        assert server._state is not state
+        assert server._revision == 11
+        assert server._state.revision == 11
+        assert server._state.modules == {
+            "original": 1,
+            "new": 2,
+        }
+        assert server._state.marker == "updated"
+
+        # Previous active state was never mutated.
+        assert state.revision == 10
+        assert state.modules == {"original": 1}
+        assert state.marker == "original"
+
+        events = client.get_events(after_seq=0)["events"]
+        assert len(events) == 1
+        assert events[0]["operation"] == "update_file"
+        assert events[0]["canonical_revision"] == 11
+        assert events[0]["revision"] == 11
+    finally:
+        server.close()
+        thread.join(timeout=2)
+
+
+def test_update_file_server_binds_successor_on_candidate_then_commits():
+    state = SimpleNamespace(
+        revision=10,
+        modules={"original": 1},
+    )
+
+    def updater(candidate, path):
+        candidate.modules["new"] = 2
+        # Intentionally leave candidate.revision == 10.
+        return SimpleNamespace(
+            status="UPDATED",
+            file_path=path,
+        )
+
+    server = CanonicalLiveServer(
+        state=state,
+        revision=10,
+        updater=updater,
+    )
+    thread = threading.Thread(
+        target=server.serve_forever,
+        daemon=True,
+    )
+    thread.start()
+    client = LiveStateClient(server.endpoint)
+
+    try:
+        res = client.update_file(
+            "src/a.py",
+            origin="desktop_watcher",
+        )
+
+        assert res["status"] == "ok"
+        assert res["revision"] == 11
+        assert server._state is not state
+        assert server._state.revision == 11
+        assert server._state.modules == {
+            "original": 1,
+            "new": 2,
+        }
+
+        assert state.revision == 10
+        assert state.modules == {"original": 1}
+
+        events = client.get_events(after_seq=0)["events"]
+        assert len(events) == 1
+        assert events[0]["canonical_revision"] == 11
+        assert events[0]["revision"] == 11
+    finally:
+        server.close()
+        thread.join(timeout=2)
+
+
+def test_publish_explicit_zero_revision_is_not_treated_as_missing():
+    # 1. Server R=10, explicit candidate revision=0
+    active = SimpleNamespace(
+        revision=10,
+        marker="active",
+    )
+
+    server = CanonicalLiveServer(
+        state=active,
+        revision=10,
+    )
+    thread = threading.Thread(
+        target=server.serve_forever,
+        daemon=True,
+    )
+    thread.start()
+    client = LiveStateClient(server.endpoint)
+
+    try:
+        candidate = SimpleNamespace(
+            revision=0,
+            marker="candidate",
+        )
+
+        res = client.publish(
+            candidate,
+            origin="desktop_analysis",
+        )
+
+        assert res["status"] == "error"
+        assert res["error"] == "non_monotonic_canonical_revision"
+        assert res["revision"] == 10
+        assert res["candidate_revision"] == 0
+        assert res["expected_revision"] == 11
+
+        assert server._state is active
+        assert server._revision == 10
+        assert active.revision == 10
+        assert active.marker == "active"
+        assert candidate.revision == 0
+
+        assert client.get_events(after_seq=0)["events"] == []
+    finally:
+        server.close()
+        thread.join(timeout=2)
+
+    # 2. Server R=0, explicit candidate revision=0
+    active_zero = SimpleNamespace(
+        revision=0,
+        marker="active_zero",
+    )
+    server_zero = CanonicalLiveServer(
+        state=active_zero,
+        revision=0,
+    )
+    thread_zero = threading.Thread(
+        target=server_zero.serve_forever,
+        daemon=True,
+    )
+    thread_zero.start()
+    client_zero = LiveStateClient(server_zero.endpoint)
+
+    try:
+        candidate_zero = SimpleNamespace(
+            revision=0,
+            marker="candidate_zero",
+        )
+
+        res = client_zero.publish(
+            candidate_zero,
+            origin="desktop_analysis",
+        )
+
+        assert res["status"] == "error"
+        assert res["error"] == "non_monotonic_canonical_revision"
+        assert res["revision"] == 0
+        assert res["candidate_revision"] == 0
+        assert res["expected_revision"] == 1
+
+        assert server_zero._state is active_zero
+        assert server_zero._revision == 0
+        assert active_zero.revision == 0
+        assert active_zero.marker == "active_zero"
+        assert candidate_zero.revision == 0
+
+        assert client_zero.get_events(after_seq=0)["events"] == []
+    finally:
+        server_zero.close()
+        thread_zero.join(timeout=2)
+
+
 
