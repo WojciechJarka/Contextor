@@ -1,4 +1,3 @@
-
 """
 contextor/core/reporting_layer/artifact_usage_report.py
 
@@ -41,13 +40,13 @@ NOTE:
 """
 
 import os
-
 from collections import defaultdict, deque
 from datetime import datetime
 from itertools import combinations
 
 from contextor.core.analysis.test_context import (
     build_test_context,
+    build_test_context_index,
     discover_test_dirs,
 )
 from contextor.core.api.api_consumers import extract_api_consumers
@@ -736,10 +735,17 @@ def generate_artifact_usage_report(
     for symbols in symbols_by_definer.values():
         symbols.sort()
 
-    # Test directories are repository-level information and
-    # therefore discovered once.
+    # Test directories and AST facts are repository-level information and
+    # therefore discovered and indexed once.
     test_dirs = discover_test_dirs(
         root_path,
+        allowed_python_paths=[module.path for module in modules.values()],
+    )
+
+    test_index = build_test_context_index(
+        root_path,
+        test_dirs=test_dirs,
+        modules=modules,
         allowed_python_paths=[module.path for module in modules.values()],
     )
 
@@ -760,6 +766,7 @@ def generate_artifact_usage_report(
                     [],
                 ),
                 test_dirs=test_dirs,
+                test_index=test_index,
             )
         )
 

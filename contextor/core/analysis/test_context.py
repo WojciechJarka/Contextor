@@ -1,5 +1,5 @@
 """
-contextor/core/test_context.py
+contextor/core/analysis/test_context.py
 
 TEST DISCOVERY ENGINE
 
@@ -19,12 +19,17 @@ Conventions detected:
     tests/test_<name>/  (test packages)
 """
 
+from __future__ import annotations
+
 import ast
 import os
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from contextor.core.paths import DEFAULT_IGNORED_DIRS
 from contextor.core.source import parse_source
+
 
 # ==========================================================
 # TEST FILE DISCOVERY
@@ -45,7 +50,7 @@ TEST_DIR_NAMES = ("tests", "test")
 def discover_test_dirs(
     root_path: str,
     allowed_python_paths: list[str] | None = None,
-) -> dict:
+) -> dict[Path, frozenset[str]]:
     """
     Locates every test directory in the repository and lists its files.
 
@@ -64,7 +69,6 @@ def discover_test_dirs(
 
     Returns {directory: frozenset(file names)}.
     """
-
     root = Path(root_path).resolve()
 
     if allowed_python_paths is not None:
@@ -88,7 +92,7 @@ def discover_test_dirs(
             for directory, file_names in listings.items()
         }
 
-    listings: dict = {}
+    listings: dict[Path, frozenset[str]] = {}
 
     for current, dir_names, file_names in os.walk(root):
         # Same exclusions the indexer applies, so a vendored 'tests'
@@ -105,95 +109,36 @@ def discover_test_dirs(
     return listings
 
 
-def find_test_files(module_id: str, root_path: str, test_dirs: dict | None = None) -> list:
-    """
-    Searches for test files associated with the module.
-
-    Searches in:
-    - tests/ and test/ directory in root
-    - tests/ and test/ directories in subdirectories
-    - directory where the module itself resides
-
-    Returns a sorted list of paths as strings.
-    """
-
-    short_name = _module_short_name(module_id)
-
-    candidates = (
-        f"test_{short_name}.py",
-        f"{short_name}_test.py",
-    )
-
-    if test_dirs is None:
-        test_dirs = discover_test_dirs(root_path)
-
-    found = [
-        str(directory / candidate)
-        for directory, file_names in test_dirs.items()
-        for candidate in candidates
-        if candidate in file_names
-    ]
-
-    # A test file does not need to mirror the implementation filename.
-    # Include tests that directly import the analyzed module so files such
-    # as test_resolver.py can cover domain.module.py.
-    for directory, file_names in test_dirs.items():
-        if directory == Path(root_path):
-            candidate_names = [name for name in file_names if name.startswith("test_") or name.endswith("_test.py")]
-        else:
-            candidate_names = [name for name in file_names if name.endswith(".py")]
-
-        for name in candidate_names:
-            test_path = directory / name
-            try:
-                tree = parse_source(test_path)
-            except Exception:
-                continue
-
-            imports_target = any(
-                (
-                    isinstance(node, ast.Import)
-                    and any(alias.name == module_id or alias.name.startswith(module_id + ".") for alias in node.names)
-                )
-                or (
-                    isinstance(node, ast.ImportFrom)
-                    and node.level == 0
-                    and (node.module == module_id or (node.module or "").startswith(module_id + "."))
-                )
-                for node in ast.walk(tree)
-            )
-            if imports_target:
-                found.append(str(test_path))
-
-    # Deduplication
-    return sorted(set(found))
-
-
 # ==========================================================
-# SYMBOL DETECTION IN TESTS
+# SINGLE-PASS AST FACT EXTRACTION
 # ==========================================================
 
 
-def _collect_names_from_file(file_path: str) -> tuple[set, bool]:
+def _extract_test_file_facts(tree: ast.AST | None) -> tuple[set[str], set[str], bool]:
     """
-    Collects all names used in the test file:
-    - imports
-    - function calls
-    - attributes
-
-    Heuristic - this is not flow analysis.
+    Extracts in a single AST walk:
+    - imported_modules: for import-based test file discovery (Import and ImportFrom level=0)
+    - names: for tested symbol matching (imports, calls, attributes, names)
+    - has_assertions: whether the test contains assert statements or assert* calls
     """
+    if tree is None:
+        return set(), set(), False
 
-    try:
-        tree = parse_source(file_path)
-    except Exception:
-        return set(), False
-
-    names = set()
+    imported_modules: set[str] = set()
+    names: set[str] = set()
     has_assertions = False
 
     for node in ast.walk(tree):
-        if isinstance(node, (ast.Import, ast.ImportFrom)):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                imported_modules.add(alias.name)
+                names.add(alias.name)
+                if alias.asname:
+                    names.add(alias.asname)
+
+        elif isinstance(node, ast.ImportFrom):
+            if node.level == 0 and node.module:
+                imported_modules.add(node.module)
             for alias in node.names:
                 names.add(alias.name)
                 if alias.asname:
@@ -206,6 +151,7 @@ def _collect_names_from_file(file_path: str) -> tuple[set, bool]:
                 names.add(node.func.attr)
                 if node.func.attr.startswith("assert"):
                     has_assertions = True
+
         elif isinstance(node, ast.Assert):
             has_assertions = True
 
@@ -215,19 +161,273 @@ def _collect_names_from_file(file_path: str) -> tuple[set, bool]:
         elif isinstance(node, ast.Name):
             names.add(node.id)
 
+    return imported_modules, names, has_assertions
+
+
+def _collect_names_from_file(file_path: str) -> tuple[set[str], bool]:
+    """
+    Collects all names used in the test file:
+    - imports
+    - function calls
+    - attributes
+
+    Heuristic - this is not flow analysis.
+    Maintained for direct backward compatibility.
+    """
+    try:
+        tree = parse_source(file_path)
+    except Exception:
+        return set(), False
+
+    _, names, has_assertions = _extract_test_file_facts(tree)
     return names, has_assertions
+
+
+# ==========================================================
+# RUN-SCOPED TEST CONTEXT INDEX
+# ==========================================================
+
+
+@dataclass(frozen=True)
+class TestFileInfo:
+    """Pre-extracted facts for a single test file."""
+
+    path: str
+    filename: str
+    directory: Path
+    imported_modules: set[str]
+    names: set[str]
+    has_assertions: bool
+
+
+class TestContextIndex:
+    """
+    Run-scoped precomputed index of test files and their AST facts.
+
+    Eliminates N x T repeated filesystem reads and AST parsing during
+    repository analysis runs.
+    """
+
+    __test__ = False
+
+    def __init__(
+        self,
+        root_path: str | Path,
+        test_dirs: dict[Path, frozenset[str]],
+        files_info: dict[str, TestFileInfo],
+    ):
+        self.root_path = Path(root_path).resolve()
+        self.test_dirs = test_dirs
+        self.files_info = files_info
+
+    @classmethod
+    def build(
+        cls,
+        root_path: str | Path,
+        test_dirs: dict[Path, frozenset[str]] | None = None,
+        modules: dict[str, Any] | None = None,
+        allowed_python_paths: list[str] | None = None,
+    ) -> TestContextIndex:
+        """
+        Builds the test context index by discovering test files and extracting
+        AST facts at most once per test file.
+        """
+        root = Path(root_path).resolve()
+        if test_dirs is None:
+            test_dirs = discover_test_dirs(
+                str(root), allowed_python_paths=allowed_python_paths
+            )
+
+        # Index known module objects by resolved path for zero-parse AST reuse
+        module_by_path: dict[str, Any] = {}
+        if modules:
+            for mod in modules.values():
+                abs_path = getattr(mod, "absolute_path", None) or getattr(
+                    mod, "path", None
+                )
+                if abs_path:
+                    module_by_path[str(Path(abs_path).resolve())] = mod
+
+        files_info: dict[str, TestFileInfo] = {}
+
+        for directory, file_names in test_dirs.items():
+            if directory == root:
+                candidate_names = [
+                    name
+                    for name in file_names
+                    if name.startswith("test_") or name.endswith("_test.py")
+                ]
+            else:
+                candidate_names = [name for name in file_names if name.endswith(".py")]
+
+            for name in candidate_names:
+                test_path = str(directory / name)
+                if test_path in files_info:
+                    continue
+
+                tree = None
+                mod = module_by_path.get(str(Path(test_path).resolve()))
+                if mod is not None:
+                    tree = getattr(mod, "ast_tree", None)
+
+                if tree is None:
+                    try:
+                        tree = parse_source(test_path)
+                    except Exception:
+                        tree = None
+
+                imported_modules, names, has_assertions = _extract_test_file_facts(tree)
+                files_info[test_path] = TestFileInfo(
+                    path=test_path,
+                    filename=name,
+                    directory=directory,
+                    imported_modules=imported_modules,
+                    names=names,
+                    has_assertions=has_assertions,
+                )
+
+        return cls(root_path=root, test_dirs=test_dirs, files_info=files_info)
+
+    def find_test_files(self, module_id: str) -> list[str]:
+        """
+        Searches for test files associated with module_id using the precomputed index.
+        """
+        short_name = _module_short_name(module_id)
+        candidates = (
+            f"test_{short_name}.py",
+            f"{short_name}_test.py",
+        )
+
+        found = [
+            str(directory / candidate)
+            for directory, file_names in self.test_dirs.items()
+            for candidate in candidates
+            if candidate in file_names
+        ]
+
+        for info in self.files_info.values():
+            if any(
+                imp == module_id or imp.startswith(f"{module_id}.")
+                for imp in info.imported_modules
+            ):
+                found.append(info.path)
+
+        return sorted(set(found))
+
+    def extract_tested_symbols(
+        self,
+        test_files: list[str],
+        public_symbols: list[str],
+    ) -> list[str]:
+        """
+        Checks which public_symbols are used in test files using pre-extracted facts.
+        """
+        if not test_files or not public_symbols:
+            return []
+
+        all_names: set[str] = set()
+        has_valid_assertions = False
+
+        for tf in test_files:
+            info = self.files_info.get(tf)
+            if info is not None:
+                all_names.update(info.names)
+                if info.has_assertions:
+                    has_valid_assertions = True
+            else:
+                names, assertions = _collect_names_from_file(tf)
+                all_names.update(names)
+                if assertions:
+                    has_valid_assertions = True
+
+        if not has_valid_assertions:
+            return []
+
+        tested = []
+        for symbol in public_symbols:
+            short = symbol.split(".")[-1]
+            if short in all_names or symbol in all_names:
+                tested.append(symbol)
+
+        return sorted(tested)
+
+    def build_test_context(
+        self,
+        module_id: str,
+        public_symbols: list[str] | None,
+    ) -> dict[str, Any]:
+        """
+        Builds the test context payload for a single module.
+        """
+        test_files = self.find_test_files(module_id)
+        tested = self.extract_tested_symbols(test_files, public_symbols or [])
+        untested = sorted(s for s in (public_symbols or []) if s not in tested)
+
+        return {
+            "test_files": test_files,
+            "tested_symbols": tested,
+            "untested_public_symbols": untested,
+        }
+
+
+def build_test_context_index(
+    root_path: str | Path,
+    test_dirs: dict[Path, frozenset[str]] | None = None,
+    modules: dict[str, Any] | None = None,
+    allowed_python_paths: list[str] | None = None,
+) -> TestContextIndex:
+    """
+    Public factory function for constructing a TestContextIndex.
+    """
+    return TestContextIndex.build(
+        root_path=root_path,
+        test_dirs=test_dirs,
+        modules=modules,
+        allowed_python_paths=allowed_python_paths,
+    )
+
+
+# ==========================================================
+# PUBLIC API (BACKWARD COMPATIBLE WRAPPERS)
+# ==========================================================
+
+
+def find_test_files(
+    module_id: str,
+    root_path: str,
+    test_dirs: dict | None = None,
+    test_index: TestContextIndex | None = None,
+) -> list[str]:
+    """
+    Searches for test files associated with the module.
+
+    Searches in:
+    - tests/ and test/ directory in root
+    - tests/ and test/ directories in subdirectories
+    - directory where the module itself resides
+
+    Returns a sorted list of paths as strings.
+    """
+    if test_index is not None:
+        return test_index.find_test_files(module_id)
+
+    index = TestContextIndex.build(root_path, test_dirs=test_dirs)
+    return index.find_test_files(module_id)
 
 
 def extract_tested_symbols(
     test_files: list,
     public_symbols: list,
-) -> list:
+    test_index: TestContextIndex | None = None,
+) -> list[str]:
     """
     Checks which public_symbols are used in test files.
 
     Returns a list of symbols found in tests
     (heuristic detection - does not guarantee 100% accuracy).
     """
+    if test_index is not None:
+        return test_index.extract_tested_symbols(test_files, public_symbols or [])
 
     if not test_files or not public_symbols:
         return []
@@ -243,7 +443,6 @@ def extract_tested_symbols(
     if not has_valid_assertions:
         return []
 
-    # Compare by short name (without class)
     tested = []
     for symbol in public_symbols:
         short = symbol.split(".")[-1]
@@ -253,17 +452,13 @@ def extract_tested_symbols(
     return sorted(tested)
 
 
-# ==========================================================
-# PUBLIC API
-# ==========================================================
-
-
 def build_test_context(
     module_id: str,
     root_path: str,
     public_symbols: list,
     test_dirs: dict | None = None,
     allowed_python_paths: list[str] | None = None,
+    test_index: TestContextIndex | None = None,
 ) -> dict:
     """
     Link: discovery + symbol matching.
@@ -275,7 +470,6 @@ def build_test_context(
         "untested_public_symbols": [...]
     }
     """
-
     if not root_path:
         return {
             "test_files": [],
@@ -283,16 +477,15 @@ def build_test_context(
             "untested_public_symbols": list(public_symbols or []),
         }
 
+    if test_index is not None:
+        return test_index.build_test_context(module_id, public_symbols or [])
+
     if test_dirs is None and allowed_python_paths is not None:
         test_dirs = discover_test_dirs(
             root_path, allowed_python_paths=allowed_python_paths
         )
-    test_files = find_test_files(module_id, root_path, test_dirs=test_dirs)
-    tested = extract_tested_symbols(test_files, public_symbols or [])
-    untested = sorted(s for s in (public_symbols or []) if s not in tested)
 
-    return {
-        "test_files": test_files,
-        "tested_symbols": tested,
-        "untested_public_symbols": untested,
-    }
+    index = TestContextIndex.build(
+        root_path, test_dirs=test_dirs, allowed_python_paths=allowed_python_paths
+    )
+    return index.build_test_context(module_id, public_symbols or [])
