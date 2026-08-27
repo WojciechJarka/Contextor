@@ -661,5 +661,488 @@ def test_hydrated_canonical_collision_facts_incremental_lifecycle():
         assert names == {"FuncA", "FuncB"}
 
 
+def test_e2e_hydrated_clean_and_edit_b_identical_foo():
+    """Verify editing B to add identical foo resolves A.foo code and produces IDENTICAL_DEFINITION_DUPLICATE."""
+    from contextor.core.analysis.incremental.preparation import prepare_source_update
+    from contextor.core.analysis.refresh_planner import RefreshPlanner
+    from contextor.core.analysis.incremental.plan_executor import execute_refresh_plan
+    from contextor.core.analysis.state_manager import RepositoryAnalysisState
+
+    src_a = "def shared_processor(data: list) -> int:\n    return len(data)\n"
+    src_b = "def shared_processor(data: list) -> int:\n    return len(data)\n"
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = Path(tmpdir)
+        path_a = root / "mod_a.py"
+        path_b = root / "mod_b.py"
+        path_a.write_text(src_a, encoding="utf-8")
+        path_b.write_text(src_b, encoding="utf-8")
+
+        mod_a = Module(module_id="mod_a", path="mod_a.py", absolute_path=str(path_a), imports=[])
+        mod_b = Module(module_id="mod_b", path="mod_b.py", absolute_path=str(path_b), imports=[])
+
+        # Hydrated state where A.shared_processor was persisted as clean (code="")
+        facts_a = [{"name": "shared_processor", "type": "function", "file": "mod_a", "file_path": str(path_a), "code": "", "line_start": 1, "line_end": 2, "col_start": 0, "col_end": 20}]
+        facts_b_old = []
+
+        state = RepositoryAnalysisState(
+            modules={"mod_a": mod_a, "mod_b": mod_b},
+            collision_facts={"mod_a": facts_a, "mod_b": facts_b_old},
+            collisions_state="fresh",
+            collisions=[],
+        )
+
+        prep = prepare_source_update(
+            file_path=str(path_b),
+            module_path="mod_b",
+            is_new=False,
+            old_module=mod_b,
+            old_artifacts={},
+            old_usage=None,
+            persistent_id="mod_b",
+            old_collision_facts=facts_b_old,
+        )
+
+        plan = RefreshPlanner.plan_refresh(
+            delta=prep.delta,
+            usage_delta=prep.usage_delta,
+            collision_facts_changed=prep.collision_facts_changed,
+        )
+
+        outcome = execute_refresh_plan(
+            state=state,
+            delta=prep.delta,
+            usage_delta=prep.usage_delta,
+            plan=plan,
+            new_imports=prep.new_imports,
+            new_artifacts=prep.new_artifacts,
+            new_usage=prep.new_usage,
+            root_path=str(root),
+            file_path=str(path_b),
+            new_collision_facts=prep.new_collision_facts,
+        )
+
+        candidate = outcome.candidate_state
+        assert candidate.collisions_state == "fresh"
+        assert len(candidate.collisions) == 1
+        col = candidate.collisions[0]
+        assert col.kind == "IDENTICAL_DEFINITION_DUPLICATE"
+        assert col.is_identical is True
+        assert col.nodes == ["mod_a", "mod_b"]
+        assert col.code_snippets["mod_a"] == "def shared_processor(data: list) -> int:\n    return len(data)"
+        assert col.code_snippets["mod_b"] == "def shared_processor(data: list) -> int:\n    return len(data)"
+
+
+def test_e2e_hydrated_clean_and_edit_b_conflicting_foo():
+    """Verify editing B to add conflicting foo resolves A.foo code and produces NAME_COLLISION."""
+    from contextor.core.analysis.incremental.preparation import prepare_source_update
+    from contextor.core.analysis.refresh_planner import RefreshPlanner
+    from contextor.core.analysis.incremental.plan_executor import execute_refresh_plan
+    from contextor.core.analysis.state_manager import RepositoryAnalysisState
+
+    src_a = "def process_item(item: str) -> str:\n    return item.strip()\n"
+    src_b = "def process_item(item: str) -> str:\n    return item.lower()\n"
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = Path(tmpdir)
+        path_a = root / "mod_a.py"
+        path_b = root / "mod_b.py"
+        path_a.write_text(src_a, encoding="utf-8")
+        path_b.write_text(src_b, encoding="utf-8")
+
+        mod_a = Module(module_id="mod_a", path="mod_a.py", absolute_path=str(path_a), imports=[])
+        mod_b = Module(module_id="mod_b", path="mod_b.py", absolute_path=str(path_b), imports=[])
+
+        # Hydrated state where A.process_item has code=""
+        facts_a = [{"name": "process_item", "type": "function", "file": "mod_a", "file_path": str(path_a), "code": "", "line_start": 1, "line_end": 2, "col_start": 0, "col_end": 23}]
+        facts_b_old = []
+
+        state = RepositoryAnalysisState(
+            modules={"mod_a": mod_a, "mod_b": mod_b},
+            collision_facts={"mod_a": facts_a, "mod_b": facts_b_old},
+            collisions_state="fresh",
+            collisions=[],
+        )
+
+        prep = prepare_source_update(
+            file_path=str(path_b),
+            module_path="mod_b",
+            is_new=False,
+            old_module=mod_b,
+            old_artifacts={},
+            old_usage=None,
+            persistent_id="mod_b",
+            old_collision_facts=facts_b_old,
+        )
+
+        plan = RefreshPlanner.plan_refresh(
+            delta=prep.delta,
+            usage_delta=prep.usage_delta,
+            collision_facts_changed=prep.collision_facts_changed,
+        )
+
+        outcome = execute_refresh_plan(
+            state=state,
+            delta=prep.delta,
+            usage_delta=prep.usage_delta,
+            plan=plan,
+            new_imports=prep.new_imports,
+            new_artifacts=prep.new_artifacts,
+            new_usage=prep.new_usage,
+            root_path=str(root),
+            file_path=str(path_b),
+            new_collision_facts=prep.new_collision_facts,
+        )
+
+        candidate = outcome.candidate_state
+        assert candidate.collisions_state == "fresh"
+        assert len(candidate.collisions) == 1
+        col = candidate.collisions[0]
+        assert col.kind == "NAME_COLLISION"
+        assert col.is_identical is False
+        assert col.nodes == ["mod_a", "mod_b"]
+        assert col.code_snippets["mod_a"] == "def process_item(item: str) -> str:\n    return item.strip()"
+        assert col.code_snippets["mod_b"] == "def process_item(item: str) -> str:\n    return item.lower()"
+
+
+def test_e2e_missing_source_fails_closed_no_blank_code_collision():
+    """Verify missing/unreadable unchanged candidate source fails closed and never publishes blank code collision."""
+    from contextor.core.analysis.incremental.preparation import prepare_source_update
+    from contextor.core.analysis.refresh_planner import RefreshPlanner
+    from contextor.core.analysis.incremental.plan_executor import execute_refresh_plan
+    from contextor.core.analysis.state_manager import RepositoryAnalysisState
+
+    src_b = "def missing_partner():\n    return 'b'\n"
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = Path(tmpdir)
+        path_a_nonexistent = root / "mod_a_deleted.py"
+        path_b = root / "mod_b.py"
+        path_b.write_text(src_b, encoding="utf-8")
+
+        mod_a = Module(module_id="mod_a", path="mod_a_deleted.py", absolute_path=str(path_a_nonexistent), imports=[])
+        mod_b = Module(module_id="mod_b", path="mod_b.py", absolute_path=str(path_b), imports=[])
+
+        # A has unmaterialized fact with non-existent file path
+        facts_a = [{"name": "missing_partner", "type": "function", "file": "mod_a", "file_path": str(path_a_nonexistent), "code": "", "line_start": 1, "line_end": 2, "col_start": 0, "col_end": 15}]
+
+        state = RepositoryAnalysisState(
+            modules={"mod_a": mod_a, "mod_b": mod_b},
+            collision_facts={"mod_a": facts_a, "mod_b": []},
+            collisions_state="fresh",
+            collisions=[],
+        )
+
+        prep = prepare_source_update(
+            file_path=str(path_b),
+            module_path="mod_b",
+            is_new=False,
+            old_module=mod_b,
+            old_artifacts={},
+            old_usage=None,
+            persistent_id="mod_b",
+            old_collision_facts=[],
+        )
+
+        plan = RefreshPlanner.plan_refresh(
+            delta=prep.delta,
+            usage_delta=prep.usage_delta,
+            collision_facts_changed=prep.collision_facts_changed,
+        )
+
+        outcome = execute_refresh_plan(
+            state=state,
+            delta=prep.delta,
+            usage_delta=prep.usage_delta,
+            plan=plan,
+            new_imports=prep.new_imports,
+            new_artifacts=prep.new_artifacts,
+            new_usage=prep.new_usage,
+            root_path=str(root),
+            file_path=str(path_b),
+            new_collision_facts=prep.new_collision_facts,
+        )
+
+        candidate = outcome.candidate_state
+        # Fails closed: candidate collisions_state is deferred, NOT fresh with blank code collision
+        assert candidate.collisions_state == "deferred"
+        assert candidate.collisions == []
+
+
+def test_e2e_noop_equality_avoids_unparse_on_unique_symbol():
+    """Verify structurally identical unique fact with code='' yields collision_facts_changed=False with zero unparse."""
+    import contextor.core.validator.collisions as col_module
+    from contextor.core.analysis.incremental.preparation import _collision_facts_differ, prepare_source_update
+
+    src = "def unique_action():\n    return 42\n"
+    tree = ast.parse(src)
+
+    # 1. Direct comparator test
+    fresh_facts = col_module.extract_module_collision_facts(tree, "mod", "/tmp/mod.py")
+    assert len(fresh_facts) == 1
+    assert fresh_facts[0]._rendered_code is None
+
+    old_facts = [{"name": "unique_action", "type": "function", "file": "mod", "file_path": "/tmp/mod.py", "code": "", "line_start": 1, "line_end": 2, "col_start": 0, "col_end": 13}]
+
+    get_code_calls = 0
+    real_get_code = col_module.CollisionFact._get_code
+    def counting_get_code(self):
+        nonlocal get_code_calls
+        get_code_calls += 1
+        return real_get_code(self)
+
+    with patch.object(col_module.CollisionFact, "_get_code", side_effect=counting_get_code):
+        changed = _collision_facts_differ(old_facts, fresh_facts)
+        assert changed is False
+        assert get_code_calls == 0
+        assert fresh_facts[0]._rendered_code is None
+
+    # 2. Integration with prepare_source_update
+    with tempfile.TemporaryDirectory() as tmpdir:
+        path = Path(tmpdir) / "mod.py"
+        path.write_text(src, encoding="utf-8")
+        mod = Module(module_id="mod", path="mod.py", absolute_path=str(path.resolve()), imports=[])
+        old_facts_same_path = [{"name": "unique_action", "type": "function", "file": "mod", "file_path": str(path.resolve()), "code": "", "line_start": 1, "line_end": 2, "col_start": 0, "col_end": 13}]
+
+        with patch.object(col_module.CollisionFact, "_get_code", side_effect=counting_get_code):
+            prep = prepare_source_update(
+                file_path=str(path),
+                module_path="mod",
+                is_new=False,
+                old_module=mod,
+                old_artifacts={},
+                old_usage=None,
+                persistent_id="mod",
+                old_collision_facts=old_facts_same_path,
+            )
+
+            # Must detect NO change and trigger ZERO collision code materializations
+            assert prep.collision_facts_changed is False
+            assert get_code_calls == 0
+            assert prep.new_collision_facts[0]._rendered_code is None
+
+
+def test_e2e_existing_candidate_body_change_detected():
+    """Verify body edit of existing collision candidate with non-empty code triggers collision_facts_changed=True."""
+    from contextor.core.analysis.incremental.preparation import prepare_source_update
+
+    src_v1 = "def candidate_func():\n    return 1\n"
+    src_v2 = "def candidate_func():\n    return 2\n"
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        path = Path(tmpdir) / "mod.py"
+        path.write_text(src_v2, encoding="utf-8")
+        mod = Module(module_id="mod", path="mod.py", absolute_path=str(path), imports=[])
+
+        # Old fact had pre-rendered code
+        old_facts = [{"name": "candidate_func", "type": "function", "file": "mod", "file_path": str(path), "code": "def candidate_func():\n    return 1", "line_start": 1, "line_end": 2, "col_start": 0, "col_end": 12}]
+
+        prep = prepare_source_update(
+            file_path=str(path),
+            module_path="mod",
+            is_new=False,
+            old_module=mod,
+            old_artifacts={},
+            old_usage=None,
+            persistent_id="mod",
+            old_collision_facts=old_facts,
+        )
+
+        assert prep.collision_facts_changed is True
+
+
+def test_e2e_unrelated_unique_symbols_remain_empty_code():
+    """Verify unrelated unique symbols in candidate state remain code='' during candidate resolution."""
+    from contextor.core.validator.collisions import resolve_collision_candidate_codes
+
+    src_a = "def collide():\n    return 1\n\ndef unique_a():\n    return 10\n"
+    src_b = "def collide():\n    return 1\n\ndef unique_b():\n    return 20\n"
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = Path(tmpdir)
+        path_a = root / "mod_a.py"
+        path_b = root / "mod_b.py"
+        path_a.write_text(src_a, encoding="utf-8")
+        path_b.write_text(src_b, encoding="utf-8")
+
+        mod_a = Module(module_id="mod_a", path="mod_a.py", absolute_path=str(path_a), imports=[])
+        mod_b = Module(module_id="mod_b", path="mod_b.py", absolute_path=str(path_b), imports=[])
+        modules = {"mod_a": mod_a, "mod_b": mod_b}
+
+        facts = {
+            "mod_a": [
+                {"name": "collide", "type": "function", "file": "mod_a", "file_path": str(path_a), "code": "", "line_start": 1, "line_end": 2, "col_start": 0, "col_end": 12},
+                {"name": "unique_a", "type": "function", "file": "mod_a", "file_path": str(path_a), "code": "", "line_start": 4, "line_end": 5, "col_start": 0, "col_end": 13},
+            ],
+            "mod_b": [
+                {"name": "collide", "type": "function", "file": "mod_b", "file_path": str(path_b), "code": "", "line_start": 1, "line_end": 2, "col_start": 0, "col_end": 12},
+                {"name": "unique_b", "type": "function", "file": "mod_b", "file_path": str(path_b), "code": "", "line_start": 4, "line_end": 5, "col_start": 0, "col_end": 13},
+            ],
+        }
+
+        resolved = resolve_collision_candidate_codes(facts, modules)
+
+        # 'collide' candidate group is resolved
+        assert resolved["mod_a"][0]["code"] == "def collide():\n    return 1"
+        assert resolved["mod_b"][0]["code"] == "def collide():\n    return 1"
+
+        # Unique symbols remain code == ""
+        assert resolved["mod_a"][1]["code"] == ""
+        assert resolved["mod_b"][1]["code"] == ""
+
+
+def test_candidate_resolution_parses_affected_module_at_most_once():
+    """Verify candidate resolution extracts/parses each affected unchanged module at most once per invocation."""
+    from contextor.core.validator.collisions import resolve_collision_candidate_codes
+    import contextor.core.validator.collisions as col_module
+
+    src_a = "def c1():\n    pass\n\ndef c2():\n    pass\n\ndef c3():\n    pass\n"
+    src_b = "def c1():\n    pass\n\ndef c2():\n    pass\n\ndef c3():\n    pass\n"
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = Path(tmpdir)
+        path_a = root / "mod_a.py"
+        path_b = root / "mod_b.py"
+        path_a.write_text(src_a, encoding="utf-8")
+        path_b.write_text(src_b, encoding="utf-8")
+
+        mod_a = Module(module_id="mod_a", path="mod_a.py", absolute_path=str(path_a), imports=[])
+        mod_b = Module(module_id="mod_b", path="mod_b.py", absolute_path=str(path_b), imports=[])
+        modules = {"mod_a": mod_a, "mod_b": mod_b}
+
+        facts = {
+            "mod_a": [
+                {"name": "c1", "type": "function", "file": "mod_a", "file_path": str(path_a), "code": "", "line_start": 1, "line_end": 2, "col_start": 0, "col_end": 8},
+                {"name": "c2", "type": "function", "file": "mod_a", "file_path": str(path_a), "code": "", "line_start": 4, "line_end": 5, "col_start": 0, "col_end": 8},
+                {"name": "c3", "type": "function", "file": "mod_a", "file_path": str(path_a), "code": "", "line_start": 7, "line_end": 8, "col_start": 0, "col_end": 8},
+            ],
+            "mod_b": [
+                {"name": "c1", "type": "function", "file": "mod_b", "file_path": str(path_b), "code": "", "line_start": 1, "line_end": 2, "col_start": 0, "col_end": 8},
+                {"name": "c2", "type": "function", "file": "mod_b", "file_path": str(path_b), "code": "", "line_start": 4, "line_end": 5, "col_start": 0, "col_end": 8},
+                {"name": "c3", "type": "function", "file": "mod_b", "file_path": str(path_b), "code": "", "line_start": 7, "line_end": 8, "col_start": 0, "col_end": 8},
+            ],
+        }
+
+        extract_count = 0
+        real_extract = col_module.extract_module_collision_facts
+        def counting_extract(*args, **kwargs):
+            nonlocal extract_count
+            extract_count += 1
+            return real_extract(*args, **kwargs)
+
+        with patch.object(col_module, "extract_module_collision_facts", side_effect=counting_extract):
+            resolved = resolve_collision_candidate_codes(facts, modules)
+
+            # Both modules mod_a and mod_b had 3 candidates each, but extract_module_collision_facts was called exactly once per module (2 total)
+            assert extract_count == 2
+            assert resolved["mod_a"][0]["code"] == "def c1():\n    pass"
+            assert resolved["mod_a"][1]["code"] == "def c2():\n    pass"
+            assert resolved["mod_a"][2]["code"] == "def c3():\n    pass"
+
+
+def test_resolver_renders_only_candidate_facts_and_zero_unrelated_collision_facts():
+    """Verify resolver materializes code ONLY for actual collision candidates and ZERO unrelated CollisionFact objects."""
+    from contextor.core.validator.collisions import (
+        CollisionFact,
+        extract_module_collision_facts,
+        resolve_collision_candidate_codes,
+    )
+    import contextor.core.validator.collisions as col_module
+
+    src_a = (
+        "def colliding_endpoint():\n    return 'a'\n\n"
+        "def unrelated_a1():\n    return 1\n\n"
+        "def unrelated_a2():\n    return 2\n\n"
+        "class UnrelatedA3:\n    pass\n"
+    )
+    src_b = (
+        "def colliding_endpoint():\n    return 'b'\n\n"
+        "def unrelated_b1():\n    return 10\n"
+    )
+
+    tree_a = ast.parse(src_a)
+    tree_b = ast.parse(src_b)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = Path(tmpdir)
+        path_a = root / "mod_a.py"
+        path_b = root / "mod_b.py"
+        path_a.write_text(src_a, encoding="utf-8")
+        path_b.write_text(src_b, encoding="utf-8")
+
+        mod_a = Module(module_id="mod_a", path="mod_a.py", absolute_path=str(path_a), imports=[])
+        mod_b = Module(module_id="mod_b", path="mod_b.py", absolute_path=str(path_b), imports=[])
+        modules = {"mod_a": mod_a, "mod_b": mod_b}
+
+        # Fresh unmaterialized CollisionFact instances (as produced during extraction)
+        facts_a = extract_module_collision_facts(tree_a, "mod_a", str(path_a))
+        facts_b = extract_module_collision_facts(tree_b, "mod_b", str(path_b))
+
+        assert len(facts_a) == 4
+        assert len(facts_b) == 2
+        for f in facts_a + facts_b:
+            assert isinstance(f, CollisionFact)
+            assert f._rendered_code is None
+
+        unparsed_names = []
+        real_unparse = col_module.ast.unparse
+        def counting_unparse(node):
+            name = getattr(node, "name", str(node))
+            unparsed_names.append(name)
+            return real_unparse(node)
+
+        with patch.object(col_module.ast, "unparse", side_effect=counting_unparse):
+            resolved = resolve_collision_candidate_codes({"mod_a": facts_a, "mod_b": facts_b}, modules)
+
+            # Renders EXACTLY the 2 colliding candidate definitions (one in mod_a, one in mod_b)
+            assert len(unparsed_names) == 2
+            assert unparsed_names == ["colliding_endpoint", "colliding_endpoint"]
+
+            # Resolved colliding candidate facts have non-empty rendered code
+            assert resolved["mod_a"][0]["code"] == "def colliding_endpoint():\n    return 'a'"
+            assert resolved["mod_b"][0]["code"] == "def colliding_endpoint():\n    return 'b'"
+
+            # Every unrelated unique fact remains code == ""
+            for target_mod, idx in [("mod_a", 1), ("mod_a", 2), ("mod_a", 3), ("mod_b", 1)]:
+                unrelated_fact = resolved[target_mod][idx]
+                assert unrelated_fact["code"] == ""
+
+
+def test_resolver_zero_candidates_zero_unparse_and_returns_same_mapping():
+    """Verify calling resolver when there are no candidate groups performs zero unparse and returns immediately."""
+    from contextor.core.validator.collisions import (
+        CollisionFact,
+        extract_module_collision_facts,
+        resolve_collision_candidate_codes,
+    )
+    import contextor.core.validator.collisions as col_module
+
+    src_a = "def unique_func_a():\n    return 'a'\n"
+    src_b = "def unique_func_b():\n    return 'b'\n"
+
+    tree_a = ast.parse(src_a)
+    tree_b = ast.parse(src_b)
+
+    facts_a = extract_module_collision_facts(tree_a, "mod_a", "/tmp/mod_a.py")
+    facts_b = extract_module_collision_facts(tree_b, "mod_b", "/tmp/mod_b.py")
+    modules = {"mod_a": None, "mod_b": None}
+    input_mapping = {"mod_a": facts_a, "mod_b": facts_b}
+
+    unparse_count = 0
+    real_unparse = col_module.ast.unparse
+    def counting_unparse(node):
+        nonlocal unparse_count
+        unparse_count += 1
+        return real_unparse(node)
+
+    with patch.object(col_module.ast, "unparse", side_effect=counting_unparse):
+        result = resolve_collision_candidate_codes(input_mapping, modules)
+        assert unparse_count == 0
+        assert result is input_mapping
+        assert facts_a[0]._rendered_code is None
+        assert facts_b[0]._rendered_code is None
+
+
+
 
 

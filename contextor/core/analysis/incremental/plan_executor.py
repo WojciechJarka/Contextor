@@ -457,12 +457,20 @@ def execute_refresh_plan(
 
         elif family == "collisions":
             from contextor.core.analysis.incremental.materialization import _validate_collision_facts_dict
-            from contextor.core.validator.collisions import compute_collisions_from_facts
+            from contextor.core.validator.collisions import (
+                compute_collisions_from_facts,
+                resolve_collision_candidate_codes,
+            )
 
             if candidate.collisions_state == "stale":
                 pass
             elif _validate_collision_facts_dict(candidate.collision_facts, candidate.modules):
                 try:
+                    resolved_facts = resolve_collision_candidate_codes(
+                        candidate.collision_facts,
+                        candidate.modules,
+                    )
+                    candidate.collision_facts = resolved_facts
                     computed = compute_collisions_from_facts(candidate.collision_facts)
                     candidate.collisions = computed
                     candidate.collisions_state = "fresh"

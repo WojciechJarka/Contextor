@@ -89,6 +89,46 @@ def calculate_file_delta(
     return delta
 
 
+def _collision_facts_differ(
+    old_facts: Optional[List[Dict[str, Any]]],
+    new_facts: Optional[List[Dict[str, Any]]],
+) -> bool:
+    """
+    Semantic comparison between old hydrated collision facts and fresh extracted collision facts.
+    Compares structural identity fields (name, type, file, file_path, line/col numbers) first.
+    If the old hydrated fact has code == "", does not materialize fresh CollisionFact code:
+    structurally identical unique facts are unchanged.
+    If the old fact has non-empty code (pre-existing collision candidate), materializes and compares code.
+    """
+    if old_facts is None or new_facts is None:
+        return old_facts != new_facts
+    if len(old_facts) != len(new_facts):
+        return True
+
+    structural_fields = (
+        "name",
+        "type",
+        "file",
+        "file_path",
+        "line_start",
+        "line_end",
+        "col_start",
+        "col_end",
+    )
+    for old_f, new_f in zip(old_facts, new_facts):
+        for field in structural_fields:
+            if old_f.get(field) != new_f.get(field):
+                return True
+
+        old_code = old_f.get("code")
+        if old_code:
+            new_code = new_f.get("code") if isinstance(new_f, dict) else getattr(new_f, "code", "")
+            if old_code != new_code:
+                return True
+
+    return False
+
+
 def prepare_source_update(
     file_path: str | Path,
     module_path: str,
@@ -201,7 +241,7 @@ def prepare_source_update(
     if old_collision_facts is None:
         collision_facts_changed = True
     else:
-        collision_facts_changed = (old_collision_facts != new_collision_facts)
+        collision_facts_changed = _collision_facts_differ(old_collision_facts, new_collision_facts)
 
     # 5. Calculate FileDelta
     delta = calculate_file_delta(

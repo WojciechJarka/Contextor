@@ -203,21 +203,24 @@ class CollisionFact(dict):
     def copy(self) -> dict[str, Any]:
         return {k: self[k] for k in COLLISION_FACT_KEYS}
 
-    def __reduce__(self):
-        # Pickles as a standard plain dict with exact schema to eliminate AST node references across persistence/IPC
-        rendered_code = self._rendered_code if self._rendered_code is not None else ""
-        d = {
+    def _to_plain_dict(self, *, render_code: bool = False) -> dict[str, Any]:
+        """Convert to plain dict without triggering ast.unparse unless render_code=True."""
+        code_val = self["code"] if render_code else (self._rendered_code or "")
+        return {
             "name": super().__getitem__("name"),
             "type": super().__getitem__("type"),
             "file": super().__getitem__("file"),
             "file_path": super().__getitem__("file_path"),
-            "code": rendered_code,
+            "code": code_val,
             "line_start": super().__getitem__("line_start"),
             "line_end": super().__getitem__("line_end"),
             "col_start": super().__getitem__("col_start"),
             "col_end": super().__getitem__("col_end"),
         }
-        return (dict, (d,))
+
+    def __reduce__(self):
+        # Pickles as a standard plain dict with exact schema to eliminate AST node references across persistence/IPC
+        return (dict, (self._to_plain_dict(render_code=False),))
 
 
 class PublicSymbolCollector(ast.NodeVisitor):
@@ -377,6 +380,139 @@ def extract_repository_collision_facts(
             str(file_path),
         )
     return facts
+
+
+def resolve_collision_candidate_codes(
+    collision_facts: dict[str, list[dict]],
+    modules: dict[str, Module],
+) -> dict[str, list[dict]]:
+    """
+    Resolves missing source code for actual multi-module collision candidate groups.
+    Operates on a copy of candidate collision_facts without mutating canonical state in place.
+    Fails closed if any unchanged candidate source cannot be read, parsed, or matched fail-closed.
+    """
+    registry = defaultdict(list)
+    for module_path, symbols in collision_facts.items():
+        for symbol in symbols:
+            key = (symbol["name"], symbol["type"])
+            registry[key].append(symbol)
+
+    # Filter only multi-module candidate groups
+    candidate_groups: dict[tuple[str, str], list[dict]] = {}
+    for key, occurrences in registry.items():
+        files = {item["file"] for item in occurrences}
+        if len(files) > 1:
+            candidate_groups[key] = occurrences
+
+    # If no multi-module candidate groups exist, return collision_facts immediately
+    if not candidate_groups:
+        return collision_facts
+
+    # Working copy to avoid in-place mutation of canonical state without triggering lazy code rendering
+    resolved_facts = {
+        mod: [
+            f._to_plain_dict(render_code=False) if hasattr(f, "_to_plain_dict") else dict(f)
+            for f in facts
+        ]
+        for mod, facts in collision_facts.items()
+    }
+    module_extracted_facts: dict[str, list[dict]] = {}
+
+    for (name, artifact_type), occurrences in candidate_groups.items():
+        for item in occurrences:
+            existing_code = (
+                item._rendered_code
+                if isinstance(item, CollisionFact)
+                else item.get("code")
+            )
+            if existing_code:
+                for target_f in resolved_facts[item["file"]]:
+                    if (
+                        target_f.get("name") == item.get("name")
+                        and target_f.get("type") == item.get("type")
+                        and target_f.get("line_start") == item.get("line_start")
+                        and target_f.get("line_end") == item.get("line_end")
+                        and target_f.get("col_start") == item.get("col_start")
+                        and target_f.get("col_end") == item.get("col_end")
+                    ):
+                        target_f["code"] = existing_code
+                        break
+                continue
+
+            mod_key = item["file"]
+            if mod_key not in module_extracted_facts:
+                module = modules.get(mod_key)
+                if module is None:
+                    raise ValueError(
+                        f"Cannot resolve collision candidate '{name}' ({artifact_type}): "
+                        f"module '{mod_key}' not found in candidate modules."
+                    )
+
+                file_path = getattr(module, "absolute_path", None) or getattr(module, "path", None)
+                if not file_path:
+                    raise ValueError(
+                        f"Cannot resolve collision candidate '{name}' ({artifact_type}): "
+                        f"module '{mod_key}' has no file path."
+                    )
+
+                tree = getattr(module, "ast_tree", None)
+                if tree is None:
+                    path = Path(file_path)
+                    if not path.exists():
+                        raise FileNotFoundError(
+                            f"Cannot resolve collision candidate '{name}' ({artifact_type}): "
+                            f"file '{path}' does not exist on disk."
+                        )
+                    try:
+                        tree = parse_source(path)
+                    except Exception as e:
+                        raise RuntimeError(
+                            f"Cannot parse source for module '{mod_key}' at '{path}': {e}"
+                        ) from e
+
+                extracted = extract_module_collision_facts(tree, mod_key, str(file_path))
+                module_extracted_facts[mod_key] = extracted
+
+            extracted_list = module_extracted_facts[mod_key]
+            matched = None
+            for candidate in extracted_list:
+                if (
+                    candidate.get("name") == item.get("name")
+                    and candidate.get("type") == item.get("type")
+                    and candidate.get("line_start") == item.get("line_start")
+                    and candidate.get("line_end") == item.get("line_end")
+                    and candidate.get("col_start") == item.get("col_start")
+                    and candidate.get("col_end") == item.get("col_end")
+                ):
+                    matched = candidate
+                    break
+
+            if matched is None:
+                raise ValueError(
+                    f"Fail-closed: could not match collision candidate '{name}' ({artifact_type}) "
+                    f"in module '{mod_key}' at location lines {item.get('line_start')}-{item.get('line_end')}."
+                )
+
+            resolved_code = matched["code"]
+            if not resolved_code:
+                raise ValueError(
+                    f"Fail-closed: matched collision candidate '{name}' in '{mod_key}' resolved to empty code."
+                )
+
+            # Update the fact in resolved_facts
+            for target_f in resolved_facts[mod_key]:
+                if (
+                    target_f.get("name") == item.get("name")
+                    and target_f.get("type") == item.get("type")
+                    and target_f.get("line_start") == item.get("line_start")
+                    and target_f.get("line_end") == item.get("line_end")
+                    and target_f.get("col_start") == item.get("col_start")
+                    and target_f.get("col_end") == item.get("col_end")
+                ):
+                    target_f["code"] = resolved_code
+                    break
+
+    return resolved_facts
 
 
 def compute_collisions_from_facts(

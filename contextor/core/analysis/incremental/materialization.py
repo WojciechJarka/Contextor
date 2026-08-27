@@ -294,8 +294,13 @@ def ensure_collisions(state: RepositoryAnalysisState) -> None:
     # C. Deferred / missing collisions + complete collision_facts: atomic in-memory recomputation
     if collision_facts_complete(state):
         try:
-            from contextor.core.validator.collisions import compute_collisions_from_facts
+            from contextor.core.validator.collisions import (
+                compute_collisions_from_facts,
+                resolve_collision_candidate_codes,
+            )
 
+            resolved = resolve_collision_candidate_codes(state.collision_facts, getattr(state, "modules", {}))
+            state.collision_facts = resolved
             computed = compute_collisions_from_facts(state.collision_facts)
             state.collisions = computed
             state.collisions_state = "fresh"
