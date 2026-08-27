@@ -167,6 +167,7 @@ _ensure_virtual_environment()
 # Suppress all warnings (like AuthlibDeprecationWarning) to prevent JSON-RPC stream corruption
 warnings.filterwarnings("ignore")
 
+from typing import Any, Callable
 from fastmcp import FastMCP
 from contextor.mcp_process_registry import (
     process_identity,
@@ -238,6 +239,7 @@ from contextor.mcp.tools.extract_indexed_report_context import (
 # Initialize FastMCP Server
 mcp = FastMCP("Contextor")
 
+
 def _cleanup_orphaned_processes(directory: Path) -> None:
     """Stop only registered MCP/Git processes whose recorded parent is gone."""
     # Two passes handle a stale server and one of its Git children regardless
@@ -276,118 +278,179 @@ def _cleanup_owned_processes(directory: Path, owner_pid: int) -> None:
             remove_record(record_path)
 
 
+def _resolve_telemetry_clients(root_path: Any = None) -> list[Any]:
+    from pathlib import Path
+    from contextor.core.live_state import connect
+    from contextor.mcp import runtime as mcp_runtime
+
+    clients = []
+    seen_endpoints = set()
+
+    def add_client(client):
+        if client is not None:
+            ep = getattr(client, "endpoint", None)
+            ep_key = (ep.host, ep.port) if ep else id(client)
+            if ep_key not in seen_endpoints:
+                seen_endpoints.add(ep_key)
+                clients.append(client)
+
+    if root_path:
+        try:
+            p = Path(root_path).expanduser().resolve()
+            add_client(connect(p))
+        except Exception:
+            pass
+
+    if not clients:
+        for root_str in sorted(mcp_runtime._live_engines.keys()):
+            try:
+                add_client(connect(Path(root_str)))
+            except Exception:
+                pass
+
+        if not clients:
+            try:
+                add_client(connect(Path.cwd()))
+            except Exception:
+                pass
+
+    return clients
+
+
+def _emit_mcp_call_telemetry(
+    tool_name: str,
+    root_path: Any,
+    success: bool,
+    error: str | None = None,
+) -> None:
+    try:
+        clients = _resolve_telemetry_clients(root_path)
+        for client in clients:
+            try:
+                client.record_activity(
+                    category="MCP_CALL",
+                    tool=tool_name,
+                    source="mcp",
+                    success=success,
+                    error=error,
+                    message=f"{tool_name}" + (f" (failed: {error})" if not success else ""),
+                )
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+
+def _instrument_mcp_tool(func: Any, tool_name: str) -> Any:
+    import functools
+    from inspect import iscoroutinefunction
+    from pathlib import Path
+
+    if iscoroutinefunction(func):
+        @functools.wraps(func)
+        async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
+            root_path = kwargs.get("repo_path") or kwargs.get("root_path") or (args[0] if args and isinstance(args[0], (str, Path)) else None)
+            try:
+                result = await func(*args, **kwargs)
+                _emit_mcp_call_telemetry(tool_name, root_path, success=True)
+                return result
+            except Exception as exc:
+                _emit_mcp_call_telemetry(tool_name, root_path, success=False, error=str(exc))
+                raise
+        return async_wrapper
+    else:
+        @functools.wraps(func)
+        def sync_wrapper(*args: Any, **kwargs: Any) -> Any:
+            root_path = kwargs.get("repo_path") or kwargs.get("root_path") or (args[0] if args and isinstance(args[0], (str, Path)) else None)
+            try:
+                result = func(*args, **kwargs)
+                _emit_mcp_call_telemetry(tool_name, root_path, success=True)
+                return result
+            except Exception as exc:
+                _emit_mcp_call_telemetry(tool_name, root_path, success=False, error=str(exc))
+                raise
+        return sync_wrapper
+
+
+def register_mcp_tool(
+    func: Any,
+    name: str | None = None,
+    description: str | None = None,
+) -> Any:
+    tool_name = name or func.__name__
+    desc = description or short_description(tool_name)
+    wrapped = _instrument_mcp_tool(func, tool_name)
+    return mcp.tool(name=tool_name, description=desc)(wrapped)
+
+
+REGISTERED_MCP_TOOL_NAMES: tuple[str, ...] = (
+    "analyze_project",
+    "analyze_layer",
+    "analyze_single_file",
+    "get_analysis_status",
+    "get_live_events",
+    "update_file",
+    "get_project_architecture",
+    "get_module_context",
+    "get_artifact_blast_radius",
+    "search_artifacts",
+    "get_symbol_implementation",
+    "get_file_edit_context",
+    "get_layer_isolation",
+    "get_report_diff",
+    "describe_canonical_state",
+    "query_canonical_projection",
+    "extract_indexed_report_context",
+    "lookup_index_entries",
+    "get_artifacts_for_module",
+    "lookup_artifact_by_symbol",
+    "search_source",
+    "get_source_range",
+    "get_symbol_call_context",
+    "get_mcp_documentation",
+)
+
+
 # ==========================================================
 # 1. ANALYSIS TRIGGER TOOLS
 # ==========================================================
 
-analyze_project = mcp.tool(description=short_description("analyze_project"))(
-    _analyze_project_impl
-)
-analyze_layer = mcp.tool(description=short_description("analyze_layer"))(
-    _analyze_layer_impl
-)
-analyze_single_file = mcp.tool(description=short_description("analyze_single_file"))(
-    _analyze_single_file_impl
-)
-get_analysis_status = mcp.tool(description=short_description("get_analysis_status"))(
-    _get_analysis_status_impl
-)
-get_live_events = mcp.tool(description=short_description("get_live_events"))(
-    _get_live_events_impl
-)
-
-
-update_file = mcp.tool(description=short_description("update_file"))(
-    _update_file_impl
-)
+analyze_project = register_mcp_tool(_analyze_project_impl, name="analyze_project")
+analyze_layer = register_mcp_tool(_analyze_layer_impl, name="analyze_layer")
+analyze_single_file = register_mcp_tool(_analyze_single_file_impl, name="analyze_single_file")
+get_analysis_status = register_mcp_tool(_get_analysis_status_impl, name="get_analysis_status")
+get_live_events = register_mcp_tool(_get_live_events_impl, name="get_live_events")
+update_file = register_mcp_tool(_update_file_impl, name="update_file")
 
 
 # ==========================================================
 # 2. QUERY LAYER (OPTIMIZED FOR LLM)
 # ==========================================================
 
-get_project_architecture = mcp.tool(description=short_description("get_project_architecture"))(
-    _get_project_architecture_impl
-)
-
-get_module_context = mcp.tool(description=short_description("get_module_context"))(
-    _get_module_context_impl
-)
-get_artifact_blast_radius = mcp.tool(description=short_description("get_artifact_blast_radius"))(
-    _get_artifact_blast_radius_impl
-)
-
-
-search_artifacts = mcp.tool(description=short_description("search_artifacts"))(
-    _search_artifacts_impl
-)
-
-
-get_symbol_implementation = mcp.tool(description=short_description("get_symbol_implementation"))(
-    _get_symbol_implementation_impl
-)
-
-get_file_edit_context = mcp.tool(description=short_description("get_file_edit_context"))(
-    _get_file_edit_context_impl
-)
-
-get_layer_isolation = mcp.tool(description=short_description("get_layer_isolation"))(
-    _get_layer_isolation_impl
-)
-
-get_report_diff = mcp.tool(description=short_description("get_report_diff"))(
-    _get_report_diff_impl
-)
-
-
-describe_canonical_state = mcp.tool(
-    description=short_description("describe_canonical_state")
-)(_describe_canonical_state_impl)
-
-
-query_canonical_projection = mcp.tool(
-    description=short_description("query_canonical_projection")
-)(_query_canonical_projection_impl)
+get_project_architecture = register_mcp_tool(_get_project_architecture_impl, name="get_project_architecture")
+get_module_context = register_mcp_tool(_get_module_context_impl, name="get_module_context")
+get_artifact_blast_radius = register_mcp_tool(_get_artifact_blast_radius_impl, name="get_artifact_blast_radius")
+search_artifacts = register_mcp_tool(_search_artifacts_impl, name="search_artifacts")
+get_symbol_implementation = register_mcp_tool(_get_symbol_implementation_impl, name="get_symbol_implementation")
+get_file_edit_context = register_mcp_tool(_get_file_edit_context_impl, name="get_file_edit_context")
+get_layer_isolation = register_mcp_tool(_get_layer_isolation_impl, name="get_layer_isolation")
+get_report_diff = register_mcp_tool(_get_report_diff_impl, name="get_report_diff")
+describe_canonical_state = register_mcp_tool(_describe_canonical_state_impl, name="describe_canonical_state")
+query_canonical_projection = register_mcp_tool(_query_canonical_projection_impl, name="query_canonical_projection")
 
 
 # ==========================================================
 # 3. TARGETED INDEX / ARTIFACT QUERY TOOLS
 # ==========================================================
 
-extract_indexed_report_context = mcp.tool(
-    description=short_description("extract_indexed_report_context")
-)(_extract_indexed_report_context_impl)
-
-
-lookup_index_entries = mcp.tool(
-    description=short_description("lookup_index_entries")
-)(_lookup_index_entries_impl)
-
-
-get_artifacts_for_module = mcp.tool(description=short_description("get_artifacts_for_module"))(
-    _get_artifacts_for_module_impl
-)
-
-
-lookup_artifact_by_symbol = mcp.tool(description=short_description("lookup_artifact_by_symbol"))(
-    _lookup_artifact_by_symbol_impl
-)
-
-search_source = mcp.tool(description=short_description("search_source"))(
-    _search_source_impl
-)
-get_source_range = mcp.tool(description=short_description("get_source_range"))(
-    _get_source_range_impl
-)
-
-get_symbol_call_context = mcp.tool(
-    description=short_description("get_symbol_call_context")
-)(_get_symbol_call_context_impl)
-
-
-get_mcp_documentation = mcp.tool(
-    description=short_description("get_mcp_documentation")
-)(_get_mcp_documentation_impl)
+extract_indexed_report_context = register_mcp_tool(_extract_indexed_report_context_impl, name="extract_indexed_report_context")
+lookup_index_entries = register_mcp_tool(_lookup_index_entries_impl, name="lookup_index_entries")
+get_artifacts_for_module = register_mcp_tool(_get_artifacts_for_module_impl, name="get_artifacts_for_module")
+lookup_artifact_by_symbol = register_mcp_tool(_lookup_artifact_by_symbol_impl, name="lookup_artifact_by_symbol")
+search_source = register_mcp_tool(_search_source_impl, name="search_source")
+get_source_range = register_mcp_tool(_get_source_range_impl, name="get_source_range")
+get_symbol_call_context = register_mcp_tool(_get_symbol_call_context_impl, name="get_symbol_call_context")
+get_mcp_documentation = register_mcp_tool(_get_mcp_documentation_impl, name="get_mcp_documentation")
 
 
 def main():

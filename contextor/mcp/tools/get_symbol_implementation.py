@@ -265,7 +265,6 @@ def get_symbol_implementation(
 
     if not root.is_dir():
         return json.dumps({"status": "error", "error": f"Repository path '{root}' does not exist."}, indent=2)
-    mcp_runtime.publish_live_status(root, f"MCP: reading symbol {symbol}")
     normalized_mode = mode.strip().lower()
     if normalized_mode not in {"auto", "preview", "fetch"}:
         return json.dumps(

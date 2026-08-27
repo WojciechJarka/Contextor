@@ -241,41 +241,97 @@ class DesktopLiveWatcher(_PollingLiveWorker):
 
 
 class DesktopLiveEventFeed(_PollingLiveWorker):
-    """Forward queued MCP-origin LIVE events to the desktop status callback."""
+    """Forward queued MCP-origin and canonical LIVE events to the desktop status callback."""
 
     def __init__(
         self,
         client: LiveStateClient,
-        on_status: Callable[[str], None],
+        on_status: Callable[..., None],
         *,
         interval: float = 0.75,
+        initial_seq: int | None = None,
     ):
         self.client = client
         self.on_status = on_status
         super().__init__(interval=interval, thread_name="contextor-live-event-feed")
-        try:
-            self._revision = int(client.ping().get("revision", 0))
-        except (OSError, EOFError, TimeoutError, ConnectionError):
-            self._revision = 0
+        self._last_seq: int = 0
+        if initial_seq is not None:
+            self._last_seq = int(initial_seq)
+        else:
+            try:
+                resp = client.get_events(limit=1)
+                self._last_seq = int(resp.get("latest_seq", 0))
+            except (OSError, EOFError, TimeoutError, ConnectionError):
+                self._last_seq = 0
 
     def _message(self, event: dict) -> str | None:
-        if event.get("origin") not in {"mcp", "mcp_analysis"}:
+        category = event.get("category", "LIVE_STATE")
+        if category == "MCP_CALL":
+            tool = event.get("tool", "")
+            success = event.get("success", True)
+            if not success:
+                err = event.get("error", "failed")
+                return f"[MCP] {tool} (failed: {err})"
+            return f"[MCP] {tool}"
+
+        origin = event.get("origin") or event.get("source")
+        if origin not in {"mcp", "mcp_analysis", "desktop_analysis", "desktop_watcher", "desktop"}:
             return None
         if event.get("operation") == "status":
-            return str(event.get("message", "MCP: LIVE activity"))
-        if event.get("operation") == "publish" and event.get("origin") == "mcp_analysis":
-            return "MCP: analysis published shared LIVE state"
+            if origin in {"mcp", "mcp_analysis"}:
+                return str(event.get("message", "MCP: LIVE activity"))
+            return None
+        if event.get("operation") == "publish":
+            rev = event.get("canonical_revision")
+            rev_str = f" (rev {rev})" if rev is not None else ""
+            if origin == "mcp_analysis":
+                return f"MCP: analysis published shared LIVE state{rev_str}"
+            elif origin == "desktop_analysis":
+                return f"[LIVE] Desktop analysis published shared LIVE state{rev_str}"
+            return f"[LIVE] Analysis published shared LIVE state{rev_str}"
+        if event.get("operation") == "update_file":
+            file_name = Path(event.get("file_path", "")).name
+            rev = event.get("canonical_revision")
+            rev_str = f" (rev {rev})" if rev is not None else ""
+            status = event.get("status", "UPDATED")
+            if status == "SYNTAX_ERROR":
+                err = event.get("error", "syntax error")
+                line = event.get("line_number")
+                col = event.get("column_number")
+                pos = f" line {line}, column {col}" if line and col else ""
+                return f"[LIVE] Syntax error in {file_name}{pos}: {err}"
+            elif status == "RECOVERED":
+                return f"[LIVE] Syntax recovered in {file_name}{rev_str}"
+            elif origin in {"desktop_watcher", "desktop"}:
+                return f"[LIVE] Watcher updated {file_name}{rev_str}"
+            elif origin in {"mcp", "mcp_update"}:
+                return f"[LIVE] MCP updated {file_name}{rev_str}"
+            return f"[LIVE] Updated {file_name}{rev_str}"
         return None
 
     def poll_once(self) -> None:
         try:
-            response = self.client.get_events(after_revision=self._revision, limit=100)
+            response = self.client.get_events(after_seq=self._last_seq, limit=100)
         except (OSError, EOFError, TimeoutError, ConnectionError):
             return
         if response.get("status") != "ok":
             return
-        for event in response.get("events", []):
+        events = response.get("events", [])
+        for event in events:
             message = self._message(event)
             if message:
-                self.on_status(message)
-        self._revision = int(response.get("revision", self._revision))
+                import inspect
+                try:
+                    sig = inspect.signature(self.on_status)
+                    if len(sig.parameters) >= 2 or any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()):
+                        self.on_status(message, event=event)
+                    else:
+                        self.on_status(message)
+                except (TypeError, ValueError):
+                    self.on_status(message)
+            seq = event.get("seq")
+            if seq is not None and seq > self._last_seq:
+                self._last_seq = seq
+        latest_seq = response.get("latest_seq")
+        if latest_seq is not None and latest_seq > self._last_seq:
+            self._last_seq = latest_seq

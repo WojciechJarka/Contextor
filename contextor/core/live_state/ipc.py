@@ -45,6 +45,7 @@ class CanonicalLiveServer:
     ):
         self._state = state
         self._revision = revision
+        self._activity_seq = 0
         self._updater = updater
         self._events: list[dict[str, Any]] = []
         self._lock = threading.RLock()
@@ -54,42 +55,77 @@ class CanonicalLiveServer:
         host, port = self._listener.address
         self.endpoint = LiveEndpoint(str(host), int(port), self._authkey.hex())
 
-    def _record_event(self, operation: str, request: dict[str, Any], result: Any = None) -> None:
-        """Keep a small, JSON-safe event journal for MCP polling."""
-        event = {
-            "revision": self._revision,
+    def _record_event(
+        self,
+        operation: str,
+        request: dict[str, Any],
+        result: Any = None,
+        *,
+        category: str = "LIVE_STATE",
+    ) -> dict[str, Any]:
+        """Keep a small, JSON-safe event journal for Desktop status and MCP polling."""
+        from datetime import datetime, timezone
+
+        self._activity_seq += 1
+        source = str(request.get("origin") or request.get("source") or "unknown")
+
+        canonical_rev = getattr(self._state, "revision", None) if category == "LIVE_STATE" else None
+
+        event: dict[str, Any] = {
+            "seq": self._activity_seq,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "category": category,
             "operation": operation,
-            "origin": str(request.get("origin", "unknown")),
-            "status": getattr(result, "status", "PUBLISHED") if not isinstance(result, dict) else result.get("status", "PUBLISHED"),
-            "file_path": getattr(result, "file_path", request.get("file_path")) if not isinstance(result, dict) else result.get("file_path", request.get("file_path")),
+            "source": source,
+            "origin": source,
+            "canonical_revision": canonical_rev,
+            "revision": self._revision,
+            "status": (
+                getattr(result, "status", "PUBLISHED")
+                if not isinstance(result, dict)
+                else result.get("status", "PUBLISHED")
+            ) if category == "LIVE_STATE" else ("SUCCESS" if request.get("success", True) else "FAILED"),
         }
-        for name in ("error", "line_number", "column_number"):
-            value = getattr(result, name, None) if not isinstance(result, dict) else result.get(name)
-            if value is not None:
-                event[name] = value
-        blast_radius_state = (
-            getattr(result, "blast_radius_state", None)
-            if not isinstance(result, dict)
-            else result.get("blast_radius_state")
-        )
-        if blast_radius_state is not None:
-            event["blast_radius_state"] = blast_radius_state
-        affected = (
-            getattr(result, "affected_modules", None)
-            if not isinstance(result, dict)
-            else result.get("affected_modules")
-        )
-        if affected is not None:
-            total = len(affected)
-            event["affected_modules"] = {
-                "total": total,
-                "truncated": total > 20,
-                "items": list(affected[:20]),
-            }
-        if request.get("message") is not None:
-            event["message"] = str(request["message"])
+
+        if category == "MCP_CALL":
+            event["tool"] = str(request.get("tool", ""))
+            event["success"] = bool(request.get("success", True))
+            if request.get("error"):
+                event["error"] = str(request["error"])
+            event["message"] = request.get("message") or f"MCP tool: {event['tool']}"
+        else:
+            file_path = getattr(result, "file_path", request.get("file_path")) if not isinstance(result, dict) else result.get("file_path", request.get("file_path"))
+            if file_path is not None:
+                event["file_path"] = str(file_path)
+            for name in ("error", "line_number", "column_number"):
+                value = getattr(result, name, None) if not isinstance(result, dict) else result.get(name)
+                if value is not None:
+                    event[name] = value
+            blast_radius_state = (
+                getattr(result, "blast_radius_state", None)
+                if not isinstance(result, dict)
+                else result.get("blast_radius_state")
+            )
+            if blast_radius_state is not None:
+                event["blast_radius_state"] = blast_radius_state
+            affected = (
+                getattr(result, "affected_modules", None)
+                if not isinstance(result, dict)
+                else result.get("affected_modules")
+            )
+            if affected is not None:
+                total = len(affected)
+                event["affected_modules"] = {
+                    "total": total,
+                    "truncated": total > 20,
+                    "items": list(affected[:20]),
+                }
+            if request.get("message") is not None:
+                event["message"] = str(request["message"])
+
         self._events.append(event)
         del self._events[:-100]
+        return event
 
     def serve_forever(self) -> None:
         while not self._stop.is_set():
@@ -128,21 +164,23 @@ class CanonicalLiveServer:
             if operation == "publish":
                 self._state = request.get("state")
                 self._revision += 1
-                self._record_event("publish", request)
-                return {"status": "ok", "revision": self._revision}
-            if operation == "status":
-                self._revision += 1
-                self._record_event("status", request)
-                return {"status": "ok", "revision": self._revision}
+                evt = self._record_event("publish", request, category="LIVE_STATE")
+                return {"status": "ok", "revision": self._revision, "seq": evt["seq"]}
+            if operation in {"status", "record_activity", "mcp_call"}:
+                cat = request.get("category", "MCP_CALL" if operation == "mcp_call" else "LIVE_STATE")
+                evt = self._record_event(operation, request, category=cat)
+                return {"status": "ok", "revision": self._revision, "seq": evt["seq"]}
             if operation == "update_file":
                 if self._state is None or self._updater is None:
                     return {"status": "error", "error": "live_state_unavailable"}
                 result = self._updater(self._state, str(request.get("file_path", "")))
                 self._revision += 1
-                self._record_event("update_file", request, result)
-                return {"status": "ok", "revision": self._revision, "result": result}
+                evt = self._record_event("update_file", request, result, category="LIVE_STATE")
+                return {"status": "ok", "revision": self._revision, "result": result, "seq": evt["seq"]}
             if operation == "get_events":
                 after_revision = request.get("after_revision")
+                after_seq = request.get("after_seq")
+                category = request.get("category")
                 limit = request.get("limit", 20)
 
                 if after_revision is not None and (
@@ -151,8 +189,19 @@ class CanonicalLiveServer:
                 ):
                     return {"status": "error", "error": "invalid_after_revision"}
 
-                earliest_retained_revision = self._events[0]["revision"] if self._events else None
+                if after_seq is not None and (
+                    isinstance(after_seq, bool)
+                    or not isinstance(after_seq, int)
+                ):
+                    return {"status": "error", "error": "invalid_after_seq"}
+
+                canonical_events = [
+                    e for e in self._events
+                    if e.get("category") == "LIVE_STATE" and e.get("operation") in {"publish", "update_file"}
+                ]
+                earliest_retained_revision = canonical_events[0]["revision"] if canonical_events else None
                 latest_revision = self._revision
+                latest_seq = self._activity_seq
 
                 if after_revision is None:
                     continuity = "not_requested"
@@ -162,7 +211,7 @@ class CanonicalLiveServer:
                     continuity = "gap"
                     resync_required = True
                     resync_reason = "revision_discontinuity"
-                elif not self._events:
+                elif not canonical_events:
                     if after_revision == latest_revision:
                         continuity = "continuous"
                         resync_required = False
@@ -172,7 +221,7 @@ class CanonicalLiveServer:
                         resync_required = True
                         resync_reason = "event_retention_gap"
                 else:
-                    if after_revision < earliest_retained_revision - 1:
+                    if earliest_retained_revision is not None and after_revision < earliest_retained_revision - 1:
                         continuity = "gap"
                         resync_required = True
                         resync_reason = "event_retention_gap"
@@ -182,14 +231,37 @@ class CanonicalLiveServer:
                         resync_reason = None
 
                 events = self._events
-                if after_revision is not None:
-                    events = [event for event in events if event["revision"] > after_revision]
+                if category is not None:
+                    events = [e for e in events if e.get("category") == category]
+                if after_seq is not None:
+                    events = [e for e in events if e.get("seq", 0) > after_seq]
+                elif after_revision is not None:
+                    events = [e for e in events if e.get("category") == "LIVE_STATE" and e.get("revision", 0) > after_revision]
+
                 total = len(events)
                 selected = events if limit is None else events[:max(0, int(limit))]
+
+                if after_revision is not None and after_seq is None:
+                    formatted_selected = []
+                    for e in selected:
+                        item = {
+                            "revision": e["revision"],
+                            "operation": e["operation"],
+                            "origin": e["origin"],
+                            "status": e["status"],
+                            "file_path": e.get("file_path"),
+                        }
+                        for name in ("error", "line_number", "column_number", "blast_radius_state", "affected_modules", "message"):
+                            if e.get(name) is not None:
+                                item[name] = e[name]
+                        formatted_selected.append(item)
+                    selected = formatted_selected
+
                 return {
                     "status": "ok",
                     "revision": self._revision,
                     "latest_revision": latest_revision,
+                    "latest_seq": latest_seq,
                     "earliest_retained_revision": earliest_retained_revision,
                     "continuity": continuity,
                     "resync_required": resync_required,
@@ -274,8 +346,43 @@ class LiveStateClient:
     def update_file(self, file_path: str, *, origin: str = "unknown") -> dict[str, Any]:
         return self.request("update_file", file_path=file_path, origin=origin)
 
-    def get_events(self, *, after_revision: int | None = None, limit: int | None = 20) -> dict[str, Any]:
-        return self.request("get_events", after_revision=after_revision, limit=limit)
+    def get_events(
+        self,
+        *,
+        after_revision: int | None = None,
+        after_seq: int | None = None,
+        limit: int | None = 20,
+        category: str | None = None,
+    ) -> dict[str, Any]:
+        return self.request(
+            "get_events",
+            after_revision=after_revision,
+            after_seq=after_seq,
+            limit=limit,
+            category=category,
+        )
 
     def status(self, message: str, *, origin: str = "unknown") -> dict[str, Any]:
-        return self.request("status", message=message, origin=origin)
+        return self.request("status", message=message, origin=origin, category="LIVE_STATE")
+
+    def record_activity(
+        self,
+        category: str,
+        *,
+        tool: str | None = None,
+        message: str | None = None,
+        source: str = "mcp",
+        success: bool = True,
+        error: str | None = None,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        return self.request(
+            "record_activity",
+            category=category,
+            tool=tool,
+            message=message,
+            source=source,
+            success=success,
+            error=error,
+            **kwargs,
+        )

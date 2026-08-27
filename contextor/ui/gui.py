@@ -96,6 +96,7 @@ class ContextorGUI:
         self.repo_id_var = tk.StringVar(value="Repo ID: unregistered")
         self._live_status_queue: Queue[str] = Queue()
         self._live_status_draining = False
+        self.last_live_state: dict[str, Any] | None = None
 
         cache_cleanup = prune_startup_caches()
         if any(section["errors"] for section in cache_cleanup.values()):
@@ -630,6 +631,17 @@ class ContextorGUI:
             )
             return
 
+        pre_seq = 0
+        try:
+            from pathlib import Path
+            from contextor.core.live_state import connect
+            live_client = connect(Path(path))
+            if live_client is not None:
+                resp = live_client.get_events(limit=1)
+                pre_seq = int(resp.get("latest_seq", 0))
+        except Exception:
+            pre_seq = 0
+
         def task(log=None, progress_callback=None):
             errors, _ = ContextorFacade.analyze_project(
                 path, log=log, progress_callback=progress_callback
@@ -637,7 +649,9 @@ class ContextorGUI:
             return errors
 
         def on_success(errors):
-            self._start_live_watcher(path)
+            self._start_live_watcher(path, initial_seq=pre_seq)
+            if getattr(self, "live_event_feed", None) is not None:
+                self.live_event_feed.poll_once()
             if not errors:
                 messagebox.showinfo("OK", "No issues found. Repository is healthy!")
                 return
@@ -645,6 +659,7 @@ class ContextorGUI:
             messagebox.showwarning("Issues Detected", msg)
 
         def on_error(exc):
+            self._set_live_status(f"Repository analysis failed: {exc}", category="LIVE_STATE")
             messagebox.showerror("error", str(exc))
 
         self.progress_bar.is_cancelled = False
@@ -662,34 +677,79 @@ class ContextorGUI:
             operation_name="Repository analysis",
         )
 
-    def _set_live_status(self, message: str):
+    def _set_live_status(
+        self,
+        message: str,
+        *,
+        category: str = "LIVE_STATE",
+        event: dict | None = None,
+    ):
         """Append one status to the shared GUI queue, never overwriting a peer event."""
         if not hasattr(self, "live_status_var"):
             return
-        self._live_status_queue.put(f"{message}  {datetime.now():%H:%M:%S}")
-        if threading.current_thread() is threading.main_thread():
-            self._drain_live_status_queue()
+
+        if not (message.startswith("[LIVE]") or message.startswith("[MCP]")):
+            prefix = "[MCP] " if category == "MCP_CALL" else "[LIVE] "
+            message = f"{prefix}{message}"
+
+        time_str = ""
+        if isinstance(event, dict) and event.get("timestamp"):
+            try:
+                dt = datetime.fromisoformat(event["timestamp"])
+                if dt.tzinfo is not None:
+                    dt = dt.astimezone()
+                time_str = dt.strftime("%H:%M:%S")
+            except Exception:
+                time_str = datetime.now().strftime("%H:%M:%S")
         else:
+            time_str = datetime.now().strftime("%H:%M:%S")
+
+        formatted = f"{message}  {time_str}"
+
+        if category == "LIVE_STATE" and isinstance(event, dict):
+            self.last_live_state = {
+                "revision": event.get("canonical_revision"),
+                "status": event.get("status"),
+                "timestamp": event.get("timestamp"),
+                "source": event.get("source") or event.get("origin"),
+            }
+
+        item = {
+            "formatted": formatted,
+            "category": category,
+            "event": event,
+            "message": message,
+        }
+
+        self._live_status_queue.put(item)
+        if threading.current_thread() is threading.main_thread():
+            if hasattr(self, "_drain_live_status_queue"):
+                self._drain_live_status_queue()
+        elif hasattr(self, "root") and hasattr(self.root, "after"):
             self.root.after(0, self._drain_live_status_queue)
 
     def _drain_live_status_queue(self):
         """Display queued desktop and MCP messages one at a time on Tk's thread."""
-        if self._live_status_draining:
+        if getattr(self, "_live_status_draining", False):
             return
         try:
-            message = self._live_status_queue.get_nowait()
+            item = self._live_status_queue.get_nowait()
         except Empty:
             return
         self._live_status_draining = True
-        self.live_status_var.set(message)
+        display_text = item["formatted"] if isinstance(item, dict) else str(item)
+        self.live_status_var.set(display_text)
 
         def next_message():
             self._live_status_draining = False
             self._drain_live_status_queue()
 
-        self.root.after(1250, next_message)
+        if hasattr(self, "root") and hasattr(self.root, "after"):
+            self.root.after(1250, next_message)
+        else:
+            self._live_status_draining = False
 
-    def _start_live_watcher(self, path):
+    def _start_live_watcher(self, path, initial_seq: int | None = None):
         """Connect and retain one independent LIVE watcher per repository ID."""
         try:
             identity = ContextorGUI._refresh_repo_identity(self, path)
@@ -721,10 +781,13 @@ class ContextorGUI:
                         pass
                 self._live_start_retry_after_id = None
             self._live_start_retry_attempt = 0
+            if hasattr(self.live_event_feed, "poll_once"):
+                self.live_event_feed.poll_once()
             return
 
         try:
             from contextor.core.live_state import migrate_legacy_snapshot
+            from contextor.core.paths import repo_cache_dir
 
             cache = migrate_legacy_snapshot(path)
             client = connect_or_start(
@@ -753,7 +816,7 @@ class ContextorGUI:
                 )
                 if hasattr(self, "root") and hasattr(self.root, "after"):
                     self._live_start_retry_after_id = self.root.after(
-                        delay_ms, lambda: ContextorGUI._start_live_watcher(self, path)
+                        delay_ms, lambda: ContextorGUI._start_live_watcher(self, path, initial_seq=initial_seq)
                     )
                 return
             self._live_start_retry_attempt = 0
@@ -778,10 +841,23 @@ class ContextorGUI:
         if existing_watcher is not None:
             self.live_watcher = existing_watcher
             self.live_event_feed = feeds.get(identity.repo_id)
+            if hasattr(self.live_event_feed, "poll_once"):
+                self.live_event_feed.poll_once()
             return
 
-        def status_callback(message, name=identity.repo_name):
-            self._set_live_status(f"[{name}] {message}")
+        def status_callback(message, event=None, name=identity.repo_name):
+            if event is None and (message.startswith("LIVE update successful:") or message.startswith("Updating LIVE:")):
+                return
+            cat = event.get("category", "LIVE_STATE") if isinstance(event, dict) else "LIVE_STATE"
+            if message.startswith("[LIVE] "):
+                body = message[7:]
+                msg = f"[LIVE] [{name}] {body}"
+            elif message.startswith("[MCP] "):
+                body = message[6:]
+                msg = f"[MCP] [{name}] {body}"
+            else:
+                msg = f"[{name}] {message}"
+            self._set_live_status(msg, category=cat, event=event)
 
         def on_reconnect(new_client):
             self.live_client = new_client
@@ -798,11 +874,16 @@ class ContextorGUI:
             on_status=status_callback,
             on_reconnect=on_reconnect,
         )
-        self.live_event_feed = DesktopLiveEventFeed(client, status_callback)
+        if initial_seq is not None:
+            self.live_event_feed = DesktopLiveEventFeed(client, status_callback, initial_seq=initial_seq)
+        else:
+            self.live_event_feed = DesktopLiveEventFeed(client, status_callback)
         watchers[identity.repo_id] = self.live_watcher
         feeds[identity.repo_id] = self.live_event_feed
         self.live_watcher.start()
         self.live_event_feed.start()
+        if hasattr(self.live_event_feed, "poll_once"):
+            self.live_event_feed.poll_once()
 
     def _refresh_repo_identity(self, path):
         """Refresh the permanent repository identity shown beside LIVE status."""
