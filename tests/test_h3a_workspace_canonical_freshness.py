@@ -1007,5 +1007,561 @@ def test_h3a_case_s_explicit_generation_mismatch_symbol_fail_closed(tmp_path):
     assert "generation" in sym_res["stale_reason"].lower()
 
 
+def test_h3a_case_t_active_daemon_successful_publish(tmp_path):
+    """Case T (H3A-H6 - Active Daemon + Successful Publish):
+    - Active daemon running holding P0
+    - Full analysis T1 executed
+    - EXPECT:
+      - disk snapshot = P1
+      - FileState = P1
+      - daemon = P1
+      - live_publish_status = 'success'
+      - live_publish_revision = P1
+      - live_publish_warning = None
+    """
+    import threading
+    from contextor.core.live_state import CanonicalLiveServer, LiveStateClient
+    from contextor.core.live_state.runtime import _repository_updater, endpoint_file
+    from contextor.core.live_state.store import load_snapshot, read_metadata
+    from contextor.core.paths import repo_cache_dir
+    from contextor.core.analysis.state_manager import FileStateManager
+    from contextor.core.repository_identity import require_repository_identity
+
+    repo, mod_a = _setup_repo(tmp_path)
+    ContextorFacade.analyze_project(str(repo))
+    identity = require_repository_identity(repo)
+    cache = repo_cache_dir(repo)
+
+    loaded = load_snapshot(cache, expected_repo_id=identity.repo_id, expected_root_path=identity.root_path)
+    state, metadata = loaded
+    p0 = metadata.revision
+
+    server = CanonicalLiveServer(state, revision=p0, updater=_repository_updater(repo))
+    t = threading.Thread(target=server.serve_forever, daemon=True)
+    t.start()
+
+    ep_file = endpoint_file(repo)
+    ep_file.parent.mkdir(parents=True, exist_ok=True)
+    ep_file.write_text(json.dumps({
+        "host": server.endpoint.host,
+        "port": server.endpoint.port,
+        "authkey_hex": server.endpoint.authkey_hex,
+        "pid": os.getpid(),
+        "repo_id": identity.repo_id,
+        "root_path": identity.root_path,
+    }), encoding="utf-8")
+
+    try:
+        time.sleep(0.05)
+        mod_a.write_text("def compute_data(x: int) -> int:\n    return x * 777\n", encoding="utf-8")
+
+        errors, res = ContextorFacade.analyze_project(str(repo))
+        assert not errors
+        assert res is not None
+
+        disk_meta = read_metadata(cache)
+        assert disk_meta is not None
+        p1 = disk_meta.revision
+        assert p1 > p0
+
+        sm = FileStateManager(str(cache))
+        assert sm.revision == p1
+
+        client = LiveStateClient(server.endpoint)
+        daemon_snap = client.snapshot()
+        daemon_state = daemon_snap.get("state")
+        assert getattr(daemon_state, "revision", None) == p1
+
+        # Check facade result metadata
+        assert res.live_publish_status == "success"
+        assert res.live_publish_revision == p1
+        assert res.live_publish_warning is None
+        assert res.summary_data.get("live_publish_status") == "success"
+        assert res.summary_data.get("live_publish_revision") == p1
+    finally:
+        server.close()
+
+
+def test_h3a_case_u_active_daemon_publish_raises_failure_semantics(tmp_path, monkeypatch):
+    """Case U (H3A-H6 - Active Daemon + Publish Raises Exception):
+    - Active daemon running holding P0
+    - Publish fails with exception during full analysis
+    - EXPECT:
+      - disk snapshot = P1 (preserved)
+      - FileState = P1 (preserved)
+      - daemon remains P0
+      - analysis completes without error
+      - live_publish_status = 'failed'
+      - live_publish_revision = None
+      - live_publish_warning contains exception info
+    """
+    import threading
+    from contextor.core.live_state import CanonicalLiveServer, LiveStateClient
+    from contextor.core.live_state.runtime import _repository_updater, endpoint_file
+    from contextor.core.live_state.store import load_snapshot, read_metadata
+    from contextor.core.paths import repo_cache_dir
+    from contextor.core.analysis.state_manager import FileStateManager
+    from contextor.core.repository_identity import require_repository_identity
+
+    repo, mod_a = _setup_repo(tmp_path)
+    ContextorFacade.analyze_project(str(repo))
+    identity = require_repository_identity(repo)
+    cache = repo_cache_dir(repo)
+
+    loaded = load_snapshot(cache, expected_repo_id=identity.repo_id, expected_root_path=identity.root_path)
+    state, metadata = loaded
+    p0 = metadata.revision
+
+    server = CanonicalLiveServer(state, revision=p0, updater=_repository_updater(repo))
+    t = threading.Thread(target=server.serve_forever, daemon=True)
+    t.start()
+
+    ep_file = endpoint_file(repo)
+    ep_file.parent.mkdir(parents=True, exist_ok=True)
+    ep_file.write_text(json.dumps({
+        "host": server.endpoint.host,
+        "port": server.endpoint.port,
+        "authkey_hex": server.endpoint.authkey_hex,
+        "pid": os.getpid(),
+        "repo_id": identity.repo_id,
+        "root_path": identity.root_path,
+    }), encoding="utf-8")
+
+    try:
+        time.sleep(0.05)
+        mod_a.write_text("def compute_data(x: int) -> int:\n    return x * 888\n", encoding="utf-8")
+
+        # Mock publish to raise RuntimeError
+        orig_publish = LiveStateClient.publish
+        def mock_publish(self, state, *args, **kwargs):
+            raise ConnectionResetError("Simulated daemon socket drop")
+        monkeypatch.setattr(LiveStateClient, "publish", mock_publish)
+
+        errors, res = ContextorFacade.analyze_project(str(repo))
+        assert not errors
+        assert res is not None
+
+        # Verify disk snapshot & FileState are preserved at P1
+        disk_meta = read_metadata(cache)
+        assert disk_meta is not None
+        p1 = disk_meta.revision
+        assert p1 > p0
+        sm = FileStateManager(str(cache))
+        assert sm.revision == p1
+
+        # Restore publish and check daemon state is still P0
+        monkeypatch.setattr(LiveStateClient, "publish", orig_publish)
+        client = LiveStateClient(server.endpoint)
+        daemon_snap = client.snapshot()
+        daemon_state = daemon_snap.get("state")
+        assert getattr(daemon_state, "revision", None) == p0
+
+        # Check facade result metadata reports failure
+        assert res.live_publish_status == "failed"
+        assert res.live_publish_revision is None
+        assert res.live_publish_warning is not None
+        assert "ConnectionResetError" in res.live_publish_warning
+        assert "Simulated daemon socket drop" in res.live_publish_warning
+        assert res.summary_data.get("live_publish_status") == "failed"
+    finally:
+        server.close()
+
+
+def test_h3a_case_v_active_daemon_publish_failure_response_dict(tmp_path, monkeypatch):
+    """Case V (H3A-H6 - Active Daemon + Explicit Failure Response Dict):
+    - Active daemon returns {'status': 'error', 'error': 'daemon_busy'}
+    - EXPECT:
+      - disk snapshot = P1 (preserved)
+      - FileState = P1 (preserved)
+      - daemon remains P0
+      - live_publish_status = 'failed'
+      - live_publish_revision = None
+      - live_publish_warning = 'daemon_busy'
+    """
+    import threading
+    from contextor.core.live_state import CanonicalLiveServer, LiveStateClient
+    from contextor.core.live_state.runtime import _repository_updater, endpoint_file
+    from contextor.core.live_state.store import load_snapshot, read_metadata
+    from contextor.core.paths import repo_cache_dir
+    from contextor.core.analysis.state_manager import FileStateManager
+    from contextor.core.repository_identity import require_repository_identity
+
+    repo, mod_a = _setup_repo(tmp_path)
+    ContextorFacade.analyze_project(str(repo))
+    identity = require_repository_identity(repo)
+    cache = repo_cache_dir(repo)
+
+    loaded = load_snapshot(cache, expected_repo_id=identity.repo_id, expected_root_path=identity.root_path)
+    state, metadata = loaded
+    p0 = metadata.revision
+
+    server = CanonicalLiveServer(state, revision=p0, updater=_repository_updater(repo))
+    t = threading.Thread(target=server.serve_forever, daemon=True)
+    t.start()
+
+    ep_file = endpoint_file(repo)
+    ep_file.parent.mkdir(parents=True, exist_ok=True)
+    ep_file.write_text(json.dumps({
+        "host": server.endpoint.host,
+        "port": server.endpoint.port,
+        "authkey_hex": server.endpoint.authkey_hex,
+        "pid": os.getpid(),
+        "repo_id": identity.repo_id,
+        "root_path": identity.root_path,
+    }), encoding="utf-8")
+
+    try:
+        time.sleep(0.05)
+        mod_a.write_text("def compute_data(x: int) -> int:\n    return x * 999\n", encoding="utf-8")
+
+        # Mock publish to return error dict
+        orig_publish = LiveStateClient.publish
+        def mock_publish(self, state, *args, **kwargs):
+            return {"status": "error", "error": "daemon_busy_rejecting_publish"}
+        monkeypatch.setattr(LiveStateClient, "publish", mock_publish)
+
+        errors, res = ContextorFacade.analyze_project(str(repo))
+        assert not errors
+        assert res is not None
+
+        # Verify disk snapshot & FileState are preserved at P1
+        disk_meta = read_metadata(cache)
+        assert disk_meta is not None
+        p1 = disk_meta.revision
+        assert p1 > p0
+        sm = FileStateManager(str(cache))
+        assert sm.revision == p1
+
+        # Restore publish and check daemon state is still P0
+        monkeypatch.setattr(LiveStateClient, "publish", orig_publish)
+        client = LiveStateClient(server.endpoint)
+        daemon_snap = client.snapshot()
+        daemon_state = daemon_snap.get("state")
+        assert getattr(daemon_state, "revision", None) == p0
+
+        # Check facade result metadata reports failure
+        assert res.live_publish_status == "failed"
+        assert res.live_publish_revision is None
+        assert res.live_publish_warning == "daemon_busy_rejecting_publish"
+        assert res.summary_data.get("live_publish_status") == "failed"
+    finally:
+        server.close()
+
+
+def test_h3a_case_w_no_active_daemon_not_attempted(tmp_path):
+    """Case W (H3A-H6 - No Active Daemon -> not_attempted):
+    - No daemon running
+    - Full analysis executed
+    - EXPECT:
+      - disk snapshot and FileState are valid
+      - live_publish_status = 'not_attempted'
+      - live_publish_revision = None
+      - live_publish_warning = None
+      - NO false failure reported
+    """
+    repo, mod_a = _setup_repo(tmp_path)
+    errors, res = ContextorFacade.analyze_project(str(repo))
+    assert not errors
+    assert res is not None
+
+    assert res.live_publish_status == "not_attempted"
+    assert res.live_publish_revision is None
+    assert res.live_publish_warning is None
+    assert res.summary_data.get("live_publish_status") == "not_attempted"
+
+
+def test_h3a_case_x_journal_ahead_canonical_cache_separation(tmp_path):
+    """Case X (H3A-H7 - Journal Ahead Real Live Regression):
+    - P0 canonical revision = 1
+    - Advance server journal J >= 20 via status events
+    - Change file and run ContextorFacade.analyze_project(...)
+    - EXPECT:
+      - DISK_REVISION == 2
+      - FILESTATE_REVISION == 2
+      - LIVE_DAEMON_CANONICAL_REVISION == 2
+      - PUBLISH_RETURN_REVISION >= 21
+      - get_module_context(...) returns canonical_revision=2, workspace_sync='verified', provenance='live'
+      - mcp_runtime._live_engine_revisions[root] == 2
+      - Journal revision 20+ never ends up in canonical revision cache
+    """
+    import threading
+    from contextor.core.live_state import CanonicalLiveServer, LiveStateClient
+    from contextor.core.live_state.runtime import _repository_updater, endpoint_file
+    from contextor.core.live_state.store import load_snapshot, read_metadata
+    from contextor.core.paths import repo_cache_dir
+    from contextor.core.analysis.state_manager import FileStateManager
+    from contextor.core.repository_identity import require_repository_identity
+
+    repo, mod_a = _setup_repo(tmp_path)
+    ContextorFacade.analyze_project(str(repo))
+    identity = require_repository_identity(repo)
+    cache = repo_cache_dir(repo)
+
+    loaded = load_snapshot(cache, expected_repo_id=identity.repo_id, expected_root_path=identity.root_path)
+    state, metadata = loaded
+    p0 = metadata.revision
+    assert p0 == 1
+
+    server = CanonicalLiveServer(state, revision=p0, updater=_repository_updater(repo))
+    t = threading.Thread(target=server.serve_forever, daemon=True)
+    t.start()
+
+    ep_file = endpoint_file(repo)
+    ep_file.parent.mkdir(parents=True, exist_ok=True)
+    ep_file.write_text(json.dumps({
+        "host": server.endpoint.host,
+        "port": server.endpoint.port,
+        "authkey_hex": server.endpoint.authkey_hex,
+        "pid": os.getpid(),
+        "repo_id": identity.repo_id,
+        "root_path": identity.root_path,
+    }), encoding="utf-8")
+
+    try:
+        time.sleep(0.05)
+        client = LiveStateClient(server.endpoint)
+
+        # Generate >= 20 journal events
+        for i in range(20):
+            res_stat = client.status(f"journal_event_{i}", origin="test")
+            assert res_stat.get("status") == "ok"
+
+        # Journal revision is now >= 21
+        ping_info = client.ping()
+        journal_before = int(ping_info["revision"])
+        assert journal_before >= 21
+
+        # Modify file and run full analysis
+        time.sleep(0.05)
+        mod_a.write_text("def compute_data(x: int) -> int:\n    return x * 9999\n", encoding="utf-8")
+
+        errors, res = ContextorFacade.analyze_project(str(repo))
+        assert not errors
+        assert res is not None
+
+        # Verify disk, filestate, and daemon canonical revisions are 2
+        disk_meta = read_metadata(cache)
+        assert disk_meta is not None
+        assert disk_meta.revision == 2
+
+        sm = FileStateManager(str(cache))
+        assert sm.revision == 2
+
+        daemon_snap = client.snapshot()
+        daemon_state = daemon_snap.get("state")
+        assert getattr(daemon_state, "revision", None) == 2
+
+        # Publish return revision is journal revision (>= 22)
+        assert res.live_publish_status == "success"
+        assert res.live_publish_revision > 2
+        assert res.live_publish_revision >= journal_before + 1
+        assert res.live_publish_warning is None
+
+        # Without manual cache clear, query get_module_context
+        ctx_raw = get_module_context(repo_path=str(repo), module_name="pkg.mod_a")
+        ctx = json.loads(ctx_raw)
+        freshness = ctx.get("state_freshness")
+        assert freshness is not None
+        assert freshness["canonical_revision"] == 2
+        assert freshness["workspace_sync"] == "verified"
+        assert freshness["provenance"] == "live"
+
+        # Canonical cache is strictly 2, NOT the journal revision
+        assert mcp_runtime._live_engine_revisions[str(repo)] == 2
+        assert mcp_runtime._live_journal_revisions[str(repo)] >= 22
+    finally:
+        server.close()
+
+
+def test_h3a_case_y_unknown_status_facade_fail_closed(tmp_path, monkeypatch):
+    """Case Y (H3A-H7 - Unknown Status in Facade Fails Closed):
+    - Client returns {'status': 'rejected', 'revision': 999}
+    - EXPECT:
+      - live_publish_status == 'failed'
+      - live_publish_revision is None
+      - live_publish_warning is not None and mentions rejected
+    """
+    import threading
+    from contextor.core.live_state import CanonicalLiveServer, LiveStateClient
+    from contextor.core.live_state.runtime import _repository_updater, endpoint_file
+    from contextor.core.live_state.store import load_snapshot
+    from contextor.core.paths import repo_cache_dir
+    from contextor.core.repository_identity import require_repository_identity
+
+    repo, mod_a = _setup_repo(tmp_path)
+    ContextorFacade.analyze_project(str(repo))
+    identity = require_repository_identity(repo)
+    cache = repo_cache_dir(repo)
+
+    loaded = load_snapshot(cache, expected_repo_id=identity.repo_id, expected_root_path=identity.root_path)
+    state, metadata = loaded
+
+    server = CanonicalLiveServer(state, revision=metadata.revision, updater=_repository_updater(repo))
+    t = threading.Thread(target=server.serve_forever, daemon=True)
+    t.start()
+
+    ep_file = endpoint_file(repo)
+    ep_file.parent.mkdir(parents=True, exist_ok=True)
+    ep_file.write_text(json.dumps({
+        "host": server.endpoint.host,
+        "port": server.endpoint.port,
+        "authkey_hex": server.endpoint.authkey_hex,
+        "pid": os.getpid(),
+        "repo_id": identity.repo_id,
+        "root_path": identity.root_path,
+    }), encoding="utf-8")
+
+    try:
+        time.sleep(0.05)
+        mod_a.write_text("def compute_data(x: int) -> int:\n    return x * 12345\n", encoding="utf-8")
+
+        monkeypatch.setattr(
+            LiveStateClient,
+            "publish",
+            lambda self, state, *args, **kwargs: {"status": "rejected", "revision": 999},
+        )
+
+        errors, res = ContextorFacade.analyze_project(str(repo))
+        assert not errors
+        assert res is not None
+
+        assert res.live_publish_status == "failed"
+        assert res.live_publish_revision is None
+        assert res.live_publish_warning is not None
+        assert "rejected" in res.live_publish_warning
+        assert res.summary_data.get("live_publish_status") == "failed"
+        assert res.summary_data.get("live_publish_revision") is None
+    finally:
+        server.close()
+
+
+def test_h3a_case_z_unknown_status_analysis_job_fail_closed(tmp_path, monkeypatch):
+    """Case Z (H3A-H7 - Unknown Status in MCP Analysis Job Fails Closed):
+    - Client returns {'status': 'rejected', 'revision': 999}
+    - EXPECT:
+      - job live_publish_status == 'failed'
+      - job live_publish_revision is None
+      - job live_publish_warning is not None and mentions rejected
+      - mcp_runtime._live_engine_revisions does not keep stale/invalid entry
+    """
+    import asyncio
+    from types import SimpleNamespace
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    engine_state = SimpleNamespace(fresh=True, revision=1)
+    engine = SimpleNamespace(state=engine_state)
+    client = SimpleNamespace(
+        publish=lambda state, *, origin, timeout: {"status": "rejected", "revision": 999}
+    )
+
+    async def fake_worker(*_args, **_kwargs):
+        pass
+
+    monkeypatch.setattr(analysis_jobs, "_run_analysis_worker", fake_worker)
+    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: engine)
+    monkeypatch.setattr(
+        "contextor.core.live_state.connect_or_start",
+        lambda _root, *args, **kwargs: client,
+    )
+    analysis_jobs._analysis_tasks.clear()
+    analysis_jobs._analysis_jobs_by_repo.clear()
+
+    # Pre-seed canonical cache with stale value
+    mcp_runtime._live_engine_revisions[str(repo)] = 999
+
+    job_id = "a" * 32
+    job = {
+        "job_id": job_id,
+        "repo_path": str(repo),
+        "operation": "project",
+        "target": None,
+        "exclude_paths": [],
+        "status": "queued",
+        "created_at": "2026-08-27T10:00:00Z",
+        "started_at": None,
+        "completed_at": None,
+        "error": None,
+        "live_publish_status": "pending",
+        "live_publish_revision": None,
+        "live_publish_warning": None,
+    }
+    analysis_jobs._write_analysis_job(repo, job)
+
+    asyncio.run(analysis_jobs._execute_analysis_job(repo, job, None, []))
+
+    final_job = analysis_jobs._read_analysis_job(repo, job_id)
+    assert final_job is not None
+    assert final_job["status"] == "completed"
+    assert final_job["live_publish_status"] == "failed"
+    assert final_job["live_publish_revision"] is None
+    assert final_job["live_publish_warning"] is not None
+    assert "rejected" in final_job["live_publish_warning"]
+    assert str(repo) not in mcp_runtime._live_engine_revisions
+
+
+def test_h3a_case_aa_analysis_job_journal_canonical_revision_separation(tmp_path, monkeypatch):
+    """Case AA (H3A-H7 - MCP Analysis Job Journal vs Canonical Revision Separation):
+    - Client publish returns {'status': 'ok', 'revision': 42} (journal)
+    - Canonical engine_state.revision = 3
+    - EXPECT:
+      - job live_publish_status == 'success'
+      - job live_publish_revision == 42
+      - mcp_runtime._live_engine_revisions[root] == 3 (canonical state revision, NOT 42)
+    """
+    import asyncio
+    from types import SimpleNamespace
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    engine_state = SimpleNamespace(fresh=True, revision=3)
+    engine = SimpleNamespace(state=engine_state)
+    client = SimpleNamespace(
+        publish=lambda state, *, origin, timeout: {"status": "ok", "revision": 42}
+    )
+
+    async def fake_worker(*_args, **_kwargs):
+        return {}
+
+    monkeypatch.setattr(analysis_jobs, "_run_analysis_worker", fake_worker)
+    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: engine)
+    monkeypatch.setattr(
+        "contextor.core.live_state.connect_or_start",
+        lambda _root, *args, **kwargs: client,
+    )
+    analysis_jobs._analysis_tasks.clear()
+    analysis_jobs._analysis_jobs_by_repo.clear()
+
+    job_id = "b" * 32
+    job = {
+        "job_id": job_id,
+        "repo_path": str(repo),
+        "operation": "project",
+        "target": None,
+        "exclude_paths": [],
+        "status": "queued",
+        "created_at": "2026-08-27T10:00:00Z",
+        "started_at": None,
+        "completed_at": None,
+        "error": None,
+        "live_publish_status": "pending",
+        "live_publish_revision": None,
+        "live_publish_warning": None,
+    }
+    analysis_jobs._write_analysis_job(repo, job)
+
+    asyncio.run(analysis_jobs._execute_analysis_job(repo, job, None, []))
+
+    final_job = analysis_jobs._read_analysis_job(repo, job_id)
+    assert final_job is not None
+    assert final_job["status"] == "completed"
+    assert final_job["live_publish_status"] == "success"
+    assert final_job["live_publish_revision"] == 42
+    assert final_job["live_publish_warning"] is None
+    assert mcp_runtime._live_engine_revisions[str(repo)] == 3
+
+
 
 

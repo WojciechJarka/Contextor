@@ -253,14 +253,34 @@ async def _execute_analysis_job(
                 published = live_client.publish(
                     engine_state, origin="mcp_analysis", timeout=10.0
                 )
-                revision = int(published["revision"])
-                mcp_runtime._live_engine_revisions[str(root)] = revision
-                job = {
-                    **job, "live_publish_status": "success",
-                    "live_publish_revision": revision,
-                    "live_publish_warning": None,
-                }
-            except (TimeoutError, OSError, EOFError, ConnectionError, RuntimeError) as live_exc:
+                if (
+                    isinstance(published, dict)
+                    and published.get("status") == "ok"
+                    and published.get("revision") is not None
+                ):
+                    canonical_revision = getattr(engine_state, "revision", None)
+                    if canonical_revision is not None:
+                        mcp_runtime._live_engine_revisions[str(root)] = int(canonical_revision)
+                    else:
+                        mcp_runtime._live_engine_revisions.pop(str(root), None)
+                    job = {
+                        **job, "live_publish_status": "success",
+                        "live_publish_revision": int(published["revision"]),
+                        "live_publish_warning": None,
+                    }
+                else:
+                    mcp_runtime._live_engine_revisions.pop(str(root), None)
+                    err = published.get("error") if isinstance(published, dict) else None
+                    status_val = published.get("status") if isinstance(published, dict) else None
+                    warning = err or (f"LIVE service returned status '{status_val}'." if status_val else "Canonical LIVE service rejected publication.")
+                    _stderr_log(f"Warning: Live state publish failed: {warning}")
+                    job = {
+                        **job, "live_publish_status": "failed",
+                        "live_publish_revision": None,
+                        "live_publish_warning": warning,
+                    }
+            except Exception as live_exc:
+                mcp_runtime._live_engine_revisions.pop(str(root), None)
                 publish_status = (
                     "timed_out" if isinstance(live_exc, TimeoutError) else "failed"
                 )

@@ -579,11 +579,12 @@ def test_analysis_endpoint_returns_reusable_job_and_pollable_completion(
         await asyncio.to_thread(release.wait)
 
     published = []
-    engine = SimpleNamespace(state={"fresh": True})
+    engine_state = SimpleNamespace(fresh=True, revision=1)
+    engine = SimpleNamespace(state=engine_state)
     client = SimpleNamespace(
         publish=lambda state, *, origin, timeout: published.append(
             (state, origin, timeout)
-        ) or {"revision": 1}
+        ) or {"status": "ok", "revision": 1}
     )
     monkeypatch.setattr(analysis_jobs, "_run_analysis_worker", fake_worker)
     monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: engine)

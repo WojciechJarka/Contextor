@@ -72,6 +72,9 @@ class AnalysisResult:
     trie: Optional[Any] = None
     package_root: str = ""
     collision_facts: Optional[Dict[str, Any]] = None
+    live_publish_status: str = "not_attempted"
+    live_publish_revision: Optional[int] = None
+    live_publish_warning: Optional[str] = None
 
 
 @dataclass
