@@ -42,13 +42,24 @@ from contextor.core.reporting_layer.reporting_single_file import (
     save_single_file_report,
 )
 from contextor.core.single_file.single_file_analysis import collect_all_contexts
+
 from contextor.core.symbol_engine.indexer import build_index, index_repository
 from contextor.core.validator import validate
-from contextor.core.validator.collisions import validate_name_collisions
+from contextor.core.validator.collisions import (
+    compute_collisions_from_facts,
+    extract_repository_collision_facts,
+    validate_name_collisions,
+)
 from contextor.core.live_state import hydrate_repository_engine
 
 
-def _compute_metrics_and_debt(modules, graph, progress_callback=None):
+def _compute_metrics_and_debt(
+    modules,
+    graph,
+    progress_callback=None,
+    collisions=None,
+    collision_facts=None,
+):
     """
     Shared analytical pipeline extracting graph metrics and tech debt scores.
     """
@@ -59,7 +70,12 @@ def _compute_metrics_and_debt(modules, graph, progress_callback=None):
     cycles = detect_cycles(graph.hard_edges, progress_callback=progress_callback)
 
     checkpoint(progress_callback, "Validating collisions...")
-    all_collisions = validate_name_collisions(modules)
+    if collisions is not None:
+        all_collisions = collisions
+    elif collision_facts is not None:
+        all_collisions = compute_collisions_from_facts(collision_facts)
+    else:
+        all_collisions = validate_name_collisions(modules)
 
     checkpoint(progress_callback, "Computing tech debt...")
     debt = compute_debt(
@@ -318,6 +334,11 @@ class ContextorFacade:
         )
         modules = index.modules
 
+        # Compute collision facts once from current-run modules
+        from contextor.core.validator.collisions import compute_collisions_from_facts, extract_repository_collision_facts
+        collision_facts = extract_repository_collision_facts(modules)
+        all_collisions = compute_collisions_from_facts(collision_facts)
+
         from contextor.core.graph.resolver import build_trie, detect_package_root
         trie = build_trie(modules.keys())
         package_root = detect_package_root(modules, trie)
@@ -340,16 +361,31 @@ class ContextorFacade:
         if log:
             log(f"Graph validation (cache_hit={cache_hit})...")
         validation_progress = progress.begin("Validating dependency graph")
-        errors = validate(modules, graph, progress_callback=validation_progress)
+        errors = validate(
+            modules, 
+            graph, 
+            progress_callback=validation_progress,
+            collisions=all_collisions,
+            collision_facts=collision_facts,
+        )
 
         repo_name = Path(path).name
 
-        if log:
-            log("Calculating metrics, detecting cycles and tech debt...")
         metrics_progress = progress.begin("Computing metrics, cycles and debt")
-        metrics, cycles, all_collisions, debt = _compute_metrics_and_debt(
-            modules, graph, progress_callback=metrics_progress
-        )
+        try:
+            metrics, cycles, all_collisions, debt = _compute_metrics_and_debt(
+                modules,
+                graph,
+                progress_callback=metrics_progress,
+                collisions=all_collisions,
+                collision_facts=collision_facts,
+            )
+        except TypeError:
+            metrics, cycles, all_collisions, debt = _compute_metrics_and_debt(
+                modules,
+                graph,
+                progress_callback=metrics_progress,
+            )
 
         from datetime import datetime
         datestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -366,6 +402,7 @@ class ContextorFacade:
             root_path=path,
             log=log,
             collisions=all_collisions,
+            collision_facts=collision_facts,
             progress_callback=report_progress,
             skipped_files=index.skipped,
             datestamp=datestamp,

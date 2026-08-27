@@ -51,7 +51,11 @@ from contextor.core.analysis.test_context import (
 )
 from contextor.core.api.api_consumers import extract_api_consumers
 from contextor.core.errors import AnalysisCancelled, checkpoint
-from contextor.core.reference.engine import build_symbol_references
+from contextor.core.reference import (
+    RepositoryReferenceIndex,
+    build_repository_reference_index,
+    build_symbol_references,
+)
 from contextor.core.symbol_engine import extract_file_symbols
 
 
@@ -113,16 +117,22 @@ def _symbol_kind(symbol: str, symbols: dict) -> str:
 
 _WORKER_MODULES: dict = {}
 _WORKER_ROOT: str = ""
+_WORKER_REFERENCE_INDEX: RepositoryReferenceIndex | None = None
 
 
-def _init_artifact_worker(modules: dict, root_path: str) -> None:
+def _init_artifact_worker(
+    modules: dict,
+    root_path: str,
+    reference_index: RepositoryReferenceIndex | None = None,
+) -> None:
     """
     Initialize process-local worker state.
     """
-    global _WORKER_MODULES, _WORKER_ROOT
+    global _WORKER_MODULES, _WORKER_ROOT, _WORKER_REFERENCE_INDEX
 
     _WORKER_MODULES = modules
     _WORKER_ROOT = root_path
+    _WORKER_REFERENCE_INDEX = reference_index
 
 
 def _process_single_artifact_module(module_id: str):
@@ -151,6 +161,7 @@ def _process_single_artifact_module(module_id: str):
         own_symbols,
         _WORKER_ROOT,
         definer_module=module_id,
+        reference_index=_WORKER_REFERENCE_INDEX,
     )
 
     signatures = symbols.get("signatures", {})
@@ -172,6 +183,7 @@ def collect_module_artifacts(
     modules: dict,
     root_path: str,
     progress_callback=None,
+    reference_index: RepositoryReferenceIndex | None = None,
 ) -> tuple[dict, dict]:
     """
     Collect artifact/reference information for all modules.
@@ -187,8 +199,11 @@ def collect_module_artifacts(
     total = len(modules)
     completed = 0
 
+    if reference_index is None:
+        reference_index = build_repository_reference_index(modules, root_path)
+
     if os.environ.get("CONTEXTOR_DISABLE_PROCESS_POOL") == "1":
-        _init_artifact_worker(modules, root_path)
+        _init_artifact_worker(modules, root_path, reference_index)
         for module_id in modules:
             try:
                 returned_module_id, data = _process_single_artifact_module(module_id)
@@ -201,7 +216,7 @@ def collect_module_artifacts(
 
     with ProcessPoolExecutor(
         initializer=_init_artifact_worker,
-        initargs=(modules, root_path),
+        initargs=(modules, root_path, reference_index),
     ) as executor:
         futures = {
             executor.submit(

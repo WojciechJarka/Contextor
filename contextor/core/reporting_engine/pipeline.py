@@ -46,6 +46,7 @@ def execute_global_pipeline(
     datestamp: str | None = None,
     trie: dict | None = None,
     package_root: str = "",
+    collision_facts: dict | None = None,
 ):
     """
     Execute the complete global report pipeline.
@@ -113,31 +114,35 @@ def execute_global_pipeline(
     # BASIC GRAPH / VALIDATION DATA
     # ------------------------------------------------------
 
-    parsed_facts = {}
-    incomplete_domain = False
+    if collision_facts is not None:
+        parsed_facts = collision_facts
+        incomplete_domain = (set(parsed_facts.keys()) != set(modules.keys()))
+    else:
+        parsed_facts = {}
+        incomplete_domain = False
 
-    for module_path, module in modules.items():
-        file_path = getattr(module, "absolute_path", None) or getattr(module, "path", None)
-        if not file_path:
-            incomplete_domain = True
-            continue
-        tree = getattr(module, "ast_tree", None)
-        if tree is None:
-            path = Path(file_path)
-            if not path.exists():
+        for module_path, module in modules.items():
+            file_path = getattr(module, "absolute_path", None) or getattr(module, "path", None)
+            if not file_path:
                 incomplete_domain = True
                 continue
-            try:
-                tree = parse_source(path)
-            except SourceError:
-                incomplete_domain = True
-                continue
-        facts = extract_module_collision_facts(
-            tree,
-            module_path,
-            str(file_path),
-        )
-        parsed_facts[module_path] = facts
+            tree = getattr(module, "ast_tree", None)
+            if tree is None:
+                path = Path(file_path)
+                if not path.exists():
+                    incomplete_domain = True
+                    continue
+                try:
+                    tree = parse_source(path)
+                except SourceError:
+                    incomplete_domain = True
+                    continue
+            facts = extract_module_collision_facts(
+                tree,
+                module_path,
+                str(file_path),
+            )
+            parsed_facts[module_path] = facts
 
     # Snapshot-visible report collisions: match 1:1 legacy validate_name_collisions across all parseable modules
     if collisions is not None:

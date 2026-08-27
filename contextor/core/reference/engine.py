@@ -20,6 +20,15 @@ from contextor.core.source import SourceError, read_source
 
 from .visitor import SymbolReferenceVisitor
 from .resolution import _absolute_import_module, _resolve_reexport
+from .shared import (
+    MAX_USAGE_DETAILS,
+    _REEXPORT_CACHE,
+    _build_reexport_map,
+    _empty_reference,
+    _export_module_name,
+    _normalize_references,
+    reset_reexport_cache,
+)
 
 _IDENTIFIER_CACHE: dict[str, frozenset[str]] = {}
 
@@ -27,7 +36,6 @@ _IDENTIFIER_CACHE: dict[str, frozenset[str]] = {}
 # module. The repository is treated as a fixed snapshot for
 # the duration of an analysis.
 _FINGERPRINT_CACHE: dict[str, str | None] = {}
-_REEXPORT_CACHE: dict[tuple[int, int], dict[str, str]] = {}
 
 _IDENTIFIER_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
@@ -40,7 +48,7 @@ def reset_caches() -> None:
     """
     _IDENTIFIER_CACHE.clear()
     _FINGERPRINT_CACHE.clear()
-    _REEXPORT_CACHE.clear()
+    reset_reexport_cache()
 
 
 def _cache_key(path: Path) -> str | None:
@@ -119,130 +127,6 @@ def _search_needles(
     return needles
 
 
-def _explicit_all(tree) -> set[str] | None:
-    for node in getattr(tree, "body", []):
-        if not isinstance(node, ast.Assign):
-            continue
-        if not any(isinstance(target, ast.Name) and target.id == "__all__" for target in node.targets):
-            continue
-        if isinstance(node.value, (ast.List, ast.Tuple, ast.Set)):
-            return {
-                item.value
-                for item in node.value.elts
-                if isinstance(item, ast.Constant) and isinstance(item.value, str)
-            }
-        return set()
-    return None
-
-
-def _export_module_name(module_id: str) -> str:
-    return module_id.removesuffix(".__init__")
-
-
-def _build_reexport_map(modules) -> dict[str, str]:
-    """Build cycle-safe transitive identities for top-level ImportFrom re-exports."""
-
-    cache_key = (id(modules), len(modules))
-    cached = _REEXPORT_CACHE.get(cache_key)
-    if cached is not None:
-        return cached
-    raw: dict[str, str] = {}
-    module_exports: dict[str, dict[str, str]] = {}
-    star_imports: list[tuple[str, str, set[str] | None]] = []
-    for module_id, module in modules.items():
-        tree = getattr(module, "ast_tree", None)
-        if tree is None:
-            continue
-        exporter = _export_module_name(module_id)
-        allowed = _explicit_all(tree)
-        bindings: dict[str, str] = {}
-        for node in tree.body:
-            if isinstance(node, ast.ImportFrom):
-                source = _absolute_import_module(
-                    module_id, node.module, node.level or 0
-                )
-                for item in node.names:
-                    if item.name == "*":
-                        star_imports.append((exporter, source, allowed))
-                        continue
-                    bindings[item.asname or item.name] = f"{source}.{item.name}"
-            elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-                bindings[node.name] = f"{exporter}.{node.name}"
-            elif isinstance(node, (ast.Assign, ast.AnnAssign)):
-                targets = node.targets if isinstance(node, ast.Assign) else [node.target]
-                value = node.value
-                for target in targets:
-                    if not isinstance(target, ast.Name) or target.id == "__all__":
-                        continue
-                    if isinstance(value, ast.Name) and value.id in bindings:
-                        bindings[target.id] = bindings[value.id]
-                    else:
-                        bindings[target.id] = f"{exporter}.{target.id}"
-        visible_bindings = {}
-        for local, target in bindings.items():
-            if allowed is not None and local not in allowed:
-                continue
-            if allowed is None and local.startswith("_"):
-                continue
-            visible_bindings[local] = target
-            key = f"{exporter}.{local}"
-            if key != target:
-                raw[key] = target
-        module_exports[exporter] = visible_bindings
-
-    changed = True
-    while changed:
-        changed = False
-        for exporter, source, allowed in star_imports:
-            for local, target in list(module_exports.get(source, {}).items()):
-                if allowed is not None and local not in allowed:
-                    continue
-                if allowed is None and local.startswith("_"):
-                    continue
-                key = f"{exporter}.{local}"
-                if key not in raw:
-                    raw[key] = target
-                    module_exports.setdefault(exporter, {})[local] = target
-                    changed = True
-
-    resolved = {}
-    for key, initial in raw.items():
-        target = initial
-        visited = {key}
-        while target in raw and target not in visited:
-            visited.add(target)
-            target = raw[target]
-        if target not in visited:
-            resolved[key] = target
-    _REEXPORT_CACHE[cache_key] = resolved
-    return resolved
-
-
-def _empty_reference():
-    """
-    Creates an empty reference record.
-
-    Each usage category is represented explicitly so downstream
-    consumers do not need to infer semantics from missing keys.
-    """
-    return {
-        "called_by": [],
-        "called_by_detail": [],
-        "callback_called": [],
-        "callback_called_detail": [],
-        "called_by_ambiguous": [],
-        "called_by_ambiguous_detail": [],
-        "event_bound_by": [],
-        "event_bound_by_detail": [],
-        "imported_from": [],
-        "inherited_by": [],
-        "inherited_by_detail": [],
-        "qualified_refs": [],
-        "qualified_refs_detail": [],
-        "runtime_calls": [],
-    }
-
-
 def _module_path(
     root_path,
     module,
@@ -281,35 +165,6 @@ def _import_matches_symbol(
 
 
 # ==========================================================
-# NORMALIZATION
-# ==========================================================
-
-MAX_USAGE_DETAILS = 15
-
-
-def _normalize_references(references):
-    """
-    Deduplicates scalar consumer lists and caps detail lists.
-
-    Detail records remain dictionaries and therefore are not
-    converted through set().
-    """
-    for data in references.values():
-        for key, values in data.items():
-            if not isinstance(values, list):
-                continue
-
-            if key.endswith("_detail"):
-                data[key] = values[:MAX_USAGE_DETAILS]
-                continue
-
-            if all(isinstance(value, str) for value in values):
-                data[key] = sorted(set(values))
-
-    return references
-
-
-# ==========================================================
 # SYMBOL REFERENCE BUILDING
 # ==========================================================
 
@@ -319,34 +174,32 @@ def build_symbol_references(
     target_symbols,
     root_path,
     definer_module=None,
+    reference_index=None,
 ):
     """
-    Builds reference facts for target symbols.
+    Builds reference facts for target symbols using the run-scoped single-pass reference index.
+    """
+    if reference_index is not None:
+        return reference_index.build_symbol_references(
+            target_symbols, definer_module=definer_module
+        )
 
-    Usage categories:
+    from .index import build_repository_reference_index
 
-        called_by
-            Confirmed direct runtime calls.
+    index = build_repository_reference_index(modules, root_path)
+    return index.build_symbol_references(
+        target_symbols, definer_module=definer_module
+    )
 
-        callback_called
-            Confirmed target callables passed as arguments.
 
-        event_bound_by
-            Explicit event/subscription bindings.
-
-        called_by_ambiguous
-            Heuristic short-name matches.
-
-        imported_from
-            Confirmed imports.
-
-        inherited_by
-            Confirmed inheritance relationships.
-
-        qualified_refs
-            Confirmed non-call qualified attribute references.
-
-    Ambiguous matches never become confirmed consumers.
+def _legacy_build_symbol_references(
+    modules,
+    target_symbols,
+    root_path,
+    definer_module=None,
+):
+    """
+    Legacy reference extraction path preserved as a test/reference helper.
     """
     bare_symbols = set(target_symbols)
 
