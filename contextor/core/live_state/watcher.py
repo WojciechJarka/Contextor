@@ -326,41 +326,71 @@ class DesktopLiveEventFeed(_PollingLiveWorker):
     def poll_once(self) -> None:
         if not self._poll_lock.acquire(blocking=False):
             return
+
         try:
-            try:
-                response = self.client.get_events(
-                    after_seq=self._last_seq,
-                    limit=100,
-                )
-            except (OSError, EOFError, TimeoutError, ConnectionError):
-                return
+            gap_reported = False
 
-            if response.get("status") != "ok":
-                return
+            while True:
+                try:
+                    response = self.client.get_events(
+                        after_seq=self._last_seq,
+                        limit=100,
+                    )
+                except (OSError, EOFError, TimeoutError, ConnectionError):
+                    return
 
-            if response.get("activity_resync_required"):
-                from datetime import datetime, timezone
-                self._emit_status(
-                    "[LIVE] Activity stream gap detected; some status events were not retained",
-                    event={
-                        "category": "ACTIVITY",
-                        "operation": "activity_gap",
-                        "timestamp": datetime.now(timezone.utc).isoformat(),
-                    },
-                )
+                if response.get("status") != "ok":
+                    return
 
-            events = response.get("events", [])
-            for event in events:
-                message = self._message(event)
-                if message:
-                    self._emit_status(message, event)
+                if response.get("activity_resync_required") and not gap_reported:
+                    from datetime import datetime, timezone
 
-                seq = event.get("seq")
-                if isinstance(seq, int) and seq > self._last_seq:
-                    self._last_seq = seq
+                    self._emit_status(
+                        "[LIVE] Activity stream gap detected; some status events were not retained",
+                        event={
+                            "category": "ACTIVITY",
+                            "operation": "activity_gap",
+                            "timestamp": datetime.now(timezone.utc).isoformat(),
+                        },
+                    )
+                    gap_reported = True
 
-            latest_seq = response.get("latest_seq")
-            if isinstance(latest_seq, int) and latest_seq > self._last_seq:
-                self._last_seq = latest_seq
+                events = response.get("events", [])
+
+                previous_cursor = self._last_seq
+
+                for event in events:
+                    seq = event.get("seq")
+
+                    # Defensive duplicate protection.
+                    if isinstance(seq, int) and seq <= self._last_seq:
+                        continue
+
+                    message = self._message(event)
+                    if message:
+                        self._emit_status(message, event)
+
+                    if isinstance(seq, int):
+                        self._last_seq = seq
+
+                # No more pages.
+                if not response.get("truncated", False):
+                    break
+
+                # Fail closed against an impossible/non-progressing page.
+                # Never spin forever and never jump to latest_seq.
+                if self._last_seq == previous_cursor:
+                    from datetime import datetime, timezone
+
+                    self._emit_status(
+                        "[LIVE] Activity stream pagination stalled",
+                        event={
+                            "category": "ACTIVITY",
+                            "operation": "activity_pagination_stalled",
+                            "timestamp": datetime.now(timezone.utc).isoformat(),
+                        },
+                    )
+                    break
+
         finally:
             self._poll_lock.release()

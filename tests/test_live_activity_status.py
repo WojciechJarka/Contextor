@@ -6,17 +6,19 @@ Covers all concrete correctness and evidence requirements:
 3. Rootless positional string is not repository path
 4. Rootless tool emits once to each active repository
 5. Noncanonical status/activity does not replace last_live_state
-6. Over 100 activity events are retained and not silently lost & activity gap detection
-7. Authoritative Desktop full analysis event & first-run cursor handoff
-8. Event timestamp authoritativeness & invariance to drain delay
-9. Single-event watcher & MCP update semantics
-10. Canonical continuity isolation from >100 MCP telemetry events
-11. Central MCP wrapper read-only success
-12. Central MCP wrapper failure re-raise & logging
-13. MCP analyze_project wrapper & canonical publication separation
-14. All 24 registered FastMCP tools coverage & registry synchronization
-15. Real server-to-GUI burst ordering, zero dropped events & zero duplicates
-16. Desktop vs MCP full analysis publication equivalence
+6. DesktopLiveEventFeed paginates >100 events without loss across pages
+7. DesktopLiveEventFeed retention gap reports once and consumes all retained pages
+8. Over 100 activity events are retained and not silently lost & activity gap detection
+9. Authoritative Desktop full analysis event & first-run cursor handoff
+10. Event timestamp authoritativeness & invariance to drain delay
+11. Single-event watcher & MCP update semantics
+12. Canonical continuity isolation from >100 MCP telemetry events
+13. Central MCP wrapper read-only success
+14. Central MCP wrapper failure re-raise & logging
+15. MCP analyze_project wrapper & canonical publication separation
+16. All 24 registered FastMCP tools coverage & registry synchronization
+17. Real server-to-GUI burst ordering, zero dropped events & zero duplicates
+18. Desktop vs MCP full analysis publication equivalence
 """
 
 import inspect
@@ -241,6 +243,78 @@ def test_noncanonical_status_does_not_replace_last_live_state(live_server_instan
 
     # last_live_state advances to rev 6
     assert controller.last_live_state["revision"] == 6
+
+
+def test_feed_paginates_more_than_100_events_without_loss(live_server_instance):
+    server, client = live_server_instance
+    delivered_seqs = []
+
+    def status_callback(msg, event=None):
+        if event and "seq" in event:
+            delivered_seqs.append(event["seq"])
+
+    feed = DesktopLiveEventFeed(client, status_callback, initial_seq=0)
+
+    # Create 250 MCP_CALL / LIVE_STATE events before polling
+    for i in range(125):
+        client.publish(SimpleNamespace(modules={}, revision=10 + i), origin="desktop_analysis")
+        client.record_activity("MCP_CALL", tool=f"tool_{i}", source="mcp")
+
+    assert server._activity_seq == 250
+
+    # Call feed.poll_once() ONCE (page size remains 100 on each request)
+    feed.poll_once()
+
+    assert len(delivered_seqs) == 250
+    assert delivered_seqs == list(range(1, 251))
+    assert len(delivered_seqs) == len(set(delivered_seqs))
+    assert feed._last_seq == 250
+
+
+def test_feed_retention_gap_reports_once_and_consumes_all_retained_pages():
+    server = CanonicalLiveServer(state=SimpleNamespace(modules={}, revision=1), revision=1, retention=150)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    client = LiveStateClient(server.endpoint)
+
+    delivered_seqs = []
+    gap_events = []
+
+    def status_callback(msg, event=None):
+        if event:
+            if event.get("operation") == "activity_gap":
+                gap_events.append(event)
+            if "seq" in event:
+                delivered_seqs.append(event["seq"])
+
+    feed = DesktopLiveEventFeed(client, status_callback, initial_seq=0)
+
+    try:
+        # Create 350 events so retention=150 keeps events 201..350 (gap for 1..200)
+        for i in range(350):
+            client.record_activity("MCP_CALL", tool=f"t_{i}", source="mcp")
+
+        assert server._activity_seq == 350
+        assert len(server._events) == 150
+        retained_seqs = [e["seq"] for e in server._events]
+        assert retained_seqs == list(range(201, 351))
+
+        # Call poll_once() ONCE
+        feed.poll_once()
+
+        # Exactly 1 gap event reported
+        assert len(gap_events) == 1
+        assert gap_events[0]["category"] == "ACTIVITY"
+        assert gap_events[0]["operation"] == "activity_gap"
+
+        # All 150 retained events delivered across multiple 100-event pages in sequence order
+        assert len(delivered_seqs) == 150
+        assert delivered_seqs == list(range(201, 351))
+        assert len(delivered_seqs) == len(set(delivered_seqs))
+        assert feed._last_seq == 350
+    finally:
+        server.close()
+        thread.join(timeout=2)
 
 
 def test_over_100_activity_events_are_not_silently_lost(live_server_instance):
