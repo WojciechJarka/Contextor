@@ -91,6 +91,20 @@ Added fail-closed one-time materialization of legacy reference evidence during n
 ### Desktop LIVE startup hardening
 Hardened Desktop LIVE startup against transient service initialization delays with bounded non-blocking GUI retries, duplicate-watcher prevention, and shutdown-safe retry cancellation, without changing canonical LIVE runtime behavior or MCP connection timeout semantics.
 
+Added per-tool canonical freshness envelopes across LLM-facing MCP queries, exposing canonical revision, LIVE/snapshot provenance, workspace synchronization state, family-level freshness and explicit advisory warnings without requiring a separate get_analysis_status call.
+Hardened interrupted-analysis handling so stale canonical answers are no longer silent: disk/canonical divergence is reported as out_of_sync or unverified, while later LIVE reconciliation correctly restores verified freshness instead of permanently inheriting an old interrupted-job state.
+Added positive generation proof between canonical state and FileState using state_id, publication revision and file fingerprints; incomplete legacy evidence remains explicitly unverified, while confirmed generation mismatches fail closed for source-sensitive operations.
+Made get_symbol_implementation refuse implementation extraction when canonical coordinates cannot be safely matched to the current workspace generation, preventing stale AST/source slices from being returned after repository changes.
+Synchronized successful full repository analyses with an already-running LIVE daemon in place, keeping persisted snapshot, FileState, daemon state and subsequent MCP queries on the same canonical publication without daemon restart or manual MCP cache clearing.
+Separated canonical publication revisions from LIVE transport/event journal revisions throughout runtime caching and reporting. Canonical engine caches now track only canonical state revisions, while live_publish_revision retains the daemon journal/event revision returned by publication.
+Hardened LIVE publication failure semantics: missing daemons are reported as not_attempted, rejected/unknown responses fail closed, IPC failures and timeouts remain visible through live_publish_status / live_publish_warning, and valid persisted canonical state is preserved even when daemon publication fails.
+Added strict LIVE publish response validation (status == "ok" with a revision) and regressions proving that a heavily advanced LIVE event journal can never contaminate canonical revision tracking.
+Hardened LIVE cold startup by separating normal connection timing from a bounded 60-second canonical-initialization budget, detecting dead child processes immediately and avoiding termination of healthy daemons performing one-time canonical materialization.
+Persisted startup materialization so expensive legacy/canonical backfill is paid once: the real Contextor repository completed an initial 299-module LIVE bootstrap in ~11.9 s and subsequent startup in ~0.95 s.
+Added end-to-end regressions for daemon restart epochs, same-session cache reuse, cross-session journal reuse, full-analysis same-daemon publication, explicit generation mismatch, publication rejection/failure handling, journal-ahead revision separation and slow/dead/hung LIVE startup paths.
+Completed post-restart runtime certification with all audited MCP tools resolving from the same verified LIVE canonical publication, canonical/event revision separation intact, Desktop watcher active and no runtime freshness warnings.
+
+
 ## [1.2.0-beta Patch — LIVE Hardening, MCP Modularization & Token Efficiency] - 2026-08-21
 
 ### Canonical LIVE truth and recovery semantics

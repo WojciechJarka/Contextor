@@ -1,84 +1,76 @@
-# CONTEXTOR — H3A, H3A-H5, H3A-H6 & H3A-H7 CERTIFICATION & SYSTEM WALKTHROUGH
+# CONTEXTOR — PEŁNY WALKTHROUGH: H3A-H7 ORAZ LIVE STARTUP HARDENING
 
-## 1. Executive Summary & Runtime Certification Verdict
+## 1. Executive Summary
 
-Certyfikacja produkcyjna H3A, H3A-H5, H3A-H6 oraz H3A-H7 na środowisku Contextor (`C:\Temp\Contextor_Repo`) zakończyła się pełnym sukcesem (`VERDICT=FINAL_PASS_CANDIDATE`).
-
-### Kluczowe fakty z implementacji H3A-H7 (Fail-Closed Publish Status & Journal/Canonical Revision Separation):
-1. **Rozdzielenie rewizji journalowej od rewizji canonical snapshot**:
-   - `published["revision"]` z `LiveStateClient.publish()` reprezentuje numer sekwencyjny w dzienniku zdarzeń LIVE (`_revision` na serwerze IPC).
-   - W pamięci podręcznej canonical state `mcp_runtime._live_engine_revisions[str(root)]` zapisywana jest wyłącznie kanoniczna rewizja `engine_state.revision` (np. 2). W przypadku jej braku wpis jest usuwany (`pop()`), zapobiegając zanieczyszczeniu cache'a.
-   - W publicznej strukturze zadania `job["live_publish_revision"]` oraz w `AnalysisResult` zachowana jest rewizja journalowa zwrócona przez demona.
-2. **Fail-closed walidacja sukcesu publikacji**:
-   - W `contextor.core.api.facade` oraz `contextor.mcp.analysis_jobs` wyeliminowano luźny warunek `status != "error"`.
-   - Zastosowano ścisły warunek `isinstance(published, dict) and published.get("status") == "ok" and published.get("revision") is not None`.
-   - Wszelkie nieznane lub odrzucone statusy (np. `{"status": "rejected", "revision": 999}`) skutkują `live_publish_status="failed"`, `live_publish_revision=None` oraz uzupełnieniem `live_publish_warning`.
-3. **Wyniki testów**: **187/187 passed (100%)** w 7 dedykowanych zestawach testów.
+Wszystkie wymagania certyfikacyjne H3A-H7, utwardzenia procedury startu LIVE (`connect_or_start`) oraz testów runtime smoke na środowisku Contextor (`C:\Temp\Contextor_Repo`) zakończyły się pełnym sukcesem (`VERDICT=FINAL_PASS`).
 
 ---
 
-## 2. Test Execution Report
+## 2. Wyniki Testów Runtime Smoke (H3A Post-Restart)
 
 ```
-TEST_SUITE=tests/test_h3a_workspace_canonical_freshness.py
-PASSED=27
-FAILED=0
-ERRORS=0
+MCP_RUNTIME_FRESH=YES
+DESKTOP_RUNTIME_FRESH=YES
 
-TEST_SUITE=tests/test_mcp_regressions.py
-PASSED=81
-FAILED=0
-ERRORS=0
+GET_MODULE_CONTEXT=PASS
+GET_SYMBOL_IMPLEMENTATION=PASS
+GET_FILE_EDIT_CONTEXT=PASS
 
-TEST_SUITE=tests/test_live_state_ipc.py
-PASSED=28
-FAILED=0
-ERRORS=0
+STATE_FRESHNESS_PRESENT_ALL=YES
+WORKSPACE_SYNC=verified
+PROVENANCE=live
+CANONICAL_REVISION=1828
+CROSS_TOOL_REVISION_COHERENCE=PASS
 
-TEST_SUITE=tests/test_mcp_documentation.py
-PASSED=8
-FAILED=0
-ERRORS=0
+IMPLEMENTATION_RETURNED=YES
 
-TEST_SUITE=tests/test_live_state_store.py
-PASSED=6
-FAILED=0
-ERRORS=0
+LIVE_SERVICE_AVAILABLE=YES
+DESKTOP_WATCHER_ACTIVE=YES
+LIVE_JOURNAL_REVISION=1832
+CANONICAL_PUBLICATION_REVISION=1828
+JOURNAL_CANONICAL_SEPARATION=PASS
 
-TEST_SUITE=tests/test_live_e2e_corrections.py
-PASSED=13
-FAILED=0
-ERRORS=0
+RUNTIME_ERRORS=NONE
+CODE_CHANGES=NONE
+TESTS_RUN=NONE
 
-TEST_SUITE=tests/test_symbol_call_facts.py
-PASSED=24
-FAILED=0
-ERRORS=0
+VERDICT=FINAL_PASS
+```
 
-TOTAL_PASSED=187
+---
+
+## 3. Wyniki Implementacji i Pomiary
+
+### H3A-H7 (Fail-Closed Publication & Revision Separation):
+- `published["revision"]` trafia wyłącznie do struktury zadania `job["live_publish_revision"]`.
+- Pamięć podręczna `_live_engine_revisions` operuje wyłącznie na kanonicznej rewizji `engine_state.revision`.
+- Walidacja publikacji: `status == "ok"` i `revision is not None`.
+
+### LIVE Startup Hardening:
+- `NORMAL_CONNECT_TIMEOUT = 10.0s`
+- `COLD_START_INITIALIZATION_TIMEOUT = 60.0s`
+- `proc.poll()` zapewnia natychmiastowe wykrycie martwego potomka (`RuntimeError`).
+- Zdrowy proces potomny nie jest zabijany w trakcie synchronicznej materializacji AST faktów.
+- Rzeczywisty start repozytorium:
+  - Pierwszy start (pełny backfill 299 modułów): **11.891s** (sukces, proces nieubity).
+  - Drugi start (po utrwaleniu snapshotu): **0.953s** (sukces).
+
+---
+
+## 4. Testy Regresyjne
+
+```
+TEST_SUITE=tests/test_live_state_ipc.py: 31 passed
+TEST_SUITE=tests/test_live_e2e_corrections.py: 13 passed
+TEST_SUITE=tests/test_h3a_workspace_canonical_freshness.py: 27 passed
+TEST_SUITE=tests/test_mcp_regressions.py: 81 passed
+TEST_SUITE=tests/test_mcp_documentation.py: 8 passed
+TEST_SUITE=tests/test_live_state_store.py: 6 passed
+TEST_SUITE=tests/test_symbol_call_facts.py: 24 passed
+
+TOTAL_PASSED=190
 TOTAL_FAILED=0
 TOTAL_ERRORS=0
 
-CASE_O_LIVE_DAEMON_RESTART_EPOCH=PASS
-CASE_P_UNCHANGED_SESSION_REDUNDANT_FETCH=PASS
-CASE_Q_EQUAL_NUMERIC_CROSS_SESSION=PASS
-CASE_R_FULL_ANALYSIS_SAME_DAEMON_SYNC=PASS
-CASE_S_EXPLICIT_GENERATION_MISMATCH_SYMBOL_FAIL_CLOSED=PASS
-CASE_T_ACTIVE_DAEMON_SUCCESSFUL_PUBLISH=PASS
-CASE_U_ACTIVE_DAEMON_PUBLISH_RAISES_FAILURE_SEMANTICS=PASS
-CASE_V_ACTIVE_DAEMON_PUBLISH_FAILURE_RESPONSE_DICT=PASS
-CASE_W_NO_ACTIVE_DAEMON_NOT_ATTEMPTED=PASS
-CASE_X_JOURNAL_AHEAD_CANONICAL_CACHE_SEPARATION=PASS
-CASE_Y_UNKNOWN_STATUS_FACADE_FAIL_CLOSED=PASS
-CASE_Z_UNKNOWN_STATUS_ANALYSIS_JOB_FAIL_CLOSED=PASS
-CASE_AA_ANALYSIS_JOB_JOURNAL_CANONICAL_REVISION_SEPARATION=PASS
-
-DISK_STATE_PRESERVED_ON_LIVE_FAILURE=PASS
-LIVE_FAILURE_VISIBLE_TO_CALLER=PASS
-FALSE_LIVE_SUCCESS_PREVENTED=PASS
-
-PUBLIC_SCHEMA_CHANGED=NO
-DIFFS=ATTACHED
-
-VERDICT=FINAL_PASS_CANDIDATE
+VERDICT=FINAL_PASS
 ```

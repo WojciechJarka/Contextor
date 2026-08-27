@@ -271,12 +271,19 @@ def _spawn_runtime_subprocess(
             raise fallback_exc from exc
 
 
+DEFAULT_CONNECT_TIMEOUT: float = 10.0
+DEFAULT_COLD_START_TIMEOUT: float = 60.0
+NORMAL_CONNECT_TIMEOUT = DEFAULT_CONNECT_TIMEOUT
+COLD_START_INITIALIZATION_TIMEOUT = DEFAULT_COLD_START_TIMEOUT
+
+
 def connect_or_start(
     repo_path: str | Path,
     *,
     owner_pid: int | None = None,
     owner_token: str | None = None,
-    timeout: float = 10.0,
+    timeout: float = DEFAULT_CONNECT_TIMEOUT,
+    cold_start_timeout: float = DEFAULT_COLD_START_TIMEOUT,
 ) -> LiveStateClient:
     root = Path(repo_path).resolve()
     existing_ep = _read_endpoint(root)
@@ -352,7 +359,8 @@ def connect_or_start(
     target = endpoint_file(root)
     target.parent.mkdir(parents=True, exist_ok=True)
     start_lock = target.with_name("live_service_start.lock")
-    deadline = time.monotonic() + timeout
+    effective_startup_budget = max(timeout, cold_start_timeout)
+    deadline = time.monotonic() + effective_startup_budget
     lock_fd = None
     while time.monotonic() < deadline:
         existing = connect(root)
@@ -376,7 +384,7 @@ def connect_or_start(
             break
         except FileExistsError:
             try:
-                if time.time() - start_lock.stat().st_mtime > timeout:
+                if time.time() - start_lock.stat().st_mtime > effective_startup_budget:
                     start_lock.unlink()
             except FileNotFoundError:
                 pass
@@ -422,7 +430,7 @@ def connect_or_start(
 
         proc = _spawn_runtime_subprocess(cmd, root, env)
 
-        spawn_deadline = time.monotonic() + timeout
+        spawn_deadline = time.monotonic() + effective_startup_budget
         while time.monotonic() < spawn_deadline:
             client = connect(root)
             if client:
@@ -459,10 +467,20 @@ def connect_or_start(
                         owner_pid=ep.owner_pid,
                         owner_token=ep.owner_token,
                     )
+
+            ret = proc.poll()
+            if ret is not None:
+                raise RuntimeError(
+                    f"Canonical LIVE service process exited prematurely with code {ret} for {root}"
+                )
+
             time.sleep(0.05)
+
         if _is_pid_alive(proc.pid):
             _terminate_pid_tree(proc.pid)
-        raise TimeoutError(f"Canonical LIVE service did not start for {root}")
+        raise TimeoutError(
+            f"Canonical LIVE service startup and canonical initialization timed out after {effective_startup_budget}s for {root}"
+        )
     finally:
         try:
             os.close(lock_fd)

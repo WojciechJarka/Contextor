@@ -898,4 +898,140 @@ def test_get_events_continuity_gap_detection_and_retention_contract():
     assert len(r_neg["events"]) == 20
 
 
+def test_connect_or_start_slow_healthy_startup(tmp_path, monkeypatch):
+    """Regression: Slow healthy startup where endpoint appears after normal connection timeout
+    but within cold-start initialization budget.
+    EXPECT:
+    - Child process is NOT terminated prematurely.
+    - connect_or_start succeeds.
+    """
+    cache = tmp_path / "cache"
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    PersistentIdentityRegistry(str(repo))
+    monkeypatch.setenv("CONTEXTOR_CACHE_DIR", str(cache))
+
+    # Helper script that sleeps 0.25s before writing endpoint and serving
+    helper = tmp_path / "delayed_server.py"
+    helper.write_text(
+        "import sys, time, json, os, pathlib\n"
+        "from contextor.core.live_state import CanonicalLiveServer\n"
+        "from contextor.core.live_state.runtime import endpoint_file\n"
+        "time.sleep(0.25)\n"
+        "server = CanonicalLiveServer(None, revision=1)\n"
+        "ep_file = endpoint_file(pathlib.Path(sys.argv[1]))\n"
+        "ep_file.parent.mkdir(parents=True, exist_ok=True)\n"
+        "ep_file.write_text(json.dumps({\n"
+        "    'host': server.endpoint.host,\n"
+        "    'port': server.endpoint.port,\n"
+        "    'authkey_hex': server.endpoint.authkey_hex,\n"
+        "    'pid': os.getpid(),\n"
+        "    'repo_id': 'test_repo',\n"
+        "    'root_path': sys.argv[1],\n"
+        "    'owner_token': 'delayed_token',\n"
+        "}), encoding='utf-8')\n"
+        "server.serve_forever()\n",
+        encoding="utf-8",
+    )
+
+    # Monkeypatch _spawn_runtime_subprocess to run our delayed server
+    from contextor.core.live_state import runtime as runtime_mod
+    orig_spawn = runtime_mod._spawn_runtime_subprocess
+
+    def mock_spawn(cmd, cwd, env):
+        delayed_cmd = [sys.executable, str(helper), str(repo)]
+        return orig_spawn(delayed_cmd, cwd, env)
+
+    monkeypatch.setattr(runtime_mod, "_spawn_runtime_subprocess", mock_spawn)
+
+    # Normal connect timeout is short (0.08s), but cold start timeout is 2.0s
+    t0 = time.monotonic()
+    client = runtime_mod.connect_or_start(
+        repo,
+        owner_token="delayed_token",
+        timeout=0.08,
+        cold_start_timeout=2.0,
+    )
+    elapsed = time.monotonic() - t0
+
+    assert client is not None
+    assert elapsed >= 0.20  # Verified it waited past 0.08s without killing the child
+    status = client.ping()
+    assert status.get("status") == "ok"
+    client.request("shutdown")
+
+
+def test_connect_or_start_dead_child_fast_failure(tmp_path, monkeypatch):
+    """Regression: Dead child process fails fast with exit code rather than waiting for timeout.
+    """
+    cache = tmp_path / "cache"
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    PersistentIdentityRegistry(str(repo))
+    monkeypatch.setenv("CONTEXTOR_CACHE_DIR", str(cache))
+
+    from contextor.core.live_state import runtime as runtime_mod
+    orig_spawn = runtime_mod._spawn_runtime_subprocess
+
+    # Mock subprocess that immediately exits with code 42
+    def mock_spawn(cmd, cwd, env):
+        exit_cmd = [sys.executable, "-c", "import sys; sys.exit(42)"]
+        return orig_spawn(exit_cmd, cwd, env)
+
+    monkeypatch.setattr(runtime_mod, "_spawn_runtime_subprocess", mock_spawn)
+
+    t0 = time.monotonic()
+    import pytest
+    with pytest.raises(RuntimeError) as exc_info:
+        runtime_mod.connect_or_start(
+            repo,
+            timeout=0.05,
+            cold_start_timeout=10.0,
+        )
+    elapsed = time.monotonic() - t0
+
+    assert "exited prematurely with code 42" in str(exc_info.value)
+    assert elapsed < 1.0  # Fast failure (did not wait 10s)
+
+
+def test_connect_or_start_true_startup_hang(tmp_path, monkeypatch):
+    """Regression: True startup hang terminates child and raises TimeoutError upon hard cold_start_timeout.
+    """
+    cache = tmp_path / "cache"
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    PersistentIdentityRegistry(str(repo))
+    monkeypatch.setenv("CONTEXTOR_CACHE_DIR", str(cache))
+
+    from contextor.core.live_state import runtime as runtime_mod
+    orig_spawn = runtime_mod._spawn_runtime_subprocess
+
+    spawned_pids = []
+
+    # Mock subprocess that hangs (sleeps 30s) without publishing endpoint
+    def mock_spawn(cmd, cwd, env):
+        hang_cmd = [sys.executable, "-c", "import time; time.sleep(30)"]
+        proc = orig_spawn(hang_cmd, cwd, env)
+        spawned_pids.append(proc.pid)
+        return proc
+
+    monkeypatch.setattr(runtime_mod, "_spawn_runtime_subprocess", mock_spawn)
+
+    import pytest
+    with pytest.raises(TimeoutError) as exc_info:
+        runtime_mod.connect_or_start(
+            repo,
+            timeout=0.05,
+            cold_start_timeout=0.25,
+        )
+
+    assert "timed out after 0.25s" in str(exc_info.value)
+    assert len(spawned_pids) == 1
+    child_pid = spawned_pids[0]
+
+    # Verify child was killed by connect_or_start
+    time.sleep(0.1)
+    assert not runtime_mod._is_pid_alive(child_pid)
+
+
 
