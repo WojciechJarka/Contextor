@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+from contextlib import contextmanager
 import secrets
 import threading
 import time
@@ -38,6 +39,73 @@ ACTIVITY_EVENT_RETENTION = 10_000
 
 
 _MISSING_REVISION = object()
+
+
+def _safe_trace_op(request: dict[str, Any], prefix: str) -> str | None:
+    existing = request.get("trace_op")
+    if existing is not None:
+        try:
+            return str(existing)
+        except Exception:
+            return None
+    try:
+        from contextor.core.runtime_trace import new_trace_operation
+
+        return new_trace_operation(prefix)
+    except Exception:
+        return None
+
+
+def _safe_trace_event(domain: str, event: str, **fields: Any) -> None:
+    try:
+        from contextor.core.runtime_trace import trace_event
+
+        trace_event(domain, event, **fields)
+    except Exception:
+        pass
+
+
+@contextmanager
+def _trace_operation_context(op: str | None):
+    if op is None:
+        yield
+        return
+    try:
+        from contextor.core.runtime_trace import trace_operation
+        manager = trace_operation(op)
+    except Exception:
+        yield
+        return
+
+    entered = False
+    try:
+        try:
+            manager.__enter__()
+            entered = True
+        except Exception:
+            yield
+            return
+
+        try:
+            yield
+        except BaseException:
+            import sys
+
+            exc_info = sys.exc_info()
+            if entered:
+                try:
+                    manager.__exit__(*exc_info)
+                except Exception:
+                    pass
+            raise
+        else:
+            if entered:
+                try:
+                    manager.__exit__(None, None, None)
+                except Exception:
+                    pass
+    finally:
+        pass
 
 
 def _raw_state_revision(state: Any) -> Any:
@@ -227,17 +295,12 @@ class CanonicalLiveServer:
 
         self._events.append(event)
         del self._events[:-self._retention]
-        try:
-            from contextor.core.runtime_trace import trace_event
-
-            trace_event(
-                "LIVE", "ACTIVITY_APPEND", op=trace_op,
-                rev=self._revision, seq=self._activity_seq,
-                category=category, operation=operation,
-                status=event.get("status"),
-            )
-        except Exception:
-            pass
+        _safe_trace_event(
+            "LIVE", "ACTIVITY_APPEND", op=trace_op,
+            rev=self._revision, seq=self._activity_seq,
+            category=category, operation=operation,
+            status=event.get("status"),
+        )
         return event
 
     def serve_forever(self) -> None:
@@ -275,15 +338,16 @@ class CanonicalLiveServer:
             if operation == "snapshot":
                 return {"status": "ok", "revision": self._revision, "state": self._state}
             if operation == "publish":
-                from contextor.core.runtime_trace import new_trace_operation, trace_event
-
-                trace_op = request.get("trace_op") or new_trace_operation("p")
-                request = {**request, "trace_op": trace_op}
-                trace_event("LIVE", "PUBLISH_RECEIVED", op=trace_op, rev=self._revision)
+                previous_revision = self._revision
+                trace_op = _safe_trace_op(request, "p")
+                if trace_op is not None:
+                    request = {**request, "trace_op": trace_op}
+                _safe_trace_event("LIVE", "PUBLISH_RECEIVED", op=trace_op, rev=previous_revision)
                 state = request.get("state")
                 try:
                     state_rev = _extract_state_revision(state)
                 except ValueError as exc:
+                    _safe_trace_event("LIVE", "PUBLISH_FAIL", op=trace_op, rev=previous_revision, status="invalid_canonical_revision", candidate_rev=_raw_state_revision(state))
                     return {
                         "status": "error",
                         "error": "invalid_canonical_revision",
@@ -294,6 +358,7 @@ class CanonicalLiveServer:
 
                 if state_rev is not None:
                     if state_rev < expected_revision:
+                        _safe_trace_event("LIVE", "PUBLISH_FAIL", op=trace_op, rev=previous_revision, status="non_monotonic_canonical_revision", candidate_rev=state_rev)
                         return {
                             "status": "error",
                             "error": "non_monotonic_canonical_revision",
@@ -302,6 +367,7 @@ class CanonicalLiveServer:
                             "expected_revision": expected_revision,
                         }
                     if state_rev > expected_revision:
+                        _safe_trace_event("LIVE", "PUBLISH_FAIL", op=trace_op, rev=previous_revision, status="canonical_revision_discontinuity", candidate_rev=state_rev)
                         return {
                             "status": "error",
                             "error": "canonical_revision_discontinuity",
@@ -311,6 +377,7 @@ class CanonicalLiveServer:
                         }
                 else:
                     if not _bind_state_revision(state, expected_revision):
+                        _safe_trace_event("LIVE", "PUBLISH_FAIL", op=trace_op, rev=previous_revision, status="canonical_revision_binding_failed", candidate_rev=None)
                         return {
                             "status": "error",
                             "error": "canonical_revision_binding_failed",
@@ -322,7 +389,7 @@ class CanonicalLiveServer:
                 self._state = state
                 self._revision = state_rev
                 evt = self._record_event("publish", request, category="LIVE_STATE")
-                trace_event("LIVE", "CANONICAL_PUBLISH", op=trace_op, rev_before=state_rev - 1, rev_after=self._revision, seq=evt["seq"], origin=request.get("origin"))
+                _safe_trace_event("LIVE", "CANONICAL_PUBLISH", op=trace_op, rev_before=previous_revision, rev_after=self._revision, seq=evt["seq"], origin=request.get("origin"))
                 return {"status": "ok", "revision": self._revision, "seq": evt["seq"]}
             if operation in {"status", "record_activity", "mcp_call"}:
                 cat = request.get("category", "MCP_CALL" if operation == "mcp_call" else "LIVE_STATE")
@@ -339,16 +406,15 @@ class CanonicalLiveServer:
                 previous_revision = self._revision
                 expected_revision = previous_revision + 1
                 file_path = str(request.get("file_path", ""))
-                from contextor.core.runtime_trace import new_trace_operation, trace_event, trace_operation
-
-                trace_op = request.get("trace_op") or new_trace_operation("u")
-                request = {**request, "trace_op": trace_op}
-                trace_event("LIVE", "UPDATE_RECEIVED", op=trace_op, path=file_path, rev=previous_revision)
+                trace_op = _safe_trace_op(request, "u")
+                if trace_op is not None:
+                    request = {**request, "trace_op": trace_op}
+                _safe_trace_event("LIVE", "UPDATE_RECEIVED", op=trace_op, path=file_path, rev=previous_revision)
 
                 try:
                     candidate_state = _clone_state_for_update(previous_state)
                 except Exception as exc:
-                    trace_event("LIVE", "PUBLISH_FAIL", op=trace_op, rev=previous_revision, err=exc)
+                    _safe_trace_event("LIVE", "UPDATE_FAIL", op=trace_op, path=file_path, rev=previous_revision, status="canonical_state_clone_failed", err=exc)
                     return {
                         "status": "error",
                         "error": "canonical_state_clone_failed",
@@ -356,23 +422,24 @@ class CanonicalLiveServer:
                         "expected_revision": expected_revision,
                         "detail": str(exc),
                     }
-                trace_event("LIVE", "CLONE_END", op=trace_op, path=file_path, rev=previous_revision)
+                _safe_trace_event("LIVE", "CLONE_END", op=trace_op, path=file_path, rev=previous_revision)
 
                 # IMPORTANT: updater operates ONLY on candidate_state.
                 # It must never receive previous_state/self._state directly.
-                trace_event("LIVE", "UPDATER_START", op=trace_op, path=file_path)
+                _safe_trace_event("LIVE", "UPDATER_START", op=trace_op, path=file_path)
                 updater_started = time.monotonic()
                 try:
-                    with trace_operation(trace_op):
+                    with _trace_operation_context(trace_op):
                         result = self._updater(candidate_state, file_path)
                 except Exception as exc:
-                    trace_event("LIVE", "UPDATER_FAIL", op=trace_op, path=file_path, elapsed_ms=(time.monotonic() - updater_started) * 1000.0, err=exc)
+                    _safe_trace_event("LIVE", "UPDATER_FAIL", op=trace_op, path=file_path, elapsed_ms=(time.monotonic() - updater_started) * 1000.0, err=exc)
                     raise
-                trace_event("LIVE", "UPDATER_END", op=trace_op, path=file_path, elapsed_ms=(time.monotonic() - updater_started) * 1000.0, status=getattr(result, "status", None))
+                _safe_trace_event("LIVE", "UPDATER_END", op=trace_op, path=file_path, elapsed_ms=(time.monotonic() - updater_started) * 1000.0, status=getattr(result, "status", None))
 
                 try:
                     state_rev = _extract_state_revision(candidate_state)
                 except ValueError:
+                    _safe_trace_event("LIVE", "UPDATE_FAIL", op=trace_op, path=file_path, rev=previous_revision, status="invalid_canonical_revision", candidate_rev=_raw_state_revision(candidate_state))
                     return {
                         "status": "error",
                         "error": "invalid_canonical_revision",
@@ -383,6 +450,7 @@ class CanonicalLiveServer:
 
                 if state_rev is None:
                     if not _bind_state_revision(candidate_state, expected_revision):
+                        _safe_trace_event("LIVE", "UPDATE_FAIL", op=trace_op, path=file_path, rev=previous_revision, status="canonical_revision_binding_failed", candidate_rev=None)
                         return {
                             "status": "error",
                             "error": "canonical_revision_binding_failed",
@@ -394,6 +462,7 @@ class CanonicalLiveServer:
 
                 elif state_rev == previous_revision:
                     if not _bind_state_revision(candidate_state, expected_revision):
+                        _safe_trace_event("LIVE", "UPDATE_FAIL", op=trace_op, path=file_path, rev=previous_revision, status="canonical_revision_binding_failed", candidate_rev=state_rev)
                         return {
                             "status": "error",
                             "error": "canonical_revision_binding_failed",
@@ -404,6 +473,7 @@ class CanonicalLiveServer:
                     state_rev = expected_revision
 
                 elif state_rev < previous_revision:
+                    _safe_trace_event("LIVE", "UPDATE_FAIL", op=trace_op, path=file_path, rev=previous_revision, status="non_monotonic_canonical_revision", candidate_rev=state_rev)
                     return {
                         "status": "error",
                         "error": "non_monotonic_canonical_revision",
@@ -413,6 +483,7 @@ class CanonicalLiveServer:
                     }
 
                 elif state_rev > expected_revision:
+                    _safe_trace_event("LIVE", "UPDATE_FAIL", op=trace_op, path=file_path, rev=previous_revision, status="canonical_revision_discontinuity", candidate_rev=state_rev)
                     return {
                         "status": "error",
                         "error": "canonical_revision_discontinuity",
@@ -422,6 +493,7 @@ class CanonicalLiveServer:
                     }
 
                 elif state_rev != expected_revision:
+                    _safe_trace_event("LIVE", "UPDATE_FAIL", op=trace_op, path=file_path, rev=previous_revision, status="canonical_revision_discontinuity", candidate_rev=state_rev)
                     return {
                         "status": "error",
                         "error": "canonical_revision_discontinuity",
@@ -432,6 +504,7 @@ class CanonicalLiveServer:
 
                 # Final parity proof before commit.
                 if _extract_state_revision(candidate_state) != expected_revision:
+                    _safe_trace_event("LIVE", "UPDATE_FAIL", op=trace_op, path=file_path, rev=previous_revision, status="canonical_revision_binding_failed", candidate_rev=_raw_state_revision(candidate_state))
                     return {
                         "status": "error",
                         "error": "canonical_revision_binding_failed",
@@ -444,7 +517,7 @@ class CanonicalLiveServer:
                 # Nothing above this line may replace/mutate active canonical ownership.
                 self._state = candidate_state
                 self._revision = expected_revision
-                trace_event("LIVE", "CANONICAL_COMMIT", op=trace_op, path=file_path, rev_before=previous_revision, rev_after=expected_revision)
+                _safe_trace_event("LIVE", "CANONICAL_COMMIT", op=trace_op, path=file_path, rev_before=previous_revision, rev_after=expected_revision)
 
                 evt = self._record_event(
                     "update_file",
@@ -452,7 +525,7 @@ class CanonicalLiveServer:
                     result,
                     category="LIVE_STATE",
                 )
-                trace_event("LIVE", "UPDATE_PUBLISHED", op=trace_op, path=file_path, rev=self._revision, seq=evt["seq"], status=getattr(result, "status", None))
+                _safe_trace_event("LIVE", "UPDATE_PUBLISHED", op=trace_op, path=file_path, rev=self._revision, seq=evt["seq"], status=getattr(result, "status", None))
 
                 return {
                     "status": "ok",

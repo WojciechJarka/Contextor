@@ -1,224 +1,804 @@
-# Contextor runtime LIVE/MCP JSONL trace logger — architectural reconnaissance
+# Runtime trace canonical non-interference correction
 
-Scope: discovery and impact analysis only. No production, test, documentation, or runtime changes were made. No restart, `analyze_project`, `update_file`, or pytest was run.
-
-Contextor MCP was used for architecture, source spans, symbol ownership, callers/consumers, and covering-test discovery. Textual search was used only to confirm literal symbols and paths. Current LIVE canonical evidence reported revision `4449`; `get_project_architecture` returned `data_source=live_canonical_state`, `module_count=314`, and the MCP documentation/tool inventory reports 25 tools.
-
-DESKTOP_SESSION_OWNER={
-    FILE: C:\\Temp\\Contextor_Repo\\contextor\\__main__.py
-    SYMBOL: main -> _run_gui; ContextorGUI.__init__
-    INIT_POINT: contextor.__main__.main dispatches `--gui` to `_run_gui`; ContextorGUI.__init__ creates the Tk controller, loads state, and creates LIVE client/watcher fields. GUI startup calls configure_program_log().
-    SHUTDOWN_POINT: ContextorGUI shutdown/close path in contextor/ui/gui.py calls close_cmd_log(); DesktopLiveWatcher.stop() is the watcher lifecycle release.
-}
-
-CONTEXTOR_ROOT_OWNER={
-    FILE: C:\\Temp\\Contextor_Repo\\contextor\\core\\paths.py
-    SYMBOL: package_root(), state_dir(), repo_cache_dir()
-    EXISTING_LOGS_PATH: state_dir() / "logs" / "contextor-program.log" via program_log_path(); Windows default is `%APPDATA%\\Contextor` unless CONTEXTOR_STATE_DIR overrides it
-}
-
-PROCESS_BOUNDARIES={
-    DESKTOP: contextor.__main__.main -> _run_gui -> ContextorGUI; Tkinter GUI process owning DesktopLiveWatcher and DesktopLiveEventFeed.
-    MCP: contextor.mcp_main.main -> contextor.mcp_server.main; separate MCP stdio/server process with central registration and wrapper telemetry.
-    LIVE: contextor.core.live_state.runtime.main -> run_service; separate localhost multiprocessing.connection service owning CanonicalLiveServer, canonical state, revision, and journal.
-}
-
-Existing cross-process metadata: LIVE IPC exposes LIVE_PROTOCOL_VERSION=3, endpoint host/port/authkey, revision, activity_seq/seq, timestamp, origin/source, operation, status, and optional file_path/error fields. Desktop and MCP clients connect through LiveStateClient; watcher updates use origin `desktop_watcher`.
-
-ACTIVE_TRACE_DISCOVERY_CANDIDATES=[
-    {FILE: C:\\Temp\\Contextor_Repo\\contextor\\core\\live_state\\watcher.py, SYMBOL: DesktopLiveWatcher.__init__/start/poll_once/_handle_poll_error/stop, ROLE: filesystem scan, coalescing/startup reconciliation, update submission, status/error outcome},
-    {FILE: C:\\Temp\\Contextor_Repo\\contextor\\core\\live_state\\ipc.py, SYMBOL: CanonicalLiveServer._record_event/request/publish, ROLE: authoritative revision/activity event journal and IPC boundary},
-    {FILE: C:\\Temp\\Contextor_Repo\\contextor\\core\\live_state\\runtime.py, SYMBOL: run_service/connect/connect_or_start, ROLE: LIVE process lifecycle and client/server startup},
-    {FILE: C:\\Temp\\Contextor_Repo\\contextor\\mcp_server.py, SYMBOL: _instrument_mcp_tool and registration, ROLE: central MCP-call timing/success/error telemetry},
-    {FILE: C:\\Temp\\Contextor_Repo\\contextor\\core\\program_log.py, SYMBOL: program_log_path/configure_program_log/emit_program_log/log_program_event, ROLE: existing process-wide plain-text stdout/stderr mirror},
-    {FILE: C:\\Temp\\Contextor_Repo\\contextor\\ui\\gui.py, SYMBOL: ContextorGUI.__init__/_run_test_suite/analyze/shutdown path, ROLE: Desktop session and UI integration},
-]
-
-LIVE_INSTRUMENTATION_POINTS=[
-    {FILE: C:\\Temp\\Contextor_Repo\\contextor\\core\\live_state\\watcher.py, SYMBOL: DesktopLiveWatcher.poll_once, EVENT: scan/ping, changed-path detection, update start/end/failure and final changed list, REV_AVAILABLE: returned through update response/event feed, ACTIVITY_SEQ_AVAILABLE: returned by LIVE event journal, PATH_AVAILABLE: YES},
-    {FILE: C:\\Temp\\Contextor_Repo\\contextor\\core\\live_state\\watcher.py, SYMBOL: DesktopLiveWatcher._emit, EVENT: human-readable watcher status/error, REV_AVAILABLE: only when response-derived, ACTIVITY_SEQ_AVAILABLE: NO direct field, PATH_AVAILABLE: embedded when applicable},
-    {FILE: C:\\Temp\\Contextor_Repo\\contextor\\core\\live_state\\ipc.py, SYMBOL: CanonicalLiveServer._record_event, EVENT: LIVE_STATE and MCP_CALL event append, REV_AVAILABLE: YES (`canonical_revision`, `revision`), ACTIVITY_SEQ_AVAILABLE: YES (`seq`), PATH_AVAILABLE: YES when result/request carries file_path},
-    {FILE: C:\\Temp\\Contextor_Repo\\contextor\\core\\live_state\\ipc.py, SYMBOL: CanonicalLiveServer.publish, EVENT: publish request boundary, REV_AVAILABLE: YES via server revision/result, ACTIVITY_SEQ_AVAILABLE: YES after record_event, PATH_AVAILABLE: state-dependent},
-    {FILE: C:\\Temp\\Contextor_Repo\\contextor\\mcp\\runtime.py, SYMBOL: publish_live_status, EVENT: MCP status publication, REV_AVAILABLE: via LIVE client event, ACTIVITY_SEQ_AVAILABLE: via LIVE journal, PATH_AVAILABLE: not guaranteed},
-    {FILE: C:\\Temp\\Contextor_Repo\\contextor\\core\\live_state\\runtime.py, SYMBOL: run_service, EVENT: service startup/shutdown boundary, REV_AVAILABLE: YES after server initialization, ACTIVITY_SEQ_AVAILABLE: initial/retained server state, PATH_AVAILABLE: repository root},
-]
-
-Watcher coalescing has no separate named debounce callback: it is embodied by `poll_once()` comparing `_snapshot`, `_startup_pending`, and the current scan. Authoritative revision/activity publication is owned by `CanonicalLiveServer._record_event`; lease/publication internals remain below the analysis/facade/coordinator path.
-
-MCP_INSTRUMENTATION_OWNER={
-    FILE: C:\\Temp\\Contextor_Repo\\contextor\\mcp_server.py
-    SYMBOL: _instrument_mcp_tool
-    CENTRAL_FOR_ALL_25_TOOLS: YES
-    REV_AVAILABLE_WITHOUT_EXTRA_WORK: YES when wrapper reads LIVE-backed response/diagnostics; wrapper is not canonical revision owner
-    TIMING_AVAILABLE: YES
-}
-
-CANONICAL_REVISION_OWNER={FILE: C:\\Temp\\Contextor_Repo\\contextor\\core\\live_state\\ipc.py, SYMBOL: CanonicalLiveServer._revision and publish/request handling}
-ACTIVITY_SEQUENCE_OWNER={FILE: C:\\Temp\\Contextor_Repo\\contextor\\core\\live_state\\ipc.py, SYMBOL: CanonicalLiveServer._activity_seq and _record_event}
-
-Revision is canonical-state revision. `_record_event` stores it as `canonical_revision` for LIVE_STATE events and also exposes current server `revision`. Activity sequence is a separate monotonic journal sequence incremented for recorded LIVE/MCP events.
-
-EXISTING_LOGGING={
-    FACILITY: contextor.core.program_log
-    FILE: C:\\Temp\\Contextor_Repo\\contextor\\core\\program_log.py
-    PATH_OWNER: program_log_path() -> state_dir()/logs/contextor-program.log
-    CONFIGURATION: configure_program_log() mirrors stdout/stderr process-wide through _TeeStream and emits a startup line
-    STRUCTURED_JSONL: NONE found
-    STD_LOGGING: one direct logging.getLogger(...).info call in contextor/core/live_state/runtime.py; no global FileHandler/RotatingFileHandler configuration found
-}
-
-GUI_TEST_SUITE_LOCATION={
-    FILE: C:\\Temp\\Contextor_Repo\\contextor\\ui\\gui.py
-    SYMBOL: ContextorGUI.__init__ (button), ContextorGUI._run_test_suite, ContextorGUI.run_test_suite
-    OPEN_FOLDER_HELPER: contextor.ui.system_actions.handle_open_output_folder is imported; no dedicated test-log open-folder helper found
-    TOOLTIP_MECHANISM: HeaderTooltipManager.bind_tooltip; tooltip says “Run Contextor's complete test suite, including LIVE tests.”
-}
-
-GUI execution delegates to contextor.ui.test_runner.run_test_suite, which launches pytest in a separate interpreter and streams output to the GUI log box.
-
-FOCUSED_TESTS=[
-    C:\\Temp\\Contextor_Repo\\tests\\test_live_desktop_integration.py,
-    C:\\Temp\\Contextor_Repo\\tests\\test_live_watcher_startup_reconciliation.py,
-    C:\\Temp\\Contextor_Repo\\tests\\test_live_activity_status.py,
-    C:\\Temp\\Contextor_Repo\\tests\\test_live_state_ipc.py,
-    C:\\Temp\\Contextor_Repo\\tests\\test_live_e2e_corrections.py,
-    C:\\Temp\\Contextor_Repo\\tests\\test_live_job_object.py,
-    C:\\Temp\\Contextor_Repo\\tests\\test_program_log.py,
-    C:\\Temp\\Contextor_Repo\\tests\\test_gui_live_startup.py,
-    C:\\Temp\\Contextor_Repo\\tests\\test_test_runner.py,
-]
-
-The focused list is grounded in Contextor `tests_covering` results for watcher, IPC, runtime, GUI, and program-log owners plus direct source confirmation.
-
-EXACT_PRODUCTION_FILES_LIKELY_TOUCHED=[
-    C:\\Temp\\Contextor_Repo\\contextor\\core\\program_log.py,
-    C:\\Temp\\Contextor_Repo\\contextor\\core\\paths.py,
-    C:\\Temp\\Contextor_Repo\\contextor\\core\\live_state\\watcher.py,
-    C:\\Temp\\Contextor_Repo\\contextor\\core\\live_state\\ipc.py,
-    C:\\Temp\\Contextor_Repo\\contextor\\core\\live_state\\runtime.py,
-    C:\\Temp\\Contextor_Repo\\contextor\\mcp_server.py,
-    C:\\Temp\\Contextor_Repo\\contextor\\ui\\gui.py,
-    C:\\Temp\\Contextor_Repo\\contextor\\ui\\test_runner.py,
-]
-
-ARCHITECTURAL_BLOCKERS=NONE. Existing logging is plain-text and the LIVE journal is already JSON-safe/in-memory, so ownership boundaries are identifiable. Retention/rotation and cross-process append coordination remain unspecified repository policies.
-
-FILES_CHANGED=NONE
-TESTS_RUN=NONE
-RESTART_REQUIRED=NO
-
----
-
-# Compact LLM-friendly LIVE/MCP runtime JSONL trace — implementation closure
-
-TRACE_SCHEMA=contextor-runtime-trace/v1
-TRACE_DIRECTORY=package_root()/logs
-ACTIVE_POINTER=package_root()/logs/contextor_runtime_active.json
-TRACE_FILENAME_EXAMPLE=contextor_runtime_YYYYMMDD_HHMMSS_mmm_<desktop-pid>.jsonl
-HEADER_RECORD_COUNT=5
-HEADER_IS_VALID_JSONL=YES
-LEGEND_SELF_DOCUMENTING=YES
-CROSS_PROCESS_SESSION_DISCOVERY=active pointer with atomic replacement and 100ms process-local refresh cache
-CROSS_PROCESS_APPEND_STRATEGY=single binary append write per JSONL record (O_APPEND semantics)
-MULTIPROCESS_APPEND_VALID_JSON=YES (focused multiprocess append test passed)
-TRACE_FAILURE_IS_NON_FATAL=YES
-TRACE_PERFORMS_LIVE_IPC=NO
-TRACE_READS_CANONICAL_STATE=NO
-TRACE_CALCULATES_REVISION=NO
-TRACE_MUTATES_REVISION=NO
-TRACE_MUTATES_ACTIVITY_SEQ=NO
-
-LIVE_TRACE_EVENTS_IMPLEMENTED=[FS_CHANGE_DETECTED,WATCH_UPDATE_START,WATCH_UPDATE_END,WATCH_UPDATE_FAIL,UPDATE_RECEIVED,CLONE_END,UPDATER_START,UPDATER_END,UPDATER_FAIL,ENGINE_READY,INCREMENTAL_END,SNAPSHOT_SAVE_END,FILE_STATE_SAVE_END,CANONICAL_COMMIT,UPDATE_PUBLISHED,PUBLISH_RECEIVED,CANONICAL_PUBLISH,ACTIVITY_APPEND,SERVICE_START,SERVICE_END]
-MCP_TRACE_EVENTS_IMPLEMENTED=[CALL_START,IMPLEMENTATION_END,DIAGNOSTICS_END,TELEMETRY_END,CALL_END,CALL_FAIL]
-GUI_TRACE_EVENTS_IMPLEMENTED=[EVENT_BATCH_RECEIVED,ACTIVITY_GAP,STATUS_QUEUED,STATUS_RENDERED]
-TRACE_OP_PROPAGATION=PASS
-REVISION_TRANSITION_TRACE=PASS
-ACTIVITY_SEQ_TRACE=PASS
-GUI_MCP_LOGS_BUTTON=PASS
-GUI_MCP_LOGS_TOOLTIP=Open the folder containing LIVE and MCP operation logs.
-GUI_1250MS_CADENCE_CHANGED=NO
-MCP_TOOL_COUNT=25
-MCP_WRAPPER_IDENTITY=PASS (functools.wraps preserved)
-MCP_DOCS_CHANGE=NO
-
-TRACE_1000_EVENT_MIN_US=510.89
-TRACE_1000_EVENT_MEDIAN_US=677.60
-TRACE_1000_EVENT_P95_US=1243.24
-TRACE_1000_EVENT_MAX_US=35568.63
-TRACE_1000_EVENT_BYTES=157569
-TRACE_NO_ACTIVE_SESSION_MEDIAN_US=3.91
-TRACE_NO_ACTIVE_SESSION_MAX_US=919.11
-
-TESTS_RUN=tests/test_runtime_trace.py; tests/test_mcp_diagnostics.py; tests/test_program_log.py; tests/test_gui_live_startup.py; tests/test_live_desktop_integration.py; tests/test_live_watcher_startup_reconciliation.py
-TESTS_PASSED=52
-TESTS_FAILED=0 in requested focused sets
-ADDITIONAL_RUN_NOTE=An earlier combined run also exposed two pre-existing Windows process-termination failures in tests/test_live_state_ipc.py; no production trace failure was involved and those tests were not changed.
-MANUAL_MCP_RESTART_REQUIRED=YES
-MANUAL_DESKTOP_LIVE_RESTART_REQUIRED=YES
-FILES_CHANGED_THIS_TASK=contextor/core/runtime_trace.py; contextor/core/paths.py; contextor/__main__.py; contextor/core/live_state/watcher.py; contextor/core/live_state/ipc.py; contextor/core/live_state/runtime.py; contextor/mcp_server.py; contextor/ui/gui.py; contextor/ui/system_actions.py; tests/test_runtime_trace.py
-COMPLETE_RAW_DIFFS=available via git diff for the files above (walkthrough excluded)
-VERDICT=IMPLEMENTATION_PASS_STATIC_ONLY_RESTART_REQUIRED
-
----
-
-# Runtime trace logger audit closure
-
-AUDIT_SCOPE=actual current implementation; no restart; no full pytest
-TRACE_FAILURE_IS_NON_FATAL=YES
-TRACE_PERFORMS_LIVE_IPC=NO
-TRACE_READS_CANONICAL_STATE=NO
-TRACE_CALCULATES_REVISION=NO
-TRACE_MUTATES_REVISION=NO
-TRACE_MUTATES_ACTIVITY_SEQ=NO
-TRACE_DIRECTORY=package_root()/logs
-ACTIVE_POINTER=package_root()/logs/contextor_runtime_active.json
-POINTER_PUBLICATION=atomic after all five JSON header records are written
-SESSION_REPLACEMENT=cache switches to changed pointer; prior JSONL remains untouched
-POINTER_REFRESH=bounded 100ms cache refresh; no logs-directory scan
-APPEND=single os.write on cached O_APPEND descriptor; no fsync or correctness lock
-TRACE_HOT_PATH=cached pointer lookup (refresh at most every 100ms), compact json.dumps, one os.write
-TRACE_OP_PROPAGATION=PASS
-REVISION_TRANSITION_TRACE=PASS
-ACTIVITY_SEQ_TRACE=PASS
-MCP_TOOL_COUNT=25
-MCP_WRAPPER_IDENTITY=PASS
-GUI_1250MS_CADENCE_CHANGED=NO
-GUI_MCP_LOGS_BUTTON=PASS
-GUI_MCP_LOGS_TOOLTIP=Open the folder containing LIVE and MCP operation logs.
-MCP_DOCS_CHANGE=NO
-
-LIVE_STATE_IPC_TESTS=29 passed, 2 failed
-IPC_FAILURE_CAUSED_BY_TRACE=NO
-IPC_FAILURE_EVIDENCE=The only failures are test_terminate_pid_tree_kills_process_and_children and test_connect_or_start_true_startup_hang. Both fail in existing Windows process termination/_is_pid_alive assertions in contextor/core/live_state/runtime.py; the trace diff does not touch _terminate_pid_tree, _is_pid_alive, or their call sites. Running the same two tests in a fresh pytest process with contextor.core.runtime_trace.trace_event monkeypatched to a no-op produced the identical two failures.
-
-TRACE_1000_EVENT_MIN_US=77.73
-TRACE_1000_EVENT_MEDIAN_US=89.96
-TRACE_1000_EVENT_P95_US=351.02
-TRACE_1000_EVENT_MAX_US=69497.03
-TRACE_1000_EVENT_BYTES=155560
-
-TESTS_RUN=tests/test_runtime_trace.py tests/test_live_state_ipc.py tests/test_mcp_diagnostics.py tests/test_program_log.py tests/test_gui_live_startup.py tests/test_live_desktop_integration.py tests/test_live_watcher_startup_reconciliation.py tests/test_live_activity_status.py
-TESTS_PASSED=112
-TESTS_FAILED=2 unrelated Windows termination tests
-MANUAL_MCP_RESTART_REQUIRED=YES
-MANUAL_DESKTOP_LIVE_RESTART_REQUIRED=YES
-FILES_CHANGED=contextor/core/runtime_trace.py contextor/core/paths.py contextor/__main__.py contextor/core/live_state/watcher.py contextor/core/live_state/ipc.py contextor/core/live_state/runtime.py contextor/mcp_server.py contextor/ui/gui.py contextor/ui/system_actions.py tests/test_runtime_trace.py
-GENERATED_ARTIFACT_CLEANUP=package_root()/logs contains one benchmark JSONL still held open by an already-running process; active pointer is absent. No process was restarted or terminated per task constraints.
-COMPLETE_RAW_DIFFS=Use `git diff --` for tracked files and the complete new-file contents for the two untracked files; walkthrough itself excluded.
 VERDICT=IMPLEMENTATION_PASS
-RUNTIME_FRESHNESS=PASS
-R0=4449
-R1=4449
-FIRST_CALL_MS=113
-WARM_INDIVIDUAL_MS=[132,111,114,102,105,92,102,83,100,90]
-WARM_MEDIAN_MS=102
-REPEATED_COLD_REBUILD_PATTERN=NO
-RESPONSE_SEMANTIC_VALID=YES
-DIAGNOSTICS_SUMMARY_PRESENT=YES (11/11 responses)
-CANONICAL_MUTATION_FROM_QUERY=NO
-LIVE_ERROR_DETECTED=NO
-OWNER_TEMPORARILY_UNREACHABLE=NO
-ACTIVITY_GAP_DETECTED=NO (post-test continuity=continuous, resync_required=false)
-FILES_CHANGED=NONE
+UNGUARDED_TRACE_DEPENDENCY_IN_CANONICAL_PATH=NO
+PUBLISH_REV0_SOURCE=previous authoritative self._revision
+PUBLISH_REV1_SOURCE=post-commit authoritative self._revision
+TRACE_DERIVES_REVISION_ARITHMETICALLY=NO
+TRACE_OP_GENERATOR_FAILURE_NON_FATAL=PASS
+TRACE_EVENT_FAILURE_NON_FATAL=PASS
+TRACE_CONTEXT_FAILURE_NON_FATAL=PASS
+UPDATER_EXCEPTION_SEMANTICS_PRESERVED=PASS
+PUBLISH_FAIL_IMPLEMENTED=YES
+CANONICAL_COMMIT_BOUNDARY_CHANGED=NO
+REVISION_VALIDATION_CHANGED=NO
+ACTIVITY_SEQ_SEMANTICS_CHANGED=NO
+TESTS_RUN=pytest -q tests/test_runtime_trace.py tests/test_live_state_ipc.py tests/test_live_activity_status.py; correction subset -k "publish_trace or update_trace or runtime_trace"
+TESTS_PASSED=70 in focused invocation; 7 correction tests
+TESTS_FAILED=3 pre-existing Windows process termination/startup assertions
+MANUAL_MCP_RESTART_REQUIRED=YES
+MANUAL_DESKTOP_LIVE_RESTART_REQUIRED=YES
+FILES_CHANGED=contextor/core/live_state/ipc.py; contextor/core/runtime_trace.py; tests/test_live_state_ipc.py
+COMPLETE_RAW_DIFFS=YES
 
-Runtime evidence came from the running MCP server after restart: Contextor returned the current `get_module_context` implementation with workspace sync verified and canonical revision 4449. The first measured call was 113 ms; the ten immediate repeats ranged from 83 to 132 ms, with a 102 ms median. All responses contained valid module/metrics/state-freshness fields and diagnostics_summary.
+Complete raw unified diff command:
+git diff -- contextor/core/live_state/ipc.py contextor/core/runtime_trace.py tests/test_live_state_ipc.py
+
+---
+
+# Runtime trace final correctness correction
+
+VERDICT=IMPLEMENTATION_PASS
+TRACE_CONTEXT_IMPORT_FAILURE_NON_FATAL=PASS
+TRACE_CONTEXT_ENTER_FAILURE_NON_FATAL=PASS
+TRACE_CONTEXT_EXIT_FAILURE_NON_FATAL=PASS
+UPDATER_EXCEPTION_CANNOT_BE_REPLACED_BY_TRACE=PASS
+PUBLISH_FAIL_USED_ONLY_FOR_PUBLISH=PASS
+UPDATE_FAIL_IMPLEMENTED=YES
+UPDATE_FAIL_USED_ONLY_FOR_UPDATE=PASS
+TRACE_EVENT_LEGEND_MATCHES_PRODUCTION=PASS
+PUBLISH_REV0_SOURCE=previous authoritative self._revision
+PUBLISH_REV1_SOURCE=post-commit authoritative self._revision
+TRACE_DERIVES_REVISION_ARITHMETICALLY=NO
+CANONICAL_COMMIT_BOUNDARY_CHANGED=NO
+REVISION_VALIDATION_CHANGED=NO
+ACTIVITY_SEQ_SEMANTICS_CHANGED=NO
+FOCUSED_TEST_FAILURE_NAMES=[test_terminate_pid_tree_kills_process_and_children, test_connect_or_start_true_startup_hang]
+NEW_FAILURE_INTRODUCED_BY_TRACE=NO
+TESTS_RUN=pytest -q tests/test_runtime_trace.py tests/test_live_state_ipc.py tests/test_live_activity_status.py; pytest -q tests/test_live_state_ipc.py -k "trace_context or update_fail or publish_trace or update_trace"
+TESTS_PASSED=75 focused; 7 correction subset
+TESTS_FAILED=2 known unrelated Windows process termination/startup tests
+MANUAL_MCP_RESTART_REQUIRED=YES
+MANUAL_DESKTOP_LIVE_RESTART_REQUIRED=YES
+FILES_CHANGED=contextor/core/live_state/ipc.py; contextor/core/runtime_trace.py; tests/test_live_state_ipc.py
+COMPLETE_RAW_DIFFS=YES
+
+---
+COMPLETE_RAW_UNIFIED_DIFF_BEGIN
+diff --git a/contextor/core/live_state/ipc.py b/contextor/core/live_state/ipc.py
+index b154e42..85d439c 100644
+--- a/contextor/core/live_state/ipc.py
++++ b/contextor/core/live_state/ipc.py
+@@ -3,6 +3,7 @@
+ from __future__ import annotations
+ 
+ import copy
++from contextlib import nullcontext
+ import secrets
+ import threading
+ import time
+@@ -40,6 +41,41 @@ ACTIVITY_EVENT_RETENTION = 10_000
+ _MISSING_REVISION = object()
+ 
+ 
++def _safe_trace_op(request: dict[str, Any], prefix: str) -> str | None:
++    existing = request.get("trace_op")
++    if existing is not None:
++        try:
++            return str(existing)
++        except Exception:
++            return None
++    try:
++        from contextor.core.runtime_trace import new_trace_operation
++
++        return new_trace_operation(prefix)
++    except Exception:
++        return None
++
++
++def _safe_trace_event(domain: str, event: str, **fields: Any) -> None:
++    try:
++        from contextor.core.runtime_trace import trace_event
++
++        trace_event(domain, event, **fields)
++    except Exception:
++        pass
++
++
++def _trace_operation_context(op: str | None):
++    if op is None:
++        return nullcontext()
++    try:
++        from contextor.core.runtime_trace import trace_operation
++
++        return trace_operation(op)
++    except Exception:
++        return nullcontext()
++
++
+ def _raw_state_revision(state: Any) -> Any:
+     if state is None:
+         return _MISSING_REVISION
+@@ -227,17 +263,12 @@ class CanonicalLiveServer:
+ 
+         self._events.append(event)
+         del self._events[:-self._retention]
+-        try:
+-            from contextor.core.runtime_trace import trace_event
+-
+-            trace_event(
+-                "LIVE", "ACTIVITY_APPEND", op=trace_op,
+-                rev=self._revision, seq=self._activity_seq,
+-                category=category, operation=operation,
+-                status=event.get("status"),
+-            )
+-        except Exception:
+-            pass
++        _safe_trace_event(
++            "LIVE", "ACTIVITY_APPEND", op=trace_op,
++            rev=self._revision, seq=self._activity_seq,
++            category=category, operation=operation,
++            status=event.get("status"),
++        )
+         return event
+ 
+     def serve_forever(self) -> None:
+@@ -275,15 +306,16 @@ class CanonicalLiveServer:
+             if operation == "snapshot":
+                 return {"status": "ok", "revision": self._revision, "state": self._state}
+             if operation == "publish":
+-                from contextor.core.runtime_trace import new_trace_operation, trace_event
+-
+-                trace_op = request.get("trace_op") or new_trace_operation("p")
+-                request = {**request, "trace_op": trace_op}
+-                trace_event("LIVE", "PUBLISH_RECEIVED", op=trace_op, rev=self._revision)
++                previous_revision = self._revision
++                trace_op = _safe_trace_op(request, "p")
++                if trace_op is not None:
++                    request = {**request, "trace_op": trace_op}
++                _safe_trace_event("LIVE", "PUBLISH_RECEIVED", op=trace_op, rev=previous_revision)
+                 state = request.get("state")
+                 try:
+                     state_rev = _extract_state_revision(state)
+                 except ValueError as exc:
++                    _safe_trace_event("LIVE", "PUBLISH_FAIL", op=trace_op, rev=previous_revision, status="invalid_canonical_revision", candidate_rev=_raw_state_revision(state))
+                     return {
+                         "status": "error",
+                         "error": "invalid_canonical_revision",
+@@ -294,6 +326,7 @@ class CanonicalLiveServer:
+ 
+                 if state_rev is not None:
+                     if state_rev < expected_revision:
++                        _safe_trace_event("LIVE", "PUBLISH_FAIL", op=trace_op, rev=previous_revision, status="non_monotonic_canonical_revision", candidate_rev=state_rev)
+                         return {
+                             "status": "error",
+                             "error": "non_monotonic_canonical_revision",
+@@ -302,6 +335,7 @@ class CanonicalLiveServer:
+                             "expected_revision": expected_revision,
+                         }
+                     if state_rev > expected_revision:
++                        _safe_trace_event("LIVE", "PUBLISH_FAIL", op=trace_op, rev=previous_revision, status="canonical_revision_discontinuity", candidate_rev=state_rev)
+                         return {
+                             "status": "error",
+                             "error": "canonical_revision_discontinuity",
+@@ -311,6 +345,7 @@ class CanonicalLiveServer:
+                         }
+                 else:
+                     if not _bind_state_revision(state, expected_revision):
++                        _safe_trace_event("LIVE", "PUBLISH_FAIL", op=trace_op, rev=previous_revision, status="canonical_revision_binding_failed", candidate_rev=None)
+                         return {
+                             "status": "error",
+                             "error": "canonical_revision_binding_failed",
+@@ -322,7 +357,7 @@ class CanonicalLiveServer:
+                 self._state = state
+                 self._revision = state_rev
+                 evt = self._record_event("publish", request, category="LIVE_STATE")
+-                trace_event("LIVE", "CANONICAL_PUBLISH", op=trace_op, rev_before=state_rev - 1, rev_after=self._revision, seq=evt["seq"], origin=request.get("origin"))
++                _safe_trace_event("LIVE", "CANONICAL_PUBLISH", op=trace_op, rev_before=previous_revision, rev_after=self._revision, seq=evt["seq"], origin=request.get("origin"))
+                 return {"status": "ok", "revision": self._revision, "seq": evt["seq"]}
+             if operation in {"status", "record_activity", "mcp_call"}:
+                 cat = request.get("category", "MCP_CALL" if operation == "mcp_call" else "LIVE_STATE")
+@@ -339,16 +374,15 @@ class CanonicalLiveServer:
+                 previous_revision = self._revision
+                 expected_revision = previous_revision + 1
+                 file_path = str(request.get("file_path", ""))
+-                from contextor.core.runtime_trace import new_trace_operation, trace_event, trace_operation
+-
+-                trace_op = request.get("trace_op") or new_trace_operation("u")
+-                request = {**request, "trace_op": trace_op}
+-                trace_event("LIVE", "UPDATE_RECEIVED", op=trace_op, path=file_path, rev=previous_revision)
++                trace_op = _safe_trace_op(request, "u")
++                if trace_op is not None:
++                    request = {**request, "trace_op": trace_op}
++                _safe_trace_event("LIVE", "UPDATE_RECEIVED", op=trace_op, path=file_path, rev=previous_revision)
+ 
+                 try:
+                     candidate_state = _clone_state_for_update(previous_state)
+                 except Exception as exc:
+-                    trace_event("LIVE", "PUBLISH_FAIL", op=trace_op, rev=previous_revision, err=exc)
++                    _safe_trace_event("LIVE", "PUBLISH_FAIL", op=trace_op, rev=previous_revision, err=exc)
+                     return {
+                         "status": "error",
+                         "error": "canonical_state_clone_failed",
+@@ -356,19 +390,19 @@ class CanonicalLiveServer:
+                         "expected_revision": expected_revision,
+                         "detail": str(exc),
+                     }
+-                trace_event("LIVE", "CLONE_END", op=trace_op, path=file_path, rev=previous_revision)
++                _safe_trace_event("LIVE", "CLONE_END", op=trace_op, path=file_path, rev=previous_revision)
+ 
+                 # IMPORTANT: updater operates ONLY on candidate_state.
+                 # It must never receive previous_state/self._state directly.
+-                trace_event("LIVE", "UPDATER_START", op=trace_op, path=file_path)
++                _safe_trace_event("LIVE", "UPDATER_START", op=trace_op, path=file_path)
+                 updater_started = time.monotonic()
+                 try:
+-                    with trace_operation(trace_op):
++                    with _trace_operation_context(trace_op):
+                         result = self._updater(candidate_state, file_path)
+                 except Exception as exc:
+-                    trace_event("LIVE", "UPDATER_FAIL", op=trace_op, path=file_path, elapsed_ms=(time.monotonic() - updater_started) * 1000.0, err=exc)
++                    _safe_trace_event("LIVE", "UPDATER_FAIL", op=trace_op, path=file_path, elapsed_ms=(time.monotonic() - updater_started) * 1000.0, err=exc)
+                     raise
+-                trace_event("LIVE", "UPDATER_END", op=trace_op, path=file_path, elapsed_ms=(time.monotonic() - updater_started) * 1000.0, status=getattr(result, "status", None))
++                _safe_trace_event("LIVE", "UPDATER_END", op=trace_op, path=file_path, elapsed_ms=(time.monotonic() - updater_started) * 1000.0, status=getattr(result, "status", None))
+ 
+                 try:
+                     state_rev = _extract_state_revision(candidate_state)
+@@ -444,7 +478,7 @@ class CanonicalLiveServer:
+                 # Nothing above this line may replace/mutate active canonical ownership.
+                 self._state = candidate_state
+                 self._revision = expected_revision
+-                trace_event("LIVE", "CANONICAL_COMMIT", op=trace_op, path=file_path, rev_before=previous_revision, rev_after=expected_revision)
++                _safe_trace_event("LIVE", "CANONICAL_COMMIT", op=trace_op, path=file_path, rev_before=previous_revision, rev_after=expected_revision)
+ 
+                 evt = self._record_event(
+                     "update_file",
+@@ -452,7 +486,7 @@ class CanonicalLiveServer:
+                     result,
+                     category="LIVE_STATE",
+                 )
+-                trace_event("LIVE", "UPDATE_PUBLISHED", op=trace_op, path=file_path, rev=self._revision, seq=evt["seq"], status=getattr(result, "status", None))
++                _safe_trace_event("LIVE", "UPDATE_PUBLISHED", op=trace_op, path=file_path, rev=self._revision, seq=evt["seq"], status=getattr(result, "status", None))
+ 
+                 return {
+                     "status": "ok",
+diff --git a/contextor/core/runtime_trace.py b/contextor/core/runtime_trace.py
+index aa13126..5557b26 100644
+--- a/contextor/core/runtime_trace.py
++++ b/contextor/core/runtime_trace.py
+@@ -137,7 +137,7 @@ def _append(record: dict[str, object], path: Path) -> None:
+ def _header_records(sid: str, started_at: str, desktop_pid: int, file_name: str) -> list[dict[str, object]]:
+     return [
+         {"_type": "header", "schema": TRACE_SCHEMA, "purpose": "chronological Contextor Desktop/LIVE/MCP runtime diagnostics; one JSON object per line", "sid": sid, "started_at": started_at, "desktop_pid": desktop_pid, "file": file_name},
+-        {"_type": "fields", "fields": {"ts": "UTC ISO-8601 milliseconds", "mono_ms": "host monotonic milliseconds", "sid": "desktop trace session", "pid": "process id", "tid": "thread id", "d": "domain", "ev": "event", "op": "operation correlation id", "repo": "repository", "path": "repository-relative path", "kind": "change kind", "tool": "MCP tool", "rev": "observed canonical revision", "rev0": "canonical revision before transition", "rev1": "canonical revision after transition", "seq": "activity-journal sequence", "q": "GUI queue size", "count": "count", "bytes": "byte count", "wait_ms": "queue wait milliseconds", "elapsed_ms": "elapsed milliseconds", "scan_ms": "watcher scan milliseconds", "ping_ms": "watcher ping milliseconds", "status": "compact status", "err": "bounded error", "mtime_ns": "observed file mtime"}},
++        {"_type": "fields", "fields": {"ts": "UTC ISO-8601 milliseconds", "mono_ms": "host monotonic milliseconds", "sid": "desktop trace session", "pid": "process id", "tid": "thread id", "d": "domain", "ev": "event", "op": "operation correlation id", "repo": "repository", "path": "repository-relative path", "kind": "change kind", "tool": "MCP tool", "rev": "observed canonical revision", "rev0": "canonical revision before transition", "rev1": "canonical revision after transition", "candidate_rev": "rejected candidate canonical revision", "seq": "activity-journal sequence", "q": "GUI queue size", "count": "count", "bytes": "byte count", "wait_ms": "queue wait milliseconds", "elapsed_ms": "elapsed milliseconds", "scan_ms": "watcher scan milliseconds", "ping_ms": "watcher ping milliseconds", "status": "compact status", "err": "bounded error", "mtime_ns": "observed file mtime"}},
+         {"_type": "domains", "domains": ["DESKTOP", "LIVE", "MCP", "GUI"], "reserved": ["OPS"], "ops_note": "Reserved for future repository-operation coordination; not implemented here."},
+         {"_type": "revision_semantics", "rev": "observed authoritative canonical revision", "rev0": "authoritative canonical revision before transition", "rev1": "authoritative canonical revision after transition", "seq": "independent activity-journal sequence", "logger_rule": "The logger never calculates or increments canonical revision or activity sequence."},
+         {"_type": "events", "events": {"DESKTOP": ["SESSION_START", "SESSION_END"], "LIVE": ["FS_CHANGE_DETECTED", "WATCH_UPDATE_START", "WATCH_UPDATE_END", "WATCH_UPDATE_FAIL", "UPDATE_RECEIVED", "CLONE_END", "UPDATER_START", "UPDATER_END", "UPDATER_FAIL", "ENGINE_READY", "INCREMENTAL_END", "SNAPSHOT_SAVE_END", "FILE_STATE_SAVE_END", "CANONICAL_COMMIT", "UPDATE_PUBLISHED", "PUBLISH_RECEIVED", "CANONICAL_PUBLISH", "PUBLISH_FAIL", "ACTIVITY_APPEND", "SERVICE_START", "SERVICE_END"], "MCP": ["CALL_START", "IMPLEMENTATION_END", "DIAGNOSTICS_END", "TELEMETRY_END", "CALL_END", "CALL_FAIL"], "GUI": ["EVENT_BATCH_RECEIVED", "ACTIVITY_GAP", "STATUS_QUEUED", "STATUS_RENDERED"]}},
+@@ -235,7 +235,7 @@ def trace_event(domain: str, event: str, *, op: str | None = None, rev: int | No
+         for key, value in (("rev", rev), ("rev0", rev_before), ("rev1", rev_after), ("seq", seq)):
+             if value is not None:
+                 record[key] = value
+-        key_map = {"repo": "repo", "path": "path", "kind": "kind", "tool": "tool", "q": "q", "count": "count", "bytes": "bytes", "wait_ms": "wait_ms", "elapsed_ms": "elapsed_ms", "scan_ms": "scan_ms", "ping_ms": "ping_ms", "status": "status", "err": "err", "mtime_ns": "mtime_ns", "category": "category", "operation": "operation", "first_seq": "first_seq", "last_seq": "last_seq"}
++        key_map = {"repo": "repo", "path": "path", "kind": "kind", "tool": "tool", "q": "q", "count": "count", "bytes": "bytes", "wait_ms": "wait_ms", "elapsed_ms": "elapsed_ms", "scan_ms": "scan_ms", "ping_ms": "ping_ms", "status": "status", "err": "err", "mtime_ns": "mtime_ns", "category": "category", "operation": "operation", "first_seq": "first_seq", "last_seq": "last_seq", "candidate_rev": "candidate_rev"}
+         for key, value in fields.items():
+             target = key_map.get(key)
+             if target is not None and value is not None:
+diff --git a/tests/test_live_state_ipc.py b/tests/test_live_state_ipc.py
+index b9c735e..86f26a3 100644
+--- a/tests/test_live_state_ipc.py
++++ b/tests/test_live_state_ipc.py
+@@ -73,6 +73,56 @@ def test_two_clients_observe_one_in_ram_state_and_revision(live_server):
+     assert snap["state"].revision == 1
+ 
+ 
++def test_publish_trace_uses_authoritative_revision_and_rejections_are_nonfatal(monkeypatch):
++    import contextor.core.runtime_trace as runtime_trace
++
++    events = []
++    monkeypatch.setattr(runtime_trace, "trace_event", lambda *args, **kwargs: events.append((args, kwargs)))
++    server = CanonicalLiveServer(SimpleNamespace(files=[]), revision=4)
++
++    accepted = server._dispatch({"operation": "publish", "state": SimpleNamespace(files=["x"])})
++    assert accepted["status"] == "ok"
++    canonical = next(kwargs for args, kwargs in events if args[1] == "CANONICAL_PUBLISH")
++    assert canonical["rev_before"] == 4
++    assert canonical["rev_after"] == 5
++
++    rejected = server._dispatch({"operation": "publish", "state": SimpleNamespace(revision=3)})
++    assert rejected["error"] == "non_monotonic_canonical_revision"
++    assert any(args[1] == "PUBLISH_FAIL" and kwargs["candidate_rev"] == 3 for args, kwargs in events)
++
++
++def test_publish_trace_operation_and_event_failures_do_not_break_canonical_commit(monkeypatch):
++    import contextor.core.runtime_trace as runtime_trace
++
++    def fail_operation(_prefix):
++        raise RuntimeError("trace operation unavailable")
++
++    def fail_event(*_args, **_kwargs):
++        raise RuntimeError("trace sink unavailable")
++
++    monkeypatch.setattr(runtime_trace, "new_trace_operation", fail_operation)
++    monkeypatch.setattr(runtime_trace, "trace_event", fail_event)
++    server = CanonicalLiveServer(SimpleNamespace(files=[]))
++
++    response = server._dispatch({"operation": "publish", "state": SimpleNamespace(files=["x"])})
++    assert response["status"] == "ok"
++    assert response["revision"] == 1
++
++
++def test_update_trace_failure_preserves_updater_exception(monkeypatch):
++    import contextor.core.runtime_trace as runtime_trace
++
++    monkeypatch.setattr(runtime_trace, "trace_event", lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("trace sink unavailable")))
++
++    def failing_updater(_state, _path):
++        raise RuntimeError("updater failure")
++
++    server = CanonicalLiveServer(SimpleNamespace(files=[]), updater=failing_updater)
++    with pytest.raises(RuntimeError, match="updater failure"):
++        server._dispatch({"operation": "update_file", "file_path": "x.py"})
++    assert server._revision == 0
++
++
+ def test_update_runs_inside_the_live_owner_and_is_visible_to_other_clients():
+     def update(state, file_path):
+         state.files.append(file_path)
+@@ -1034,4 +1084,3 @@ def test_connect_or_start_true_startup_hang(tmp_path, monkeypatch):
+     assert not runtime_mod._is_pid_alive(child_pid)
+ 
+ 
+-
+COMPLETE_RAW_UNIFIED_DIFF_END
+
+COMPLETE_RAW_UNIFIED_DIFF_CORRECTION_BEGIN
+diff --git a/contextor/core/live_state/ipc.py b/contextor/core/live_state/ipc.py
+index b154e42..9e30776 100644
+--- a/contextor/core/live_state/ipc.py
++++ b/contextor/core/live_state/ipc.py
+@@ -3,6 +3,7 @@
+ from __future__ import annotations
+ 
+ import copy
++from contextlib import contextmanager
+ import secrets
+ import threading
+ import time
+@@ -40,6 +41,73 @@ ACTIVITY_EVENT_RETENTION = 10_000
+ _MISSING_REVISION = object()
+ 
+ 
++def _safe_trace_op(request: dict[str, Any], prefix: str) -> str | None:
++    existing = request.get("trace_op")
++    if existing is not None:
++        try:
++            return str(existing)
++        except Exception:
++            return None
++    try:
++        from contextor.core.runtime_trace import new_trace_operation
++
++        return new_trace_operation(prefix)
++    except Exception:
++        return None
++
++
++def _safe_trace_event(domain: str, event: str, **fields: Any) -> None:
++    try:
++        from contextor.core.runtime_trace import trace_event
++
++        trace_event(domain, event, **fields)
++    except Exception:
++        pass
++
++
++@contextmanager
++def _trace_operation_context(op: str | None):
++    if op is None:
++        yield
++        return
++    try:
++        from contextor.core.runtime_trace import trace_operation
++        manager = trace_operation(op)
++    except Exception:
++        yield
++        return
++
++    entered = False
++    try:
++        try:
++            manager.__enter__()
++            entered = True
++        except Exception:
++            yield
++            return
++
++        try:
++            yield
++        except BaseException:
++            import sys
++
++            exc_info = sys.exc_info()
++            if entered:
++                try:
++                    manager.__exit__(*exc_info)
++                except Exception:
++                    pass
++            raise
++        else:
++            if entered:
++                try:
++                    manager.__exit__(None, None, None)
++                except Exception:
++                    pass
++    finally:
++        pass
++
++
+ def _raw_state_revision(state: Any) -> Any:
+     if state is None:
+         return _MISSING_REVISION
+@@ -227,17 +295,12 @@ class CanonicalLiveServer:
+ 
+         self._events.append(event)
+         del self._events[:-self._retention]
+-        try:
+-            from contextor.core.runtime_trace import trace_event
+-
+-            trace_event(
+-                "LIVE", "ACTIVITY_APPEND", op=trace_op,
+-                rev=self._revision, seq=self._activity_seq,
+-                category=category, operation=operation,
+-                status=event.get("status"),
+-            )
+-        except Exception:
+-            pass
++        _safe_trace_event(
++            "LIVE", "ACTIVITY_APPEND", op=trace_op,
++            rev=self._revision, seq=self._activity_seq,
++            category=category, operation=operation,
++            status=event.get("status"),
++        )
+         return event
+ 
+     def serve_forever(self) -> None:
+@@ -275,15 +338,16 @@ class CanonicalLiveServer:
+             if operation == "snapshot":
+                 return {"status": "ok", "revision": self._revision, "state": self._state}
+             if operation == "publish":
+-                from contextor.core.runtime_trace import new_trace_operation, trace_event
+-
+-                trace_op = request.get("trace_op") or new_trace_operation("p")
+-                request = {**request, "trace_op": trace_op}
+-                trace_event("LIVE", "PUBLISH_RECEIVED", op=trace_op, rev=self._revision)
++                previous_revision = self._revision
++                trace_op = _safe_trace_op(request, "p")
++                if trace_op is not None:
++                    request = {**request, "trace_op": trace_op}
++                _safe_trace_event("LIVE", "PUBLISH_RECEIVED", op=trace_op, rev=previous_revision)
+                 state = request.get("state")
+                 try:
+                     state_rev = _extract_state_revision(state)
+                 except ValueError as exc:
++                    _safe_trace_event("LIVE", "PUBLISH_FAIL", op=trace_op, rev=previous_revision, status="invalid_canonical_revision", candidate_rev=_raw_state_revision(state))
+                     return {
+                         "status": "error",
+                         "error": "invalid_canonical_revision",
+@@ -294,6 +358,7 @@ class CanonicalLiveServer:
+ 
+                 if state_rev is not None:
+                     if state_rev < expected_revision:
++                        _safe_trace_event("LIVE", "PUBLISH_FAIL", op=trace_op, rev=previous_revision, status="non_monotonic_canonical_revision", candidate_rev=state_rev)
+                         return {
+                             "status": "error",
+                             "error": "non_monotonic_canonical_revision",
+@@ -302,6 +367,7 @@ class CanonicalLiveServer:
+                             "expected_revision": expected_revision,
+                         }
+                     if state_rev > expected_revision:
++                        _safe_trace_event("LIVE", "PUBLISH_FAIL", op=trace_op, rev=previous_revision, status="canonical_revision_discontinuity", candidate_rev=state_rev)
+                         return {
+                             "status": "error",
+                             "error": "canonical_revision_discontinuity",
+@@ -311,6 +377,7 @@ class CanonicalLiveServer:
+                         }
+                 else:
+                     if not _bind_state_revision(state, expected_revision):
++                        _safe_trace_event("LIVE", "PUBLISH_FAIL", op=trace_op, rev=previous_revision, status="canonical_revision_binding_failed", candidate_rev=None)
+                         return {
+                             "status": "error",
+                             "error": "canonical_revision_binding_failed",
+@@ -322,7 +389,7 @@ class CanonicalLiveServer:
+                 self._state = state
+                 self._revision = state_rev
+                 evt = self._record_event("publish", request, category="LIVE_STATE")
+-                trace_event("LIVE", "CANONICAL_PUBLISH", op=trace_op, rev_before=state_rev - 1, rev_after=self._revision, seq=evt["seq"], origin=request.get("origin"))
++                _safe_trace_event("LIVE", "CANONICAL_PUBLISH", op=trace_op, rev_before=previous_revision, rev_after=self._revision, seq=evt["seq"], origin=request.get("origin"))
+                 return {"status": "ok", "revision": self._revision, "seq": evt["seq"]}
+             if operation in {"status", "record_activity", "mcp_call"}:
+                 cat = request.get("category", "MCP_CALL" if operation == "mcp_call" else "LIVE_STATE")
+@@ -339,16 +406,15 @@ class CanonicalLiveServer:
+                 previous_revision = self._revision
+                 expected_revision = previous_revision + 1
+                 file_path = str(request.get("file_path", ""))
+-                from contextor.core.runtime_trace import new_trace_operation, trace_event, trace_operation
+-
+-                trace_op = request.get("trace_op") or new_trace_operation("u")
+-                request = {**request, "trace_op": trace_op}
+-                trace_event("LIVE", "UPDATE_RECEIVED", op=trace_op, path=file_path, rev=previous_revision)
++                trace_op = _safe_trace_op(request, "u")
++                if trace_op is not None:
++                    request = {**request, "trace_op": trace_op}
++                _safe_trace_event("LIVE", "UPDATE_RECEIVED", op=trace_op, path=file_path, rev=previous_revision)
+ 
+                 try:
+                     candidate_state = _clone_state_for_update(previous_state)
+                 except Exception as exc:
+-                    trace_event("LIVE", "PUBLISH_FAIL", op=trace_op, rev=previous_revision, err=exc)
++                    _safe_trace_event("LIVE", "UPDATE_FAIL", op=trace_op, path=file_path, rev=previous_revision, status="canonical_state_clone_failed", err=exc)
+                     return {
+                         "status": "error",
+                         "error": "canonical_state_clone_failed",
+@@ -356,23 +422,24 @@ class CanonicalLiveServer:
+                         "expected_revision": expected_revision,
+                         "detail": str(exc),
+                     }
+-                trace_event("LIVE", "CLONE_END", op=trace_op, path=file_path, rev=previous_revision)
++                _safe_trace_event("LIVE", "CLONE_END", op=trace_op, path=file_path, rev=previous_revision)
+ 
+                 # IMPORTANT: updater operates ONLY on candidate_state.
+                 # It must never receive previous_state/self._state directly.
+-                trace_event("LIVE", "UPDATER_START", op=trace_op, path=file_path)
++                _safe_trace_event("LIVE", "UPDATER_START", op=trace_op, path=file_path)
+                 updater_started = time.monotonic()
+                 try:
+-                    with trace_operation(trace_op):
++                    with _trace_operation_context(trace_op):
+                         result = self._updater(candidate_state, file_path)
+                 except Exception as exc:
+-                    trace_event("LIVE", "UPDATER_FAIL", op=trace_op, path=file_path, elapsed_ms=(time.monotonic() - updater_started) * 1000.0, err=exc)
++                    _safe_trace_event("LIVE", "UPDATER_FAIL", op=trace_op, path=file_path, elapsed_ms=(time.monotonic() - updater_started) * 1000.0, err=exc)
+                     raise
+-                trace_event("LIVE", "UPDATER_END", op=trace_op, path=file_path, elapsed_ms=(time.monotonic() - updater_started) * 1000.0, status=getattr(result, "status", None))
++                _safe_trace_event("LIVE", "UPDATER_END", op=trace_op, path=file_path, elapsed_ms=(time.monotonic() - updater_started) * 1000.0, status=getattr(result, "status", None))
+ 
+                 try:
+                     state_rev = _extract_state_revision(candidate_state)
+                 except ValueError:
++                    _safe_trace_event("LIVE", "UPDATE_FAIL", op=trace_op, path=file_path, rev=previous_revision, status="invalid_canonical_revision", candidate_rev=_raw_state_revision(candidate_state))
+                     return {
+                         "status": "error",
+                         "error": "invalid_canonical_revision",
+@@ -383,6 +450,7 @@ class CanonicalLiveServer:
+ 
+                 if state_rev is None:
+                     if not _bind_state_revision(candidate_state, expected_revision):
++                        _safe_trace_event("LIVE", "UPDATE_FAIL", op=trace_op, path=file_path, rev=previous_revision, status="canonical_revision_binding_failed", candidate_rev=None)
+                         return {
+                             "status": "error",
+                             "error": "canonical_revision_binding_failed",
+@@ -394,6 +462,7 @@ class CanonicalLiveServer:
+ 
+                 elif state_rev == previous_revision:
+                     if not _bind_state_revision(candidate_state, expected_revision):
++                        _safe_trace_event("LIVE", "UPDATE_FAIL", op=trace_op, path=file_path, rev=previous_revision, status="canonical_revision_binding_failed", candidate_rev=state_rev)
+                         return {
+                             "status": "error",
+                             "error": "canonical_revision_binding_failed",
+@@ -404,6 +473,7 @@ class CanonicalLiveServer:
+                     state_rev = expected_revision
+ 
+                 elif state_rev < previous_revision:
++                    _safe_trace_event("LIVE", "UPDATE_FAIL", op=trace_op, path=file_path, rev=previous_revision, status="non_monotonic_canonical_revision", candidate_rev=state_rev)
+                     return {
+                         "status": "error",
+                         "error": "non_monotonic_canonical_revision",
+@@ -413,6 +483,7 @@ class CanonicalLiveServer:
+                     }
+ 
+                 elif state_rev > expected_revision:
++                    _safe_trace_event("LIVE", "UPDATE_FAIL", op=trace_op, path=file_path, rev=previous_revision, status="canonical_revision_discontinuity", candidate_rev=state_rev)
+                     return {
+                         "status": "error",
+                         "error": "canonical_revision_discontinuity",
+@@ -422,6 +493,7 @@ class CanonicalLiveServer:
+                     }
+ 
+                 elif state_rev != expected_revision:
++                    _safe_trace_event("LIVE", "UPDATE_FAIL", op=trace_op, path=file_path, rev=previous_revision, status="canonical_revision_discontinuity", candidate_rev=state_rev)
+                     return {
+                         "status": "error",
+                         "error": "canonical_revision_discontinuity",
+@@ -432,6 +504,7 @@ class CanonicalLiveServer:
+ 
+                 # Final parity proof before commit.
+                 if _extract_state_revision(candidate_state) != expected_revision:
++                    _safe_trace_event("LIVE", "UPDATE_FAIL", op=trace_op, path=file_path, rev=previous_revision, status="canonical_revision_binding_failed", candidate_rev=_raw_state_revision(candidate_state))
+                     return {
+                         "status": "error",
+                         "error": "canonical_revision_binding_failed",
+@@ -444,7 +517,7 @@ class CanonicalLiveServer:
+                 # Nothing above this line may replace/mutate active canonical ownership.
+                 self._state = candidate_state
+                 self._revision = expected_revision
+-                trace_event("LIVE", "CANONICAL_COMMIT", op=trace_op, path=file_path, rev_before=previous_revision, rev_after=expected_revision)
++                _safe_trace_event("LIVE", "CANONICAL_COMMIT", op=trace_op, path=file_path, rev_before=previous_revision, rev_after=expected_revision)
+ 
+                 evt = self._record_event(
+                     "update_file",
+@@ -452,7 +525,7 @@ class CanonicalLiveServer:
+                     result,
+                     category="LIVE_STATE",
+                 )
+-                trace_event("LIVE", "UPDATE_PUBLISHED", op=trace_op, path=file_path, rev=self._revision, seq=evt["seq"], status=getattr(result, "status", None))
++                _safe_trace_event("LIVE", "UPDATE_PUBLISHED", op=trace_op, path=file_path, rev=self._revision, seq=evt["seq"], status=getattr(result, "status", None))
+ 
+                 return {
+                     "status": "ok",
+diff --git a/contextor/core/runtime_trace.py b/contextor/core/runtime_trace.py
+index aa13126..f2f842a 100644
+--- a/contextor/core/runtime_trace.py
++++ b/contextor/core/runtime_trace.py
+@@ -137,10 +137,10 @@ def _append(record: dict[str, object], path: Path) -> None:
+ def _header_records(sid: str, started_at: str, desktop_pid: int, file_name: str) -> list[dict[str, object]]:
+     return [
+         {"_type": "header", "schema": TRACE_SCHEMA, "purpose": "chronological Contextor Desktop/LIVE/MCP runtime diagnostics; one JSON object per line", "sid": sid, "started_at": started_at, "desktop_pid": desktop_pid, "file": file_name},
+-        {"_type": "fields", "fields": {"ts": "UTC ISO-8601 milliseconds", "mono_ms": "host monotonic milliseconds", "sid": "desktop trace session", "pid": "process id", "tid": "thread id", "d": "domain", "ev": "event", "op": "operation correlation id", "repo": "repository", "path": "repository-relative path", "kind": "change kind", "tool": "MCP tool", "rev": "observed canonical revision", "rev0": "canonical revision before transition", "rev1": "canonical revision after transition", "seq": "activity-journal sequence", "q": "GUI queue size", "count": "count", "bytes": "byte count", "wait_ms": "queue wait milliseconds", "elapsed_ms": "elapsed milliseconds", "scan_ms": "watcher scan milliseconds", "ping_ms": "watcher ping milliseconds", "status": "compact status", "err": "bounded error", "mtime_ns": "observed file mtime"}},
++        {"_type": "fields", "fields": {"ts": "UTC ISO-8601 milliseconds", "mono_ms": "host monotonic milliseconds", "sid": "desktop trace session", "pid": "process id", "tid": "thread id", "d": "domain", "ev": "event", "op": "operation correlation id", "repo": "repository", "path": "repository-relative path", "kind": "change kind", "tool": "MCP tool", "rev": "observed canonical revision", "rev0": "canonical revision before transition", "rev1": "canonical revision after transition", "candidate_rev": "rejected candidate canonical revision", "seq": "activity-journal sequence", "q": "GUI queue size", "count": "count", "bytes": "byte count", "wait_ms": "queue wait milliseconds", "elapsed_ms": "elapsed milliseconds", "scan_ms": "watcher scan milliseconds", "ping_ms": "watcher ping milliseconds", "status": "compact status", "err": "bounded error", "mtime_ns": "observed file mtime"}},
+         {"_type": "domains", "domains": ["DESKTOP", "LIVE", "MCP", "GUI"], "reserved": ["OPS"], "ops_note": "Reserved for future repository-operation coordination; not implemented here."},
+         {"_type": "revision_semantics", "rev": "observed authoritative canonical revision", "rev0": "authoritative canonical revision before transition", "rev1": "authoritative canonical revision after transition", "seq": "independent activity-journal sequence", "logger_rule": "The logger never calculates or increments canonical revision or activity sequence."},
+-        {"_type": "events", "events": {"DESKTOP": ["SESSION_START", "SESSION_END"], "LIVE": ["FS_CHANGE_DETECTED", "WATCH_UPDATE_START", "WATCH_UPDATE_END", "WATCH_UPDATE_FAIL", "UPDATE_RECEIVED", "CLONE_END", "UPDATER_START", "UPDATER_END", "UPDATER_FAIL", "ENGINE_READY", "INCREMENTAL_END", "SNAPSHOT_SAVE_END", "FILE_STATE_SAVE_END", "CANONICAL_COMMIT", "UPDATE_PUBLISHED", "PUBLISH_RECEIVED", "CANONICAL_PUBLISH", "PUBLISH_FAIL", "ACTIVITY_APPEND", "SERVICE_START", "SERVICE_END"], "MCP": ["CALL_START", "IMPLEMENTATION_END", "DIAGNOSTICS_END", "TELEMETRY_END", "CALL_END", "CALL_FAIL"], "GUI": ["EVENT_BATCH_RECEIVED", "ACTIVITY_GAP", "STATUS_QUEUED", "STATUS_RENDERED"]}},
++        {"_type": "events", "events": {"DESKTOP": ["SESSION_START", "SESSION_END"], "LIVE": ["FS_CHANGE_DETECTED", "WATCH_UPDATE_START", "WATCH_UPDATE_END", "WATCH_UPDATE_FAIL", "UPDATE_RECEIVED", "UPDATE_FAIL", "CLONE_END", "UPDATER_START", "UPDATER_END", "UPDATER_FAIL", "ENGINE_READY", "INCREMENTAL_END", "SNAPSHOT_SAVE_END", "FILE_STATE_SAVE_END", "CANONICAL_COMMIT", "UPDATE_PUBLISHED", "PUBLISH_RECEIVED", "CANONICAL_PUBLISH", "PUBLISH_FAIL", "ACTIVITY_APPEND", "SERVICE_START", "SERVICE_END"], "MCP": ["CALL_START", "IMPLEMENTATION_END", "DIAGNOSTICS_END", "TELEMETRY_END", "CALL_END", "CALL_FAIL"], "GUI": ["EVENT_BATCH_RECEIVED", "ACTIVITY_GAP", "STATUS_QUEUED", "STATUS_RENDERED"]}},
+     ]
+ 
+ 
+@@ -235,7 +235,7 @@ def trace_event(domain: str, event: str, *, op: str | None = None, rev: int | No
+         for key, value in (("rev", rev), ("rev0", rev_before), ("rev1", rev_after), ("seq", seq)):
+             if value is not None:
+                 record[key] = value
+-        key_map = {"repo": "repo", "path": "path", "kind": "kind", "tool": "tool", "q": "q", "count": "count", "bytes": "bytes", "wait_ms": "wait_ms", "elapsed_ms": "elapsed_ms", "scan_ms": "scan_ms", "ping_ms": "ping_ms", "status": "status", "err": "err", "mtime_ns": "mtime_ns", "category": "category", "operation": "operation", "first_seq": "first_seq", "last_seq": "last_seq"}
++        key_map = {"repo": "repo", "path": "path", "kind": "kind", "tool": "tool", "q": "q", "count": "count", "bytes": "bytes", "wait_ms": "wait_ms", "elapsed_ms": "elapsed_ms", "scan_ms": "scan_ms", "ping_ms": "ping_ms", "status": "status", "err": "err", "mtime_ns": "mtime_ns", "category": "category", "operation": "operation", "first_seq": "first_seq", "last_seq": "last_seq", "candidate_rev": "candidate_rev"}
+         for key, value in fields.items():
+             target = key_map.get(key)
+             if target is not None and value is not None:
+diff --git a/tests/test_live_state_ipc.py b/tests/test_live_state_ipc.py
+index b9c735e..b7e76f9 100644
+--- a/tests/test_live_state_ipc.py
++++ b/tests/test_live_state_ipc.py
+@@ -73,6 +73,137 @@ def test_two_clients_observe_one_in_ram_state_and_revision(live_server):
+     assert snap["state"].revision == 1
+ 
+ 
++def test_publish_trace_uses_authoritative_revision_and_rejections_are_nonfatal(monkeypatch):
++    import contextor.core.runtime_trace as runtime_trace
++
++    events = []
++    monkeypatch.setattr(runtime_trace, "trace_event", lambda *args, **kwargs: events.append((args, kwargs)))
++    server = CanonicalLiveServer(SimpleNamespace(files=[]), revision=4)
++
++    accepted = server._dispatch({"operation": "publish", "state": SimpleNamespace(files=["x"])})
++    assert accepted["status"] == "ok"
++    canonical = next(kwargs for args, kwargs in events if args[1] == "CANONICAL_PUBLISH")
++    assert canonical["rev_before"] == 4
++    assert canonical["rev_after"] == 5
++
++    rejected = server._dispatch({"operation": "publish", "state": SimpleNamespace(revision=3)})
++    assert rejected["error"] == "non_monotonic_canonical_revision"
++    assert any(args[1] == "PUBLISH_FAIL" and kwargs["candidate_rev"] == 3 for args, kwargs in events)
++
++
++def test_publish_trace_operation_and_event_failures_do_not_break_canonical_commit(monkeypatch):
++    import contextor.core.runtime_trace as runtime_trace
++
++    def fail_operation(_prefix):
++        raise RuntimeError("trace operation unavailable")
++
++    def fail_event(*_args, **_kwargs):
++        raise RuntimeError("trace sink unavailable")
++
++    monkeypatch.setattr(runtime_trace, "new_trace_operation", fail_operation)
++    monkeypatch.setattr(runtime_trace, "trace_event", fail_event)
++    server = CanonicalLiveServer(SimpleNamespace(files=[]))
++
++    response = server._dispatch({"operation": "publish", "state": SimpleNamespace(files=["x"])})
++    assert response["status"] == "ok"
++    assert response["revision"] == 1
++
++
++def test_update_trace_failure_preserves_updater_exception(monkeypatch):
++    import contextor.core.runtime_trace as runtime_trace
++
++    monkeypatch.setattr(runtime_trace, "trace_event", lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("trace sink unavailable")))
++
++    def failing_updater(_state, _path):
++        raise RuntimeError("updater failure")
++
++    server = CanonicalLiveServer(SimpleNamespace(files=[]), updater=failing_updater)
++    with pytest.raises(RuntimeError, match="updater failure"):
++        server._dispatch({"operation": "update_file", "file_path": "x.py"})
++    assert server._revision == 0
++
++
++def test_trace_context_enter_failure_is_fail_open(monkeypatch):
++    import contextor.core.runtime_trace as runtime_trace
++
++    class BrokenEnter:
++        def __enter__(self):
++            raise RuntimeError("trace enter failure")
++
++        def __exit__(self, *_args):
++            raise RuntimeError("trace exit failure")
++
++    monkeypatch.setattr(runtime_trace, "trace_operation", lambda _op: BrokenEnter())
++    executed = []
++
++    def updater(state, path):
++        executed.append(path)
++        return {"ok": True}
++
++    server = CanonicalLiveServer(SimpleNamespace(files=[]), updater=updater)
++    response = server._dispatch({"operation": "update_file", "file_path": "x.py"})
++    assert executed == ["x.py"]
++    assert response["status"] == "ok"
++    assert response["revision"] == 1
++
++
++def test_trace_context_exit_failure_after_success_is_swallowed(monkeypatch):
++    import contextor.core.runtime_trace as runtime_trace
++
++    class BrokenExit:
++        def __enter__(self):
++            return self
++
++        def __exit__(self, *_args):
++            raise RuntimeError("trace exit failure")
++
++    monkeypatch.setattr(runtime_trace, "trace_operation", lambda _op: BrokenExit())
++    result = {"ok": True}
++    server = CanonicalLiveServer(SimpleNamespace(files=[]), updater=lambda _state, _path: result)
++    response = server._dispatch({"operation": "update_file", "file_path": "x.py"})
++    assert response["status"] == "ok"
++    assert response["result"] is result
++    assert response["revision"] == 1
++
++
++def test_trace_context_exit_failure_cannot_replace_updater_exception(monkeypatch):
++    import contextor.core.runtime_trace as runtime_trace
++
++    class BrokenExit:
++        def __enter__(self):
++            return self
++
++        def __exit__(self, *_args):
++            raise RuntimeError("trace cleanup failure")
++
++    monkeypatch.setattr(runtime_trace, "trace_operation", lambda _op: BrokenExit())
++
++    def updater(_state, _path):
++        raise RuntimeError("authoritative updater failure")
++
++    server = CanonicalLiveServer(SimpleNamespace(files=[]), updater=updater)
++    with pytest.raises(RuntimeError, match="^authoritative updater failure$"):
++        server._dispatch({"operation": "update_file", "file_path": "x.py"})
++    assert server._revision == 0
++
++
++def test_update_clone_failure_uses_update_fail_not_publish_fail(monkeypatch):
++    import contextor.core.runtime_trace as runtime_trace
++
++    events = []
++    monkeypatch.setattr(runtime_trace, "trace_event", lambda *args, **kwargs: events.append((args, kwargs)))
++
++    class Uncloneable:
++        def __deepcopy__(self, _memo):
++            raise RuntimeError("clone failure")
++
++    server = CanonicalLiveServer(Uncloneable(), updater=lambda *_args: {"ok": True})
++    response = server._dispatch({"operation": "update_file", "file_path": "x.py"})
++    assert response["error"] == "canonical_state_clone_failed"
++    assert any(args[1] == "UPDATE_FAIL" for args, _kwargs in events)
++    assert not any(args[1] == "PUBLISH_FAIL" for args, _kwargs in events)
++
++
+ def test_update_runs_inside_the_live_owner_and_is_visible_to_other_clients():
+     def update(state, file_path):
+         state.files.append(file_path)
+@@ -1033,5 +1164,3 @@ def test_connect_or_start_true_startup_hang(tmp_path, monkeypatch):
+     time.sleep(0.1)
+     assert not runtime_mod._is_pid_alive(child_pid)
+ 
+-
+-
+COMPLETE_RAW_UNIFIED_DIFF_CORRECTION_END

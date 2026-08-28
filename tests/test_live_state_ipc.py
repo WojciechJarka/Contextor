@@ -73,6 +73,137 @@ def test_two_clients_observe_one_in_ram_state_and_revision(live_server):
     assert snap["state"].revision == 1
 
 
+def test_publish_trace_uses_authoritative_revision_and_rejections_are_nonfatal(monkeypatch):
+    import contextor.core.runtime_trace as runtime_trace
+
+    events = []
+    monkeypatch.setattr(runtime_trace, "trace_event", lambda *args, **kwargs: events.append((args, kwargs)))
+    server = CanonicalLiveServer(SimpleNamespace(files=[]), revision=4)
+
+    accepted = server._dispatch({"operation": "publish", "state": SimpleNamespace(files=["x"])})
+    assert accepted["status"] == "ok"
+    canonical = next(kwargs for args, kwargs in events if args[1] == "CANONICAL_PUBLISH")
+    assert canonical["rev_before"] == 4
+    assert canonical["rev_after"] == 5
+
+    rejected = server._dispatch({"operation": "publish", "state": SimpleNamespace(revision=3)})
+    assert rejected["error"] == "non_monotonic_canonical_revision"
+    assert any(args[1] == "PUBLISH_FAIL" and kwargs["candidate_rev"] == 3 for args, kwargs in events)
+
+
+def test_publish_trace_operation_and_event_failures_do_not_break_canonical_commit(monkeypatch):
+    import contextor.core.runtime_trace as runtime_trace
+
+    def fail_operation(_prefix):
+        raise RuntimeError("trace operation unavailable")
+
+    def fail_event(*_args, **_kwargs):
+        raise RuntimeError("trace sink unavailable")
+
+    monkeypatch.setattr(runtime_trace, "new_trace_operation", fail_operation)
+    monkeypatch.setattr(runtime_trace, "trace_event", fail_event)
+    server = CanonicalLiveServer(SimpleNamespace(files=[]))
+
+    response = server._dispatch({"operation": "publish", "state": SimpleNamespace(files=["x"])})
+    assert response["status"] == "ok"
+    assert response["revision"] == 1
+
+
+def test_update_trace_failure_preserves_updater_exception(monkeypatch):
+    import contextor.core.runtime_trace as runtime_trace
+
+    monkeypatch.setattr(runtime_trace, "trace_event", lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("trace sink unavailable")))
+
+    def failing_updater(_state, _path):
+        raise RuntimeError("updater failure")
+
+    server = CanonicalLiveServer(SimpleNamespace(files=[]), updater=failing_updater)
+    with pytest.raises(RuntimeError, match="updater failure"):
+        server._dispatch({"operation": "update_file", "file_path": "x.py"})
+    assert server._revision == 0
+
+
+def test_trace_context_enter_failure_is_fail_open(monkeypatch):
+    import contextor.core.runtime_trace as runtime_trace
+
+    class BrokenEnter:
+        def __enter__(self):
+            raise RuntimeError("trace enter failure")
+
+        def __exit__(self, *_args):
+            raise RuntimeError("trace exit failure")
+
+    monkeypatch.setattr(runtime_trace, "trace_operation", lambda _op: BrokenEnter())
+    executed = []
+
+    def updater(state, path):
+        executed.append(path)
+        return {"ok": True}
+
+    server = CanonicalLiveServer(SimpleNamespace(files=[]), updater=updater)
+    response = server._dispatch({"operation": "update_file", "file_path": "x.py"})
+    assert executed == ["x.py"]
+    assert response["status"] == "ok"
+    assert response["revision"] == 1
+
+
+def test_trace_context_exit_failure_after_success_is_swallowed(monkeypatch):
+    import contextor.core.runtime_trace as runtime_trace
+
+    class BrokenExit:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            raise RuntimeError("trace exit failure")
+
+    monkeypatch.setattr(runtime_trace, "trace_operation", lambda _op: BrokenExit())
+    result = {"ok": True}
+    server = CanonicalLiveServer(SimpleNamespace(files=[]), updater=lambda _state, _path: result)
+    response = server._dispatch({"operation": "update_file", "file_path": "x.py"})
+    assert response["status"] == "ok"
+    assert response["result"] is result
+    assert response["revision"] == 1
+
+
+def test_trace_context_exit_failure_cannot_replace_updater_exception(monkeypatch):
+    import contextor.core.runtime_trace as runtime_trace
+
+    class BrokenExit:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            raise RuntimeError("trace cleanup failure")
+
+    monkeypatch.setattr(runtime_trace, "trace_operation", lambda _op: BrokenExit())
+
+    def updater(_state, _path):
+        raise RuntimeError("authoritative updater failure")
+
+    server = CanonicalLiveServer(SimpleNamespace(files=[]), updater=updater)
+    with pytest.raises(RuntimeError, match="^authoritative updater failure$"):
+        server._dispatch({"operation": "update_file", "file_path": "x.py"})
+    assert server._revision == 0
+
+
+def test_update_clone_failure_uses_update_fail_not_publish_fail(monkeypatch):
+    import contextor.core.runtime_trace as runtime_trace
+
+    events = []
+    monkeypatch.setattr(runtime_trace, "trace_event", lambda *args, **kwargs: events.append((args, kwargs)))
+
+    class Uncloneable:
+        def __deepcopy__(self, _memo):
+            raise RuntimeError("clone failure")
+
+    server = CanonicalLiveServer(Uncloneable(), updater=lambda *_args: {"ok": True})
+    response = server._dispatch({"operation": "update_file", "file_path": "x.py"})
+    assert response["error"] == "canonical_state_clone_failed"
+    assert any(args[1] == "UPDATE_FAIL" for args, _kwargs in events)
+    assert not any(args[1] == "PUBLISH_FAIL" for args, _kwargs in events)
+
+
 def test_update_runs_inside_the_live_owner_and_is_visible_to_other_clients():
     def update(state, file_path):
         state.files.append(file_path)
@@ -1032,6 +1163,4 @@ def test_connect_or_start_true_startup_hang(tmp_path, monkeypatch):
     # Verify child was killed by connect_or_start
     time.sleep(0.1)
     assert not runtime_mod._is_pid_alive(child_pid)
-
-
 
