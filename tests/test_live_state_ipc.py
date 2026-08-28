@@ -204,6 +204,240 @@ def test_update_clone_failure_uses_update_fail_not_publish_fail(monkeypatch):
     assert not any(args[1] == "PUBLISH_FAIL" for args, _kwargs in events)
 
 
+def test_persister_runs_after_validation_before_canonical_exposure():
+    observed = []
+    initial_state = SimpleNamespace(files=[])
+    server = None
+
+    def updater(state, _path):
+        state.files.append("x")
+        return {"status": "UPDATED"}
+
+    def persister(state, revision):
+        assert server._state is initial_state
+        assert server._revision == 0
+        assert server._activity_seq == 0
+        observed.append((state, revision))
+
+    server = CanonicalLiveServer(initial_state, updater=updater, persister=persister)
+    response = server._dispatch({"operation": "update_file", "file_path": "x.py"})
+    assert response["revision"] == 1
+    assert observed[0][1] == 1
+    assert server._state is observed[0][0]
+    assert server._activity_seq == 1
+
+
+def test_persistence_conflict_fails_closed_without_live_event():
+    from contextor.core.live_state.store import SnapshotRevisionConflict
+
+    events = []
+    import contextor.core.runtime_trace as runtime_trace
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(runtime_trace, "trace_event", lambda *args, **kwargs: events.append((args, kwargs)))
+    try:
+        initial = SimpleNamespace(files=[])
+        def updater(state, _path):
+            state.files.append("x")
+            return {"status": "UPDATED"}
+        def persister(_state, revision):
+            raise SnapshotRevisionConflict(11, revision)
+        server = CanonicalLiveServer(initial, updater=updater, persister=persister)
+        response = server._dispatch({"operation": "update_file", "file_path": "x.py"})
+        assert response["error"] == "canonical_persistence_revision_conflict"
+        assert response["resync_required"] is True
+        assert server._revision == 0
+        assert server._state is initial
+        assert server._activity_seq == 0
+        assert not any(e[0][1] == "update_file" for e in server._events)
+    finally:
+        monkeypatch.undo()
+
+
+def test_real_repository_persister_disk_ahead_fails_closed(tmp_path, monkeypatch):
+    from contextor.core.live_state.runtime import _repository_persister
+    from contextor.core.live_state.store import load_snapshot, read_metadata, save_snapshot
+    from contextor.core.analysis.state_manager import FileStateManager
+    from contextor.core.paths import repo_cache_dir
+    from contextor.core.reporting_engine.persistent_registry import PersistentIdentityRegistry
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    PersistentIdentityRegistry(str(repo))
+    monkeypatch.setenv("CONTEXTOR_CACHE_DIR", str(tmp_path / "cache"))
+    cache = repo_cache_dir(repo)
+    state = SimpleNamespace(files=[])
+    for _ in range(11):
+        save_snapshot(state, cache, "sid")
+    manager = FileStateManager(str(cache))
+    manager.save("sid", revision=11)
+    previous = SimpleNamespace(files=[])
+    server = CanonicalLiveServer(previous, revision=10, updater=lambda candidate, _path: {"status": "UPDATED"}, persister=_repository_persister(repo, {"manager": manager, "state_id": "sid"}))
+    response = server._dispatch({"operation": "update_file", "file_path": "x.py"})
+    assert response["error"] == "canonical_persistence_revision_conflict"
+    assert response["resync_required"] is True
+    assert server._revision == 10 and server._state is previous and server._activity_seq == 0
+    assert read_metadata(cache).revision == 11
+    assert FileStateManager(str(cache)).revision == 11
+    assert load_snapshot(cache, "sid")[1].revision == 11
+
+
+def test_real_repository_adapter_two_successive_updates_are_exact_successors(tmp_path, monkeypatch):
+    from contextor.core.analysis.state_manager import FileStateManager, RepositoryAnalysisState
+    from contextor.core.live_state.runtime import _repository_persister, _repository_updater
+    from contextor.core.live_state.store import load_snapshot, read_metadata, save_snapshot
+    from contextor.core.paths import repo_cache_dir
+    from contextor.core.repository_identity import ensure_repository_identity
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    source = repo / "module.py"
+    source.write_text("VALUE = 1\n", encoding="utf-8")
+    ensure_repository_identity(repo)
+    monkeypatch.setenv("CONTEXTOR_CACHE_DIR", str(tmp_path / "cache"))
+    cache = repo_cache_dir(repo)
+    state = RepositoryAnalysisState(modules={})
+    state.revision = 1
+    identity = ensure_repository_identity(repo)[0]
+    metadata = save_snapshot(
+        state,
+        cache,
+        "sid",
+        repo_id=identity.repo_id,
+        root_path=identity.root_path,
+    )
+    manager = FileStateManager(str(cache))
+    manager.save("sid", revision=metadata.revision)
+    holder = {}
+    server = CanonicalLiveServer(
+        state,
+        revision=metadata.revision,
+        updater=_repository_updater(repo, holder),
+        persister=_repository_persister(repo, holder),
+    )
+
+    for expected in (2, 3):
+        response = server._dispatch({"operation": "update_file", "file_path": str(source)})
+        assert response["revision"] == expected
+        assert server._revision == expected
+        assert server._state.revision == expected
+        assert read_metadata(cache).revision == expected
+        loaded_state, loaded_metadata = load_snapshot(cache, "sid")
+        assert loaded_metadata.revision == expected
+        assert loaded_state.revision == expected
+        assert FileStateManager(str(cache)).revision == expected
+        assert server._events[-1]["revision"] == expected
+
+
+def test_persistence_trace_operation_is_propagated_across_successful_real_update(tmp_path, monkeypatch):
+    from contextor.core.analysis.state_manager import FileStateManager, RepositoryAnalysisState
+    from contextor.core.live_state.runtime import _repository_persister, _repository_updater
+    from contextor.core.live_state.store import save_snapshot
+    from contextor.core.paths import repo_cache_dir
+    from contextor.core.repository_identity import ensure_repository_identity
+    import contextor.core.runtime_trace as runtime_trace
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    source = repo / "module.py"
+    source.write_text("VALUE = 1\n", encoding="utf-8")
+    ensure_repository_identity(repo)
+    monkeypatch.setenv("CONTEXTOR_CACHE_DIR", str(tmp_path / "cache"))
+    cache = repo_cache_dir(repo)
+    state = RepositoryAnalysisState(modules={})
+    state.revision = 1
+    metadata = save_snapshot(state, cache, "sid")
+    FileStateManager(str(cache)).save("sid", revision=metadata.revision)
+    holder = {}
+    captured = []
+    monkeypatch.setattr(runtime_trace, "trace_event", lambda domain, event, **fields: captured.append((event, fields)))
+    server = CanonicalLiveServer(
+        state,
+        revision=metadata.revision,
+        updater=_repository_updater(repo, holder),
+        persister=_repository_persister(repo, holder),
+    )
+    response = server._dispatch({"operation": "update_file", "file_path": str(source), "trace_op": "trace-real-1"})
+    assert response["status"] == "ok"
+    required = {
+        "UPDATE_RECEIVED",
+        "UPDATER_START",
+        "UPDATER_END",
+        "PERSIST_START",
+        "SNAPSHOT_SAVE_END",
+        "FILE_STATE_SAVE_END",
+        "PERSIST_END",
+        "CANONICAL_COMMIT",
+        "UPDATE_PUBLISHED",
+    }
+    events = {event: fields for event, fields in captured}
+    assert required <= events.keys()
+    assert {events[event].get("op") for event in required} == {"trace-real-1"}
+    monkeypatch.setattr(
+        runtime_trace,
+        "trace_event",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("trace sink unavailable")),
+    )
+    second = server._dispatch({"operation": "update_file", "file_path": str(source)})
+    assert second["status"] == "ok"
+
+
+def test_startup_backfill_preserves_filestate_content_and_revision_parity(tmp_path, monkeypatch):
+    import contextor.core.live_state.runtime as runtime
+    from contextor.core.analysis.state_manager import FileState, FileStateManager, RepositoryAnalysisState
+    from contextor.core.live_state.store import load_snapshot, read_metadata, save_snapshot
+    from contextor.core.paths import repo_cache_dir
+    from contextor.core.repository_identity import ensure_repository_identity
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    ensure_repository_identity(repo)
+    monkeypatch.setenv("CONTEXTOR_CACHE_DIR", str(tmp_path / "cache"))
+    cache = repo_cache_dir(repo)
+    state = RepositoryAnalysisState(modules={"a.py": SimpleNamespace()})
+    state.revision = 1
+    identity = ensure_repository_identity(repo)[0]
+    metadata = save_snapshot(
+        state,
+        cache,
+        "sid",
+        repo_id=identity.repo_id,
+        root_path=identity.root_path,
+    )
+    manager = FileStateManager(str(cache))
+    manager._state = {
+        "a.py": FileState(10, 3, "aaa"),
+        "b.py": FileState(20, 4, "bbb"),
+    }
+    manager.save("sid", revision=metadata.revision)
+    before = dict(manager._state)
+
+    class StubServer:
+        def __init__(self, state, revision, **_kwargs):
+            self._state = state
+            self._revision = revision
+            self.endpoint = SimpleNamespace(host="127.0.0.1", port=1, authkey_hex="00")
+            self._stop = threading.Event()
+        def serve_forever(self):
+            return None
+        def close(self):
+            return None
+
+    monkeypatch.setattr(runtime, "CanonicalLiveServer", StubServer)
+    import contextor.core.analysis.incremental.materialization as materialization
+    monkeypatch.setattr(materialization, "module_usages_require_materialization", lambda _state: True)
+    monkeypatch.setattr(materialization, "ensure_module_usages", lambda value: setattr(value, "module_usages", {"a.py": SimpleNamespace(symbol_calls_materialized=True, reference_evidence_materialized=True)}))
+    runtime.run_service(repo)
+
+    after = FileStateManager(str(cache))
+    loaded_state, loaded_metadata = load_snapshot(cache, "sid")
+    assert len(after._state) == len(before)
+    assert after._state == before
+    assert after.revision == metadata.revision + 1
+    assert read_metadata(cache).revision == metadata.revision + 1
+    assert loaded_metadata.revision == metadata.revision + 1
+    assert loaded_state.revision == metadata.revision + 1
+
+
 def test_update_runs_inside_the_live_owner_and_is_visible_to_other_clients():
     def update(state, file_path):
         state.files.append(file_path)
@@ -1163,4 +1397,3 @@ def test_connect_or_start_true_startup_hang(tmp_path, monkeypatch):
     # Verify child was killed by connect_or_start
     time.sleep(0.1)
     assert not runtime_mod._is_pid_alive(child_pid)
-

@@ -95,6 +95,18 @@ class LiveStateMetadata:
     writer: str = "unknown"
     repo_id: str = ""
     root_path: str = ""
+    state_file: str = ""
+    file_state_file: str = ""
+
+
+class SnapshotRevisionConflict(ValueError):
+    def __init__(self, current_revision: int | None, requested_revision: int):
+        self.current_revision = current_revision
+        self.requested_revision = requested_revision
+        super().__init__(
+            "Snapshot revision conflict: "
+            f"current={current_revision}, requested={requested_revision}."
+        )
 
 
 def _paths(cache_dir: str | Path) -> tuple[Path, Path, Path]:
@@ -119,6 +131,8 @@ def read_metadata(cache_dir: str | Path) -> LiveStateMetadata | None:
             writer=str(payload.get("writer", "legacy")),
             repo_id=str(payload.get("repo_id", "")),
             root_path=str(payload.get("root_path", "")),
+            state_file=str(payload.get("state_file", "")),
+            file_state_file=str(payload.get("file_state_file", "")),
         )
     except (OSError, ValueError, TypeError):
         return None
@@ -151,6 +165,8 @@ def save_snapshot(
     repo_id: str = "",
     root_path: str = "",
     revision_floor: int = 0,
+    exact_revision: int | None = None,
+    file_state_payload: dict[str, Any] | None = None,
 ) -> LiveStateMetadata:
     """Atomically publish a complete snapshot and monotonically increasing revision."""
 
@@ -160,6 +176,9 @@ def save_snapshot(
     token = uuid.uuid4().hex
     state_tmp = state_file.with_name(f".{state_file.name}.{token}.tmp")
     meta_tmp = meta_file.with_name(f".{meta_file.name}.{token}.tmp")
+    generation_state = state_tmp
+    generation_file_state: Path | None = None
+    committed = False
     try:
         current = read_metadata(cache_dir)
         normalized_root = (
@@ -174,26 +193,61 @@ def save_snapshot(
             and Path(current.root_path).expanduser().resolve() != Path(normalized_root)
         ):
             raise ValueError("Snapshot repository root does not match existing metadata.")
+        if exact_revision is not None:
+            if isinstance(exact_revision, bool) or not isinstance(exact_revision, int) or exact_revision < 0:
+                raise ValueError("exact_revision must be a non-negative integer.")
+            current_revision = current.revision if current is not None else None
+            if current_revision is None and exact_revision != 1:
+                raise SnapshotRevisionConflict(None, exact_revision)
+            if current_revision is not None and exact_revision != current_revision + 1:
+                raise SnapshotRevisionConflict(current_revision, exact_revision)
+            next_revision = exact_revision
+            generation_state = state_file.parent / f"engine_state.r{exact_revision}.{token}.pkl"
+            generation_file_state = state_file.parent / f"file_state.r{exact_revision}.{token}.json"
+        else:
+            next_revision = max(current.revision if current else 0, revision_floor) + 1
         metadata = LiveStateMetadata(
             state_id=state_id,
-            revision=max(current.revision if current else 0, revision_floor) + 1,
+            revision=next_revision,
             writer=writer,
             repo_id=repo_id,
             root_path=normalized_root,
+            state_file=generation_state.name if exact_revision is not None else "",
+            file_state_file=generation_file_state.name if generation_file_state is not None else "",
         )
-        if state is not None and hasattr(state, "__dict__"):
+        if exact_revision is not None and isinstance(state, dict):
+            state["revision"] = metadata.revision
+            state["state_id"] = metadata.state_id
+        elif state is not None and hasattr(state, "__dict__"):
             try:
                 setattr(state, "state_id", metadata.state_id)
                 setattr(state, "revision", metadata.revision)
             except AttributeError:
                 pass
-        with state_tmp.open("wb") as stream:
+        with generation_state.open("wb") as stream:
             pickle.dump({"metadata": asdict(metadata), "state": state}, stream)
             stream.flush()
             os.fsync(stream.fileno())
-        meta_tmp.write_text(json.dumps(asdict(metadata), indent=2), encoding="utf-8")
-        os.replace(state_tmp, state_file)
+        if generation_file_state is not None:
+            if not isinstance(file_state_payload, dict) or not isinstance(file_state_payload.get("_meta"), dict):
+                raise ValueError("file_state_payload must contain a _meta mapping.")
+            payload_meta = file_state_payload["_meta"]
+            if payload_meta.get("state_id", "") != state_id:
+                raise ValueError("FileState payload state_id does not match snapshot state_id.")
+            if payload_meta.get("revision") != exact_revision:
+                raise ValueError("FileState payload revision does not match exact_revision.")
+            with generation_file_state.open("w", encoding="utf-8") as stream:
+                json.dump(file_state_payload, stream, indent=2)
+                stream.flush()
+                os.fsync(stream.fileno())
+        with meta_tmp.open("w", encoding="utf-8") as stream:
+            json.dump(asdict(metadata), stream, indent=2)
+            stream.flush()
+            os.fsync(stream.fileno())
+        if exact_revision is None:
+            os.replace(generation_state, state_file)
         os.replace(meta_tmp, meta_file)
+        committed = True
         return metadata
     finally:
         for temporary in (state_tmp, meta_tmp):
@@ -201,6 +255,13 @@ def save_snapshot(
                 temporary.unlink()
             except FileNotFoundError:
                 pass
+        if not committed and exact_revision is not None:
+            for temporary in (generation_state, generation_file_state):
+                if temporary is not None:
+                    try:
+                        temporary.unlink()
+                    except FileNotFoundError:
+                        pass
         os.close(lock_fd)
         try:
             lock_file.unlink()
@@ -233,6 +294,8 @@ def load_snapshot(
         or Path(metadata.root_path).expanduser().resolve() != Path(normalized_root)
     ):
         return None
+    if metadata.state_file:
+        state_file = state_file.parent / metadata.state_file
     try:
         with state_file.open("rb") as stream:
             payload = _SnapshotUnpickler(stream).load()
@@ -245,8 +308,24 @@ def load_snapshot(
                 writer=str(embedded.get("writer", "unknown")),
                 repo_id=str(embedded.get("repo_id", "")),
                 root_path=str(embedded.get("root_path", "")),
+                state_file=str(embedded.get("state_file", "")),
+                file_state_file=str(embedded.get("file_state_file", "")),
             )
+            if embedded_metadata.revision != metadata.revision:
+                return None
             state_obj = _normalize_symbol_call_facts(payload["state"])
+            state_revision = (
+                state_obj.get("revision") if isinstance(state_obj, dict)
+                else getattr(state_obj, "revision", None)
+            )
+            state_id_value = (
+                state_obj.get("state_id") if isinstance(state_obj, dict)
+                else getattr(state_obj, "state_id", None)
+            )
+            if state_obj is not None and state_revision is not None and int(state_revision) != metadata.revision:
+                return None
+            if state_obj is not None and state_id_value is not None and str(state_id_value) != metadata.state_id:
+                return None
             if state_obj is not None and hasattr(state_obj, "__dict__"):
                 try:
                     setattr(state_obj, "state_id", embedded_metadata.state_id)
@@ -324,7 +403,7 @@ def load_snapshot(
                         setattr(state_obj, "shared_usage_clusters_state", "deferred")
                     except AttributeError:
                         pass
-            return state_obj, embedded_metadata
+            return state_obj, metadata
         payload = _normalize_symbol_call_facts(payload)
         if payload is not None and hasattr(payload, "__dict__"):
             if not hasattr(payload, "module_usages"):

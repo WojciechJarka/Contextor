@@ -17,8 +17,24 @@ from contextor.core.repository_identity import (
     require_repository_identity,
 )
 
-from .ipc import CanonicalLiveServer, LIVE_PROTOCOL_VERSION, LiveEndpoint, LiveStateClient
+from .ipc import CanonicalLiveServer, CanonicalPersistenceConflict, LIVE_PROTOCOL_VERSION, LiveEndpoint, LiveStateClient
 from .store import load_snapshot, migrate_legacy_snapshot, read_metadata, save_snapshot
+
+
+def _safe_current_trace_operation() -> str | None:
+    try:
+        from contextor.core.runtime_trace import current_trace_operation
+        return current_trace_operation()
+    except Exception:
+        return None
+
+
+def _safe_trace_event(domain: str, event: str, **fields) -> None:
+    try:
+        from contextor.core.runtime_trace import trace_event
+        trace_event(domain, event, **fields)
+    except Exception:
+        pass
 
 
 def _is_pid_alive(pid: int | None) -> bool:
@@ -492,15 +508,13 @@ def connect_or_start(
             pass
 
 
-def _repository_updater(root: Path):
+def _repository_updater(root: Path, holder: dict[str, object] | None = None):
     identity = require_repository_identity(root)
     cache = repo_cache_dir(root)
 
     def update(state, file_path: str):
         import time
-        from contextor.core.runtime_trace import current_trace_operation, trace_event
-
-        op = current_trace_operation()
+        op = _safe_current_trace_operation()
         started = time.monotonic()
         from contextor.core.analysis.incremental_engine import IncrementalAnalysisEngine
         from contextor.core.analysis.state_manager import FileStateManager
@@ -513,29 +527,55 @@ def _repository_updater(root: Path):
             manager,
             str(root),
         )
-        trace_event("LIVE", "ENGINE_READY", op=op, repo=str(root), elapsed_ms=(time.monotonic() - started) * 1000.0)
+        _safe_trace_event("LIVE", "ENGINE_READY", op=op, repo=str(root), elapsed_ms=(time.monotonic() - started) * 1000.0)
         incremental_started = time.monotonic()
         delta = engine.update_file(file_path)
-        trace_event("LIVE", "INCREMENTAL_END", op=op, repo=str(root), elapsed_ms=(time.monotonic() - incremental_started) * 1000.0, status=getattr(delta, "status", None))
-        snapshot_started = time.monotonic()
-        meta = save_snapshot(
-            engine.state,
-            cache,
-            getattr(manager, "state_id", ""),
-            writer="live-service",
-            repo_id=identity.repo_id,
-            root_path=identity.root_path,
-        )
-        trace_event("LIVE", "SNAPSHOT_SAVE_END", op=op, repo=str(root), elapsed_ms=(time.monotonic() - snapshot_started) * 1000.0)
-        file_state_started = time.monotonic()
-        manager.save(
-            getattr(manager, "state_id", ""),
-            revision=meta.revision if meta else None,
-        )
-        trace_event("LIVE", "FILE_STATE_SAVE_END", op=op, repo=str(root), elapsed_ms=(time.monotonic() - file_state_started) * 1000.0)
+        _safe_trace_event("LIVE", "INCREMENTAL_END", op=op, repo=str(root), elapsed_ms=(time.monotonic() - incremental_started) * 1000.0, status=getattr(delta, "status", None))
+        if holder is not None:
+            holder["manager"] = manager
+            holder["state_id"] = getattr(manager, "state_id", "")
         return delta
 
     return update
+
+
+def _repository_persister(root: Path, holder: dict[str, object] | None = None):
+    identity = require_repository_identity(root)
+    cache = repo_cache_dir(root)
+
+    def persist(state, exact_revision: int):
+        import time
+        op = _safe_current_trace_operation()
+        manager = (holder or {}).get("manager")
+        if manager is None:
+            from contextor.core.analysis.state_manager import FileStateManager
+
+            manager = FileStateManager(str(cache))
+        state_id = (holder or {}).get("state_id", getattr(manager, "state_id", ""))
+        snapshot_started = time.monotonic()
+        try:
+            meta = save_snapshot(
+                state,
+                cache,
+                str(state_id),
+                writer="live-service",
+                repo_id=identity.repo_id,
+                root_path=identity.root_path,
+                exact_revision=exact_revision,
+                file_state_payload=manager.build_payload(str(state_id), exact_revision),
+            )
+            if meta.revision != exact_revision:
+                raise ValueError("Exact LIVE persistence revision mismatch.")
+            _safe_trace_event("LIVE", "SNAPSHOT_SAVE_END", op=op, repo=str(root), elapsed_ms=(time.monotonic() - snapshot_started) * 1000.0)
+            _safe_trace_event("LIVE", "FILE_STATE_SAVE_END", op=op, repo=str(root), elapsed_ms=0.0)
+        except Exception as exc:
+            from contextor.core.live_state.store import SnapshotRevisionConflict
+            if isinstance(exc, SnapshotRevisionConflict):
+                raise CanonicalPersistenceConflict(exc.current_revision, exc.requested_revision) from exc
+            raise
+        return meta
+
+    return persist
 
 
 def run_service(
@@ -559,9 +599,11 @@ def run_service(
         )
 
         if module_usages_require_materialization(state):
-            ensure_module_usages(state)
             loaded_metadata = loaded[1]
-            save_snapshot(
+            from contextor.core.analysis.state_manager import FileStateManager
+            file_state_manager = FileStateManager(str(cache))
+            ensure_module_usages(state)
+            backfill_metadata = save_snapshot(
                 state,
                 cache,
                 loaded_metadata.state_id,
@@ -570,14 +612,19 @@ def run_service(
                 root_path=identity.root_path,
                 revision_floor=loaded_metadata.revision,
             )
+            file_state_manager.save(
+                loaded_metadata.state_id,
+                revision=backfill_metadata.revision,
+            )
     revision = (read_metadata(cache).revision if read_metadata(cache) else 0)
+    adapter_holder: dict[str, object] = {}
     server = CanonicalLiveServer(
         state,
         revision=revision,
-        updater=_repository_updater(root),
+        updater=_repository_updater(root, adapter_holder),
+        persister=_repository_persister(root, adapter_holder),
     )
-    from contextor.core.runtime_trace import trace_event
-    trace_event("LIVE", "SERVICE_START", repo=str(root), rev=server._revision)
+    _safe_trace_event("LIVE", "SERVICE_START", repo=str(root), rev=server._revision)
 
     if owner_pid is not None and owner_pid > 0:
         if sys.platform == "win32":
@@ -635,7 +682,7 @@ def run_service(
     try:
         server.serve_forever()
     finally:
-        trace_event("LIVE", "SERVICE_END", repo=str(root), rev=server._revision)
+        _safe_trace_event("LIVE", "SERVICE_END", repo=str(root), rev=server._revision)
         server.close()
         try:
             current_ep = _read_endpoint(root)

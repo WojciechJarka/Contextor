@@ -41,6 +41,15 @@ ACTIVITY_EVENT_RETENTION = 10_000
 _MISSING_REVISION = object()
 
 
+class CanonicalPersistenceConflict(RuntimeError):
+    def __init__(self, current_revision: int | None, requested_revision: int):
+        self.current_revision = current_revision
+        self.requested_revision = requested_revision
+        super().__init__(
+            f"Canonical persistence revision conflict: current={current_revision}, requested={requested_revision}."
+        )
+
+
 def _safe_trace_op(request: dict[str, Any], prefix: str) -> str | None:
     existing = request.get("trace_op")
     if existing is not None:
@@ -175,6 +184,7 @@ class CanonicalLiveServer:
         *,
         revision: int | None = None,
         updater: Callable[[Any, str], Any] | None = None,
+        persister: Callable[[Any, int], Any] | None = None,
         authkey: bytes | None = None,
         retention: int = ACTIVITY_EVENT_RETENTION,
     ):
@@ -213,6 +223,7 @@ class CanonicalLiveServer:
 
         self._activity_seq = 0
         self._updater = updater
+        self._persister = persister
         self._retention = retention
         self._events: list[dict[str, Any]] = []
         self._lock = threading.RLock()
@@ -512,6 +523,33 @@ class CanonicalLiveServer:
                         "candidate_revision": _raw_state_revision(candidate_state),
                         "expected_revision": expected_revision,
                     }
+
+                if self._persister is not None:
+                    _safe_trace_event("LIVE", "PERSIST_START", op=trace_op, path=file_path, rev=expected_revision)
+                    try:
+                        with _trace_operation_context(trace_op):
+                            self._persister(candidate_state, expected_revision)
+                    except Exception as exc:
+                        from .store import SnapshotRevisionConflict
+
+                        status = (
+                            "canonical_persistence_revision_conflict"
+                            if isinstance(exc, (CanonicalPersistenceConflict, SnapshotRevisionConflict))
+                            else "canonical_persistence_failed"
+                        )
+                        _safe_trace_event("LIVE", "UPDATE_FAIL", op=trace_op, path=file_path, rev=previous_revision, status=status, err=exc)
+                        response = {
+                            "status": "error",
+                            "error": status,
+                            "revision": previous_revision,
+                            "expected_revision": expected_revision,
+                        }
+                        persisted_revision = getattr(exc, "current_revision", None)
+                        if persisted_revision is not None:
+                            response["persisted_revision"] = persisted_revision
+                            response["resync_required"] = True
+                        return response
+                    _safe_trace_event("LIVE", "PERSIST_END", op=trace_op, path=file_path, rev=expected_revision)
 
                 # ATOMIC COMMIT BOUNDARY.
                 # Nothing above this line may replace/mutate active canonical ownership.
