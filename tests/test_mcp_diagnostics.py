@@ -11,6 +11,7 @@ from contextor.mcp.diagnostics import (
 from contextor.mcp.output_guard import LARGE_OUTPUT_WARNING_BYTES
 from contextor.mcp import runtime as mcp_runtime
 from contextor.mcp.tools.get_name_collisions import get_name_collisions
+import contextor.mcp.tools.get_name_collisions as collision_tool
 from contextor.mcp.tools.get_analysis_status import get_analysis_status
 
 
@@ -137,6 +138,142 @@ def test_get_name_collisions_indexed_representation_is_bounded(tmp_path, monkeyp
     assert result["returned"] == 3
     assert result["truncated"] is True
     assert all("conflicting_code" not in item for item in result["details"])
+
+
+def test_always_on_collision_health_uses_len_without_iteration():
+    class LenOnly:
+        def __len__(self):
+            return 7
+
+        def __iter__(self):
+            raise AssertionError("collision sequence iterated")
+
+    result = diagnostics_summary_for_state(SimpleNamespace(
+        collisions_state="fresh", collisions=LenOnly(), cycles_state="fresh", cycles=[]
+    ))
+    assert result["name_collisions"]["count"] == 7
+    assert result["name_collisions"]["critical"] is None
+    assert result["name_collisions"]["warning"] is None
+    assert result["name_collisions"]["info"] is None
+    assert result["attention_required"] is True
+
+
+def test_name_collisions_paging_and_deterministic_result_indices(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    errors = [_collision(module=f"pkg.mod{i:04d}") for i in range(45)]
+    state = SimpleNamespace(collisions_state="fresh", collisions=errors, cycles_state="fresh", cycles=[])
+    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: SimpleNamespace(state=state))
+    page1 = json.loads(get_name_collisions(str(repo), representation="indexed", offset=0, limit=20))
+    page2 = json.loads(get_name_collisions(str(repo), representation="indexed", offset=20, limit=20))
+    final = json.loads(get_name_collisions(str(repo), representation="indexed", offset=40, limit=20))
+    assert page1["matched"] == 45
+    assert [d["result_index"] for d in page1["details"]] == list(range(20))
+    assert [d["result_index"] for d in page2["details"]] == list(range(20, 40))
+    assert not ({d["result_index"] for d in page1["details"]} & {d["result_index"] for d in page2["details"]})
+    assert page1["next_offset"] == 20 and page1["has_more"] is True
+    assert page2["next_offset"] == 40 and page2["has_more"] is True
+    assert final["has_more"] is False and final["next_offset"] is None
+    assert final["returned"] == 5
+    for result in (page1, page2, final):
+        if result["has_more"]:
+            assert result["returned"] > 0
+            assert result["next_offset"] > result["offset"]
+
+
+def test_name_collisions_paging_validation_and_summary_shape(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    state = SimpleNamespace(collisions_state="fresh", collisions=[_collision()], cycles_state="fresh", cycles=[])
+    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: SimpleNamespace(state=state))
+    assert json.loads(get_name_collisions(str(repo), offset=-1))["error"] == "offset must be >= 0"
+    assert json.loads(get_name_collisions(str(repo), limit=-1))["error"] == "limit must be > 0 or null"
+    assert json.loads(get_name_collisions(str(repo), limit=0))["error"] == "limit must be > 0 or null"
+    beyond = json.loads(get_name_collisions(str(repo), representation="indexed", offset=9, limit=2))
+    assert beyond["details"] == [] and beyond["returned"] == 0 and beyond["next_offset"] is None
+    summary = json.loads(get_name_collisions(str(repo), representation="summary", limit=20))
+    assert summary["matched"] == 1
+    assert summary["returned"] == 0
+    assert summary["details"] == []
+    assert summary["has_more"] is False
+    assert summary["next_offset"] is None
+    assert summary["truncated"] is True
+
+
+def test_auto_large_fixture_materializes_only_requested_page(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    errors = []
+    for i in range(1000):
+        error = _collision(module=f"pkg.mod{i:04d}")
+        error.code_snippets = {"a": "x" * 4000}
+        errors.append(error)
+    state = SimpleNamespace(collisions_state="fresh", collisions=errors, cycles_state="fresh", cycles=[])
+    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: SimpleNamespace(state=state))
+    original = collision_tool._detail
+    calls = []
+
+    def counted(error, representation, **kwargs):
+        if representation in {"named", "bounded"}:
+            calls.append(error)
+        return original(error, representation, **kwargs)
+
+    monkeypatch.setattr(collision_tool, "_detail", counted)
+    raw = get_name_collisions(str(repo), representation="auto", offset=0, limit=20)
+    result = json.loads(raw)
+    assert result["matched"] == 1000
+    assert result["returned"] <= 20
+    assert len(calls) <= 20
+    assert len(raw.encode("utf-8")) <= LARGE_OUTPUT_WARNING_BYTES
+    assert result["representation"] == "indexed"
+
+
+def test_named_zero_fit_returns_confirmation_required_without_stalled_page(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    error = _collision()
+    error.code_snippets = {"pkg.a": "x" * (LARGE_OUTPUT_WARNING_BYTES * 2)}
+    state = SimpleNamespace(collisions_state="fresh", collisions=[error], cycles_state="fresh", cycles=[])
+    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: SimpleNamespace(state=state))
+    raw = get_name_collisions(
+        str(repo), representation="named", offset=0, limit=1, allow_large_output=False
+    )
+    result = json.loads(raw)
+    assert result["status"] == "confirmation_required"
+    assert not (result.get("has_more") is True and result.get("next_offset") == 0)
+    assert len(raw.encode("utf-8")) <= LARGE_OUTPUT_WARNING_BYTES
+
+
+def test_wrapper_retry_guidance_matches_tool_signature(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    state = SimpleNamespace(collisions_state="fresh", collisions=[], cycles_state="fresh", cycles=[])
+    monkeypatch.setitem(mcp_runtime._live_engines, str(repo.resolve()), SimpleNamespace(state=state))
+    oversized = json.dumps({"status": "ok", "payload": "x" * (LARGE_OUTPUT_WARNING_BYTES + 100)})
+    with_allow = mcp_server._instrument_mcp_tool(lambda repo_path, allow_large_output=False: oversized, "with_allow")
+    without_allow = mcp_server._instrument_mcp_tool(lambda repo_path: oversized, "without_allow")
+    assert "allow_large_output" in with_allow(str(repo))
+    assert "allow_large_output" not in without_allow(str(repo))
+
+
+def test_cheap_filters_run_before_severity_and_severity_filter_survives(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    errors = [_collision(module=f"other.mod{i}") for i in range(100)]
+    errors.extend(_collision(module="target.module") for _ in range(7))
+    state = SimpleNamespace(collisions_state="fresh", collisions=errors, cycles_state="fresh", cycles=[])
+    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: SimpleNamespace(state=state))
+    original = collision_tool._severity
+    calls = []
+
+    def counted(error):
+        calls.append(error)
+        return original(error)
+
+    monkeypatch.setattr(collision_tool, "_severity", counted)
+    result = json.loads(get_name_collisions(str(repo), module="target.module", severity="warning"))
+    assert result["matched"] == 7
+    assert len(calls) == 7
 
 
 def test_registered_name_collision_tool_and_shared_summary_wrapper():

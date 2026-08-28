@@ -374,20 +374,26 @@ def _instrument_mcp_tool(func: Any, tool_name: str) -> Any:
     import functools
     from inspect import iscoroutinefunction
     from contextor.mcp.diagnostics import inject_diagnostics_summary
+    signature = inspect.signature(func)
+    supports_allow_large_output = "allow_large_output" in signature.parameters
 
     if iscoroutinefunction(func):
         @functools.wraps(func)
         async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
             root_path = _tool_repository_argument(func, args, kwargs)
             try:
-                bound = inspect.signature(func).bind_partial(*args, **kwargs)
+                bound = signature.bind_partial(*args, **kwargs)
                 allow_large_output = bool(bound.arguments.get("allow_large_output", False))
             except (TypeError, ValueError):
                 allow_large_output = False
             try:
                 result = await func(*args, **kwargs)
                 result = inject_diagnostics_summary(
-                    result, root_path, tool_name, allow_large_output=allow_large_output
+                    result,
+                    root_path,
+                    tool_name,
+                    allow_large_output=allow_large_output,
+                    supports_allow_large_output=supports_allow_large_output,
                 )
                 _emit_mcp_call_telemetry(tool_name, root_path, success=True)
                 return result
@@ -400,14 +406,18 @@ def _instrument_mcp_tool(func: Any, tool_name: str) -> Any:
         def sync_wrapper(*args: Any, **kwargs: Any) -> Any:
             root_path = _tool_repository_argument(func, args, kwargs)
             try:
-                bound = inspect.signature(func).bind_partial(*args, **kwargs)
+                bound = signature.bind_partial(*args, **kwargs)
                 allow_large_output = bool(bound.arguments.get("allow_large_output", False))
             except (TypeError, ValueError):
                 allow_large_output = False
             try:
                 result = func(*args, **kwargs)
                 result = inject_diagnostics_summary(
-                    result, root_path, tool_name, allow_large_output=allow_large_output
+                    result,
+                    root_path,
+                    tool_name,
+                    allow_large_output=allow_large_output,
+                    supports_allow_large_output=supports_allow_large_output,
                 )
                 _emit_mcp_call_telemetry(tool_name, root_path, success=True)
                 return result

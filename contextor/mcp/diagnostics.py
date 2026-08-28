@@ -21,22 +21,6 @@ def _availability(state: Any, family: str, values: Any) -> str:
     return "fresh"
 
 
-def _issue_severity(item: Any) -> str:
-    severity = getattr(item, "severity", None)
-    if severity in {"critical", "warning", "info"}:
-        return severity
-    try:
-        from contextor.core.reporting_engine.formatting import _collision_severity
-
-        return _collision_severity(
-            getattr(item, "artifact_type", "unknown"),
-            getattr(item, "symbol_details", []) or [],
-            getattr(item, "code_snippets", {}) or {},
-        )
-    except Exception:
-        return "warning"
-
-
 def diagnostics_summary_for_state(state: Any) -> dict[str, Any]:
     """Return counts plus freshness, never converting unavailable to zero."""
     if state is None:
@@ -65,11 +49,8 @@ def diagnostics_summary_for_state(state: Any) -> dict[str, Any]:
     if collision_availability != "fresh":
         collision_count = critical = warning = info = None
     else:
-        collisions = list(collisions or [])
-        collision_count = len(collisions)
-        critical = sum(_issue_severity(item) == "critical" for item in collisions)
-        warning = sum(_issue_severity(item) == "warning" for item in collisions)
-        info = sum(_issue_severity(item) == "info" for item in collisions)
+        collision_count = len(collisions or [])
+        critical = warning = info = None
     cycle_count = len(cycles) if cycle_availability == "fresh" else None
     syntax_issue = syntax_values if syntax_availability == "fresh" else None
     attention = any(
@@ -124,6 +105,7 @@ def inject_diagnostics_summary(
     tool_name: str,
     *,
     allow_large_output: bool = False,
+    supports_allow_large_output: bool = False,
 ) -> Any:
     """Add a small summary to JSON analytical responses without touching prose/errors."""
     if tool_name == "get_mcp_documentation" or not isinstance(result, str):
@@ -148,12 +130,22 @@ def inject_diagnostics_summary(
     guarded = guard_large_output(
         serialized,
         allow_large_output=False,
-        retry_instruction="Repeat the same call with a narrower projection or allow_large_output=true.",
+        retry_instruction=(
+            "Repeat the same call with a narrower projection or allow_large_output=true."
+            if supports_allow_large_output
+            else "Repeat the same call with a narrower projection or semantic filter."
+        ),
     )
     try:
         warning = json.loads(guarded)
     except json.JSONDecodeError:
         return guarded
+    if not supports_allow_large_output:
+        retry = warning.get("retry")
+        if isinstance(retry, dict):
+            retry.pop("allow_large_output", None)
+            if not retry:
+                warning.pop("retry", None)
     warning["diagnostics_summary"] = summary
     warning["diagnostics_attention_required"] = summary["attention_required"]
     final_guarded = json.dumps(warning, indent=2, ensure_ascii=False)

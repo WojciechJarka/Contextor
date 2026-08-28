@@ -13,13 +13,17 @@
     "conflicting_only (boolean, optional, default false): exclude identical definitions.",
     "identical_only (boolean, optional, default false): return only identical definitions.",
     "representation (string, default auto): auto, summary, bounded, indexed, or named.",
-    "limit (integer or null, default 20): maximum detail entries.",
+    "offset (integer, optional, default 0): zero-based page offset in the deterministic matched result.",
+    "limit (integer or null, default 20): positive maximum detail entries, or null for all remaining matches subject to output guard.",
     "allow_large_output (boolean, default false): permit the selected response above the shared budget; does not change limit."
   ],
   "behavior": [
     "Reads only canonical collision state; stale, deferred, and unavailable state is reported explicitly and never converted to zero.",
     "The response begins with total/matched/returned counts, severity counts, conflicting/identical counts, representation, truncation, estimated size, budget, and attention_required.",
-    "auto selects named details for small results and indexed details for large results. indexed and summary omit source-heavy detail; bounded/named include bounded detail entries.",
+    "Results use deterministic semantic ordering before paging. offset/limit select a page; has_more and next_offset describe remaining matched entries.",
+    "auto selects named details for a bounded page, falling back to indexed details when that page exceeds the shared budget. indexed and summary omit source-heavy detail; bounded/named include detail only for the requested page.",
+    "result_index is query-result-local: it is valid only for the deterministic result set under the current canonical state and filters, and is not a collision identity.",
+    "estimated_full_bytes may be null when exact estimation would require full heavy serialization.",
     "When a response cannot fit the shared 15 KiB budget, narrowing guidance or an explicit confirmation_required response is returned."
   ],
   "freshness": [
@@ -31,7 +35,7 @@
     "No fresh canonical collision producer returns an explicit unavailable/deferred projection."
   ],
   "usage_notes": [
-    "Narrow by severity/module before increasing limit; indexed output is response-local and has no persistent collision identity."
+    "Narrow by severity/module before increasing limit; indexed output and result_index are response-local and have no persistent collision identity."
   ],
   "examples": []
 }
