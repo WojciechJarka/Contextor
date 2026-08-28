@@ -16,7 +16,7 @@ Covers all concrete correctness and evidence requirements:
 13. Central MCP wrapper read-only success
 14. Central MCP wrapper failure re-raise & logging
 15. MCP analyze_project wrapper & canonical publication separation
-16. All 24 registered FastMCP tools coverage & registry synchronization
+16. All 25 registered FastMCP tools coverage & registry synchronization
 17. Real server-to-GUI burst ordering, zero dropped events & zero duplicates
 18. Desktop vs MCP full analysis publication equivalence
 """
@@ -601,10 +601,10 @@ def test_mcp_analyze_project_wrapper_and_canonical_publish_equivalence(live_serv
     assert events[1]["canonical_revision"] == 2
 
 
-def test_all_24_registered_mcp_tools_telemetry_against_fastmcp_registry(monkeypatch):
+def test_all_25_registered_mcp_tools_telemetry_against_fastmcp_registry(monkeypatch):
     fastmcp_tool_names = set(mcp._tool_manager._tools.keys())
     assert set(REGISTERED_MCP_TOOL_NAMES) == fastmcp_tool_names
-    assert len(REGISTERED_MCP_TOOL_NAMES) == 24
+    assert len(REGISTERED_MCP_TOOL_NAMES) == 25
 
     calls_emitted = []
 

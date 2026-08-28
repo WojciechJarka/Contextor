@@ -3,14 +3,13 @@ contextor/core/analysis/full_analysis_coordinator.py
 
 Single-writer cross-process coordinator for full repository analysis.
 Guarantees that at most one full analysis execution runs per repository identity
-across Desktop GUI, MCP server, and CLI processes.
+across Desktop GUI, MCP server, and CLI processes using native OS file locking.
 """
 
 from __future__ import annotations
 
 import json
 import os
-import sys
 import threading
 import time
 import uuid
@@ -19,7 +18,6 @@ from pathlib import Path
 from typing import Any, Callable
 
 from contextor.core.errors import AnalysisCancelled
-from contextor.core.live_state.runtime import _is_pid_alive
 from contextor.core.paths import repo_cache_dir, repo_key
 from contextor.core.repository_identity import read_repository_identity
 
@@ -31,6 +29,7 @@ class FullAnalysisLease:
     owner: str
     lock_path: str
     repo_id: str
+    lock_fd: int
 
 
 class FullAnalysisBusyError(RuntimeError):
@@ -38,15 +37,90 @@ class FullAnalysisBusyError(RuntimeError):
     pass
 
 
-_PROCESS_LOCKS: dict[str, threading.RLock] = {}
+_PROCESS_LOCKS: dict[str, threading.Lock] = {}
 _PROCESS_LOCKS_GUARD = threading.Lock()
 
 
-def _get_process_lock(repo_key_str: str) -> threading.RLock:
+def _get_process_lock(
+    repo_key_str: str,
+) -> threading.Lock:
     with _PROCESS_LOCKS_GUARD:
-        if repo_key_str not in _PROCESS_LOCKS:
-            _PROCESS_LOCKS[repo_key_str] = threading.RLock()
-        return _PROCESS_LOCKS[repo_key_str]
+        lock = _PROCESS_LOCKS.get(repo_key_str)
+        if lock is None:
+            lock = threading.Lock()
+            _PROCESS_LOCKS[repo_key_str] = lock
+        return lock
+
+
+def _prepare_lock_fd(lock_path: Path) -> int:
+    lock_path.parent.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    fd = os.open(
+        lock_path,
+        os.O_RDWR | os.O_CREAT,
+        0o600,
+    )
+
+    if os.fstat(fd).st_size == 0:
+        os.write(fd, b"\0")
+        os.fsync(fd)
+
+    os.lseek(fd, 0, os.SEEK_SET)
+    return fd
+
+
+def _try_lock_fd(fd: int) -> bool:
+    os.lseek(fd, 0, os.SEEK_SET)
+
+    if os.name == "nt":
+        import msvcrt
+
+        try:
+            msvcrt.locking(
+                fd,
+                msvcrt.LK_NBLCK,
+                1,
+            )
+            return True
+        except OSError:
+            return False
+
+    import fcntl
+
+    try:
+        fcntl.flock(
+            fd,
+            fcntl.LOCK_EX | fcntl.LOCK_NB,
+        )
+        return True
+    except BlockingIOError:
+        return False
+
+
+def _unlock_fd(fd: int) -> None:
+    try:
+        os.lseek(fd, 0, os.SEEK_SET)
+
+        if os.name == "nt":
+            import msvcrt
+
+            msvcrt.locking(
+                fd,
+                msvcrt.LK_UNLCK,
+                1,
+            )
+        else:
+            import fcntl
+
+            fcntl.flock(
+                fd,
+                fcntl.LOCK_UN,
+            )
+    finally:
+        os.close(fd)
 
 
 def _resolve_lock_path(repo_path: str | Path) -> tuple[Path, str, str]:
@@ -80,118 +154,124 @@ def acquire_full_analysis(
     lock_file, key, repo_id = _resolve_lock_path(repo_path)
     proc_lock = _get_process_lock(key)
 
-    # In-process lock acquisition
     start_time = time.monotonic()
-    deadline = (start_time + timeout) if timeout is not None else None
+    deadline = (
+        start_time + timeout
+        if timeout is not None
+        else None
+    )
 
-    # Wait for process-level lock
     while True:
         if is_cancelled and is_cancelled():
-            raise AnalysisCancelled("Full analysis cancelled while waiting for local lock.")
-        acquired_proc = proc_lock.acquire(blocking=False)
-        if acquired_proc:
-            break
-        if deadline is not None and time.monotonic() >= deadline:
-            raise FullAnalysisBusyError(
-                f"Timed out waiting for in-process full analysis lock for {repo_id}"
+            raise AnalysisCancelled(
+                "Full analysis cancelled while waiting for local lock."
             )
-        time.sleep(min(poll_interval, 0.1))
 
-    token = uuid.uuid4().hex
+        if proc_lock.acquire(blocking=False):
+            break
+
+        if (
+            deadline is not None
+            and time.monotonic() >= deadline
+        ):
+            raise FullAnalysisBusyError(
+                "Timed out waiting for in-process full analysis lock for "
+                f"{repo_id}"
+            )
+
+        time.sleep(
+            min(max(poll_interval, 0.01), 0.25)
+        )
+
     fd = -1
     logged_waiting = False
 
     try:
+        fd = _prepare_lock_fd(lock_file)
+
         while True:
             if is_cancelled and is_cancelled():
-                raise AnalysisCancelled("Full analysis cancelled while waiting for repository lease.")
-
-            # Attempt atomic creation of lock file
-            try:
-                fd = os.open(
-                    lock_file,
-                    os.O_CREAT | os.O_EXCL | os.O_RDWR,
+                raise AnalysisCancelled(
+                    "Full analysis cancelled while waiting for repository lease."
                 )
-                payload = {
+
+            if _try_lock_fd(fd):
+                token = uuid.uuid4().hex
+
+                metadata = {
                     "pid": os.getpid(),
                     "token": token,
                     "owner": str(owner),
                     "repo_id": str(repo_id),
                     "timestamp": time.time(),
                 }
-                data = json.dumps(payload).encode("utf-8")
-                os.write(fd, data)
-                os.close(fd)
-                fd = -1
+
+                # Metadata is diagnostic only.
+                # OS lock ownership is authoritative.
+                os.ftruncate(fd, 0)
+                os.lseek(fd, 0, os.SEEK_SET)
+                os.write(
+                    fd,
+                    json.dumps(metadata).encode("utf-8"),
+                )
+                os.fsync(fd)
+
+                # Ensure byte 0 remains inside the locked file after metadata write.
+                os.lseek(fd, 0, os.SEEK_SET)
+
                 return FullAnalysisLease(
                     repo_key=key,
                     token=token,
                     owner=str(owner),
                     lock_path=str(lock_file),
                     repo_id=str(repo_id),
+                    lock_fd=fd,
                 )
-            except (FileExistsError, PermissionError):
-                # Lock file exists or is locked by another process
-                existing_pid = None
-                existing_owner = "unknown"
-                try:
-                    raw = lock_file.read_text(encoding="utf-8")
-                    if raw:
-                        parsed = json.loads(raw)
-                        existing_pid = parsed.get("pid")
-                        existing_owner = parsed.get("owner", "unknown")
-                except Exception:
-                    pass
 
-                # Check for dead process (stale lock recovery)
-                if existing_pid is not None and not _is_pid_alive(existing_pid):
-                    try:
-                        lock_file.unlink(missing_ok=True)
-                        if log:
-                            log(f"Recovered stale full-analysis lock from terminated PID {existing_pid}")
-                        continue
-                    except Exception:
-                        pass
-
-                if not logged_waiting:
-                    if log:
-                        log(f"Waiting for full analysis lease on repository {repo_id} (owned by {existing_owner})...")
-                    logged_waiting = True
-
-                if deadline is not None and time.monotonic() >= deadline:
-                    raise FullAnalysisBusyError(
-                        f"Repository {repo_id} is currently locked for full analysis by owner '{existing_owner}' (PID {existing_pid})"
+            if not logged_waiting:
+                if log:
+                    log(
+                        f"Waiting for full analysis lease on repository {repo_id}..."
                     )
+                logged_waiting = True
 
-                time.sleep(poll_interval)
+            if (
+                deadline is not None
+                and time.monotonic() >= deadline
+            ):
+                raise FullAnalysisBusyError(
+                    f"Repository {repo_id} is currently locked for full analysis"
+                )
+
+            time.sleep(poll_interval)
+
     except Exception:
         if fd >= 0:
             try:
                 os.close(fd)
             except OSError:
                 pass
+
         proc_lock.release()
         raise
 
 
-def release_full_analysis(lease: FullAnalysisLease) -> None:
+def release_full_analysis(
+    lease: FullAnalysisLease,
+) -> None:
     """Release the full analysis lease."""
-    if not isinstance(lease, FullAnalysisLease):
+    if not isinstance(
+        lease,
+        FullAnalysisLease,
+    ):
         return
 
-    lock_file = Path(lease.lock_path)
     try:
-        if lock_file.exists():
-            try:
-                raw = lock_file.read_text(encoding="utf-8")
-                if raw:
-                    parsed = json.loads(raw)
-                    if parsed.get("token") == lease.token:
-                        lock_file.unlink(missing_ok=True)
-            except Exception:
-                lock_file.unlink(missing_ok=True)
+        _unlock_fd(lease.lock_fd)
     finally:
-        proc_lock = _get_process_lock(lease.repo_key)
+        proc_lock = _get_process_lock(
+            lease.repo_key
+        )
         try:
             proc_lock.release()
         except RuntimeError:

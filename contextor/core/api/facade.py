@@ -533,37 +533,36 @@ class ContextorFacade:
             if meta is not None:
                 sm = FileStateManager(str(repo_cache_dir(path)))
                 sm.save(datestamp or "", revision=meta.revision)
-                if owner != "mcp_analysis":
-                    from contextor.core.live_state import connect
+                from contextor.core.live_state import connect
 
-                    try:
-                        client = connect(path)
-                        if client is not None:
-                            published = client.publish(state, origin=origin)
-                            if (
-                                isinstance(published, dict)
-                                and published.get("status") == "ok"
-                                and published.get("revision") is not None
-                            ):
-                                live_publish_status = "success"
-                                live_publish_revision = int(published["revision"])
-                                live_publish_warning = None
-                            else:
-                                live_publish_status = "failed"
-                                live_publish_revision = None
-                                err = published.get("error") if isinstance(published, dict) else None
-                                status_val = published.get("status") if isinstance(published, dict) else None
-                                live_publish_warning = err or (f"LIVE service returned status '{status_val}'." if status_val else "Canonical LIVE service rejected publication.")
-                                if log:
-                                    log(f"Warning: Failed to publish canonical state to live daemon: {live_publish_warning}")
+                try:
+                    client = connect(path)
+                    if client is not None:
+                        published = client.publish(state, origin=origin)
+                        if (
+                            isinstance(published, dict)
+                            and published.get("status") == "ok"
+                            and published.get("revision") is not None
+                        ):
+                            live_publish_status = "success"
+                            live_publish_revision = int(published["revision"])
+                            live_publish_warning = None
                         else:
-                            live_publish_status = "not_attempted"
-                    except Exception as e:
-                        live_publish_status = "timed_out" if isinstance(e, TimeoutError) else "failed"
-                        live_publish_revision = None
-                        live_publish_warning = f"{type(e).__name__}: {e}"
-                        if log:
-                            log(f"Warning: Failed to publish canonical state to live daemon: {live_publish_warning}")
+                            live_publish_status = "failed"
+                            live_publish_revision = None
+                            err = published.get("error") if isinstance(published, dict) else None
+                            status_val = published.get("status") if isinstance(published, dict) else None
+                            live_publish_warning = err or (f"LIVE service returned status '{status_val}'." if status_val else "Canonical LIVE service rejected publication.")
+                            if log:
+                                log(f"Warning: Failed to publish canonical state to live daemon: {live_publish_warning}")
+                    else:
+                        live_publish_status = "not_attempted"
+                except Exception as e:
+                    live_publish_status = "timed_out" if isinstance(e, TimeoutError) else "failed"
+                    live_publish_revision = None
+                    live_publish_warning = f"{type(e).__name__}: {e}"
+                    if log:
+                        log(f"Warning: Failed to publish canonical state to live daemon: {live_publish_warning}")
 
             if analysis_result is not None:
                 analysis_result.live_publish_status = live_publish_status

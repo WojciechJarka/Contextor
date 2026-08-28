@@ -182,6 +182,9 @@ from contextor.mcp.documentation import short_description
 from contextor.mcp.tools.get_artifact_blast_radius import (
     get_artifact_blast_radius as _get_artifact_blast_radius_impl,
 )
+from contextor.mcp.tools.get_name_collisions import (
+    get_name_collisions as _get_name_collisions_impl,
+)
 from contextor.mcp.tools.search_artifacts import search_artifacts as _search_artifacts_impl
 from contextor.mcp.tools.search_source import search_source as _search_source_impl
 from contextor.mcp.tools.get_source_range import get_source_range as _get_source_range_impl
@@ -370,13 +373,22 @@ def _emit_mcp_call_telemetry(
 def _instrument_mcp_tool(func: Any, tool_name: str) -> Any:
     import functools
     from inspect import iscoroutinefunction
+    from contextor.mcp.diagnostics import inject_diagnostics_summary
 
     if iscoroutinefunction(func):
         @functools.wraps(func)
         async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
             root_path = _tool_repository_argument(func, args, kwargs)
             try:
+                bound = inspect.signature(func).bind_partial(*args, **kwargs)
+                allow_large_output = bool(bound.arguments.get("allow_large_output", False))
+            except (TypeError, ValueError):
+                allow_large_output = False
+            try:
                 result = await func(*args, **kwargs)
+                result = inject_diagnostics_summary(
+                    result, root_path, tool_name, allow_large_output=allow_large_output
+                )
                 _emit_mcp_call_telemetry(tool_name, root_path, success=True)
                 return result
             except Exception as exc:
@@ -388,7 +400,15 @@ def _instrument_mcp_tool(func: Any, tool_name: str) -> Any:
         def sync_wrapper(*args: Any, **kwargs: Any) -> Any:
             root_path = _tool_repository_argument(func, args, kwargs)
             try:
+                bound = inspect.signature(func).bind_partial(*args, **kwargs)
+                allow_large_output = bool(bound.arguments.get("allow_large_output", False))
+            except (TypeError, ValueError):
+                allow_large_output = False
+            try:
                 result = func(*args, **kwargs)
+                result = inject_diagnostics_summary(
+                    result, root_path, tool_name, allow_large_output=allow_large_output
+                )
                 _emit_mcp_call_telemetry(tool_name, root_path, success=True)
                 return result
             except Exception as exc:
@@ -432,6 +452,7 @@ REGISTERED_MCP_TOOL_NAMES: tuple[str, ...] = (
     "search_source",
     "get_source_range",
     "get_symbol_call_context",
+    "get_name_collisions",
     "get_mcp_documentation",
 )
 
@@ -475,6 +496,7 @@ lookup_artifact_by_symbol = register_mcp_tool(_lookup_artifact_by_symbol_impl, n
 search_source = register_mcp_tool(_search_source_impl, name="search_source")
 get_source_range = register_mcp_tool(_get_source_range_impl, name="get_source_range")
 get_symbol_call_context = register_mcp_tool(_get_symbol_call_context_impl, name="get_symbol_call_context")
+get_name_collisions = register_mcp_tool(_get_name_collisions_impl, name="get_name_collisions")
 get_mcp_documentation = register_mcp_tool(_get_mcp_documentation_impl, name="get_mcp_documentation")
 
 

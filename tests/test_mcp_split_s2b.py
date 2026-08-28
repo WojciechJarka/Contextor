@@ -1,4 +1,5 @@
 import ast
+import importlib
 import inspect
 import json
 import subprocess
@@ -25,7 +26,7 @@ _EXPECTED_ORDER = [
     "query_canonical_projection", "extract_indexed_report_context",
     "lookup_index_entries", "get_artifacts_for_module",
     "lookup_artifact_by_symbol", "search_source", "get_source_range",
-    "get_symbol_call_context", "get_mcp_documentation",
+    "get_symbol_call_context", "get_name_collisions", "get_mcp_documentation",
 ]
 
 _IMPLEMENTATIONS = {
@@ -45,7 +46,7 @@ _EXPECTED_SIGNATURES = {
 }
 
 JOB_STATE = {
-    "_MCP_OWNER_TOKEN", "_analysis_lock", "_analysis_job_lock",
+    "_analysis_lock", "_analysis_job_lock",
     "_analysis_tasks", "_analysis_jobs_by_repo",
 }
 
@@ -58,10 +59,13 @@ def test_s2b_registration_contract_and_implementation_owners():
     }
 
     assert list(registered) == _EXPECTED_ORDER
-    for name, implementation in _IMPLEMENTATIONS.items():
+    for name in _IMPLEMENTATIONS:
+        implementation = getattr(
+            importlib.import_module(f"contextor.mcp.tools.{name}"), name
+        )
         tool = registered[name]
         assert getattr(mcp_server, name) is tool
-        assert tool.fn is implementation
+        assert tool.fn.__wrapped__ is implementation
         assert tool.fn.__module__ == f"contextor.mcp.tools.{name}"
         assert str(inspect.signature(tool.fn)) == _EXPECTED_SIGNATURES[name]
         assert tool.description == descriptions[name]
@@ -80,6 +84,7 @@ def test_s2b_import_graph_state_owner_and_remaining_tool_count():
     assert decorated == []
     assert JOB_STATE.isdisjoint(vars(mcp_server))
     assert JOB_STATE <= vars(analysis_jobs).keys()
+    assert "_MCP_OWNER_TOKEN" not in vars(analysis_jobs)
 
     for name in _IMPLEMENTATIONS:
         path = root / "contextor" / "mcp" / "tools" / f"{name}.py"
@@ -116,6 +121,13 @@ def test_s2b_spawn_entrypoint_does_not_bootstrap_fastmcp_in_child_mode():
 
 
 def test_s2b_has_no_registration_dependency_binding():
-    server_source = Path(mcp_server.__file__).read_text(encoding="utf-8")
-    assert "bind_" not in server_source
-    assert "set_analysis" not in server_source
+    tree = ast.parse(Path(mcp_server.__file__).read_text(encoding="utf-8"))
+    forbidden = {"bind_engine_resolver", "set_analysis_engine"}
+    assert not any(
+        isinstance(node, ast.Call)
+        and (
+            isinstance(node.func, ast.Name) and node.func.id in forbidden
+            or isinstance(node.func, ast.Attribute) and node.func.attr in forbidden
+        )
+        for node in ast.walk(tree)
+    )

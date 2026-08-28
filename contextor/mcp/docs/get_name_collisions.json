@@ -1,0 +1,37 @@
+{
+  "version": "1.0.0",
+  "tool": "get_name_collisions",
+  "purpose": [
+    "Return bounded, fail-closed name-collision diagnostics from canonical LIVE state."
+  ],
+  "parameters": [
+    "repo_path (string, required): canonical repository root.",
+    "severity (string or null, optional, default null): critical, warning, or info.",
+    "artifact_type (string or null, optional, default null): canonical collision artifact type.",
+    "collision_type (string or null, optional, default null): NAME_COLLISION or IDENTICAL_DEFINITION_DUPLICATE.",
+    "module (string or null, optional, default null): only collisions containing this module.",
+    "conflicting_only (boolean, optional, default false): exclude identical definitions.",
+    "identical_only (boolean, optional, default false): return only identical definitions.",
+    "representation (string, default auto): auto, summary, bounded, indexed, or named.",
+    "limit (integer or null, default 20): maximum detail entries.",
+    "allow_large_output (boolean, default false): permit the selected response above the shared budget; does not change limit."
+  ],
+  "behavior": [
+    "Reads only canonical collision state; stale, deferred, and unavailable state is reported explicitly and never converted to zero.",
+    "The response begins with total/matched/returned counts, severity counts, conflicting/identical counts, representation, truncation, estimated size, budget, and attention_required.",
+    "auto selects named details for small results and indexed details for large results. indexed and summary omit source-heavy detail; bounded/named include bounded detail entries.",
+    "When a response cannot fit the shared 15 KiB budget, narrowing guidance or an explicit confirmation_required response is returned."
+  ],
+  "freshness": [
+    "availability is fresh, stale, deferred, or unavailable and is bound to canonical LIVE collision state.",
+    "diagnostics_summary is included with the same family availability and never fabricates unavailable counts."
+  ],
+  "errors": [
+    "Invalid severity or representation returns a structured error with allowed values.",
+    "No fresh canonical collision producer returns an explicit unavailable/deferred projection."
+  ],
+  "usage_notes": [
+    "Narrow by severity/module before increasing limit; indexed output is response-local and has no persistent collision identity."
+  ],
+  "examples": []
+}

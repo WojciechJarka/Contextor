@@ -1,4 +1,5 @@
 import ast
+import importlib
 import inspect
 from pathlib import Path
 
@@ -20,7 +21,7 @@ _EXPECTED_ORDER = [
     "query_canonical_projection", "extract_indexed_report_context",
     "lookup_index_entries", "get_artifacts_for_module",
     "lookup_artifact_by_symbol", "search_source", "get_source_range",
-    "get_symbol_call_context", "get_mcp_documentation",
+    "get_symbol_call_context", "get_name_collisions", "get_mcp_documentation",
 ]
 
 _IMPLEMENTATIONS = {
@@ -45,10 +46,13 @@ def test_s2d_registration_order_bindings_signatures_and_descriptions():
         for entry in load_documentation_index()["tools"]
     }
     assert list(registered) == _EXPECTED_ORDER
-    for name, implementation in _IMPLEMENTATIONS.items():
+    for name in _IMPLEMENTATIONS:
+        implementation = getattr(
+            importlib.import_module(f"contextor.mcp.tools.{name}"), name
+        )
         tool = registered[name]
         assert getattr(mcp_server, name) is tool
-        assert tool.fn is implementation
+        assert tool.fn.__wrapped__ is implementation
         assert tool.fn.__module__ == f"contextor.mcp.tools.{name}"
         assert str(inspect.signature(tool.fn)) == _EXPECTED_SIGNATURES[name]
         assert tool.description == descriptions[name]
@@ -87,8 +91,14 @@ def test_s2d_ownership_and_import_graph():
 
 
 def test_s2d_has_no_dependency_binding_or_report_ssot():
-    server_source = Path(mcp_server.__file__).read_text(encoding="utf-8")
-    assert "bind_" not in server_source
+    server_tree = ast.parse(Path(mcp_server.__file__).read_text(encoding="utf-8"))
+    assert not any(
+        isinstance(node, ast.Call)
+        and isinstance(node.func, (ast.Name, ast.Attribute))
+        and (node.func.id if isinstance(node.func, ast.Name) else node.func.attr)
+        in {"bind_engine_resolver", "set_analysis_engine"}
+        for node in ast.walk(server_tree)
+    )
     for implementation in _IMPLEMENTATIONS.values():
         source = Path(implementation.__code__.co_filename).read_text(encoding="utf-8")
         assert "resolve_output_dir" not in source
@@ -358,4 +368,3 @@ def test_get_symbol_implementation_no_file_paths_or_file_path_returns_not_found(
     res = json.loads(res_raw)
     assert res["status"] == "not_found"
     assert res["message"] == "No exact class, function, or method match was found."
-

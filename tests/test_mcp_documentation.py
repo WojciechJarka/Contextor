@@ -72,7 +72,7 @@ def test_documentation_default_returns_only_index(monkeypatch):
     result = json.loads(mcp_server.get_mcp_documentation.fn())
 
     assert result["version"]
-    assert len(result["tools"]) == 24
+    assert len(result["tools"]) == 25
     assert loaded == [documentation.INDEX_PATH]
 
 

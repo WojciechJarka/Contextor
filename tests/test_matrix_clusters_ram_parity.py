@@ -802,7 +802,7 @@ def test_full_analysis_vs_incremental_add_exact_parity(tmp_path: Path):
                 assert "api_imports" in entry_a["channels"][c] and "api_imports" in entry_b["channels"][c]
 
 
-def test_resync_required_fails_closed_in_engine_lifecycle(tmp_path: Path):
+def test_resync_required_fails_closed_in_engine_lifecycle(tmp_path: Path, isolated_dirs):
     """
     PROVES that if state.resync_required is True, engine update lifecycle
     refuses to mark artifact_consumption_state as 'fresh' even with 100% valid coverage.

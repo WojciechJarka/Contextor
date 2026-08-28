@@ -1,13 +1,12 @@
 """
 tests/test_full_analysis_coordination.py
 
-Comprehensive test suite certifying the single-writer full-analysis coordinator:
-- Multi-threaded / integration concurrency exclusion (max_active == 1)
-- Multi-process isolation and different-repo concurrency
-- Crash / dead-PID stale lock auto-recovery
-- Exception release guarantees in finally
-- Cancellation & timeout handling
-- Serialized canonical publication sequence (Desktop R+1 -> MCP R+2)
+Complete test suite certifying the single-writer full-analysis coordinator:
+- Lease held during publication (Requirement 5)
+- OS file-lock cross-process exclusion and process-death auto-recovery (Requirement 11)
+- MCP single publication root cause regression (Requirement 12)
+- Serialized Desktop + MCP full analysis execution (Requirement 13)
+- Non-reentrant in-process lock exclusion and timeout / cancellation guarantees
 """
 
 from __future__ import annotations
@@ -24,12 +23,16 @@ import pytest
 from contextor.core.analysis.full_analysis_coordinator import (
     FullAnalysisBusyError,
     FullAnalysisLease,
+    _resolve_lock_path,
+    _try_lock_fd,
     acquire_full_analysis,
     release_full_analysis,
     run_full_analysis_exclusive,
 )
 from contextor.core.errors import AnalysisCancelled
 from contextor.core.live_state.ipc import CanonicalLiveServer, LiveStateClient
+from contextor.mcp import analysis_jobs
+from contextor.mcp import runtime as mcp_runtime
 
 
 def test_coordinator_lease_acquisition_and_release(tmp_path: Path):
@@ -39,106 +42,96 @@ def test_coordinator_lease_acquisition_and_release(tmp_path: Path):
     lease = acquire_full_analysis(repo_dir, owner="test_owner")
     assert isinstance(lease, FullAnalysisLease)
     assert lease.owner == "test_owner"
+    assert lease.lock_fd >= 0
     assert Path(lease.lock_path).exists()
 
     release_full_analysis(lease)
-    assert not Path(lease.lock_path).exists()
 
 
-def test_max_active_full_analyses_and_serialized_execution(tmp_path: Path):
+def test_lease_is_held_during_publication(tmp_path: Path, monkeypatch):
     """
-    Requirement 10: Multi-threaded integration test proving max_active_full_analyses == 1
-    and strict sequential execution order between Desktop and MCP.
+    Requirement 5: Deterministic lifecycle order proving lease is held during publication:
+    lease_acquired -> analysis_started -> analysis_finished -> publish_started -> publish_finished -> lease_released
+    Forbidden: lease_released before publish_started
     """
-    repo_dir = tmp_path / "repo_concurrency"
+    repo_dir = tmp_path / "repo_lifecycle"
     repo_dir.mkdir()
 
-    active_count = 0
-    max_active = 0
-    active_lock = threading.Lock()
+    event_log: list[str] = []
+    log_lock = threading.Lock()
 
-    execution_order = []
+    def record(event: str):
+        with log_lock:
+            event_log.append(event)
 
-    desktop_started = threading.Event()
-    desktop_can_finish = threading.Event()
+    # Wrap acquire and release to log events
+    from contextor.core.analysis import full_analysis_coordinator as fac
 
-    def fake_analysis(path, *, owner, **kwargs):
-        nonlocal active_count, max_active
-        with active_lock:
-            active_count += 1
-            if active_count > max_active:
-                max_active = active_count
-            execution_order.append(f"{owner}:start")
+    orig_acquire = fac.acquire_full_analysis
+    orig_release = fac.release_full_analysis
 
-        if owner == "desktop_analysis":
-            desktop_started.set()
-            desktop_can_finish.wait(timeout=5.0)
+    def tracked_acquire(*args, **kwargs):
+        record("lease_acquired")
+        return orig_acquire(*args, **kwargs)
 
-        time.sleep(0.05)
+    def tracked_release(lease):
+        record("lease_released")
+        return orig_release(lease)
 
-        with active_lock:
-            active_count -= 1
-            execution_order.append(f"{owner}:end")
-        return [], SimpleNamespace(status="ok")
+    monkeypatch.setattr(fac, "acquire_full_analysis", tracked_acquire)
+    monkeypatch.setattr(fac, "release_full_analysis", tracked_release)
 
-    # Thread 1: Desktop analysis
-    def run_desktop():
-        run_full_analysis_exclusive(
-            repo_dir,
-            owner="desktop_analysis",
-            analysis_fn=fake_analysis,
+    # Injected analysis function that performs work and publication
+    def tracked_analysis(path, *, owner, **kwargs):
+        record("analysis_started")
+        time.sleep(0.02)
+        record("analysis_finished")
+
+        record("publish_started")
+        time.sleep(0.02)
+        record("publish_finished")
+
+        return [], SimpleNamespace(
+            live_publish_status="success",
+            live_publish_revision=11,
+            live_publish_warning=None,
         )
 
-    # Thread 2: MCP analysis
-    def run_mcp():
-        run_full_analysis_exclusive(
-            repo_dir,
-            owner="mcp_analysis",
-            analysis_fn=fake_analysis,
-        )
+    run_full_analysis_exclusive(
+        repo_dir,
+        owner="mcp_analysis",
+        analysis_fn=tracked_analysis,
+    )
 
-    t_desktop = threading.Thread(target=run_desktop)
-    t_mcp = threading.Thread(target=run_mcp)
-
-    t_desktop.start()
-    assert desktop_started.wait(timeout=3.0), "Desktop analysis did not start"
-
-    # Start MCP analysis while Desktop analysis is active
-    t_mcp.start()
-    time.sleep(0.2)
-
-    # MCP should NOT have started inside fake_analysis yet
-    with active_lock:
-        assert max_active == 1
-        assert "mcp_analysis:start" not in execution_order
-
-    # Now allow Desktop to finish
-    desktop_can_finish.set()
-
-    t_desktop.join(timeout=3.0)
-    t_mcp.join(timeout=3.0)
-
-    assert max_active == 1
-    assert execution_order == [
-        "desktop_analysis:start",
-        "desktop_analysis:end",
-        "mcp_analysis:start",
-        "mcp_analysis:end",
+    expected_order = [
+        "lease_acquired",
+        "analysis_started",
+        "analysis_finished",
+        "publish_started",
+        "publish_finished",
+        "lease_released",
     ]
+    assert event_log == expected_order
 
 
-def _worker_acquire_and_hold(repo_path: str, owner: str, ready_event, release_event, result_queue):
+def _worker_os_lock_hold(repo_path: str, owner: str, ready_event, result_queue, hold_seconds: float):
+    """Worker process that acquires OS lock and holds it until killed or timeout."""
     try:
         lease = acquire_full_analysis(repo_path, owner=owner, timeout=5.0)
+        result_queue.put({"status": "acquired", "owner": owner, "pid": os.getpid()})
         ready_event.set()
-        release_event.wait(timeout=5.0)
+        time.sleep(hold_seconds)
         release_full_analysis(lease)
-        result_queue.put({"status": "ok", "owner": owner})
-    except Exception as exc:
-        result_queue.put({"status": "error", "error": str(exc), "owner": owner})
+    except BaseException as exc:
+        result_queue.put(
+            {"status": "error", "owner": owner, "pid": os.getpid(), "error": repr(exc)}
+        )
+        ready_event.set()
+        raise
 
 
 def _worker_try_acquire(repo_path: str, owner: str, timeout: float, result_queue):
+    """Worker process that attempts to acquire lease."""
     try:
         lease = acquire_full_analysis(repo_path, owner=owner, timeout=timeout)
         release_full_analysis(lease)
@@ -149,11 +142,13 @@ def _worker_try_acquire(repo_path: str, owner: str, timeout: float, result_queue
         result_queue.put({"status": "error", "error": str(exc), "owner": owner})
 
 
-def test_cross_process_coordination_and_repo_isolation(tmp_path: Path):
+def test_cross_process_os_lock_and_process_death_recovery(tmp_path: Path, isolated_dirs):
     """
-    Requirement 11: Cross-process test using multiprocessing.Process.
-    Proves process A blocks process B on same repo, while process B2 on
-    a different repo acquires concurrently without blocking.
+    Requirement 11: Cross-process exclusion and OS-held file lock auto-recovery on process termination.
+    Proves:
+    - Process A blocks Process B on same repo.
+    - Process A terminated without release -> Process B automatically acquires without lock file unlinking.
+    - Process C on different repo acquires concurrently.
     """
     repo1 = tmp_path / "repo1"
     repo2 = tmp_path / "repo2"
@@ -162,118 +157,255 @@ def test_cross_process_coordination_and_repo_isolation(tmp_path: Path):
 
     ctx = multiprocessing.get_context("spawn")
     ready_a = ctx.Event()
-    release_a = ctx.Event()
     results_a = ctx.Queue()
-    results_b = ctx.Queue()
+    results_b1 = ctx.Queue()
     results_b2 = ctx.Queue()
+    results_c = ctx.Queue()
 
-    # Process A: acquires repo1 and holds
+    # 1. Process A acquires repo1
     p_a = ctx.Process(
-        target=_worker_acquire_and_hold,
-        args=(str(repo1), "proc_a", ready_a, release_a, results_a),
+        target=_worker_os_lock_hold,
+        args=(str(repo1), "proc_a", ready_a, results_a, 15.0),
     )
     p_a.start()
 
     try:
-        assert ready_a.wait(timeout=5.0), "Process A failed to acquire repo1"
+        assert ready_a.wait(timeout=15.0), "Process A produced no acquisition diagnostic"
+        res_a = results_a.get(timeout=2.0)
+        assert res_a["status"] == "acquired", f"Process A failed to acquire repo1: {res_a}"
 
-        # Process B: tries to acquire repo1 with short timeout -> should be busy / blocked
-        p_b = ctx.Process(
+        # 2. Process B attempts repo1 while A is alive -> busy
+        p_b1 = ctx.Process(
             target=_worker_try_acquire,
-            args=(str(repo1), "proc_b", 0.5, results_b),
+            args=(str(repo1), "proc_b1", 0.5, results_b1),
         )
-        p_b.start()
-        p_b.join(timeout=3.0)
+        p_b1.start()
+        p_b1.join(timeout=3.0)
 
-        res_b = results_b.get(timeout=2.0)
-        assert res_b["status"] == "busy", f"Process B did not encounter busy state: {res_b}"
+        res_b1 = results_b1.get(timeout=2.0)
+        assert res_b1["status"] == "busy", f"Process B1 was not blocked: {res_b1}"
 
-        # Process B2: tries to acquire repo2 (different repo) -> should succeed immediately!
+        # 3. Process C attempts repo2 (different repo) concurrently -> succeeds immediately
+        p_c = ctx.Process(
+            target=_worker_try_acquire,
+            args=(str(repo2), "proc_c", 1.0, results_c),
+        )
+        p_c.start()
+        p_c.join(timeout=3.0)
+
+        res_c = results_c.get(timeout=2.0)
+        assert res_c["status"] == "ok", f"Process C on different repo failed: {res_c}"
+
+        # 4. Terminate Process A WITHOUT clean release (simulates sudden process death/crash)
+        p_a.terminate()
+        p_a.join(timeout=3.0)
+
+        # 5. Process B attempts repo1 now -> OS automatically unlocked, acquires without unlinking lock file!
         p_b2 = ctx.Process(
             target=_worker_try_acquire,
-            args=(str(repo2), "proc_b2", 1.0, results_b2),
+            args=(str(repo1), "proc_b2", 2.0, results_b2),
         )
         p_b2.start()
         p_b2.join(timeout=3.0)
 
         res_b2 = results_b2.get(timeout=2.0)
-        assert res_b2["status"] == "ok", f"Process B2 failed on different repo: {res_b2}"
+        assert res_b2["status"] == "ok", f"Process B2 failed to acquire after process death: {res_b2}"
 
-        # Release A
-        release_a.set()
-        p_a.join(timeout=3.0)
-
-        res_a = results_a.get(timeout=2.0)
-        assert res_a["status"] == "ok"
+        # Ensure lock file was NOT deleted (file existence is not ownership)
+        lock_file, _, _ = _resolve_lock_path(repo1)
+        assert lock_file.exists()
     finally:
-        release_a.set()
         if p_a.is_alive():
             p_a.terminate()
 
 
-def test_exception_in_analysis_releases_lease(tmp_path: Path):
-    """
-    Requirement 12a: Exception inside analysis releases lock in finally block.
-    """
-    repo_dir = tmp_path / "repo_exc"
+def test_mcp_single_publication_root_cause_regression(tmp_path: Path, monkeypatch):
+    """The real MCP worker has one facade-owned LIVE publication path."""
+    repo_dir = tmp_path / "repo_mcp_pub"
     repo_dir.mkdir()
+    exclusive_calls: list[str] = []
 
-    def failing_analysis(path, **kwargs):
-        raise ValueError("synthetic analysis failure")
-
-    with pytest.raises(ValueError, match="synthetic analysis failure"):
-        run_full_analysis_exclusive(
-            repo_dir,
-            owner="test_failing",
-            analysis_fn=failing_analysis,
+    def fake_run_full_analysis_exclusive(_root, *, owner, **_kwargs):
+        exclusive_calls.append(owner)
+        return [], SimpleNamespace(
+            skipped_python_files=[],
+            live_publish_status="success",
+            live_publish_revision=11,
+            live_publish_warning=None,
         )
 
-    # Next attempt should succeed immediately without busy error
-    executed = False
-    def succeeding_analysis(path, **kwargs):
-        nonlocal executed
-        executed = True
-        return [], SimpleNamespace(status="ok")
-
-    run_full_analysis_exclusive(
-        repo_dir,
-        owner="test_succeeding",
-        analysis_fn=succeeding_analysis,
-        timeout=1.0,
+    monkeypatch.setattr(
+        analysis_jobs,
+        "run_full_analysis_exclusive",
+        fake_run_full_analysis_exclusive,
     )
-    assert executed is True
+    outcome = __import__("asyncio").run(
+        analysis_jobs._run_analysis_worker("project", repo_dir)
+    )
+
+    assert exclusive_calls == ["mcp_analysis"]
+    assert outcome["live_publish_status"] == "success"
+    assert outcome["live_publish_revision"] == 11
+    assert outcome["live_publish_warning"] is None
+
+    async def fake_worker(*_args, **_kwargs):
+        return outcome
+
+    def forbidden_second_publish(*_args, **_kwargs):
+        raise AssertionError("outer MCP duplicate publication attempted")
+
+    monkeypatch.setattr(analysis_jobs, "_run_analysis_worker", fake_worker)
+    monkeypatch.setattr(
+        mcp_runtime,
+        "get_or_init_engine",
+        lambda _root: SimpleNamespace(state=SimpleNamespace(revision=11)),
+    )
+    monkeypatch.setattr(
+        "contextor.core.live_state.connect_or_start",
+        forbidden_second_publish,
+    )
+    mcp_runtime._live_engine_revisions.pop(str(repo_dir), None)
+    job = {
+        "job_id": "c" * 32,
+        "repo_path": str(repo_dir),
+        "operation": "project",
+        "target": None,
+        "exclude_paths": [],
+        "status": "queued",
+        "created_at": "2026-08-28T00:00:00Z",
+        "started_at": None,
+        "completed_at": None,
+        "message": "Analysis accepted.",
+        "error": None,
+        "live_publish_status": "pending",
+        "live_publish_revision": None,
+        "live_publish_warning": None,
+    }
+    analysis_jobs._write_analysis_job(repo_dir, job)
+    __import__("asyncio").run(
+        analysis_jobs._execute_analysis_job(repo_dir, job, None, [])
+    )
+
+    final_job = analysis_jobs._read_analysis_job(repo_dir, job["job_id"])
+    assert final_job is not None
+    assert final_job["status"] == "completed"
+    assert final_job["live_publish_status"] == "success"
+    assert final_job["live_publish_revision"] == 11
+    assert mcp_runtime._live_engine_revisions[str(repo_dir)] == 11
 
 
-def test_dead_pid_stale_lock_recovery(tmp_path: Path):
+def test_serialized_desktop_and_mcp_coordination(tmp_path: Path, monkeypatch):
     """
-    Requirement 12b: Stale lock file from terminated/crashed PID is automatically recovered.
+    Requirement 13: Concurrency test proving serialized Desktop + MCP execution:
+    - Desktop requests full analysis (R=10 -> R=11)
+    - MCP requests full analysis while Desktop owns lease
+    - Desktop completes, publishes R=11, releases lease
+    - MCP acquires lease, performs complete hard reset, publishes R=12, releases lease
+    - max_active == 1
+    - publications == [("desktop_analysis", 11), ("mcp_analysis", 12)]
     """
-    repo_dir = tmp_path / "repo_dead_pid"
+    repo_dir = tmp_path / "repo_serialized"
     repo_dir.mkdir()
 
-    from contextor.core.analysis.full_analysis_coordinator import _resolve_lock_path
-    import json
+    initial_state = SimpleNamespace(revision=10, modules={"app": 1})
+    server = CanonicalLiveServer(state=initial_state, revision=10)
+    server_thread = threading.Thread(target=server.serve_forever, daemon=True)
+    server_thread.start()
+    live_client = LiveStateClient(server.endpoint)
 
-    lock_file, key, repo_id = _resolve_lock_path(repo_dir)
+    from contextor.core import live_state
+    monkeypatch.setattr(live_state, "connect", lambda _path: live_client)
+    monkeypatch.setattr("contextor.core.live_state.connect", lambda _path: live_client)
 
-    # Create a stale lock file with an impossible/dead PID (e.g. 99999999)
-    stale_payload = {
-        "pid": 99999999,
-        "token": "stale_token_123",
-        "owner": "crashed_process",
-        "repo_id": repo_id,
-        "timestamp": time.time() - 100,
-    }
-    lock_file.write_text(json.dumps(stale_payload), encoding="utf-8")
-    assert lock_file.exists()
+    active_analyses = 0
+    max_simultaneous = 0
+    active_lock = threading.Lock()
+    publications_observed: list[tuple[str, int]] = []
 
-    # New acquisition should detect dead PID and recover seamlessly
-    lease = acquire_full_analysis(repo_dir, owner="recovering_process", timeout=1.0)
-    assert lease.owner == "recovering_process"
-    assert lease.token != "stale_token_123"
+    desktop_holding = threading.Event()
+    desktop_can_finish = threading.Event()
 
-    release_full_analysis(lease)
-    assert not lock_file.exists()
+    def coordinated_analysis(path, *, owner, **kwargs):
+        nonlocal active_analyses, max_simultaneous
+        with active_lock:
+            active_analyses += 1
+            if active_analyses > max_simultaneous:
+                max_simultaneous = active_analyses
+
+        if owner == "desktop_analysis":
+            desktop_holding.set()
+            desktop_can_finish.wait(timeout=5.0)
+            next_rev = 11
+        else:
+            next_rev = 12
+
+        time.sleep(0.05)
+        cand_state = SimpleNamespace(revision=next_rev, modules={"app": 1, owner: 1})
+        pub_res = live_client.publish(cand_state, origin=owner)
+        assert pub_res.get("status") == "ok"
+        with active_lock:
+            publications_observed.append((owner, pub_res["revision"]))
+            active_analyses -= 1
+
+        return [], SimpleNamespace(
+            live_publish_status="success",
+            live_publish_revision=pub_res["revision"],
+        )
+
+    t_desktop = threading.Thread(
+        target=lambda: run_full_analysis_exclusive(
+            repo_dir, owner="desktop_analysis", analysis_fn=coordinated_analysis
+        )
+    )
+    t_mcp = threading.Thread(
+        target=lambda: run_full_analysis_exclusive(
+            repo_dir, owner="mcp_analysis", analysis_fn=coordinated_analysis
+        )
+    )
+
+    try:
+        t_desktop.start()
+        assert desktop_holding.wait(timeout=3.0), "Desktop did not start analysis"
+
+        # Start MCP while Desktop is holding lease
+        t_mcp.start()
+        time.sleep(0.1)
+
+        with active_lock:
+            assert max_simultaneous == 1
+            assert len(publications_observed) == 0
+
+        # Release Desktop
+        desktop_can_finish.set()
+
+        t_desktop.join(timeout=3.0)
+        t_mcp.join(timeout=3.0)
+
+        assert max_simultaneous == 1
+        assert publications_observed == [
+            ("desktop_analysis", 11),
+            ("mcp_analysis", 12),
+        ]
+        assert server._revision == 12
+        assert live_client.ping()["revision"] == 12
+    finally:
+        server.close()
+        server_thread.join(timeout=2)
+
+
+def test_in_process_non_reentrant_lock_exclusion(tmp_path: Path):
+    """
+    Requirement 8: Non-reentrant lock prevents recursive bypass by same thread.
+    """
+    repo_dir = tmp_path / "repo_non_reentrant"
+    repo_dir.mkdir()
+
+    lease1 = acquire_full_analysis(repo_dir, owner="outer", timeout=1.0)
+    try:
+        with pytest.raises(FullAnalysisBusyError):
+            acquire_full_analysis(repo_dir, owner="inner_recursive", timeout=0.2)
+    finally:
+        release_full_analysis(lease1)
 
 
 def test_cancellation_during_wait(tmp_path: Path):
@@ -298,64 +430,34 @@ def test_cancellation_during_wait(tmp_path: Path):
     release_full_analysis(lease)
 
 
-def test_serialized_publication_sequence_desktop_then_mcp(tmp_path: Path):
-    """
-    Requirement 13: Simulate Desktop full analysis followed by MCP full analysis
-    starting from same initial state, verifying sequential exact-successor revisions
-    (R=10 -> R=11 -> R=12), zero non-monotonic errors, and zero duplicates.
-    """
-    repo_dir = tmp_path / "repo_pub_seq"
-    repo_dir.mkdir()
+def test_exception_in_analysis_releases_lease(tmp_path: Path):
+    repo = tmp_path / "repo_exception_release"
+    repo.mkdir()
 
-    # Initialize live server at revision 10
-    initial_state = SimpleNamespace(revision=10, modules={"init": 1})
-    server = CanonicalLiveServer(state=initial_state, revision=10)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    client = LiveStateClient(server.endpoint)
+    def failing_analysis(path, **kwargs):
+        raise RuntimeError("synthetic analysis failure")
 
-    try:
-        # 1. Desktop Full Analysis (R=10 -> R=11)
-        def desktop_analysis_step(path, **kwargs):
-            cand = SimpleNamespace(revision=11, modules={"init": 1, "desktop": 1})
-            res = client.publish(cand, origin="desktop_analysis")
-            assert res["status"] == "ok"
-            assert res["revision"] == 11
-            return [], SimpleNamespace(live_publish_status="success", live_publish_revision=11)
-
+    with pytest.raises(RuntimeError, match="synthetic analysis failure"):
         run_full_analysis_exclusive(
-            repo_dir,
-            owner="desktop_analysis",
-            analysis_fn=desktop_analysis_step,
+            repo,
+            owner="failing_owner",
+            analysis_fn=failing_analysis,
         )
 
-        assert server._revision == 11
-        assert client.ping()["revision"] == 11
+    executed = False
 
-        # 2. MCP Full Analysis (R=11 -> R=12)
-        def mcp_analysis_step(path, **kwargs):
-            # Reads fresh state at R=11 and produces candidate R=12
-            cand = SimpleNamespace(revision=12, modules={"init": 1, "desktop": 1, "mcp": 1})
-            res = client.publish(cand, origin="mcp_analysis")
-            assert res["status"] == "ok"
-            assert res["revision"] == 12
-            return [], SimpleNamespace(live_publish_status="success", live_publish_revision=12)
-
-        run_full_analysis_exclusive(
-            repo_dir,
-            owner="mcp_analysis",
-            analysis_fn=mcp_analysis_step,
+    def succeeding_analysis(path, **kwargs):
+        nonlocal executed
+        executed = True
+        return [], SimpleNamespace(
+            live_publish_status="not_attempted",
+            live_publish_revision=None,
         )
 
-        assert server._revision == 12
-        assert client.ping()["revision"] == 12
-
-        events = client.get_events(after_seq=0)["events"]
-        assert len(events) == 2
-        assert events[0]["canonical_revision"] == 11
-        assert events[0]["origin"] == "desktop_analysis"
-        assert events[1]["canonical_revision"] == 12
-        assert events[1]["origin"] == "mcp_analysis"
-    finally:
-        server.close()
-        thread.join(timeout=2)
+    run_full_analysis_exclusive(
+        repo,
+        owner="next_owner",
+        analysis_fn=succeeding_analysis,
+        timeout=1.0,
+    )
+    assert executed is True

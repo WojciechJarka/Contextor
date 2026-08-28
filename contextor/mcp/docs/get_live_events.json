@@ -14,7 +14,7 @@
   ],
   "freshness": [],
   "errors": [
-    "Events are retained in RAM by the shared LIVE owner (most recent 10,000 records).\nEach canonical event identifies its ``origin`` (``desktop_watcher``,\n``mcp_analysis`` or ``desktop_analysis``), operation, status and file path. Update\nevents additionally expose ``blast_radius_state`` and a bounded\n``affected_modules`` collection (hard limit of 20 items in journal).\nSyntax failures additionally expose ``error``, ``line_number`` and\n``column_number``."
+    "Events are retained in RAM by the shared LIVE owner (most recent 10,000 records).\nEach canonical full-analysis event identifies its ``origin`` (``desktop_analysis``,\n``mcp_analysis`` or ``cli_analysis``); incremental watcher events use\n``desktop_watcher``. Events also identify operation, status and file path. Update\nevents additionally expose ``blast_radius_state`` and a bounded\n``affected_modules`` collection (hard limit of 20 items in journal).\nSyntax failures additionally expose ``error``, ``line_number`` and\n``column_number``."
   ],
   "usage_notes": [
     "LLM workflow after every file edit:\n- If the desktop app is running, do *not* call ``update_file``. Its watcher\n  owns the update. Poll this tool with the last observed revision until the\n  desktop event arrives, then react to its status before further edits.\n- If the desktop app is not running, call ``update_file`` after every edit,\n  then call this tool to confirm the revision and diagnostics.\n- If ``resync_required=true`` is returned, do not assume unbroken event history;\n  perform a canonical state sync using query_canonical_projection."

@@ -107,6 +107,10 @@ class IncrementalAnalysisEngine:
         Returns the update status and the freshness of the architectural model.
         """
         with self._lock:
+            if getattr(self.state, "resync_required", False):
+                # Every exit path, including a semantic no-op, must expose the
+                # already-lost incremental continuity as fail-closed.
+                self.state.artifact_consumption_state = "stale"
             path = Path(file_path)
             rel_path = path.relative_to(self.root_path)
             module_path = ".".join(rel_path.with_suffix("").parts)
@@ -353,6 +357,7 @@ class IncrementalAnalysisEngine:
         """
         Executes planned RefreshPlan phases and performs atomic persistent & RAM commit.
         """
+        resync_required = bool(getattr(self.state, "resync_required", False))
         outcome = execute_refresh_plan(
             state=self.state,
             delta=delta,
@@ -389,12 +394,17 @@ class IncrementalAnalysisEngine:
         self.state.artifact_consumption = candidate.artifact_consumption
         if (
             candidate.artifact_consumption_state != "stale"
-            and not getattr(self.state, "resync_required", False)
+            and not resync_required
             and validate_canonical_artifact_consumption_coverage(candidate.artifact_consumption, candidate.artifacts)
         ):
             self.state.artifact_consumption_state = "fresh"
         else:
             self.state.artifact_consumption_state = "stale"
+        if resync_required:
+            # A lost incremental continuity is authoritative until a full
+            # rebuild replaces this state; an incremental candidate cannot
+            # certify it fresh again.
+            self.state.resync_required = True
         self.state.module_usages = candidate.module_usages
         self.state.trie = candidate.trie
         self.state.package_root = candidate.package_root

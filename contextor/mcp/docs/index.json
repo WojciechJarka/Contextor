@@ -119,6 +119,11 @@
       "short_description": "Return a bounded callers/callees neighborhood from current canonical intra-module symbol-call facts without reading source."
     },
     {
+      "tool": "get_name_collisions",
+      "filename": "get_name_collisions.json",
+      "short_description": "Return bounded canonical name-collision diagnostics with explicit freshness, semantic filters and progressive representations."
+    },
+    {
       "tool": "get_mcp_documentation",
       "filename": "get_mcp_documentation.json",
       "short_description": "Return centralized MCP documentation, optionally filtered by tool names and sections. This passive tool reads no repository, LIVE state, or output reports."

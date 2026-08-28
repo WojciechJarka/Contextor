@@ -8,6 +8,7 @@ from contextor.mcp.output_guard import (
     guard_large_output,
     largest_fitting_prefix,
 )
+from contextor.mcp.diagnostics import diagnostics_summary, diagnostics_summary_for_completed_job
 
 
 def get_analysis_status(
@@ -77,6 +78,10 @@ def get_analysis_status(
         }
         analysis_jobs._write_analysis_job(root, job)
     public_job = analysis_jobs._public_job(job, max_skipped_files=max_skipped_files)
+    if public_job.get("status") == "completed":
+        diag = diagnostics_summary_for_completed_job(diagnostics_summary(root), job)
+        public_job["diagnostics_summary"] = diag
+        public_job["diagnostics_attention_required"] = diag["attention_required"]
     serialized = json.dumps(public_job, indent=2)
     full_bytes = len(serialized.encode("utf-8"))
 
@@ -116,4 +121,3 @@ def get_analysis_status(
             "Repeat the same get_analysis_status call with the same repo_path, job_id, and max_skipped_files and set allow_large_output=true."
         ),
     )
-

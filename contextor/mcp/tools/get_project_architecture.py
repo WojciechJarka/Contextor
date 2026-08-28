@@ -4,6 +4,7 @@ from pathlib import Path
 from contextor.core.analysis.state_manager import module_current_truth
 from contextor.mcp import query_helpers
 from contextor.mcp import runtime as mcp_runtime
+from contextor.mcp.diagnostics import diagnostics_summary
 
 
 def _stale_module_truths(state) -> dict[str, dict]:
@@ -115,11 +116,14 @@ def get_project_architecture(
         else:
             layer_index = dict(unavailable)
         collections["layer_index"] = layer_index
+        diag = diagnostics_summary(root, state)
         result = {
             **collections,
             "debt_summary": debt_summary,
             "module_count": len(getattr(state, "modules", {}) or {}),
             "data_source": "live_canonical_state",
+            "diagnostics_summary": diag,
+            "diagnostics_attention_required": diag["attention_required"],
         }
         if fields is not None:
             allowed_fields = set(result)

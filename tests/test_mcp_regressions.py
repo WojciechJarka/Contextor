@@ -577,21 +577,16 @@ def test_analysis_endpoint_returns_reusable_job_and_pollable_completion(
 
     async def fake_worker(*_args, **_kwargs):
         await asyncio.to_thread(release.wait)
+        return {
+            "live_publish_status": "success",
+            "live_publish_revision": 1,
+            "live_publish_warning": None,
+        }
 
-    published = []
     engine_state = SimpleNamespace(fresh=True, revision=1)
     engine = SimpleNamespace(state=engine_state)
-    client = SimpleNamespace(
-        publish=lambda state, *, origin, timeout: published.append(
-            (state, origin, timeout)
-        ) or {"status": "ok", "revision": 1}
-    )
     monkeypatch.setattr(analysis_jobs, "_run_analysis_worker", fake_worker)
     monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: engine)
-    monkeypatch.setattr(
-        "contextor.core.live_state.connect_or_start",
-        lambda _root, *args, **kwargs: client,
-    )
     analysis_jobs._analysis_tasks.clear()
     analysis_jobs._analysis_jobs_by_repo.clear()
 
@@ -619,7 +614,7 @@ def test_analysis_endpoint_returns_reusable_job_and_pollable_completion(
         assert completed["live_publish_status"] == "success"
         assert completed["live_publish_revision"] == 1
         assert completed["live_publish_warning"] is None
-        assert published == [(engine.state, "mcp_analysis", 10.0)]
+        assert mcp_runtime._live_engine_revisions[str(repo)] == 1
 
     asyncio.run(scenario())
 
@@ -655,22 +650,23 @@ def test_analysis_job_preserves_live_publish_timeout_status(tmp_path, monkeypatc
     repo.mkdir()
 
     async def fake_worker(*_args, **_kwargs):
-        return {"skipped_python_files": []}
-
-    engine = SimpleNamespace(state={"fresh": True})
-
-    class Client:
-        def publish(self, _state, *, origin, timeout):
-            assert origin == "mcp_analysis"
-            assert timeout == 10.0
-            raise TimeoutError("simulated LIVE timeout")
+        return {
+            "skipped_python_files": [],
+            "live_publish_status": "timed_out",
+            "live_publish_revision": None,
+            "live_publish_warning": "TimeoutError: simulated LIVE timeout",
+        }
 
     monkeypatch.setattr(analysis_jobs, "_run_analysis_worker", fake_worker)
-    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: engine)
-    monkeypatch.setattr(
-        "contextor.core.live_state.connect_or_start",
-        lambda _root, *args, **kwargs: Client(),
+    mcp_runtime._live_engines[str(repo)] = SimpleNamespace(
+        state=SimpleNamespace(revision=10)
     )
+    mcp_runtime._live_engine_revisions[str(repo)] = 10
+
+    def forbidden_hydration(_root):
+        raise AssertionError("canonical engine hydration attempted after timeout")
+
+    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", forbidden_hydration)
     analysis_jobs._analysis_tasks.clear()
     analysis_jobs._analysis_jobs_by_repo.clear()
 
@@ -688,6 +684,8 @@ def test_analysis_job_preserves_live_publish_timeout_status(tmp_path, monkeypatc
         assert completed["live_publish_revision"] is None
         assert "simulated LIVE timeout" in completed["live_publish_warning"]
         assert "LIVE publish timed_out" in completed["message"]
+        assert str(repo) not in mcp_runtime._live_engines
+        assert str(repo) not in mcp_runtime._live_engine_revisions
 
     asyncio.run(scenario())
 
@@ -741,7 +739,174 @@ def test_project_worker_carries_indexer_skips_into_durable_job_status(
 
     outcome = asyncio.run(analysis_jobs._run_analysis_worker("project", repo))
 
-    assert outcome == {"skipped_python_files": skipped}
+    assert outcome == {
+        "skipped_python_files": skipped,
+        "live_publish_status": "not_attempted",
+        "live_publish_revision": None,
+        "live_publish_warning": None,
+    }
+
+
+def _project_analysis_job(repo: Path, job_id: str) -> dict:
+    return {
+        "job_id": (job_id.encode("utf-8").hex() + ("0" * 32))[:32],
+        "repo_path": str(repo),
+        "operation": "project",
+        "target": None,
+        "exclude_paths": [],
+        "status": "queued",
+        "created_at": "2026-08-28T00:00:00Z",
+        "started_at": None,
+        "completed_at": None,
+        "message": "Analysis accepted.",
+        "error": None,
+        "live_publish_status": "pending",
+        "live_publish_revision": None,
+        "live_publish_warning": None,
+    }
+
+
+def test_project_analysis_job_fails_closed_when_canonical_engine_is_missing(
+    tmp_path, monkeypatch
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    async def fake_worker(*_args, **_kwargs):
+        return {
+            "skipped_python_files": [],
+            "live_publish_status": "success",
+            "live_publish_revision": 11,
+            "live_publish_warning": None,
+        }
+
+    monkeypatch.setattr(analysis_jobs, "_run_analysis_worker", fake_worker)
+    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: None)
+    mcp_runtime._live_engines[str(repo)] = SimpleNamespace(
+        state=SimpleNamespace(revision=10)
+    )
+    mcp_runtime._live_engine_revisions[str(repo)] = 10
+    job = _project_analysis_job(repo, "engine-missing")
+    analysis_jobs._write_analysis_job(repo, job)
+
+    asyncio.run(analysis_jobs._execute_analysis_job(repo, job, None, []))
+
+    final_job = analysis_jobs._read_analysis_job(repo, job["job_id"])
+    assert final_job is not None
+    assert final_job["status"] == "failed"
+    assert "canonical state could not be loaded" in final_job["error"]
+    assert str(repo) not in mcp_runtime._live_engines
+    assert str(repo) not in mcp_runtime._live_engine_revisions
+
+
+def test_project_analysis_job_fails_closed_on_canonical_revision_mismatch(
+    tmp_path, monkeypatch
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    async def fake_worker(*_args, **_kwargs):
+        return {
+            "skipped_python_files": [],
+            "live_publish_status": "success",
+            "live_publish_revision": 11,
+            "live_publish_warning": None,
+        }
+
+    monkeypatch.setattr(analysis_jobs, "_run_analysis_worker", fake_worker)
+    mismatched_engine = SimpleNamespace(state=SimpleNamespace(revision=10))
+
+    def fake_get_or_init_engine(_root):
+        mcp_runtime._live_engines[str(repo)] = mismatched_engine
+        return mismatched_engine
+
+    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", fake_get_or_init_engine)
+    job = _project_analysis_job(repo, "revision-mismatch")
+    analysis_jobs._write_analysis_job(repo, job)
+
+    asyncio.run(analysis_jobs._execute_analysis_job(repo, job, None, []))
+
+    final_job = analysis_jobs._read_analysis_job(repo, job["job_id"])
+    assert final_job is not None
+    assert final_job["status"] == "failed"
+    assert "loaded=10" in final_job["error"]
+    assert "published=11" in final_job["error"]
+    assert str(repo) not in mcp_runtime._live_engines
+    assert str(repo) not in mcp_runtime._live_engine_revisions
+
+
+def test_project_analysis_job_certifies_matching_canonical_revision(
+    tmp_path, monkeypatch
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    async def fake_worker(*_args, **_kwargs):
+        return {
+            "skipped_python_files": [],
+            "live_publish_status": "success",
+            "live_publish_revision": 11,
+            "live_publish_warning": None,
+        }
+
+    monkeypatch.setattr(analysis_jobs, "_run_analysis_worker", fake_worker)
+    matching_engine = SimpleNamespace(state=SimpleNamespace(revision=11))
+
+    def fake_get_or_init_engine(_root):
+        mcp_runtime._live_engines[str(repo)] = matching_engine
+        return matching_engine
+
+    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", fake_get_or_init_engine)
+    job = _project_analysis_job(repo, "revision-parity")
+    analysis_jobs._write_analysis_job(repo, job)
+
+    asyncio.run(analysis_jobs._execute_analysis_job(repo, job, None, []))
+
+    final_job = analysis_jobs._read_analysis_job(repo, job["job_id"])
+    assert final_job is not None
+    assert final_job["status"] == "completed"
+    assert mcp_runtime._live_engines[str(repo)] is matching_engine
+    assert mcp_runtime._live_engine_revisions[str(repo)] == 11
+
+
+def test_project_analysis_job_does_not_hydrate_after_failed_publication(
+    tmp_path, monkeypatch
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    async def fake_worker(*_args, **_kwargs):
+        return {
+            "skipped_python_files": [],
+            "live_publish_status": "failed",
+            "live_publish_revision": None,
+            "live_publish_warning": "synthetic publication failure",
+        }
+
+    monkeypatch.setattr(analysis_jobs, "_run_analysis_worker", fake_worker)
+    mcp_runtime._live_engines[str(repo)] = SimpleNamespace(
+        state=SimpleNamespace(revision=10)
+    )
+    mcp_runtime._live_engine_revisions[str(repo)] = 10
+
+    def forbidden_hydration(_root):
+        raise AssertionError(
+            "canonical engine hydration attempted after failed publication"
+        )
+
+    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", forbidden_hydration)
+    job = _project_analysis_job(repo, "failed-publication")
+    analysis_jobs._write_analysis_job(repo, job)
+
+    asyncio.run(analysis_jobs._execute_analysis_job(repo, job, None, []))
+
+    final_job = analysis_jobs._read_analysis_job(repo, job["job_id"])
+    assert final_job is not None
+    assert final_job["status"] == "completed"
+    assert final_job["live_publish_status"] == "failed"
+    assert final_job["live_publish_warning"] == "synthetic publication failure"
+    assert str(repo) not in mcp_runtime._live_engines
+    assert str(repo) not in mcp_runtime._live_engine_revisions
 
 
 def test_analysis_status_bounds_and_exposes_skipped_python_files(tmp_path):
@@ -2440,9 +2605,13 @@ def test_mcp_analysis_worker_forwards_per_run_excludes(tmp_path, monkeypatch):
     calls = []
 
     def fake_analysis(
-        repo_path, log=None, progress_callback=None, additional_excludes=None
+        repo_path,
+        *,
+        additional_excludes=None,
+        owner="desktop_analysis",
+        **_kwargs,
     ):
-        calls.append((repo_path, additional_excludes))
+        calls.append((repo_path, additional_excludes, owner))
         return [], object()
 
     monkeypatch.setattr(ContextorFacade, "analyze_project", fake_analysis)
@@ -2454,7 +2623,7 @@ def test_mcp_analysis_worker_forwards_per_run_excludes(tmp_path, monkeypatch):
     )
 
     assert calls == [
-        (str(repo), ["tests", "legacy/adapter.py"])
+        (str(repo), ["tests", "legacy/adapter.py"], "mcp_analysis")
     ]
 
 
@@ -5911,5 +6080,3 @@ def test_get_artifacts_for_module_representation_and_progressive_disclosure(
     )
     assert blast_res["consumers"]["total"] == 20
     assert len(blast_res["consumers"]["items"]) == 20
-
-

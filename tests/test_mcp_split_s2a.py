@@ -1,4 +1,5 @@
 import ast
+import importlib
 import inspect
 from pathlib import Path
 
@@ -42,6 +43,7 @@ _EXPECTED_ORDER = [
     "search_source",
     "get_source_range",
     "get_symbol_call_context",
+    "get_name_collisions",
     "get_mcp_documentation",
 ]
 
@@ -115,10 +117,13 @@ def test_s2a_registration_order_owners_signatures_schemas_and_descriptions():
     }
 
     assert list(registered) == _EXPECTED_ORDER
-    for name, implementation in _IMPLEMENTATIONS.items():
+    for name in _IMPLEMENTATIONS:
+        implementation = getattr(
+            importlib.import_module(f"contextor.mcp.tools.{name}"), name
+        )
         tool = registered[name]
         assert getattr(mcp_server, name) is tool
-        assert tool.fn is implementation
+        assert tool.fn.__wrapped__ is implementation
         assert tool.fn.__module__ == f"contextor.mcp.tools.{name}"
         assert str(inspect.signature(tool.fn)) == _EXPECTED_SIGNATURES[name]
         assert tool.parameters == EXPECTED_PARAMETERS[name]
@@ -165,6 +170,7 @@ def test_s2a_implementations_remain_moved_after_later_slices():
 
 def test_s2a_query_projection_uses_single_shared_runtime_owner():
     server_source = Path(mcp_server.__file__).read_text(encoding="utf-8")
+    server_tree = ast.parse(server_source)
     tool_source = inspect.getsource(
         __import__(
             "contextor.mcp.tools.query_canonical_projection",
@@ -172,8 +178,33 @@ def test_s2a_query_projection_uses_single_shared_runtime_owner():
         )
     )
 
-    assert "bind_engine_resolver" not in server_source
+    assert not any(
+        isinstance(node, ast.Call)
+        and (
+            isinstance(node.func, ast.Name) and node.func.id == "bind_engine_resolver"
+            or isinstance(node.func, ast.Attribute) and node.func.attr == "bind_engine_resolver"
+        )
+        for node in ast.walk(server_tree)
+    )
+    assert not any(
+        (
+            isinstance(node, ast.Name)
+            and node.id == "_get_or_init_engine"
+        )
+        or (
+            isinstance(node, ast.Attribute)
+            and node.attr == "_get_or_init_engine"
+        )
+        or (
+            isinstance(node, ast.ImportFrom)
+            and any(
+                alias.name == "_get_or_init_engine"
+                or alias.asname == "_get_or_init_engine"
+                for alias in node.names
+            )
+        )
+        for node in ast.walk(server_tree)
+    )
     assert "bind_engine_resolver" not in tool_source
-    assert "_get_or_init_engine" not in server_source
     assert "from contextor.mcp import runtime as mcp_runtime" in tool_source
     assert "mcp_runtime.get_or_init_engine(root)" in tool_source

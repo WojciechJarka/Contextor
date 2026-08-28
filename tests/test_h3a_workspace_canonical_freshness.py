@@ -1481,7 +1481,11 @@ def test_h3a_case_z_unknown_status_analysis_job_fail_closed(tmp_path, monkeypatc
     )
 
     async def fake_worker(*_args, **_kwargs):
-        pass
+        return {
+            "live_publish_status": "failed",
+            "live_publish_revision": None,
+            "live_publish_warning": "LIVE service returned status 'rejected'.",
+        }
 
     monkeypatch.setattr(analysis_jobs, "_run_analysis_worker", fake_worker)
     monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: engine)
@@ -1525,15 +1529,8 @@ def test_h3a_case_z_unknown_status_analysis_job_fail_closed(tmp_path, monkeypatc
     assert str(repo) not in mcp_runtime._live_engine_revisions
 
 
-def test_h3a_case_aa_analysis_job_journal_canonical_revision_separation(tmp_path, monkeypatch):
-    """Case AA (H3A-H7 - MCP Analysis Job Journal vs Canonical Revision Separation):
-    - Client publish returns {'status': 'ok', 'revision': 42} (journal)
-    - Canonical engine_state.revision = 3
-    - EXPECT:
-      - job live_publish_status == 'success'
-      - job live_publish_revision == 42
-      - mcp_runtime._live_engine_revisions[root] == 3 (canonical state revision, NOT 42)
-    """
+def test_h3a_case_aa_analysis_job_revision_mismatch_fails_closed(tmp_path, monkeypatch):
+    """Case AA: full-analysis certification rejects unequal revisions."""
     import asyncio
     from types import SimpleNamespace
 
@@ -1542,19 +1539,15 @@ def test_h3a_case_aa_analysis_job_journal_canonical_revision_separation(tmp_path
 
     engine_state = SimpleNamespace(fresh=True, revision=3)
     engine = SimpleNamespace(state=engine_state)
-    client = SimpleNamespace(
-        publish=lambda state, *, origin, timeout: {"status": "ok", "revision": 42}
-    )
-
     async def fake_worker(*_args, **_kwargs):
-        return {}
+        return {
+            "live_publish_status": "success",
+        "live_publish_revision": 42,
+            "live_publish_warning": None,
+        }
 
     monkeypatch.setattr(analysis_jobs, "_run_analysis_worker", fake_worker)
     monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: engine)
-    monkeypatch.setattr(
-        "contextor.core.live_state.connect_or_start",
-        lambda _root, *args, **kwargs: client,
-    )
     analysis_jobs._analysis_tasks.clear()
     analysis_jobs._analysis_jobs_by_repo.clear()
 
@@ -1580,12 +1573,10 @@ def test_h3a_case_aa_analysis_job_journal_canonical_revision_separation(tmp_path
 
     final_job = analysis_jobs._read_analysis_job(repo, job_id)
     assert final_job is not None
-    assert final_job["status"] == "completed"
-    assert final_job["live_publish_status"] == "success"
-    assert final_job["live_publish_revision"] == 42
-    assert final_job["live_publish_warning"] is None
-    assert mcp_runtime._live_engine_revisions[str(repo)] == 3
-
+    assert final_job["status"] == "failed"
+    assert "loaded=3" in final_job["error"]
+    assert "published=42" in final_job["error"]
+    assert str(repo) not in mcp_runtime._live_engine_revisions
 
 
 

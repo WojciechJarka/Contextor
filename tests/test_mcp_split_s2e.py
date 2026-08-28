@@ -1,4 +1,5 @@
 import ast
+import importlib
 import inspect
 from pathlib import Path
 
@@ -21,7 +22,7 @@ _EXPECTED_ORDER = [
     "query_canonical_projection", "extract_indexed_report_context",
     "lookup_index_entries", "get_artifacts_for_module",
     "lookup_artifact_by_symbol", "search_source", "get_source_range",
-    "get_symbol_call_context", "get_mcp_documentation",
+    "get_symbol_call_context", "get_name_collisions", "get_mcp_documentation",
 ]
 
 _IMPLEMENTATIONS = {
@@ -48,10 +49,13 @@ def test_s2e_registration_order_bindings_signatures_and_descriptions():
         for entry in load_documentation_index()["tools"]
     }
     assert list(registered) == _EXPECTED_ORDER
-    for name, implementation in _IMPLEMENTATIONS.items():
+    for name in _IMPLEMENTATIONS:
+        implementation = getattr(
+            importlib.import_module(f"contextor.mcp.tools.{name}"), name
+        )
         tool = registered[name]
         assert getattr(mcp_server, name) is tool
-        assert tool.fn is implementation
+        assert tool.fn.__wrapped__ is implementation
         assert tool.fn.__module__ == f"contextor.mcp.tools.{name}"
         assert str(inspect.signature(tool.fn)) == _EXPECTED_SIGNATURES[name]
         assert tool.description == descriptions[name]
@@ -59,8 +63,7 @@ def test_s2e_registration_order_bindings_signatures_and_descriptions():
 
 def test_s2e_final_ownership_import_graph_and_thin_server():
     root = Path(__file__).parents[1]
-    server_source = Path(mcp_server.__file__).read_text(encoding="utf-8")
-    server_tree = ast.parse(server_source)
+    server_tree = ast.parse(Path(mcp_server.__file__).read_text(encoding="utf-8"))
     decorated = [
         node.name
         for node in server_tree.body
@@ -68,7 +71,13 @@ def test_s2e_final_ownership_import_graph_and_thin_server():
         and any(ast.unparse(item).startswith("mcp.tool") for item in node.decorator_list)
     ]
     assert decorated == []
-    assert "bind_" not in server_source
+    assert not any(
+        isinstance(node, ast.Call)
+        and isinstance(node.func, (ast.Name, ast.Attribute))
+        and (node.func.id if isinstance(node.func, ast.Name) else node.func.attr)
+        in {"bind_engine_resolver", "set_analysis_engine"}
+        for node in ast.walk(server_tree)
+    )
 
     for name in _IMPLEMENTATIONS:
         path = root / "contextor" / "mcp" / "tools" / f"{name}.py"
