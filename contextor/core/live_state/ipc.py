@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import secrets
 import threading
+import time
 from dataclasses import dataclass
 from multiprocessing.connection import Client, Listener
 from typing import Any, Callable
@@ -184,6 +185,9 @@ class CanonicalLiveServer:
                 else result.get("status", "PUBLISHED")
             ) if category == "LIVE_STATE" else ("SUCCESS" if request.get("success", True) else "FAILED"),
         }
+        trace_op = request.get("trace_op")
+        if trace_op is not None:
+            event["trace_op"] = str(trace_op)
 
         if category == "MCP_CALL":
             event["tool"] = str(request.get("tool", ""))
@@ -223,6 +227,17 @@ class CanonicalLiveServer:
 
         self._events.append(event)
         del self._events[:-self._retention]
+        try:
+            from contextor.core.runtime_trace import trace_event
+
+            trace_event(
+                "LIVE", "ACTIVITY_APPEND", op=trace_op,
+                rev=self._revision, seq=self._activity_seq,
+                category=category, operation=operation,
+                status=event.get("status"),
+            )
+        except Exception:
+            pass
         return event
 
     def serve_forever(self) -> None:
@@ -260,6 +275,11 @@ class CanonicalLiveServer:
             if operation == "snapshot":
                 return {"status": "ok", "revision": self._revision, "state": self._state}
             if operation == "publish":
+                from contextor.core.runtime_trace import new_trace_operation, trace_event
+
+                trace_op = request.get("trace_op") or new_trace_operation("p")
+                request = {**request, "trace_op": trace_op}
+                trace_event("LIVE", "PUBLISH_RECEIVED", op=trace_op, rev=self._revision)
                 state = request.get("state")
                 try:
                     state_rev = _extract_state_revision(state)
@@ -302,6 +322,7 @@ class CanonicalLiveServer:
                 self._state = state
                 self._revision = state_rev
                 evt = self._record_event("publish", request, category="LIVE_STATE")
+                trace_event("LIVE", "CANONICAL_PUBLISH", op=trace_op, rev_before=state_rev - 1, rev_after=self._revision, seq=evt["seq"], origin=request.get("origin"))
                 return {"status": "ok", "revision": self._revision, "seq": evt["seq"]}
             if operation in {"status", "record_activity", "mcp_call"}:
                 cat = request.get("category", "MCP_CALL" if operation == "mcp_call" else "LIVE_STATE")
@@ -318,10 +339,16 @@ class CanonicalLiveServer:
                 previous_revision = self._revision
                 expected_revision = previous_revision + 1
                 file_path = str(request.get("file_path", ""))
+                from contextor.core.runtime_trace import new_trace_operation, trace_event, trace_operation
+
+                trace_op = request.get("trace_op") or new_trace_operation("u")
+                request = {**request, "trace_op": trace_op}
+                trace_event("LIVE", "UPDATE_RECEIVED", op=trace_op, path=file_path, rev=previous_revision)
 
                 try:
                     candidate_state = _clone_state_for_update(previous_state)
                 except Exception as exc:
+                    trace_event("LIVE", "PUBLISH_FAIL", op=trace_op, rev=previous_revision, err=exc)
                     return {
                         "status": "error",
                         "error": "canonical_state_clone_failed",
@@ -329,13 +356,19 @@ class CanonicalLiveServer:
                         "expected_revision": expected_revision,
                         "detail": str(exc),
                     }
+                trace_event("LIVE", "CLONE_END", op=trace_op, path=file_path, rev=previous_revision)
 
                 # IMPORTANT: updater operates ONLY on candidate_state.
                 # It must never receive previous_state/self._state directly.
-                result = self._updater(
-                    candidate_state,
-                    file_path,
-                )
+                trace_event("LIVE", "UPDATER_START", op=trace_op, path=file_path)
+                updater_started = time.monotonic()
+                try:
+                    with trace_operation(trace_op):
+                        result = self._updater(candidate_state, file_path)
+                except Exception as exc:
+                    trace_event("LIVE", "UPDATER_FAIL", op=trace_op, path=file_path, elapsed_ms=(time.monotonic() - updater_started) * 1000.0, err=exc)
+                    raise
+                trace_event("LIVE", "UPDATER_END", op=trace_op, path=file_path, elapsed_ms=(time.monotonic() - updater_started) * 1000.0, status=getattr(result, "status", None))
 
                 try:
                     state_rev = _extract_state_revision(candidate_state)
@@ -411,6 +444,7 @@ class CanonicalLiveServer:
                 # Nothing above this line may replace/mutate active canonical ownership.
                 self._state = candidate_state
                 self._revision = expected_revision
+                trace_event("LIVE", "CANONICAL_COMMIT", op=trace_op, path=file_path, rev_before=previous_revision, rev_after=expected_revision)
 
                 evt = self._record_event(
                     "update_file",
@@ -418,6 +452,7 @@ class CanonicalLiveServer:
                     result,
                     category="LIVE_STATE",
                 )
+                trace_event("LIVE", "UPDATE_PUBLISHED", op=trace_op, path=file_path, rev=self._revision, seq=evt["seq"], status=getattr(result, "status", None))
 
                 return {
                     "status": "ok",
@@ -627,8 +662,8 @@ class LiveStateClient:
             "publish", timeout=timeout, state=state, origin=origin
         )
 
-    def update_file(self, file_path: str, *, origin: str = "unknown") -> dict[str, Any]:
-        return self.request("update_file", file_path=file_path, origin=origin)
+    def update_file(self, file_path: str, *, origin: str = "unknown", trace_op: str | None = None) -> dict[str, Any]:
+        return self.request("update_file", file_path=file_path, origin=origin, trace_op=trace_op)
 
     def get_events(
         self,

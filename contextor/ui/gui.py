@@ -7,6 +7,7 @@ state persistence, sub-windows and orchestrates the analysis process.
 
 import os
 import threading
+import time
 import tkinter as tk
 import uuid
 from datetime import datetime
@@ -35,7 +36,11 @@ from contextor.ui.progress_widget import (
     run_with_progress,
 )
 from contextor.core.program_log import close_cmd_log, configure_program_log, open_cmd_log
-from contextor.ui.system_actions import handle_empty_output_folder, handle_open_output_folder
+from contextor.ui.system_actions import (
+    handle_empty_output_folder,
+    handle_open_output_folder,
+    handle_open_runtime_logs_folder,
+)
 from contextor.ui.test_runner import (
     TestSuiteUnavailable,
     format_summary,
@@ -225,6 +230,14 @@ class ContextorGUI:
         )
         self.test_suite_btn.pack(side="left", padx=(PAD_SM, 0))
 
+        self.mcp_logs_btn = ttk.Button(
+            title_frame,
+            text="MCP Logs",
+            style="Ghost.TButton",
+            command=self.open_mcp_logs,
+        )
+        self.mcp_logs_btn.pack(side="left", padx=(PAD_SM, 0))
+
         sub_label = ttk.Label(
             header, text="Static architecture analysis · Read-only mode", style="Sub.TLabel"
         )
@@ -239,6 +252,10 @@ class ContextorGUI:
         self.tooltip.bind_tooltip(
             self.test_suite_btn,
             "Run Contextor's complete test suite, including LIVE tests.",
+        )
+        self.tooltip.bind_tooltip(
+            self.mcp_logs_btn,
+            "Open the folder containing LIVE and MCP operation logs.",
         )
         self.tooltip.bind_tooltip(
             self.theme_btn,
@@ -728,9 +745,21 @@ class ContextorGUI:
             "category": category,
             "event": event,
             "message": message,
+            "enqueue_mono": time.monotonic(),
         }
 
         self._live_status_queue.put(item)
+        try:
+            from contextor.core.runtime_trace import trace_event
+            event_dict = event if isinstance(event, dict) else {}
+            trace_event(
+                "GUI", "STATUS_QUEUED", op=event_dict.get("trace_op"),
+                rev=event_dict.get("canonical_revision") or event_dict.get("revision"),
+                seq=event_dict.get("seq"), q=self._live_status_queue.qsize(),
+                category=category, status=message[:80],
+            )
+        except Exception:
+            pass
         if threading.current_thread() is threading.main_thread():
             if hasattr(self, "_drain_live_status_queue"):
                 self._drain_live_status_queue()
@@ -748,6 +777,19 @@ class ContextorGUI:
         self._live_status_draining = True
         display_text = item["formatted"] if isinstance(item, dict) else str(item)
         self.live_status_var.set(display_text)
+        try:
+            from contextor.core.runtime_trace import trace_event
+            event_dict = item.get("event") if isinstance(item, dict) else {}
+            event_dict = event_dict if isinstance(event_dict, dict) else {}
+            queued_at = item.get("enqueue_mono") if isinstance(item, dict) else None
+            trace_event(
+                "GUI", "STATUS_RENDERED", op=event_dict.get("trace_op"),
+                rev=event_dict.get("canonical_revision") or event_dict.get("revision"),
+                seq=event_dict.get("seq"), q=self._live_status_queue.qsize(),
+                wait_ms=(time.monotonic() - queued_at) * 1000.0 if queued_at is not None else None,
+            )
+        except Exception:
+            pass
 
         def next_message():
             self._live_status_draining = False
@@ -1038,6 +1080,9 @@ class ContextorGUI:
 
     def empty_output_folder(self):
         handle_empty_output_folder()
+
+    def open_mcp_logs(self):
+        handle_open_runtime_logs_folder()
 
     def on_closing(self):
         import re

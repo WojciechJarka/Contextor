@@ -11,6 +11,17 @@ import sys
 from tkinter import messagebox
 
 from contextor.core.paths import output_dir as resolve_output_dir
+from contextor.core.paths import runtime_logs_dir
+
+
+def _open_folder(path):
+    path = path
+    if sys.platform.startswith("win"):
+        os.startfile(path)
+    elif sys.platform == "darwin":
+        subprocess.run(["open", str(path)])
+    else:
+        subprocess.run(["xdg-open", str(path)])
 
 
 def handle_open_output_folder():
@@ -24,12 +35,13 @@ def handle_open_output_folder():
         )
         return
 
-    if sys.platform.startswith("win"):
-        os.startfile(output_dir)
-    elif sys.platform == "darwin":
-        subprocess.run(["open", str(output_dir)])
-    else:
-        subprocess.run(["xdg-open", str(output_dir)])
+    _open_folder(output_dir)
+
+
+def handle_open_runtime_logs_folder():
+    logs_dir = runtime_logs_dir()
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    _open_folder(logs_dir)
 
 
 def handle_empty_output_folder():

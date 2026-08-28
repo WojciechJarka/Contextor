@@ -43,13 +43,21 @@ def _hide_console() -> None:
 
 def _run_gui() -> int:
     from contextor.core.program_log import configure_program_log
+    from contextor.core.runtime_trace import (
+        finish_desktop_trace_session,
+        start_desktop_trace_session,
+    )
 
     configure_program_log()
-    _hide_console()
+    start_desktop_trace_session()
+    try:
+        _hide_console()
 
-    from contextor.ui.gui import run
+        from contextor.ui.gui import run
 
-    run()
+        run()
+    finally:
+        finish_desktop_trace_session()
 
     return 0
 

@@ -351,36 +351,45 @@ def _emit_mcp_call_telemetry(
     root_path: Any,
     success: bool,
     error: str | None = None,
-) -> None:
+    trace_op: str | None = None,
+) -> dict[str, Any] | None:
+    response = None
     try:
         clients = _resolve_telemetry_clients(root_path)
         for client in clients:
             try:
-                client.record_activity(
+                response = client.record_activity(
                     category="MCP_CALL",
                     tool=tool_name,
                     source="mcp",
                     success=success,
                     error=error,
                     message=f"{tool_name}" + (f" (failed: {error})" if not success else ""),
+                    trace_op=trace_op,
                 )
             except Exception:
                 pass
     except Exception:
         pass
+    return response
 
 
 def _instrument_mcp_tool(func: Any, tool_name: str) -> Any:
     import functools
+    import time
     from inspect import iscoroutinefunction
     from contextor.mcp.diagnostics import inject_diagnostics_summary
+    from contextor.core.runtime_trace import new_trace_operation, trace_event
     signature = inspect.signature(func)
     supports_allow_large_output = "allow_large_output" in signature.parameters
 
     if iscoroutinefunction(func):
         @functools.wraps(func)
         async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
+            op = new_trace_operation("m")
+            started = time.monotonic()
             root_path = _tool_repository_argument(func, args, kwargs)
+            trace_event("MCP", "CALL_START", op=op, tool=tool_name, repo=root_path)
             try:
                 bound = signature.bind_partial(*args, **kwargs)
                 allow_large_output = bool(bound.arguments.get("allow_large_output", False))
@@ -388,6 +397,8 @@ def _instrument_mcp_tool(func: Any, tool_name: str) -> Any:
                 allow_large_output = False
             try:
                 result = await func(*args, **kwargs)
+                trace_event("MCP", "IMPLEMENTATION_END", op=op, tool=tool_name, elapsed_ms=(time.monotonic() - started) * 1000.0)
+                diagnostics_started = time.monotonic()
                 result = inject_diagnostics_summary(
                     result,
                     root_path,
@@ -395,16 +406,23 @@ def _instrument_mcp_tool(func: Any, tool_name: str) -> Any:
                     allow_large_output=allow_large_output,
                     supports_allow_large_output=supports_allow_large_output,
                 )
-                _emit_mcp_call_telemetry(tool_name, root_path, success=True)
+                trace_event("MCP", "DIAGNOSTICS_END", op=op, tool=tool_name, elapsed_ms=(time.monotonic() - diagnostics_started) * 1000.0)
+                telemetry = _emit_mcp_call_telemetry(tool_name, root_path, success=True, trace_op=op)
+                trace_event("MCP", "TELEMETRY_END", op=op, tool=tool_name, rev=(telemetry or {}).get("revision") if isinstance(telemetry, dict) else None, seq=(telemetry or {}).get("seq") if isinstance(telemetry, dict) else None, elapsed_ms=(time.monotonic() - started) * 1000.0)
+                trace_event("MCP", "CALL_END", op=op, tool=tool_name, elapsed_ms=(time.monotonic() - started) * 1000.0, status="ok", bytes=len(result.encode("utf-8")) if isinstance(result, str) else None)
                 return result
             except Exception as exc:
-                _emit_mcp_call_telemetry(tool_name, root_path, success=False, error=str(exc))
+                trace_event("MCP", "CALL_FAIL", op=op, tool=tool_name, elapsed_ms=(time.monotonic() - started) * 1000.0, err=exc)
+                _emit_mcp_call_telemetry(tool_name, root_path, success=False, error=str(exc), trace_op=op)
                 raise
         return async_wrapper
     else:
         @functools.wraps(func)
         def sync_wrapper(*args: Any, **kwargs: Any) -> Any:
+            op = new_trace_operation("m")
+            started = time.monotonic()
             root_path = _tool_repository_argument(func, args, kwargs)
+            trace_event("MCP", "CALL_START", op=op, tool=tool_name, repo=root_path)
             try:
                 bound = signature.bind_partial(*args, **kwargs)
                 allow_large_output = bool(bound.arguments.get("allow_large_output", False))
@@ -412,6 +430,8 @@ def _instrument_mcp_tool(func: Any, tool_name: str) -> Any:
                 allow_large_output = False
             try:
                 result = func(*args, **kwargs)
+                trace_event("MCP", "IMPLEMENTATION_END", op=op, tool=tool_name, elapsed_ms=(time.monotonic() - started) * 1000.0)
+                diagnostics_started = time.monotonic()
                 result = inject_diagnostics_summary(
                     result,
                     root_path,
@@ -419,10 +439,14 @@ def _instrument_mcp_tool(func: Any, tool_name: str) -> Any:
                     allow_large_output=allow_large_output,
                     supports_allow_large_output=supports_allow_large_output,
                 )
-                _emit_mcp_call_telemetry(tool_name, root_path, success=True)
+                trace_event("MCP", "DIAGNOSTICS_END", op=op, tool=tool_name, elapsed_ms=(time.monotonic() - diagnostics_started) * 1000.0)
+                telemetry = _emit_mcp_call_telemetry(tool_name, root_path, success=True, trace_op=op)
+                trace_event("MCP", "TELEMETRY_END", op=op, tool=tool_name, rev=(telemetry or {}).get("revision") if isinstance(telemetry, dict) else None, seq=(telemetry or {}).get("seq") if isinstance(telemetry, dict) else None, elapsed_ms=(time.monotonic() - started) * 1000.0)
+                trace_event("MCP", "CALL_END", op=op, tool=tool_name, elapsed_ms=(time.monotonic() - started) * 1000.0, status="ok", bytes=len(result.encode("utf-8")) if isinstance(result, str) else None)
                 return result
             except Exception as exc:
-                _emit_mcp_call_telemetry(tool_name, root_path, success=False, error=str(exc))
+                trace_event("MCP", "CALL_FAIL", op=op, tool=tool_name, elapsed_ms=(time.monotonic() - started) * 1000.0, err=exc)
+                _emit_mcp_call_telemetry(tool_name, root_path, success=False, error=str(exc), trace_op=op)
                 raise
         return sync_wrapper
 

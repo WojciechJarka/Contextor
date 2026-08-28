@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import threading
+import time
 from collections.abc import Callable
 from pathlib import Path
 
@@ -181,7 +182,10 @@ class DesktopLiveWatcher(_PollingLiveWorker):
         return ".".join(relative.parts)
 
     def poll_once(self) -> list[str]:
+        scan_started = time.monotonic()
         current = self._scan()
+        scan_ms = (time.monotonic() - scan_started) * 1000.0
+        ping_started = time.monotonic()
         try:
             status = self.client.ping()
         except (OSError, EOFError, TimeoutError, ConnectionError):
@@ -189,6 +193,7 @@ class DesktopLiveWatcher(_PollingLiveWorker):
             if self._recover_client() is None:
                 raise
             status = self.client.ping()
+        ping_ms = (time.monotonic() - ping_started) * 1000.0
 
         if not status.get("available"):
             self._snapshot = current
@@ -206,20 +211,41 @@ class DesktopLiveWatcher(_PollingLiveWorker):
             }
         )
         for path in changed:
-            self._emit(f"Updating LIVE: {Path(path).name}")
+            from contextor.core.runtime_trace import new_trace_operation, trace_event
+
+            op = new_trace_operation("u")
+            old_present = path in self._snapshot
+            current_present = path in current
+            kind = "create" if not old_present and current_present else "delete" if old_present and not current_present else "modify"
+            relative = None
             try:
-                response = self.client.update_file(path, origin="desktop_watcher")
+                relative = Path(path).resolve().relative_to(self.root).as_posix()
+            except ValueError:
+                pass
+            mtime_ns = current.get(path, (None, None))[0]
+            trace_event(
+                "LIVE", "FS_CHANGE_DETECTED", op=op, repo=str(self.root),
+                path=relative, kind=kind, rev=status.get("revision"),
+                scan_ms=scan_ms, ping_ms=ping_ms, mtime_ns=mtime_ns,
+            )
+            self._emit(f"Updating LIVE: {Path(path).name}")
+            update_started = time.monotonic()
+            trace_event("LIVE", "WATCH_UPDATE_START", op=op, repo=str(self.root), path=relative)
+            try:
+                response = self.client.update_file(path, origin="desktop_watcher", trace_op=op)
             except (OSError, EOFError, TimeoutError, ConnectionError):
                 self._emit("LIVE: connection lost during update; recovering...")
                 if self._recover_client() is None:
                     raise
-                response = self.client.update_file(path, origin="desktop_watcher")
+                response = self.client.update_file(path, origin="desktop_watcher", trace_op=op)
 
             if response.get("status") != "ok":
+                trace_event("LIVE", "WATCH_UPDATE_FAIL", op=op, repo=str(self.root), path=relative, elapsed_ms=(time.monotonic() - update_started) * 1000.0, err=response.get("error"))
                 self._emit(f"LIVE connection error: {response.get('error', 'update failed')}")
                 raise RuntimeError(f"LIVE update failed for {path}: {response.get('error')}")
             result = response.get("result")
             result_status = getattr(result, "status", "UPDATED")
+            trace_event("LIVE", "WATCH_UPDATE_END", op=op, repo=str(self.root), path=relative, rev=response.get("revision"), seq=response.get("seq"), status=result_status, elapsed_ms=(time.monotonic() - update_started) * 1000.0)
             if result_status == "SYNTAX_ERROR":
                 line = getattr(result, "line_number", None)
                 column = getattr(result, "column_number", None)
@@ -353,9 +379,21 @@ class DesktopLiveEventFeed(_PollingLiveWorker):
                             "timestamp": datetime.now(timezone.utc).isoformat(),
                         },
                     )
+                    try:
+                        from contextor.core.runtime_trace import trace_event
+                        trace_event("GUI", "ACTIVITY_GAP", seq=response.get("latest_seq"), status="gap")
+                    except Exception:
+                        pass
                     gap_reported = True
 
                 events = response.get("events", [])
+                if events:
+                    try:
+                        from contextor.core.runtime_trace import trace_event
+                        seqs = [item.get("seq") for item in events if isinstance(item, dict) and isinstance(item.get("seq"), int)]
+                        trace_event("GUI", "EVENT_BATCH_RECEIVED", count=len(events), rev=response.get("revision"), seq=response.get("latest_seq"), first_seq=min(seqs) if seqs else None, last_seq=max(seqs) if seqs else None)
+                    except Exception:
+                        pass
 
                 previous_cursor = self._last_seq
 

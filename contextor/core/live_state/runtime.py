@@ -497,6 +497,11 @@ def _repository_updater(root: Path):
     cache = repo_cache_dir(root)
 
     def update(state, file_path: str):
+        import time
+        from contextor.core.runtime_trace import current_trace_operation, trace_event
+
+        op = current_trace_operation()
+        started = time.monotonic()
         from contextor.core.analysis.incremental_engine import IncrementalAnalysisEngine
         from contextor.core.analysis.state_manager import FileStateManager
         from contextor.core.reporting_engine.persistent_registry import PersistentIdentityRegistry
@@ -508,7 +513,11 @@ def _repository_updater(root: Path):
             manager,
             str(root),
         )
+        trace_event("LIVE", "ENGINE_READY", op=op, repo=str(root), elapsed_ms=(time.monotonic() - started) * 1000.0)
+        incremental_started = time.monotonic()
         delta = engine.update_file(file_path)
+        trace_event("LIVE", "INCREMENTAL_END", op=op, repo=str(root), elapsed_ms=(time.monotonic() - incremental_started) * 1000.0, status=getattr(delta, "status", None))
+        snapshot_started = time.monotonic()
         meta = save_snapshot(
             engine.state,
             cache,
@@ -517,10 +526,13 @@ def _repository_updater(root: Path):
             repo_id=identity.repo_id,
             root_path=identity.root_path,
         )
+        trace_event("LIVE", "SNAPSHOT_SAVE_END", op=op, repo=str(root), elapsed_ms=(time.monotonic() - snapshot_started) * 1000.0)
+        file_state_started = time.monotonic()
         manager.save(
             getattr(manager, "state_id", ""),
             revision=meta.revision if meta else None,
         )
+        trace_event("LIVE", "FILE_STATE_SAVE_END", op=op, repo=str(root), elapsed_ms=(time.monotonic() - file_state_started) * 1000.0)
         return delta
 
     return update
@@ -564,6 +576,8 @@ def run_service(
         revision=revision,
         updater=_repository_updater(root),
     )
+    from contextor.core.runtime_trace import trace_event
+    trace_event("LIVE", "SERVICE_START", repo=str(root), rev=server._revision)
 
     if owner_pid is not None and owner_pid > 0:
         if sys.platform == "win32":
@@ -621,6 +635,8 @@ def run_service(
     try:
         server.serve_forever()
     finally:
+        trace_event("LIVE", "SERVICE_END", repo=str(root), rev=server._revision)
+        server.close()
         try:
             current_ep = _read_endpoint(root)
             if current_ep is not None and current_ep.pid == os.getpid():
