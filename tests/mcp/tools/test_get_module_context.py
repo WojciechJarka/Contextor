@@ -505,6 +505,26 @@ def test_get_module_context__fuzzy_windows_init_path_typo_suggestions(tmp_path, 
     assert top["module_id"] == "13/1"
 
 
+def test_get_module_context_revision_scoped_query_index_rebuilds_on_revision_change(tmp_path, monkeypatch):
+    state = _setup_module_context_state(monkeypatch)
+    state.revision = 101
+    original_read = query_helpers.read_registries
+    read_calls = []
+
+    def counted_read(root):
+        read_calls.append(root)
+        return original_read(root)
+
+    monkeypatch.setattr(query_helpers, "read_registries", counted_read)
+    get_module_context(str(tmp_path), module_name="pkg.mod_a")
+    get_module_context(str(tmp_path), module_name="pkg.mod_a")
+    assert len(read_calls) == 1
+
+    state.revision = 102
+    get_module_context(str(tmp_path), module_name="pkg.mod_a")
+    assert len(read_calls) == 2
+
+
 def test_get_module_context__normalize_module_path_to_dotted_unit():
     from contextor.core.report_query import normalize_module_path_to_dotted
 

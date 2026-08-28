@@ -5,6 +5,7 @@ from contextor.mcp import query_helpers
 from contextor.mcp import runtime as mcp_runtime
 
 _COMPACT_EVIDENCE_LIMIT = 3
+_QUERY_INDEX_CACHE: dict[str, tuple[int, tuple, object]] = {}
 
 
 def _dependency_collection_view(
@@ -61,8 +62,28 @@ def get_module_context(
         resolve_index_query,
     )
 
-    mod_path_to_id, mod_id_to_path, art_path_to_id, art_id_to_path = query_helpers.read_registries(root)
-    catalog = catalog_from_registry(str(root))
+    engine = mcp_runtime.get_or_init_engine(root)
+    state = getattr(engine, "state", None) if engine is not None else None
+    canonical_module_paths = {
+        str(name): str(getattr(module_obj, "path"))
+        for name, module_obj in (getattr(state, "modules", {}) or {}).items()
+        if getattr(module_obj, "path", None)
+    }
+    cache_key = str(root)
+    revision = getattr(state, "revision", None)
+    cached = _QUERY_INDEX_CACHE.get(cache_key)
+    if cached is not None and cached[0] == revision:
+        registries = cached[1]
+        catalog = cached[2]
+    else:
+        registries = query_helpers.read_registries(root)
+        catalog = catalog_from_registry(
+            str(root),
+            module_paths=canonical_module_paths or None,
+        )
+        if revision is not None:
+            _QUERY_INDEX_CACHE[cache_key] = (revision, registries, catalog)
+    mod_path_to_id, mod_id_to_path, art_path_to_id, art_id_to_path = registries
     if not catalog.modules and mod_id_to_path:
         catalog = IndexCatalog(
             modules=mod_id_to_path,
@@ -133,7 +154,6 @@ def get_module_context(
         else:
             module_name = input_query
 
-    engine = mcp_runtime.get_or_init_engine(root)
     if not engine or getattr(engine.state, "resync_required", False):
         return "Error: No usable canonical LIVE state. Run analyze_project first."
 
