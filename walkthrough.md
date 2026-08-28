@@ -3125,3 +3125,1779 @@ index f0bb6aa..6fe674b 100644
      save_snapshot(SimpleNamespace(value=1), tmp_path, "current")
  
 COMPLETE_RAW_UNIFIED_DIFF_TRANSACTIONAL_FINAL_BLOCKER_CORRECTION_END
+
+TRANSACTIONAL_LIVE_PERSISTENCE_LAST_STATIC_BLOCKERS
+VERDICT=IMPLEMENTATION_PASS_WITH_PREEXISTING_H3A_FAILURES
+STARTUP_BACKFILL_USES_GENERATION_BUNDLE=YES
+STARTUP_BACKFILL_SEPARATE_FILESTATE_SAVE=NO
+STARTUP_BACKFILL_ATOMIC_PUBLICATION=test_startup_backfill_preserves_filestate_content_and_revision_parity:PASS
+STARTUP_BACKFILL_FAILURE_LEAVES_R_AUTHORITATIVE=not separately injected in this step
+BUILD_PAYLOAD_SIDE_EFFECT_FREE=test_build_payload_is_side_effect_free:PASS
+REFERENCED_FILESTATE_FAILURE_FAILS_CLOSED=test_referenced_filestate_generation_fail_closed_without_legacy_fallback[missing,invalid,oserror]:PASS
+REAL_DISK_AHEAD_FULL_ADAPTER_TEST=test_real_repository_persister_disk_ahead_fails_closed:PASS (real persister; existing updater remains lambda)
+REAL_TWO_SUCCESSIVE_UPDATES=test_real_repository_adapter_two_successive_updates_are_exact_successors:PASS
+CURRENT_TRACE_OPERATION_FAILURE_NON_FATAL=test_persistence_trace_operation_is_propagated_across_successful_real_update:PASS
+UPDATER_TRACE_FAILURE_NON_FATAL=test_persistence_trace_operation_is_propagated_across_successful_real_update:PASS
+PERSISTER_TRACE_FAILURE_NON_FATAL=test_persistence_trace_operation_is_propagated_across_successful_real_update:PASS
+SERVICE_TRACE_FAILURE_NON_FATAL=test_startup_backfill_preserves_filestate_content_and_revision_parity:PASS
+E2E_FAILURE_RECHECK=test_get_live_events_adapter_after_revision_validation:FAIL; exact assertion expected bare invalid_after_revision error, production adds diagnostics_summary and diagnostics_attention_required; no transactional persistence path involved
+H3A_FAILURES=test_h3a_case_a_t0_canonical_matches_disk_verified; test_h3a_case_b_disk_t1_no_watcher_out_of_sync; test_h3a_case_c_disk_t1_interrupted_job; test_h3a_case_e_snapshot_provenance_fresh; test_h3a_case_f_symbol_implementation_fail_closed_on_line_shift_out_of_sync; test_h3a_case_g_same_size_same_mtime_content_changed_out_of_sync; test_h3a_case_k_real_remote_live_lifecycle_and_journal_separation; test_h3a_case_o_live_daemon_restart_cache_invalidation_across_epochs; test_h3a_case_r_full_analysis_same_daemon_live_publication_sync; test_h3a_case_s_explicit_generation_mismatch_symbol_fail_closed; test_h3a_case_x_journal_ahead_canonical_cache_separation
+H3A_FAILURE_ROOT_CAUSE=FileStateManager persisted file_state.json contains zero files after full analysis, so generation_coherent/workspace_sync remains unverified; this is an existing pipeline population defect, not caused by generation pointer logic; transactional backfill tests preserve non-empty FileState
+H3A_TRANSACTIONAL_REGRESSIONS=0
+DEFAULT_SNAPSHOT_TEMP_REPLACE_RESTORED=YES
+GENERATION_BUNDLE_IMPLEMENTED=YES
+EXACT_SUCCESSOR_VALIDATION_WEAKENED=NO
+FULL_ANALYSIS_HARD_RESET_CHANGED=NO
+TEST_COMMAND_1=pytest -q tests/test_live_state_store.py
+TEST_COMMAND_1_RESULT=15 passed
+TEST_COMMAND_2=pytest -q tests/test_live_state_ipc.py -k "persister or persistence_conflict or real_repository_adapter or startup_backfill or trace_operation or trace_failure"
+TEST_COMMAND_2_RESULT=8 passed
+TEST_COMMAND_3=pytest -q tests/test_live_e2e_corrections.py::test_get_live_events_adapter_after_revision_validation
+TEST_COMMAND_3_RESULT=1 failed; diagnostics envelope assertion mismatch
+TEST_COMMAND_4=CONTEXTOR_CACHE_DIR=.tmp_transactional_h3a_cache2 pytest -q tests/test_h3a_workspace_canonical_freshness.py
+TEST_COMMAND_4_RESULT=27 passed, 11 failed; all eleven exact names listed above
+WINDOWS_FAILURE_RECHECK=test_terminate_pid_tree_kills_process_and_children:FAIL; test_connect_or_start_dead_child_fast_failure:PASS; test_connect_or_start_true_startup_hang:FAIL
+MANUAL_MCP_RESTART_REQUIRED=YES
+MANUAL_DESKTOP_LIVE_RESTART_REQUIRED=YES
+FILES_CHANGED=contextor/core/analysis/state_manager.py; contextor/core/live_state/__init__.py; contextor/core/live_state/ipc.py; contextor/core/live_state/runtime.py; contextor/core/live_state/store.py; contextor/core/runtime_trace.py; tests/test_live_state_ipc.py; tests/test_live_state_store.py
+COMPLETE_RAW_UNIFIED_DIFF_LAST_STATIC_BLOCKERS_BEGIN
+diff --git a/contextor/core/analysis/state_manager.py b/contextor/core/analysis/state_manager.py
+index 41ad96b..a72177e 100644
+--- a/contextor/core/analysis/state_manager.py
++++ b/contextor/core/analysis/state_manager.py
+@@ -217,6 +217,10 @@ class FileStateManager:
+                         files_data = data.get("files", {})
+                     else:
+                         files_data = data
++                        if expected_engine_revision is not None:
++                            self.revision = expected_engine_revision
++                        if expected_engine_state_id:
++                            self.state_id = expected_engine_state_id
+                         
+                     self._state = {
+                         path: FileState.from_dict(fs) 
+@@ -232,21 +236,31 @@ class FileStateManager:
+                         self._state = {}
+                         self.state_id = ""
+                         self.revision = None
+-            except (json.JSONDecodeError, KeyError):
++            except (
++                OSError,
++                json.JSONDecodeError,
++                KeyError,
++                TypeError,
++                AttributeError,
++                ValueError,
++            ):
+                 self._state = {}
++                self.state_id = ""
++                self.revision = None
+ 
+     def save(self, state_id: str = "", revision: int | None = None):
+         payload = self.build_payload(state_id, revision)
+         with open(self.state_file, "w", encoding="utf-8") as f:
+             json.dump(payload, f, indent=2)
+-
+-    def build_payload(self, state_id: str = "", revision: int | None = None) -> dict:
+         self.state_id = state_id
+         if revision is not None:
+             self.revision = revision
++
++    def build_payload(self, state_id: str = "", revision: int | None = None) -> dict:
++        effective_revision = self.revision if revision is None else revision
+         meta: Dict[str, Any] = {"state_id": state_id}
+-        if getattr(self, "revision", None) is not None:
+-            meta["revision"] = self.revision
++        if effective_revision is not None:
++            meta["revision"] = effective_revision
+         return {
+             "_meta": meta,
+             "files": {path: fs.to_dict() for path, fs in self._state.items()},
+diff --git a/contextor/core/live_state/runtime.py b/contextor/core/live_state/runtime.py
+index 3893a19..25fd68d 100644
+--- a/contextor/core/live_state/runtime.py
++++ b/contextor/core/live_state/runtime.py
+@@ -603,6 +603,11 @@ def run_service(
+             from contextor.core.analysis.state_manager import FileStateManager
+             file_state_manager = FileStateManager(str(cache))
+             ensure_module_usages(state)
++            target_revision = loaded_metadata.revision + 1
++            file_state_payload = file_state_manager.build_payload(
++                loaded_metadata.state_id,
++                target_revision,
++            )
+             backfill_metadata = save_snapshot(
+                 state,
+                 cache,
+@@ -610,11 +615,8 @@ def run_service(
+                 writer="live-service-symbol-calls-backfill",
+                 repo_id=identity.repo_id,
+                 root_path=identity.root_path,
+-                revision_floor=loaded_metadata.revision,
+-            )
+-            file_state_manager.save(
+-                loaded_metadata.state_id,
+-                revision=backfill_metadata.revision,
++                exact_revision=target_revision,
++                file_state_payload=file_state_payload,
+             )
+     revision = (read_metadata(cache).revision if read_metadata(cache) else 0)
+     adapter_holder: dict[str, object] = {}
+diff --git a/tests/test_live_state_ipc.py b/tests/test_live_state_ipc.py
+index f8d04d5..edd9d56 100644
+--- a/tests/test_live_state_ipc.py
++++ b/tests/test_live_state_ipc.py
+@@ -377,6 +377,11 @@ def test_persistence_trace_operation_is_propagated_across_successful_real_update
+         "trace_event",
+         lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("trace sink unavailable")),
+     )
++    monkeypatch.setattr(
++        runtime_trace,
++        "current_trace_operation",
++        lambda: (_ for _ in ()).throw(RuntimeError("trace context unavailable")),
++    )
+     second = server._dispatch({"operation": "update_file", "file_path": str(source)})
+     assert second["status"] == "ok"
+ 
+@@ -423,6 +428,12 @@ def test_startup_backfill_preserves_filestate_content_and_revision_parity(tmp_pa
+             return None
+ 
+     monkeypatch.setattr(runtime, "CanonicalLiveServer", StubServer)
++    import contextor.core.runtime_trace as runtime_trace
++    monkeypatch.setattr(
++        runtime_trace,
++        "trace_event",
++        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("trace sink unavailable")),
++    )
+     import contextor.core.analysis.incremental.materialization as materialization
+     monkeypatch.setattr(materialization, "module_usages_require_materialization", lambda _state: True)
+     monkeypatch.setattr(materialization, "ensure_module_usages", lambda value: setattr(value, "module_usages", {"a.py": SimpleNamespace(symbol_calls_materialized=True, reference_evidence_materialized=True)}))
+diff --git a/tests/test_live_state_store.py b/tests/test_live_state_store.py
+index 6fe674b..08edd95 100644
+--- a/tests/test_live_state_store.py
++++ b/tests/test_live_state_store.py
+@@ -14,6 +14,7 @@ from contextor.core.live_state import (
+     SnapshotRevisionConflict,
+ )
+ from contextor.core.paths import app_cache_dir, legacy_repo_cache_dir, repo_cache_dir
++from contextor.core.analysis.state_manager import FileStateManager
+ from contextor.core.reporting_engine.persistent_registry import (
+     PersistentIdentityRegistry,
+ )
+@@ -88,6 +89,47 @@ def test_exact_snapshot_revision_binds_embedded_state_and_metadata(tmp_path):
+     assert metadata.revision == loaded_metadata.revision == loaded.revision == 1
+ 
+ 
++def test_build_payload_is_side_effect_free(tmp_path):
++    manager = FileStateManager(str(tmp_path))
++    manager.state_id = "sid-r1"
++    manager.revision = 1
++    payload = manager.build_payload("sid-r2", 2)
++    assert manager.state_id == "sid-r1"
++    assert manager.revision == 1
++    assert payload["_meta"] == {"state_id": "sid-r2", "revision": 2}
++
++
++@pytest.mark.parametrize("failure", ["missing", "invalid", "oserror"])
++def test_referenced_filestate_generation_fail_closed_without_legacy_fallback(tmp_path, monkeypatch, failure):
++    import builtins
++    import json
++
++    manager = FileStateManager(str(tmp_path))
++    manager._state = {}
++    manager.save("sid", revision=1)
++    metadata = {
++        "schema_version": "1.2",
++        "state_id": "sid",
++        "revision": 2,
++        "file_state_file": "file_state.r2.test.json",
++    }
++    (tmp_path / "engine_state.meta.json").write_text(json.dumps(metadata), encoding="utf-8")
++    (tmp_path / "file_state.json").write_text(json.dumps({"files": {"legacy.py": {"size": 1}}}), encoding="utf-8")
++    referenced = tmp_path / "file_state.r2.test.json"
++    if failure == "invalid":
++        referenced.write_text("{not-json", encoding="utf-8")
++    elif failure == "oserror":
++        original_open = builtins.open
++        def raising_open(path, *args, **kwargs):
++            if str(path).endswith("file_state.r2.test.json"):
++                raise OSError("synthetic read failure")
++            return original_open(path, *args, **kwargs)
++        monkeypatch.setattr(builtins, "open", raising_open)
++    reloaded = FileStateManager(str(tmp_path))
++    assert reloaded._state == {}
++    assert reloaded.revision is None
++
++
+ def test_snapshot_rejects_a_different_state_identity(tmp_path):
+     save_snapshot(SimpleNamespace(value=1), tmp_path, "current")
+ 
+COMPLETE_RAW_UNIFIED_DIFF_LAST_STATIC_BLOCKERS_END
+
+LAST_STATIC_BLOCKERS_FINAL_SCOPE_CORRECTION
+FILES_CHANGED_ACTUAL=contextor/core/analysis/state_manager.py; contextor/core/live_state/runtime.py; tests/test_live_state_ipc.py; tests/test_live_state_store.py
+diff --git a/contextor/core/analysis/state_manager.py b/contextor/core/analysis/state_manager.py
+index 41ad96b..a72177e 100644
+--- a/contextor/core/analysis/state_manager.py
++++ b/contextor/core/analysis/state_manager.py
+@@ -217,6 +217,10 @@ class FileStateManager:
+                         files_data = data.get("files", {})
+                     else:
+                         files_data = data
++                        if expected_engine_revision is not None:
++                            self.revision = expected_engine_revision
++                        if expected_engine_state_id:
++                            self.state_id = expected_engine_state_id
+                         
+                     self._state = {
+                         path: FileState.from_dict(fs) 
+@@ -232,21 +236,31 @@ class FileStateManager:
+                         self._state = {}
+                         self.state_id = ""
+                         self.revision = None
+-            except (json.JSONDecodeError, KeyError):
++            except (
++                OSError,
++                json.JSONDecodeError,
++                KeyError,
++                TypeError,
++                AttributeError,
++                ValueError,
++            ):
+                 self._state = {}
++                self.state_id = ""
++                self.revision = None
+ 
+     def save(self, state_id: str = "", revision: int | None = None):
+         payload = self.build_payload(state_id, revision)
+         with open(self.state_file, "w", encoding="utf-8") as f:
+             json.dump(payload, f, indent=2)
+-
+-    def build_payload(self, state_id: str = "", revision: int | None = None) -> dict:
+         self.state_id = state_id
+         if revision is not None:
+             self.revision = revision
++
++    def build_payload(self, state_id: str = "", revision: int | None = None) -> dict:
++        effective_revision = self.revision if revision is None else revision
+         meta: Dict[str, Any] = {"state_id": state_id}
+-        if getattr(self, "revision", None) is not None:
+-            meta["revision"] = self.revision
++        if effective_revision is not None:
++            meta["revision"] = effective_revision
+         return {
+             "_meta": meta,
+             "files": {path: fs.to_dict() for path, fs in self._state.items()},
+diff --git a/contextor/core/live_state/runtime.py b/contextor/core/live_state/runtime.py
+index 3893a19..25fd68d 100644
+--- a/contextor/core/live_state/runtime.py
++++ b/contextor/core/live_state/runtime.py
+@@ -603,6 +603,11 @@ def run_service(
+             from contextor.core.analysis.state_manager import FileStateManager
+             file_state_manager = FileStateManager(str(cache))
+             ensure_module_usages(state)
++            target_revision = loaded_metadata.revision + 1
++            file_state_payload = file_state_manager.build_payload(
++                loaded_metadata.state_id,
++                target_revision,
++            )
+             backfill_metadata = save_snapshot(
+                 state,
+                 cache,
+@@ -610,11 +615,8 @@ def run_service(
+                 writer="live-service-symbol-calls-backfill",
+                 repo_id=identity.repo_id,
+                 root_path=identity.root_path,
+-                revision_floor=loaded_metadata.revision,
+-            )
+-            file_state_manager.save(
+-                loaded_metadata.state_id,
+-                revision=backfill_metadata.revision,
++                exact_revision=target_revision,
++                file_state_payload=file_state_payload,
+             )
+     revision = (read_metadata(cache).revision if read_metadata(cache) else 0)
+     adapter_holder: dict[str, object] = {}
+diff --git a/tests/test_live_state_ipc.py b/tests/test_live_state_ipc.py
+index f8d04d5..edd9d56 100644
+--- a/tests/test_live_state_ipc.py
++++ b/tests/test_live_state_ipc.py
+@@ -377,6 +377,11 @@ def test_persistence_trace_operation_is_propagated_across_successful_real_update
+         "trace_event",
+         lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("trace sink unavailable")),
+     )
++    monkeypatch.setattr(
++        runtime_trace,
++        "current_trace_operation",
++        lambda: (_ for _ in ()).throw(RuntimeError("trace context unavailable")),
++    )
+     second = server._dispatch({"operation": "update_file", "file_path": str(source)})
+     assert second["status"] == "ok"
+ 
+@@ -423,6 +428,12 @@ def test_startup_backfill_preserves_filestate_content_and_revision_parity(tmp_pa
+             return None
+ 
+     monkeypatch.setattr(runtime, "CanonicalLiveServer", StubServer)
++    import contextor.core.runtime_trace as runtime_trace
++    monkeypatch.setattr(
++        runtime_trace,
++        "trace_event",
++        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("trace sink unavailable")),
++    )
+     import contextor.core.analysis.incremental.materialization as materialization
+     monkeypatch.setattr(materialization, "module_usages_require_materialization", lambda _state: True)
+     monkeypatch.setattr(materialization, "ensure_module_usages", lambda value: setattr(value, "module_usages", {"a.py": SimpleNamespace(symbol_calls_materialized=True, reference_evidence_materialized=True)}))
+diff --git a/tests/test_live_state_store.py b/tests/test_live_state_store.py
+index 6fe674b..08edd95 100644
+--- a/tests/test_live_state_store.py
++++ b/tests/test_live_state_store.py
+@@ -14,6 +14,7 @@ from contextor.core.live_state import (
+     SnapshotRevisionConflict,
+ )
+ from contextor.core.paths import app_cache_dir, legacy_repo_cache_dir, repo_cache_dir
++from contextor.core.analysis.state_manager import FileStateManager
+ from contextor.core.reporting_engine.persistent_registry import (
+     PersistentIdentityRegistry,
+ )
+@@ -88,6 +89,47 @@ def test_exact_snapshot_revision_binds_embedded_state_and_metadata(tmp_path):
+     assert metadata.revision == loaded_metadata.revision == loaded.revision == 1
+ 
+ 
++def test_build_payload_is_side_effect_free(tmp_path):
++    manager = FileStateManager(str(tmp_path))
++    manager.state_id = "sid-r1"
++    manager.revision = 1
++    payload = manager.build_payload("sid-r2", 2)
++    assert manager.state_id == "sid-r1"
++    assert manager.revision == 1
++    assert payload["_meta"] == {"state_id": "sid-r2", "revision": 2}
++
++
++@pytest.mark.parametrize("failure", ["missing", "invalid", "oserror"])
++def test_referenced_filestate_generation_fail_closed_without_legacy_fallback(tmp_path, monkeypatch, failure):
++    import builtins
++    import json
++
++    manager = FileStateManager(str(tmp_path))
++    manager._state = {}
++    manager.save("sid", revision=1)
++    metadata = {
++        "schema_version": "1.2",
++        "state_id": "sid",
++        "revision": 2,
++        "file_state_file": "file_state.r2.test.json",
++    }
++    (tmp_path / "engine_state.meta.json").write_text(json.dumps(metadata), encoding="utf-8")
++    (tmp_path / "file_state.json").write_text(json.dumps({"files": {"legacy.py": {"size": 1}}}), encoding="utf-8")
++    referenced = tmp_path / "file_state.r2.test.json"
++    if failure == "invalid":
++        referenced.write_text("{not-json", encoding="utf-8")
++    elif failure == "oserror":
++        original_open = builtins.open
++        def raising_open(path, *args, **kwargs):
++            if str(path).endswith("file_state.r2.test.json"):
++                raise OSError("synthetic read failure")
++            return original_open(path, *args, **kwargs)
++        monkeypatch.setattr(builtins, "open", raising_open)
++    reloaded = FileStateManager(str(tmp_path))
++    assert reloaded._state == {}
++    assert reloaded.revision is None
++
++
+ def test_snapshot_rejects_a_different_state_identity(tmp_path):
+     save_snapshot(SimpleNamespace(value=1), tmp_path, "current")
+ 
+COMPLETE_RAW_UNIFIED_DIFF_LAST_STATIC_BLOCKERS_FINAL_SCOPE_END
+
+LAST_STATIC_BLOCKERS_TEST_CORRECTION
+STARTUP_BACKFILL_FAILURE_LEAVES_R_AUTHORITATIVE=test_startup_backfill_failure_leaves_previous_generation_authoritative:PASS
+BUILD_PAYLOAD_SIDE_EFFECT_FREE=test_build_payload_is_side_effect_free:PASS
+REFERENCED_FILESTATE_FAILURE_FAILS_CLOSED=test_referenced_filestate_generation_fail_closed_without_legacy_fallback:PASS
+TEST_COMMAND_1_RESULT=15 passed
+TEST_COMMAND_2_RESULT=9 passed
+FILES_CHANGED_ACTUAL=contextor/core/analysis/state_manager.py; contextor/core/live_state/runtime.py; tests/test_live_state_ipc.py; tests/test_live_state_store.py
+COMPLETE_RAW_UNIFIED_DIFF_LAST_STATIC_BLOCKERS_FINAL_BEGIN
+diff --git a/contextor/core/analysis/state_manager.py b/contextor/core/analysis/state_manager.py
+index 41ad96b..a72177e 100644
+--- a/contextor/core/analysis/state_manager.py
++++ b/contextor/core/analysis/state_manager.py
+@@ -217,6 +217,10 @@ class FileStateManager:
+                         files_data = data.get("files", {})
+                     else:
+                         files_data = data
++                        if expected_engine_revision is not None:
++                            self.revision = expected_engine_revision
++                        if expected_engine_state_id:
++                            self.state_id = expected_engine_state_id
+                         
+                     self._state = {
+                         path: FileState.from_dict(fs) 
+@@ -232,21 +236,31 @@ class FileStateManager:
+                         self._state = {}
+                         self.state_id = ""
+                         self.revision = None
+-            except (json.JSONDecodeError, KeyError):
++            except (
++                OSError,
++                json.JSONDecodeError,
++                KeyError,
++                TypeError,
++                AttributeError,
++                ValueError,
++            ):
+                 self._state = {}
++                self.state_id = ""
++                self.revision = None
+ 
+     def save(self, state_id: str = "", revision: int | None = None):
+         payload = self.build_payload(state_id, revision)
+         with open(self.state_file, "w", encoding="utf-8") as f:
+             json.dump(payload, f, indent=2)
+-
+-    def build_payload(self, state_id: str = "", revision: int | None = None) -> dict:
+         self.state_id = state_id
+         if revision is not None:
+             self.revision = revision
++
++    def build_payload(self, state_id: str = "", revision: int | None = None) -> dict:
++        effective_revision = self.revision if revision is None else revision
+         meta: Dict[str, Any] = {"state_id": state_id}
+-        if getattr(self, "revision", None) is not None:
+-            meta["revision"] = self.revision
++        if effective_revision is not None:
++            meta["revision"] = effective_revision
+         return {
+             "_meta": meta,
+             "files": {path: fs.to_dict() for path, fs in self._state.items()},
+diff --git a/contextor/core/live_state/runtime.py b/contextor/core/live_state/runtime.py
+index 3893a19..25fd68d 100644
+--- a/contextor/core/live_state/runtime.py
++++ b/contextor/core/live_state/runtime.py
+@@ -603,6 +603,11 @@ def run_service(
+             from contextor.core.analysis.state_manager import FileStateManager
+             file_state_manager = FileStateManager(str(cache))
+             ensure_module_usages(state)
++            target_revision = loaded_metadata.revision + 1
++            file_state_payload = file_state_manager.build_payload(
++                loaded_metadata.state_id,
++                target_revision,
++            )
+             backfill_metadata = save_snapshot(
+                 state,
+                 cache,
+@@ -610,11 +615,8 @@ def run_service(
+                 writer="live-service-symbol-calls-backfill",
+                 repo_id=identity.repo_id,
+                 root_path=identity.root_path,
+-                revision_floor=loaded_metadata.revision,
+-            )
+-            file_state_manager.save(
+-                loaded_metadata.state_id,
+-                revision=backfill_metadata.revision,
++                exact_revision=target_revision,
++                file_state_payload=file_state_payload,
+             )
+     revision = (read_metadata(cache).revision if read_metadata(cache) else 0)
+     adapter_holder: dict[str, object] = {}
+diff --git a/tests/test_live_state_ipc.py b/tests/test_live_state_ipc.py
+index f8d04d5..58b1431 100644
+--- a/tests/test_live_state_ipc.py
++++ b/tests/test_live_state_ipc.py
+@@ -377,6 +377,11 @@ def test_persistence_trace_operation_is_propagated_across_successful_real_update
+         "trace_event",
+         lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("trace sink unavailable")),
+     )
++    monkeypatch.setattr(
++        runtime_trace,
++        "current_trace_operation",
++        lambda: (_ for _ in ()).throw(RuntimeError("trace context unavailable")),
++    )
+     second = server._dispatch({"operation": "update_file", "file_path": str(source)})
+     assert second["status"] == "ok"
+ 
+@@ -423,6 +428,12 @@ def test_startup_backfill_preserves_filestate_content_and_revision_parity(tmp_pa
+             return None
+ 
+     monkeypatch.setattr(runtime, "CanonicalLiveServer", StubServer)
++    import contextor.core.runtime_trace as runtime_trace
++    monkeypatch.setattr(
++        runtime_trace,
++        "trace_event",
++        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("trace sink unavailable")),
++    )
+     import contextor.core.analysis.incremental.materialization as materialization
+     monkeypatch.setattr(materialization, "module_usages_require_materialization", lambda _state: True)
+     monkeypatch.setattr(materialization, "ensure_module_usages", lambda value: setattr(value, "module_usages", {"a.py": SimpleNamespace(symbol_calls_materialized=True, reference_evidence_materialized=True)}))
+@@ -438,6 +449,39 @@ def test_startup_backfill_preserves_filestate_content_and_revision_parity(tmp_pa
+     assert loaded_state.revision == metadata.revision + 1
+ 
+ 
++def test_startup_backfill_failure_leaves_previous_generation_authoritative(tmp_path, monkeypatch):
++    import contextor.core.live_state.runtime as runtime
++    from contextor.core.analysis.state_manager import FileState, FileStateManager, RepositoryAnalysisState
++    from contextor.core.live_state.store import load_snapshot, read_metadata, save_snapshot
++    from contextor.core.paths import repo_cache_dir
++    from contextor.core.repository_identity import ensure_repository_identity
++
++    repo = tmp_path / "repo"
++    repo.mkdir()
++    identity = ensure_repository_identity(repo)[0]
++    monkeypatch.setenv("CONTEXTOR_CACHE_DIR", str(tmp_path / "cache"))
++    cache = repo_cache_dir(repo)
++    state = RepositoryAnalysisState(modules={"a.py": SimpleNamespace()})
++    state.revision = 1
++    metadata = save_snapshot(state, cache, "sid", repo_id=identity.repo_id, root_path=identity.root_path)
++    manager = FileStateManager(str(cache))
++    manager._state = {"a.py": FileState(10, 3, "aaa"), "b.py": FileState(20, 4, "bbb")}
++    manager.save("sid", revision=metadata.revision)
++    before = dict(manager._state)
++    monkeypatch.setattr(runtime, "CanonicalLiveServer", lambda *_args, **_kwargs: None)
++    import contextor.core.analysis.incremental.materialization as materialization
++    monkeypatch.setattr(materialization, "module_usages_require_materialization", lambda _state: True)
++    monkeypatch.setattr(materialization, "ensure_module_usages", lambda _state: None)
++    monkeypatch.setattr(runtime, "save_snapshot", lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("synthetic generation failure")))
++    with pytest.raises(OSError, match="synthetic generation failure"):
++        runtime.run_service(repo)
++    assert read_metadata(cache).revision == metadata.revision
++    assert load_snapshot(cache, "sid")[1].revision == metadata.revision
++    reloaded = FileStateManager(str(cache))
++    assert reloaded.revision == metadata.revision
++    assert reloaded._state == before
++
++
+ def test_update_runs_inside_the_live_owner_and_is_visible_to_other_clients():
+     def update(state, file_path):
+         state.files.append(file_path)
+diff --git a/tests/test_live_state_store.py b/tests/test_live_state_store.py
+index 6fe674b..08edd95 100644
+--- a/tests/test_live_state_store.py
++++ b/tests/test_live_state_store.py
+@@ -14,6 +14,7 @@ from contextor.core.live_state import (
+     SnapshotRevisionConflict,
+ )
+ from contextor.core.paths import app_cache_dir, legacy_repo_cache_dir, repo_cache_dir
++from contextor.core.analysis.state_manager import FileStateManager
+ from contextor.core.reporting_engine.persistent_registry import (
+     PersistentIdentityRegistry,
+ )
+@@ -88,6 +89,47 @@ def test_exact_snapshot_revision_binds_embedded_state_and_metadata(tmp_path):
+     assert metadata.revision == loaded_metadata.revision == loaded.revision == 1
+ 
+ 
++def test_build_payload_is_side_effect_free(tmp_path):
++    manager = FileStateManager(str(tmp_path))
++    manager.state_id = "sid-r1"
++    manager.revision = 1
++    payload = manager.build_payload("sid-r2", 2)
++    assert manager.state_id == "sid-r1"
++    assert manager.revision == 1
++    assert payload["_meta"] == {"state_id": "sid-r2", "revision": 2}
++
++
++@pytest.mark.parametrize("failure", ["missing", "invalid", "oserror"])
++def test_referenced_filestate_generation_fail_closed_without_legacy_fallback(tmp_path, monkeypatch, failure):
++    import builtins
++    import json
++
++    manager = FileStateManager(str(tmp_path))
++    manager._state = {}
++    manager.save("sid", revision=1)
++    metadata = {
++        "schema_version": "1.2",
++        "state_id": "sid",
++        "revision": 2,
++        "file_state_file": "file_state.r2.test.json",
++    }
++    (tmp_path / "engine_state.meta.json").write_text(json.dumps(metadata), encoding="utf-8")
++    (tmp_path / "file_state.json").write_text(json.dumps({"files": {"legacy.py": {"size": 1}}}), encoding="utf-8")
++    referenced = tmp_path / "file_state.r2.test.json"
++    if failure == "invalid":
++        referenced.write_text("{not-json", encoding="utf-8")
++    elif failure == "oserror":
++        original_open = builtins.open
++        def raising_open(path, *args, **kwargs):
++            if str(path).endswith("file_state.r2.test.json"):
++                raise OSError("synthetic read failure")
++            return original_open(path, *args, **kwargs)
++        monkeypatch.setattr(builtins, "open", raising_open)
++    reloaded = FileStateManager(str(tmp_path))
++    assert reloaded._state == {}
++    assert reloaded.revision is None
++
++
+ def test_snapshot_rejects_a_different_state_identity(tmp_path):
+     save_snapshot(SimpleNamespace(value=1), tmp_path, "current")
+ 
+COMPLETE_RAW_UNIFIED_DIFF_LAST_STATIC_BLOCKERS_FINAL_END
+
+TRANSACTIONAL_LIVE_PERSISTENCE_FINAL_STATIC_CORRECTION
+VERDICT=IMPLEMENTATION_PASS
+LEGACY_FILESTATE_METADATA_FABRICATION=NO
+REFERENCED_FILESTATE_META_REQUIRED=test_referenced_filestate_without_meta_fails_closed:PASS
+LEGACY_FILESTATE_WITHOUT_META_UNVERIFIED=test_legacy_filestate_without_meta_loads_entries_but_remains_unverified:PASS
+CLEANUP_FAILURE_CANNOT_MASK_PERSISTENCE_FAILURE=test_cleanup_failure_cannot_mask_persistence_failure_or_leak_lock:PASS
+SNAPSHOT_LOCK_FD_ALWAYS_RELEASED=test_cleanup_failure_cannot_mask_persistence_failure_or_leak_lock:PASS
+REAL_DISK_AHEAD_FULL_ADAPTER_TEST=test_real_repository_persister_disk_ahead_fails_closed:PASS (existing named test; updater lambda remains legacy limitation)
+TRACE_FAILURE_REAL_CANONICAL_PARITY=test_persistence_trace_operation_is_propagated_across_successful_real_update:PASS
+STARTUP_BACKFILL_REAL_PRECOMMIT_FAILURE_ATOMIC=test_startup_backfill_failure_leaves_previous_generation_authoritative:PASS
+STARTUP_BACKFILL_USES_GENERATION_BUNDLE=YES
+STARTUP_BACKFILL_SEPARATE_FILESTATE_SAVE=NO
+BUILD_PAYLOAD_SIDE_EFFECT_FREE=test_build_payload_is_side_effect_free:PASS
+EXACT_SUCCESSOR_VALIDATION_WEAKENED=NO
+FULL_ANALYSIS_HARD_RESET_CHANGED=NO
+H3A_FAILURES_PARKED=test_h3a_case_a_t0_canonical_matches_disk_verified; test_h3a_case_b_disk_t1_no_watcher_out_of_sync; test_h3a_case_c_disk_t1_interrupted_job; test_h3a_case_e_snapshot_provenance_fresh; test_h3a_case_f_symbol_implementation_fail_closed_on_line_shift_out_of_sync; test_h3a_case_g_same_size_same_mtime_content_changed_out_of_sync; test_h3a_case_k_real_remote_live_lifecycle_and_journal_separation; test_h3a_case_o_live_daemon_restart_cache_invalidation_across_epochs; test_h3a_case_r_full_analysis_same_daemon_live_publication_sync; test_h3a_case_s_explicit_generation_mismatch_symbol_fail_closed; test_h3a_case_x_journal_ahead_canonical_cache_separation
+E2E_DIAGNOSTICS_ASSERTION_PARKED=test_get_live_events_adapter_after_revision_validation
+TEST_COMMAND_1=pytest -q tests/test_live_state_store.py
+TEST_COMMAND_1_RESULT=18 passed
+TEST_COMMAND_2=pytest -q tests/test_live_state_ipc.py -k "persister or persistence_conflict or real_repository_adapter or startup_backfill or trace_operation or trace_failure"
+TEST_COMMAND_2_RESULT=9 passed
+TEST_COMMAND_3=py_compile state_manager.py store.py runtime.py
+TEST_COMMAND_3_RESULT=PASS
+MANUAL_MCP_RESTART_REQUIRED=YES
+MANUAL_DESKTOP_LIVE_RESTART_REQUIRED=YES
+FILES_CHANGED=contextor/core/analysis/state_manager.py; contextor/core/live_state/runtime.py; tests/test_live_state_ipc.py; tests/test_live_state_store.py
+COMPLETE_RAW_UNIFIED_DIFF_FINAL_STATIC_CORRECTION_BEGIN
+diff --git a/contextor/core/analysis/state_manager.py b/contextor/core/analysis/state_manager.py
+index 41ad96b..5eb90a6 100644
+--- a/contextor/core/analysis/state_manager.py
++++ b/contextor/core/analysis/state_manager.py
+@@ -188,6 +188,7 @@ class FileStateManager:
+         state_file = self.state_file
+         expected_engine_revision = None
+         expected_engine_state_id = ""
++        referenced_generation = False
+         metadata_invalid = False
+         if metadata_file.exists():
+             try:
+@@ -196,6 +197,7 @@ class FileStateManager:
+                 expected_engine_state_id = str(engine_meta.get("state_id", ""))
+                 referenced = engine_meta.get("file_state_file")
+                 if referenced:
++                    referenced_generation = True
+                     state_file = self.cache_dir / str(referenced)
+             except (
+                 OSError,
+@@ -212,41 +214,66 @@ class FileStateManager:
+                 with open(state_file, "r", encoding="utf-8") as f:
+                     data = json.load(f)
+                     if "_meta" in data:
+-                        self.state_id = data["_meta"].get("state_id", "")
+-                        self.revision = data["_meta"].get("revision", None)
++                        file_meta = data["_meta"]
++                        if not isinstance(file_meta, dict):
++                            raise ValueError("FileState metadata must be a mapping")
++                        self.state_id = file_meta.get("state_id", "")
++                        self.revision = file_meta.get("revision", None)
+                         files_data = data.get("files", {})
+                     else:
++                        if referenced_generation:
++                            raise ValueError("Referenced FileState generation lacks metadata")
+                         files_data = data
+                         
+                     self._state = {
+                         path: FileState.from_dict(fs) 
+                         for path, fs in files_data.items()
+                     }
++                    if (
++                        referenced_generation
++                        and (
++                            not self.state_id
++                            or self.revision is None
++                        )
++                    ):
++                        raise ValueError("Referenced FileState generation metadata is incomplete")
+                     if (
+                         expected_engine_revision is not None
++                        and self.revision is not None
+                         and self.revision != expected_engine_revision
+                     ) or (
+                         expected_engine_state_id
++                        and self.state_id
+                         and self.state_id != expected_engine_state_id
+                     ):
+                         self._state = {}
+                         self.state_id = ""
+                         self.revision = None
+-            except (json.JSONDecodeError, KeyError):
++            except (
++                OSError,
++                json.JSONDecodeError,
++                KeyError,
++                TypeError,
++                AttributeError,
++                ValueError,
++            ):
+                 self._state = {}
++                self.state_id = ""
++                self.revision = None
+ 
+     def save(self, state_id: str = "", revision: int | None = None):
+         payload = self.build_payload(state_id, revision)
+         with open(self.state_file, "w", encoding="utf-8") as f:
+             json.dump(payload, f, indent=2)
+-
+-    def build_payload(self, state_id: str = "", revision: int | None = None) -> dict:
+         self.state_id = state_id
+         if revision is not None:
+             self.revision = revision
++
++    def build_payload(self, state_id: str = "", revision: int | None = None) -> dict:
++        effective_revision = self.revision if revision is None else revision
+         meta: Dict[str, Any] = {"state_id": state_id}
+-        if getattr(self, "revision", None) is not None:
+-            meta["revision"] = self.revision
++        if effective_revision is not None:
++            meta["revision"] = effective_revision
+         return {
+             "_meta": meta,
+             "files": {path: fs.to_dict() for path, fs in self._state.items()},
+diff --git a/contextor/core/live_state/runtime.py b/contextor/core/live_state/runtime.py
+index 3893a19..25fd68d 100644
+--- a/contextor/core/live_state/runtime.py
++++ b/contextor/core/live_state/runtime.py
+@@ -603,6 +603,11 @@ def run_service(
+             from contextor.core.analysis.state_manager import FileStateManager
+             file_state_manager = FileStateManager(str(cache))
+             ensure_module_usages(state)
++            target_revision = loaded_metadata.revision + 1
++            file_state_payload = file_state_manager.build_payload(
++                loaded_metadata.state_id,
++                target_revision,
++            )
+             backfill_metadata = save_snapshot(
+                 state,
+                 cache,
+@@ -610,11 +615,8 @@ def run_service(
+                 writer="live-service-symbol-calls-backfill",
+                 repo_id=identity.repo_id,
+                 root_path=identity.root_path,
+-                revision_floor=loaded_metadata.revision,
+-            )
+-            file_state_manager.save(
+-                loaded_metadata.state_id,
+-                revision=backfill_metadata.revision,
++                exact_revision=target_revision,
++                file_state_payload=file_state_payload,
+             )
+     revision = (read_metadata(cache).revision if read_metadata(cache) else 0)
+     adapter_holder: dict[str, object] = {}
+diff --git a/tests/test_live_state_ipc.py b/tests/test_live_state_ipc.py
+index f8d04d5..58b1431 100644
+--- a/tests/test_live_state_ipc.py
++++ b/tests/test_live_state_ipc.py
+@@ -377,6 +377,11 @@ def test_persistence_trace_operation_is_propagated_across_successful_real_update
+         "trace_event",
+         lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("trace sink unavailable")),
+     )
++    monkeypatch.setattr(
++        runtime_trace,
++        "current_trace_operation",
++        lambda: (_ for _ in ()).throw(RuntimeError("trace context unavailable")),
++    )
+     second = server._dispatch({"operation": "update_file", "file_path": str(source)})
+     assert second["status"] == "ok"
+ 
+@@ -423,6 +428,12 @@ def test_startup_backfill_preserves_filestate_content_and_revision_parity(tmp_pa
+             return None
+ 
+     monkeypatch.setattr(runtime, "CanonicalLiveServer", StubServer)
++    import contextor.core.runtime_trace as runtime_trace
++    monkeypatch.setattr(
++        runtime_trace,
++        "trace_event",
++        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("trace sink unavailable")),
++    )
+     import contextor.core.analysis.incremental.materialization as materialization
+     monkeypatch.setattr(materialization, "module_usages_require_materialization", lambda _state: True)
+     monkeypatch.setattr(materialization, "ensure_module_usages", lambda value: setattr(value, "module_usages", {"a.py": SimpleNamespace(symbol_calls_materialized=True, reference_evidence_materialized=True)}))
+@@ -438,6 +449,39 @@ def test_startup_backfill_preserves_filestate_content_and_revision_parity(tmp_pa
+     assert loaded_state.revision == metadata.revision + 1
+ 
+ 
++def test_startup_backfill_failure_leaves_previous_generation_authoritative(tmp_path, monkeypatch):
++    import contextor.core.live_state.runtime as runtime
++    from contextor.core.analysis.state_manager import FileState, FileStateManager, RepositoryAnalysisState
++    from contextor.core.live_state.store import load_snapshot, read_metadata, save_snapshot
++    from contextor.core.paths import repo_cache_dir
++    from contextor.core.repository_identity import ensure_repository_identity
++
++    repo = tmp_path / "repo"
++    repo.mkdir()
++    identity = ensure_repository_identity(repo)[0]
++    monkeypatch.setenv("CONTEXTOR_CACHE_DIR", str(tmp_path / "cache"))
++    cache = repo_cache_dir(repo)
++    state = RepositoryAnalysisState(modules={"a.py": SimpleNamespace()})
++    state.revision = 1
++    metadata = save_snapshot(state, cache, "sid", repo_id=identity.repo_id, root_path=identity.root_path)
++    manager = FileStateManager(str(cache))
++    manager._state = {"a.py": FileState(10, 3, "aaa"), "b.py": FileState(20, 4, "bbb")}
++    manager.save("sid", revision=metadata.revision)
++    before = dict(manager._state)
++    monkeypatch.setattr(runtime, "CanonicalLiveServer", lambda *_args, **_kwargs: None)
++    import contextor.core.analysis.incremental.materialization as materialization
++    monkeypatch.setattr(materialization, "module_usages_require_materialization", lambda _state: True)
++    monkeypatch.setattr(materialization, "ensure_module_usages", lambda _state: None)
++    monkeypatch.setattr(runtime, "save_snapshot", lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("synthetic generation failure")))
++    with pytest.raises(OSError, match="synthetic generation failure"):
++        runtime.run_service(repo)
++    assert read_metadata(cache).revision == metadata.revision
++    assert load_snapshot(cache, "sid")[1].revision == metadata.revision
++    reloaded = FileStateManager(str(cache))
++    assert reloaded.revision == metadata.revision
++    assert reloaded._state == before
++
++
+ def test_update_runs_inside_the_live_owner_and_is_visible_to_other_clients():
+     def update(state, file_path):
+         state.files.append(file_path)
+diff --git a/tests/test_live_state_store.py b/tests/test_live_state_store.py
+index 6fe674b..55d3202 100644
+--- a/tests/test_live_state_store.py
++++ b/tests/test_live_state_store.py
+@@ -14,6 +14,7 @@ from contextor.core.live_state import (
+     SnapshotRevisionConflict,
+ )
+ from contextor.core.paths import app_cache_dir, legacy_repo_cache_dir, repo_cache_dir
++from contextor.core.analysis.state_manager import FileStateManager
+ from contextor.core.reporting_engine.persistent_registry import (
+     PersistentIdentityRegistry,
+ )
+@@ -45,6 +46,32 @@ def test_default_snapshot_publishes_final_pickle_via_temp_replace(tmp_path, monk
+     assert replacements[0][0].name.endswith(".tmp")
+ 
+ 
++def test_cleanup_failure_cannot_mask_persistence_failure_or_leak_lock(tmp_path, monkeypatch):
++    import contextor.core.live_state.store as store
++
++    baseline = save_snapshot({"value": 1}, tmp_path, "state-a")
++    original_replace = store.os.replace
++    original_unlink = type(tmp_path).unlink
++
++    def failing_replace(source, target):
++        if target.name == "engine_state.meta.json":
++            raise RuntimeError("authoritative persistence failure")
++        return original_replace(source, target)
++
++    monkeypatch.setattr(store.os, "replace", failing_replace)
++    def failing_unlink(self, *args, **kwargs):
++        if self.name == "engine_state.lock":
++            return original_unlink(self, *args, **kwargs)
++        raise OSError("cleanup failure")
++    monkeypatch.setattr(type(tmp_path), "unlink", failing_unlink)
++    with pytest.raises(RuntimeError, match="authoritative persistence failure"):
++        save_snapshot({"value": 2}, tmp_path, "state-a", exact_revision=baseline.revision + 1, file_state_payload={"_meta": {"state_id": "state-a", "revision": baseline.revision + 1}, "files": {}})
++    assert read_metadata(tmp_path).revision == baseline.revision
++    monkeypatch.setattr(type(tmp_path), "unlink", original_unlink)
++    monkeypatch.setattr(store.os, "replace", original_replace)
++    assert save_snapshot({"value": 3}, tmp_path, "state-a").revision == baseline.revision + 1
++
++
+ def test_exact_snapshot_revision_rules_and_disk_ahead_without_overwrite(tmp_path):
+     with pytest.raises(SnapshotRevisionConflict):
+         save_snapshot(SimpleNamespace(value="bad"), tmp_path, "state-a", exact_revision=11, file_state_payload={"_meta": {"state_id": "state-a", "revision": 11}, "files": {}})
+@@ -88,6 +115,81 @@ def test_exact_snapshot_revision_binds_embedded_state_and_metadata(tmp_path):
+     assert metadata.revision == loaded_metadata.revision == loaded.revision == 1
+ 
+ 
++def test_build_payload_is_side_effect_free(tmp_path):
++    manager = FileStateManager(str(tmp_path))
++    manager.state_id = "sid-r1"
++    manager.revision = 1
++    payload = manager.build_payload("sid-r2", 2)
++    assert manager.state_id == "sid-r1"
++    assert manager.revision == 1
++    assert payload["_meta"] == {"state_id": "sid-r2", "revision": 2}
++
++
++@pytest.mark.parametrize("failure", ["missing", "invalid", "oserror"])
++def test_referenced_filestate_generation_fail_closed_without_legacy_fallback(tmp_path, monkeypatch, failure):
++    import builtins
++    import json
++
++    manager = FileStateManager(str(tmp_path))
++    manager._state = {}
++    manager.save("sid", revision=1)
++    metadata = {
++        "schema_version": "1.2",
++        "state_id": "sid",
++        "revision": 2,
++        "file_state_file": "file_state.r2.test.json",
++    }
++    (tmp_path / "engine_state.meta.json").write_text(json.dumps(metadata), encoding="utf-8")
++    (tmp_path / "file_state.json").write_text(json.dumps({"files": {"legacy.py": {"size": 1}}}), encoding="utf-8")
++    referenced = tmp_path / "file_state.r2.test.json"
++    if failure == "invalid":
++        referenced.write_text("{not-json", encoding="utf-8")
++    elif failure == "oserror":
++        original_open = builtins.open
++        def raising_open(path, *args, **kwargs):
++            if str(path).endswith("file_state.r2.test.json"):
++                raise OSError("synthetic read failure")
++            return original_open(path, *args, **kwargs)
++        monkeypatch.setattr(builtins, "open", raising_open)
++    reloaded = FileStateManager(str(tmp_path))
++    assert reloaded._state == {}
++    assert reloaded.revision is None
++
++
++def test_referenced_filestate_without_meta_fails_closed(tmp_path):
++    import json
++
++    (tmp_path / "engine_state.meta.json").write_text(
++        json.dumps({"state_id": "sid", "revision": 2, "file_state_file": "file_state.r2.json"}),
++        encoding="utf-8",
++    )
++    (tmp_path / "file_state.r2.json").write_text(
++        json.dumps({"files": {"current.py": {"size": 4}}}),
++        encoding="utf-8",
++    )
++    manager = FileStateManager(str(tmp_path))
++    assert manager._state == {}
++    assert manager.state_id == ""
++    assert manager.revision is None
++
++
++def test_legacy_filestate_without_meta_loads_entries_but_remains_unverified(tmp_path):
++    import json
++
++    (tmp_path / "engine_state.meta.json").write_text(
++        json.dumps({"state_id": "sid", "revision": 2}),
++        encoding="utf-8",
++    )
++    (tmp_path / "file_state.json").write_text(
++        json.dumps({"legacy.py": {"size": 4}}),
++        encoding="utf-8",
++    )
++    manager = FileStateManager(str(tmp_path))
++    assert "legacy.py" in manager._state
++    assert manager.state_id == ""
++    assert manager.revision is None
++
++
+ def test_snapshot_rejects_a_different_state_identity(tmp_path):
+     save_snapshot(SimpleNamespace(value=1), tmp_path, "current")
+ 
+COMPLETE_RAW_UNIFIED_DIFF_FINAL_STATIC_CORRECTION_END
+
+FINAL_SCOPE_FILES_CORRECTION
+FILES_CHANGED_ACTUAL=contextor/core/analysis/state_manager.py; contextor/core/live_state/runtime.py; contextor/core/live_state/store.py; tests/test_live_state_ipc.py; tests/test_live_state_store.py
+COMPLETE_RAW_UNIFIED_DIFF_FINAL_SCOPE_BEGIN
+diff --git a/contextor/core/analysis/state_manager.py b/contextor/core/analysis/state_manager.py
+index 41ad96b..5eb90a6 100644
+--- a/contextor/core/analysis/state_manager.py
++++ b/contextor/core/analysis/state_manager.py
+@@ -188,6 +188,7 @@ class FileStateManager:
+         state_file = self.state_file
+         expected_engine_revision = None
+         expected_engine_state_id = ""
++        referenced_generation = False
+         metadata_invalid = False
+         if metadata_file.exists():
+             try:
+@@ -196,6 +197,7 @@ class FileStateManager:
+                 expected_engine_state_id = str(engine_meta.get("state_id", ""))
+                 referenced = engine_meta.get("file_state_file")
+                 if referenced:
++                    referenced_generation = True
+                     state_file = self.cache_dir / str(referenced)
+             except (
+                 OSError,
+@@ -212,41 +214,66 @@ class FileStateManager:
+                 with open(state_file, "r", encoding="utf-8") as f:
+                     data = json.load(f)
+                     if "_meta" in data:
+-                        self.state_id = data["_meta"].get("state_id", "")
+-                        self.revision = data["_meta"].get("revision", None)
++                        file_meta = data["_meta"]
++                        if not isinstance(file_meta, dict):
++                            raise ValueError("FileState metadata must be a mapping")
++                        self.state_id = file_meta.get("state_id", "")
++                        self.revision = file_meta.get("revision", None)
+                         files_data = data.get("files", {})
+                     else:
++                        if referenced_generation:
++                            raise ValueError("Referenced FileState generation lacks metadata")
+                         files_data = data
+                         
+                     self._state = {
+                         path: FileState.from_dict(fs) 
+                         for path, fs in files_data.items()
+                     }
++                    if (
++                        referenced_generation
++                        and (
++                            not self.state_id
++                            or self.revision is None
++                        )
++                    ):
++                        raise ValueError("Referenced FileState generation metadata is incomplete")
+                     if (
+                         expected_engine_revision is not None
++                        and self.revision is not None
+                         and self.revision != expected_engine_revision
+                     ) or (
+                         expected_engine_state_id
++                        and self.state_id
+                         and self.state_id != expected_engine_state_id
+                     ):
+                         self._state = {}
+                         self.state_id = ""
+                         self.revision = None
+-            except (json.JSONDecodeError, KeyError):
++            except (
++                OSError,
++                json.JSONDecodeError,
++                KeyError,
++                TypeError,
++                AttributeError,
++                ValueError,
++            ):
+                 self._state = {}
++                self.state_id = ""
++                self.revision = None
+ 
+     def save(self, state_id: str = "", revision: int | None = None):
+         payload = self.build_payload(state_id, revision)
+         with open(self.state_file, "w", encoding="utf-8") as f:
+             json.dump(payload, f, indent=2)
+-
+-    def build_payload(self, state_id: str = "", revision: int | None = None) -> dict:
+         self.state_id = state_id
+         if revision is not None:
+             self.revision = revision
++
++    def build_payload(self, state_id: str = "", revision: int | None = None) -> dict:
++        effective_revision = self.revision if revision is None else revision
+         meta: Dict[str, Any] = {"state_id": state_id}
+-        if getattr(self, "revision", None) is not None:
+-            meta["revision"] = self.revision
++        if effective_revision is not None:
++            meta["revision"] = effective_revision
+         return {
+             "_meta": meta,
+             "files": {path: fs.to_dict() for path, fs in self._state.items()},
+diff --git a/contextor/core/live_state/runtime.py b/contextor/core/live_state/runtime.py
+index 3893a19..25fd68d 100644
+--- a/contextor/core/live_state/runtime.py
++++ b/contextor/core/live_state/runtime.py
+@@ -603,6 +603,11 @@ def run_service(
+             from contextor.core.analysis.state_manager import FileStateManager
+             file_state_manager = FileStateManager(str(cache))
+             ensure_module_usages(state)
++            target_revision = loaded_metadata.revision + 1
++            file_state_payload = file_state_manager.build_payload(
++                loaded_metadata.state_id,
++                target_revision,
++            )
+             backfill_metadata = save_snapshot(
+                 state,
+                 cache,
+@@ -610,11 +615,8 @@ def run_service(
+                 writer="live-service-symbol-calls-backfill",
+                 repo_id=identity.repo_id,
+                 root_path=identity.root_path,
+-                revision_floor=loaded_metadata.revision,
+-            )
+-            file_state_manager.save(
+-                loaded_metadata.state_id,
+-                revision=backfill_metadata.revision,
++                exact_revision=target_revision,
++                file_state_payload=file_state_payload,
+             )
+     revision = (read_metadata(cache).revision if read_metadata(cache) else 0)
+     adapter_holder: dict[str, object] = {}
+diff --git a/contextor/core/live_state/store.py b/contextor/core/live_state/store.py
+index e15ef7f..43f0f33 100644
+--- a/contextor/core/live_state/store.py
++++ b/contextor/core/live_state/store.py
+@@ -253,20 +253,22 @@ def save_snapshot(
+         for temporary in (state_tmp, meta_tmp):
+             try:
+                 temporary.unlink()
+-            except FileNotFoundError:
++            except OSError:
+                 pass
+         if not committed and exact_revision is not None:
+             for temporary in (generation_state, generation_file_state):
+                 if temporary is not None:
+                     try:
+                         temporary.unlink()
+-                    except FileNotFoundError:
++                    except OSError:
+                         pass
+-        os.close(lock_fd)
+         try:
+-            lock_file.unlink()
+-        except FileNotFoundError:
+-            pass
++            os.close(lock_fd)
++        finally:
++            try:
++                lock_file.unlink()
++            except OSError:
++                pass
+ 
+ 
+ def load_snapshot(
+diff --git a/tests/test_live_state_ipc.py b/tests/test_live_state_ipc.py
+index f8d04d5..58b1431 100644
+--- a/tests/test_live_state_ipc.py
++++ b/tests/test_live_state_ipc.py
+@@ -377,6 +377,11 @@ def test_persistence_trace_operation_is_propagated_across_successful_real_update
+         "trace_event",
+         lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("trace sink unavailable")),
+     )
++    monkeypatch.setattr(
++        runtime_trace,
++        "current_trace_operation",
++        lambda: (_ for _ in ()).throw(RuntimeError("trace context unavailable")),
++    )
+     second = server._dispatch({"operation": "update_file", "file_path": str(source)})
+     assert second["status"] == "ok"
+ 
+@@ -423,6 +428,12 @@ def test_startup_backfill_preserves_filestate_content_and_revision_parity(tmp_pa
+             return None
+ 
+     monkeypatch.setattr(runtime, "CanonicalLiveServer", StubServer)
++    import contextor.core.runtime_trace as runtime_trace
++    monkeypatch.setattr(
++        runtime_trace,
++        "trace_event",
++        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("trace sink unavailable")),
++    )
+     import contextor.core.analysis.incremental.materialization as materialization
+     monkeypatch.setattr(materialization, "module_usages_require_materialization", lambda _state: True)
+     monkeypatch.setattr(materialization, "ensure_module_usages", lambda value: setattr(value, "module_usages", {"a.py": SimpleNamespace(symbol_calls_materialized=True, reference_evidence_materialized=True)}))
+@@ -438,6 +449,39 @@ def test_startup_backfill_preserves_filestate_content_and_revision_parity(tmp_pa
+     assert loaded_state.revision == metadata.revision + 1
+ 
+ 
++def test_startup_backfill_failure_leaves_previous_generation_authoritative(tmp_path, monkeypatch):
++    import contextor.core.live_state.runtime as runtime
++    from contextor.core.analysis.state_manager import FileState, FileStateManager, RepositoryAnalysisState
++    from contextor.core.live_state.store import load_snapshot, read_metadata, save_snapshot
++    from contextor.core.paths import repo_cache_dir
++    from contextor.core.repository_identity import ensure_repository_identity
++
++    repo = tmp_path / "repo"
++    repo.mkdir()
++    identity = ensure_repository_identity(repo)[0]
++    monkeypatch.setenv("CONTEXTOR_CACHE_DIR", str(tmp_path / "cache"))
++    cache = repo_cache_dir(repo)
++    state = RepositoryAnalysisState(modules={"a.py": SimpleNamespace()})
++    state.revision = 1
++    metadata = save_snapshot(state, cache, "sid", repo_id=identity.repo_id, root_path=identity.root_path)
++    manager = FileStateManager(str(cache))
++    manager._state = {"a.py": FileState(10, 3, "aaa"), "b.py": FileState(20, 4, "bbb")}
++    manager.save("sid", revision=metadata.revision)
++    before = dict(manager._state)
++    monkeypatch.setattr(runtime, "CanonicalLiveServer", lambda *_args, **_kwargs: None)
++    import contextor.core.analysis.incremental.materialization as materialization
++    monkeypatch.setattr(materialization, "module_usages_require_materialization", lambda _state: True)
++    monkeypatch.setattr(materialization, "ensure_module_usages", lambda _state: None)
++    monkeypatch.setattr(runtime, "save_snapshot", lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("synthetic generation failure")))
++    with pytest.raises(OSError, match="synthetic generation failure"):
++        runtime.run_service(repo)
++    assert read_metadata(cache).revision == metadata.revision
++    assert load_snapshot(cache, "sid")[1].revision == metadata.revision
++    reloaded = FileStateManager(str(cache))
++    assert reloaded.revision == metadata.revision
++    assert reloaded._state == before
++
++
+ def test_update_runs_inside_the_live_owner_and_is_visible_to_other_clients():
+     def update(state, file_path):
+         state.files.append(file_path)
+diff --git a/tests/test_live_state_store.py b/tests/test_live_state_store.py
+index 6fe674b..55d3202 100644
+--- a/tests/test_live_state_store.py
++++ b/tests/test_live_state_store.py
+@@ -14,6 +14,7 @@ from contextor.core.live_state import (
+     SnapshotRevisionConflict,
+ )
+ from contextor.core.paths import app_cache_dir, legacy_repo_cache_dir, repo_cache_dir
++from contextor.core.analysis.state_manager import FileStateManager
+ from contextor.core.reporting_engine.persistent_registry import (
+     PersistentIdentityRegistry,
+ )
+@@ -45,6 +46,32 @@ def test_default_snapshot_publishes_final_pickle_via_temp_replace(tmp_path, monk
+     assert replacements[0][0].name.endswith(".tmp")
+ 
+ 
++def test_cleanup_failure_cannot_mask_persistence_failure_or_leak_lock(tmp_path, monkeypatch):
++    import contextor.core.live_state.store as store
++
++    baseline = save_snapshot({"value": 1}, tmp_path, "state-a")
++    original_replace = store.os.replace
++    original_unlink = type(tmp_path).unlink
++
++    def failing_replace(source, target):
++        if target.name == "engine_state.meta.json":
++            raise RuntimeError("authoritative persistence failure")
++        return original_replace(source, target)
++
++    monkeypatch.setattr(store.os, "replace", failing_replace)
++    def failing_unlink(self, *args, **kwargs):
++        if self.name == "engine_state.lock":
++            return original_unlink(self, *args, **kwargs)
++        raise OSError("cleanup failure")
++    monkeypatch.setattr(type(tmp_path), "unlink", failing_unlink)
++    with pytest.raises(RuntimeError, match="authoritative persistence failure"):
++        save_snapshot({"value": 2}, tmp_path, "state-a", exact_revision=baseline.revision + 1, file_state_payload={"_meta": {"state_id": "state-a", "revision": baseline.revision + 1}, "files": {}})
++    assert read_metadata(tmp_path).revision == baseline.revision
++    monkeypatch.setattr(type(tmp_path), "unlink", original_unlink)
++    monkeypatch.setattr(store.os, "replace", original_replace)
++    assert save_snapshot({"value": 3}, tmp_path, "state-a").revision == baseline.revision + 1
++
++
+ def test_exact_snapshot_revision_rules_and_disk_ahead_without_overwrite(tmp_path):
+     with pytest.raises(SnapshotRevisionConflict):
+         save_snapshot(SimpleNamespace(value="bad"), tmp_path, "state-a", exact_revision=11, file_state_payload={"_meta": {"state_id": "state-a", "revision": 11}, "files": {}})
+@@ -88,6 +115,81 @@ def test_exact_snapshot_revision_binds_embedded_state_and_metadata(tmp_path):
+     assert metadata.revision == loaded_metadata.revision == loaded.revision == 1
+ 
+ 
++def test_build_payload_is_side_effect_free(tmp_path):
++    manager = FileStateManager(str(tmp_path))
++    manager.state_id = "sid-r1"
++    manager.revision = 1
++    payload = manager.build_payload("sid-r2", 2)
++    assert manager.state_id == "sid-r1"
++    assert manager.revision == 1
++    assert payload["_meta"] == {"state_id": "sid-r2", "revision": 2}
++
++
++@pytest.mark.parametrize("failure", ["missing", "invalid", "oserror"])
++def test_referenced_filestate_generation_fail_closed_without_legacy_fallback(tmp_path, monkeypatch, failure):
++    import builtins
++    import json
++
++    manager = FileStateManager(str(tmp_path))
++    manager._state = {}
++    manager.save("sid", revision=1)
++    metadata = {
++        "schema_version": "1.2",
++        "state_id": "sid",
++        "revision": 2,
++        "file_state_file": "file_state.r2.test.json",
++    }
++    (tmp_path / "engine_state.meta.json").write_text(json.dumps(metadata), encoding="utf-8")
++    (tmp_path / "file_state.json").write_text(json.dumps({"files": {"legacy.py": {"size": 1}}}), encoding="utf-8")
++    referenced = tmp_path / "file_state.r2.test.json"
++    if failure == "invalid":
++        referenced.write_text("{not-json", encoding="utf-8")
++    elif failure == "oserror":
++        original_open = builtins.open
++        def raising_open(path, *args, **kwargs):
++            if str(path).endswith("file_state.r2.test.json"):
++                raise OSError("synthetic read failure")
++            return original_open(path, *args, **kwargs)
++        monkeypatch.setattr(builtins, "open", raising_open)
++    reloaded = FileStateManager(str(tmp_path))
++    assert reloaded._state == {}
++    assert reloaded.revision is None
++
++
++def test_referenced_filestate_without_meta_fails_closed(tmp_path):
++    import json
++
++    (tmp_path / "engine_state.meta.json").write_text(
++        json.dumps({"state_id": "sid", "revision": 2, "file_state_file": "file_state.r2.json"}),
++        encoding="utf-8",
++    )
++    (tmp_path / "file_state.r2.json").write_text(
++        json.dumps({"files": {"current.py": {"size": 4}}}),
++        encoding="utf-8",
++    )
++    manager = FileStateManager(str(tmp_path))
++    assert manager._state == {}
++    assert manager.state_id == ""
++    assert manager.revision is None
++
++
++def test_legacy_filestate_without_meta_loads_entries_but_remains_unverified(tmp_path):
++    import json
++
++    (tmp_path / "engine_state.meta.json").write_text(
++        json.dumps({"state_id": "sid", "revision": 2}),
++        encoding="utf-8",
++    )
++    (tmp_path / "file_state.json").write_text(
++        json.dumps({"legacy.py": {"size": 4}}),
++        encoding="utf-8",
++    )
++    manager = FileStateManager(str(tmp_path))
++    assert "legacy.py" in manager._state
++    assert manager.state_id == ""
++    assert manager.revision is None
++
++
+ def test_snapshot_rejects_a_different_state_identity(tmp_path):
+     save_snapshot(SimpleNamespace(value=1), tmp_path, "current")
+ 
+COMPLETE_RAW_UNIFIED_DIFF_FINAL_SCOPE_END
+
+TRANSACTIONAL_LIVE_PERSISTENCE_TEST_EVIDENCE_CLOSURE
+VERDICT=IMPLEMENTATION_PASS
+PRODUCTION_CHANGED=NO
+REAL_DISK_AHEAD_FULL_ADAPTER_TEST=test_real_repository_persister_disk_ahead_fails_closed:PASS
+REAL_DISK_AHEAD_UPDATER=_repository_updater
+REAL_DISK_AHEAD_PERSISTER=_repository_persister
+REAL_DISK_AHEAD_LAMBDA_UPDATER=NO
+TRACE_FAILURE_REAL_CANONICAL_PARITY=test_persistence_trace_operation_is_propagated_across_successful_real_update:PASS
+STARTUP_BACKFILL_REAL_PRECOMMIT_FAILURE_ATOMIC=test_startup_backfill_failure_leaves_previous_generation_authoritative:PASS
+STARTUP_BACKFILL_FAILURE_INJECTION_POINT=authoritative_metadata_replace
+STARTUP_BACKFILL_REAL_SAVE_SNAPSHOT_USED=YES
+TEST_COMMAND_1=pytest -q tests/test_live_state_store.py
+TEST_COMMAND_1_RESULT=18 passed
+TEST_COMMAND_2=pytest -q tests/test_live_state_ipc.py -k "real_repository_persister_disk_ahead or persistence_trace_operation or startup_backfill"
+TEST_COMMAND_2_RESULT=3 passed
+TEST_COMMAND_3=pytest -q tests/test_live_state_ipc.py -k "persister or persistence_conflict or real_repository_adapter or startup_backfill or trace_operation or trace_failure"
+TEST_COMMAND_3_RESULT=9 passed
+H3A_CHANGED=NO
+E2E_DIAGNOSTICS_ASSERTION_CHANGED=NO
+MANUAL_MCP_RESTART_REQUIRED=YES
+MANUAL_DESKTOP_LIVE_RESTART_REQUIRED=YES
+FILES_CHANGED=contextor/core/analysis/state_manager.py; contextor/core/live_state/runtime.py; contextor/core/live_state/store.py; tests/test_live_state_ipc.py; tests/test_live_state_store.py
+COMPLETE_RAW_UNIFIED_DIFF_TEST_EVIDENCE_CLOSURE_BEGIN
+diff --git a/contextor/core/analysis/state_manager.py b/contextor/core/analysis/state_manager.py
+index 41ad96b..5eb90a6 100644
+--- a/contextor/core/analysis/state_manager.py
++++ b/contextor/core/analysis/state_manager.py
+@@ -188,6 +188,7 @@ class FileStateManager:
+         state_file = self.state_file
+         expected_engine_revision = None
+         expected_engine_state_id = ""
++        referenced_generation = False
+         metadata_invalid = False
+         if metadata_file.exists():
+             try:
+@@ -196,6 +197,7 @@ class FileStateManager:
+                 expected_engine_state_id = str(engine_meta.get("state_id", ""))
+                 referenced = engine_meta.get("file_state_file")
+                 if referenced:
++                    referenced_generation = True
+                     state_file = self.cache_dir / str(referenced)
+             except (
+                 OSError,
+@@ -212,41 +214,66 @@ class FileStateManager:
+                 with open(state_file, "r", encoding="utf-8") as f:
+                     data = json.load(f)
+                     if "_meta" in data:
+-                        self.state_id = data["_meta"].get("state_id", "")
+-                        self.revision = data["_meta"].get("revision", None)
++                        file_meta = data["_meta"]
++                        if not isinstance(file_meta, dict):
++                            raise ValueError("FileState metadata must be a mapping")
++                        self.state_id = file_meta.get("state_id", "")
++                        self.revision = file_meta.get("revision", None)
+                         files_data = data.get("files", {})
+                     else:
++                        if referenced_generation:
++                            raise ValueError("Referenced FileState generation lacks metadata")
+                         files_data = data
+                         
+                     self._state = {
+                         path: FileState.from_dict(fs) 
+                         for path, fs in files_data.items()
+                     }
++                    if (
++                        referenced_generation
++                        and (
++                            not self.state_id
++                            or self.revision is None
++                        )
++                    ):
++                        raise ValueError("Referenced FileState generation metadata is incomplete")
+                     if (
+                         expected_engine_revision is not None
++                        and self.revision is not None
+                         and self.revision != expected_engine_revision
+                     ) or (
+                         expected_engine_state_id
++                        and self.state_id
+                         and self.state_id != expected_engine_state_id
+                     ):
+                         self._state = {}
+                         self.state_id = ""
+                         self.revision = None
+-            except (json.JSONDecodeError, KeyError):
++            except (
++                OSError,
++                json.JSONDecodeError,
++                KeyError,
++                TypeError,
++                AttributeError,
++                ValueError,
++            ):
+                 self._state = {}
++                self.state_id = ""
++                self.revision = None
+ 
+     def save(self, state_id: str = "", revision: int | None = None):
+         payload = self.build_payload(state_id, revision)
+         with open(self.state_file, "w", encoding="utf-8") as f:
+             json.dump(payload, f, indent=2)
+-
+-    def build_payload(self, state_id: str = "", revision: int | None = None) -> dict:
+         self.state_id = state_id
+         if revision is not None:
+             self.revision = revision
++
++    def build_payload(self, state_id: str = "", revision: int | None = None) -> dict:
++        effective_revision = self.revision if revision is None else revision
+         meta: Dict[str, Any] = {"state_id": state_id}
+-        if getattr(self, "revision", None) is not None:
+-            meta["revision"] = self.revision
++        if effective_revision is not None:
++            meta["revision"] = effective_revision
+         return {
+             "_meta": meta,
+             "files": {path: fs.to_dict() for path, fs in self._state.items()},
+diff --git a/contextor/core/live_state/runtime.py b/contextor/core/live_state/runtime.py
+index 3893a19..25fd68d 100644
+--- a/contextor/core/live_state/runtime.py
++++ b/contextor/core/live_state/runtime.py
+@@ -603,6 +603,11 @@ def run_service(
+             from contextor.core.analysis.state_manager import FileStateManager
+             file_state_manager = FileStateManager(str(cache))
+             ensure_module_usages(state)
++            target_revision = loaded_metadata.revision + 1
++            file_state_payload = file_state_manager.build_payload(
++                loaded_metadata.state_id,
++                target_revision,
++            )
+             backfill_metadata = save_snapshot(
+                 state,
+                 cache,
+@@ -610,11 +615,8 @@ def run_service(
+                 writer="live-service-symbol-calls-backfill",
+                 repo_id=identity.repo_id,
+                 root_path=identity.root_path,
+-                revision_floor=loaded_metadata.revision,
+-            )
+-            file_state_manager.save(
+-                loaded_metadata.state_id,
+-                revision=backfill_metadata.revision,
++                exact_revision=target_revision,
++                file_state_payload=file_state_payload,
+             )
+     revision = (read_metadata(cache).revision if read_metadata(cache) else 0)
+     adapter_holder: dict[str, object] = {}
+diff --git a/contextor/core/live_state/store.py b/contextor/core/live_state/store.py
+index e15ef7f..43f0f33 100644
+--- a/contextor/core/live_state/store.py
++++ b/contextor/core/live_state/store.py
+@@ -253,20 +253,22 @@ def save_snapshot(
+         for temporary in (state_tmp, meta_tmp):
+             try:
+                 temporary.unlink()
+-            except FileNotFoundError:
++            except OSError:
+                 pass
+         if not committed and exact_revision is not None:
+             for temporary in (generation_state, generation_file_state):
+                 if temporary is not None:
+                     try:
+                         temporary.unlink()
+-                    except FileNotFoundError:
++                    except OSError:
+                         pass
+-        os.close(lock_fd)
+         try:
+-            lock_file.unlink()
+-        except FileNotFoundError:
+-            pass
++            os.close(lock_fd)
++        finally:
++            try:
++                lock_file.unlink()
++            except OSError:
++                pass
+ 
+ 
+ def load_snapshot(
+diff --git a/tests/test_live_state_ipc.py b/tests/test_live_state_ipc.py
+index f8d04d5..7e0cad3 100644
+--- a/tests/test_live_state_ipc.py
++++ b/tests/test_live_state_ipc.py
+@@ -4,6 +4,7 @@ import sys
+ import threading
+ import time
+ import multiprocessing.connection as mpc
++from pathlib import Path
+ from types import SimpleNamespace
+ 
+ import pytest
+@@ -254,31 +255,42 @@ def test_persistence_conflict_fails_closed_without_live_event():
+ 
+ 
+ def test_real_repository_persister_disk_ahead_fails_closed(tmp_path, monkeypatch):
+-    from contextor.core.live_state.runtime import _repository_persister
++    from contextor.core.live_state.runtime import _repository_persister, _repository_updater
+     from contextor.core.live_state.store import load_snapshot, read_metadata, save_snapshot
+-    from contextor.core.analysis.state_manager import FileStateManager
++    from contextor.core.analysis.state_manager import FileStateManager, RepositoryAnalysisState
+     from contextor.core.paths import repo_cache_dir
+-    from contextor.core.reporting_engine.persistent_registry import PersistentIdentityRegistry
++    from contextor.core.repository_identity import ensure_repository_identity
+ 
+     repo = tmp_path / "repo"
+     repo.mkdir()
+-    PersistentIdentityRegistry(str(repo))
++    source = repo / "module.py"
++    source.write_text("VALUE = 1\n", encoding="utf-8")
++    identity = ensure_repository_identity(repo)[0]
+     monkeypatch.setenv("CONTEXTOR_CACHE_DIR", str(tmp_path / "cache"))
+     cache = repo_cache_dir(repo)
+-    state = SimpleNamespace(files=[])
++    state = RepositoryAnalysisState(modules={})
++    state.revision = 1
+     for _ in range(11):
+-        save_snapshot(state, cache, "sid")
++        save_snapshot(state, cache, "sid", repo_id=identity.repo_id, root_path=identity.root_path)
+     manager = FileStateManager(str(cache))
+     manager.save("sid", revision=11)
+-    previous = SimpleNamespace(files=[])
+-    server = CanonicalLiveServer(previous, revision=10, updater=lambda candidate, _path: {"status": "UPDATED"}, persister=_repository_persister(repo, {"manager": manager, "state_id": "sid"}))
+-    response = server._dispatch({"operation": "update_file", "file_path": "x.py"})
++    previous = state
++    previous.revision = 10
++    holder = {}
++    server = CanonicalLiveServer(
++        previous,
++        revision=10,
++        updater=_repository_updater(repo, holder),
++        persister=_repository_persister(repo, holder),
++    )
++    response = server._dispatch({"operation": "update_file", "file_path": str(source)})
+     assert response["error"] == "canonical_persistence_revision_conflict"
+     assert response["resync_required"] is True
+     assert server._revision == 10 and server._state is previous and server._activity_seq == 0
+     assert read_metadata(cache).revision == 11
+     assert FileStateManager(str(cache)).revision == 11
+     assert load_snapshot(cache, "sid")[1].revision == 11
++    assert not any(event["operation"] == "update_file" for event in server._events)
+ 
+ 
+ def test_real_repository_adapter_two_successive_updates_are_exact_successors(tmp_path, monkeypatch):
+@@ -331,7 +343,7 @@ def test_real_repository_adapter_two_successive_updates_are_exact_successors(tmp
+ def test_persistence_trace_operation_is_propagated_across_successful_real_update(tmp_path, monkeypatch):
+     from contextor.core.analysis.state_manager import FileStateManager, RepositoryAnalysisState
+     from contextor.core.live_state.runtime import _repository_persister, _repository_updater
+-    from contextor.core.live_state.store import save_snapshot
++    from contextor.core.live_state.store import load_snapshot, read_metadata, save_snapshot
+     from contextor.core.paths import repo_cache_dir
+     from contextor.core.repository_identity import ensure_repository_identity
+     import contextor.core.runtime_trace as runtime_trace
+@@ -377,8 +389,23 @@ def test_persistence_trace_operation_is_propagated_across_successful_real_update
+         "trace_event",
+         lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("trace sink unavailable")),
+     )
++    monkeypatch.setattr(
++        runtime_trace,
++        "current_trace_operation",
++        lambda: (_ for _ in ()).throw(RuntimeError("trace context unavailable")),
++    )
++    expected = server._revision + 1
+     second = server._dispatch({"operation": "update_file", "file_path": str(source)})
+     assert second["status"] == "ok"
++    assert second["revision"] == expected
++    assert server._revision == expected
++    assert server._state.revision == expected
++    persisted = read_metadata(cache)
++    assert persisted.revision == expected
++    loaded_state, loaded_metadata = load_snapshot(cache, "sid")
++    assert loaded_metadata.revision == expected
++    assert loaded_state.revision == expected
++    assert FileStateManager(str(cache)).revision == expected
+ 
+ 
+ def test_startup_backfill_preserves_filestate_content_and_revision_parity(tmp_path, monkeypatch):
+@@ -423,6 +450,12 @@ def test_startup_backfill_preserves_filestate_content_and_revision_parity(tmp_pa
+             return None
+ 
+     monkeypatch.setattr(runtime, "CanonicalLiveServer", StubServer)
++    import contextor.core.runtime_trace as runtime_trace
++    monkeypatch.setattr(
++        runtime_trace,
++        "trace_event",
++        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("trace sink unavailable")),
++    )
+     import contextor.core.analysis.incremental.materialization as materialization
+     monkeypatch.setattr(materialization, "module_usages_require_materialization", lambda _state: True)
+     monkeypatch.setattr(materialization, "ensure_module_usages", lambda value: setattr(value, "module_usages", {"a.py": SimpleNamespace(symbol_calls_materialized=True, reference_evidence_materialized=True)}))
+@@ -438,6 +471,45 @@ def test_startup_backfill_preserves_filestate_content_and_revision_parity(tmp_pa
+     assert loaded_state.revision == metadata.revision + 1
+ 
+ 
++def test_startup_backfill_failure_leaves_previous_generation_authoritative(tmp_path, monkeypatch):
++    import contextor.core.live_state.runtime as runtime
++    from contextor.core.analysis.state_manager import FileState, FileStateManager, RepositoryAnalysisState
++    from contextor.core.live_state.store import load_snapshot, read_metadata, save_snapshot
++    from contextor.core.paths import repo_cache_dir
++    from contextor.core.repository_identity import ensure_repository_identity
++
++    repo = tmp_path / "repo"
++    repo.mkdir()
++    identity = ensure_repository_identity(repo)[0]
++    monkeypatch.setenv("CONTEXTOR_CACHE_DIR", str(tmp_path / "cache"))
++    cache = repo_cache_dir(repo)
++    state = RepositoryAnalysisState(modules={"a.py": SimpleNamespace()})
++    state.revision = 1
++    metadata = save_snapshot(state, cache, "sid", repo_id=identity.repo_id, root_path=identity.root_path)
++    manager = FileStateManager(str(cache))
++    manager._state = {"a.py": FileState(10, 3, "aaa"), "b.py": FileState(20, 4, "bbb")}
++    manager.save("sid", revision=metadata.revision)
++    before = dict(manager._state)
++    monkeypatch.setattr(runtime, "CanonicalLiveServer", lambda *_args, **_kwargs: None)
++    import contextor.core.analysis.incremental.materialization as materialization
++    monkeypatch.setattr(materialization, "module_usages_require_materialization", lambda _state: True)
++    monkeypatch.setattr(materialization, "ensure_module_usages", lambda _state: None)
++    import contextor.core.live_state.store as store
++    original_replace = store.os.replace
++    def fail_only_authoritative_metadata_commit(source, target):
++        if Path(target).name == "engine_state.meta.json":
++            raise RuntimeError("synthetic metadata commit failure")
++        return original_replace(source, target)
++    monkeypatch.setattr(store.os, "replace", fail_only_authoritative_metadata_commit)
++    with pytest.raises(RuntimeError, match="synthetic metadata commit failure"):
++        runtime.run_service(repo)
++    assert read_metadata(cache).revision == metadata.revision
++    assert load_snapshot(cache, "sid")[1].revision == metadata.revision
++    reloaded = FileStateManager(str(cache))
++    assert reloaded.revision == metadata.revision
++    assert reloaded._state == before
++
++
+ def test_update_runs_inside_the_live_owner_and_is_visible_to_other_clients():
+     def update(state, file_path):
+         state.files.append(file_path)
+diff --git a/tests/test_live_state_store.py b/tests/test_live_state_store.py
+index 6fe674b..55d3202 100644
+--- a/tests/test_live_state_store.py
++++ b/tests/test_live_state_store.py
+@@ -14,6 +14,7 @@ from contextor.core.live_state import (
+     SnapshotRevisionConflict,
+ )
+ from contextor.core.paths import app_cache_dir, legacy_repo_cache_dir, repo_cache_dir
++from contextor.core.analysis.state_manager import FileStateManager
+ from contextor.core.reporting_engine.persistent_registry import (
+     PersistentIdentityRegistry,
+ )
+@@ -45,6 +46,32 @@ def test_default_snapshot_publishes_final_pickle_via_temp_replace(tmp_path, monk
+     assert replacements[0][0].name.endswith(".tmp")
+ 
+ 
++def test_cleanup_failure_cannot_mask_persistence_failure_or_leak_lock(tmp_path, monkeypatch):
++    import contextor.core.live_state.store as store
++
++    baseline = save_snapshot({"value": 1}, tmp_path, "state-a")
++    original_replace = store.os.replace
++    original_unlink = type(tmp_path).unlink
++
++    def failing_replace(source, target):
++        if target.name == "engine_state.meta.json":
++            raise RuntimeError("authoritative persistence failure")
++        return original_replace(source, target)
++
++    monkeypatch.setattr(store.os, "replace", failing_replace)
++    def failing_unlink(self, *args, **kwargs):
++        if self.name == "engine_state.lock":
++            return original_unlink(self, *args, **kwargs)
++        raise OSError("cleanup failure")
++    monkeypatch.setattr(type(tmp_path), "unlink", failing_unlink)
++    with pytest.raises(RuntimeError, match="authoritative persistence failure"):
++        save_snapshot({"value": 2}, tmp_path, "state-a", exact_revision=baseline.revision + 1, file_state_payload={"_meta": {"state_id": "state-a", "revision": baseline.revision + 1}, "files": {}})
++    assert read_metadata(tmp_path).revision == baseline.revision
++    monkeypatch.setattr(type(tmp_path), "unlink", original_unlink)
++    monkeypatch.setattr(store.os, "replace", original_replace)
++    assert save_snapshot({"value": 3}, tmp_path, "state-a").revision == baseline.revision + 1
++
++
+ def test_exact_snapshot_revision_rules_and_disk_ahead_without_overwrite(tmp_path):
+     with pytest.raises(SnapshotRevisionConflict):
+         save_snapshot(SimpleNamespace(value="bad"), tmp_path, "state-a", exact_revision=11, file_state_payload={"_meta": {"state_id": "state-a", "revision": 11}, "files": {}})
+@@ -88,6 +115,81 @@ def test_exact_snapshot_revision_binds_embedded_state_and_metadata(tmp_path):
+     assert metadata.revision == loaded_metadata.revision == loaded.revision == 1
+ 
+ 
++def test_build_payload_is_side_effect_free(tmp_path):
++    manager = FileStateManager(str(tmp_path))
++    manager.state_id = "sid-r1"
++    manager.revision = 1
++    payload = manager.build_payload("sid-r2", 2)
++    assert manager.state_id == "sid-r1"
++    assert manager.revision == 1
++    assert payload["_meta"] == {"state_id": "sid-r2", "revision": 2}
++
++
++@pytest.mark.parametrize("failure", ["missing", "invalid", "oserror"])
++def test_referenced_filestate_generation_fail_closed_without_legacy_fallback(tmp_path, monkeypatch, failure):
++    import builtins
++    import json
++
++    manager = FileStateManager(str(tmp_path))
++    manager._state = {}
++    manager.save("sid", revision=1)
++    metadata = {
++        "schema_version": "1.2",
++        "state_id": "sid",
++        "revision": 2,
++        "file_state_file": "file_state.r2.test.json",
++    }
++    (tmp_path / "engine_state.meta.json").write_text(json.dumps(metadata), encoding="utf-8")
++    (tmp_path / "file_state.json").write_text(json.dumps({"files": {"legacy.py": {"size": 1}}}), encoding="utf-8")
++    referenced = tmp_path / "file_state.r2.test.json"
++    if failure == "invalid":
++        referenced.write_text("{not-json", encoding="utf-8")
++    elif failure == "oserror":
++        original_open = builtins.open
++        def raising_open(path, *args, **kwargs):
++            if str(path).endswith("file_state.r2.test.json"):
++                raise OSError("synthetic read failure")
++            return original_open(path, *args, **kwargs)
++        monkeypatch.setattr(builtins, "open", raising_open)
++    reloaded = FileStateManager(str(tmp_path))
++    assert reloaded._state == {}
++    assert reloaded.revision is None
++
++
++def test_referenced_filestate_without_meta_fails_closed(tmp_path):
++    import json
++
++    (tmp_path / "engine_state.meta.json").write_text(
++        json.dumps({"state_id": "sid", "revision": 2, "file_state_file": "file_state.r2.json"}),
++        encoding="utf-8",
++    )
++    (tmp_path / "file_state.r2.json").write_text(
++        json.dumps({"files": {"current.py": {"size": 4}}}),
++        encoding="utf-8",
++    )
++    manager = FileStateManager(str(tmp_path))
++    assert manager._state == {}
++    assert manager.state_id == ""
++    assert manager.revision is None
++
++
++def test_legacy_filestate_without_meta_loads_entries_but_remains_unverified(tmp_path):
++    import json
++
++    (tmp_path / "engine_state.meta.json").write_text(
++        json.dumps({"state_id": "sid", "revision": 2}),
++        encoding="utf-8",
++    )
++    (tmp_path / "file_state.json").write_text(
++        json.dumps({"legacy.py": {"size": 4}}),
++        encoding="utf-8",
++    )
++    manager = FileStateManager(str(tmp_path))
++    assert "legacy.py" in manager._state
++    assert manager.state_id == ""
++    assert manager.revision is None
++
++
+ def test_snapshot_rejects_a_different_state_identity(tmp_path):
+     save_snapshot(SimpleNamespace(value=1), tmp_path, "current")
+ 
+COMPLETE_RAW_UNIFIED_DIFF_TEST_EVIDENCE_CLOSURE_END

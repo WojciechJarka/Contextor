@@ -188,6 +188,7 @@ class FileStateManager:
         state_file = self.state_file
         expected_engine_revision = None
         expected_engine_state_id = ""
+        referenced_generation = False
         metadata_invalid = False
         if metadata_file.exists():
             try:
@@ -196,6 +197,7 @@ class FileStateManager:
                 expected_engine_state_id = str(engine_meta.get("state_id", ""))
                 referenced = engine_meta.get("file_state_file")
                 if referenced:
+                    referenced_generation = True
                     state_file = self.cache_dir / str(referenced)
             except (
                 OSError,
@@ -212,10 +214,15 @@ class FileStateManager:
                 with open(state_file, "r", encoding="utf-8") as f:
                     data = json.load(f)
                     if "_meta" in data:
-                        self.state_id = data["_meta"].get("state_id", "")
-                        self.revision = data["_meta"].get("revision", None)
+                        file_meta = data["_meta"]
+                        if not isinstance(file_meta, dict):
+                            raise ValueError("FileState metadata must be a mapping")
+                        self.state_id = file_meta.get("state_id", "")
+                        self.revision = file_meta.get("revision", None)
                         files_data = data.get("files", {})
                     else:
+                        if referenced_generation:
+                            raise ValueError("Referenced FileState generation lacks metadata")
                         files_data = data
                         
                     self._state = {
@@ -223,30 +230,50 @@ class FileStateManager:
                         for path, fs in files_data.items()
                     }
                     if (
+                        referenced_generation
+                        and (
+                            not self.state_id
+                            or self.revision is None
+                        )
+                    ):
+                        raise ValueError("Referenced FileState generation metadata is incomplete")
+                    if (
                         expected_engine_revision is not None
+                        and self.revision is not None
                         and self.revision != expected_engine_revision
                     ) or (
                         expected_engine_state_id
+                        and self.state_id
                         and self.state_id != expected_engine_state_id
                     ):
                         self._state = {}
                         self.state_id = ""
                         self.revision = None
-            except (json.JSONDecodeError, KeyError):
+            except (
+                OSError,
+                json.JSONDecodeError,
+                KeyError,
+                TypeError,
+                AttributeError,
+                ValueError,
+            ):
                 self._state = {}
+                self.state_id = ""
+                self.revision = None
 
     def save(self, state_id: str = "", revision: int | None = None):
         payload = self.build_payload(state_id, revision)
         with open(self.state_file, "w", encoding="utf-8") as f:
             json.dump(payload, f, indent=2)
-
-    def build_payload(self, state_id: str = "", revision: int | None = None) -> dict:
         self.state_id = state_id
         if revision is not None:
             self.revision = revision
+
+    def build_payload(self, state_id: str = "", revision: int | None = None) -> dict:
+        effective_revision = self.revision if revision is None else revision
         meta: Dict[str, Any] = {"state_id": state_id}
-        if getattr(self, "revision", None) is not None:
-            meta["revision"] = self.revision
+        if effective_revision is not None:
+            meta["revision"] = effective_revision
         return {
             "_meta": meta,
             "files": {path: fs.to_dict() for path, fs in self._state.items()},

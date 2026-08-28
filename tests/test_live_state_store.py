@@ -14,6 +14,7 @@ from contextor.core.live_state import (
     SnapshotRevisionConflict,
 )
 from contextor.core.paths import app_cache_dir, legacy_repo_cache_dir, repo_cache_dir
+from contextor.core.analysis.state_manager import FileStateManager
 from contextor.core.reporting_engine.persistent_registry import (
     PersistentIdentityRegistry,
 )
@@ -43,6 +44,32 @@ def test_default_snapshot_publishes_final_pickle_via_temp_replace(tmp_path, monk
     assert replacements[0][1].name == "engine_state.pkl"
     assert replacements[0][0].name != "engine_state.pkl"
     assert replacements[0][0].name.endswith(".tmp")
+
+
+def test_cleanup_failure_cannot_mask_persistence_failure_or_leak_lock(tmp_path, monkeypatch):
+    import contextor.core.live_state.store as store
+
+    baseline = save_snapshot({"value": 1}, tmp_path, "state-a")
+    original_replace = store.os.replace
+    original_unlink = type(tmp_path).unlink
+
+    def failing_replace(source, target):
+        if target.name == "engine_state.meta.json":
+            raise RuntimeError("authoritative persistence failure")
+        return original_replace(source, target)
+
+    monkeypatch.setattr(store.os, "replace", failing_replace)
+    def failing_unlink(self, *args, **kwargs):
+        if self.name == "engine_state.lock":
+            return original_unlink(self, *args, **kwargs)
+        raise OSError("cleanup failure")
+    monkeypatch.setattr(type(tmp_path), "unlink", failing_unlink)
+    with pytest.raises(RuntimeError, match="authoritative persistence failure"):
+        save_snapshot({"value": 2}, tmp_path, "state-a", exact_revision=baseline.revision + 1, file_state_payload={"_meta": {"state_id": "state-a", "revision": baseline.revision + 1}, "files": {}})
+    assert read_metadata(tmp_path).revision == baseline.revision
+    monkeypatch.setattr(type(tmp_path), "unlink", original_unlink)
+    monkeypatch.setattr(store.os, "replace", original_replace)
+    assert save_snapshot({"value": 3}, tmp_path, "state-a").revision == baseline.revision + 1
 
 
 def test_exact_snapshot_revision_rules_and_disk_ahead_without_overwrite(tmp_path):
@@ -86,6 +113,81 @@ def test_exact_snapshot_revision_binds_embedded_state_and_metadata(tmp_path):
     metadata = save_snapshot(candidate, tmp_path, "state-a", exact_revision=1, file_state_payload={"_meta": {"state_id": "state-a", "revision": 1}, "files": {}})
     loaded, loaded_metadata = load_snapshot(tmp_path, "state-a")
     assert metadata.revision == loaded_metadata.revision == loaded.revision == 1
+
+
+def test_build_payload_is_side_effect_free(tmp_path):
+    manager = FileStateManager(str(tmp_path))
+    manager.state_id = "sid-r1"
+    manager.revision = 1
+    payload = manager.build_payload("sid-r2", 2)
+    assert manager.state_id == "sid-r1"
+    assert manager.revision == 1
+    assert payload["_meta"] == {"state_id": "sid-r2", "revision": 2}
+
+
+@pytest.mark.parametrize("failure", ["missing", "invalid", "oserror"])
+def test_referenced_filestate_generation_fail_closed_without_legacy_fallback(tmp_path, monkeypatch, failure):
+    import builtins
+    import json
+
+    manager = FileStateManager(str(tmp_path))
+    manager._state = {}
+    manager.save("sid", revision=1)
+    metadata = {
+        "schema_version": "1.2",
+        "state_id": "sid",
+        "revision": 2,
+        "file_state_file": "file_state.r2.test.json",
+    }
+    (tmp_path / "engine_state.meta.json").write_text(json.dumps(metadata), encoding="utf-8")
+    (tmp_path / "file_state.json").write_text(json.dumps({"files": {"legacy.py": {"size": 1}}}), encoding="utf-8")
+    referenced = tmp_path / "file_state.r2.test.json"
+    if failure == "invalid":
+        referenced.write_text("{not-json", encoding="utf-8")
+    elif failure == "oserror":
+        original_open = builtins.open
+        def raising_open(path, *args, **kwargs):
+            if str(path).endswith("file_state.r2.test.json"):
+                raise OSError("synthetic read failure")
+            return original_open(path, *args, **kwargs)
+        monkeypatch.setattr(builtins, "open", raising_open)
+    reloaded = FileStateManager(str(tmp_path))
+    assert reloaded._state == {}
+    assert reloaded.revision is None
+
+
+def test_referenced_filestate_without_meta_fails_closed(tmp_path):
+    import json
+
+    (tmp_path / "engine_state.meta.json").write_text(
+        json.dumps({"state_id": "sid", "revision": 2, "file_state_file": "file_state.r2.json"}),
+        encoding="utf-8",
+    )
+    (tmp_path / "file_state.r2.json").write_text(
+        json.dumps({"files": {"current.py": {"size": 4}}}),
+        encoding="utf-8",
+    )
+    manager = FileStateManager(str(tmp_path))
+    assert manager._state == {}
+    assert manager.state_id == ""
+    assert manager.revision is None
+
+
+def test_legacy_filestate_without_meta_loads_entries_but_remains_unverified(tmp_path):
+    import json
+
+    (tmp_path / "engine_state.meta.json").write_text(
+        json.dumps({"state_id": "sid", "revision": 2}),
+        encoding="utf-8",
+    )
+    (tmp_path / "file_state.json").write_text(
+        json.dumps({"legacy.py": {"size": 4}}),
+        encoding="utf-8",
+    )
+    manager = FileStateManager(str(tmp_path))
+    assert "legacy.py" in manager._state
+    assert manager.state_id == ""
+    assert manager.revision is None
 
 
 def test_snapshot_rejects_a_different_state_identity(tmp_path):

@@ -603,6 +603,11 @@ def run_service(
             from contextor.core.analysis.state_manager import FileStateManager
             file_state_manager = FileStateManager(str(cache))
             ensure_module_usages(state)
+            target_revision = loaded_metadata.revision + 1
+            file_state_payload = file_state_manager.build_payload(
+                loaded_metadata.state_id,
+                target_revision,
+            )
             backfill_metadata = save_snapshot(
                 state,
                 cache,
@@ -610,11 +615,8 @@ def run_service(
                 writer="live-service-symbol-calls-backfill",
                 repo_id=identity.repo_id,
                 root_path=identity.root_path,
-                revision_floor=loaded_metadata.revision,
-            )
-            file_state_manager.save(
-                loaded_metadata.state_id,
-                revision=backfill_metadata.revision,
+                exact_revision=target_revision,
+                file_state_payload=file_state_payload,
             )
     revision = (read_metadata(cache).revision if read_metadata(cache) else 0)
     adapter_holder: dict[str, object] = {}

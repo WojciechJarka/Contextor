@@ -4,6 +4,7 @@ import sys
 import threading
 import time
 import multiprocessing.connection as mpc
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -254,31 +255,42 @@ def test_persistence_conflict_fails_closed_without_live_event():
 
 
 def test_real_repository_persister_disk_ahead_fails_closed(tmp_path, monkeypatch):
-    from contextor.core.live_state.runtime import _repository_persister
+    from contextor.core.live_state.runtime import _repository_persister, _repository_updater
     from contextor.core.live_state.store import load_snapshot, read_metadata, save_snapshot
-    from contextor.core.analysis.state_manager import FileStateManager
+    from contextor.core.analysis.state_manager import FileStateManager, RepositoryAnalysisState
     from contextor.core.paths import repo_cache_dir
-    from contextor.core.reporting_engine.persistent_registry import PersistentIdentityRegistry
+    from contextor.core.repository_identity import ensure_repository_identity
 
     repo = tmp_path / "repo"
     repo.mkdir()
-    PersistentIdentityRegistry(str(repo))
+    source = repo / "module.py"
+    source.write_text("VALUE = 1\n", encoding="utf-8")
+    identity = ensure_repository_identity(repo)[0]
     monkeypatch.setenv("CONTEXTOR_CACHE_DIR", str(tmp_path / "cache"))
     cache = repo_cache_dir(repo)
-    state = SimpleNamespace(files=[])
+    state = RepositoryAnalysisState(modules={})
+    state.revision = 1
     for _ in range(11):
-        save_snapshot(state, cache, "sid")
+        save_snapshot(state, cache, "sid", repo_id=identity.repo_id, root_path=identity.root_path)
     manager = FileStateManager(str(cache))
     manager.save("sid", revision=11)
-    previous = SimpleNamespace(files=[])
-    server = CanonicalLiveServer(previous, revision=10, updater=lambda candidate, _path: {"status": "UPDATED"}, persister=_repository_persister(repo, {"manager": manager, "state_id": "sid"}))
-    response = server._dispatch({"operation": "update_file", "file_path": "x.py"})
+    previous = state
+    previous.revision = 10
+    holder = {}
+    server = CanonicalLiveServer(
+        previous,
+        revision=10,
+        updater=_repository_updater(repo, holder),
+        persister=_repository_persister(repo, holder),
+    )
+    response = server._dispatch({"operation": "update_file", "file_path": str(source)})
     assert response["error"] == "canonical_persistence_revision_conflict"
     assert response["resync_required"] is True
     assert server._revision == 10 and server._state is previous and server._activity_seq == 0
     assert read_metadata(cache).revision == 11
     assert FileStateManager(str(cache)).revision == 11
     assert load_snapshot(cache, "sid")[1].revision == 11
+    assert not any(event["operation"] == "update_file" for event in server._events)
 
 
 def test_real_repository_adapter_two_successive_updates_are_exact_successors(tmp_path, monkeypatch):
@@ -331,7 +343,7 @@ def test_real_repository_adapter_two_successive_updates_are_exact_successors(tmp
 def test_persistence_trace_operation_is_propagated_across_successful_real_update(tmp_path, monkeypatch):
     from contextor.core.analysis.state_manager import FileStateManager, RepositoryAnalysisState
     from contextor.core.live_state.runtime import _repository_persister, _repository_updater
-    from contextor.core.live_state.store import save_snapshot
+    from contextor.core.live_state.store import load_snapshot, read_metadata, save_snapshot
     from contextor.core.paths import repo_cache_dir
     from contextor.core.repository_identity import ensure_repository_identity
     import contextor.core.runtime_trace as runtime_trace
@@ -377,8 +389,23 @@ def test_persistence_trace_operation_is_propagated_across_successful_real_update
         "trace_event",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("trace sink unavailable")),
     )
+    monkeypatch.setattr(
+        runtime_trace,
+        "current_trace_operation",
+        lambda: (_ for _ in ()).throw(RuntimeError("trace context unavailable")),
+    )
+    expected = server._revision + 1
     second = server._dispatch({"operation": "update_file", "file_path": str(source)})
     assert second["status"] == "ok"
+    assert second["revision"] == expected
+    assert server._revision == expected
+    assert server._state.revision == expected
+    persisted = read_metadata(cache)
+    assert persisted.revision == expected
+    loaded_state, loaded_metadata = load_snapshot(cache, "sid")
+    assert loaded_metadata.revision == expected
+    assert loaded_state.revision == expected
+    assert FileStateManager(str(cache)).revision == expected
 
 
 def test_startup_backfill_preserves_filestate_content_and_revision_parity(tmp_path, monkeypatch):
@@ -423,6 +450,12 @@ def test_startup_backfill_preserves_filestate_content_and_revision_parity(tmp_pa
             return None
 
     monkeypatch.setattr(runtime, "CanonicalLiveServer", StubServer)
+    import contextor.core.runtime_trace as runtime_trace
+    monkeypatch.setattr(
+        runtime_trace,
+        "trace_event",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("trace sink unavailable")),
+    )
     import contextor.core.analysis.incremental.materialization as materialization
     monkeypatch.setattr(materialization, "module_usages_require_materialization", lambda _state: True)
     monkeypatch.setattr(materialization, "ensure_module_usages", lambda value: setattr(value, "module_usages", {"a.py": SimpleNamespace(symbol_calls_materialized=True, reference_evidence_materialized=True)}))
@@ -436,6 +469,45 @@ def test_startup_backfill_preserves_filestate_content_and_revision_parity(tmp_pa
     assert read_metadata(cache).revision == metadata.revision + 1
     assert loaded_metadata.revision == metadata.revision + 1
     assert loaded_state.revision == metadata.revision + 1
+
+
+def test_startup_backfill_failure_leaves_previous_generation_authoritative(tmp_path, monkeypatch):
+    import contextor.core.live_state.runtime as runtime
+    from contextor.core.analysis.state_manager import FileState, FileStateManager, RepositoryAnalysisState
+    from contextor.core.live_state.store import load_snapshot, read_metadata, save_snapshot
+    from contextor.core.paths import repo_cache_dir
+    from contextor.core.repository_identity import ensure_repository_identity
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    identity = ensure_repository_identity(repo)[0]
+    monkeypatch.setenv("CONTEXTOR_CACHE_DIR", str(tmp_path / "cache"))
+    cache = repo_cache_dir(repo)
+    state = RepositoryAnalysisState(modules={"a.py": SimpleNamespace()})
+    state.revision = 1
+    metadata = save_snapshot(state, cache, "sid", repo_id=identity.repo_id, root_path=identity.root_path)
+    manager = FileStateManager(str(cache))
+    manager._state = {"a.py": FileState(10, 3, "aaa"), "b.py": FileState(20, 4, "bbb")}
+    manager.save("sid", revision=metadata.revision)
+    before = dict(manager._state)
+    monkeypatch.setattr(runtime, "CanonicalLiveServer", lambda *_args, **_kwargs: None)
+    import contextor.core.analysis.incremental.materialization as materialization
+    monkeypatch.setattr(materialization, "module_usages_require_materialization", lambda _state: True)
+    monkeypatch.setattr(materialization, "ensure_module_usages", lambda _state: None)
+    import contextor.core.live_state.store as store
+    original_replace = store.os.replace
+    def fail_only_authoritative_metadata_commit(source, target):
+        if Path(target).name == "engine_state.meta.json":
+            raise RuntimeError("synthetic metadata commit failure")
+        return original_replace(source, target)
+    monkeypatch.setattr(store.os, "replace", fail_only_authoritative_metadata_commit)
+    with pytest.raises(RuntimeError, match="synthetic metadata commit failure"):
+        runtime.run_service(repo)
+    assert read_metadata(cache).revision == metadata.revision
+    assert load_snapshot(cache, "sid")[1].revision == metadata.revision
+    reloaded = FileStateManager(str(cache))
+    assert reloaded.revision == metadata.revision
+    assert reloaded._state == before
 
 
 def test_update_runs_inside_the_live_owner_and_is_visible_to_other_clients():

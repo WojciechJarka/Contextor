@@ -253,20 +253,22 @@ def save_snapshot(
         for temporary in (state_tmp, meta_tmp):
             try:
                 temporary.unlink()
-            except FileNotFoundError:
+            except OSError:
                 pass
         if not committed and exact_revision is not None:
             for temporary in (generation_state, generation_file_state):
                 if temporary is not None:
                     try:
                         temporary.unlink()
-                    except FileNotFoundError:
+                    except OSError:
                         pass
-        os.close(lock_fd)
         try:
-            lock_file.unlink()
-        except FileNotFoundError:
-            pass
+            os.close(lock_fd)
+        finally:
+            try:
+                lock_file.unlink()
+            except OSError:
+                pass
 
 
 def load_snapshot(
