@@ -63,6 +63,7 @@ class DesktopLiveWatcher(_PollingLiveWorker):
         interval: float = 0.75,
         on_status: Callable[[str], None] | None = None,
         on_reconnect: Callable[[LiveStateClient], None] | None = None,
+        on_resync: Callable[[], object] | None = None,
     ):
         self.root = Path(root).resolve()
         self.client = client
@@ -71,6 +72,9 @@ class DesktopLiveWatcher(_PollingLiveWorker):
         super().__init__(interval=interval, thread_name="contextor-live-watcher")
         self.on_status = on_status
         self.on_reconnect = on_reconnect
+        self.on_resync = on_resync
+        self._startup_requires_resync = False
+        self._startup_resync_attempted = False
         self._excluded_paths, self._ignored_dirs = self._load_watch_filters()
         self._snapshot = self._scan()
         self._startup_pending = self._startup_reconciliation_paths(self._snapshot)
@@ -150,7 +154,10 @@ class DesktopLiveWatcher(_PollingLiveWorker):
         from contextor.core.analysis.state_manager import FileStateManager
         from contextor.core.paths import repo_cache_dir
 
-        manager = FileStateManager(str(repo_cache_dir(self.root)))
+        manager = self._trusted_file_state(response)
+        if manager is None:
+            self._startup_requires_resync = True
+            return []
         pending = {
             path
             for path in current
@@ -177,6 +184,58 @@ class DesktopLiveWatcher(_PollingLiveWorker):
                 pending.add(tracked_path)
         return sorted(pending)
 
+    def _trusted_file_state(self, snapshot: dict | None = None):
+        """Return the persisted baseline only when it matches LIVE's generation."""
+        from contextor.core.analysis.state_manager import FileStateManager
+        from contextor.core.paths import repo_cache_dir
+
+        manager = FileStateManager(str(repo_cache_dir(self.root)))
+        if getattr(manager, "baseline_status", "untrusted") != "trusted":
+            return None
+        state = (snapshot or {}).get("state") if isinstance(snapshot, dict) else None
+        state_revision = getattr(state, "revision", None)
+        state_id = getattr(state, "state_id", None)
+        if state_revision is None or not state_id:
+            return None
+        if manager.revision != state_revision:
+            return None
+        if manager.state_id != state_id:
+            return None
+        return manager
+
+    def _candidate_requires_update(
+        self,
+        path: str,
+        current: dict[str, tuple[int, int]],
+    ) -> bool | None:
+        """Revalidate a queued path against the generation held after the lease wait."""
+        try:
+            snapshot = self.client.snapshot()
+        except (OSError, EOFError, TimeoutError, ConnectionError):
+            return None
+        manager = self._trusted_file_state(snapshot)
+        if manager is None:
+            self._startup_requires_resync = True
+            return False
+        if path not in current:
+            return path in manager.tracked_paths()
+        state = snapshot.get("state")
+        modules = getattr(state, "modules", {})
+        return (
+            manager.has_changed(path)
+            or self._module_name(Path(path)) not in modules
+        )
+
+    @staticmethod
+    def _resync_completed(outcome: object) -> bool:
+        """`run_full_analysis_exclusive` returns ``(errors, analysis_result)``."""
+        return (
+            isinstance(outcome, tuple)
+            and len(outcome) == 2
+            and not outcome[0]
+            and outcome[1] is not None
+        )
+
     def _module_name(self, path: Path) -> str:
         relative = path.resolve().relative_to(self.root).with_suffix("")
         return ".".join(relative.parts)
@@ -199,6 +258,34 @@ class DesktopLiveWatcher(_PollingLiveWorker):
             self._snapshot = current
             self._emit("LIVE: no snapshot; waiting for analysis")
             return []
+        if self._startup_requires_resync:
+            if self._startup_resync_attempted:
+                return []
+            self._startup_resync_attempted = True
+            if self.on_resync is None:
+                self._emit("LIVE: canonical baseline requires resync")
+                return []
+            try:
+                outcome = self.on_resync()
+                if not self._resync_completed(outcome):
+                    self._emit("LIVE: startup resync failed; baseline remains untrusted")
+                    return []
+            except Exception as exc:
+                self._emit(f"LIVE: startup resync failed: {exc}")
+                return []
+            current = self._scan()
+            try:
+                snapshot = self.client.snapshot()
+            except (OSError, EOFError, TimeoutError, ConnectionError):
+                self._emit("LIVE: startup resync baseline could not be verified")
+                return []
+            if self._trusted_file_state(snapshot) is None:
+                self._emit("LIVE: startup resync baseline remains untrusted")
+                return []
+            self._snapshot = current
+            self._startup_pending = self._startup_reconciliation_paths(current)
+            self._startup_requires_resync = False
+            return []
         startup_pending = set(self._startup_pending)
         if startup_pending:
             startup_pending &= set(self._startup_reconciliation_paths(current))
@@ -210,6 +297,7 @@ class DesktopLiveWatcher(_PollingLiveWorker):
                 if self._snapshot.get(path) != current.get(path)
             }
         )
+        deferred: set[str] = set()
         for path in changed:
             from contextor.core.runtime_trace import new_trace_operation, trace_event
 
@@ -231,13 +319,37 @@ class DesktopLiveWatcher(_PollingLiveWorker):
             self._emit(f"Updating LIVE: {Path(path).name}")
             update_started = time.monotonic()
             trace_event("LIVE", "WATCH_UPDATE_START", op=op, repo=str(self.root), path=relative)
+            lease = None
             try:
+                from contextor.core.analysis.full_analysis_coordinator import (
+                    FullAnalysisBusyError,
+                    acquire_full_analysis,
+                    release_full_analysis,
+                )
+                lease = acquire_full_analysis(self.root, owner="desktop_watcher", timeout=10.0)
+            except FullAnalysisBusyError:
+                deferred.add(path)
+                self._emit("LIVE: repository mutation busy; deferring watcher update")
+                continue
+            try:
+                # A full analysis may have completed while this watcher waited.
+                # Re-read its exact FileState generation before mutating LIVE.
+                candidate_requires_update = self._candidate_requires_update(path, current)
+                if candidate_requires_update is None:
+                    deferred.add(path)
+                    self._emit("LIVE: generation revalidation unavailable; deferring watcher update")
+                    continue
+                if not candidate_requires_update:
+                    continue
                 response = self.client.update_file(path, origin="desktop_watcher", trace_op=op)
             except (OSError, EOFError, TimeoutError, ConnectionError):
                 self._emit("LIVE: connection lost during update; recovering...")
                 if self._recover_client() is None:
                     raise
                 response = self.client.update_file(path, origin="desktop_watcher", trace_op=op)
+            finally:
+                if lease is not None:
+                    release_full_analysis(lease)
 
             if response.get("status") != "ok":
                 trace_event("LIVE", "WATCH_UPDATE_FAIL", op=op, repo=str(self.root), path=relative, elapsed_ms=(time.monotonic() - update_started) * 1000.0, err=response.get("error"))
@@ -258,6 +370,10 @@ class DesktopLiveWatcher(_PollingLiveWorker):
                 self._emit(f"LIVE update successful: {Path(path).name}")
             else:
                 self._emit(f"LIVE update error: {Path(path).name}: {result_status}")
+        if deferred:
+            # Retain the old scan so a deferred candidate remains observable.
+            self._startup_pending = sorted(deferred)
+            return [path for path in changed if path not in deferred]
         self._snapshot = current
         self._startup_pending = []
         return changed

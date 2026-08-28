@@ -1,5 +1,8 @@
 import json
+import os
 import threading
+import time
+from types import SimpleNamespace
 
 import pytest
 
@@ -11,7 +14,8 @@ from contextor.core.analysis.incremental_engine import IncrementalAnalysisEngine
 from contextor.core.api.facade import exclude_state_file
 from contextor.core.graph.graph import build_graph, build_trie, detect_package_root
 from contextor.core.live_state.ipc import CanonicalLiveServer, LiveStateClient
-from contextor.core.live_state.runtime import _repository_updater
+from contextor.core.live_state.runtime import _repository_persister, _repository_updater
+from contextor.core.live_state.store import save_snapshot
 from contextor.core.live_state.watcher import DesktopLiveWatcher
 from contextor.core.paths import repo_cache_dir
 from contextor.core.reporting_engine.persistent_registry import (
@@ -41,7 +45,10 @@ def _bootstrap_state(repo):
     manager = FileStateManager(str(repo_cache_dir(repo)))
     for path in repo.rglob("*.py"):
         manager.update_state(str(path))
-    manager.save()
+    metadata = save_snapshot(state, repo_cache_dir(repo), "bootstrap", exact_revision=1, file_state_payload=manager.build_payload("bootstrap", 1))
+    manager.save("bootstrap", revision=metadata.revision)
+    state.revision = metadata.revision
+    state.state_id = metadata.state_id
     return registry, state
 
 
@@ -65,7 +72,12 @@ def test_startup_reconciles_offline_add_modify_delete_and_is_idempotent(tmp_path
     )
     removed.unlink()
 
-    server = CanonicalLiveServer(state, updater=_repository_updater(repo))
+    adapter_holder = {}
+    server = CanonicalLiveServer(
+        state,
+        updater=_repository_updater(repo, adapter_holder),
+        persister=_repository_persister(repo, adapter_holder),
+    )
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     client = LiveStateClient(server.endpoint)
@@ -75,7 +87,7 @@ def test_startup_reconciles_offline_add_modify_delete_and_is_idempotent(tmp_path
         assert changed == sorted([str(added), str(existing), str(removed)])
 
         reconciled = client.snapshot()
-        assert reconciled["revision"] == 3
+        assert reconciled["revision"] == 4
         current = reconciled["state"]
         assert "added" in current.modules
         assert "added" in current.artifacts
@@ -92,7 +104,7 @@ def test_startup_reconciles_offline_add_modify_delete_and_is_idempotent(tmp_path
 
         restarted = DesktopLiveWatcher(repo, client)
         assert restarted.poll_once() == []
-        assert client.snapshot()["revision"] == 3
+        assert client.snapshot()["revision"] == 4
     finally:
         server.close()
         thread.join(timeout=2)
@@ -151,11 +163,12 @@ def test_startup_candidate_is_revalidated_after_fingerprint_refresh(tmp_path):
             raise AssertionError("stale startup candidate must be filtered")
 
     watcher = DesktopLiveWatcher(repo, Client())
-    assert watcher._startup_pending == [str(source)]
+    assert watcher._startup_pending == []
+    assert watcher._startup_requires_resync is True
 
     manager = FileStateManager(str(repo_cache_dir(repo)))
     manager.update_state(str(source))
-    manager.save()
+    manager.save("bootstrap", revision=1)
 
     assert watcher.poll_once() == []
     assert updates == []
@@ -177,3 +190,231 @@ def test_semantic_noop_acknowledges_missing_persisted_fingerprint(tmp_path):
     result = engine.update_file(str(source))
     assert result.status == "UNCHANGED"
     assert missing_manager.has_changed(str(source)) is False
+
+
+def test_untrusted_startup_filestate_uses_single_resync_not_per_file_replay(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    for index in range(9):
+        (repo / f"module_{index}.py").write_text(f"VALUE = {index}\n", encoding="utf-8")
+    calls = []
+
+    class Client:
+        def snapshot(self):
+            return {"status": "ok", "state": RepositoryAnalysisState(modules={})}
+        def ping(self):
+            return {"status": "ok", "available": True}
+        def update_file(self, *_args, **_kwargs):
+            calls.append("update")
+
+    watcher = DesktopLiveWatcher(
+        repo,
+        Client(),
+        on_resync=lambda: (calls.append("resync") or [], object()),
+    )
+    assert watcher.poll_once() == []
+    assert calls == ["resync"]
+
+
+def test_unchanged_restart_with_coherent_filestate_emits_zero_updates(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "module.py").write_text("VALUE = 1\n", encoding="utf-8")
+    _registry, state = _bootstrap_state(repo)
+    server = CanonicalLiveServer(state, updater=_repository_updater(repo))
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    client = LiveStateClient(server.endpoint)
+    try:
+        watcher = DesktopLiveWatcher(repo, client)
+        assert watcher.poll_once() == []
+        assert client.snapshot()["revision"] == 1
+    finally:
+        server.close(); thread.join(timeout=2)
+
+
+def test_startup_with_trusted_baseline_reconciles_only_real_offline_change(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir(); (repo / "a.py").write_text("A = 1\n", encoding="utf-8"); (repo / "b.py").write_text("B = 1\n", encoding="utf-8")
+    _registry, state = _bootstrap_state(repo)
+    (repo / "a.py").write_text("A = 2\n", encoding="utf-8")
+    server = CanonicalLiveServer(state, updater=_repository_updater(repo)); thread = threading.Thread(target=server.serve_forever, daemon=True); thread.start(); client = LiveStateClient(server.endpoint)
+    try:
+        assert DesktopLiveWatcher(repo, client).poll_once() == [str(repo / "a.py")]
+    finally:
+        server.close(); thread.join(timeout=2)
+
+
+def test_failed_startup_resync_does_not_fallback_to_mass_incremental_updates(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir(); (repo / "module.py").write_text("VALUE = 1\n", encoding="utf-8")
+    calls = []
+    class Client:
+        def snapshot(self): return {"status": "ok", "state": RepositoryAnalysisState(modules={})}
+        def ping(self): return {"status": "ok", "available": True}
+        def update_file(self, *_args, **_kwargs): calls.append("update")
+    watcher = DesktopLiveWatcher(repo, Client(), on_resync=lambda: False)
+    assert watcher.poll_once() == []
+    assert calls == []
+    assert watcher._startup_requires_resync is True
+
+
+def test_successful_startup_resync_establishes_stable_next_restart_baseline(
+    tmp_path, monkeypatch
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "module.py").write_text("VALUE = 1\n", encoding="utf-8")
+    calls = []
+    _registry, state = _bootstrap_state(repo)
+    cache = repo_cache_dir(repo)
+    (cache / "engine_state.meta.json").write_text(
+        json.dumps(
+            {
+                "revision": 99,
+                "state_id": "untrusted",
+                "file_state_file": "missing-generation.json",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    class Client:
+        def snapshot(self): return {"status": "ok", "state": state}
+        def ping(self): return {"status": "ok", "available": True}
+        def update_file(self, *_args, **_kwargs): calls.append("update")
+
+    def real_resync():
+        calls.append("resync")
+        (cache / "engine_state.meta.json").unlink()
+        manager = FileStateManager(str(cache))
+        for path in repo.rglob("*.py"):
+            manager.update_state(str(path))
+        metadata = save_snapshot(
+            state, cache, "resynced", exact_revision=2,
+            file_state_payload=manager.build_payload("resynced", 2),
+        )
+        state.revision = metadata.revision
+        state.state_id = metadata.state_id
+        return [], SimpleNamespace(live_publish_status="success")
+
+    watcher = DesktopLiveWatcher(repo, Client(), on_resync=real_resync)
+    assert watcher.poll_once() == []
+    assert calls == ["resync"]
+    restarted = DesktopLiveWatcher(repo, Client(), on_resync=lambda: calls.append("second-resync"))
+    assert restarted.poll_once() == []
+    assert calls == ["resync"]
+
+
+def test_real_semantic_unchanged_edit_still_advances_filestate_once(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    source = repo / "module.py"
+    source.write_text("def value():\n    return 1\n", encoding="utf-8")
+    registry, state = _bootstrap_state(repo)
+    warm_manager = FileStateManager(str(tmp_path / "warm-state"))
+    IncrementalAnalysisEngine(state, registry, warm_manager, str(repo)).update_file(
+        str(source)
+    )
+    manager = FileStateManager(str(tmp_path / "current-state"))
+    engine = IncrementalAnalysisEngine(state, registry, manager, str(repo))
+    # A filesystem-only edit is intentionally semantic-UNCHANGED while still
+    # requiring FileState acknowledgement for restart reconciliation.
+    time.sleep(0.01)
+    os.utime(source, None)
+    result = engine.update_file(str(source))
+    assert result.status == "UNCHANGED"
+    assert manager.has_changed(str(source)) is False
+    manager.save("semantic-noop", revision=1)
+    assert FileStateManager(str(tmp_path / "current-state")).has_changed(str(source)) is False
+
+
+def test_full_analysis_publishes_current_filestate_generation(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "module.py").write_text("VALUE = 1\n", encoding="utf-8")
+    (repo / "other.py").write_text("OTHER = 2\n", encoding="utf-8")
+    monkeypatch.setenv("CONTEXTOR_CACHE_DIR", str(tmp_path / "cache"))
+    from contextor.core.analysis.full_analysis_coordinator import run_full_analysis_exclusive
+
+    errors, result = run_full_analysis_exclusive(repo, timeout=15.0)
+    assert result is not None
+    manager = FileStateManager(str(repo_cache_dir(repo)))
+    assert manager.baseline_status == "trusted"
+    assert str(repo / "module.py") in manager.tracked_paths()
+    assert str(repo / "other.py") in manager.tracked_paths()
+    from contextor.core.live_state.store import read_metadata
+    metadata = read_metadata(repo_cache_dir(repo))
+    assert manager.revision == metadata.revision
+    assert manager.state_id == metadata.state_id
+
+
+def test_watcher_lease_timeout_never_dispatches_unguarded_update(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    source = repo / "module.py"
+    source.write_text("VALUE = 1\n", encoding="utf-8")
+    _registry, state = _bootstrap_state(repo)
+    calls = []
+
+    class Client:
+        def snapshot(self): return {"status": "ok", "state": state}
+        def ping(self): return {"status": "ok", "available": True}
+        def update_file(self, *_args, **_kwargs): calls.append("update"); return {"status": "ok", "result": SimpleNamespace(status="UPDATED")}
+
+    from contextor.core.analysis import full_analysis_coordinator as coordinator
+    monkeypatch.setattr(
+        coordinator, "acquire_full_analysis",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(coordinator.FullAnalysisBusyError("busy")),
+    )
+    watcher = DesktopLiveWatcher(repo, Client())
+    source.write_text("VALUE = 2\n", encoding="utf-8")
+    assert watcher.poll_once() == []
+    assert calls == []
+    assert watcher._startup_pending == [str(source)]
+
+
+@pytest.mark.parametrize("state", [
+    SimpleNamespace(modules={}, revision=None, state_id="sid"),
+    SimpleNamespace(modules={}, revision=1, state_id=""),
+])
+def test_filestate_is_not_trusted_without_authoritative_live_generation_identity(
+    tmp_path, state
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "module.py").write_text("VALUE = 1\n", encoding="utf-8")
+    _registry, _state = _bootstrap_state(repo)
+
+    class Client:
+        def snapshot(self): return {"status": "ok", "state": state}
+        def ping(self): return {"status": "ok", "available": True}
+
+    watcher = DesktopLiveWatcher(repo, Client())
+    assert watcher._trusted_file_state(Client().snapshot()) is None
+    assert watcher._startup_requires_resync is True
+
+
+def test_post_lease_snapshot_failure_never_dispatches_unverified_update(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    source = repo / "module.py"
+    source.write_text("VALUE = 1\n", encoding="utf-8")
+    _registry, state = _bootstrap_state(repo)
+    calls = []
+
+    class Client:
+        def __init__(self): self.snapshot_calls = 0
+        def snapshot(self):
+            self.snapshot_calls += 1
+            if self.snapshot_calls == 1:
+                return {"status": "ok", "state": state}
+            raise ConnectionError("post-lease snapshot unavailable")
+        def ping(self): return {"status": "ok", "available": True}
+        def update_file(self, *_args, **_kwargs): calls.append("update")
+
+    watcher = DesktopLiveWatcher(repo, Client())
+    source.write_text("VALUE = 2\n", encoding="utf-8")
+    assert watcher.poll_once() == []
+    assert calls == []
+    assert watcher._startup_pending == [str(source)]

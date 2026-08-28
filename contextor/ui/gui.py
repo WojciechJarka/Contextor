@@ -882,8 +882,24 @@ class ContextorGUI:
             expected_root_path=identity.root_path,
         )
         if state is not None:
-            client.publish(state, origin="desktop_analysis")
-            self._set_live_status("LIVE: shared state published; watcher active")
+            current = client.ping() if hasattr(client, "ping") else {}
+            state_revision = getattr(state, "revision", None)
+            live_snapshot = client.snapshot() if hasattr(client, "snapshot") else {}
+            live_state = live_snapshot.get("state") if isinstance(live_snapshot, dict) else None
+            state_id = getattr(state, "state_id", None)
+            if (
+                state_revision is not None
+                and state_id
+                and current.get("revision") == int(state_revision)
+                and getattr(live_state, "state_id", None) == state_id
+            ):
+                self._set_live_status("LIVE: shared state attached; watcher active")
+            else:
+                published = client.publish(state, origin="desktop_analysis")
+                if isinstance(published, dict) and published.get("status") == "ok":
+                    self._set_live_status("LIVE: shared state published; watcher active")
+                else:
+                    self._set_live_status("LIVE: shared state attach failed; analysis required")
         else:
             self._set_live_status("LIVE: no snapshot; waiting for analysis")
         existing_watcher = watchers.get(identity.repo_id)
@@ -913,6 +929,14 @@ class ContextorGUI:
             if feed is not None:
                 feed.client = new_client
 
+        def on_resync():
+            from contextor.core.analysis.full_analysis_coordinator import run_full_analysis_exclusive
+            return run_full_analysis_exclusive(
+                path,
+                owner="desktop_analysis",
+                timeout=30.0,
+            )
+
         self.live_watcher = DesktopLiveWatcher(
             path,
             client,
@@ -920,6 +944,7 @@ class ContextorGUI:
             owner_token=getattr(self, "owner_token", None),
             on_status=status_callback,
             on_reconnect=on_reconnect,
+            on_resync=on_resync,
         )
         if initial_seq is not None:
             feed = DesktopLiveEventFeed(

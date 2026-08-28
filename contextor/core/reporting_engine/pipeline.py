@@ -626,4 +626,5 @@ def execute_global_pipeline(
             graph_analytics_data
         ),
         "_analysis_result": analysis_result,
+        "_file_state_manager": state_mgr,
     }

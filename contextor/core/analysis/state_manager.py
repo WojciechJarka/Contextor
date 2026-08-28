@@ -184,6 +184,7 @@ class FileStateManager:
     def _load(self):
         self.state_id = ""
         self.revision = None
+        self.baseline_status = "untrusted"
         metadata_file = self.cache_dir / "engine_state.meta.json"
         state_file = self.state_file
         expected_engine_revision = None
@@ -249,6 +250,8 @@ class FileStateManager:
                         self._state = {}
                         self.state_id = ""
                         self.revision = None
+                    elif self.state_id and self.revision is not None:
+                        self.baseline_status = "trusted"
             except (
                 OSError,
                 json.JSONDecodeError,
@@ -260,6 +263,7 @@ class FileStateManager:
                 self._state = {}
                 self.state_id = ""
                 self.revision = None
+                self.baseline_status = "untrusted"
 
     def save(self, state_id: str = "", revision: int | None = None):
         payload = self.build_payload(state_id, revision)
@@ -344,6 +348,8 @@ def save_engine_state(
     writer: str = "unknown",
     repo_id: str = "",
     root_path: str = "",
+    exact_revision: int | None = None,
+    file_state_payload: dict[str, Any] | None = None,
 ):
     from contextor.core.live_state import save_snapshot
     try:
@@ -354,6 +360,8 @@ def save_engine_state(
             writer=writer,
             repo_id=repo_id,
             root_path=root_path,
+            exact_revision=exact_revision,
+            file_state_payload=file_state_payload,
         )
     except Exception as e:
         import sys

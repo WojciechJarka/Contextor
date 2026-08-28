@@ -21,6 +21,51 @@ class _LiveIntegrationFakeVar:
         self.value = value
 
 
+def test_same_revision_startup_attaches_without_redundant_publish(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    PersistentIdentityRegistry(str(repo))
+    state = SimpleNamespace(modules={}, revision=7, state_id="same-generation")
+    events = []
+
+    class Client:
+        def ping(self):
+            return {"revision": 7, "available": True}
+
+        def snapshot(self):
+            return {"state": state}
+
+        def publish(self, *_args, **_kwargs):
+            events.append("publish")
+
+    class Watcher:
+        def __init__(self, *_args, **_kwargs): pass
+        def start(self): pass
+
+    class Feed:
+        def __init__(self, *_args, **_kwargs): pass
+        def start(self): pass
+
+    statuses = []
+    controller = SimpleNamespace(
+        live_watcher=None, live_event_feed=None, live_watchers={},
+        live_event_feeds={}, repo_id_var=_LiveIntegrationFakeVar(),
+        _set_live_status=statuses.append,
+    )
+    monkeypatch.setattr(gui, "connect_or_start", lambda *_args, **_kwargs: Client())
+    monkeypatch.setattr(gui, "DesktopLiveWatcher", Watcher)
+    monkeypatch.setattr(gui, "DesktopLiveEventFeed", Feed)
+    monkeypatch.setattr(
+        "contextor.core.analysis.state_manager.load_engine_state",
+        lambda *_args, **_kwargs: state,
+    )
+
+    gui.ContextorGUI._start_live_watcher(controller, str(repo))
+
+    assert events == []
+    assert "LIVE: shared state attached; watcher active" in statuses
+
+
 def test_desktop_publishes_latest_snapshot_and_replaces_existing_watcher(
     tmp_path, monkeypatch
 ):
@@ -535,6 +580,7 @@ def test_desktop_watcher_syntax_error_does_not_trigger_recovery(tmp_path):
         owner_token="gui-token-xyz",
     )
     watcher._recover_client = lambda: recovery_called.append(True)
+    watcher._candidate_requires_update = lambda *_args: True
 
     status_messages = []
     watcher.on_status = lambda msg: status_messages.append(msg)
@@ -546,4 +592,3 @@ def test_desktop_watcher_syntax_error_does_not_trigger_recovery(tmp_path):
     assert str(py_file) in changed
     assert len(recovery_called) == 0
     assert any("syntax error" in msg.lower() for msg in status_messages)
-

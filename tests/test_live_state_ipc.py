@@ -286,10 +286,17 @@ def test_real_repository_persister_disk_ahead_fails_closed(tmp_path, monkeypatch
     response = server._dispatch({"operation": "update_file", "file_path": str(source)})
     assert response["error"] == "canonical_persistence_revision_conflict"
     assert response["resync_required"] is True
+    assert response["revision"] == 10
+    assert response["expected_revision"] == 11
+    assert response["persisted_revision"] == 11
     assert server._revision == 10 and server._state is previous and server._activity_seq == 0
     assert read_metadata(cache).revision == 11
     assert FileStateManager(str(cache)).revision == 11
-    assert load_snapshot(cache, "sid")[1].revision == 11
+    loaded_state, loaded_metadata = load_snapshot(cache, "sid")
+    assert loaded_metadata.revision == 11
+    assert loaded_state.revision == 11
+    assert read_metadata(cache).revision != 12
+    assert loaded_metadata.revision != 12
     assert not any(event["operation"] == "update_file" for event in server._events)
 
 

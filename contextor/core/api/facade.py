@@ -425,6 +425,7 @@ class ContextorFacade:
                 validate_canonical_artifact_consumption_coverage,
             )
             from contextor.core.paths import repo_cache_dir
+            from contextor.core.live_state.store import read_metadata
             from contextor.core.reporting_engine.graph_analytics import (
                 compute_dependency_matrix_from_state,
                 compute_shared_usage_clusters_from_state,
@@ -522,17 +523,26 @@ class ContextorFacade:
             writer = "mcp" if "mcp" in str(owner) else "desktop"
             origin = str(owner) if str(owner) in {"desktop_analysis", "mcp_analysis", "cli_analysis"} else "desktop_analysis"
 
+            cache_dir = str(repo_cache_dir(path))
+            file_state_manager = report_result.get("_file_state_manager")
+            current_metadata = read_metadata(cache_dir)
+            target_revision = (current_metadata.revision if current_metadata else 0) + 1
+            file_state_payload = (
+                file_state_manager.build_payload(datestamp or "", target_revision)
+                if file_state_manager is not None
+                else None
+            )
             meta = save_engine_state(
                 state,
-                str(repo_cache_dir(path)),
+                cache_dir,
                 datestamp,
                 writer=writer,
                 repo_id=registry.repo_id,
                 root_path=path,
+                exact_revision=target_revision,
+                file_state_payload=file_state_payload,
             )
             if meta is not None:
-                sm = FileStateManager(str(repo_cache_dir(path)))
-                sm.save(datestamp or "", revision=meta.revision)
                 from contextor.core.live_state import connect
 
                 try:
