@@ -158,6 +158,54 @@ MANUAL_DESKTOP_LIVE_RESTART_REQUIRED=YES
 FILES_CHANGED_THIS_TASK=contextor/core/runtime_trace.py; contextor/core/paths.py; contextor/__main__.py; contextor/core/live_state/watcher.py; contextor/core/live_state/ipc.py; contextor/core/live_state/runtime.py; contextor/mcp_server.py; contextor/ui/gui.py; contextor/ui/system_actions.py; tests/test_runtime_trace.py
 COMPLETE_RAW_DIFFS=available via git diff for the files above (walkthrough excluded)
 VERDICT=IMPLEMENTATION_PASS_STATIC_ONLY_RESTART_REQUIRED
+
+---
+
+# Runtime trace logger audit closure
+
+AUDIT_SCOPE=actual current implementation; no restart; no full pytest
+TRACE_FAILURE_IS_NON_FATAL=YES
+TRACE_PERFORMS_LIVE_IPC=NO
+TRACE_READS_CANONICAL_STATE=NO
+TRACE_CALCULATES_REVISION=NO
+TRACE_MUTATES_REVISION=NO
+TRACE_MUTATES_ACTIVITY_SEQ=NO
+TRACE_DIRECTORY=package_root()/logs
+ACTIVE_POINTER=package_root()/logs/contextor_runtime_active.json
+POINTER_PUBLICATION=atomic after all five JSON header records are written
+SESSION_REPLACEMENT=cache switches to changed pointer; prior JSONL remains untouched
+POINTER_REFRESH=bounded 100ms cache refresh; no logs-directory scan
+APPEND=single os.write on cached O_APPEND descriptor; no fsync or correctness lock
+TRACE_HOT_PATH=cached pointer lookup (refresh at most every 100ms), compact json.dumps, one os.write
+TRACE_OP_PROPAGATION=PASS
+REVISION_TRANSITION_TRACE=PASS
+ACTIVITY_SEQ_TRACE=PASS
+MCP_TOOL_COUNT=25
+MCP_WRAPPER_IDENTITY=PASS
+GUI_1250MS_CADENCE_CHANGED=NO
+GUI_MCP_LOGS_BUTTON=PASS
+GUI_MCP_LOGS_TOOLTIP=Open the folder containing LIVE and MCP operation logs.
+MCP_DOCS_CHANGE=NO
+
+LIVE_STATE_IPC_TESTS=29 passed, 2 failed
+IPC_FAILURE_CAUSED_BY_TRACE=NO
+IPC_FAILURE_EVIDENCE=The only failures are test_terminate_pid_tree_kills_process_and_children and test_connect_or_start_true_startup_hang. Both fail in existing Windows process termination/_is_pid_alive assertions in contextor/core/live_state/runtime.py; the trace diff does not touch _terminate_pid_tree, _is_pid_alive, or their call sites. Running the same two tests in a fresh pytest process with contextor.core.runtime_trace.trace_event monkeypatched to a no-op produced the identical two failures.
+
+TRACE_1000_EVENT_MIN_US=77.73
+TRACE_1000_EVENT_MEDIAN_US=89.96
+TRACE_1000_EVENT_P95_US=351.02
+TRACE_1000_EVENT_MAX_US=69497.03
+TRACE_1000_EVENT_BYTES=155560
+
+TESTS_RUN=tests/test_runtime_trace.py tests/test_live_state_ipc.py tests/test_mcp_diagnostics.py tests/test_program_log.py tests/test_gui_live_startup.py tests/test_live_desktop_integration.py tests/test_live_watcher_startup_reconciliation.py tests/test_live_activity_status.py
+TESTS_PASSED=112
+TESTS_FAILED=2 unrelated Windows termination tests
+MANUAL_MCP_RESTART_REQUIRED=YES
+MANUAL_DESKTOP_LIVE_RESTART_REQUIRED=YES
+FILES_CHANGED=contextor/core/runtime_trace.py contextor/core/paths.py contextor/__main__.py contextor/core/live_state/watcher.py contextor/core/live_state/ipc.py contextor/core/live_state/runtime.py contextor/mcp_server.py contextor/ui/gui.py contextor/ui/system_actions.py tests/test_runtime_trace.py
+GENERATED_ARTIFACT_CLEANUP=package_root()/logs contains one benchmark JSONL still held open by an already-running process; active pointer is absent. No process was restarted or terminated per task constraints.
+COMPLETE_RAW_DIFFS=Use `git diff --` for tracked files and the complete new-file contents for the two untracked files; walkthrough itself excluded.
+VERDICT=IMPLEMENTATION_PASS
 RUNTIME_FRESHNESS=PASS
 R0=4449
 R1=4449

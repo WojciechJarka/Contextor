@@ -26,6 +26,7 @@ _lock = threading.RLock()
 _active_meta: dict[str, object] | None = None
 _active_path: Path | None = None
 _active_sid: str | None = None
+_active_fd: int | None = None
 _last_pointer_check = 0.0
 _counter = 0
 _operation_var: contextvars.ContextVar[str | None] = contextvars.ContextVar(
@@ -77,7 +78,7 @@ def _read_pointer() -> tuple[dict[str, object], Path] | None:
 
 
 def _refresh_pointer(*, force: bool = False) -> Path | None:
-    global _active_meta, _active_path, _active_sid, _last_pointer_check
+    global _active_meta, _active_path, _active_sid, _active_fd, _last_pointer_check
     now = time.monotonic()
     with _lock:
         if not force and now - _last_pointer_check < _CHECK_INTERVAL:
@@ -85,12 +86,24 @@ def _refresh_pointer(*, force: bool = False) -> Path | None:
         _last_pointer_check = now
         resolved = _read_pointer()
         if resolved is None:
+            if _active_fd is not None:
+                try:
+                    os.close(_active_fd)
+                except OSError:
+                    pass
+                _active_fd = None
             _active_meta = None
             _active_path = None
             _active_sid = None
             return None
         meta, path = resolved
         if meta != _active_meta or path != _active_path:
+            if _active_fd is not None:
+                try:
+                    os.close(_active_fd)
+                except OSError:
+                    pass
+                _active_fd = None
             _active_meta = meta
             _active_path = path
             _active_sid = str(meta["sid"])
@@ -106,10 +119,17 @@ def active_trace_path(*, force_refresh: bool = False) -> Path | None:
 
 
 def _append(record: dict[str, object], path: Path) -> None:
+    global _active_fd
     try:
         payload = json.dumps(record, ensure_ascii=False, separators=(",", ":")) + "\n"
-        with open(path, "ab", buffering=0) as handle:
-            handle.write(payload.encode("utf-8"))
+        encoded = payload.encode("utf-8")
+        with _lock:
+            if _active_fd is None:
+                flags = os.O_WRONLY | os.O_APPEND | os.O_CREAT
+                if hasattr(os, "O_BINARY"):
+                    flags |= os.O_BINARY
+                _active_fd = os.open(str(path), flags)
+            os.write(_active_fd, encoded)
     except Exception:
         pass
 
@@ -126,7 +146,7 @@ def _header_records(sid: str, started_at: str, desktop_pid: int, file_name: str)
 
 def start_desktop_trace_session() -> Path | None:
     """Create and publish one trace for this Desktop lifetime."""
-    global _active_meta, _active_path, _active_sid, _last_pointer_check
+    global _active_meta, _active_path, _active_sid, _active_fd, _last_pointer_check
     try:
         logs = runtime_logs_dir()
         logs.mkdir(parents=True, exist_ok=True)
@@ -143,6 +163,7 @@ def start_desktop_trace_session() -> Path | None:
         atomic_write(_pointer_path(), json.dumps(pointer, ensure_ascii=False, separators=(",", ":")))
         with _lock:
             _active_meta, _active_path, _active_sid = pointer, path.resolve(), sid
+            _active_fd = None
             _last_pointer_check = time.monotonic()
         trace_event("DESKTOP", "SESSION_START", op=new_trace_operation("d"))
         return path
@@ -151,7 +172,7 @@ def start_desktop_trace_session() -> Path | None:
 
 
 def finish_desktop_trace_session() -> None:
-    global _active_meta, _active_path, _active_sid, _last_pointer_check
+    global _active_meta, _active_path, _active_sid, _active_fd, _last_pointer_check
     try:
         sid = _active_sid
         path = _active_path
@@ -164,6 +185,12 @@ def finish_desktop_trace_session() -> None:
             except FileNotFoundError:
                 pass
         with _lock:
+            if _active_fd is not None:
+                try:
+                    os.close(_active_fd)
+                except OSError:
+                    pass
+                _active_fd = None
             _active_meta = _active_path = _active_sid = None
             _last_pointer_check = 0.0
     except Exception:

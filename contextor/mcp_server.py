@@ -380,6 +380,24 @@ def _instrument_mcp_tool(func: Any, tool_name: str) -> Any:
     from inspect import iscoroutinefunction
     from contextor.mcp.diagnostics import inject_diagnostics_summary
     from contextor.core.runtime_trace import new_trace_operation, trace_event
+
+    def emit_trace(*args: Any, **kwargs: Any) -> None:
+        try:
+            trace_event(*args, **kwargs)
+        except Exception:
+            pass
+
+    def emit_telemetry(*, root_path: Any, success: bool, error: str | None, trace_op: str):
+        try:
+            return _emit_mcp_call_telemetry(
+                tool_name, root_path, success=success, error=error, trace_op=trace_op
+            )
+        except TypeError as exc:
+            # Preserve compatibility with narrow test/embedding shims that
+            # still implement the pre-trace four-argument telemetry hook.
+            if "trace_op" not in str(exc):
+                raise
+            return _emit_mcp_call_telemetry(tool_name, root_path, success=success, error=error)
     signature = inspect.signature(func)
     supports_allow_large_output = "allow_large_output" in signature.parameters
 
@@ -389,7 +407,7 @@ def _instrument_mcp_tool(func: Any, tool_name: str) -> Any:
             op = new_trace_operation("m")
             started = time.monotonic()
             root_path = _tool_repository_argument(func, args, kwargs)
-            trace_event("MCP", "CALL_START", op=op, tool=tool_name, repo=root_path)
+            emit_trace("MCP", "CALL_START", op=op, tool=tool_name, repo=root_path)
             try:
                 bound = signature.bind_partial(*args, **kwargs)
                 allow_large_output = bool(bound.arguments.get("allow_large_output", False))
@@ -397,7 +415,7 @@ def _instrument_mcp_tool(func: Any, tool_name: str) -> Any:
                 allow_large_output = False
             try:
                 result = await func(*args, **kwargs)
-                trace_event("MCP", "IMPLEMENTATION_END", op=op, tool=tool_name, elapsed_ms=(time.monotonic() - started) * 1000.0)
+                emit_trace("MCP", "IMPLEMENTATION_END", op=op, tool=tool_name, elapsed_ms=(time.monotonic() - started) * 1000.0)
                 diagnostics_started = time.monotonic()
                 result = inject_diagnostics_summary(
                     result,
@@ -406,14 +424,14 @@ def _instrument_mcp_tool(func: Any, tool_name: str) -> Any:
                     allow_large_output=allow_large_output,
                     supports_allow_large_output=supports_allow_large_output,
                 )
-                trace_event("MCP", "DIAGNOSTICS_END", op=op, tool=tool_name, elapsed_ms=(time.monotonic() - diagnostics_started) * 1000.0)
-                telemetry = _emit_mcp_call_telemetry(tool_name, root_path, success=True, trace_op=op)
-                trace_event("MCP", "TELEMETRY_END", op=op, tool=tool_name, rev=(telemetry or {}).get("revision") if isinstance(telemetry, dict) else None, seq=(telemetry or {}).get("seq") if isinstance(telemetry, dict) else None, elapsed_ms=(time.monotonic() - started) * 1000.0)
-                trace_event("MCP", "CALL_END", op=op, tool=tool_name, elapsed_ms=(time.monotonic() - started) * 1000.0, status="ok", bytes=len(result.encode("utf-8")) if isinstance(result, str) else None)
+                emit_trace("MCP", "DIAGNOSTICS_END", op=op, tool=tool_name, elapsed_ms=(time.monotonic() - diagnostics_started) * 1000.0)
+                telemetry = emit_telemetry(root_path=root_path, success=True, error=None, trace_op=op)
+                emit_trace("MCP", "TELEMETRY_END", op=op, tool=tool_name, rev=(telemetry or {}).get("revision") if isinstance(telemetry, dict) else None, seq=(telemetry or {}).get("seq") if isinstance(telemetry, dict) else None, elapsed_ms=(time.monotonic() - started) * 1000.0)
+                emit_trace("MCP", "CALL_END", op=op, tool=tool_name, elapsed_ms=(time.monotonic() - started) * 1000.0, status="ok", bytes=len(result.encode("utf-8")) if isinstance(result, str) else None)
                 return result
             except Exception as exc:
-                trace_event("MCP", "CALL_FAIL", op=op, tool=tool_name, elapsed_ms=(time.monotonic() - started) * 1000.0, err=exc)
-                _emit_mcp_call_telemetry(tool_name, root_path, success=False, error=str(exc), trace_op=op)
+                emit_trace("MCP", "CALL_FAIL", op=op, tool=tool_name, elapsed_ms=(time.monotonic() - started) * 1000.0, err=exc)
+                emit_telemetry(root_path=root_path, success=False, error=str(exc), trace_op=op)
                 raise
         return async_wrapper
     else:
@@ -422,7 +440,7 @@ def _instrument_mcp_tool(func: Any, tool_name: str) -> Any:
             op = new_trace_operation("m")
             started = time.monotonic()
             root_path = _tool_repository_argument(func, args, kwargs)
-            trace_event("MCP", "CALL_START", op=op, tool=tool_name, repo=root_path)
+            emit_trace("MCP", "CALL_START", op=op, tool=tool_name, repo=root_path)
             try:
                 bound = signature.bind_partial(*args, **kwargs)
                 allow_large_output = bool(bound.arguments.get("allow_large_output", False))
@@ -430,7 +448,7 @@ def _instrument_mcp_tool(func: Any, tool_name: str) -> Any:
                 allow_large_output = False
             try:
                 result = func(*args, **kwargs)
-                trace_event("MCP", "IMPLEMENTATION_END", op=op, tool=tool_name, elapsed_ms=(time.monotonic() - started) * 1000.0)
+                emit_trace("MCP", "IMPLEMENTATION_END", op=op, tool=tool_name, elapsed_ms=(time.monotonic() - started) * 1000.0)
                 diagnostics_started = time.monotonic()
                 result = inject_diagnostics_summary(
                     result,
@@ -439,14 +457,14 @@ def _instrument_mcp_tool(func: Any, tool_name: str) -> Any:
                     allow_large_output=allow_large_output,
                     supports_allow_large_output=supports_allow_large_output,
                 )
-                trace_event("MCP", "DIAGNOSTICS_END", op=op, tool=tool_name, elapsed_ms=(time.monotonic() - diagnostics_started) * 1000.0)
-                telemetry = _emit_mcp_call_telemetry(tool_name, root_path, success=True, trace_op=op)
-                trace_event("MCP", "TELEMETRY_END", op=op, tool=tool_name, rev=(telemetry or {}).get("revision") if isinstance(telemetry, dict) else None, seq=(telemetry or {}).get("seq") if isinstance(telemetry, dict) else None, elapsed_ms=(time.monotonic() - started) * 1000.0)
-                trace_event("MCP", "CALL_END", op=op, tool=tool_name, elapsed_ms=(time.monotonic() - started) * 1000.0, status="ok", bytes=len(result.encode("utf-8")) if isinstance(result, str) else None)
+                emit_trace("MCP", "DIAGNOSTICS_END", op=op, tool=tool_name, elapsed_ms=(time.monotonic() - diagnostics_started) * 1000.0)
+                telemetry = emit_telemetry(root_path=root_path, success=True, error=None, trace_op=op)
+                emit_trace("MCP", "TELEMETRY_END", op=op, tool=tool_name, rev=(telemetry or {}).get("revision") if isinstance(telemetry, dict) else None, seq=(telemetry or {}).get("seq") if isinstance(telemetry, dict) else None, elapsed_ms=(time.monotonic() - started) * 1000.0)
+                emit_trace("MCP", "CALL_END", op=op, tool=tool_name, elapsed_ms=(time.monotonic() - started) * 1000.0, status="ok", bytes=len(result.encode("utf-8")) if isinstance(result, str) else None)
                 return result
             except Exception as exc:
-                trace_event("MCP", "CALL_FAIL", op=op, tool=tool_name, elapsed_ms=(time.monotonic() - started) * 1000.0, err=exc)
-                _emit_mcp_call_telemetry(tool_name, root_path, success=False, error=str(exc), trace_op=op)
+                emit_trace("MCP", "CALL_FAIL", op=op, tool=tool_name, elapsed_ms=(time.monotonic() - started) * 1000.0, err=exc)
+                emit_telemetry(root_path=root_path, success=False, error=str(exc), trace_op=op)
                 raise
         return sync_wrapper
 
