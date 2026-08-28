@@ -516,12 +516,12 @@ def test_get_module_context_revision_scoped_query_index_rebuilds_on_revision_cha
         return original_read(root)
 
     monkeypatch.setattr(query_helpers, "read_registries", counted_read)
-    get_module_context(str(tmp_path), module_name="pkg.mod_a")
-    get_module_context(str(tmp_path), module_name="pkg.mod_a")
+    get_module_context(str(tmp_path), module="pkg/mod_a.py")
+    get_module_context(str(tmp_path), module="pkg/mod_a.py")
     assert len(read_calls) == 1
 
     state.revision = 102
-    get_module_context(str(tmp_path), module_name="pkg.mod_a")
+    get_module_context(str(tmp_path), module="pkg/mod_a.py")
     assert len(read_calls) == 2
 
 

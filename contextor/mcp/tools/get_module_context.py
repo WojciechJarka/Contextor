@@ -71,18 +71,49 @@ def get_module_context(
     }
     cache_key = str(root)
     revision = getattr(state, "revision", None)
-    cached = _QUERY_INDEX_CACHE.get(cache_key)
-    if cached is not None and cached[0] == revision:
-        registries = cached[1]
-        catalog = cached[2]
-    else:
-        registries = query_helpers.read_registries(root)
-        catalog = catalog_from_registry(
-            str(root),
-            module_paths=canonical_module_paths or None,
+    effective_name = (module_name or "").strip()
+    effective_alias = (module or "").strip()
+    direct_query = effective_alias or effective_name
+    direct_module = (
+        direct_query
+        if effective_name == effective_alias or not (effective_name and effective_alias)
+        else ""
+    )
+    direct_module_obj = (getattr(state, "modules", {}) or {}).get(direct_module)
+    direct_fast_path = bool(
+        direct_module_obj is not None
+        and direct_module
+        and not query_helpers.is_module_id(direct_module)
+    )
+    if direct_fast_path:
+        direct_id = str(getattr(direct_module_obj, "module_id", direct_module))
+        registries = (
+            {direct_module: direct_id},
+            {direct_id: direct_module},
+            {},
+            {},
         )
-        if revision is not None:
-            _QUERY_INDEX_CACHE[cache_key] = (revision, registries, catalog)
+        catalog = IndexCatalog(
+            modules={direct_id: direct_module},
+            artifacts={},
+            module_paths=canonical_module_paths,
+            recovered_modules={},
+            recovered_artifacts={},
+        )
+        cached = None
+    else:
+        cached = _QUERY_INDEX_CACHE.get(cache_key)
+        if cached is not None and cached[0] == revision:
+            registries = cached[1]
+            catalog = cached[2]
+        else:
+            registries = query_helpers.read_registries(root)
+            catalog = catalog_from_registry(
+                str(root),
+                module_paths=canonical_module_paths or None,
+            )
+            if revision is not None:
+                _QUERY_INDEX_CACHE[cache_key] = (revision, registries, catalog)
     mod_path_to_id, mod_id_to_path, art_path_to_id, art_id_to_path = registries
     if not catalog.modules and mod_id_to_path:
         catalog = IndexCatalog(
@@ -92,9 +123,6 @@ def get_module_context(
             recovered_modules={},
             recovered_artifacts={},
         )
-
-    effective_name = (module_name or "").strip()
-    effective_alias = (module or "").strip()
 
     if effective_name and effective_alias:
         res_name = resolve_index_query(effective_name, catalog, repo_root=str(root))
