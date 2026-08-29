@@ -288,7 +288,6 @@ def test_h3a_case_i_crash_window_false_verified_prevented(tmp_path):
     from contextor.core.paths import repo_cache_dir
     from contextor.core.analysis.state_manager import FileStateManager
     from contextor.core.live_state.store import read_metadata
-    from contextor.core.live_state.store import read_metadata
 
     repo, mod_a = _setup_repo(tmp_path)
     ContextorFacade.analyze_project(str(repo))

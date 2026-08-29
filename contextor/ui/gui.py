@@ -892,6 +892,7 @@ class ContextorGUI:
                     self._set_live_status("LIVE: shared state attached; watcher active")
                 else:
                     self._set_live_status("LIVE: generation conflict; analysis required")
+                    return
             else:
                 published = client.publish(state, origin="desktop_analysis")
                 if isinstance(published, dict) and published.get("status") == "ok":

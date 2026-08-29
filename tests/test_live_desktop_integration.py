@@ -47,7 +47,6 @@ def test_same_revision_startup_attaches_without_redundant_publish(tmp_path, monk
         def start(self): pass
 
     statuses = []
-    statuses = []
     controller = SimpleNamespace(
         live_watcher=None, live_event_feed=None, live_watchers={},
         live_event_feeds={}, repo_id_var=_LiveIntegrationFakeVar(),
@@ -75,6 +74,8 @@ def test_same_revision_different_state_id_does_not_attach_as_same_generation(tmp
     remote = SimpleNamespace(modules={}, revision=7, state_id="remote-generation")
     events = []
     statuses = []
+    watcher_starts = []
+    feed_starts = []
 
     class Client:
         def snapshot(self):
@@ -84,12 +85,12 @@ def test_same_revision_different_state_id_does_not_attach_as_same_generation(tmp
             events.append("publish")
 
     class Watcher:
-        def __init__(self, *_args, **_kwargs): pass
-        def start(self): pass
+        def __init__(self, *_args, **_kwargs): watcher_starts.append(True)
+        def start(self): watcher_starts.append("started")
 
     class Feed:
-        def __init__(self, *_args, **_kwargs): pass
-        def start(self): pass
+        def __init__(self, *_args, **_kwargs): feed_starts.append(True)
+        def start(self): feed_starts.append("started")
 
     controller = SimpleNamespace(
         live_watcher=None, live_event_feed=None, live_watchers={},
@@ -108,6 +109,53 @@ def test_same_revision_different_state_id_does_not_attach_as_same_generation(tmp
 
     assert events == []
     assert "LIVE: generation conflict; analysis required" in statuses
+    assert watcher_starts == []
+    assert feed_starts == []
+
+
+def test_same_revision_missing_state_id_does_not_start_live_components(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    PersistentIdentityRegistry(str(repo))
+    loaded = SimpleNamespace(modules={}, revision=7, state_id="loaded-generation")
+    remote = SimpleNamespace(modules={}, revision=7)
+    statuses = []
+    watcher_starts = []
+    feed_starts = []
+
+    class Client:
+        def snapshot(self):
+            return {"state": remote, "revision": 7}
+
+        def publish(self, *_args, **_kwargs):
+            raise AssertionError("same-revision generation conflict must not publish")
+
+    class Watcher:
+        def __init__(self, *_args, **_kwargs): watcher_starts.append(True)
+        def start(self): watcher_starts.append("started")
+
+    class Feed:
+        def __init__(self, *_args, **_kwargs): feed_starts.append(True)
+        def start(self): feed_starts.append("started")
+
+    controller = SimpleNamespace(
+        live_watcher=None, live_event_feed=None, live_watchers={},
+        live_event_feeds={}, repo_id_var=_LiveIntegrationFakeVar(),
+        _set_live_status=statuses.append,
+    )
+    monkeypatch.setattr(gui, "connect_or_start", lambda *_args, **_kwargs: Client())
+    monkeypatch.setattr(gui, "DesktopLiveWatcher", Watcher)
+    monkeypatch.setattr(gui, "DesktopLiveEventFeed", Feed)
+    monkeypatch.setattr(
+        "contextor.core.analysis.state_manager.load_engine_state",
+        lambda *_args, **_kwargs: loaded,
+    )
+
+    gui.ContextorGUI._start_live_watcher(controller, str(repo))
+
+    assert "LIVE: generation conflict; analysis required" in statuses
+    assert watcher_starts == []
+    assert feed_starts == []
 
 
 def test_desktop_publishes_latest_snapshot_and_replaces_existing_watcher(
