@@ -183,7 +183,7 @@ def prepare_source_update(
     # 2. Extract imports
     try:
         from contextor.core.symbol_engine.indexer import read_imports
-        new_imports, error = read_imports(path)
+        new_imports, error = read_imports(path, tree=parsed_tree)
         if error:
             return PreparedSourceUpdate(
                 module_path=module_path,
@@ -219,7 +219,7 @@ def prepare_source_update(
             extract_file_symbols,
             _module_own_symbols,
         )
-        raw_symbols = extract_file_symbols(str(path))
+        raw_symbols = extract_file_symbols(str(path), tree=parsed_tree)
         own_symbols = _module_own_symbols(raw_symbols)
         old_consumers = (old_artifacts or {}).get("consumers", {})
         new_artifacts = {
@@ -258,7 +258,7 @@ def prepare_source_update(
     from contextor.core.reference.engine import extract_module_usage_facts
     new_usage = extract_module_usage_facts(
         module_path,
-        source_text,
+        parsed_tree,
         imports=new_imports,
     )
     curr_old_usage = old_usage if old_usage is not None else ModuleUsageFacts()

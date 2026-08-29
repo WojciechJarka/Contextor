@@ -99,7 +99,11 @@ class AdvancedImportVisitor(ast.NodeVisitor):
         )
 
 
-def read_imports(file_path: Path) -> tuple[list[ImportRef] | None, str | None]:
+def read_imports(
+    file_path: Path,
+    *,
+    tree: ast.AST | None = None,
+) -> tuple[list[ImportRef] | None, str | None]:
     """
     Ekstrakcja surowych importów AST.
 
@@ -112,7 +116,8 @@ def read_imports(file_path: Path) -> tuple[list[ImportRef] | None, str | None]:
     """
 
     try:
-        tree = parse_source(file_path)
+        if tree is None:
+            tree = parse_source(file_path)
 
     except SourceError as exc:
         return None, str(exc)

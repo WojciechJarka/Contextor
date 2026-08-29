@@ -125,12 +125,17 @@ class SymbolVisitor(ast.NodeVisitor):
         self.generic_visit(node)
 
 
-def extract_symbol_facts(file_path: Path | str) -> SymbolFacts:
+def extract_symbol_facts(
+    file_path: Path | str,
+    *,
+    tree: ast.AST | None = None,
+) -> SymbolFacts:
     path = Path(file_path)
     facts = SymbolFacts()
 
     try:
-        tree = parse_source(path)
+        if tree is None:
+            tree = parse_source(path)
     except SourceError as exc:
         facts.errors.append(str(exc))
         return facts
@@ -140,7 +145,11 @@ def extract_symbol_facts(file_path: Path | str) -> SymbolFacts:
     return visitor.facts
 
 
-def extract_file_symbols(file_path: Path | str) -> dict:
+def extract_file_symbols(
+    file_path: Path | str,
+    *,
+    tree: ast.AST | None = None,
+) -> dict:
     """Legacy Adapter"""
-    facts = extract_symbol_facts(file_path)
+    facts = extract_symbol_facts(file_path, tree=tree)
     return facts.to_dict()
