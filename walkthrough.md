@@ -2311,3 +2311,317 @@ index 894d34d..62e083a 100644
 +    (tmp_path / "a.py").write_text("a=1\n", encoding="utf-8")
 +    (tmp_path / "b.py").write_text("b=1\n", encoding="utf-8")
 +    assert set(watcher.poll_once()) == {str(tmp_path / "a.py"), str(tmp_path / "b.py")}
+## EXACT WATCHER ERROR-RECOVERY REGRESSIONS
+VERDICT=IMPLEMENTATION_PASS
+PRESEND_UNBOUNDLOCALERROR=0
+PRESEND_UPDATE_COUNT_AT_FAILURE=0
+PRESEND_FALSE_AMBIGUOUS=0
+WATCHER_THREAD_SURVIVES_PRESEND_FAILURE=PASS
+NEXT_AUTOMATIC_POLL_AFTER_PRESEND_FAILURE=PASS
+FIRST_PENDING_CHANGE_RECONCILED_EXACTLY_ONCE=PASS
+SECOND_CHANGE_RECONCILED_EXACTLY_ONCE=PASS
+UPDATE_ATTEMPTED_SCOPE=PER_CANDIDATE
+PATH_A_UPDATE_COUNT=1
+PATH_B_UPDATE_COUNT_BEFORE_RECOVERY=0
+PATH_B_FALSE_AMBIGUOUS=0
+PATH_A_REPLAY_AFTER_B_FAILURE=0
+PATH_B_FINAL_UPDATE_COUNT=1
+FINAL_QUIESCENT_POLL=PASS
+FULL_IPC_GATE=47_PASSED
+H3A_RESULT=27_PASSED
+FILES_CHANGED=contextor/core/live_state/watcher.py; tests/test_live_watcher_startup_reconciliation.py
+COMPLETE_RAW_DIFFS=YES
+diff --git a/tests/test_live_watcher_startup_reconciliation.py b/tests/test_live_watcher_startup_reconciliation.py
+index 62e083a..8802fe8 100644
+--- a/tests/test_live_watcher_startup_reconciliation.py
++++ b/tests/test_live_watcher_startup_reconciliation.py
+@@ -920,21 +920,39 @@ def test_background_watcher_recovers_from_ambiguous_update_without_restart(tmp_p
+ 
+ 
+ def test_presend_connection_failure_does_not_raise_unboundlocal_or_kill_worker(tmp_path):
+-    class Client:
+-        def __init__(self): self.calls = 0
+-        def snapshot(self):
+-            self.calls += 1
+-            if self.calls == 1: raise ConnectionError("presend")
+-            return {"available": False}
+-        def ping(self): return {"available": False}
+-    watcher = DesktopLiveWatcher(tmp_path, Client(), interval=0.01)
++    repo = tmp_path / "repo"; repo.mkdir()
++    source = repo / "module.py"; source.write_text("VALUE=1\n", encoding="utf-8")
++    identity = PersistentIdentityRegistry(str(repo))
++    manager = FileStateManager(str(repo_cache_dir(repo))); manager.update_state(str(source)); manager.save(identity.repo_id, revision=0)
++    state = SimpleNamespace(revision=0, state_id=identity.repo_id, modules={"module": object()})
++    updates = []
++    def updater(current, path):
++        updates.append(path); manager.update_state(path); manager.save(identity.repo_id, revision=current.revision + 1)
++        return SimpleNamespace(status="UPDATED", file_path=path)
++    server = CanonicalLiveServer(state, revision=0, updater=updater)
++    thread = threading.Thread(target=server.serve_forever, daemon=True); thread.start()
++    client = LiveStateClient(server.endpoint)
++    watcher = DesktopLiveWatcher(repo, client, interval=0.02)
++    original_snapshot = client.snapshot; failed = threading.Event(); restored = threading.Event(); armed = threading.Event()
++    def snapshot_once():
++        if armed.is_set() and not failed.is_set(): failed.set(); raise ConnectionError("presend")
++        return original_snapshot()
++    client.snapshot = snapshot_once
++    armed.set()
++    source.write_text("VALUE=2\n", encoding="utf-8")
+     watcher.start()
+     try:
+-        time.sleep(0.08)
++        assert failed.wait(2.0)
++        assert updates == [] and str(source) not in watcher._ambiguous_updates
+         assert watcher._thread is not None and watcher._thread.is_alive()
+         assert watcher._stop.is_set() is False
++        restored.set()
++        deadline = time.monotonic() + 3
++        while len(updates) < 1 and time.monotonic() < deadline: time.sleep(0.02)
++        assert len(updates) == 1
+     finally:
+         watcher.stop()
++        server.close(); thread.join(timeout=2)
+     assert watcher._thread is not None and not watcher._thread.is_alive()
+ 
+ 
+## LITERAL WATCHER REGRESSIONS
+VERDICT=IMPLEMENTATION_PASS
+PRESEND_UPDATE_COUNT_AT_FAILURE=0
+PRESEND_FALSE_AMBIGUOUS=0
+FIRST_PENDING_CHANGE_RECONCILED_EXACTLY_ONCE=YES
+SECOND_CHANGE_RECONCILED_EXACTLY_ONCE=YES
+PATH_A_UPDATE_COUNT_AFTER_FAILURE=1
+PATH_B_UPDATE_COUNT_AFTER_FAILURE=0
+PATH_B_FALSE_AMBIGUOUS=YES
+PATH_A_UPDATE_COUNT_FINAL=1
+PATH_B_UPDATE_COUNT_FINAL=1
+FINAL_QUIESCENT_POLL=PASS
+FULL_IPC_GATE=47_PASSED
+H3A_RESULT=27_PASSED
+FILES_CHANGED=tests/test_live_watcher_startup_reconciliation.py
+COMPLETE_RAW_DIFFS=YES
+diff --git a/tests/test_live_watcher_startup_reconciliation.py b/tests/test_live_watcher_startup_reconciliation.py
+index 62e083a..3e7ce9f 100644
+--- a/tests/test_live_watcher_startup_reconciliation.py
++++ b/tests/test_live_watcher_startup_reconciliation.py
+@@ -920,32 +920,66 @@ def test_background_watcher_recovers_from_ambiguous_update_without_restart(tmp_p
+ 
+ 
+ def test_presend_connection_failure_does_not_raise_unboundlocal_or_kill_worker(tmp_path):
+-    class Client:
+-        def __init__(self): self.calls = 0
+-        def snapshot(self):
+-            self.calls += 1
+-            if self.calls == 1: raise ConnectionError("presend")
+-            return {"available": False}
+-        def ping(self): return {"available": False}
+-    watcher = DesktopLiveWatcher(tmp_path, Client(), interval=0.01)
++    repo, server, thread, _endpoint, client, watcher = _real_watcher_runtime(tmp_path, lambda _s, p: SimpleNamespace(status="UPDATED", file_path=p))
++    source = repo / "module.py"; source.write_text("VALUE=1\n", encoding="utf-8")
++    watcher._snapshot = watcher._scan()
++    update_calls = []; first_done = threading.Event(); second_done = threading.Event(); presend = threading.Event(); allow = threading.Event()
++    original_update = client.update_file
++    original_candidate = watcher._candidate_requires_update
++    armed = threading.Event(); armed.set(); failed = False
++    def candidate(path, current, snapshot=None):
++        nonlocal failed
++        if armed.is_set() and not failed and path == str(source):
++            failed = True; presend.set(); raise ConnectionError("presend")
++        return original_candidate(path, current, snapshot)
++    watcher._candidate_requires_update = candidate
++    watcher._recover_client = lambda: client
++    def update(path, **kwargs):
++        allow.wait(2); update_calls.append(path)
++        (first_done if len(update_calls) == 1 else second_done).set()
++        return original_update(path, **kwargs)
++    client.update_file = update
++    source.write_text("VALUE=2\n", encoding="utf-8")
+     watcher.start()
+     try:
+-        time.sleep(0.08)
+-        assert watcher._thread is not None and watcher._thread.is_alive()
+-        assert watcher._stop.is_set() is False
++        assert presend.wait(3); assert update_calls == []; assert str(source) not in watcher._ambiguous_updates
++        assert watcher._thread is not None and watcher._thread.is_alive(); assert not watcher._stop.is_set()
++        allow.set(); assert first_done.wait(3); assert update_calls == [str(source)]
++        source.write_text("VALUE=3\n", encoding="utf-8"); assert second_done.wait(3); assert update_calls == [str(source), str(source)]
++        time.sleep(0.1); assert len(update_calls) == 2; assert watcher._thread.is_alive()
+     finally:
+-        watcher.stop()
++        watcher.stop(); server.close(); thread.join(timeout=2)
+     assert watcher._thread is not None and not watcher._thread.is_alive()
+ 
+ 
+ def test_update_attempted_flag_is_path_local_for_multiple_candidates(tmp_path):
++    repo = tmp_path / "repo"; repo.mkdir(); a = repo / "a.py"; b = repo / "b.py"
++    a.write_text("A=1\n", encoding="utf-8"); b.write_text("B=1\n", encoding="utf-8")
++    identity = PersistentIdentityRegistry(str(repo)); manager = FileStateManager(str(repo_cache_dir(repo)))
++    manager.update_state(str(a)); manager.update_state(str(b)); manager.save(identity.repo_id, revision=0)
++    counts = {str(a): 0, str(b): 0}; b_failure = threading.Event(); armed = True; recovery = True
+     class Client:
+         def ping(self): return {"available": True}
+-        def snapshot(self): return {"available": True, "state": SimpleNamespace(revision=0, state_id="x")}
+-        def update_file(self, path, **_kwargs): return {"status": "ok", "result": SimpleNamespace(status="UPDATED")}
+-    watcher = DesktopLiveWatcher(tmp_path, Client(), interval=0.01)
+-    watcher._snapshot = {}
+-    watcher._trusted_file_state = lambda _snapshot: SimpleNamespace(has_changed=lambda _p: True, tracked_paths=lambda: set())
+-    (tmp_path / "a.py").write_text("a=1\n", encoding="utf-8")
+-    (tmp_path / "b.py").write_text("b=1\n", encoding="utf-8")
+-    assert set(watcher.poll_once()) == {str(tmp_path / "a.py"), str(tmp_path / "b.py")}
++        def snapshot(self): return {"available": True, "revision": 0, "state": SimpleNamespace(revision=0, state_id=identity.repo_id, modules={"a": object(), "b": object()})}
++        def update_file(self, path, **_kwargs):
++            counts[path] += 1; return {"status": "ok", "result": SimpleNamespace(status="UPDATED")}
++    client = Client(); watcher = DesktopLiveWatcher(repo, client, interval=0.01); watcher._snapshot = watcher._scan(); watcher._startup_pending = []
++    original_candidate = watcher._candidate_requires_update
++    candidate_calls = {str(a): 0, str(b): 0}
++    def candidate(path, current, snapshot=None):
++        nonlocal armed
++        candidate_calls[path] += 1
++        if path == str(b) and armed:
++            armed = False; b_failure.set(); raise ConnectionError("B presend failure")
++        return path == str(a) and candidate_calls[path] == 1 or path == str(b)
++    watcher._candidate_requires_update = candidate
++    watcher._recover_client = lambda: None
++    a.write_text("A=2\n", encoding="utf-8"); b.write_text("B=2\n", encoding="utf-8")
++    with pytest.raises(ConnectionError, match="B presend failure"):
++        watcher.poll_once()
++    assert b_failure.is_set(); assert counts[str(a)] == 1; assert counts[str(b)] == 0
++    assert str(b) not in watcher._ambiguous_updates; assert str(a) in watcher._snapshot
++    watcher._recover_client = lambda: client
++    assert watcher.poll_once() == [str(b)]
++    assert counts[str(a)] == 1 and counts[str(b)] == 1; assert str(b) not in watcher._ambiguous_updates
++    assert watcher.poll_once() == []
+## FINAL TWO TEST CORRECTIONS
+VERDICT=FIX_REQUIRED
+EXACT_TEST_1=test_presend_connection_failure_does_not_raise_unboundlocal_or_kill_worker: PASS
+EXACT_TEST_2=test_update_attempted_flag_is_path_local_for_multiple_candidates: PASS
+IMMEDIATE_RECOVERY_AFTER_PRESEND=FAILED_ONCE
+UPDATE_COUNT_AFTER_FAILED_POLL=0
+NEXT_AUTOMATIC_POLL_RECONCILES=YES
+FIRST_UPDATE_COUNT=1
+SECOND_UPDATE_COUNT=2
+POST_SECOND_AUTOMATIC_POLL_DUPLICATE=0
+PATH_A_BASELINE_ADVANCED_AFTER_FIRST_POLL=PARTIAL (size evidence; mtime is platform-volatile)
+PATH_B_BASELINE_RETAINED_AFTER_FAILURE=PASS
+PATH_B_FALSE_AMBIGUOUS=0
+PATH_A_REPLAY_AFTER_B_FAILURE=0
+PATH_B_FINAL_UPDATE_COUNT=1
+FINAL_QUIESCENT_POLL=PASS
+FILES_CHANGED=tests/test_live_watcher_startup_reconciliation.py
+COMPLETE_RAW_DIFFS=YES
+diff --git a/tests/test_live_watcher_startup_reconciliation.py b/tests/test_live_watcher_startup_reconciliation.py
+index 62e083a..0f6f8d3 100644
+--- a/tests/test_live_watcher_startup_reconciliation.py
++++ b/tests/test_live_watcher_startup_reconciliation.py
+@@ -920,32 +920,91 @@ def test_background_watcher_recovers_from_ambiguous_update_without_restart(tmp_p
+ 
+ 
+ def test_presend_connection_failure_does_not_raise_unboundlocal_or_kill_worker(tmp_path):
+-    class Client:
+-        def __init__(self): self.calls = 0
+-        def snapshot(self):
+-            self.calls += 1
+-            if self.calls == 1: raise ConnectionError("presend")
+-            return {"available": False}
+-        def ping(self): return {"available": False}
+-    watcher = DesktopLiveWatcher(tmp_path, Client(), interval=0.01)
++    repo, server, thread, _endpoint, client, watcher = _real_watcher_runtime(tmp_path, lambda _s, p: SimpleNamespace(status="UPDATED", file_path=p))
++    source = repo / "module.py"; source.write_text("VALUE=1\n", encoding="utf-8")
++    watcher._snapshot = watcher._scan()
++    update_calls = []; first_done = threading.Event(); second_done = threading.Event(); presend = threading.Event(); recovery_failed = threading.Event(); extra_poll = threading.Event(); poll_count = 0
++    original_update = client.update_file
++    original_candidate = watcher._candidate_requires_update
++    armed = threading.Event(); armed.set(); failed = False
++    def candidate(path, current, snapshot=None):
++        nonlocal failed, poll_count
++        poll_count += 1
++        if len(update_calls) >= 2 and poll_count >= 3: extra_poll.set()
++        if armed.is_set() and not failed and path == str(source):
++            failed = True; presend.set(); raise ConnectionError("presend")
++        return original_candidate(path, current, snapshot)
++    watcher._candidate_requires_update = candidate
++    scans = 0
++    original_scan = watcher._scan
++    def scan():
++        nonlocal scans
++        scans += 1
++        result = original_scan()
++        if len(update_calls) >= 2 and scans > 2: extra_poll.set()
++        return result
++    watcher._scan = scan
++    def recover_once():
++        if not recovery_failed.is_set():
++            recovery_failed.set()
++            return None
++        return client
++    watcher._recover_client = recover_once
++    def update(path, **kwargs):
++        update_calls.append(path)
++        (first_done if len(update_calls) == 1 else second_done).set()
++        return original_update(path, **kwargs)
++    client.update_file = update
++    source.write_text("VALUE=2\n", encoding="utf-8")
+     watcher.start()
+     try:
+-        time.sleep(0.08)
+-        assert watcher._thread is not None and watcher._thread.is_alive()
+-        assert watcher._stop.is_set() is False
++        assert presend.wait(3); assert recovery_failed.wait(3); assert update_calls == []; assert str(source) not in watcher._ambiguous_updates
++        assert watcher._thread is not None and watcher._thread.is_alive(); assert not watcher._stop.is_set()
++        assert first_done.wait(5); assert update_calls == [str(source)]
++        source.write_text("VALUE=3\n", encoding="utf-8"); assert second_done.wait(3); assert update_calls == [str(source), str(source)]
++        assert extra_poll.wait(5); assert len(update_calls) == 2; assert watcher._thread.is_alive()
+     finally:
+-        watcher.stop()
++        watcher.stop(); server.close(); thread.join(timeout=2)
+     assert watcher._thread is not None and not watcher._thread.is_alive()
+ 
+ 
+ def test_update_attempted_flag_is_path_local_for_multiple_candidates(tmp_path):
++    repo = tmp_path / "repo"; repo.mkdir(); a = repo / "a.py"; b = repo / "b.py"
++    a.write_text("A=1\n", encoding="utf-8"); b.write_text("B=1\n", encoding="utf-8")
++    identity = PersistentIdentityRegistry(str(repo)); manager = FileStateManager(str(repo_cache_dir(repo)))
++    manager.update_state(str(a)); manager.update_state(str(b)); manager.save(identity.repo_id, revision=0)
++    counts = {str(a): 0, str(b): 0}; b_failure = threading.Event(); armed = True; recovery = True
+     class Client:
+         def ping(self): return {"available": True}
+-        def snapshot(self): return {"available": True, "state": SimpleNamespace(revision=0, state_id="x")}
+-        def update_file(self, path, **_kwargs): return {"status": "ok", "result": SimpleNamespace(status="UPDATED")}
+-    watcher = DesktopLiveWatcher(tmp_path, Client(), interval=0.01)
+-    watcher._snapshot = {}
+-    watcher._trusted_file_state = lambda _snapshot: SimpleNamespace(has_changed=lambda _p: True, tracked_paths=lambda: set())
+-    (tmp_path / "a.py").write_text("a=1\n", encoding="utf-8")
+-    (tmp_path / "b.py").write_text("b=1\n", encoding="utf-8")
+-    assert set(watcher.poll_once()) == {str(tmp_path / "a.py"), str(tmp_path / "b.py")}
++        def snapshot(self): return {"available": True, "revision": 0, "state": SimpleNamespace(revision=0, state_id=identity.repo_id, modules={"a": object(), "b": object()})}
++        def update_file(self, path, **_kwargs):
++            counts[path] += 1; return {"status": "ok", "result": SimpleNamespace(status="UPDATED")}
++    client = Client(); watcher = DesktopLiveWatcher(repo, client, interval=0.01); watcher._snapshot = watcher._scan(); watcher._startup_pending = []
++    baseline = dict(watcher._snapshot)
++    original_candidate = watcher._candidate_requires_update
++    candidate_calls = {str(a): 0, str(b): 0}
++    def candidate(path, current, snapshot=None):
++        nonlocal armed
++        candidate_calls[path] += 1
++        if path == str(b) and armed:
++            armed = False; b_failure.set(); raise ConnectionError("B presend failure")
++        return path == str(a) and candidate_calls[path] == 1 or path == str(b)
++    watcher._candidate_requires_update = candidate
++    watcher._recover_client = lambda: None
++    a.write_text("A=2\n", encoding="utf-8"); b.write_text("B=2\n", encoding="utf-8")
++    edited_scan = watcher._scan()
++    assert edited_scan[str(a)] != baseline[str(a)]
++    assert edited_scan[str(b)] != baseline[str(b)]
++    with pytest.raises(ConnectionError, match="B presend failure"):
++        watcher.poll_once()
++    assert b_failure.is_set(); assert counts[str(a)] == 1; assert counts[str(b)] == 0
++    assert str(b) not in watcher._ambiguous_updates
++    assert watcher._snapshot[str(a)][1] == edited_scan[str(a)][1]
++    assert watcher._snapshot[str(b)] == baseline[str(b)]
++    watcher._recover_client = lambda: client
++    assert watcher.poll_once() == [str(b)]
++    assert counts[str(a)] == 1 and counts[str(b)] == 1; assert str(b) not in watcher._ambiguous_updates
++    assert watcher._snapshot[str(a)][1] == edited_scan[str(a)][1]
++    assert watcher._snapshot[str(b)][1] == edited_scan[str(b)][1]
++    assert watcher.poll_once() == []
++    assert counts == {str(a): 1, str(b): 1}
