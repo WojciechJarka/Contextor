@@ -25,6 +25,7 @@ def test_index_cache_miss_stores_symbol_facts(tmp_path, isolated_dirs):
 
 
 def test_new_format_cache_hit_does_not_parse(tmp_path, isolated_dirs, monkeypatch):
+    monkeypatch.setenv("CONTEXTOR_DISABLE_PROCESS_POOL", "1")
     root = tmp_path / "repo"
     root.mkdir()
     source = root / "module.py"
@@ -41,6 +42,38 @@ def test_new_format_cache_hit_does_not_parse(tmp_path, isolated_dirs, monkeypatc
 
     assert result.modules["module"].imports == []
     assert result.symbol_facts_by_module["module"]["status"] == "available"
+
+
+def test_source_change_invalidates_symbol_facts_then_warm_hit_is_parse_free(
+    tmp_path, isolated_dirs, monkeypatch
+):
+    monkeypatch.setenv("CONTEXTOR_DISABLE_PROCESS_POOL", "1")
+    root = tmp_path / "repo"
+    root.mkdir()
+    source = root / "module.py"
+    source.write_text("def old():\n    return 1\n", encoding="utf-8")
+    indexer.index_repository(str(root))
+
+    source.write_text("def new():\n    return 2\n", encoding="utf-8")
+    indexer._CACHE_MANAGERS.pop(str(root.resolve()), None)
+    parse_calls = []
+    original_parse = indexer.parse_source
+    monkeypatch.setattr(
+        indexer,
+        "parse_source",
+        lambda path: (parse_calls.append(path) or original_parse(path)),
+    )
+
+    changed = indexer.index_repository(str(root))
+
+    assert len(parse_calls) == 1
+    assert changed.symbol_facts_by_module["module"]["facts"]["functions"] == ["new"]
+
+    indexer._CACHE_MANAGERS.pop(str(root.resolve()), None)
+    parse_calls.clear()
+    warm = indexer.index_repository(str(root))
+    assert parse_calls == []
+    assert warm.symbol_facts_by_module["module"]["facts"]["functions"] == ["new"]
 
 
 def test_legacy_cache_is_migrated_once_then_warm_hit_is_parse_free(
