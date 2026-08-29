@@ -375,6 +375,11 @@ class DesktopLiveWatcher(_PollingLiveWorker):
                     continue
                 self._emit("LIVE: connection lost during update; recovering...")
                 if self._recover_client() is None:
+                    # Earlier candidates in this poll may already have received
+                    # an acknowledged canonical response.  Preserve those
+                    # per-path advances before surfacing the later pre-send
+                    # transport failure.
+                    self._snapshot = next_snapshot
                     raise
                 try:
                     recovered_snapshot = self.client.snapshot()

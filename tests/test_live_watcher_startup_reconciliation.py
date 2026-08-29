@@ -952,8 +952,12 @@ def test_presend_connection_failure_does_not_raise_unboundlocal_or_kill_worker(t
     watcher._recover_client = recover_once
     def update(path, **kwargs):
         update_calls.append(path)
-        (first_done if len(update_calls) == 1 else second_done).set()
-        return original_update(path, **kwargs)
+        result = original_update(path, **kwargs)
+        if len(update_calls) == 1:
+            first_done.set()
+        elif len(update_calls) == 2:
+            second_done.set()
+        return result
     client.update_file = update
     source.write_text("VALUE=2\n", encoding="utf-8")
     watcher.start()
@@ -991,10 +995,10 @@ def test_update_attempted_flag_is_path_local_for_multiple_candidates(tmp_path):
         return path == str(a) and candidate_calls[path] == 1 or path == str(b)
     watcher._candidate_requires_update = candidate
     watcher._recover_client = lambda: None
-    a.write_text("A=2\n", encoding="utf-8"); b.write_text("B=2\n", encoding="utf-8")
+    a.write_text("A=22222\n", encoding="utf-8"); b.write_text("B=22222\n", encoding="utf-8")
     edited_scan = watcher._scan()
-    assert edited_scan[str(a)] != baseline[str(a)]
-    assert edited_scan[str(b)] != baseline[str(b)]
+    assert baseline[str(a)][1] != edited_scan[str(a)][1]
+    assert baseline[str(b)][1] != edited_scan[str(b)][1]
     with pytest.raises(ConnectionError, match="B presend failure"):
         watcher.poll_once()
     assert b_failure.is_set(); assert counts[str(a)] == 1; assert counts[str(b)] == 0
