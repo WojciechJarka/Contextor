@@ -45,6 +45,7 @@ def build_artifact_pipeline(
     soft_edges: dict,
     progress_callback=None,
     log=None,
+    symbol_facts_by_module: dict[str, dict] | None = None,
 ) -> ArtifactPipelineResult:
     """Build mutually consistent artifact and graph report representations."""
     log_program_event("REPORT", "artifact pipeline start", modules=len(modules))
@@ -56,6 +57,7 @@ def build_artifact_pipeline(
         root_path,
         runtime,
         progress_callback=progress_callback,
+        symbol_facts_by_module=symbol_facts_by_module,
     )
     artifact_data["debug_info"] = {
         "module_count": len(modules),

@@ -404,6 +404,7 @@ class ContextorFacade:
             datestamp=datestamp,
             trie=trie,
             package_root=package_root,
+            symbol_facts_by_module=index.symbol_facts_by_module,
         )
 
         if log and report_result.get("high_risk_layers"):
@@ -690,6 +691,7 @@ class ContextorFacade:
                 str(root_resolved),
                 runtime,
                 progress_callback=artifacts_progress,
+                symbol_facts_by_module=getattr(index, "symbol_facts_by_module", None),
             )
         
         from contextor.core.reporting_engine.dictionary import IndexDictionary

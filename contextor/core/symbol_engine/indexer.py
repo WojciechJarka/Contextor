@@ -27,6 +27,26 @@ from contextor.core.domain.module import (
 from contextor.core.errors import AnalysisCancelled, checkpoint
 from contextor.core.paths import DEFAULT_IGNORED_DIRS
 from contextor.core.source import SourceError, parse_source
+from contextor.core.symbol_engine.extractor import extract_file_symbols
+
+
+SYMBOL_FACTS_SCHEMA_VERSION = 1
+_SYMBOL_FACTS_AVAILABLE = "available"
+_SYMBOL_FACTS_FAILURE = "failure"
+_SYMBOL_FACTS_NOT_COMPUTED = "not_computed"
+_SYMBOL_FACT_FIELDS = frozenset(
+    {
+        "classes",
+        "functions",
+        "methods",
+        "globals",
+        "calls",
+        "assignments",
+        "signatures",
+        "body_fingerprints",
+        "errors",
+    }
+)
 
 
 # ==========================================================
@@ -162,18 +182,80 @@ def _process_single_file(path_str: str, root_str: str) -> dict:
     cache = _cache_manager(root_str)
     cached_data = cache.get(path)
 
-    if cached_data:
+    symbol_facts = None
+    if cached_data is not None:
         error = cached_data.get("error")
         imports = None if error else [ImportRef(**imp) for imp in cached_data.get("imports", [])]
+
+        cached_facts = cached_data.get("symbol_facts") if not error else None
+        if (
+            isinstance(cached_facts, dict)
+            and cached_facts.get("schema_version") == SYMBOL_FACTS_SCHEMA_VERSION
+            and cached_facts.get("status") == _SYMBOL_FACTS_AVAILABLE
+            and isinstance(cached_facts.get("facts"), dict)
+            and set(cached_facts["facts"]) == _SYMBOL_FACT_FIELDS
+        ):
+            symbol_facts = cached_facts
+        elif not error:
+            try:
+                tree = parse_source(path)
+                migrated_facts = extract_file_symbols(path, tree=tree)
+                symbol_facts = {
+                    "schema_version": SYMBOL_FACTS_SCHEMA_VERSION,
+                    "status": _SYMBOL_FACTS_AVAILABLE,
+                    "facts": migrated_facts,
+                }
+                cache.set(
+                    path,
+                    {
+                        "imports": cached_data.get("imports", []),
+                        "error": error,
+                        "symbol_facts": symbol_facts,
+                    },
+                )
+            except SourceError as exc:
+                symbol_facts = {
+                    "schema_version": SYMBOL_FACTS_SCHEMA_VERSION,
+                    "status": _SYMBOL_FACTS_FAILURE,
+                    "exception_type": type(exc).__name__,
+                    "message": str(exc),
+                }
+            except Exception as exc:
+                symbol_facts = {
+                    "schema_version": SYMBOL_FACTS_SCHEMA_VERSION,
+                    "status": _SYMBOL_FACTS_FAILURE,
+                    "exception_type": type(exc).__name__,
+                    "message": str(exc),
+                }
     else:
-        imports, error = read_imports(path)
-        cache.set(
-            path,
-            {
-                "imports": [dataclasses.asdict(imp) for imp in imports or []],
-                "error": error,
-            },
-        )
+        try:
+            tree = parse_source(path)
+        except SourceError as exc:
+            imports, error = None, str(exc)
+        else:
+            imports, error = read_imports(path, tree=tree)
+            if error is None:
+                try:
+                    extracted_facts = extract_file_symbols(path, tree=tree)
+                    symbol_facts = {
+                        "schema_version": SYMBOL_FACTS_SCHEMA_VERSION,
+                        "status": _SYMBOL_FACTS_AVAILABLE,
+                        "facts": extracted_facts,
+                    }
+                except Exception as exc:
+                    symbol_facts = {
+                        "schema_version": SYMBOL_FACTS_SCHEMA_VERSION,
+                        "status": _SYMBOL_FACTS_FAILURE,
+                        "exception_type": type(exc).__name__,
+                        "message": str(exc),
+                    }
+        cache_data = {
+            "imports": [dataclasses.asdict(imp) for imp in imports or []],
+            "error": error,
+        }
+        if symbol_facts and symbol_facts.get("status") == _SYMBOL_FACTS_AVAILABLE:
+            cache_data["symbol_facts"] = symbol_facts
+        cache.set(path, cache_data)
 
     rel = path.relative_to(Path(root_str))
     module_id = ".".join(rel.with_suffix("").parts)
@@ -185,6 +267,7 @@ def _process_single_file(path_str: str, root_str: str) -> dict:
         "imports": imports,
         "error": error,
         "filename": path.name,
+        "symbol_facts": symbol_facts,
     }
 
 
@@ -230,6 +313,8 @@ class RepositoryIndex:
 
     skipped: list[SkippedFile]
 
+    symbol_facts_by_module: dict[str, dict] = dataclasses.field(default_factory=dict)
+
 
 def index_repository(
     root: str, excludes: list[str] = None, extra_ignored_dirs: set = None, progress_callback=None
@@ -248,6 +333,7 @@ def index_repository(
 
     modules: dict[str, Module] = {}
     skipped: list[SkippedFile] = []
+    symbol_facts_by_module: dict[str, dict] = {}
 
     ignored_dirs = set(DEFAULT_IGNORED_DIRS)
 
@@ -300,11 +386,14 @@ def index_repository(
                     absolute_path=res.get("absolute_path", res["path"]),
                     imports=res["imports"],
                 )
+                if res.get("symbol_facts") is not None:
+                    symbol_facts_by_module[res["module_id"]] = res["symbol_facts"]
             completed += 1
             checkpoint(progress_callback, res["filename"], completed, total_files)
         return RepositoryIndex(
             modules=modules,
             skipped=sorted(skipped, key=lambda item: item.path),
+            symbol_facts_by_module=symbol_facts_by_module,
         )
 
     with ProcessPoolExecutor() as executor:
@@ -333,6 +422,8 @@ def index_repository(
                     absolute_path=res.get("absolute_path", res["path"]),
                     imports=res["imports"],
                 )
+                if res.get("symbol_facts") is not None:
+                    symbol_facts_by_module[res["module_id"]] = res["symbol_facts"]
 
             completed += 1
             try:
@@ -344,6 +435,7 @@ def index_repository(
     return RepositoryIndex(
         modules=modules,
         skipped=sorted(skipped, key=lambda item: item.path),
+        symbol_facts_by_module=symbol_facts_by_module,
     )
 
 

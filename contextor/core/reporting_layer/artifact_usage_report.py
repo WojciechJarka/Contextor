@@ -118,21 +118,24 @@ def _symbol_kind(symbol: str, symbols: dict) -> str:
 _WORKER_MODULES: dict = {}
 _WORKER_ROOT: str = ""
 _WORKER_REFERENCE_INDEX: RepositoryReferenceIndex | None = None
+_WORKER_SYMBOL_FACTS: dict[str, dict] = {}
 
 
 def _init_artifact_worker(
     modules: dict,
     root_path: str,
     reference_index: RepositoryReferenceIndex | None = None,
+    symbol_facts_by_module: dict[str, dict] | None = None,
 ) -> None:
     """
     Initialize process-local worker state.
     """
-    global _WORKER_MODULES, _WORKER_ROOT, _WORKER_REFERENCE_INDEX
+    global _WORKER_MODULES, _WORKER_ROOT, _WORKER_REFERENCE_INDEX, _WORKER_SYMBOL_FACTS
 
     _WORKER_MODULES = modules
     _WORKER_ROOT = root_path
     _WORKER_REFERENCE_INDEX = reference_index
+    _WORKER_SYMBOL_FACTS = symbol_facts_by_module or {}
 
 
 def _process_single_artifact_module(module_id: str):
@@ -146,7 +149,11 @@ def _process_single_artifact_module(module_id: str):
         or module.path
     )
 
-    symbols = extract_file_symbols(str(absolute_path))
+    fact_record = _WORKER_SYMBOL_FACTS.get(module_id)
+    if fact_record and fact_record.get("status") == "available":
+        symbols = fact_record["facts"]
+    else:
+        symbols = extract_file_symbols(str(absolute_path))
     own_symbols = _module_own_symbols(symbols)
 
     if not own_symbols:
@@ -184,6 +191,7 @@ def collect_module_artifacts(
     root_path: str,
     progress_callback=None,
     reference_index: RepositoryReferenceIndex | None = None,
+    symbol_facts_by_module: dict[str, dict] | None = None,
 ) -> tuple[dict, dict]:
     """
     Collect artifact/reference information for all modules.
@@ -202,9 +210,25 @@ def collect_module_artifacts(
     if reference_index is None:
         reference_index = build_repository_reference_index(modules, root_path)
 
+    symbol_facts_by_module = symbol_facts_by_module or {}
+    for module_id, facts in symbol_facts_by_module.items():
+        if facts.get("status") == "failure":
+            failures[module_id] = (
+                f"{facts.get('exception_type', 'Exception')}: "
+                f"{facts.get('message', '')}"
+            )
+
+    eligible_module_ids = [
+        module_id
+        for module_id in modules
+        if module_id not in failures
+    ]
+
     if os.environ.get("CONTEXTOR_DISABLE_PROCESS_POOL") == "1":
-        _init_artifact_worker(modules, root_path, reference_index)
-        for module_id in modules:
+        _init_artifact_worker(
+            modules, root_path, reference_index, symbol_facts_by_module
+        )
+        for module_id in eligible_module_ids:
             try:
                 returned_module_id, data = _process_single_artifact_module(module_id)
                 result[returned_module_id] = data
@@ -216,14 +240,19 @@ def collect_module_artifacts(
 
     with ProcessPoolExecutor(
         initializer=_init_artifact_worker,
-        initargs=(modules, root_path, reference_index),
+        initargs=(
+            modules,
+            root_path,
+            reference_index,
+            symbol_facts_by_module,
+        ),
     ) as executor:
         futures = {
             executor.submit(
                 _process_single_artifact_module,
                 module_id,
             ): module_id
-            for module_id in modules
+            for module_id in eligible_module_ids
         }
 
         for future in as_completed(futures):
@@ -659,6 +688,7 @@ def generate_artifact_usage_report(
     root_path: str,
     runtime: dict | None = None,
     progress_callback=None,
+    symbol_facts_by_module: dict[str, dict] | None = None,
 ) -> dict:
     """
     Generate the global artifact usage report.
@@ -683,6 +713,7 @@ def generate_artifact_usage_report(
             modules,
             root_path,
             progress_callback=progress_callback,
+            symbol_facts_by_module=symbol_facts_by_module,
         )
     )
 
