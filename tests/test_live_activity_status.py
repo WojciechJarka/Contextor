@@ -76,6 +76,62 @@ class _FakeVar:
         return self.value
 
 
+def test_activity_cursor_resets_on_daemon_epoch_change_without_false_gap():
+    responses = [
+        {
+            "status": "ok", "activity_epoch": "epoch-a", "latest_seq": 1,
+            "earliest_retained_seq": 1, "activity_resync_required": False,
+            "events": [{"seq": 1, "category": "MCP_CALL", "tool": "a", "success": True}],
+            "truncated": False,
+        },
+        {
+            "status": "ok", "activity_epoch": "epoch-b", "latest_seq": 0,
+            "earliest_retained_seq": None, "activity_resync_required": True,
+            "events": [], "truncated": False,
+        },
+        {
+            "status": "ok", "activity_epoch": "epoch-b", "latest_seq": 1,
+            "earliest_retained_seq": 1, "activity_resync_required": False,
+            "events": [{"seq": 1, "category": "MCP_CALL", "tool": "b", "success": True}],
+            "truncated": False,
+        },
+    ]
+
+    class Client:
+        def get_events(self, **_kwargs):
+            return responses.pop(0)
+
+    delivered = []
+    feed = DesktopLiveEventFeed(Client(), lambda _message, event=None: delivered.append(event), initial_seq=0)
+    feed.poll_once()
+    feed.poll_once()
+
+    assert feed._activity_epoch == "epoch-b"
+    assert feed._last_seq == 1
+    assert [event["seq"] for event in delivered if event and "seq" in event] == [1, 1]
+    assert not any(event and event.get("operation") == "activity_gap" for event in delivered)
+
+
+def test_activity_gap_is_still_reported_for_real_missing_sequence_in_same_epoch():
+    class Client:
+        def get_events(self, **_kwargs):
+            return {
+                "status": "ok", "activity_epoch": "epoch-a", "latest_seq": 3,
+                "earliest_retained_seq": 3, "activity_resync_required": True,
+                "events": [{"seq": 3, "category": "MCP_CALL", "tool": "missing", "success": True}],
+                "truncated": False,
+            }
+
+    delivered = []
+    feed = DesktopLiveEventFeed(Client(), lambda message, event=None: delivered.append((message, event)), initial_seq=1)
+    feed._activity_epoch = "epoch-a"
+    feed.poll_once()
+
+    gaps = [event for _message, event in delivered if event and event.get("operation") == "activity_gap"]
+    assert len(gaps) == 1
+    assert feed._last_seq == 3
+
+
 @pytest.fixture
 def live_server_instance():
     server = CanonicalLiveServer(state=SimpleNamespace(modules={}, revision=1), revision=1)
@@ -449,7 +505,7 @@ def test_desktop_watcher_and_mcp_update_file_single_event_semantics(tmp_path):
     py_file.write_text("x = 1\n", encoding="utf-8")
     PersistentIdentityRegistry(str(repo))
 
-    initial_state = SimpleNamespace(modules={"module": object()}, revision=1)
+    initial_state = SimpleNamespace(modules={"module": object()}, revision=1, state_id="sid")
 
     def updater(state, path):
         state.revision += 1
@@ -472,6 +528,13 @@ def test_desktop_watcher_and_mcp_update_file_single_event_semantics(tmp_path):
         client,
         on_status=lambda msg: gui_status_callback(msg, event=None),
     )
+    watcher._trusted_file_state = lambda _snapshot: SimpleNamespace(
+        has_changed=lambda _path: True,
+        tracked_paths=lambda: set(),
+        revision=1,
+        state_id="sid",
+    )
+    watcher._startup_requires_resync = False
     feed = DesktopLiveEventFeed(
         client,
         lambda msg, event=None: gui_status_callback(msg, event=event),
@@ -480,7 +543,7 @@ def test_desktop_watcher_and_mcp_update_file_single_event_semantics(tmp_path):
 
     try:
         time.sleep(0.05)
-        py_file.write_text("x = 2\n", encoding="utf-8")
+        py_file.write_text("x = 22\n", encoding="utf-8")
 
         changed = watcher.poll_once()
         assert str(py_file) in changed

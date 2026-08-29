@@ -131,6 +131,18 @@ def _terminate_pid_tree(pid: int | None) -> None:
             )
         except Exception:
             pass
+        if _is_pid_alive(pid):
+            try:
+                import ctypes
+
+                handle = ctypes.windll.kernel32.OpenProcess(0x0001, False, int(pid))
+                if handle:
+                    try:
+                        ctypes.windll.kernel32.TerminateProcess(handle, 1)
+                    finally:
+                        ctypes.windll.kernel32.CloseHandle(handle)
+            except Exception:
+                pass
     else:
         try:
             os.kill(int(pid), 15)  # SIGTERM
@@ -367,6 +379,15 @@ def connect_or_start(
     # Clean up any stale unresponsive endpoint
     stale_endpoint = _read_endpoint(root)
     if stale_endpoint is not None:
+        # A live owner that is temporarily unable to answer (for example while
+        # executing a long update) is not a proven-dead service.  Never replace
+        # it or send a competing mutation merely because the liveness ping
+        # timed out; the caller must observe and retry later.
+        if stale_endpoint.pid is not None and _is_pid_alive(stale_endpoint.pid):
+            raise TimeoutError(
+                "Canonical LIVE service is busy but still owned by a live "
+                f"process (pid={stale_endpoint.pid}); replacement is unsafe."
+            )
         try:
             LiveStateClient(stale_endpoint).request("shutdown", timeout=1.5)
         except (OSError, EOFError, ConnectionError, RuntimeError, TimeoutError):

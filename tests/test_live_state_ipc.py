@@ -666,6 +666,7 @@ def test_desktop_watcher_reports_create_edit_and_delete_without_manual_update(tm
     def update(state, file_path):
         updates.append(file_path)
         state.updates += 1
+        return SimpleNamespace(status="UPDATED", file_path=file_path)
 
     server = CanonicalLiveServer(SimpleNamespace(updates=0), updater=update)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -673,6 +674,9 @@ def test_desktop_watcher_reports_create_edit_and_delete_without_manual_update(tm
     watcher = DesktopLiveWatcher(
         tmp_path, LiveStateClient(server.endpoint), on_status=statuses.append
     )
+    watcher._trusted_file_state = lambda _snapshot: object()
+    watcher._candidate_requires_update = lambda *_args: True
+    watcher._startup_requires_resync = False
     target = tmp_path / "sample.py"
     try:
         target.write_text("value = 1\n", encoding="utf-8")
@@ -698,12 +702,19 @@ def test_desktop_watcher_reports_create_edit_and_delete_without_manual_update(tm
 
 
 def test_first_run_watcher_waits_for_initial_canonical_state(tmp_path):
-    server = CanonicalLiveServer(updater=lambda state, path: setattr(state, "last_path", path))
+    def update(state, path):
+        state.last_path = path
+        return SimpleNamespace(status="UPDATED", file_path=path)
+
+    server = CanonicalLiveServer(updater=update)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     client = LiveStateClient(server.endpoint)
     statuses = []
     watcher = DesktopLiveWatcher(tmp_path, client, on_status=statuses.append)
+    watcher._trusted_file_state = lambda _snapshot: object()
+    watcher._candidate_requires_update = lambda *_args: True
+    watcher._startup_requires_resync = False
     try:
         (tmp_path / "before_analysis.py").write_text("value = 1\n", encoding="utf-8")
         assert watcher.poll_once() == []
@@ -737,6 +748,8 @@ def test_desktop_watcher_reports_syntax_location(tmp_path):
     watcher = DesktopLiveWatcher(
         tmp_path, LiveStateClient(server.endpoint), on_status=statuses.append
     )
+    watcher._trusted_file_state = lambda _snapshot: object()
+    watcher._candidate_requires_update = lambda *_args: True
     try:
         target = tmp_path / "broken.py"
         target.write_text("def broken(:\n", encoding="utf-8")
@@ -768,6 +781,58 @@ def test_real_service_process_starts_connects_and_stops(tmp_path, monkeypatch):
         while endpoint.exists() and time.monotonic() < deadline:
             time.sleep(0.05)
         assert not endpoint.exists()
+
+
+def test_test_live_runtime_isolation_preserves_existing_live_service(
+    tmp_path, monkeypatch
+):
+    """Independent real LIVE namespaces cannot replace or tear down each other."""
+
+    cache = tmp_path / "cache"
+    repo_a = tmp_path / "repo_a"
+    repo_b = tmp_path / "repo_b"
+    repo_a.mkdir()
+    repo_b.mkdir()
+    PersistentIdentityRegistry(str(repo_a))
+    PersistentIdentityRegistry(str(repo_b))
+    monkeypatch.setenv("CONTEXTOR_CACHE_DIR", str(cache))
+
+    client_a = connect_or_start(
+        repo_a, owner_pid=os.getpid(), owner_token="isolation-a"
+    )
+    endpoint_a = endpoint_file(repo_a)
+    pid_a = client_a.service_pid
+    epoch_a = client_a.get_events().get("activity_epoch")
+    try:
+        assert client_a.ping()["status"] == "ok"
+        assert endpoint_a.is_file()
+
+        client_b = connect_or_start(
+            repo_b, owner_pid=os.getpid(), owner_token="isolation-b"
+        )
+        endpoint_b = endpoint_file(repo_b)
+        try:
+            assert client_b.ping()["status"] == "ok"
+            assert endpoint_b.is_file()
+            assert endpoint_b != endpoint_a
+            assert endpoint_b.parent != endpoint_a.parent
+            assert client_b.service_pid != pid_a
+        finally:
+            client_b.request("shutdown")
+            deadline = time.monotonic() + 5.0
+            while endpoint_b.exists() and time.monotonic() < deadline:
+                time.sleep(0.05)
+            assert not endpoint_b.exists()
+
+        assert endpoint_a.is_file()
+        assert client_a.ping()["status"] == "ok"
+        assert client_a.get_events().get("activity_epoch") == epoch_a
+    finally:
+        client_a.request("shutdown")
+        deadline = time.monotonic() + 5.0
+        while endpoint_a.exists() and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert not endpoint_a.exists()
 
 
 def test_connect_or_start_ownership_when_spawning_new(tmp_path, monkeypatch):

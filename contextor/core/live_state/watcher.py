@@ -436,6 +436,7 @@ class DesktopLiveEventFeed(_PollingLiveWorker):
         self.on_status = on_status
         super().__init__(interval=interval, thread_name="contextor-live-event-feed")
         self._last_seq: int = 0
+        self._activity_epoch: str | None = None
         self._poll_lock = threading.Lock()
         if initial_seq is not None:
             self._last_seq = int(initial_seq)
@@ -443,6 +444,7 @@ class DesktopLiveEventFeed(_PollingLiveWorker):
             try:
                 resp = client.get_events(limit=1)
                 self._last_seq = int(resp.get("latest_seq", 0))
+                self._activity_epoch = resp.get("activity_epoch")
             except (OSError, EOFError, TimeoutError, ConnectionError):
                 self._last_seq = 0
 
@@ -523,6 +525,29 @@ class DesktopLiveEventFeed(_PollingLiveWorker):
                 if response.get("status") != "ok":
                     return
 
+                current_epoch = response.get("activity_epoch")
+                previous_epoch = self._activity_epoch
+                if current_epoch is not None and previous_epoch is not None and current_epoch != previous_epoch:
+                    previous_cursor = self._last_seq
+                    self._activity_epoch = str(current_epoch)
+                    self._last_seq = 0
+                    try:
+                        from contextor.core.runtime_trace import trace_event
+                        trace_event(
+                            "GUI", "ACTIVITY_EPOCH_RESET",
+                            previous_cursor=previous_cursor,
+                            expected_seq=previous_cursor + 1,
+                            received_first_seq=response.get("earliest_retained_seq"),
+                            received_last_seq=response.get("latest_seq"),
+                            previous_epoch=previous_epoch,
+                            current_epoch=current_epoch,
+                        )
+                    except Exception:
+                        pass
+                    continue
+                if current_epoch is not None and self._activity_epoch is None:
+                    self._activity_epoch = str(current_epoch)
+
                 if response.get("activity_resync_required") and not gap_reported:
                     from datetime import datetime, timezone
 
@@ -536,7 +561,16 @@ class DesktopLiveEventFeed(_PollingLiveWorker):
                     )
                     try:
                         from contextor.core.runtime_trace import trace_event
-                        trace_event("GUI", "ACTIVITY_GAP", seq=response.get("latest_seq"), status="gap")
+                        seqs = [item.get("seq") for item in response.get("events", []) if isinstance(item, dict) and isinstance(item.get("seq"), int)]
+                        trace_event(
+                            "GUI", "ACTIVITY_GAP", seq=response.get("latest_seq"), status="gap",
+                            previous_cursor=self._last_seq,
+                            expected_seq=self._last_seq + 1,
+                            received_first_seq=min(seqs) if seqs else response.get("earliest_retained_seq"),
+                            received_last_seq=max(seqs) if seqs else response.get("latest_seq"),
+                            previous_epoch=self._activity_epoch,
+                            current_epoch=response.get("activity_epoch"),
+                        )
                     except Exception:
                         pass
                     gap_reported = True

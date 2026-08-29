@@ -7,6 +7,7 @@ from contextlib import contextmanager
 import secrets
 import threading
 import time
+import uuid
 from dataclasses import dataclass
 from multiprocessing.connection import Client, Listener
 from typing import Any, Callable
@@ -222,6 +223,7 @@ class CanonicalLiveServer:
                     )
 
         self._activity_seq = 0
+        self._activity_epoch = uuid.uuid4().hex
         self._updater = updater
         self._persister = persister
         self._retention = retention
@@ -567,6 +569,7 @@ class CanonicalLiveServer:
 
                 return {
                     "status": "ok",
+                    "activity_epoch": self._activity_epoch,
                     "revision": self._revision,
                     "result": result,
                     "seq": evt["seq"],

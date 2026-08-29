@@ -14,7 +14,11 @@ from contextor.core.analysis.incremental_engine import IncrementalAnalysisEngine
 from contextor.core.api.facade import exclude_state_file
 from contextor.core.graph.graph import build_graph, build_trie, detect_package_root
 from contextor.core.live_state.ipc import CanonicalLiveServer, LiveStateClient
-from contextor.core.live_state.runtime import _repository_persister, _repository_updater
+from contextor.core.live_state.runtime import (
+    _repository_persister,
+    _repository_updater,
+    endpoint_file,
+)
 from contextor.core.live_state.store import save_snapshot
 from contextor.core.live_state.watcher import DesktopLiveWatcher
 from contextor.core.paths import repo_cache_dir
@@ -28,6 +32,42 @@ from contextor.core.symbol_engine.indexer import index_repository
 
 
 pytestmark = pytest.mark.live
+
+
+def _real_watcher_runtime(tmp_path, updater):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    identity = PersistentIdentityRegistry(str(repo))
+    server = CanonicalLiveServer(
+        SimpleNamespace(revision=0, state_id=identity.repo_id),
+        revision=0,
+        updater=updater,
+    )
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    endpoint = endpoint_file(repo)
+    endpoint.parent.mkdir(parents=True, exist_ok=True)
+    endpoint.write_text(
+        json.dumps(
+            {
+                "host": server.endpoint.host,
+                "port": server.endpoint.port,
+                "authkey_hex": server.endpoint.authkey_hex,
+                "pid": os.getpid(),
+                "owner_pid": os.getpid(),
+                "owner_token": "test-watcher-owner",
+                "repo_id": identity.repo_id,
+                "root_path": str(repo.resolve()),
+            }
+        ),
+        encoding="utf-8",
+    )
+    client = LiveStateClient(server.endpoint)
+    watcher = DesktopLiveWatcher(repo, client)
+    watcher._trusted_file_state = lambda _snapshot: object()
+    watcher._startup_requires_resync = False
+    watcher._startup_pending = []
+    return repo, server, thread, endpoint, client, watcher
 
 
 def _bootstrap_state(repo):
@@ -499,6 +539,125 @@ def test_change_during_startup_resync_is_not_lost(tmp_path):
     assert calls == ["update"]
 
 
+def test_real_full_analysis_rebases_watcher_without_duplicate_update(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    source = repo / "module.py"
+    source.write_text("VALUE = 1\n", encoding="utf-8")
+    monkeypatch.setenv("CONTEXTOR_CACHE_DIR", str(tmp_path / "cache"))
+    from contextor.core.api.facade import ContextorFacade
+    from contextor.core.analysis.full_analysis_coordinator import run_full_analysis_exclusive
+    from contextor.core.live_state.store import read_metadata
+
+    errors, initial = ContextorFacade.analyze_project(str(repo))
+    assert not errors and initial is not None
+    initial_metadata = read_metadata(repo_cache_dir(repo))
+    initial.revision = initial_metadata.revision
+    initial.state_id = initial_metadata.state_id
+    holder = {}
+    server = CanonicalLiveServer(
+        None,
+        revision=0,
+        updater=lambda _state, path: SimpleNamespace(status="UPDATED", file_path=path),
+        persister=lambda _state, _revision: None,
+    )
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    client = LiveStateClient(server.endpoint)
+    client.publish(initial, origin="desktop_analysis")
+    watcher = DesktopLiveWatcher(repo, client)
+    source.write_text("VALUE = 2\n", encoding="utf-8")
+    try:
+        def analysis(path, **kwargs):
+            time.sleep(0.25)
+            result = ContextorFacade.analyze_project(path, **kwargs)
+            result_metadata = read_metadata(repo_cache_dir(repo))
+            result[1].revision = result_metadata.revision
+            result[1].state_id = result_metadata.state_id
+            if result[1] is not None:
+                client.publish(result[1], origin="desktop_analysis")
+            return result
+
+        analysis_thread = threading.Thread(
+            target=lambda: run_full_analysis_exclusive(
+                repo, owner="full-analysis", analysis_fn=analysis, timeout=15.0
+            ),
+            daemon=True,
+        )
+        analysis_thread.start()
+        time.sleep(0.05)
+        assert watcher.poll_once() == []
+        analysis_thread.join(timeout=20)
+        assert not analysis_thread.is_alive()
+        assert watcher.poll_once() == []
+        assert watcher._startup_pending == []
+    finally:
+        server.close()
+        thread.join(timeout=2)
+
+
+def test_real_change_during_startup_resync_is_reconciled_once(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    source = repo / "module.py"
+    source.write_text("VALUE = 1\n", encoding="utf-8")
+    monkeypatch.setenv("CONTEXTOR_CACHE_DIR", str(tmp_path / "cache"))
+    from contextor.core.api.facade import ContextorFacade
+    from contextor.core.analysis.full_analysis_coordinator import run_full_analysis_exclusive
+    from contextor.core.live_state.store import read_metadata
+
+    errors, initial = ContextorFacade.analyze_project(str(repo))
+    assert not errors and initial is not None
+    initial_metadata = read_metadata(repo_cache_dir(repo))
+    initial.revision = initial_metadata.revision
+    initial.state_id = initial_metadata.state_id
+    holder = {}
+    server = CanonicalLiveServer(
+        None,
+        revision=0,
+        updater=lambda _state, path: SimpleNamespace(status="UPDATED", file_path=path),
+        persister=lambda _state, _revision: None,
+    )
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    client = LiveStateClient(server.endpoint)
+    client.publish(initial, origin="desktop_analysis")
+    updates = []
+
+    def resync_analysis(path, **kwargs):
+        result = ContextorFacade.analyze_project(path, **kwargs)
+        result_state_metadata = read_metadata(repo_cache_dir(repo))
+        result[1].revision = result_state_metadata.revision
+        result[1].state_id = result_state_metadata.state_id
+        time.sleep(0.05)
+        source.write_text("VALUE = 22\n", encoding="utf-8")
+        if result[1] is not None:
+            client.publish(result[1], origin="desktop_analysis")
+        return result
+
+    watcher = DesktopLiveWatcher(
+        repo,
+        client,
+        on_resync=lambda: run_full_analysis_exclusive(
+            repo, owner="startup-resync", analysis_fn=resync_analysis, timeout=15.0
+        ),
+    )
+    watcher._startup_requires_resync = True
+    original_update = client.update_file
+    client.update_file = lambda path, **kwargs: (
+        updates.append(path), original_update(path, **kwargs)
+    )[1]
+    try:
+        assert watcher.poll_once() == []
+        assert watcher._startup_pending == [str(source)]
+        assert watcher.poll_once() == [str(source)]
+        assert updates == [str(source)]
+        assert watcher.poll_once() == []
+    finally:
+        server.close()
+        thread.join(timeout=2)
+
+
 def test_update_transport_recovery_revalidates_generation_before_retry(tmp_path):
     repo = tmp_path / "repo"; repo.mkdir(); source = repo / "module.py"; source.write_text("VALUE = 1\n", encoding="utf-8")
 
@@ -600,3 +759,123 @@ def test_error_top_level_response_is_not_acknowledged(tmp_path):
     with pytest.raises(RuntimeError, match="rejected"):
         watcher.poll_once()
     assert watcher._snapshot[str(source)] == (0, 1)
+
+
+def test_slow_inflight_update_does_not_spawn_competing_live_service(tmp_path):
+    entered = threading.Event()
+    release = threading.Event()
+    update_count = []
+
+    def updater(state, path):
+        entered.set()
+        release.wait(timeout=30.0)
+        update_count.append(path)
+        return SimpleNamespace(status="UPDATED", file_path=path)
+
+    repo, server, thread, endpoint, client, watcher = _real_watcher_runtime(
+        tmp_path, updater
+    )
+    source = repo / "module.py"
+    source.write_text("VALUE = 1\n", encoding="utf-8")
+    watcher._snapshot = {str(source): (0, 1)}
+    candidate_results = iter((True, False, True))
+    watcher._candidate_requires_update = lambda *_args: next(candidate_results)
+    original_update = client.update_file
+    first = True
+
+    def short_first_update(path, **kwargs):
+        nonlocal first
+        if first:
+            first = False
+            return client.request(
+                "update_file", timeout=0.1, file_path=path, **kwargs
+            )
+        return original_update(path, **kwargs)
+
+    client.update_file = short_first_update
+    try:
+        source.write_text("VALUE = 2\n", encoding="utf-8")
+        assert watcher.poll_once() == []
+        assert entered.wait(timeout=2.0)
+        assert endpoint.is_file()
+        assert client.endpoint == LiveStateClient(server.endpoint).endpoint
+        release.set()
+        deadline = time.monotonic() + 5.0
+        while len(update_count) < 1 and time.monotonic() < deadline:
+            time.sleep(0.02)
+        assert len(update_count) == 1
+        assert watcher.poll_once() == []
+
+        source.write_text("VALUE = 3\n", encoding="utf-8")
+        assert watcher.poll_once() == [str(source)]
+        assert len(update_count) == 2
+    finally:
+        release.set()
+        server.close()
+        thread.join(timeout=2)
+
+
+def test_lost_update_response_revalidates_without_duplicate_mutation(tmp_path):
+    update_count = []
+
+    def updater(state, path):
+        update_count.append(path)
+        return SimpleNamespace(status="UPDATED", file_path=path)
+
+    repo, server, thread, _endpoint, client, watcher = _real_watcher_runtime(
+        tmp_path, updater
+    )
+    source = repo / "module.py"
+    source.write_text("VALUE = 1\n", encoding="utf-8")
+    watcher._snapshot = {str(source): (0, 1)}
+    watcher._candidate_requires_update = lambda *_args: not update_count
+    original_update = client.update_file
+
+    def lost_response(path, **kwargs):
+        original_update(path, **kwargs)
+        raise ConnectionError("response lost after commit")
+
+    client.update_file = lost_response
+    try:
+        source.write_text("VALUE = 2\n", encoding="utf-8")
+        assert watcher.poll_once() == []
+        assert update_count == [str(source)]
+        assert watcher.poll_once() == []
+        assert update_count == [str(source)]
+    finally:
+        server.close()
+        thread.join(timeout=2)
+
+
+def test_precommit_transport_failure_recovers_pending_watcher_change_once(tmp_path):
+    update_count = []
+
+    def updater(state, path):
+        update_count.append(path)
+        return SimpleNamespace(status="UPDATED", file_path=path)
+
+    repo, server, thread, _endpoint, client, watcher = _real_watcher_runtime(
+        tmp_path, updater
+    )
+    source = repo / "module.py"
+    source.write_text("VALUE = 1\n", encoding="utf-8")
+    watcher._snapshot = {str(source): (0, 1)}
+    watcher._candidate_requires_update = lambda *_args: True
+    original_update = client.update_file
+    first = True
+
+    def fail_before_commit(path, **kwargs):
+        nonlocal first
+        if first:
+            first = False
+            raise ConnectionError("transport failed before commit")
+        return original_update(path, **kwargs)
+
+    client.update_file = fail_before_commit
+    try:
+        source.write_text("VALUE = 2\n", encoding="utf-8")
+        assert watcher.poll_once() == [str(source)]
+        assert update_count == [str(source)]
+    finally:
+        server.close()
+        thread.join(timeout=2)

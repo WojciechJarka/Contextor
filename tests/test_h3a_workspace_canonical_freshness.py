@@ -3,6 +3,10 @@ import os
 import time
 from pathlib import Path
 
+import pytest
+
+pytestmark = pytest.mark.live
+
 from contextor.core.api.facade import ContextorFacade
 from contextor.mcp import analysis_jobs
 from contextor.mcp import runtime as mcp_runtime
