@@ -6888,3 +6888,5 @@
 {"ts":"2026-08-29T16:15:58.580+00:00","mono_ms":387136812,"sid":"d-13012-20260829_150523_424","pid":12136,"tid":10252,"d":"LIVE","ev":"ACTIVITY_APPEND","rev":148,"seq":148,"category":"LIVE_STATE","operation":"update_file","status":"UPDATED"}
 {"ts":"2026-08-29T16:15:58.580+00:00","mono_ms":387136812,"sid":"d-13012-20260829_150523_424","pid":12136,"tid":10252,"d":"LIVE","ev":"ACTIVITY_APPEND","rev":149,"seq":149,"category":"LIVE_STATE","operation":"update_file","status":"UPDATED"}
 {"ts":"2026-08-29T16:15:58.580+00:00","mono_ms":387136812,"sid":"d-13012-20260829_150523_424","pid":12136,"tid":10252,"d":"LIVE","ev":"ACTIVITY_APPEND","rev":150,"seq":150,"category":"LIVE_STATE","operation":"update_file","status":"UPDATED"}
+{"ts":"2026-08-29T16:20:01.897+00:00","mono_ms":387380125,"sid":"d-13012-20260829_150523_424","pid":5868,"tid":7528,"d":"LIVE","ev":"SERVICE_END","rev":5485,"repo":"C:\\Temp\\Contextor_Repo"}
+{"ts":"2026-08-29T16:20:06.014+00:00","mono_ms":387384250,"sid":"d-13012-20260829_150523_424","pid":13012,"tid":11836,"d":"DESKTOP","ev":"SESSION_END","op":"d-13012-7"}
