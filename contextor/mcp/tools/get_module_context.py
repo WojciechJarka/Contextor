@@ -319,9 +319,6 @@ def get_module_context(
         else:
             metrics_source = "deferred_topology_analytics"
 
-        if mod_path_to_id.get(module_name):
-            metrics["module_idx"] = mod_path_to_id[module_name]
-
         cached_analytics = getattr(state, "cached_analytics", {}) or {}
         cached_freshness = getattr(state, "cached_analytics_state", "deferred")
         if cached_freshness == "fresh" and isinstance(cached_analytics, dict):

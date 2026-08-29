@@ -191,6 +191,25 @@ def test_large_named_candidate_forces_indexed_preflight_and_exact_retry(monkeypa
 
 def test_query_does_not_parse_or_read_source(monkeypatch):
     _install(monkeypatch, [_edge("root", "callee", 2)])
-    monkeypatch.setattr(ast, "parse", lambda *_args, **_kwargs: pytest.fail("ast.parse called"))
-    monkeypatch.setattr(Path, "read_text", lambda *_args, **_kwargs: pytest.fail("read_text called"))
-    assert _call(direction="callees", representation="named")["status"] == "ok"
+    original_parse = ast.parse
+    parse_calls = []
+
+    def tracked_parse(*args, **kwargs):
+        parse_calls.append((args, kwargs))
+        return original_parse(*args, **kwargs)
+
+    original_read_text = Path.read_text
+    read_paths = []
+
+    def tracked_read_text(path, *args, **kwargs):
+        read_paths.append(path)
+        return original_read_text(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", tracked_read_text)
+    with monkeypatch.context() as scoped:
+        scoped.setattr(ast, "parse", tracked_parse)
+        result = _call(direction="callees", representation="named")
+
+    assert result["status"] == "ok"
+    assert parse_calls == []
+    assert [path for path in read_paths if path.suffix == ".py"] == []

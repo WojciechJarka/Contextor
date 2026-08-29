@@ -411,8 +411,10 @@ def _instrument_mcp_tool(func: Any, tool_name: str) -> Any:
             try:
                 bound = signature.bind_partial(*args, **kwargs)
                 allow_large_output = bool(bound.arguments.get("allow_large_output", False))
+                fields = bound.arguments.get("fields")
             except (TypeError, ValueError):
                 allow_large_output = False
+                fields = None
             try:
                 result = await func(*args, **kwargs)
                 emit_trace("MCP", "IMPLEMENTATION_END", op=op, tool=tool_name, elapsed_ms=(time.monotonic() - started) * 1000.0)
@@ -423,6 +425,7 @@ def _instrument_mcp_tool(func: Any, tool_name: str) -> Any:
                     tool_name,
                     allow_large_output=allow_large_output,
                     supports_allow_large_output=supports_allow_large_output,
+                    fields=fields,
                 )
                 emit_trace("MCP", "DIAGNOSTICS_END", op=op, tool=tool_name, elapsed_ms=(time.monotonic() - diagnostics_started) * 1000.0)
                 telemetry = emit_telemetry(root_path=root_path, success=True, error=None, trace_op=op)
@@ -444,8 +447,10 @@ def _instrument_mcp_tool(func: Any, tool_name: str) -> Any:
             try:
                 bound = signature.bind_partial(*args, **kwargs)
                 allow_large_output = bool(bound.arguments.get("allow_large_output", False))
+                fields = bound.arguments.get("fields")
             except (TypeError, ValueError):
                 allow_large_output = False
+                fields = None
             try:
                 result = func(*args, **kwargs)
                 emit_trace("MCP", "IMPLEMENTATION_END", op=op, tool=tool_name, elapsed_ms=(time.monotonic() - started) * 1000.0)
@@ -456,6 +461,7 @@ def _instrument_mcp_tool(func: Any, tool_name: str) -> Any:
                     tool_name,
                     allow_large_output=allow_large_output,
                     supports_allow_large_output=supports_allow_large_output,
+                    fields=fields,
                 )
                 emit_trace("MCP", "DIAGNOSTICS_END", op=op, tool=tool_name, elapsed_ms=(time.monotonic() - diagnostics_started) * 1000.0)
                 telemetry = emit_telemetry(root_path=root_path, success=True, error=None, trace_op=op)

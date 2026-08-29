@@ -106,9 +106,10 @@ def inject_diagnostics_summary(
     *,
     allow_large_output: bool = False,
     supports_allow_large_output: bool = False,
+    fields: Any = None,
 ) -> Any:
     """Add a small summary to JSON analytical responses without touching prose/errors."""
-    if tool_name == "get_mcp_documentation" or not isinstance(result, str):
+    if tool_name in {"get_mcp_documentation", "lookup_index_entries"} or not isinstance(result, str):
         return result
     try:
         payload = json.loads(result)
@@ -116,7 +117,27 @@ def inject_diagnostics_summary(
         return result
     if not isinstance(payload, dict):
         return result
-    if payload.get("status") in {"queued", "running", "accepted", "missing_repository"}:
+    if payload.get("status") in {
+        "error",
+        "queued",
+        "running",
+        "accepted",
+        "missing_repository",
+    }:
+        return result
+    if isinstance(fields, (list, tuple)) and fields:
+        return result
+    if any(
+        key in payload
+        for key in (
+            "diagnostics_summary",
+            "diagnostics_attention_required",
+            "representation",
+            "representation_decision",
+            "sizes",
+            "_output",
+        )
+    ):
         return result
     root = Path(root_path).expanduser().resolve() if root_path else None
     if root is None:
