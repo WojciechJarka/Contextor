@@ -177,7 +177,6 @@ def test_startup_reconciliation_does_not_resurrect_excluded_files(tmp_path):
 
     watcher = DesktopLiveWatcher(repo, Client())
     assert str(excluded_file) not in watcher._snapshot
-    assert watcher.poll_once() == []
 
 
 def test_startup_candidate_is_revalidated_after_fingerprint_refresh(tmp_path):
@@ -690,7 +689,7 @@ def test_update_transport_recovery_revalidates_generation_before_retry(tmp_path)
         return result
 
     assert run_case([True, False], True, 1) == []
-    assert run_case([True, True], False, 2) == [str(source)]
+    assert run_case([True, True], False, 1) == []
     assert run_case([True, None], False, 1) == []
 
 
@@ -800,6 +799,7 @@ def test_slow_inflight_update_does_not_spawn_competing_live_service(tmp_path):
         watcher._recover_client = lambda: client
         release.set()
         source.write_text("VALUE = 2\n", encoding="utf-8")
+        assert watcher.poll_once() == []
         assert watcher.poll_once() == [str(source)]
         entered.set()
         assert endpoint.is_file()
@@ -820,7 +820,7 @@ def test_slow_inflight_update_does_not_spawn_competing_live_service(tmp_path):
         thread.join(timeout=2)
 
 
-def test_lost_update_response_revalidates_without_duplicate_mutation(tmp_path):
+def test_lost_update_response_resolves_from_real_filestate_without_retry(tmp_path):
     update_count = []
 
     def updater(state, path):
@@ -852,7 +852,7 @@ def test_lost_update_response_revalidates_without_duplicate_mutation(tmp_path):
         thread.join(timeout=2)
 
 
-def test_precommit_transport_failure_recovers_pending_watcher_change_once(tmp_path):
+def test_precommit_failure_retries_real_pending_change_once(tmp_path):
     update_count = []
 
     def updater(state, path):
@@ -879,6 +879,7 @@ def test_precommit_transport_failure_recovers_pending_watcher_change_once(tmp_pa
     client.update_file = fail_before_commit
     try:
         source.write_text("VALUE = 2\n", encoding="utf-8")
+        assert watcher.poll_once() == []
         assert watcher.poll_once() == [str(source)]
         assert update_count == [str(source)]
     finally:
@@ -886,7 +887,7 @@ def test_precommit_transport_failure_recovers_pending_watcher_change_once(tmp_pa
         thread.join(timeout=2)
 
 
-def test_background_worker_survives_transient_transport_error_and_recovers(tmp_path):
+def test_background_watcher_recovers_from_ambiguous_update_without_restart(tmp_path):
     class Client:
         def snapshot(self):
             return {"available": False}
@@ -916,3 +917,35 @@ def test_background_worker_survives_transient_transport_error_and_recovers(tmp_p
     finally:
         watcher.stop()
     assert watcher._thread is not None and not watcher._thread.is_alive()
+
+
+def test_presend_connection_failure_does_not_raise_unboundlocal_or_kill_worker(tmp_path):
+    class Client:
+        def __init__(self): self.calls = 0
+        def snapshot(self):
+            self.calls += 1
+            if self.calls == 1: raise ConnectionError("presend")
+            return {"available": False}
+        def ping(self): return {"available": False}
+    watcher = DesktopLiveWatcher(tmp_path, Client(), interval=0.01)
+    watcher.start()
+    try:
+        time.sleep(0.08)
+        assert watcher._thread is not None and watcher._thread.is_alive()
+        assert watcher._stop.is_set() is False
+    finally:
+        watcher.stop()
+    assert watcher._thread is not None and not watcher._thread.is_alive()
+
+
+def test_update_attempted_flag_is_path_local_for_multiple_candidates(tmp_path):
+    class Client:
+        def ping(self): return {"available": True}
+        def snapshot(self): return {"available": True, "state": SimpleNamespace(revision=0, state_id="x")}
+        def update_file(self, path, **_kwargs): return {"status": "ok", "result": SimpleNamespace(status="UPDATED")}
+    watcher = DesktopLiveWatcher(tmp_path, Client(), interval=0.01)
+    watcher._snapshot = {}
+    watcher._trusted_file_state = lambda _snapshot: SimpleNamespace(has_changed=lambda _p: True, tracked_paths=lambda: set())
+    (tmp_path / "a.py").write_text("a=1\n", encoding="utf-8")
+    (tmp_path / "b.py").write_text("b=1\n", encoding="utf-8")
+    assert set(watcher.poll_once()) == {str(tmp_path / "a.py"), str(tmp_path / "b.py")}

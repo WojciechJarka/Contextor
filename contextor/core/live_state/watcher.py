@@ -75,6 +75,7 @@ class DesktopLiveWatcher(_PollingLiveWorker):
         self.on_resync = on_resync
         self._startup_requires_resync = False
         self._startup_resync_attempted = False
+        self._ambiguous_updates: set[str] = set()
         self._excluded_paths, self._ignored_dirs = self._load_watch_filters()
         self._snapshot = self._scan()
         self._startup_pending = self._startup_reconciliation_paths(self._snapshot)
@@ -331,6 +332,8 @@ class DesktopLiveWatcher(_PollingLiveWorker):
             update_started = time.monotonic()
             trace_event("LIVE", "WATCH_UPDATE_START", op=op, repo=str(self.root), path=relative)
             lease = None
+            was_ambiguous = path in self._ambiguous_updates
+            update_attempted = False
             try:
                 from contextor.core.analysis.full_analysis_coordinator import (
                     FullAnalysisBusyError,
@@ -348,13 +351,28 @@ class DesktopLiveWatcher(_PollingLiveWorker):
                 candidate_requires_update = self._candidate_requires_update(path, current)
                 if candidate_requires_update is None:
                     deferred.add(path)
+                    if was_ambiguous:
+                        trace_event("LIVE", "WATCH_UPDATE_AMBIGUOUS_UNVERIFIED", op=op, repo=str(self.root), path=relative, reason="generation_unavailable")
                     self._emit("LIVE: generation revalidation unavailable; deferring watcher update")
                     continue
                 if not candidate_requires_update:
+                    if was_ambiguous:
+                        self._ambiguous_updates.discard(path)
+                        trace_event("LIVE", "WATCH_UPDATE_AMBIGUOUS_RESOLVED", op=op, repo=str(self.root), path=relative, rev=status.get("revision"), retry=False)
                     acknowledge(path)
                     continue
+                if was_ambiguous:
+                    self._ambiguous_updates.discard(path)
+                    trace_event("LIVE", "WATCH_UPDATE_AMBIGUOUS_RESOLVED", op=op, repo=str(self.root), path=relative, rev=status.get("revision"), retry=True)
+                update_attempted = True
                 response = self.client.update_file(path, origin="desktop_watcher", trace_op=op)
             except (OSError, EOFError, TimeoutError, ConnectionError):
+                if update_attempted:
+                    self._ambiguous_updates.add(path)
+                    trace_event("LIVE", "WATCH_UPDATE_AMBIGUOUS", op=op, repo=str(self.root), path=relative, rev=status.get("revision"), exception="transport")
+                    deferred.add(path)
+                    self._emit("LIVE: update outcome ambiguous; deferring revalidation")
+                    continue
                 self._emit("LIVE: connection lost during update; recovering...")
                 if self._recover_client() is None:
                     raise
@@ -373,11 +391,20 @@ class DesktopLiveWatcher(_PollingLiveWorker):
                 )
                 if candidate_requires_update is None:
                     deferred.add(path)
+                    if was_ambiguous:
+                        trace_event("LIVE", "WATCH_UPDATE_AMBIGUOUS_UNVERIFIED", op=op, repo=str(self.root), path=relative, reason="generation_unavailable")
                     self._emit("LIVE: generation revalidation unavailable; deferring watcher update")
                     continue
                 if candidate_requires_update is False:
+                    if was_ambiguous:
+                        self._ambiguous_updates.discard(path)
+                        trace_event("LIVE", "WATCH_UPDATE_AMBIGUOUS_RESOLVED", op=op, repo=str(self.root), path=relative, rev=recovered_snapshot.get("revision"), retry=False)
                     acknowledge(path)
                     continue
+                if was_ambiguous:
+                    self._ambiguous_updates.discard(path)
+                    trace_event("LIVE", "WATCH_UPDATE_AMBIGUOUS_RESOLVED", op=op, repo=str(self.root), path=relative, rev=recovered_snapshot.get("revision"), retry=True)
+                update_attempted = True
                 response = self.client.update_file(path, origin="desktop_watcher", trace_op=op)
             finally:
                 if lease is not None:

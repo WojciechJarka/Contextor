@@ -786,7 +786,7 @@ def test_real_service_process_starts_connects_and_stops(tmp_path, monkeypatch):
         client.request("shutdown")
 
 
-def test_real_process_slow_inflight_update_never_spawns_second_canonical_service(tmp_path, monkeypatch):
+def test_real_process_busy_update_does_not_spawn_second_live_owner(tmp_path, monkeypatch):
     cache = tmp_path / "cache"
     repo = tmp_path / "repo"
     repo.mkdir()

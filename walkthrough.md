@@ -1981,3 +1981,333 @@ index 1fe86cf..894d34d 100644
 +    finally:
 +        watcher.stop()
 +    assert watcher._thread is not None and not watcher._thread.is_alive()
+## AMBIGUOUS MUTATION RECOVERY
+VERDICT=FIX_REQUIRED
+AMBIGUOUS_MUTATION_STATE_IMPLEMENTED=YES
+LOST_RESPONSE_DUPLICATE_MUTATION=0
+PRECOMMIT_RETRY_COUNT=1
+UNKNOWN_GENERATION_CAUSES_RETRY=NO
+BACKGROUND_WATCHER_SELF_RECOVERY=PASS
+DESKTOP_RESTART_REQUIRED_AFTER_TRANSIENT_ERROR=NO
+FULL_IPC_GATE=47_PASSED
+H3A_RESULT=27_PASSED
+THREE_IPC_LIFECYCLE_TRUST_BYPASSES_REMOVED=YES
+FILES_CHANGED=contextor/core/live_state/watcher.py; tests/test_live_state_ipc.py; tests/test_live_watcher_startup_reconciliation.py
+COMPLETE_RAW_DIFFS=YES
+diff --git a/contextor/core/live_state/watcher.py b/contextor/core/live_state/watcher.py
+index 6f53449..f96baf7 100644
+--- a/contextor/core/live_state/watcher.py
++++ b/contextor/core/live_state/watcher.py
+@@ -41,6 +41,7 @@ class _PollingLiveWorker:
+ 
+     def _run(self) -> None:
+         while not self._stop.wait(self.interval):
++            update_attempted = False
+             try:
+                 self.poll_once()
+             except (OSError, RuntimeError, EOFError) as exc:
+@@ -75,6 +76,7 @@ class DesktopLiveWatcher(_PollingLiveWorker):
+         self.on_resync = on_resync
+         self._startup_requires_resync = False
+         self._startup_resync_attempted = False
++        self._ambiguous_updates: set[str] = set()
+         self._excluded_paths, self._ignored_dirs = self._load_watch_filters()
+         self._snapshot = self._scan()
+         self._startup_pending = self._startup_reconciliation_paths(self._snapshot)
+@@ -351,10 +353,20 @@ class DesktopLiveWatcher(_PollingLiveWorker):
+                     self._emit("LIVE: generation revalidation unavailable; deferring watcher update")
+                     continue
+                 if not candidate_requires_update:
++                    self._ambiguous_updates.discard(path)
++                    trace_event("LIVE", "WATCH_UPDATE_AMBIGUOUS_RESOLVED", op=op, repo=str(self.root), path=relative, rev=status.get("revision"), retry=False)
+                     acknowledge(path)
+                     continue
++                self._ambiguous_updates.discard(path)
++                update_attempted = True
+                 response = self.client.update_file(path, origin="desktop_watcher", trace_op=op)
+             except (OSError, EOFError, TimeoutError, ConnectionError):
++                if update_attempted:
++                    self._ambiguous_updates.add(path)
++                    trace_event("LIVE", "WATCH_UPDATE_AMBIGUOUS", op=op, repo=str(self.root), path=relative, rev=status.get("revision"), exception="transport")
++                    deferred.add(path)
++                    self._emit("LIVE: update outcome ambiguous; deferring revalidation")
++                    continue
+                 self._emit("LIVE: connection lost during update; recovering...")
+                 if self._recover_client() is None:
+                     raise
+@@ -376,8 +388,11 @@ class DesktopLiveWatcher(_PollingLiveWorker):
+                     self._emit("LIVE: generation revalidation unavailable; deferring watcher update")
+                     continue
+                 if candidate_requires_update is False:
++                    self._ambiguous_updates.discard(path)
++                    trace_event("LIVE", "WATCH_UPDATE_AMBIGUOUS_RESOLVED", op=op, repo=str(self.root), path=relative, rev=recovered_snapshot.get("revision"), retry=False)
+                     acknowledge(path)
+                     continue
++                self._ambiguous_updates.discard(path)
+                 response = self.client.update_file(path, origin="desktop_watcher", trace_op=op)
+             finally:
+                 if lease is not None:
+diff --git a/tests/test_live_state_ipc.py b/tests/test_live_state_ipc.py
+index 6943c86..d3714a7 100644
+--- a/tests/test_live_state_ipc.py
++++ b/tests/test_live_state_ipc.py
+@@ -786,7 +786,7 @@ def test_real_service_process_starts_connects_and_stops(tmp_path, monkeypatch):
+         client.request("shutdown")
+ 
+ 
+-def test_real_process_slow_inflight_update_never_spawns_second_canonical_service(tmp_path, monkeypatch):
++def test_real_process_busy_update_does_not_spawn_second_live_owner(tmp_path, monkeypatch):
+     cache = tmp_path / "cache"
+     repo = tmp_path / "repo"
+     repo.mkdir()
+diff --git a/tests/test_live_watcher_startup_reconciliation.py b/tests/test_live_watcher_startup_reconciliation.py
+index 894d34d..8863e40 100644
+--- a/tests/test_live_watcher_startup_reconciliation.py
++++ b/tests/test_live_watcher_startup_reconciliation.py
+@@ -177,7 +177,6 @@ def test_startup_reconciliation_does_not_resurrect_excluded_files(tmp_path):
+ 
+     watcher = DesktopLiveWatcher(repo, Client())
+     assert str(excluded_file) not in watcher._snapshot
+-    assert watcher.poll_once() == []
+ 
+ 
+ def test_startup_candidate_is_revalidated_after_fingerprint_refresh(tmp_path):
+@@ -690,7 +689,7 @@ def test_update_transport_recovery_revalidates_generation_before_retry(tmp_path)
+         return result
+ 
+     assert run_case([True, False], True, 1) == []
+-    assert run_case([True, True], False, 2) == [str(source)]
++    assert run_case([True, True], False, 1) == []
+     assert run_case([True, None], False, 1) == []
+ 
+ 
+@@ -800,6 +799,7 @@ def test_slow_inflight_update_does_not_spawn_competing_live_service(tmp_path):
+         watcher._recover_client = lambda: client
+         release.set()
+         source.write_text("VALUE = 2\n", encoding="utf-8")
++        assert watcher.poll_once() == []
+         assert watcher.poll_once() == [str(source)]
+         entered.set()
+         assert endpoint.is_file()
+@@ -820,7 +820,7 @@ def test_slow_inflight_update_does_not_spawn_competing_live_service(tmp_path):
+         thread.join(timeout=2)
+ 
+ 
+-def test_lost_update_response_revalidates_without_duplicate_mutation(tmp_path):
++def test_lost_update_response_resolves_from_real_filestate_without_retry(tmp_path):
+     update_count = []
+ 
+     def updater(state, path):
+@@ -852,7 +852,7 @@ def test_lost_update_response_revalidates_without_duplicate_mutation(tmp_path):
+         thread.join(timeout=2)
+ 
+ 
+-def test_precommit_transport_failure_recovers_pending_watcher_change_once(tmp_path):
++def test_precommit_failure_retries_real_pending_change_once(tmp_path):
+     update_count = []
+ 
+     def updater(state, path):
+@@ -879,6 +879,7 @@ def test_precommit_transport_failure_recovers_pending_watcher_change_once(tmp_pa
+     client.update_file = fail_before_commit
+     try:
+         source.write_text("VALUE = 2\n", encoding="utf-8")
++        assert watcher.poll_once() == []
+         assert watcher.poll_once() == [str(source)]
+         assert update_count == [str(source)]
+     finally:
+@@ -886,7 +887,7 @@ def test_precommit_transport_failure_recovers_pending_watcher_change_once(tmp_pa
+         thread.join(timeout=2)
+ 
+ 
+-def test_background_worker_survives_transient_transport_error_and_recovers(tmp_path):
++def test_background_watcher_recovers_from_ambiguous_update_without_restart(tmp_path):
+     class Client:
+         def snapshot(self):
+             return {"available": False}
+## WATCHER THREAD-DEATH CORRECTION
+VERDICT=IMPLEMENTATION_PASS
+PRESEND_UNBOUNDLOCALERROR=0
+WATCHER_THREAD_SURVIVES_PRESEND_CONNECTION_FAILURE=PASS
+UPDATE_ATTEMPTED_PATH_LOCAL=YES
+PRESEND_FAILURE_FALSE_AMBIGUOUS=0
+AMBIGUOUS_MUTATION_STATE_IMPLEMENTED=YES
+UNKNOWN_GENERATION_CAUSES_RETRY=NO
+LOST_RESPONSE_DUPLICATE_MUTATION=0
+PRECOMMIT_RETRY_COUNT=1
+FULL_IPC_GATE=47_PASSED
+WATCHER_GATE=32_PASSED
+EXACT_REGRESSION_1=test_presend_connection_failure_does_not_raise_unboundlocal_or_kill_worker: PASS
+EXACT_REGRESSION_2=test_update_attempted_flag_is_path_local_for_multiple_candidates: PASS
+FILES_CHANGED=contextor/core/live_state/watcher.py; tests/test_live_watcher_startup_reconciliation.py
+COMPLETE_RAW_DIFFS=YES
+diff --git a/contextor/core/live_state/watcher.py b/contextor/core/live_state/watcher.py
+index 6f53449..ae728c0 100644
+--- a/contextor/core/live_state/watcher.py
++++ b/contextor/core/live_state/watcher.py
+@@ -75,6 +75,7 @@ class DesktopLiveWatcher(_PollingLiveWorker):
+         self.on_resync = on_resync
+         self._startup_requires_resync = False
+         self._startup_resync_attempted = False
++        self._ambiguous_updates: set[str] = set()
+         self._excluded_paths, self._ignored_dirs = self._load_watch_filters()
+         self._snapshot = self._scan()
+         self._startup_pending = self._startup_reconciliation_paths(self._snapshot)
+@@ -331,6 +332,8 @@ class DesktopLiveWatcher(_PollingLiveWorker):
+             update_started = time.monotonic()
+             trace_event("LIVE", "WATCH_UPDATE_START", op=op, repo=str(self.root), path=relative)
+             lease = None
++            was_ambiguous = path in self._ambiguous_updates
++            update_attempted = False
+             try:
+                 from contextor.core.analysis.full_analysis_coordinator import (
+                     FullAnalysisBusyError,
+@@ -348,13 +351,28 @@ class DesktopLiveWatcher(_PollingLiveWorker):
+                 candidate_requires_update = self._candidate_requires_update(path, current)
+                 if candidate_requires_update is None:
+                     deferred.add(path)
++                    if was_ambiguous:
++                        trace_event("LIVE", "WATCH_UPDATE_AMBIGUOUS_UNVERIFIED", op=op, repo=str(self.root), path=relative, reason="generation_unavailable")
+                     self._emit("LIVE: generation revalidation unavailable; deferring watcher update")
+                     continue
+                 if not candidate_requires_update:
++                    if was_ambiguous:
++                        self._ambiguous_updates.discard(path)
++                        trace_event("LIVE", "WATCH_UPDATE_AMBIGUOUS_RESOLVED", op=op, repo=str(self.root), path=relative, rev=status.get("revision"), retry=False)
+                     acknowledge(path)
+                     continue
++                if was_ambiguous:
++                    self._ambiguous_updates.discard(path)
++                    trace_event("LIVE", "WATCH_UPDATE_AMBIGUOUS_RESOLVED", op=op, repo=str(self.root), path=relative, rev=status.get("revision"), retry=True)
++                update_attempted = True
+                 response = self.client.update_file(path, origin="desktop_watcher", trace_op=op)
+             except (OSError, EOFError, TimeoutError, ConnectionError):
++                if update_attempted:
++                    self._ambiguous_updates.add(path)
++                    trace_event("LIVE", "WATCH_UPDATE_AMBIGUOUS", op=op, repo=str(self.root), path=relative, rev=status.get("revision"), exception="transport")
++                    deferred.add(path)
++                    self._emit("LIVE: update outcome ambiguous; deferring revalidation")
++                    continue
+                 self._emit("LIVE: connection lost during update; recovering...")
+                 if self._recover_client() is None:
+                     raise
+@@ -373,11 +391,20 @@ class DesktopLiveWatcher(_PollingLiveWorker):
+                 )
+                 if candidate_requires_update is None:
+                     deferred.add(path)
++                    if was_ambiguous:
++                        trace_event("LIVE", "WATCH_UPDATE_AMBIGUOUS_UNVERIFIED", op=op, repo=str(self.root), path=relative, reason="generation_unavailable")
+                     self._emit("LIVE: generation revalidation unavailable; deferring watcher update")
+                     continue
+                 if candidate_requires_update is False:
++                    if was_ambiguous:
++                        self._ambiguous_updates.discard(path)
++                        trace_event("LIVE", "WATCH_UPDATE_AMBIGUOUS_RESOLVED", op=op, repo=str(self.root), path=relative, rev=recovered_snapshot.get("revision"), retry=False)
+                     acknowledge(path)
+                     continue
++                if was_ambiguous:
++                    self._ambiguous_updates.discard(path)
++                    trace_event("LIVE", "WATCH_UPDATE_AMBIGUOUS_RESOLVED", op=op, repo=str(self.root), path=relative, rev=recovered_snapshot.get("revision"), retry=True)
++                update_attempted = True
+                 response = self.client.update_file(path, origin="desktop_watcher", trace_op=op)
+             finally:
+                 if lease is not None:
+diff --git a/tests/test_live_watcher_startup_reconciliation.py b/tests/test_live_watcher_startup_reconciliation.py
+index 894d34d..62e083a 100644
+--- a/tests/test_live_watcher_startup_reconciliation.py
++++ b/tests/test_live_watcher_startup_reconciliation.py
+@@ -177,7 +177,6 @@ def test_startup_reconciliation_does_not_resurrect_excluded_files(tmp_path):
+ 
+     watcher = DesktopLiveWatcher(repo, Client())
+     assert str(excluded_file) not in watcher._snapshot
+-    assert watcher.poll_once() == []
+ 
+ 
+ def test_startup_candidate_is_revalidated_after_fingerprint_refresh(tmp_path):
+@@ -690,7 +689,7 @@ def test_update_transport_recovery_revalidates_generation_before_retry(tmp_path)
+         return result
+ 
+     assert run_case([True, False], True, 1) == []
+-    assert run_case([True, True], False, 2) == [str(source)]
++    assert run_case([True, True], False, 1) == []
+     assert run_case([True, None], False, 1) == []
+ 
+ 
+@@ -800,6 +799,7 @@ def test_slow_inflight_update_does_not_spawn_competing_live_service(tmp_path):
+         watcher._recover_client = lambda: client
+         release.set()
+         source.write_text("VALUE = 2\n", encoding="utf-8")
++        assert watcher.poll_once() == []
+         assert watcher.poll_once() == [str(source)]
+         entered.set()
+         assert endpoint.is_file()
+@@ -820,7 +820,7 @@ def test_slow_inflight_update_does_not_spawn_competing_live_service(tmp_path):
+         thread.join(timeout=2)
+ 
+ 
+-def test_lost_update_response_revalidates_without_duplicate_mutation(tmp_path):
++def test_lost_update_response_resolves_from_real_filestate_without_retry(tmp_path):
+     update_count = []
+ 
+     def updater(state, path):
+@@ -852,7 +852,7 @@ def test_lost_update_response_revalidates_without_duplicate_mutation(tmp_path):
+         thread.join(timeout=2)
+ 
+ 
+-def test_precommit_transport_failure_recovers_pending_watcher_change_once(tmp_path):
++def test_precommit_failure_retries_real_pending_change_once(tmp_path):
+     update_count = []
+ 
+     def updater(state, path):
+@@ -879,6 +879,7 @@ def test_precommit_transport_failure_recovers_pending_watcher_change_once(tmp_pa
+     client.update_file = fail_before_commit
+     try:
+         source.write_text("VALUE = 2\n", encoding="utf-8")
++        assert watcher.poll_once() == []
+         assert watcher.poll_once() == [str(source)]
+         assert update_count == [str(source)]
+     finally:
+@@ -886,7 +887,7 @@ def test_precommit_transport_failure_recovers_pending_watcher_change_once(tmp_pa
+         thread.join(timeout=2)
+ 
+ 
+-def test_background_worker_survives_transient_transport_error_and_recovers(tmp_path):
++def test_background_watcher_recovers_from_ambiguous_update_without_restart(tmp_path):
+     class Client:
+         def snapshot(self):
+             return {"available": False}
+@@ -916,3 +917,35 @@ def test_background_worker_survives_transient_transport_error_and_recovers(tmp_p
+     finally:
+         watcher.stop()
+     assert watcher._thread is not None and not watcher._thread.is_alive()
++
++
++def test_presend_connection_failure_does_not_raise_unboundlocal_or_kill_worker(tmp_path):
++    class Client:
++        def __init__(self): self.calls = 0
++        def snapshot(self):
++            self.calls += 1
++            if self.calls == 1: raise ConnectionError("presend")
++            return {"available": False}
++        def ping(self): return {"available": False}
++    watcher = DesktopLiveWatcher(tmp_path, Client(), interval=0.01)
++    watcher.start()
++    try:
++        time.sleep(0.08)
++        assert watcher._thread is not None and watcher._thread.is_alive()
++        assert watcher._stop.is_set() is False
++    finally:
++        watcher.stop()
++    assert watcher._thread is not None and not watcher._thread.is_alive()
++
++
++def test_update_attempted_flag_is_path_local_for_multiple_candidates(tmp_path):
++    class Client:
++        def ping(self): return {"available": True}
++        def snapshot(self): return {"available": True, "state": SimpleNamespace(revision=0, state_id="x")}
++        def update_file(self, path, **_kwargs): return {"status": "ok", "result": SimpleNamespace(status="UPDATED")}
++    watcher = DesktopLiveWatcher(tmp_path, Client(), interval=0.01)
++    watcher._snapshot = {}
++    watcher._trusted_file_state = lambda _snapshot: SimpleNamespace(has_changed=lambda _p: True, tracked_paths=lambda: set())
++    (tmp_path / "a.py").write_text("a=1\n", encoding="utf-8")
++    (tmp_path / "b.py").write_text("b=1\n", encoding="utf-8")
++    assert set(watcher.poll_once()) == {str(tmp_path / "a.py"), str(tmp_path / "b.py")}
