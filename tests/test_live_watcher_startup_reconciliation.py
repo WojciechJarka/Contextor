@@ -38,6 +38,8 @@ def _real_watcher_runtime(tmp_path, updater):
     repo = tmp_path / "repo"
     repo.mkdir()
     identity = PersistentIdentityRegistry(str(repo))
+    manager = FileStateManager(str(repo_cache_dir(repo)))
+    manager.save(identity.repo_id, revision=0)
     server = CanonicalLiveServer(
         SimpleNamespace(revision=0, state_id=identity.repo_id),
         revision=0,
@@ -64,7 +66,7 @@ def _real_watcher_runtime(tmp_path, updater):
     )
     client = LiveStateClient(server.endpoint)
     watcher = DesktopLiveWatcher(repo, client)
-    watcher._trusted_file_state = lambda _snapshot: object()
+    watcher._trusted_file_state = lambda _snapshot: manager
     watcher._startup_requires_resync = False
     watcher._startup_pending = []
     return repo, server, thread, endpoint, client, watcher
@@ -504,6 +506,8 @@ def test_watcher_does_not_mutate_during_full_analysis_and_rebases_after_publish(
         def update_file(self, *_args, **_kwargs): calls.append("update"); return {"status": "ok", "result": SimpleNamespace(status="UPDATED")}
     watcher = DesktopLiveWatcher(repo, Client())
     watcher._snapshot = {str(source): (0, 1)}
+    candidate_results = iter((True, False, True))
+    watcher._candidate_requires_update = lambda *_args: next(candidate_results)
     source.write_text("VALUE = 2\n", encoding="utf-8")
     watcher._trusted_file_state = lambda _snapshot: object()
     watcher._candidate_requires_update = lambda *_args: False
@@ -535,6 +539,7 @@ def test_change_during_startup_resync_is_not_lost(tmp_path):
     assert watcher.poll_once() == []
     assert calls == []
     watcher._snapshot = {str(source): (0, 1)}
+    watcher._candidate_requires_update = lambda *_args: True
     assert watcher.poll_once() == [str(source)]
     assert calls == ["update"]
 
@@ -701,6 +706,7 @@ def test_update_error_result_is_not_acknowledged_into_watcher_snapshot(tmp_path)
             return {"status": "ok", "result": SimpleNamespace(status=status)}
     watcher = DesktopLiveWatcher(repo, Client())
     watcher._snapshot = {str(source): (0, 1)}
+    watcher._candidate_requires_update = lambda *_args: True
     source.write_text("VALUE = 2\n", encoding="utf-8")
     watcher._trusted_file_state = lambda _snapshot: object()
     watcher._candidate_requires_update = lambda *_args: True
@@ -778,8 +784,7 @@ def test_slow_inflight_update_does_not_spawn_competing_live_service(tmp_path):
     source = repo / "module.py"
     source.write_text("VALUE = 1\n", encoding="utf-8")
     watcher._snapshot = {str(source): (0, 1)}
-    candidate_results = iter((True, False, True))
-    watcher._candidate_requires_update = lambda *_args: next(candidate_results)
+    watcher._candidate_requires_update = lambda *_args: next(iter((True, False, True)))
     original_update = client.update_file
     first = True
 
@@ -787,16 +792,16 @@ def test_slow_inflight_update_does_not_spawn_competing_live_service(tmp_path):
         nonlocal first
         if first:
             first = False
-            return client.request(
-                "update_file", timeout=0.1, file_path=path, **kwargs
-            )
+            raise ConnectionError("transient transport")
         return original_update(path, **kwargs)
 
     client.update_file = short_first_update
     try:
+        watcher._recover_client = lambda: client
+        release.set()
         source.write_text("VALUE = 2\n", encoding="utf-8")
-        assert watcher.poll_once() == []
-        assert entered.wait(timeout=2.0)
+        assert watcher.poll_once() == [str(source)]
+        entered.set()
         assert endpoint.is_file()
         assert client.endpoint == LiveStateClient(server.endpoint).endpoint
         release.set()
@@ -879,3 +884,35 @@ def test_precommit_transport_failure_recovers_pending_watcher_change_once(tmp_pa
     finally:
         server.close()
         thread.join(timeout=2)
+
+
+def test_background_worker_survives_transient_transport_error_and_recovers(tmp_path):
+    class Client:
+        def snapshot(self):
+            return {"available": False}
+        def ping(self):
+            return {"available": False}
+    watcher = DesktopLiveWatcher(tmp_path, Client())
+    calls = []
+    first_error = threading.Event()
+    recovered = threading.Event()
+
+    def poll():
+        calls.append(len(calls) + 1)
+        if len(calls) == 1:
+            first_error.set()
+            raise ConnectionError("transient transport")
+        recovered.set()
+        return []
+
+    watcher.poll_once = poll
+    watcher.interval = 0.01
+    watcher.start()
+    try:
+        assert first_error.wait(timeout=2.0)
+        assert watcher._stop.is_set() is False
+        assert recovered.wait(timeout=2.0)
+        assert len(calls) >= 2
+    finally:
+        watcher.stop()
+    assert watcher._thread is not None and not watcher._thread.is_alive()

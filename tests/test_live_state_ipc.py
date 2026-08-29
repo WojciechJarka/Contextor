@@ -19,6 +19,8 @@ from contextor.core.live_state.ipc import LIVE_PROTOCOL_VERSION
 from contextor.core.live_state import ipc as ipc_module
 from contextor.core.live_state.runtime import connect_or_start, endpoint_file
 from contextor.core.reporting_engine.persistent_registry import PersistentIdentityRegistry
+from contextor.core.analysis.state_manager import FileStateManager
+from contextor.core.paths import repo_cache_dir
 
 pytestmark = pytest.mark.live
 
@@ -662,21 +664,24 @@ def test_updater_failure_does_not_kill_the_service():
 def test_desktop_watcher_reports_create_edit_and_delete_without_manual_update(tmp_path):
     updates = []
     statuses = []
+    identity = PersistentIdentityRegistry(str(tmp_path))
+    manager = FileStateManager(str(repo_cache_dir(tmp_path)))
+    manager.save(identity.repo_id, revision=0)
 
     def update(state, file_path):
         updates.append(file_path)
         state.updates += 1
+        manager.update_state(file_path)
+        manager.save(identity.repo_id, revision=state.revision + 1)
         return SimpleNamespace(status="UPDATED", file_path=file_path)
 
-    server = CanonicalLiveServer(SimpleNamespace(updates=0), updater=update)
+    server_state = SimpleNamespace(updates=0, revision=0, state_id=identity.repo_id, modules={})
+    server = CanonicalLiveServer(server_state, revision=0, updater=update)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     watcher = DesktopLiveWatcher(
         tmp_path, LiveStateClient(server.endpoint), on_status=statuses.append
     )
-    watcher._trusted_file_state = lambda _snapshot: object()
-    watcher._candidate_requires_update = lambda *_args: True
-    watcher._startup_requires_resync = False
     target = tmp_path / "sample.py"
     try:
         target.write_text("value = 1\n", encoding="utf-8")
@@ -702,19 +707,19 @@ def test_desktop_watcher_reports_create_edit_and_delete_without_manual_update(tm
 
 
 def test_first_run_watcher_waits_for_initial_canonical_state(tmp_path):
+    identity = PersistentIdentityRegistry(str(tmp_path))
+    manager = FileStateManager(str(repo_cache_dir(tmp_path)))
+    manager.save(identity.repo_id, revision=0)
     def update(state, path):
         state.last_path = path
         return SimpleNamespace(status="UPDATED", file_path=path)
 
-    server = CanonicalLiveServer(updater=update)
+    server = CanonicalLiveServer(None, revision=0, updater=update)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     client = LiveStateClient(server.endpoint)
     statuses = []
     watcher = DesktopLiveWatcher(tmp_path, client, on_status=statuses.append)
-    watcher._trusted_file_state = lambda _snapshot: object()
-    watcher._candidate_requires_update = lambda *_args: True
-    watcher._startup_requires_resync = False
     try:
         (tmp_path / "before_analysis.py").write_text("value = 1\n", encoding="utf-8")
         assert watcher.poll_once() == []
@@ -724,7 +729,8 @@ def test_first_run_watcher_waits_for_initial_canonical_state(tmp_path):
         }
         assert statuses == ["LIVE: no snapshot; waiting for analysis"]
 
-        client.publish(SimpleNamespace(ready=True))
+        client.publish(SimpleNamespace(ready=True, revision=1, state_id=identity.repo_id, modules={}))
+        manager.save(identity.repo_id, revision=1)
         (tmp_path / "after_analysis.py").write_text("value = 2\n", encoding="utf-8")
         response = watcher.poll_once()
         assert response == [str(tmp_path / "after_analysis.py")]
@@ -734,6 +740,9 @@ def test_first_run_watcher_waits_for_initial_canonical_state(tmp_path):
 
 
 def test_desktop_watcher_reports_syntax_location(tmp_path):
+    identity = PersistentIdentityRegistry(str(tmp_path))
+    manager = FileStateManager(str(repo_cache_dir(tmp_path)))
+    manager.save(identity.repo_id, revision=0)
     statuses = []
     result = SimpleNamespace(
         status="SYNTAX_ERROR",
@@ -742,14 +751,12 @@ def test_desktop_watcher_reports_syntax_location(tmp_path):
         line_number=2,
         column_number=7,
     )
-    server = CanonicalLiveServer(SimpleNamespace(ready=True), updater=lambda *_args: result)
+    server = CanonicalLiveServer(SimpleNamespace(ready=True, revision=0, state_id=identity.repo_id, modules={}), revision=0, updater=lambda *_args: result)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     watcher = DesktopLiveWatcher(
         tmp_path, LiveStateClient(server.endpoint), on_status=statuses.append
     )
-    watcher._trusted_file_state = lambda _snapshot: object()
-    watcher._candidate_requires_update = lambda *_args: True
     try:
         target = tmp_path / "broken.py"
         target.write_text("def broken(:\n", encoding="utf-8")
@@ -775,6 +782,25 @@ def test_real_service_process_starts_connects_and_stops(tmp_path, monkeypatch):
     try:
         assert client.ping()["status"] == "ok"
         assert endpoint.is_file()
+    finally:
+        client.request("shutdown")
+
+
+def test_real_process_slow_inflight_update_never_spawns_second_canonical_service(tmp_path, monkeypatch):
+    cache = tmp_path / "cache"
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    PersistentIdentityRegistry(str(repo))
+    monkeypatch.setenv("CONTEXTOR_CACHE_DIR", str(cache))
+    client = connect_or_start(repo, owner_pid=os.getpid(), owner_token="busy-test")
+    try:
+        endpoint = endpoint_file(repo)
+        payload = __import__("json").loads(endpoint.read_text(encoding="utf-8"))
+        pid_a = int(payload["pid"])
+        assert pid_a != os.getpid()
+        assert client.service_pid == pid_a
+        assert endpoint.exists()
+        assert client.ping()["status"] == "ok"
     finally:
         client.request("shutdown")
         deadline = time.monotonic() + 5

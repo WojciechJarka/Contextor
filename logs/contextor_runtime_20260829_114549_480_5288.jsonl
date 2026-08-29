@@ -2905,3 +2905,5 @@
 {"ts":"2026-08-29T12:01:39.767+00:00","mono_ms":371878000,"sid":"d-5288-20260829_114549_480","pid":13936,"tid":2180,"d":"LIVE","ev":"PUBLISH_RECEIVED","op":"p-13936-6","rev":1}
 {"ts":"2026-08-29T12:01:39.768+00:00","mono_ms":371878000,"sid":"d-5288-20260829_114549_480","pid":13936,"tid":2180,"d":"LIVE","ev":"ACTIVITY_APPEND","op":"p-13936-6","rev":2,"seq":21,"category":"LIVE_STATE","operation":"publish","status":"PUBLISHED"}
 {"ts":"2026-08-29T12:01:39.768+00:00","mono_ms":371878000,"sid":"d-5288-20260829_114549_480","pid":13936,"tid":2180,"d":"LIVE","ev":"CANONICAL_PUBLISH","op":"p-13936-6","rev0":1,"rev1":2,"seq":21}
+{"ts":"2026-08-29T12:20:59.219+00:00","mono_ms":373037453,"sid":"d-5288-20260829_114549_480","pid":13628,"tid":7744,"d":"LIVE","ev":"SERVICE_END","rev":5423,"repo":"C:\\Temp\\Contextor_Repo"}
+{"ts":"2026-08-29T12:21:00.466+00:00","mono_ms":373038703,"sid":"d-5288-20260829_114549_480","pid":5288,"tid":7112,"d":"DESKTOP","ev":"SESSION_END","op":"d-5288-14"}
