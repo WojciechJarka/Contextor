@@ -683,6 +683,7 @@ class CanonicalLiveServer:
 
                 return {
                     "status": "ok",
+                    "activity_epoch": self._activity_epoch,
                     "revision": self._revision,
                     "latest_revision": latest_revision,
                     "latest_seq": latest_seq,

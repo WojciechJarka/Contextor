@@ -1,56 +1,88 @@
 # Walkthrough
 
-## CONTEXTOR LIVE — final read-only runtime proof closure
+## CONTEXTOR LIVE — activity_epoch propagation
 
-Scope was limited to the two requested observability proofs. No code or tests were modified, no pytest/full analysis was run, no MCP/Desktop/LIVE restart was performed, no `update_file` was called, and no repository probe sequence was recreated.
-
-### Activity epoch proof
-
-The active endpoint was queried directly through the existing `LiveStateClient` IPC operation `client.get_events(limit=1)`, then queried again after an 8-second idle interval.
+### Verdict
 
 ```ini
-IPC_ACTIVITY_EPOCH_1=None
-IPC_ACTIVITY_EPOCH_2=None
-IPC_LIVE_PID_1=5868
-IPC_LIVE_PID_2=5868
+VERDICT=STATIC_PASS
+ROOT_CAUSE=CanonicalLiveServer owned one immutable activity epoch, but the read-only get_events dispatcher response omitted it.
+EPOCH_OWNER=CanonicalLiveServer._activity_epoch (one value per server instance)
+LOSS_POINT=CanonicalLiveServer._dispatch operation=get_events serialized response
+IMPLEMENTATION=Added activity_epoch=self._activity_epoch to the existing get_events response; no new generation or mutation.
+GET_EVENTS_IPC_ACTIVITY_EPOCH_PRESENT=PASS
+GET_EVENTS_CLIENT_ACTIVITY_EPOCH_PRESENT=PASS
+SAME_SERVER_EPOCH_STABLE=PASS
+EPOCH_OWNER_SINGLE_SOURCE=PASS
+FEED_EPOCH_RESET_CONTRACT=PASS
+ACTIVITY_SEQ_SEMANTICS_UNCHANGED=PASS
+REVISION_SEMANTICS_UNCHANGED=PASS
+RESYNC_SEMANTICS_UNCHANGED=PASS
+PUBLIC_MCP_CONTRACT_CHANGED=NO
+DOCS_CHANGE=NO
 ```
 
-Both IPC responses were successful, but neither response contained a non-empty `activity_epoch`. Textual inspection of the current IPC dispatcher confirms that `activity_epoch` is returned by `update_file`, while the `get_events` response does not include it. Therefore the required equality/non-empty activity-epoch proof cannot be established through the requested read-only operation.
+### Contextor discovery
 
-The same active trace window showed no new target-repository service start, activity gap, or activity-epoch reset. Existing target-repository counts remained:
+Contextor MCP resolved the current path as `CanonicalLiveServer._dispatch` in `contextor/core/live_state/ipc.py` → `LiveStateClient.get_events` in the same module → `DesktopLiveEventFeed.poll_once` in `contextor/core/live_state/watcher.py`. LIVE freshness was `fresh`, provenance `live`, canonical revision `5483`, and workspace sync `verified`. Source inspection confirmed the server already owned `_activity_epoch` and the feed already consumed `response.get("activity_epoch")`; only the serialized `get_events` response field was missing.
+
+### Tests
+
+Exact propagation regression (real server/dispatcher/client boundary and same-server stability):
+
+```text
+.venv\Scripts\python.exe -m pytest -q tests/test_live_state_ipc.py -k "activity_epoch or isolation_preserves_existing_live_service"
+1 passed, 46 deselected
+```
+
+The existing isolation regression was strengthened with an explicit non-empty epoch assertion.
+
+Existing feed epoch/reset and same-epoch gap contract:
+
+```text
+.venv\Scripts\python.exe -m pytest -q tests/test_live_activity_status.py -k "activity_cursor_resets_on_daemon_epoch_change_without_false_gap or activity_gap_is_still_reported_for_real_missing_sequence_in_same_epoch"
+2 passed, 35 deselected, 1 warning
+```
+
+The file currently collects **47 tests** (`pytest --collect-only -q tests/test_live_state_ipc.py`). The earlier run that emitted only 42 dots was incomplete and was not a result. A fresh complete run now passed all 47:
+
+```text
+.venv\Scripts\python.exe -m pytest -q tests/test_live_state_ipc.py
+47 passed in 32.69s
+```
+
+No watcher-startup gate was needed because the production change is confined to read-only IPC serialization and the feed contract tests passed.
+
+### Complete raw unified diff
+
+```diff
+diff --git a/contextor/core/live_state/ipc.py b/contextor/core/live_state/ipc.py
+index 4f2879f..25e3592 100644
+--- a/contextor/core/live_state/ipc.py
++++ b/contextor/core/live_state/ipc.py
+@@ -683,6 +683,7 @@ class CanonicalLiveServer:
+ 
+                 return {
+                     "status": "ok",
++                    "activity_epoch": self._activity_epoch,
+                     "revision": self._revision,
+                     "latest_revision": latest_revision,
+                     "latest_seq": latest_seq,
+diff --git a/tests/test_live_state_ipc.py b/tests/test_live_state_ipc.py
+index d3714a7..f510e7a 100644
+--- a/tests/test_live_state_ipc.py
++++ b/tests/test_live_state_ipc.py
+@@ -830,6 +830,7 @@ def test_test_live_runtime_isolation_preserves_existing_live_service(
+     pid_a = client_a.service_pid
+     epoch_a = client_a.get_events().get("activity_epoch")
+     try:
++        assert epoch_a
+         assert client_a.ping()["status"] == "ok"
+         assert endpoint_a.is_file()
+```
 
 ```ini
-additional SERVICE_START=0
-ACTIVITY_EPOCH_RESET=0
-ACTIVITY_GAP=0
-CONNECTION_ERROR=0
-PERSISTENCE_CONFLICT=0
-SERVICE_REPLACEMENT=0
+FULL_SUITE_RUN_BY_AGENT=NO
+FULL_SUITE_PENDING_USER_RUN=YES
+FILES_CHANGED=contextor/core/live_state/ipc.py; tests/test_live_state_ipc.py
 ```
-
-### Final Canonical/FileState parity proof
-
-Read-only IPC snapshot and the authoritative FileState cache metadata reported:
-
-```ini
-FINAL_CANONICAL_REVISION=5483
-FINAL_CANONICAL_STATE_ID=20260829_171752
-FINAL_FILESTATE_REVISION=5483
-FINAL_FILESTATE_STATE_ID=20260829_171752
-FINAL_REVISION_PARITY=PASS
-FINAL_STATE_ID_PARITY=PASS
-RESYNC_REQUIRED=NO
-WORKSPACE_SYNC=verified
-```
-
-Contextor MCP `get_file_edit_context` independently reported live canonical revision `5483`, canonical state `fresh`, provenance `live`, and workspace sync `verified`.
-
-### Final verdict
-
-```ini
-VERDICT=FIX_REQUIRED
-FILES_CHANGED=NONE
-DIFFS=NONE
-```
-
-The only failing gate is the requested read-only IPC activity-epoch proof: both `get_events` responses omit the field. This is preserved as runtime evidence; no contract or implementation change was made.

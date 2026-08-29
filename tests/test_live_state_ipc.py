@@ -830,6 +830,7 @@ def test_test_live_runtime_isolation_preserves_existing_live_service(
     pid_a = client_a.service_pid
     epoch_a = client_a.get_events().get("activity_epoch")
     try:
+        assert epoch_a
         assert client_a.ping()["status"] == "ok"
         assert endpoint_a.is_file()
 
