@@ -469,6 +469,30 @@ def is_explicit_generation_mismatch(
     if canonical_rev is None and engine is not None:
         canonical_rev = getattr(engine, "revision", None)
 
+    # A referenced generation is authoritative.  FileStateManager intentionally
+    # clears malformed metadata, so inspect that generation directly before its
+    # fail-closed normalization can hide an explicit mismatch from source tools.
+    try:
+        from contextor.core.live_state.store import read_metadata
+        import json
+
+        metadata = read_metadata(repo_cache_dir(root_path))
+        referenced = getattr(metadata, "file_state_file", "") if metadata else ""
+        if referenced:
+            payload = json.loads((repo_cache_dir(root_path) / referenced).read_text(encoding="utf-8"))
+            raw_meta = payload.get("_meta") if isinstance(payload, dict) else None
+            raw_state_id = raw_meta.get("state_id") if isinstance(raw_meta, dict) else None
+            raw_revision = raw_meta.get("revision") if isinstance(raw_meta, dict) else None
+            if (
+                not raw_state_id
+                or raw_revision is None
+                or (canonical_state_id and str(raw_state_id) != str(canonical_state_id))
+                or (canonical_rev is not None and int(raw_revision) != int(canonical_rev))
+            ):
+                return True
+    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        return True
+
     managers_to_check = []
     if disk_mgr is not None:
         managers_to_check.append(disk_mgr)
@@ -493,5 +517,4 @@ def is_explicit_generation_mismatch(
         if state_id_mismatch or rev_mismatch:
             return True
     return False
-
 

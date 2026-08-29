@@ -33,7 +33,7 @@ def test_same_revision_startup_attaches_without_redundant_publish(tmp_path, monk
             return {"revision": 7, "available": True}
 
         def snapshot(self):
-            return {"state": state}
+            return {"state": state, "revision": 7}
 
         def publish(self, *_args, **_kwargs):
             events.append("publish")
@@ -46,6 +46,7 @@ def test_same_revision_startup_attaches_without_redundant_publish(tmp_path, monk
         def __init__(self, *_args, **_kwargs): pass
         def start(self): pass
 
+    statuses = []
     statuses = []
     controller = SimpleNamespace(
         live_watcher=None, live_event_feed=None, live_watchers={},
@@ -64,6 +65,49 @@ def test_same_revision_startup_attaches_without_redundant_publish(tmp_path, monk
 
     assert events == []
     assert "LIVE: shared state attached; watcher active" in statuses
+
+
+def test_same_revision_different_state_id_does_not_attach_as_same_generation(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    PersistentIdentityRegistry(str(repo))
+    loaded = SimpleNamespace(modules={}, revision=7, state_id="loaded-generation")
+    remote = SimpleNamespace(modules={}, revision=7, state_id="remote-generation")
+    events = []
+    statuses = []
+
+    class Client:
+        def snapshot(self):
+            return {"state": remote, "revision": 7}
+
+        def publish(self, *_args, **_kwargs):
+            events.append("publish")
+
+    class Watcher:
+        def __init__(self, *_args, **_kwargs): pass
+        def start(self): pass
+
+    class Feed:
+        def __init__(self, *_args, **_kwargs): pass
+        def start(self): pass
+
+    controller = SimpleNamespace(
+        live_watcher=None, live_event_feed=None, live_watchers={},
+        live_event_feeds={}, repo_id_var=_LiveIntegrationFakeVar(),
+        _set_live_status=statuses.append,
+    )
+    monkeypatch.setattr(gui, "connect_or_start", lambda *_args, **_kwargs: Client())
+    monkeypatch.setattr(gui, "DesktopLiveWatcher", Watcher)
+    monkeypatch.setattr(gui, "DesktopLiveEventFeed", Feed)
+    monkeypatch.setattr(
+        "contextor.core.analysis.state_manager.load_engine_state",
+        lambda *_args, **_kwargs: loaded,
+    )
+
+    gui.ContextorGUI._start_live_watcher(controller, str(repo))
+
+    assert events == []
+    assert "LIVE: generation conflict; analysis required" in statuses
 
 
 def test_desktop_publishes_latest_snapshot_and_replaces_existing_watcher(
@@ -479,6 +523,7 @@ def test_desktop_watcher_recovers_after_live_service_death(tmp_path):
     # Mock client 2 that succeeds
     recovered_client = MagicMock()
     recovered_client.ping.return_value = {"status": "ok", "available": True}
+    recovered_client.snapshot.return_value = {"status": "ok"}
     recovered_client.update_file.return_value = {"status": "ok", "result": SimpleNamespace(status="UPDATED")}
 
     def on_reconnect(client):
@@ -503,6 +548,8 @@ def test_desktop_watcher_recovers_after_live_service_death(tmp_path):
         return recovered_client
 
     watcher._recover_client = mock_recover
+    watcher._trusted_file_state = lambda _snapshot: object()
+    watcher._candidate_requires_update = lambda _path, _current: True
 
     # Modify file so that watcher detects a change
     py_file.write_text("x = 2000\n", encoding="utf-8")

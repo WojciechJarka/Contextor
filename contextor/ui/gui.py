@@ -882,18 +882,16 @@ class ContextorGUI:
             expected_root_path=identity.root_path,
         )
         if state is not None:
-            current = client.ping() if hasattr(client, "ping") else {}
+            current = client.snapshot() if hasattr(client, "snapshot") else {}
             state_revision = getattr(state, "revision", None)
-            live_snapshot = client.snapshot() if hasattr(client, "snapshot") else {}
-            live_state = live_snapshot.get("state") if isinstance(live_snapshot, dict) else None
+            live_state = current.get("state") if isinstance(current, dict) else None
+            live_revision = current.get("revision") if isinstance(current, dict) else None
             state_id = getattr(state, "state_id", None)
-            if (
-                state_revision is not None
-                and state_id
-                and current.get("revision") == int(state_revision)
-                and getattr(live_state, "state_id", None) == state_id
-            ):
-                self._set_live_status("LIVE: shared state attached; watcher active")
+            if state_revision is not None and live_revision == int(state_revision):
+                if state_id and getattr(live_state, "state_id", None) == state_id:
+                    self._set_live_status("LIVE: shared state attached; watcher active")
+                else:
+                    self._set_live_status("LIVE: generation conflict; analysis required")
             else:
                 published = client.publish(state, origin="desktop_analysis")
                 if isinstance(published, dict) and published.get("status") == "ok":

@@ -287,6 +287,8 @@ def test_h3a_case_i_crash_window_false_verified_prevented(tmp_path):
     """
     from contextor.core.paths import repo_cache_dir
     from contextor.core.analysis.state_manager import FileStateManager
+    from contextor.core.live_state.store import read_metadata
+    from contextor.core.live_state.store import read_metadata
 
     repo, mod_a = _setup_repo(tmp_path)
     ContextorFacade.analyze_project(str(repo))
@@ -309,7 +311,10 @@ def test_h3a_case_i_crash_window_false_verified_prevented(tmp_path):
     sm_t1 = FileStateManager(str(cache))
     sm_t1.update_state(str(mod_a))
     t1_state_id = "2026-08-26_T1_CRASHED"
-    sm_t1.save(state_id=t1_state_id, revision=2)
+    metadata = read_metadata(cache)
+    assert metadata is not None and metadata.file_state_file
+    fs_file = cache / metadata.file_state_file
+    fs_file.write_text(json.dumps({"_meta": {"state_id": t1_state_id, "revision": 2}, "files": {path: fs.to_dict() for path, fs in sm_t1._state.items()}}), encoding="utf-8")
 
     # CRASH: do NOT save snapshot T1. Snapshot remains T0 (state_id=t0_state_id, revision=1).
     # Clear all memory caches to simulate process restart / hydration
@@ -317,17 +322,11 @@ def test_h3a_case_i_crash_window_false_verified_prevented(tmp_path):
     mcp_runtime._live_engine_revisions.pop(str(repo), None)
     mcp_runtime._live_engine_provenance.pop(str(repo), None)
 
-    # Query tool now hydrats canonical state from snapshot (T0) and FileStateManager from file_state.json (T1)
+    # The authoritative referenced generation is malformed relative to T0.
     res_raw = get_module_context(repo_path=str(repo), module_name="pkg.mod_a")
-    res = json.loads(res_raw)
-    freshness = res.get("state_freshness")
-
-    assert freshness is not None
-    # Verified that generation mismatch fails closed to unverified
-    assert freshness["workspace_sync"] != "verified"
-    assert freshness["workspace_sync"] != "metadata_match"
+    freshness = json.loads(res_raw)["state_freshness"]
     assert freshness["workspace_sync"] == "unverified"
-    assert "generation" in freshness["advisory_warning"].lower() or "crash" in freshness["advisory_warning"].lower()
+    assert "generation" in freshness["advisory_warning"].lower()
 
 
 def test_h3a_case_j_local_incremental_mutation_revision_sync(tmp_path):
@@ -390,7 +389,7 @@ def test_h3a_case_k_real_remote_live_lifecycle_and_journal_separation(tmp_path):
     """
     import threading
     from contextor.core.live_state import CanonicalLiveServer, LiveStateClient
-    from contextor.core.live_state.runtime import _repository_updater, endpoint_file
+    from contextor.core.live_state.runtime import _repository_persister, _repository_updater, endpoint_file
     from contextor.core.live_state.store import load_snapshot
     from contextor.core.paths import repo_cache_dir
     from contextor.core.repository_identity import require_repository_identity
@@ -406,7 +405,8 @@ def test_h3a_case_k_real_remote_live_lifecycle_and_journal_separation(tmp_path):
     state, metadata = loaded
 
     # 2. Start real CanonicalLiveServer
-    server = CanonicalLiveServer(state, revision=metadata.revision, updater=_repository_updater(repo))
+    holder = {}
+    server = CanonicalLiveServer(state, revision=metadata.revision, updater=_repository_updater(repo, holder), persister=_repository_persister(repo, holder))
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
 
@@ -491,6 +491,7 @@ def test_h3a_case_l_legacy_filestate_missing_revision(tmp_path):
     """
     from contextor.core.paths import repo_cache_dir
     from contextor.core.analysis.state_manager import FileStateManager
+    from contextor.core.live_state.store import read_metadata
 
     repo, mod_a = _setup_repo(tmp_path)
     ContextorFacade.analyze_project(str(repo))
@@ -506,8 +507,9 @@ def test_h3a_case_l_legacy_filestate_missing_revision(tmp_path):
 
     # Update file_state on disk with matching sha256 and matching state_id, but MISSING revision
     sm.update_state(str(mod_a))
-    # Write file_state.json directly without revision
-    fs_file = cache / "file_state.json"
+    metadata = read_metadata(cache)
+    assert metadata is not None and metadata.file_state_file
+    fs_file = cache / metadata.file_state_file
     fs_data = {
         "_meta": {"state_id": t0_state_id},  # No revision key
         "files": {path: fs.to_dict() for path, fs in sm._state.items()}
@@ -515,11 +517,7 @@ def test_h3a_case_l_legacy_filestate_missing_revision(tmp_path):
     fs_file.write_text(json.dumps(fs_data, indent=2), encoding="utf-8")
 
     mcp_runtime._live_engines.pop(str(repo), None)
-    res = json.loads(get_module_context(repo_path=str(repo), module_name="pkg.mod_a"))
-    freshness = res["state_freshness"]
-
-    assert freshness["workspace_sync"] != "verified"
-    assert freshness["workspace_sync"] != "metadata_match"
+    freshness = json.loads(get_module_context(repo_path=str(repo), module_name="pkg.mod_a"))["state_freshness"]
     assert freshness["workspace_sync"] == "unverified"
     assert "generation" in freshness["advisory_warning"].lower()
 
@@ -532,6 +530,7 @@ def test_h3a_case_m_legacy_filestate_missing_state_id(tmp_path):
     """
     from contextor.core.paths import repo_cache_dir
     from contextor.core.analysis.state_manager import FileStateManager
+    from contextor.core.live_state.store import read_metadata
 
     repo, mod_a = _setup_repo(tmp_path)
     ContextorFacade.analyze_project(str(repo))
@@ -540,8 +539,9 @@ def test_h3a_case_m_legacy_filestate_missing_state_id(tmp_path):
     cache = repo_cache_dir(repo)
     sm = FileStateManager(str(cache))
 
-    # Write file_state.json with empty state_id
-    fs_file = cache / "file_state.json"
+    metadata = read_metadata(cache)
+    assert metadata is not None and metadata.file_state_file
+    fs_file = cache / metadata.file_state_file
     fs_data = {
         "_meta": {"state_id": "", "revision": 1},
         "files": {path: fs.to_dict() for path, fs in sm._state.items()}
@@ -549,12 +549,9 @@ def test_h3a_case_m_legacy_filestate_missing_state_id(tmp_path):
     fs_file.write_text(json.dumps(fs_data, indent=2), encoding="utf-8")
 
     mcp_runtime._live_engines.pop(str(repo), None)
-    res = json.loads(get_module_context(repo_path=str(repo), module_name="pkg.mod_a"))
-    freshness = res["state_freshness"]
-
-    assert freshness["workspace_sync"] != "verified"
-    assert freshness["workspace_sync"] != "metadata_match"
+    freshness = json.loads(get_module_context(repo_path=str(repo), module_name="pkg.mod_a"))["state_freshness"]
     assert freshness["workspace_sync"] == "unverified"
+    assert "generation" in freshness["advisory_warning"].lower()
 
 
 def test_h3a_case_n_filestate_both_generation_fields_missing(tmp_path):
@@ -565,6 +562,7 @@ def test_h3a_case_n_filestate_both_generation_fields_missing(tmp_path):
     """
     from contextor.core.paths import repo_cache_dir
     from contextor.core.analysis.state_manager import FileStateManager
+    from contextor.core.live_state.store import read_metadata
 
     repo, mod_a = _setup_repo(tmp_path)
     ContextorFacade.analyze_project(str(repo))
@@ -573,20 +571,18 @@ def test_h3a_case_n_filestate_both_generation_fields_missing(tmp_path):
     cache = repo_cache_dir(repo)
     sm = FileStateManager(str(cache))
 
-    # Write file_state.json without _meta or empty _meta
-    fs_file = cache / "file_state.json"
+    metadata = read_metadata(cache)
+    assert metadata is not None and metadata.file_state_file
+    fs_file = cache / metadata.file_state_file
     fs_data = {
         "files": {path: fs.to_dict() for path, fs in sm._state.items()}
     }
     fs_file.write_text(json.dumps(fs_data, indent=2), encoding="utf-8")
 
     mcp_runtime._live_engines.pop(str(repo), None)
-    res = json.loads(get_module_context(repo_path=str(repo), module_name="pkg.mod_a"))
-    freshness = res["state_freshness"]
-
-    assert freshness["workspace_sync"] != "verified"
-    assert freshness["workspace_sync"] != "metadata_match"
+    freshness = json.loads(get_module_context(repo_path=str(repo), module_name="pkg.mod_a"))["state_freshness"]
     assert freshness["workspace_sync"] == "unverified"
+    assert "generation" in freshness["advisory_warning"].lower()
 
 
 def test_h3a_case_o_live_daemon_restart_cache_invalidation_across_epochs(tmp_path):
@@ -608,7 +604,7 @@ def test_h3a_case_o_live_daemon_restart_cache_invalidation_across_epochs(tmp_pat
     """
     import threading
     from contextor.core.live_state import CanonicalLiveServer, LiveStateClient
-    from contextor.core.live_state.runtime import _repository_updater, endpoint_file
+    from contextor.core.live_state.runtime import _repository_persister, _repository_updater, endpoint_file
     from contextor.core.live_state.store import load_snapshot
     from contextor.core.paths import repo_cache_dir
     from contextor.core.repository_identity import require_repository_identity
@@ -623,7 +619,8 @@ def test_h3a_case_o_live_daemon_restart_cache_invalidation_across_epochs(tmp_pat
     state, metadata = loaded
     p0 = metadata.revision  # 1
 
-    server1 = CanonicalLiveServer(state, revision=p0, updater=_repository_updater(repo))
+    holder1 = {}
+    server1 = CanonicalLiveServer(state, revision=p0, updater=_repository_updater(repo, holder1), persister=_repository_persister(repo, holder1))
     t1 = threading.Thread(target=server1.serve_forever, daemon=True)
     t1.start()
 
@@ -661,7 +658,8 @@ def test_h3a_case_o_live_daemon_restart_cache_invalidation_across_epochs(tmp_pat
     # 3. Start Server S2 from disk snapshot (without clearing MCP cache)
     loaded_s2 = load_snapshot(cache, expected_repo_id=identity.repo_id, expected_root_path=identity.root_path)
     state_s2, metadata_s2 = loaded_s2
-    server2 = CanonicalLiveServer(state_s2, revision=metadata_s2.revision, updater=_repository_updater(repo))
+    holder2 = {}
+    server2 = CanonicalLiveServer(state_s2, revision=metadata_s2.revision, updater=_repository_updater(repo, holder2), persister=_repository_persister(repo, holder2))
     t2 = threading.Thread(target=server2.serve_forever, daemon=True)
     t2.start()
 
@@ -1000,6 +998,7 @@ def test_h3a_case_s_explicit_generation_mismatch_symbol_fail_closed(tmp_path):
     """
     from contextor.core.paths import repo_cache_dir
     from contextor.core.analysis.state_manager import FileStateManager
+    from contextor.core.live_state.store import read_metadata
     from contextor.mcp.tools.get_symbol_implementation import get_symbol_implementation
 
     repo, mod_a = _setup_repo(tmp_path)
@@ -1019,7 +1018,15 @@ def test_h3a_case_s_explicit_generation_mismatch_symbol_fail_closed(tmp_path):
     # Mutate FileStateManager on disk to simulate explicit generation mismatch (P1 on disk, P0 in engine)
     sm = FileStateManager(str(cache))
     sm.update_state(str(mod_a))
-    sm.save(state_id="2026-08-27_P1_MISMATCH", revision=p0_rev + 1)
+    metadata = read_metadata(cache)
+    assert metadata is not None and metadata.file_state_file
+    (cache / metadata.file_state_file).write_text(
+        json.dumps({
+            "_meta": {"state_id": "2026-08-27_P1_MISMATCH", "revision": p0_rev + 1},
+            "files": {path: fs.to_dict() for path, fs in sm._state.items()},
+        }),
+        encoding="utf-8",
+    )
 
     # get_symbol_implementation with cached engine (holding P0) against FileState on disk (holding P1)
     sym_res = json.loads(get_symbol_implementation(repo_path=str(repo), symbol="compute_data", mode="fetch", include=["implementation"]))
@@ -1577,6 +1584,3 @@ def test_h3a_case_aa_analysis_job_revision_mismatch_fails_closed(tmp_path, monke
     assert "loaded=3" in final_job["error"]
     assert "published=42" in final_job["error"]
     assert str(repo) not in mcp_runtime._live_engine_revisions
-
-
-

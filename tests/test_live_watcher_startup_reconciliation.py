@@ -418,3 +418,185 @@ def test_post_lease_snapshot_failure_never_dispatches_unverified_update(tmp_path
     assert watcher.poll_once() == []
     assert calls == []
     assert watcher._startup_pending == [str(source)]
+
+
+def test_startup_resync_with_analysis_errors_remains_untrusted(tmp_path):
+    repo = tmp_path / "repo"; repo.mkdir(); (repo / "module.py").write_text("VALUE = 1\n", encoding="utf-8")
+    class Client:
+        def snapshot(self): return {"status": "ok", "state": RepositoryAnalysisState(modules={})}
+        def ping(self): return {"status": "ok", "available": True}
+        def update_file(self, *_args, **_kwargs): raise AssertionError("fallback update")
+    watcher = DesktopLiveWatcher(repo, Client(), on_resync=lambda: (["error"], object()))
+    assert watcher.poll_once() == []
+    assert watcher._startup_requires_resync is True
+
+
+def test_full_analysis_waits_for_inflight_watcher_mutation(tmp_path):
+    from contextor.core.analysis.full_analysis_coordinator import acquire_full_analysis, release_full_analysis
+    repo = tmp_path / "repo"; repo.mkdir(); PersistentIdentityRegistry(str(repo))
+    lease = acquire_full_analysis(repo, owner="watcher", timeout=1)
+    entered = threading.Event()
+    finished = threading.Event()
+    def run():
+        try:
+            other = acquire_full_analysis(repo, owner="analysis", timeout=2)
+            entered.set(); release_full_analysis(other)
+        finally: finished.set()
+    thread = threading.Thread(target=run); thread.start()
+    assert not entered.wait(0.1)
+    release_full_analysis(lease); assert finished.wait(2); thread.join()
+
+
+def test_watcher_does_not_mutate_during_full_analysis_and_rebases_after_publish(tmp_path):
+    repo = tmp_path / "repo"; repo.mkdir(); source = repo / "module.py"; source.write_text("VALUE = 1\n", encoding="utf-8")
+    calls = []
+    from contextor.core.analysis import full_analysis_coordinator as coordinator
+    original = coordinator.acquire_full_analysis
+    busy = {"first": True}
+    def acquire(root, *, owner, timeout):
+        if busy["first"]:
+            busy["first"] = False
+            raise coordinator.FullAnalysisBusyError("analysis owns lease")
+        return original(root, owner=owner, timeout=timeout)
+    class Client:
+        def ping(self): return {"status": "ok", "available": True}
+        def snapshot(self): return {"status": "ok", "state": SimpleNamespace(revision=1, state_id="g")}
+        def update_file(self, *_args, **_kwargs): calls.append("update"); return {"status": "ok", "result": SimpleNamespace(status="UPDATED")}
+    watcher = DesktopLiveWatcher(repo, Client())
+    watcher._snapshot = {str(source): (0, 1)}
+    source.write_text("VALUE = 2\n", encoding="utf-8")
+    watcher._trusted_file_state = lambda _snapshot: object()
+    watcher._candidate_requires_update = lambda *_args: False
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(coordinator, "acquire_full_analysis", acquire)
+    try:
+        assert watcher.poll_once() == []
+        assert calls == []
+        assert watcher.poll_once() == []
+        assert calls == []
+    finally:
+        monkeypatch.undo()
+
+
+def test_change_during_startup_resync_is_not_lost(tmp_path):
+    repo = tmp_path / "repo"; repo.mkdir(); source = repo / "module.py"; source.write_text("VALUE = 1\n", encoding="utf-8")
+    calls = []
+    class Client:
+        def ping(self): return {"status": "ok", "available": True}
+        def snapshot(self): return {"status": "ok", "state": SimpleNamespace(revision=1, state_id="g")}
+        def update_file(self, *_args, **_kwargs): calls.append("update"); return {"status": "ok", "result": SimpleNamespace(status="UPDATED")}
+    def resync():
+        source.write_text("VALUE = 2\n", encoding="utf-8")
+        return ([], object())
+    watcher = DesktopLiveWatcher(repo, Client(), on_resync=resync)
+    watcher._startup_requires_resync = True
+    watcher._trusted_file_state = lambda _snapshot: object()
+    watcher._candidate_requires_update = lambda *_args: True
+    assert watcher.poll_once() == []
+    assert calls == []
+    watcher._snapshot = {str(source): (0, 1)}
+    assert watcher.poll_once() == [str(source)]
+    assert calls == ["update"]
+
+
+def test_update_transport_recovery_revalidates_generation_before_retry(tmp_path):
+    repo = tmp_path / "repo"; repo.mkdir(); source = repo / "module.py"; source.write_text("VALUE = 1\n", encoding="utf-8")
+
+    def run_case(candidate_values, commit_first, expected_calls):
+        calls = []
+        class Client:
+            def __init__(self): self.recovered = False
+            def ping(self): return {"status": "ok", "available": True}
+            def snapshot(self): return {"status": "ok", "state": SimpleNamespace(revision=2 if commit_first else 1, state_id="g")}
+            def update_file(self, *_args, **_kwargs):
+                calls.append("update")
+                if len(calls) == 1 and commit_first: raise ConnectionError("response lost after commit")
+                if len(calls) == 1 and not commit_first: raise ConnectionError("before commit")
+                return {"status": "ok", "result": SimpleNamespace(status="UPDATED")}
+        client = Client()
+        watcher = DesktopLiveWatcher(repo, client)
+        watcher._snapshot = {str(source): (0, 1)}
+        source.write_text("VALUE = 2\n", encoding="utf-8")
+        watcher._trusted_file_state = lambda _snapshot: object()
+        values = iter(candidate_values)
+        watcher._candidate_requires_update = lambda *_args: next(values)
+        watcher._recover_client = lambda: client
+        result = watcher.poll_once()
+        assert len(calls) == expected_calls
+        return result
+
+    assert run_case([True, False], True, 1) == []
+    assert run_case([True, True], False, 2) == [str(source)]
+    assert run_case([True, None], False, 1) == []
+
+
+def test_update_error_result_is_not_acknowledged_into_watcher_snapshot(tmp_path):
+    repo = tmp_path / "repo"; repo.mkdir(); source = repo / "module.py"; source.write_text("VALUE = 1\n", encoding="utf-8")
+    calls = []
+    class Client:
+        def ping(self): return {"status": "ok", "available": True}
+        def snapshot(self): return {"status": "ok", "state": SimpleNamespace(revision=1, state_id="g")}
+        def update_file(self, *_args, **_kwargs):
+            calls.append("update")
+            status = "ERROR" if len(calls) == 1 else "UPDATED"
+            return {"status": "ok", "result": SimpleNamespace(status=status)}
+    watcher = DesktopLiveWatcher(repo, Client())
+    watcher._snapshot = {str(source): (0, 1)}
+    source.write_text("VALUE = 2\n", encoding="utf-8")
+    watcher._trusted_file_state = lambda _snapshot: object()
+    watcher._candidate_requires_update = lambda *_args: True
+
+    assert watcher.poll_once() == []
+    assert calls == ["update"]
+    assert watcher._startup_pending == [str(source)]
+    assert watcher.poll_once() == [str(source)]
+    assert calls == ["update", "update"]
+
+
+def test_deferred_candidate_does_not_replay_already_reconciled_sibling(tmp_path):
+    repo = tmp_path / "repo"; repo.mkdir()
+    first = repo / "a.py"; second = repo / "b.py"
+    first.write_text("A = 1\n", encoding="utf-8"); second.write_text("B = 1\n", encoding="utf-8")
+    calls = []
+    class Client:
+        def ping(self): return {"status": "ok", "available": True}
+        def snapshot(self): return {"status": "ok", "state": SimpleNamespace(revision=1, state_id="g")}
+        def update_file(self, path, **_kwargs): calls.append(path); return {"status": "ok", "result": SimpleNamespace(status="UPDATED")}
+    watcher = DesktopLiveWatcher(repo, Client())
+    watcher._snapshot = {str(first): (0, 1), str(second): (0, 1)}
+    first.write_text("A = 2\n", encoding="utf-8"); second.write_text("B = 2\n", encoding="utf-8")
+    watcher._trusted_file_state = lambda _snapshot: object()
+    deferred = {str(second)}
+    watcher._candidate_requires_update = lambda path, *_args: None if path in deferred else True
+    assert watcher.poll_once() == [str(first)]
+    assert calls == [str(first)]
+    deferred.clear()
+    assert watcher.poll_once() == [str(second)]
+    assert calls == [str(first), str(second)]
+
+
+def test_missing_update_result_is_not_acknowledged(tmp_path):
+    repo = tmp_path / "repo"; repo.mkdir(); source = repo / "module.py"; source.write_text("VALUE = 1\n", encoding="utf-8")
+    class Client:
+        def ping(self): return {"status": "ok", "available": True}
+        def snapshot(self): return {"status": "ok", "state": SimpleNamespace(revision=1, state_id="g")}
+        def update_file(self, *_args, **_kwargs): return {"status": "ok"}
+    watcher = DesktopLiveWatcher(repo, Client()); watcher._snapshot = {str(source): (0, 1)}
+    source.write_text("VALUE = 2\n", encoding="utf-8")
+    watcher._trusted_file_state = lambda _snapshot: object(); watcher._candidate_requires_update = lambda *_args: True
+    assert watcher.poll_once() == []
+    assert watcher._startup_pending == [str(source)]
+
+
+def test_error_top_level_response_is_not_acknowledged(tmp_path):
+    repo = tmp_path / "repo"; repo.mkdir(); source = repo / "module.py"; source.write_text("VALUE = 1\n", encoding="utf-8")
+    class Client:
+        def ping(self): return {"status": "ok", "available": True}
+        def snapshot(self): return {"status": "ok", "state": SimpleNamespace(revision=1, state_id="g")}
+        def update_file(self, *_args, **_kwargs): return {"status": "error", "error": "rejected"}
+    watcher = DesktopLiveWatcher(repo, Client()); watcher._snapshot = {str(source): (0, 1)}
+    source.write_text("VALUE = 2\n", encoding="utf-8")
+    watcher._trusted_file_state = lambda _snapshot: object(); watcher._candidate_requires_update = lambda *_args: True
+    with pytest.raises(RuntimeError, match="rejected"):
+        watcher.poll_once()
+    assert watcher._snapshot[str(source)] == (0, 1)

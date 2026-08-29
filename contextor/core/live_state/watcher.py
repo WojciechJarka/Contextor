@@ -207,16 +207,18 @@ class DesktopLiveWatcher(_PollingLiveWorker):
         self,
         path: str,
         current: dict[str, tuple[int, int]],
+        snapshot: dict | None = None,
     ) -> bool | None:
         """Revalidate a queued path against the generation held after the lease wait."""
-        try:
-            snapshot = self.client.snapshot()
-        except (OSError, EOFError, TimeoutError, ConnectionError):
-            return None
+        if snapshot is None:
+            try:
+                snapshot = self.client.snapshot()
+            except (OSError, EOFError, TimeoutError, ConnectionError):
+                return None
         manager = self._trusted_file_state(snapshot)
         if manager is None:
             self._startup_requires_resync = True
-            return False
+            return None
         if path not in current:
             return path in manager.tracked_paths()
         state = snapshot.get("state")
@@ -298,6 +300,15 @@ class DesktopLiveWatcher(_PollingLiveWorker):
             }
         )
         deferred: set[str] = set()
+        reconciled: list[str] = []
+        next_snapshot = dict(self._snapshot)
+
+        def acknowledge(path: str) -> None:
+            if path in current:
+                next_snapshot[path] = current[path]
+            else:
+                next_snapshot.pop(path, None)
+
         for path in changed:
             from contextor.core.runtime_trace import new_trace_operation, trace_event
 
@@ -340,24 +351,47 @@ class DesktopLiveWatcher(_PollingLiveWorker):
                     self._emit("LIVE: generation revalidation unavailable; deferring watcher update")
                     continue
                 if not candidate_requires_update:
+                    acknowledge(path)
                     continue
                 response = self.client.update_file(path, origin="desktop_watcher", trace_op=op)
             except (OSError, EOFError, TimeoutError, ConnectionError):
                 self._emit("LIVE: connection lost during update; recovering...")
                 if self._recover_client() is None:
                     raise
+                try:
+                    recovered_snapshot = self.client.snapshot()
+                except (OSError, EOFError, TimeoutError, ConnectionError):
+                    deferred.add(path)
+                    self._emit("LIVE: generation revalidation unavailable; deferring watcher update")
+                    continue
+                if self._trusted_file_state(recovered_snapshot) is None:
+                    deferred.add(path)
+                    self._emit("LIVE: generation revalidation unavailable; deferring watcher update")
+                    continue
+                candidate_requires_update = self._candidate_requires_update(
+                    path, current, recovered_snapshot
+                )
+                if candidate_requires_update is None:
+                    deferred.add(path)
+                    self._emit("LIVE: generation revalidation unavailable; deferring watcher update")
+                    continue
+                if candidate_requires_update is False:
+                    acknowledge(path)
+                    continue
                 response = self.client.update_file(path, origin="desktop_watcher", trace_op=op)
             finally:
                 if lease is not None:
                     release_full_analysis(lease)
 
-            if response.get("status") != "ok":
-                trace_event("LIVE", "WATCH_UPDATE_FAIL", op=op, repo=str(self.root), path=relative, elapsed_ms=(time.monotonic() - update_started) * 1000.0, err=response.get("error"))
-                self._emit(f"LIVE connection error: {response.get('error', 'update failed')}")
-                raise RuntimeError(f"LIVE update failed for {path}: {response.get('error')}")
+            if not isinstance(response, dict) or response.get("status") != "ok":
+                error = response.get("error", "update failed") if isinstance(response, dict) else "malformed update response"
+                trace_event("LIVE", "WATCH_UPDATE_FAIL", op=op, repo=str(self.root), path=relative, elapsed_ms=(time.monotonic() - update_started) * 1000.0, err=error)
+                self._emit(f"LIVE connection error: {error}")
+                raise RuntimeError(f"LIVE update failed for {path}: {error}")
             result = response.get("result")
-            result_status = getattr(result, "status", "UPDATED")
+            result_status = getattr(result, "status", None)
             trace_event("LIVE", "WATCH_UPDATE_END", op=op, repo=str(self.root), path=relative, rev=response.get("revision"), seq=response.get("seq"), status=result_status, elapsed_ms=(time.monotonic() - update_started) * 1000.0)
+            acknowledged = result_status in {"UPDATED", "DELETED", "UNCHANGED", "RECOVERED", "SYNTAX_ERROR"}
             if result_status == "SYNTAX_ERROR":
                 line = getattr(result, "line_number", None)
                 column = getattr(result, "column_number", None)
@@ -370,13 +404,18 @@ class DesktopLiveWatcher(_PollingLiveWorker):
                 self._emit(f"LIVE update successful: {Path(path).name}")
             else:
                 self._emit(f"LIVE update error: {Path(path).name}: {result_status}")
+            if not acknowledged:
+                deferred.add(path)
+                continue
+            acknowledge(path)
+            reconciled.append(path)
         if deferred:
-            # Retain the old scan so a deferred candidate remains observable.
+            self._snapshot = next_snapshot
             self._startup_pending = sorted(deferred)
-            return [path for path in changed if path not in deferred]
-        self._snapshot = current
+            return reconciled
+        self._snapshot = next_snapshot
         self._startup_pending = []
-        return changed
+        return reconciled
 
     def _handle_poll_error(self, exc: OSError | RuntimeError | EOFError) -> None:
         self._emit(f"LIVE connection error: {exc}")
