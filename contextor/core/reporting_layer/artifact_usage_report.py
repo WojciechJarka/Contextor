@@ -224,7 +224,18 @@ def collect_module_artifacts(
         if module_id not in failures
     ]
 
-    if os.environ.get("CONTEXTOR_DISABLE_PROCESS_POOL") == "1":
+    if not eligible_module_ids:
+        return result, failures
+
+    all_tasks_have_available_facts = all(
+        symbol_facts_by_module.get(module_id, {}).get("status") == "available"
+        for module_id in eligible_module_ids
+    )
+
+    if (
+        os.environ.get("CONTEXTOR_DISABLE_PROCESS_POOL") == "1"
+        or all_tasks_have_available_facts
+    ):
         _init_artifact_worker(
             modules, root_path, reference_index, symbol_facts_by_module
         )
@@ -232,6 +243,8 @@ def collect_module_artifacts(
             try:
                 returned_module_id, data = _process_single_artifact_module(module_id)
                 result[returned_module_id] = data
+            except AnalysisCancelled:
+                raise
             except Exception as exc:
                 failures[module_id] = f"{type(exc).__name__}: {exc}"
             completed += 1
@@ -262,6 +275,8 @@ def collect_module_artifacts(
                 returned_module_id, data = future.result()
                 result[returned_module_id] = data
 
+            except AnalysisCancelled:
+                raise
             except Exception as exc:
                 failures[module_id] = (
                     f"{type(exc).__name__}: {exc}"

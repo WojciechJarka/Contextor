@@ -54,3 +54,8 @@
 {"ts":"2026-08-29T22:06:49.863+00:00","mono_ms":407502671,"sid":"d-5684-20260829_215744_995","pid":10696,"tid":5132,"d":"LIVE","ev":"PUBLISH_RECEIVED","op":"p-10696-2","rev":10}
 {"ts":"2026-08-29T22:06:49.879+00:00","mono_ms":407502687,"sid":"d-5684-20260829_215744_995","pid":10696,"tid":5132,"d":"LIVE","ev":"ACTIVITY_APPEND","op":"p-10696-2","rev":11,"seq":4,"category":"LIVE_STATE","operation":"publish","status":"PUBLISHED"}
 {"ts":"2026-08-29T22:06:49.879+00:00","mono_ms":407502687,"sid":"d-5684-20260829_215744_995","pid":10696,"tid":5132,"d":"LIVE","ev":"CANONICAL_PUBLISH","op":"p-10696-2","rev0":10,"rev1":11,"seq":4}
+{"ts":"2026-08-29T22:06:49.989+00:00","mono_ms":407502796,"sid":"d-5684-20260829_215744_995","pid":5684,"tid":8180,"d":"GUI","ev":"EVENT_BATCH_RECEIVED","rev":11,"seq":4,"count":1,"first_seq":4,"last_seq":4}
+{"ts":"2026-08-29T22:06:49.989+00:00","mono_ms":407502796,"sid":"d-5684-20260829_215744_995","pid":5684,"tid":8180,"d":"GUI","ev":"STATUS_QUEUED","op":"p-10696-2","rev":11,"seq":4,"q":1,"category":"LIVE_STATE","status":"[LIVE] [Contextor_Repo] Desktop analysis published shared LIVE state (rev 11)"}
+{"ts":"2026-08-29T22:06:50.005+00:00","mono_ms":407502812,"sid":"d-5684-20260829_215744_995","pid":5684,"tid":8288,"d":"GUI","ev":"STATUS_RENDERED","op":"p-10696-2","rev":11,"seq":4,"q":0,"wait_ms":16.00000000325963}
+{"ts":"2026-08-29T22:12:07.978+00:00","mono_ms":407820781,"sid":"d-5684-20260829_215744_995","pid":10696,"tid":5132,"d":"LIVE","ev":"SERVICE_END","rev":11,"repo":"C:\\Temp\\Contextor_Repo"}
+{"ts":"2026-08-29T22:12:08.777+00:00","mono_ms":407821578,"sid":"d-5684-20260829_215744_995","pid":5684,"tid":8288,"d":"DESKTOP","ev":"SESSION_END","op":"d-5684-4"}

@@ -1,149 +1,131 @@
-# TASK=BOTTLENECKS-0E1
+# BOTTLENECKS-0H — POST-0G FULL-ANALYSIS COST REMAP
 
-VERDICT=FINAL_STATIC_PERF_PASS
+VERDICT=CURRENT_COST_MAP_READY
 
-## TEST_HARNESS_FIXED
+Scope was read-only measurement and architectural discovery. No production or test file was modified for 0H. The required disposable benchmark copies and isolated caches were outside the canonical repository and were removed after measurement.
 
-YES. Added CONTEXTOR_DISABLE_PROCESS_POOL=1 to tests/test_index_fusion.py::test_new_format_cache_hit_does_not_parse. The assertion remains that the new-format cache hit performs zero parse calls. This is test-only.
+## Protocol and validity
 
-## CACHE_INVALIDATION_PROOF
+- Benchmark root: `C:\Temp\Contextor_Benchmarks\0H\run2`.
+- Pre-benchmark gate passed: the resolved benchmark root was neither equal to nor a descendant of `C:\Temp\Contextor_Repo`.
+- Source copy: current source, 316 Python modules.
+- LIVE was disconnected in the external harness; cache/output/state were isolated.
+- Executor selection was normal production selection; no production executor flag or instrumentation was added.
+- Runs: one cold followed by three unchanged-source warm `ContextorFacade.analyze_project` runs.
+- All four runs completed with result present, 316 modules, and zero errors.
+- Three initial harness attempts with incorrect wrapper/import targets were rejected as harness-contaminated and excluded; they produced no analysis result used below.
+- No full pytest run was performed.
 
-Added tests/test_index_fusion.py::test_source_change_invalidates_symbol_facts_then_warm_hit_is_parse_free.
+## Full-analysis measurements
 
-It proves: old facts are not reused after source content changes; the changed source produces NEW facts; the changed run performs one parse; the unchanged follow-up warm run performs zero parses.
+All values are milliseconds. Warm values are `warm1`, `warm2`, `warm3`; percentage is median divided by the warm total median. Nested rows are shown for attribution and must not be summed as independent costs.
 
-## FOCUSED_TESTS
+| Stage | warm1 | warm2 | warm3 | median | % warm total |
+|---|---:|---:|---:|---:|---:|
+| TOTAL_ANALYZE_PROJECT | 13956.944 | 10144.289 | 10829.406 | 10829.406 | 100.00% |
+| INDEX_REPOSITORY | 4480.778 | 1305.334 | 1537.160 | 1537.160 | 14.20% |
+| COLLISION_FACTS | 1083.290 | 1092.994 | 1117.901 | 1092.994 | 10.10% |
+| PACKAGE_ROOT | 8.996 | 7.321 | 7.619 | 7.619 | 0.07% |
+| BUILD_GRAPH | 17.705 | 14.257 | 14.025 | 14.257 | 0.13% |
+| VALIDATION | 4.463 | 4.048 | 4.549 | 4.463 | 0.04% |
+| METRICS_CYCLES_DEBT | 2.480 | 2.722 | 2.623 | 2.623 | 0.02% |
+| GLOBAL_PIPELINE | 7049.777 | 6692.937 | 7108.293 | 7049.777 | 65.09% |
+| ARTIFACT_PIPELINE_TOTAL | 6395.295 | 6066.395 | 6424.747 | 6395.295 | 59.07% |
+| ARTIFACT_USAGE_COLLECTION | 5619.315 | 5313.194 | 5714.753 | 5619.315 | 51.89% |
+| COLLECT_MODULE_ARTIFACTS | 4094.280 | 3853.805 | 4245.710 | 4094.280 | 37.80% |
+| COMPACT_ARTIFACT | 15.882 | 13.890 | 13.627 | 13.890 | 0.13% |
+| COMPACT_STRUCTURE | 6.266 | 4.355 | 3.492 | 4.355 | 0.04% |
+| GRAPH_ANALYTICS | 417.658 | 369.279 | 353.591 | 369.279 | 3.41% |
+| DEPENDENCY_MATRIX | 395.597 | 43.666 | 40.325 | 43.666 | 0.40% |
+| SHARED_CLUSTERS | 302.678 | 326.861 | 295.597 | 302.678 | 2.80% |
+| PERSISTENCE | 227.791 | 249.837 | 291.658 | 249.837 | 2.31% |
 
-Command:
-.\.venv\Scripts\python.exe -m pytest -q tests/test_index_fusion.py tests/test_paths_and_cache.py tests/test_non_python_files.py tests/test_symbol_extractor_semantics.py tests/test_artifact_parallelism.py tests/test_artifact_report.py tests/test_h2a_reference_index_equivalence.py tests/test_h2a_complexity_regression.py tests/test_no_double_parse.py
+`ARTIFACT_USAGE_COLLECTION`, `COLLECT_MODULE_ARTIFACTS`, and `ARTIFACT_PIPELINE_TOTAL` are nested. `GLOBAL_PIPELINE` also contains the artifact pipeline. The independent top-level measurements therefore identify artifact collection and repository indexing as the meaningful cost centers; the percentages are attribution percentages, not additive shares.
 
-Result:
-43 passed in 38.28s
+COLD_TOTAL=29960.400 ms.
 
-No production files changed. No full pytest was run.
+The artifact-usage timer was installed on the alias actually used by `artifact_pipeline`; the collect timer was installed on `artifact_usage_report`. This avoids the earlier invalid zero reading from wrapping only the wrong import binding.
 
-## REAL_BENCHMARK
+## Top-two bounded decomposition
 
-Protocol: disposable copy of the current source tree, exactly 317 Python modules after excluding scratch and benchmark helper files; isolated cache/state/output/registry; LIVE disconnected; default Windows ProcessPool, no serial fallback for primary comparison; worker count unchanged at 4.
+The bounded internal warm diagnostic was one additional uncontaminated warm run and is not part of the three-run medians.
 
-The first attempted run was discarded because helper files inside the copy made the count 319. It is recorded as CONTAMINATED_RUN=1 and is not used in any result.
+1. `ARTIFACT_USAGE_COLLECTION` / `collect_module_artifacts`:
 
-The accepted run used one cold ProcessPool run followed by three uncontaminated new-format warm ProcessPool runs on the same unchanged checkout.
+   - `REFERENCE_INDEX_BUILD=3323.518 ms`.
+   - `WORKER_COMPUTE=765.240 ms`.
+   - `ARTIFACT_INDEX=8.812 ms`.
+   - `SHARED_KEYS=0.585 ms`.
+   - `FILTER_SHARED=0.602 ms`.
+   - `SHARED_CLUSTERS_BUILD=9.357 ms`.
+   - `CORE_CANDIDATES=0.501 ms`.
+   - `DISCOVER_TEST_DIRS=162.546 ms`.
+   - `TEST_CONTEXT_INDEX=1107.498 ms`.
+   - `TEST_CONTEXT_PER_MODULE=178.205 ms` (nested per-module work).
 
-| Case | TOTAL_ANALYZE_PROJECT ms | INDEX_REPOSITORY ms | ARTIFACT_USAGE_COLLECTION ms | ARTIFACT_PIPELINE_TOTAL ms | GLOBAL_PIPELINE_TOTAL ms | ast.parse count |
-|---|---:|---:|---:|---:|---:|---:|
-| COLD | 36308.379 | 7768.438 | 10387.436 | 20927.084 | 21726.278 | 317 |
-| NEW_FORMAT_WARM_1 | 22794.387 | 7252.848 | 10808.966 | 11661.815 | 12334.995 | 0 |
-| NEW_FORMAT_WARM_2 | 22431.252 | 7355.657 | 10144.544 | 11155.237 | 11871.450 | 0 |
-| NEW_FORMAT_WARM_3 | 20982.300 | 6813.342 | 9510.481 | 10656.358 | 11335.210 | 0 |
-| WARM_MEDIAN | 22431.252 | 7252.848 | 10144.544 | 11155.237 | 11871.450 | 0 |
+   The reference-index rebuild is approximately 81% of the measured collect median (`3323.518 / 4094.280`) and is the dominant owned subcost. Worker symbol-fact computation is comparatively small after fusion.
 
-MODULE_COUNT=317
-WORKER_COUNT=4
-PAYLOAD_SIZE=3563882 bytes initializer payload (modules, root, RepositoryReferenceIndex)
+2. `INDEX_REPOSITORY`:
 
-## BASELINE_TO_NEW
+   The three representative warm timings were `4480.778`, `1305.334`, and `1537.160 ms`; the median is `1537.160 ms`. Source inspection identifies its owned work as module discovery, cache validation/assembly, and ProcessPool orchestration. A safe external split of spawned worker internals would require changing executor behavior or adding production instrumentation, both outside this task. The bounded evidence is therefore the direct stage timing and its large warm-run variance; no unsupported sub-timing is claimed.
 
-Baseline 0C:
-TOTAL=25839.631 ms
-INDEX_REPOSITORY=3272.821 ms
-ARTIFACT_USAGE_COLLECTION=12115.656 ms
-ARTIFACT_PIPELINE_TOTAL=15582.821 ms
+## 0G adaptive-path confirmation
 
-Warm median deltas:
-- TOTAL: -3408.379 ms (-13.19%)
-- INDEX_REPOSITORY: +3980.027 ms (+121.61%)
-- ARTIFACT_USAGE_COLLECTION: -1971.112 ms (-16.27%)
-- ARTIFACT_PIPELINE_TOTAL: -4427.584 ms (-28.41%)
+AVAILABLE_FACT_TASKS=316
 
-The index became heavier because SymbolVisitor work moved into index workers. The full warm total still achieved a meaningful 13.19% reduction, and focused artifact parity tests passed.
+FALLBACK_PATH_TASKS=0
 
-## READ_COUNTS
+FAILURES=0
 
-Accepted ProcessPool benchmark:
-- COLD: 317 ast.parse calls; 317 cache hash/source-content reads; parse path adds one source read per module.
-- Each NEW_FORMAT_WARM run: 0 ast.parse calls; 317 existing cache hash/source-content reads; 0 artifact-worker source reads/parses for available facts.
-- Warm facts were available for all 317 parseable modules.
-- The cache hash read is legitimate source validation and was not treated as a parse regression.
+The current all-available artifact stage selected the adaptive serial worker path. The post-fusion artifact computation performed no source parses or source reads for these tasks.
 
-The earlier 0E disposable migration probe also established one parse for a legacy entry and zero parses on its post-migration warm run.
+## Comparison
 
-## CACHE_AND_PARITY_STATUS
+0E baseline full-analysis total: `22431.252 ms`.
 
-INDEX_FUSION_ACTIVE=YES
-CACHE_SEMANTIC_VALIDITY=PASS
-LEGACY_CACHE_MIGRATION=PASS
-POST_MIGRATION_ZERO_SYMBOL_PARSE=PASS
-CACHE_INVALIDATION=PASS
-SYMBOL_FIELD_PARITY=PASS
-ARTIFACT_PARITY=PASS
-SERIAL_PROCESSPOOL_PARITY=PASS
-SYMBOL_FAILURE_ISOLATION=PASS
-FAILURE_RETRY=PASS
+Current controlled warm median: `10829.406 ms`.
 
-## FILES_CHANGED
+Delta: `-11601.846 ms` (`-51.72%`).
 
-Production files: NONE
-Test files: tests/test_index_fusion.py
-walkthrough.md is the reporting artifact and is excluded from this count. Runtime logs are environment-generated and were not touched.
+The user-observed Desktop result of approximately 18 seconds is separate real-world context and is not treated as equivalent to this isolated benchmark protocol.
 
-## COMPLETE_RAW_UNIFIED_DIFF
+## Decision and next target
 
-DIFF_BEGIN
+NEXT_TARGET_FILE=`contextor/core/reporting_layer/artifact_usage_report.py`
 
-diff --git a/tests/test_index_fusion.py b/tests/test_index_fusion.py
-index f615ddf..7c8614d 100644
---- a/tests/test_index_fusion.py
-+++ b/tests/test_index_fusion.py
-@@ -25,6 +25,7 @@ def test_index_cache_miss_stores_symbol_facts(tmp_path, isolated_dirs):
- 
- 
- def test_new_format_cache_hit_does_not_parse(tmp_path, isolated_dirs, monkeypatch):
-+    monkeypatch.setenv("CONTEXTOR_DISABLE_PROCESS_POOL", "1")
-     root = tmp_path / "repo"
-     root.mkdir()
-     source = root / "module.py"
-@@ -43,6 +44,38 @@ def test_new_format_cache_hit_does_not_parse(tmp_path, isolated_dirs, monkeypatc
-     assert result.symbol_facts_by_module["module"]["status"] == "available"
- 
- 
-+def test_source_change_invalidates_symbol_facts_then_warm_hit_is_parse_free(
-+    tmp_path, isolated_dirs, monkeypatch
-+):
-+    monkeypatch.setenv("CONTEXTOR_DISABLE_PROCESS_POOL", "1")
-+    root = tmp_path / "repo"
-+    root.mkdir()
-+    source = root / "module.py"
-+    source.write_text("def old():\n    return 1\n", encoding="utf-8")
-+    indexer.index_repository(str(root))
-+
-+    source.write_text("def new():\n    return 2\n", encoding="utf-8")
-+    indexer._CACHE_MANAGERS.pop(str(root.resolve()), None)
-+    parse_calls = []
-+    original_parse = indexer.parse_source
-+    monkeypatch.setattr(
-+        indexer,
-+        "parse_source",
-+        lambda path: (parse_calls.append(path) or original_parse(path)),
-+    )
-+
-+    changed = indexer.index_repository(str(root))
-+
-+    assert len(parse_calls) == 1
-+    assert changed.symbol_facts_by_module["module"]["facts"]["functions"] == ["new"]
-+
-+    indexer._CACHE_MANAGERS.pop(str(root.resolve()), None)
-+    parse_calls.clear()
-+    warm = indexer.index_repository(str(root))
-+    assert parse_calls == []
-+    assert warm.symbol_facts_by_module["module"]["facts"]["functions"] == ["new"]
-+
-+
- def test_legacy_cache_is_migrated_once_then_warm_hit_is_parse_free(
-     tmp_path, isolated_dirs, monkeypatch
- ):
+NEXT_TARGET_SYMBOL=`collect_module_artifacts`
 
-DIFF_END
+ROOT_COST=The full-analysis artifact path rebuilds a `RepositoryReferenceIndex` inside `collect_module_artifacts` even though the same analysis run already has reference-index-capable data and the artifact path is the dominant remaining cost center.
+
+EXPECTED_CHANGE_SHAPE=Create or retain one run-scoped `RepositoryReferenceIndex` in the full-analysis path and pass it through the artifact pipeline into `generate_artifact_usage_report` and `collect_module_artifacts`. Keep the existing `None` fallback for standalone callers, so only the full-analysis path reuses the run-scoped object. Preserve current available-fact, fallback-extraction, failure-isolation, and artifact assembly behavior.
+
+ESTIMATED_MAX_SAVINGS_MS_PERCENT=3323.518 ms upper-bound attribution, approximately 30.70% of the current warm-total median. This is a removable-cost upper bound, not a measured promise; construction may be required elsewhere and parity validation is mandatory.
+
+REQUIRED_INVARIANTS=
+
+- Artifact, failure, import, graph-membership, and public result semantics remain identical.
+- One authoritative run-scoped reference index is reused; no second independent cache and no AST persistence are introduced.
+- Standalone callers without a reference index retain the current construction fallback.
+- Available symbol-fact tasks remain parse/read free; fallback tasks retain existing extraction semantics.
+- Cache, index, Module/API/MCP, LIVE, watcher, FileState, coordinator, and executor contracts remain unchanged.
+- Nested timers and progress/checkpoint behavior remain correctly owned.
+
+REQUIRED_TESTS=
+
+- Full-analysis artifact output parity with and without the passed reference index.
+- Exactly-once/reuse behavior for the run-scoped reference index.
+- Standalone `collect_module_artifacts(..., reference_index=None)` fallback parity.
+- Available-fact no-parse/no-source-read regression and fallback failure isolation.
+- Existing focused artifact, index-fusion, and report tests only; no full suite.
+
+## Required report fields
+
+FILES_CHANGED=NONE
+
+DIFFS=NONE
+
+The only file written for this 0H report is the repository-root `walkthrough.md`; it is reporting output and is not counted as a production/test file change. Pre-existing 0G/0G1 worktree changes were not altered.
 
 FULL_SUITE_RUN_BY_AGENT=NO
 
+BENCHMARK_DISPOSABLE_DATA=REMOVED
