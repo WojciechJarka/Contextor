@@ -44,11 +44,14 @@ from contextor.core.reporting_layer.reporting_single_file import (
 )
 from contextor.core.single_file.single_file_analysis import collect_all_contexts
 
-from contextor.core.symbol_engine.indexer import build_index, index_repository
+from contextor.core.symbol_engine.indexer import (
+    assemble_collision_facts_or_fallback,
+    build_index,
+    index_repository,
+)
 from contextor.core.validator import validate
 from contextor.core.validator.collisions import (
     compute_collisions_from_facts,
-    extract_repository_collision_facts,
     validate_name_collisions,
 )
 from contextor.core.live_state import hydrate_repository_engine
@@ -341,9 +344,11 @@ class ContextorFacade:
             modules, path, index.reference_facts_by_module
         )
 
-        # Compute collision facts once from current-run modules
-        from contextor.core.validator.collisions import compute_collisions_from_facts, extract_repository_collision_facts
-        collision_facts = extract_repository_collision_facts(modules)
+        # Accept only complete index-worker facts; otherwise preserve the
+        # existing authoritative full-domain AST fallback.
+        collision_facts = assemble_collision_facts_or_fallback(
+            modules, index.collision_facts_by_module
+        )
         all_collisions = compute_collisions_from_facts(collision_facts)
 
         from contextor.core.graph.resolver import build_trie, detect_package_root
@@ -445,8 +450,6 @@ class ContextorFacade:
             topology_analytics = compute_topology_analytics(hard_edges, soft_edges, metrics) if hard_edges else {}
 
             from contextor.core.analysis.incremental.materialization import _validate_collision_facts_dict
-            from contextor.core.validator.collisions import compute_collisions_from_facts
-
             cf = getattr(analysis_result, "collision_facts", None)
             mods = getattr(analysis_result, "modules", {})
             is_collision_complete = _validate_collision_facts_dict(cf, mods)

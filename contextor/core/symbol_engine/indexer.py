@@ -29,13 +29,22 @@ from contextor.core.paths import DEFAULT_IGNORED_DIRS
 from contextor.core.reference.index import extract_compact_reference_facts
 from contextor.core.source import SourceError, parse_source
 from contextor.core.symbol_engine.extractor import extract_file_symbols
+from contextor.core.validator.collisions import (
+    COLLISION_FACT_KEYS,
+    extract_module_collision_facts,
+    extract_repository_collision_facts,
+)
 
 
 SYMBOL_FACTS_SCHEMA_VERSION = 1
 REFERENCE_FACTS_SCHEMA_VERSION = 1
+COLLISION_FACTS_SCHEMA_VERSION = 1
 _SYMBOL_FACTS_AVAILABLE = "available"
 _SYMBOL_FACTS_FAILURE = "failure"
 _SYMBOL_FACTS_NOT_COMPUTED = "not_computed"
+_COLLISION_FACTS_AVAILABLE = "available"
+_COLLISION_TYPES = frozenset({"class", "function", "variable"})
+_COLLISION_FACT_FIELDS = frozenset(COLLISION_FACT_KEYS)
 _SYMBOL_FACT_FIELDS = frozenset(
     {
         "classes",
@@ -68,6 +77,58 @@ def _valid_reference_facts(value: object) -> bool:
         and value.get("status") == "available"
         and isinstance(value.get("facts"), dict)
     )
+
+
+def _valid_collision_fact_list(value: object, module_id: str) -> bool:
+    if not isinstance(value, list):
+        return False
+    for fact in value:
+        if not isinstance(fact, dict) or set(fact) != _COLLISION_FACT_FIELDS:
+            return False
+        if fact.get("name") is None or not isinstance(fact.get("name"), str):
+            return False
+        if fact.get("type") not in _COLLISION_TYPES:
+            return False
+        if fact.get("file") != module_id:
+            return False
+        if not isinstance(fact.get("file_path"), str) or not isinstance(fact.get("code"), str):
+            return False
+        if not all(
+            isinstance(fact.get(field), int) or fact.get(field) is None
+            for field in ("line_start", "line_end", "col_start", "col_end")
+        ):
+            return False
+    return True
+
+
+def _valid_collision_facts(value: object, module_id: str) -> bool:
+    return (
+        isinstance(value, dict)
+        and value.get("schema_version") == COLLISION_FACTS_SCHEMA_VERSION
+        and value.get("status") == _COLLISION_FACTS_AVAILABLE
+        and _valid_collision_fact_list(value.get("facts"), module_id)
+    )
+
+
+def _extract_collision_facts(tree: ast.AST, module_id: str, path: Path) -> list[dict]:
+    """Return cache/IPC-safe collision facts while the current AST is live."""
+    return [
+        fact.copy()
+        for fact in extract_module_collision_facts(tree, module_id, str(path.resolve()))
+    ]
+
+
+def assemble_collision_facts_or_fallback(
+    modules: dict[str, Module], collision_facts_by_module: dict[str, list[dict]] | None
+) -> dict[str, list[dict]]:
+    """Accept only complete indexed facts; otherwise preserve AST fallback semantics."""
+    facts = collision_facts_by_module or {}
+    if set(facts) == set(modules) and all(
+        _valid_collision_fact_list(facts.get(module_id), module_id)
+        for module_id in modules
+    ):
+        return facts
+    return extract_repository_collision_facts(modules)
 
 
 # ==========================================================
@@ -208,18 +269,28 @@ def _process_single_file(path_str: str, root_str: str) -> dict:
 
     symbol_facts = None
     reference_facts = None
+    collision_facts = None
+    collision_facts_status = None
     if cached_data is not None:
         error = cached_data.get("error")
         imports = None if error else [ImportRef(**imp) for imp in cached_data.get("imports", [])]
 
         cached_facts = cached_data.get("symbol_facts") if not error else None
         cached_reference_facts = cached_data.get("reference_facts") if not error else None
+        cached_collision_facts = cached_data.get("collision_facts") if not error else None
         if _valid_symbol_facts(cached_facts):
             symbol_facts = cached_facts
         if _valid_reference_facts(cached_reference_facts):
             reference_facts = cached_reference_facts
+        if _valid_collision_facts(cached_collision_facts, module_id):
+            collision_facts = cached_collision_facts
+            collision_facts_status = _COLLISION_FACTS_AVAILABLE
 
-        if not error and (symbol_facts is None or reference_facts is None):
+        if not error and (
+            symbol_facts is None
+            or reference_facts is None
+            or collision_facts is None
+        ):
             try:
                 tree = parse_source(path)
             except SourceError as exc:
@@ -238,6 +309,8 @@ def _process_single_file(path_str: str, root_str: str) -> dict:
                         "error_type": type(exc).__name__,
                         "message": str(exc),
                     }
+                if collision_facts is None:
+                    collision_facts_status = "failure"
             else:
                 if symbol_facts is None:
                     try:
@@ -262,12 +335,30 @@ def _process_single_file(path_str: str, root_str: str) -> dict:
                     reference_facts = {
                         "schema_version": REFERENCE_FACTS_SCHEMA_VERSION,
                         **extracted_reference,
-                    }
+                        }
+                if collision_facts is None:
+                    try:
+                        extracted_collision_facts = _extract_collision_facts(
+                            tree, module_id, path
+                        )
+                    except Exception:
+                        collision_facts_status = "failure"
+                    else:
+                        collision_facts = {
+                            "schema_version": COLLISION_FACTS_SCHEMA_VERSION,
+                            "status": _COLLISION_FACTS_AVAILABLE,
+                            "facts": extracted_collision_facts,
+                        }
+                        collision_facts_status = _COLLISION_FACTS_AVAILABLE
                 rewritten = dict(cached_data)
+                if collision_facts is None:
+                    rewritten.pop("collision_facts", None)
                 if _valid_symbol_facts(symbol_facts):
                     rewritten["symbol_facts"] = symbol_facts
                 if _valid_reference_facts(reference_facts):
                     rewritten["reference_facts"] = reference_facts
+                if _valid_collision_facts(collision_facts, module_id):
+                    rewritten["collision_facts"] = collision_facts
                 cache.set(path, rewritten)
     else:
         try:
@@ -298,6 +389,19 @@ def _process_single_file(path_str: str, root_str: str) -> dict:
                     "schema_version": REFERENCE_FACTS_SCHEMA_VERSION,
                     **extracted_reference,
                 }
+                try:
+                    extracted_collision_facts = _extract_collision_facts(
+                        tree, module_id, path
+                    )
+                except Exception:
+                    collision_facts_status = "failure"
+                else:
+                    collision_facts = {
+                        "schema_version": COLLISION_FACTS_SCHEMA_VERSION,
+                        "status": _COLLISION_FACTS_AVAILABLE,
+                        "facts": extracted_collision_facts,
+                    }
+                    collision_facts_status = _COLLISION_FACTS_AVAILABLE
         cache_data = {
             "imports": [dataclasses.asdict(imp) for imp in imports or []],
             "error": error,
@@ -306,6 +410,8 @@ def _process_single_file(path_str: str, root_str: str) -> dict:
             cache_data["symbol_facts"] = symbol_facts
         if _valid_reference_facts(reference_facts):
             cache_data["reference_facts"] = reference_facts
+        if _valid_collision_facts(collision_facts, module_id):
+            cache_data["collision_facts"] = collision_facts
         cache.set(path, cache_data)
 
     return {
@@ -317,6 +423,8 @@ def _process_single_file(path_str: str, root_str: str) -> dict:
         "filename": path.name,
         "symbol_facts": symbol_facts,
         "reference_facts": reference_facts,
+        "collision_facts": collision_facts,
+        "collision_facts_status": collision_facts_status,
     }
 
 
@@ -366,6 +474,8 @@ class RepositoryIndex:
 
     reference_facts_by_module: dict[str, dict] = dataclasses.field(default_factory=dict)
 
+    collision_facts_by_module: dict[str, list[dict]] = dataclasses.field(default_factory=dict)
+
 
 def index_repository(
     root: str, excludes: list[str] = None, extra_ignored_dirs: set = None, progress_callback=None
@@ -386,6 +496,7 @@ def index_repository(
     skipped: list[SkippedFile] = []
     symbol_facts_by_module: dict[str, dict] = {}
     reference_facts_by_module: dict[str, dict] = {}
+    collision_facts_by_module: dict[str, list[dict]] = {}
 
     ignored_dirs = set(DEFAULT_IGNORED_DIRS)
 
@@ -442,6 +553,9 @@ def index_repository(
                     symbol_facts_by_module[res["module_id"]] = res["symbol_facts"]
                 if res.get("reference_facts") is not None:
                     reference_facts_by_module[res["module_id"]] = res["reference_facts"]
+                cached_collision_facts = res.get("collision_facts")
+                if _valid_collision_facts(cached_collision_facts, res["module_id"]):
+                    collision_facts_by_module[res["module_id"]] = cached_collision_facts["facts"]
             completed += 1
             checkpoint(progress_callback, res["filename"], completed, total_files)
         return RepositoryIndex(
@@ -449,6 +563,7 @@ def index_repository(
             skipped=sorted(skipped, key=lambda item: item.path),
             symbol_facts_by_module=symbol_facts_by_module,
             reference_facts_by_module=reference_facts_by_module,
+            collision_facts_by_module=collision_facts_by_module,
         )
 
     with ProcessPoolExecutor() as executor:
@@ -481,6 +596,9 @@ def index_repository(
                     symbol_facts_by_module[res["module_id"]] = res["symbol_facts"]
                 if res.get("reference_facts") is not None:
                     reference_facts_by_module[res["module_id"]] = res["reference_facts"]
+                cached_collision_facts = res.get("collision_facts")
+                if _valid_collision_facts(cached_collision_facts, res["module_id"]):
+                    collision_facts_by_module[res["module_id"]] = cached_collision_facts["facts"]
 
             completed += 1
             try:
@@ -494,6 +612,7 @@ def index_repository(
         skipped=sorted(skipped, key=lambda item: item.path),
         symbol_facts_by_module=symbol_facts_by_module,
         reference_facts_by_module=reference_facts_by_module,
+        collision_facts_by_module=collision_facts_by_module,
     )
 
 
