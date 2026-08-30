@@ -1,708 +1,586 @@
-# Collision-fact fusion correction closure
+# Post-0J4 warm cost remap
 
-## Scope and verdict basis
+## Scope and outcome
 
-This is a correction/audit-closure pass for the existing collision-fact fusion task. No unrelated refactor, collision semantic change, API/MCP change, LIVE behavior change, cache freshness weakening, or canonical-state change was introduced.
+Discovery/measurement only. No production or test file was edited. No benchmark file was created in the repository; the harness and all runtime artifacts were kept under C:\Temp\Contextor_Benchmarks.
 
-The correction removes only the stale invalid collision envelope during a parse-success migration when collision extraction fails. Valid symbol/reference/import/error data remains in the existing CacheManager record. A successful migration writes the current-schema envelope; a valid current-schema warm hit does not enter migration and remains unchanged. No negative collision cache entry is written.
+Current warm whole-analysis median: 6559.137 ms from the latest six-observation run. Accepted post-0J4 reference from the prior thread: approximately 6516.110 ms. Accepted post-0J3 median: approximately 7703.149 ms. The latest result is consistent with the accepted post-0J4 range and does not show a regression attributable to this turn.
 
-## Correction rationale and regression
+The largest remaining removable candidate is a duplicate pure-RAM Shared Usage Clusters computation in canonical-state persistence. The recommended next target is a raw-cluster handoff from the already executed global graph-analytics computation into canonical-state construction, while preserving the compact public report and full-name canonical state. The lower-risk alternative is the repeated TestContextIndex.find_test_files scan.
 
-Before the correction, the migration path started with `rewritten = dict(cached_data)`. If a cached collision envelope was missing, invalid, or schema-mismatched and the current AST collision extraction raised, the later validity guard did not overwrite the field, so the original invalid envelope could be persisted unchanged.
+## Contextor evidence
 
-The production correction in `C:\Temp\Contextor_Repo\contextor\core\symbol_engine\indexer.py` is the narrow removal:
+Contextor MCP was used before textual verification.
 
-```python
-if collision_facts is None:
-    rewritten.pop("collision_facts", None)
-```
+Current canonical state:
+- canonical revision: 68
+- canonical state: fresh
+- workspace synchronization: verified
+- provenance: live
+- fresh families: module, graph, topology, artifact_consumption, cycles, collisions
+- architecture: 320 modules, 7 layers, 0 cycles, 0 name collisions
+- graph_analytics: live canonical topology, fan-in 16, fan-out 6
+- test_context: live canonical topology, fan-in 6, fan-out 2
+- indexer: live canonical topology, fan-in 21, fan-out 10
 
-It executes immediately after the migration copy and before valid fact-family writes. A successful extraction sets a valid envelope afterward. An ordinary valid warm hit has non-None valid collision facts and does not execute this rewrite block.
+Contextor resolved the complete path as:
+ContextorFacade.analyze_project -> index_repository -> assemble_reference_index_or_fallback -> assemble_collision_facts_or_fallback -> graph/trie/validation/metrics -> execute_global_pipeline -> build_artifact_pipeline -> generate_artifact_usage_report -> collect_module_artifacts -> artifact index/test-context construction -> global graph analytics -> layer pipelines -> report writes and incremental state update -> canonical-state construction -> compute_shared_usage_clusters_from_state -> save_engine_state.
 
-The focused regression in `C:\Temp\Contextor_Repo\tests\test_collision_facts_fusion.py` seeds a schema-mismatched envelope, preserves the seeded valid symbol/reference records, forces the index-worker collision extractor to fail, asserts the side table is incomplete and the persisted record has no `collision_facts` field, then restores extraction and verifies a subsequent run repopulates the current-schema envelope.
+Contextor resolved build_jaccard_clusters callers exactly:
+- generate_graph_analytics_report line 1838;
+- compute_shared_usage_clusters line 2222;
+- compute_shared_usage_clusters_from_state reaches it through compute_shared_usage_clusters line 2264.
 
-## Focused verification
+Contextor resolved collect_module_artifacts as a direct callee only of generate_artifact_usage_report line 729.
 
-Command:
+Contextor source confirms build_artifact_pipeline calls generate_artifact_usage_report, then registry synchronization/compaction, then generate_graph_analytics_report(scope="global"). The global graph-analytics result is retained in ArtifactPipelineResult.graph_analytics_data and returned through execute_global_pipeline.
 
-```
-& 'C:\Temp\Contextor_Repo\.venv\Scripts\python.exe' -m pytest -q -s tests/test_collision_facts_fusion.py tests/test_index_fusion.py
-```
+Contextor source confirms layer pipelines call the same graph-analytics authority with scope="layer" and scope_modules. Layer work is semantically distinct.
 
-Result:
+Contextor source confirms compute_shared_usage_clusters_from_state builds a pure-RAM projection from state.artifacts and state.artifact_consumption, then invokes build_jaccard_clusters. The projection contract states zero filesystem reads, zero report reads, and zero AST parsing.
 
-```
-................
-16 passed in 3.70s
-```
+Existing parity evidence in tests/test_matrix_clusters_ram_parity.py asserts exact equality between snapshot build_jaccard_clusters(production_artifact_data, min_jaccard=0.30) and canonical compute_shared_usage_clusters_from_state(state, min_jaccard=0.30). The same test asserts field-by-field artifact and usage-sidecar parity before the cluster comparison.
 
-The directly affected focused suite includes the new stale-envelope regression, cold parity/materialization, current-schema warm no-extraction behavior, missing-field migration, schema mismatch/source invalidation, valid empty facts, extraction failure/fallback selection, complete-coverage gating, serial/ProcessPool side-table parity, facade single-source consumption, and existing index-fusion coverage.
+Contextor source confirms _compact_clusters converts modules and shared_artifact_keys to registry-compacted IDs for the public graph report. The public graph_analytics_data shared_usage_clusters cannot be assigned directly to canonical state. Any fusion must retain a pre-compaction raw result in an internal in-memory handoff and must not expose raw IDs in the public report.
 
-Commands:
-
-```
-& 'C:\Temp\Contextor_Repo\.venv\Scripts\python.exe' -m py_compile contextor/core/symbol_engine/indexer.py tests/test_collision_facts_fusion.py
-git diff --check -- contextor/core/api/facade.py contextor/core/symbol_engine/indexer.py
-git diff --no-index --check -- /dev/null tests/test_collision_facts_fusion.py
-```
-
-Results: `py_compile` passed. Production/test diff checks passed; the no-index check returned its normal difference status and was normalized to success after reporting no whitespace errors. A repository-wide `git diff --check` includes the intentional single-space blank-context markers preserved inside the embedded raw unified diff; the production/test-file checks above are clean.
-
-## Cache and coverage invariant
-
-- Current-schema valid collision envelope: accepted unchanged on ordinary warm hit.
-- Missing/invalid/schema-mismatched envelope: one current parse and one index-worker extraction attempt, using the already-live AST.
-- Successful migration: existing valid symbol/reference/import/error data is preserved and collision facts are replaced by the validated current-schema envelope.
-- Failed migration after parse: existing invalid/missing `collision_facts` is removed from the rewritten record; no failure/negative collision envelope is persisted.
-- Source change: CacheManager source-fingerprint validation invalidates the record; the current AST path repopulates all successful fact families.
-- Valid empty facts: stored as an available current-schema envelope with `facts=[]`, so empty is distinguishable from incomplete.
-- Incomplete or invalid side table: never merged with fallback. The facade calls `assemble_collision_facts_or_fallback`; only an exact module-key domain with valid per-module facts is accepted. Otherwise the authoritative `extract_repository_collision_facts` path runs.
-- `compute_collisions_from_facts` remains the aggregation/classification authority.
-- Maximum normal affected-file AST traversal remains one parse shared by symbol/reference/collision extraction; normal current-schema warm traversal is zero.
+Contextor source confirms index_repository owns the current per-file collection of modules, symbol facts, reference facts, collision facts, and test facts, and uses a normal ProcessPoolExecutor unless disabled. Contextor source confirms _process_single_artifact_module reuses available symbol facts, projects references through the existing RepositoryReferenceIndex, and classifies API consumers; it only falls back to source symbol extraction when facts are unavailable.
 
 ## Benchmark protocol
 
-The controlled benchmark used the existing external location `C:\Temp\Contextor_Benchmarks\0J3_collision_fusion`; no benchmark structure was created in the repository. It used a clean isolated cache/state/output directory, the copied repository source, the real `ContextorFacade.analyze_project()` path, six warm runs after one cold seed, and ProcessPool mode.
+Harness: C:\Temp\Contextor_Benchmarks\post0J4_warm_cost_remap.py
+Latest result: C:\Temp\Contextor_Benchmarks\post0J4_warm_cost_remap_scoped_20260830\results.json
+Command:
+& 'C:\Temp\Contextor_Repo\.venv\Scripts\python.exe' 'C:\Temp\Contextor_Benchmarks\post0J4_warm_cost_remap.py'
 
-Two independent counters were instrumented in the external benchmark copy only:
+Controls:
+- disposable source copy outside the repository;
+- isolated cache, state, output, and registry directories outside the repository;
+- one cold setup run followed by six warm observations;
+- normal ProcessPool enabled;
+- detached LIVE publication by patching only the benchmark process live_state.connect;
+- no benchmark artifacts inside C:\Temp\Contextor_Repo;
+- inclusive/exclusive wall timing with nested child time removed;
+- parent-process CPU timing collected in the latest run; ProcessPool worker CPU is not included in that parent counter.
 
-1. index-worker `_extract_collision_facts` / `extract_module_collision_facts` execution, recorded as `COLLISION_VISITOR_COUNT`;
-2. authoritative `extract_repository_collision_facts` entry, recorded as `COLLISION_FALLBACK_COUNT`.
+Latest six raw warm whole-analysis observations (ms):
+6558.905321988277, 6445.370152010582, 6516.624249983579, 6559.3692770344205, 6768.302326032426, 6853.282959025819
 
-The facade's `index_repository` call was timed separately from whole-analysis wall time. No counter was inferred from the other counter.
+Latest warm median: 6559.137299511349 ms
+Latest range: 6445.370152010582-6853.282959025819 ms (407.913 ms)
 
-Raw runs (milliseconds):
+A prior scoped instrumentation run was materially contaminated and is retained:
+6582.641369954217, 7597.543053969275, 7662.665017996915, 7926.3252730015665, 6593.813459039666, 6533.0025180010125
+Contaminated-run median: 7095.6782565044705 ms
 
-| run | whole analyze_project | index_repository | collision visitor count | authoritative fallback count | errors | result |
-|---|---:|---:|---:|---:|---:|---|
-| cold_seed | 16112.713557 | 9304.706115 | 318 | 0 | 0 | true |
-| warm_1 | 9511.558942 | 3808.670794 | 0 | 0 | 0 | true |
-| warm_2 | 7837.482907 | 1958.364471 | 0 | 0 | 0 | true |
-| warm_3 | 7555.671670 | 1742.857333 | 0 | 0 | 0 | true |
-| warm_4 | 7407.669830 | 1793.355650 | 0 | 0 | 0 | true |
-| warm_5 | 8252.386826 | 2367.972256 | 0 | 0 | 0 | true |
-| warm_6 | 7568.814473 | 1963.386827 | 0 | 0 | 0 | true |
+## Derived unexplained buckets
 
-Candidate warm whole-analysis median: 7703.148690 ms; range 7407.669830-9511.558942 ms.
+These are inclusive residuals, not extra additive stages. The detailed stage records use exclusive timings to avoid double counting.
 
-Candidate warm index median: 1960.875649 ms; range 1742.857333-3808.670794 ms.
+- generate_artifact_usage_report inclusive median: 1600.657 ms.
+- collect_module_artifacts inclusive median: 943.040 ms.
+- generate_artifact_usage_report excluding collect_module_artifacts: 657.617 ms inclusive residual. Its fully exclusive outer remainder is 5.118 ms; the residual is explained by test-directory discovery, test-index construction, 320 test-context calls, and nested find_test_files.
+- execute_global_pipeline inclusive median: 3046.604 ms.
+- execute_global_pipeline excluding complete artifact-usage stage: 1445.947 ms inclusive residual.
+- fully exclusive execute_global_pipeline remainder: 125.383 ms.
+- build_artifact_pipeline exclusive remainder after instrumented children: 357.149 ms. This is registry/compaction/graph-report/layer/report preparation residual and is not one proven eliminable operation.
 
-Warm visitor counts: [0, 0, 0, 0, 0, 0].
-Warm authoritative fallback counts: [0, 0, 0, 0, 0, 0].
+## Material stage records
 
-Cold worker count 318 is expected extraction on the clean seed. Cold fallback count 0 confirms the complete worker side table was used even on the seed. The warm outlier (warm_1) is retained and not hidden; the median and full range include it.
+All timings are latest six-run warm medians. RUN_VARIANCE gives the six-value min-max range. Exclusive timing subtracts all instrumented child time.
 
-Accepted post-0J2 baseline retained in the thread: whole-analysis warm median 8496.942524 ms. Current candidate delta is 7703.148690 - 8496.942524 = -793.793834 ms, a 9.34% reduction. The reduced cost is from eliminating the duplicated authoritative collision AST traversal on the complete warm path; it is not relocation into indexing, as shown by the independent index timings and zero fallback counter.
+### Initialization, index, and references
 
-## Contextor post-change freshness and architecture evidence
+OWNER_FILE=C:\Temp\Contextor_Repo\contextor\core\api\facade.py
+OWNER_SYMBOL=_initialize_repository_identity
+CALL_PATH=ContextorFacade.analyze_project -> _initialize_repository_identity
+CALL_COUNT=1 per run
+INCLUSIVE_MEDIAN_MS=109.951
+EXCLUSIVE_MEDIAN_MS=109.263
+RUN_VARIANCE=101.595-121.401 ms
+SOURCE_OR_AST_DEPENDENT=NO
+RECOMPUTES_ALREADY_AVAILABLE_STATE=NO
+DUPLICATED_WITH_OTHER_STAGE=NO
+CAN_REUSE_CURRENT_INDEX_CACHE_RAM_FACTS=PARTIAL
+SEMANTIC_SCOPE_SAME_AS_POTENTIAL_SOURCE=YES
+LIKELY_REMOVABLE_WHOLE_ANALYSIS_MS=0-0
+SEMANTIC_RISK=LOW + repository identity and registry setup are required
 
-Initial status inspection before the normal incremental path reported the prior completed job as `status=completed`, `live_publish_status=failed`, `live_publish_revision=null`, warning `non_monotonic_canonical_revision`. A broad live-event request required confirmation because its estimated output was 21.18 KiB, so it was not treated as evidence.
+OWNER_FILE=C:\Temp\Contextor_Repo\contextor\core\symbol_engine\indexer.py
+OWNER_SYMBOL=index_repository
+CALL_PATH=ContextorFacade.analyze_project -> index_repository -> ProcessPoolExecutor -> _process_single_file
+CALL_COUNT=1 per run
+INCLUSIVE_MEDIAN_MS=1793.122
+EXCLUSIVE_MEDIAN_MS=1793.122
+RUN_VARIANCE=1697.302-1926.639 ms
+SOURCE_OR_AST_DEPENDENT=YES + worker freshness/index extraction can use source/AST; current warm facts are reused where valid
+RECOMPUTES_ALREADY_AVAILABLE_STATE=PARTIAL + validates/reassembles current per-file state while rebuilding RepositoryIndex
+DUPLICATED_WITH_OTHER_STAGE=NO proven duplicate
+CAN_REUSE_CURRENT_INDEX_CACHE_RAM_FACTS=PARTIAL
+SEMANTIC_SCOPE_SAME_AS_POTENTIAL_SOURCE=YES
+LIKELY_REMOVABLE_WHOLE_ANALYSIS_MS=0-50 without new proof
+SEMANTIC_RISK=HIGH + freshness, failure handling, and complete-domain assembly are correctness contracts
 
-The normal Contextor incremental path was then used for both changed production files:
+OWNER_FILE=C:\Temp\Contextor_Repo\contextor\core\reference\index.py
+OWNER_SYMBOL=assemble_reference_index_or_fallback
+CALL_PATH=ContextorFacade.analyze_project -> assemble_reference_index_or_fallback -> RepositoryReferenceIndex.from_compact_facts
+CALL_COUNT=1 per run
+INCLUSIVE_MEDIAN_MS=512.785
+EXCLUSIVE_MEDIAN_MS=512.785
+RUN_VARIANCE=408.338-555.043 ms
+SOURCE_OR_AST_DEPENDENT=NO on the normal warm current-facts path
+RECOMPUTES_ALREADY_AVAILABLE_STATE=NO + assembles a query index from current compact reference facts
+DUPLICATED_WITH_OTHER_STAGE=PARTIAL + the resulting index is shared by artifact assembly
+CAN_REUSE_CURRENT_INDEX_CACHE_RAM_FACTS=YES
+SEMANTIC_SCOPE_SAME_AS_POTENTIAL_SOURCE=YES
+LIKELY_REMOVABLE_WHOLE_ANALYSIS_MS=0-0 without a new validated persistent derived-index contract
+SEMANTIC_RISK=HIGH + this is the shared repository reference-index authority
 
-- `update_file(repo_path="C:\Temp\Contextor_Repo", file_path="C:\Temp\Contextor_Repo\contextor\core\symbol_engine\indexer.py")`: `status=UNCHANGED`, `graph_state=fresh`, `dependencies_state=fresh`, `artifact_consumption_state=fresh`, `live_state_persisted=true`, `runtime_restart_required=false`.
-- `update_file(repo_path="C:\Temp\Contextor_Repo", file_path="C:\Temp\Contextor_Repo\contextor\core\api\facade.py")`: same result and freshness fields.
+OWNER_FILE=C:\Temp\Contextor_Repo\contextor\core\api\facade.py
+OWNER_SYMBOL=execute_global_pipeline
+CALL_PATH=ContextorFacade.analyze_project -> execute_global_pipeline
+CALL_COUNT=1 per run
+INCLUSIVE_MEDIAN_MS=3046.604
+EXCLUSIVE_MEDIAN_MS=125.383
+RUN_VARIANCE=2995.529-3396.438 ms inclusive; 110.223-139.432 ms exclusive
+SOURCE_OR_AST_DEPENDENT=NO
+RECOMPUTES_ALREADY_AVAILABLE_STATE=PARTIAL
+DUPLICATED_WITH_OTHER_STAGE=PARTIAL + contains artifact pipeline and canonical persistence
+CAN_REUSE_CURRENT_INDEX_CACHE_RAM_FACTS=YES
+SEMANTIC_SCOPE_SAME_AS_POTENTIAL_SOURCE=PARTIAL
+LIKELY_REMOVABLE_WHOLE_ANALYSIS_MS=0-125
+SEMANTIC_RISK=HIGH + owns report, layer, incremental-state, and result contracts
 
-Post-change Contextor queries consistently reported `canonical_state=fresh`, `workspace_sync=verified`, `canonical_revision=47`, `provenance=live`, and fresh module/graph/topology/artifact-consumption/cycles/collisions families for the indexer, facade, and collisions modules. No MCP restart was performed or required.
+### Artifact and test-context stages
 
-Contextor evidence:
+OWNER_FILE=C:\Temp\Contextor_Repo\contextor\core\reporting_engine\artifact_pipeline.py
+OWNER_SYMBOL=build_artifact_pipeline
+CALL_PATH=execute_global_pipeline -> build_artifact_pipeline
+CALL_COUNT=1 per run
+INCLUSIVE_MEDIAN_MS=2359.972
+EXCLUSIVE_MEDIAN_MS=357.149
+RUN_VARIANCE=2324.767-2696.202 ms inclusive; 332.338-385.929 ms exclusive
+SOURCE_OR_AST_DEPENDENT=NO on the normal warm current-facts path
+RECOMPUTES_ALREADY_AVAILABLE_STATE=PARTIAL
+DUPLICATED_WITH_OTHER_STAGE=PARTIAL
+CAN_REUSE_CURRENT_INDEX_CACHE_RAM_FACTS=YES
+SEMANTIC_SCOPE_SAME_AS_POTENTIAL_SOURCE=PARTIAL
+LIKELY_REMOVABLE_WHOLE_ANALYSIS_MS=0-150, exact owner unknown
+SEMANTIC_RISK=MEDIUM + fuses registry, compaction, graph report, and returned bundle contracts
 
-- `contextor.core.symbol_engine.indexer`: runtime layer, fan-in 21, fan-out 9; outbound dependencies include the new hard dependency on `contextor.core.validator.collisions`; inbound facade dependency is present.
-- `contextor.core.validator.collisions`: runtime layer; inbound hard dependency from `contextor.core.symbol_engine.indexer` is present; facade and existing reporting/validation consumers remain present.
-- `contextor.core.api.facade`: contract layer; imports include `contextor.core.validator.collisions`; existing consumer/test reachability remains available.
-- Exact Contextor source ranges confirmed the production migration removal, facade selection of `assemble_collision_facts_or_fallback` followed by `compute_collisions_from_facts`, and the authoritative full-domain extractor.
-- Exact symbol implementations resolved `_process_single_file`, `assemble_collision_facts_or_fallback`, and `extract_repository_collision_facts` with complete AST-bounded implementations and the same verified revision.
-- `get_project_architecture` reported fresh cycles with count 0. Nested `runtime` and `contract` layer-isolation calls had no dedicated report, so no fabricated isolation metric is claimed. The available fresh graph and cycle evidence shows no new cycle or layer violation attributable to this correction.
+OWNER_FILE=C:\Temp\Contextor_Repo\contextor\core\reporting_layer\artifact_usage_report.py
+OWNER_SYMBOL=generate_artifact_usage_report
+CALL_PATH=build_artifact_pipeline -> generate_artifact_usage_report
+CALL_COUNT=1 per run
+INCLUSIVE_MEDIAN_MS=1600.657
+EXCLUSIVE_MEDIAN_MS=5.118
+RUN_VARIANCE=1565.537-1902.169 ms inclusive; 4.729-6.740 ms exclusive
+SOURCE_OR_AST_DEPENDENT=NO on normal warm current-facts path; inner worker has source fallback when facts are unavailable
+RECOMPUTES_ALREADY_AVAILABLE_STATE=PARTIAL
+DUPLICATED_WITH_OTHER_STAGE=PARTIAL
+CAN_REUSE_CURRENT_INDEX_CACHE_RAM_FACTS=YES
+SEMANTIC_SCOPE_SAME_AS_POTENTIAL_SOURCE=YES
+LIKELY_REMOVABLE_WHOLE_ANALYSIS_MS=0-205 only through a proven child fusion
+SEMANTIC_RISK=MEDIUM + report payload and traceability shape must remain identical
 
-## Changed-file scope
+OWNER_FILE=C:\Temp\Contextor_Repo\contextor\core\reporting_layer\artifact_usage_report.py
+OWNER_SYMBOL=collect_module_artifacts
+CALL_PATH=generate_artifact_usage_report -> collect_module_artifacts -> _process_single_artifact_module
+CALL_COUNT=1 per run; one internal module task per eligible module
+INCLUSIVE_MEDIAN_MS=943.040
+EXCLUSIVE_MEDIAN_MS=943.040
+RUN_VARIANCE=900.302-1166.244 ms
+SOURCE_OR_AST_DEPENDENT=YES + source symbol fallback exists; warm path reused available symbol facts
+RECOMPUTES_ALREADY_AVAILABLE_STATE=PARTIAL + derives own-symbol/reference/API-consumer artifact records
+DUPLICATED_WITH_OTHER_STAGE=NO proven duplicate
+CAN_REUSE_CURRENT_INDEX_CACHE_RAM_FACTS=YES
+SEMANTIC_SCOPE_SAME_AS_POTENTIAL_SOURCE=YES
+LIKELY_REMOVABLE_WHOLE_ANALYSIS_MS=0-100 without an equivalent prebuilt consumer projection
+SEMANTIC_RISK=HIGH + artifact identity, consumer channels, failures, and usage sidecar must not change
 
-Production/test files changed by the entire collision-fusion task:
+OWNER_FILE=C:\Temp\Contextor_Repo\contextor\core\reporting_layer\artifact_usage_report.py
+OWNER_SYMBOL=build_artifact_index
+CALL_PATH=generate_artifact_usage_report -> build_artifact_index
+CALL_COUNT=1 per run
+INCLUSIVE_MEDIAN_MS=11.033
+EXCLUSIVE_MEDIAN_MS=11.033
+RUN_VARIANCE=9.412-14.416 ms
+SOURCE_OR_AST_DEPENDENT=NO
+RECOMPUTES_ALREADY_AVAILABLE_STATE=NO
+DUPLICATED_WITH_OTHER_STAGE=NO
+CAN_REUSE_CURRENT_INDEX_CACHE_RAM_FACTS=YES
+SEMANTIC_SCOPE_SAME_AS_POTENTIAL_SOURCE=YES
+LIKELY_REMOVABLE_WHOLE_ANALYSIS_MS=0-0
+SEMANTIC_RISK=LOW + required deterministic report assembly
 
-- `C:\Temp\Contextor_Repo\contextor\core\api\facade.py`
-- `C:\Temp\Contextor_Repo\contextor\core\symbol_engine\indexer.py`
-- `C:\Temp\Contextor_Repo\tests\test_collision_facts_fusion.py`
+OWNER_FILE=C:\Temp\Contextor_Repo\contextor\core\analysis\test_context.py
+OWNER_SYMBOL=discover_test_dirs
+CALL_PATH=generate_artifact_usage_report -> discover_test_dirs
+CALL_COUNT=1 per run
+INCLUSIVE_MEDIAN_MS=179.159
+EXCLUSIVE_MEDIAN_MS=179.159
+RUN_VARIANCE=163.243-239.611 ms
+SOURCE_OR_AST_DEPENDENT=NO
+RECOMPUTES_ALREADY_AVAILABLE_STATE=YES + filters/resolves the already assembled allowed Python path set
+DUPLICATED_WITH_OTHER_STAGE=PARTIAL
+CAN_REUSE_CURRENT_INDEX_CACHE_RAM_FACTS=PARTIAL
+SEMANTIC_SCOPE_SAME_AS_POTENTIAL_SOURCE=PARTIAL
+LIKELY_REMOVABLE_WHOLE_ANALYSIS_MS=120-175 if exact candidate map is fused
+SEMANTIC_RISK=MEDIUM + root naming, tests/test rules, exclusions, and explicit test_dirs semantics must remain exact
 
-The external benchmark harness and copied source under `C:\Temp\Contextor_Benchmarks\0J3_collision_fusion` are measurement-only artifacts outside the repository and are not task files. Runtime log changes and `walkthrough.md` are excluded from `FILES_CHANGED`.
+OWNER_FILE=C:\Temp\Contextor_Repo\contextor\core\analysis\test_context.py
+OWNER_SYMBOL=TestContextIndex.build
+CALL_PATH=generate_artifact_usage_report -> build_test_context_index -> TestContextIndex.build
+CALL_COUNT=1 per run
+INCLUSIVE_MEDIAN_MS=228.872
+EXCLUSIVE_MEDIAN_MS=228.872
+RUN_VARIANCE=200.165-235.756 ms
+SOURCE_OR_AST_DEPENDENT=NO on normal warm supplied test facts
+RECOMPUTES_ALREADY_AVAILABLE_STATE=PARTIAL
+DUPLICATED_WITH_OTHER_STAGE=PARTIAL + one-time indexing is separate from repeated lookup
+CAN_REUSE_CURRENT_INDEX_CACHE_RAM_FACTS=YES
+SEMANTIC_SCOPE_SAME_AS_POTENTIAL_SOURCE=YES
+LIKELY_REMOVABLE_WHOLE_ANALYSIS_MS=0-30 after accepted 0J4 fusion
+SEMANTIC_RISK=MEDIUM + candidate membership and supplied-directory compatibility are public behavior
 
-## Complete raw unified diff
+OWNER_FILE=C:\Temp\Contextor_Repo\contextor\core\analysis\test_context.py
+OWNER_SYMBOL=TestContextIndex.build_test_context
+CALL_PATH=generate_artifact_usage_report -> build_test_context -> TestContextIndex.build_test_context
+CALL_COUNT=320 per run
+INCLUSIVE_MEDIAN_MS=232.635 aggregate
+EXCLUSIVE_MEDIAN_MS=7.105 aggregate
+RUN_VARIANCE=212.948-244.213 ms inclusive; 6.593-8.355 ms exclusive
+SOURCE_OR_AST_DEPENDENT=NO on normal warm fact-index path
+RECOMPUTES_ALREADY_AVAILABLE_STATE=NO
+DUPLICATED_WITH_OTHER_STAGE=PARTIAL + inclusive time contains find_test_files
+CAN_REUSE_CURRENT_INDEX_CACHE_RAM_FACTS=YES
+SEMANTIC_SCOPE_SAME_AS_POTENTIAL_SOURCE=YES
+LIKELY_REMOVABLE_WHOLE_ANALYSIS_MS=0-205 only through nested lookup
+SEMANTIC_RISK=MEDIUM + output classification must remain exact
 
-The following is the complete raw unified diff for every production/test file changed by the entire collision-fusion task. `walkthrough.md` is intentionally excluded.
+OWNER_FILE=C:\Temp\Contextor_Repo\contextor\core\analysis\test_context.py
+OWNER_SYMBOL=TestContextIndex.find_test_files
+CALL_PATH=TestContextIndex.build_test_context -> TestContextIndex.find_test_files
+CALL_COUNT=320 per run
+INCLUSIVE_MEDIAN_MS=217.302
+EXCLUSIVE_MEDIAN_MS=217.302
+RUN_VARIANCE=199.258-227.480 ms
+SOURCE_OR_AST_DEPENDENT=NO
+RECOMPUTES_ALREADY_AVAILABLE_STATE=YES + scans the same files_info imported-module sets for every module
+DUPLICATED_WITH_OTHER_STAGE=YES + repeated scan over one run-scoped in-memory index
+CAN_REUSE_CURRENT_INDEX_CACHE_RAM_FACTS=YES
+SEMANTIC_SCOPE_SAME_AS_POTENTIAL_SOURCE=YES
+LIKELY_REMOVABLE_WHOLE_ANALYSIS_MS=150-205 net
+SEMANTIC_RISK=LOW + reverse lookup can preserve equality, dotted-prefix, dedupe, and sort semantics
 
-```diff
-diff --git a/contextor/core/api/facade.py b/contextor/core/api/facade.py
-index 1351d48..3832e1d 100644
---- a/contextor/core/api/facade.py
-+++ b/contextor/core/api/facade.py
-@@ -44,11 +44,14 @@ from contextor.core.reporting_layer.reporting_single_file import (
- )
- from contextor.core.single_file.single_file_analysis import collect_all_contexts
- 
--from contextor.core.symbol_engine.indexer import build_index, index_repository
-+from contextor.core.symbol_engine.indexer import (
-+    assemble_collision_facts_or_fallback,
-+    build_index,
-+    index_repository,
-+)
- from contextor.core.validator import validate
- from contextor.core.validator.collisions import (
-     compute_collisions_from_facts,
--    extract_repository_collision_facts,
-     validate_name_collisions,
- )
- from contextor.core.live_state import hydrate_repository_engine
-@@ -341,9 +344,11 @@ class ContextorFacade:
-             modules, path, index.reference_facts_by_module
-         )
- 
--        # Compute collision facts once from current-run modules
--        from contextor.core.validator.collisions import compute_collisions_from_facts, extract_repository_collision_facts
--        collision_facts = extract_repository_collision_facts(modules)
-+        # Accept only complete index-worker facts; otherwise preserve the
-+        # existing authoritative full-domain AST fallback.
-+        collision_facts = assemble_collision_facts_or_fallback(
-+            modules, index.collision_facts_by_module
-+        )
-         all_collisions = compute_collisions_from_facts(collision_facts)
- 
-         from contextor.core.graph.resolver import build_trie, detect_package_root
-@@ -445,8 +450,6 @@ class ContextorFacade:
-             topology_analytics = compute_topology_analytics(hard_edges, soft_edges, metrics) if hard_edges else {}
- 
-             from contextor.core.analysis.incremental.materialization import _validate_collision_facts_dict
--            from contextor.core.validator.collisions import compute_collisions_from_facts
--
-             cf = getattr(analysis_result, "collision_facts", None)
-             mods = getattr(analysis_result, "modules", {})
-             is_collision_complete = _validate_collision_facts_dict(cf, mods)
-diff --git a/contextor/core/symbol_engine/indexer.py b/contextor/core/symbol_engine/indexer.py
-index f83f987..37a080e 100644
---- a/contextor/core/symbol_engine/indexer.py
-+++ b/contextor/core/symbol_engine/indexer.py
-@@ -29,13 +29,22 @@ from contextor.core.paths import DEFAULT_IGNORED_DIRS
- from contextor.core.reference.index import extract_compact_reference_facts
- from contextor.core.source import SourceError, parse_source
- from contextor.core.symbol_engine.extractor import extract_file_symbols
-+from contextor.core.validator.collisions import (
-+    COLLISION_FACT_KEYS,
-+    extract_module_collision_facts,
-+    extract_repository_collision_facts,
-+)
- 
- 
- SYMBOL_FACTS_SCHEMA_VERSION = 1
- REFERENCE_FACTS_SCHEMA_VERSION = 1
-+COLLISION_FACTS_SCHEMA_VERSION = 1
- _SYMBOL_FACTS_AVAILABLE = "available"
- _SYMBOL_FACTS_FAILURE = "failure"
- _SYMBOL_FACTS_NOT_COMPUTED = "not_computed"
-+_COLLISION_FACTS_AVAILABLE = "available"
-+_COLLISION_TYPES = frozenset({"class", "function", "variable"})
-+_COLLISION_FACT_FIELDS = frozenset(COLLISION_FACT_KEYS)
- _SYMBOL_FACT_FIELDS = frozenset(
-     {
-         "classes",
-@@ -70,6 +79,58 @@ def _valid_reference_facts(value: object) -> bool:
-     )
- 
- 
-+def _valid_collision_fact_list(value: object, module_id: str) -> bool:
-+    if not isinstance(value, list):
-+        return False
-+    for fact in value:
-+        if not isinstance(fact, dict) or set(fact) != _COLLISION_FACT_FIELDS:
-+            return False
-+        if fact.get("name") is None or not isinstance(fact.get("name"), str):
-+            return False
-+        if fact.get("type") not in _COLLISION_TYPES:
-+            return False
-+        if fact.get("file") != module_id:
-+            return False
-+        if not isinstance(fact.get("file_path"), str) or not isinstance(fact.get("code"), str):
-+            return False
-+        if not all(
-+            isinstance(fact.get(field), int) or fact.get(field) is None
-+            for field in ("line_start", "line_end", "col_start", "col_end")
-+        ):
-+            return False
-+    return True
-+
-+
-+def _valid_collision_facts(value: object, module_id: str) -> bool:
-+    return (
-+        isinstance(value, dict)
-+        and value.get("schema_version") == COLLISION_FACTS_SCHEMA_VERSION
-+        and value.get("status") == _COLLISION_FACTS_AVAILABLE
-+        and _valid_collision_fact_list(value.get("facts"), module_id)
-+    )
-+
-+
-+def _extract_collision_facts(tree: ast.AST, module_id: str, path: Path) -> list[dict]:
-+    """Return cache/IPC-safe collision facts while the current AST is live."""
-+    return [
-+        fact.copy()
-+        for fact in extract_module_collision_facts(tree, module_id, str(path.resolve()))
-+    ]
-+
-+
-+def assemble_collision_facts_or_fallback(
-+    modules: dict[str, Module], collision_facts_by_module: dict[str, list[dict]] | None
-+) -> dict[str, list[dict]]:
-+    """Accept only complete indexed facts; otherwise preserve AST fallback semantics."""
-+    facts = collision_facts_by_module or {}
-+    if set(facts) == set(modules) and all(
-+        _valid_collision_fact_list(facts.get(module_id), module_id)
-+        for module_id in modules
-+    ):
-+        return facts
-+    return extract_repository_collision_facts(modules)
-+
-+
- # ==========================================================
- # IMPORT EXTRACTION
- # ==========================================================
-@@ -208,18 +269,28 @@ def _process_single_file(path_str: str, root_str: str) -> dict:
- 
-     symbol_facts = None
-     reference_facts = None
-+    collision_facts = None
-+    collision_facts_status = None
-     if cached_data is not None:
-         error = cached_data.get("error")
-         imports = None if error else [ImportRef(**imp) for imp in cached_data.get("imports", [])]
- 
-         cached_facts = cached_data.get("symbol_facts") if not error else None
-         cached_reference_facts = cached_data.get("reference_facts") if not error else None
-+        cached_collision_facts = cached_data.get("collision_facts") if not error else None
-         if _valid_symbol_facts(cached_facts):
-             symbol_facts = cached_facts
-         if _valid_reference_facts(cached_reference_facts):
-             reference_facts = cached_reference_facts
--
--        if not error and (symbol_facts is None or reference_facts is None):
-+        if _valid_collision_facts(cached_collision_facts, module_id):
-+            collision_facts = cached_collision_facts
-+            collision_facts_status = _COLLISION_FACTS_AVAILABLE
-+
-+        if not error and (
-+            symbol_facts is None
-+            or reference_facts is None
-+            or collision_facts is None
-+        ):
-             try:
-                 tree = parse_source(path)
-             except SourceError as exc:
-@@ -238,6 +309,8 @@ def _process_single_file(path_str: str, root_str: str) -> dict:
-                         "error_type": type(exc).__name__,
-                         "message": str(exc),
-                     }
-+                if collision_facts is None:
-+                    collision_facts_status = "failure"
-             else:
-                 if symbol_facts is None:
-                     try:
-@@ -262,12 +335,30 @@ def _process_single_file(path_str: str, root_str: str) -> dict:
-                     reference_facts = {
-                         "schema_version": REFERENCE_FACTS_SCHEMA_VERSION,
-                         **extracted_reference,
--                    }
-+                        }
-+                if collision_facts is None:
-+                    try:
-+                        extracted_collision_facts = _extract_collision_facts(
-+                            tree, module_id, path
-+                        )
-+                    except Exception:
-+                        collision_facts_status = "failure"
-+                    else:
-+                        collision_facts = {
-+                            "schema_version": COLLISION_FACTS_SCHEMA_VERSION,
-+                            "status": _COLLISION_FACTS_AVAILABLE,
-+                            "facts": extracted_collision_facts,
-+                        }
-+                        collision_facts_status = _COLLISION_FACTS_AVAILABLE
-                 rewritten = dict(cached_data)
-+                if collision_facts is None:
-+                    rewritten.pop("collision_facts", None)
-                 if _valid_symbol_facts(symbol_facts):
-                     rewritten["symbol_facts"] = symbol_facts
-                 if _valid_reference_facts(reference_facts):
-                     rewritten["reference_facts"] = reference_facts
-+                if _valid_collision_facts(collision_facts, module_id):
-+                    rewritten["collision_facts"] = collision_facts
-                 cache.set(path, rewritten)
-     else:
-         try:
-@@ -298,6 +389,19 @@ def _process_single_file(path_str: str, root_str: str) -> dict:
-                     "schema_version": REFERENCE_FACTS_SCHEMA_VERSION,
-                     **extracted_reference,
-                 }
-+                try:
-+                    extracted_collision_facts = _extract_collision_facts(
-+                        tree, module_id, path
-+                    )
-+                except Exception:
-+                    collision_facts_status = "failure"
-+                else:
-+                    collision_facts = {
-+                        "schema_version": COLLISION_FACTS_SCHEMA_VERSION,
-+                        "status": _COLLISION_FACTS_AVAILABLE,
-+                        "facts": extracted_collision_facts,
-+                    }
-+                    collision_facts_status = _COLLISION_FACTS_AVAILABLE
-         cache_data = {
-             "imports": [dataclasses.asdict(imp) for imp in imports or []],
-             "error": error,
-@@ -306,6 +410,8 @@ def _process_single_file(path_str: str, root_str: str) -> dict:
-             cache_data["symbol_facts"] = symbol_facts
-         if _valid_reference_facts(reference_facts):
-             cache_data["reference_facts"] = reference_facts
-+        if _valid_collision_facts(collision_facts, module_id):
-+            cache_data["collision_facts"] = collision_facts
-         cache.set(path, cache_data)
- 
-     return {
-@@ -317,6 +423,8 @@ def _process_single_file(path_str: str, root_str: str) -> dict:
-         "filename": path.name,
-         "symbol_facts": symbol_facts,
-         "reference_facts": reference_facts,
-+        "collision_facts": collision_facts,
-+        "collision_facts_status": collision_facts_status,
-     }
- 
- 
-@@ -366,6 +474,8 @@ class RepositoryIndex:
- 
-     reference_facts_by_module: dict[str, dict] = dataclasses.field(default_factory=dict)
- 
-+    collision_facts_by_module: dict[str, list[dict]] = dataclasses.field(default_factory=dict)
-+
- 
- def index_repository(
-     root: str, excludes: list[str] = None, extra_ignored_dirs: set = None, progress_callback=None
-@@ -386,6 +496,7 @@ def index_repository(
-     skipped: list[SkippedFile] = []
-     symbol_facts_by_module: dict[str, dict] = {}
-     reference_facts_by_module: dict[str, dict] = {}
-+    collision_facts_by_module: dict[str, list[dict]] = {}
- 
-     ignored_dirs = set(DEFAULT_IGNORED_DIRS)
- 
-@@ -442,6 +553,9 @@ def index_repository(
-                     symbol_facts_by_module[res["module_id"]] = res["symbol_facts"]
-                 if res.get("reference_facts") is not None:
-                     reference_facts_by_module[res["module_id"]] = res["reference_facts"]
-+                cached_collision_facts = res.get("collision_facts")
-+                if _valid_collision_facts(cached_collision_facts, res["module_id"]):
-+                    collision_facts_by_module[res["module_id"]] = cached_collision_facts["facts"]
-             completed += 1
-             checkpoint(progress_callback, res["filename"], completed, total_files)
-         return RepositoryIndex(
-@@ -449,6 +563,7 @@ def index_repository(
-             skipped=sorted(skipped, key=lambda item: item.path),
-             symbol_facts_by_module=symbol_facts_by_module,
-             reference_facts_by_module=reference_facts_by_module,
-+            collision_facts_by_module=collision_facts_by_module,
-         )
- 
-     with ProcessPoolExecutor() as executor:
-@@ -481,6 +596,9 @@ def index_repository(
-                     symbol_facts_by_module[res["module_id"]] = res["symbol_facts"]
-                 if res.get("reference_facts") is not None:
-                     reference_facts_by_module[res["module_id"]] = res["reference_facts"]
-+                cached_collision_facts = res.get("collision_facts")
-+                if _valid_collision_facts(cached_collision_facts, res["module_id"]):
-+                    collision_facts_by_module[res["module_id"]] = cached_collision_facts["facts"]
- 
-             completed += 1
-             try:
-@@ -494,6 +612,7 @@ def index_repository(
-         skipped=sorted(skipped, key=lambda item: item.path),
-         symbol_facts_by_module=symbol_facts_by_module,
-         reference_facts_by_module=reference_facts_by_module,
-+        collision_facts_by_module=collision_facts_by_module,
-     )
- 
- 
-diff --git a/tests/test_collision_facts_fusion.py b/tests/test_collision_facts_fusion.py
-new file mode 100644
-index 0000000..4cefe56
---- /dev/null
-+++ b/tests/test_collision_facts_fusion.py
-@@ -0,0 +1,263 @@
-+import json
-+
-+from contextor.core.analysis.cache_manager import CacheManager
-+from contextor.core.domain.module import Module
-+from contextor.core.symbol_engine import indexer
-+from contextor.core.validator.collisions import (
-+    compute_collisions_from_facts,
-+    extract_repository_collision_facts,
-+)
-+
-+
-+def _cache_data(root, source):
-+    manager = CacheManager(str(root))
-+    return json.loads(manager._get_cache_file_path(source).read_text(encoding="utf-8"))["data"]
-+
-+
-+def _serial(monkeypatch):
-+    monkeypatch.setenv("CONTEXTOR_DISABLE_PROCESS_POOL", "1")
-+
-+
-+def _repo(tmp_path, text):
-+    root = tmp_path / "repo"
-+    root.mkdir()
-+    source = root / "module.py"
-+    source.write_text(text, encoding="utf-8")
-+    return root, source
-+
-+
-+def test_cold_index_facts_match_repository_extraction_and_materialize_all_fields(
-+    tmp_path, isolated_dirs, monkeypatch
-+):
-+    _serial(monkeypatch)
-+    root, _ = _repo(
-+        tmp_path,
-+        "class Public:\n    def method(self):\n        pass\n\n"
-+        "async def async_public():\n    return 1\n\n"
-+        "MAXIMUM = 2\n\n"
-+        "def main():\n    pass\n\n"
-+        "def _private():\n    pass\n",
-+    )
-+
-+    result = indexer.index_repository(str(root))
-+    indexed = result.collision_facts_by_module
-+    legacy = extract_repository_collision_facts(result.modules)
-+
-+    assert indexed == legacy
-+    assert [fact["name"] for fact in indexed["module"]] == ["Public", "async_public", "MAXIMUM"]
-+    for fact in indexed["module"]:
-+        assert list(fact) == [
-+            "name", "type", "file", "file_path", "code", "line_start", "line_end", "col_start", "col_end"
-+        ]
-+        assert fact["file"] == "module"
-+        assert fact["file_path"] == str((root / "module.py").resolve())
-+        assert isinstance(fact["code"], str)
-+
-+
-+def test_warm_current_schema_has_zero_parse_and_collision_extraction(
-+    tmp_path, isolated_dirs, monkeypatch
-+):
-+    _serial(monkeypatch)
-+    root, _ = _repo(tmp_path, "def public():\n    return 1\n")
-+    indexer.index_repository(str(root))
-+    indexer._CACHE_MANAGERS.pop(str(root.resolve()), None)
-+
-+    def forbidden(*args, **kwargs):
-+        raise AssertionError("unexpected warm extraction")
-+
-+    monkeypatch.setattr(indexer, "parse_source", forbidden)
-+    monkeypatch.setattr(indexer, "extract_module_collision_facts", forbidden)
-+    warm = indexer.index_repository(str(root))
-+
-+    assert warm.collision_facts_by_module["module"][0]["name"] == "public"
-+
-+
-+def test_missing_collision_field_migrates_once_and_preserves_other_fact_families(
-+    tmp_path, isolated_dirs, monkeypatch
-+):
-+    _serial(monkeypatch)
-+    root, source = _repo(tmp_path, "def public():\n    return 1\n")
-+    seeded = indexer.index_repository(str(root))
-+    data = _cache_data(root, source)
-+    data.pop("collision_facts")
-+    CacheManager(str(root)).set(source, data)
-+    indexer._CACHE_MANAGERS.pop(str(root.resolve()), None)
-+
-+    parse_calls = []
-+    collision_calls = []
-+    real_parse = indexer.parse_source
-+    real_extract = indexer.extract_module_collision_facts
-+    monkeypatch.setattr(indexer, "parse_source", lambda path: (parse_calls.append(path) or real_parse(path)))
-+    monkeypatch.setattr(
-+        indexer,
-+        "extract_module_collision_facts",
-+        lambda *args, **kwargs: (collision_calls.append(args[1]) or real_extract(*args, **kwargs)),
-+    )
-+
-+    migrated = indexer.index_repository(str(root))
-+
-+    assert len(parse_calls) == len(collision_calls) == 1
-+    assert migrated.symbol_facts_by_module == seeded.symbol_facts_by_module
-+    assert migrated.reference_facts_by_module == seeded.reference_facts_by_module
-+    assert _cache_data(root, source)["collision_facts"]["status"] == "available"
-+
-+
-+def test_failed_collision_migration_drops_invalid_envelope_and_retry_populates(
-+    tmp_path, isolated_dirs, monkeypatch
-+):
-+    _serial(monkeypatch)
-+    root, source = _repo(tmp_path, "def public():\n    return 1\n")
-+    seeded = indexer.index_repository(str(root))
-+    data = _cache_data(root, source)
-+    data["collision_facts"]["schema_version"] = 0
-+    CacheManager(str(root)).set(source, data)
-+    indexer._CACHE_MANAGERS.pop(str(root.resolve()), None)
-+
-+    real_extract = indexer.extract_module_collision_facts
-+    monkeypatch.setattr(
-+        indexer,
-+        "extract_module_collision_facts",
-+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("transient")),
-+    )
-+    failed = indexer.index_repository(str(root))
-+
-+    persisted = _cache_data(root, source)
-+    assert set(failed.modules) != set(failed.collision_facts_by_module)
-+    assert failed.collision_facts_by_module == {}
-+    assert "collision_facts" not in persisted
-+    assert persisted["symbol_facts"] == seeded.symbol_facts_by_module["module"]
-+    assert persisted["reference_facts"] == seeded.reference_facts_by_module["module"]
-+
-+    monkeypatch.setattr(
-+        indexer,
-+        "extract_module_collision_facts",
-+        real_extract,
-+    )
-+    indexer._CACHE_MANAGERS.pop(str(root.resolve()), None)
-+    retried = indexer.index_repository(str(root))
-+
-+    assert retried.collision_facts_by_module["module"][0]["name"] == "public"
-+    assert _cache_data(root, source)["collision_facts"]["status"] == "available"
-+
-+
-+def test_schema_mismatch_and_source_change_reextract_once(tmp_path, isolated_dirs, monkeypatch):
-+    _serial(monkeypatch)
-+    root, source = _repo(tmp_path, "def old_name():\n    return 1\n")
-+    indexer.index_repository(str(root))
-+    data = _cache_data(root, source)
-+    data["collision_facts"]["schema_version"] = 0
-+    CacheManager(str(root)).set(source, data)
-+    indexer._CACHE_MANAGERS.pop(str(root.resolve()), None)
-+
-+    parse_calls = []
-+    real_parse = indexer.parse_source
-+    monkeypatch.setattr(indexer, "parse_source", lambda path: (parse_calls.append(path) or real_parse(path)))
-+    mismatched = indexer.index_repository(str(root))
-+    assert len(parse_calls) == 1
-+    assert mismatched.collision_facts_by_module["module"][0]["name"] == "old_name"
-+
-+    source.write_text("def new_name():\n    return 2\n", encoding="utf-8")
-+    indexer._CACHE_MANAGERS.pop(str(root.resolve()), None)
-+    parse_calls.clear()
-+    changed = indexer.index_repository(str(root))
-+    assert len(parse_calls) == 1
-+    assert changed.collision_facts_by_module["module"][0]["name"] == "new_name"
-+
-+
-+def test_valid_empty_collision_facts_persist_and_cover_module(tmp_path, isolated_dirs, monkeypatch):
-+    _serial(monkeypatch)
-+    root, source = _repo(tmp_path, "def _private():\n    pass\n")
-+    result = indexer.index_repository(str(root))
-+
-+    assert result.collision_facts_by_module == {"module": []}
-+    envelope = _cache_data(root, source)["collision_facts"]
-+    assert envelope == {
-+        "schema_version": indexer.COLLISION_FACTS_SCHEMA_VERSION,
-+        "status": "available",
-+        "facts": [],
-+    }
-+
-+
-+def test_collision_failure_is_not_cached_and_uses_full_domain_fallback(
-+    tmp_path, isolated_dirs, monkeypatch
-+):
-+    _serial(monkeypatch)
-+    root, source = _repo(tmp_path, "def public():\n    return 1\n")
-+
-+    real_extract = indexer.extract_module_collision_facts
-+    monkeypatch.setattr(
-+        indexer,
-+        "extract_module_collision_facts",
-+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("transient")),
-+    )
-+    failed = indexer.index_repository(str(root))
-+
-+    assert failed.collision_facts_by_module == {}
-+    assert "collision_facts" not in _cache_data(root, source)
-+
-+    fallback_calls = []
-+    monkeypatch.setattr(indexer, "extract_repository_collision_facts", lambda modules: (fallback_calls.append(modules) or {"module": []}))
-+    assert indexer.assemble_collision_facts_or_fallback(failed.modules, failed.collision_facts_by_module) == {"module": []}
-+    assert fallback_calls == [failed.modules]
-+
-+    monkeypatch.setattr(indexer, "extract_module_collision_facts", real_extract)
-+    indexer._CACHE_MANAGERS.pop(str(root.resolve()), None)
-+    retried = indexer.index_repository(str(root))
-+    assert retried.collision_facts_by_module["module"][0]["name"] == "public"
-+
-+
-+def test_incomplete_or_invalid_side_table_never_merges_with_fallback(tmp_path, isolated_dirs, monkeypatch):
-+    root, a = _repo(tmp_path, "def one():\n    return 1\n")
-+    b = root / "other.py"
-+    b.write_text("def two():\n    return 2\n", encoding="utf-8")
-+    modules = {
-+        "module": Module("module", "module.py", str(a), []),
-+        "other": Module("other", "other.py", str(b), []),
-+    }
-+    fallback = {"module": [], "other": []}
-+    monkeypatch.setattr(indexer, "extract_repository_collision_facts", lambda got: fallback)
-+
-+    assert indexer.assemble_collision_facts_or_fallback(modules, {"module": []}) is fallback
-+    assert indexer.assemble_collision_facts_or_fallback(modules, {"module": [{"bad": "fact"}], "other": []}) is fallback
-+
-+
-+def test_serial_and_process_pool_side_tables_match(tmp_path, isolated_dirs, monkeypatch):
-+    root, _ = _repo(tmp_path, "def first():\n    return 1\n")
-+    (root / "other.py").write_text("VALUE = 3\n", encoding="utf-8")
-+    _serial(monkeypatch)
-+    serial = indexer.index_repository(str(root))
-+    indexer._CACHE_MANAGERS.pop(str(root.resolve()), None)
-+    monkeypatch.delenv("CONTEXTOR_DISABLE_PROCESS_POOL")
-+    pooled = indexer.index_repository(str(root))
-+
-+    assert pooled.collision_facts_by_module == serial.collision_facts_by_module
-+    assert compute_collisions_from_facts(pooled.collision_facts_by_module) == []
-+
-+
-+def test_full_facade_uses_complete_indexed_facts_without_repository_fallback(
-+    tmp_path, isolated_dirs, monkeypatch
-+):
-+    from contextor.core.api.facade import ContextorFacade
-+    import contextor.core.api.facade as facade_module
-+
-+    _serial(monkeypatch)
-+    root, _ = _repo(tmp_path, "def public():\n    return 1\n")
-+    observed = []
-+    real_assemble = facade_module.assemble_collision_facts_or_fallback
-+
-+    def track_assemble(modules, facts):
-+        observed.append((set(modules), set(facts)))
-+        return real_assemble(modules, facts)
-+
-+    monkeypatch.setattr(facade_module, "assemble_collision_facts_or_fallback", track_assemble)
-+    monkeypatch.setattr(
-+        indexer,
-+        "extract_repository_collision_facts",
-+        lambda modules: (_ for _ in ()).throw(AssertionError("unexpected fallback")),
-+    )
-+
-+    errors, analysis_result = ContextorFacade.analyze_project(str(root))
-+
-+    assert errors == []
-+    assert analysis_result.collision_facts == {"module": analysis_result.collision_facts["module"]}
-+    assert observed == [({"module"}, {"module"})]
-```
+OWNER_FILE=C:\Temp\Contextor_Repo\contextor\core\analysis\test_context.py
+OWNER_SYMBOL=build_shared_usage_clusters
+CALL_PATH=generate_artifact_usage_report -> build_shared_usage_clusters
+CALL_COUNT=1 per run
+INCLUSIVE_MEDIAN_MS=10.429
+EXCLUSIVE_MEDIAN_MS=10.429
+RUN_VARIANCE=8.913-14.666 ms
+SOURCE_OR_AST_DEPENDENT=NO
+RECOMPUTES_ALREADY_AVAILABLE_STATE=NO
+DUPLICATED_WITH_OTHER_STAGE=NO
+CAN_REUSE_CURRENT_INDEX_CACHE_RAM_FACTS=YES
+SEMANTIC_SCOPE_SAME_AS_POTENTIAL_SOURCE=YES
+LIKELY_REMOVABLE_WHOLE_ANALYSIS_MS=0-0
+SEMANTIC_RISK=LOW + small report-local cluster assembly
 
-FILES_CHANGED=C:\Temp\Contextor_Repo\contextor\core\api\facade.py
-C:\Temp\Contextor_Repo\contextor\core\symbol_engine\indexer.py
-C:\Temp\Contextor_Repo\tests\test_collision_facts_fusion.py
-DIFFS=SEE_COMPLETE_RAW_UNIFIED_DIFF_SECTION
-FINAL_VERDICT=PASS
-WARM_COLLISION_VISITOR_COUNT=0
-WARM_COLLISION_FALLBACK_COUNT=0
-WHOLE_ANALYSIS_BASELINE_MEDIAN_MS=8496.942524
-WHOLE_ANALYSIS_CANDIDATE_MEDIAN_MS=7703.148690
-WHOLE_ANALYSIS_DELTA_MS=-793.793834
-CONTEXTOR_WORKSPACE_SYNC=verified
-FILES_CHANGED=C:\Temp\Contextor_Repo\contextor\core\api\facade.py; C:\Temp\Contextor_Repo\contextor\core\symbol_engine\indexer.py; C:\Temp\Contextor_Repo\tests\test_collision_facts_fusion.py
+### Graph analytics and persistence
+
+OWNER_FILE=C:\Temp\Contextor_Repo\contextor\core\reporting_engine\graph_analytics.py
+OWNER_SYMBOL=build_jaccard_clusters
+CALL_PATHS=build_artifact_pipeline -> generate_graph_analytics_report(scope=global) -> build_jaccard_clusters; layer_pipeline -> generate_graph_analytics_report(scope=layer) -> build_jaccard_clusters; facade persistence -> compute_shared_usage_clusters_from_state -> compute_shared_usage_clusters -> build_jaccard_clusters
+CALL_COUNT=4 per run
+INCLUSIVE_MEDIAN_MS=665.592 aggregate
+EXCLUSIVE_MEDIAN_MS=665.592 aggregate
+RUN_VARIANCE=654.363-727.774 ms aggregate
+SOURCE_OR_AST_DEPENDENT=NO
+RECOMPUTES_ALREADY_AVAILABLE_STATE=YES + pure-RAM complete-linkage computation
+DUPLICATED_WITH_OTHER_STAGE=PARTIAL + global/canonical are parity-equivalent before compaction; layer calls are distinct
+CAN_REUSE_CURRENT_INDEX_CACHE_RAM_FACTS=YES
+SEMANTIC_SCOPE_SAME_AS_POTENTIAL_SOURCE=PARTIAL
+LIKELY_REMOVABLE_WHOLE_ANALYSIS_MS=280-320 for canonical state only; 0 for layer calls
+SEMANTIC_RISK=MEDIUM + public compact IDs differ from canonical full IDs
+
+Observed Jaccard input shapes:
+- global/full report: 634 artifacts, 320 module-artifact entries, private keys present;
+- layer scope: 634 artifacts with scoped report keys;
+- empty layer scope: 0 artifacts;
+- canonical-state projection: 634 artifacts with projection/sidecar keys.
+
+Thus the full 665.592 ms is not one removable duplicate. Only the global/canonical pair is a candidate.
+
+OWNER_FILE=C:\Temp\Contextor_Repo\contextor\core\reporting_engine\graph_analytics.py
+OWNER_SYMBOL=compute_shared_usage_clusters_from_state
+CALL_PATH=ContextorFacade.analyze_project -> canonical state construction -> compute_shared_usage_clusters_from_state -> compute_shared_usage_clusters
+CALL_COUNT=1 per run
+INCLUSIVE_MEDIAN_MS=317.092
+EXCLUSIVE_MEDIAN_MS=0.498
+RUN_VARIANCE=295.509-363.600 ms
+SOURCE_OR_AST_DEPENDENT=NO
+RECOMPUTES_ALREADY_AVAILABLE_STATE=YES
+DUPLICATED_WITH_OTHER_STAGE=PARTIAL + exact pre-compaction cluster semantics are already computed in global graph analytics
+CAN_REUSE_CURRENT_INDEX_CACHE_RAM_FACTS=YES
+SEMANTIC_SCOPE_SAME_AS_POTENTIAL_SOURCE=YES after exact projection/parity validation
+LIKELY_REMOVABLE_WHOLE_ANALYSIS_MS=280-320
+SEMANTIC_RISK=MEDIUM + coverage validation and raw/full-ID handoff must remain authoritative
+
+OWNER_FILE=C:\Temp\Contextor_Repo\contextor\core\reporting_engine\graph_analytics.py
+OWNER_SYMBOL=build_artifact_data_projection
+CALL_PATH=compute_shared_usage_clusters_from_state -> compute_shared_usage_clusters -> build_artifact_data_projection
+CALL_COUNT=2 per run aggregate with dependency-matrix path
+INCLUSIVE_MEDIAN_MS=63.174 aggregate
+EXCLUSIVE_MEDIAN_MS=63.174 aggregate
+RUN_VARIANCE=48.983-211.431 ms aggregate
+SOURCE_OR_AST_DEPENDENT=NO
+RECOMPUTES_ALREADY_AVAILABLE_STATE=NO
+DUPLICATED_WITH_OTHER_STAGE=PARTIAL
+CAN_REUSE_CURRENT_INDEX_CACHE_RAM_FACTS=YES
+SEMANTIC_SCOPE_SAME_AS_POTENTIAL_SOURCE=YES
+LIKELY_REMOVABLE_WHOLE_ANALYSIS_MS=0-40 in the selected cluster fusion
+SEMANTIC_RISK=MEDIUM + projection parity is a tested contract
+
+OWNER_FILE=C:\Temp\Contextor_Repo\contextor\core\reporting_engine\graph_analytics.py
+OWNER_SYMBOL=generate_graph_analytics_report
+CALL_PATH=build_artifact_pipeline -> generate_graph_analytics_report(scope=global)
+CALL_COUNT=1 direct global call per run; two additional layer calls use the same symbol
+INCLUSIVE_MEDIAN_MS=387.782 direct global alias
+EXCLUSIVE_MEDIAN_MS=26.710 direct global alias
+RUN_VARIANCE=364.864-428.611 ms
+SOURCE_OR_AST_DEPENDENT=NO
+RECOMPUTES_ALREADY_AVAILABLE_STATE=PARTIAL
+DUPLICATED_WITH_OTHER_STAGE=PARTIAL
+CAN_REUSE_CURRENT_INDEX_CACHE_RAM_FACTS=YES
+SEMANTIC_SCOPE_SAME_AS_POTENTIAL_SOURCE=PARTIAL
+LIKELY_REMOVABLE_WHOLE_ANALYSIS_MS=0-320 only by preserving raw clusters already computed
+SEMANTIC_RISK=MEDIUM + report schema, scope, compact IDs, matrix, and visibility must remain unchanged
+
+OWNER_FILE=C:\Temp\Contextor_Repo\contextor\core\reporting_engine\graph_analytics.py
+OWNER_SYMBOL=_compute_pagerank
+CALL_PATH=generate_graph_analytics_report -> _compute_pagerank
+CALL_COUNT=4 per run
+INCLUSIVE_MEDIAN_MS=70.695 aggregate
+EXCLUSIVE_MEDIAN_MS=70.695 aggregate
+RUN_VARIANCE=66.298-81.472 ms
+SOURCE_OR_AST_DEPENDENT=NO
+RECOMPUTES_ALREADY_AVAILABLE_STATE=NO
+DUPLICATED_WITH_OTHER_STAGE=PARTIAL + distinct global/layer scopes
+CAN_REUSE_CURRENT_INDEX_CACHE_RAM_FACTS=YES
+SEMANTIC_SCOPE_SAME_AS_POTENTIAL_SOURCE=PARTIAL
+LIKELY_REMOVABLE_WHOLE_ANALYSIS_MS=0-0
+SEMANTIC_RISK=LOW + scope-specific RAM metric
+
+OWNER_FILE=C:\Temp\Contextor_Repo\contextor\core\reporting_engine\graph_analytics.py
+OWNER_SYMBOL=_compute_hub_authority
+CALL_PATH=generate_graph_analytics_report -> _compute_hub_authority
+CALL_COUNT=4 per run
+INCLUSIVE_MEDIAN_MS=63.711 aggregate
+EXCLUSIVE_MEDIAN_MS=63.711 aggregate
+RUN_VARIANCE=59.936-76.528 ms
+SOURCE_OR_AST_DEPENDENT=NO
+RECOMPUTES_ALREADY_AVAILABLE_STATE=NO
+DUPLICATED_WITH_OTHER_STAGE=PARTIAL + distinct scopes
+CAN_REUSE_CURRENT_INDEX_CACHE_RAM_FACTS=YES
+SEMANTIC_SCOPE_SAME_AS_POTENTIAL_SOURCE=PARTIAL
+LIKELY_REMOVABLE_WHOLE_ANALYSIS_MS=0-0
+SEMANTIC_RISK=LOW + scope-specific RAM metric
+
+OWNER_FILE=C:\Temp\Contextor_Repo\contextor\core\reporting_engine\graph_analytics.py
+OWNER_SYMBOL=compute_topology_analytics
+CALL_PATH=facade persistence -> compute_topology_analytics
+CALL_COUNT=1 per run
+INCLUSIVE_MEDIAN_MS=95.503
+EXCLUSIVE_MEDIAN_MS=27.799
+RUN_VARIANCE=82.371-117.701 ms
+SOURCE_OR_AST_DEPENDENT=NO
+RECOMPUTES_ALREADY_AVAILABLE_STATE=YES
+DUPLICATED_WITH_OTHER_STAGE=PARTIAL
+CAN_REUSE_CURRENT_INDEX_CACHE_RAM_FACTS=YES
+SEMANTIC_SCOPE_SAME_AS_POTENTIAL_SOURCE=YES
+LIKELY_REMOVABLE_WHOLE_ANALYSIS_MS=0-0
+SEMANTIC_RISK=MEDIUM + canonical topology must remain independently valid
+
+OWNER_FILE=C:\Temp\Contextor_Repo\contextor\core\reporting_engine\graph_analytics.py
+OWNER_SYMBOL=build_module_dependency_matrix
+CALL_PATH=generate_graph_analytics_report -> build_module_dependency_matrix
+CALL_COUNT=4 per run
+INCLUSIVE_MEDIAN_MS=45.460
+EXCLUSIVE_MEDIAN_MS=45.460
+RUN_VARIANCE=38.633-203.123 ms
+SOURCE_OR_AST_DEPENDENT=NO
+RECOMPUTES_ALREADY_AVAILABLE_STATE=YES
+DUPLICATED_WITH_OTHER_STAGE=PARTIAL + global/layer/state scopes
+CAN_REUSE_CURRENT_INDEX_CACHE_RAM_FACTS=YES
+SEMANTIC_SCOPE_SAME_AS_POTENTIAL_SOURCE=PARTIAL
+LIKELY_REMOVABLE_WHOLE_ANALYSIS_MS=0-0
+SEMANTIC_RISK=MEDIUM + exact matrix scope parity required
+
+OWNER_FILE=C:\Temp\Contextor_Repo\contextor\core\analysis\state_manager.py
+OWNER_SYMBOL=save_engine_state
+CALL_PATH=ContextorFacade.analyze_project -> canonical state construction -> save_engine_state
+CALL_COUNT=1 per run
+INCLUSIVE_MEDIAN_MS=277.812
+EXCLUSIVE_MEDIAN_MS=277.812
+RUN_VARIANCE=232.238-323.883 ms
+SOURCE_OR_AST_DEPENDENT=NO
+RECOMPUTES_ALREADY_AVAILABLE_STATE=NO
+DUPLICATED_WITH_OTHER_STAGE=NO proven duplicate
+CAN_REUSE_CURRENT_INDEX_CACHE_RAM_FACTS=PARTIAL
+SEMANTIC_SCOPE_SAME_AS_POTENTIAL_SOURCE=YES
+LIKELY_REMOVABLE_WHOLE_ANALYSIS_MS=0-0
+SEMANTIC_RISK=HIGH + persistence, revision, and file-state synchronization are required
+
+OWNER_FILE=C:\Temp\Contextor_Repo\contextor\core\analysis\state_manager.py
+OWNER_SYMBOL=FileStateManager.update_state
+CALL_PATH=execute_global_pipeline -> FileStateManager.update_state for each indexed module
+CALL_COUNT=320 per run
+INCLUSIVE_MEDIAN_MS=138.744 aggregate
+EXCLUSIVE_MEDIAN_MS=138.744 aggregate
+RUN_VARIANCE=125.673-154.348 ms aggregate
+SOURCE_OR_AST_DEPENDENT=NO
+RECOMPUTES_ALREADY_AVAILABLE_STATE=NO
+DUPLICATED_WITH_OTHER_STAGE=NO proven duplicate
+CAN_REUSE_CURRENT_INDEX_CACHE_RAM_FACTS=PARTIAL
+SEMANTIC_SCOPE_SAME_AS_POTENTIAL_SOURCE=YES
+LIKELY_REMOVABLE_WHOLE_ANALYSIS_MS=0-0
+SEMANTIC_RISK=HIGH + freshness and incremental invalidation persistence
+
+OWNER_FILE=C:\Temp\Contextor_Repo\contextor\core\reporting_engine/header.py
+OWNER_SYMBOL=build_report_header
+CALL_PATH=execute_global_pipeline -> build_report_header
+CALL_COUNT=1 per run
+INCLUSIVE_MEDIAN_MS=103.051
+EXCLUSIVE_MEDIAN_MS=103.051
+RUN_VARIANCE=92.619-116.600 ms
+SOURCE_OR_AST_DEPENDENT=NO
+RECOMPUTES_ALREADY_AVAILABLE_STATE=NO
+DUPLICATED_WITH_OTHER_STAGE=NO
+CAN_REUSE_CURRENT_INDEX_CACHE_RAM_FACTS=PARTIAL
+SEMANTIC_SCOPE_SAME_AS_POTENTIAL_SOURCE=YES
+LIKELY_REMOVABLE_WHOLE_ANALYSIS_MS=0-0
+SEMANTIC_RISK=LOW + report metadata contract
+
+OWNER_FILE=C:\Temp\Contextor_Repo\contextor\core\reporting_engine/layer_pipeline.py
+OWNER_SYMBOL=execute_layer_pipeline
+CALL_PATH=execute_global_pipeline -> execute_layer_pipeline -> generate_graph_analytics_report(scope=layer)
+CALL_COUNT=2 per run
+INCLUSIVE_MEDIAN_MS=177.603 aggregate
+EXCLUSIVE_MEDIAN_MS=32.142 aggregate
+RUN_VARIANCE=158.683-224.770 ms aggregate
+SOURCE_OR_AST_DEPENDENT=NO
+RECOMPUTES_ALREADY_AVAILABLE_STATE=PARTIAL
+DUPLICATED_WITH_OTHER_STAGE=PARTIAL + each layer has a distinct scope
+CAN_REUSE_CURRENT_INDEX_CACHE_RAM_FACTS=YES
+SEMANTIC_SCOPE_SAME_AS_POTENTIAL_SOURCE=NO for global/canonical reuse
+LIKELY_REMOVABLE_WHOLE_ANALYSIS_MS=0-0
+SEMANTIC_RISK=MEDIUM + layer-specific report scope
+
+## Index-repository inspection
+
+index_repository resolves the root, walks current Python files, applies excludes/ignored directories, and submits one _process_single_file task per selected file through the normal ProcessPool path. The worker result carries module/path/import data plus symbol, reference, collision, and test facts.
+
+The warm stage is wall median 1793.122 ms and parent CPU median 734.375 ms. The difference is consistent with worker execution. The source proves per-file fingerprint/cache validation and current facts must remain authoritative. No evidence proves that removing path resolution, JSON decoding, schema validation, or worker setup would preserve freshness and failure behavior.
+
+Later reference-index assembly consumes worker compact reference facts; it is not a second AST traversal on the normal warm path. Later artifact assembly reuses symbol/reference facts but performs distinct consumer classification needed for report content. No safe indexer elimination was established.
+
+## Candidate ranking
+
+### 1. Canonical shared-usage cluster raw-result handoff
+
+CURRENT_EVIDENCE=The same pure-RAM complete-linkage authority runs for global, two layer scopes, and canonical persistence. The canonical call is 317.092 ms inclusive. Existing parity tests prove snapshot/canonical equality. The public global result is compacted, so direct public-field reuse is invalid.
+
+OWNER=C:\Temp\Contextor_Repo\contextor\core\reporting_engine\graph_analytics.py::generate_graph_analytics_report, with consumption in C:\Temp\Contextor_Repo\contextor\core\api\facade.py::ContextorFacade.analyze_project.
+
+REMOVABLE_WORK=The second canonical projection plus Jaccard traversal for already validated global current-run facts; retain layer calls and canonical coverage validation.
+
+SAFE_OPTIMIZATION_SHAPE=Capture the pre-_compact_clusters raw global list in an internal in-memory side-channel owned by the artifact pipeline. After canonical artifact-consumption coverage is validated, use that raw list for canonical state. Keep the compact public graph report unchanged. If the side-channel is absent, parameters/scope differ, or coverage validation fails, retain the existing canonical computation.
+
+EXPECTED_WHOLE_ANALYSIS_SAVING_MS=280-320
+SEMANTIC_RISK=MEDIUM + full IDs and compact IDs must remain separate
+REQUIRED_INVARIANTS=exact existing parity; identical cluster parameters; no reuse on incomplete/stale consumption; unchanged public schema/compact IDs; unchanged canonical full-name payload; no source/AST reads; existing fallback retained
+
+### 2. TestContextIndex.find_test_files reverse lookup
+
+CURRENT_EVIDENCE=320 calls scan the same files_info imported-module sets. Aggregate exclusive median is 217.302 ms with no nested work. The predicate is exact equality or dotted-prefix matching, followed by filename candidates, set de-duplication, and sorting.
+
+OWNER=C:\Temp\Contextor_Repo\contextor\core\analysis\test_context.py::TestContextIndex
+
+REMOVABLE_WORK=Repeated O(number of test files) scans for every analyzed module.
+
+SAFE_OPTIMIZATION_SHAPE=Build a run-scoped reverse lookup from each imported module and its dotted prefixes while constructing files_info. Preserve filename lookup, exact/prefix semantics, dedupe, sorted output, and the compatibility wrapper.
+
+EXPECTED_WHOLE_ANALYSIS_SAVING_MS=150-205
+SEMANTIC_RISK=LOW + deterministic in-memory lookup with focused parity tests
+REQUIRED_INVARIANTS=all current files_info entries; exact matches; dotted child matches; unrelated prefixes excluded; sorted unique paths; standalone wrapper unchanged
+
+### 3. discover_test_dirs candidate-map fusion
+
+CURRENT_EVIDENCE=One warm call is 179.159 ms and resolves/filters the already allowed Python path set from RepositoryIndex.modules. It is repository-level candidate classification, not AST parsing.
+
+OWNER=C:\Temp\Contextor_Repo\contextor\core\analysis\test_context.py::discover_test_dirs, with possible RepositoryIndex result plumbing.
+
+REMOVABLE_WORK=Repeated normalization and candidate filtering over a path domain already held by the indexer result.
+
+SAFE_OPTIMIZATION_SHAPE=Produce an exact candidate directory/file-name map at the existing indexer/result boundary and consume it from artifact reporting. Keep one automatic-discovery predicate; do not apply it to caller-supplied authoritative test_dirs.
+
+EXPECTED_WHOLE_ANALYSIS_SAVING_MS=120-175
+SEMANTIC_RISK=MEDIUM + exclusions, root naming, nested behavior, and explicit test_dirs compatibility
+REQUIRED_INVARIANTS=same allowed path domain; root test_<name> and <name>_test.py rules; tests/test rules; nested exclusions; conftest handling; absolute/relative normalization; explicit test_dirs authoritative
+
+## Non-candidates
+
+collect_module_artifacts is large but derives own symbols, reference projections, consumer channels, failures, and module-artifact payloads. No complete equivalent prebuilt projection was proven.
+
+assemble_reference_index_or_fallback is a one-time current-facts assembly and is explicitly shared by artifact workers. A new persisted derived-index contract would expand freshness semantics.
+
+save_engine_state and FileStateManager.update_state are required persistence/freshness work. Skipping or relocating writes is not elimination.
+
+The two layer Jaccard calls are scope-specific. PageRank, hubs/authorities, betweenness, topology, matrices, compaction, registry synchronization, and report serialization are required or scope-specific. Their local cost alone is not evidence for safe elimination.
+
+No parallelism or micro-optimization is recommended.
+
+## Acceptance gate for the next implementation
+
+- Public reports, compact reports, canonical state, and API results remain equivalent except for an internal non-persisted handoff.
+- Raw global clusters before compaction equal the existing canonical-state clusters.
+- Layer graph analytics retains its original scope and count.
+- Incomplete/stale artifact-consumption coverage retains the existing fallback and cannot mark partial data fresh.
+- The canonical duplicate Jaccard computation count decreases by one; global/layer counts do not change.
+- Six or more clean warm observations show a material whole-analysis reduction near 280-320 ms, with all raw observations retained.
+- No source/AST traversal, freshness validation, report field, persistence write, LIVE behavior, or canonical authority is weakened.
+
+## Commands and results
+
+Read task:
+Get-Content -LiteralPath C:\Temp\Contextor_Repo\task.txt -TotalCount 80
+Result: task.txt contains the earlier 0J4 test-context design task; the latest pasted user task was followed as the current instruction.
+
+Contextor MCP tools used:
+get_symbol_implementation, get_symbol_call_context, get_source_range, get_module_context, get_project_architecture.
+All decision-critical responses used revision 68, canonical_state=fresh, workspace_sync=verified, provenance=live.
+
+Benchmark command:
+& 'C:\Temp\Contextor_Repo\.venv\Scripts\python.exe' 'C:\Temp\Contextor_Benchmarks\post0J4_warm_cost_remap.py'
+Result: warm_total_median_ms=6559.137299511349
+
+No production/test pytest, py_compile, or mutation command was run because this task was discovery/measurement only.
+
+## Files and diffs
+
+The current working tree contains pre-existing 0J4 production/test and runtime-log changes from the accepted prior task. This turn did not edit a production or test file. The external harness is outside the repository.
+
+FILES_CHANGED=NONE
+DIFFS=NONE
+
+walkthrough.md is the required report artifact and is excluded from task-file accounting. No production/test unified diff exists for this discovery-only turn.
+
+CURRENT_WHOLE_ANALYSIS_MEDIAN_MS=6559.137299511349
+NEXT_TARGET=ContextorFacade.analyze_project
+EXPECTED_WHOLE_ANALYSIS_SAVING_MS=280-320
+SECOND_CANDIDATE=TestContextIndex.find_test_files
+THIRD_CANDIDATE=discover_test_dirs
+FILES_CHANGED=NONE
+DIFFS=NONE
+WHY=The global graph report already computes raw full-name Jaccard clusters from the same validated current-run facts later projected and recomputed for canonical state; preserving that raw result before public ID compaction can remove the measured 317 ms canonical duplicate while leaving layer scopes, report schemas, freshness gates, and fallback behavior unchanged.

@@ -47,6 +47,28 @@ def _module_short_name(module_id: str) -> str:
 TEST_DIR_NAMES = ("tests", "test")
 
 
+def _is_test_context_directory(root: Path, directory: Path) -> bool:
+    return directory == root or directory.name in TEST_DIR_NAMES
+
+
+def is_test_context_candidate(root_path: str | Path, file_path: str | Path) -> bool:
+    """Return whether a path is a current TestContextIndex candidate."""
+    root = Path(root_path).resolve()
+    path = Path(file_path)
+    if not path.is_absolute():
+        path = root / path
+    path = path.resolve()
+    try:
+        path.relative_to(root)
+    except ValueError:
+        return False
+    if path.suffix != ".py" or not _is_test_context_directory(root, path.parent):
+        return False
+    if path.parent == root:
+        return path.name.startswith("test_") or path.name.endswith("_test.py")
+    return True
+
+
 def discover_test_dirs(
     root_path: str,
     allowed_python_paths: list[str] | None = None,
@@ -85,7 +107,7 @@ def discover_test_dirs(
             if path.suffix != ".py":
                 continue
             directory = path.parent
-            if directory == root or directory.name in TEST_DIR_NAMES:
+            if _is_test_context_directory(root, directory):
                 listings.setdefault(directory, set()).add(path.name)
         return {
             directory: frozenset(file_names)
@@ -101,7 +123,7 @@ def discover_test_dirs(
 
         directory = Path(current)
 
-        if directory == root or directory.name in TEST_DIR_NAMES:
+        if _is_test_context_directory(root, directory):
             listings[directory] = frozenset(file_names)
 
     listings.setdefault(root, frozenset())
@@ -227,12 +249,14 @@ class TestContextIndex:
         test_dirs: dict[Path, frozenset[str]] | None = None,
         modules: dict[str, Any] | None = None,
         allowed_python_paths: list[str] | None = None,
+        test_facts_by_path: dict[str, dict] | None = None,
     ) -> TestContextIndex:
         """
         Builds the test context index by discovering test files and extracting
         AST facts at most once per test file.
         """
         root = Path(root_path).resolve()
+        discovered_test_dirs = test_dirs is None
         if test_dirs is None:
             test_dirs = discover_test_dirs(
                 str(root), allowed_python_paths=allowed_python_paths
@@ -251,7 +275,13 @@ class TestContextIndex:
         files_info: dict[str, TestFileInfo] = {}
 
         for directory, file_names in test_dirs.items():
-            if directory == root:
+            if discovered_test_dirs:
+                candidate_names = [
+                    name
+                    for name in file_names
+                    if is_test_context_candidate(root, directory / name)
+                ]
+            elif directory == root:
                 candidate_names = [
                     name
                     for name in file_names
@@ -265,18 +295,37 @@ class TestContextIndex:
                 if test_path in files_info:
                     continue
 
-                tree = None
-                mod = module_by_path.get(str(Path(test_path).resolve()))
-                if mod is not None:
-                    tree = getattr(mod, "ast_tree", None)
+                normalized_path = str(Path(test_path).resolve())
+                supplied_facts = (test_facts_by_path or {}).get(normalized_path)
+                if (
+                    isinstance(supplied_facts, dict)
+                    and set(supplied_facts) == {
+                        "imported_modules",
+                        "names",
+                        "has_assertions",
+                    }
+                    and isinstance(supplied_facts["imported_modules"], list)
+                    and all(isinstance(item, str) for item in supplied_facts["imported_modules"])
+                    and isinstance(supplied_facts["names"], list)
+                    and all(isinstance(item, str) for item in supplied_facts["names"])
+                    and isinstance(supplied_facts["has_assertions"], bool)
+                ):
+                    imported_modules = set(supplied_facts["imported_modules"])
+                    names = set(supplied_facts["names"])
+                    has_assertions = supplied_facts["has_assertions"]
+                else:
+                    tree = None
+                    mod = module_by_path.get(normalized_path)
+                    if mod is not None:
+                        tree = getattr(mod, "ast_tree", None)
 
-                if tree is None:
-                    try:
-                        tree = parse_source(test_path)
-                    except Exception:
-                        tree = None
+                    if tree is None:
+                        try:
+                            tree = parse_source(test_path)
+                        except Exception:
+                            tree = None
 
-                imported_modules, names, has_assertions = _extract_test_file_facts(tree)
+                    imported_modules, names, has_assertions = _extract_test_file_facts(tree)
                 files_info[test_path] = TestFileInfo(
                     path=test_path,
                     filename=name,
@@ -375,6 +424,7 @@ def build_test_context_index(
     test_dirs: dict[Path, frozenset[str]] | None = None,
     modules: dict[str, Any] | None = None,
     allowed_python_paths: list[str] | None = None,
+    test_facts_by_path: dict[str, dict] | None = None,
 ) -> TestContextIndex:
     """
     Public factory function for constructing a TestContextIndex.
@@ -384,6 +434,7 @@ def build_test_context_index(
         test_dirs=test_dirs,
         modules=modules,
         allowed_python_paths=allowed_python_paths,
+        test_facts_by_path=test_facts_by_path,
     )
 
 

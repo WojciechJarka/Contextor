@@ -705,6 +705,7 @@ def generate_artifact_usage_report(
     progress_callback=None,
     symbol_facts_by_module: dict[str, dict] | None = None,
     reference_index: RepositoryReferenceIndex | None = None,
+    test_facts_by_path: dict[str, dict] | None = None,
 ) -> dict:
     """
     Generate the global artifact usage report.
@@ -810,6 +811,7 @@ def generate_artifact_usage_report(
         test_dirs=test_dirs,
         modules=modules,
         allowed_python_paths=[module.path for module in modules.values()],
+        test_facts_by_path=test_facts_by_path,
     )
 
     for module_id in modules:
