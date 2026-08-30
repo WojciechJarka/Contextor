@@ -106,6 +106,12 @@ def test_handoff_validator_accepts_exact_current_run_and_rejects_invalid_variant
     assert is_valid_shared_usage_clusters_handoff(
         valid, artifact_data=artifact_data, raw_artifacts=raw_artifacts
     )
+    for complete in (1, "true", None):
+        assert not is_valid_shared_usage_clusters_handoff(
+            replace(valid, complete=complete),
+            artifact_data=artifact_data,
+            raw_artifacts=raw_artifacts,
+        )
     assert not is_valid_shared_usage_clusters_handoff(
         None, artifact_data=artifact_data, raw_artifacts=raw_artifacts
     )
@@ -134,6 +140,18 @@ def test_handoff_validator_accepts_exact_current_run_and_rejects_invalid_variant
         {**cluster, "shared_artifact_count": len(cluster["shared_artifact_keys"]) - 1},
         {**cluster, "shared_artifact_count": "1"},
         {**cluster, "shared_artifact_count": True},
+        {
+            **cluster,
+            "shared_artifact_count": 2,
+            "shared_artifact_keys": [
+                cluster["shared_artifact_keys"][0],
+                cluster["shared_artifact_keys"][0],
+            ],
+        },
+        {
+            **cluster,
+            "modules": [cluster["modules"][0], cluster["modules"][0]],
+        },
         {**cluster, "size": len(cluster["modules"]) + 1},
         {**cluster, "size": "2"},
         {**cluster, "size": True},
@@ -146,6 +164,17 @@ def test_handoff_validator_accepts_exact_current_run_and_rejects_invalid_variant
             artifact_data=artifact_data,
             raw_artifacts=raw_artifacts,
         )
+
+    second_cluster = {
+        **cluster,
+        "modules": sorted([cluster["modules"][0], "zzzz_extra"]),
+        "size": 2,
+    }
+    assert not is_valid_shared_usage_clusters_handoff(
+        _handoff(artifact_data, clusters=[cluster, second_cluster]),
+        artifact_data=artifact_data,
+        raw_artifacts=raw_artifacts,
+    )
 
     malformed_artifact_data = {"artifacts": None}
     malformed_artifact_handoff = replace(
@@ -170,6 +199,12 @@ def test_handoff_validator_accepts_exact_current_run_and_rejects_invalid_variant
         "non_int_size",
         "malformed_similarity",
         "malformed_ratio",
+        "intra_cluster_duplicate",
+        "cross_cluster_duplicate",
+        "complete_one",
+        "complete_string",
+        "complete_none",
+        "duplicate_shared_key",
     ],
 )
 def test_facade_rejected_handoff_falls_back_without_failing(
@@ -210,9 +245,44 @@ def test_facade_rejected_handoff_falls_back_without_failing(
             cluster = {**cluster, "jaccard_similarity": "not-a-number"}
         elif mutation == "malformed_ratio":
             cluster = {**cluster, "shared_ratio": "not-a-number"}
-        result["_raw_shared_usage_clusters"] = replace(
-            handoff, clusters=(cluster,)
-        )
+        elif mutation == "intra_cluster_duplicate":
+            cluster = {
+                **cluster,
+                "modules": [cluster["modules"][0], cluster["modules"][0]],
+            }
+        elif mutation == "cross_cluster_duplicate":
+            second_cluster = {
+                **cluster,
+                "modules": sorted([cluster["modules"][0], "zzzz_extra"]),
+                "size": 2,
+            }
+            result["_raw_shared_usage_clusters"] = replace(
+                handoff, clusters=(cluster, second_cluster)
+            )
+            return result
+        elif mutation == "complete_one":
+            result["_raw_shared_usage_clusters"] = replace(
+                handoff, complete=1
+            )
+            return result
+        elif mutation == "complete_string":
+            result["_raw_shared_usage_clusters"] = replace(
+                handoff, complete="true"
+            )
+            return result
+        elif mutation == "complete_none":
+            result["_raw_shared_usage_clusters"] = replace(
+                handoff, complete=None
+            )
+            return result
+        elif mutation == "duplicate_shared_key":
+            key = cluster["shared_artifact_keys"][0]
+            cluster = {
+                **cluster,
+                "shared_artifact_keys": [key, key],
+                "shared_artifact_count": 2,
+            }
+        result["_raw_shared_usage_clusters"] = replace(handoff, clusters=(cluster,))
         return result
 
     original_execute = __import__(

@@ -92,7 +92,7 @@ def is_valid_shared_usage_clusters_handoff(
         or handoff.max_cluster_size != 25
         or handoff.min_cluster_size != 2
         or handoff.artifact_data_identity != id(artifact_data)
-        or not handoff.complete
+        or handoff.complete is not True
     ):
         return False
     if not isinstance(artifact_data, dict) or not isinstance(raw_artifacts, dict):
@@ -133,6 +133,7 @@ def is_valid_shared_usage_clusters_handoff(
         if (
             not isinstance(modules, list)
             or not all(isinstance(module, str) for module in modules)
+            or len(set(modules)) != len(modules)
             or modules != sorted(modules)
             or len(modules) != size
             or len(modules) < 2
@@ -143,6 +144,7 @@ def is_valid_shared_usage_clusters_handoff(
         if (
             not isinstance(shared_keys, list)
             or not all(isinstance(key, str) for key in shared_keys)
+            or len(set(shared_keys)) != len(shared_keys)
             or shared_keys != sorted(shared_keys)
             or len(shared_keys) != shared_artifact_count
         ):
@@ -2398,5 +2400,4 @@ __all__ = [
     "_classify_visibility",
     "_compute_export_degrees",
 ]
-
 

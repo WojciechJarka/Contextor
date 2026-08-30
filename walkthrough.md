@@ -1,69 +1,70 @@
-# 0J5 raw Shared Usage Clusters handoff - correction/audit closure
+# 0J5 raw Shared Usage Clusters handoff - final validator hardening closure
 
-## Scope
+## Scope and verdict basis
 
-This closure was limited to the fail-closed handoff validator defect. No new optimization scope was opened, no benchmark harness was created in the repository, and no production/test behavior outside the validator and its focused regressions was changed.
+This closure was limited to final fail-closed validator hardening. No performance benchmark was rerun, no provenance/clustering/pipeline ownership design was reopened, and no public report, persistence, LIVE, API, MCP, or fallback architecture was changed.
 
-The defect was in C:\Temp\Contextor_Repo\contextor\core\reporting_engine\graph_analytics.py::is_valid_shared_usage_clusters_handoff. The validator compared list lengths with size and shared_artifact_count before validating those values. A malformed non-numeric value could therefore raise TypeError instead of returning False and selecting the canonical fallback.
+The two requested defects were concrete:
 
-## Correction
+1. is_valid_shared_usage_clusters_handoff accepted duplicate module IDs inside one cluster because it only checked cross-cluster reuse through seen_modules.intersection(modules).
+2. It accepted any truthy complete value, including 1 and nonempty strings, instead of the exact boolean True required by the producer contract.
 
-The validator now validates size and shared_artifact_count before any length comparison, rejects booleans for integer count fields, requires exact equality for both count relationships, rejects boolean similarity/ratio values, and validates the artifact container before calling .keys().
+The validator also had one equivalent concrete shape defect: duplicate shared_artifact_keys could pass when shared_artifact_count was adjusted to the duplicated list length. Contextor evidence for build_jaccard_clusters shows producer-side consumer and shared-artifact identities are deduplicated through sets, so this was corrected with a bounded per-cluster uniqueness check.
 
-All existing scope, parameter, current-run identity, complete-marker, exact-field-set, sorted-identity, duplicate-module, range, and fallback rules remain in force. The authoritative compute_shared_usage_clusters_from_state aggregation/classification path was not changed.
+## Production correction
 
-## Contextor evidence and current workspace freshness
+Owner: C:\Temp\Contextor_Repo\contextor\core\reporting_engine\graph_analytics.py::is_valid_shared_usage_clusters_handoff
 
-Contextor MCP was used before editing to resolve the current validator, artifact pipeline, global pipeline, and facade symbols. The post-edit evidence is:
+The validator now:
 
-- get_live_events(after_revision=80) first had one transient connection failure; the immediate retry succeeded with continuous revisions and no resync requirement.
-- Revision 81: desktop_watcher, UPDATED, C:\Temp\Contextor_Repo\contextor\core\reporting_engine\graph_analytics.py.
-- Revision 82: desktop_watcher, UPDATED, C:\Temp\Contextor_Repo\tests\test_jaccard_handoff_0j5.py.
-- Revision 83: desktop_watcher, UPDATED, C:\Temp\Contextor_Repo\tests\test_jaccard_handoff_0j5.py.
-- Event continuity was continuous; resync_required=false; no MCP restart was performed or needed.
-- Current Contextor state: canonical_state=fresh, workspace_sync=verified, canonical_revision=83, provenance=live.
-- Fresh families: module, graph, topology, artifact_consumption, cycles, and collisions.
-- Project architecture reported 321 modules, 7 layers, 0 cycles, 0 name collisions, and no diagnostics attention required. Deferred analytics families were not treated as zero-valued evidence.
-- contextor.core.reporting_engine.graph_analytics remained engine, live fan-in 17/fan-out 6.
-- contextor.core.api.facade remained contract, live fan-in 29/fan-out 29.
-- contextor.core.symbol_engine.indexer remained runtime, live fan-in 21/fan-out 10.
-- No new cycle or layer-boundary violation was observed. Nested engine/contract isolation has no dedicated report without starting a separate layer analysis, which was unnecessary for this narrow unchanged-layer correction.
-- get_source_range at the facade handoff block confirms invalid handoffs call compute_shared_usage_clusters_from_state(state) inside the existing try/except. The pipeline source confirms _raw_shared_usage_clusters and _artifact_data are carried in the same result.
-- get_symbol_call_context returned no static intra-module caller edge for the validator; the current facade source range is direct evidence of its dynamic local import and production call.
+- requires handoff.complete is True;
+- rejects duplicate module IDs within a cluster with len(set(modules)) != len(modules);
+- retains the existing cross-cluster duplicate rejection through seen_modules.intersection(modules);
+- rejects duplicate shared artifact IDs within a cluster with len(set(shared_keys)) != len(shared_keys);
+- retains all earlier exact count, type, bool, ordering, field-set, range, scope, parameter, identity, artifact-key-domain, raw-key-domain, complete-marker, and malformed-container checks.
 
-## Handoff provenance proof retained from 0J5
+These checks are bounded by the already materialized handoff lists. No AST/source traversal, producer change, canonical recomputation, or derived current-run module-domain structure was added.
 
-The current-run provenance remains proven and was not weakened:
+## Review of other possible fail-open shapes
 
-1. build_artifact_pipeline calls global generate_graph_analytics_report with one current-run artifact_data object and captures its pre-compaction raw clusters in SharedUsageClustersHandoff.
-2. The handoff stores id(artifact_data), the exact ordered artifact key domain, and the exact ordered raw module-artifact key domain.
-3. execute_global_pipeline carries both the handoff and the same artifact-data object into its result as _raw_shared_usage_clusters and _artifact_data.
-4. ContextorFacade.analyze_project builds canonical artifact consumption from current-run raw_artifacts, validates coverage, and validates the handoff against current-run identity/key domains before accepting it.
-5. A valid handoff is copied only into the state list; an invalid or absent handoff enters the existing canonical computation path.
+Contextor MCP resolved the current producer and validator at canonical revision 83 before the correction and at revision 86 after it.
 
-The accepted 0J5 evidence established that canonical artifact/consumption state is deterministically constructed from the same current-run artifact/usage payload, with no intervening semantic filtering that changes the relevant consumer key domain. No hashes, deep comparisons, extra copies, second cache, AST/source persistence, or provenance overhead was added.
+build_jaccard_clusters constructs module identities from _artifact_consumers. Contextor returned the exact implementation: _artifact_consumers filters non-empty strings and returns sorted(set(...)). Shared artifact IDs are built from a set comprehension and sorted. Therefore duplicate modules or shared keys are contrary to the producer contract and are concrete validator defects; both are now rejected.
 
-## Regression coverage
+The producer's module-domain membership is not recomputed by the validator. The handoff is an unpersisted current-run object and already binds artifact_data by object identity plus the exact ordered artifact and raw-artifact key domains. Rebuilding the full consumer-module domain would rewalk the complete artifact payload on every normal warm analysis and would violate this closure's no-expensive-derived-structure and no-performance-change constraints. No additional speculative or semantically redundant domain check was added. The bounded duplicate checks are the concrete shape checks required here.
 
-tests/test_jaccard_handoff_0j5.py covers inflated and deflated counts, non-integer and boolean counts, inconsistent/non-integer/boolean sizes, malformed similarity and ratio values, malformed artifact data without an exception, direct rejection of every malformed variant, facade fallback for every rejected handoff variant, valid-handoff no-duplicate behavior, raw-vs-compacted parity, and layer non-capture behavior.
+No other equivalent concrete exception or permissive-shape path was found in the current validator after the review. Type checks precede all len, set, sort, intersection, and numeric range operations. The exact field set prevents omitted or extra fields; current-run identity and ordered key-domain checks prevent stale or unrelated handoffs.
 
-The existing lifecycle regression in tests/test_matrix_clusters_state_lifecycle.py continues to force validator rejection and verifies fallback failure isolation.
+## Focused regressions
 
-Focused command result:
+tests/test_jaccard_handoff_0j5.py now proves:
 
-~~~text
-& .\.venv\Scripts\python.exe -m pytest -q -s tests\test_jaccard_handoff_0j5.py tests\test_matrix_clusters_state_lifecycle.py tests\test_derived_analytics_parity.py
-59 passed in 25.58s
-~~~
+- duplicate module IDs inside one cluster are rejected;
+- a module repeated in a second cluster remains rejected;
+- complete=1, complete="true", and complete=None are rejected;
+- complete=True remains accepted;
+- duplicate shared artifact keys are rejected;
+- all newly rejected handoffs select the existing canonical fallback and complete analysis without errors.
 
-Directly affected command after the final test adjustment:
+The existing 0J5 valid-handoff path and the lifecycle failure-isolation regression remain covered. The facade-level fallback test parameterizes all newly rejected forms and asserts the canonical computation is called once.
+
+## Commands and results
+
+Focused validator/handoff tests:
 
 ~~~text
 & .\.venv\Scripts\python.exe -m pytest -q -s tests\test_jaccard_handoff_0j5.py
-12 passed in 15.09s
+18 passed in 24.02s
 ~~~
 
-Compilation and whitespace validation:
+Directly relevant canonical lifecycle test:
+
+~~~text
+& .\.venv\Scripts\python.exe -m pytest -q -s tests\test_matrix_clusters_state_lifecycle.py::test_real_facade_clusters_failure_isolation
+1 passed in 2.10s
+~~~
+
+Changed-file compilation and whitespace validation:
 
 ~~~text
 & .\.venv\Scripts\python.exe -m py_compile contextor\core\reporting_engine\graph_analytics.py tests\test_jaccard_handoff_0j5.py
@@ -72,51 +73,77 @@ git diff --check -- ':!walkthrough.md'
 GIT_DIFF_CHECK_EXCLUDING_WALKTHROUGH=PASS
 ~~~
 
-The repository's existing LF/CRLF conversion warnings from Git did not affect either result.
+The unscoped git diff --check necessarily reports trailing whitespace on embedded raw unified-diff context lines in walkthrough.md; those spaces are part of the required complete raw diff. The changed production/test-only check above passes. Git's LF/CRLF conversion warnings are non-failing.
 
-The literal unscoped git diff --check also reports trailing whitespace on the twelve raw unified-diff context lines embedded in this report. Those single spaces are part of the required complete raw diff representation. The production/test-only check above excludes walkthrough.md and is the authoritative changed-file whitespace result.
+## Retained performance evidence
 
-## Performance evidence and gate decision
+The requested controlled performance benchmark was not rerun. The valid normal handoff producer, global/layer call structure, canonical gate, and aggregation path are unchanged; this correction adds only bounded constant-time validation checks over already materialized cluster lists.
 
-The correction changes only malformed-input validation and leaves producer, aggregation, canonical-state, persistence, and normal valid-handoff control flow unchanged. The accepted external controlled 0J5 gate was retained rather than rerun.
-
-Harness: C:\Temp\Contextor_Benchmarks\0J5_handoff_gate_20260830.
+Retained accepted external gate:
 
 ~~~text
+HARNESS=C:\Temp\Contextor_Benchmarks\0J5_handoff_gate_20260830
 WHOLE_ANALYSIS_BASELINE_MEDIAN_MS=6559.137299511349
 WHOLE_ANALYSIS_CANDIDATE_MEDIAN_MS=6291.322954988573
 WHOLE_ANALYSIS_DELTA_MS=-267.8143445227761
-
-candidate cold=22836.7352560163
-candidate warm=8044.92777702399,6168.75238303328,6132.74424598785,6484.05544500565,6350.11893999763,6232.52696997952
-candidate warm_median=6291.322954988573
-candidate global_graph_median_ms=434.76283250493
-candidate canonical_boundary_median_ms=0
-candidate GLOBAL_JACCARD_COUNT=1 on every run
-candidate LAYER_JACCARD_COUNT=2 on every run
-candidate CANONICAL_JACCARD_COUNT=0 on every run
-
-fallback cold=24688.1044240436
-fallback warm=8575.29455603799,6876.94713997189,6671.18355800631,6481.55868897447,6647.2837330075,6797.054863011
-fallback warm_median=6734.119210508652
-fallback global_graph_median_ms=450.3752574964892
-fallback canonical_boundary_median_ms=313.305461982964
-fallback GLOBAL_JACCARD_COUNT=1 on every run
-fallback LAYER_JACCARD_COUNT=2 on every run
-fallback FALLBACK_CANONICAL_JACCARD_COUNT=1 on every run
+GLOBAL_JACCARD_COUNT=1
+LAYER_JACCARD_COUNT=2
+CANONICAL_JACCARD_COUNT=0
+FALLBACK_CANONICAL_JACCARD_COUNT=1
 ~~~
 
-The normal current-schema warm path remains zero canonical recomputations. The fallback control independently measured one canonical computation; this is not inferred from the global counter alone. The retained candidate remains 267.814 ms below the accepted baseline median, while forced fallback is 442.796 ms above the candidate median.
+Retained raw candidate timings, one cold and six warm observations:
 
-## Semantic and architectural conclusion
+~~~text
+cold=22836.7352560163
+warm=8044.92777702399,6168.75238303328,6132.74424598785,6484.05544500565,6350.11893999763,6232.52696997952
+warm_median=6291.322954988573
+~~~
 
-Malformed values now return False, the facade retains its existing canonical fallback, and fallback exceptions still mark canonical state stale without failing the whole analysis. Exact equality prevents inflated or deflated counts. Boolean values cannot qualify as numeric counts or ratios. Valid current-schema handoffs and public graph schemas remain unchanged.
+Retained raw forced-fallback timings:
 
-No new cycle, layer-boundary issue, public API/MCP change, persistence change, LIVE behavior change, cache change, or canonical-state weakening was introduced. The optimization remains elimination of redundant Jaccard recomputation only.
+~~~text
+cold=24688.1044240436
+warm=8575.29455603799,6876.94713997189,6671.18355800631,6481.55868897447,6647.2837330075,6797.054863011
+warm_median=6734.119210508652
+~~~
+
+The accepted candidate remains 267.814 ms below baseline. The fallback control remains independently measured at one canonical computation and 442.796 ms above the candidate median. No claim of fallback=0 is inferred from the worker/global counter.
+
+## Contextor post-change freshness and architecture
+
+Post-edit Contextor LIVE evidence:
+
+- revision 84: desktop_watcher UPDATED graph_analytics.py;
+- revision 85: desktop_watcher UPDATED test_jaccard_handoff_0j5.py;
+- revision 86: desktop_watcher UPDATED test_jaccard_handoff_0j5.py;
+- continuity=continuous;
+- resync_required=false;
+- activity epoch remained continuous;
+- no MCP restart was performed or required.
+
+Post-change Contextor architecture at revision 86:
+
+- canonical_state=fresh;
+- workspace_sync=verified;
+- provenance=live;
+- fresh module, graph, topology, artifact_consumption, cycles, and collisions families;
+- project module_count=321 and layer_count=7;
+- cycles=0 and name_collisions=0;
+- diagnostics attention_required=false;
+- graph_analytics remained layer engine, fan_in=17, fan_out=6;
+- api.facade remained layer contract, fan_in=29, fan_out=29;
+- symbol_engine.indexer remained layer runtime, fan_in=21, fan_out=10.
+
+The correction stays inside graph_analytics and adds no cross-module dependency. No new cycle or layer violation was reported. Nested layer isolation has no dedicated report without starting a separate analysis; global fresh architecture and the unchanged dependency topology were sufficient for this narrow closure.
+
+## Current-run provenance
+
+CURRENT_RUN_PROVENANCE remains PROVEN from accepted 0J5 evidence. build_artifact_pipeline captures raw global clusters from the exact current-run artifact_data object; execute_global_pipeline carries that handoff and the same artifact_data; ContextorFacade validates object identity and ordered artifact/raw-artifact key domains before accepting it. Canonical artifact consumption is derived from the same current-run raw artifact payload. The canonical compute function remains the fallback authority.
 
 ## FILES_CHANGED
 
-walkthrough.md and the desktop-generated log are excluded:
+The complete current 0J5 task file set is:
 
 ~~~text
 C:\Temp\Contextor_Repo\contextor\core\api\facade.py
@@ -127,11 +154,11 @@ C:\Temp\Contextor_Repo\tests\test_jaccard_handoff_0j5.py
 C:\Temp\Contextor_Repo\tests\test_matrix_clusters_state_lifecycle.py
 ~~~
 
+The desktop-generated log and walkthrough.md are excluded from task FILES_CHANGED.
+
 ## DIFFS
 
-Complete raw unified diff for every production/test file changed by the entire current 0J5 task follows. walkthrough.md is not counted.
-
-### C:\Temp\Contextor_Repo\contextor\core\api\facade.py
+Complete raw unified diff for every production/test file changed by the entire 0J5 task is below. The diff base is the accepted pre-0J5 commit 9cb56e6; it includes the accepted handoff implementation plus this final validator correction. The log and walkthrough.md are excluded.
 
 ~~~diff
 diff --git a/contextor/core/api/facade.py b/contextor/core/api/facade.py
@@ -144,7 +171,7 @@ index cbace68..331c74b 100644
                  compute_topology_analytics,
 +                is_valid_shared_usage_clusters_handoff,
              )
-
+ 
              graph = getattr(analysis_result, "graph", None)
 @@ -516,13 +517,26 @@ class ContextorFacade:
  
@@ -178,11 +205,7 @@ index cbace68..331c74b 100644
 +                        state.shared_usage_clusters_state = "fresh"
              else:
                  state.shared_usage_clusters_state = "stale"
-~~~
-
-### C:\Temp\Contextor_Repo\contextor\core\reporting_engine\artifact_pipeline.py
-
-~~~diff
+ 
 diff --git a/contextor/core/reporting_engine/artifact_pipeline.py b/contextor/core/reporting_engine/artifact_pipeline.py
 index 47f44fa..8dd779f 100644
 --- a/contextor/core/reporting_engine/artifact_pipeline.py
@@ -241,16 +264,11 @@ index 47f44fa..8dd779f 100644
          graph_analytics_data=graph_analytics_data,
 +        raw_shared_usage_clusters=raw_shared_usage_clusters,
      )
-~~~
-
-### C:\Temp\Contextor_Repo\contextor\core\reporting_engine\graph_analytics.py
-
-~~~diff
 diff --git a/contextor/core/reporting_engine/graph_analytics.py b/contextor/core/reporting_engine/graph_analytics.py
-index 3035787..bdc3a71 100644
+index 3035787..4906fe5 100644
 --- a/contextor/core/reporting_engine/graph_analytics.py
 +++ b/contextor/core/reporting_engine/graph_analytics.py
-@@ -55,12 +55,116 @@ The implementation is deterministic and does not depend on networkx.
+@@ -55,12 +55,118 @@ The implementation is deterministic and does not depend on networkx.
  from __future__ import annotations
  
  from collections import defaultdict, deque
@@ -291,7 +309,7 @@ index 3035787..bdc3a71 100644
 +        or handoff.max_cluster_size != 25
 +        or handoff.min_cluster_size != 2
 +        or handoff.artifact_data_identity != id(artifact_data)
-+        or not handoff.complete
++        or handoff.complete is not True
 +    ):
 +        return False
 +    if not isinstance(artifact_data, dict) or not isinstance(raw_artifacts, dict):
@@ -332,6 +350,7 @@ index 3035787..bdc3a71 100644
 +        if (
 +            not isinstance(modules, list)
 +            or not all(isinstance(module, str) for module in modules)
++            or len(set(modules)) != len(modules)
 +            or modules != sorted(modules)
 +            or len(modules) != size
 +            or len(modules) < 2
@@ -342,6 +361,7 @@ index 3035787..bdc3a71 100644
 +        if (
 +            not isinstance(shared_keys, list)
 +            or not all(isinstance(key, str) for key in shared_keys)
++            or len(set(shared_keys)) != len(shared_keys)
 +            or shared_keys != sorted(shared_keys)
 +            or len(shared_keys) != shared_artifact_count
 +        ):
@@ -367,7 +387,7 @@ index 3035787..bdc3a71 100644
  # ==========================================================
  # LAYER CLASSIFICATION
  # ==========================================================
-@@ -1450,6 +1554,7 @@ def generate_graph_analytics_report(
+@@ -1450,6 +1556,7 @@ def generate_graph_analytics_report(
      scope_modules: set[str] | None = None,
      global_artifact_data: dict | None = None,
      progress_callback=None,
@@ -375,7 +395,7 @@ index 3035787..bdc3a71 100644
  ) -> dict:
      """
      Generate the graph analytics report.
-@@ -1840,6 +1945,9 @@ def generate_graph_analytics_report(
+@@ -1840,6 +1947,9 @@ def generate_graph_analytics_report(
          progress_callback=progress_callback,
      )
  
@@ -385,16 +405,12 @@ index 3035787..bdc3a71 100644
      clusters = _compact_clusters(
          clusters,
          index_dict,
-@@ -2292,4 +2400,3 @@ __all__ = [
+@@ -2291,5 +2401,3 @@ __all__ = [
+     "_compute_export_degrees",
  ]
-
-
+ 
 -
-~~~
-
-### C:\Temp\Contextor_Repo\contextor\core\reporting_engine\pipeline.py
-
-~~~diff
+-
 diff --git a/contextor/core/reporting_engine/pipeline.py b/contextor/core/reporting_engine/pipeline.py
 index d3a687c..a47f03b 100644
 --- a/contextor/core/reporting_engine/pipeline.py
@@ -415,17 +431,12 @@ index d3a687c..a47f03b 100644
          "_analysis_result": analysis_result,
          "_file_state_manager": state_mgr,
      }
-~~~
-
-### C:\Temp\Contextor_Repo\tests\test_jaccard_handoff_0j5.py
-
-~~~diff
 diff --git a/tests/test_jaccard_handoff_0j5.py b/tests/test_jaccard_handoff_0j5.py
 new file mode 100644
-index 0000000..8883d4d
+index 0000000..41ae439
 --- /dev/null
 +++ b/tests/test_jaccard_handoff_0j5.py
-@@ -0,0 +1,285 @@
+@@ -0,0 +1,355 @@
 +from dataclasses import replace
 +from pathlib import Path
 +from unittest.mock import patch
@@ -534,6 +545,12 @@ index 0000000..8883d4d
 +    assert is_valid_shared_usage_clusters_handoff(
 +        valid, artifact_data=artifact_data, raw_artifacts=raw_artifacts
 +    )
++    for complete in (1, "true", None):
++        assert not is_valid_shared_usage_clusters_handoff(
++            replace(valid, complete=complete),
++            artifact_data=artifact_data,
++            raw_artifacts=raw_artifacts,
++        )
 +    assert not is_valid_shared_usage_clusters_handoff(
 +        None, artifact_data=artifact_data, raw_artifacts=raw_artifacts
 +    )
@@ -562,6 +579,18 @@ index 0000000..8883d4d
 +        {**cluster, "shared_artifact_count": len(cluster["shared_artifact_keys"]) - 1},
 +        {**cluster, "shared_artifact_count": "1"},
 +        {**cluster, "shared_artifact_count": True},
++        {
++            **cluster,
++            "shared_artifact_count": 2,
++            "shared_artifact_keys": [
++                cluster["shared_artifact_keys"][0],
++                cluster["shared_artifact_keys"][0],
++            ],
++        },
++        {
++            **cluster,
++            "modules": [cluster["modules"][0], cluster["modules"][0]],
++        },
 +        {**cluster, "size": len(cluster["modules"]) + 1},
 +        {**cluster, "size": "2"},
 +        {**cluster, "size": True},
@@ -574,6 +603,17 @@ index 0000000..8883d4d
 +            artifact_data=artifact_data,
 +            raw_artifacts=raw_artifacts,
 +        )
++
++    second_cluster = {
++        **cluster,
++        "modules": sorted([cluster["modules"][0], "zzzz_extra"]),
++        "size": 2,
++    }
++    assert not is_valid_shared_usage_clusters_handoff(
++        _handoff(artifact_data, clusters=[cluster, second_cluster]),
++        artifact_data=artifact_data,
++        raw_artifacts=raw_artifacts,
++    )
 +
 +    malformed_artifact_data = {"artifacts": None}
 +    malformed_artifact_handoff = replace(
@@ -598,6 +638,12 @@ index 0000000..8883d4d
 +        "non_int_size",
 +        "malformed_similarity",
 +        "malformed_ratio",
++        "intra_cluster_duplicate",
++        "cross_cluster_duplicate",
++        "complete_one",
++        "complete_string",
++        "complete_none",
++        "duplicate_shared_key",
 +    ],
 +)
 +def test_facade_rejected_handoff_falls_back_without_failing(
@@ -638,9 +684,44 @@ index 0000000..8883d4d
 +            cluster = {**cluster, "jaccard_similarity": "not-a-number"}
 +        elif mutation == "malformed_ratio":
 +            cluster = {**cluster, "shared_ratio": "not-a-number"}
-+        result["_raw_shared_usage_clusters"] = replace(
-+            handoff, clusters=(cluster,)
-+        )
++        elif mutation == "intra_cluster_duplicate":
++            cluster = {
++                **cluster,
++                "modules": [cluster["modules"][0], cluster["modules"][0]],
++            }
++        elif mutation == "cross_cluster_duplicate":
++            second_cluster = {
++                **cluster,
++                "modules": sorted([cluster["modules"][0], "zzzz_extra"]),
++                "size": 2,
++            }
++            result["_raw_shared_usage_clusters"] = replace(
++                handoff, clusters=(cluster, second_cluster)
++            )
++            return result
++        elif mutation == "complete_one":
++            result["_raw_shared_usage_clusters"] = replace(
++                handoff, complete=1
++            )
++            return result
++        elif mutation == "complete_string":
++            result["_raw_shared_usage_clusters"] = replace(
++                handoff, complete="true"
++            )
++            return result
++        elif mutation == "complete_none":
++            result["_raw_shared_usage_clusters"] = replace(
++                handoff, complete=None
++            )
++            return result
++        elif mutation == "duplicate_shared_key":
++            key = cluster["shared_artifact_keys"][0]
++            cluster = {
++                **cluster,
++                "shared_artifact_keys": [key, key],
++                "shared_artifact_count": 2,
++            }
++        result["_raw_shared_usage_clusters"] = replace(handoff, clusters=(cluster,))
 +        return result
 +
 +    original_execute = __import__(
@@ -711,11 +792,6 @@ index 0000000..8883d4d
 +    assert raw[0] == before[0]
 +    assert raw[0]["modules"] == before[1]
 +    assert raw[0]["shared_artifact_keys"] == before[2]
-~~~
-
-### C:\Temp\Contextor_Repo\tests\test_matrix_clusters_state_lifecycle.py
-
-~~~diff
 diff --git a/tests/test_matrix_clusters_state_lifecycle.py b/tests/test_matrix_clusters_state_lifecycle.py
 index 70c0829..04f9499 100644
 --- a/tests/test_matrix_clusters_state_lifecycle.py
@@ -735,13 +811,15 @@ index 70c0829..04f9499 100644
 ## Final audit values
 
 FINAL_VERDICT=PASS
+INTRA_CLUSTER_DUPLICATES_REJECTED=PASS
+CROSS_CLUSTER_DUPLICATES_REJECTED=PASS
+COMPLETE_MARKER_EXACT=PASS
 HANDOFF_VALIDATOR_FAIL_CLOSED=PASS
-COUNT_CONSISTENCY=PASS
 CURRENT_RUN_PROVENANCE=PROVEN
 GLOBAL_JACCARD_COUNT=1
 LAYER_JACCARD_COUNT=2
 CANONICAL_JACCARD_COUNT=0
 FALLBACK_CANONICAL_JACCARD_COUNT=1
 WHOLE_ANALYSIS_CANDIDATE_MEDIAN_MS=6291.322954988573
-CONTEXTOR_WORKSPACE_SYNC=verified/fresh revision 83, desktop-watcher events continuous, no resync
-FILES_CHANGED=C:\Temp\Contextor_Repo\contextor\core\api\facade.py; C:\Temp\Contextor_Repo\contextor\core\reporting_engine\artifact_pipeline.py; C:\Temp\Contextor_Repo\contextor\core\reporting_engine\graph_analytics.py; C:\Temp\Contextor_Repo\contextor\core\reporting_engine\pipeline.py; C:\Temp\Contextor_Repo\tests\test_jaccard_handoff_0j5.py; C:\Temp\Contextor_Repo\tests\test_matrix_clusters_state_lifecycle.py
+CONTEXTOR_WORKSPACE_SYNC=verified/fresh revision 86, desktop-watcher events continuous, no resync
+FILES_CHANGED=C:\Temp\Contextor_Repo\contextor\core\api\facade.py; C:\Temp\Contextor_Repo\contextor\core\reporting_engine\artifact_pipeline.py; C:\Temp\Contextor_Repo\contextor\core\reporting_engine\pipeline.py; C:\Temp\Contextor_Repo\contextor\core\reporting_engine\graph_analytics.py; C:\Temp\Contextor_Repo\tests\test_jaccard_handoff_0j5.py; C:\Temp\Contextor_Repo\tests\test_matrix_clusters_state_lifecycle.py
