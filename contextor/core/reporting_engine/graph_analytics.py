@@ -55,10 +55,114 @@ The implementation is deterministic and does not depend on networkx.
 from __future__ import annotations
 
 from collections import defaultdict, deque
+from dataclasses import dataclass
 from typing import Any
 
 from contextor.core.errors import checkpoint
 from contextor.core.program_log import log_program_event
+
+
+@dataclass(frozen=True)
+class SharedUsageClustersHandoff:
+    """Internal current-run handoff of full-identity global clusters."""
+
+    clusters: tuple[dict, ...]
+    scope: str
+    min_jaccard: float
+    max_cluster_size: int
+    min_cluster_size: int
+    artifact_data_identity: int
+    artifact_keys: tuple[str, ...]
+    raw_artifact_keys: tuple[str, ...]
+    complete: bool = True
+
+
+def is_valid_shared_usage_clusters_handoff(
+    handoff: Any,
+    *,
+    artifact_data: Any,
+    raw_artifacts: Any,
+) -> bool:
+    """Validate an unpersisted global-cluster handoff for this run."""
+    if not isinstance(handoff, SharedUsageClustersHandoff):
+        return False
+    if (
+        handoff.scope != "global"
+        or handoff.min_jaccard != 0.30
+        or handoff.max_cluster_size != 25
+        or handoff.min_cluster_size != 2
+        or handoff.artifact_data_identity != id(artifact_data)
+        or not handoff.complete
+    ):
+        return False
+    if not isinstance(artifact_data, dict) or not isinstance(raw_artifacts, dict):
+        return False
+    artifact_entries = artifact_data.get("artifacts", {})
+    if not isinstance(artifact_entries, dict):
+        return False
+    if tuple(artifact_entries.keys()) != handoff.artifact_keys:
+        return False
+    if tuple(raw_artifacts.keys()) != handoff.raw_artifact_keys:
+        return False
+    if not isinstance(handoff.clusters, tuple):
+        return False
+
+    expected_keys = {
+        "modules",
+        "size",
+        "shared_artifact_count",
+        "shared_artifact_keys",
+        "jaccard_similarity",
+        "shared_ratio",
+    }
+    seen_modules: set[str] = set()
+    for cluster in handoff.clusters:
+        if not isinstance(cluster, dict) or set(cluster) != expected_keys:
+            return False
+        modules = cluster["modules"]
+        size = cluster["size"]
+        shared_keys = cluster["shared_artifact_keys"]
+        shared_artifact_count = cluster["shared_artifact_count"]
+        if (
+            not isinstance(size, int)
+            or isinstance(size, bool)
+            or not isinstance(shared_artifact_count, int)
+            or isinstance(shared_artifact_count, bool)
+        ):
+            return False
+        if (
+            not isinstance(modules, list)
+            or not all(isinstance(module, str) for module in modules)
+            or modules != sorted(modules)
+            or len(modules) != size
+            or len(modules) < 2
+            or len(modules) > 25
+            or seen_modules.intersection(modules)
+        ):
+            return False
+        if (
+            not isinstance(shared_keys, list)
+            or not all(isinstance(key, str) for key in shared_keys)
+            or shared_keys != sorted(shared_keys)
+            or len(shared_keys) != shared_artifact_count
+        ):
+            return False
+        if (
+            not isinstance(cluster["jaccard_similarity"], (int, float))
+            or isinstance(cluster["jaccard_similarity"], bool)
+        ):
+            return False
+        if (
+            not isinstance(cluster["shared_ratio"], (int, float))
+            or isinstance(cluster["shared_ratio"], bool)
+        ):
+            return False
+        if not 0.0 <= cluster["jaccard_similarity"] <= 1.0:
+            return False
+        if not 0.0 <= cluster["shared_ratio"] <= 1.0:
+            return False
+        seen_modules.update(modules)
+    return True
 
 
 # ==========================================================
@@ -1450,6 +1554,7 @@ def generate_graph_analytics_report(
     scope_modules: set[str] | None = None,
     global_artifact_data: dict | None = None,
     progress_callback=None,
+    raw_clusters_out: list[dict] | None = None,
 ) -> dict:
     """
     Generate the graph analytics report.
@@ -1839,6 +1944,9 @@ def generate_graph_analytics_report(
         scoped_artifact_data,
         progress_callback=progress_callback,
     )
+
+    if raw_clusters_out is not None and scope == "global":
+        raw_clusters_out.extend(clusters)
 
     clusters = _compact_clusters(
         clusters,
@@ -2290,6 +2398,5 @@ __all__ = [
     "_classify_visibility",
     "_compute_export_degrees",
 ]
-
 
 

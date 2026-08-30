@@ -226,6 +226,7 @@ def execute_global_pipeline(
     compact_artifact_data = artifact_bundle.compact_artifact_data
     compact_structure_data = artifact_bundle.compact_structure_data
     graph_analytics_data = artifact_bundle.graph_analytics_data
+    raw_shared_usage_clusters = artifact_bundle.raw_shared_usage_clusters
 
     # ------------------------------------------------------
     # SANITY CHECK
@@ -631,6 +632,7 @@ def execute_global_pipeline(
         "_graph_analytics_data": (
             graph_analytics_data
         ),
+        "_raw_shared_usage_clusters": raw_shared_usage_clusters,
         "_analysis_result": analysis_result,
         "_file_state_manager": state_mgr,
     }

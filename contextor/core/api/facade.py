@@ -442,6 +442,7 @@ class ContextorFacade:
                 compute_dependency_matrix_from_state,
                 compute_shared_usage_clusters_from_state,
                 compute_topology_analytics,
+                is_valid_shared_usage_clusters_handoff,
             )
 
             graph = getattr(analysis_result, "graph", None)
@@ -516,13 +517,26 @@ class ContextorFacade:
 
             # Compute Shared Usage Clusters from canonical state (independent failure & AC trust)
             if artifact_consumption_is_fresh(state):
-                try:
-                    _suc_candidate = compute_shared_usage_clusters_from_state(state)
-                except Exception:
-                    state.shared_usage_clusters_state = "stale"
-                else:
-                    state.shared_usage_clusters = _suc_candidate
+                raw_shared_usage_clusters = report_result.get(
+                    "_raw_shared_usage_clusters"
+                )
+                if is_valid_shared_usage_clusters_handoff(
+                    raw_shared_usage_clusters,
+                    artifact_data=report_result.get("_artifact_data"),
+                    raw_artifacts=raw_artifacts,
+                ):
+                    state.shared_usage_clusters = list(
+                        raw_shared_usage_clusters.clusters
+                    )
                     state.shared_usage_clusters_state = "fresh"
+                else:
+                    try:
+                        _suc_candidate = compute_shared_usage_clusters_from_state(state)
+                    except Exception:
+                        state.shared_usage_clusters_state = "stale"
+                    else:
+                        state.shared_usage_clusters = _suc_candidate
+                        state.shared_usage_clusters_state = "fresh"
             else:
                 state.shared_usage_clusters_state = "stale"
 

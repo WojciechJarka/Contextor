@@ -802,6 +802,9 @@ def test_real_facade_clusters_failure_isolation(tmp_path: Path):
     with unittest.mock.patch(
         "contextor.core.reporting_engine.graph_analytics.compute_shared_usage_clusters_from_state",
         side_effect=_clusters_raise,
+    ), unittest.mock.patch(
+        "contextor.core.reporting_engine.graph_analytics.is_valid_shared_usage_clusters_handoff",
+        return_value=False,
     ):
         facade = ContextorFacade()
         errors, _ = facade.analyze_project(str(tmp_path))

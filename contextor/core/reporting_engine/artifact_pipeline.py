@@ -17,7 +17,10 @@ from contextor.core.reporting_layer.artifact_usage_report_compact import (
 )
 
 from .dictionary import IndexDictionary
-from .graph_analytics import generate_graph_analytics_report
+from .graph_analytics import (
+    SharedUsageClustersHandoff,
+    generate_graph_analytics_report,
+)
 from .persistent_registry import PersistentIdentityRegistry
 from .structure_generator import compact_structure_report
 
@@ -32,6 +35,7 @@ class ArtifactPipelineResult:
     compact_artifact_data: dict
     compact_structure_data: dict
     graph_analytics_data: dict
+    raw_shared_usage_clusters: SharedUsageClustersHandoff | None = None
 
 
 def build_artifact_pipeline(
@@ -103,6 +107,7 @@ def build_artifact_pipeline(
 
     checkpoint(progress_callback, "Starting graph analytics")
 
+    raw_clusters: list[dict] = []
     graph_analytics_data = generate_graph_analytics_report(
         artifact_data=artifact_data,
         hard_edges=hard_edges,
@@ -111,6 +116,19 @@ def build_artifact_pipeline(
         index_dict=index_dict,
         scope="global",
         progress_callback=progress_callback,
+        raw_clusters_out=raw_clusters,
+    )
+    raw_shared_usage_clusters = SharedUsageClustersHandoff(
+        clusters=tuple(raw_clusters),
+        scope="global",
+        min_jaccard=0.30,
+        max_cluster_size=25,
+        min_cluster_size=2,
+        artifact_data_identity=id(artifact_data),
+        artifact_keys=tuple(artifact_data.get("artifacts", {}).keys()),
+        raw_artifact_keys=tuple(
+            artifact_data.get("_module_artifacts", {}).keys()
+        ),
     )
     log_program_event(
         "REPORT",
@@ -124,4 +142,5 @@ def build_artifact_pipeline(
         compact_artifact_data=compact_artifact_data,
         compact_structure_data=compact_structure_data,
         graph_analytics_data=graph_analytics_data,
+        raw_shared_usage_clusters=raw_shared_usage_clusters,
     )
