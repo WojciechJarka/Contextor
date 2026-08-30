@@ -26,11 +26,13 @@ from contextor.core.domain.module import (
 )
 from contextor.core.errors import AnalysisCancelled, checkpoint
 from contextor.core.paths import DEFAULT_IGNORED_DIRS
+from contextor.core.reference.index import extract_compact_reference_facts
 from contextor.core.source import SourceError, parse_source
 from contextor.core.symbol_engine.extractor import extract_file_symbols
 
 
 SYMBOL_FACTS_SCHEMA_VERSION = 1
+REFERENCE_FACTS_SCHEMA_VERSION = 1
 _SYMBOL_FACTS_AVAILABLE = "available"
 _SYMBOL_FACTS_FAILURE = "failure"
 _SYMBOL_FACTS_NOT_COMPUTED = "not_computed"
@@ -47,6 +49,25 @@ _SYMBOL_FACT_FIELDS = frozenset(
         "errors",
     }
 )
+
+
+def _valid_symbol_facts(value: object) -> bool:
+    return (
+        isinstance(value, dict)
+        and value.get("schema_version") == SYMBOL_FACTS_SCHEMA_VERSION
+        and value.get("status") == _SYMBOL_FACTS_AVAILABLE
+        and isinstance(value.get("facts"), dict)
+        and set(value["facts"]) == _SYMBOL_FACT_FIELDS
+    )
+
+
+def _valid_reference_facts(value: object) -> bool:
+    return (
+        isinstance(value, dict)
+        and value.get("schema_version") == REFERENCE_FACTS_SCHEMA_VERSION
+        and value.get("status") == "available"
+        and isinstance(value.get("facts"), dict)
+    )
 
 
 # ==========================================================
@@ -178,55 +199,76 @@ def _process_single_file(path_str: str, root_str: str) -> dict:
     """Funkcja pomocnicza dla wieloprocesowości."""
     path = Path(path_str)
 
+    rel = path.relative_to(Path(root_str))
+    module_id = ".".join(rel.with_suffix("").parts)
+
     # Próba odczytu z cache
     cache = _cache_manager(root_str)
     cached_data = cache.get(path)
 
     symbol_facts = None
+    reference_facts = None
     if cached_data is not None:
         error = cached_data.get("error")
         imports = None if error else [ImportRef(**imp) for imp in cached_data.get("imports", [])]
 
         cached_facts = cached_data.get("symbol_facts") if not error else None
-        if (
-            isinstance(cached_facts, dict)
-            and cached_facts.get("schema_version") == SYMBOL_FACTS_SCHEMA_VERSION
-            and cached_facts.get("status") == _SYMBOL_FACTS_AVAILABLE
-            and isinstance(cached_facts.get("facts"), dict)
-            and set(cached_facts["facts"]) == _SYMBOL_FACT_FIELDS
-        ):
+        cached_reference_facts = cached_data.get("reference_facts") if not error else None
+        if _valid_symbol_facts(cached_facts):
             symbol_facts = cached_facts
-        elif not error:
+        if _valid_reference_facts(cached_reference_facts):
+            reference_facts = cached_reference_facts
+
+        if not error and (symbol_facts is None or reference_facts is None):
             try:
                 tree = parse_source(path)
-                migrated_facts = extract_file_symbols(path, tree=tree)
-                symbol_facts = {
-                    "schema_version": SYMBOL_FACTS_SCHEMA_VERSION,
-                    "status": _SYMBOL_FACTS_AVAILABLE,
-                    "facts": migrated_facts,
-                }
-                cache.set(
-                    path,
-                    {
-                        "imports": cached_data.get("imports", []),
-                        "error": error,
-                        "symbol_facts": symbol_facts,
-                    },
-                )
             except SourceError as exc:
-                symbol_facts = {
-                    "schema_version": SYMBOL_FACTS_SCHEMA_VERSION,
-                    "status": _SYMBOL_FACTS_FAILURE,
-                    "exception_type": type(exc).__name__,
-                    "message": str(exc),
-                }
-            except Exception as exc:
-                symbol_facts = {
-                    "schema_version": SYMBOL_FACTS_SCHEMA_VERSION,
-                    "status": _SYMBOL_FACTS_FAILURE,
-                    "exception_type": type(exc).__name__,
-                    "message": str(exc),
-                }
+                if symbol_facts is None:
+                    symbol_facts = {
+                        "schema_version": SYMBOL_FACTS_SCHEMA_VERSION,
+                        "status": _SYMBOL_FACTS_FAILURE,
+                        "exception_type": type(exc).__name__,
+                        "message": str(exc),
+                    }
+                if reference_facts is None:
+                    reference_facts = {
+                        "schema_version": REFERENCE_FACTS_SCHEMA_VERSION,
+                        "status": "failure",
+                        "facts": None,
+                        "error_type": type(exc).__name__,
+                        "message": str(exc),
+                    }
+            else:
+                if symbol_facts is None:
+                    try:
+                        migrated_facts = extract_file_symbols(path, tree=tree)
+                    except Exception as exc:
+                        symbol_facts = {
+                            "schema_version": SYMBOL_FACTS_SCHEMA_VERSION,
+                            "status": _SYMBOL_FACTS_FAILURE,
+                            "exception_type": type(exc).__name__,
+                            "message": str(exc),
+                        }
+                    else:
+                        symbol_facts = {
+                            "schema_version": SYMBOL_FACTS_SCHEMA_VERSION,
+                            "status": _SYMBOL_FACTS_AVAILABLE,
+                            "facts": migrated_facts,
+                        }
+                if reference_facts is None:
+                    extracted_reference = extract_compact_reference_facts(
+                        module_id, tree=tree, imports=imports
+                    )
+                    reference_facts = {
+                        "schema_version": REFERENCE_FACTS_SCHEMA_VERSION,
+                        **extracted_reference,
+                    }
+                rewritten = dict(cached_data)
+                if _valid_symbol_facts(symbol_facts):
+                    rewritten["symbol_facts"] = symbol_facts
+                if _valid_reference_facts(reference_facts):
+                    rewritten["reference_facts"] = reference_facts
+                cache.set(path, rewritten)
     else:
         try:
             tree = parse_source(path)
@@ -249,16 +291,22 @@ def _process_single_file(path_str: str, root_str: str) -> dict:
                         "exception_type": type(exc).__name__,
                         "message": str(exc),
                     }
+                extracted_reference = extract_compact_reference_facts(
+                    module_id, tree=tree, imports=imports
+                )
+                reference_facts = {
+                    "schema_version": REFERENCE_FACTS_SCHEMA_VERSION,
+                    **extracted_reference,
+                }
         cache_data = {
             "imports": [dataclasses.asdict(imp) for imp in imports or []],
             "error": error,
         }
         if symbol_facts and symbol_facts.get("status") == _SYMBOL_FACTS_AVAILABLE:
             cache_data["symbol_facts"] = symbol_facts
+        if _valid_reference_facts(reference_facts):
+            cache_data["reference_facts"] = reference_facts
         cache.set(path, cache_data)
-
-    rel = path.relative_to(Path(root_str))
-    module_id = ".".join(rel.with_suffix("").parts)
 
     return {
         "module_id": module_id,
@@ -268,6 +316,7 @@ def _process_single_file(path_str: str, root_str: str) -> dict:
         "error": error,
         "filename": path.name,
         "symbol_facts": symbol_facts,
+        "reference_facts": reference_facts,
     }
 
 
@@ -315,6 +364,8 @@ class RepositoryIndex:
 
     symbol_facts_by_module: dict[str, dict] = dataclasses.field(default_factory=dict)
 
+    reference_facts_by_module: dict[str, dict] = dataclasses.field(default_factory=dict)
+
 
 def index_repository(
     root: str, excludes: list[str] = None, extra_ignored_dirs: set = None, progress_callback=None
@@ -334,6 +385,7 @@ def index_repository(
     modules: dict[str, Module] = {}
     skipped: list[SkippedFile] = []
     symbol_facts_by_module: dict[str, dict] = {}
+    reference_facts_by_module: dict[str, dict] = {}
 
     ignored_dirs = set(DEFAULT_IGNORED_DIRS)
 
@@ -388,12 +440,15 @@ def index_repository(
                 )
                 if res.get("symbol_facts") is not None:
                     symbol_facts_by_module[res["module_id"]] = res["symbol_facts"]
+                if res.get("reference_facts") is not None:
+                    reference_facts_by_module[res["module_id"]] = res["reference_facts"]
             completed += 1
             checkpoint(progress_callback, res["filename"], completed, total_files)
         return RepositoryIndex(
             modules=modules,
             skipped=sorted(skipped, key=lambda item: item.path),
             symbol_facts_by_module=symbol_facts_by_module,
+            reference_facts_by_module=reference_facts_by_module,
         )
 
     with ProcessPoolExecutor() as executor:
@@ -424,6 +479,8 @@ def index_repository(
                 )
                 if res.get("symbol_facts") is not None:
                     symbol_facts_by_module[res["module_id"]] = res["symbol_facts"]
+                if res.get("reference_facts") is not None:
+                    reference_facts_by_module[res["module_id"]] = res["reference_facts"]
 
             completed += 1
             try:
@@ -436,6 +493,7 @@ def index_repository(
         modules=modules,
         skipped=sorted(skipped, key=lambda item: item.path),
         symbol_facts_by_module=symbol_facts_by_module,
+        reference_facts_by_module=reference_facts_by_module,
     )
 
 

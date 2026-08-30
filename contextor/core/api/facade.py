@@ -18,6 +18,7 @@ from contextor.core.graph.metrics import compute_graph_metrics
 from contextor.core.hotspots import detect_hotspots
 from contextor.core.paths import DEFAULT_IGNORED_DIRS, output_dir, repo_key, state_dir
 from contextor.core.reference.engine import reset_caches
+from contextor.core.reference.index import assemble_reference_index_or_fallback
 from contextor.core.reporting_engine.debt import compute_debt
 from contextor.core.reporting_engine.generators import (
     generate_report,
@@ -336,6 +337,9 @@ class ContextorFacade:
             progress_callback=index_progress,
         )
         modules = index.modules
+        reference_index = assemble_reference_index_or_fallback(
+            modules, path, index.reference_facts_by_module
+        )
 
         # Compute collision facts once from current-run modules
         from contextor.core.validator.collisions import compute_collisions_from_facts, extract_repository_collision_facts
@@ -405,6 +409,7 @@ class ContextorFacade:
             trie=trie,
             package_root=package_root,
             symbol_facts_by_module=index.symbol_facts_by_module,
+            reference_index=reference_index,
         )
 
         if log and report_result.get("high_risk_layers"):
@@ -629,6 +634,7 @@ class ContextorFacade:
             graph = hydrated.engine.state.dependency_graph
             cache_hit = True
             skipped_files = []
+            reference_index = None
             if log:
                 log(
                     "Reused canonical context "
@@ -657,6 +663,11 @@ class ContextorFacade:
                 ),
             )
             skipped_files = getattr(index, "skipped", [])
+            reference_index = assemble_reference_index_or_fallback(
+                modules,
+                str(root_resolved),
+                index.reference_facts_by_module,
+            )
 
         if log:
             log("Calculating metrics and collisions for the full project...")
@@ -692,6 +703,7 @@ class ContextorFacade:
                 runtime,
                 progress_callback=artifacts_progress,
                 symbol_facts_by_module=getattr(index, "symbol_facts_by_module", None),
+                reference_index=reference_index,
             )
         
         from contextor.core.reporting_engine.dictionary import IndexDictionary

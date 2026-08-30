@@ -31,7 +31,6 @@ from .resolution import (
     _resolve_reexport,
 )
 from .shared import (
-    _build_reexport_map,
     _empty_reference,
     _normalize_references,
 )
@@ -303,6 +302,170 @@ class SinglePassConsumerVisitor(ast.NodeVisitor):
         self.class_stack.pop()
 
 
+def _extract_reexport_facts(
+    module_id: str,
+    tree: ast.AST,
+) -> dict[str, Any]:
+    """Extract JSON-safe, source-local inputs for global re-export assembly."""
+    exporter = module_id.removesuffix(".__init__")
+    explicit_all: list[str] | None = None
+    bindings: dict[str, str] = {}
+    star_sources: list[str] = []
+
+    for node in getattr(tree, "body", []):
+        if isinstance(node, ast.Assign) and any(
+            isinstance(target, ast.Name) and target.id == "__all__"
+            for target in node.targets
+        ):
+            if isinstance(node.value, (ast.List, ast.Tuple, ast.Set)):
+                explicit_all = [
+                    item.value
+                    for item in node.value.elts
+                    if isinstance(item, ast.Constant)
+                    and isinstance(item.value, str)
+                ]
+            else:
+                explicit_all = []
+
+        if isinstance(node, ast.ImportFrom):
+            source = _absolute_import_module(
+                module_id, node.module, node.level or 0
+            )
+            for item in node.names:
+                if item.name == "*":
+                    star_sources.append(source)
+                else:
+                    bindings[item.asname or item.name] = f"{source}.{item.name}"
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            bindings[node.name] = f"{exporter}.{node.name}"
+        elif isinstance(node, (ast.Assign, ast.AnnAssign)):
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            value = node.value
+            for target in targets:
+                if not isinstance(target, ast.Name) or target.id == "__all__":
+                    continue
+                if isinstance(value, ast.Name) and value.id in bindings:
+                    bindings[target.id] = bindings[value.id]
+                else:
+                    bindings[target.id] = f"{exporter}.{target.id}"
+
+    return {
+        "exporter": exporter,
+        "explicit_all": explicit_all,
+        "bindings": bindings,
+        "star_sources": star_sources,
+    }
+
+
+def extract_compact_reference_facts(
+    module_id: str,
+    module: Any = None,
+    *,
+    tree: ast.AST | None = None,
+    imports: Any = None,
+) -> dict[str, Any]:
+    """Extract lossless source-local reference evidence without global resolution."""
+    if tree is None and module is not None:
+        tree = getattr(module, "ast_tree", None)
+    if tree is None:
+        return {"status": "unavailable", "facts": None}
+
+    try:
+        visitor = SinglePassConsumerVisitor(module_id, {})
+        visitor.visit(tree)
+        compact_imports = []
+        source_imports = imports if imports is not None else getattr(module, "imports", [])
+        for imp in source_imports:
+            compact_imports.append({
+                "module": getattr(imp, "module", None),
+                "names": list(getattr(imp, "names", ())),
+                "level": getattr(imp, "level", 0),
+            })
+        return {
+            "status": "available",
+            "facts": {
+                "aliases": dict(visitor.aliases),
+                "calls": [
+                    {
+                        "called_name": event.called_name,
+                        "resolved": event.resolved,
+                        "candidate": event.candidate,
+                        "line": event.lineno,
+                        "context": event.context,
+                    }
+                    for event in visitor.call_events
+                ],
+                "callbacks": [list(event) for event in visitor.callback_calls],
+                "events": [list(event) for event in visitor.event_bindings],
+                "inheritance": [list(event) for event in visitor.inheritance],
+                "qualified_refs": [list(event) for event in visitor.qualified_refs],
+                "imports": compact_imports,
+                "reexports": _extract_reexport_facts(module_id, tree),
+            },
+        }
+    except Exception as exc:
+        return {
+            "status": "failure",
+            "facts": None,
+            "error_type": type(exc).__name__,
+            "message": str(exc),
+        }
+
+
+def _assemble_reexport_map(compact_facts: dict[str, dict[str, Any]]) -> dict[str, str]:
+    """Assemble cycle-safe transitive re-exports from source-local facts."""
+    raw: dict[str, str] = {}
+    module_exports: dict[str, dict[str, str]] = {}
+    star_imports: list[tuple[str, str, set[str] | None]] = []
+
+    for envelope in compact_facts.values():
+        if envelope["status"] != "available":
+            continue
+        reexport = envelope["facts"]["reexports"]
+        exporter = reexport["exporter"]
+        explicit_all = reexport["explicit_all"]
+        allowed = None if explicit_all is None else set(explicit_all)
+        visible_bindings: dict[str, str] = {}
+        for local, target in reexport["bindings"].items():
+            if allowed is not None and local not in allowed:
+                continue
+            if allowed is None and local.startswith("_"):
+                continue
+            visible_bindings[local] = target
+            key = f"{exporter}.{local}"
+            if key != target:
+                raw[key] = target
+        module_exports[exporter] = visible_bindings
+        for source in reexport["star_sources"]:
+            star_imports.append((exporter, source, allowed))
+
+    changed = True
+    while changed:
+        changed = False
+        for exporter, source, allowed in star_imports:
+            for local, target in list(module_exports.get(source, {}).items()):
+                if allowed is not None and local not in allowed:
+                    continue
+                if allowed is None and local.startswith("_"):
+                    continue
+                key = f"{exporter}.{local}"
+                if key not in raw:
+                    raw[key] = target
+                    module_exports.setdefault(exporter, {})[local] = target
+                    changed = True
+
+    resolved: dict[str, str] = {}
+    for key, initial in raw.items():
+        target = initial
+        visited = {key}
+        while target in raw and target not in visited:
+            visited.add(target)
+            target = raw[target]
+        if target not in visited:
+            resolved[key] = target
+    return resolved
+
+
 class RepositoryReferenceIndex:
     """
     Run-scoped repository-wide reference index built in a single AST pass.
@@ -348,7 +511,40 @@ class RepositoryReferenceIndex:
 
     @classmethod
     def build(cls, modules: dict, root_path: str) -> "RepositoryReferenceIndex":
-        reexports = _build_reexport_map(modules)
+        compact_facts = {
+            module_id: extract_compact_reference_facts(module_id, module)
+            for module_id, module in modules.items()
+        }
+        return cls.from_compact_facts(modules, root_path, compact_facts)
+
+    @classmethod
+    def from_compact_facts(
+        cls,
+        modules: dict,
+        root_path: str,
+        compact_facts: dict[str, dict[str, Any]],
+    ) -> "RepositoryReferenceIndex":
+        """Assemble the repository index from complete source-local evidence."""
+        missing = set(modules) - set(compact_facts)
+        if missing:
+            raise ValueError(
+                "Missing compact reference facts for modules: "
+                + ", ".join(sorted(missing))
+            )
+        failures = {
+            module_id: envelope
+            for module_id, envelope in compact_facts.items()
+            if module_id in modules and envelope.get("status") == "failure"
+        }
+        if failures:
+            details = ", ".join(
+                f"{module_id}: {envelope.get('error_type', 'Error')}: "
+                f"{envelope.get('message', '')}"
+                for module_id, envelope in sorted(failures.items())
+            )
+            raise RuntimeError(f"Compact reference extraction failed: {details}")
+
+        reexports = _assemble_reexport_map(compact_facts)
 
         direct_calls_by_target: dict[str, list[tuple[str, Optional[int], Optional[str]]]] = defaultdict(list)
         instance_calls_by_target: dict[str, list[tuple[str, Optional[int], Optional[str]]]] = defaultdict(list)
@@ -365,30 +561,35 @@ class RepositoryReferenceIndex:
         ambiguous_inheritance_by_leaf: dict[str, list] = defaultdict(list)
         ambiguous_qualified_by_leaf: dict[str, list] = defaultdict(list)
 
-        for module_id, module in modules.items():
-            tree = getattr(module, "ast_tree", None)
-            if tree is None:
+        for module_id in modules:
+            envelope = compact_facts[module_id]
+            if envelope.get("status") == "unavailable":
                 continue
-            visitor = SinglePassConsumerVisitor(module_id, reexports)
-            visitor.visit(tree)
-            aliases = visitor.aliases
+            if envelope.get("status") != "available" or envelope.get("facts") is None:
+                raise ValueError(f"Invalid compact reference facts for module: {module_id}")
+            facts = envelope["facts"]
+            aliases = facts["aliases"]
 
             # 1. Calls
-            for event in visitor.call_events:
-                if event.resolved:
-                    direct_calls_by_target[event.resolved].append((module_id, event.lineno, event.context))
-                if event.candidate:
-                    instance_calls_by_target[event.candidate].append((module_id, event.lineno, event.context))
+            for event in facts["calls"]:
+                resolved = _resolve_reexport(event["resolved"], reexports)
+                candidate = _resolve_reexport(event["candidate"], reexports)
+                if resolved:
+                    direct_calls_by_target[resolved].append((module_id, event["line"], event["context"]))
+                if candidate:
+                    instance_calls_by_target[candidate].append((module_id, event["line"], event["context"]))
 
-                name_to_check = event.called_name or event.resolved
+                name_to_check = event["called_name"] or resolved
                 if name_to_check:
                     leaf = name_to_check.split(".")[-1]
                     ambiguous_calls_by_leaf[leaf].append((
-                        module_id, event.called_name, event.resolved, event.candidate, event.lineno, event.context, aliases
+                        module_id, event["called_name"], resolved, candidate,
+                        event["line"], event["context"], aliases
                     ))
 
             # 2. Callbacks
-            for name, resolved, lineno, ctx in visitor.callback_calls:
+            for name, local_resolved, lineno, ctx in facts["callbacks"]:
+                resolved = _resolve_reexport(local_resolved, reexports)
                 if resolved:
                     callbacks_by_target[resolved].append((module_id, lineno, ctx))
                 name_to_check = name or resolved
@@ -399,7 +600,8 @@ class RepositoryReferenceIndex:
                     ))
 
             # 3. Events
-            for name, resolved, lineno, ctx in visitor.event_bindings:
+            for name, local_resolved, lineno, ctx in facts["events"]:
+                resolved = _resolve_reexport(local_resolved, reexports)
                 if resolved:
                     events_by_target[resolved].append((module_id, lineno, ctx))
                 name_to_check = name or resolved
@@ -410,7 +612,8 @@ class RepositoryReferenceIndex:
                     ))
 
             # 4. Inheritance
-            for child_name, base_name, resolved, lineno in visitor.inheritance:
+            for child_name, base_name, local_resolved, lineno in facts["inheritance"]:
+                resolved = _resolve_reexport(local_resolved, reexports)
                 if resolved:
                     inheritance_by_target[resolved].append((module_id, child_name, lineno))
                 name_to_check = base_name or resolved
@@ -421,7 +624,8 @@ class RepositoryReferenceIndex:
                     ))
 
             # 5. Qualified Refs
-            for name, resolved, lineno, ctx in visitor.qualified_refs:
+            for name, local_resolved, lineno, ctx in facts["qualified_refs"]:
+                resolved = _resolve_reexport(local_resolved, reexports)
                 if resolved:
                     qualified_refs_by_target[resolved].append((module_id, lineno, ctx))
                 name_to_check = name or resolved
@@ -432,11 +636,11 @@ class RepositoryReferenceIndex:
                     ))
 
             # 6. Imports
-            for imp in getattr(module, "imports", []):
-                imp_module = getattr(imp, "module", None)
-                for imported_name in imp.names:
+            for imp in facts["imports"]:
+                imp_module = imp["module"]
+                for imported_name in imp["names"]:
                     source_module = _absolute_import_module(
-                        module_id, imp_module, getattr(imp, "level", 0)
+                        module_id, imp_module, imp["level"]
                     )
                     if imported_name == "*":
                         star_imports_by_source[source_module].append(module_id)
@@ -551,4 +755,24 @@ def build_repository_reference_index(modules: dict, root_path: str) -> Repositor
     """
     Builds a run-scoped single-pass repository symbol reference index.
     """
+    return RepositoryReferenceIndex.build(modules, root_path)
+
+
+def assemble_reference_index_or_fallback(
+    modules: dict,
+    root_path: str,
+    compact_facts: dict[str, dict[str, Any]] | None,
+) -> RepositoryReferenceIndex:
+    """Use complete current-run facts, otherwise preserve the AST fallback contract."""
+    facts = compact_facts or {}
+    if set(facts) == set(modules) and all(
+        envelope.get("status") in {"available", "unavailable"}
+        for envelope in facts.values()
+    ):
+        try:
+            return RepositoryReferenceIndex.from_compact_facts(
+                modules, root_path, facts
+            )
+        except (KeyError, TypeError, ValueError, RuntimeError):
+            pass
     return RepositoryReferenceIndex.build(modules, root_path)

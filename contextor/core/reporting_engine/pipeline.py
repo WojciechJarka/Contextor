@@ -48,6 +48,7 @@ def execute_global_pipeline(
     package_root: str = "",
     collision_facts: dict | None = None,
     symbol_facts_by_module: dict[str, dict] | None = None,
+    reference_index=None,
 ):
     """
     Execute the complete global report pipeline.
@@ -215,6 +216,7 @@ def execute_global_pipeline(
         progress_callback=progress_callback,
         log=log,
         symbol_facts_by_module=symbol_facts_by_module,
+        reference_index=reference_index,
     )
     artifact_data = artifact_bundle.artifact_data
     usage_sidecar = artifact_bundle.usage_sidecar
