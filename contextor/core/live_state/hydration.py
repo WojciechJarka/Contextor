@@ -15,19 +15,26 @@ class HydratedRepositoryEngine:
     source: str
 
 
-def hydrate_repository_engine(
-    repo_path: str | Path,
-) -> HydratedRepositoryEngine | None:
-    """Load a complete engine without triggering a repository analysis."""
+@dataclass(frozen=True)
+class AuthoritativeRepositoryState:
+    """Validated current canonical state without incremental-engine materialization."""
 
-    from contextor.core.analysis.incremental_engine import IncrementalAnalysisEngine
-    from contextor.core.analysis.state_manager import FileStateManager, load_engine_state
+    state: Any
+    client: Any | None
+    revision: int
+    source: str
+    cache_dir: Path
+
+
+def resolve_authoritative_repository_state(
+    repo_path: str | Path,
+) -> AuthoritativeRepositoryState | None:
+    """Resolve the same LIVE-first, validated canonical state used by hydration."""
+
+    from contextor.core.analysis.state_manager import load_engine_state
     from contextor.core.live_state.runtime import connect
     from contextor.core.live_state.store import migrate_legacy_snapshot, read_metadata
     from contextor.core.repository_identity import read_repository_identity
-    from contextor.core.reporting_engine.persistent_registry import (
-        PersistentIdentityRegistry,
-    )
 
     root = Path(repo_path).resolve()
     identity = read_repository_identity(root)
@@ -66,18 +73,48 @@ def hydrate_repository_engine(
     ):
         return None
 
+    return AuthoritativeRepositoryState(
+        state=state,
+        client=client,
+        revision=revision,
+        source=source,
+        cache_dir=cache_dir,
+    )
+
+
+def hydrate_repository_engine(
+    repo_path: str | Path,
+) -> HydratedRepositoryEngine | None:
+    """Load a complete engine without triggering a repository analysis."""
+
+    from contextor.core.analysis.incremental_engine import IncrementalAnalysisEngine
+    from contextor.core.analysis.state_manager import FileStateManager
+    from contextor.core.reporting_engine.persistent_registry import (
+        PersistentIdentityRegistry,
+    )
+
+    root = Path(repo_path).resolve()
+    resolved = resolve_authoritative_repository_state(root)
+    if resolved is None:
+        return None
+
     engine = IncrementalAnalysisEngine(
-        state,
+        resolved.state,
         PersistentIdentityRegistry(str(root)),
-        FileStateManager(str(cache_dir)),
+        FileStateManager(str(resolved.cache_dir)),
         str(root),
     )
     return HydratedRepositoryEngine(
         engine=engine,
-        client=client,
-        revision=revision,
-        source=source,
+        client=resolved.client,
+        revision=resolved.revision,
+        source=resolved.source,
     )
 
 
-__all__ = ["HydratedRepositoryEngine", "hydrate_repository_engine"]
+__all__ = [
+    "AuthoritativeRepositoryState",
+    "HydratedRepositoryEngine",
+    "hydrate_repository_engine",
+    "resolve_authoritative_repository_state",
+]

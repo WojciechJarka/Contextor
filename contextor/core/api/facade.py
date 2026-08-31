@@ -54,7 +54,10 @@ from contextor.core.validator.collisions import (
     compute_collisions_from_facts,
     validate_name_collisions,
 )
-from contextor.core.live_state import hydrate_repository_engine
+from contextor.core.live_state import (
+    hydrate_repository_engine,
+    resolve_authoritative_repository_state,
+)
 
 
 def _compute_metrics_and_debt(
@@ -90,6 +93,36 @@ def _compute_metrics_and_debt(
         collisions=all_collisions,
     )
     return metrics, cycles, all_collisions, debt
+
+
+def _assemble_layer_collision_facts(
+    modules,
+    *,
+    indexed_facts=None,
+    state=None,
+):
+    """Select authoritative collision facts without weakening existing gates.
+
+    Indexed fallback facts are validated by the accepted indexer authority.
+    Hydrated facts additionally require the canonical materialization
+    completeness validator and a fresh collision state.  Any failed gate
+    deliberately falls through to the same repository AST fallback used by
+    the existing collision authority.
+    """
+    if state is not None:
+        from contextor.core.analysis.incremental.materialization import (
+            collision_facts_complete,
+        )
+
+        if (
+            getattr(state, "collisions_state", None) == "fresh"
+            and collision_facts_complete(state)
+        ):
+            return state.collision_facts
+
+        return assemble_collision_facts_or_fallback(modules, None)
+
+    return assemble_collision_facts_or_fallback(modules, indexed_facts)
 
 
 def exclude_state_file(repo_path: str) -> Path:
@@ -640,24 +673,29 @@ class ContextorFacade:
         )
         from contextor.core.graph.resolver import build_trie, detect_package_root
 
-        hydrated = hydrate_repository_engine(root_resolved)
-        if hydrated is not None:
+        collision_facts = None
+        authoritative_state = resolve_authoritative_repository_state(root_resolved)
+        if authoritative_state is not None:
             progress.begin("Loading canonical LIVE context")
-            modules = hydrated.engine.state.modules
-            trie = hydrated.engine.state.trie or build_trie(modules.keys())
+            state = authoritative_state.state
+            modules = state.modules
+            trie = state.trie or build_trie(modules.keys())
             package_root = (
-                hydrated.engine.state.package_root
+                state.package_root
                 or detect_package_root(modules, trie)
             )
             progress.begin("Reusing canonical dependency graph")
-            graph = hydrated.engine.state.dependency_graph
+            graph = state.dependency_graph
             cache_hit = True
             skipped_files = []
             reference_index = None
+            collision_facts = _assemble_layer_collision_facts(
+                modules, state=state
+            )
             if log:
                 log(
                     "Reused canonical context "
-                    f"from {hydrated.source}; skipped repository re-indexing."
+                    f"from {authoritative_state.source}; skipped repository re-indexing."
                 )
         else:
             index_progress = progress.begin("Indexing repository files")
@@ -687,12 +725,18 @@ class ContextorFacade:
                 str(root_resolved),
                 index.reference_facts_by_module,
             )
+            collision_facts = _assemble_layer_collision_facts(
+                modules, indexed_facts=index.collision_facts_by_module
+            )
 
         if log:
             log("Calculating metrics and collisions for the full project...")
         metrics_progress = progress.begin("Computing metrics, cycles and debt")
         metrics, cycles, all_collisions, debt = _compute_metrics_and_debt(
-            modules, graph, progress_callback=metrics_progress
+            modules,
+            graph,
+            progress_callback=metrics_progress,
+            collision_facts=collision_facts,
         )
 
         runtime = {"cache_hit": cache_hit}
@@ -710,10 +754,10 @@ class ContextorFacade:
         )
         global_structure = generate_structure_report(graph.hard_edges, graph.soft_edges)
         artifacts_progress = progress.begin("Preparing artifact usage")
-        if hydrated is not None:
+        if authoritative_state is not None:
             checkpoint(artifacts_progress, "Projecting canonical artifacts", 0, 1)
             global_artifacts = canonical_artifact_report(
-                hydrated.engine.state.artifacts
+                authoritative_state.state.artifacts
             )
         else:
             global_artifacts = generate_artifact_usage_report(

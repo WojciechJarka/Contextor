@@ -43,3 +43,5 @@
 {"ts":"2026-08-31T11:51:05.439+00:00","mono_ms":516317468,"sid":"d-6728-20260831_114735_179","pid":6728,"tid":4888,"d":"GUI","ev":"EVENT_BATCH_RECEIVED","rev":112,"seq":5,"count":1,"first_seq":5,"last_seq":5}
 {"ts":"2026-08-31T11:51:05.439+00:00","mono_ms":516317468,"sid":"d-6728-20260831_114735_179","pid":6728,"tid":4888,"d":"GUI","ev":"STATUS_QUEUED","op":"m-8760-51","rev":112,"seq":5,"q":1,"category":"MCP_CALL","status":"[MCP] [Contextor_Repo] get_symbol_implementation"}
 {"ts":"2026-08-31T11:51:05.443+00:00","mono_ms":516317468,"sid":"d-6728-20260831_114735_179","pid":6728,"tid":13844,"d":"GUI","ev":"STATUS_RENDERED","op":"m-8760-51","rev":112,"seq":5,"q":0,"wait_ms":0.0}
+{"ts":"2026-08-31T12:31:42.956+00:00","mono_ms":518754984,"sid":"d-6728-20260831_114735_179","pid":7480,"tid":6344,"d":"LIVE","ev":"SERVICE_END","rev":112,"repo":"C:\\Temp\\Contextor_Repo"}
+{"ts":"2026-08-31T12:31:43.343+00:00","mono_ms":518755375,"sid":"d-6728-20260831_114735_179","pid":6728,"tid":13844,"d":"DESKTOP","ev":"SESSION_END","op":"d-6728-2"}
