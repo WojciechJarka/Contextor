@@ -1,4 +1,19 @@
-## [1.2.0-beta Patch — MCP Ergonomics and Round-Trip Runtime Hardening] - 2026-08-26
+## Patch — Full Repository Analysis Performance] - 2026-08-31
+
+### Full repository analysis performance
+
+* Reworked the full `analyze_project` execution path to eliminate repeated repository-wide work while preserving the complete analysis, reporting, cache, LIVE, persistence and fallback contracts.
+* Fused collision analysis into the existing indexed AST/fact pipeline. Warm current-schema analyses now reuse cached collision facts instead of traversing every module AST again, while incomplete or invalid coverage still falls back to the authoritative repository-wide collision extractor.
+* Fused test-context facts into the index worker/cache path. Test imports, referenced names and assertion presence are extracted from the already-live AST and reused by `TestContextIndex`, removing the previous second parse/visitor pass over test files.
+* Reused the already-computed global shared-usage Jaccard clusters for canonical state publication. The handoff is accepted only with exact current-run provenance, domain and structural validation; invalid or incomplete handoffs retain the canonical recomputation fallback.
+* Replaced repeated `TestContextIndex.find_test_files()` full scans with run-scoped reverse indexes for filename and dotted import-prefix lookup, preserving exact previous matching, deduplication and deterministic ordering semantics.
+* Reused automatic test-directory discovery directly from the current `RepositoryIndex` result domain instead of rescanning indexed module paths during artifact reporting. Explicit caller-supplied `test_dirs`, including custom directories, remain authoritative and unchanged.
+* Preserved serial and ProcessPool parity, current cache fingerprint/source validation, schema migration behavior, exclusions, test discovery rules, canonical/LIVE freshness, report contents, MCP/API contracts and persistent identities throughout the optimization series.
+* Final warm-path attribution confirmed that current-schema indexed files perform zero source parses, zero symbol/reference/collision/test-fact extraction and zero cache rewrites. Remaining `index_repository` cost is dominated by required cache freshness validation, ProcessPool transport/coordination and construction of current-run repository representations rather than duplicated analysis work.
+* Controlled post-optimization full-repository benchmarking reached a warm median of approximately **5.9 s** on the current Contextor repository workload. No further repository-wide optimization target with at least approximately 100 ms of demonstrated safely removable duplicate work remained, so the full-analysis performance series was closed rather than adding marginal complexity.
+
+
+## Patch — MCP Ergonomics and Round-Trip Runtime Hardening] - 2026-08-26
 
 ### Public MCP ergonomics
 
