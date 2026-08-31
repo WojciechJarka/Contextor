@@ -50,6 +50,7 @@ def execute_global_pipeline(
     symbol_facts_by_module: dict[str, dict] | None = None,
     reference_index=None,
     test_facts_by_path: dict[str, dict] | None = None,
+    automatic_test_dirs=None,
 ):
     """
     Execute the complete global report pipeline.
@@ -219,6 +220,7 @@ def execute_global_pipeline(
         symbol_facts_by_module=symbol_facts_by_module,
         reference_index=reference_index,
         test_facts_by_path=test_facts_by_path,
+        automatic_test_dirs=automatic_test_dirs,
     )
     artifact_data = artifact_bundle.artifact_data
     usage_sidecar = artifact_bundle.usage_sidecar

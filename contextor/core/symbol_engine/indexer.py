@@ -494,6 +494,11 @@ def _process_single_file(path_str: str, root_str: str) -> dict:
         "collision_facts_status": collision_facts_status,
         "test_facts": test_facts,
         "test_facts_status": test_facts_status,
+        "automatic_test_context_directory": (
+            str(path.parent)
+            if test_candidate or path.parent == Path(root_str)
+            else None
+        ),
     }
 
 
@@ -547,6 +552,8 @@ class RepositoryIndex:
 
     test_facts_by_path: dict[str, dict] = dataclasses.field(default_factory=dict)
 
+    automatic_test_dirs: dict[Path, frozenset[str]] = dataclasses.field(default_factory=dict)
+
 
 def index_repository(
     root: str, excludes: list[str] = None, extra_ignored_dirs: set = None, progress_callback=None
@@ -569,6 +576,20 @@ def index_repository(
     reference_facts_by_module: dict[str, dict] = {}
     collision_facts_by_module: dict[str, list[dict]] = {}
     test_facts_by_path: dict[str, dict] = {}
+    automatic_test_dir_entries: dict[Path, set[str]] = {root_path: set()}
+
+    def record_automatic_test_context_path(result: dict) -> None:
+        directory = result.get("automatic_test_context_directory")
+        if directory is not None:
+            automatic_test_dir_entries.setdefault(Path(directory), set()).add(
+                result["filename"]
+            )
+
+    def automatic_test_dirs() -> dict[Path, frozenset[str]]:
+        return {
+            directory: frozenset(automatic_test_dir_entries[directory])
+            for directory in sorted(automatic_test_dir_entries)
+        }
 
     ignored_dirs = set(DEFAULT_IGNORED_DIRS)
 
@@ -630,6 +651,7 @@ def index_repository(
                     collision_facts_by_module[res["module_id"]] = cached_collision_facts["facts"]
                 if _valid_test_facts(res.get("test_facts")):
                     test_facts_by_path[str(Path(res["absolute_path"]).resolve())] = res["test_facts"]["facts"]
+                record_automatic_test_context_path(res)
             completed += 1
             checkpoint(progress_callback, res["filename"], completed, total_files)
         return RepositoryIndex(
@@ -639,6 +661,7 @@ def index_repository(
             reference_facts_by_module=reference_facts_by_module,
             collision_facts_by_module=collision_facts_by_module,
             test_facts_by_path=test_facts_by_path,
+            automatic_test_dirs=automatic_test_dirs(),
         )
 
     with ProcessPoolExecutor() as executor:
@@ -676,6 +699,7 @@ def index_repository(
                     collision_facts_by_module[res["module_id"]] = cached_collision_facts["facts"]
                 if _valid_test_facts(res.get("test_facts")):
                     test_facts_by_path[str(Path(res["absolute_path"]).resolve())] = res["test_facts"]["facts"]
+                record_automatic_test_context_path(res)
 
             completed += 1
             try:
@@ -691,6 +715,7 @@ def index_repository(
         reference_facts_by_module=reference_facts_by_module,
         collision_facts_by_module=collision_facts_by_module,
         test_facts_by_path=test_facts_by_path,
+        automatic_test_dirs=automatic_test_dirs(),
     )
 
 

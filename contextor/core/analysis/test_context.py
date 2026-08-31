@@ -241,6 +241,26 @@ class TestContextIndex:
         self.root_path = Path(root_path).resolve()
         self.test_dirs = test_dirs
         self.files_info = files_info
+        self._paths_by_filename: dict[str, set[str]] = {}
+        for directory, file_names in test_dirs.items():
+            for file_name in file_names:
+                self._paths_by_filename.setdefault(file_name, set()).add(
+                    str(directory / file_name)
+                )
+
+        self._paths_by_import_prefix: dict[str, set[str]] = {}
+        for info in files_info.values():
+            for imported_module in info.imported_modules:
+                lookup_keys = {imported_module}
+                lookup_keys.update(
+                    imported_module[:position]
+                    for position, character in enumerate(imported_module)
+                    if character == "."
+                )
+                for lookup_key in lookup_keys:
+                    self._paths_by_import_prefix.setdefault(lookup_key, set()).add(
+                        info.path
+                    )
 
     @classmethod
     def build(
@@ -347,21 +367,12 @@ class TestContextIndex:
             f"{short_name}_test.py",
         )
 
-        found = [
-            str(directory / candidate)
-            for directory, file_names in self.test_dirs.items()
-            for candidate in candidates
-            if candidate in file_names
-        ]
+        found: set[str] = set()
+        for candidate in candidates:
+            found.update(self._paths_by_filename.get(candidate, ()))
+        found.update(self._paths_by_import_prefix.get(module_id, ()))
 
-        for info in self.files_info.values():
-            if any(
-                imp == module_id or imp.startswith(f"{module_id}.")
-                for imp in info.imported_modules
-            ):
-                found.append(info.path)
-
-        return sorted(set(found))
+        return sorted(found)
 
     def extract_tested_symbols(
         self,

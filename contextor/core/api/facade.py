@@ -416,6 +416,7 @@ class ContextorFacade:
             symbol_facts_by_module=index.symbol_facts_by_module,
             reference_index=reference_index,
             test_facts_by_path=index.test_facts_by_path,
+            automatic_test_dirs=index.automatic_test_dirs,
         )
 
         if log and report_result.get("high_risk_layers"):

@@ -52,6 +52,7 @@ def build_artifact_pipeline(
     symbol_facts_by_module: dict[str, dict] | None = None,
     reference_index=None,
     test_facts_by_path: dict[str, dict] | None = None,
+    automatic_test_dirs=None,
 ) -> ArtifactPipelineResult:
     """Build mutually consistent artifact and graph report representations."""
     log_program_event("REPORT", "artifact pipeline start", modules=len(modules))
@@ -66,6 +67,7 @@ def build_artifact_pipeline(
         symbol_facts_by_module=symbol_facts_by_module,
         reference_index=reference_index,
         test_facts_by_path=test_facts_by_path,
+        automatic_test_dirs=automatic_test_dirs,
     )
     artifact_data["debug_info"] = {
         "module_count": len(modules),

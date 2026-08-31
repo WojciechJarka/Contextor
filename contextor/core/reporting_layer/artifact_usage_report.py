@@ -706,6 +706,7 @@ def generate_artifact_usage_report(
     symbol_facts_by_module: dict[str, dict] | None = None,
     reference_index: RepositoryReferenceIndex | None = None,
     test_facts_by_path: dict[str, dict] | None = None,
+    automatic_test_dirs: dict | None = None,
 ) -> dict:
     """
     Generate the global artifact usage report.
@@ -801,10 +802,13 @@ def generate_artifact_usage_report(
 
     # Test directories and AST facts are repository-level information and
     # therefore discovered and indexed once.
-    test_dirs = discover_test_dirs(
-        root_path,
-        allowed_python_paths=[module.path for module in modules.values()],
-    )
+    if automatic_test_dirs is None:
+        test_dirs = discover_test_dirs(
+            root_path,
+            allowed_python_paths=[module.path for module in modules.values()],
+        )
+    else:
+        test_dirs = automatic_test_dirs
 
     test_index = build_test_context_index(
         root_path,
