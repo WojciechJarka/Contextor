@@ -283,6 +283,82 @@ SAME_SNAPSHOT_DELTA_MS=-99.300191
 CONTEXTOR_WORKSPACE_SYNC=verified; canonical_revision=107; continuous; resync_required=false
 FILES_CHANGED=C:\Temp\Contextor_Repo\contextor\core\symbol_engine\indexer.py;C:\Temp\Contextor_Repo\contextor\core\api\facade.py;C:\Temp\Contextor_Repo\contextor\core\reporting_engine\pipeline.py;C:\Temp\Contextor_Repo\contextor\core\reporting_engine\artifact_pipeline.py;C:\Temp\Contextor_Repo\contextor\core\reporting_layer\artifact_usage_report.py;C:\Temp\Contextor_Repo\tests\test_test_context_discovery_map_0j7.py
 
+## 0J7 paired performance-certification closure
+
+No repository production or test file was modified for this closure. The existing source snapshot and external root `C:\Temp\Contextor_Benchmarks\0J7_discovery_map_20260831` were used. A was exact pre-0J7 source restoration (no map construction/transport; legacy discovery); B was the unchanged current 0J7 source. Both variants had independently warmed isolated cache/state/output/registry. ProcessPool was enabled; LIVE was detached. Decision observations were 12 interleaved full `ContextorFacade.analyze_project()` pairs with alternating order; no pair was discarded.
+
+```text
+PAIR=1 ORDER=AB A_WHOLE_MS=9339.174742 B_WHOLE_MS=8654.714077 DELTA_MS=-684.460665 A_DISCOVER_MS=228.117051 A_DISCOVER_COUNT=1 B_DISCOVER_COUNT=0 B_MAP_BUILD_MS=7.694630 MAP_PARITY=TRUE MODULE_COUNT=323 ERRORS_A=0 ERRORS_B=0
+PAIR=2 ORDER=BA A_WHOLE_MS=5933.173909 B_WHOLE_MS=5577.625997 DELTA_MS=-355.547912 A_DISCOVER_MS=202.727581 A_DISCOVER_COUNT=1 B_DISCOVER_COUNT=0 B_MAP_BUILD_MS=5.722445 MAP_PARITY=TRUE MODULE_COUNT=323 ERRORS_A=0 ERRORS_B=0
+PAIR=3 ORDER=AB A_WHOLE_MS=6642.276044 B_WHOLE_MS=6005.428274 DELTA_MS=-636.847770 A_DISCOVER_MS=206.229004 A_DISCOVER_COUNT=1 B_DISCOVER_COUNT=0 B_MAP_BUILD_MS=6.797005 MAP_PARITY=TRUE MODULE_COUNT=323 ERRORS_A=0 ERRORS_B=0
+PAIR=4 ORDER=BA A_WHOLE_MS=7049.902851 B_WHOLE_MS=6574.945768 DELTA_MS=-474.957083 A_DISCOVER_MS=170.798244 A_DISCOVER_COUNT=1 B_DISCOVER_COUNT=0 B_MAP_BUILD_MS=10.894402 MAP_PARITY=TRUE MODULE_COUNT=323 ERRORS_A=0 ERRORS_B=0
+PAIR=5 ORDER=AB A_WHOLE_MS=6872.532961 B_WHOLE_MS=5784.935445 DELTA_MS=-1087.597516 A_DISCOVER_MS=286.024969 A_DISCOVER_COUNT=1 B_DISCOVER_COUNT=0 B_MAP_BUILD_MS=9.324091 MAP_PARITY=TRUE MODULE_COUNT=323 ERRORS_A=0 ERRORS_B=0
+PAIR=6 ORDER=BA A_WHOLE_MS=6137.067491 B_WHOLE_MS=6182.709674 DELTA_MS=45.642183 A_DISCOVER_MS=181.469224 A_DISCOVER_COUNT=1 B_DISCOVER_COUNT=0 B_MAP_BUILD_MS=8.341917 MAP_PARITY=TRUE MODULE_COUNT=323 ERRORS_A=0 ERRORS_B=0
+PAIR=7 ORDER=AB A_WHOLE_MS=6134.390334 B_WHOLE_MS=6166.707360 DELTA_MS=32.317026 A_DISCOVER_MS=173.636244 A_DISCOVER_COUNT=1 B_DISCOVER_COUNT=0 B_MAP_BUILD_MS=7.973292 MAP_PARITY=TRUE MODULE_COUNT=323 ERRORS_A=0 ERRORS_B=0
+PAIR=8 ORDER=BA A_WHOLE_MS=6535.633718 B_WHOLE_MS=6996.308889 DELTA_MS=460.675171 A_DISCOVER_MS=185.593490 A_DISCOVER_COUNT=1 B_DISCOVER_COUNT=0 B_MAP_BUILD_MS=5.594859 MAP_PARITY=TRUE MODULE_COUNT=323 ERRORS_A=0 ERRORS_B=0
+PAIR=9 ORDER=AB A_WHOLE_MS=7149.884063 B_WHOLE_MS=5732.968506 DELTA_MS=-1416.915557 A_DISCOVER_MS=192.602203 A_DISCOVER_COUNT=1 B_DISCOVER_COUNT=0 B_MAP_BUILD_MS=5.533231 MAP_PARITY=TRUE MODULE_COUNT=323 ERRORS_A=0 ERRORS_B=0
+PAIR=10 ORDER=BA A_WHOLE_MS=6255.770217 B_WHOLE_MS=6342.416494 DELTA_MS=86.646277 A_DISCOVER_MS=168.853444 A_DISCOVER_COUNT=1 B_DISCOVER_COUNT=0 B_MAP_BUILD_MS=7.165635 MAP_PARITY=TRUE MODULE_COUNT=323 ERRORS_A=0 ERRORS_B=0
+PAIR=11 ORDER=AB A_WHOLE_MS=6369.704320 B_WHOLE_MS=6522.725584 DELTA_MS=153.021264 A_DISCOVER_MS=205.202826 A_DISCOVER_COUNT=1 B_DISCOVER_COUNT=0 B_MAP_BUILD_MS=6.896763 MAP_PARITY=TRUE MODULE_COUNT=323 ERRORS_A=0 ERRORS_B=0
+PAIR=12 ORDER=BA A_WHOLE_MS=6890.520653 B_WHOLE_MS=7093.754234 DELTA_MS=203.233581 A_DISCOVER_MS=251.218032 A_DISCOVER_COUNT=1 B_DISCOVER_COUNT=0 B_MAP_BUILD_MS=6.014808 MAP_PARITY=TRUE MODULE_COUNT=323 ERRORS_A=0 ERRORS_B=0
+```
+
+Paired median `B-A=-161.615443 ms`; paired mean `-306.232583 ms`; B was faster in `6/12` pairs. Legacy discovery median was `197.664892 ms`; candidate map-build median was `7.031199 ms`; stable local removed work was `190.633693 ms`. Parity was true, counts were A=1/B=0, module count was 323, and errors were zero in every pair.
+
+However, the whole-wall effect remains order-correlated: AB pairs have four negative and two positive deltas (median -660.654218 ms), while BA pairs have two negative and four positive deltas (median +66.144230 ms). Per the certification rule, that correlation prevents converting the local causal evidence into a certified whole-analysis reduction. This is a measurement-certification outcome only, not a semantic/code failure; retain/revert requires explicit direction.
+
+FINAL_VERDICT=PERFORMANCE_NOT_CERTIFIED
+PAIRED_RUN_COUNT=12
+PAIRS_CANDIDATE_FASTER=6/12
+PAIRED_MEDIAN_DELTA_MS=-161.615443
+PAIRED_MEAN_DELTA_MS=-306.232583
+LEGACY_DISCOVER_MEDIAN_MS=197.664892
+CANDIDATE_MAP_BUILD_MEDIAN_MS=7.031199
+LOCAL_REMOVED_MS=190.633693
+AUTOMATIC_DISCOVERY_PARITY=PASS
+FILES_CHANGED=NONE
+DIFFS=NONE
+
+## 0J7 final owner-stage cost accounting closure
+
+The earlier paired artifact did not contain raw `index_repository` timings, so the same external interleaved paired protocol was rerun solely to instrument that owner boundary: `C:\Temp\Contextor_Benchmarks\0J7_discovery_map_20260831\paired_index_results.json`. A was exact pre-0J7 source restoration; B was unchanged 0J7. Both variants had independent warm-ups, isolated warmed runtime state, ProcessPool enabled, and detached LIVE. No repository production/test file was changed, and no pytest, compilation, diff check, or Contextor discovery was rerun.
+
+```text
+PAIR=1 ORDER=AB A_INDEX_REPOSITORY_MS=5364.058282 B_INDEX_REPOSITORY_MS=4901.755600 INDEX_DELTA_MS=-462.302682 A_DISCOVER_MS=203.380248 B_MAP_BUILD_MS=7.104527 MAP_PARITY=TRUE ERRORS_A=0 ERRORS_B=0
+PAIR=2 ORDER=BA A_INDEX_REPOSITORY_MS=2259.552820 B_INDEX_REPOSITORY_MS=2346.870342 INDEX_DELTA_MS=87.317522 A_DISCOVER_MS=232.418785 B_MAP_BUILD_MS=5.813873 MAP_PARITY=TRUE ERRORS_A=0 ERRORS_B=0
+PAIR=3 ORDER=AB A_INDEX_REPOSITORY_MS=2725.357412 B_INDEX_REPOSITORY_MS=2139.995516 INDEX_DELTA_MS=-585.361896 A_DISCOVER_MS=199.342514 B_MAP_BUILD_MS=5.917996 MAP_PARITY=TRUE ERRORS_A=0 ERRORS_B=0
+PAIR=4 ORDER=BA A_INDEX_REPOSITORY_MS=2166.588142 B_INDEX_REPOSITORY_MS=2393.092348 INDEX_DELTA_MS=226.504206 A_DISCOVER_MS=249.974787 B_MAP_BUILD_MS=6.000619 MAP_PARITY=TRUE ERRORS_A=0 ERRORS_B=0
+PAIR=5 ORDER=AB A_INDEX_REPOSITORY_MS=2199.276724 B_INDEX_REPOSITORY_MS=2129.214537 INDEX_DELTA_MS=-70.062187 A_DISCOVER_MS=182.687046 B_MAP_BUILD_MS=9.010723 MAP_PARITY=TRUE ERRORS_A=0 ERRORS_B=0
+PAIR=6 ORDER=BA A_INDEX_REPOSITORY_MS=2777.502308 B_INDEX_REPOSITORY_MS=2888.291878 INDEX_DELTA_MS=110.789570 A_DISCOVER_MS=253.752432 B_MAP_BUILD_MS=8.158093 MAP_PARITY=TRUE ERRORS_A=0 ERRORS_B=0
+PAIR=7 ORDER=AB A_INDEX_REPOSITORY_MS=2471.372758 B_INDEX_REPOSITORY_MS=2264.381577 INDEX_DELTA_MS=-206.991181 A_DISCOVER_MS=166.252554 B_MAP_BUILD_MS=5.492176 MAP_PARITY=TRUE ERRORS_A=0 ERRORS_B=0
+PAIR=8 ORDER=BA A_INDEX_REPOSITORY_MS=2496.433694 B_INDEX_REPOSITORY_MS=2275.968245 INDEX_DELTA_MS=-220.465449 A_DISCOVER_MS=215.675805 B_MAP_BUILD_MS=5.485811 MAP_PARITY=TRUE ERRORS_A=0 ERRORS_B=0
+PAIR=9 ORDER=AB A_INDEX_REPOSITORY_MS=2443.889377 B_INDEX_REPOSITORY_MS=2670.971451 INDEX_DELTA_MS=227.082074 A_DISCOVER_MS=175.256911 B_MAP_BUILD_MS=6.611740 MAP_PARITY=TRUE ERRORS_A=0 ERRORS_B=0
+PAIR=10 ORDER=BA A_INDEX_REPOSITORY_MS=2740.334525 B_INDEX_REPOSITORY_MS=2625.247622 INDEX_DELTA_MS=-115.086903 A_DISCOVER_MS=234.929718 B_MAP_BUILD_MS=5.514176 MAP_PARITY=TRUE ERRORS_A=0 ERRORS_B=0
+PAIR=11 ORDER=AB A_INDEX_REPOSITORY_MS=1876.879394 B_INDEX_REPOSITORY_MS=2708.493188 INDEX_DELTA_MS=831.613794 A_DISCOVER_MS=168.394866 B_MAP_BUILD_MS=5.953203 MAP_PARITY=TRUE ERRORS_A=0 ERRORS_B=0
+PAIR=12 ORDER=BA A_INDEX_REPOSITORY_MS=2615.012732 B_INDEX_REPOSITORY_MS=2346.523720 INDEX_DELTA_MS=-268.489012 A_DISCOVER_MS=211.192693 B_MAP_BUILD_MS=5.991834 MAP_PARITY=TRUE ERRORS_A=0 ERRORS_B=0
+```
+
+The paired index delta median is `-92.574545 ms` and mean is `-37.121012 ms`. AB paired index deltas have median `-138.526684 ms`; BA paired index deltas have median `-13.884691 ms`. Both are negative, so `INDEX_ORDER_CORRELATION=NO` (there is normal magnitude variance but no sign-reversing order effect).
+
+Map construction is within the `index_repository` boundary: the parent records it while assembling worker results, and the measured B index timer includes the worker-result marker, ProcessPool serialization/IPC, string/Path handling, parent assembly, and map construction. Therefore the non-double-counting equation applies:
+
+`LOCAL_NET_DELTA_MS = PAIRED_MEDIAN_INDEX_DELTA_MS - LEGACY_DISCOVER_MEDIAN_MS`
+
+`= -92.574545 - 207.286470 = -299.861015 ms`.
+
+`CANDIDATE_MAP_BUILD_MEDIAN_MS=5.972518` is reported only as a decomposition of the already-measured B index cost, not added again. All parity values were true; A discovery count was one and B was zero in every pair; errors were zero. The measured B index cost does not consume the removed legacy discovery work; it is lower at the paired median. 0J7 is certified to keep on narrow owner-stage accounting, independent of noisy whole-analysis wall time.
+
+FINAL_VERDICT=PASS
+PAIR_COUNT=12
+PAIRED_MEDIAN_INDEX_DELTA_MS=-92.574545
+PAIRED_MEAN_INDEX_DELTA_MS=-37.121012
+LEGACY_DISCOVER_MEDIAN_MS=207.286470
+CANDIDATE_MAP_BUILD_MEDIAN_MS=5.972518
+LOCAL_NET_DELTA_MS=-299.861015
+INDEX_ORDER_CORRELATION=NO
+AUTOMATIC_DISCOVERY_PARITY=PASS
+FILES_CHANGED=NONE
+DIFFS=NONE
+
 REPORT_COMPLETENESS=PASS
 MISSING_DIFFS=NONE
 FILES_CHANGED=C:\Temp\Contextor_Repo\contextor\core\symbol_engine\indexer.py;C:\Temp\Contextor_Repo\contextor\core\api\facade.py;C:\Temp\Contextor_Repo\contextor\core\reporting_engine\pipeline.py;C:\Temp\Contextor_Repo\contextor\core\reporting_engine\artifact_pipeline.py;C:\Temp\Contextor_Repo\contextor\core\reporting_layer\artifact_usage_report.py;C:\Temp\Contextor_Repo\tests\test_test_context_discovery_map_0j7.py
