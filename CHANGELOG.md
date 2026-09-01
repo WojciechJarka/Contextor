@@ -1,3 +1,16 @@
+### Layer and single-file reporting performance
+
+* Reworked layer analysis to consume validated authoritative canonical state directly instead of constructing and materializing a full incremental engine when layer reporting does not require update semantics.
+* Preserved the existing LIVE-first/snapshot-validated repository-state selection, repository identity checks, collision freshness rules and fail-closed fallbacks while removing unnecessary repository-wide materialization from layer reports.
+* Reduced large-layer analysis from full-engine-scale latency to a few seconds on the Contextor repository without reducing report content or architectural analysis.
+* Added a fail-closed state-only fast path for single-file analysis when the target is already tracked, byte-current and backed by healthy canonical state.
+* Healthy unchanged single-file analysis now reuses canonical modules, dependency graph, artifacts and existing report fallbacks directly, avoiding incremental-engine construction, repository-wide module-usage materialization and a redundant `update_file` call.
+* Changed, new, deleted, stale or resync-required files continue through the existing full incremental-engine path, preserving refresh planning, recovery, persistence and LIVE publication semantics.
+* Unified downstream single-file reporting around the selected canonical analysis state so deep context, artifact projection and graph analytics use the same report pipeline regardless of whether the state came from the lightweight or full-engine path.
+* Preserved source-backed reference discovery when persisted canonical state intentionally lacks materialized module-usage facts; output parity was verified against the previous fully materialized path.
+* Reduced healthy unchanged single-file analysis to roughly 0.5 seconds in warm measurements while retaining the existing report and MCP contracts.
+
+
 ## Patch — Full Repository Analysis Performance] - 2026-08-31
 
 ### Full repository analysis performance
