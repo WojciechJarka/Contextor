@@ -861,10 +861,71 @@ class ContextorFacade:
         if log:
             log("Preparing project context...")
         excludes, extra_dirs = _analysis_filters(repo_root, additional_excludes)
-        hydrated = hydrate_repository_engine(repo_root)
-        if hydrated is not None:
+        hydrated = None
+        analysis_state = None
+        state_only = False
+
+        resolved = resolve_authoritative_repository_state(repo_root)
+
+        if resolved is not None:
+            state = resolved.state
+
+            try:
+                rel_path = file.resolve().relative_to(Path(repo_root).resolve())
+                module_path = ".".join(rel_path.with_suffix("").parts)
+            except ValueError:
+                module_path = ""
+
+            state_only_candidate = (
+                not getattr(state, "resync_required", False)
+                and getattr(state, "artifact_consumption_state", None) == "fresh"
+                and getattr(state, "cycles_state", None) == "fresh"
+                and getattr(state, "collisions_state", None) == "fresh"
+                and isinstance(getattr(state, "module_usages", None), dict)
+                and getattr(state, "artifacts", None) is not None
+                and bool(module_path)
+                and module_path in state.modules
+            )
+
+            if state_only_candidate:
+                from contextor.core.analysis.state_manager import FileStateManager
+
+                state_manager = FileStateManager(str(resolved.cache_dir))
+
+                if not state_manager.has_changed(str(file)):
+                    progress.begin("Loading canonical LIVE context")
+                    verify_progress = progress.begin(
+                        "Verifying selected file in canonical context"
+                    )
+                    checkpoint(
+                        verify_progress,
+                        f"Verifying {file.name}",
+                        0,
+                        1,
+                    )
+
+                    modules = state.modules
+                    graph = state.dependency_graph
+                    analysis_state = state
+                    cache_hit = True
+                    state_only = True
+
+                    if log:
+                        log(
+                            "Reused unchanged canonical context "
+                            f"from {resolved.source}; skipped incremental-engine materialization."
+                        )
+
+        if not state_only:
+            hydrated = hydrate_repository_engine(repo_root)
+
+        if state_only:
+            pass
+        elif hydrated is not None:
             progress.begin("Loading canonical LIVE context")
-            update_progress = progress.begin("Refreshing selected file in LIVE context")
+            update_progress = progress.begin(
+                "Refreshing selected file in LIVE context"
+            )
             checkpoint(update_progress, f"Refreshing {file.name}", 0, 1)
             update_result = hydrated.engine.update_file(str(file))
             if update_result.status in {"SYNTAX_ERROR", "ERROR"}:
@@ -874,13 +935,14 @@ class ContextorFacade:
                 raise ValueError(
                     f"Cannot analyze {file.name}{location}: {update_result.error}"
                 )
-            modules = hydrated.engine.state.modules
-            graph = hydrated.engine.state.dependency_graph
+            analysis_state = hydrated.engine.state
+            modules = analysis_state.modules
+            graph = analysis_state.dependency_graph
             cache_hit = True
             if update_result.status == "UPDATED" and hydrated.client is not None:
                 try:
                     hydrated.client.publish(
-                        hydrated.engine.state,
+                        analysis_state,
                         origin="scoped_analysis",
                         timeout=5.0,
                     )
@@ -921,7 +983,7 @@ class ContextorFacade:
             global_report=global_report,
             root_path=repo_root,
             progress_callback=progress.items,
-            engine_state=hydrated.engine.state if hydrated is not None else None,
+            engine_state=analysis_state,
         )
 
         if log:
@@ -967,9 +1029,9 @@ class ContextorFacade:
         from contextor.core.reporting_engine.graph_analytics import generate_graph_analytics_report
         from contextor.core.reporting_layer.artifact_usage_report import generate_artifact_usage_report as _gen_art
         try:
-            if hydrated is not None:
+            if analysis_state is not None:
                 sf_artifact_data = canonical_artifact_report(
-                    hydrated.engine.state.artifacts
+                    analysis_state.artifacts
                 )
             else:
                 sf_artifact_data = _gen_art(
