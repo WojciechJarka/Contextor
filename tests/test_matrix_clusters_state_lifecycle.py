@@ -208,7 +208,7 @@ def test_incremental_matrix_compute_failure_marks_only_matrix_stale(tmp_path: Pa
     target.write_text("def baz():\n    return 2\n", encoding="utf-8")
 
     with unittest.mock.patch(
-        "contextor.core.reporting_engine.graph_analytics.compute_dependency_matrix_from_state",
+        "contextor.core.reporting_engine.graph_analytics.build_module_dependency_matrix",
         side_effect=RuntimeError("matrix failure"),
     ):
         result = engine.update_file(str(target))
@@ -262,14 +262,57 @@ def test_incremental_cluster_compute_failure_marks_clusters_stale(tmp_path: Path
     engine = _incremental_engine_from_full_state(tmp_path)
     target.write_text("def two():\n    return 2\n", encoding="utf-8")
     with unittest.mock.patch(
-        "contextor.core.reporting_engine.graph_analytics.compute_shared_usage_clusters_from_state",
+        "contextor.core.reporting_engine.graph_analytics.build_jaccard_clusters",
         side_effect=RuntimeError("clusters failure"),
     ):
         result = engine.update_file(str(target))
     assert result.status == "UPDATED"
-    assert "mod" in engine.state.modules
+    own_symbols = engine.state.artifacts["mod"]["own_symbols"]
+    assert "two" in own_symbols
+    assert "one" not in own_symbols
     assert engine.state.shared_usage_clusters_state == "stale"
     assert engine.state.dependency_matrix_state == "fresh"
+
+
+def test_incremental_derived_projection_is_reused_once(tmp_path: Path):
+    (tmp_path / "provider.py").write_text("def shared():\n    return 1\n", encoding="utf-8")
+    target = tmp_path / "consumer.py"
+    target.write_text("from provider import shared\ndef use():\n    return shared()\n", encoding="utf-8")
+    errors, _ = ContextorFacade().analyze_project(str(tmp_path))
+    assert not errors
+    engine = _incremental_engine_from_full_state(tmp_path)
+    target.write_text("def use():\n    return 0\n", encoding="utf-8")
+    from contextor.core.reporting_engine.graph_analytics import build_artifact_data_projection
+    with unittest.mock.patch(
+        "contextor.core.reporting_engine.graph_analytics.build_artifact_data_projection",
+        wraps=build_artifact_data_projection,
+    ) as projection_mock:
+        result = engine.update_file(str(target))
+    assert result.status == "UPDATED"
+    assert projection_mock.call_count == 1
+    assert engine.state.dependency_matrix_state == "fresh"
+    assert engine.state.shared_usage_clusters_state == "fresh"
+    assert engine.state.dependency_matrix == compute_dependency_matrix_from_state(engine.state)
+    assert engine.state.shared_usage_clusters == compute_shared_usage_clusters_from_state(engine.state)
+
+
+def test_incremental_shared_projection_failure_marks_both_derived_stale(tmp_path: Path):
+    target = tmp_path / "mod.py"
+    target.write_text("def one():\n    return 1\n", encoding="utf-8")
+    errors, _ = ContextorFacade().analyze_project(str(tmp_path))
+    assert not errors
+    engine = _incremental_engine_from_full_state(tmp_path)
+    target.write_text("def two():\n    return 2\n", encoding="utf-8")
+    with unittest.mock.patch(
+        "contextor.core.reporting_engine.graph_analytics.build_artifact_data_projection",
+        side_effect=RuntimeError("projection failure"),
+    ):
+        result = engine.update_file(str(target))
+    assert result.status == "UPDATED"
+    assert "two" in engine.state.artifacts["mod"]["own_symbols"]
+    assert "one" not in engine.state.artifacts["mod"]["own_symbols"]
+    assert engine.state.dependency_matrix_state == "stale"
+    assert engine.state.shared_usage_clusters_state == "stale"
 
 
 def test_collision_only_plan_preserves_fresh_dependency_matrix():
@@ -288,6 +331,9 @@ def test_collision_only_plan_preserves_fresh_dependency_matrix():
     ), unittest.mock.patch(
         "contextor.core.reporting_engine.graph_analytics.compute_shared_usage_clusters_from_state",
         side_effect=AssertionError("clusters must not be recomputed"),
+    ), unittest.mock.patch(
+        "contextor.core.reporting_engine.graph_analytics.build_artifact_data_projection",
+        side_effect=AssertionError("projection must not be built"),
     ):
         outcome = execute_refresh_plan(
             state, delta, None, plan, [], {}, None, Path("."), "mod_a.py", []
@@ -315,6 +361,9 @@ def test_resync_plan_marks_dependency_matrix_stale_without_compute():
     ), unittest.mock.patch(
         "contextor.core.reporting_engine.graph_analytics.compute_shared_usage_clusters_from_state",
         side_effect=AssertionError("clusters must not be recomputed"),
+    ), unittest.mock.patch(
+        "contextor.core.reporting_engine.graph_analytics.build_artifact_data_projection",
+        side_effect=AssertionError("projection must not be built"),
     ):
         outcome = execute_refresh_plan(
             state, delta, None, RefreshPlan(), [], {}, None, Path("."), "mod_a.py", []

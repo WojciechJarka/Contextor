@@ -247,3 +247,67 @@ DEPENDENCY_MATRIX_POST162_INCREMENTAL_EVENT=UNAVAILABLE
 DEPENDENCY_MATRIX_AFTER_EVENT_EXACT_PARITY=NOT_CHECKED
 FILES_CHANGED=C:\Temp\Contextor_Repo\contextor\core\analysis\incremental\plan_executor.py; C:\Temp\Contextor_Repo\contextor\core\analysis\incremental\engine.py; C:\Temp\Contextor_Repo\tests\test_matrix_clusters_state_lifecycle.py
 NEXT_TARGET=strict external diff audit
+
+## Final test-proof correction
+
+```diff
+diff --git a/tests/test_matrix_clusters_state_lifecycle.py b/tests/test_matrix_clusters_state_lifecycle.py
+index 172deab..8944422 100644
+--- a/tests/test_matrix_clusters_state_lifecycle.py
++++ b/tests/test_matrix_clusters_state_lifecycle.py
+@@ -267,7 +267,9 @@ def test_incremental_cluster_compute_failure_marks_clusters_stale(tmp_path: Path
+     ):
+         result = engine.update_file(str(target))
+     assert result.status == "UPDATED"
+-    assert "mod" in engine.state.modules
++    own_symbols = engine.state.artifacts["mod"]["own_symbols"]
++    assert "two" in own_symbols
++    assert "one" not in own_symbols
+     assert engine.state.shared_usage_clusters_state == "stale"
+     assert engine.state.dependency_matrix_state == "fresh"
+ 
+```
+
+```text
+COMMAND=.\\.venv\\Scripts\\python.exe -m pytest -q tests/test_matrix_clusters_state_lifecycle.py::test_incremental_cluster_compute_failure_marks_clusters_stale
+RESULT=1 passed
+DURATION=3.67s
+
+COMMAND=.\\.venv\\Scripts\\python.exe -m pytest -q tests/test_matrix_clusters_state_lifecycle.py
+RESULT=52 passed
+DURATION=24.82s
+```
+
+PRODUCTION_AUDIT=PASS
+FAILURE_TEST_PROVES_CANONICAL_DELTA_COMMIT=YES
+FOCUSED_FAILURE_TEST=PASS
+MATRIX_CLUSTERS_LIFECYCLE_TESTS=PASS
+PRODUCTION_FILES_CHANGED=NO
+TEST_FILE_CHANGED=C:\\Temp\\Contextor_Repo\\tests\\test_matrix_clusters_state_lifecycle.py
+MCP_RESTART_REQUIRED=NO
+NEXT_TARGET=external FINAL PASS audit
+
+## Projection-reuse refactor status
+
+`plan_executor.py` now builds a shared candidate artifact projection before derived recomputation and uses it for the matrix builder and Jaccard builder. Incremental failure injections were updated to patch `build_module_dependency_matrix` and `build_jaccard_clusters`; both targeted tests pass (`2 passed in 5.96s`).
+
+The required shared-projection integration tests, serial suite validation, raw diff evidence, and empirical reversible desktop-watcher probe have not yet been completed. No loaded-runtime claim is made.
+
+PROJECTION_REUSE_REFACTOR=INCOMPLETE
+NEXT_TARGET=complete projection reuse tests and LIVE proof
+
+## Projection-reuse current evidence
+
+Added the required projection reuse and shared-projection failure integration tests. Their targeted command completed: `2 passed in 5.00s`. Collision-only and resync now block `build_artifact_data_projection` directly.
+
+The full lifecycle suite was started after these additions but has not returned a terminal pytest summary yet. The mandatory reversible loaded-desktop watcher probe has not been performed; no loaded-runtime certification is claimed.
+
+PROJECTION_REUSE_REFACTOR=INCOMPLETE
+PROJECTION_COUNT_BEFORE=2
+PROJECTION_COUNT_AFTER=1
+PROJECTION_REUSE_TEST=PASS
+SHARED_PROJECTION_FAILURE_FAILS_CLOSED=PASS
+COLLISION_ONLY_PROJECTION_CALLS=0
+RESYNC_PROJECTION_CALLS=0
+FOCUSED_TESTS=UNCERTIFIED
+NEXT_TARGET=finish serial suites and mandatory reversible LIVE probe

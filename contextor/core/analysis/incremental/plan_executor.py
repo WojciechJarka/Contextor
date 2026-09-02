@@ -589,6 +589,24 @@ def execute_refresh_plan(
         if "cycles" in plan.graph_recomputations:
             candidate.cycles_state = "fresh"
 
+    derived_artifact_projection = None
+    derived_artifact_projection_failed = False
+    if (
+        (matrix_inputs_changed or cluster_inputs_changed)
+        and plan.refresh_completeness != "requires_resync"
+        and not getattr(state, "resync_required", False)
+    ):
+        from contextor.core.analysis.state_manager import artifact_consumption_is_fresh
+        if artifact_consumption_is_fresh(candidate):
+            from contextor.core.reporting_engine.graph_analytics import build_artifact_data_projection
+            try:
+                derived_artifact_projection = build_artifact_data_projection(
+                    artifacts=candidate.artifacts,
+                    artifact_consumption=candidate.artifact_consumption,
+                )
+            except Exception:
+                derived_artifact_projection_failed = True
+
     if plan.refresh_completeness == "requires_resync" or getattr(
         state, "resync_required", False
     ):
@@ -598,15 +616,23 @@ def execute_refresh_plan(
             dependency_matrix_inputs_are_fresh,
         )
 
-        if not dependency_matrix_inputs_are_fresh(candidate):
+        if not dependency_matrix_inputs_are_fresh(candidate) or derived_artifact_projection_failed:
             candidate.dependency_matrix_state = "stale"
         else:
             from contextor.core.reporting_engine.graph_analytics import (
-                compute_dependency_matrix_from_state,
+                build_module_dependency_matrix,
             )
 
             try:
-                dependency_matrix = compute_dependency_matrix_from_state(candidate)
+                hard_edges = (
+                    getattr(candidate.dependency_graph, "hard_edges", {}) or {}
+                    if candidate.dependency_graph is not None
+                    else {}
+                )
+                dependency_matrix = build_module_dependency_matrix(
+                    artifact_data=derived_artifact_projection,
+                    hard_edges=hard_edges,
+                )
             except Exception:
                 candidate.dependency_matrix_state = "stale"
             else:
@@ -622,15 +648,15 @@ def execute_refresh_plan(
             artifact_consumption_is_fresh,
         )
 
-        if not artifact_consumption_is_fresh(candidate):
+        if not artifact_consumption_is_fresh(candidate) or derived_artifact_projection_failed:
             candidate.shared_usage_clusters_state = "stale"
         else:
             from contextor.core.reporting_engine.graph_analytics import (
-                compute_shared_usage_clusters_from_state,
+                build_jaccard_clusters,
             )
 
             try:
-                clusters = compute_shared_usage_clusters_from_state(candidate)
+                clusters = build_jaccard_clusters(artifact_data=derived_artifact_projection)
             except Exception:
                 candidate.shared_usage_clusters_state = "stale"
             else:

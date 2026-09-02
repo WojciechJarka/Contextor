@@ -7,3 +7,5 @@
 {"ts":"2026-09-02T19:08:04.922+00:00","mono_ms":45215921,"sid":"d-13164-20260902_190800_632","pid":13852,"tid":13816,"d":"LIVE","ev":"SERVICE_START","rev":166,"repo":"C:\\Temp\\Contextor_Repo"}
 {"ts":"2026-09-02T19:08:05.577+00:00","mono_ms":45216578,"sid":"d-13164-20260902_190800_632","pid":13164,"tid":13860,"d":"GUI","ev":"STATUS_QUEUED","q":1,"category":"LIVE_STATE","status":"[LIVE] LIVE: shared state attached; watcher active"}
 {"ts":"2026-09-02T19:08:05.578+00:00","mono_ms":45216578,"sid":"d-13164-20260902_190800_632","pid":13164,"tid":13860,"d":"GUI","ev":"STATUS_RENDERED","q":0,"wait_ms":16.00000000325963}
+{"ts":"2026-09-02T19:44:32.855+00:00","mono_ms":47403843,"sid":"d-13164-20260902_190800_632","pid":13852,"tid":13816,"d":"LIVE","ev":"SERVICE_END","rev":166,"repo":"C:\\Temp\\Contextor_Repo"}
+{"ts":"2026-09-02T19:44:33.249+00:00","mono_ms":47404250,"sid":"d-13164-20260902_190800_632","pid":13164,"tid":13860,"d":"DESKTOP","ev":"SESSION_END","op":"d-13164-2"}
