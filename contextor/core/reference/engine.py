@@ -764,6 +764,36 @@ def extract_module_usage_facts(
     )
 
 
+def _build_module_usage_baseline(modules) -> dict[str, ModuleUsageFacts]:
+    """Build the complete materialized usage baseline from current module ASTs."""
+    baseline = {}
+
+    for module_id, module in modules.items():
+        facts = extract_module_usage_facts(
+            module_id,
+            module.ast_tree,
+            imports=module.imports,
+        )
+
+        if (
+            not facts.symbol_calls_materialized
+            or not facts.reference_evidence_materialized
+        ):
+            raise RuntimeError(
+                "Canonical ModuleUsageFacts baseline unavailable for current module "
+                f"{module_id}"
+            )
+
+        baseline[module_id] = facts
+
+    if set(baseline) != set(modules):
+        raise RuntimeError(
+            "Canonical ModuleUsageFacts baseline does not cover the current module domain"
+        )
+
+    return baseline
+
+
 # ==========================================================
 # CANONICAL REFERENCE PROJECTION
 # ==========================================================

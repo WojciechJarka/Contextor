@@ -139,6 +139,39 @@ def test_golden_parity_matrix(multi_channel_repo):
     assert summarize_api_consumers(canonical_consumers) == summarize_api_consumers(legacy_consumers)
 
 
+def test_full_analysis_persists_materialized_usage_without_hydration_backfill(tmp_path):
+    root = tmp_path / "pkg"
+    root.mkdir()
+    (root / "__init__.py").write_text("", encoding="utf-8")
+    (root / "provider.py").write_text("def value():\n    return 1\n", encoding="utf-8")
+    (root / "consumer.py").write_text(
+        "from pkg.provider import value\n\ndef use():\n    return value()\n",
+        encoding="utf-8",
+    )
+
+    ContextorFacade.analyze_project(str(tmp_path))
+
+    from contextor.core.reference import engine as reference_engine
+    original = reference_engine.extract_module_usage_facts
+    calls = {"count": 0}
+
+    def tracked(*args, **kwargs):
+        calls["count"] += 1
+        return original(*args, **kwargs)
+
+    with patch.object(reference_engine, "extract_module_usage_facts", side_effect=tracked):
+        hydrated = hydrate_repository_engine(str(tmp_path))
+
+    state = hydrated.engine.state
+    assert calls["count"] == 0
+    assert set(state.module_usages) == set(state.modules)
+    assert all(
+        facts.symbol_calls_materialized
+        and facts.reference_evidence_materialized
+        for facts in state.module_usages.values()
+    )
+
+
 def test_zero_io_and_zero_ast_parses_during_canonical_projection(multi_channel_repo):
     td, state, graph = multi_channel_repo
     symbols = [

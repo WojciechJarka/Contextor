@@ -14,7 +14,10 @@ from contextor.core.analysis.state_manager import FileStateManager, RepositoryAn
 from contextor.core.domain.module import Module
 from contextor.core.domain.usage_facts import ModuleUsageFacts
 from contextor.core.live_state.store import load_snapshot, save_snapshot
-from contextor.core.reference.engine import extract_module_usage_facts
+from contextor.core.reference.engine import (
+    _build_module_usage_baseline,
+    extract_module_usage_facts,
+)
 from contextor.core.reporting_engine.persistent_registry import PersistentIdentityRegistry
 
 
@@ -184,3 +187,38 @@ def test_state_lifecycle_and_snapshot_persistence(tmp_path):
     assert hasattr(loaded_state, "module_usages")
     assert "mod_x" in loaded_state.module_usages
     assert loaded_state.module_usages["mod_x"].imports == ("sys",)
+
+
+def test_build_module_usage_baseline_materializes_current_module_domain(tmp_path):
+    first = tmp_path / "first.py"
+    second = tmp_path / "second.py"
+    first.write_text("def caller():\n    return callee()\n\ndef callee():\n    return 1\n", encoding="utf-8")
+    second.write_text("value = 2\n", encoding="utf-8")
+    modules = {
+        "first": Module("first", "first.py", str(first), []),
+        "second": Module("second", "second.py", str(second), []),
+    }
+
+    result = _build_module_usage_baseline(modules)
+
+    assert set(result) == set(modules)
+    assert all(
+        facts.symbol_calls_materialized
+        and facts.reference_evidence_materialized
+        for facts in result.values()
+    )
+    assert result["first"].symbol_calls == (
+        ("first::caller", "first::callee", 2, "direct"),
+    )
+
+
+def test_build_module_usage_baseline_fails_closed_when_current_ast_is_unavailable(tmp_path):
+    unavailable = Module(
+        "unavailable",
+        "unavailable.py",
+        str(tmp_path / "missing.py"),
+        [],
+    )
+
+    with pytest.raises(RuntimeError, match="baseline unavailable"):
+        _build_module_usage_baseline({"unavailable": unavailable})

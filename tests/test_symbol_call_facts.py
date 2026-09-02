@@ -69,17 +69,17 @@ def test_graph_analytics_full_materialization_has_canonical_symbol_edges(tmp_pat
     assert _edge(
         f"{module_name}::generate_graph_analytics_report",
         f"{module_name}::_compute_pagerank",
-        1648,
+        1755,
     ) in calls
     assert _edge(
         f"{module_name}::_compute_pagerank",
         f"{module_name}::_normalized_edges",
-        737,
+        843,
     ) in calls
     assert _edge(
         f"{module_name}::compute_topology_analytics",
         f"{module_name}::_compute_pagerank",
-        1930,
+        2040,
     ) in calls
 
 
@@ -476,9 +476,9 @@ def test_graph_analytics_legacy_usage_backfills_required_edges(tmp_path):
     ensure_module_usages(state)
     calls = set(state.module_usages[module_name].symbol_calls)
 
-    assert _edge(f"{module_name}::generate_graph_analytics_report", f"{module_name}::_compute_pagerank", 1648) in calls
-    assert _edge(f"{module_name}::_compute_pagerank", f"{module_name}::_normalized_edges", 737) in calls
-    assert _edge(f"{module_name}::compute_topology_analytics", f"{module_name}::_compute_pagerank", 1930) in calls
+    assert _edge(f"{module_name}::generate_graph_analytics_report", f"{module_name}::_compute_pagerank", 1755) in calls
+    assert _edge(f"{module_name}::_compute_pagerank", f"{module_name}::_normalized_edges", 843) in calls
+    assert _edge(f"{module_name}::compute_topology_analytics", f"{module_name}::_compute_pagerank", 2040) in calls
     assert state.module_usages["unrelated"] is unrelated
 
 

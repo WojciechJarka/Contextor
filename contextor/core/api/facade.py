@@ -500,6 +500,9 @@ class ContextorFacade:
             raw_artifacts = getattr(analysis_result, "artifacts", {}) or {}
             canonical_consumption = build_canonical_artifact_consumption(raw_artifacts)
 
+            from contextor.core.reference.engine import _build_module_usage_baseline
+            module_usages = _build_module_usage_baseline(mods)
+
             # Exact canonical coverage trust gate (no truthiness)
             consumption_valid = validate_canonical_artifact_consumption_coverage(
                 canonical_consumption,
@@ -507,13 +510,14 @@ class ContextorFacade:
             )
 
             state = RepositoryAnalysisState(
-                modules=getattr(analysis_result, "modules", {}),
+                modules=mods,
                 artifacts=raw_artifacts,
                 dependency_graph=graph,
                 trie=getattr(analysis_result, "trie", None),
                 package_root=getattr(analysis_result, "package_root", ""),
                 artifact_consumption=canonical_consumption,
                 artifact_consumption_state="fresh" if consumption_valid else "stale",
+                module_usages=module_usages,
                 metrics=metrics,
                 topology_analytics=topology_analytics,
                 topology_metrics_state="fresh",
