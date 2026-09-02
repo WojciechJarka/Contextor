@@ -386,6 +386,8 @@ class IncrementalAnalysisEngine:
         self.state.cached_analytics = candidate.cached_analytics
         self.state.dependency_matrix = candidate.dependency_matrix
         self.state.dependency_matrix_state = candidate.dependency_matrix_state
+        self.state.shared_usage_clusters = candidate.shared_usage_clusters
+        self.state.shared_usage_clusters_state = candidate.shared_usage_clusters_state
         self.state.topology_metrics_state = candidate.topology_metrics_state
         self.state.cached_analytics_state = candidate.cached_analytics_state
         self.state.cycles = candidate.cycles

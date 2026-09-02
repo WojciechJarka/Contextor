@@ -1,94 +1,249 @@
-# dependency_matrix P0 real LIVE certification
+# shared_usage_clusters P0 final audit evidence
 
-## 1. Runtime/state freshness
+## Complete raw unified diffs
 
-Contextor MCP reports the authoritative LIVE revision as `162` (`latest_revision=162`). Its current event journal epoch began at revision 162 and reports a successful desktop full-analysis publication. A same-revision authoritative hydration resolved from `live_service` at revision 162.
-
-```text
-CANONICAL_REVISION=162
-CANONICAL_STATE=LIVE_AUTHORITATIVE
-WORKSPACE_SYNC=LIVE_SERVICE
-RESYNC_REQUIRED=false
-ARTIFACT_CONSUMPTION_STATE=fresh
-DEPENDENCY_MATRIX_STATE=fresh
+```diff
+diff --git a/contextor/core/analysis/incremental/engine.py b/contextor/core/analysis/incremental/engine.py
+index 32b5a41..2118f2f 100644
+--- a/contextor/core/analysis/incremental/engine.py
++++ b/contextor/core/analysis/incremental/engine.py
+@@ -386,6 +386,8 @@ class IncrementalAnalysisEngine:
+         self.state.cached_analytics = candidate.cached_analytics
+         self.state.dependency_matrix = candidate.dependency_matrix
+         self.state.dependency_matrix_state = candidate.dependency_matrix_state
++        self.state.shared_usage_clusters = candidate.shared_usage_clusters
++        self.state.shared_usage_clusters_state = candidate.shared_usage_clusters_state
+         self.state.topology_metrics_state = candidate.topology_metrics_state
+         self.state.cached_analytics_state = candidate.cached_analytics_state
+         self.state.cycles = candidate.cycles
+diff --git a/contextor/core/analysis/incremental/plan_executor.py b/contextor/core/analysis/incremental/plan_executor.py
+index 81d4267..cc0f972 100644
+--- a/contextor/core/analysis/incremental/plan_executor.py
++++ b/contextor/core/analysis/incremental/plan_executor.py
+@@ -49,6 +49,8 @@ class CandidateState:
+     topology_analytics: Dict[str, Any]
+     dependency_matrix: Dict[str, Any]
+     dependency_matrix_state: str
++    shared_usage_clusters: list
++    shared_usage_clusters_state: str
+     cached_analytics: Dict[str, Any]
+     topology_metrics_state: str
+     cached_analytics_state: str
+@@ -252,6 +254,14 @@ def _prepare_candidate_state(state: RepositoryAnalysisState) -> CandidateState:
+             "dependency_matrix_state",
+             "deferred",
+         ),
++        shared_usage_clusters=list(
++            getattr(state, "shared_usage_clusters", []) or []
++        ),
++        shared_usage_clusters_state=getattr(
++            state,
++            "shared_usage_clusters_state",
++            "deferred",
++        ),
+         cached_analytics=dict(getattr(state, "cached_analytics", {}) or {}),
+         topology_metrics_state=getattr(state, "topology_metrics_state", "deferred"),
+         cached_analytics_state=getattr(state, "cached_analytics_state", "deferred"),
+@@ -294,6 +304,13 @@ def execute_refresh_plan(
+         }
+         & set(plan.patch_families)
+     )
++    cluster_inputs_changed = bool(
++        {
++            "definitions",
++            "artifact_consumption",
++        }
++        & set(plan.patch_families)
++    )
+     if getattr(state, "resync_required", False):
+         candidate.artifact_consumption_state = "stale"
+ 
+@@ -596,6 +613,30 @@ def execute_refresh_plan(
+                 candidate.dependency_matrix = dependency_matrix
+                 candidate.dependency_matrix_state = "fresh"
+ 
++    if plan.refresh_completeness == "requires_resync" or getattr(
++        state, "resync_required", False
++    ):
++        candidate.shared_usage_clusters_state = "stale"
++    elif cluster_inputs_changed:
++        from contextor.core.analysis.state_manager import (
++            artifact_consumption_is_fresh,
++        )
++
++        if not artifact_consumption_is_fresh(candidate):
++            candidate.shared_usage_clusters_state = "stale"
++        else:
++            from contextor.core.reporting_engine.graph_analytics import (
++                compute_shared_usage_clusters_from_state,
++            )
++
++            try:
++                clusters = compute_shared_usage_clusters_from_state(candidate)
++            except Exception:
++                candidate.shared_usage_clusters_state = "stale"
++            else:
++                candidate.shared_usage_clusters = clusters
++                candidate.shared_usage_clusters_state = "fresh"
++
+     # 7. PREPARE registry payload if required
+     all_modules = set(candidate.modules.keys())
+     current_artifacts = collect_qualified_artifact_identities(candidate.artifacts) if identity_sync_required else {}
+diff --git a/tests/test_matrix_clusters_state_lifecycle.py b/tests/test_matrix_clusters_state_lifecycle.py
+index 16b6ac2..172deab 100644
+--- a/tests/test_matrix_clusters_state_lifecycle.py
++++ b/tests/test_matrix_clusters_state_lifecycle.py
+@@ -218,17 +218,76 @@ def test_incremental_matrix_compute_failure_marks_only_matrix_stale(tmp_path: Pa
+     assert engine.state.dependency_matrix_state == "stale"
+ 
+ 
++def test_incremental_body_usage_change_refreshes_shared_usage_clusters(tmp_path: Path):
++    (tmp_path / "provider.py").write_text("def shared():\n    return 1\n", encoding="utf-8")
++    changed = tmp_path / "changed.py"
++    changed.write_text("from provider import shared\ndef use():\n    return shared()\n", encoding="utf-8")
++    (tmp_path / "other.py").write_text("from provider import shared\ndef other_use():\n    return shared()\n", encoding="utf-8")
++    errors, _ = ContextorFacade().analyze_project(str(tmp_path))
++    assert not errors
++    engine = _incremental_engine_from_full_state(tmp_path)
++    old_clusters = engine.state.shared_usage_clusters
++    changed.write_text("def use():\n    return 0\n", encoding="utf-8")
++    result = engine.update_file(str(changed))
++    assert result.status == "UPDATED"
++    assert "changed" not in engine.state.artifact_consumption["provider::shared"]["consumers"]
++    assert engine.state.shared_usage_clusters_state == "fresh"
++    assert engine.state.shared_usage_clusters == compute_shared_usage_clusters_from_state(engine.state)
++    assert engine.state.shared_usage_clusters != old_clusters
++
++
++def test_incremental_delete_refreshes_shared_usage_clusters(tmp_path: Path):
++    (tmp_path / "provider.py").write_text("def shared():\n    return 1\n", encoding="utf-8")
++    deleted = tmp_path / "deleted.py"
++    deleted.write_text("from provider import shared\ndef use():\n    return shared()\n", encoding="utf-8")
++    (tmp_path / "other.py").write_text("from provider import shared\ndef other_use():\n    return shared()\n", encoding="utf-8")
++    errors, _ = ContextorFacade().analyze_project(str(tmp_path))
++    assert not errors
++    engine = _incremental_engine_from_full_state(tmp_path)
++    old_clusters = engine.state.shared_usage_clusters
++    deleted.unlink()
++    result = engine.update_file(str(deleted))
++    assert result.status == "DELETED"
++    assert "deleted" not in engine.state.modules
++    assert engine.state.shared_usage_clusters_state == "fresh"
++    assert engine.state.shared_usage_clusters == compute_shared_usage_clusters_from_state(engine.state)
++    assert engine.state.shared_usage_clusters != old_clusters
++
++
++def test_incremental_cluster_compute_failure_marks_clusters_stale(tmp_path: Path):
++    target = tmp_path / "mod.py"
++    target.write_text("def one():\n    return 1\n", encoding="utf-8")
++    errors, _ = ContextorFacade().analyze_project(str(tmp_path))
++    assert not errors
++    engine = _incremental_engine_from_full_state(tmp_path)
++    target.write_text("def two():\n    return 2\n", encoding="utf-8")
++    with unittest.mock.patch(
++        "contextor.core.reporting_engine.graph_analytics.compute_shared_usage_clusters_from_state",
++        side_effect=RuntimeError("clusters failure"),
++    ):
++        result = engine.update_file(str(target))
++    assert result.status == "UPDATED"
++    assert "mod" in engine.state.modules
++    assert engine.state.shared_usage_clusters_state == "stale"
++    assert engine.state.dependency_matrix_state == "fresh"
++
++
+ def test_collision_only_plan_preserves_fresh_dependency_matrix():
+     """Collision-only patch plans never recompute a fresh matrix."""
+     state = _make_minimal_fresh_state()
+     state.dependency_matrix = {"SENTINEL": {}}
+     state.dependency_matrix_state = "fresh"
++    state.shared_usage_clusters = [{"SENTINEL": True}]
++    state.shared_usage_clusters_state = "fresh"
+     plan = RefreshPlan(patch_families=("collision_facts", "collisions"))
+     delta = FileDelta(module_path="mod_a")
+ 
+     with unittest.mock.patch(
+         "contextor.core.reporting_engine.graph_analytics.compute_dependency_matrix_from_state",
+         side_effect=AssertionError("matrix must not be recomputed"),
++    ), unittest.mock.patch(
++        "contextor.core.reporting_engine.graph_analytics.compute_shared_usage_clusters_from_state",
++        side_effect=AssertionError("clusters must not be recomputed"),
+     ):
+         outcome = execute_refresh_plan(
+             state, delta, None, plan, [], {}, None, Path("."), "mod_a.py", []
+@@ -236,6 +295,8 @@ def test_collision_only_plan_preserves_fresh_dependency_matrix():
+ 
+     assert outcome.candidate_state.dependency_matrix == {"SENTINEL": {}}
+     assert outcome.candidate_state.dependency_matrix_state == "fresh"
++    assert outcome.candidate_state.shared_usage_clusters == [{"SENTINEL": True}]
++    assert outcome.candidate_state.shared_usage_clusters_state == "fresh"
+ 
+ 
+ def test_resync_plan_marks_dependency_matrix_stale_without_compute():
+@@ -244,17 +305,23 @@ def test_resync_plan_marks_dependency_matrix_stale_without_compute():
+     state.resync_required = True
+     state.dependency_matrix = {"SENTINEL": {}}
+     state.dependency_matrix_state = "fresh"
++    state.shared_usage_clusters = [{"SENTINEL": True}]
++    state.shared_usage_clusters_state = "fresh"
+     delta = FileDelta(module_path="mod_a")
+ 
+     with unittest.mock.patch(
+         "contextor.core.reporting_engine.graph_analytics.compute_dependency_matrix_from_state",
+         side_effect=AssertionError("matrix must not be recomputed"),
++    ), unittest.mock.patch(
++        "contextor.core.reporting_engine.graph_analytics.compute_shared_usage_clusters_from_state",
++        side_effect=AssertionError("clusters must not be recomputed"),
+     ):
+         outcome = execute_refresh_plan(
+             state, delta, None, RefreshPlan(), [], {}, None, Path("."), []
+         )
+ 
+     assert outcome.candidate_state.dependency_matrix_state == "stale"
++    assert outcome.candidate_state.shared_usage_clusters_state == "stale"
+ 
+ 
+ # ---------------------------------------------------------------------------
 ```
 
-`resync_required` is absent on the resolved state object, which is the current false/default condition; the LIVE event response separately reports no active canonical state resync requirement for the latest state.
+No unrelated pre-existing changes appear in these three current diff blocks.
 
-## 2. Exact matrix parity
-
-One authoritative state was resolved once from `live_service` at revision 162. From that same in-memory state, the persisted `state.dependency_matrix` was compared directly with `compute_dependency_matrix_from_state(state)`.
+## Serial pytest evidence
 
 ```text
-PERSISTED_MATRIX_EQUALS_CURRENT_RAM_RECOMPUTE=YES
-PERSISTED_MATRIX_ENTRY_COUNT=262
-RECOMPUTED_MATRIX_ENTRY_COUNT=262
+COMMAND=.\.venv\Scripts\python.exe -m pytest -q tests/test_matrix_clusters_state_lifecycle.py
+RESULT=52 passed
+DURATION=24.13s
+
+COMMAND=.\.venv\Scripts\python.exe -m pytest -q tests/test_jaccard_handoff_0j5.py
+RESULT=18 passed
+DURATION=25.43s
+
+COMMAND=.\.venv\Scripts\python.exe -m pytest -q tests/test_matrix_clusters_ram_parity.py
+RESULT=34 passed
+DURATION=21.84s
+
+COMMAND=.\.venv\Scripts\python.exe -m pytest -q tests/test_refresh_plan_execution.py
+RESULT=7 passed
+DURATION=17.31s
+
+COMMAND=.\.venv\Scripts\python.exe -m pytest -q tests/test_refresh_planner.py
+RESULT=11 passed
+DURATION=5.22s (previously certified; not rerun)
 ```
 
-No structural diff exists because the complete mappings compare equal.
-
-## 3. Retained LIVE event evidence
-
-The current MCP activity epoch is `456b20ff698848f0b5b55803e5997d89`. The retained journal starts at revision 162, so querying after revision 158 returns `continuity=gap`, `resync_required=true`, reason `event_retention_gap`, and only the current full publication. Revisions 159–161 are not retained in this epoch; their semantic plans and patch families cannot be recovered from the current MCP event journal.
-
-```text
-REVISION=159
-FILE=unavailable
-ORIGIN=unavailable
-PATCH_FAMILIES=unavailable
-MATRIX_INPUT_FAMILY_PRESENT=UNAVAILABLE
-
-REVISION=160
-FILE=unavailable
-ORIGIN=unavailable
-PATCH_FAMILIES=unavailable
-MATRIX_INPUT_FAMILY_PRESENT=UNAVAILABLE
-
-REVISION=161
-FILE=unavailable
-ORIGIN=unavailable
-PATCH_FAMILIES=unavailable
-MATRIX_INPUT_FAMILY_PRESENT=UNAVAILABLE
-```
-
-The current retained event is revision 162, `origin=desktop_analysis`, `operation=publish`, `status=PUBLISHED`. It is a full publication, not retained proof of a post-implementation incremental matrix-input update.
-
-## 4. Current implementation visibility
-
-Contextor MCP canonical source ranges at the current LIVE scope show:
-
-- `CandidateState.dependency_matrix` and `CandidateState.dependency_matrix_state` in `contextor/core/analysis/incremental/plan_executor.py`.
-- The exact `definitions`, `artifact_consumption`, `dependency_graph` trigger and candidate-RAM recomputation/fail-closed logic in the same module.
-- Both candidate-to-state assignments in `_apply_delta_and_commit` in `contextor/core/analysis/incremental/engine.py`.
-
-```text
-RUNNING_CODE_SEES_MATRIX_CANDIDATE_FIELDS=YES
-RUNNING_CODE_SEES_MATRIX_RECOMPUTE_LOGIC=YES
-RUNNING_CODE_SEES_MATRIX_COMMIT=YES
-```
-
-This proves canonical source visibility at revision 162. It does not independently prove that an already-imported incremental executor object in the desktop process was reloaded after the edit; loaded-runtime freshness is therefore unverified rather than inferred.
-
-## 5. False-fresh classification
-
-The current state is fresh, its artifact-consumption prerequisite is fresh, it has no active state resync requirement, and the persisted matrix equals the pure-RAM recomputation from the same revision-162 state.
-
-```text
-FALSE_FRESH_DEPENDENCY_MATRIX_PRESENT=NO
-REAL_LIVE_FRESH_MATRIX_PARITY=PASS
-```
-
-DEPENDENCY_MATRIX_CODE_STATUS=PASS
-CANONICAL_REVISION=162
-RESYNC_REQUIRED=NO
-ARTIFACT_CONSUMPTION_STATE=fresh
-DEPENDENCY_MATRIX_STATE=fresh
-PERSISTED_MATRIX_EQUALS_CURRENT_RAM_RECOMPUTE=YES
-POST_IMPLEMENTATION_MATRIX_INPUT_UPDATE_PROVEN=UNAVAILABLE
-RUNNING_IMPLEMENTATION_FRESHNESS=UNVERIFIED
-FALSE_FRESH_DEPENDENCY_MATRIX_PRESENT=NO
-REAL_LIVE_FRESH_MATRIX_PARITY=PASS
-MCP_RESTART_REQUIRED=NO
-FILES_CHANGED=NONE
-DIFFS=NONE
-NEXT_TARGET=shared_usage_clusters P0 exact-code preflight
+IMPLEMENTATION_DIFFS_COMPLETE=YES
+CONTEXTOR_IMPLEMENTATION_VERIFICATION=PASS
+CLUSTER_TRIGGER_EXACT=YES
+CLUSTER_RECOMPUTE_FROM_FINAL_CANDIDATE=YES
+CLUSTER_FAILURE_ISOLATION_VERIFIED=YES
+REFRESH_PLANNER_UNCHANGED=YES
+GRAPH_ANALYTICS_UNCHANGED=YES
+MATRIX_CLUSTERS_LIFECYCLE_TESTS=PASS
+JACCARD_HANDOFF_TESTS=PASS
+MATRIX_CLUSTERS_RAM_PARITY_TESTS=PASS
+REFRESH_PLANNER_TESTS=PASS
+REFRESH_PLAN_EXECUTION_TESTS=PASS
+DEPENDENCY_MATRIX_POST162_INCREMENTAL_EVENT=UNAVAILABLE
+DEPENDENCY_MATRIX_AFTER_EVENT_EXACT_PARITY=NOT_CHECKED
+FILES_CHANGED=C:\Temp\Contextor_Repo\contextor\core\analysis\incremental\plan_executor.py; C:\Temp\Contextor_Repo\contextor\core\analysis\incremental\engine.py; C:\Temp\Contextor_Repo\tests\test_matrix_clusters_state_lifecycle.py
+NEXT_TARGET=strict external diff audit

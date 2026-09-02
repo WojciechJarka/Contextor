@@ -218,17 +218,76 @@ def test_incremental_matrix_compute_failure_marks_only_matrix_stale(tmp_path: Pa
     assert engine.state.dependency_matrix_state == "stale"
 
 
+def test_incremental_body_usage_change_refreshes_shared_usage_clusters(tmp_path: Path):
+    (tmp_path / "provider.py").write_text("def shared():\n    return 1\n", encoding="utf-8")
+    changed = tmp_path / "changed.py"
+    changed.write_text("from provider import shared\ndef use():\n    return shared()\n", encoding="utf-8")
+    (tmp_path / "other.py").write_text("from provider import shared\ndef other_use():\n    return shared()\n", encoding="utf-8")
+    errors, _ = ContextorFacade().analyze_project(str(tmp_path))
+    assert not errors
+    engine = _incremental_engine_from_full_state(tmp_path)
+    old_clusters = engine.state.shared_usage_clusters
+    changed.write_text("def use():\n    return 0\n", encoding="utf-8")
+    result = engine.update_file(str(changed))
+    assert result.status == "UPDATED"
+    assert "changed" not in engine.state.artifact_consumption["provider::shared"]["consumers"]
+    assert engine.state.shared_usage_clusters_state == "fresh"
+    assert engine.state.shared_usage_clusters == compute_shared_usage_clusters_from_state(engine.state)
+    assert engine.state.shared_usage_clusters != old_clusters
+
+
+def test_incremental_delete_refreshes_shared_usage_clusters(tmp_path: Path):
+    (tmp_path / "provider.py").write_text("def shared():\n    return 1\n", encoding="utf-8")
+    deleted = tmp_path / "deleted.py"
+    deleted.write_text("from provider import shared\ndef use():\n    return shared()\n", encoding="utf-8")
+    (tmp_path / "other.py").write_text("from provider import shared\ndef other_use():\n    return shared()\n", encoding="utf-8")
+    errors, _ = ContextorFacade().analyze_project(str(tmp_path))
+    assert not errors
+    engine = _incremental_engine_from_full_state(tmp_path)
+    old_clusters = engine.state.shared_usage_clusters
+    deleted.unlink()
+    result = engine.update_file(str(deleted))
+    assert result.status == "DELETED"
+    assert "deleted" not in engine.state.modules
+    assert engine.state.shared_usage_clusters_state == "fresh"
+    assert engine.state.shared_usage_clusters == compute_shared_usage_clusters_from_state(engine.state)
+    assert engine.state.shared_usage_clusters != old_clusters
+
+
+def test_incremental_cluster_compute_failure_marks_clusters_stale(tmp_path: Path):
+    target = tmp_path / "mod.py"
+    target.write_text("def one():\n    return 1\n", encoding="utf-8")
+    errors, _ = ContextorFacade().analyze_project(str(tmp_path))
+    assert not errors
+    engine = _incremental_engine_from_full_state(tmp_path)
+    target.write_text("def two():\n    return 2\n", encoding="utf-8")
+    with unittest.mock.patch(
+        "contextor.core.reporting_engine.graph_analytics.compute_shared_usage_clusters_from_state",
+        side_effect=RuntimeError("clusters failure"),
+    ):
+        result = engine.update_file(str(target))
+    assert result.status == "UPDATED"
+    assert "mod" in engine.state.modules
+    assert engine.state.shared_usage_clusters_state == "stale"
+    assert engine.state.dependency_matrix_state == "fresh"
+
+
 def test_collision_only_plan_preserves_fresh_dependency_matrix():
     """Collision-only patch plans never recompute a fresh matrix."""
     state = _make_minimal_fresh_state()
     state.dependency_matrix = {"SENTINEL": {}}
     state.dependency_matrix_state = "fresh"
+    state.shared_usage_clusters = [{"SENTINEL": True}]
+    state.shared_usage_clusters_state = "fresh"
     plan = RefreshPlan(patch_families=("collision_facts", "collisions"))
     delta = FileDelta(module_path="mod_a")
 
     with unittest.mock.patch(
         "contextor.core.reporting_engine.graph_analytics.compute_dependency_matrix_from_state",
         side_effect=AssertionError("matrix must not be recomputed"),
+    ), unittest.mock.patch(
+        "contextor.core.reporting_engine.graph_analytics.compute_shared_usage_clusters_from_state",
+        side_effect=AssertionError("clusters must not be recomputed"),
     ):
         outcome = execute_refresh_plan(
             state, delta, None, plan, [], {}, None, Path("."), "mod_a.py", []
@@ -236,6 +295,8 @@ def test_collision_only_plan_preserves_fresh_dependency_matrix():
 
     assert outcome.candidate_state.dependency_matrix == {"SENTINEL": {}}
     assert outcome.candidate_state.dependency_matrix_state == "fresh"
+    assert outcome.candidate_state.shared_usage_clusters == [{"SENTINEL": True}]
+    assert outcome.candidate_state.shared_usage_clusters_state == "fresh"
 
 
 def test_resync_plan_marks_dependency_matrix_stale_without_compute():
@@ -244,17 +305,23 @@ def test_resync_plan_marks_dependency_matrix_stale_without_compute():
     state.resync_required = True
     state.dependency_matrix = {"SENTINEL": {}}
     state.dependency_matrix_state = "fresh"
+    state.shared_usage_clusters = [{"SENTINEL": True}]
+    state.shared_usage_clusters_state = "fresh"
     delta = FileDelta(module_path="mod_a")
 
     with unittest.mock.patch(
         "contextor.core.reporting_engine.graph_analytics.compute_dependency_matrix_from_state",
         side_effect=AssertionError("matrix must not be recomputed"),
+    ), unittest.mock.patch(
+        "contextor.core.reporting_engine.graph_analytics.compute_shared_usage_clusters_from_state",
+        side_effect=AssertionError("clusters must not be recomputed"),
     ):
         outcome = execute_refresh_plan(
             state, delta, None, RefreshPlan(), [], {}, None, Path("."), "mod_a.py", []
         )
 
     assert outcome.candidate_state.dependency_matrix_state == "stale"
+    assert outcome.candidate_state.shared_usage_clusters_state == "stale"
 
 
 # ---------------------------------------------------------------------------

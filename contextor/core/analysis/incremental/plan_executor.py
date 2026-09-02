@@ -49,6 +49,8 @@ class CandidateState:
     topology_analytics: Dict[str, Any]
     dependency_matrix: Dict[str, Any]
     dependency_matrix_state: str
+    shared_usage_clusters: list
+    shared_usage_clusters_state: str
     cached_analytics: Dict[str, Any]
     topology_metrics_state: str
     cached_analytics_state: str
@@ -252,6 +254,14 @@ def _prepare_candidate_state(state: RepositoryAnalysisState) -> CandidateState:
             "dependency_matrix_state",
             "deferred",
         ),
+        shared_usage_clusters=list(
+            getattr(state, "shared_usage_clusters", []) or []
+        ),
+        shared_usage_clusters_state=getattr(
+            state,
+            "shared_usage_clusters_state",
+            "deferred",
+        ),
         cached_analytics=dict(getattr(state, "cached_analytics", {}) or {}),
         topology_metrics_state=getattr(state, "topology_metrics_state", "deferred"),
         cached_analytics_state=getattr(state, "cached_analytics_state", "deferred"),
@@ -291,6 +301,13 @@ def execute_refresh_plan(
             "definitions",
             "artifact_consumption",
             "dependency_graph",
+        }
+        & set(plan.patch_families)
+    )
+    cluster_inputs_changed = bool(
+        {
+            "definitions",
+            "artifact_consumption",
         }
         & set(plan.patch_families)
     )
@@ -595,6 +612,30 @@ def execute_refresh_plan(
             else:
                 candidate.dependency_matrix = dependency_matrix
                 candidate.dependency_matrix_state = "fresh"
+
+    if plan.refresh_completeness == "requires_resync" or getattr(
+        state, "resync_required", False
+    ):
+        candidate.shared_usage_clusters_state = "stale"
+    elif cluster_inputs_changed:
+        from contextor.core.analysis.state_manager import (
+            artifact_consumption_is_fresh,
+        )
+
+        if not artifact_consumption_is_fresh(candidate):
+            candidate.shared_usage_clusters_state = "stale"
+        else:
+            from contextor.core.reporting_engine.graph_analytics import (
+                compute_shared_usage_clusters_from_state,
+            )
+
+            try:
+                clusters = compute_shared_usage_clusters_from_state(candidate)
+            except Exception:
+                candidate.shared_usage_clusters_state = "stale"
+            else:
+                candidate.shared_usage_clusters = clusters
+                candidate.shared_usage_clusters_state = "fresh"
 
     # 7. PREPARE registry payload if required
     all_modules = set(candidate.modules.keys())
