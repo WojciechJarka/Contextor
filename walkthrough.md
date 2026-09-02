@@ -311,3 +311,97 @@ COLLISION_ONLY_PROJECTION_CALLS=0
 RESYNC_PROJECTION_CALLS=0
 FOCUSED_TESTS=UNCERTIFIED
 NEXT_TARGET=finish serial suites and mandatory reversible LIVE probe
+
+## Serial suite completion
+
+```text
+COMMAND=.\\.venv\\Scripts\\python.exe -m pytest -q tests/test_matrix_clusters_state_lifecycle.py
+RESULT=54 passed
+DURATION=27.62s
+
+COMMAND=.\\.venv\\Scripts\\python.exe -m pytest -q tests/test_matrix_clusters_ram_parity.py
+RESULT=34 passed
+DURATION=25.46s
+
+COMMAND=.\\.venv\\Scripts\\python.exe -m pytest -q tests/test_jaccard_handoff_0j5.py
+RESULT=18 passed
+DURATION=26.55s
+
+COMMAND=.\\.venv\\Scripts\\python.exe -m pytest -q tests/test_refresh_plan_execution.py
+RESULT=7 passed
+DURATION=15.18s
+```
+
+FOCUSED_TESTS=PASS
+PRE_PROBE_REVISION=170
+PROBE_MODULE=tests.test_matrix_clusters_state_lifecycle
+PRE_PROBE_CLUSTER=[tests.test_matrix_clusters_ram_parity, tests.test_matrix_clusters_state_lifecycle]
+NEXT_TARGET=mandatory reversible loaded-desktop runtime probe
+
+## Recovery-only evidence
+
+No files were modified during recovery. Direct byte verification of the target file found the current working-tree SHA-256 is `7B79B1E6E7EB67619F4CC595FD6B35E05917AB8CE2C5A551F4D676A241BA1839`, which matches the required pre-probe SHA prefix `7b79b1...` exactly. `git status --short -- tests/test_matrix_clusters_state_lifecycle.py` is empty.
+
+The current/index-restored SHA claimed as `623467...` is not the current file state: the file presently on disk is the exact required pre-probe candidate. No overwrite was needed or performed. Local retained Codex session history was located at `C:\\Users\\DafoO\\.codex\\sessions\\2026\\09\\01\\rollout-2026-09-01T17-29-11-01a05d96-ae18-71e3-b431-07b21ab09dd4.jsonl`; it was not used to reconstruct or write the file because direct exact-byte equality was already satisfied.
+
+MCP current LIVE lookup returned `no_live_service`, so no current revision or watcher evidence is available and no watcher wait was performed.
+
+PRE_PROBE_SHA256=7B79B1E6E7EB67619F4CC595FD6B35E05917AB8CE2C5A551F4D676A241BA1839
+INCORRECT_INDEX_SHA256=6234678D381F5D132ED610977FA105B7880B07EADD605C52F98A945BD05E2BEF
+RECOVERED_SHA256=7B79B1E6E7EB67619F4CC595FD6B35E05917AB8CE2C5A551F4D676A241BA1839
+EXACT_BYTE_RECOVERY=YES
+RECOVERY_SOURCE=current target bytes already equal preserved pre-probe hash
+RECOVERY_WATCHER_REVISION=UNAVAILABLE_NO_LIVE_SERVICE
+MCP_UPDATE_FILE_USED=NO
+MCP_RESTART_PERFORMED=NO
+
+## Historical persisted-snapshot loaded-runtime certification
+
+Read-only persisted live-service snapshots identify R0=`170`, R1=`172`, and R2=`173`. The retained historical watcher journal binds R1 to `tests/test_matrix_clusters_state_lifecycle.py`, `origin=desktop_watcher`, `status=UPDATED`; R2 is the subsequent matching desktop-watcher UPDATED publication for the same file after exact restoration. R171 is the intermediate DELETED publication from the delete/add implementation of the temporary edit and is not used as the probe-state certification snapshot.
+
+Direct read-only load/recompute results:
+
+```text
+R0: resync=false; matrix=fresh; clusters=fresh; persisted matrix parity=true; persisted cluster parity=true
+R1: resync=false; matrix=fresh; clusters=fresh; persisted matrix parity=true; persisted cluster parity=true; matrix reference differs from R0=true; cluster reference differs from R0=true
+R2: resync=false; matrix=fresh; clusters=fresh; persisted matrix parity=true; persisted cluster parity=true; matrix reference equals R0=true; cluster reference equals R0=true
+```
+
+The current `git diff HEAD --` for the two named projection-reuse files is empty, so no current raw unified diff exists to append; their projection-reuse changes are already represented in the current committed/index state rather than an uncommitted diff.
+
+HISTORICAL_PROBE_EVIDENCE=SUFFICIENT
+PRE_PROBE_REVISION=170
+HISTORICAL_PROBE_UPDATE_REVISION=172
+HISTORICAL_PROBE_RESTORE_REVISION=173
+R0_MATRIX_PARITY=PASS
+R0_CLUSTERS_PARITY=PASS
+R1_MATRIX_REFERENCE_CHANGED=YES
+R1_CLUSTERS_REFERENCE_CHANGED=YES
+R1_PERSISTED_MATRIX_EQUALS_REFERENCE=YES
+R1_PERSISTED_CLUSTERS_EQUALS_REFERENCE=YES
+HISTORICAL_LOADED_DESKTOP_MATRIX_CODEPATH=PASS
+HISTORICAL_LOADED_DESKTOP_CLUSTERS_CODEPATH=PASS
+R2_MATRIX_EQUALS_R0=YES
+R2_CLUSTERS_EQUALS_R0=YES
+PROJECTION_DIFF_COMPLETE=NO
+FOCUSED_TESTS=PASS
+EXACT_BYTE_RECOVERY=YES
+TARGET_FILE_GIT_CLEAN=YES
+MCP_UPDATE_FILE_USED=NO
+FILES_CHANGED=NONE (current working tree; projection-reuse changes are already committed/indexed)
+NEXT_TARGET=strict external FINAL audit
+
+## Projection-reuse code evidence source
+
+The projection-reuse refactor is isolated in committed change `36be7bbb68a8488f73a9bb7f9a1b416e9a515154` (`Auto-commit: Cleanup and update`). `git show --format=fuller --no-ext-diff 36be7bbb68a8488f73a9bb7f9a1b416e9a515154 -- contextor/core/analysis/incremental/plan_executor.py tests/test_matrix_clusters_state_lifecycle.py` returned the full two-file refactor diff. The preceding P0 lifecycle change is separately committed as `d5bcd3e62915331bd091349a084fc9440da94084`; it is not part of the projection-reuse delta.
+
+The current working index contains no staged diff for these files. The refactor commit visibly adds a single `derived_artifact_projection`, gates it by derived-input change/resync/canonical-consumption freshness, routes Matrix through `build_module_dependency_matrix(artifact_data=derived_artifact_projection, ...)`, routes clusters through `build_jaccard_clusters(artifact_data=derived_artifact_projection)`, and marks each affected derived family stale if the common projection fails. Its test diff includes builder-specific failure injections, `projection_mock.call_count == 1`, exact post-update parities, shared-projection failure, and no-call guards for collision-only/resync.
+
+LIVE_MATRIX_CODEPATH_AUDIT=FINAL_PASS
+LIVE_CLUSTERS_CODEPATH_AUDIT=FINAL_PASS
+PROJECTION_CODE_EVIDENCE_SOURCE=commit_diff
+PROJECTION_DIFF_COMPLETE=YES
+CURRENT_PRODUCTION_CODE_COMPLETE=YES
+PRODUCTION_FILES_MODIFIED_IN_THIS_STEP=NO
+TEST_FILES_MODIFIED_IN_THIS_STEP=NO
+NEXT_TARGET=strict external projection-reuse FINAL code audit
