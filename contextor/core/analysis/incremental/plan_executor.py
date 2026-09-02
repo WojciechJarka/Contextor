@@ -47,6 +47,8 @@ class CandidateState:
     package_root: Any
     metrics: Any
     topology_analytics: Dict[str, Any]
+    dependency_matrix: Dict[str, Any]
+    dependency_matrix_state: str
     cached_analytics: Dict[str, Any]
     topology_metrics_state: str
     cached_analytics_state: str
@@ -242,6 +244,14 @@ def _prepare_candidate_state(state: RepositoryAnalysisState) -> CandidateState:
         package_root=state.package_root,
         metrics=state.metrics,
         topology_analytics=dict(getattr(state, "topology_analytics", {}) or {}),
+        dependency_matrix=dict(
+            getattr(state, "dependency_matrix", {}) or {}
+        ),
+        dependency_matrix_state=getattr(
+            state,
+            "dependency_matrix_state",
+            "deferred",
+        ),
         cached_analytics=dict(getattr(state, "cached_analytics", {}) or {}),
         topology_metrics_state=getattr(state, "topology_metrics_state", "deferred"),
         cached_analytics_state=getattr(state, "cached_analytics_state", "deferred"),
@@ -276,6 +286,14 @@ def execute_refresh_plan(
 
     # 1. PREPARE candidate state
     candidate = _prepare_candidate_state(state)
+    matrix_inputs_changed = bool(
+        {
+            "definitions",
+            "artifact_consumption",
+            "dependency_graph",
+        }
+        & set(plan.patch_families)
+    )
     if getattr(state, "resync_required", False):
         candidate.artifact_consumption_state = "stale"
 
@@ -553,6 +571,30 @@ def execute_refresh_plan(
             candidate.cached_analytics_state = "fresh"
         if "cycles" in plan.graph_recomputations:
             candidate.cycles_state = "fresh"
+
+    if plan.refresh_completeness == "requires_resync" or getattr(
+        state, "resync_required", False
+    ):
+        candidate.dependency_matrix_state = "stale"
+    elif matrix_inputs_changed:
+        from contextor.core.analysis.state_manager import (
+            dependency_matrix_inputs_are_fresh,
+        )
+
+        if not dependency_matrix_inputs_are_fresh(candidate):
+            candidate.dependency_matrix_state = "stale"
+        else:
+            from contextor.core.reporting_engine.graph_analytics import (
+                compute_dependency_matrix_from_state,
+            )
+
+            try:
+                dependency_matrix = compute_dependency_matrix_from_state(candidate)
+            except Exception:
+                candidate.dependency_matrix_state = "stale"
+            else:
+                candidate.dependency_matrix = dependency_matrix
+                candidate.dependency_matrix_state = "fresh"
 
     # 7. PREPARE registry payload if required
     all_modules = set(candidate.modules.keys())

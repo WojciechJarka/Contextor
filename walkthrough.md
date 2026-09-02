@@ -1,86 +1,94 @@
-# Canonical ModuleUsageFacts lifecycle hardening — Stage 3 real reseed certification
+# dependency_matrix P0 real LIVE certification
 
-Read-only certification after the user-owned fresh full Analyze Repository.
+## 1. Runtime/state freshness
 
-## A. Real canonical baseline
+Contextor MCP reports the authoritative LIVE revision as `162` (`latest_revision=162`). Its current event journal epoch began at revision 162 and reports a successful desktop full-analysis publication. A same-revision authoritative hydration resolved from `live_service` at revision 162.
 
-CANONICAL_REVISION=158
-CANONICAL_STATE=fresh
-MODULE_COUNT=325
-MODULE_USAGE_COUNT=325
-MISSING_MODULE_USAGE_MODULES=NONE
-EXTRA_MODULE_USAGE_MODULES=NONE
-SYMBOL_CALLS_MATERIALIZED_TRUE=325
-SYMBOL_CALLS_MATERIALIZED_FALSE=0
-REFERENCE_EVIDENCE_MATERIALIZED_TRUE=325
-REFERENCE_EVIDENCE_MATERIALIZED_FALSE=0
+```text
+CANONICAL_REVISION=162
+CANONICAL_STATE=LIVE_AUTHORITATIVE
+WORKSPACE_SYNC=LIVE_SERVICE
+RESYNC_REQUIRED=false
+ARTIFACT_CONSUMPTION_STATE=fresh
+DEPENDENCY_MATRIX_STATE=fresh
+```
 
-The hydrated authoritative state satisfies `set(state.module_usages) == set(state.modules)`. All 325 current slices have both materialization flags true.
+`resync_required` is absent on the resolved state object, which is the current false/default condition; the LIVE event response separately reports no active canonical state resync requirement for the latest state.
 
-## B. Persistence/hydration proof
+## 2. Exact matrix parity
 
-A normal authoritative hydration of revision 158 returned the complete 325-slice mapping. `module_usages_require_materialization(state)` returned `False`. No `ensure_module_usages` call was made.
+One authoritative state was resolved once from `live_service` at revision 162. From that same in-memory state, the persisted `state.dependency_matrix` was compared directly with `compute_dependency_matrix_from_state(state)`.
 
-MODULE_USAGES_REQUIRE_MATERIALIZATION_AFTER_FULL_SEED=NO
-HYDRATION_LEGACY_USAGE_BACKFILL_REQUIRED=NO
+```text
+PERSISTED_MATRIX_EQUALS_CURRENT_RAM_RECOMPUTE=YES
+PERSISTED_MATRIX_ENTRY_COUNT=262
+RECOMPUTED_MATRIX_ENTRY_COUNT=262
+```
 
-## C. Canonical reference projection
+No structural diff exists because the complete mappings compare equal.
 
-Real seeded state projection selected `contextor.__main__::main`, which has current confirmed consumers. `build_symbol_references_from_canonical` completed with canonical data; the result contains `called_by=["main"]`, source detail line 27, and `imported_from=["main"]`.
+## 3. Retained LIVE event evidence
 
-The direct projector has no reference-index invocation, source read, or AST parse path; it consumed the already loaded canonical artifacts and module usages.
+The current MCP activity epoch is `456b20ff698848f0b5b55803e5997d89`. The retained journal starts at revision 162, so querying after revision 158 returns `continuity=gap`, `resync_required=true`, reason `event_retention_gap`, and only the current full publication. Revisions 159–161 are not retained in this epoch; their semantic plans and patch families cannot be recovered from the current MCP event journal.
 
-CANONICAL_REFERENCE_PROJECTION=PASS
-REFERENCE_INDEX_FALLBACK_REQUIRED=NO
-SOURCE_READ_REQUIRED_FOR_PROJECTION=NO
-AST_PARSE_REQUIRED_FOR_PROJECTION=NO
+```text
+REVISION=159
+FILE=unavailable
+ORIGIN=unavailable
+PATCH_FAMILIES=unavailable
+MATRIX_INPUT_FAMILY_PRESENT=UNAVAILABLE
 
-## D. Symbol-call canonical consumer
+REVISION=160
+FILE=unavailable
+ORIGIN=unavailable
+PATCH_FAMILIES=unavailable
+MATRIX_INPUT_FAMILY_PRESENT=UNAVAILABLE
 
-Symbol: `contextor.core.reporting_engine.graph_analytics::generate_graph_analytics_report`.
+REVISION=161
+FILE=unavailable
+ORIGIN=unavailable
+PATCH_FAMILIES=unavailable
+MATRIX_INPUT_FAMILY_PRESENT=UNAVAILABLE
+```
 
-`get_symbol_call_context(direction="callees", depth=1, max_items=10)` returned `status="ok"`, 16 total intra-module edges (10 returned due to requested bound), and `data_source="live_canonical_module_usages_symbol_calls"`. The state envelope reported `canonical_revision=158`, `canonical_state="fresh"`, and `workspace_sync="verified"`. No unmaterialized-state error occurred.
+The current retained event is revision 162, `origin=desktop_analysis`, `operation=publish`, `status=PUBLISHED`. It is a full publication, not retained proof of a post-implementation incremental matrix-input update.
 
-## E. LIVE publication
+## 4. Current implementation visibility
 
-The LIVE service was reachable. Its current authoritative revision is 158. The retained journal includes desktop full-analysis publishes:
-- revision 157, `desktop_analysis`, status `PUBLISHED`;
-- revision 158, `desktop_analysis`, status `PUBLISHED`.
+Contextor MCP canonical source ranges at the current LIVE scope show:
 
-The authoritative revision matches the latest full-analysis publication.
+- `CandidateState.dependency_matrix` and `CandidateState.dependency_matrix_state` in `contextor/core/analysis/incremental/plan_executor.py`.
+- The exact `definitions`, `artifact_consumption`, `dependency_graph` trigger and candidate-RAM recomputation/fail-closed logic in the same module.
+- Both candidate-to-state assignments in `_apply_delta_and_commit` in `contextor/core/analysis/incremental/engine.py`.
 
-LIVE_SERVICE_REACHABLE=YES
-FULL_ANALYSIS_PUBLICATION_EVENT_PRESENT=YES
-FULL_ANALYSIS_PUBLICATION_REVISION=158
-AUTHORITATIVE_REVISION_MATCHES_PUBLICATION=YES
+```text
+RUNNING_CODE_SEES_MATRIX_CANDIDATE_FIELDS=YES
+RUNNING_CODE_SEES_MATRIX_RECOMPUTE_LOGIC=YES
+RUNNING_CODE_SEES_MATRIX_COMMIT=YES
+```
 
-## F. Parse-cost diagnostic
+This proves canonical source visibility at revision 162. It does not independently prove that an already-imported incremental executor object in the desktop process was reloaded after the edit; loaded-runtime freshness is therefore unverified rather than inferred.
 
-The completed full-analysis event/snapshot does not retain instrumentation distinguishing a warm `Module.ast_tree` cache hit from a cache miss that called `parse_source`. The Stage 2 helper itself passes `module.ast_tree` and does not call `ast.parse`, but retrospective evidence cannot prove how the property was populated during the completed run.
+## 5. False-fresh classification
 
-BASELINE_ADDITIONAL_AST_PARSE_COUNT=UNKNOWN
-FUTURE_CONTROLLED_INSTRUMENTED_FULL_ANALYSIS_REQUIRED=YES
+The current state is fresh, its artifact-consumption prerequisite is fresh, it has no active state resync requirement, and the persisted matrix equals the pure-RAM recomputation from the same revision-162 state.
 
-This uncertainty does not affect lifecycle correctness.
+```text
+FALSE_FRESH_DEPENDENCY_MATRIX_PRESENT=NO
+REAL_LIVE_FRESH_MATRIX_PARITY=PASS
+```
 
-STAGE2_CODE_STATUS=PASS
-REAL_FULL_SEED_CERTIFIED=YES
-MODULE_COUNT=325
-MODULE_USAGE_COUNT=325
-FULL_USAGE_DOMAIN_MATCH=YES
-ALL_SYMBOL_CALLS_MATERIALIZED=YES
-ALL_REFERENCE_EVIDENCE_MATERIALIZED=YES
-HYDRATION_LEGACY_USAGE_BACKFILL_REQUIRED=NO
-CANONICAL_REFERENCE_PROJECTION=PASS
-REFERENCE_INDEX_FALLBACK_REQUIRED=NO
-GET_SYMBOL_CALL_CONTEXT_CANONICAL=PASS
-LIVE_SERVICE_REACHABLE=YES
-FULL_ANALYSIS_PUBLICATION_EVENT_PRESENT=YES
-BASELINE_ADDITIONAL_AST_PARSE_COUNT=UNKNOWN
+DEPENDENCY_MATRIX_CODE_STATUS=PASS
+CANONICAL_REVISION=162
+RESYNC_REQUIRED=NO
+ARTIFACT_CONSUMPTION_STATE=fresh
+DEPENDENCY_MATRIX_STATE=fresh
+PERSISTED_MATRIX_EQUALS_CURRENT_RAM_RECOMPUTE=YES
+POST_IMPLEMENTATION_MATRIX_INPUT_UPDATE_PROVEN=UNAVAILABLE
+RUNNING_IMPLEMENTATION_FRESHNESS=UNVERIFIED
+FALSE_FRESH_DEPENDENCY_MATRIX_PRESENT=NO
+REAL_LIVE_FRESH_MATRIX_PARITY=PASS
 MCP_RESTART_REQUIRED=NO
 FILES_CHANGED=NONE
 DIFFS=NONE
-NEXT_TARGET=residual canonical LIVE completeness audit
-
-Wait for proceduj.
-
+NEXT_TARGET=shared_usage_clusters P0 exact-code preflight

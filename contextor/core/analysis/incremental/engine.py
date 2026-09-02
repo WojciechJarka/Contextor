@@ -384,6 +384,8 @@ class IncrementalAnalysisEngine:
         self.state.metrics = candidate.metrics
         self.state.topology_analytics = candidate.topology_analytics
         self.state.cached_analytics = candidate.cached_analytics
+        self.state.dependency_matrix = candidate.dependency_matrix
+        self.state.dependency_matrix_state = candidate.dependency_matrix_state
         self.state.topology_metrics_state = candidate.topology_metrics_state
         self.state.cached_analytics_state = candidate.cached_analytics_state
         self.state.cycles = candidate.cycles

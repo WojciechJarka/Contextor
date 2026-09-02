@@ -44,7 +44,11 @@ from contextor.core.analysis.incremental.materialization import (
     ensure_shared_usage_clusters,
     materialize_incremental_state,
 )
+from contextor.core.analysis.incremental.engine import IncrementalAnalysisEngine
+from contextor.core.analysis.incremental.plan_executor import execute_refresh_plan
 from contextor.core.analysis.state_manager import (
+    FileDelta,
+    FileStateManager,
     RepositoryAnalysisState,
     artifact_consumption_is_fresh,
     dependency_matrix_inputs_are_fresh,
@@ -52,8 +56,10 @@ from contextor.core.analysis.state_manager import (
 )
 from contextor.core.api.facade import ContextorFacade
 from contextor.core.domain.graph import ProjectGraph
+from contextor.core.domain.refresh_plan import RefreshPlan
 from contextor.core.live_state import hydrate_repository_engine
 from contextor.core.live_state.store import load_snapshot, save_snapshot
+from contextor.core.reporting_engine.persistent_registry import PersistentIdentityRegistry
 from contextor.core.reporting_engine.graph_analytics import (
     compute_dependency_matrix_from_state,
     compute_shared_usage_clusters_from_state,
@@ -132,6 +138,123 @@ def test_full_analysis_seeds_both_families_fresh(tmp_path: Path):
     assert st.shared_usage_clusters_state == "fresh"
     assert isinstance(st.dependency_matrix, dict)
     assert isinstance(st.shared_usage_clusters, list)
+
+
+def _incremental_engine_from_full_state(tmp_path: Path) -> IncrementalAnalysisEngine:
+    hydrated = hydrate_repository_engine(tmp_path)
+    assert hydrated is not None
+    cache_dir = tmp_path / "incremental-cache"
+    cache_dir.mkdir()
+    return IncrementalAnalysisEngine(
+        hydrated.engine.state,
+        PersistentIdentityRegistry(str(tmp_path)),
+        FileStateManager(str(cache_dir)),
+        str(tmp_path),
+    )
+
+
+def test_incremental_body_usage_change_refreshes_dependency_matrix(tmp_path: Path):
+    """A body-only call removal recomputes the matrix from candidate RAM state."""
+    (tmp_path / "mod_a.py").write_text("def foo():\n    return 1\n", encoding="utf-8")
+    target = tmp_path / "mod_b.py"
+    target.write_text(
+        "import mod_a\n\ndef bar():\n    return mod_a.foo()\n",
+        encoding="utf-8",
+    )
+    errors, _ = ContextorFacade().analyze_project(str(tmp_path))
+    assert not errors
+    engine = _incremental_engine_from_full_state(tmp_path)
+    old_matrix = engine.state.dependency_matrix
+
+    target.write_text("import mod_a\n\ndef bar():\n    return 0\n", encoding="utf-8")
+    result = engine.update_file(str(target))
+
+    assert result.status == "UPDATED"
+    assert engine.state.artifact_consumption["mod_a::foo"]["consumers"] == []
+    assert engine.state.dependency_matrix_state == "fresh"
+    assert engine.state.dependency_matrix == compute_dependency_matrix_from_state(engine.state)
+    assert engine.state.dependency_matrix != old_matrix
+
+
+def test_incremental_import_graph_change_refreshes_dependency_matrix(tmp_path: Path):
+    """An import change refreshes graph inputs and the canonical matrix together."""
+    (tmp_path / "mod_a.py").write_text("def foo():\n    return 1\n", encoding="utf-8")
+    target = tmp_path / "mod_b.py"
+    target.write_text("def bar():\n    return 0\n", encoding="utf-8")
+    errors, _ = ContextorFacade().analyze_project(str(tmp_path))
+    assert not errors
+    engine = _incremental_engine_from_full_state(tmp_path)
+
+    target.write_text(
+        "from mod_a import foo\n\ndef bar():\n    return foo()\n",
+        encoding="utf-8",
+    )
+    result = engine.update_file(str(target))
+
+    assert result.status == "UPDATED"
+    assert "mod_a" in engine.state.dependency_graph.hard_edges.get("mod_b", set())
+    assert engine.state.dependency_matrix_state == "fresh"
+    assert engine.state.dependency_matrix == compute_dependency_matrix_from_state(engine.state)
+
+
+def test_incremental_matrix_compute_failure_marks_only_matrix_stale(tmp_path: Path):
+    """A matrix failure is fail-closed without rolling back the committed delta."""
+    (tmp_path / "mod_a.py").write_text("def foo():\n    return 1\n", encoding="utf-8")
+    target = tmp_path / "mod_b.py"
+    target.write_text("def bar():\n    return 0\n", encoding="utf-8")
+    errors, _ = ContextorFacade().analyze_project(str(tmp_path))
+    assert not errors
+    engine = _incremental_engine_from_full_state(tmp_path)
+    target.write_text("def baz():\n    return 2\n", encoding="utf-8")
+
+    with unittest.mock.patch(
+        "contextor.core.reporting_engine.graph_analytics.compute_dependency_matrix_from_state",
+        side_effect=RuntimeError("matrix failure"),
+    ):
+        result = engine.update_file(str(target))
+
+    assert result.status == "UPDATED"
+    assert engine.state.modules["mod_b"].ast_tree is not None
+    assert engine.state.dependency_matrix_state == "stale"
+
+
+def test_collision_only_plan_preserves_fresh_dependency_matrix():
+    """Collision-only patch plans never recompute a fresh matrix."""
+    state = _make_minimal_fresh_state()
+    state.dependency_matrix = {"SENTINEL": {}}
+    state.dependency_matrix_state = "fresh"
+    plan = RefreshPlan(patch_families=("collision_facts", "collisions"))
+    delta = FileDelta(module_path="mod_a")
+
+    with unittest.mock.patch(
+        "contextor.core.reporting_engine.graph_analytics.compute_dependency_matrix_from_state",
+        side_effect=AssertionError("matrix must not be recomputed"),
+    ):
+        outcome = execute_refresh_plan(
+            state, delta, None, plan, [], {}, None, Path("."), "mod_a.py", []
+        )
+
+    assert outcome.candidate_state.dependency_matrix == {"SENTINEL": {}}
+    assert outcome.candidate_state.dependency_matrix_state == "fresh"
+
+
+def test_resync_plan_marks_dependency_matrix_stale_without_compute():
+    """Resync is fail-closed even when no matrix input family was patched."""
+    state = _make_minimal_fresh_state()
+    state.resync_required = True
+    state.dependency_matrix = {"SENTINEL": {}}
+    state.dependency_matrix_state = "fresh"
+    delta = FileDelta(module_path="mod_a")
+
+    with unittest.mock.patch(
+        "contextor.core.reporting_engine.graph_analytics.compute_dependency_matrix_from_state",
+        side_effect=AssertionError("matrix must not be recomputed"),
+    ):
+        outcome = execute_refresh_plan(
+            state, delta, None, RefreshPlan(), [], {}, None, Path("."), "mod_a.py", []
+        )
+
+    assert outcome.candidate_state.dependency_matrix_state == "stale"
 
 
 # ---------------------------------------------------------------------------
