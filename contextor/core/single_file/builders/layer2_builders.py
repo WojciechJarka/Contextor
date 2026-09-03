@@ -8,7 +8,18 @@ class TestContextBuilder:
     
     def build(self, payload: ContextPayload, state: BuildState) -> dict[str, Any]:
         from contextor.core.analysis.test_context import build_test_context
+        from contextor.core.analysis.state_manager import module_current_truth
+
         public_api = state["public_api"]
+        reusable_modules = {}
+        engine_state = payload.engine_state
+        if getattr(engine_state, "modules", None) is payload.modules:
+            for module_id, module in payload.modules.items():
+                if (
+                    getattr(module, "ast_tree", None) is not None
+                    and module_current_truth(engine_state, module_id).get("available")
+                ):
+                    reusable_modules[module_id] = module
         return {
             "test_context": build_test_context(
                 payload.module_id,
@@ -17,6 +28,7 @@ class TestContextBuilder:
                 allowed_python_paths=[
                     module.path for module in payload.modules.values()
                 ],
+                modules=reusable_modules,
             )
         }
 

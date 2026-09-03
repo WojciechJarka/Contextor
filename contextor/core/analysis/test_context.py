@@ -521,6 +521,7 @@ def build_test_context(
     test_dirs: dict | None = None,
     allowed_python_paths: list[str] | None = None,
     test_index: TestContextIndex | None = None,
+    modules: dict[str, Any] | None = None,
 ) -> dict:
     """
     Link: discovery + symbol matching.
@@ -548,6 +549,9 @@ def build_test_context(
         )
 
     index = TestContextIndex.build(
-        root_path, test_dirs=test_dirs, allowed_python_paths=allowed_python_paths
+        root_path,
+        test_dirs=test_dirs,
+        modules=modules,
+        allowed_python_paths=allowed_python_paths,
     )
     return index.build_test_context(module_id, public_symbols or [])

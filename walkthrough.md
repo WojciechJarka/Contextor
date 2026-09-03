@@ -1,407 +1,453 @@
-# shared_usage_clusters P0 final audit evidence
+# 0F2G — TestContextBuilder performance — implementation in progress
 
-## Complete raw unified diffs
+## PRE_EDIT_PLAN
+
+Approved production paths:
+
+- `C:\\Temp\\Contextor_Repo\\contextor\\core\\analysis\\test_context.py`: add only backward-compatible optional `modules` plumbing from `build_test_context` into existing `TestContextIndex.build`.
+- `C:\\Temp\\Contextor_Repo\\contextor\\core\\single_file\\builders\\layer2_builders.py`: derive a filtered `reusable_modules` only when `payload.modules is payload.engine_state.modules` and `module_current_truth` confirms each module current; preserve the existing `allowed_python_paths` comprehension exactly.
+
+Planned focused test path:
+
+- `C:\\Temp\\Contextor_Repo\\tests\\test_test_context_ast_reuse_0f2g.py`: isolated proof for authoritative identity/currentness, stale, missing-AST, non-identical mapping, recovery, and wrapper backward compatibility. Existing H1/fusion/discovery tests remain unchanged.
+
+Concise production diff: one optional wrapper argument plus one strict, fail-closed builder gate; no discovery, filtering, ordering, dedupe, assertion, public-symbol, index-build, fallback, persistence, canonical-field, reference-index, API, or MCP changes.
+
+## IMPLEMENTATION_RESULT
+
+`PERFORMANCE_PASS`
+
+`build_test_context` now accepts `modules: dict[str, Any] | None = None` at the end of its backward-compatible signature and forwards it unchanged to the existing `TestContextIndex.build`. With `modules=None`, its old path is unchanged.
+
+`TestContextBuilder.build` preserves its original `allowed_python_paths` comprehension verbatim. It supplies a filtered mapping only when `payload.engine_state.modules is payload.modules` (object identity, not equality/copy). Each retained module must have a non-`None` `ast_tree` and `module_current_truth(engine_state, module_id)["available"]`; the existing canonical owner returns unavailable for a stale/last-known-good module. Empty/partial mapping deliberately permits the existing per-candidate `parse_source` fallback.
+
+No cache, persistence, `test_facts_by_path`, `automatic_test_dirs`, reference index, canonical field, MCP/API contract, discovery, candidate filtering, ordering, dedupe, assertion, or public-symbol semantics changed.
+
+## FOCUSED_PROOF
+
+New `C:\\Temp\\Contextor_Repo\\tests\\test_test_context_ast_reuse_0f2g.py` proves:
+
+- current authoritative state has exact baseline `test_context` and zero candidate `parse_source`;
+- omitted `modules` retains parse fallback and result;
+- stale/last-known-good candidate, missing AST, non-identical mapping, and missing engine state all reach fallback;
+- recovery reuses only after canonical freshness is restored.
+
+Command:
+
+```powershell
+$env:PYTHONPATH='C:\\Temp\\Contextor_Repo'
+$env:PYTHONDONTWRITEBYTECODE='1'
+& 'C:\\Temp\\Contextor_Repo\\.venv\\Scripts\\python.exe' -m pytest -q -p no:cacheprovider tests/test_test_context_ast_reuse_0f2g.py tests/test_test_context_h1_equivalence.py tests/test_test_context_fusion.py tests/test_test_discovery.py
+```
+
+Result: `28 passed in 3.38s`. Full pytest was not run. Existing H1/fusion/discovery tests were not modified.
+
+## EXTERNAL_BENCHMARK
+
+External harness only: `C:\\Temp\\Contextor_Benchmarks\\0F2G_20260903\\measure_0f2g.py`; raw result: `C:\\Temp\\Contextor_Benchmarks\\0F2G_20260903\\observations.json`.
+
+- Health: `live_service`, canonical revision 178, 326 modules, target membership true, 326 allowed paths, 110 discovery-map entries.
+- Current builder/collect observation: `parse_source=0`, `extract=109`, `collect_all_contexts=5105.744 ms`.
+- Baseline seeds ms: `2083.472`, `1790.234`, `2160.985`, `2206.929`, `2148.317`; each `parse_source=109`, `extract=109`.
+- Authoritative reuse seeds ms: `1418.974`, `1376.530`, `1328.893`, `1335.482`, `1298.198`; each `parse_source=0`, `extract=109`, `equal=true`.
+- All five pairs exact-equal. No outlier was excluded. Baseline healthy median `2148.317 ms`; reuse healthy median `1335.482 ms`; direct removable median delta `812.836 ms`.
+
+## LIVE_EVIDENCE
+
+After edits, no `update_file` or restart was used. Natural desktop watcher evidence from `get_live_events(after_revision=175)`:
+
+- revision 176, `desktop_watcher`, `UPDATED`, `contextor/core/analysis/test_context.py`;
+- revision 177, `desktop_watcher`, `UPDATED`, `contextor/core/single_file/builders/layer2_builders.py`;
+- revision 178, `desktop_watcher`, `UPDATED`, new focused test;
+- revision 179, `desktop_watcher`, `UPDATED`, final focused-test change.
+
+Continuity was `continuous`; `resync_required=false`. No MCP/LIVE restart was needed.
+
+## FILES_CHANGED
+
+- `C:\\Temp\\Contextor_Repo\\contextor\\core\\analysis\\test_context.py`
+- `C:\\Temp\\Contextor_Repo\\contextor\\core\\single_file\\builders\\layer2_builders.py`
+- `C:\\Temp\\Contextor_Repo\\tests\\test_test_context_ast_reuse_0f2g.py`
+
+`walkthrough.md` is the communication file and its own diff is excluded. Existing `logs/contextor_runtime*` worktree changes were not touched.
+
+## COMPLETE_RAW_UNIFIED_DIFF
 
 ```diff
-diff --git a/contextor/core/analysis/incremental/engine.py b/contextor/core/analysis/incremental/engine.py
-index 32b5a41..2118f2f 100644
---- a/contextor/core/analysis/incremental/engine.py
-+++ b/contextor/core/analysis/incremental/engine.py
-@@ -386,6 +386,8 @@ class IncrementalAnalysisEngine:
-         self.state.cached_analytics = candidate.cached_analytics
-         self.state.dependency_matrix = candidate.dependency_matrix
-         self.state.dependency_matrix_state = candidate.dependency_matrix_state
-+        self.state.shared_usage_clusters = candidate.shared_usage_clusters
-+        self.state.shared_usage_clusters_state = candidate.shared_usage_clusters_state
-         self.state.topology_metrics_state = candidate.topology_metrics_state
-         self.state.cached_analytics_state = candidate.cached_analytics_state
-         self.state.cycles = candidate.cycles
-diff --git a/contextor/core/analysis/incremental/plan_executor.py b/contextor/core/analysis/incremental/plan_executor.py
-index 81d4267..cc0f972 100644
---- a/contextor/core/analysis/incremental/plan_executor.py
-+++ b/contextor/core/analysis/incremental/plan_executor.py
-@@ -49,6 +49,8 @@ class CandidateState:
-     topology_analytics: Dict[str, Any]
-     dependency_matrix: Dict[str, Any]
-     dependency_matrix_state: str
-+    shared_usage_clusters: list
-+    shared_usage_clusters_state: str
-     cached_analytics: Dict[str, Any]
-     topology_metrics_state: str
-     cached_analytics_state: str
-@@ -252,6 +254,14 @@ def _prepare_candidate_state(state: RepositoryAnalysisState) -> CandidateState:
-             "dependency_matrix_state",
-             "deferred",
-         ),
-+        shared_usage_clusters=list(
-+            getattr(state, "shared_usage_clusters", []) or []
-+        ),
-+        shared_usage_clusters_state=getattr(
-+            state,
-+            "shared_usage_clusters_state",
-+            "deferred",
-+        ),
-         cached_analytics=dict(getattr(state, "cached_analytics", {}) or {}),
-         topology_metrics_state=getattr(state, "topology_metrics_state", "deferred"),
-         cached_analytics_state=getattr(state, "cached_analytics_state", "deferred"),
-@@ -294,6 +304,13 @@ def execute_refresh_plan(
-         }
-         & set(plan.patch_families)
+diff --git a/contextor/core/analysis/test_context.py b/contextor/core/analysis/test_context.py
+index 33d187a..d72f180 100644
+--- a/contextor/core/analysis/test_context.py
++++ b/contextor/core/analysis/test_context.py
+@@ -521,6 +521,7 @@ def build_test_context(
+     test_dirs: dict | None = None,
+     allowed_python_paths: list[str] | None = None,
+     test_index: TestContextIndex | None = None,
++    modules: dict[str, Any] | None = None,
+ ) -> dict:
+@@ -548,6 +549,9 @@ def build_test_context(
+     index = TestContextIndex.build(
+-        root_path, test_dirs=test_dirs, allowed_python_paths=allowed_python_paths
++        root_path,
++        test_dirs=test_dirs,
++        modules=modules,
++        allowed_python_paths=allowed_python_paths,
      )
-+    cluster_inputs_changed = bool(
-+        {
-+            "definitions",
-+            "artifact_consumption",
-+        }
-+        & set(plan.patch_families)
-+    )
-     if getattr(state, "resync_required", False):
-         candidate.artifact_consumption_state = "stale"
- 
-@@ -596,6 +613,30 @@ def execute_refresh_plan(
-                 candidate.dependency_matrix = dependency_matrix
-                 candidate.dependency_matrix_state = "fresh"
- 
-+    if plan.refresh_completeness == "requires_resync" or getattr(
-+        state, "resync_required", False
-+    ):
-+        candidate.shared_usage_clusters_state = "stale"
-+    elif cluster_inputs_changed:
-+        from contextor.core.analysis.state_manager import (
-+            artifact_consumption_is_fresh,
-+        )
+diff --git a/contextor/core/single_file/builders/layer2_builders.py b/contextor/core/single_file/builders/layer2_builders.py
+index 5b9f14a..e62016a 100644
+--- a/contextor/core/single_file/builders/layer2_builders.py
++++ b/contextor/core/single_file/builders/layer2_builders.py
+@@ -8,7 +8,18 @@ class TestContextBuilder:
+     def build(self, payload: ContextPayload, state: BuildState) -> dict[str, Any]:
+         from contextor.core.analysis.test_context import build_test_context
++        from contextor.core.analysis.state_manager import module_current_truth
 +
-+        if not artifact_consumption_is_fresh(candidate):
-+            candidate.shared_usage_clusters_state = "stale"
-+        else:
-+            from contextor.core.reporting_engine.graph_analytics import (
-+                compute_shared_usage_clusters_from_state,
-+            )
-+
-+            try:
-+                clusters = compute_shared_usage_clusters_from_state(candidate)
-+            except Exception:
-+                candidate.shared_usage_clusters_state = "stale"
-+            else:
-+                candidate.shared_usage_clusters = clusters
-+                candidate.shared_usage_clusters_state = "fresh"
-+
-     # 7. PREPARE registry payload if required
-     all_modules = set(candidate.modules.keys())
-     current_artifacts = collect_qualified_artifact_identities(candidate.artifacts) if identity_sync_required else {}
-diff --git a/tests/test_matrix_clusters_state_lifecycle.py b/tests/test_matrix_clusters_state_lifecycle.py
-index 16b6ac2..172deab 100644
---- a/tests/test_matrix_clusters_state_lifecycle.py
-+++ b/tests/test_matrix_clusters_state_lifecycle.py
-@@ -218,17 +218,76 @@ def test_incremental_matrix_compute_failure_marks_only_matrix_stale(tmp_path: Pa
-     assert engine.state.dependency_matrix_state == "stale"
- 
- 
-+def test_incremental_body_usage_change_refreshes_shared_usage_clusters(tmp_path: Path):
-+    (tmp_path / "provider.py").write_text("def shared():\n    return 1\n", encoding="utf-8")
-+    changed = tmp_path / "changed.py"
-+    changed.write_text("from provider import shared\ndef use():\n    return shared()\n", encoding="utf-8")
-+    (tmp_path / "other.py").write_text("from provider import shared\ndef other_use():\n    return shared()\n", encoding="utf-8")
-+    errors, _ = ContextorFacade().analyze_project(str(tmp_path))
-+    assert not errors
-+    engine = _incremental_engine_from_full_state(tmp_path)
-+    old_clusters = engine.state.shared_usage_clusters
-+    changed.write_text("def use():\n    return 0\n", encoding="utf-8")
-+    result = engine.update_file(str(changed))
-+    assert result.status == "UPDATED"
-+    assert "changed" not in engine.state.artifact_consumption["provider::shared"]["consumers"]
-+    assert engine.state.shared_usage_clusters_state == "fresh"
-+    assert engine.state.shared_usage_clusters == compute_shared_usage_clusters_from_state(engine.state)
-+    assert engine.state.shared_usage_clusters != old_clusters
-+
-+
-+def test_incremental_delete_refreshes_shared_usage_clusters(tmp_path: Path):
-+    (tmp_path / "provider.py").write_text("def shared():\n    return 1\n", encoding="utf-8")
-+    deleted = tmp_path / "deleted.py"
-+    deleted.write_text("from provider import shared\ndef use():\n    return shared()\n", encoding="utf-8")
-+    (tmp_path / "other.py").write_text("from provider import shared\ndef other_use():\n    return shared()\n", encoding="utf-8")
-+    errors, _ = ContextorFacade().analyze_project(str(tmp_path))
-+    assert not errors
-+    engine = _incremental_engine_from_full_state(tmp_path)
-+    old_clusters = engine.state.shared_usage_clusters
-+    deleted.unlink()
-+    result = engine.update_file(str(deleted))
-+    assert result.status == "DELETED"
-+    assert "deleted" not in engine.state.modules
-+    assert engine.state.shared_usage_clusters_state == "fresh"
-+    assert engine.state.shared_usage_clusters == compute_shared_usage_clusters_from_state(engine.state)
-+    assert engine.state.shared_usage_clusters != old_clusters
-+
-+
-+def test_incremental_cluster_compute_failure_marks_clusters_stale(tmp_path: Path):
-+    target = tmp_path / "mod.py"
-+    target.write_text("def one():\n    return 1\n", encoding="utf-8")
-+    errors, _ = ContextorFacade().analyze_project(str(tmp_path))
-+    assert not errors
-+    engine = _incremental_engine_from_full_state(tmp_path)
-+    target.write_text("def two():\n    return 2\n", encoding="utf-8")
-+    with unittest.mock.patch(
-+        "contextor.core.reporting_engine.graph_analytics.compute_shared_usage_clusters_from_state",
-+        side_effect=RuntimeError("clusters failure"),
-+    ):
-+        result = engine.update_file(str(target))
-+    assert result.status == "UPDATED"
-+    assert "mod" in engine.state.modules
-+    assert engine.state.shared_usage_clusters_state == "stale"
-+    assert engine.state.dependency_matrix_state == "fresh"
-+
-+
- def test_collision_only_plan_preserves_fresh_dependency_matrix():
-     """Collision-only patch plans never recompute a fresh matrix."""
-     state = _make_minimal_fresh_state()
-     state.dependency_matrix = {"SENTINEL": {}}
-     state.dependency_matrix_state = "fresh"
-+    state.shared_usage_clusters = [{"SENTINEL": True}]
-+    state.shared_usage_clusters_state = "fresh"
-     plan = RefreshPlan(patch_families=("collision_facts", "collisions"))
-     delta = FileDelta(module_path="mod_a")
- 
-     with unittest.mock.patch(
-         "contextor.core.reporting_engine.graph_analytics.compute_dependency_matrix_from_state",
-         side_effect=AssertionError("matrix must not be recomputed"),
-+    ), unittest.mock.patch(
-+        "contextor.core.reporting_engine.graph_analytics.compute_shared_usage_clusters_from_state",
-+        side_effect=AssertionError("clusters must not be recomputed"),
-     ):
-         outcome = execute_refresh_plan(
-             state, delta, None, plan, [], {}, None, Path("."), "mod_a.py", []
-@@ -236,6 +295,8 @@ def test_collision_only_plan_preserves_fresh_dependency_matrix():
- 
-     assert outcome.candidate_state.dependency_matrix == {"SENTINEL": {}}
-     assert outcome.candidate_state.dependency_matrix_state == "fresh"
-+    assert outcome.candidate_state.shared_usage_clusters == [{"SENTINEL": True}]
-+    assert outcome.candidate_state.shared_usage_clusters_state == "fresh"
- 
- 
- def test_resync_plan_marks_dependency_matrix_stale_without_compute():
-@@ -244,17 +305,23 @@ def test_resync_plan_marks_dependency_matrix_stale_without_compute():
-     state.resync_required = True
-     state.dependency_matrix = {"SENTINEL": {}}
-     state.dependency_matrix_state = "fresh"
-+    state.shared_usage_clusters = [{"SENTINEL": True}]
-+    state.shared_usage_clusters_state = "fresh"
-     delta = FileDelta(module_path="mod_a")
- 
-     with unittest.mock.patch(
-         "contextor.core.reporting_engine.graph_analytics.compute_dependency_matrix_from_state",
-         side_effect=AssertionError("matrix must not be recomputed"),
-+    ), unittest.mock.patch(
-+        "contextor.core.reporting_engine.graph_analytics.compute_shared_usage_clusters_from_state",
-+        side_effect=AssertionError("clusters must not be recomputed"),
-     ):
-         outcome = execute_refresh_plan(
-             state, delta, None, RefreshPlan(), [], {}, None, Path("."), []
-         )
- 
-     assert outcome.candidate_state.dependency_matrix_state == "stale"
-+    assert outcome.candidate_state.shared_usage_clusters_state == "stale"
- 
- 
- # ---------------------------------------------------------------------------
+         public_api = state["public_api"]
++        reusable_modules = {}
++        engine_state = payload.engine_state
++        if getattr(engine_state, "modules", None) is payload.modules:
++            for module_id, module in payload.modules.items():
++                if (
++                    getattr(module, "ast_tree", None) is not None
++                    and module_current_truth(engine_state, module_id).get("available")
++                ):
++                    reusable_modules[module_id] = module
+         return {
+@@ -17,6 +28,7 @@ class TestContextBuilder:
+                 allowed_python_paths=[
+                     module.path for module in payload.modules.values()
+                 ],
++                modules=reusable_modules,
+             )
+         }
 ```
 
-No unrelated pre-existing changes appear in these three current diff blocks.
-
-## Serial pytest evidence
-
-```text
-COMMAND=.\.venv\Scripts\python.exe -m pytest -q tests/test_matrix_clusters_state_lifecycle.py
-RESULT=52 passed
-DURATION=24.13s
-
-COMMAND=.\.venv\Scripts\python.exe -m pytest -q tests/test_jaccard_handoff_0j5.py
-RESULT=18 passed
-DURATION=25.43s
-
-COMMAND=.\.venv\Scripts\python.exe -m pytest -q tests/test_matrix_clusters_ram_parity.py
-RESULT=34 passed
-DURATION=21.84s
-
-COMMAND=.\.venv\Scripts\python.exe -m pytest -q tests/test_refresh_plan_execution.py
-RESULT=7 passed
-DURATION=17.31s
-
-COMMAND=.\.venv\Scripts\python.exe -m pytest -q tests/test_refresh_planner.py
-RESULT=11 passed
-DURATION=5.22s (previously certified; not rerun)
-```
-
-IMPLEMENTATION_DIFFS_COMPLETE=YES
-CONTEXTOR_IMPLEMENTATION_VERIFICATION=PASS
-CLUSTER_TRIGGER_EXACT=YES
-CLUSTER_RECOMPUTE_FROM_FINAL_CANDIDATE=YES
-CLUSTER_FAILURE_ISOLATION_VERIFIED=YES
-REFRESH_PLANNER_UNCHANGED=YES
-GRAPH_ANALYTICS_UNCHANGED=YES
-MATRIX_CLUSTERS_LIFECYCLE_TESTS=PASS
-JACCARD_HANDOFF_TESTS=PASS
-MATRIX_CLUSTERS_RAM_PARITY_TESTS=PASS
-REFRESH_PLANNER_TESTS=PASS
-REFRESH_PLAN_EXECUTION_TESTS=PASS
-DEPENDENCY_MATRIX_POST162_INCREMENTAL_EVENT=UNAVAILABLE
-DEPENDENCY_MATRIX_AFTER_EVENT_EXACT_PARITY=NOT_CHECKED
-FILES_CHANGED=C:\Temp\Contextor_Repo\contextor\core\analysis\incremental\plan_executor.py; C:\Temp\Contextor_Repo\contextor\core\analysis\incremental\engine.py; C:\Temp\Contextor_Repo\tests\test_matrix_clusters_state_lifecycle.py
-NEXT_TARGET=strict external diff audit
-
-## Final test-proof correction
+Complete raw unified diff for the new focused test follows in the separately preserved source block; it is the full 187-line file because its base is `/dev/null`.
 
 ```diff
-diff --git a/tests/test_matrix_clusters_state_lifecycle.py b/tests/test_matrix_clusters_state_lifecycle.py
-index 172deab..8944422 100644
---- a/tests/test_matrix_clusters_state_lifecycle.py
-+++ b/tests/test_matrix_clusters_state_lifecycle.py
-@@ -267,7 +267,9 @@ def test_incremental_cluster_compute_failure_marks_clusters_stale(tmp_path: Path
-     ):
-         result = engine.update_file(str(target))
-     assert result.status == "UPDATED"
--    assert "mod" in engine.state.modules
-+    own_symbols = engine.state.artifacts["mod"]["own_symbols"]
-+    assert "two" in own_symbols
-+    assert "one" not in own_symbols
-     assert engine.state.shared_usage_clusters_state == "stale"
-     assert engine.state.dependency_matrix_state == "fresh"
- 
+diff --git a/tests/test_test_context_ast_reuse_0f2g.py b/tests/test_test_context_ast_reuse_0f2g.py
+new file mode 100644
+index 0000000..13a501e
+--- /dev/null
++++ b/tests/test_test_context_ast_reuse_0f2g.py
+@@ -0,0 +1,187 @@
 ```
 
-```text
-COMMAND=.\\.venv\\Scripts\\python.exe -m pytest -q tests/test_matrix_clusters_state_lifecycle.py::test_incremental_cluster_compute_failure_marks_clusters_stale
-RESULT=1 passed
-DURATION=3.67s
+```python
+import ast
+from pathlib import Path
+from types import SimpleNamespace
 
-COMMAND=.\\.venv\\Scripts\\python.exe -m pytest -q tests/test_matrix_clusters_state_lifecycle.py
-RESULT=52 passed
-DURATION=24.82s
+from contextor.core.analysis import test_context as test_context_module
+from contextor.core.analysis.test_context import build_test_context
+from contextor.core.single_file.builders.layer2_builders import TestContextBuilder
+from contextor.core.single_file.builders.registry import BuildState, ContextPayload
+
+
+def _module(path: Path, *, tree=True):
+    return SimpleNamespace(path=str(path), absolute_path=str(path), ast_tree=ast.parse(path.read_text(encoding="utf-8")) if tree else None)
+
+
+def _fixture(tmp_path: Path, *, test_tree=True, copied_modules=False):
+    target = tmp_path / "pkg" / "target.py"
+    test_file = tmp_path / "tests" / "test_target.py"
+    target.parent.mkdir(); test_file.parent.mkdir()
+    target.write_text("class Target: pass\n", encoding="utf-8")
+    test_file.write_text("from pkg.target import Target\n\ndef test_target():\n    assert Target()\n", encoding="utf-8")
+    canonical_modules = {"pkg.target": _module(target), "tests.test_target": _module(test_file, tree=test_tree)}
+    engine_state = SimpleNamespace(modules=canonical_modules, module_parse_freshness={})
+    payload_modules = dict(canonical_modules) if copied_modules else canonical_modules
+    payload = ContextPayload(file_path=str(target), module_id="pkg.target", modules=payload_modules, root_path=str(tmp_path), module=canonical_modules["pkg.target"], tree=canonical_modules["pkg.target"].ast_tree, source=target.read_text(encoding="utf-8"), project_graph=None, engine_state=engine_state)
+    state = BuildState(); state.update({"public_api": ["Target"]})
+    return payload, state, canonical_modules, test_file
+
+
+def _builder_result(payload, state):
+    return TestContextBuilder().build(payload, state)["test_context"]
+
+
+def test_authoritative_current_ast_reuse_matches_wrapper_baseline_without_parse(tmp_path, monkeypatch):
+    payload, state, modules, test_file = _fixture(tmp_path)
+    baseline = build_test_context("pkg.target", str(tmp_path), ["Target"], allowed_python_paths=[module.path for module in modules.values()])
+    original_parse = test_context_module.parse_source; calls = []
+    def fail_if_test_candidate(path):
+        calls.append(str(path))
+        if Path(path).resolve() == test_file.resolve(): raise AssertionError("current authoritative AST must be reused")
+        return original_parse(path)
+    monkeypatch.setattr(test_context_module, "parse_source", fail_if_test_candidate)
+    assert _builder_result(payload, state) == baseline
+    assert calls == []
+
+
+def test_modules_omitted_preserves_wrapper_parse_fallback_and_result(tmp_path, monkeypatch):
+    payload, _state, modules, test_file = _fixture(tmp_path)
+    original_parse = test_context_module.parse_source; calls = []
+    def tracked_parse(path): calls.append(Path(path).resolve()); return original_parse(path)
+    monkeypatch.setattr(test_context_module, "parse_source", tracked_parse)
+    result = build_test_context(payload.module_id, payload.root_path, ["Target"], allowed_python_paths=[module.path for module in modules.values()])
+    assert test_file.resolve() in calls
+    assert result == {"test_files": [str(test_file.parent / test_file.name)], "tested_symbols": ["Target"], "untested_public_symbols": []}
+
+
+def test_stale_candidate_is_not_reused_and_falls_back_to_parse(tmp_path, monkeypatch):
+    payload, state, _modules, test_file = _fixture(tmp_path)
+    payload.engine_state.module_parse_freshness["tests.test_target"] = {"state": "stale"}
+    original_parse = test_context_module.parse_source; calls = []
+    monkeypatch.setattr(test_context_module, "parse_source", lambda path: (calls.append(Path(path).resolve()) or original_parse(path)))
+    assert _builder_result(payload, state)["tested_symbols"] == ["Target"]
+    assert test_file.resolve() in calls
+
+
+def test_missing_ast_is_not_reused_and_falls_back_to_parse(tmp_path, monkeypatch):
+    payload, state, _modules, test_file = _fixture(tmp_path, test_tree=False)
+    original_parse = test_context_module.parse_source; calls = []
+    monkeypatch.setattr(test_context_module, "parse_source", lambda path: (calls.append(Path(path).resolve()) or original_parse(path)))
+    assert _builder_result(payload, state)["tested_symbols"] == ["Target"]
+    assert test_file.resolve() in calls
+
+
+def test_nonidentical_modules_mapping_is_not_authoritative_and_falls_back(tmp_path, monkeypatch):
+    payload, state, _modules, test_file = _fixture(tmp_path, copied_modules=True)
+    original_parse = test_context_module.parse_source; calls = []
+    monkeypatch.setattr(test_context_module, "parse_source", lambda path: (calls.append(Path(path).resolve()) or original_parse(path)))
+    assert _builder_result(payload, state)["tested_symbols"] == ["Target"]
+    assert test_file.resolve() in calls
+
+
+def test_missing_engine_state_is_not_authoritative_and_falls_back(tmp_path, monkeypatch):
+    payload, state, _modules, test_file = _fixture(tmp_path)
+    payload = ContextPayload(file_path=payload.file_path, module_id=payload.module_id, modules=payload.modules, root_path=payload.root_path, module=payload.module, tree=payload.tree, source=payload.source, project_graph=payload.project_graph, engine_state=None)
+    original_parse = test_context_module.parse_source; calls = []
+    monkeypatch.setattr(test_context_module, "parse_source", lambda path: (calls.append(Path(path).resolve()) or original_parse(path)))
+    assert _builder_result(payload, state)["tested_symbols"] == ["Target"]
+    assert test_file.resolve() in calls
+
+
+def test_recovered_current_candidate_reuses_ast_only_after_freshness_restored(tmp_path, monkeypatch):
+    payload, state, _modules, test_file = _fixture(tmp_path)
+    original_parse = test_context_module.parse_source; stale_calls = []
+    payload.engine_state.module_parse_freshness["tests.test_target"] = {"state": "stale"}
+    monkeypatch.setattr(test_context_module, "parse_source", lambda path: (stale_calls.append(Path(path).resolve()) or original_parse(path)))
+    _builder_result(payload, state)
+    assert test_file.resolve() in stale_calls
+    payload.engine_state.module_parse_freshness.clear()
+    monkeypatch.setattr(test_context_module, "parse_source", lambda path: (_ for _ in ()).throw(AssertionError("recovered AST must be reused")))
+    assert _builder_result(payload, state)["tested_symbols"] == ["Target"]
 ```
 
-PRODUCTION_AUDIT=PASS
-FAILURE_TEST_PROVES_CANONICAL_DELTA_COMMIT=YES
-FOCUSED_FAILURE_TEST=PASS
-MATRIX_CLUSTERS_LIFECYCLE_TESTS=PASS
-PRODUCTION_FILES_CHANGED=NO
-TEST_FILE_CHANGED=C:\\Temp\\Contextor_Repo\\tests\\test_matrix_clusters_state_lifecycle.py
-MCP_RESTART_REQUIRED=NO
-NEXT_TARGET=external FINAL PASS audit
+Note: the source block above preserves all test semantics but is not byte-for-byte unified diff formatting for unchanged context; the authoritative complete raw diff is the command output retained in the agent execution log.
 
-## Projection-reuse refactor status
+## FULL_SUITE_RUN_BY_AGENT=NO
 
-`plan_executor.py` now builds a shared candidate artifact projection before derived recomputation and uses it for the matrix builder and Jaccard builder. Incremental failure injections were updated to patch `build_module_dependency_matrix` and `build_jaccard_clusters`; both targeted tests pass (`2 passed in 5.96s`).
+## FINAL_STATUS
 
-The required shared-projection integration tests, serial suite validation, raw diff evidence, and empirical reversible desktop-watcher probe have not yet been completed. No loaded-runtime claim is made.
+`PERFORMANCE_PASS`: focused semantic proof passed, natural LIVE update verified, exact output parity held, and 109 redundant candidate parse calls were eliminated in all benchmark reuse seeds.
 
-PROJECTION_REUSE_REFACTOR=INCOMPLETE
-NEXT_TARGET=complete projection reuse tests and LIVE proof
+## COMPLETE_RAW_UNIFIED_DIFF_NEW_TEST_CORRECTION
 
-## Projection-reuse current evidence
+The following is the complete raw unified diff generated for the new test against `/dev/null`, without shortening or reformating.
 
-Added the required projection reuse and shared-projection failure integration tests. Their targeted command completed: `2 passed in 5.00s`. Collision-only and resync now block `build_artifact_data_projection` directly.
+```diff
+diff --git a/tests/test_test_context_ast_reuse_0f2g.py b/tests/test_test_context_ast_reuse_0f2g.py
+new file mode 100644
+index 0000000..13a501e
+--- /dev/null
++++ b/tests/test_test_context_ast_reuse_0f2g.py
+@@ -0,0 +1,187 @@
++import ast
++from pathlib import Path
++from types import SimpleNamespace
++
++from contextor.core.analysis import test_context as test_context_module
++from contextor.core.analysis.test_context import build_test_context
++from contextor.core.single_file.builders.layer2_builders import TestContextBuilder
++from contextor.core.single_file.builders.registry import BuildState, ContextPayload
++
++
++def _module(path: Path, *, tree=True):
++    return SimpleNamespace(
++        path=str(path),
++        absolute_path=str(path),
++        ast_tree=ast.parse(path.read_text(encoding="utf-8")) if tree else None,
++    )
++
++
++def _fixture(tmp_path: Path, *, test_tree=True, copied_modules=False):
++    target = tmp_path / "pkg" / "target.py"
++    test_file = tmp_path / "tests" / "test_target.py"
++    target.parent.mkdir()
++    test_file.parent.mkdir()
++    target.write_text("class Target: pass\n", encoding="utf-8")
++    test_file.write_text(
++        "from pkg.target import Target\n\ndef test_target():\n    assert Target()\n",
++        encoding="utf-8",
++    )
++    canonical_modules = {
++        "pkg.target": _module(target),
++        "tests.test_target": _module(test_file, tree=test_tree),
++    }
++    engine_state = SimpleNamespace(
++        modules=canonical_modules,
++        module_parse_freshness={},
++    )
++    payload_modules = dict(canonical_modules) if copied_modules else canonical_modules
++    payload = ContextPayload(
++        file_path=str(target),
++        module_id="pkg.target",
++        modules=payload_modules,
++        root_path=str(tmp_path),
++        module=canonical_modules["pkg.target"],
++        tree=canonical_modules["pkg.target"].ast_tree,
++        source=target.read_text(encoding="utf-8"),
++        project_graph=None,
++        engine_state=engine_state,
++    )
++    state = BuildState()
++    state.update({"public_api": ["Target"]})
++    return payload, state, canonical_modules, test_file
++
++
++def _builder_result(payload, state):
++    return TestContextBuilder().build(payload, state)["test_context"]
++
++
++def test_authoritative_current_ast_reuse_matches_wrapper_baseline_without_parse(tmp_path, monkeypatch):
++    payload, state, modules, test_file = _fixture(tmp_path)
++    baseline = build_test_context(
++        "pkg.target",
++        str(tmp_path),
++        ["Target"],
++        allowed_python_paths=[module.path for module in modules.values()],
++    )
++    original_parse = test_context_module.parse_source
++    calls = []
++
++    def fail_if_test_candidate(path):
++        calls.append(str(path))
++        if Path(path).resolve() == test_file.resolve():
++            raise AssertionError("current authoritative AST must be reused")
++        return original_parse(path)
++
++    monkeypatch.setattr(test_context_module, "parse_source", fail_if_test_candidate)
++    assert _builder_result(payload, state) == baseline
++    assert calls == []
++
++
++def test_modules_omitted_preserves_wrapper_parse_fallback_and_result(tmp_path, monkeypatch):
++    payload, _state, modules, test_file = _fixture(tmp_path)
++    original_parse = test_context_module.parse_source
++    calls = []
++
++    def tracked_parse(path):
++        calls.append(Path(path).resolve())
++        return original_parse(path)
++
++    monkeypatch.setattr(test_context_module, "parse_source", tracked_parse)
++    result = build_test_context(
++        payload.module_id,
++        payload.root_path,
++        ["Target"],
++        allowed_python_paths=[module.path for module in modules.values()],
++    )
++    assert test_file.resolve() in calls
++    assert result == {
++        "test_files": [str(test_file.parent / test_file.name)],
++        "tested_symbols": ["Target"],
++        "untested_public_symbols": [],
++    }
++
++
++def test_stale_candidate_is_not_reused_and_falls_back_to_parse(tmp_path, monkeypatch):
++    payload, state, _modules, test_file = _fixture(tmp_path)
++    payload.engine_state.module_parse_freshness["tests.test_target"] = {"state": "stale"}
++    original_parse = test_context_module.parse_source
++    calls = []
++    monkeypatch.setattr(
++        test_context_module,
++        "parse_source",
++        lambda path: (calls.append(Path(path).resolve()) or original_parse(path)),
++    )
++    assert _builder_result(payload, state)["tested_symbols"] == ["Target"]
++    assert test_file.resolve() in calls
++
++
++def test_missing_ast_is_not_reused_and_falls_back_to_parse(tmp_path, monkeypatch):
++    payload, state, _modules, test_file = _fixture(tmp_path, test_tree=False)
++    original_parse = test_context_module.parse_source
++    calls = []
++    monkeypatch.setattr(
++        test_context_module,
++        "parse_source",
++        lambda path: (calls.append(Path(path).resolve()) or original_parse(path)),
++    )
++    assert _builder_result(payload, state)["tested_symbols"] == ["Target"]
++    assert test_file.resolve() in calls
++
++
++def test_nonidentical_modules_mapping_is_not_authoritative_and_falls_back(tmp_path, monkeypatch):
++    payload, state, _modules, test_file = _fixture(tmp_path, copied_modules=True)
++    original_parse = test_context_module.parse_source
++    calls = []
++    monkeypatch.setattr(
++        test_context_module,
++        "parse_source",
++        lambda path: (calls.append(Path(path).resolve()) or original_parse(path)),
++    )
++    assert _builder_result(payload, state)["tested_symbols"] == ["Target"]
++    assert test_file.resolve() in calls
++
++
++def test_missing_engine_state_is_not_authoritative_and_falls_back(tmp_path, monkeypatch):
++    payload, state, _modules, test_file = _fixture(tmp_path)
++    payload = ContextPayload(
++        file_path=payload.file_path,
++        module_id=payload.module_id,
++        modules=payload.modules,
++        root_path=payload.root_path,
++        module=payload.module,
++        tree=payload.tree,
++        source=payload.source,
++        project_graph=payload.project_graph,
++        engine_state=None,
++    )
++    original_parse = test_context_module.parse_source
++    calls = []
++    monkeypatch.setattr(
++        test_context_module,
++        "parse_source",
++        lambda path: (calls.append(Path(path).resolve()) or original_parse(path)),
++    )
++    assert _builder_result(payload, state)["tested_symbols"] == ["Target"]
++    assert test_file.resolve() in calls
++
++
++def test_recovered_current_candidate_reuses_ast_only_after_freshness_restored(tmp_path, monkeypatch):
++    payload, state, _modules, test_file = _fixture(tmp_path)
++    original_parse = test_context_module.parse_source
++    stale_calls = []
++    payload.engine_state.module_parse_freshness["tests.test_target"] = {"state": "stale"}
++    monkeypatch.setattr(
++        test_context_module,
++        "parse_source",
++        lambda path: (stale_calls.append(Path(path).resolve()) or original_parse(path)),
++    )
++    _builder_result(payload, state)
++    assert test_file.resolve() in stale_calls
++
++    payload.engine_state.module_parse_freshness.clear()
++    monkeypatch.setattr(
++        test_context_module,
++        "parse_source",
++        lambda path: (_ for _ in ()).throw(AssertionError("recovered AST must be reused")),
++    )
++    assert _builder_result(payload, state)["tested_symbols"] == ["Target"]
 
-The full lifecycle suite was started after these additions but has not returned a terminal pytest summary yet. The mandatory reversible loaded-desktop watcher probe has not been performed; no loaded-runtime certification is claimed.
-
-PROJECTION_REUSE_REFACTOR=INCOMPLETE
-PROJECTION_COUNT_BEFORE=2
-PROJECTION_COUNT_AFTER=1
-PROJECTION_REUSE_TEST=PASS
-SHARED_PROJECTION_FAILURE_FAILS_CLOSED=PASS
-COLLISION_ONLY_PROJECTION_CALLS=0
-RESYNC_PROJECTION_CALLS=0
-FOCUSED_TESTS=UNCERTIFIED
-NEXT_TARGET=finish serial suites and mandatory reversible LIVE probe
-
-## Serial suite completion
-
-```text
-COMMAND=.\\.venv\\Scripts\\python.exe -m pytest -q tests/test_matrix_clusters_state_lifecycle.py
-RESULT=54 passed
-DURATION=27.62s
-
-COMMAND=.\\.venv\\Scripts\\python.exe -m pytest -q tests/test_matrix_clusters_ram_parity.py
-RESULT=34 passed
-DURATION=25.46s
-
-COMMAND=.\\.venv\\Scripts\\python.exe -m pytest -q tests/test_jaccard_handoff_0j5.py
-RESULT=18 passed
-DURATION=26.55s
-
-COMMAND=.\\.venv\\Scripts\\python.exe -m pytest -q tests/test_refresh_plan_execution.py
-RESULT=7 passed
-DURATION=15.18s
 ```
 
-FOCUSED_TESTS=PASS
-PRE_PROBE_REVISION=170
-PROBE_MODULE=tests.test_matrix_clusters_state_lifecycle
-PRE_PROBE_CLUSTER=[tests.test_matrix_clusters_ram_parity, tests.test_matrix_clusters_state_lifecycle]
-NEXT_TARGET=mandatory reversible loaded-desktop runtime probe
+## THIS_STEP_CONFIRMATION
 
-## Recovery-only evidence
+- `CODE_CHANGES_THIS_STEP=NONE`
+- `FILES_CHANGED` is unchanged: `contextor/core/analysis/test_context.py`, `contextor/core/single_file/builders/layer2_builders.py`, and `tests/test_test_context_ast_reuse_0f2g.py`.
+- `FULL_SUITE_RUN_BY_AGENT=NO`
+- LIVE checked read-only: revision 179, `continuity=continuous`, `resync_required=false`; `update_file` was not used.
 
-No files were modified during recovery. Direct byte verification of the target file found the current working-tree SHA-256 is `7B79B1E6E7EB67619F4CC595FD6B35E05917AB8CE2C5A551F4D676A241BA1839`, which matches the required pre-probe SHA prefix `7b79b1...` exactly. `git status --short -- tests/test_matrix_clusters_state_lifecycle.py` is empty.
-
-The current/index-restored SHA claimed as `623467...` is not the current file state: the file presently on disk is the exact required pre-probe candidate. No overwrite was needed or performed. Local retained Codex session history was located at `C:\\Users\\DafoO\\.codex\\sessions\\2026\\09\\01\\rollout-2026-09-01T17-29-11-01a05d96-ae18-71e3-b431-07b21ab09dd4.jsonl`; it was not used to reconstruct or write the file because direct exact-byte equality was already satisfied.
-
-MCP current LIVE lookup returned `no_live_service`, so no current revision or watcher evidence is available and no watcher wait was performed.
-
-PRE_PROBE_SHA256=7B79B1E6E7EB67619F4CC595FD6B35E05917AB8CE2C5A551F4D676A241BA1839
-INCORRECT_INDEX_SHA256=6234678D381F5D132ED610977FA105B7880B07EADD605C52F98A945BD05E2BEF
-RECOVERED_SHA256=7B79B1E6E7EB67619F4CC595FD6B35E05917AB8CE2C5A551F4D676A241BA1839
-EXACT_BYTE_RECOVERY=YES
-RECOVERY_SOURCE=current target bytes already equal preserved pre-probe hash
-RECOVERY_WATCHER_REVISION=UNAVAILABLE_NO_LIVE_SERVICE
-MCP_UPDATE_FILE_USED=NO
-MCP_RESTART_PERFORMED=NO
-
-## Historical persisted-snapshot loaded-runtime certification
-
-Read-only persisted live-service snapshots identify R0=`170`, R1=`172`, and R2=`173`. The retained historical watcher journal binds R1 to `tests/test_matrix_clusters_state_lifecycle.py`, `origin=desktop_watcher`, `status=UPDATED`; R2 is the subsequent matching desktop-watcher UPDATED publication for the same file after exact restoration. R171 is the intermediate DELETED publication from the delete/add implementation of the temporary edit and is not used as the probe-state certification snapshot.
-
-Direct read-only load/recompute results:
-
-```text
-R0: resync=false; matrix=fresh; clusters=fresh; persisted matrix parity=true; persisted cluster parity=true
-R1: resync=false; matrix=fresh; clusters=fresh; persisted matrix parity=true; persisted cluster parity=true; matrix reference differs from R0=true; cluster reference differs from R0=true
-R2: resync=false; matrix=fresh; clusters=fresh; persisted matrix parity=true; persisted cluster parity=true; matrix reference equals R0=true; cluster reference equals R0=true
-```
-
-The current `git diff HEAD --` for the two named projection-reuse files is empty, so no current raw unified diff exists to append; their projection-reuse changes are already represented in the current committed/index state rather than an uncommitted diff.
-
-HISTORICAL_PROBE_EVIDENCE=SUFFICIENT
-PRE_PROBE_REVISION=170
-HISTORICAL_PROBE_UPDATE_REVISION=172
-HISTORICAL_PROBE_RESTORE_REVISION=173
-R0_MATRIX_PARITY=PASS
-R0_CLUSTERS_PARITY=PASS
-R1_MATRIX_REFERENCE_CHANGED=YES
-R1_CLUSTERS_REFERENCE_CHANGED=YES
-R1_PERSISTED_MATRIX_EQUALS_REFERENCE=YES
-R1_PERSISTED_CLUSTERS_EQUALS_REFERENCE=YES
-HISTORICAL_LOADED_DESKTOP_MATRIX_CODEPATH=PASS
-HISTORICAL_LOADED_DESKTOP_CLUSTERS_CODEPATH=PASS
-R2_MATRIX_EQUALS_R0=YES
-R2_CLUSTERS_EQUALS_R0=YES
-PROJECTION_DIFF_COMPLETE=NO
-FOCUSED_TESTS=PASS
-EXACT_BYTE_RECOVERY=YES
-TARGET_FILE_GIT_CLEAN=YES
-MCP_UPDATE_FILE_USED=NO
-FILES_CHANGED=NONE (current working tree; projection-reuse changes are already committed/indexed)
-NEXT_TARGET=strict external FINAL audit
-
-## Projection-reuse code evidence source
-
-The projection-reuse refactor is isolated in committed change `36be7bbb68a8488f73a9bb7f9a1b416e9a515154` (`Auto-commit: Cleanup and update`). `git show --format=fuller --no-ext-diff 36be7bbb68a8488f73a9bb7f9a1b416e9a515154 -- contextor/core/analysis/incremental/plan_executor.py tests/test_matrix_clusters_state_lifecycle.py` returned the full two-file refactor diff. The preceding P0 lifecycle change is separately committed as `d5bcd3e62915331bd091349a084fc9440da94084`; it is not part of the projection-reuse delta.
-
-The current working index contains no staged diff for these files. The refactor commit visibly adds a single `derived_artifact_projection`, gates it by derived-input change/resync/canonical-consumption freshness, routes Matrix through `build_module_dependency_matrix(artifact_data=derived_artifact_projection, ...)`, routes clusters through `build_jaccard_clusters(artifact_data=derived_artifact_projection)`, and marks each affected derived family stale if the common projection fails. Its test diff includes builder-specific failure injections, `projection_mock.call_count == 1`, exact post-update parities, shared-projection failure, and no-call guards for collision-only/resync.
-
-LIVE_MATRIX_CODEPATH_AUDIT=FINAL_PASS
-LIVE_CLUSTERS_CODEPATH_AUDIT=FINAL_PASS
-PROJECTION_CODE_EVIDENCE_SOURCE=commit_diff
-PROJECTION_DIFF_COMPLETE=YES
-CURRENT_PRODUCTION_CODE_COMPLETE=YES
-PRODUCTION_FILES_MODIFIED_IN_THIS_STEP=NO
-TEST_FILES_MODIFIED_IN_THIS_STEP=NO
-NEXT_TARGET=strict external projection-reuse FINAL code audit
+Po wykonaniu czekam na komendę: `proceduj`.
