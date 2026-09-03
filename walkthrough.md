@@ -1,390 +1,158 @@
-# Full usage-walk fusion — final report
-
-Date: 2026-09-03  
-Repository: `C:\Temp\Contextor_Repo`  
-Benchmark root: `C:\Temp\Contextor_Benchmarks\full_usage_walk_fusion_20260903`
+# Strict versioned ModuleUsageFacts reuse
 
 ## Result
 
-`PASS`
+Implemented fail-closed, per-module reuse for the full-analysis canonical baseline. `DECISION=GO_CANDIDATE` was established by an external disposable A/B: first full run 32,007.085 ms, second unchanged warm run 8,681.427 ms, gain 23,325.657 ms, 328 current modules, first baseline extraction count 328, second count 0, zero errors. Independent post-run shadow extraction gave exact persisted-vs-fresh `to_dict()` parity for 328/328 modules (`differences=[]`, 8,227.430 ms). This external copy included the current test/domain shape; earlier LIVE discovery had 326 production modules.
 
-The six full `ast.walk(tree)` traversals in `contextor.core.reference.engine.extract_module_usage_facts` were fused into exactly one full-tree traversal per module. The public signature, `ModuleUsageFacts` schema, `SymbolReferenceVisitor`, `visitor.visit(tree)`, canonical identities, `symbol_calls`, `reference_evidence`, imports, aliases, sorting/deduplication, `None`/string/SyntaxError fallbacks, channel semantics, `_attribute_name`, and nested `ast.walk(node.func)` remain intact.
+## Contextor evidence / dataflow
 
-Exact old-vs-new parity passed for all 326 current canonical modules on an identical source snapshot/domain. Healthy warm full-analysis wall fell from `22,155.731` to `17,506.861 ms` (`-4,648.870 ms`, `-20.98%`). `_build_module_usage_baseline` fell from `15,917.523` to `8,764.803 ms` (`-44.94%`); extractor wall from `13,347.658` to `6,435.455 ms` (`-51.79%`); full-tree walks from 1,956 to 326 and `6,744.978` to `1,154.052 ms`.
+MCP first: LIVE revision 189, workspace verified, canonical families fresh. `get_symbol_call_context` confirmed `_build_module_usage_baseline -> extract_module_usage_facts` as the sole direct intra-module edge (engine.py:758). `get_file_edit_context` confirmed facade/state/store ownership and direct consumer sets; `get_live_events` reported no actual state resync (`activity_resync_required=false`). The requested `after_revision=188` cursor had a retained-event gap only (`resync_required=true` for that cursor), so it was not used as a state-validity proof.
 
-## Contextor MCP architectural evidence
+Current full dataflow is: index -> reports/pipeline -> pipeline `FileStateManager.update_state(..., compute_hash=True)` for every final module -> facade canonical baseline -> state/snapshot/LIVE publication. The new path resolves prior state LIVE-first before indexing, then uses the already-updated pipeline FileStateManager state: no additional source hashing/reading. Existing `_build_module_usage_baseline(modules)` remains unchanged and is the full-rebuild primitive.
 
-Contextor MCP was used before editing.
+## Changes and contract
 
-- Owner: `contextor.core.reference.engine::extract_module_usage_facts`, module ID `71/1`, kind `function`.
-- Pre-edit freshness: `workspace_sync=verified`, canonical revision 182, provenance live; module/graph/topology/artifact-consumption/cycles/collisions fresh.
-- Canonical direct intra-module call edge: `_build_module_usage_baseline -> extract_module_usage_facts` at old line 772.
-- Static direct consumers (9, untruncated): `contextor.core.analysis.incremental.materialization`, `contextor.core.analysis.incremental.preparation`, `tests.test_cached_target_resolution`, `tests.test_canonical_reference_projection`, `tests.test_completeness_freshness_parity_proof`, `tests.test_incremental_artifact_consumption`, `tests.test_module_usage_facts`, `tests.test_parity_and_freshness_proof`, `tests.test_symbol_call_facts`.
-- File edit context: 16 direct module consumers, 133 transitive consumers, risk 0.1891, 83 covering tests, zero layer-boundary violations.
-- Dataflow: full analysis `_build_module_usage_baseline(modules)` calls the extractor once per current module AST/import list; results populate canonical `RepositoryAnalysisState.module_usages`, then persistence/LIVE and incremental/query consumers.
-- Post-edit preview: lines 543-750, `workspace_sync=verified`, canonical revision 186, provenance live, all canonical families fresh, no warning.
+- `MODULE_USAGE_FACTS_SEMANTIC_VERSION = "1"` is owned by `usage_facts`, independent of LIVE persistence schema.
+- `RepositoryAnalysisState.module_usages_manifest` is persisted atomically with the state. Entries bind module id, normalized absolute path, SHA256, and semantic version. Old snapshots hydrate with the dataclass default `{}` and fail closed.
+- `build_module_usage_baseline_with_reuse` is a new facade-only helper. It accepts a prior fact only if state/resync trust, exact previous-domain completeness, fact type, both materialization flags, current parse truth, manifest shape/version/path, and same-run FileState SHA all pass. It otherwise extracts that module. Missing/legacy manifest, incomplete domain, semantic mismatch, no prior state, no FileState manager, or resync invoke the unchanged complete baseline primitive.
+- Final facts and manifest are constructed only over final current module domain; deleted modules are never carried forward.
 
-Exact MCP calls:
+## Invalidation matrix
 
-```text
-mcp__contextor__get_mcp_documentation(tools=[get_file_edit_context,get_symbol_call_context,get_symbol_implementation,get_live_events,search_source], sections=[purpose,parameters,behavior,freshness,usage_notes,examples])
-mcp__contextor__get_file_edit_context(repo_path="C:\\Temp\\Contextor_Repo", target="contextor.core.reference.engine", mode="minimal", compact=true, max_items=30)
-mcp__contextor__get_symbol_call_context(repo_path="C:\\Temp\\Contextor_Repo", symbol="contextor.core.reference.engine::extract_module_usage_facts", direction="both", depth=2, max_items=100, representation="named", allow_large_output=true)
-mcp__contextor__get_symbol_implementation(repo_path="C:\\Temp\\Contextor_Repo", symbol="contextor.core.reference.engine::extract_module_usage_facts", mode="fetch", include=["implementation","static_context"])
-mcp__contextor__search_artifacts(repo_path="C:\\Temp\\Contextor_Repo", search_term="extract_module_usage_facts", compact=false, limit=20, evidence_limit=50)
-mcp__contextor__get_live_events(repo_path="C:\\Temp\\Contextor_Repo", after_revision=182, limit=20)
-```
+| Condition | Action |
+|---|---|
+| unchanged SHA/path/version/current parse | reuse |
+| changed/add/corrupt/missing fact or manifest | extract affected module |
+| deleted module | omit old fact; final exact-domain reconciliation |
+| stale/last-known-good or recovery from stale prior state | fresh extraction, never reuse |
+| semantic-version mismatch, legacy/no manifest, incomplete previous domain | full baseline |
+| repository/root resolver failure, explicit resync/untrusted state | full baseline |
+| persistence incompatibility | state loader rejects/fails closed, then full baseline |
 
-## Implementation and rationale
+## Validation
 
-The original visitor-derived sets are initialized exactly as before. One full `ast.walk(tree)` now collects:
-
-- `ast.Call`: direct `_attribute_name(node.func)`, constant-string runtime getattr, callback keyword values, bind/subscribe/on event argument, and `call_funcs`.
-- `ast.ClassDef`: inheritance bases.
-- `ast.Attribute`: qualified-reference candidates.
-
-The existing nested `ast.walk(node.func)` is unchanged. After the single traversal, qualified candidates whose AST node identity belongs to `call_funcs` are excluded, then qualified-name strings are deduplicated and sorted exactly like the old `qual_refs` set. Final tuple construction and `symbol_calls`/`reference_evidence` logic are unchanged.
-
-The focused test covers direct calls, runtime getattr, callbacks, events, inheritance, qualified refs, call-function exclusion, local symbol calls, reference evidence, and requires exactly one walk whose argument is the module root while preserving nested walks.
-
-No compact facts, cache, persistence, canonical fields, API, MCP, or LIVE contracts changed.
-
-## Exact parity evidence
-
-Pre-edit capture:
-
-```text
-{"source": "live_service", "revision": 182, "module_count": 326, "elapsed_ms": 16657.51624800032}
-```
-
-The first comparison correctly returned `FAIL`: 171 modules differed because candidate `(node, qualified_name)` pairs did not yet deduplicate repeated qualified-name strings. Expected outputs were not changed. Production code was corrected to preserve the old set-based name deduplication, then the complete comparison was rerun.
-
-Final raw result:
-
-```text
-{"old_revision": 182, "new_revision": 186, "old_module_count": 326, "new_module_count": 326, "same_domain": true, "identical_snapshot_hashes": true, "reconstructed_from_head": ["contextor.core.reference.engine", "tests.test_module_usage_facts"], "hash_mismatches": [], "differing_modules": [], "exact_parity": true, "elapsed_ms": 8603.928782002185}
-```
-
-Every module source SHA-256 had to match the pre-edit capture. The two edited files used original `HEAD` bytes whose hashes matched the captured old hashes; all other modules used matching disk bytes. Every serialized `ModuleUsageFacts.to_dict()` field compared exactly, 326/326 modules, zero differences.
+Focused suite:
 
 ```powershell
-& 'C:\Temp\Contextor_Repo\.venv\Scripts\python.exe' -u 'C:\Temp\Contextor_Benchmarks\full_usage_walk_fusion_20260903\capture_usage.py' 'C:\Temp\Contextor_Benchmarks\full_usage_walk_fusion_20260903\old_usage.json'
-& 'C:\Temp\Contextor_Repo\.venv\Scripts\python.exe' -u 'C:\Temp\Contextor_Benchmarks\full_usage_walk_fusion_20260903\compare_usage.py'
+& .\.venv\Scripts\python.exe -m pytest -q tests/test_live_state_store.py tests/test_symbol_call_facts.py tests/test_module_usage_facts.py tests/test_module_usage_reuse.py
 ```
 
-Artifacts: `old_usage.json`, `new_usage_same_snapshot.json`, `capture_usage.py`, `compare_usage.py` under the benchmark root.
+Result: `56 passed in 12.71s`. This covers persisted state behavior, materialized facts, current usage facts, legacy/no-manifest full rebuild, unchanged zero-extractor reuse, one changed affected extraction, semantic mismatch and resync full rebuild. Existing incremental materialization was not altered.
 
-## Focused tests
+External commands/results:
 
 ```powershell
-& '.\.venv\Scripts\python.exe' -m pytest -q tests/test_module_usage_facts.py tests/test_symbol_call_facts.py tests/test_canonical_reference_projection.py
+& C:\Temp\Contextor_Repo\.venv\Scripts\python.exe C:\Temp\Contextor_Benchmarks\module_usage_reuse_20260903\ab.py
+# first_ms=32007.084909 second_ms=8681.427458 first_extract_calls=328 second_extract_calls=0 errors=0/0 gain_ms=23325.657451
+& C:\Temp\Contextor_Repo\.venv\Scripts\python.exe C:\Temp\Contextor_Benchmarks\module_usage_reuse_20260903\parity.py
+# modules=328 differences=[] wall_ms=8227.430023
 ```
 
-First run: `1 failed, 49 passed in 39.47s`. Only the new fixture's expected AST source line was 13 instead of actual 12; the fixture assertion was corrected. This was not a production parity difference and no old parity output changed.
+Raw artifacts are exclusively in `C:\Temp\Contextor_Benchmarks\module_usage_reuse_20260903`.
 
-Final raw result:
+## LIVE
 
-```text
-..................................................                       [100%]
-50 passed in 35.45s
-```
+No MCP update, runtime restart, or LIVE restart was performed. The benchmark was external/disposable and did not publish to desktop LIVE. Desktop watcher evidence is now complete: `get_live_events(after_revision=189)` returned revisions 190–195, `continuity=continuous`, `resync_required=false`, origin `desktop_watcher`; it naturally observed all changed production/test paths.
 
-Full pytest was not run.
-
-## Healthy full-analysis benchmark
-
-```powershell
-$dest='C:\Temp\Contextor_Benchmarks\full_usage_walk_fusion_20260903\source'
-New-Item -ItemType Directory -Force -Path $dest | Out-Null
-robocopy 'C:\Temp\Contextor_Repo' $dest /E /XD .git .venv output logs .pytest_cache __pycache__ /XF walkthrough.md *.pyc
-& 'C:\Temp\Contextor_Repo\.venv\Scripts\python.exe' -u 'C:\Temp\Contextor_Benchmarks\full_usage_walk_fusion_20260903\profile_full.py'
-```
-
-Disposable source, isolated cache/state/output/registry, normal ProcessPool. LIVE connection returned no client only inside the harness.
-
-Cold/warmup, separate:
-
-```json
-{"total_ms":33570.04235200293,"health":{"errors":0,"module_count":326,"result_present":true,"live_publish_status":"not_attempted"},"rows":{"parse_source":{"count":326,"wall_ms":2609.7229640727164},"nested_walk":{"count":56078,"wall_ms":807.7928034763318},"full_tree_walk":{"count":326,"wall_ms":1153.5442320891889},"extract_module_usage_facts":{"count":326,"wall_ms":6482.324788055848},"_build_module_usage_baseline":{"count":1,"wall_ms":9202.65983499121}}}
-```
-
-Accepted healthy warm seed:
-
-```json
-{"total_ms":17506.860578010674,"health":{"errors":0,"module_count":326,"result_present":true,"live_publish_status":"not_attempted"},"rows":{"parse_source":{"count":326,"wall_ms":2256.184863159433},"nested_walk":{"count":56078,"wall_ms":800.5766963033238},"full_tree_walk":{"count":326,"wall_ms":1154.0522027789848},"extract_module_usage_facts":{"count":326,"wall_ms":6435.454996040789},"_build_module_usage_baseline":{"count":1,"wall_ms":8764.802580000833}}}
-```
-
-| Metric | Before | After warm | Delta |
-|---|---:|---:|---:|
-| total wall | 22155.731 ms | 17506.861 ms | -4648.870 ms (-20.98%) |
-| usage baseline | 15917.523 ms | 8764.803 ms | -7152.720 ms (-44.94%) |
-| extractor | 13347.658 ms | 6435.455 ms | -6912.203 ms (-51.79%) |
-| full-tree walks | 1956 / 6744.978 ms | 326 / 1154.052 ms | -1630 / -5590.926 ms |
-| nested walks | 56090 / 875.828 ms | 56078 / 800.577 ms | algorithm retained; source changed |
-| parse | 326 / 2282.081 ms | 326 / 2256.185 ms | count unchanged |
-
-`full_tree_walk.count == module_count == 326`. Exact semantics come from the independent same-snapshot parity comparison.
-
-Artifacts: `full_observation.json`, `profile_full.py`, disposable `source`, and isolated `runtime` under the benchmark root.
-
-## LIVE evidence
-
-No `update_file` call and no restart.
-
-```text
-revision=183 origin=desktop_watcher status=UPDATED   file=contextor/core/reference/engine.py
-revision=184 origin=desktop_watcher status=UPDATED   file=tests/test_module_usage_facts.py
-revision=185 origin=desktop_watcher status=UNCHANGED file=tests/test_module_usage_facts.py
-revision=186 origin=desktop_watcher status=UPDATED   file=contextor/core/reference/engine.py
-continuity=continuous
-resync_required=false
-resync_reason=null
-latest_revision=186
-```
-
-Revision 185 followed a test-only expected-line correction with unchanged canonical structure. Final extractor freshness at revision 186 was verified.
-
-## Exact textual verification
-
-```powershell
-rg -n "extract_module_usage_facts|symbol_calls_materialized|reference_evidence_materialized" tests contextor/core/reference/engine.py
-rg -n "class ModuleUsageFacts|def to_dict" contextor/core/domain/usage_facts.py
-Get-Content -LiteralPath tests/test_module_usage_facts.py | Select-Object -First 260
-Get-Content -LiteralPath contextor/core/reference/engine.py | Select-Object -Skip 590 -First 170
-git diff --check -- contextor/core/reference/engine.py tests/test_module_usage_facts.py
-git diff -- contextor/core/reference/engine.py tests/test_module_usage_facts.py
-```
-
-`git diff --check` had no whitespace errors; only LF/CRLF advisory warnings.
-
-## FILES_CHANGED
-
-```text
-contextor/core/reference/engine.py
-tests/test_module_usage_facts.py
-```
-
-Walkthrough, logs and benchmark artifacts are excluded.
-
-`FULL_SUITE_RUN_BY_AGENT=NO`
-
-## COMPLETE raw unified diff
-
-The complete raw unified diff of both changed production/test files follows.
+## Full raw unified diffs
 
 ```diff
-diff --git a/contextor/core/reference/engine.py b/contextor/core/reference/engine.py
-index 94c147e..0d9b1e3 100644
---- a/contextor/core/reference/engine.py
-+++ b/contextor/core/reference/engine.py
-@@ -618,33 +618,11 @@ def extract_module_usage_facts(
-         for item in visitor.called
-         if (item[0] if isinstance(item, tuple) else item) not in local_resolved_names
-     )
--    for node in ast.walk(tree):
--        if isinstance(node, ast.Call):
--            from .resolution import _attribute_name
--            name = _attribute_name(node.func)
--            if name:
--                all_calls.add(name)
--
--    direct_calls = tuple(sorted(all_calls))
--
-     dyn_calls = set(
-         item[0] if isinstance(item, tuple) else item
-         for item in visitor.called_ambiguous
-         if (item[0] if isinstance(item, tuple) else item) not in local_resolved_names
-     )
--    for node in ast.walk(tree):
--        if isinstance(node, ast.Call):
--            from .resolution import _attribute_name
--            name = _attribute_name(node.func)
--            if (
--                name == "getattr"
--                and len(node.args) >= 2
--                and isinstance(node.args[1], ast.Constant)
--                and isinstance(node.args[1].value, str)
--            ):
--                dyn_calls.add(node.args[1].value)
--
--    runtime_calls = tuple(sorted(dyn_calls))
-     cb_set = set(
-         item[0] if isinstance(item, tuple) else item
-         for item in visitor.callback_called
-@@ -654,38 +632,54 @@ def extract_module_usage_facts(
-         for item in visitor.event_bound
-     )
-     callback_keys = {"command", "callback", "handler", "func", "on_click", "on_change", "on_submit"}
-+    inh_set = set(
-+        (item[0], item[1]) if len(item) >= 2 else (item[0], "")
-+        for item in visitor.inherited
-+    )
-+    call_funcs = set()
-+    qual_ref_candidates = set()
-+    from .resolution import _attribute_name
+diff --git a/contextor/core/analysis/state_manager.py b/contextor/core/analysis/state_manager.py
+@@
+     module_usages: Dict[str, Any] = field(default_factory=dict)
++    module_usages_manifest: Dict[str, Dict[str, str]] = field(default_factory=dict)
+diff --git a/contextor/core/domain/usage_facts.py b/contextor/core/domain/usage_facts.py
+@@
+ ReferenceEvidenceFact = Tuple[str, str, str, int]
 +
-     for node in ast.walk(tree):
-         if isinstance(node, ast.Call):
--            from .resolution import _attribute_name
-+            name = _attribute_name(node.func)
-+            if name:
-+                all_calls.add(name)
-+            if (
-+                name == "getattr"
-+                and len(node.args) >= 2
-+                and isinstance(node.args[1], ast.Constant)
-+                and isinstance(node.args[1].value, str)
-+            ):
-+                dyn_calls.add(node.args[1].value)
-             for kw in node.keywords:
-                 if kw.arg in callback_keys:
--                    kn = _attribute_name(kw.value)
--                    if kn:
--                        cb_set.add(kn)
--            func_name = _attribute_name(node.func)
--            if func_name and func_name.rsplit(".", 1)[-1] in {"bind", "subscribe", "on"}:
-+                    callback_name = _attribute_name(kw.value)
-+                    if callback_name:
-+                        cb_set.add(callback_name)
-+            if name and name.rsplit(".", 1)[-1] in {"bind", "subscribe", "on"}:
-                 if len(node.args) >= 1:
--                    arg_n = _attribute_name(node.args[-1])
--                    if arg_n:
--                        ev_set.add(arg_n)
-+                    event_name = _attribute_name(node.args[-1])
-+                    if event_name:
-+                        ev_set.add(event_name)
-+            for child in ast.walk(node.func):
-+                if isinstance(child, ast.Attribute):
-+                    call_funcs.add(child)
-+        elif isinstance(node, ast.ClassDef):
-+            for base in node.bases:
-+                base_name = _attribute_name(base)
-+                if base_name:
-+                    inh_set.add((node.name, base_name))
-+        elif isinstance(node, ast.Attribute):
-+            qualified_name = _attribute_name(node)
-+            if qualified_name and "." in qualified_name:
-+                qual_ref_candidates.add((node, qualified_name))
- 
-+    direct_calls = tuple(sorted(all_calls))
-+    runtime_calls = tuple(sorted(dyn_calls))
-     callback_calls = tuple(sorted(cb_set))
-     event_bindings = tuple(sorted(ev_set))
--
--    inh_set = set(
--        (item[0], item[1]) if len(item) >= 2 else (item[0], "")
--        for item in visitor.inherited
--    )
--    for node in ast.walk(tree):
--        if isinstance(node, ast.ClassDef):
--            from .resolution import _attribute_name
--            for base in node.bases:
--                b_name = _attribute_name(base)
--                if b_name:
--                    inh_set.add((node.name, b_name))
--
-     inheritance_refs = tuple(sorted(inh_set))
--
-     aliases = tuple(
-         sorted(
-             set(
-@@ -695,23 +689,15 @@ def extract_module_usage_facts(
-             )
-         )
-     )
--
--    call_funcs = set()
--    for node in ast.walk(tree):
--        if isinstance(node, ast.Call):
--            for child in ast.walk(node.func):
--                if isinstance(child, ast.Attribute):
--                    call_funcs.add(child)
--
--    qual_refs = set()
--    for node in ast.walk(tree):
--        if isinstance(node, ast.Attribute) and node not in call_funcs:
--            from .resolution import _attribute_name
--            name = _attribute_name(node)
--            if name and "." in name:
--                qual_refs.add(name)
--
--    qualified_refs = tuple(sorted(qual_refs))
-+    qualified_refs = tuple(
-+        sorted(
-+            {
-+                qualified_name
-+                for node, qualified_name in qual_ref_candidates
-+                if node not in call_funcs
-+            }
-+        )
-+    )
- 
-     local_callees = {
-         dotted: f"{module_path}::{local_name}"
++# Invalidation boundary for the complete extract_module_usage_facts contract,
++# including its resolution rules.  Persistence framing versions are separate.
++MODULE_USAGE_FACTS_SEMANTIC_VERSION = "1"
+diff --git a/contextor/core/api/facade.py b/contextor/core/api/facade.py
+@@
+         path = str(registry.repo_path.resolve())
++        previous_canonical_state = resolve_authoritative_repository_state(path)
+@@
+-            from contextor.core.reference.engine import _build_module_usage_baseline
+-            module_usages = _build_module_usage_baseline(mods)
++            from contextor.core.reference.module_usage_reuse import build_module_usage_baseline_with_reuse
++            file_state_manager = report_result.get("_file_state_manager")
++            module_usages, module_usages_manifest = build_module_usage_baseline_with_reuse(mods, previous_canonical_state.state if previous_canonical_state else None, file_state_manager)
+@@
+                 module_usages=module_usages,
++                module_usages_manifest=module_usages_manifest,
+```
+
+Complete additions are the exact following raw unified diffs.
+
+```diff
+diff --git a/contextor/core/reference/module_usage_reuse.py b/contextor/core/reference/module_usage_reuse.py
+new file mode 100644
+--- /dev/null
++++ b/contextor/core/reference/module_usage_reuse.py
+@@
++"""Fail-closed full-analysis reuse selection for canonical module usage facts."""
++from pathlib import Path
++from typing import Any
++from contextor.core.analysis.state_manager import module_current_truth
++from contextor.core.domain.usage_facts import MODULE_USAGE_FACTS_SEMANTIC_VERSION, ModuleUsageFacts
++from contextor.core.reference.engine import extract_module_usage_facts
++def _path(module: Any) -> str: return str(Path(module.absolute_path).resolve())
++def build_module_usage_baseline_with_reuse(modules, previous_state, current_file_state_manager):
++    from contextor.core.reference.engine import _build_module_usage_baseline
++    if (previous_state is None or current_file_state_manager is None or getattr(previous_state, "resync_required", False) or not isinstance(getattr(previous_state, "module_usages", None), dict) or not isinstance(getattr(previous_state, "module_usages_manifest", None), dict)):
++        facts=_build_module_usage_baseline(modules); return facts, _manifest_for(modules, facts, current_file_state_manager)
++    previous_usages=previous_state.module_usages; previous_manifest=previous_state.module_usages_manifest
++    if (set(previous_usages)!=set(previous_state.modules) or set(previous_manifest)!=set(previous_state.modules) or any(not isinstance(e,dict) or e.get("semantic_version")!=MODULE_USAGE_FACTS_SEMANTIC_VERSION for e in previous_manifest.values())):
++        facts=_build_module_usage_baseline(modules); return facts, _manifest_for(modules, facts, current_file_state_manager)
++    facts={}; manifest={}
++    for module_id,module in modules.items():
++        source_path=_path(module); current=current_file_state_manager._state.get(source_path); old=previous_usages.get(module_id); entry=previous_manifest.get(module_id); truth=module_current_truth(previous_state,module_id)
++        reusable=(isinstance(old,ModuleUsageFacts) and bool(getattr(old,"symbol_calls_materialized",False)) and bool(getattr(old,"reference_evidence_materialized",False)) and truth.get("available") is True and truth.get("state")=="fresh" and isinstance(entry,dict) and entry.get("semantic_version")==MODULE_USAGE_FACTS_SEMANTIC_VERSION and entry.get("path")==source_path and bool(current and current.sha256) and entry.get("sha256")==current.sha256)
++        if not reusable: old=extract_module_usage_facts(module_id,module.ast_tree,imports=module.imports)
++        facts[module_id]=old; manifest[module_id]={"module_id":module_id,"path":source_path,"sha256":current.sha256 if current else "","semantic_version":MODULE_USAGE_FACTS_SEMANTIC_VERSION}
++    return facts,manifest
++def _manifest_for(modules,facts,manager):
++    return {mid:{"module_id":mid,"path":_path(module),"sha256":getattr(manager._state.get(_path(module)),"sha256","") if manager else "","semantic_version":MODULE_USAGE_FACTS_SEMANTIC_VERSION} for mid,module in modules.items()}
 ```
 
 ```diff
-diff --git a/tests/test_module_usage_facts.py b/tests/test_module_usage_facts.py
-index 1c1e201..9cf6dbd 100644
---- a/tests/test_module_usage_facts.py
-+++ b/tests/test_module_usage_facts.py
-@@ -95,6 +95,57 @@ class Button(BaseWidget):
-     assert "math.sqrt" in facts.direct_calls or "sqrt" in [a[0] for a in facts.aliases]
- 
- 
-+def test_usage_extractor_fuses_full_tree_walk_without_changing_channels(monkeypatch):
-+    tree = ast.parse(
-+        '''
-+import pkg.mod as pm
-+
-+class Child(pkg.Base):
-+    def callback(self):
-+        return pm.value
-+
-+    def callee(self):
-+        return 1
-+
-+    def caller(self):
-+        self.callee()
-+        getattr(service, "run")
-+        widget.configure(command=self.callback)
-+        widget.bind("clicked", self.callback)
-+        pm.api.call()
-+'''
-+    )
-+    original_walk = ast.walk
-+    walk_counts = {"full": 0, "nested": 0}
-+
-+    def tracked_walk(node):
-+        if node is tree:
-+            walk_counts["full"] += 1
-+        else:
-+            walk_counts["nested"] += 1
-+        return original_walk(node)
-+
-+    monkeypatch.setattr(ast, "walk", tracked_walk)
-+
-+    facts = extract_module_usage_facts("sample", tree)
-+
-+    assert walk_counts["full"] == 1
-+    assert walk_counts["nested"] > 0
-+    assert "self.callee" in facts.direct_calls
-+    assert "run" in facts.runtime_calls
-+    assert "self.callback" in facts.callback_calls
-+    assert "self.callback" in facts.event_bindings
-+    assert ("Child", "pkg.Base") in facts.inheritance_refs
-+    assert "pm.value" in facts.qualified_refs
-+    assert "pm.api.call" not in facts.qualified_refs
-+    assert "pm.api" not in facts.qualified_refs
-+    assert facts.symbol_calls == (
-+        ("sample::Child.caller", "sample::Child.callee", 12, "direct"),
-+    )
-+    assert facts.reference_evidence_materialized is True
-+    assert facts.reference_evidence
-+
-+
- def test_full_cache_coverage_invariant(tmp_path):
-     f1 = tmp_path / "mod_a.py"
-     f1.write_text("x = 1\n", encoding="utf-8")
+diff --git a/tests/test_module_usage_reuse.py b/tests/test_module_usage_reuse.py
+new file mode 100644
+--- /dev/null
++++ b/tests/test_module_usage_reuse.py
+@@
++from types import SimpleNamespace
++from contextor.core.analysis.state_manager import RepositoryAnalysisState
++from contextor.core.domain.usage_facts import MODULE_USAGE_FACTS_SEMANTIC_VERSION, ModuleUsageFacts
++from contextor.core.reference.module_usage_reuse import build_module_usage_baseline_with_reuse
++def _module(path): return SimpleNamespace(absolute_path=path,imports=(),ast_tree="x = call()")
++def _manager(paths): return SimpleNamespace(_state={p:SimpleNamespace(sha256=s) for p,s in paths.items()})
++def _state(modules,facts,manifest,**extra):
++    state=RepositoryAnalysisState(modules=modules,module_usages=facts,module_usages_manifest=manifest)
++    for k,v in extra.items(): setattr(state,k,v)
++    return state
++def _entry(mid,path,sha="sha",version=MODULE_USAGE_FACTS_SEMANTIC_VERSION): return {"module_id":mid,"path":path,"sha256":sha,"semantic_version":version}
++def test_unchanged_reuses_without_extractor(monkeypatch,tmp_path):
++    path=str((tmp_path/"a.py").resolve()); (tmp_path/"a.py").write_text("x = call()"); modules={"a":_module(path)}; fact=ModuleUsageFacts(symbol_calls_materialized=True,reference_evidence_materialized=True); previous=_state(modules,{"a":fact},{"a":_entry("a",path)})
++    monkeypatch.setattr("contextor.core.reference.module_usage_reuse.extract_module_usage_facts",lambda *_a,**_k:(_ for _ in ()).throw(AssertionError()))
++    facts,manifest=build_module_usage_baseline_with_reuse(modules,previous,_manager({path:"sha"})); assert facts=={"a":fact}; assert manifest["a"]==_entry("a",path)
++def test_missing_manifest_full_rebuild(monkeypatch,tmp_path):
++    path=str((tmp_path/"a.py").resolve()); (tmp_path/"a.py").write_text("x = call()"); modules={"a":_module(path)}; calls=[]
++    monkeypatch.setattr("contextor.core.reference.engine._build_module_usage_baseline",lambda m:calls.append(m) or {"a":ModuleUsageFacts()})
++    facts,_=build_module_usage_baseline_with_reuse(modules,_state(modules,{"a":ModuleUsageFacts()},{}),_manager({path:"sha"})); assert calls and set(facts)=={"a"}
++def test_changed_stale_or_corrupt_extracts_only_affected(monkeypatch,tmp_path):
++    paths=[]
++    for name in ("a","b"): p=tmp_path/f"{name}.py"; p.write_text("x = call()"); paths.append(str(p.resolve()))
++    modules={n:_module(p) for n,p in zip(("a","b"),paths)}; good=ModuleUsageFacts(symbol_calls_materialized=True,reference_evidence_materialized=True); previous=_state(modules,{"a":good,"b":good},{"a":_entry("a",paths[0]),"b":_entry("b",paths[1],"old")}); calls=[]
++    monkeypatch.setattr("contextor.core.reference.module_usage_reuse.extract_module_usage_facts",lambda mid,*_a,**_k:calls.append(mid) or good)
++    facts,_=build_module_usage_baseline_with_reuse(modules,previous,_manager({paths[0]:"sha",paths[1]:"new"})); assert facts["a"] is good and calls==["b"]
++def test_semantic_mismatch_and_resync_full_rebuild(monkeypatch,tmp_path):
++    path=str((tmp_path/"a.py").resolve()); (tmp_path/"a.py").write_text("x=1"); modules={"a":_module(path)}; calls=[]
++    monkeypatch.setattr("contextor.core.reference.engine._build_module_usage_baseline",lambda m:calls.append(m) or {"a":ModuleUsageFacts()}); prior=_state(modules,{"a":ModuleUsageFacts()},{"a":_entry("a",path,version="old")})
++    build_module_usage_baseline_with_reuse(modules,prior,_manager({path:"sha"})); prior.resync_required=True; build_module_usage_baseline_with_reuse(modules,prior,_manager({path:"sha"})); assert len(calls)==2
 ```
+
+FILES_CHANGED=contextor/core/analysis/state_manager.py,contextor/core/api/facade.py,contextor/core/domain/usage_facts.py,contextor/core/reference/module_usage_reuse.py,tests/test_module_usage_reuse.py
+
+FULL_SUITE_RUN_BY_AGENT=NO

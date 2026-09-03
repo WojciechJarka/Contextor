@@ -360,6 +360,7 @@ class ContextorFacade:
         progress.begin("Initializing repository identity")
         registry = _initialize_repository_identity(path)
         path = str(registry.repo_path.resolve())
+        previous_canonical_state = resolve_authoritative_repository_state(path)
         reset_caches()
 
         if log:
@@ -500,8 +501,17 @@ class ContextorFacade:
             raw_artifacts = getattr(analysis_result, "artifacts", {}) or {}
             canonical_consumption = build_canonical_artifact_consumption(raw_artifacts)
 
-            from contextor.core.reference.engine import _build_module_usage_baseline
-            module_usages = _build_module_usage_baseline(mods)
+            from contextor.core.reference.module_usage_reuse import (
+                build_module_usage_baseline_with_reuse,
+            )
+            file_state_manager = report_result.get("_file_state_manager")
+            module_usages, module_usages_manifest = (
+                build_module_usage_baseline_with_reuse(
+                    mods,
+                    previous_canonical_state.state if previous_canonical_state else None,
+                    file_state_manager,
+                )
+            )
 
             # Exact canonical coverage trust gate (no truthiness)
             consumption_valid = validate_canonical_artifact_consumption_coverage(
@@ -518,6 +528,7 @@ class ContextorFacade:
                 artifact_consumption=canonical_consumption,
                 artifact_consumption_state="fresh" if consumption_valid else "stale",
                 module_usages=module_usages,
+                module_usages_manifest=module_usages_manifest,
                 metrics=metrics,
                 topology_analytics=topology_analytics,
                 topology_metrics_state="fresh",

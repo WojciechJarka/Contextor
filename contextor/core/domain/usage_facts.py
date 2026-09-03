@@ -13,6 +13,10 @@ from typing import Any, Dict, Tuple
 SymbolCallFact = Tuple[str, str, int, str]
 ReferenceEvidenceFact = Tuple[str, str, str, int]
 
+# Invalidation boundary for the complete extract_module_usage_facts contract,
+# including its resolution rules.  Persistence framing versions are separate.
+MODULE_USAGE_FACTS_SEMANTIC_VERSION = "1"
+
 
 @dataclass(frozen=True)
 class ModuleUsageFacts:

@@ -90,6 +90,7 @@ class RepositoryAnalysisState:
     file_state: Dict[str, FileState] = field(default_factory=dict)
     module_parse_freshness: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     module_usages: Dict[str, Any] = field(default_factory=dict)
+    module_usages_manifest: Dict[str, Dict[str, str]] = field(default_factory=dict)
     topology_analytics: Dict[str, Any] = field(default_factory=dict)
     topology_metrics_state: str = "deferred"
     cached_analytics: Dict[str, Any] = field(default_factory=dict)
