@@ -1,22 +1,23 @@
-# Final stage evidence
+# Pipeline attribution completion
 
 DECISION=NO_GO_FULL_ANALYSIS_OPTIMAL
 
-MCP: facade/reuse ownership confirmed at LIVE revision 206; state fresh; continuity continuous and resync false. Harness: `C:\Temp\Contextor_Benchmarks\final_full_profile_20260903\stage_profile.py`, normal ProcessPool disposable copy, boundary-only `perf_counter_ns` wrappers, no repository mutation.
+MCP/current textual binding map: facade owns module-level alias `execute_global_pipeline`; `execute_global_pipeline` performs a local runtime import of `build_artifact_pipeline` from `contextor.core.reporting_engine.artifact_pipeline`. Harness patched those exact consumer/runtime lookup bindings, not producer-only aliases.
 
-```powershell
-& C:\Temp\Contextor_Repo\.venv\Scripts\python.exe C:\Temp\Contextor_Benchmarks\final_full_profile_20260903\stage_profile.py
-```
+Raw boundary-only warm observations (`pipeline_attribution.py`, disposable ProcessPool copy):
 
-Seed (not authority): 6597.120 ms. Accepted instrumented warm runs: 6979.029, 6875.196, 6745.188 ms; median 6875.196 ms. Post-profile uninstrumented validation: 6891.538 ms, 0.24% from instrumented median (<10%), so stage timing is accepted.
+| run | total ms | pipeline count/ms | artifact bundle count/ms | modules/errors/extract/baseline |
+|---|---:|---:|---:|---|
+| 1 | 10271.290 | 1 / 3064.331 | 1 / 2208.629 | 328/0/0/0 |
+| 2 | 6724.691 | 1 / 2705.813 | 1 / 1919.217 | 328/0/0/0 |
+| 3 | 6786.663 | 1 / 2643.717 | 1 / 1996.001 | 328/0/0/0 |
+| median | 6786.663 | 1 / 2705.813 | 1 / 1996.001 | reuse correct |
 
-Reuse control each warm: module domain=328, errors=0, extraction=0, baseline=0, reuse=1, final facts/manifest current-domain contract preserved. Raw median stage rows (inclusive, do not sum): index_repository 1 / 2058.101 ms; FileStateManager.update_state 328 / 133.583 ms; FileStateManager._compute_hash 328 / 92.092 ms; build_module_usage_baseline_with_reuse 1 / 538.502 ms; save_engine_state 1 / 410.319 ms. Pipeline/report/analytics wrappers were not reached through their current imported aliases in this low-overhead harness, so no invented current owner timing is reported.
+Inclusive nested timings are not summed. Stage-profile medians remain index 2058.101ms, reuse 538.502ms, persistence 410.319ms. Top-level residual after index/pipeline/reuse/persistence is about 1074ms; it is facade/report finalization and overlapping canonical stages, so it is not asserted as an independent duplicate.
 
-Source lifecycle: current FileState SHA=328 calls; parent `parse_source`, `Module.ast_tree`, extractor and full baseline=0 in every warm due strict reuse. The remaining index worker hash is captured in index inclusive cost. Parent AST attribution is therefore `PARENT_AST_TOTAL=0`, `UNATTRIBUTED=0`; no AST materialization remains after reuse in this run.
+>=200ms owners: index repository (required worker freshness, no equivalent producer); execute_global_pipeline (required report orchestration, no equivalent producer); build_artifact_pipeline (required report bundle/output, no fact-equivalent second producer); canonical reuse validator (required version/path/SHA/domain trust); save engine state (single revision-bound atomic snapshot). Exact equivalent producer identity proof is NO for every owner, measured removable wall 0, verdict NO_GO. No report child was separately callable from the current producer boundary without entering inner builders; artifact bundle is the lowest stable boundary.
 
->=200ms audit: index_repository 2058.101ms: NO_GO, worker source/cache freshness has no exact equivalent current-run producer. reuse helper 538.502ms: NO_GO, required SHA/path/version/materialization/domain validation; no duplicate producer. save state 410.319ms: NO_GO, one revision-bound atomic persistence owner; no duplicate save. Hash/update are below 200ms; worker cache hash and FileState SHA have distinct algorithms/boundaries (cache freshness vs revision-bound SHA), hence NO_GO even if both read source. No owner has an exact equivalent producer plus measurable removable >=300ms/3% median.
-
-History background only: 22.156s pre-fusion; 17.507s post-fusion; 14.974s profiling; 7.018s controlled strict reuse; current stage-run median 6.875s. Different harnesses are not A/B.
+Reuse regression controls all passed: domain 328, errors 0, fresh extractor 0, full baseline 0, parent AST total 0.
 
 FILES_CHANGED=NONE
 
