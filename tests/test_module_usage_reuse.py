@@ -134,8 +134,22 @@ def test_wrong_manifest_identity_path_or_sha_extracts(monkeypatch,tmp_path):
     monkeypatch.setattr("contextor.core.reference.module_usage_reuse.extract_module_usage_facts",lambda mid,*a,**k:calls.append(mid) or good)
     build_module_usage_baseline_with_reuse(modules,prior,_manager({paths[0]:"sha",paths[1]:"sha"})); assert calls==["a"]
 
-def test_partial_unmaterialized_raises(monkeypatch,tmp_path):
+def test_partial_missing_symbol_calls_materialization_raises(monkeypatch,tmp_path):
     import pytest
     modules,paths,good=_two(tmp_path); prior=_state(modules,{"a":good,"b":good},{"a":_entry("a",paths[0],"old"),"b":_entry("b",paths[1])})
-    monkeypatch.setattr("contextor.core.reference.module_usage_reuse.extract_module_usage_facts",lambda *_a,**_k:ModuleUsageFacts())
+    monkeypatch.setattr("contextor.core.reference.module_usage_reuse.extract_module_usage_facts",lambda *_a,**_k:ModuleUsageFacts(symbol_calls_materialized=False,reference_evidence_materialized=True))
     with pytest.raises(RuntimeError): build_module_usage_baseline_with_reuse(modules,prior,_manager({paths[0]:"sha",paths[1]:"sha"}))
+
+def test_partial_missing_reference_evidence_materialization_raises(monkeypatch,tmp_path):
+    import pytest
+    modules,paths,good=_two(tmp_path); prior=_state(modules,{"a":good,"b":good},{"a":_entry("a",paths[0],"old"),"b":_entry("b",paths[1])})
+    monkeypatch.setattr("contextor.core.reference.module_usage_reuse.extract_module_usage_facts",lambda *_a,**_k:ModuleUsageFacts(symbol_calls_materialized=True,reference_evidence_materialized=False))
+    with pytest.raises(RuntimeError): build_module_usage_baseline_with_reuse(modules,prior,_manager({paths[0]:"sha",paths[1]:"sha"}))
+
+def test_missing_file_state_manager_full_rebuilds_with_nonreusable_manifest(monkeypatch,tmp_path):
+    modules,paths,good=_two(tmp_path); prior=_state(modules,{"a":good,"b":good},{"a":_entry("a",paths[0]),"b":_entry("b",paths[1])}); calls=[]
+    monkeypatch.setattr("contextor.core.reference.engine._build_module_usage_baseline",lambda mods:calls.append(mods) or {mid:good for mid in mods})
+    monkeypatch.setattr("contextor.core.reference.module_usage_reuse.extract_module_usage_facts",lambda *_a,**_k:(_ for _ in ()).throw(AssertionError()))
+    facts,manifest=build_module_usage_baseline_with_reuse(modules,prior,None)
+    assert len(calls)==1 and set(facts)==set(manifest)==set(modules)
+    assert all(entry["sha256"]=="" for entry in manifest.values())
