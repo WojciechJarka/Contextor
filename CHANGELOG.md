@@ -1,3 +1,14 @@
+## Patch — Canonical LIVE completeness and final single-file performance] - 2026-09-03
+
+* Completed canonical `ModuleUsageFacts` lifecycle coverage across full analysis, persistence, hydration and incremental/LIVE updates, including materialized intra-module symbol calls and reference evidence without query-time source reconstruction.
+* Closed the remaining canonical false-fresh gaps for derived analytics. Dependency Matrix and Shared Usage Clusters now participate in candidate-state copy-on-write, freshness transitions, incremental recomputation, persistence and LIVE publication with independent failure isolation.
+* Reused one shared artifact-data projection for Dependency Matrix and Shared Usage Clusters during the same incremental update, eliminating duplicate projection work without changing either analysis domain or report semantics.
+* Hardened stale and parse-failure handling so last-known-good module facts remain explicitly distinguishable from current source truth and cannot be reused as fresh canonical data.
+* Optimized single-file test-context construction by reusing authoritative current ASTs already present in canonical repository state. Test candidates with current ASTs no longer reread and reparse their source files; stale, missing or non-authoritative candidates retain the existing parse fallback.
+* Preserved exact test discovery, assertion detection, symbol coverage, ordering, deduplication and fallback semantics while eliminating 109 redundant `parse_source` calls in the representative single-file benchmark.
+* Reduced measured TestContextBuilder median runtime from approximately `2.15 s` to `1.34 s` on the representative repository, with exact output parity across all measured runs.
+* Verified natural desktop LIVE publication for the affected production and test changes with continuous revisions and no resynchronization requirement.
+* Closed the current full-repository, layer and single-file performance optimization branch after exhausting the known meaningful duplicate-work candidates without reducing analytical coverage or correctness.
 ### Layer and single-file reporting performance
 
 * Reworked layer analysis to consume validated authoritative canonical state directly instead of constructing and materializing a full incremental engine when layer reporting does not require update semantics.
