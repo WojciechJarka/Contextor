@@ -1,95 +1,39 @@
 """Fail-closed full-analysis reuse selection for canonical module usage facts."""
-
 from pathlib import Path
 from typing import Any
-
 from contextor.core.analysis.state_manager import module_current_truth
-from contextor.core.domain.usage_facts import (
-    MODULE_USAGE_FACTS_SEMANTIC_VERSION,
-    ModuleUsageFacts,
-)
+from contextor.core.domain.usage_facts import MODULE_USAGE_FACTS_SEMANTIC_VERSION, ModuleUsageFacts
 from contextor.core.reference.engine import extract_module_usage_facts
 
-
-def _path(module: Any) -> str:
-    return str(Path(module.absolute_path).resolve())
-
-
-def build_module_usage_baseline_with_reuse(
-    modules: dict[str, Any],
-    previous_state: Any | None,
-    current_file_state_manager: Any | None,
-) -> tuple[dict[str, ModuleUsageFacts], dict[str, dict[str, str]]]:
-    """Merge only independently proven current facts; otherwise extract per module.
-
-    Global trust failure intentionally delegates the complete domain to the
-    existing authoritative primitive, preserving its callers and semantics.
-    """
+def _path(module: Any) -> str: return str(Path(module.absolute_path).resolve())
+def _require_materialized(module_id: str, facts: ModuleUsageFacts) -> ModuleUsageFacts:
+    if not isinstance(facts, ModuleUsageFacts) or not facts.symbol_calls_materialized or not facts.reference_evidence_materialized:
+        raise RuntimeError("Canonical ModuleUsageFacts baseline unavailable for current module " f"{module_id}")
+    return facts
+def _requires_full_rebuild(previous_state, manager) -> bool:
+    if previous_state is None or manager is None or getattr(previous_state,"resync_required",False): return True
+    pm=getattr(previous_state,"modules",None); pu=getattr(previous_state,"module_usages",None); pf=getattr(previous_state,"module_usages_manifest",None)
+    if not isinstance(pm,dict) or not isinstance(pu,dict) or not isinstance(pf,dict): return True
+    if set(pu)!=set(pm) or set(pf)!=set(pm): return True
+    return any(not isinstance(e,dict) or e.get("semantic_version")!=MODULE_USAGE_FACTS_SEMANTIC_VERSION for e in pf.values())
+def _manifest_entry(module_id,module,manager):
+    path=_path(module); return {"module_id":module_id,"path":path,"sha256":manager.get_tracked_sha256(path),"semantic_version":MODULE_USAGE_FACTS_SEMANTIC_VERSION}
+def _build_manifest(modules,manager): return {mid:_manifest_entry(mid,module,manager) for mid,module in modules.items()}
+def _can_reuse(module_id,module,previous_state,previous_fact,entry,current_sha):
+    if not isinstance(previous_fact,ModuleUsageFacts) or not previous_fact.symbol_calls_materialized or not previous_fact.reference_evidence_materialized: return False
+    truth=module_current_truth(previous_state,module_id)
+    if truth.get("available") is not True or truth.get("state")!="fresh": return False
+    if not isinstance(entry,dict) or entry.get("semantic_version")!=MODULE_USAGE_FACTS_SEMANTIC_VERSION: return False
+    return entry.get("module_id")==module_id and entry.get("path")==_path(module) and bool(current_sha) and entry.get("sha256")==current_sha
+def build_module_usage_baseline_with_reuse(modules,previous_state,current_file_state_manager):
     from contextor.core.reference.engine import _build_module_usage_baseline
-
-    if (
-        previous_state is None
-        or current_file_state_manager is None
-        or getattr(previous_state, "resync_required", False)
-        or not isinstance(getattr(previous_state, "module_usages", None), dict)
-        or not isinstance(getattr(previous_state, "module_usages_manifest", None), dict)
-    ):
-        facts = _build_module_usage_baseline(modules)
-        return facts, _manifest_for(modules, facts, current_file_state_manager)
-
-    previous_usages = previous_state.module_usages
-    previous_manifest = previous_state.module_usages_manifest
-    if (
-        set(previous_usages) != set(previous_state.modules)
-        or set(previous_manifest) != set(previous_state.modules)
-        or any(
-            not isinstance(entry, dict)
-            or entry.get("semantic_version") != MODULE_USAGE_FACTS_SEMANTIC_VERSION
-            for entry in previous_manifest.values()
-        )
-    ):
-        facts = _build_module_usage_baseline(modules)
-        return facts, _manifest_for(modules, facts, current_file_state_manager)
-
-    facts: dict[str, ModuleUsageFacts] = {}
-    manifest: dict[str, dict[str, str]] = {}
-    for module_id, module in modules.items():
-        source_path = _path(module)
-        current = current_file_state_manager._state.get(source_path)
-        old = previous_usages.get(module_id)
-        entry = previous_manifest.get(module_id)
-        truth = module_current_truth(previous_state, module_id)
-        reusable = (
-            isinstance(old, ModuleUsageFacts)
-            and bool(getattr(old, "symbol_calls_materialized", False))
-            and bool(getattr(old, "reference_evidence_materialized", False))
-            and truth.get("available") is True
-            and truth.get("state") == "fresh"
-            and isinstance(entry, dict)
-            and entry.get("semantic_version") == MODULE_USAGE_FACTS_SEMANTIC_VERSION
-            and entry.get("path") == source_path
-            and bool(current and current.sha256)
-            and entry.get("sha256") == current.sha256
-        )
-        if not reusable:
-            old = extract_module_usage_facts(module_id, module.ast_tree, imports=module.imports)
-        facts[module_id] = old
-        manifest[module_id] = {
-            "module_id": module_id,
-            "path": source_path,
-            "sha256": current.sha256 if current else "",
-            "semantic_version": MODULE_USAGE_FACTS_SEMANTIC_VERSION,
-        }
-    return facts, manifest
-
-
-def _manifest_for(modules, facts, manager):
-    return {
-        module_id: {
-            "module_id": module_id,
-            "path": _path(module),
-            "sha256": getattr(manager._state.get(_path(module)), "sha256", "") if manager else "",
-            "semantic_version": MODULE_USAGE_FACTS_SEMANTIC_VERSION,
-        }
-        for module_id, module in modules.items()
-    }
+    if _requires_full_rebuild(previous_state,current_file_state_manager):
+        facts=_build_module_usage_baseline(modules); return facts,_build_manifest(modules,current_file_state_manager)
+    facts={}; manifest={}; usages=previous_state.module_usages; old_manifest=previous_state.module_usages_manifest
+    for module_id,module in modules.items():
+        path=_path(module); sha=current_file_state_manager.get_tracked_sha256(path); old=usages.get(module_id); entry=old_manifest.get(module_id)
+        fact=old if _can_reuse(module_id,module,previous_state,old,entry,sha) else _require_materialized(module_id,extract_module_usage_facts(module_id,module.ast_tree,imports=module.imports))
+        facts[module_id]=fact; manifest[module_id]={"module_id":module_id,"path":path,"sha256":sha,"semantic_version":MODULE_USAGE_FACTS_SEMANTIC_VERSION}
+    if set(facts)!=set(modules): raise RuntimeError("Canonical ModuleUsageFacts baseline does not cover the current module domain")
+    if set(manifest)!=set(modules): raise RuntimeError("Canonical ModuleUsageFacts manifest does not cover the current module domain")
+    return facts,manifest

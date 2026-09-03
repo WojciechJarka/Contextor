@@ -14,12 +14,28 @@ from contextor.core.live_state import (
     SnapshotRevisionConflict,
 )
 from contextor.core.paths import app_cache_dir, legacy_repo_cache_dir, repo_cache_dir
-from contextor.core.analysis.state_manager import FileStateManager
+from contextor.core.analysis.state_manager import FileStateManager, RepositoryAnalysisState
+from contextor.core.domain.usage_facts import MODULE_USAGE_FACTS_SEMANTIC_VERSION
 from contextor.core.reporting_engine.persistent_registry import (
     PersistentIdentityRegistry,
 )
 
 pytestmark = pytest.mark.live
+
+
+def test_module_usage_manifest_roundtrips_with_repository_state(tmp_path):
+    manifest={"pkg.mod":{"module_id":"pkg.mod","path":"C:/x.py","sha256":"abc","semantic_version":MODULE_USAGE_FACTS_SEMANTIC_VERSION}}
+    state=RepositoryAnalysisState(module_usages_manifest=manifest)
+    save_snapshot(state,tmp_path,"manifest")
+    loaded,_=load_snapshot(tmp_path,"manifest")
+    assert loaded.module_usages_manifest == manifest
+
+
+def test_legacy_state_without_manifest_loads_with_empty_manifest(tmp_path):
+    legacy=SimpleNamespace(modules={},dependency_graph=None,module_usages={})
+    save_snapshot(legacy,tmp_path,"legacy-manifest")
+    loaded,_=load_snapshot(tmp_path,"legacy-manifest")
+    assert loaded.module_usages_manifest == {}
 
 
 def test_snapshot_roundtrip_increments_revision_and_records_writer(tmp_path):

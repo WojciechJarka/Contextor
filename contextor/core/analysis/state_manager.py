@@ -301,6 +301,11 @@ class FileStateManager:
         except FileNotFoundError:
             return None
 
+    def get_tracked_sha256(self, file_path: str) -> str:
+        """Return already captured SHA256 without stat/read/hash."""
+        state = self._state.get(str(Path(file_path).resolve()))
+        return state.sha256 if state is not None else ""
+
     def has_changed(self, file_path: str) -> bool:
         """Returns True if the file was modified since it was last tracked."""
         current = self.get_current_file_state(file_path, compute_hash=False)

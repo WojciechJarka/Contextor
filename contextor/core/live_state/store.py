@@ -340,6 +340,11 @@ def load_snapshot(
                         setattr(state_obj, "module_usages", {})
                     except AttributeError:
                         pass
+                if not hasattr(state_obj, "module_usages_manifest"):
+                    try:
+                        setattr(state_obj, "module_usages_manifest", {})
+                    except AttributeError:
+                        pass
                 if not hasattr(state_obj, "topology_analytics"):
                     try:
                         setattr(state_obj, "topology_analytics", {})
@@ -411,6 +416,11 @@ def load_snapshot(
             if not hasattr(payload, "module_usages"):
                 try:
                     setattr(payload, "module_usages", {})
+                except AttributeError:
+                    pass
+            if not hasattr(payload, "module_usages_manifest"):
+                try:
+                    setattr(payload, "module_usages_manifest", {})
                 except AttributeError:
                     pass
             if not hasattr(payload, "topology_analytics"):
