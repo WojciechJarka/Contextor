@@ -1,237 +1,390 @@
-# Full-analysis regression discovery/profiling (read-only)
+# Full usage-walk fusion — final report
 
 Date: 2026-09-03  
 Repository: `C:\Temp\Contextor_Repo`  
-Benchmark root: `C:\Temp\Contextor_Benchmarks\full_regression_20260903`
+Benchmark root: `C:\Temp\Contextor_Benchmarks\full_usage_walk_fusion_20260903`
 
-## Decision
+## Result
 
-`EXPECTED_CANONICAL_COST`
+`PASS`
 
-Representative healthy full run: `22,155.731 ms`, 326/326 modules, zero analysis errors, result present. The new canonical `ModuleUsageFacts` baseline cost `15,917.523 ms` inclusive. It alone explains the approximately `11 s` increase from the supplied historical approximately `12 s` level. No current-run fact-equivalent recomputation with exact identity/snapshot/domain equivalence and safely measurable removable end-to-end cost was proven, so there is no `REDUNDANCY_GO_CANDIDATE`.
+The six full `ast.walk(tree)` traversals in `contextor.core.reference.engine.extract_module_usage_facts` were fused into exactly one full-tree traversal per module. The public signature, `ModuleUsageFacts` schema, `SymbolReferenceVisitor`, `visitor.visit(tree)`, canonical identities, `symbol_calls`, `reference_evidence`, imports, aliases, sorting/deduplication, `None`/string/SyntaxError fallbacks, channel semantics, `_attribute_name`, and nested `ast.walk(node.func)` remain intact.
 
-Dominant decomposition:
+Exact old-vs-new parity passed for all 326 current canonical modules on an identical source snapshot/domain. Healthy warm full-analysis wall fell from `22,155.731` to `17,506.861 ms` (`-4,648.870 ms`, `-20.98%`). `_build_module_usage_baseline` fell from `15,917.523` to `8,764.803 ms` (`-44.94%`); extractor wall from `13,347.658` to `6,435.455 ms` (`-51.79%`); full-tree walks from 1,956 to 326 and `6,744.978` to `1,154.052 ms`.
 
-- `_build_module_usage_baseline`: once, `15,917.523 ms` inclusive / `287.783 ms` self.
-- `extract_module_usage_facts`: 326 calls, `13,347.658 ms` inclusive / `5,726.852 ms` self.
-- Six full `ast.walk(tree)` traversals per module: `1,956 = 326 * 6`, `6,744.978 ms`.
-- Nested `ast.walk(node.func)`: 56,090 calls, `875.828 ms`.
-- Fresh-process `Module.ast_tree -> parse_source`: exactly 326 reads/parses, `2,282.081 ms`.
+## Contextor MCP architectural evidence
 
-The compact index facts overlap with `ModuleUsageFacts`, but their contracts are not identical: compact facts contain aliases/calls/callbacks/events/inheritance/qualified refs/imports/reexports, while the canonical baseline guarantees materialized `symbol_calls` and `reference_evidence` with canonical identities and complete current-module coverage. No exact converter/parity proof exists. Therefore the measured extractor cost is not labeled removable.
+Contextor MCP was used before editing.
 
-## Health, seeds, and raw timings
+- Owner: `contextor.core.reference.engine::extract_module_usage_facts`, module ID `71/1`, kind `function`.
+- Pre-edit freshness: `workspace_sync=verified`, canonical revision 182, provenance live; module/graph/topology/artifact-consumption/cycles/collisions fresh.
+- Canonical direct intra-module call edge: `_build_module_usage_baseline -> extract_module_usage_facts` at old line 772.
+- Static direct consumers (9, untruncated): `contextor.core.analysis.incremental.materialization`, `contextor.core.analysis.incremental.preparation`, `tests.test_cached_target_resolution`, `tests.test_canonical_reference_projection`, `tests.test_completeness_freshness_parity_proof`, `tests.test_incremental_artifact_consumption`, `tests.test_module_usage_facts`, `tests.test_parity_and_freshness_proof`, `tests.test_symbol_call_facts`.
+- File edit context: 16 direct module consumers, 133 transitive consumers, risk 0.1891, 83 covering tests, zero layer-boundary violations.
+- Dataflow: full analysis `_build_module_usage_baseline(modules)` calls the extractor once per current module AST/import list; results populate canonical `RepositoryAnalysisState.module_usages`, then persistence/LIVE and incremental/query consumers.
+- Post-edit preview: lines 543-750, `workspace_sync=verified`, canonical revision 186, provenance live, all canonical families fresh, no warning.
 
-Disposable source copy; isolated cache/state/output/registry; normal ProcessPool enabled; LIVE connection disabled only inside the external harness.
-
-```text
-{"seed": 0, "total_ms": 22155.730546000996, "health": {"errors": 0, "module_count": 326, "result_present": true, "live_publish_status": "not_attempted"}}
-{"count": 1, "median_total_ms": 22155.730546000996, "min_total_ms": 22155.730546000996, "max_total_ms": 22155.730546000996}
-```
-
-Additional healthy seeds used only to identify warmup/outliers:
+Exact MCP calls:
 
 ```text
-seed=0 total_ms=36635.16634100233 errors=0 modules=326  # cold/warmup; separate
-seed=1 total_ms=21563.904071008437 errors=0 modules=326
-seed=2 total_ms=19615.975424007047 errors=0 modules=326
+mcp__contextor__get_mcp_documentation(tools=[get_file_edit_context,get_symbol_call_context,get_symbol_implementation,get_live_events,search_source], sections=[purpose,parameters,behavior,freshness,usage_notes,examples])
+mcp__contextor__get_file_edit_context(repo_path="C:\\Temp\\Contextor_Repo", target="contextor.core.reference.engine", mode="minimal", compact=true, max_items=30)
+mcp__contextor__get_symbol_call_context(repo_path="C:\\Temp\\Contextor_Repo", symbol="contextor.core.reference.engine::extract_module_usage_facts", direction="both", depth=2, max_items=100, representation="named", allow_large_output=true)
+mcp__contextor__get_symbol_implementation(repo_path="C:\\Temp\\Contextor_Repo", symbol="contextor.core.reference.engine::extract_module_usage_facts", mode="fetch", include=["implementation","static_context"])
+mcp__contextor__search_artifacts(repo_path="C:\\Temp\\Contextor_Repo", search_term="extract_module_usage_facts", compact=false, limit=20, evidence_limit=50)
+mcp__contextor__get_live_events(repo_path="C:\\Temp\\Contextor_Repo", after_revision=182, limit=20)
 ```
 
-No degraded run occurred. The 36.635 s cold observation is not mixed with warm results.
+## Implementation and rationale
 
-Raw stage timings for the representative run:
+The original visitor-derived sets are initialized exactly as before. One full `ast.walk(tree)` now collects:
+
+- `ast.Call`: direct `_attribute_name(node.func)`, constant-string runtime getattr, callback keyword values, bind/subscribe/on event argument, and `call_funcs`.
+- `ast.ClassDef`: inheritance bases.
+- `ast.Attribute`: qualified-reference candidates.
+
+The existing nested `ast.walk(node.func)` is unchanged. After the single traversal, qualified candidates whose AST node identity belongs to `call_funcs` are excluded, then qualified-name strings are deduplicated and sorted exactly like the old `qual_refs` set. Final tuple construction and `symbol_calls`/`reference_evidence` logic are unchanged.
+
+The focused test covers direct calls, runtime getattr, callbacks, events, inheritance, qualified refs, call-function exclusion, local symbol calls, reference evidence, and requires exactly one walk whose argument is the module root while preserving nested walks.
+
+No compact facts, cache, persistence, canonical fields, API, MCP, or LIVE contracts changed.
+
+## Exact parity evidence
+
+Pre-edit capture:
 
 ```text
-Step 1/8 Initializing repository identity        165.291 ms
-Step 2/8 Indexing repository files             2509.530 ms
-Step 3/8 Resolving dependency graph               48.218 ms
-Step 4/8 Validating dependency graph               4.859 ms
-Step 5/8 Computing metrics, cycles and debt         2.648 ms
-Step 6/8 Generating architectural reports        2691.804 ms
-Step 7/8 Persisting canonical LIVE snapshot     16707.896 ms
-Step 8/8 Finalizing analysis                       25.466 ms
-TOTAL                                           22155.731 ms
+{"source": "live_service", "revision": 182, "module_count": 326, "elapsed_ms": 16657.51624800032}
 ```
 
-Artifacts:
+The first comparison correctly returned `FAIL`: 171 modules differed because candidate `(node, qualified_name)` pairs did not yet deduplicate repeated qualified-name strings. Expected outputs were not changed. Production code was corrected to preserve the old set-based name deduplication, then the complete comparison was rerun.
+
+Final raw result:
 
 ```text
-C:\Temp\Contextor_Benchmarks\full_regression_20260903\profile_full.py
-C:\Temp\Contextor_Benchmarks\full_regression_20260903\observations.json
-C:\Temp\Contextor_Benchmarks\full_regression_20260903\observations_detail.json
-C:\Temp\Contextor_Benchmarks\full_regression_20260903\source
-C:\Temp\Contextor_Benchmarks\full_regression_20260903\runtime
+{"old_revision": 182, "new_revision": 186, "old_module_count": 326, "new_module_count": 326, "same_domain": true, "identical_snapshot_hashes": true, "reconstructed_from_head": ["contextor.core.reference.engine", "tests.test_module_usage_facts"], "hash_mismatches": [], "differing_modules": [], "exact_parity": true, "elapsed_ms": 8603.928782002185}
 ```
 
-## Exact commands
-
-Contextor MCP was used first:
-
-```text
-mcp__contextor__get_mcp_documentation(tools=[get_project_architecture,get_symbol_call_context,get_symbol_implementation,search_source,analyze_project,get_analysis_status], sections=[purpose,parameters,behavior,freshness,usage_notes,examples])
-mcp__contextor__get_project_architecture(repo_path="C:\\Temp\\Contextor_Repo", compact=true, max_items=20)
-mcp__contextor__search_artifacts(... search_term="analyze_project"|"index_repository"|"execute_global_pipeline"|"ModuleUsageFacts")
-mcp__contextor__get_symbol_implementation(... mode="fetch", include=["implementation","static_context"])
-mcp__contextor__get_symbol_call_context(... direction="both", depth=2, max_items=100, representation="named", allow_large_output=true)
-```
-
-Text verification:
+Every module source SHA-256 had to match the pre-edit capture. The two edited files used original `HEAD` bytes whose hashes matched the captured old hashes; all other modules used matching disk bytes. Every serialized `ModuleUsageFacts.to_dict()` field compared exactly, 326/326 modules, zero differences.
 
 ```powershell
-git status --short
-rg -n "def analyze_project|def _process_single_file|def execute_global_pipeline|ModuleUsageFacts|ensure_module_usages|artifact_consumption|extract_test|graph_metrics|derived" contextor/core contextor/mcp/analysis_jobs.py
-Get-Content -LiteralPath contextor/core/api/facade.py | Select-Object -Skip 320 -First 280
-Get-Content -LiteralPath contextor/core/reporting_engine/pipeline.py | Select-Object -First 260
-Get-Content -LiteralPath contextor/core/symbol_engine/indexer.py | Select-Object -Skip 280 -First 240
-Get-Content -LiteralPath contextor/core/reporting_engine/artifact_pipeline.py | Select-Object -First 360
-Get-Content -LiteralPath contextor/core/reference/engine.py | Select-Object -Skip 760 -First 140
-rg -n "build_jaccard_clusters\(" contextor/core/reporting_engine contextor/core/analysis
-rg -n "_build_module_usage_baseline\(" contextor/core
-rg -n "extract_module_usage_facts\(" contextor/core/symbol_engine contextor/core/reference contextor/core/api
-git diff -- contextor tests
-git diff --numstat -- contextor tests
+& 'C:\Temp\Contextor_Repo\.venv\Scripts\python.exe' -u 'C:\Temp\Contextor_Benchmarks\full_usage_walk_fusion_20260903\capture_usage.py' 'C:\Temp\Contextor_Benchmarks\full_usage_walk_fusion_20260903\old_usage.json'
+& 'C:\Temp\Contextor_Repo\.venv\Scripts\python.exe' -u 'C:\Temp\Contextor_Benchmarks\full_usage_walk_fusion_20260903\compare_usage.py'
 ```
 
-Benchmark:
+Artifacts: `old_usage.json`, `new_usage_same_snapshot.json`, `capture_usage.py`, `compare_usage.py` under the benchmark root.
+
+## Focused tests
 
 ```powershell
-$dest='C:\Temp\Contextor_Benchmarks\full_regression_20260903\source'
+& '.\.venv\Scripts\python.exe' -m pytest -q tests/test_module_usage_facts.py tests/test_symbol_call_facts.py tests/test_canonical_reference_projection.py
+```
+
+First run: `1 failed, 49 passed in 39.47s`. Only the new fixture's expected AST source line was 13 instead of actual 12; the fixture assertion was corrected. This was not a production parity difference and no old parity output changed.
+
+Final raw result:
+
+```text
+..................................................                       [100%]
+50 passed in 35.45s
+```
+
+Full pytest was not run.
+
+## Healthy full-analysis benchmark
+
+```powershell
+$dest='C:\Temp\Contextor_Benchmarks\full_usage_walk_fusion_20260903\source'
 New-Item -ItemType Directory -Force -Path $dest | Out-Null
 robocopy 'C:\Temp\Contextor_Repo' $dest /E /XD .git .venv output logs .pytest_cache __pycache__ /XF walkthrough.md *.pyc
-& 'C:\Temp\Contextor_Repo\.venv\Scripts\python.exe' -u 'C:\Temp\Contextor_Benchmarks\full_regression_20260903\profile_full.py'
+& 'C:\Temp\Contextor_Repo\.venv\Scripts\python.exe' -u 'C:\Temp\Contextor_Benchmarks\full_usage_walk_fusion_20260903\profile_full.py'
 ```
 
-Robocopy completion:
+Disposable source, isolated cache/state/output/registry, normal ProcessPool. LIVE connection returned no client only inside the harness.
+
+Cold/warmup, separate:
+
+```json
+{"total_ms":33570.04235200293,"health":{"errors":0,"module_count":326,"result_present":true,"live_publish_status":"not_attempted"},"rows":{"parse_source":{"count":326,"wall_ms":2609.7229640727164},"nested_walk":{"count":56078,"wall_ms":807.7928034763318},"full_tree_walk":{"count":326,"wall_ms":1153.5442320891889},"extract_module_usage_facts":{"count":326,"wall_ms":6482.324788055848},"_build_module_usage_baseline":{"count":1,"wall_ms":9202.65983499121}}}
+```
+
+Accepted healthy warm seed:
+
+```json
+{"total_ms":17506.860578010674,"health":{"errors":0,"module_count":326,"result_present":true,"live_publish_status":"not_attempted"},"rows":{"parse_source":{"count":326,"wall_ms":2256.184863159433},"nested_walk":{"count":56078,"wall_ms":800.5766963033238},"full_tree_walk":{"count":326,"wall_ms":1154.0522027789848},"extract_module_usage_facts":{"count":326,"wall_ms":6435.454996040789},"_build_module_usage_baseline":{"count":1,"wall_ms":8764.802580000833}}}
+```
+
+| Metric | Before | After warm | Delta |
+|---|---:|---:|---:|
+| total wall | 22155.731 ms | 17506.861 ms | -4648.870 ms (-20.98%) |
+| usage baseline | 15917.523 ms | 8764.803 ms | -7152.720 ms (-44.94%) |
+| extractor | 13347.658 ms | 6435.455 ms | -6912.203 ms (-51.79%) |
+| full-tree walks | 1956 / 6744.978 ms | 326 / 1154.052 ms | -1630 / -5590.926 ms |
+| nested walks | 56090 / 875.828 ms | 56078 / 800.577 ms | algorithm retained; source changed |
+| parse | 326 / 2282.081 ms | 326 / 2256.185 ms | count unchanged |
+
+`full_tree_walk.count == module_count == 326`. Exact semantics come from the independent same-snapshot parity comparison.
+
+Artifacts: `full_observation.json`, `profile_full.py`, disposable `source`, and isolated `runtime` under the benchmark root.
+
+## LIVE evidence
+
+No `update_file` call and no restart.
 
 ```text
-Dirs : 160 total, 125 copied, 35 skipped, 0 failed
-Files: 1062 total, 1061 copied, 1 skipped, 0 failed
-Bytes: 5.39 m total, 5.37 m copied
+revision=183 origin=desktop_watcher status=UPDATED   file=contextor/core/reference/engine.py
+revision=184 origin=desktop_watcher status=UPDATED   file=tests/test_module_usage_facts.py
+revision=185 origin=desktop_watcher status=UNCHANGED file=tests/test_module_usage_facts.py
+revision=186 origin=desktop_watcher status=UPDATED   file=contextor/core/reference/engine.py
+continuity=continuous
+resync_required=false
+resync_reason=null
+latest_revision=186
 ```
 
-## Contextor architectural evidence
+Revision 185 followed a test-only expected-line correction with unchanged canonical structure. Final extractor freshness at revision 186 was verified.
 
-At canonical revision 182 Contextor reported 326 modules, `data_source=live_canonical_state`, and fresh module/graph/topology/artifact-consumption/cycles/collisions families. Layer counts: adapter 76, cli 1, contract 12, engine 27, runtime 74, tests 126, ui 10.
+## Exact textual verification
 
-- `contextor.core.api.facade::ContextorFacade.analyze_project` owns orchestration. Canonical intra-module call facts showed `_initialize_repository_identity`, `_analysis_filters`, `_compute_metrics_and_debt`, `_log_skipped`. Cross-module flow below was verified from exact source because MCP documents this query as intra-module only.
-- `contextor.core.symbol_engine.indexer::index_repository` is `indexer.py:558-719`; Contextor showed 18 static consumers. Canonical callees included `_process_single_file`, fact validators, `read_imports`, `_extract_collision_facts`, and `_extract_test_facts`.
-- `contextor.core.reporting_engine.pipeline::execute_global_pipeline` had 5 static consumers. Its canonical call query returned zero cross-module edges, consistent with the documented scope; exact source showed artifact/layer/report/file-state orchestration.
-- Contextor showed exact edge `_build_module_usage_baseline -> extract_module_usage_facts` at `engine.py:772`.
-- `ModuleUsageFacts` had 23 canonical static consumers (bounded response). The full-run producer is `_build_module_usage_baseline`; consumers include `RepositoryAnalysisState`, persistence, LIVE and incremental/query paths.
-- `generate_artifact_usage_report` canonical callees included `collect_module_artifacts`, `build_artifact_index`, shared filtering/clusters and core candidates.
-- Fetched implementations for `index_repository`, `extract_module_usage_facts`, `ensure_module_usages` were `workspace_sync=verified`, revision 182, provenance live.
+```powershell
+rg -n "extract_module_usage_facts|symbol_calls_materialized|reference_evidence_materialized" tests contextor/core/reference/engine.py
+rg -n "class ModuleUsageFacts|def to_dict" contextor/core/domain/usage_facts.py
+Get-Content -LiteralPath tests/test_module_usage_facts.py | Select-Object -First 260
+Get-Content -LiteralPath contextor/core/reference/engine.py | Select-Object -Skip 590 -First 170
+git diff --check -- contextor/core/reference/engine.py tests/test_module_usage_facts.py
+git diff -- contextor/core/reference/engine.py tests/test_module_usage_facts.py
+```
 
-## Complete `analyze_project` flow
+`git diff --check` had no whitespace errors; only LF/CRLF advisory warnings.
 
-1. `_initialize_repository_identity`, cache reset, filters.
-2. `index_repository`: enumerate Python; `_process_single_file` via ProcessPool; on miss one AST feeds imports, symbol facts, compact references, collision facts, test facts; valid warm cache returns JSON-safe facts without parse.
-3. `assemble_reference_index_or_fallback` and collision assembly, both complete-coverage/fail-closed.
-4. Trie/package root; cached graph/build graph; validation.
-5. Metrics, cycles, collisions, debt.
-6. `execute_global_pipeline`: summary, structure, collisions.
-7. `build_artifact_pipeline -> generate_artifact_usage_report`: definitions, references, test context, artifact index, shared filtering/clusters, core candidates.
-8. Registry/compaction, graph analytics, layer slicing/analytics.
-9. Report writes and `FileStateManager` snapshot.
-10. Canonical state: `build_canonical_artifact_consumption`, `_build_module_usage_baseline`, topology, dependency matrix, shared-usage cluster handoff/recompute gate.
-11. `save_engine_state`, then production LIVE publish. The harness stopped before connection by returning no client.
-
-## Complete cost table: every instrumented operation >=100 ms
-
-Inclusive rows overlap. Percent uses total 22,155.731 ms. Self excludes explicitly instrumented children.
-
-| Qualified owner | Count | Input domain | Inclusive ms | Self ms | % | Classification |
-|---|---:|---|---:|---:|---:|---|
-| `contextor.core.reference.engine._build_module_usage_baseline` | 1 | 326 current modules/AST/imports | 15917.523 | 287.783 | 71.84 | required new canonical usage baseline |
-| `contextor.core.reference.engine.extract_module_usage_facts` | 326 | one AST/module | 13347.658 | 5726.852 | 60.24 | canonical usage/call/evidence producer |
-| `ast.walk` aggregate inside extractor | 58046 | 326 ASTs | 7620.806 | 7620.806 | 34.40 | required current implementation work; not automatically duplicate |
-| `ast.walk.full_tree` | 1956 | six per AST | 6744.978 | 6744.978 | 30.44 | distinct semantic channels/filters |
-| `contextor.core.api.facade.execute_global_pipeline` | 1 | full report domain | 2691.761 | 799.322 | 12.15 | reports/artifacts/analytics/persistence preparation |
-| `contextor.core.domain.module.parse_source` | 326 | 326 source files | 2282.081 | 2282.081 | 10.30 | AST materialization for baseline |
-| `contextor.core.api.facade.index_repository` | 1 | 326 Python files | 2138.177 | 2138.177 | 9.65 | indexing/freshness/fact assembly |
-| `contextor.core.reporting_engine.artifact_pipeline.generate_artifact_usage_report` | 1 | 326 modules + reference/test facts | 1176.779 | 265.654 | 5.31 | artifact semantics |
-| `contextor.core.reporting_layer.artifact_usage_report.collect_module_artifacts` | 1 | 326 modules | 889.644 | 889.644 | 4.02 | definitions/references/test context |
-| `ast.walk.nested` | 56090 | call-function subtrees | 875.828 | 875.828 | 3.95 | qualified-reference exclusion logic |
-| `contextor.core.reporting_engine.artifact_pipeline.generate_graph_analytics_report` | 1 | artifact report + graph | 409.601 | 31.407 | 1.85 | required analytics |
-| `contextor.core.analysis.state_manager.save_engine_state` | 1 | canonical state + file payload | 402.929 | 402.929 | 1.82 | persistence contract |
-| `contextor.core.reporting_engine.graph_analytics.build_jaccard_clusters` | 3 | global/eligible-layer domains | 382.156 | 382.156 | 1.72 | different scopes/domains |
-| `contextor.core.api.facade.assemble_reference_index_or_fallback` | 1 | 326 compact-fact envelopes | 346.636 | 346.636 | 1.56 | fail-closed reference resolution |
-| `contextor.core.api.facade._initialize_repository_identity` | 1 | repository root | 161.226 | 161.226 | 0.73 | identity ownership |
-| `contextor.core.analysis.state_manager.build_canonical_artifact_consumption` | 1 | complete raw artifacts | 141.931 | 141.931 | 0.64 | canonical inbound-consumption SSOT |
-| `contextor.core.analysis.state_manager.FileStateManager.update_state` | 326 | one source/module | 133.525 | 133.525 | 0.60 | file-state snapshot |
-
-## Per-module/source/AST counts
-
-| Operation | Calls | Exact behavior | Wall |
-|---|---:|---|---:|
-| `_process_single_file` results | 326 | warm-cache source hash/read/decode/fact validation; no worker parse on accepted hits | in indexing 2138.177 ms |
-| `Module.ast_tree -> parse_source -> read_text + ast.parse` | 326 | exactly once per source in fresh parent process | 2282.081 ms |
-| `extract_module_usage_facts` | 326 | exactly once per AST | 13347.658 ms |
-| `SymbolReferenceVisitor.visit(tree)` | 326 | one recursive visitor traversal per AST | included in extractor self |
-| full `ast.walk(tree)` | 1956 | exactly six per AST | 6744.978 ms |
-| nested `ast.walk(node.func)` | 56090 | variable by call count; total walks/module min 6, median 90, max 3456 | 875.828 ms |
-| compact reference extractor | 0 current-run warm traversals | cached envelopes reused | assembly 346.636 ms |
-| test-fact extractor | 0 current-run warm traversals | cached `test_facts_by_path` reused | included in artifact path |
-| collision extractor | 0 current-run warm traversals | complete cached facts reused | included in indexing |
-
-Top walk-call modules:
+## FILES_CHANGED
 
 ```text
-tests.test_mcp_regressions 3456
-tests.test_live_state_ipc 1368
-tests.test_h3a_workspace_canonical_freshness 1328
-tests.test_live_watcher_startup_reconciliation 1306
-tests.test_live_activity_status 1224
-tests.test_completeness_freshness_parity_proof 1200
-contextor.core.reporting_engine.graph_analytics 992
-contextor.ui.gui 926
+contextor/core/reference/engine.py
+tests/test_module_usage_facts.py
 ```
 
-Complete 326-entry `parse_by_path` and `ast_walk_by_module` maps are in `observations_detail.json`.
+Walkthrough, logs and benchmark artifacts are excluded.
 
-## Duplicate/reuse map
-
-| First producer | Later consumer/recompute | Identity/snapshot/domain evidence | Verdict |
-|---|---|---|---|
-| index cache/worker facts | reference/collision/artifact/test consumers | same indexed source identity; complete coverage gates | reused; no warm re-extraction |
-| assembled reference index | artifact reference collection | same run-scoped instance, 326-module domain | reused |
-| global report shared-cluster handoff | canonical shared clusters | artifact-data identity, keys, raw keys, scope, thresholds validated | reused when valid |
-| report `_module_artifacts` | canonical artifact consumption | same analysis result/domain, different inbound SSOT contract | required derivation, 141.931 ms |
-| compact reference facts | canonical module usage baseline | same module/source domain, but no exact parity for materialized symbol calls/reference evidence | overlap only; no GO |
-| worker AST on cold miss | parent `Module.ast_tree` | cold unchanged-source path parses in both processes; accepted warm run had no worker parse | cold lead only; no safe measured removable warm cost |
-| six full walks | one another | same AST but different channels/filters | not duplicate by AST identity alone |
-| three Jaccard calls | global/layer outputs | scopes/domains differ | required scoped computations |
-
-## Exact reread/reparse path
-
-After warm indexing, every module was read/parsed in the fresh parent process:
-
-```text
-ContextorFacade.analyze_project
- -> _build_module_usage_baseline(mods)          facade.py:504
- -> module.ast_tree                             engine.py:774
- -> _get_cached_ast(absolute_path)              domain/module.py:60
- -> _parse(path,(mtime_ns,size))                domain/module.py:39
- -> parse_source -> Path.read_text + ast.parse  domain/module.py:22
-```
-
-Measured: 326/326 sources, one parse each, `2,282.081 ms`. Canonical facts are built from `modules[*].ast_tree`; the property reconstructs the AST from source on a process-local cache miss. Later accesses reuse the same process-local AST. On warm index cache hits this is not a same-run duplicate parse because indexing does not parse. On cold/migration paths worker and parent structurally parse unchanged source across the process boundary, but this did not cause the warm approximately 23 s regression and lacks an end-to-end removable-cost/parity proof.
-
-## Uncertainties / non-claims
-
-1. Parent instrumentation cannot see ProcessPool child subcomponents; worker time is included in `index_repository` wall. Accepted warm behavior follows the current cache-hit branch.
-2. Timing uses deterministic wrappers, not sampling. `ast.walk` was materialized to time full iterator consumption; emitted nodes/semantics are unchanged, but allocation adds small overhead. Detailed totals 21.705 s and 22.156 s remain in the observed approximately 23 s class.
-3. Exact compact-reference-to-`ModuleUsageFacts` parity is unproven; no removable saving is claimed.
-4. Historical approximately 12 s came from the task and was not replayed on an older checkout.
-5. Closed earlier optimizations (reference fusion, cached test/collision facts, run-scoped reference reuse, shared-cluster handoff) were not reopened because current evidence shows reuse, not regression.
-
-## Mutation audit
-
-`git diff -- contextor tests` returned no output.  
-`git diff --numstat -- contextor tests` returned no output.  
-Pre-existing/unrelated untracked runtime logs were untouched.
-
-`FILES_CHANGED=NONE`  
-`DIFFS=NONE`  
 `FULL_SUITE_RUN_BY_AGENT=NO`
 
-Only the required root `walkthrough.md` report was overwritten. No production/test file changed; therefore no production/test unified diff is required.
+## COMPLETE raw unified diff
+
+The complete raw unified diff of both changed production/test files follows.
+
+```diff
+diff --git a/contextor/core/reference/engine.py b/contextor/core/reference/engine.py
+index 94c147e..0d9b1e3 100644
+--- a/contextor/core/reference/engine.py
++++ b/contextor/core/reference/engine.py
+@@ -618,33 +618,11 @@ def extract_module_usage_facts(
+         for item in visitor.called
+         if (item[0] if isinstance(item, tuple) else item) not in local_resolved_names
+     )
+-    for node in ast.walk(tree):
+-        if isinstance(node, ast.Call):
+-            from .resolution import _attribute_name
+-            name = _attribute_name(node.func)
+-            if name:
+-                all_calls.add(name)
+-
+-    direct_calls = tuple(sorted(all_calls))
+-
+     dyn_calls = set(
+         item[0] if isinstance(item, tuple) else item
+         for item in visitor.called_ambiguous
+         if (item[0] if isinstance(item, tuple) else item) not in local_resolved_names
+     )
+-    for node in ast.walk(tree):
+-        if isinstance(node, ast.Call):
+-            from .resolution import _attribute_name
+-            name = _attribute_name(node.func)
+-            if (
+-                name == "getattr"
+-                and len(node.args) >= 2
+-                and isinstance(node.args[1], ast.Constant)
+-                and isinstance(node.args[1].value, str)
+-            ):
+-                dyn_calls.add(node.args[1].value)
+-
+-    runtime_calls = tuple(sorted(dyn_calls))
+     cb_set = set(
+         item[0] if isinstance(item, tuple) else item
+         for item in visitor.callback_called
+@@ -654,38 +632,54 @@ def extract_module_usage_facts(
+         for item in visitor.event_bound
+     )
+     callback_keys = {"command", "callback", "handler", "func", "on_click", "on_change", "on_submit"}
++    inh_set = set(
++        (item[0], item[1]) if len(item) >= 2 else (item[0], "")
++        for item in visitor.inherited
++    )
++    call_funcs = set()
++    qual_ref_candidates = set()
++    from .resolution import _attribute_name
++
+     for node in ast.walk(tree):
+         if isinstance(node, ast.Call):
+-            from .resolution import _attribute_name
++            name = _attribute_name(node.func)
++            if name:
++                all_calls.add(name)
++            if (
++                name == "getattr"
++                and len(node.args) >= 2
++                and isinstance(node.args[1], ast.Constant)
++                and isinstance(node.args[1].value, str)
++            ):
++                dyn_calls.add(node.args[1].value)
+             for kw in node.keywords:
+                 if kw.arg in callback_keys:
+-                    kn = _attribute_name(kw.value)
+-                    if kn:
+-                        cb_set.add(kn)
+-            func_name = _attribute_name(node.func)
+-            if func_name and func_name.rsplit(".", 1)[-1] in {"bind", "subscribe", "on"}:
++                    callback_name = _attribute_name(kw.value)
++                    if callback_name:
++                        cb_set.add(callback_name)
++            if name and name.rsplit(".", 1)[-1] in {"bind", "subscribe", "on"}:
+                 if len(node.args) >= 1:
+-                    arg_n = _attribute_name(node.args[-1])
+-                    if arg_n:
+-                        ev_set.add(arg_n)
++                    event_name = _attribute_name(node.args[-1])
++                    if event_name:
++                        ev_set.add(event_name)
++            for child in ast.walk(node.func):
++                if isinstance(child, ast.Attribute):
++                    call_funcs.add(child)
++        elif isinstance(node, ast.ClassDef):
++            for base in node.bases:
++                base_name = _attribute_name(base)
++                if base_name:
++                    inh_set.add((node.name, base_name))
++        elif isinstance(node, ast.Attribute):
++            qualified_name = _attribute_name(node)
++            if qualified_name and "." in qualified_name:
++                qual_ref_candidates.add((node, qualified_name))
+ 
++    direct_calls = tuple(sorted(all_calls))
++    runtime_calls = tuple(sorted(dyn_calls))
+     callback_calls = tuple(sorted(cb_set))
+     event_bindings = tuple(sorted(ev_set))
+-
+-    inh_set = set(
+-        (item[0], item[1]) if len(item) >= 2 else (item[0], "")
+-        for item in visitor.inherited
+-    )
+-    for node in ast.walk(tree):
+-        if isinstance(node, ast.ClassDef):
+-            from .resolution import _attribute_name
+-            for base in node.bases:
+-                b_name = _attribute_name(base)
+-                if b_name:
+-                    inh_set.add((node.name, b_name))
+-
+     inheritance_refs = tuple(sorted(inh_set))
+-
+     aliases = tuple(
+         sorted(
+             set(
+@@ -695,23 +689,15 @@ def extract_module_usage_facts(
+             )
+         )
+     )
+-
+-    call_funcs = set()
+-    for node in ast.walk(tree):
+-        if isinstance(node, ast.Call):
+-            for child in ast.walk(node.func):
+-                if isinstance(child, ast.Attribute):
+-                    call_funcs.add(child)
+-
+-    qual_refs = set()
+-    for node in ast.walk(tree):
+-        if isinstance(node, ast.Attribute) and node not in call_funcs:
+-            from .resolution import _attribute_name
+-            name = _attribute_name(node)
+-            if name and "." in name:
+-                qual_refs.add(name)
+-
+-    qualified_refs = tuple(sorted(qual_refs))
++    qualified_refs = tuple(
++        sorted(
++            {
++                qualified_name
++                for node, qualified_name in qual_ref_candidates
++                if node not in call_funcs
++            }
++        )
++    )
+ 
+     local_callees = {
+         dotted: f"{module_path}::{local_name}"
+```
+
+```diff
+diff --git a/tests/test_module_usage_facts.py b/tests/test_module_usage_facts.py
+index 1c1e201..9cf6dbd 100644
+--- a/tests/test_module_usage_facts.py
++++ b/tests/test_module_usage_facts.py
+@@ -95,6 +95,57 @@ class Button(BaseWidget):
+     assert "math.sqrt" in facts.direct_calls or "sqrt" in [a[0] for a in facts.aliases]
+ 
+ 
++def test_usage_extractor_fuses_full_tree_walk_without_changing_channels(monkeypatch):
++    tree = ast.parse(
++        '''
++import pkg.mod as pm
++
++class Child(pkg.Base):
++    def callback(self):
++        return pm.value
++
++    def callee(self):
++        return 1
++
++    def caller(self):
++        self.callee()
++        getattr(service, "run")
++        widget.configure(command=self.callback)
++        widget.bind("clicked", self.callback)
++        pm.api.call()
++'''
++    )
++    original_walk = ast.walk
++    walk_counts = {"full": 0, "nested": 0}
++
++    def tracked_walk(node):
++        if node is tree:
++            walk_counts["full"] += 1
++        else:
++            walk_counts["nested"] += 1
++        return original_walk(node)
++
++    monkeypatch.setattr(ast, "walk", tracked_walk)
++
++    facts = extract_module_usage_facts("sample", tree)
++
++    assert walk_counts["full"] == 1
++    assert walk_counts["nested"] > 0
++    assert "self.callee" in facts.direct_calls
++    assert "run" in facts.runtime_calls
++    assert "self.callback" in facts.callback_calls
++    assert "self.callback" in facts.event_bindings
++    assert ("Child", "pkg.Base") in facts.inheritance_refs
++    assert "pm.value" in facts.qualified_refs
++    assert "pm.api.call" not in facts.qualified_refs
++    assert "pm.api" not in facts.qualified_refs
++    assert facts.symbol_calls == (
++        ("sample::Child.caller", "sample::Child.callee", 12, "direct"),
++    )
++    assert facts.reference_evidence_materialized is True
++    assert facts.reference_evidence
++
++
+ def test_full_cache_coverage_invariant(tmp_path):
+     f1 = tmp_path / "mod_a.py"
+     f1.write_text("x = 1\n", encoding="utf-8")
+```

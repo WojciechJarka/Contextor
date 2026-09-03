@@ -95,6 +95,57 @@ class Button(BaseWidget):
     assert "math.sqrt" in facts.direct_calls or "sqrt" in [a[0] for a in facts.aliases]
 
 
+def test_usage_extractor_fuses_full_tree_walk_without_changing_channels(monkeypatch):
+    tree = ast.parse(
+        '''
+import pkg.mod as pm
+
+class Child(pkg.Base):
+    def callback(self):
+        return pm.value
+
+    def callee(self):
+        return 1
+
+    def caller(self):
+        self.callee()
+        getattr(service, "run")
+        widget.configure(command=self.callback)
+        widget.bind("clicked", self.callback)
+        pm.api.call()
+'''
+    )
+    original_walk = ast.walk
+    walk_counts = {"full": 0, "nested": 0}
+
+    def tracked_walk(node):
+        if node is tree:
+            walk_counts["full"] += 1
+        else:
+            walk_counts["nested"] += 1
+        return original_walk(node)
+
+    monkeypatch.setattr(ast, "walk", tracked_walk)
+
+    facts = extract_module_usage_facts("sample", tree)
+
+    assert walk_counts["full"] == 1
+    assert walk_counts["nested"] > 0
+    assert "self.callee" in facts.direct_calls
+    assert "run" in facts.runtime_calls
+    assert "self.callback" in facts.callback_calls
+    assert "self.callback" in facts.event_bindings
+    assert ("Child", "pkg.Base") in facts.inheritance_refs
+    assert "pm.value" in facts.qualified_refs
+    assert "pm.api.call" not in facts.qualified_refs
+    assert "pm.api" not in facts.qualified_refs
+    assert facts.symbol_calls == (
+        ("sample::Child.caller", "sample::Child.callee", 12, "direct"),
+    )
+    assert facts.reference_evidence_materialized is True
+    assert facts.reference_evidence
+
+
 def test_full_cache_coverage_invariant(tmp_path):
     f1 = tmp_path / "mod_a.py"
     f1.write_text("x = 1\n", encoding="utf-8")

@@ -618,33 +618,11 @@ def extract_module_usage_facts(
         for item in visitor.called
         if (item[0] if isinstance(item, tuple) else item) not in local_resolved_names
     )
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Call):
-            from .resolution import _attribute_name
-            name = _attribute_name(node.func)
-            if name:
-                all_calls.add(name)
-
-    direct_calls = tuple(sorted(all_calls))
-
     dyn_calls = set(
         item[0] if isinstance(item, tuple) else item
         for item in visitor.called_ambiguous
         if (item[0] if isinstance(item, tuple) else item) not in local_resolved_names
     )
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Call):
-            from .resolution import _attribute_name
-            name = _attribute_name(node.func)
-            if (
-                name == "getattr"
-                and len(node.args) >= 2
-                and isinstance(node.args[1], ast.Constant)
-                and isinstance(node.args[1].value, str)
-            ):
-                dyn_calls.add(node.args[1].value)
-
-    runtime_calls = tuple(sorted(dyn_calls))
     cb_set = set(
         item[0] if isinstance(item, tuple) else item
         for item in visitor.callback_called
@@ -654,38 +632,54 @@ def extract_module_usage_facts(
         for item in visitor.event_bound
     )
     callback_keys = {"command", "callback", "handler", "func", "on_click", "on_change", "on_submit"}
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Call):
-            from .resolution import _attribute_name
-            for kw in node.keywords:
-                if kw.arg in callback_keys:
-                    kn = _attribute_name(kw.value)
-                    if kn:
-                        cb_set.add(kn)
-            func_name = _attribute_name(node.func)
-            if func_name and func_name.rsplit(".", 1)[-1] in {"bind", "subscribe", "on"}:
-                if len(node.args) >= 1:
-                    arg_n = _attribute_name(node.args[-1])
-                    if arg_n:
-                        ev_set.add(arg_n)
-
-    callback_calls = tuple(sorted(cb_set))
-    event_bindings = tuple(sorted(ev_set))
-
     inh_set = set(
         (item[0], item[1]) if len(item) >= 2 else (item[0], "")
         for item in visitor.inherited
     )
+    call_funcs = set()
+    qual_ref_candidates = set()
+    from .resolution import _attribute_name
+
     for node in ast.walk(tree):
-        if isinstance(node, ast.ClassDef):
-            from .resolution import _attribute_name
+        if isinstance(node, ast.Call):
+            name = _attribute_name(node.func)
+            if name:
+                all_calls.add(name)
+            if (
+                name == "getattr"
+                and len(node.args) >= 2
+                and isinstance(node.args[1], ast.Constant)
+                and isinstance(node.args[1].value, str)
+            ):
+                dyn_calls.add(node.args[1].value)
+            for kw in node.keywords:
+                if kw.arg in callback_keys:
+                    callback_name = _attribute_name(kw.value)
+                    if callback_name:
+                        cb_set.add(callback_name)
+            if name and name.rsplit(".", 1)[-1] in {"bind", "subscribe", "on"}:
+                if len(node.args) >= 1:
+                    event_name = _attribute_name(node.args[-1])
+                    if event_name:
+                        ev_set.add(event_name)
+            for child in ast.walk(node.func):
+                if isinstance(child, ast.Attribute):
+                    call_funcs.add(child)
+        elif isinstance(node, ast.ClassDef):
             for base in node.bases:
-                b_name = _attribute_name(base)
-                if b_name:
-                    inh_set.add((node.name, b_name))
+                base_name = _attribute_name(base)
+                if base_name:
+                    inh_set.add((node.name, base_name))
+        elif isinstance(node, ast.Attribute):
+            qualified_name = _attribute_name(node)
+            if qualified_name and "." in qualified_name:
+                qual_ref_candidates.add((node, qualified_name))
 
+    direct_calls = tuple(sorted(all_calls))
+    runtime_calls = tuple(sorted(dyn_calls))
+    callback_calls = tuple(sorted(cb_set))
+    event_bindings = tuple(sorted(ev_set))
     inheritance_refs = tuple(sorted(inh_set))
-
     aliases = tuple(
         sorted(
             set(
@@ -695,23 +689,15 @@ def extract_module_usage_facts(
             )
         )
     )
-
-    call_funcs = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Call):
-            for child in ast.walk(node.func):
-                if isinstance(child, ast.Attribute):
-                    call_funcs.add(child)
-
-    qual_refs = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Attribute) and node not in call_funcs:
-            from .resolution import _attribute_name
-            name = _attribute_name(node)
-            if name and "." in name:
-                qual_refs.add(name)
-
-    qualified_refs = tuple(sorted(qual_refs))
+    qualified_refs = tuple(
+        sorted(
+            {
+                qualified_name
+                for node, qualified_name in qual_ref_candidates
+                if node not in call_funcs
+            }
+        )
+    )
 
     local_callees = {
         dotted: f"{module_path}::{local_name}"
