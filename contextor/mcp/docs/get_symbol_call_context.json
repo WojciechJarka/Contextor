@@ -19,19 +19,19 @@
     "A successful canonical module::symbol remains the first and cheapest textual path. Qualified textual misses may return bounded suggestion-only candidates from current, materialized, queryable active artifacts; fuzzy candidates never execute traversal and recovery identities are excluded.",
     "Plain leaves remain unsupported even when a globally unique exact leaf exists in the shared resolver.",
     "Traversal is deterministic BFS: nearer facts precede deeper facts, and canonical edge identities are deduplicated.",
-    "Named output is permitted only when the complete named candidate is at most 51200 UTF-8 bytes. Larger named candidates automatically select indexed output.",
+    "Explicit named output is permitted only when the complete named candidate is at most 51200 UTF-8 bytes. Above that hard ceiling it returns large_named_output_requires_indexed_representation without edges; if indexed identities are complete, retry with representation='indexed'. allow_large_output does not bypass this ceiling.",
     "Auto selects indexed below the 51200-byte boundary only when existing shared representation policy saves at least 512 serialized bytes; otherwise it emits named output.",
     "Indexed edges use existing persistent artifact IDs only and expose lookup_index_entries as the batch resolver. No new IDs or graph registry are created.",
-    "Representation negotiation happens before output auto-bounding: explicit named/indexed and auto selection remain authoritative, named candidates strictly above 51200 bytes force indexed representation, and auto switches to indexed at 512+ bytes savings.",
+    "Representation negotiation happens before output auto-bounding: explicit named never switches to indexed; auto candidates strictly above 51200 bytes require complete indexed identities, while auto below that boundary switches to indexed only at 512+ bytes savings.",
     "After representation selection, the exact final JSON is measured against the 15360 UTF-8 byte threshold. When output exceeds 15360 bytes with allow_large_output=false and contains edges, the tool returns the largest deterministic edge prefix fitting within 15360 bytes (embedding _output.auto_bounded=true, full_output_bytes, requested_count, and returned_count). If even one edge cannot fit or returned_edges is zero, compact confirmation_required is returned without graph edges. No BFS, registry lookup, or canonical analysis is repeated for auto-bounding. Passing allow_large_output=true returns the complete original selected candidate."
   ],
   "freshness": [
-    "Reads only current LIVE canonical module_usages symbol_calls. It performs no ast.parse, source read, grep, report parsing, or query-time graph reconstruction.",
+    "Reads call facts only from current LIVE canonical module_usages symbol_calls. It performs no repository scan, ast.parse, source-derived call reconstruction, grep, or report parsing. A target-local fingerprint/hash read may occur solely to populate workspace_sync.",
     "Fails closed when module truth is stale/unavailable or symbol_calls_materialized is false. A valid materialized-empty graph returns status ok with zero totals.",
     "The response includes a ``state_freshness`` envelope scoped to the module containing the queried symbol:\n- ``workspace_sync``: ``verified`` (sha256 matches), ``metadata_match`` (mtime+size only), ``out_of_sync`` (disk modified), or ``unverified``.\n- ``canonical_revision``: Exact revision of the canonical state used to answer this query.\n- ``provenance``: ``live`` or ``snapshot`` derived from engine hydration path.\n- ``advisory_warning``: Non-null if the file is out of sync or the last analysis job was interrupted/failed."
   ],
   "errors": [
-    "Unknown qualified symbols return controlled unknown_symbol or ambiguity responses with bounded suggestion-only candidates. Non-exact plain leaves, missing artifact IDs, invalid direction/depth/max_items/representation, missing indexed identities, stale truth, and unmaterialized call facts return controlled responses."
+    "Unknown qualified symbols return controlled unknown_symbol or ambiguity responses with bounded suggestion-only candidates. Non-exact plain leaves, missing artifact IDs, invalid direction/depth/max_items/representation, explicit named candidates above 51200 bytes, missing indexed identities, stale truth, and unmaterialized call facts return controlled responses."
   ],
   "usage_notes": [
     "Start with direction, depth=1, and a small max_items. Use expand metadata or retry with a larger bound only when the refactor needs more context.",

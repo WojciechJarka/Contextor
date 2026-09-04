@@ -1,6 +1,5 @@
 import ast
 import json
-from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -154,7 +153,7 @@ def test_named_indexed_and_auto_use_existing_ids(monkeypatch):
     assert auto["representation_decision"]["bytes_saved"] < 512
 
 
-def test_large_named_candidate_forces_indexed_preflight_and_exact_retry(monkeypatch):
+def test_large_explicit_named_candidate_requires_indexed_retry(monkeypatch):
     edges = []
     for index in range(220):
         long_name = f"callee_{index}_" + ("x" * 150)
@@ -167,13 +166,10 @@ def test_large_named_candidate_forces_indexed_preflight_and_exact_retry(monkeypa
         max_items=None,
         representation="named",
     )
-    assert bounded["status"] == "ok"
-    assert bounded["representation"] == "indexed"
-    assert bounded["representation_decision"]["reason"] == "named_candidate_exceeded_51200_bytes"
-    assert "_output" in bounded
-    assert bounded["_output"]["auto_bounded"] is True
-    assert bounded["_output"]["warning_threshold_bytes"] == 15360
-    assert bounded["_output"]["full_output_bytes"] > 15360
+    assert bounded["status"] == "error"
+    assert bounded["error"] == "large_named_output_requires_indexed_representation"
+    assert bounded["retry"] == {"representation": "indexed"}
+    assert "_output" not in bounded
 
     approved_text = get_symbol_call_context(
         "C:/repo",
@@ -185,11 +181,11 @@ def test_large_named_candidate_forces_indexed_preflight_and_exact_retry(monkeypa
         allow_large_output=True,
     )
     approved = json.loads(approved_text)
-    assert approved["representation"] == "indexed"
-    assert len(approved_text.encode("utf-8")) == bounded["_output"]["full_output_bytes"]
+    assert approved["status"] == "error"
+    assert approved["error"] == "large_named_output_requires_indexed_representation"
 
 
-def test_query_does_not_parse_or_read_source(monkeypatch):
+def test_query_does_not_parse_or_reconstruct_calls(monkeypatch):
     _install(monkeypatch, [_edge("root", "callee", 2)])
     original_parse = ast.parse
     parse_calls = []
@@ -198,18 +194,9 @@ def test_query_does_not_parse_or_read_source(monkeypatch):
         parse_calls.append((args, kwargs))
         return original_parse(*args, **kwargs)
 
-    original_read_text = Path.read_text
-    read_paths = []
-
-    def tracked_read_text(path, *args, **kwargs):
-        read_paths.append(path)
-        return original_read_text(path, *args, **kwargs)
-
-    monkeypatch.setattr(Path, "read_text", tracked_read_text)
     with monkeypatch.context() as scoped:
         scoped.setattr(ast, "parse", tracked_parse)
         result = _call(direction="callees", representation="named")
 
     assert result["status"] == "ok"
     assert parse_calls == []
-    assert [path for path in read_paths if path.suffix == ".py"] == []

@@ -116,7 +116,7 @@
     {
       "tool": "get_symbol_call_context",
       "filename": "get_symbol_call_context.json",
-      "short_description": "Return a bounded callers/callees neighborhood from current canonical intra-module symbol-call facts without reading source."
+      "short_description": "Return a bounded callers/callees neighborhood from canonical intra-module symbol-call facts without a repository scan or source-derived call reconstruction."
     },
     {
       "tool": "get_name_collisions",

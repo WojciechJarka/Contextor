@@ -392,7 +392,15 @@ def get_symbol_call_context(
                 suggested_action="Use representation='named' or refresh persistent identities.",
             )
         force_indexed = named_bytes > LARGE_NAMED_GRAPH_BYTES
-        if force_indexed and indexed_candidate is None:
+        if representation == "named" and force_indexed:
+            details = {"named_candidate_bytes": named_bytes}
+            if indexed_candidate is not None:
+                details["retry"] = {"representation": "indexed"}
+            return _error(
+                "large_named_output_requires_indexed_representation",
+                **details,
+            )
+        if representation == "auto" and force_indexed and indexed_candidate is None:
             return _error(
                 "large_named_output_requires_indexed_identities",
                 named_candidate_bytes=named_bytes,

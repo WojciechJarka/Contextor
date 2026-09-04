@@ -1,3 +1,4 @@
+import ast
 import json
 from types import SimpleNamespace
 
@@ -87,6 +88,25 @@ def _call(symbol=_ROOT, **kwargs):
             **kwargs,
         )
     )
+
+
+def test_get_symbol_call_context__uses_freshness_helper_without_call_reconstruction(monkeypatch):
+    _install(monkeypatch)
+    freshness_calls = []
+
+    def target_local_freshness(*args, **kwargs):
+        freshness_calls.append((args, kwargs))
+        return {"workspace_sync": "verified"}
+
+    monkeypatch.setattr(query_helpers, "build_state_freshness", target_local_freshness)
+    monkeypatch.setattr(ast, "parse", lambda *_args, **_kwargs: pytest.fail("ast.parse"))
+
+    result = _call(direction="callees")
+
+    assert result["status"] == "ok"
+    assert result["callees"]["items"]
+    assert result["state_freshness"] == {"workspace_sync": "verified"}
+    assert len(freshness_calls) == 1
 
 
 def test_get_symbol_call_context__active_artifact_id_matches_canonical(monkeypatch):
@@ -411,9 +431,11 @@ def test_get_symbol_call_context__named_force_boundary_51200_vs_51201(monkeypatc
         return _call(_ROOT, direction="callees", representation="named")
 
     assert run(51200)["representation"] == "named"
-    forced = run(51201)
-    assert forced["representation"] == "indexed"
-    assert forced["representation_decision"]["reason"] == "named_candidate_exceeded_51200_bytes"
+    blocked = run(51201)
+    assert blocked["status"] == "error"
+    assert blocked["error"] == "large_named_output_requires_indexed_representation"
+    assert blocked["named_candidate_bytes"] == 51201
+    assert blocked["retry"] == {"representation": "indexed"}
 
 
 def test_get_symbol_call_context__auto_savings_boundary_511_vs_512(monkeypatch):
@@ -648,7 +670,7 @@ def test_get_symbol_call_context__explicit_named_is_not_silently_changed_to_inde
     assert bounded["_output"]["auto_bounded"] is True
 
 
-def test_get_symbol_call_context__forced_indexed_happens_before_auto_bounding(monkeypatch):
+def test_get_symbol_call_context__explicit_named_hard_ceiling_precedes_auto_bounding(monkeypatch):
     # Setup graph where named candidate > 51200 bytes (e.g. 350 edges, named ~65 KB)
     _install_large_graph(monkeypatch, edge_count=350, symbol_prefix="callee_with_a_very_long_symbol_name_")
 
@@ -662,12 +684,43 @@ def test_get_symbol_call_context__forced_indexed_happens_before_auto_bounding(mo
     )
     bounded = json.loads(raw_bounded)
 
-    assert bounded["status"] == "ok"
-    # Forced to indexed before auto-bounding!
-    assert bounded["representation"] == "indexed"
-    assert bounded["representation_decision"]["reason"] == "named_candidate_exceeded_51200_bytes"
-    assert bounded["_output"]["auto_bounded"] is True
-    assert len(raw_bounded.encode("utf-8")) <= 15360
+    assert bounded["status"] == "error"
+    assert bounded["error"] == "large_named_output_requires_indexed_representation"
+    assert bounded["retry"] == {"representation": "indexed"}
+    assert "_output" not in bounded
+
+    approved = json.loads(call_tool.get_symbol_call_context(
+        "C:/repo",
+        _ROOT,
+        direction="callees",
+        representation="named",
+        allow_large_output=True,
+        max_items=None,
+    ))
+    assert approved["status"] == "error"
+    assert approved["error"] == "large_named_output_requires_indexed_representation"
+
+
+def test_get_symbol_call_context__auto_large_named_requires_indexed_identities(monkeypatch):
+    _install_large_graph(monkeypatch, edge_count=350, symbol_prefix="callee_with_a_very_long_symbol_name_")
+    original_read_registries = call_tool.query_helpers.read_registries
+
+    def incomplete_registry(root):
+        registries = list(original_read_registries(root))
+        registries[2] = {}
+        return tuple(registries)
+
+    monkeypatch.setattr(call_tool.query_helpers, "read_registries", incomplete_registry)
+
+    result = _call(
+        _ROOT,
+        direction="callees",
+        representation="auto",
+        max_items=None,
+    )
+
+    assert result["status"] == "error"
+    assert result["error"] == "large_named_output_requires_indexed_identities"
 
 
 def test_get_symbol_call_context__auto_bounded_full_output_bytes_matches_allow_large_original(monkeypatch):
@@ -794,4 +847,3 @@ def test_get_symbol_call_context__allow_large_output_returns_original_unbounded_
     assert "_output" not in res
     assert len(res["callees"]["items"]) == 100
     assert len(raw.encode("utf-8")) > 15360
-
