@@ -90,7 +90,7 @@ def _call(symbol=_ROOT, **kwargs):
     )
 
 
-def test_get_symbol_call_context__uses_freshness_helper_without_call_reconstruction(monkeypatch):
+def test_get_symbol_call_context__uses_freshness_helper_without_ast_parse(monkeypatch):
     _install(monkeypatch)
     freshness_calls = []
 

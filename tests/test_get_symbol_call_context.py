@@ -185,7 +185,7 @@ def test_large_explicit_named_candidate_requires_indexed_retry(monkeypatch):
     assert approved["error"] == "large_named_output_requires_indexed_representation"
 
 
-def test_query_does_not_parse_or_reconstruct_calls(monkeypatch):
+def test_query_does_not_parse_materialized_call_facts(monkeypatch):
     _install(monkeypatch, [_edge("root", "callee", 2)])
     original_parse = ast.parse
     parse_calls = []
