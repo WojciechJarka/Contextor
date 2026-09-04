@@ -1,62 +1,64 @@
-# F2F0 correction
+# F2F0 runtime certification
 
 DECISION=PASS
 
-MCP_RESTART_REQUIRED=YES
+RUNTIME_FRESHNESS=PASS
+
+MCP_RESTART_REQUIRED=NO
 
 LIVE_RESTART_REQUIRED=NO
 
-RUNTIME_CERTIFICATION_NOT_YET_PERFORMED=YES
+RUNTIME_CERTIFICATION_NOT_YET_PERFORMED=NO
+
+FILES_CHANGED=NONE
+
+DIFFS=NONE
 
 FULL_SUITE_RUN_BY_AGENT=NO
 
-Contextor LIVE call-graph evidence at revision 214 for `contextor.mcp.tools.get_symbol_call_context::get_symbol_call_context` returned 32/32 intra-module callee edges (depth 3). The executable local callees are `_error`, `_identity`, `_known_symbols_for_module`, `_ordered_union`, `_queryable_artifact_registry`, `_shape`, `_textual_miss_response`, and `_walk`; none reconstructs or materializes source-derived call facts.
+## Loaded tool/schema evidence
 
-Contextor source evidence for the runtime binding `mcp_runtime.get_or_init_engine` shows only LIVE snapshot retrieval or persisted-state hydration and engine construction. It does not call `ensure_module_usages`, `extract_module_usage_facts`, `SymbolReferenceVisitor`, analysis, or AST/source call-fact production. No reconstruction/materialization callable is reachable from the query path; a fake monkeypatch target would not test executable behavior.
+The live MCP `get_mcp_documentation(tool="get_symbol_call_context")` response exposes `get_symbol_call_context` with version `1.0.0` and the current eight-parameter schema, including `representation` and `allow_large_output`.
 
-The focused tests now accurately state executable behavior: materialized call facts do not invoke `ast.parse`; the target-local `build_state_freshness` helper remains allowed without `ast.parse`.
+Its live behavior text contains the corrected loaded contract: explicit named output over 51,200 bytes returns `large_named_output_requires_indexed_representation` without edges; `allow_large_output` does not bypass this ceiling; explicit named never switches to indexed; auto above the ceiling requires complete indexed identities. The freshness text also states no repository scan, no `ast.parse`, and no source-derived call reconstruction while allowing target-local fingerprint/hash work for `workspace_sync`.
 
-Documentation contract validator: `tests/mcp/tools/test_public_mcp_docs_parity.py`, which checks documentation/index parity against registered MCP tools via `documentation.query_documentation()`.
+This is runtime-served documentation, not repository-source evidence, so it proves that the running server is not serving the pre-correction schema/contract.
 
-Command:
+## LIVE evidence
 
-```text
-.venv\Scripts\python.exe -m pytest -q tests/test_get_symbol_call_context.py::test_query_does_not_parse_materialized_call_facts tests/mcp/tools/test_get_symbol_call_context.py::test_get_symbol_call_context__uses_freshness_helper_without_ast_parse tests/mcp/tools/test_public_mcp_docs_parity.py
-```
-
-Result:
+`get_live_events(after_revision=216)` returned:
 
 ```text
-6 passed, 1 warning in 4.03s
+revision=217
+latest_revision=217
+continuity=continuous
+resync_required=false
+resync_reason=null
+origin=desktop_analysis
+operation=publish
+status=PUBLISHED
 ```
 
-`git diff --check` passed. The warning is FastMCP/Authlib deprecation only. No unrelated suite was run.
+The representative tool responses all used `canonical_revision=217`, `provenance=live`, `canonical_state=fresh`, `workspace_sync=verified`, and `advisory_warning=null`.
 
-FILES_CHANGED:
+## Representative runtime query
+
+Root: `contextor.mcp.tools.get_symbol_call_context::get_symbol_call_context`.
 
 ```text
-tests/test_get_symbol_call_context.py
-tests/mcp/tools/test_get_symbol_call_context.py
+direction=callees depth=1 max_items=5
 ```
 
-No production or docs file changed in this correction. Their preceding accepted F2F0 changes remain in the worktree. The existing runtime log was untouched. The walkthrough diff is omitted.
+Named response: `status=ok`, `total_edges=28`, `returned_edges=5`, `truncated=true`, with canonical qualified caller/callee identities, direct call facts, and source lines 223/226/228/230/235. `data_source=live_canonical_module_usages_symbol_calls`.
 
-## COMPLETE RAW UNIFIED DIFFS
+Indexed response: `status=ok`, same 28/5 topology, persistent endpoint IDs (`A2407/1` → `A2411/1`) and `resolver.resolve_via=lookup_index_entries`.
 
-```diff
-diff --git a/tests/test_get_symbol_call_context.py b/tests/test_get_symbol_call_context.py
---- a/tests/test_get_symbol_call_context.py
-+++ b/tests/test_get_symbol_call_context.py
-@@ -188 +188 @@
--def test_query_does_not_parse_or_reconstruct_calls(monkeypatch):
-+def test_query_does_not_parse_materialized_call_facts(monkeypatch):
-```
+Auto response: `status=ok`, selected `named`, `requested_representation=auto`, `bytes_saved=430`, `reason=auto_named`; this is the unchanged below-ceiling behavior because the saving is below 512 bytes.
 
-```diff
-diff --git a/tests/mcp/tools/test_get_symbol_call_context.py b/tests/mcp/tools/test_get_symbol_call_context.py
---- a/tests/mcp/tools/test_get_symbol_call_context.py
-+++ b/tests/mcp/tools/test_get_symbol_call_context.py
-@@ -93 +93 @@
--def test_get_symbol_call_context__uses_freshness_helper_without_call_reconstruction(monkeypatch):
-+def test_get_symbol_call_context__uses_freshness_helper_without_ast_parse(monkeypatch):
-```
+No source-derived call reconstruction or AST analysis is claimed or observed: the runtime response’s loaded freshness contract expressly forbids them, and the response identifies only materialized LIVE canonical `symbol_calls` as its data source.
+
+## Boundary exercise
+
+BOUNDARY_RUNTIME_EXERCISE=NOT_PRACTICAL
+
+The real runtime candidate for the representative symbol is only 1,908 named bytes at the requested five-edge bound. No sufficiently large real candidate was manufactured, and no repository/LIVE state was mutated to force one. The freshly loaded runtime schema explicitly exposes the explicit-named hard-ceiling and auto/indexed precedence; focused source tests remain the authority for synthetic 51,200-byte boundary cases.

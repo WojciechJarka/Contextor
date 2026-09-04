@@ -494,3 +494,5 @@
 {"ts":"2026-09-04T06:45:50.653+00:00","mono_ms":130866734,"sid":"d-2264-20260904_060113_719","pid":2264,"tid":10236,"d":"GUI","ev":"EVENT_BATCH_RECEIVED","rev":216,"seq":28,"count":1,"first_seq":28,"last_seq":28}
 {"ts":"2026-09-04T06:45:50.654+00:00","mono_ms":130866734,"sid":"d-2264-20260904_060113_719","pid":2264,"tid":10236,"d":"GUI","ev":"STATUS_QUEUED","op":"u-2264-10","rev":216,"seq":28,"q":1,"category":"LIVE_STATE","status":"[LIVE] [Contextor_Repo] Watcher updated test_get_symbol_call_context.py (rev 216"}
 {"ts":"2026-09-04T06:45:50.655+00:00","mono_ms":130866750,"sid":"d-2264-20260904_060113_719","pid":2264,"tid":6960,"d":"GUI","ev":"STATUS_RENDERED","op":"u-2264-10","rev":216,"seq":28,"q":0,"wait_ms":16.00000000325963}
+{"ts":"2026-09-04T06:53:48.143+00:00","mono_ms":131344234,"sid":"d-2264-20260904_060113_719","pid":13956,"tid":5712,"d":"LIVE","ev":"SERVICE_END","rev":216,"repo":"C:\\Temp\\Contextor_Repo"}
+{"ts":"2026-09-04T06:53:51.007+00:00","mono_ms":131347093,"sid":"d-2264-20260904_060113_719","pid":2264,"tid":6960,"d":"DESKTOP","ev":"SESSION_END","op":"d-2264-11"}
