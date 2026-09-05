@@ -53,6 +53,50 @@ class IndexCatalog:
     recovered_artifacts: Mapping[str, str] | None = None
 
 
+def registry_maps_from_state(state: Mapping[str, Any]) -> tuple[dict, dict, dict, dict]:
+    """Project registry identity maps from one already-loaded generation."""
+
+    modules = state.get("module_registry", {})
+    artifacts = state.get("artifact_registry", {})
+    return (
+        dict(modules.get("path_to_id", {})),
+        dict(modules.get("id_to_path", {})),
+        dict(artifacts.get("path_to_id", {})),
+        dict(artifacts.get("id_to_path", {})),
+    )
+
+
+def catalog_from_registry_state(
+    state: Mapping[str, Any],
+    module_paths: Mapping[str, str] | None = None,
+) -> IndexCatalog:
+    """Build an IndexCatalog from one already-loaded registry generation."""
+
+    _, modules, _, artifacts = registry_maps_from_state(state)
+    recovered_modules = {
+        str(obj_id): entry.get("path")
+        for obj_id, entry in state.get("module_recovery", {}).items()
+        if isinstance(entry, dict) and entry.get("path")
+    }
+    recovered_artifacts = {
+        str(obj_id): entry.get("name")
+        for obj_id, entry in state.get("artifact_recovery", {}).items()
+        if isinstance(entry, dict) and entry.get("name")
+    }
+    active_modules = {str(key): value for key, value in modules.items() if value}
+    return IndexCatalog(
+        modules=active_modules,
+        artifacts={str(key): value for key, value in artifacts.items() if value},
+        module_paths=(
+            dict(module_paths)
+            if module_paths is not None
+            else None
+        ),
+        recovered_modules=recovered_modules,
+        recovered_artifacts=recovered_artifacts,
+    )
+
+
 def catalog_from_registry(
     repo_path: str,
     module_paths: Mapping[str, str] | None = None,
@@ -64,32 +108,19 @@ def catalog_from_registry(
     )
 
     registry = PersistentIdentityRegistry(repo_path)
-    with registry.transaction():
-        state = registry._state
-        modules = dict(state.get("module_registry", {}).get("id_to_path", {}))
-        artifacts = dict(state.get("artifact_registry", {}).get("id_to_path", {}))
-        recovered_modules = {
-            str(obj_id): entry.get("path")
-            for obj_id, entry in state.get("module_recovery", {}).items()
-            if isinstance(entry, dict) and entry.get("path")
-        }
-        recovered_artifacts = {
-            str(obj_id): entry.get("name")
-            for obj_id, entry in state.get("artifact_recovery", {}).items()
-            if isinstance(entry, dict) and entry.get("name")
-        }
-    active_modules = {str(key): value for key, value in modules.items() if value}
+    with registry.read_transaction():
+        catalog = catalog_from_registry_state(registry._state, module_paths=module_paths)
     resolved_module_paths = (
         dict(module_paths)
         if module_paths is not None
-        else discover_module_paths(repo_path, active_modules.values())
+        else discover_module_paths(repo_path, catalog.modules.values())
     )
     return IndexCatalog(
-        modules=active_modules,
-        artifacts={str(key): value for key, value in artifacts.items() if value},
+        modules=catalog.modules,
+        artifacts=catalog.artifacts,
         module_paths=resolved_module_paths,
-        recovered_modules=recovered_modules,
-        recovered_artifacts=recovered_artifacts,
+        recovered_modules=catalog.recovered_modules,
+        recovered_artifacts=catalog.recovered_artifacts,
     )
 
 

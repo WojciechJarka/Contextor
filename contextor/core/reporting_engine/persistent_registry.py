@@ -254,6 +254,25 @@ class PersistentIdentityRegistry:
             self._in_transaction = False
             self._unlock()
 
+    @contextmanager
+    def read_transaction(self):
+        """Load one recovered registry generation without committing it."""
+
+        if self._in_transaction:
+            yield
+            return
+
+        self._lock()
+        self._in_transaction = True
+
+        try:
+            self._recover_transaction()
+            self._load_all()
+            yield
+        finally:
+            self._in_transaction = False
+            self._unlock()
+
     # ---- Logic Methods ----
 
     def _allocate_slot(self, kind: str) -> str:

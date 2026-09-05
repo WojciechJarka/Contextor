@@ -46,6 +46,24 @@ def _static_test_reachability(
     ]
 
 
+def _canonical_module_paths(root: Path, state, required_modules: set[str]) -> dict[str, str] | None:
+    """Return complete, repository-relative canonical paths or fail safe."""
+
+    result: dict[str, str] = {}
+    for module_name in required_modules:
+        module = (getattr(state, "modules", {}) or {}).get(module_name)
+        raw_path = getattr(module, "absolute_path", None) or getattr(module, "path", None)
+        if not raw_path:
+            return None
+        candidate = Path(raw_path)
+        try:
+            relative = candidate.resolve().relative_to(root).as_posix()
+        except ValueError:
+            return None
+        result[module_name] = relative
+    return result
+
+
 def get_file_edit_context(
     repo_path: str,
     file_path: str = "",
@@ -69,10 +87,29 @@ def get_file_edit_context(
         )
 
     # Read registries & catalog for canonical resolution
-    from contextor.core.report_query import IndexCatalog, catalog_from_registry, resolve_index_query
+    from contextor.core.report_query import IndexCatalog, catalog_from_registry, catalog_from_registry_state, registry_maps_from_state, resolve_index_query
 
-    mod_path_to_id, mod_id_to_path, art_path_to_id, art_id_to_path = query_helpers.read_registries(root)
-    catalog = catalog_from_registry(str(root))
+    minimal_engine = mcp_runtime.get_or_init_engine(root) if mode == "minimal" else None
+    if mode == "minimal":
+        from contextor.core.reporting_engine.persistent_registry import PersistentIdentityRegistry
+
+        registry = PersistentIdentityRegistry(str(root))
+        with registry.read_transaction():
+            mod_path_to_id, mod_id_to_path, art_path_to_id, art_id_to_path = registry_maps_from_state(registry._state)
+            module_paths = None
+            if minimal_engine and not getattr(minimal_engine.state, "resync_required", False):
+                module_paths = _canonical_module_paths(root, minimal_engine.state, set(mod_id_to_path.values()))
+            catalog = catalog_from_registry_state(registry._state, module_paths=module_paths)
+            if catalog.module_paths is None:
+                catalog = catalog_from_registry(str(root))
+        if not catalog.modules:
+            # Preserve the established fail-safe path when the on-disk registry
+            # has no active generation (including isolated embedders).
+            mod_path_to_id, mod_id_to_path, art_path_to_id, art_id_to_path = query_helpers.read_registries(root)
+            catalog = catalog_from_registry(str(root))
+    else:
+        mod_path_to_id, mod_id_to_path, art_path_to_id, art_id_to_path = query_helpers.read_registries(root)
+        catalog = catalog_from_registry(str(root))
     if not catalog.modules and mod_id_to_path:
         catalog = IndexCatalog(
             modules=mod_id_to_path,
@@ -183,7 +220,7 @@ def get_file_edit_context(
             module_id = top["id"]
             file_path_resolved = (catalog.module_paths or {}).get(module_name) or module_name.replace(".", "/") + ".py"
 
-            engine = mcp_runtime.get_or_init_engine(root)
+            engine = minimal_engine
             if not engine or getattr(engine.state, "resync_required", False):
                 return json.dumps(
                     {
