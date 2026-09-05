@@ -1,166 +1,73 @@
-# PersistentIdentityRegistry read transaction repair
+# Runtime performance certification — get_file_edit_context(mode=minimal)
 
-DECISION=PASS
+DECISION=FINAL_PASS
 
-## Transaction-mode contract
+## Runtime freshness evidence
 
-`_in_transaction` now means only an active scope. `_transaction_mode` is `read` or `write`.
+Certification used the running Contextor MCP tool only, not source from disk and not a direct Python call. The live endpoint served the current minimal in-memory decision projection at revision 237 and completed the discarded warm-up plus three identical calls in 479–511 ms. This is materially inconsistent with the pre-fast-path baseline of 5.5–8.3 s and confirms the running MCP has the accepted minimal fast path loaded.
 
-- An outer write sets `write`; nested writes share its generation and existing commit/persistence path.
-- An outer read sets `read`, recovers/loads, and releases without commit.
-- A write inside a read raises `RuntimeError("Cannot enter write transaction inside read transaction.")` before caller-body mutation.
-- A read inside a write views the write generation without changing outer commit behavior.
-- Existing IDs resolve in either mode. Missing module/artifact IDs allocate only in `write`; read returns `None` with no slots/maps/recovery mutation.
+The public runtime does not expose child-level transaction counters or an implementation/version hash. It therefore cannot independently expose the internal `read/write` transaction-mode field or distinguish the catalog helper's read scope. Their ownership-count proof remains the focused regression authority; no artificial runtime instrumentation was added. The observed endpoint behavior is compatible with the loaded fast path and has no catalog/discovery-scale delay.
 
-`_repair_kind` remains in `_load_all`: read exposes its repaired in-memory projection. The regression verifies no read-only commit of that projection.
+## Canonical LIVE health
 
-## Focused validation
+`get_module_context(contextor.cli)` returned:
 
 ```text
-.venv\Scripts\python.exe -m pytest -q tests/test_persistent_registry.py tests/mcp/tools/test_minimal_registry_read_path.py tests/test_indexed_report_query.py
+canonical_state=fresh
+workspace_sync=verified
+canonical_revision=237
+provenance=live
+families=module, graph, topology, artifact_consumption, cycles, collisions: fresh
 ```
 
-Result: `46 passed in 9.73s`.
+Canonical engine health is therefore fresh LIVE at revision 237; no engine `resync_required` condition was reported by the canonical query. `get_live_events(after_revision=236)` separately reported `continuity=gap` and `resync_reason=event_retention_gap`. This is an event-stream retention condition, not evidence of canonical-engine resync.
 
-Coverage: existing/missing IDs in read; exact state non-mutation; write allocation and reload persistence; controlled write-inside-read rejection; read-inside-write view; and repair projection without persistence. Existing interrupted-transaction recovery coverage remains in `tests/test_persistent_registry.py`; persistence protocol was not changed.
+## Real MCP benchmark
 
-Fresh minimal invariants: `read_transaction count=1`, `mutating transaction count=0`, `discover_module_paths count=0`, `response parity=true` (focused canonical fixture returns the expected `pkg/module.py`).
+Request (identical to baseline):
 
-`git diff --check` passed (only existing LF-to-CRLF warnings).
+```json
+{"repo_path":"C:\\Temp\\Contextor_Repo","file_path":"contextor\\cli.py","mode":"minimal","max_items":10,"compact":true}
+```
 
-## LIVE evidence
+One warm-up was discarded, followed by three real MCP calls.
 
-Contextor MCP `get_live_events` after revision 234 returned `status=transient_connection_failure`, reason `Existing LIVE owner is temporarily unreachable`. No new runtime-performance certification is asserted.
+```text
+BASELINE_RUNS_MS=8294, 5489, 5667
+BASELINE_MEDIAN_MS=5667
+BASELINE_RESPONSE_BYTES=1338
 
-MCP_RESTART_REQUIRED=YES
+RUNS_MS=479, 502, 511
+MEDIAN_MS=502
+RESPONSE_BYTES=1338
+RESPONSE_PARITY=true
+CANONICAL_REVISION=237
+PROVENANCE=live
+RESYNC_REQUIRED=false (canonical engine)
+```
+
+Median improvement: `5165 ms` (`91.14%` faster).
+
+Semantic parity was checked against the baseline contract: `resolved_as=module`, `module=contextor.cli`, `module_id=135/1`, `file=contextor/cli.py`, `layer=cli`, direct/transitive consumers `1/2` with sample `contextor.__main__`, `tests_covering=0`, and `warnings=[]`. The response was not shortened to obtain the performance result.
+
+## Ownership counts
+
+```text
+read_transaction count=not exposed by running runtime trace
+mutating registry transaction count=not exposed by running runtime trace
+discover_module_paths count=not exposed by running runtime trace
+```
+
+No synthetic runtime patching was used. Focused tests remain the authority for the previously verified fresh-minimal invariants: one read transaction, zero mutating transactions, zero discovery calls, and response parity.
+
+MCP_RESTART_REQUIRED=NO
 
 LIVE_RESTART_REQUIRED=NO
 
-RUNTIME_PERFORMANCE_CERTIFICATION_PENDING=YES
+RUNTIME_PERFORMANCE_CERTIFICATION_PENDING=NO
 
-FILES_CHANGED
+FILES_CHANGED=NONE
 
-```text
-contextor/core/reporting_engine/persistent_registry.py
-tests/test_persistent_registry.py
-```
-
-## COMPLETE RAW UNIFIED DIFF
-
-```diff
-diff --git a/contextor/core/reporting_engine/persistent_registry.py b/contextor/core/reporting_engine/persistent_registry.py
-index 9008bd3..d4e90d9 100644
---- a/contextor/core/reporting_engine/persistent_registry.py
-+++ b/contextor/core/reporting_engine/persistent_registry.py
-@@ -32,6 +32,7 @@ class PersistentIdentityRegistry:
-         self._state = {}
-         self._in_transaction = False
-+        self._transaction_mode: str | None = None
-         self._lock_file_obj = None
-@@ -198,11 +199,16 @@ class PersistentIdentityRegistry:
-     def transaction(self):
-         if self._in_transaction:
-+            if self._transaction_mode != "write":
-+                raise RuntimeError(
-+                    "Cannot enter write transaction inside read transaction."
-+                )
-             yield
-             return
-         self._lock()
-         self._in_transaction = True
-+        self._transaction_mode = "write"
-@@ -251,6 +257,7 @@ class PersistentIdentityRegistry:
-         finally:
-+            self._transaction_mode = None
-             self._in_transaction = False
-             self._unlock()
-@@ -263,12 +270,14 @@ class PersistentIdentityRegistry:
-         self._lock()
-         self._in_transaction = True
-+        self._transaction_mode = "read"
-         try:
-             self._recover_transaction()
-             self._load_all()
-             yield
-         finally:
-+            self._transaction_mode = None
-             self._in_transaction = False
-             self._unlock()
-@@ -311,7 +320,7 @@ class PersistentIdentityRegistry:
--        if self._in_transaction:
-+        if self._transaction_mode == "write":
-             new_id = self._allocate_slot("module")
-@@ -327,7 +336,7 @@ class PersistentIdentityRegistry:
--        if self._in_transaction:
-+        if self._transaction_mode == "write":
-             new_id = self._allocate_slot("artifact")
-diff --git a/tests/test_persistent_registry.py b/tests/test_persistent_registry.py
-index ab5ce09..394d01c 100644
---- a/tests/test_persistent_registry.py
-+++ b/tests/test_persistent_registry.py
-@@ -1,6 +1,7 @@
- import os
- import json
- import shutil
-+import copy
- import pytest
-@@ -200,3 +201,62 @@ def test_registry_repairs_reverse_only_entries_into_recovery(temp_repo):
-+def test_read_transaction_returns_existing_ids_without_allocating_missing_ids(temp_repo):
-+    registry = PersistentIdentityRegistry(temp_repo)
-+    with registry.transaction():
-+        module_id = registry.get_module_id("existing.py")
-+        artifact_id = registry.get_artifact_id("existing::symbol")
-+    with registry.read_transaction():
-+        before = copy.deepcopy(registry._state)
-+        assert registry.get_module_id("existing.py") == module_id
-+        assert registry.get_artifact_id("existing::symbol") == artifact_id
-+        assert registry.get_module_id("missing.py") is None
-+        assert registry.get_artifact_id("missing::symbol") is None
-+        assert registry._state == before
-+
-+def test_write_transaction_allocates_and_persists_missing_ids(temp_repo):
-+    registry = PersistentIdentityRegistry(temp_repo)
-+    with registry.transaction():
-+        module_id = registry.get_module_id("new.py")
-+        artifact_id = registry.get_artifact_id("new::symbol")
-+    reloaded = PersistentIdentityRegistry(temp_repo)
-+    assert reloaded.get_module_id("new.py") == module_id
-+    assert reloaded.get_artifact_id("new::symbol") == artifact_id
-+
-+def test_write_transaction_nested_in_read_transaction_fails_without_mutation(temp_repo):
-+    registry = PersistentIdentityRegistry(temp_repo)
-+    with registry.read_transaction():
-+        before = copy.deepcopy(registry._state)
-+        with pytest.raises(RuntimeError, match="Cannot enter write transaction inside read transaction\\."):
-+            with registry.transaction():
-+                pass
-+        assert registry.get_module_id("missing.py") is None
-+        assert registry.get_artifact_id("missing::symbol") is None
-+        assert registry._state == before
-+
-+def test_read_transaction_nested_in_write_transaction_views_current_generation(temp_repo):
-+    registry = PersistentIdentityRegistry(temp_repo)
-+    with registry.transaction():
-+        module_id = registry.get_module_id("current.py")
-+        artifact_id = registry.get_artifact_id("current::symbol")
-+        with registry.read_transaction():
-+            assert registry.get_module_id("current.py") == module_id
-+            assert registry.get_artifact_id("current::symbol") == artifact_id
-+    reloaded = PersistentIdentityRegistry(temp_repo)
-+    assert reloaded.get_module_id("current.py") == module_id
-+    assert reloaded.get_artifact_id("current::symbol") == artifact_id
-+
-+def test_read_transaction_repairs_in_memory_without_persisting_projection(temp_repo):
-+    registry = PersistentIdentityRegistry(temp_repo)
-+    with registry.transaction():
-+        registry._state["module_registry"]["id_to_path"]["9/3"] = "orphan.py"
-+    registry_file = registry.files["module_registry"]
-+    before = registry_file.read_bytes()
-+    with registry.read_transaction():
-+        assert "9/3" not in registry._state["module_registry"]["id_to_path"]
-+        assert registry._state["module_recovery"]["9/3"]["path"] == "orphan.py"
-+        assert registry._state["module_slots"]["9"] == 3
-+    assert registry_file.read_bytes() == before
-```
+DIFFS=NONE
 
 FULL_SUITE_RUN_BY_AGENT=NO
