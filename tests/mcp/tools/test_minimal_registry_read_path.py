@@ -50,3 +50,65 @@ def test_fresh_minimal_query_uses_one_read_transaction_and_no_discovery(tmp_path
     assert result["resolved_as"] == "module"
     assert result["file"] == "pkg/module.py"
     assert counts == {"read": 1, "write": 0, "discover": 0}
+
+
+def test_incomplete_canonical_paths_fallback_runs_after_first_read_lock(tmp_path, monkeypatch):
+    registry = PersistentIdentityRegistry(str(tmp_path))
+    with registry.transaction():
+        registry._state["module_registry"]["path_to_id"] = {"pkg.module": "1/1"}
+        registry._state["module_registry"]["id_to_path"] = {"1/1": "pkg.module"}
+
+    state = RepositoryAnalysisState(modules={"pkg.module": object()})
+    state.resync_required = False
+    engine = SimpleNamespace(state=state)
+    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: engine)
+
+    active_reads = {"value": 0, "nested": False, "discover": 0}
+    original_read = PersistentIdentityRegistry.read_transaction
+
+    def tracked_read(self):
+        manager = original_read(self)
+        class Scope:
+            def __enter__(_self):
+                active_reads["value"] += 1
+                if active_reads["value"] > 1:
+                    active_reads["nested"] = True
+                return manager.__enter__()
+            def __exit__(_self, *args):
+                try:
+                    return manager.__exit__(*args)
+                finally:
+                    active_reads["value"] -= 1
+        return Scope()
+
+    monkeypatch.setattr(PersistentIdentityRegistry, "read_transaction", tracked_read)
+    monkeypatch.setattr(
+        "contextor.core.report_query.discover_module_paths",
+        lambda _root, modules: active_reads.__setitem__("discover", active_reads["discover"] + 1)
+        or {"pkg.module": "pkg/module.py"},
+    )
+
+    result = json.loads(get_file_edit_context(str(tmp_path), target="pkg.module", mode="minimal"))
+
+    assert result["status"] == "unavailable"
+    assert active_reads == {"value": 0, "nested": False, "discover": 1}
+
+
+def test_canonical_relative_path_is_resolved_from_repo_root(tmp_path, monkeypatch):
+    source = tmp_path / "pkg" / "module.py"
+    source.parent.mkdir()
+    source.write_text("x = 1\n", encoding="utf-8")
+    registry = PersistentIdentityRegistry(str(tmp_path))
+    with registry.transaction():
+        registry._state["module_registry"]["path_to_id"] = {"pkg.module": "1/1"}
+        registry._state["module_registry"]["id_to_path"] = {"1/1": "pkg.module"}
+    module = Module(module_id="pkg.module", path="pkg/module.py", absolute_path="", imports=[])
+    state = RepositoryAnalysisState(modules={"pkg.module": module})
+    state.dependency_graph = SimpleNamespace(hard_edges={}, soft_edges={})
+    state.cached_analytics_state = "deferred"
+    state.topology_metrics_state = "deferred"
+    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: SimpleNamespace(state=state))
+
+    result = json.loads(get_file_edit_context(str(tmp_path), target="pkg.module", mode="minimal"))
+
+    assert result["file"] == "pkg/module.py"

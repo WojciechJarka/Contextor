@@ -57,7 +57,8 @@ def _canonical_module_paths(root: Path, state, required_modules: set[str]) -> di
             return None
         candidate = Path(raw_path)
         try:
-            relative = candidate.resolve().relative_to(root).as_posix()
+            resolved = candidate.resolve() if candidate.is_absolute() else (root / candidate).resolve()
+            relative = resolved.relative_to(root).as_posix()
         except ValueError:
             return None
         result[module_name] = relative
@@ -94,14 +95,16 @@ def get_file_edit_context(
         from contextor.core.reporting_engine.persistent_registry import PersistentIdentityRegistry
 
         registry = PersistentIdentityRegistry(str(root))
+        needs_discovery_fallback = False
         with registry.read_transaction():
             mod_path_to_id, mod_id_to_path, art_path_to_id, art_id_to_path = registry_maps_from_state(registry._state)
             module_paths = None
             if minimal_engine and not getattr(minimal_engine.state, "resync_required", False):
                 module_paths = _canonical_module_paths(root, minimal_engine.state, set(mod_id_to_path.values()))
             catalog = catalog_from_registry_state(registry._state, module_paths=module_paths)
-            if catalog.module_paths is None:
-                catalog = catalog_from_registry(str(root))
+            needs_discovery_fallback = catalog.module_paths is None
+        if needs_discovery_fallback:
+            catalog = catalog_from_registry(str(root))
         if not catalog.modules:
             # Preserve the established fail-safe path when the on-disk registry
             # has no active generation (including isolated embedders).
