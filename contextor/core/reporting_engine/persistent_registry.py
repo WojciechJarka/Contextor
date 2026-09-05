@@ -35,6 +35,7 @@ class PersistentIdentityRegistry:
 
         self._state = {}
         self._in_transaction = False
+        self._transaction_mode: str | None = None
         self._lock_file_obj = None
 
         self._recover_transaction()
@@ -197,11 +198,16 @@ class PersistentIdentityRegistry:
     @contextmanager
     def transaction(self):
         if self._in_transaction:
+            if self._transaction_mode != "write":
+                raise RuntimeError(
+                    "Cannot enter write transaction inside read transaction."
+                )
             yield
             return
 
         self._lock()
         self._in_transaction = True
+        self._transaction_mode = "write"
 
         try:
             self._recover_transaction()
@@ -251,6 +257,7 @@ class PersistentIdentityRegistry:
                 pass
 
         finally:
+            self._transaction_mode = None
             self._in_transaction = False
             self._unlock()
 
@@ -264,12 +271,14 @@ class PersistentIdentityRegistry:
 
         self._lock()
         self._in_transaction = True
+        self._transaction_mode = "read"
 
         try:
             self._recover_transaction()
             self._load_all()
             yield
         finally:
+            self._transaction_mode = None
             self._in_transaction = False
             self._unlock()
 
@@ -309,7 +318,7 @@ class PersistentIdentityRegistry:
         if obj_id:
             return obj_id
 
-        if self._in_transaction:
+        if self._transaction_mode == "write":
             new_id = self._allocate_slot("module")
             self._state["module_registry"]["path_to_id"][path] = new_id
             self._state["module_registry"]["id_to_path"][new_id] = path
@@ -325,7 +334,7 @@ class PersistentIdentityRegistry:
         if obj_id:
             return obj_id
 
-        if self._in_transaction:
+        if self._transaction_mode == "write":
             new_id = self._allocate_slot("artifact")
             self._state["artifact_registry"]["path_to_id"][name] = new_id
             self._state["artifact_registry"]["id_to_path"][new_id] = name

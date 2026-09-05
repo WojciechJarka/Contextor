@@ -1,6 +1,7 @@
 import os
 import json
 import shutil
+import copy
 import pytest
 from pathlib import Path
 
@@ -198,3 +199,78 @@ def test_registry_repairs_reverse_only_entries_into_recovery(temp_repo):
         assert "10/2" not in registry._state["module_recovery"]
         assert registry._state["module_slots"]["9"] == 3
         assert registry._state["module_slots"]["10"] == 2
+
+
+def test_read_transaction_returns_existing_ids_without_allocating_missing_ids(temp_repo):
+    registry = PersistentIdentityRegistry(temp_repo)
+    with registry.transaction():
+        module_id = registry.get_module_id("existing.py")
+        artifact_id = registry.get_artifact_id("existing::symbol")
+
+    with registry.read_transaction():
+        before = copy.deepcopy(registry._state)
+
+        assert registry.get_module_id("existing.py") == module_id
+        assert registry.get_artifact_id("existing::symbol") == artifact_id
+        assert registry.get_module_id("missing.py") is None
+        assert registry.get_artifact_id("missing::symbol") is None
+        assert registry._state == before
+
+
+def test_write_transaction_allocates_and_persists_missing_ids(temp_repo):
+    registry = PersistentIdentityRegistry(temp_repo)
+    with registry.transaction():
+        module_id = registry.get_module_id("new.py")
+        artifact_id = registry.get_artifact_id("new::symbol")
+
+    reloaded = PersistentIdentityRegistry(temp_repo)
+    assert reloaded.get_module_id("new.py") == module_id
+    assert reloaded.get_artifact_id("new::symbol") == artifact_id
+
+
+def test_write_transaction_nested_in_read_transaction_fails_without_mutation(temp_repo):
+    registry = PersistentIdentityRegistry(temp_repo)
+    with registry.read_transaction():
+        before = copy.deepcopy(registry._state)
+
+        with pytest.raises(
+            RuntimeError,
+            match="Cannot enter write transaction inside read transaction\\.",
+        ):
+            with registry.transaction():
+                pass
+
+        assert registry.get_module_id("missing.py") is None
+        assert registry.get_artifact_id("missing::symbol") is None
+        assert registry._state == before
+
+
+def test_read_transaction_nested_in_write_transaction_views_current_generation(temp_repo):
+    registry = PersistentIdentityRegistry(temp_repo)
+    with registry.transaction():
+        module_id = registry.get_module_id("current.py")
+        artifact_id = registry.get_artifact_id("current::symbol")
+
+        with registry.read_transaction():
+            assert registry.get_module_id("current.py") == module_id
+            assert registry.get_artifact_id("current::symbol") == artifact_id
+
+    reloaded = PersistentIdentityRegistry(temp_repo)
+    assert reloaded.get_module_id("current.py") == module_id
+    assert reloaded.get_artifact_id("current::symbol") == artifact_id
+
+
+def test_read_transaction_repairs_in_memory_without_persisting_projection(temp_repo):
+    registry = PersistentIdentityRegistry(temp_repo)
+    with registry.transaction():
+        registry._state["module_registry"]["id_to_path"]["9/3"] = "orphan.py"
+
+    registry_file = registry.files["module_registry"]
+    before = registry_file.read_bytes()
+
+    with registry.read_transaction():
+        assert "9/3" not in registry._state["module_registry"]["id_to_path"]
+        assert registry._state["module_recovery"]["9/3"]["path"] == "orphan.py"
+        assert registry._state["module_slots"]["9"] == 3
+
+    assert registry_file.read_bytes() == before

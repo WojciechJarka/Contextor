@@ -1,130 +1,166 @@
-# Fallback-lock verification
+# PersistentIdentityRegistry read transaction repair
 
 DECISION=PASS
 
-Exact active MCP source evidence: PersistentIdentityRegistry._lock opens the same .lock file and takes msvcrt.LK_LOCK on Windows; _unlock uses LK_UNLCK and closes that instance's file handle. read_transaction only treats self._in_transaction as reentrant. catalog_from_registry creates a new PersistentIdentityRegistry and opens its own read_transaction. Therefore separate same-repo instances have no explicit reentrancy mechanism; calling catalog_from_registry inside another instance's read_transaction may block on the same non-reentrant file lock.
+## Transaction-mode contract
 
-Fallback dataflow is now: first registry instance read_transaction -> maps/catalog projection only -> lock released -> if canonical module paths unavailable/incomplete, catalog_from_registry -> second read_transaction -> discover_module_paths. There is no same-repo nested lock. Relative canonical module.path is resolved from root / candidate before repo-relative POSIX conversion; absolute paths are resolved directly and both fail safe if outside root.
+`_in_transaction` now means only an active scope. `_transaction_mode` is `read` or `write`.
 
-Focused tests:
-  .venv\Scripts\python.exe -m pytest -q tests/mcp/tools/test_minimal_registry_read_path.py tests/test_persistent_registry.py tests/test_mcp_regressions.py -k "minimal or persistent_registry"
-  git diff --check
-Result: 13 passed, 83 deselected, 1 warning in 12.07s; diff check passed (only CRLF warnings). Tests cover fresh fast path counts, incomplete-path fallback without concurrent nested read locks, relative canonical path from repo root, no read commit side effects, existing minimal resolution behavior, interrupted recovery and mutating transaction regressions.
+- An outer write sets `write`; nested writes share its generation and existing commit/persistence path.
+- An outer read sets `read`, recovers/loads, and releases without commit.
+- A write inside a read raises `RuntimeError("Cannot enter write transaction inside read transaction.")` before caller-body mutation.
+- A read inside a write views the write generation without changing outer commit behavior.
+- Existing IDs resolve in either mode. Missing module/artifact IDs allocate only in `write`; read returns `None` with no slots/maps/recovery mutation.
 
-LIVE evidence: get_live_events(after_revision=230) returned revisions 233-234, but continuity=gap and resync_required=true with event_retention_gap. The watcher event for the focused test is present. This is a natural retention gap, not evidence of code failure; no MCP update_file was called.
+`_repair_kind` remains in `_load_all`: read exposes its repaired in-memory projection. The regression verifies no read-only commit of that projection.
+
+## Focused validation
+
+```text
+.venv\Scripts\python.exe -m pytest -q tests/test_persistent_registry.py tests/mcp/tools/test_minimal_registry_read_path.py tests/test_indexed_report_query.py
+```
+
+Result: `46 passed in 9.73s`.
+
+Coverage: existing/missing IDs in read; exact state non-mutation; write allocation and reload persistence; controlled write-inside-read rejection; read-inside-write view; and repair projection without persistence. Existing interrupted-transaction recovery coverage remains in `tests/test_persistent_registry.py`; persistence protocol was not changed.
+
+Fresh minimal invariants: `read_transaction count=1`, `mutating transaction count=0`, `discover_module_paths count=0`, `response parity=true` (focused canonical fixture returns the expected `pkg/module.py`).
+
+`git diff --check` passed (only existing LF-to-CRLF warnings).
+
+## LIVE evidence
+
+Contextor MCP `get_live_events` after revision 234 returned `status=transient_connection_failure`, reason `Existing LIVE owner is temporarily unreachable`. No new runtime-performance certification is asserted.
 
 MCP_RESTART_REQUIRED=YES
+
 LIVE_RESTART_REQUIRED=NO
+
 RUNTIME_PERFORMANCE_CERTIFICATION_PENDING=YES
-FILES_CHANGED=contextor/core/reporting_engine/persistent_registry.py; contextor/core/report_query.py; contextor/mcp/tools/get_file_edit_context.py; tests/mcp/tools/test_minimal_registry_read_path.py
-FULL_SUITE_RUN_BY_AGENT=NO
+
+FILES_CHANGED
+
+```text
+contextor/core/reporting_engine/persistent_registry.py
+tests/test_persistent_registry.py
+```
 
 ## COMPLETE RAW UNIFIED DIFF
 
 ```diff
-warning: in the working copy of 'contextor/mcp/tools/get_file_edit_context.py', LF will be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'tests/mcp/tools/test_minimal_registry_read_path.py', LF will be replaced by CRLF the next time Git touches it
-diff --git a/contextor/mcp/tools/get_file_edit_context.py b/contextor/mcp/tools/get_file_edit_context.py
-index 9cb4eb8..d4c2255 100644
---- a/contextor/mcp/tools/get_file_edit_context.py
-+++ b/contextor/mcp/tools/get_file_edit_context.py
-@@ -57,7 +57,8 @@ def _canonical_module_paths(root: Path, state, required_modules: set[str]) -> di
-             return None
-         candidate = Path(raw_path)
+diff --git a/contextor/core/reporting_engine/persistent_registry.py b/contextor/core/reporting_engine/persistent_registry.py
+index 9008bd3..d4e90d9 100644
+--- a/contextor/core/reporting_engine/persistent_registry.py
++++ b/contextor/core/reporting_engine/persistent_registry.py
+@@ -32,6 +32,7 @@ class PersistentIdentityRegistry:
+         self._state = {}
+         self._in_transaction = False
++        self._transaction_mode: str | None = None
+         self._lock_file_obj = None
+@@ -198,11 +199,16 @@ class PersistentIdentityRegistry:
+     def transaction(self):
+         if self._in_transaction:
++            if self._transaction_mode != "write":
++                raise RuntimeError(
++                    "Cannot enter write transaction inside read transaction."
++                )
+             yield
+             return
+         self._lock()
+         self._in_transaction = True
++        self._transaction_mode = "write"
+@@ -251,6 +257,7 @@ class PersistentIdentityRegistry:
+         finally:
++            self._transaction_mode = None
+             self._in_transaction = False
+             self._unlock()
+@@ -263,12 +270,14 @@ class PersistentIdentityRegistry:
+         self._lock()
+         self._in_transaction = True
++        self._transaction_mode = "read"
          try:
--            relative = candidate.resolve().relative_to(root).as_posix()
-+            resolved = candidate.resolve() if candidate.is_absolute() else (root / candidate).resolve()
-+            relative = resolved.relative_to(root).as_posix()
-         except ValueError:
-             return None
-         result[module_name] = relative
-@@ -94,14 +95,16 @@ def get_file_edit_context(
-         from contextor.core.reporting_engine.persistent_registry import PersistentIdentityRegistry
- 
-         registry = PersistentIdentityRegistry(str(root))
-+        needs_discovery_fallback = False
-         with registry.read_transaction():
-             mod_path_to_id, mod_id_to_path, art_path_to_id, art_id_to_path = registry_maps_from_state(registry._state)
-             module_paths = None
-             if minimal_engine and not getattr(minimal_engine.state, "resync_required", False):
-                 module_paths = _canonical_module_paths(root, minimal_engine.state, set(mod_id_to_path.values()))
-             catalog = catalog_from_registry_state(registry._state, module_paths=module_paths)
--            if catalog.module_paths is None:
--                catalog = catalog_from_registry(str(root))
-+            needs_discovery_fallback = catalog.module_paths is None
-+        if needs_discovery_fallback:
-+            catalog = catalog_from_registry(str(root))
-         if not catalog.modules:
-             # Preserve the established fail-safe path when the on-disk registry
-             # has no active generation (including isolated embedders).
-diff --git a/tests/mcp/tools/test_minimal_registry_read_path.py b/tests/mcp/tools/test_minimal_registry_read_path.py
-index cea2f7c..a68cd70 100644
---- a/tests/mcp/tools/test_minimal_registry_read_path.py
-+++ b/tests/mcp/tools/test_minimal_registry_read_path.py
-@@ -50,3 +50,65 @@ def test_fresh_minimal_query_uses_one_read_transaction_and_no_discovery(tmp_path
-     assert result["resolved_as"] == "module"
-     assert result["file"] == "pkg/module.py"
-     assert counts == {"read": 1, "write": 0, "discover": 0}
-+
-+
-+def test_incomplete_canonical_paths_fallback_runs_after_first_read_lock(tmp_path, monkeypatch):
-+    registry = PersistentIdentityRegistry(str(tmp_path))
+             self._recover_transaction()
+             self._load_all()
+             yield
+         finally:
++            self._transaction_mode = None
+             self._in_transaction = False
+             self._unlock()
+@@ -311,7 +320,7 @@ class PersistentIdentityRegistry:
+-        if self._in_transaction:
++        if self._transaction_mode == "write":
+             new_id = self._allocate_slot("module")
+@@ -327,7 +336,7 @@ class PersistentIdentityRegistry:
+-        if self._in_transaction:
++        if self._transaction_mode == "write":
+             new_id = self._allocate_slot("artifact")
+diff --git a/tests/test_persistent_registry.py b/tests/test_persistent_registry.py
+index ab5ce09..394d01c 100644
+--- a/tests/test_persistent_registry.py
++++ b/tests/test_persistent_registry.py
+@@ -1,6 +1,7 @@
+ import os
+ import json
+ import shutil
++import copy
+ import pytest
+@@ -200,3 +201,62 @@ def test_registry_repairs_reverse_only_entries_into_recovery(temp_repo):
++def test_read_transaction_returns_existing_ids_without_allocating_missing_ids(temp_repo):
++    registry = PersistentIdentityRegistry(temp_repo)
 +    with registry.transaction():
-+        registry._state["module_registry"]["path_to_id"] = {"pkg.module": "1/1"}
-+        registry._state["module_registry"]["id_to_path"] = {"1/1": "pkg.module"}
++        module_id = registry.get_module_id("existing.py")
++        artifact_id = registry.get_artifact_id("existing::symbol")
++    with registry.read_transaction():
++        before = copy.deepcopy(registry._state)
++        assert registry.get_module_id("existing.py") == module_id
++        assert registry.get_artifact_id("existing::symbol") == artifact_id
++        assert registry.get_module_id("missing.py") is None
++        assert registry.get_artifact_id("missing::symbol") is None
++        assert registry._state == before
 +
-+    state = RepositoryAnalysisState(modules={"pkg.module": object()})
-+    state.resync_required = False
-+    engine = SimpleNamespace(state=state)
-+    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: engine)
-+
-+    active_reads = {"value": 0, "nested": False, "discover": 0}
-+    original_read = PersistentIdentityRegistry.read_transaction
-+
-+    def tracked_read(self):
-+        manager = original_read(self)
-+        class Scope:
-+            def __enter__(_self):
-+                active_reads["value"] += 1
-+                if active_reads["value"] > 1:
-+                    active_reads["nested"] = True
-+                return manager.__enter__()
-+            def __exit__(_self, *args):
-+                try:
-+                    return manager.__exit__(*args)
-+                finally:
-+                    active_reads["value"] -= 1
-+        return Scope()
-+
-+    monkeypatch.setattr(PersistentIdentityRegistry, "read_transaction", tracked_read)
-+    monkeypatch.setattr(
-+        "contextor.core.report_query.discover_module_paths",
-+        lambda _root, modules: active_reads.__setitem__("discover", active_reads["discover"] + 1)
-+        or {"pkg.module": "pkg/module.py"},
-+    )
-+
-+    result = json.loads(get_file_edit_context(str(tmp_path), target="pkg.module", mode="minimal"))
-+
-+    assert result["status"] == "unavailable"
-+    assert active_reads == {"value": 0, "nested": False, "discover": 1}
-+
-+
-+def test_canonical_relative_path_is_resolved_from_repo_root(tmp_path, monkeypatch):
-+    source = tmp_path / "pkg" / "module.py"
-+    source.parent.mkdir()
-+    source.write_text("x = 1\n", encoding="utf-8")
-+    registry = PersistentIdentityRegistry(str(tmp_path))
++def test_write_transaction_allocates_and_persists_missing_ids(temp_repo):
++    registry = PersistentIdentityRegistry(temp_repo)
 +    with registry.transaction():
-+        registry._state["module_registry"]["path_to_id"] = {"pkg.module": "1/1"}
-+        registry._state["module_registry"]["id_to_path"] = {"1/1": "pkg.module"}
-+    module = Module(module_id="pkg.module", path="pkg/module.py", absolute_path="", imports=[])
-+    state = RepositoryAnalysisState(modules={"pkg.module": module})
-+    state.dependency_graph = SimpleNamespace(hard_edges={}, soft_edges={})
-+    state.cached_analytics_state = "deferred"
-+    state.topology_metrics_state = "deferred"
-+    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: SimpleNamespace(state=state))
++        module_id = registry.get_module_id("new.py")
++        artifact_id = registry.get_artifact_id("new::symbol")
++    reloaded = PersistentIdentityRegistry(temp_repo)
++    assert reloaded.get_module_id("new.py") == module_id
++    assert reloaded.get_artifact_id("new::symbol") == artifact_id
 +
-+    result = json.loads(get_file_edit_context(str(tmp_path), target="pkg.module", mode="minimal"))
++def test_write_transaction_nested_in_read_transaction_fails_without_mutation(temp_repo):
++    registry = PersistentIdentityRegistry(temp_repo)
++    with registry.read_transaction():
++        before = copy.deepcopy(registry._state)
++        with pytest.raises(RuntimeError, match="Cannot enter write transaction inside read transaction\\."):
++            with registry.transaction():
++                pass
++        assert registry.get_module_id("missing.py") is None
++        assert registry.get_artifact_id("missing::symbol") is None
++        assert registry._state == before
 +
-+    assert result["file"] == "pkg/module.py"
++def test_read_transaction_nested_in_write_transaction_views_current_generation(temp_repo):
++    registry = PersistentIdentityRegistry(temp_repo)
++    with registry.transaction():
++        module_id = registry.get_module_id("current.py")
++        artifact_id = registry.get_artifact_id("current::symbol")
++        with registry.read_transaction():
++            assert registry.get_module_id("current.py") == module_id
++            assert registry.get_artifact_id("current::symbol") == artifact_id
++    reloaded = PersistentIdentityRegistry(temp_repo)
++    assert reloaded.get_module_id("current.py") == module_id
++    assert reloaded.get_artifact_id("current::symbol") == artifact_id
++
++def test_read_transaction_repairs_in_memory_without_persisting_projection(temp_repo):
++    registry = PersistentIdentityRegistry(temp_repo)
++    with registry.transaction():
++        registry._state["module_registry"]["id_to_path"]["9/3"] = "orphan.py"
++    registry_file = registry.files["module_registry"]
++    before = registry_file.read_bytes()
++    with registry.read_transaction():
++        assert "9/3" not in registry._state["module_registry"]["id_to_path"]
++        assert registry._state["module_recovery"]["9/3"]["path"] == "orphan.py"
++        assert registry._state["module_slots"]["9"] == 3
++    assert registry_file.read_bytes() == before
 ```
+
+FULL_SUITE_RUN_BY_AGENT=NO
