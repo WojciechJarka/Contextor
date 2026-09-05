@@ -1,226 +1,168 @@
-# Contextor MCP latency discovery: get_artifact_blast_radius
+# Contextor MCP latency discovery: `extract_indexed_report_context`
 
-## Scope
+Discovery/profiling only. No production code, tests, report/cache, or LIVE state changed; `update_file` was not called. MCP is present in current deferred-tool inventory.
 
-- Discovery/profiling only: no production source, tests, MCP state, or watcher behavior changed.
-- Desktop LIVE watcher remained authoritative; `update_file` was not called.
-- Contextor MCP supplied contract, ownership, dataflow, source spans, and LIVE proof. Text search only verified concrete paths.
-- Historical screen (median about 2285 ms, response about 925 B) is comparison only; all results below are current.
+## Current runtime contract and request
 
-## Exact current runtime public contract
+Current MCP docs define:
+```text
+repo_path:string required; query:string required (artifact/module ID, .py path, module::symbol, or explicit prefix)
+report_path:string default ""; resolve_indices:bool default true; public_api_only:bool default false
+max_items:int|null default 20; fields:string[]|null default null; evidence_limit:int|null default 3
+representation:string|null default null; named|indexed|auto take precedence when non-null
+```
+Behavior: index-first GUI-shared resolution; ambiguous/missing identities explicit; active plus recovery dictionaries; nested-evidence bounds/retry descriptors; read-only. Auto negotiates response size.
 
-Runtime docs: version `1.0.0`, tool `get_artifact_blast_radius`.
+Exact deterministic representative normal indexed request:
+```json
+{"repo_path":"C:\\Temp\\Contextor_Repo","query":"contextor/mcp/tools/extract_indexed_report_context.py","report_path":"","resolve_indices":false,"public_api_only":false,"max_items":20,"fields":null,"evidence_limit":3,"representation":"indexed"}
+```
+It produced exact file match / module ID `266/1`, 12 complete artifact blocks, selection + diagnostics + expand, `truncated=false`, `representation=indexed`, `resolve_via=lookup_index_entries`.
 
-| Parameter | Contract |
-|---|---|
-| `repo_path` | required canonical repository root |
-| `artifact_name` | optional string (default empty); active artifact ID, full canonical identity, or leaf symbol |
-| `artifact` | alias for `artifact_name`; both must match when supplied |
-| `max_items` | integer or null; default 30 |
-| `compact` | boolean; default true |
-| `fields` | optional top-level projection |
-| `representation` | `named`, `indexed`, or `auto`; default named |
+## Freshness and real MCP benchmark
 
-Resolution: exact active artifact ID; canonical LIVE full identity/unique leaf; module redirect; bounded fuzzy suggestions; legacy not-found. Direct consumers are confirmed static symbol consumers; downstream reachability is conservative module-level reachability seeded from direct consumer modules. Freshness reports canonical state, workspace sync, revision, provenance, family flags, and warning.
-
-## Reproduced request and LIVE proof
-
-The historical 925-byte response identifies the representative request:
+Before and after: canonical revision=246; activity_epoch=d2ba45aff622421c9a47ea3367543769; continuity=continuous; resync_required=false; no events after revision 246. Default report: `output/Contextor_Repo_artifacts_compact.json`, 116,520 bytes.
 
 ```text
-get_artifact_blast_radius(
-  repo_path="C:\\Temp\\Contextor_Repo",
-  artifact_name="main",
-  compact=true,
-  max_items=10,
-  representation="named",
-)
+discarded warm-up=271 ms
+warm raw wall=[192,199,219] ms
+median=199 ms
+response bytes=[7121,7121,7121]
+exact output parity=PASS (including discarded warm-up)
 ```
+This is below historical screening median ~2112 ms. Real MCP wall remains authority.
 
-It deterministically returns ambiguity for seven canonical `main` artifacts. Current response is exactly 925 ASCII/UTF-8 bytes.
+## Dataflow
 
 ```text
-canonical_revision=243
-provenance=live
-canonical_state=fresh
-workspace_sync=verified (successful artifact responses)
-families.module=graph=topology=artifact_consumption=cycles=collisions=fresh
-get_live_events(after_revision=243): continuity=continuous; resync_required=false
+MCP wrapper -> extract_indexed_report_context
+ -> canonical report path/is_file -> one read_text + json.loads
+ -> get_or_init_engine (LIVE ping/current engine)
+ -> engine.state.modules -> in-memory module_paths
+ -> catalog_from_registry -> new PersistentIdentityRegistry/read transaction
+ -> catalog_from_registry_state
+ -> query_indexed_report -> bound blocks/consumer evidence
+ -> rewrite_selected_indices(resolve_names=false) -> projection/expand -> json.dumps
 ```
 
-## Real MCP benchmark (authority)
-
-One warm-up was discarded; three following calls were sequential and identical.
-
-| Call | Wall time | Response bytes | Exact response parity |
-|---|---:|---:|---|
-| discarded warm-up | 3720 ms | 925 B | baseline |
-| warm 1 | 3960 ms | 925 B | yes |
-| warm 2 | 5989 ms | 925 B | yes |
-| warm 3 | 10348 ms | 925 B | yes |
-| median warm | **5989 ms** | **925 B** | **exact** |
-
-Current runtime is slower than the historical screen; no historical conclusion was reused as current evidence.
-
-## Exact dataflow
-
-```text
-MCP wrapper/decorator
-  -> get_artifact_blast_radius
-     -> normalize/validate representation and aliases
-     -> query_helpers.read_registries(root)
-        -> new PersistentIdentityRegistry(root), transaction, module/artifact maps
-     -> mcp_runtime.get_or_init_engine(root)
-        -> current desktop LIVE engine/state
-     -> scan engine.state.artifacts
-        -> canonical_symbol_catalog
-        -> canonical_symbol_consumers
-     -> seven main matches -> deterministic candidate sort -> ambiguity serialization
-```
-
-This ambiguity return occurs before architecture aggregation, reachability, `calculate_affected_set`, catalog/module-path fallback, consumer representation conversion, and `fields` projection.
+Explicit indexed representation performs one indexed rewrite, no named->indexed->named roundtrip. public_api_only=false, so no filter. Engine paths bypass `discover_module_paths()`, hence no repo-wide scan.
 
 ## Child attribution
 
-No runtime child timings are exposed. A controlled read-only in-process harness was used only for attribution: same direct function request, one discarded warm-up, then three warm calls. It did not modify source or persisted state. Direct function core JSON is 388 characters; MCP adds the diagnostics envelope seen in the real 925-B response. Baseline/experiments are exact hash-equal: `a3c42fae6ee647a4a462f1a73841b8fd12fc3d0f336532a7dd833c98a30de66b`.
-
-Nested/inclusive timings are not summed.
+Controlled warmed in-process profile only (not real MCP authority); profiled total 676 ms is perturbed. Nested inclusive timings below are not additive.
 
 ```text
 BOUNDARY=MCP wrapper/self
-RUNS_MS=real 3960,5989,10348; direct 1596.116,2216.203,2278.471
-MEDIAN_MS=5989 real; 2216.203 direct
+RUNS_MS=[192,199,219] real MCP
+MEDIAN_MS=199
 COUNT_PER_CALL=1
-INCLUSIVE_OR_SELF=real inclusive; wrapper self unavailable
-DISK_IO=not separately exposed
-REPO_WIDE=yes
-CANONICAL_OR_RECOMPUTED=canonical LIVE request path
-REDUNDANCY_PROOF=not asserted
-
-BOUNDARY=read_registries -> fresh PersistentIdentityRegistry transaction
-RUNS_MS=1382.146,2011.658,2065.153
-MEDIAN_MS=2011.658
-COUNT_PER_CALL=1
-INCLUSIVE_OR_SELF=self child timing
-DISK_IO=yes
+INCLUSIVE_OR_SELF=real end-to-end inclusive
+DISK_IO=telemetry only
 REPO_WIDE=no
-CANONICAL_OR_RECOMPUTED=re-reads registry maps despite fresh engine.registry in same request
-REDUNDANCY_PROOF=Experiment A exact parity using current engine.registry maps
+CANONICAL_OR_RECOMPUTED=canonical MCP surface
+REDUNDANCY_PROOF=none
+
+BOUNDARY=report/file resolution
+RUNS_MS=not isolated
+MEDIAN_MS=N/A
+COUNT_PER_CALL=1 selection + 1 is_file
+INCLUSIVE_OR_SELF=self/setup
+DISK_IO=path/stat
+REPO_WIDE=no
+CANONICAL_OR_RECOMPUTED=canonical
+REDUNDANCY_PROOF=required identity/fail-closed validation
+
+BOUNDARY=physical report read + JSON parse
+RUNS_MS=not isolated
+MEDIAN_MS=N/A
+COUNT_PER_CALL=1 read_text + 1 json.loads
+INCLUSIVE_OR_SELF=extractor inclusive
+DISK_IO=yes, 116520-byte report
+REPO_WIDE=no
+CANONICAL_OR_RECOMPUTED=canonical materialization
+REDUNDANCY_PROOF=none; exactly one read and no proven equivalent partial accessor
 
 BOUNDARY=get_or_init_engine
-RUNS_MS=7.271,9.746,9.090
-MEDIAN_MS=9.090
-COUNT_PER_CALL=1 baseline; 2 in simple Experiment-A harness replacement
-INCLUSIVE_OR_SELF=self child timing
-DISK_IO=not observed fresh; may consult LIVE session/journal metadata
+RUNS_MS=[13] profiler
+MEDIAN_MS=13 attribution only
+COUNT_PER_CALL=1
+INCLUSIVE_OR_SELF=inclusive
+DISK_IO=LIVE ping
 REPO_WIDE=no
-CANONICAL_OR_RECOMPUTED=current LIVE engine acquisition
-REDUNDANCY_PROOF=not removable; owns freshness/current state
+CANONICAL_OR_RECOMPUTED=LIVE engine; observed provenance=live, revision=246
+REDUNDANCY_PROOF=none; current/freshness owner
 
-BOUNDARY=canonical artifact scan / target identity resolution
-RUNS_MS=catalog helper sums 10.282,17.129,12.277; contained in direct total
-MEDIAN_MS=12.277 helper-only
-COUNT_PER_CALL=330 catalogs; 7 main matches
-INCLUSIVE_OR_SELF=scan contained in parent; child numbers not additive
-DISK_IO=no observed
-REPO_WIDE=yes
-CANONICAL_OR_RECOMPUTED=canonical LIVE artifacts, no AST/source reconstruction
-REDUNDANCY_PROOF=not asserted: unqualified leaf requires ambiguity detection
+BOUNDARY=index dictionary/catalog acquisition
+RUNS_MS=profiler catalog=[537]; direct baseline=[120.040,122.775,126.894]
+MEDIAN_MS=122.775 direct harness
+COUNT_PER_CALL=1 catalog; 1 PersistentIdentityRegistry; 14 registry _load_json; 18 aggregate json.loads
+INCLUSIVE_OR_SELF=catalog inclusive; catalog_from_registry_state=[13] profiler
+DISK_IO=yes, second registry read
+REPO_WIDE=no; engine paths bypass discover_module_paths
+CANONICAL_OR_RECOMPUTED=canonical catalog recomputed from second registry
+REDUNDANCY_PROOF=Experiment A has exact output and byte parity using engine.registry + existing catalog_from_registry_state
 
-BOUNDARY=canonical artifact-consumer lookup
-RUNS_MS=187.771,168.250,184.068 inclusive sums
-MEDIAN_MS=184.068
-COUNT_PER_CALL=7
-INCLUSIVE_OR_SELF=inclusive sum; not additive
+BOUNDARY=indexed ID resolution
+RUNS_MS=[96] profiler
+MEDIAN_MS=96 attribution only
+COUNT_PER_CALL=1 query_indexed_report
+INCLUSIVE_OR_SELF=inclusive
+DISK_IO=no additional read shown
+REPO_WIDE=no
+CANONICAL_OR_RECOMPUTED=index-first GUI-shared resolver
+REDUNDANCY_PROOF=none; required exact resolution/diagnostics
+
+BOUNDARY=requested-context extraction/bounds/projection
+RUNS_MS=_build_candidate_response=[6], rewrite_selected_indices=[10] profiler
+MEDIAN_MS=N/A (nested inclusive)
+COUNT_PER_CALL=12 selected blocks; rewrite=1
+INCLUSIVE_OR_SELF=nested inclusive
 DISK_IO=no
 REPO_WIDE=no
-CANONICAL_OR_RECOMPUTED=canonical artifact_consumption maps
-REDUNDANCY_PROOF=discarded on ambiguity; Experiment D exact parity, but below GO threshold
+CANONICAL_OR_RECOMPUTED=public bounds/order/truncation semantics
+REDUNDANCY_PROOF=none
 
-BOUNDARY=direct consumer projection / sorting / bounding
-RUNS_MS=not separately exposed
-MEDIAN_MS=not separately exposed
-COUNT_PER_CALL=0 consumer representation conversions; candidate sort once
-INCLUSIVE_OR_SELF=contained in direct total
+BOUNDARY=serialization
+RUNS_MS=[15] profiler
+MEDIAN_MS=15 attribution only
+COUNT_PER_CALL=1 json.dumps
+INCLUSIVE_OR_SELF=inclusive
 DISK_IO=no
 REPO_WIDE=no
-CANONICAL_OR_RECOMPUTED=canonical candidate identities
-REDUNDANCY_PROOF=consumer projection not reached; deterministic sort required
-
-BOUNDARY=reachability/transitive traversal and reverse adjacency
-RUNS_MS=0 calls
-MEDIAN_MS=0
-COUNT_PER_CALL=0 calculate_affected_set
-INCLUSIVE_OR_SELF=not reached
-DISK_IO=no
-REPO_WIDE=no execution
-CANONICAL_OR_RECOMPUTED=would use current dependency graph for unique artifact
-REDUNDANCY_PROOF=not applicable; traversal is not called redundant
-
-BOUNDARY=catalog_from_registry/discover_module_paths fallback
-RUNS_MS=0 calls
-MEDIAN_MS=0
-COUNT_PER_CALL=0
-INCLUSIVE_OR_SELF=not reached
-DISK_IO=not reached
-REPO_WIDE=not reached
-CANONICAL_OR_RECOMPUTED=legacy/module-diagnosis fallback
-REDUNDANCY_PROOF=not applicable to successful-live ambiguity path
-
-BOUNDARY=serialization/representation
-RUNS_MS=not separately exposed
-MEDIAN_MS=not separately exposed
-COUNT_PER_CALL=1 JSON serialization; 0 named/indexed consumer conversions
-INCLUSIVE_OR_SELF=contained in direct total
-DISK_IO=no
-REPO_WIDE=no
-CANONICAL_OR_RECOMPUTED=one final serialization
-REDUNDANCY_PROOF=no duplicate conversion observed
+CANONICAL_OR_RECOMPUTED=public serialization
+REDUNDANCY_PROOF=none
 ```
+
+`query_helpers.read_registries()` is not on this path. No duplicate compact-report read: one report read; the separate persistent registry acquisition is the duplicate identity source.
 
 ## Experiments (no production patch)
 
-### A. Reuse fresh engine.registry
-
-Harness-only replacement returned module/artifact `path_to_id` and `id_to_path` maps from the current `engine.registry._state` instead of calling `read_registries`. It retained current LIVE engine acquisition.
-
-| Variant | Warm 1 | Warm 2 | Warm 3 | Median | Exact parity |
-|---|---:|---:|---:|---:|---|
-| direct baseline | 1304.304 | 2342.586 | 2037.102 | 2037.102 ms | baseline |
-| A: current engine registry | 179.761 | 210.660 | 210.553 | 210.553 ms | yes |
-
-Output parity: same SHA-256 and 388 chars. Direct-harness recovery is **1826.549 ms** median. The existing order performs a disk-backed registry acquisition before obtaining the current engine that already owns an equivalent active registry. This removable owner exceeds 300 ms and 5% of the real 5989-ms MCP median.
-
-Implementation constraint: obtain/validate usable non-resync engine first; use its registry maps only then; retain independent-registry/recovery behavior when no engine is available and preserve exact ID/currentness failure behavior.
-
-### B. Catalog/module-path discovery
-
-Not mutated: ownership proves `catalog_from_registry()` and fallback module-path discovery are not reached after seven canonical LIVE matches. No recovery claim.
-
-### C. Reverse adjacency/reachability reuse
-
-Not mutated: ambiguity returns before traversal. No evidence permits calling required unique-artifact graph walking redundant.
-
-### D. Defer consumer lookup until uniqueness
-
-Harness-only replacement omitted the seven pre-ambiguity consumer values, which are discarded before output.
-
-| Variant | Warm 1 | Warm 2 | Warm 3 | Median | Exact parity |
-|---|---:|---:|---:|---:|---|
-| direct baseline | 2011.104 | 2061.320 | 2054.592 | 2054.592 ms | baseline |
-| D: omit discarded lookups | 1877.433 | 2120.145 | 2406.055 | 2120.145 ms | yes |
-
-Although attribution is about 184 ms, end-to-end harness results are noisy and do not show a median recovery. D is below both GO thresholds alone; it may be considered only after A, never as the target itself.
-
-## Conclusion
-
-Approved candidate: **A, reuse fresh engine registry**. It preserves current LIVE ownership, IDs, ambiguity candidates, ordering, limits, named representation, and exact output for this request while removing a duplicate disk-backed registry read.
-
-Expected recoverable wall-clock is bounded evidence, not a promise: **about 1.83 s direct-harness median**. Real MCP remains authority; re-run the real MCP benchmark after any production change because wrapper/transport variance means harness child time cannot be subtracted exactly from real wall clock.
+A — reusing fresh `engine.registry`: harness acquired current LIVE engine, temporarily used existing `catalog_from_registry_state(engine.registry._state,module_paths)`, then restored original behavior.
 
 ```text
-DECISION=GO_OPTIMIZE
-FILES_CHANGED=NONE
-DIFFS=NONE
-FULL_SUITE_RUN_BY_AGENT=NO
+engine=live revision=246
+baseline direct=[120.040,122.775,126.894] ms; median=122.775
+A direct=[32.088,27.470,29.848] ms; median=29.848
+recoverable direct median=92.926 ms
+exact parity: PASS across 3 baseline + 3 A outputs
+byte parity: PASS, 7121 bytes
 ```
+
+This proves a new PersistentIdentityRegistry plus 14 JSON loads occurs despite fresh engine registry, while the existing canonical projection is semantically equivalent in this runtime. Production must retain catalog_from_registry fallback when no usable current engine/registry exists, and retain report/index consistency, recovery, and fail-closed behavior.
+
+B — skip discovery: no candidate; engine module paths already avoid `discover_module_paths()` / `rglob("*.py")`.
+C — reuse report parse: no candidate; report is read/parsed once.
+D — partial accessor: no experiment/no redundancy claim; no accessor was proven to preserve full blocks, resolution, diagnostics, ordering, bounds, recovery, and fail-closed validation.
+
+## Decision
+
+DECISION=GO_OPTIMIZE
+
+Removable parity-proven direct owner: 92.926 ms, about 46.7% of real MCP median 199 ms, exceeding >=5% gate. Existing equivalent canonical path exists. Expected recoverable real wall-clock is an estimate only: up to ~93 ms; it is not post-patch evidence. After any patch rerun this exact request, exact-byte parity, LIVE revision/continuity/resync, and absent/stale-engine fallback tests.
+
+FILES_CHANGED=NONE
+
+DIFFS=NONE
+
+FULL_SUITE_RUN_BY_AGENT=NO
+

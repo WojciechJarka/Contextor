@@ -1,4 +1,5 @@
 import json
+from contextlib import contextmanager
 from types import SimpleNamespace
 import pytest
 
@@ -107,6 +108,191 @@ def _setup_blast_radius_state(monkeypatch):
         lambda _root: (mod_path_to_id, mod_id_to_path, art_path_to_id, art_id_to_path),
     )
     return state
+
+
+class _LiveRegistry:
+    def __init__(self, state):
+        self._state = state
+        self.read_transaction_count = 0
+
+    @contextmanager
+    def read_transaction(self):
+        self.read_transaction_count += 1
+        yield
+
+
+def _registry_state(mod_path_to_id, mod_id_to_path, art_path_to_id, art_id_to_path):
+    return {
+        "module_registry": {
+            "path_to_id": mod_path_to_id,
+            "id_to_path": mod_id_to_path,
+        },
+        "artifact_registry": {
+            "path_to_id": art_path_to_id,
+            "id_to_path": art_id_to_path,
+        },
+    }
+
+
+def test_get_artifact_blast_radius__fresh_live_reuses_engine_registry_with_exact_parity(
+    tmp_path, monkeypatch
+):
+    state = _setup_blast_radius_state(monkeypatch)
+    state.provenance = "live"
+    mod_path_to_id = {"pkg.mod_a": "10/1", "pkg.services.auth": "13/1"}
+    mod_id_to_path = {value: key for key, value in mod_path_to_id.items()}
+    art_path_to_id = {
+        "pkg.mod_a::my_func": "A100/1",
+        "pkg.mod_a::extra_func": "A101/1",
+        "pkg.mod_a::MyClass": "A102/1",
+        "pkg.services.auth::login_user": "A103/1",
+        "pkg.services.auth::authenticate_token": "A104/1",
+    }
+    art_id_to_path = {value: key for key, value in art_path_to_id.items()}
+    registry = _LiveRegistry(
+        _registry_state(mod_path_to_id, mod_id_to_path, art_path_to_id, art_id_to_path)
+    )
+    engine_calls = 0
+    registry_reads = 0
+
+    def get_live_engine(_root):
+        nonlocal engine_calls
+        engine_calls += 1
+        return SimpleNamespace(state=state, provenance="live", registry=registry)
+
+    def fail_registry_read(_root):
+        nonlocal registry_reads
+        registry_reads += 1
+        raise AssertionError("fresh LIVE path must not call read_registries")
+
+    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", get_live_engine)
+    monkeypatch.setattr(query_helpers, "read_registries", fail_registry_read)
+
+    optimized = get_artifact_blast_radius(
+        repo_path=str(tmp_path), artifact_name="A100/1", compact=False, max_items=1
+    )
+
+    assert engine_calls == 1
+    assert registry.read_transaction_count == 1
+    assert registry_reads == 0
+
+    monkeypatch.setattr(
+        mcp_runtime,
+        "get_or_init_engine",
+        lambda _root: SimpleNamespace(state=state, provenance="snapshot"),
+    )
+    monkeypatch.setattr(
+        query_helpers,
+        "read_registries",
+        lambda _root: (mod_path_to_id, mod_id_to_path, art_path_to_id, art_id_to_path),
+    )
+    fallback = get_artifact_blast_radius(
+        repo_path=str(tmp_path), artifact_name="A100/1", compact=False, max_items=1
+    )
+
+    assert optimized == fallback
+
+
+@pytest.mark.parametrize(
+    "artifact_name, representation",
+    [
+        ("A100/1", "named"),
+        ("pkg.mod_a::my_func", "indexed"),
+        ("my_func", "auto"),
+        ("pkg.services.auth", "named"),
+        ("my_funcc", "named"),
+        ("completely_unrelated_xyz_123", "named"),
+    ],
+)
+def test_get_artifact_blast_radius__fresh_live_registry_parity_for_contract_paths(
+    tmp_path, monkeypatch, artifact_name, representation
+):
+    state = _setup_blast_radius_state(monkeypatch)
+    state.provenance = "live"
+    state.artifacts["pkg.services.auth"]["symbols"]["functions"].append("my_func")
+    state.artifacts["pkg.services.auth"]["own_symbols"].append("my_func")
+    state.artifact_consumption["pkg.services.auth::my_func"] = {
+        "consumers": [],
+        "channels": {},
+    }
+    mod_path_to_id = {"pkg.mod_a": "10/1", "pkg.services.auth": "13/1"}
+    mod_id_to_path = {value: key for key, value in mod_path_to_id.items()}
+    art_path_to_id = {
+        "pkg.mod_a::my_func": "A100/1",
+        "pkg.mod_a::extra_func": "A101/1",
+        "pkg.mod_a::MyClass": "A102/1",
+        "pkg.services.auth::login_user": "A103/1",
+        "pkg.services.auth::authenticate_token": "A104/1",
+        "pkg.services.auth::my_func": "A105/1",
+    }
+    art_id_to_path = {value: key for key, value in art_path_to_id.items()}
+    registry = _LiveRegistry(
+        _registry_state(mod_path_to_id, mod_id_to_path, art_path_to_id, art_id_to_path)
+    )
+    monkeypatch.setattr(
+        mcp_runtime,
+        "get_or_init_engine",
+        lambda _root: SimpleNamespace(state=state, provenance="snapshot"),
+    )
+    monkeypatch.setattr(
+        query_helpers,
+        "read_registries",
+        lambda _root: (mod_path_to_id, mod_id_to_path, art_path_to_id, art_id_to_path),
+    )
+    baseline = get_artifact_blast_radius(
+        repo_path=str(tmp_path),
+        artifact_name=artifact_name,
+        compact=False,
+        max_items=10,
+        representation=representation,
+    )
+    monkeypatch.setattr(
+        mcp_runtime,
+        "get_or_init_engine",
+        lambda _root: SimpleNamespace(state=state, provenance="live", registry=registry),
+    )
+    monkeypatch.setattr(
+        query_helpers,
+        "read_registries",
+        lambda _root: (_ for _ in ()).throw(AssertionError("unexpected fallback")),
+    )
+    optimized = get_artifact_blast_radius(
+        repo_path=str(tmp_path),
+        artifact_name=artifact_name,
+        compact=False,
+        max_items=10,
+        representation=representation,
+    )
+
+    assert optimized == baseline
+
+
+def test_get_artifact_blast_radius__unusable_live_paths_keep_registry_fallback(tmp_path, monkeypatch):
+    state = _setup_blast_radius_state(monkeypatch)
+    reads = 0
+
+    def read_registries(_root):
+        nonlocal reads
+        reads += 1
+        return ({}, {}, {}, {})
+
+    monkeypatch.setattr(query_helpers, "read_registries", read_registries)
+    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: None)
+    assert get_artifact_blast_radius(repo_path=str(tmp_path), artifact_name="A999/1") == (
+        "Error: No usable canonical LIVE state. Run analyze_project first."
+    )
+    assert reads == 1
+
+    state.resync_required = True
+    monkeypatch.setattr(
+        mcp_runtime,
+        "get_or_init_engine",
+        lambda _root: SimpleNamespace(state=state, provenance="live", registry=_LiveRegistry({})),
+    )
+    assert get_artifact_blast_radius(repo_path=str(tmp_path), artifact_name="A999/1") == (
+        "Error: No usable canonical LIVE state. Run analyze_project first."
+    )
+    assert reads == 2
 
 
 def test_get_artifact_blast_radius__legacy_normal_artifact_success(tmp_path, monkeypatch):
