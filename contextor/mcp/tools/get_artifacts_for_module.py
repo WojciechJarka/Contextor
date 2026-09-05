@@ -75,8 +75,33 @@ def get_artifacts_for_module(
     effective_module = module_name
 
     try:
-        mod_path_to_id, mod_id_to_path, art_path_to_id, art_id_to_path = query_helpers.read_registries(root)
         engine = mcp_runtime.get_or_init_engine(root)
+        live_registry = getattr(engine, "registry", None) if engine else None
+        use_live_registry = (
+            engine is not None
+            and getattr(engine, "provenance", None) == "live"
+            and not getattr(engine.state, "resync_required", False)
+            and live_registry is not None
+        )
+        if use_live_registry:
+            from contextor.core.report_query import registry_maps_from_state
+
+            with live_registry.read_transaction():
+                (
+                    mod_path_to_id,
+                    mod_id_to_path,
+                    art_path_to_id,
+                    art_id_to_path,
+                ) = registry_maps_from_state(live_registry._state)
+        else:
+            # Preserve the established registry-read path for recovery,
+            # unavailable, resync-required, and non-LIVE engine states.
+            (
+                mod_path_to_id,
+                mod_id_to_path,
+                art_path_to_id,
+                art_id_to_path,
+            ) = query_helpers.read_registries(root)
         if not engine or getattr(engine.state, "resync_required", False):
             return "Error: No usable canonical LIVE state. Run analyze_project first."
 

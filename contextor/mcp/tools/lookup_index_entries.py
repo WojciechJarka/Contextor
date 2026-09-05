@@ -14,7 +14,7 @@ def lookup_index_entries(
 ) -> str:
     root = Path(repo_path).expanduser().resolve()
     try:
-        catalog = catalog_from_registry(str(root))
+        catalog = catalog_from_registry(str(root), module_paths={})
         result = {}
         for id_ in ids:
             normalized_id = str(id_)
@@ -69,4 +69,3 @@ def lookup_index_entries(
         )
     except Exception as e:
         return f"Error resolving index entries: {e}"
-

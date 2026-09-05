@@ -1,4 +1,5 @@
 import json
+from contextlib import nullcontext
 from types import SimpleNamespace
 import pytest
 
@@ -391,6 +392,78 @@ def test_get_artifacts_for_module__usable_live_with_missing_id_preserves_legacy_
         module="9999/1",
     )
     assert raw == "Module '9999/1' not found in registry or canonical LIVE state. Check the module name or run an analysis."
+
+
+def test_get_artifacts_for_module__fresh_live_reuses_engine_registry_with_exact_parity(tmp_path, monkeypatch):
+    state = _setup_test_state(monkeypatch)
+    request = {
+        "repo_path": str(tmp_path),
+        "module_name": "pkg.mod_a",
+        "compact": False,
+        "limit": 20,
+        "evidence_limit": 3,
+        "representation": "named",
+    }
+    expected = get_artifacts_for_module(**request)
+    mod_path_to_id = {"pkg.mod_a": "10/1", "pkg.services.auth": "13/1"}
+    art_path_to_id = {
+        "pkg.mod_a::my_func": "A1/1",
+        "pkg.mod_a::extra_func": "A2/1",
+        "pkg.services.auth::login": "A3/1",
+    }
+    registry = SimpleNamespace(
+        _state={
+            "module_registry": {
+                "path_to_id": mod_path_to_id,
+                "id_to_path": {value: key for key, value in mod_path_to_id.items()},
+            },
+            "artifact_registry": {
+                "path_to_id": art_path_to_id,
+                "id_to_path": {value: key for key, value in art_path_to_id.items()},
+            },
+        }
+    )
+    transaction_calls = []
+    registry.read_transaction = lambda: (transaction_calls.append(True) or nullcontext())
+    engine_calls = []
+    read_calls = []
+
+    def fresh_live_engine(_root):
+        engine_calls.append(True)
+        return SimpleNamespace(state=state, provenance="live", registry=registry)
+
+    def fail_if_read(_root):
+        read_calls.append(True)
+        raise AssertionError("fresh LIVE path must not call read_registries")
+
+    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", fresh_live_engine)
+    monkeypatch.setattr(query_helpers, "read_registries", fail_if_read)
+
+    raw = get_artifacts_for_module(**request)
+
+    assert raw == expected
+    assert len(engine_calls) == 1
+    assert len(transaction_calls) == 1
+    assert read_calls == []
+
+
+@pytest.mark.parametrize("engine", [None, SimpleNamespace(state=SimpleNamespace(resync_required=True))])
+def test_get_artifacts_for_module__nonfresh_live_paths_keep_registry_fallback(tmp_path, monkeypatch, engine):
+    _setup_test_state(monkeypatch)
+    read_calls = []
+    registries = ({"pkg.mod_a": "10/1"}, {"10/1": "pkg.mod_a"}, {}, {})
+
+    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: engine)
+    monkeypatch.setattr(
+        query_helpers,
+        "read_registries",
+        lambda _root: (read_calls.append(True) or registries),
+    )
+
+    raw = get_artifacts_for_module(repo_path=str(tmp_path), module_name="pkg.mod_a")
+
+    assert raw == "Error: No usable canonical LIVE state. Run analyze_project first."
+    assert len(read_calls) == 1
 
 
 def test_get_artifacts_for_module__original_query_preserved_and_candidate_structure(tmp_path, monkeypatch):

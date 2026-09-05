@@ -187,7 +187,11 @@ def _setup_lookup_index_catalog(monkeypatch, total_entries: int = 150):
         recovered_modules={},
         recovered_artifacts={},
     )
-    monkeypatch.setattr(lookup_tool_module, "catalog_from_registry", lambda root: catalog)
+    monkeypatch.setattr(
+        lookup_tool_module,
+        "catalog_from_registry",
+        lambda root, module_paths=None: catalog,
+    )
     return [f"A{i}/1" for i in range(total_entries)]
 
 
@@ -256,7 +260,11 @@ def test_auto_bounded_output__lookup_index_entries_single_entry_too_large_confir
         recovered_modules={},
         recovered_artifacts={},
     )
-    monkeypatch.setattr(lookup_tool_module, "catalog_from_registry", lambda root: catalog)
+    monkeypatch.setattr(
+        lookup_tool_module,
+        "catalog_from_registry",
+        lambda root, module_paths=None: catalog,
+    )
 
     raw = lookup_index_entries(str(tmp_path), ids=["A1/1"], allow_large_output=False)
     res = json.loads(raw)
@@ -470,7 +478,7 @@ def test_auto_bounded_output__lookup_reserved_output_key_is_never_overwritten(
     monkeypatch.setattr(
         lookup_tool_module,
         "catalog_from_registry",
-        lambda root: catalog,
+        lambda root, module_paths=None: catalog,
     )
 
     ids = ["_output"] + [f"A{i}/1" for i in range(150)]
@@ -501,4 +509,3 @@ def test_auto_bounded_output__lookup_reserved_output_key_is_never_overwritten(
 
 def test_auto_bounded_output__shared_warning_threshold_is_15360():
     assert LARGE_OUTPUT_WARNING_BYTES == 15360
-
