@@ -1109,7 +1109,7 @@ def test_lookup_index_entries_distinguishes_active_recovery_and_missing(
     monkeypatch.setattr(
         lookup_index_entries_tool,
         "catalog_from_registry",
-        lambda _root: catalog,
+        lambda _root, module_paths=None: catalog,
     )
 
     result = json.loads(
@@ -1136,7 +1136,7 @@ def test_lookup_index_entries_large_output_preflight_gate(tmp_path, monkeypatch)
     monkeypatch.setattr(
         lookup_index_entries_tool,
         "catalog_from_registry",
-        lambda _root: catalog,
+        lambda _root, module_paths=None: catalog,
     )
 
     ids = [f"{i}/1" for i in range(200)]
@@ -2867,6 +2867,9 @@ def test_file_edit_context_decodes_modules_and_marks_unresolved_api(
             self._state = {}
 
         def transaction(self):
+            return nullcontext()
+
+        def read_transaction(self):
             return nullcontext()
 
         def get_module_id(self, _module):
