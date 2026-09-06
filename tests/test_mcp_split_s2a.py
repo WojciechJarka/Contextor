@@ -45,6 +45,7 @@ _EXPECTED_ORDER = [
     "get_symbol_call_context",
     "get_name_collisions",
     "get_mcp_documentation",
+    "get_module_blast_radius",
 ]
 
 _IMPLEMENTATIONS = {

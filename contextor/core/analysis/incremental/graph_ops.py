@@ -34,25 +34,43 @@ def calculate_affected_set(
     A module is affected if it directly or transitively depends on changed_module
     in either the old or candidate new dependency graph (hard and soft edges).
     """
-    affected: Set[str] = {changed_module}
-
     graphs = [g for g in (old_graph, new_graph) if g is not None]
     if not graphs:
-        return affected
+        return {changed_module}
 
+    reverse_edges = build_reverse_adjacency(*graphs)
+    return calculate_affected_set_from_reverse(changed_module, reverse_edges)
+
+
+def build_reverse_adjacency(
+    *graphs: Optional[ProjectGraph],
+) -> dict[str, set[str]]:
+    """Build one deterministic reverse adjacency map from dependency graphs.
+
+    Both hard and soft edges participate, matching ``calculate_affected_set``.
+    Passing multiple graphs unions their edges; ``None`` graphs are ignored.
+    """
     reverse_edges: dict[str, set[str]] = defaultdict(set)
-    for g in graphs:
-        for source, targets in g.hard_edges.items():
-            for target in targets:
-                reverse_edges[target].add(source)
-        for source, targets in g.soft_edges.items():
-            for target in targets:
-                reverse_edges[target].add(source)
+    for graph in graphs:
+        if graph is None:
+            continue
+        for edge_map in (graph.hard_edges, graph.soft_edges):
+            for source, targets in edge_map.items():
+                for target in targets:
+                    reverse_edges[target].add(source)
+    return dict(reverse_edges)
 
+
+def calculate_affected_set_from_reverse(
+    changed_module: str,
+    reverse_adjacency: dict[str, set[str]],
+) -> Set[str]:
+    """Calculate reverse transitive closure from a prepared adjacency map."""
+    affected: Set[str] = {changed_module}
     queue = deque([changed_module])
     while queue:
         curr = queue.popleft()
-        for consumer in reverse_edges.get(curr, set()):
+        for consumer in sorted(reverse_adjacency.get(curr, set())):
             if consumer not in affected:
                 affected.add(consumer)
                 queue.append(consumer)

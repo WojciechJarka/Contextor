@@ -321,4 +321,4 @@ def test_cheap_filters_run_before_severity_and_severity_filter_survives(tmp_path
 
 def test_registered_name_collision_tool_and_shared_summary_wrapper():
     assert "get_name_collisions" in mcp_server.REGISTERED_MCP_TOOL_NAMES
-    assert len(mcp_server.REGISTERED_MCP_TOOL_NAMES) == 25
+    assert len(mcp_server.REGISTERED_MCP_TOOL_NAMES) == 26

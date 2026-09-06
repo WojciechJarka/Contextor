@@ -124,6 +124,11 @@
       "short_description": "Return bounded canonical name-collision diagnostics with explicit freshness, semantic filters and progressive representations."
     },
     {
+      "tool": "get_module_blast_radius",
+      "filename": "get_module_blast_radius.json",
+      "short_description": "Return the complete lossless per-artifact and aggregate blast-radius projection for one module from fresh canonical state."
+    },
+    {
       "tool": "get_mcp_documentation",
       "filename": "get_mcp_documentation.json",
       "short_description": "Return centralized MCP documentation, optionally filtered by tool names and sections. This passive tool reads no repository, LIVE state, or output reports."

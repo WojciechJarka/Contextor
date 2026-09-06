@@ -1,0 +1,46 @@
+{
+  "version": "1.0.0",
+  "tool": "get_module_blast_radius",
+  "purpose": [
+    "Return the complete canonical blast radius of one module in a single call. The result contains every canonical artifact, every direct artifact consumer, every downstream identity, and aggregate impact facts from one fresh state projection."
+  ],
+  "parameters": [
+    "repo_path (string, required): canonical repository root.",
+    "module (string, required): canonical dotted module name, repository-relative or absolute Python path, or active module ID.",
+    "compact (boolean, default true): select the lossless compact serialization; this never bounds or samples artifacts, consumers, or downstream identities.",
+    "fields (array of strings or null, default null): optional top-level projection. Allowed values are module, module_id, artifact_count_total, artifact_count_returned, artifacts, aggregate, data_source, and state_freshness. Projection can intentionally omit semantic collections, but does not change facts used for aggregate calculation.",
+    "representation (string, default auto): lossless repeated-module encoding: auto, named, or indexed. Auto chooses the smaller complete candidate without an interaction envelope.",
+    "allow_large_output (boolean, default false): explicit named output uses the shared large-output preflight; complete indexed output uses this tool's local safety ceiling."
+  ],
+  "behavior": [
+    "Always resolves one module and projects the complete canonical artifact set. artifact_count_total is the canonical count; artifact_count_returned is the number of serialized top-level artifact entries (zero when artifacts is projected out).",
+    "compact and indexed are lossless encodings, not previews. They contain schema=module_blast_radius.lossless.v1, canonical persistent artifact IDs, module_index containing canonical persistent module IDs, deterministic deduplicated sets of local ordinal references, and module layer codes. Local ordinals are response-local compression references, never registry IDs; lookup_index_entries can expand canonical module IDs to names.",
+    "Named output is a complete readable expansion with all direct and downstream identity collections. No artifact, consumer, downstream, evidence, sample, or impact collection is truncated.",
+    "The complete indexed representation derives same-module, same-layer, cross-layer, test, unknown, production-downstream, test-downstream, and unknown-downstream identities from direct/downstream set references and shared module layer metadata instead of duplicating sets.",
+    "Precedence is explicit: auto with compact=true compares complete candidates and normally selects indexed; auto with compact=false returns the full named/readable result; explicit named always returns named; explicit indexed always returns indexed when losslessly possible and otherwise returns a structured error.",
+    "Indexed support tables (schema, representation, module_index, module_layers, and sets) are attached only when the projected artifacts or aggregate contain references that require them. fields=[module] therefore has no orphan tables; fields=[artifacts] or fields=[aggregate] includes every table required to decode its refs.",
+    "All canonical facts are materialized once. The tool performs one read-only registry transaction, builds one reverse adjacency, and caches each unique direct-consumer seed closure at most once. It never calls get_artifact_blast_radius internally, scans the repository, reads source/AST at query time, or requires per-artifact follow-up calls.",
+    "Per-artifact downstream_module_reachability retains the exact get_artifact_blast_radius closure semantics. aggregate.unique_downstream_consumers means additional transitive module reachability beyond all module-level direct artifact consumers; unique_direct_consumers and unique_downstream_consumers are disjoint only at this module aggregate level.",
+    "Aggregate calculations always use the full canonical artifact set, even when fields projects artifacts out. Aggregate exposes consumed_artifact_ids, unconsumed_artifact_ids, and deterministic highest_impact_artifact_ids ordered by downstream count descending, direct count descending, and full identity ascending.",
+    "Auto chooses the smaller of final lossless named and indexed candidates. It never returns representation_decision_required for a valid indexed candidate; representation metadata is omitted when the final projection contains no repeated module identity collection."
+  ],
+  "freshness": [
+    "Requires a usable canonical engine and fails closed when the engine is missing or state.resync_required is true.",
+    "Artifact consumption is required to be fresh when the module has artifacts; stale or unavailable consumption returns an explicit unavailable/error response rather than fabricated empty consumers.",
+    "Missing dependency_graph leaves per-artifact and aggregate downstream reachability explicitly unavailable, while direct canonical artifact consumption remains available.",
+    "Stale or deferred cached analytics leaves architecture and layer classification explicitly unavailable; empty sets are never substituted for unavailable, stale, deferred, missing, or recovery-only families.",
+    "state_freshness identifies canonical revision, provenance, family states, and advisory warning. The query performs no source or AST reads."
+  ],
+  "errors": [
+    "Unsupported representation or fields return a structured error with the current allowlist.",
+    "Indexed output fails closed if a canonical module identity has no persistent module ID; use named output or repair the canonical registry/state.",
+    "Explicit named output above the shared context threshold returns confirmation_required with retry guidance. A pathological indexed result above this tool's local complete-context ceiling returns the same safe confirmation protocol."
+  ],
+  "usage_notes": [
+    "Use get_module_blast_radius(repo_path, module) for a complete default result. Auto selects a complete lossless representation and does not require a second call.",
+    "Use representation=named when a human-readable expansion is required; it may trigger the large-output guard. Use representation=indexed for canonical persistent module IDs plus lossless shared sets.",
+    "Use lookup_index_entries to expand module_index IDs if names are needed. No per-artifact get_artifact_blast_radius calls are required to reconstruct the module blast radius.",
+    "fields is projection only: excluding artifacts sets artifact_count_returned to zero but does not reduce canonical aggregate calculations."
+  ],
+  "examples": []
+}

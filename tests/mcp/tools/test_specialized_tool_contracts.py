@@ -45,6 +45,12 @@ def test_specialized_tool_contracts__get_mcp_documentation_signature():
     assert sig == "(tool: str | None = None, tools: list[str] | None = None, sections: list[str] | None = None) -> str"
 
 
+def test_specialized_tool_contracts__get_module_blast_radius_signature():
+    tools = mcp_server.mcp._tool_manager._tools
+    sig = str(inspect.signature(tools["get_module_blast_radius"].fn))
+    assert sig == "(repo_path: str, module: str = '', compact: bool = True, fields: list[str] | None = None, representation: str = 'auto', allow_large_output: bool = False) -> str"
+
+
 def test_specialized_tool_contracts__describe_canonical_state_docs_complete():
     doc = _load_doc("describe_canonical_state")
     params_text = "\n".join(doc.get("parameters", []))
@@ -88,6 +94,26 @@ def test_specialized_tool_contracts__get_mcp_documentation_docs_complete():
     assert "tool (string or null, optional, default null)" in params_text
     assert "tools (array of strings or null, optional, default null)" in params_text
     assert "sections (array of strings or null, optional, default null)" in params_text
+
+
+def test_specialized_tool_contracts__get_module_blast_radius_docs_complete():
+    doc = _load_doc("get_module_blast_radius")
+    params_text = "\n".join(doc.get("parameters", []))
+    behavior_text = "\n".join(doc.get("behavior", []))
+    assert "repo_path (string, required)" in params_text
+    assert "module (string, required)" in params_text
+    assert "never bounds or samples" in params_text
+    assert "lossless compact serialization" in params_text
+    assert "module_index" in behavior_text
+    assert "module_blast_radius.lossless.v1" in behavior_text
+    assert "representation" in params_text
+    assert "allow_large_output" in params_text
+    assert "additional transitive module reachability beyond all module-level direct artifact consumers" in behavior_text
+    assert "unique_direct_consumers and unique_downstream_consumers are disjoint" in behavior_text
+    assert "exact get_artifact_blast_radius closure semantics" in behavior_text
+    assert "auto with compact=true" in behavior_text
+    assert "auto with compact=false" in behavior_text
+    assert "no orphan tables" in behavior_text
 
 
 def test_specialized_tool_contracts__documentation_default_is_index_only():
