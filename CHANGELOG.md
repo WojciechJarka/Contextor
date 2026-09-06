@@ -1,3 +1,15 @@
+## [MCP query latency hardening and canonical registry reuse] - 2026-09-06
+
+* Removed redundant persistent-registry reads from several public MCP query paths by reusing the already-loaded registry owned by a fresh canonical LIVE engine, while preserving snapshot/recovery fallbacks, persistent identity semantics, fail-closed behavior, and public response contracts.
+* Reduced real MCP median latency for `get_artifacts_for_module` from **1324 ms to 241 ms** and for `get_artifact_blast_radius` from **5989 ms to 319 ms**, with exact response parity.
+* Reduced `get_symbol_call_context` from **1366 ms to 183 ms** while preserving canonical materialized `symbol_calls`, BFS depth/direction semantics, evidence ordering, representation negotiation, and zero query-time source/AST reconstruction.
+* Reduced `lookup_index_entries` from **1689 ms to 192 ms** and `get_file_edit_context(mode="minimal")` from **5667 ms to 502 ms** by eliminating unnecessary repository discovery and write-style registry transactions on read-only paths.
+* Optimized `extract_indexed_report_context` to reuse the LIVE registry catalog projection, retaining exact indexed-report semantics and reducing its current real MCP median from **199 ms to 181 ms**.
+* Profiled `search_source` end-to-end and established that its dominant cost is semantic source-span construction rather than disk I/O. Added resolver-local ephemeral line indexes for comments, strings, and statements, reducing real MCP median latency from **14546 ms to 13014 ms** with byte-identical output and unchanged source-read behavior.
+* Added focused regression coverage for fresh-LIVE registry reuse, fallback/recovery behavior, resolver span precedence, column-sensitive resolution, multiline spans, identity representation, and exact semantic/output parity.
+* Preserved Desktop LIVE ownership throughout the refactors: no MCP `update_file` path was used, canonical revisions remained fresh after edits, and LIVE restart was not required; MCP runtime reloads were performed only where modified server modules required them.
+
+
 ## Patch — Canonical LIVE completeness and final single-file performance] - 2026-09-03
 
 * Completed canonical `ModuleUsageFacts` lifecycle coverage across full analysis, persistence, hydration and incremental/LIVE updates, including materialized intra-module symbol calls and reference evidence without query-time source reconstruction.
