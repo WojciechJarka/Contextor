@@ -5,6 +5,7 @@ from contextor.core.analysis.state_manager import (
     canonical_artifact_consumption_targets,
     module_current_truth,
 )
+from contextor.core.report_query import registry_maps_from_state
 from contextor.mcp import query_helpers
 from contextor.mcp import representation as mcp_rep
 from contextor.mcp import runtime as mcp_runtime
@@ -331,7 +332,18 @@ def get_symbol_call_context(
         selected_identities = {_identity(item) for item in selected}
 
         if registry_snapshot is None:
-            registry_snapshot = query_helpers.read_registries(root)
+            registry = getattr(engine, "registry", None)
+            read_transaction = getattr(registry, "read_transaction", None)
+            if (
+                getattr(engine, "provenance", None) == "live"
+                and registry is not None
+                and callable(read_transaction)
+                and hasattr(registry, "_state")
+            ):
+                with read_transaction():
+                    registry_snapshot = registry_maps_from_state(registry._state)
+            else:
+                registry_snapshot = query_helpers.read_registries(root)
         _, _, artifact_path_to_id, _ = registry_snapshot
         needed_symbols = {
             endpoint

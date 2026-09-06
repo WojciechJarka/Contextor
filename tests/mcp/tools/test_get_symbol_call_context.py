@@ -1,5 +1,6 @@
 import ast
 import json
+from contextlib import contextmanager
 from types import SimpleNamespace
 
 import pytest
@@ -261,6 +262,105 @@ def test_get_symbol_call_context__canonical_success_uses_no_identity_resolver(mo
 
     assert result["status"] == "ok"
     assert reads["count"] == 1
+
+
+def test_get_symbol_call_context__fresh_live_registry_reuse_preserves_output(monkeypatch):
+    state, registry, reads = _install(monkeypatch)
+    monkeypatch.setattr(
+        mcp_runtime,
+        "get_or_init_engine",
+        lambda _root: SimpleNamespace(state=state, provenance="live"),
+    )
+    fallback = _call(_ROOT, direction="callees", representation="auto")
+    reads["count"] = 0
+
+    class LiveRegistry:
+        def __init__(self):
+            self._state = {
+                "module_registry": {},
+                "artifact_registry": {
+                    "path_to_id": registry,
+                    "id_to_path": {value: key for key, value in registry.items()},
+                },
+            }
+            self.read_transaction_count = 0
+
+        @contextmanager
+        def read_transaction(self):
+            self.read_transaction_count += 1
+            yield
+
+    live_registry = LiveRegistry()
+    engine_calls = {"count": 0}
+
+    def get_live_engine(_root):
+        engine_calls["count"] += 1
+        return SimpleNamespace(
+            state=state,
+            provenance="live",
+            registry=live_registry,
+        )
+
+    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", get_live_engine)
+
+    result = _call(_ROOT, direction="callees", representation="auto")
+
+    assert result == fallback
+    assert engine_calls["count"] == 1
+    assert live_registry.read_transaction_count == 1
+    assert reads["count"] == 0
+
+
+@pytest.mark.parametrize(
+    "engine_factory, expected_status, expected_reads",
+    [
+        (lambda state: None, "error", 0),
+        (
+            lambda state: SimpleNamespace(
+                state=state,
+                provenance="snapshot",
+                registry=object(),
+            ),
+            "ok",
+            1,
+        ),
+        (
+            lambda state: SimpleNamespace(
+                state=SimpleNamespace(resync_required=True),
+                provenance="live",
+                registry=object(),
+            ),
+            "error",
+            0,
+        ),
+        (
+            lambda state: SimpleNamespace(
+                state=state,
+                provenance="live",
+            ),
+            "ok",
+            1,
+        ),
+    ],
+    ids=["engine_unavailable", "snapshot", "resync_required", "missing_registry"],
+)
+def test_get_symbol_call_context__registry_reuse_fallbacks_preserve_behavior(
+    monkeypatch,
+    engine_factory,
+    expected_status,
+    expected_reads,
+):
+    state, _registry, reads = _install(monkeypatch)
+    monkeypatch.setattr(
+        mcp_runtime,
+        "get_or_init_engine",
+        lambda _root: engine_factory(state),
+    )
+
+    result = _call(_ROOT, direction="callees")
+
+    assert result["status"] == expected_status
+    assert reads["count"] == expected_reads
 
 
 def test_get_symbol_call_context__artifact_id_reuses_registry_snapshot(monkeypatch):
