@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 
+from contextor.core.report_query import registry_maps_from_state
 from contextor.mcp import query_helpers
 from contextor.mcp import runtime as mcp_runtime
 from contextor.mcp import report_helpers
@@ -157,7 +158,28 @@ def get_layer_isolation(
 
     try:
         ga = json.loads(ga_path.read_text(encoding="utf-8"))
-        _, id_to_name, _, artifact_id_to_name = query_helpers.read_registries(root)
+        engine = None
+        try:
+            engine = mcp_runtime.get_or_init_engine(root)
+        except (OSError, EOFError, RuntimeError):
+            # A dedicated report remains usable when LIVE acquisition is unavailable.
+            engine = None
+
+        registry = getattr(engine, "registry", None)
+        state = getattr(engine, "state", None)
+        read_transaction = getattr(registry, "read_transaction", None)
+        if (
+            getattr(engine, "provenance", None) == "live"
+            and not getattr(state, "resync_required", False)
+            and callable(read_transaction)
+            and getattr(registry, "_state", None) is not None
+        ):
+            with read_transaction():
+                _, id_to_name, _, artifact_id_to_name = registry_maps_from_state(
+                    registry._state
+                )
+        else:
+            _, id_to_name, _, artifact_id_to_name = query_helpers.read_registries(root)
         modules = ga.get("modules", {})
         matrix = ga.get("module_dependency_matrix", {})
         _LAYER_ORDER = ["tests", "ui", "cli", "contract", "engine", "runtime", "adapter"]

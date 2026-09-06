@@ -1,90 +1,166 @@
-# `get_symbol_call_context` runtime performance certification
+# lookup_artifact_by_symbol — discovery/profiling only
 
-## Running MCP / LIVE evidence
+## Scope and authority
 
-```text
-RUNTIME_MCP_DOC_VERSION=1.0.0
-LIVE_LATEST_REVISION=259
-LIVE_RESYNC_REQUIRED=false
-RESPONSE_CANONICAL_STATE=fresh
-RESPONSE_WORKSPACE_SYNC=verified
-RESPONSE_CANONICAL_REVISION=259
-RESPONSE_PROVENANCE=live
-RESPONSE_ADVISORY_WARNING=null
-DATA_SOURCE=live_canonical_module_usages_symbol_calls
+- Production code was not changed.
+- Contextor was present in the deferred-tool inventory and explicitly made available before investigation.
+- Ownership/dataflow are from Contextor MCP documentation and the current runtime source; `rg` was used only to verify exact implementation locations.
+- Historical screening median: approximately 1636 ms. This fresh-LIVE run is not a cross-process comparison claim.
+
+## Current runtime contract
+
+`lookup_artifact_by_symbol(repo_path, symbol_name="", limit=20, evidence_limit=20, compact=true, fields=null, symbol=null)` accepts an active artifact ID, full canonical `module::symbol`, or leaf symbol. `symbol` aliases `symbol_name`; both must agree if supplied. Exact matches are preferred, and consumer evidence is bounded.
+
+```ini
+data_source=live_canonical_state
+canonical_state=fresh
+workspace_sync=unverified (expected for repo-wide registry lookup)
+canonical_revision=3
+provenance=live
+resync_required=false
+artifact_consumption=fresh
 ```
 
-The post-restart deployed runtime is materially faster than the pre-change authority baseline, which is runtime evidence that the fresh-LIVE identity-projection path is deployed. The public runtime response/trace does not expose internal counters, so `get_or_init_engine=1`, `engine.registry.read_transaction=1`, and `read_registries=0` remain supported by the focused regression rather than independently observable from this real-MCP call. No instrumentation was added.
-
-## Exact benchmark request
+Representative deterministic request, chosen from a canonical projection:
 
 ```json
-{"repo_path":"C:\\Temp\\Contextor_Repo","symbol":"contextor.mcp.tools.get_symbol_call_context::_ordered_union","direction":"both","depth":3,"max_items":100,"representation":"auto","allow_large_output":true}
+{"repo_path":"C:\\Temp\\Contextor_Repo","symbol_name":"contextor.__main__::main","limit":20,"evidence_limit":20,"compact":true}
 ```
+
+It took the normal successful path and returned one nonempty artifact: `A2968/1`, `contextor.__main__::main`, with one consumer (`main`). Response: 1370 UTF-8 bytes.
+
+## Exact current dataflow
+
+1. MCP wrapper dispatches to `contextor/mcp/tools/lookup_artifact_by_symbol.py:9`.
+2. It resolves the path; trims `symbol_name` and alias `symbol`; rejects conflicting aliases; selects the effective query.
+3. Before engine acquisition it calls `query_helpers.read_registries(root)` (`:42`): a new `PersistentIdentityRegistry` read transaction returns four maps.
+4. It calls `mcp_runtime.get_or_init_engine(root)`, rejecting unavailable/resync-required state.
+5. It case-folds the query and scans sorted `state.artifacts` module-by-module (`:48-62`), checking module truth and calling `canonical_symbol_catalog`.
+6. It sorts candidates, prefers exact leaf matches, preserves ambiguity behavior, and only after a scan miss uses `resolve_artifact_identity` with the registry maps. Not-found/similar/ambiguous behavior remains at `:78-137`.
+7. It bounds results and projects fresh canonical consumer evidence. Compact mode limits displayed evidence to three; non-compact retains the requested bounded list (`:142-185`).
+8. It builds the named artifact object, freshness envelope, optional top-level field projection, and indented JSON (`:187-206`).
+
+No `catalog_from_registry` or `discover_module_paths` call occurs. No named/indexed conversion occurs; the tool emits the named artifact object directly.
+
+## Real MCP benchmark (authority)
 
 One discarded warm-up plus three identical real MCP calls:
 
-```text
-WARMUP_MS=1745
-RUNS_MS=183,186,162
-MEDIAN_MS=183
-RESPONSE_BYTES=1893,1893,1893
-RESPONSE_PARITY=YES (exact full payload across the three measured responses)
-CANONICAL_REVISION=259
-PROVENANCE=live
-RESYNC_REQUIRED=false
-IMPROVEMENT_MS=1183 (1366 - 183)
-IMPROVEMENT_PERCENT=86.60%
+```makefile
+WARMUP_WALL_MS=663
+RUNS_MS=596,753,739
+MEDIAN_MS=739
+RESPONSE_BYTES=1370,1370,1370
+EXACT_FULL_RESPONSE_PARITY=true
 ```
 
-## Semantic comparison
+All returned identical complete JSON. Real-MCP median (739 ms) is the authority.
 
-Stable post-restart semantics across all three responses:
+## Controlled in-process attribution
 
-```text
-symbol=contextor.mcp.tools.get_symbol_call_context::_ordered_union
-depth=3
-direction=both
-edges=3/3
-representation=named
-named_bytes=1336
-indexed_bytes=1120
-bytes_saved=216
-truncated=false
-data_source=live canonical symbol_calls
-caller=get_symbol_call_context -> _ordered_union @ line 330
-callees=_ordered_union -> _identity @ lines 94,100
+No child timings were exposed by the runtime, so a read-only harness attributed the already-initialized fresh LIVE Python tool path. It modified only process-local wrappers/counters; no production file, cache, or server state changed. Engine: `PersistentIdentityRegistry` with loaded `_state`, `provenance=live`, `resync_required=false`.
+
+```makefile
+HARNESS_WARMUP_MS=492.237
+HARNESS_RUNS_MS=486.418,478.666,465.409
+HARNESS_MEDIAN_MS=478.666
+REGISTRY_READS=1
+CATALOG_BUILDS=334
+DISCOVER_MODULE_PATHS_CALLS=0
+ARTIFACT_SCAN_COUNT=1
+ARTIFACTS_SCANNED=332
+SOURCE_READS=0
+AST_PARSES=0
 ```
 
-Topology, direction/depth, representation selection, edge count, ordering, and truncation match the baseline. However, this is **not** complete required semantic parity with the supplied baseline:
+`CATALOG_BUILDS` means `canonical_symbol_catalog` calls (one per scanned module plus target validation), not `catalog_from_registry` materialization. Required fresh-path source/AST counters are zero.
 
-```text
-BASELINE_LINES=329;93,99
-POST_RESTART_LINES=330;94,100
-BASELINE_NAMED_INDEXED_BYTES=1335;1119
-POST_RESTART_NAMED_INDEXED_BYTES=1336;1120
+```makefile
+BOUNDARY=wrapper/self excluding measured children
+RUNS_MS=~44,~48,~36
+MEDIAN_MS=~44
+COUNT_PER_CALL=1
+INCLUSIVE_OR_SELF=self
+DISK_IO=no direct source IO
+REPO_WIDE=no
+CANONICAL_OR_RECOMPUTED=canonical envelope/projection/serialization
+REDUNDANCY_PROOF=not established
+
+BOUNDARY=read_registries -> new PersistentIdentityRegistry read transaction
+RUNS_MS=406.848,394.732,398.553
+MEDIAN_MS=398.553
+COUNT_PER_CALL=1
+INCLUSIVE_OR_SELF=inclusive
+DISK_IO=yes (registry read)
+REPO_WIDE=no
+CANONICAL_OR_RECOMPUTED=recomputed duplicate of available fresh LIVE registry state
+REDUNDANCY_PROOF=fresh engine.registry._state produces byte-identical maps/output in Experiment A
+
+BOUNDARY=full artifact scan + canonical_symbol_catalog
+RUNS_MS=12.098,12.908,9.021
+MEDIAN_MS=12.098
+COUNT_PER_CALL=334 catalogs; one scan
+INCLUSIVE_OR_SELF=inclusive summed child time
+DISK_IO=no
+REPO_WIDE=yes (332 modules)
+CANONICAL_OR_RECOMPUTED=recomputed per-module symbol catalogs
+REDUNDANCY_PROOF=exact full identity is registry-resolvable, but no production-equivalent direct-index branch was implemented in this diagnostic
+
+BOUNDARY=canonical consumer resolution
+RUNS_MS=23.118,22.811,19.759
+MEDIAN_MS=22.811
+COUNT_PER_CALL=1
+INCLUSIVE_OR_SELF=inclusive
+DISK_IO=no
+REPO_WIDE=no
+CANONICAL_OR_RECOMPUTED=canonical fresh consumption facts
+REDUNDANCY_PROOF=not established; required output evidence
 ```
 
-The one-byte response/candidate change is stable across all post-restart responses and is not caused by dynamic freshness fields: all three have identical fresh envelope values at revision 259. It follows the shifted canonical call-evidence line numbers (the last callee changed `99 -> 100`), so it cannot be dismissed as the permitted new-revision freshness-envelope variation.
+Do not sum nested inclusive times. Harness median differs from real wall because real MCP also includes transport/server scheduling.
 
-## Source / AST counters
+## Diagnostic experiments (no production patch)
 
-The public runtime response and trace do not expose `SOURCE_READS` or `AST_PARSES`; therefore real-MCP values are `NOT_EXPOSED`, not asserted. No instrumentation was added. The running contract continues to state that this query performs no source-derived call reconstruction or `ast.parse`, but that is contract evidence rather than a runtime counter.
+### A. Reuse fresh engine.registry
 
-```text
-SOURCE_READS=NOT_EXPOSED_BY_PUBLIC_RUNTIME_TRACE
-AST_PARSES=NOT_EXPOSED_BY_PUBLIC_RUNTIME_TRACE
+Only the harness's separate `read_registries(root)` was replaced with `registry_maps_from_state(engine.registry._state)`. Preconditions were live provenance, fresh state, no resync, `PersistentIdentityRegistry`, and loaded dictionary state. Any future implementation must retain the existing disk-read fallback for unavailable/non-LIVE/resync/missing-registry state.
+
+```makefile
+EXPERIMENT=A_fresh_engine_registry_maps
+WARMUP_MS=64.961
+RUNS_MS=67.289,66.890,66.825
+MEDIAN_MS=66.890
+BASELINE_MEDIAN_MS=478.666
+DELTA_MS=411.776
+REGISTRY_READS=0
+CATALOG_BUILDS=334
+ARTIFACTS_SCANNED=332
+SOURCE_READS=0
+AST_PARSES=0
+EXACT_FULL_OUTPUT_PARITY=true
+SAME_ARTIFACT_ID=true
+SAME_FULL_IDENTITY=true
+SAME_STATUS=true
+SAME_ORDERING=true
+SAME_REPRESENTATION=true
+REMOVABLE_OWNER=separate PersistentIdentityRegistry/read_registries acquisition
 ```
 
-## Decision
+Both sources represent the same loaded registry generation in the measured fresh-LIVE state. The removable 411.776 ms attribution delta exceeds 300 ms and 5% of 739 ms real-MCP median.
 
-```text
-DECISION=FIX_REQUIRED
-REASON=real deployed response changes public caller/callee line evidence and representation candidate byte fields; this is not a dynamic freshness-only delta
-PERFORMANCE_RESULT=materially improved real-MCP median (1366 -> 183 ms)
-MCP_RESTART_REQUIRED=NO
-LIVE_RESTART_REQUIRED=NO
-RUNTIME_PERFORMANCE_CERTIFICATION_PENDING=NO
+### B/C/D assessment
+
+- B: not applicable; `catalog_from_registry` and `discover_module_paths` counters are zero.
+- C: full scan is a secondary candidate for exact identity lookups, but its 12.098 ms attribution is below threshold; no standalone experiment/recommendation now.
+- D: two trims plus one casefold are negligible; named response is produced once. No duplicate named/indexed conversion or removable normalization/projection owner was observed.
+
+## Removable vs unavoidable wall and decision
+
+Removable now: duplicate persistent-registry acquisition before the fresh LIVE engine lookup. Not established removable: real MCP transport/scheduling, required fresh consumer evidence, envelope/serialization, and small scan/catalog work.
+
+```makefile
+DECISION=GO_OPTIMIZE
+RATIONALE=fresh-LIVE registry reuse has exact full-output parity and removes 411.776 ms median in controlled attribution; exceeds 300 ms and 5% real MCP wall.
 FILES_CHANGED=NONE
 DIFFS=NONE
 FULL_SUITE_RUN_BY_AGENT=NO
