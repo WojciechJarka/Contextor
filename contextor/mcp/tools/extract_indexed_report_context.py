@@ -45,6 +45,13 @@ def extract_indexed_report_context(
 
         report = json.loads(selected_path.read_text(encoding="utf-8"))
         engine = mcp_runtime.get_or_init_engine(root)
+        live_registry = getattr(engine, "registry", None) if engine else None
+        use_live_registry = (
+            engine is not None
+            and getattr(engine, "provenance", None) == "live"
+            and not getattr(engine.state, "resync_required", False)
+            and live_registry is not None
+        )
         module_paths = None
         if engine:
             module_paths = {
@@ -52,7 +59,16 @@ def extract_indexed_report_context(
                 for module_name, module in engine.state.modules.items()
                 if getattr(module, "path", None)
             }
-        catalog = report_query.catalog_from_registry(str(root), module_paths=module_paths)
+        if use_live_registry:
+            with live_registry.read_transaction():
+                catalog = report_query.catalog_from_registry_state(
+                    live_registry._state,
+                    module_paths=module_paths,
+                )
+        else:
+            catalog = report_query.catalog_from_registry(
+                str(root), module_paths=module_paths
+            )
         if public_api_only:
             report = report_query.filter_public_artifact_report(report, catalog)
 
