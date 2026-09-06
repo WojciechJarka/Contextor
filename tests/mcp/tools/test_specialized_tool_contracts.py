@@ -103,7 +103,7 @@ def test_specialized_tool_contracts__get_module_blast_radius_docs_complete():
     assert "repo_path (string, required)" in params_text
     assert "module (string, required)" in params_text
     assert "never bounds or samples" in params_text
-    assert "lossless compact serialization" in params_text
+    assert "complete_compact serialization policy" in params_text
     assert "module_index" in behavior_text
     assert "module_blast_radius.lossless.v1" in behavior_text
     assert "representation" in params_text
@@ -114,6 +114,11 @@ def test_specialized_tool_contracts__get_module_blast_radius_docs_complete():
     assert "auto with compact=true" in behavior_text
     assert "auto with compact=false" in behavior_text
     assert "no orphan tables" in behavior_text
+    assert "Semantic representation" in behavior_text
+    assert "zero-identity named-equivalent compact result" in behavior_text
+    assert "persistent module and artifact identities" in behavior_text
+    assert "never allocates query-local IDs" in behavior_text
+    assert "readable_named" in behavior_text
 
 
 def test_specialized_tool_contracts__documentation_default_is_index_only():

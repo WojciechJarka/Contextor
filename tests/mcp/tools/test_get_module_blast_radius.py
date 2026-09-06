@@ -115,6 +115,32 @@ def _fixture(monkeypatch):
     return state, registry
 
 
+def _zero_identity_large_fixture(monkeypatch):
+    state, registry = _fixture(monkeypatch)
+    symbols = [f"symbol_{index:02d}" for index in range(48)]
+    state.artifacts["pkg.mod"] = {
+        "own_symbols": symbols,
+        "symbols": {
+            "functions": symbols,
+            "signatures": {symbol: f"def {symbol}({('x' * 250)})" for symbol in symbols},
+        },
+    }
+    state.artifact_consumption = {
+        f"pkg.mod::{symbol}": {"consumers": [], "channels": {}}
+        for symbol in symbols
+    }
+    state.dependency_graph = ProjectGraph(hard_edges={}, soft_edges={})
+    artifact_path_to_id = {
+        f"pkg.mod::{symbol}": f"A{200 + index}/1"
+        for index, symbol in enumerate(symbols)
+    }
+    registry._state["artifact_registry"] = {
+        "path_to_id": artifact_path_to_id,
+        "id_to_path": {value: key for key, value in artifact_path_to_id.items()},
+    }
+    return state, registry
+
+
 def _decode_indexed(payload, registry_state):
     id_to_name = registry_state["module_registry"]["id_to_path"]
     sets = payload["sets"]
@@ -156,7 +182,7 @@ def _decode_indexed(payload, registry_state):
             if module != payload["module"]
             and name_to_layer.get(module) not in (None, "tests", definer_layer)
         ]
-        return {
+        result = {
             **architecture,
             "identity_partitions": {
                 "same_module": same_module,
@@ -166,6 +192,9 @@ def _decode_indexed(payload, registry_state):
                 "unknown": unknown,
             },
         }
+        if cross:
+            result["cross_layer_sample"] = {"total": len(cross), "items": cross, "truncated": False}
+        return result
 
     result = {}
     for artifact_id, entry in payload["artifacts"].items():
@@ -175,20 +204,23 @@ def _decode_indexed(payload, registry_state):
         downstream_semantics = dict(downstream)
         if downstream_items is not None:
             downstream_semantics["items"] = downstream_items
-            layers_by_name = {
-                id_to_name[module_id]: layer
-                for module_id, layer in module_layers.items()
-                if module_id in id_to_name
-            }
-            production = [module for module in downstream_items if layers_by_name.get(module) not in (None, "tests")]
-            tests = [module for module in downstream_items if layers_by_name.get(module) == "tests"]
-            unknown = [module for module in downstream_items if layers_by_name.get(module) is None]
-            downstream_semantics.update({
-                "production_downstream_sample": {"total": len(production), "items": production, "truncated": False},
-                "test_downstream_sample": {"total": len(tests), "items": tests, "truncated": False},
-                "unknown_downstream_sample": {"total": len(unknown), "items": unknown, "truncated": False},
-            })
+            if downstream.get("layer_classification_available"):
+                layers_by_name = {
+                    id_to_name[module_id]: layer
+                    for module_id, layer in module_layers.items()
+                    if module_id in id_to_name
+                }
+                production = [module for module in downstream_items if layers_by_name.get(module) not in (None, "tests")]
+                tests = [module for module in downstream_items if layers_by_name.get(module) == "tests"]
+                unknown = [module for module in downstream_items if layers_by_name.get(module) is None]
+                downstream_semantics.update({
+                    "production_downstream_sample": {"total": len(production), "items": production, "truncated": False},
+                    "test_downstream_sample": {"total": len(tests), "items": tests, "truncated": False},
+                    "unknown_downstream_sample": {"total": len(unknown), "items": unknown, "truncated": False},
+                })
         result[artifact_id] = {
+            "artifact_id": entry["artifact_id"],
+            "full_name": f"{payload['module']}::{entry['symbol']}",
             "symbol": entry["symbol"],
             "kind": entry["kind"],
             "signature": entry["signature"],
@@ -208,6 +240,70 @@ def _decode_indexed(payload, registry_state):
             key: value
             for key, value in aggregate["unique_downstream_consumers"].items()
             if key != "set_ref"
+        },
+    }
+
+
+def _semantic_named(payload):
+    artifacts = {}
+    for artifact_id, entry in payload.get("artifacts", {}).items():
+        artifacts[artifact_id] = {
+            key: entry[key]
+            for key in ("artifact_id", "full_name", "symbol", "kind", "signature", "architecture", "downstream_module_reachability", "evidence_scope")
+        }
+        artifacts[artifact_id]["direct"] = entry["direct_consumers"]["items"]
+        del artifacts[artifact_id]["downstream_module_reachability"]
+        artifacts[artifact_id]["downstream"] = entry["downstream_module_reachability"]
+    aggregate = payload.get("aggregate")
+    return {
+        "module": payload.get("module"),
+        "module_id": payload.get("module_id"),
+        "artifacts": artifacts,
+        "aggregate": {
+            "direct": aggregate["unique_direct_consumers"],
+            "downstream": aggregate["unique_downstream_consumers"],
+            "consumed": aggregate["consumed_artifact_ids"],
+            "unconsumed": aggregate["unconsumed_artifact_ids"],
+            "impact": aggregate["highest_impact_artifact_ids"],
+        } if aggregate is not None else None,
+    }
+
+
+def _semantic_indexed(payload):
+    if "schema" not in payload:
+        return _semantic_named(payload)
+    decoded_artifacts, decoded_aggregate = _decode_indexed(payload, _registry_state())
+    artifacts = {}
+    for artifact_id, entry in decoded_artifacts.items():
+        downstream = dict(entry["downstream"])
+        downstream.pop("downstream_set_ref", None)
+        artifacts[artifact_id] = {
+            "artifact_id": entry["artifact_id"],
+            "full_name": entry["full_name"],
+            "symbol": entry["symbol"],
+            "kind": entry["kind"],
+            "signature": entry["signature"],
+            "architecture": entry["architecture"],
+            "direct": entry["direct"],
+            "downstream": downstream,
+            "evidence_scope": "direct_static_artifact_consumption",
+        }
+    downstream_state = dict(decoded_aggregate["downstream_state"])
+    downstream_state.pop("set_ref", None)
+    if decoded_aggregate["downstream"] is not None:
+        downstream_state["items"] = decoded_aggregate["downstream"]
+        downstream_state.setdefault("truncated", False)
+    direct_state = {"total": len(decoded_aggregate["direct"]), "truncated": False, "items": decoded_aggregate["direct"]}
+    return {
+        "module": payload.get("module"),
+        "module_id": payload.get("module_id"),
+        "artifacts": artifacts,
+        "aggregate": {
+            "direct": direct_state,
+            "downstream": downstream_state,
+            "consumed": decoded_aggregate["consumed"],
+            "unconsumed": decoded_aggregate["unconsumed"],
+            "impact": decoded_aggregate["impact"],
         },
     }
 
@@ -271,6 +367,25 @@ def test_named_and_indexed_are_semantically_lossless(tmp_path, monkeypatch):
     assert decoded_aggregate["consumed"] == named["aggregate"]["consumed_artifact_ids"]
     assert decoded_aggregate["unconsumed"] == named["aggregate"]["unconsumed_artifact_ids"]
     assert decoded_aggregate["impact"] == named["aggregate"]["highest_impact_artifact_ids"]
+
+
+@pytest.mark.parametrize("case", ["fresh", "missing_graph", "deferred_analytics", "zero_identities"])
+def test_named_and_indexed_full_semantic_parity_matrix(tmp_path, monkeypatch, case):
+    state, _ = _fixture(monkeypatch)
+    if case == "missing_graph":
+        state.dependency_graph = None
+    elif case == "deferred_analytics":
+        state.cached_analytics_state = "deferred"
+    elif case == "zero_identities":
+        state.artifact_consumption = {
+            f"pkg.mod::{symbol}": {"consumers": [], "channels": {}}
+            for symbol in ("alpha", "beta", "gamma")
+        }
+        state.dependency_graph = ProjectGraph(hard_edges={}, soft_edges={})
+
+    named = json.loads(get_module_blast_radius(str(tmp_path), "pkg.mod", representation="named", allow_large_output=True))
+    indexed = json.loads(get_module_blast_radius(str(tmp_path), "pkg.mod", representation="indexed", allow_large_output=True))
+    assert _semantic_indexed(indexed) == _semantic_named(named)
 
 
 def test_all_downstream_is_complete_and_aggregate_is_disjoint(tmp_path, monkeypatch):
@@ -394,6 +509,51 @@ def test_indexed_zero_identity_output_has_no_representation_metadata(tmp_path, m
     assert "schema" not in indexed
     assert "representation" not in indexed
     assert "consumer_representation" not in indexed
+
+
+def test_auto_zero_identity_large_module_is_complete_compact_not_guarded(tmp_path, monkeypatch):
+    _zero_identity_large_fixture(monkeypatch)
+    result_text = get_module_blast_radius(str(tmp_path), "pkg.mod")
+    result = json.loads(result_text)
+    result_bytes = len(result_text.encode("utf-8"))
+    assert result.get("status") != "confirmation_required"
+    assert result["artifact_count_total"] == 48
+    assert result["artifact_count_returned"] == len(result["artifacts"]) == 48
+    assert result["aggregate"]["artifact_count_returned"] == 48
+    assert 15 * 1024 < result_bytes < 64 * 1024
+    assert all(artifact_id.startswith("A") for artifact_id in result["artifacts"])
+    assert not any(key in result for key in ("schema", "representation", "module_index", "module_layers", "sets", "consumer_representation"))
+
+
+def test_zero_identity_named_representation_uses_readable_guard(tmp_path, monkeypatch):
+    _zero_identity_large_fixture(monkeypatch)
+    result = json.loads(get_module_blast_radius(str(tmp_path), "pkg.mod", representation="named"))
+    assert result["status"] == "confirmation_required"
+
+
+def test_indexed_requires_persistent_artifact_ids_and_auto_falls_back(tmp_path, monkeypatch):
+    _, registry = _fixture(monkeypatch)
+    full_name = "pkg.mod::beta"
+    artifact_id = registry._state["artifact_registry"]["path_to_id"].pop(full_name)
+    registry._state["artifact_registry"]["id_to_path"].pop(artifact_id)
+
+    explicit = json.loads(get_module_blast_radius(str(tmp_path), "pkg.mod", representation="indexed"))
+    assert explicit["status"] == "error"
+    assert "missing persistent artifact IDs" in explicit["error"]
+    assert full_name in explicit["error"]
+
+    auto = json.loads(get_module_blast_radius(str(tmp_path), "pkg.mod", representation="auto", compact=True))
+    assert auto.get("status") != "error"
+    assert "schema" not in auto
+    assert set(auto["artifacts"]) == {"A100/1", "A102/1", full_name}
+    assert auto["artifacts"][full_name]["artifact_id"] is None
+
+
+def test_indexed_with_all_persistent_artifact_ids_has_no_full_name_keys(tmp_path, monkeypatch):
+    _fixture(monkeypatch)
+    indexed = json.loads(get_module_blast_radius(str(tmp_path), "pkg.mod", representation="indexed"))
+    assert set(indexed["artifacts"]) == {"A100/1", "A101/1", "A102/1"}
+    assert all(entry["artifact_id"].startswith("A") for entry in indexed["artifacts"].values())
 
 
 def test_artifact_contract_semantics_remain_equal(tmp_path, monkeypatch):

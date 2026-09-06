@@ -246,7 +246,7 @@ def _build_shared_sets(
     missing: list[str] = []
     for name in sorted(names):
         module_id = _module_id_for(name, module_path_to_id, state)
-        if module_id is None:
+        if module_id is None or not query_helpers.is_module_id(str(module_id)):
             missing.append(name)
         else:
             pairs.append((name, module_id))
@@ -266,6 +266,34 @@ def _build_shared_sets(
     return module_index, [list(item) for item in ordered_signatures], ordinal, {
         signature: index for index, signature in enumerate(ordered_signatures)
     }
+
+
+def _validate_indexed_artifact_ids(
+    artifact_facts: list[dict[str, Any]],
+    *,
+    artifact_path_to_id: dict[str, str],
+    artifact_id_to_path: dict[str, str],
+) -> None:
+    """Require every serialized artifact to retain its canonical persistent ID."""
+    missing: list[str] = []
+    for fact in artifact_facts:
+        item = fact["item"]
+        full_name = str(item["full_name"])
+        artifact_id = item.get("artifact_id")
+        canonical_id = artifact_path_to_id.get(full_name)
+        if (
+            not artifact_id
+            or not query_helpers.is_artifact_id(str(artifact_id))
+            or canonical_id is None
+            or str(canonical_id) != str(artifact_id)
+            or artifact_id_to_path.get(str(artifact_id)) != full_name
+        ):
+            missing.append(full_name)
+    if missing:
+        raise ValueError(
+            "Cannot fulfill indexed representation: missing persistent artifact IDs for: "
+            + ", ".join(sorted(missing))
+        )
 
 
 def _named_artifact_entry(fact: dict[str, Any]) -> dict[str, Any]:
@@ -364,12 +392,21 @@ def _build_indexed_projection(
     artifacts_projected: bool,
     fields: list[str] | None,
     module_path_to_id: dict[str, str],
+    artifact_path_to_id: dict[str, str],
+    artifact_id_to_path: dict[str, str],
     state: Any,
     all_direct: set[str],
     all_downstream: set[str],
     reverse_adjacency: dict[str, set[str]] | None,
     cached_analytics: dict[str, Any],
 ) -> dict[str, Any]:
+    serialized_artifacts = artifacts_projected or aggregate is not None
+    if serialized_artifacts:
+        _validate_indexed_artifact_ids(
+            artifact_facts,
+            artifact_path_to_id=artifact_path_to_id,
+            artifact_id_to_path=artifact_id_to_path,
+        )
     identity_payload = {
         "direct": sorted(all_direct),
         "downstream": sorted(all_downstream),
@@ -389,6 +426,9 @@ def _build_indexed_projection(
             artifacts_projected=artifacts_projected,
             fields=fields,
         )
+
+    if module_id is None or not query_helpers.is_module_id(str(module_id)):
+        raise ValueError("Cannot fulfill indexed representation: missing persistent module ID for: " + module_name)
 
     module_index, sets, ordinal, refs = _build_shared_sets(
         artifact_facts=artifact_facts,
@@ -431,7 +471,7 @@ def _build_indexed_projection(
         }
         if fact["downstream"].get("available"):
             encoded["downstream_count"] = len(fact["downstream_names"])
-        encoded_artifacts[str(item["artifact_id"] or item["full_name"])] = encoded
+        encoded_artifacts[str(item["artifact_id"])] = encoded
 
     encoded_aggregate = None
     if aggregate is not None:
@@ -492,9 +532,14 @@ def _build_indexed_projection(
 
 
 def _serialize_payload(
-    payload: dict[str, Any], *, semantic_representation: str, allow_large_output: bool, requested_count: int
+    payload: dict[str, Any],
+    *,
+    semantic_representation: str,
+    serialization_policy: str,
+    allow_large_output: bool,
+    requested_count: int,
 ) -> str:
-    if semantic_representation == "indexed":
+    if serialization_policy == "complete_compact":
         serialized = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
         size = len(serialized.encode("utf-8"))
         if size <= _LOSSLESS_COMPACT_MAX_BYTES or allow_large_output:
@@ -502,7 +547,7 @@ def _serialize_payload(
         return json.dumps(
             {
                 "status": "confirmation_required",
-                "reason": "Complete lossless indexed module context exceeds the local safety ceiling.",
+                "reason": "Complete lossless module context exceeds the local safety ceiling.",
                 "requested_count": requested_count,
                 "estimated_output_bytes": size,
                 "warning_threshold_bytes": _LOSSLESS_COMPACT_MAX_BYTES,
@@ -512,6 +557,8 @@ def _serialize_payload(
             indent=2,
             ensure_ascii=False,
         )
+    if serialization_policy != "readable_named":
+        raise ValueError(f"Unsupported module blast-radius serialization policy: {serialization_policy}")
     return guard_large_output(
         json.dumps(payload, indent=2, ensure_ascii=False),
         allow_large_output=allow_large_output,
@@ -718,6 +765,8 @@ def get_module_blast_radius(
                     artifacts_projected=artifacts_projected,
                     fields=fields,
                     module_path_to_id=module_path_to_id,
+                    artifact_path_to_id=_artifact_path_to_id,
+                    artifact_id_to_path=_artifact_id_to_path,
                     state=state,
                     all_direct=all_direct,
                     all_downstream=all_downstream,
@@ -727,20 +776,27 @@ def get_module_blast_radius(
             except ValueError as exc:
                 indexed_error = exc
 
-        identity_present = _has_module_identity_collection(named_payload)
+        indexed_available = indexed_payload is not None and "schema" in indexed_payload
         if representation == "indexed" and indexed_error is not None:
             return _json_error(str(indexed_error))
         if representation == "named":
-            payload, selected_representation = named_payload, "named"
+            payload, selected_representation, serialization_policy = named_payload, "named", "readable_named"
         elif representation == "indexed":
             payload = indexed_payload if indexed_payload is not None else named_payload
-            selected_representation = "indexed" if indexed_payload is not None and "schema" in indexed_payload else "named"
+            if indexed_available:
+                selected_representation, serialization_policy = "indexed", "complete_compact"
+            else:
+                selected_representation, serialization_policy = "named", "complete_compact"
         elif not compact:
-            payload, selected_representation = named_payload, "named"
-        elif indexed_payload is None or indexed_error is not None or not identity_present:
+            payload, selected_representation, serialization_policy = named_payload, "named", "readable_named"
+        elif indexed_error is not None or indexed_payload is None:
             # A missing indexed candidate is a real named fallback.  It must
             # retain named semantics and the named output policy.
-            payload, selected_representation = named_payload, "named"
+            payload, selected_representation, serialization_policy = named_payload, "named", "readable_named"
+        elif not indexed_available:
+            # No identity collection means there is no indexed schema to
+            # construct, but compact auto still promises a complete result.
+            payload, selected_representation, serialization_policy = named_payload, "named", "complete_compact"
         else:
             named_candidate = json.loads(json.dumps(named_payload, ensure_ascii=False))
             indexed_candidate = json.loads(json.dumps(indexed_payload, ensure_ascii=False))
@@ -753,8 +809,15 @@ def get_module_blast_radius(
                 payload, selected_representation = indexed_candidate, "indexed"
             else:
                 payload, selected_representation = named_candidate, "named"
+            serialization_policy = "complete_compact"
 
-        return _serialize_payload(payload, semantic_representation=selected_representation, allow_large_output=allow_large_output, requested_count=returned_count)
+        return _serialize_payload(
+            payload,
+            semantic_representation=selected_representation,
+            serialization_policy=serialization_policy,
+            allow_large_output=allow_large_output,
+            requested_count=returned_count,
+        )
     except ValueError as exc:
         return _json_error(str(exc))
     except Exception as exc:
