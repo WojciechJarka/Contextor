@@ -1,75 +1,96 @@
-# Runtime performance certification: `extract_indexed_report_context`
+# Runtime performance certification — `search_source`
 
-DECISION=FINAL_PASS
+## Runtime freshness and deployed implementation
 
-## Runtime freshness and LIVE evidence
-
-The deferred Contextor MCP tools are present and the deployed documentation identifies `extract_indexed_report_context` as `[OPTIMIZED]`. The running tool accepted the exact requested indexed query and returned the fresh active identity `module_id=266/1` for the target path.
-
-CANONICAL_REVISION=252
-PROVENANCE=NOT_EXPOSED_BY_PUBLIC_RUNTIME_SURFACE
-RESYNC_REQUIRED=false
-LIVE_EVIDENCE=After the restart epoch `3156833e30514c96805e21d6df55f64e`, a current-cursor `get_live_events(after_revision=252)` response reported `continuity=continuous`, `resync_required=false`, and `activity_resync_required=false`.
-
-The initial request with the pre-restart cursor `251` correctly reported `event_retention_gap`; it was not used as fresh-LIVE evidence. The current canonical cursor was then used and is continuous.
-
-No runtime child trace fields were exposed by the public tool surface. Consequently the following ownership counts are unavailable rather than inferred:
+The directly running Contextor MCP returned the current `SourceSpanResolver` implementation containing all three resolver-local line indexes:
 
 ```text
-get_or_init_engine=NOT_EXPOSED
-engine.registry.read_transaction=NOT_EXPOSED
-catalog_from_registry fallback=NOT_EXPOSED
+comments_by_line
+strings_by_line
+statements_by_line
+```
+
+The fetched running-MCP implementation also shows `resolve(line_no, column)` selecting candidates with the three `.get(line_no, ())` maps while retaining `_contains`, the existing `min(...)` keys, precedence, and fallback.
+
+LIVE evidence at certification:
+
+```text
+CANONICAL_REVISION=257
+PROVENANCE=live
+CANONICAL_STATE=fresh
+WORKSPACE_SYNC=verified
+RESYNC_REQUIRED=false
+RESYNC_REASON=null
+LATEST_REVISION=257
 ```
 
 ## Exact real-MCP benchmark
 
-Exact request:
-
-```json
-{
-  "repo_path":"C:\\Temp\\Contextor_Repo",
-  "query":"contextor/mcp/tools/extract_indexed_report_context.py",
-  "report_path":"",
-  "resolve_indices":false,
-  "public_api_only":false,
-  "max_items":20,
-  "fields":null,
-  "evidence_limit":3,
-  "representation":"indexed"
-}
-```
-
-One discarded warm-up was followed by three sequential, identical calls. An earlier measurement-collector attempt failed after completing calls but before it could retain its results; it is discarded and not used below. The valid certification cohort is the warm-up plus the three calls reported here.
+Request:
 
 ```text
-RUNS_MS=181,444,180
-MEDIAN_MS=181
-RESPONSE_BYTES=7121
-RESPONSE_PARITY=EXACT: all three complete response strings were identical; each is ASCII-only JSON, so character length equals UTF-8 byte length (7121).
-CANONICAL_REVISION=252
-PROVENANCE=NOT_EXPOSED_BY_PUBLIC_RUNTIME_SURFACE
+search_source(
+    repo_path="C:\\Temp\\Contextor_Repo",
+    search_term="def ",
+    limit=20,
+    case_sensitive=false,
+    allow_large_output=false
+)
+```
+
+One discarded warm-up plus three sequential identical real MCP calls:
+
+```text
+DISCARDED_WARMUP_MS=15487
+RUNS_MS=13625,13014,12805
+MEDIAN_MS=13014
+RESPONSE_BYTES=14808
+RESPONSE_SHA256=fd5f97b387d9f7518608d6b40aeb51e3e89051aa11f67191ae9c9ba38298b270
+RESPONSE_PARITY=EXACT: all warm responses, including discarded warm-up, were byte-identical
+TOTAL_MATCHES=3908
+FULL_OUTPUT_BYTES=45419
+RETURNED_COUNT=5
+AUTO_BOUNDED=true
+CANONICAL_REVISION=257
+PROVENANCE=live
 RESYNC_REQUIRED=false
-IMPROVEMENT_MS=18
-IMPROVEMENT_PERCENT=9.05%
 ```
 
-The one 444 ms observation is an outlier, but the requested median is 181 ms: 18 ms (9.05%) below the 199 ms baseline, so there is no median latency regression.
-
-## Exact semantic and byte parity
+## Baseline comparison and parity
 
 ```text
-module_id=266/1
-artifact_count=12
-total_artifact_count=12
-truncated=false
-representation=indexed
-resolve_via=lookup_index_entries
-response_bytes=7121
+BASELINE_MEDIAN_MS=14546
+POST_CHANGE_MEDIAN_MS=13014
+IMPROVEMENT_MS=1532
+IMPROVEMENT_PERCENT=10.53%
 ```
 
+The entire returned JSON is byte-identical to the approved baseline:
+
+```text
+total_matches=3908
+response_bytes=14808
+sha256=fd5f97b387d9f7518608d6b40aeb51e3e89051aa11f67191ae9c9ba38298b270
+full_output_bytes=45419
+returned_count=5
+auto_bounded=true
+ordering/spans/match_kind/text/line_maps unchanged
+```
+
+## Remaining latency interpretation
+
+The line index removes the previously measured repeated per-occurrence full-collection scans and delivers a material real-MCP improvement with exact parity. The remaining roughly 13 seconds still includes per-file `SourceSpanResolver.__init__` work (tokenization, AST parse, and construction of the required semantic facts) across the canonical source set.
+
+The approved lazy-construction experiment saved only about 179 ms / 1.3%, so it is not a remaining optimization path to revisit. No persistent AST/source cache was added, and no further refactor was designed or profiled in this certification turn. Raw source reads remain the already-approved single-read-per-candidate path; no new removable owner is established by this runtime cohort.
+
+## Decision
+
+```text
+DECISION=FINAL_PASS
 MCP_RESTART_REQUIRED=NO
 LIVE_RESTART_REQUIRED=NO
 RUNTIME_PERFORMANCE_CERTIFICATION_PENDING=NO
 FILES_CHANGED=NONE
 DIFFS=NONE
 FULL_SUITE_RUN_BY_AGENT=NO
+```

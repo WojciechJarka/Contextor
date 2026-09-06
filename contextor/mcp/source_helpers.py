@@ -127,10 +127,23 @@ class SourceSpanResolver:
             if isinstance(node, ast.Constant) and isinstance(node.value, str)
         ]
         self.statements = [node for node in nodes if isinstance(node, ast.stmt)]
+        self.comments_by_line: dict[int, list[tuple[int, int, int, int, int, str]]] = {}
+        for token in self.comment_tokens:
+            self.comments_by_line.setdefault(token[0], []).append(token)
+
+        self.strings_by_line: dict[int, list[ast.Constant]] = {}
+        for node in self.strings:
+            for line_no in range(node.lineno, node.end_lineno + 1):
+                self.strings_by_line.setdefault(line_no, []).append(node)
+
+        self.statements_by_line: dict[int, list[ast.stmt]] = {}
+        for node in self.statements:
+            for line_no in range(node.lineno, node.end_lineno + 1):
+                self.statements_by_line.setdefault(line_no, []).append(node)
 
     def resolve(self, line_no: int, column: int) -> tuple[int, int, str, str]:
-        for token_line, start_col, end_col, start, end, token_text in self.comment_tokens:
-            if token_line == line_no and start_col <= column < end_col:
+        for _token_line, start_col, end_col, start, end, token_text in self.comments_by_line.get(line_no, ()):
+            if start_col <= column < end_col:
                 text = (
                     "\n".join(self.lines[start - 1 : end])
                     if start != end or self.lines[line_no - 1].lstrip().startswith("#")
@@ -141,7 +154,11 @@ class SourceSpanResolver:
         if self.tree is None:
             return line_no, line_no, "line", self.lines[line_no - 1]
 
-        strings = [node for node in self.strings if _contains(node, line_no, column)]
+        strings = [
+            node
+            for node in self.strings_by_line.get(line_no, ())
+            if _contains(node, line_no, column)
+        ]
         if strings:
             node = min(
                 strings,
@@ -156,7 +173,11 @@ class SourceSpanResolver:
                     "\n".join(self.lines[node.lineno - 1 : node.end_lineno]),
                 )
 
-        statements = [node for node in self.statements if _contains(node, line_no, column)]
+        statements = [
+            node
+            for node in self.statements_by_line.get(line_no, ())
+            if _contains(node, line_no, column)
+        ]
         if statements:
             node = min(
                 statements,

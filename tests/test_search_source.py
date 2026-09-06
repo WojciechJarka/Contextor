@@ -234,6 +234,55 @@ def test_span_analysis_runs_once_per_file_with_multiple_hits(tmp_path, monkeypat
     assert parse_calls == 1
     assert tokenize_calls == 1
 
+    inline = source_helpers.SourceSpanResolver(
+        'value = "string_marker"  # comment_marker\n'
+    )
+    string = inline.resolve(1, inline.lines[0].index("string_marker"))
+    comment = inline.resolve(1, inline.lines[0].index("comment_marker"))
+    assert string == (1, 1, "statement", 'value = "string_marker"  # comment_marker')
+    assert comment == (1, 1, "comment", "# comment_marker")
+    assert inline.comments_by_line[1] == inline.comment_tokens
+
+    same_line = source_helpers.SourceSpanResolver(
+        'left = "first_marker"; right = "second_marker"\n'
+    )
+    first = same_line.resolve(1, same_line.lines[0].index("first_marker"))
+    second = same_line.resolve(1, same_line.lines[0].index("second_marker"))
+    assert first == second == (1, 1, "statement", same_line.lines[0])
+    assert same_line.strings_by_line[1] == same_line.strings
+    assert all(node in same_line.statements_by_line[1] for node in same_line.statements)
+
+    multiline_string = source_helpers.SourceSpanResolver(
+        'value = """start\nmultiline_string_marker\nend"""\n'
+    )
+    assert multiline_string.resolve(2, 0) == (
+        1,
+        3,
+        "multiline_string",
+        'value = """start\nmultiline_string_marker\nend"""',
+    )
+
+    multiline_statement = source_helpers.SourceSpanResolver(
+        "if (\n    multiline_statement_marker\n):\n    pass\n"
+    )
+    assert multiline_statement.resolve(2, 4) == (
+        1,
+        4,
+        "statement",
+        "if (\n    multiline_statement_marker\n):\n    pass",
+    )
+
+    comment_block = source_helpers.SourceSpanResolver("# comment_marker\n# continued\n")
+    assert comment_block.resolve(1, 2) == (
+        1,
+        2,
+        "comment",
+        "# comment_marker\n# continued",
+    )
+
+    fallback = source_helpers.SourceSpanResolver("value = ( fallback_marker\n")
+    assert fallback.resolve(1, 10) == (1, 1, "line", "value = ( fallback_marker")
+
 
 def test_search_source_large_output_guard_and_retry(tmp_path, monkeypatch):
     files = {
