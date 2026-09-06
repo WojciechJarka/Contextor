@@ -340,6 +340,16 @@ def load_snapshot(
                         setattr(state_obj, "module_usages", {})
                     except AttributeError:
                         pass
+                if not hasattr(state_obj, "syntax_diagnostics_by_path"):
+                    try:
+                        setattr(state_obj, "syntax_diagnostics_by_path", {})
+                    except AttributeError:
+                        pass
+                if not hasattr(state_obj, "syntax_diagnostics_state"):
+                    try:
+                        setattr(state_obj, "syntax_diagnostics_state", "not_materialized")
+                    except AttributeError:
+                        pass
                 if not hasattr(state_obj, "module_usages_manifest"):
                     try:
                         setattr(state_obj, "module_usages_manifest", {})
@@ -416,6 +426,16 @@ def load_snapshot(
             if not hasattr(payload, "module_usages"):
                 try:
                     setattr(payload, "module_usages", {})
+                except AttributeError:
+                    pass
+            if not hasattr(payload, "syntax_diagnostics_by_path"):
+                try:
+                    setattr(payload, "syntax_diagnostics_by_path", {})
+                except AttributeError:
+                    pass
+            if not hasattr(payload, "syntax_diagnostics_state"):
+                try:
+                    setattr(payload, "syntax_diagnostics_state", "not_materialized")
                 except AttributeError:
                     pass
             if not hasattr(payload, "module_usages_manifest"):

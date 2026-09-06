@@ -89,6 +89,8 @@ class RepositoryAnalysisState:
     metrics: Dict[str, Any] = field(default_factory=dict)
     file_state: Dict[str, FileState] = field(default_factory=dict)
     module_parse_freshness: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    syntax_diagnostics_by_path: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    syntax_diagnostics_state: str = "not_materialized"
     module_usages: Dict[str, Any] = field(default_factory=dict)
     module_usages_manifest: Dict[str, Dict[str, str]] = field(default_factory=dict)
     topology_analytics: Dict[str, Any] = field(default_factory=dict)
@@ -114,6 +116,62 @@ class RepositoryAnalysisState:
 
     trie: Optional[Any] = None
     package_root: str = ""
+
+
+def _canonical_python_source_path(path: Any) -> str | None:
+    """Normalize an already repository-relative Python source path for state keys."""
+    normalized = str(path).replace("\\", "/")
+    if normalized.startswith("./"):
+        normalized = normalized[2:]
+    if (
+        not normalized.endswith(".py")
+        or normalized.startswith("/")
+        or (len(normalized) >= 3 and normalized[1:3] == ":/")
+    ):
+        return None
+    return normalized
+
+
+def build_syntax_diagnostics_from_index(index: Any) -> tuple[Dict[str, Dict[str, Any]], str]:
+    """Materialize full-analysis syntax facts from one completed RepositoryIndex.
+
+    A missing result for any indexed Python path is deliberately incomplete;
+    no source is read or parsed here.
+    """
+    expected_paths: set[str] = set()
+    facts: Dict[str, Dict[str, Any]] = {}
+    complete = True
+
+    for module in (getattr(index, "modules", {}) or {}).values():
+        path = _canonical_python_source_path(getattr(module, "path", None))
+        if path is None or path in expected_paths:
+            complete = False
+            continue
+        expected_paths.add(path)
+        facts[path] = {"status": "checked_and_none", "errors": []}
+
+    for skipped in getattr(index, "skipped", []) or []:
+        path = _canonical_python_source_path(getattr(skipped, "path", None))
+        if path is None or path in expected_paths:
+            complete = False
+            continue
+        expected_paths.add(path)
+        reason = str(getattr(skipped, "reason", ""))
+        if "is not valid Python" not in reason:
+            complete = False
+            continue
+        facts[path] = {
+            "status": "checked_with_errors",
+            "errors": [{
+                "message": reason,
+                "line_number": getattr(skipped, "line_number", None),
+                "column_number": getattr(skipped, "column_number", None),
+            }],
+        }
+
+    if not complete or set(facts) != expected_paths:
+        return facts, "deferred"
+    return facts, "fresh"
 
 
 def module_current_truth(state: RepositoryAnalysisState, module_name: str) -> Dict[str, Any]:

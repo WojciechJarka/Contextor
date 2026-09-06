@@ -466,6 +466,7 @@ class ContextorFacade:
                 FileStateManager,
                 RepositoryAnalysisState,
                 artifact_consumption_is_fresh,
+                build_syntax_diagnostics_from_index,
                 build_canonical_artifact_consumption,
                 dependency_matrix_inputs_are_fresh,
                 save_engine_state,
@@ -518,6 +519,9 @@ class ContextorFacade:
                 canonical_consumption,
                 raw_artifacts,
             )
+            syntax_diagnostics_by_path, syntax_diagnostics_state = (
+                build_syntax_diagnostics_from_index(index)
+            )
 
             state = RepositoryAnalysisState(
                 modules=mods,
@@ -527,6 +531,8 @@ class ContextorFacade:
                 package_root=getattr(analysis_result, "package_root", ""),
                 artifact_consumption=canonical_consumption,
                 artifact_consumption_state="fresh" if consumption_valid else "stale",
+                syntax_diagnostics_by_path=syntax_diagnostics_by_path,
+                syntax_diagnostics_state=syntax_diagnostics_state,
                 module_usages=module_usages,
                 module_usages_manifest=module_usages_manifest,
                 metrics=metrics,
