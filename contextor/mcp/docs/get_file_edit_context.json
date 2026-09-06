@@ -17,7 +17,11 @@
     "1. mode=null (default): Combines LIVE module, API boundary, direct/transitive consumers, and covering tests. When compact=True, emits collection counts and truncated flags; when compact=False, emits bounded item lists up to max_items.",
     "2. mode='minimal': Returns an ultra-lightweight in-memory pre-edit decision projection (direct and transitive consumer counts, risk metrics, and covering test sample) without reading file bodies from disk.",
     "3. Consumer semantics: direct_count measures unique modules directly importing the target; transitive_count measures all unique modules reachable via reverse dependency traversal.",
-    "4. Exposes stale or unavailable canonical truth explicitly. Does not dump whole source files."
+    "4. Exposes stale or unavailable canonical truth explicitly. Does not dump whole source files.",
+    "5. syntax_diagnostics is a bounded projection of the canonical LIVE fact for the target's repository-relative Python source path. It is materialized only when syntax_diagnostics_state is fresh; checked_and_none returns materialized=true and errors=[], while checked_with_errors returns structured message, line_number, and column_number entries with total/truncated bounds.",
+    "6. When syntax_diagnostics_state is not_materialized, deferred, stale, unavailable, or the target has no canonical fact, syntax_diagnostics reports materialized=false, explicit availability, and errors=null; it never fabricates an empty success. A stale structural module response remains fail-closed but includes the current canonical syntax_diagnostics projection when available.",
+    "7. syntax_diagnostics is projected from canonical state only. This tool does not parse source or reread source for syntax diagnostics at query time.",
+    "8. A syntax fact for a path without a canonical module identity remains outside the existing get_file_edit_context target-resolution contract; this tool does not invent a module identity or broaden that input contract."
   ],
   "freshness": [
     "The response includes a ``state_freshness`` envelope scoped to the queried target file or module.",
@@ -25,7 +29,8 @@
     "- DOUBLE WARNING: When ``workspace_sync`` is ``out_of_sync``, a warning message is also added to the top-level ``warnings`` array in the response so legacy consumers see it.",
     "- ``canonical_revision``: Revision of the canonical state used to answer this query.",
     "- ``provenance``: ``live`` or ``snapshot``.",
-    "- ``advisory_warning``: Warning message when out of sync or if the last analysis job was interrupted/failed."
+    "- ``advisory_warning``: Warning message when out of sync or if the last analysis job was interrupted/failed.",
+    "- ``syntax_diagnostics.availability``: ``fresh`` means the current canonical syntax family was materialized for the target; ``not_materialized``, ``deferred``, ``stale``, or ``unavailable`` are explicit non-success states. ``syntax_diagnostics.errors=[]`` is emitted only for a materialized ``checked_and_none`` fact."
   ],
   "errors": [],
   "usage_notes": [

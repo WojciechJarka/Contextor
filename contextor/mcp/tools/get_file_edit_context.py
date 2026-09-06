@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 
 from contextor.mcp import query_helpers
+from contextor.mcp.diagnostics import syntax_diagnostics_for_path
 from contextor.mcp import runtime as mcp_runtime
 
 
@@ -234,6 +235,9 @@ def get_file_edit_context(
                 )
             unavailable = query_helpers.module_truth_unavailable(engine.state, module_name)
             if unavailable:
+                unavailable["syntax_diagnostics"] = syntax_diagnostics_for_path(
+                    engine.state, file_path_resolved, max_items=max_items, compact=compact
+                )
                 return json.dumps(unavailable, indent=2)
             live_graph = getattr(engine.state, "dependency_graph", None)
             if live_graph is None:
@@ -395,6 +399,9 @@ def get_file_edit_context(
                     "live_revision": live_revision,
                     "layer": layer,
                     "risk_score": risk_score,
+                    "syntax_diagnostics": syntax_diagnostics_for_path(
+                        engine.state, file_path_resolved, max_items=max_items, compact=compact
+                    ),
                     "layer_guard": layer_guard,
                     "consumers": {
                         "direct_count": len(direct_consumers),
@@ -437,6 +444,7 @@ def get_file_edit_context(
     module_name = ".".join(parts)
     effective_file_or_target = query_input
     target_kind = "module"
+    file_path_resolved = (catalog.module_paths or {}).get(module_name) or rel_path.as_posix()
 
     engine = mcp_runtime.get_or_init_engine(root)
     if not engine or getattr(engine.state, "resync_required", False):
@@ -446,6 +454,9 @@ def get_file_edit_context(
         state = engine.state
         unavailable = query_helpers.module_truth_unavailable(state, module_name)
         if unavailable:
+            unavailable["syntax_diagnostics"] = syntax_diagnostics_for_path(
+                state, file_path_resolved, max_items=max_items, compact=compact
+            )
             return json.dumps(unavailable, indent=2)
         state_metrics = getattr(state, "metrics", {}) or {}
         candidate_metrics = state_metrics.get(module_name, {}) if isinstance(state_metrics, dict) else {}
@@ -582,6 +593,9 @@ def get_file_edit_context(
             "layer": mod_info.get("layer", "unknown"),
             "entrypoint": mod_info.get("entrypoint", False),
             "risk_score": risk_score,
+            "syntax_diagnostics": syntax_diagnostics_for_path(
+                state, file_path_resolved, max_items=max_items, compact=compact
+            ),
             "dependency_data_source": dependency_data_source,
             "artifact_data_source": artifact_data_source,
             "state_freshness": state_freshness,

@@ -118,7 +118,7 @@ class RepositoryAnalysisState:
     package_root: str = ""
 
 
-def _canonical_python_source_path(path: Any) -> str | None:
+def canonical_python_source_path(path: Any) -> str | None:
     """Normalize an already repository-relative Python source path for state keys."""
     normalized = str(path).replace("\\", "/")
     if normalized.startswith("./"):
@@ -143,7 +143,7 @@ def build_syntax_diagnostics_from_index(index: Any) -> tuple[Dict[str, Dict[str,
     complete = True
 
     for module in (getattr(index, "modules", {}) or {}).values():
-        path = _canonical_python_source_path(getattr(module, "path", None))
+        path = canonical_python_source_path(getattr(module, "path", None))
         if path is None or path in expected_paths:
             complete = False
             continue
@@ -151,7 +151,7 @@ def build_syntax_diagnostics_from_index(index: Any) -> tuple[Dict[str, Dict[str,
         facts[path] = {"status": "checked_and_none", "errors": []}
 
     for skipped in getattr(index, "skipped", []) or []:
-        path = _canonical_python_source_path(getattr(skipped, "path", None))
+        path = canonical_python_source_path(getattr(skipped, "path", None))
         if path is None or path in expected_paths:
             complete = False
             continue

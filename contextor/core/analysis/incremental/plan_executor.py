@@ -40,6 +40,9 @@ class CandidateState:
     """
     modules: Dict[str, Any]
     artifacts: Dict[str, Any]
+    module_parse_freshness: Dict[str, Dict[str, Any]]
+    syntax_diagnostics_by_path: Dict[str, Dict[str, Any]]
+    syntax_diagnostics_state: str
     module_usages: Dict[str, Any]
     artifact_consumption: Dict[str, Any]
     dependency_graph: Optional[ProjectGraph]
@@ -239,6 +242,9 @@ def _prepare_candidate_state(state: RepositoryAnalysisState) -> CandidateState:
     return CandidateState(
         modules=dict(state.modules),
         artifacts=dict(state.artifacts),
+        module_parse_freshness=dict(getattr(state, "module_parse_freshness", {}) or {}),
+        syntax_diagnostics_by_path=dict(getattr(state, "syntax_diagnostics_by_path", {}) or {}),
+        syntax_diagnostics_state=getattr(state, "syntax_diagnostics_state", "not_materialized"),
         module_usages=dict(getattr(state, "module_usages", {}) or {}),
         artifact_consumption=dict(state.artifact_consumption or {}),
         dependency_graph=state.dependency_graph,

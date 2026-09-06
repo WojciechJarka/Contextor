@@ -27,10 +27,12 @@ from contextor.core.analysis.incremental.preparation import (
     prepare_deleted_module_update,
 )
 from contextor.core.analysis.incremental.plan_executor import (
+    _prepare_candidate_state,
     execute_refresh_plan,
 )
 from contextor.core.analysis.state_manager import (
     artifact_consumption_is_fresh,
+    canonical_python_source_path,
     clear_module_parse_failure,
     mark_module_parse_failure,
     validate_canonical_artifact_consumption_coverage,
@@ -101,6 +103,39 @@ class IncrementalAnalysisEngine:
         """Compatibility wrapper delegating to materialization.ensure_collisions."""
         ensure_collisions(self.state)
 
+    def _commit_syntax_candidate(
+        self,
+        *,
+        source_path: str,
+        syntax_fact: Dict[str, Any] | None = None,
+        remove_syntax_fact: bool = False,
+        mark_parse_error: tuple[str | None, int | None, int | None] | None = None,
+        clear_parse_module: str | None = None,
+        degrade_syntax_family: bool = False,
+    ) -> None:
+        """Commit syntax and parse-freshness changes through a COW candidate."""
+        candidate = _prepare_candidate_state(self.state)
+        if remove_syntax_fact:
+            candidate.syntax_diagnostics_by_path.pop(source_path, None)
+        elif syntax_fact is not None:
+            candidate.syntax_diagnostics_by_path[source_path] = syntax_fact
+        if degrade_syntax_family and candidate.syntax_diagnostics_state == "fresh":
+            candidate.syntax_diagnostics_state = "deferred"
+        if mark_parse_error is not None:
+            error, line_number, column_number = mark_parse_error
+            mark_module_parse_failure(
+                candidate,
+                clear_parse_module or "",
+                error=error,
+                line_number=line_number,
+                column_number=column_number,
+            )
+        elif clear_parse_module is not None:
+            clear_module_parse_failure(candidate, clear_parse_module)
+        self.state.syntax_diagnostics_by_path = candidate.syntax_diagnostics_by_path
+        self.state.syntax_diagnostics_state = candidate.syntax_diagnostics_state
+        self.state.module_parse_freshness = candidate.module_parse_freshness
+
     def update_file(self, file_path: str) -> IncrementalUpdateResult:
         """
         Updates the canonical state incrementally for a single changed file.
@@ -114,6 +149,9 @@ class IncrementalAnalysisEngine:
             path = Path(file_path)
             rel_path = path.relative_to(self.root_path)
             module_path = ".".join(rel_path.with_suffix("").parts)
+            source_path = canonical_python_source_path(rel_path.as_posix())
+            if source_path is None:
+                raise ValueError(f"Incremental source path is not canonical Python: {file_path}")
 
             if (
                 not self.state_manager.has_changed(file_path)
@@ -137,7 +175,6 @@ class IncrementalAnalysisEngine:
             # 1. Handle Deletion
             current_state = self.state_manager.get_current_file_state(file_path, compute_hash=False)
             if not current_state:
-                clear_module_parse_failure(self.state, module_path)
                 old_module = self.state.modules.get(module_path)
                 old_artifacts = self.state.artifacts.get(module_path, {})
                 old_usage = self.state.module_usages.get(module_path, ModuleUsageFacts()) if hasattr(self.state, "module_usages") and self.state.module_usages else ModuleUsageFacts()
@@ -158,7 +195,11 @@ class IncrementalAnalysisEngine:
                     collision_facts_changed=collision_facts_changed,
                 )
                 affected_set, blast_radius_complete, execution_trace = self._apply_delta_and_commit(
-                    file_path, delta, usage_delta, plan, [], {}, ModuleUsageFacts(), new_collision_facts=None
+                    file_path, delta, usage_delta, plan, [], {}, ModuleUsageFacts(),
+                    new_collision_facts=None,
+                    syntax_source_path=source_path,
+                    remove_syntax_fact=True,
+                    clear_parse_module=module_path,
                 )
                 blast_radius_state = "fresh" if blast_radius_complete else "deferred"
                 affected_modules = sorted(affected_set) if blast_radius_complete else []
@@ -201,12 +242,28 @@ class IncrementalAnalysisEngine:
             )
 
             if prep.has_error:
-                mark_module_parse_failure(
-                    self.state,
-                    module_path,
-                    error=prep.error_message,
-                    line_number=prep.line_number,
-                    column_number=prep.column_number,
+                syntax_fact = (
+                    {
+                        "status": "checked_with_errors",
+                        "errors": [{
+                            "message": prep.error_message,
+                            "line_number": prep.line_number,
+                            "column_number": prep.column_number,
+                        }],
+                    }
+                    if prep.error_status == "SYNTAX_ERROR"
+                    else None
+                )
+                self._commit_syntax_candidate(
+                    source_path=source_path,
+                    syntax_fact=syntax_fact,
+                    mark_parse_error=(
+                        prep.error_message,
+                        prep.line_number,
+                        prep.column_number,
+                    ),
+                    clear_parse_module=module_path,
+                    degrade_syntax_family=prep.error_status != "SYNTAX_ERROR",
                 )
                 return IncrementalUpdateResult(
                     status=prep.error_status,
@@ -216,9 +273,12 @@ class IncrementalAnalysisEngine:
                     column_number=prep.column_number,
                 )
 
-            recovered_from_parse_failure = clear_module_parse_failure(
-                self.state, module_path
+            freshness = getattr(self.state, "module_parse_freshness", {}) or {}
+            recovered_from_parse_failure = (
+                isinstance(freshness.get(module_path), dict)
+                and freshness[module_path].get("state") == "stale"
             )
+            checked_and_none = {"status": "checked_and_none", "errors": []}
 
             delta = prep.delta
             usage_delta = prep.usage_delta
@@ -240,6 +300,11 @@ class IncrementalAnalysisEngine:
                 # Parsing proved the tracked source is semantically unchanged.
                 # Acknowledge its current fingerprint so restart reconciliation
                 # does not repeatedly queue the same canonical module.
+                self._commit_syntax_candidate(
+                    source_path=source_path,
+                    syntax_fact=checked_and_none,
+                    clear_parse_module=module_path,
+                )
                 self.state_manager.update_state(file_path)
                 return IncrementalUpdateResult(
                     status="RECOVERED" if recovered_from_parse_failure else "UNCHANGED",
@@ -267,7 +332,11 @@ class IncrementalAnalysisEngine:
 
             # 3. Apply and Commit driven by RefreshPlan
             affected_set, blast_radius_complete, execution_trace = self._apply_delta_and_commit(
-                file_path, delta, usage_delta, plan, new_imports, new_artifacts, new_usage, new_collision_facts=new_collision_facts
+                file_path, delta, usage_delta, plan, new_imports, new_artifacts, new_usage,
+                new_collision_facts=new_collision_facts,
+                syntax_source_path=source_path,
+                syntax_fact=checked_and_none,
+                clear_parse_module=module_path,
             )
 
             if plan.refresh_completeness == "requires_resync":
@@ -353,6 +422,10 @@ class IncrementalAnalysisEngine:
         mod_artifacts: dict,
         new_usage: Any,
         new_collision_facts: Optional[List[Dict[str, Any]]] = None,
+        syntax_source_path: str | None = None,
+        syntax_fact: Dict[str, Any] | None = None,
+        remove_syntax_fact: bool = False,
+        clear_parse_module: str | None = None,
     ) -> tuple[Set[str], bool, dict]:
         """
         Executes planned RefreshPlan phases and performs atomic persistent & RAM commit.
@@ -378,8 +451,17 @@ class IncrementalAnalysisEngine:
 
         # Canonical State Publication
         candidate = outcome.candidate_state
+        if remove_syntax_fact and syntax_source_path is not None:
+            candidate.syntax_diagnostics_by_path.pop(syntax_source_path, None)
+        elif syntax_fact is not None and syntax_source_path is not None:
+            candidate.syntax_diagnostics_by_path[syntax_source_path] = syntax_fact
+        if clear_parse_module is not None:
+            clear_module_parse_failure(candidate, clear_parse_module)
         self.state.modules = candidate.modules
         self.state.artifacts = candidate.artifacts
+        self.state.module_parse_freshness = candidate.module_parse_freshness
+        self.state.syntax_diagnostics_by_path = candidate.syntax_diagnostics_by_path
+        self.state.syntax_diagnostics_state = candidate.syntax_diagnostics_state
         self.state.dependency_graph = candidate.dependency_graph
         self.state.metrics = candidate.metrics
         self.state.topology_analytics = candidate.topology_analytics

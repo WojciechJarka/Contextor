@@ -66,6 +66,49 @@ def test_attention_required_tracks_each_available_family():
     assert diagnostics_summary_for_state(SimpleNamespace(collisions_state="fresh", collisions=[], cycles_state="fresh", cycles=[["a", "b", "a"]]))["attention_required"] is True
 
 
+def test_current_syntax_summary_counts_only_materialized_error_facts():
+    state = SimpleNamespace(
+        syntax_diagnostics_state="fresh",
+        syntax_diagnostics_by_path={
+            "valid.py": {"status": "checked_and_none", "errors": []},
+            "broken.py": {"status": "checked_with_errors", "errors": [{"message": "bad"}]},
+            "other.py": {"status": "checked_with_errors", "errors": [{"message": "bad"}]},
+        },
+        collisions_state="fresh", collisions=[], cycles_state="fresh", cycles=[],
+    )
+
+    summary = diagnostics_summary_for_state(state)
+
+    assert summary["syntax_errors"] == {"count": 2, "availability": "fresh"}
+    assert summary["attention_required"] is True
+
+
+def test_current_syntax_summary_materialized_zero_is_not_unavailable():
+    state = SimpleNamespace(
+        syntax_diagnostics_state="fresh",
+        syntax_diagnostics_by_path={"valid.py": {"status": "checked_and_none", "errors": []}},
+        collisions_state="fresh", collisions=[], cycles_state="fresh", cycles=[],
+    )
+
+    summary = diagnostics_summary_for_state(state)
+
+    assert summary["syntax_errors"] == {"count": 0, "availability": "fresh"}
+    assert summary["attention_required"] is False
+
+
+def test_current_syntax_summary_unmaterialized_families_never_fabricate_zero():
+    for family_state in ("not_materialized", "deferred"):
+        state = SimpleNamespace(
+            syntax_diagnostics_state=family_state,
+            syntax_diagnostics_by_path={},
+            collisions_state="fresh", collisions=[], cycles_state="fresh", cycles=[],
+        )
+
+        summary = diagnostics_summary_for_state(state)
+
+        assert summary["syntax_errors"] == {"count": None, "availability": family_state}
+
+
 def test_historical_job_does_not_promote_global_syntax_freshness(tmp_path, monkeypatch):
     repo = tmp_path / "repo"
     repo.mkdir()

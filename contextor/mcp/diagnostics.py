@@ -8,6 +8,7 @@ from typing import Any
 
 from contextor.mcp import runtime as mcp_runtime
 from contextor.mcp.output_guard import LARGE_OUTPUT_WARNING_BYTES, guard_large_output
+from contextor.core.analysis.state_manager import canonical_python_source_path
 
 
 def _availability(state: Any, family: str, values: Any) -> str:
@@ -40,8 +41,20 @@ def diagnostics_summary_for_state(state: Any) -> dict[str, Any]:
             },
         }
 
-    syntax_values = None
-    syntax_availability = "unavailable"
+    syntax_state = getattr(state, "syntax_diagnostics_state", None)
+    syntax_facts = getattr(state, "syntax_diagnostics_by_path", None)
+    if syntax_state == "fresh" and isinstance(syntax_facts, dict):
+        syntax_values = sum(
+            isinstance(fact, dict) and fact.get("status") == "checked_with_errors"
+            for fact in syntax_facts.values()
+        )
+        syntax_availability = "fresh"
+    elif syntax_state in {"not_materialized", "deferred", "stale", "unavailable"}:
+        syntax_values = None
+        syntax_availability = syntax_state
+    else:
+        syntax_values = None
+        syntax_availability = "unavailable"
     collisions = getattr(state, "collisions", None)
     cycles = getattr(state, "cycles", None)
     collision_availability = _availability(state, "collisions", collisions)
@@ -73,6 +86,75 @@ def diagnostics_summary_for_state(state: Any) -> dict[str, Any]:
             "name_collisions": collision_availability,
             "cycles": cycle_availability,
         },
+    }
+
+
+def syntax_diagnostics_for_path(
+    state: Any,
+    source_path: str,
+    *,
+    max_items: int | None = 30,
+    compact: bool = True,
+) -> dict[str, Any]:
+    """Project one canonical syntax fact without reading or parsing source."""
+    canonical_path = canonical_python_source_path(source_path)
+    if canonical_path is None:
+        return {
+            "status": "unavailable",
+            "availability": "unavailable",
+            "materialized": False,
+            "errors": None,
+        }
+
+    family_state = getattr(state, "syntax_diagnostics_state", None)
+    facts = getattr(state, "syntax_diagnostics_by_path", None)
+    if family_state != "fresh" or not isinstance(facts, dict):
+        return {
+            "status": "unavailable",
+            "availability": family_state if family_state in {"not_materialized", "deferred", "stale", "unavailable"} else "unavailable",
+            "materialized": False,
+            "source_path": canonical_path,
+            "errors": None,
+        }
+
+    fact = facts.get(canonical_path)
+    if not isinstance(fact, dict) or fact.get("status") not in {"checked_and_none", "checked_with_errors"}:
+        return {
+            "status": "unavailable",
+            "availability": "unavailable",
+            "materialized": False,
+            "source_path": canonical_path,
+            "errors": None,
+        }
+
+    status = fact["status"]
+    if status == "checked_and_none":
+        return {
+            "status": status,
+            "availability": "fresh",
+            "materialized": True,
+            "source_path": canonical_path,
+            "errors": [],
+            "total": 0,
+            "truncated": False,
+        }
+
+    errors = fact.get("errors")
+    if not isinstance(errors, list):
+        errors = []
+    bound = 3 if compact else max_items
+    if bound is None:
+        bounded_errors = list(errors)
+    else:
+        bounded_errors = errors[:max(0, bound)]
+    return {
+        "status": status,
+        "availability": "fresh",
+        "materialized": True,
+        "source_path": canonical_path,
+        "errors": bounded_errors,
+        "total": len(errors),
+        "truncated": len(bounded_errors) < len(errors),
     }
 
 
