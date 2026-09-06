@@ -14,3 +14,4 @@ stdout.txt export-ignore
 .git/ export-ignore
 GUI_test_suite_installer.bat export-ignore
 MCP_installer.bat export-ignore
+size.bat export-ignore
