@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 
 from contextor.core.analysis.state_manager import artifact_consumption_is_fresh
+from contextor.core.report_query import registry_maps_from_state
 from contextor.mcp import runtime as mcp_runtime
 from contextor.mcp import query_helpers
 
@@ -39,8 +40,24 @@ def lookup_artifact_by_symbol(
         )
 
     try:
-        _, _, art_path_to_id, art_id_to_path = query_helpers.read_registries(root)
         engine = mcp_runtime.get_or_init_engine(root)
+        registry = getattr(engine, "registry", None) if engine else None
+        read_transaction = getattr(registry, "read_transaction", None)
+        use_live_registry = (
+            engine is not None
+            and getattr(engine, "provenance", None) == "live"
+            and not getattr(engine.state, "resync_required", False)
+            and registry is not None
+            and callable(read_transaction)
+            and getattr(registry, "_state", None) is not None
+        )
+        if use_live_registry:
+            with read_transaction():
+                _, _, art_path_to_id, art_id_to_path = registry_maps_from_state(
+                    registry._state
+                )
+        else:
+            _, _, art_path_to_id, art_id_to_path = query_helpers.read_registries(root)
         if not engine or getattr(engine.state, "resync_required", False):
             return "Error: No usable canonical LIVE state. Run analyze_project first."
 

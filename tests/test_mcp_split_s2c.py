@@ -187,6 +187,84 @@ def _setup_lookup_state(monkeypatch):
     return state
 
 
+def test_lookup_artifact_by_symbol_reuses_fresh_live_registry_with_exact_parity(tmp_path, monkeypatch):
+    from contextlib import contextmanager
+    from types import SimpleNamespace
+    from contextor.mcp import query_helpers, runtime as mcp_runtime
+
+    state = _setup_lookup_state(monkeypatch)
+    monkeypatch.setattr(
+        mcp_runtime,
+        "get_or_init_engine",
+        lambda _root: SimpleNamespace(state=state, provenance="live"),
+    )
+    baseline = lookup_artifact_by_symbol(repo_path=str(tmp_path), symbol="my_func")
+    reads = []
+    transactions = []
+
+    class Registry:
+        _state = {
+            "module_registry": {},
+            "artifact_registry": {
+                "path_to_id": {"pkg.mod_a::my_func": "A1/1", "pkg.mod_a::ambig_symbol": "A2/1", "pkg.mod_b::ambig_symbol": "A3/1"},
+                "id_to_path": {"A1/1": "pkg.mod_a::my_func", "A2/1": "pkg.mod_a::ambig_symbol", "A3/1": "pkg.mod_b::ambig_symbol"},
+            },
+        }
+
+        @contextmanager
+        def read_transaction(self):
+            transactions.append(True)
+            yield
+
+    registry = Registry()
+    monkeypatch.setattr(
+        mcp_runtime,
+        "get_or_init_engine",
+        lambda _root: SimpleNamespace(state=state, provenance="live", registry=registry),
+    )
+    original_read = query_helpers.read_registries
+
+    def counting_read(root):
+        reads.append(root)
+        return original_read(root)
+
+    monkeypatch.setattr(query_helpers, "read_registries", counting_read)
+    assert lookup_artifact_by_symbol(repo_path=str(tmp_path), symbol="my_func") == baseline
+    assert len(transactions) == 1
+    assert reads == []
+
+
+def test_lookup_artifact_by_symbol_falls_back_when_live_registry_reuse_is_unavailable(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from contextor.mcp import query_helpers, runtime as mcp_runtime
+
+    state = _setup_lookup_state(monkeypatch)
+    original_read = query_helpers.read_registries
+    variants = [
+        None,
+        SimpleNamespace(state=state, provenance="snapshot", registry=object()),
+        SimpleNamespace(state=SimpleNamespace(resync_required=True), provenance="live", registry=object()),
+        SimpleNamespace(state=state, provenance="live"),
+        SimpleNamespace(state=state, provenance="live", registry=SimpleNamespace(_state={})),
+        SimpleNamespace(state=state, provenance="live", registry=SimpleNamespace(read_transaction=lambda: None)),
+    ]
+    for engine in variants:
+        reads = []
+
+        def counting_read(root):
+            reads.append(root)
+            return original_read(root)
+
+        monkeypatch.setattr(query_helpers, "read_registries", counting_read)
+        monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root, current=engine: current)
+        raw = lookup_artifact_by_symbol(repo_path=str(tmp_path), symbol="my_func")
+        assert len(reads) == 1
+        if engine is None or getattr(engine.state, "resync_required", False):
+            assert raw == "Error: No usable canonical LIVE state. Run analyze_project first."
+        else:
+            assert raw.startswith("{")
+
+
 def test_lookup_artifact_by_symbol_legacy_symbol_name(tmp_path, monkeypatch):
     import json
     _setup_lookup_state(monkeypatch)
