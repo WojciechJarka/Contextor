@@ -10,7 +10,7 @@ from contextor import mcp_server
 from contextor.core.analysis.state_manager import RepositoryAnalysisState
 from contextor.mcp import query_helpers, runtime as mcp_runtime
 from contextor.mcp.documentation import load_tool_document
-from contextor.mcp.tools.get_dataflow_lineage import get_dataflow_lineage
+from contextor.mcp.tools.contextor_fact_lineage import contextor_fact_lineage
 
 
 _SYMBOLS = {
@@ -183,7 +183,7 @@ def test_artifact_consumption_fresh_contains_both_branches_and_projections(tmp_p
     _install(monkeypatch, tmp_path, state)
 
     result = _load(
-        get_dataflow_lineage(
+        contextor_fact_lineage(
             str(tmp_path), "artifact_consumption", direction="both", depth=4
         )
     )
@@ -212,7 +212,7 @@ def test_artifact_consumption_stale_stops_downstream_and_reports_gap(tmp_path, m
     state = _state(artifact_state="stale")
     _install(monkeypatch, tmp_path, state)
 
-    result = _load(get_dataflow_lineage(str(tmp_path), "artifact_consumption"))
+    result = _load(contextor_fact_lineage(str(tmp_path), "artifact_consumption"))
 
     assert result["status"] == "stale"
     assert result["nodes"]
@@ -231,7 +231,7 @@ def test_artifact_consumption_incomplete_is_partial_without_downstream_edges(tmp
     state.artifact_consumption.pop("pkg.beta::beta")
     _install(monkeypatch, tmp_path, state)
 
-    result = _load(get_dataflow_lineage(str(tmp_path), "artifact_consumption"))
+    result = _load(contextor_fact_lineage(str(tmp_path), "artifact_consumption"))
 
     assert result["status"] == "partial"
     assert not _edge(result, "PERSISTS")
@@ -245,7 +245,7 @@ def test_syntax_diagnostics_fresh_contains_full_incremental_and_file_projection(
     state = _state()
     _install(monkeypatch, tmp_path, state)
 
-    result = _load(get_dataflow_lineage(str(tmp_path), "syntax_diagnostics"))
+    result = _load(contextor_fact_lineage(str(tmp_path), "syntax_diagnostics"))
 
     assert result["status"] == "ok"
     assert {
@@ -265,7 +265,7 @@ def test_syntax_diagnostics_deferred_keeps_owner_and_reports_unavailable_downstr
     state = _state(syntax_state="deferred")
     _install(monkeypatch, tmp_path, state)
 
-    result = _load(get_dataflow_lineage(str(tmp_path), "syntax_diagnostics"))
+    result = _load(contextor_fact_lineage(str(tmp_path), "syntax_diagnostics"))
 
     assert result["status"] == "unavailable"
     assert "state:RepositoryAnalysisState.syntax_diagnostics_by_path" in {
@@ -281,7 +281,7 @@ def test_syntax_diagnostics_stale_is_not_empty_success(tmp_path, monkeypatch):
     state = _state(syntax_state="stale")
     _install(monkeypatch, tmp_path, state)
 
-    result = _load(get_dataflow_lineage(str(tmp_path), "syntax_diagnostics"))
+    result = _load(contextor_fact_lineage(str(tmp_path), "syntax_diagnostics"))
 
     assert result["status"] == "stale"
     assert not _edge(result, "PROJECTS")
@@ -292,7 +292,7 @@ def test_symbol_calls_complete_reports_coverage_and_three_update_branches(tmp_pa
     state = _state()
     _install(monkeypatch, tmp_path, state)
 
-    result = _load(get_dataflow_lineage(str(tmp_path), "symbol_calls"))
+    result = _load(contextor_fact_lineage(str(tmp_path), "symbol_calls"))
 
     assert result["status"] == "ok"
     assert result["coverage"] == {
@@ -326,7 +326,7 @@ def test_symbol_calls_partial_uses_one_aggregate_coverage_gap(tmp_path, monkeypa
     state = _state(usages=usages)
     _install(monkeypatch, tmp_path, state)
 
-    result = _load(get_dataflow_lineage(str(tmp_path), "symbol_calls"))
+    result = _load(contextor_fact_lineage(str(tmp_path), "symbol_calls"))
 
     assert result["status"] == "partial"
     assert result["coverage"]["missing_symbol_calls_materialization_count"] == 1
@@ -345,7 +345,7 @@ def test_resync_fails_closed_without_confirmed_downstream_data_edges(tmp_path, m
     state = _state(resync=True)
     _install(monkeypatch, tmp_path, state)
 
-    result = _load(get_dataflow_lineage(str(tmp_path), "artifact_consumption"))
+    result = _load(contextor_fact_lineage(str(tmp_path), "artifact_consumption"))
 
     assert result["status"] == "unavailable"
     assert result["freshness"]["resync_required"] is True
@@ -361,13 +361,13 @@ def test_direction_and_depth_are_relative_to_family_anchor(tmp_path, monkeypatch
     _install(monkeypatch, tmp_path, state)
 
     upstream = _load(
-        get_dataflow_lineage(str(tmp_path), "artifact_consumption", "upstream", 1)
+        contextor_fact_lineage(str(tmp_path), "artifact_consumption", "upstream", 1)
     )
     downstream = _load(
-        get_dataflow_lineage(str(tmp_path), "artifact_consumption", "downstream", 1)
+        contextor_fact_lineage(str(tmp_path), "artifact_consumption", "downstream", 1)
     )
     shallow = _load(
-        get_dataflow_lineage(str(tmp_path), "artifact_consumption", "both", 1)
+        contextor_fact_lineage(str(tmp_path), "artifact_consumption", "both", 1)
     )
 
     assert upstream["entry_points"] == ["family:artifact_consumption"]
@@ -391,7 +391,7 @@ def test_direction_and_depth_are_relative_to_family_anchor(tmp_path, monkeypatch
         for edge in shallow["edges"]
     )
     downstream_two = _load(
-        get_dataflow_lineage(str(tmp_path), "artifact_consumption", "downstream", 2)
+        contextor_fact_lineage(str(tmp_path), "artifact_consumption", "downstream", 2)
     )
     assert _edge(
         downstream_two,
@@ -411,8 +411,8 @@ def test_output_is_deterministic_and_identity_resolution_is_dynamic(tmp_path, mo
     state = _state()
     _install(monkeypatch, tmp_path, state)
 
-    first = get_dataflow_lineage(str(tmp_path), "symbol_calls", depth=4)
-    second = get_dataflow_lineage(str(tmp_path), "symbol_calls", depth=4)
+    first = contextor_fact_lineage(str(tmp_path), "symbol_calls", depth=4)
+    second = contextor_fact_lineage(str(tmp_path), "symbol_calls", depth=4)
     assert first == second
     result = _load(first)
     assert result["nodes"] == sorted(result["nodes"], key=lambda node: (node["type"], node["id"]))
@@ -428,7 +428,7 @@ def test_output_is_deterministic_and_identity_resolution_is_dynamic(tmp_path, mo
 
     _install(monkeypatch, tmp_path, state, active_ids=False)
     without_ids = _load(
-        get_dataflow_lineage(
+        contextor_fact_lineage(
             str(tmp_path), "symbol_calls", direction="upstream", depth=4
         )
     )
@@ -478,7 +478,7 @@ def test_query_time_does_not_parse_or_call_other_mcp_tools(tmp_path, monkeypatch
         lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("MCP call")),
     )
 
-    result = _load(get_dataflow_lineage(str(tmp_path), "artifact_consumption"))
+    result = _load(contextor_fact_lineage(str(tmp_path), "artifact_consumption"))
     assert result["status"] == "ok"
 
 
@@ -489,7 +489,7 @@ def test_confirmed_state_writers_match_real_owners_and_staging_chains(
     _install(monkeypatch, tmp_path, state)
 
     artifact = _load(
-        get_dataflow_lineage(str(tmp_path), "artifact_consumption", depth=4)
+        contextor_fact_lineage(str(tmp_path), "artifact_consumption", depth=4)
     )
     artifact_state = _state_node_id("artifact_consumption")
     rebuild = _symbol_node_id(
@@ -524,7 +524,7 @@ def test_confirmed_state_writers_match_real_owners_and_staging_chains(
         target=artifact_installer,
     )
 
-    symbols = _load(get_dataflow_lineage(str(tmp_path), "symbol_calls", depth=4))
+    symbols = _load(contextor_fact_lineage(str(tmp_path), "symbol_calls", depth=4))
     symbols_state = _state_node_id("symbol_calls")
     prepare = _symbol_node_id(
         symbols,
@@ -579,7 +579,7 @@ def test_confirmed_state_writers_match_real_owners_and_staging_chains(
         target=symbol_installer,
     )
 
-    syntax = _load(get_dataflow_lineage(str(tmp_path), "syntax_diagnostics", depth=4))
+    syntax = _load(contextor_fact_lineage(str(tmp_path), "syntax_diagnostics", depth=4))
     syntax_state = _state_node_id("syntax_diagnostics")
     syntax_builder = _symbol_node_id(
         syntax,
@@ -606,7 +606,7 @@ def test_state_none_fails_closed_and_keeps_references_resolvable(tmp_path, monke
     _install(monkeypatch, tmp_path, None)
 
     result = _load(
-        get_dataflow_lineage(
+        contextor_fact_lineage(
             str(tmp_path), "artifact_consumption", direction="both", depth=1
         )
     )
@@ -635,7 +635,7 @@ def test_freshness_helper_failure_fails_closed_without_downstream_edges(
     monkeypatch.setattr(query_helpers, "build_state_freshness", _raise_freshness)
 
     result = _load(
-        get_dataflow_lineage(
+        contextor_fact_lineage(
             str(tmp_path), "artifact_consumption", direction="downstream", depth=4
         )
     )
@@ -683,7 +683,7 @@ def test_legal_helper_canonical_state_gates_result(
     )
 
     result = _load(
-        get_dataflow_lineage(
+        contextor_fact_lineage(
             str(tmp_path), "artifact_consumption", direction="downstream", depth=4
         )
     )
@@ -717,7 +717,7 @@ def test_unknown_provenance_fallback_is_not_snapshot(tmp_path, monkeypatch):
 
     monkeypatch.setattr(query_helpers, "build_state_freshness", _raise_freshness)
 
-    result = _load(get_dataflow_lineage(str(tmp_path), "artifact_consumption"))
+    result = _load(contextor_fact_lineage(str(tmp_path), "artifact_consumption"))
 
     assert result["freshness"]["provenance"] == "unknown"
     assert result["data_source"] == "canonical_state_unavailable"
@@ -726,7 +726,7 @@ def test_unknown_provenance_fallback_is_not_snapshot(tmp_path, monkeypatch):
 
 
 def test_signature_docs_registration_and_public_contract_parity():
-    tool = mcp_server.mcp._tool_manager._tools["get_dataflow_lineage"]
+    tool = mcp_server.mcp._tool_manager._tools["contextor_fact_lineage"]
     assert set(inspect.signature(tool.fn).parameters) == {
         "repo_path",
         "family",
@@ -736,11 +736,11 @@ def test_signature_docs_registration_and_public_contract_parity():
     assert str(inspect.signature(tool.fn)) == (
         "(repo_path: str, family: str, direction: str = 'both', depth: int = 3) -> str"
     )
-    assert list(mcp_server.REGISTERED_MCP_TOOL_NAMES)[-1] == "get_dataflow_lineage"
-    document = load_tool_document("get_dataflow_lineage")
-    assert document["tool"] == "get_dataflow_lineage"
+    assert list(mcp_server.REGISTERED_MCP_TOOL_NAMES)[-1] == "contextor_fact_lineage"
+    document = load_tool_document("contextor_fact_lineage")
+    assert document["tool"] == "contextor_fact_lineage"
     assert any(entry.startswith("family (string, required)") for entry in document["parameters"])
-    source = inspect.getsource(get_dataflow_lineage)
+    source = inspect.getsource(contextor_fact_lineage)
     assert "ast.parse" not in source
     assert "get_module_blast_radius(" not in source
     assert "get_artifact_blast_radius(" not in source

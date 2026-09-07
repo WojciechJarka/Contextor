@@ -1,0 +1,43 @@
+{
+  "version": "1.0.0",
+  "tool": "contextor_fact_lineage",
+  "purpose": [
+    "Show how Contextor produces, transforms or stages, materializes, updates, persists, hydrates, and publicly exposes one canonical fact family."
+  ],
+  "parameters": [
+    "repo_path (string, required): Contextor repository root whose canonical/LIVE self-analysis supplies identity resolution and freshness.",
+    "family (string, required): one v1 Contextor canonical fact family: artifact_consumption, syntax_diagnostics, or symbol_calls.",
+    "direction (string, default both): traversal relative to the family anchor; allowed values are upstream, downstream, or both.",
+    "depth (integer, default 3): positive edge-hop depth from family:<family>; maximum 4; booleans are invalid."
+  ],
+  "behavior": [
+    "This is a Contextor self-architecture and canonical-fact lifecycle tool. It describes Contextor producers, transformations or staging, canonical state, incremental/LIVE writers, persistence or hydration, and public projections.",
+    "It is intended primarily for designing, refactoring, and auditing Contextor canonical/LIVE pipelines before architecture changes. It helps identify the producer, materializer, updater, persistence path, and public projection of a selected canonical fact family.",
+    "The anchor is always family:<family>; upstream follows confirmed edges toward Contextor producers and owners, downstream follows edges toward Contextor installation, persistence, hydration, consumers, and public projections, and both is their union.",
+    "V1 families are exactly artifact_consumption, syntax_diagnostics, and symbol_calls. The tool does not provide path-, module-, or symbol-scoped lineage for an analyzed repository.",
+    "Only confidence=confirmed edges are emitted. Unsupported or unproven lifecycle semantics are represented as explicit unresolved gaps rather than structural or inferred edges.",
+    "The projection uses declarative Contextor family contracts plus active canonical identities. It performs no query-time repository scan, source/AST reconstruction, report read, or internal MCP-tool call.",
+    "This is not repo-generic Python dataflow, runtime value flow, taint analysis, object flow, variable flow, or dynamic-dispatch analysis. It does not replace get_module_blast_radius, get_symbol_call_context, or get_symbol_implementation.",
+    "Active artifact and module IDs are attached when present in the current canonical registry. If an active artifact identity is unavailable, the stable qualified symbol name remains and an identity-resolution gap is reported; no ID is allocated and recovery identities are not used."
+  ],
+  "freshness": [
+    "Every response includes canonical_revision, provenance, resync_required, canonical_state, and family freshness. Provenance may be live, snapshot, or unknown in a fail-closed unavailable envelope; unknown is never presented as snapshot.",
+    "data_source is live_canonical_state only for provenance=live, snapshot_canonical_state only for provenance=snapshot, and canonical_state_unavailable otherwise.",
+    "artifact_consumption requires artifact_consumption_is_fresh, exact canonical coverage, and resync_required=false. Stale or incomplete consumption stops freshness-dependent downstream edges and never fabricates consumers.",
+    "syntax_diagnostics requires syntax_diagnostics_state=fresh and a canonical fact map for the family. The contract is family-wide and does not validate a requested path.",
+    "symbol_calls reports bounded canonical_module_count, symbol_calls_materialized_count, reference_evidence_materialized_count, missing_symbol_calls_materialization_count, and missing_reference_evidence_count. Incomplete coverage returns partial with one aggregate gap; it does not emit one gap per module.",
+    "resync_required=true fails closed for current canonical data edges with status unavailable or stale and an explicit gap. Unknown is not empty and unavailable is not no edge."
+  ],
+  "errors": [
+    "Invalid family, direction, or depth returns a controlled diagnostic.",
+    "Missing canonical state, stale/deferred/not_materialized family facts, incomplete symbol-call coverage, resync, and missing active identities remain explicit through status and unresolved fields; the tool never converts those conditions into empty-success lifecycle lineage."
+  ],
+  "usage_notes": [
+    "Use this tool when changing or auditing Contextor internal canonical/LIVE pipelines. Start with direction=both and depth=3; use depth=1 or a single direction for a compact lifecycle slice.",
+    "A partial or unavailable response is actionable: inspect freshness and the single or bounded unresolved gap before treating the returned confirmed lifecycle edges as complete."
+  ],
+  "examples": [
+    "contextor_fact_lineage(repo_path, family=\"artifact_consumption\", direction=\"both\", depth=3)",
+    "contextor_fact_lineage(repo_path, family=\"symbol_calls\", direction=\"downstream\", depth=2)"
+  ]
+}

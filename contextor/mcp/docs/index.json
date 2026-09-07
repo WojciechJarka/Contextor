@@ -129,9 +129,9 @@
       "short_description": "Return the complete lossless per-artifact and aggregate blast-radius projection for one module from fresh canonical state."
     },
     {
-      "tool": "get_dataflow_lineage",
-      "filename": "get_dataflow_lineage.json",
-      "short_description": "Return the bounded confirmed architectural lifecycle of one canonical data family from canonical/LIVE state, without runtime dataflow reconstruction."
+      "tool": "contextor_fact_lineage",
+      "filename": "contextor_fact_lineage.json",
+      "short_description": "Return Contextor self-architecture lineage for one canonical fact family: production, staging, canonical state, lifecycle writers, persistence, hydration, and public projection."
     },
     {
       "tool": "get_mcp_documentation",

@@ -844,7 +844,7 @@ def _error(status: str, **values: Any) -> str:
     return json.dumps(payload, indent=2, ensure_ascii=False)
 
 
-def get_dataflow_lineage(
+def contextor_fact_lineage(
     repo_path: str,
     family: str,
     direction: str = "both",
