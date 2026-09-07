@@ -60,6 +60,7 @@ class DesktopLiveWatcher(_PollingLiveWorker):
         *,
         owner_pid: int | None = None,
         owner_token: str | None = None,
+        desktop_instance_id: str | None = None,
         interval: float = 0.75,
         on_status: Callable[[str], None] | None = None,
         on_reconnect: Callable[[LiveStateClient], None] | None = None,
@@ -69,6 +70,7 @@ class DesktopLiveWatcher(_PollingLiveWorker):
         self.client = client
         self.owner_pid = owner_pid
         self.owner_token = owner_token
+        self.desktop_instance_id = desktop_instance_id
         super().__init__(interval=interval, thread_name="contextor-live-watcher")
         self.on_status = on_status
         self.on_reconnect = on_reconnect
@@ -94,6 +96,8 @@ class DesktopLiveWatcher(_PollingLiveWorker):
                 self.root,
                 owner_pid=self.owner_pid,
                 owner_token=self.owner_token,
+                desktop_instance_id=self.desktop_instance_id,
+                client_kind="desktop" if self.desktop_instance_id is not None else "protocol",
                 timeout=10.0,
             )
             self.client = new_client

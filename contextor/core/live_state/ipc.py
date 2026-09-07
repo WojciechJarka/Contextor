@@ -4,16 +4,19 @@ from __future__ import annotations
 
 import copy
 from contextlib import contextmanager
+import hashlib
+import json
 import secrets
 import threading
 import time
 import uuid
 from dataclasses import dataclass
 from multiprocessing.connection import Client, Listener
-from typing import Any, Callable
+from typing import Any, Callable, Mapping
 
 
 LIVE_PROTOCOL_VERSION = 3
+LIVE_ENDPOINT_SCHEMA_VERSION = 2
 
 
 @dataclass(frozen=True)
@@ -22,10 +25,25 @@ class LiveEndpoint:
     port: int
     authkey_hex: str
     pid: int | None = None
+    service_pid: int | None = None
     owner_pid: int | None = None
     owner_token: str | None = None
     repo_id: str | None = None
     root_path: str | None = None
+    runtime_domain_id: str | None = None
+    service_instance_id: str | None = None
+    lease_generation: int | None = None
+    process_start_identity: str | None = None
+    desktop_instance_id: str | None = None
+    schema_version: int = LIVE_ENDPOINT_SCHEMA_VERSION
+
+    def __post_init__(self) -> None:
+        if self.service_pid is None:
+            object.__setattr__(self, "service_pid", self.pid)
+        elif self.pid is None:
+            object.__setattr__(self, "pid", self.service_pid)
+        elif self.pid != self.service_pid:
+            raise ValueError("LIVE endpoint pid and service_pid disagree")
 
     @property
     def address(self) -> tuple[str, int]:
@@ -34,6 +52,36 @@ class LiveEndpoint:
     @property
     def authkey(self) -> bytes:
         return bytes.fromhex(self.authkey_hex)
+
+    def identity_payload(self) -> dict[str, Any]:
+        return {
+            "schema_version": self.schema_version,
+            "host": self.host,
+            "port": self.port,
+            "authkey_hex": self.authkey_hex,
+            "pid": self.pid,
+            "service_pid": self.service_pid,
+            "repo_id": self.repo_id,
+            "root_path": self.root_path,
+            "runtime_domain_id": self.runtime_domain_id,
+            "service_instance_id": self.service_instance_id,
+            "lease_generation": self.lease_generation,
+            "process_start_identity": self.process_start_identity,
+        }
+
+    def fingerprint(self) -> str:
+        encoded = json.dumps(
+            self.identity_payload(), sort_keys=True, separators=(",", ":")
+        ).encode("utf-8")
+        return hashlib.sha256(encoded).hexdigest()
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            **self.identity_payload(),
+            "owner_pid": self.owner_pid,
+            "owner_token": self.owner_token,
+            "desktop_instance_id": self.desktop_instance_id,
+        }
 
 
 ACTIVITY_EVENT_RETENTION = 10_000
@@ -188,6 +236,7 @@ class CanonicalLiveServer:
         persister: Callable[[Any, int], Any] | None = None,
         authkey: bytes | None = None,
         retention: int = ACTIVITY_EVENT_RETENTION,
+        authority_identity: Mapping[str, Any] | None = None,
     ):
         if revision is not None and (
             isinstance(revision, bool)
@@ -231,9 +280,24 @@ class CanonicalLiveServer:
         self._lock = threading.RLock()
         self._stop = threading.Event()
         self._authkey = authkey or secrets.token_bytes(32)
+        self._authority_identity = dict(authority_identity or {})
         self._listener = Listener(("127.0.0.1", 0), family="AF_INET", authkey=self._authkey)
         host, port = self._listener.address
-        self.endpoint = LiveEndpoint(str(host), int(port), self._authkey.hex())
+        self.endpoint = LiveEndpoint(
+            str(host),
+            int(port),
+            self._authkey.hex(),
+            pid=self._authority_identity.get("service_pid"),
+            owner_pid=self._authority_identity.get("owner_pid"),
+            owner_token=self._authority_identity.get("owner_token"),
+            repo_id=self._authority_identity.get("repo_id"),
+            root_path=self._authority_identity.get("root_path"),
+            runtime_domain_id=self._authority_identity.get("runtime_domain_id"),
+            service_instance_id=self._authority_identity.get("service_instance_id"),
+            lease_generation=self._authority_identity.get("lease_generation"),
+            process_start_identity=self._authority_identity.get("process_start_identity"),
+            desktop_instance_id=self._authority_identity.get("desktop_instance_id"),
+        )
 
     def _record_event(
         self,
@@ -347,6 +411,22 @@ class CanonicalLiveServer:
                     "protocol_version": LIVE_PROTOCOL_VERSION,
                     "revision": self._revision,
                     "available": self._state is not None,
+                }
+            if operation == "authority_status":
+                if not self._authority_identity:
+                    return {"status": "error", "error": "authority_identity_unavailable"}
+                return {
+                    "status": "ok",
+                    "protocol_version": LIVE_PROTOCOL_VERSION,
+                    "revision": self._revision,
+                    "repo_id": self._authority_identity.get("repo_id"),
+                    "root_path": self._authority_identity.get("root_path"),
+                    "runtime_domain_id": self._authority_identity.get("runtime_domain_id"),
+                    "service_instance_id": self._authority_identity.get("service_instance_id"),
+                    "lease_generation": self._authority_identity.get("lease_generation"),
+                    "service_pid": self._authority_identity.get("service_pid"),
+                    "process_start_identity": self._authority_identity.get("process_start_identity"),
+                    "endpoint_fingerprint": self.endpoint.fingerprint(),
                 }
             if operation == "snapshot":
                 return {"status": "ok", "revision": self._revision, "state": self._state}
@@ -735,6 +815,7 @@ class LiveStateClient:
         self.service_pid = service_pid if service_pid is not None else getattr(endpoint, "pid", None)
         self.owner_pid = owner_pid if owner_pid is not None else getattr(endpoint, "owner_pid", None)
         self.owner_token = owner_token if owner_token is not None else getattr(endpoint, "owner_token", None)
+        self.desktop_instance_id = getattr(endpoint, "desktop_instance_id", None)
 
     def request(
         self, operation: str, *, timeout: float = 30.0, **payload: Any
@@ -762,6 +843,9 @@ class LiveStateClient:
 
     def ping(self) -> dict[str, Any]:
         return self.request("ping")
+
+    def authority_status(self) -> dict[str, Any]:
+        return self.request("authority_status")
 
     def snapshot(self) -> dict[str, Any]:
         return self.request("snapshot")

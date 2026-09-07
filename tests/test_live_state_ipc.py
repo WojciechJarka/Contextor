@@ -17,7 +17,7 @@ from contextor.core.live_state import (
 )
 from contextor.core.live_state.ipc import LIVE_PROTOCOL_VERSION
 from contextor.core.live_state import ipc as ipc_module
-from contextor.core.live_state.runtime import connect_or_start, endpoint_file
+from contextor.core.live_state.runtime import EndpointSchemaError, connect_or_start, endpoint_file
 from contextor.core.reporting_engine.persistent_registry import PersistentIdentityRegistry
 from contextor.core.analysis.state_manager import FileStateManager
 from contextor.core.paths import repo_cache_dir

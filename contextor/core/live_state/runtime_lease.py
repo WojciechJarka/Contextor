@@ -32,7 +32,7 @@ from contextor.mcp_process_registry import process_identity as _process_identity
 
 RUNTIME_LEASE_SCHEMA_VERSION = 1
 AUTHORITY_GENERATION_SCHEMA_VERSION = 1
-GenerationStatus = Literal["never_acquired", "allocated", "released", "fenced"]
+GenerationStatus = Literal["never_acquired", "reserved", "active", "released", "fenced"]
 
 _RESOURCE_KEYS = (
     "repo_root",
@@ -67,6 +67,9 @@ _GENERATION_FIELDS = {
     "repo_root_fingerprint",
     "last_lease_generation",
     "last_service_instance_id",
+    "service_pid",
+    "process_start_identity",
+    "endpoint_fingerprint",
     "status",
     "fenced_service_instance_id",
     "fenced_lease_generation",
@@ -85,6 +88,10 @@ class LeaseAlreadyHeld(RuntimeLeaseError):
 
 class LeaseLivenessUnknown(RuntimeLeaseError):
     """Liveness was not strong enough to permit a takeover."""
+
+
+class LeaseRecoveryRequired(RuntimeLeaseError):
+    """Durable authority state requires recovery before another owner may start."""
 
 
 class LeaseNotOwner(RuntimeLeaseError):
@@ -242,6 +249,7 @@ class LivenessResult:
     endpoint_available: bool | None
     endpoint_matches: bool | None
     reason: str
+    endpoint_evidence_verified: bool = False
 
     def __post_init__(self) -> None:
         if not isinstance(self.status, LivenessStatus):
@@ -251,7 +259,9 @@ class LivenessResult:
     @property
     def confirmed_stale(self) -> bool:
         process_evidence = self.process_alive is False or self.process_identity_matches is False
-        endpoint_evidence = self.endpoint_available is False or self.endpoint_matches is False
+        endpoint_evidence = self.endpoint_evidence_verified and (
+            self.endpoint_available is False or self.endpoint_matches is False
+        )
         return self.status is LivenessStatus.STALE and process_evidence and endpoint_evidence
 
     @classmethod
@@ -267,6 +277,7 @@ class LivenessResult:
         endpoint_available: bool | None,
         endpoint_matches: bool | None,
         reason: str,
+        endpoint_evidence_verified: bool = False,
     ) -> "LivenessResult":
         return cls(
             LivenessStatus.STALE,
@@ -275,6 +286,7 @@ class LivenessResult:
             endpoint_available,
             endpoint_matches,
             reason,
+            endpoint_evidence_verified,
         )
 
 
@@ -299,12 +311,13 @@ class DefaultLivenessVerifier:
                 f"process identity probe failed: {exc}",
             )
         if not alive:
-            return LivenessResult.stale(
+            return LivenessResult(
+                LivenessStatus.UNKNOWN,
                 process_alive=False,
                 process_identity_matches=False,
-                endpoint_available=False,
-                endpoint_matches=False,
-                reason="recorded service process is confirmed dead",
+                endpoint_available=None,
+                endpoint_matches=None,
+                reason="recorded service process is dead; authority endpoint was not probed",
             )
         if creation_time is None:
             return LivenessResult(
@@ -317,12 +330,13 @@ class DefaultLivenessVerifier:
             )
         matches = str(creation_time) == lease.process_start_identity
         if not matches:
-            return LivenessResult.stale(
+            return LivenessResult(
+                LivenessStatus.UNKNOWN,
                 process_alive=True,
                 process_identity_matches=False,
-                endpoint_available=False,
-                endpoint_matches=False,
-                reason="PID is live but process-start identity does not match",
+                endpoint_available=None,
+                endpoint_matches=None,
+                reason="PID start identity does not match; authority endpoint was not probed",
             )
         if lease.endpoint_fingerprint is not None:
             return LivenessResult(
@@ -337,7 +351,7 @@ class DefaultLivenessVerifier:
             LivenessStatus.LIVE,
             True,
             True,
-            False,
+            None,
             None,
             "process-start identity matches; endpoint is not yet bound",
         )
@@ -484,6 +498,9 @@ class AuthorityGenerationRecord:
     repo_root_fingerprint: str
     last_lease_generation: int
     last_service_instance_id: str | None
+    service_pid: int | None
+    process_start_identity: str | None
+    endpoint_fingerprint: str | None
     status: GenerationStatus
     fenced_service_instance_id: str | None
     fenced_lease_generation: int | None
@@ -508,24 +525,59 @@ class AuthorityGenerationRecord:
             "last_lease_generation",
             _positive_int(self.last_lease_generation, field="last_lease_generation", allow_zero=True),
         )
-        if self.status not in ("never_acquired", "allocated", "released", "fenced"):
+        if self.status not in ("never_acquired", "reserved", "active", "released", "fenced"):
             raise RuntimeLeaseError("invalid authority-generation status")
-        if self.status == "never_acquired" and self.last_lease_generation != 0:
-            raise RuntimeLeaseError("never_acquired generation must be zero")
-        if self.last_lease_generation == 0 and self.last_service_instance_id is not None:
-            raise RuntimeLeaseError("generation zero cannot have a service instance")
-        for field in ("last_service_instance_id", "fenced_service_instance_id"):
+        for field in ("last_service_instance_id", "fenced_service_instance_id", "process_start_identity"):
             value = getattr(self, field)
             if value is not None:
                 object.__setattr__(self, field, _non_empty_text(value, field=field))
+        if self.service_pid is not None:
+            object.__setattr__(self, "service_pid", _positive_int(self.service_pid, field="service_pid"))
+        if self.endpoint_fingerprint is not None:
+            object.__setattr__(
+                self,
+                "endpoint_fingerprint",
+                _non_empty_text(self.endpoint_fingerprint, field="endpoint_fingerprint"),
+            )
+        current_identity_complete = (
+            self.last_service_instance_id is not None
+            and self.service_pid is not None
+            and self.process_start_identity is not None
+        )
+        if self.status == "never_acquired":
+            if self.last_lease_generation != 0 or any(
+                value is not None
+                for value in (
+                    self.last_service_instance_id,
+                    self.service_pid,
+                    self.process_start_identity,
+                    self.endpoint_fingerprint,
+                    self.fenced_service_instance_id,
+                    self.fenced_lease_generation,
+                )
+            ):
+                raise RuntimeLeaseError("never_acquired generation must have no owner or fence identity")
+        else:
+            if self.last_lease_generation == 0 or not current_identity_complete:
+                raise RuntimeLeaseError("generation status requires complete current owner identity")
+        fence_pair_complete = self.fenced_service_instance_id is not None and self.fenced_lease_generation is not None
+        if self.status in ("reserved", "active") and (
+            self.fenced_service_instance_id is not None or self.fenced_lease_generation is not None
+        ):
+            raise RuntimeLeaseError("reserved/active generation cannot carry a fence pair")
+        if self.status in ("released", "fenced") and not fence_pair_complete:
+            raise RuntimeLeaseError("released/fenced generation requires a complete fence pair")
+        if fence_pair_complete and (
+            self.fenced_service_instance_id != self.last_service_instance_id
+            or self.fenced_lease_generation != self.last_lease_generation
+        ):
+            raise RuntimeLeaseError("fence pair must match the durable owner generation")
         if self.fenced_lease_generation is not None:
             object.__setattr__(
                 self,
                 "fenced_lease_generation",
                 _positive_int(self.fenced_lease_generation, field="fenced_lease_generation"),
             )
-            if self.fenced_service_instance_id is None:
-                raise RuntimeLeaseError("fenced generation requires a fenced service instance")
         object.__setattr__(self, "updated_at", _timestamp(self.updated_at, field="updated_at"))
         fingerprints = tuple(self.resource_root_fingerprints)
         if tuple(name for name, _ in fingerprints) != _RESOURCE_KEYS:
@@ -553,6 +605,9 @@ class AuthorityGenerationRecord:
             repo_root_fingerprint=dict(fingerprints)["repo_root"],
             last_lease_generation=0,
             last_service_instance_id=None,
+            service_pid=None,
+            process_start_identity=None,
+            endpoint_fingerprint=None,
             status="never_acquired",
             fenced_service_instance_id=None,
             fenced_lease_generation=None,
@@ -579,6 +634,9 @@ class AuthorityGenerationRecord:
             "repo_root_fingerprint": self.repo_root_fingerprint,
             "last_lease_generation": self.last_lease_generation,
             "last_service_instance_id": self.last_service_instance_id,
+            "service_pid": self.service_pid,
+            "process_start_identity": self.process_start_identity,
+            "endpoint_fingerprint": self.endpoint_fingerprint,
             "status": self.status,
             "fenced_service_instance_id": self.fenced_service_instance_id,
             "fenced_lease_generation": self.fenced_lease_generation,
@@ -602,6 +660,9 @@ class AuthorityGenerationRecord:
             repo_root_fingerprint=payload["repo_root_fingerprint"],
             last_lease_generation=payload["last_lease_generation"],
             last_service_instance_id=payload["last_service_instance_id"],
+            service_pid=payload["service_pid"],
+            process_start_identity=payload["process_start_identity"],
+            endpoint_fingerprint=payload["endpoint_fingerprint"],
             status=payload["status"],
             fenced_service_instance_id=payload["fenced_service_instance_id"],
             fenced_lease_generation=payload["fenced_lease_generation"],
@@ -909,16 +970,26 @@ class RuntimeLeaseManager:
                         record.last_service_instance_id == live.service_instance_id
                         and record.last_lease_generation == live.lease_generation
                     )
-                    if not (same_fenced or same_released):
+                    same_identity = (
+                        record.service_pid == live.service_pid
+                        and record.process_start_identity == live.process_start_identity
+                        and record.endpoint_fingerprint == live.endpoint_fingerprint
+                    )
+                    if not (same_fenced or same_released) or not same_identity:
                         raise ForeignLeaseError("fenced/released live lease does not match durable record")
                     self._remove_live_lease()
                     live = None
                 else:
+                    if record.status not in {"reserved", "active"}:
+                        raise ForeignLeaseError("live lease is present for a non-owning generation status")
                     if (
                         record.last_lease_generation != live.lease_generation
                         or record.last_service_instance_id != live.service_instance_id
+                        or record.service_pid != live.service_pid
+                        or record.process_start_identity != live.process_start_identity
+                        or record.endpoint_fingerprint != live.endpoint_fingerprint
                     ):
-                        raise ForeignLeaseError("live lease and generation metadata disagree")
+                        raise ForeignLeaseError("live lease and durable owner identity disagree")
                     evidence = self.liveness_verifier.verify(live)
                     if evidence.status is LivenessStatus.LIVE:
                         raise LeaseAlreadyHeld(evidence.reason)
@@ -932,22 +1003,32 @@ class RuntimeLeaseManager:
                         raise LeaseLivenessUnknown("lease changed during stale verification")
                     record = self._fence_stale_lease(record, live)
                     live = None
+            elif record.status == "active":
+                raise LeaseRecoveryRequired(
+                    "active durable authority has no live lease; recovery is required before takeover"
+                )
 
             next_generation = record.last_lease_generation + 1
             lease = self._new_lease(next_generation)
-            allocated = replace(
+            reserved = replace(
                 record,
                 last_lease_generation=next_generation,
                 last_service_instance_id=lease.service_instance_id,
-                status="allocated",
+                service_pid=lease.service_pid,
+                process_start_identity=lease.process_start_identity,
+                endpoint_fingerprint=lease.endpoint_fingerprint,
+                status="reserved",
                 fenced_service_instance_id=None,
                 fenced_lease_generation=None,
                 updated_at=self._now(),
             )
-            self._write_generation(allocated)
-            self._inject("after_generation_persist")
+            self._write_generation(reserved)
+            self._inject("after_generation_reservation")
             self._write_live_lease(lease)
             self._inject("after_live_lease_persist")
+            active = replace(reserved, status="active", updated_at=self._now())
+            self._write_generation(active)
+            self._inject("after_generation_activation")
             return lease
 
     def _assert_current_owner(self, lease: RuntimeLease) -> tuple[RuntimeLease, AuthorityGenerationRecord]:
@@ -958,9 +1039,12 @@ class RuntimeLeaseManager:
         if current is None or not self._same_owner(current, lease):
             raise LeaseNotOwner("service instance/generation is not the current live owner")
         if (
-            record.status != "allocated"
+            record.status != "active"
             or record.last_lease_generation != lease.lease_generation
             or record.last_service_instance_id != lease.service_instance_id
+            or record.service_pid != current.service_pid
+            or record.process_start_identity != current.process_start_identity
+            or record.endpoint_fingerprint != current.endpoint_fingerprint
         ):
             raise LeaseNotOwner("service instance/generation has been durably fenced")
         return current, record
@@ -977,12 +1061,33 @@ class RuntimeLeaseManager:
     def bind_endpoint(self, lease: RuntimeLease, endpoint_fingerprint: str) -> RuntimeLease:
         endpoint = _non_empty_text(endpoint_fingerprint, field="endpoint_fingerprint")
         with self._lock():
-            current, _record = self._assert_current_owner(lease)
+            current, record = self._assert_current_owner(lease)
             if current.endpoint_fingerprint is not None and current.endpoint_fingerprint != endpoint:
                 raise EndpointBindingError("endpoint fingerprint is already bound")
             bound = replace(current, endpoint_fingerprint=endpoint)
             self._write_live_lease(bound)
+            self._write_generation(replace(record, endpoint_fingerprint=endpoint, updated_at=self._now()))
             return bound
+
+    def reconcile_endpoint_binding(self, lease: RuntimeLease, endpoint_fingerprint: str) -> RuntimeLease:
+        """Complete a durable bind after a crash between live and generation writes."""
+        endpoint = _non_empty_text(endpoint_fingerprint, field="endpoint_fingerprint")
+        with self._lock():
+            if not isinstance(lease, RuntimeLease) or not lease.matches_domain(self.domain):
+                raise LeaseNotOwner("lease does not belong to this runtime domain")
+            current = self._read_live_lease()
+            record = self._read_generation()
+            if current is None or not self._same_owner(current, lease):
+                raise LeaseNotOwner("service instance/generation is not the current live owner")
+            if record.status != "active" or record.last_lease_generation != lease.lease_generation:
+                raise LeaseNotOwner("service instance/generation is not active")
+            if current.endpoint_fingerprint != endpoint:
+                raise EndpointBindingError("live lease endpoint binding does not match reconciliation")
+            if record.endpoint_fingerprint not in (None, endpoint):
+                raise EndpointBindingError("durable generation endpoint binding conflicts")
+            if record.endpoint_fingerprint is None:
+                self._write_generation(replace(record, endpoint_fingerprint=endpoint, updated_at=self._now()))
+            return current
 
     def release(self, lease: RuntimeLease) -> AuthorityGenerationRecord:
         with self._lock():
@@ -1011,6 +1116,7 @@ __all__ = [
     "LeaseBusyError",
     "LeaseLivenessUnknown",
     "LeaseNotOwner",
+    "LeaseRecoveryRequired",
     "LivenessResult",
     "LivenessStatus",
     "LivenessVerifier",

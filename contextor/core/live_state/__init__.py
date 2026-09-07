@@ -9,7 +9,13 @@ from .store import (
     save_snapshot,
 )
 from .ipc import CanonicalLiveServer, CanonicalPersistenceConflict, LiveEndpoint, LiveStateClient
-from .runtime import connect, connect_or_start
+from .runtime import (
+    AuthorityLivenessVerifier,
+    EndpointSchemaError,
+    SecondDesktopActive,
+    connect,
+    connect_or_start,
+)
 from .watcher import DesktopLiveEventFeed, DesktopLiveWatcher
 from .hydration import (
     AuthoritativeRepositoryState,
@@ -31,6 +37,9 @@ __all__ = [
     "AuthoritativeRepositoryState",
     "connect",
     "connect_or_start",
+    "AuthorityLivenessVerifier",
+    "EndpointSchemaError",
+    "SecondDesktopActive",
     "hydrate_repository_engine",
     "resolve_authoritative_repository_state",
     "load_snapshot",

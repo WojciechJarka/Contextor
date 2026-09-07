@@ -10,15 +10,44 @@ import sys
 import threading
 import time
 from pathlib import Path
+from typing import Any
 
 from contextor.core.paths import repo_cache_dir
 from contextor.core.repository_identity import (
     read_repository_identity,
     require_repository_identity,
 )
+from contextor.mcp_process_registry import process_identity as _process_identity
+from contextor.core.live_state.runtime_domain import RuntimeDomain
+from contextor.core.live_state.runtime_lease import (
+    LeaseRecoveryRequired,
+    LivenessResult,
+    LivenessStatus,
+    RuntimeLease,
+    RuntimeLeaseManager,
+)
 
-from .ipc import CanonicalLiveServer, CanonicalPersistenceConflict, LIVE_PROTOCOL_VERSION, LiveEndpoint, LiveStateClient
+from .ipc import (
+    CanonicalLiveServer,
+    CanonicalPersistenceConflict,
+    LIVE_ENDPOINT_SCHEMA_VERSION,
+    LIVE_PROTOCOL_VERSION,
+    LiveEndpoint,
+    LiveStateClient,
+)
 from .store import load_snapshot, migrate_legacy_snapshot, read_metadata, save_snapshot
+
+
+class EndpointSchemaError(RuntimeError):
+    """Endpoint metadata is malformed or belongs to another authority domain."""
+
+
+class SecondDesktopActive(RuntimeError):
+    """The repository is already active in a different Contextor Desktop."""
+
+
+def _canonical_root(value: str | Path) -> str:
+    return str(Path(value).expanduser().resolve())
 
 
 def _safe_current_trace_operation() -> str | None:
@@ -154,42 +183,318 @@ def endpoint_file(repo_path: str | Path) -> Path:
     return repo_cache_dir(repo_path) / "live_endpoint.json"
 
 
-def _read_endpoint(repo_path: str | Path) -> LiveEndpoint | None:
+def _read_endpoint(repo_path: str | Path, *, strict: bool = False) -> LiveEndpoint | None:
+    path = endpoint_file(repo_path)
     try:
-        payload = json.loads(endpoint_file(repo_path).read_text(encoding="utf-8"))
-        pid = int(payload["pid"]) if "pid" in payload and payload["pid"] is not None else None
-        owner_pid = int(payload["owner_pid"]) if "owner_pid" in payload and payload["owner_pid"] is not None else None
-        owner_token = str(payload["owner_token"]) if "owner_token" in payload and payload["owner_token"] is not None else None
-        repo_id = str(payload["repo_id"]) if payload.get("repo_id") else None
-        root_path = str(payload["root_path"]) if payload.get("root_path") else None
-        return LiveEndpoint(
-            payload["host"],
-            int(payload["port"]),
-            payload["authkey_hex"],
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(payload, dict):
+            raise EndpointSchemaError("LIVE endpoint payload must be an object")
+        required = {
+            "schema_version",
+            "host",
+            "port",
+            "authkey_hex",
+            "pid",
+            "service_pid",
+            "repo_id",
+            "root_path",
+            "runtime_domain_id",
+            "service_instance_id",
+            "lease_generation",
+            "process_start_identity",
+        }
+        if not required.issubset(payload):
+            raise EndpointSchemaError("LIVE endpoint is missing required authority identity")
+        if int(payload["schema_version"]) != LIVE_ENDPOINT_SCHEMA_VERSION:
+            raise EndpointSchemaError("unsupported LIVE endpoint schema_version")
+        pid = int(payload["pid"])
+        service_pid = int(payload["service_pid"])
+        if service_pid != pid:
+            raise EndpointSchemaError("LIVE endpoint pid and service_pid disagree")
+        lease_generation = int(payload["lease_generation"])
+        port = int(payload["port"])
+        owner_pid_value = payload.get("owner_pid")
+        owner_pid = int(owner_pid_value) if owner_pid_value is not None else None
+        if pid <= 0 or lease_generation <= 0 or not (1 <= port <= 65535):
+            raise EndpointSchemaError("LIVE endpoint pid and lease_generation must be positive")
+        if owner_pid is not None and owner_pid <= 0:
+            raise EndpointSchemaError("LIVE endpoint owner_pid must be positive")
+        root_path = _canonical_root(payload["root_path"])
+        if not str(payload["repo_id"]).strip() or not str(payload["runtime_domain_id"]).strip():
+            raise EndpointSchemaError("LIVE endpoint identity fields must be non-empty")
+        if not str(payload["service_instance_id"]).strip() or not str(payload["process_start_identity"]).strip():
+            raise EndpointSchemaError("LIVE endpoint service identity fields must be non-empty")
+        endpoint = LiveEndpoint(
+            str(payload["host"]),
+            port,
+            str(payload["authkey_hex"]),
             pid=pid,
+            service_pid=service_pid,
             owner_pid=owner_pid,
-            owner_token=owner_token,
-            repo_id=repo_id,
+            owner_token=(str(payload["owner_token"]) if payload.get("owner_token") is not None else None),
+            repo_id=str(payload["repo_id"]),
             root_path=root_path,
+            runtime_domain_id=str(payload["runtime_domain_id"]),
+            service_instance_id=str(payload["service_instance_id"]),
+            lease_generation=lease_generation,
+            process_start_identity=str(payload["process_start_identity"]),
+            desktop_instance_id=(
+                str(payload["desktop_instance_id"])
+                if payload.get("desktop_instance_id") is not None
+                else None
+            ),
+            schema_version=int(payload["schema_version"]),
         )
-    except (OSError, ValueError, KeyError, TypeError):
+        endpoint.authkey
+        return endpoint
+    except FileNotFoundError:
         return None
+    except (OSError, ValueError, KeyError, TypeError, EndpointSchemaError) as exc:
+        if strict:
+            if isinstance(exc, EndpointSchemaError):
+                raise
+            raise EndpointSchemaError("LIVE endpoint metadata is malformed") from exc
+        return None
+
+
+def _production_domain(identity) -> RuntimeDomain:
+    return RuntimeDomain.from_identity(identity, mode="production")
+
+
+def _endpoint_matches_domain(endpoint: LiveEndpoint, domain: RuntimeDomain) -> bool:
+    return (
+        endpoint.schema_version == LIVE_ENDPOINT_SCHEMA_VERSION
+        and endpoint.repo_id == domain.repo_id
+        and endpoint.root_path == _canonical_root(domain.repo_root)
+        and endpoint.runtime_domain_id == domain.domain_id
+        and endpoint.service_instance_id is not None
+        and endpoint.lease_generation is not None
+        and endpoint.pid is not None
+        and endpoint.process_start_identity is not None
+    )
+
+
+def _status_matches_endpoint(status: dict[str, Any], endpoint: LiveEndpoint) -> bool:
+    return (
+        status.get("status") == "ok"
+        and status.get("protocol_version") == LIVE_PROTOCOL_VERSION
+        and status.get("repo_id") == endpoint.repo_id
+        and status.get("root_path") == endpoint.root_path
+        and status.get("runtime_domain_id") == endpoint.runtime_domain_id
+        and status.get("service_instance_id") == endpoint.service_instance_id
+        and status.get("lease_generation") == endpoint.lease_generation
+        and status.get("service_pid") == endpoint.pid
+        and status.get("process_start_identity") == endpoint.process_start_identity
+        and status.get("endpoint_fingerprint") == endpoint.fingerprint()
+    )
+
+
+class AuthorityLivenessVerifier:
+    """Composite process-start and authenticated authority-status verifier."""
+
+    def __init__(self, domain: RuntimeDomain):
+        self.domain = domain
+
+    def verify(self, lease: RuntimeLease) -> LivenessResult:
+        try:
+            _image, creation_time, alive = _process_identity(lease.service_pid)
+        except Exception as exc:  # pragma: no cover - platform probe boundary
+            return LivenessResult(
+                LivenessStatus.UNKNOWN,
+                None,
+                None,
+                None,
+                None,
+                f"process identity probe failed: {exc}",
+            )
+        process_matches = bool(alive and creation_time is not None and str(creation_time) == lease.process_start_identity)
+        process_stale = (not alive) or (creation_time is not None and not process_matches)
+        try:
+            endpoint = _read_endpoint(self.domain.repo_root, strict=True)
+        except EndpointSchemaError as exc:
+            endpoint = None
+            endpoint_reason = str(exc)
+        else:
+            endpoint_reason = "endpoint metadata unavailable"
+
+        if endpoint is None:
+            if process_stale:
+                return LivenessResult.stale(
+                    process_alive=bool(alive),
+                    process_identity_matches=process_matches,
+                    endpoint_available=False,
+                    endpoint_matches=False,
+                    reason=f"process is stale and authority endpoint is unavailable: {endpoint_reason}",
+                    endpoint_evidence_verified=True,
+                )
+            return LivenessResult(
+                LivenessStatus.UNKNOWN,
+                bool(alive),
+                process_matches,
+                False,
+                None,
+                f"authority endpoint is unavailable: {endpoint_reason}",
+            )
+
+        endpoint_matches = _endpoint_matches_domain(endpoint, self.domain) and (
+            endpoint.service_instance_id == lease.service_instance_id
+            and endpoint.lease_generation == lease.lease_generation
+            and endpoint.pid == lease.service_pid
+            and endpoint.process_start_identity == lease.process_start_identity
+        )
+        if not endpoint_matches:
+            if process_stale:
+                return LivenessResult.stale(
+                    process_alive=bool(alive),
+                    process_identity_matches=process_matches,
+                    endpoint_available=True,
+                    endpoint_matches=False,
+                    reason="stale process and mismatched authority endpoint identity",
+                    endpoint_evidence_verified=True,
+                )
+            return LivenessResult(
+                LivenessStatus.UNKNOWN,
+                bool(alive),
+                process_matches,
+                True,
+                False,
+                "authority endpoint identity does not match the lease",
+            )
+
+        try:
+            status = LiveStateClient(endpoint).authority_status()
+        except (OSError, EOFError, ConnectionError, TimeoutError, RuntimeError) as exc:
+            if process_stale:
+                return LivenessResult.stale(
+                    process_alive=bool(alive),
+                    process_identity_matches=process_matches,
+                    endpoint_available=False,
+                    endpoint_matches=None,
+                    reason=f"stale process and unavailable authority status: {exc}",
+                    endpoint_evidence_verified=True,
+                )
+            return LivenessResult(
+                LivenessStatus.UNKNOWN,
+                bool(alive),
+                process_matches,
+                False,
+                None,
+                f"authority status unavailable: {exc}",
+            )
+
+        status_matches = _status_matches_endpoint(status, endpoint)
+        if process_matches and status_matches:
+            return LivenessResult.live("exact process identity and authority status match")
+        if process_stale and not status_matches:
+            return LivenessResult.stale(
+                process_alive=bool(alive),
+                process_identity_matches=process_matches,
+                endpoint_available=True,
+                endpoint_matches=False,
+                reason="stale process and mismatched authority status",
+                endpoint_evidence_verified=True,
+            )
+        return LivenessResult(
+            LivenessStatus.UNKNOWN,
+            bool(alive),
+            process_matches,
+            True,
+            status_matches,
+            "authority status did not prove the exact live owner",
+        )
+
+
+def _verified_existing_client(
+    root: Path,
+    identity,
+    domain: RuntimeDomain,
+    manager: RuntimeLeaseManager,
+    *,
+    desktop_instance_id: str | None = None,
+    owner_token: str | None = None,
+) -> LiveStateClient | None:
+    endpoint = _read_endpoint(root, strict=True)
+    if endpoint is None or not _endpoint_matches_domain(endpoint, domain):
+        return None
+    try:
+        live = manager.read_live_lease()
+        record = manager.read_generation()
+        if (
+            live is not None
+            and record.status == "active"
+            and live.service_instance_id == endpoint.service_instance_id
+            and live.lease_generation == endpoint.lease_generation
+            and live.service_pid == endpoint.pid
+            and live.process_start_identity == endpoint.process_start_identity
+            and live.endpoint_fingerprint == endpoint.fingerprint()
+            and record.endpoint_fingerprint is None
+        ):
+            manager.reconcile_endpoint_binding(live, endpoint.fingerprint())
+    except Exception:
+        return None
+    try:
+        image, creation_time, alive = _process_identity(endpoint.pid)
+    except Exception:
+        return None
+    if not alive or creation_time is None or str(creation_time) != endpoint.process_start_identity:
+        return None
+    try:
+        status = LiveStateClient(endpoint).authority_status()
+    except (OSError, EOFError, ConnectionError, TimeoutError, RuntimeError):
+        return None
+    if not _status_matches_endpoint(status, endpoint):
+        return None
+    try:
+        lease = manager.read_live_lease()
+        record = manager.read_generation()
+    except Exception:
+        return None
+    if lease is None or record.status != "active":
+        return None
+    if (
+        lease.service_instance_id != endpoint.service_instance_id
+        or lease.lease_generation != endpoint.lease_generation
+        or lease.service_pid != endpoint.pid
+        or lease.process_start_identity != endpoint.process_start_identity
+        or lease.endpoint_fingerprint != endpoint.fingerprint()
+        or record.last_service_instance_id != lease.service_instance_id
+        or record.last_lease_generation != lease.lease_generation
+        or record.endpoint_fingerprint != endpoint.fingerprint()
+    ):
+        return None
+    client = LiveStateClient(
+        endpoint,
+        is_owner=(
+            (
+                desktop_instance_id is not None
+                and endpoint.desktop_instance_id == desktop_instance_id
+            )
+            or (
+                desktop_instance_id is None
+                and endpoint.owner_token is not None
+                and endpoint.owner_token == owner_token
+            )
+        ),
+        service_pid=endpoint.pid,
+        owner_pid=endpoint.owner_pid,
+        owner_token=endpoint.owner_token,
+    )
+    return client
 
 
 def connect(repo_path: str | Path) -> LiveStateClient | None:
-    endpoint = _read_endpoint(repo_path)
-    if endpoint is None:
+    root = Path(repo_path).resolve()
+    identity = read_repository_identity(root)
+    if identity is None:
         return None
-    client = LiveStateClient(endpoint)
+    domain = _production_domain(identity)
+    manager = RuntimeLeaseManager(
+        domain,
+        liveness_verifier=AuthorityLivenessVerifier(domain),
+    )
     try:
-        status = client.ping()
-        return (
-            client
-            if status.get("status") == "ok"
-            and status.get("protocol_version") == LIVE_PROTOCOL_VERSION
-            else None
-        )
-    except (OSError, EOFError, ConnectionError):
+        return _verified_existing_client(root, identity, domain, manager)
+    except EndpointSchemaError:
         return None
 
 
@@ -201,30 +506,38 @@ def connect_existing_with_status(
 ) -> tuple[LiveStateClient | None, str]:
     """Reconnect briefly to an existing owner without starting a service."""
     root = Path(repo_path).resolve()
-    expected = _read_endpoint(root)
+    identity = read_repository_identity(root)
+    if identity is None:
+        return None, "endpoint_identity_unverified"
+    domain = _production_domain(identity)
+    manager = RuntimeLeaseManager(
+        domain,
+        liveness_verifier=AuthorityLivenessVerifier(domain),
+    )
+    try:
+        expected = _read_endpoint(root, strict=True)
+    except EndpointSchemaError:
+        return None, "endpoint_identity_unverified"
     if expected is None:
         return None, "no_live_service"
-    identity = read_repository_identity(root)
-    if (
-        identity is None
-        or expected.repo_id != identity.repo_id
-        or not expected.root_path
-        or Path(expected.root_path).expanduser().resolve() != root
-    ):
+    if not _endpoint_matches_domain(expected, domain):
         return None, "endpoint_identity_unverified"
 
     total_attempts = max(1, attempts)
     for attempt in range(total_attempts):
-        client = connect(root)
+        client = _verified_existing_client(root, identity, domain, manager)
         if client is not None:
-            current = _read_endpoint(root)
+            current = _read_endpoint(root, strict=True)
             if current != expected or client.endpoint != expected:
                 return None, "owner_identity_changed"
             return client, "connected"
         if attempt + 1 < total_attempts:
             time.sleep(max(0.0, retry_delay))
 
-    endpoint = _read_endpoint(root)
+    try:
+        endpoint = _read_endpoint(root, strict=True)
+    except EndpointSchemaError:
+        return None, "endpoint_identity_unverified"
     if endpoint != expected:
         return None, "owner_identity_changed"
     if (
@@ -305,93 +618,104 @@ NORMAL_CONNECT_TIMEOUT = DEFAULT_CONNECT_TIMEOUT
 COLD_START_INITIALIZATION_TIMEOUT = DEFAULT_COLD_START_TIMEOUT
 
 
+def _write_endpoint_atomic(endpoint: LiveEndpoint, root: Path) -> None:
+    target = endpoint_file(root)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    temporary = target.with_name(f".{target.name}.{os.getpid()}.tmp")
+    payload = endpoint.to_dict()
+    try:
+        with temporary.open("w", encoding="utf-8", newline="\n") as stream:
+            json.dump(payload, stream, sort_keys=True, separators=(",", ":"))
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, target)
+    finally:
+        try:
+            temporary.unlink()
+        except FileNotFoundError:
+            pass
+
+
+def _remove_endpoint_if_exact(root: Path, endpoint: LiveEndpoint) -> None:
+    try:
+        current = _read_endpoint(root, strict=True)
+        if current is not None and current == endpoint:
+            endpoint_file(root).unlink()
+    except (OSError, FileNotFoundError, EndpointSchemaError):
+        pass
+
+
+def _authority_endpoint_from_server(server: CanonicalLiveServer, identity, domain: RuntimeDomain, lease: RuntimeLease, *, owner_pid: int | None, owner_token: str | None, desktop_instance_id: str | None) -> LiveEndpoint:
+    endpoint = server.endpoint
+    return LiveEndpoint(
+        endpoint.host,
+        endpoint.port,
+        endpoint.authkey_hex,
+        pid=lease.service_pid,
+        owner_pid=owner_pid,
+        owner_token=owner_token,
+        repo_id=identity.repo_id,
+        root_path=_canonical_root(identity.root_path),
+        runtime_domain_id=domain.domain_id,
+        service_instance_id=lease.service_instance_id,
+        lease_generation=lease.lease_generation,
+        process_start_identity=lease.process_start_identity,
+        desktop_instance_id=desktop_instance_id,
+    )
+
+
 def connect_or_start(
     repo_path: str | Path,
     *,
     owner_pid: int | None = None,
     owner_token: str | None = None,
+    desktop_instance_id: str | None = None,
+    client_kind: str = "protocol",
     timeout: float = DEFAULT_CONNECT_TIMEOUT,
     cold_start_timeout: float = DEFAULT_COLD_START_TIMEOUT,
 ) -> LiveStateClient:
-    root = Path(repo_path).resolve()
-    existing_ep = _read_endpoint(root)
-    existing = connect(root)
-    if existing is not None and existing_ep is not None:
-        # A. Matching owner token: same owner process reconnecting
-        if (
-            existing_ep.owner_token is not None
-            and owner_token is not None
-            and existing_ep.owner_token == owner_token
-        ):
-            return LiveStateClient(
-                existing_ep,
-                is_owner=True,
-                service_pid=existing_ep.pid,
-                owner_pid=existing_ep.owner_pid,
-                owner_token=existing_ep.owner_token,
-            )
-        # B. Responsive endpoint with an owner_token (different or caller has none) -> unowned client
-        if existing_ep.owner_token is not None:
-            return LiveStateClient(
-                existing_ep,
-                is_owner=False,
-                service_pid=existing_ep.pid,
-                owner_pid=existing_ep.owner_pid,
-                owner_token=existing_ep.owner_token,
-            )
-        # C. Responsive endpoint without owner_token:
-        # If owner_pid is present and alive -> unowned client
-        if existing_ep.owner_pid is not None and _is_pid_alive(existing_ep.owner_pid):
-            return LiveStateClient(
-                existing_ep,
-                is_owner=False,
-                service_pid=existing_ep.pid,
-                owner_pid=existing_ep.owner_pid,
-                owner_token=None,
-            )
-        # If owner_pid is None (legacy endpoint without token/pid) -> unowned client
-        if existing_ep.owner_pid is None:
-            return LiveStateClient(
-                existing_ep,
-                is_owner=False,
-                service_pid=existing_ep.pid,
-                owner_pid=None,
-                owner_token=None,
-            )
-        # D. Proven orphan (owner_pid recorded and known dead, and no owner_token): stop orphan and clean up
-        if existing_ep.owner_pid is not None and not _is_pid_alive(existing_ep.owner_pid):
-            try:
-                existing.request("shutdown", timeout=1.5)
-            except (OSError, EOFError, ConnectionError, RuntimeError, TimeoutError):
-                pass
-            if existing_ep.pid and _is_pid_alive(existing_ep.pid):
-                time.sleep(0.1)
-                if _is_pid_alive(existing_ep.pid):
-                    _terminate_pid_tree(existing_ep.pid)
-            try:
-                target = endpoint_file(root)
-                current = _read_endpoint(root)
-                if current is not None and current.pid == existing_ep.pid:
-                    target.unlink()
-            except (OSError, FileNotFoundError):
-                pass
+    root = Path(repo_path).expanduser().resolve()
+    identity = require_repository_identity(root)
+    domain = _production_domain(identity)
+    manager = RuntimeLeaseManager(
+        domain,
+        liveness_verifier=AuthorityLivenessVerifier(domain),
+    )
+    try:
+        endpoint = _read_endpoint(root, strict=True)
+    except EndpointSchemaError:
+        if endpoint_file(root).exists():
+            raise
+        endpoint = None
+    if endpoint is not None and not _endpoint_matches_domain(endpoint, domain):
+        raise EndpointSchemaError("LIVE endpoint belongs to another repository or runtime domain")
 
-    # Clean up any stale unresponsive endpoint
-    stale_endpoint = _read_endpoint(root)
-    if stale_endpoint is not None:
-        # A live owner that is temporarily unable to answer (for example while
-        # executing a long update) is not a proven-dead service.  Never replace
-        # it or send a competing mutation merely because the liveness ping
-        # timed out; the caller must observe and retry later.
-        if stale_endpoint.pid is not None and _is_pid_alive(stale_endpoint.pid):
-            raise TimeoutError(
-                "Canonical LIVE service is busy but still owned by a live "
-                f"process (pid={stale_endpoint.pid}); replacement is unsafe."
+    existing = _verified_existing_client(
+        root,
+        identity,
+        domain,
+        manager,
+        desktop_instance_id=desktop_instance_id,
+        owner_token=owner_token,
+    )
+    if existing is not None:
+        if (
+            client_kind == "desktop"
+            and endpoint is not None
+            and endpoint.desktop_instance_id is not None
+            and endpoint.desktop_instance_id != desktop_instance_id
+        ):
+            raise SecondDesktopActive(
+                "repository already active in another Contextor Desktop"
             )
-        try:
-            LiveStateClient(stale_endpoint).request("shutdown", timeout=1.5)
-        except (OSError, EOFError, ConnectionError, RuntimeError, TimeoutError):
-            pass
+        return existing
+
+    record = manager.read_generation()
+    live = manager.read_live_lease()
+    if live is None and record.status == "active":
+        raise LeaseRecoveryRequired(
+            "active durable authority has no live lease; recovery is required before startup"
+        )
 
     target = endpoint_file(root)
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -400,22 +724,26 @@ def connect_or_start(
     deadline = time.monotonic() + effective_startup_budget
     lock_fd = None
     while time.monotonic() < deadline:
-        existing = connect(root)
-        if existing:
-            ep = _read_endpoint(root)
-            is_owner = (
-                owner_token is not None
+        existing = _verified_existing_client(
+            root,
+            identity,
+            domain,
+            manager,
+            desktop_instance_id=desktop_instance_id,
+            owner_token=owner_token,
+        )
+        if existing is not None:
+            ep = _read_endpoint(root, strict=True)
+            if (
+                client_kind == "desktop"
                 and ep is not None
-                and ep.owner_token is not None
-                and ep.owner_token == owner_token
-            )
-            return LiveStateClient(
-                ep or existing.endpoint,
-                is_owner=is_owner,
-                service_pid=ep.pid if ep else None,
-                owner_pid=ep.owner_pid if ep else None,
-                owner_token=ep.owner_token if ep else None,
-            )
+                and ep.desktop_instance_id is not None
+                and ep.desktop_instance_id != desktop_instance_id
+            ):
+                raise SecondDesktopActive(
+                    "repository already active in another Contextor Desktop"
+                )
+            return existing
         try:
             lock_fd = os.open(start_lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
             break
@@ -426,34 +754,29 @@ def connect_or_start(
             except FileNotFoundError:
                 pass
             time.sleep(0.05)
-
     if lock_fd is None:
         raise TimeoutError(f"Could not claim Canonical LIVE startup lock for {root}")
 
+    proc = None
     try:
-        # Re-check connect right after acquiring the startup lock
-        existing = connect(root)
-        if existing:
-            ep = _read_endpoint(root)
-            is_owner = (
-                owner_token is not None
-                and ep is not None
-                and ep.owner_token is not None
-                and ep.owner_token == owner_token
-            )
-            return LiveStateClient(
-                ep or existing.endpoint,
-                is_owner=is_owner,
-                service_pid=ep.pid if ep else None,
-                owner_pid=ep.owner_pid if ep else None,
-                owner_token=ep.owner_token if ep else None,
-            )
+        existing = _verified_existing_client(
+            root,
+            identity,
+            domain,
+            manager,
+            desktop_instance_id=desktop_instance_id,
+            owner_token=owner_token,
+        )
+        if existing is not None:
+            return existing
 
         cmd = [sys.executable, "-m", "contextor.core.live_state.runtime", "--repo", str(root)]
         if owner_pid is not None:
             cmd.extend(["--owner-pid", str(owner_pid)])
         if owner_token is not None:
             cmd.extend(["--owner-token", str(owner_token)])
+        if desktop_instance_id is not None:
+            cmd.extend(["--desktop-instance-id", str(desktop_instance_id)])
 
         from contextor.core.paths import package_root
 
@@ -466,57 +789,39 @@ def connect_or_start(
             env["PYTHONPATH"] = pkg_root
 
         proc = _spawn_runtime_subprocess(cmd, root, env)
-
         spawn_deadline = time.monotonic() + effective_startup_budget
         while time.monotonic() < spawn_deadline:
-            client = connect(root)
-            if client:
-                ep = _read_endpoint(root)
-                if ep is not None:
-                    is_exact_proc = _is_same_or_descendant_pid(ep.pid, proc.pid)
-                    is_token_match = (
-                        owner_token is not None
-                        and ep.owner_token is not None
-                        and ep.owner_token == owner_token
+            client = _verified_existing_client(
+                root,
+                identity,
+                domain,
+                manager,
+                desktop_instance_id=desktop_instance_id,
+                owner_token=owner_token,
+            )
+            if client is not None:
+                endpoint = _read_endpoint(root, strict=True)
+                if (
+                    client_kind == "desktop"
+                    and endpoint is not None
+                    and endpoint.desktop_instance_id is not None
+                    and endpoint.desktop_instance_id != desktop_instance_id
+                ):
+                    if proc is not None and _is_pid_alive(proc.pid):
+                        _terminate_pid_tree(proc.pid)
+                    raise SecondDesktopActive(
+                        "repository already active in another Contextor Desktop"
                     )
-                    if is_exact_proc and is_token_match:
-                        return LiveStateClient(
-                            ep,
-                            is_owner=True,
-                            service_pid=ep.pid,
-                            owner_pid=ep.owner_pid,
-                            owner_token=ep.owner_token,
-                        )
-                    if not is_exact_proc:
-                        if _is_pid_alive(proc.pid):
-                            _terminate_pid_tree(proc.pid)
-                        return LiveStateClient(
-                            ep,
-                            is_owner=False,
-                            service_pid=ep.pid,
-                            owner_pid=ep.owner_pid,
-                            owner_token=ep.owner_token,
-                        )
-                    return LiveStateClient(
-                        ep,
-                        is_owner=False,
-                        service_pid=ep.pid,
-                        owner_pid=ep.owner_pid,
-                        owner_token=ep.owner_token,
-                    )
-
-            ret = proc.poll()
-            if ret is not None:
+                return client
+            if proc.poll() is not None:
                 raise RuntimeError(
-                    f"Canonical LIVE service process exited prematurely with code {ret} for {root}"
+                    f"Canonical LIVE service process exited prematurely with code {proc.returncode} for {root}"
                 )
-
             time.sleep(0.05)
-
-        if _is_pid_alive(proc.pid):
+        if proc is not None and _is_pid_alive(proc.pid):
             _terminate_pid_tree(proc.pid)
         raise TimeoutError(
-            f"Canonical LIVE service startup and canonical initialization timed out after {effective_startup_budget}s for {root}"
+            f"Canonical LIVE service startup and authority bootstrap timed out after {effective_startup_budget}s for {root}"
         )
     finally:
         try:
@@ -603,116 +908,173 @@ def run_service(
     repo_path: str | Path,
     owner_pid: int | None = None,
     owner_token: str | None = None,
+    desktop_instance_id: str | None = None,
 ) -> None:
-    root = Path(repo_path).resolve()
+    root = Path(repo_path).expanduser().resolve()
     identity = require_repository_identity(root)
-    cache = migrate_legacy_snapshot(root)
-    loaded = load_snapshot(
-        cache,
-        expected_repo_id=identity.repo_id,
-        expected_root_path=identity.root_path,
+    domain = _production_domain(identity)
+    manager = RuntimeLeaseManager(
+        domain,
+        liveness_verifier=AuthorityLivenessVerifier(domain),
     )
-    state = loaded[0] if loaded else None
-    if state is not None:
-        from contextor.core.analysis.incremental.materialization import (
-            ensure_module_usages,
-            module_usages_require_materialization,
+    lease = None
+    server = None
+    published_endpoint = None
+    try:
+        lease = manager.acquire()
+        cache = migrate_legacy_snapshot(root)
+        loaded = load_snapshot(
+            cache,
+            expected_repo_id=identity.repo_id,
+            expected_root_path=identity.root_path,
+        )
+        state = loaded[0] if loaded else None
+        if state is not None:
+            from contextor.core.analysis.incremental.materialization import (
+                ensure_module_usages,
+                module_usages_require_materialization,
+            )
+
+            if module_usages_require_materialization(state):
+                loaded_metadata = loaded[1]
+                from contextor.core.analysis.state_manager import FileStateManager
+
+                file_state_manager = FileStateManager(str(cache))
+                ensure_module_usages(state)
+                target_revision = loaded_metadata.revision + 1
+                file_state_payload = file_state_manager.build_payload(
+                    loaded_metadata.state_id,
+                    target_revision,
+                )
+                save_snapshot(
+                    state,
+                    cache,
+                    loaded_metadata.state_id,
+                    writer="live-service-symbol-calls-backfill",
+                    repo_id=identity.repo_id,
+                    root_path=identity.root_path,
+                    exact_revision=target_revision,
+                    file_state_payload=file_state_payload,
+                )
+        revision = read_metadata(cache).revision if read_metadata(cache) else 0
+        adapter_holder: dict[str, object] = {}
+        authority_identity = {
+            "repo_id": identity.repo_id,
+            "root_path": _canonical_root(identity.root_path),
+            "runtime_domain_id": domain.domain_id,
+            "service_instance_id": lease.service_instance_id,
+            "lease_generation": lease.lease_generation,
+            "service_pid": lease.service_pid,
+            "process_start_identity": lease.process_start_identity,
+            "owner_pid": owner_pid,
+            "owner_token": owner_token,
+            "desktop_instance_id": desktop_instance_id,
+        }
+        server = CanonicalLiveServer(
+            state,
+            revision=revision,
+            updater=_repository_updater(root, adapter_holder),
+            persister=_repository_persister(root, adapter_holder),
+            authority_identity=authority_identity,
+        )
+        published_endpoint = _authority_endpoint_from_server(
+            server,
+            identity,
+            domain,
+            lease,
+            owner_pid=owner_pid,
+            owner_token=owner_token,
+            desktop_instance_id=desktop_instance_id,
+        )
+        server.endpoint = published_endpoint
+        _write_endpoint_atomic(published_endpoint, root)
+        manager.bind_endpoint(lease, published_endpoint.fingerprint())
+        current_endpoint = _read_endpoint(root, strict=True)
+        current_lease = manager.read_live_lease()
+        current_record = manager.read_generation()
+        if (
+            current_endpoint != published_endpoint
+            or current_lease is None
+            or current_lease.service_instance_id != published_endpoint.service_instance_id
+            or current_lease.lease_generation != published_endpoint.lease_generation
+            or current_lease.endpoint_fingerprint != published_endpoint.fingerprint()
+            or current_record.status != "active"
+            or current_record.endpoint_fingerprint != published_endpoint.fingerprint()
+        ):
+            raise RuntimeError("LIVE endpoint and RuntimeLease identity parity verification failed")
+        _safe_trace_event(
+            "LIVE",
+            "AUTHORITY_READY",
+            repo=str(root),
+            domain_id=domain.domain_id,
+            service_instance_id=lease.service_instance_id,
+            lease_generation=lease.lease_generation,
         )
 
-        if module_usages_require_materialization(state):
-            loaded_metadata = loaded[1]
-            from contextor.core.analysis.state_manager import FileStateManager
-            file_state_manager = FileStateManager(str(cache))
-            ensure_module_usages(state)
-            target_revision = loaded_metadata.revision + 1
-            file_state_payload = file_state_manager.build_payload(
-                loaded_metadata.state_id,
-                target_revision,
-            )
-            backfill_metadata = save_snapshot(
-                state,
-                cache,
-                loaded_metadata.state_id,
-                writer="live-service-symbol-calls-backfill",
-                repo_id=identity.repo_id,
-                root_path=identity.root_path,
-                exact_revision=target_revision,
-                file_state_payload=file_state_payload,
-            )
-    revision = (read_metadata(cache).revision if read_metadata(cache) else 0)
-    adapter_holder: dict[str, object] = {}
-    server = CanonicalLiveServer(
-        state,
-        revision=revision,
-        updater=_repository_updater(root, adapter_holder),
-        persister=_repository_persister(root, adapter_holder),
-    )
-    _safe_trace_event("LIVE", "SERVICE_START", repo=str(root), rev=server._revision)
+        if owner_pid is not None and owner_pid > 0:
+            if sys.platform == "win32":
+                import ctypes
 
-    if owner_pid is not None and owner_pid > 0:
-        if sys.platform == "win32":
-            import ctypes
-            SYNCHRONIZE = 0x00100000
-            PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
-            owner_handle = ctypes.windll.kernel32.OpenProcess(
-                SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION, False, int(owner_pid)
-            )
-            if not owner_handle:
-                # Owner already exited before service began
-                server.close()
-                return
+                SYNCHRONIZE = 0x00100000
+                PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+                owner_handle = ctypes.windll.kernel32.OpenProcess(
+                    SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION,
+                    False,
+                    int(owner_pid),
+                )
+                if not owner_handle:
+                    return
 
-            def _owner_watchdog() -> None:
-                try:
+                def _owner_watchdog() -> None:
+                    try:
+                        while not server._stop.wait(0.75):
+                            res = ctypes.windll.kernel32.WaitForSingleObject(owner_handle, 0)
+                            if res == 0:
+                                server.close()
+                                break
+                    finally:
+                        ctypes.windll.kernel32.CloseHandle(owner_handle)
+            else:
+
+                def _owner_watchdog() -> None:
                     while not server._stop.wait(0.75):
-                        res = ctypes.windll.kernel32.WaitForSingleObject(owner_handle, 0)
-                        if res == 0:  # WAIT_OBJECT_0: owner process terminated
+                        if not _is_pid_alive(owner_pid):
                             server.close()
                             break
-                finally:
-                    ctypes.windll.kernel32.CloseHandle(owner_handle)
-        else:
-            def _owner_watchdog() -> None:
-                while not server._stop.wait(0.75):
-                    if not _is_pid_alive(owner_pid):
-                        server.close()
-                        break
 
-        watchdog = threading.Thread(
-            target=_owner_watchdog,
-            name=f"contextor-live-watchdog-{owner_pid}",
-            daemon=True,
-        )
-        watchdog.start()
-
-    target = endpoint_file(root)
-    target.parent.mkdir(parents=True, exist_ok=True)
-    temporary = target.with_suffix(f".{os.getpid()}.tmp")
-    payload: dict[str, Any] = {
-        "host": server.endpoint.host,
-        "port": server.endpoint.port,
-        "authkey_hex": server.endpoint.authkey_hex,
-        "pid": os.getpid(),
-        "repo_id": identity.repo_id,
-        "root_path": identity.root_path,
-    }
-    if owner_pid is not None:
-        payload["owner_pid"] = int(owner_pid)
-    if owner_token is not None:
-        payload["owner_token"] = str(owner_token)
-    temporary.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-    os.replace(temporary, target)
-    try:
+            threading.Thread(
+                target=_owner_watchdog,
+                name=f"contextor-live-watchdog-{owner_pid}",
+                daemon=True,
+            ).start()
         server.serve_forever()
+    except Exception as exc:
+        _safe_trace_event(
+            "LIVE",
+            "AUTHORITY_BOOTSTRAP_FAIL",
+            repo=str(root),
+            error=str(exc),
+            service_instance_id=getattr(lease, "service_instance_id", None),
+            lease_generation=getattr(lease, "lease_generation", None),
+        )
+        raise
     finally:
-        _safe_trace_event("LIVE", "SERVICE_END", repo=str(root), rev=server._revision)
-        server.close()
-        try:
-            current_ep = _read_endpoint(root)
-            if current_ep is not None and current_ep.pid == os.getpid():
-                target.unlink()
-        except (OSError, FileNotFoundError):
-            pass
+        if server is not None:
+            server.close()
+        if lease is not None:
+            try:
+                manager.release(lease)
+            except Exception as exc:
+                _safe_trace_event(
+                    "LIVE",
+                    "AUTHORITY_RELEASE_FAIL",
+                    repo=str(root),
+                    error=str(exc),
+                    service_instance_id=lease.service_instance_id,
+                    lease_generation=lease.lease_generation,
+                )
+        if published_endpoint is not None:
+            _remove_endpoint_if_exact(root, published_endpoint)
 
 
 def main() -> None:
@@ -720,8 +1082,14 @@ def main() -> None:
     parser.add_argument("--repo", required=True)
     parser.add_argument("--owner-pid", type=int, default=None)
     parser.add_argument("--owner-token", type=str, default=None)
+    parser.add_argument("--desktop-instance-id", type=str, default=None)
     args = parser.parse_args()
-    run_service(args.repo, owner_pid=args.owner_pid, owner_token=args.owner_token)
+    run_service(
+        args.repo,
+        owner_pid=args.owner_pid,
+        owner_token=args.owner_token,
+        desktop_instance_id=args.desktop_instance_id,
+    )
 
 
 if __name__ == "__main__":

@@ -17,7 +17,12 @@ from tkinter import filedialog, messagebox, ttk
 
 from contextor.core.analysis.full_analysis_coordinator import run_full_analysis_exclusive
 from contextor.core.api.facade import ContextorFacade
-from contextor.core.live_state import DesktopLiveEventFeed, DesktopLiveWatcher, connect_or_start
+from contextor.core.live_state import (
+    DesktopLiveEventFeed,
+    DesktopLiveWatcher,
+    SecondDesktopActive,
+    connect_or_start,
+)
 from contextor.core.repository_identity import (
     RepositoryIdentityError,
     read_repository_identity,
@@ -90,6 +95,7 @@ class ContextorGUI:
         self.repo_builder_win = None
         self.parser_win = None
         self.owner_token = uuid.uuid4().hex
+        self.desktop_instance_id = uuid.uuid4().hex
         self.live_client = None
         self.live_clients = {}
         self.live_watcher = None
@@ -839,11 +845,18 @@ class ContextorGUI:
             from contextor.core.paths import repo_cache_dir
 
             cache = migrate_legacy_snapshot(path)
-            client = connect_or_start(
-                path,
-                owner_pid=os.getpid(),
-                owner_token=getattr(self, "owner_token", None),
-            )
+            connect_kwargs = {
+                "owner_pid": os.getpid(),
+                "owner_token": getattr(self, "owner_token", None),
+            }
+            import inspect
+
+            parameters = inspect.signature(connect_or_start).parameters
+            if "desktop_instance_id" in parameters:
+                connect_kwargs["desktop_instance_id"] = getattr(self, "desktop_instance_id", None)
+            if "client_kind" in parameters:
+                connect_kwargs["client_kind"] = "desktop"
+            client = connect_or_start(path, **connect_kwargs)
             self.live_client = client
             clients[identity.repo_id] = client
             if getattr(self, "_live_start_retry_after_id", None) is not None:
@@ -854,6 +867,11 @@ class ContextorGUI:
                         pass
                 self._live_start_retry_after_id = None
             self._live_start_retry_attempt = 0
+        except SecondDesktopActive as exc:
+            self._live_start_retry_attempt = 0
+            self._live_start_retry_after_id = None
+            self._set_live_status(f"LIVE: {exc}")
+            return
         except (OSError, EOFError, RuntimeError, TimeoutError, RepositoryIdentityError) as exc:
             current_attempt = getattr(self, "_live_start_retry_attempt", 0) + 1
             self._live_start_retry_attempt = current_attempt
@@ -941,6 +959,7 @@ class ContextorGUI:
             client,
             owner_pid=os.getpid(),
             owner_token=getattr(self, "owner_token", None),
+            desktop_instance_id=getattr(self, "desktop_instance_id", None),
             on_status=status_callback,
             on_reconnect=on_reconnect,
             on_resync=on_resync,

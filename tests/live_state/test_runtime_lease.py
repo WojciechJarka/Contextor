@@ -9,14 +9,17 @@ from typing import Any
 
 import pytest
 
+import contextor.core.live_state.runtime_lease as runtime_lease_module
 from contextor.core.live_state.runtime_domain import RuntimeDomain
 from contextor.core.live_state.runtime_lease import (
     AuthorityGenerationRecord,
+    DefaultLivenessVerifier,
     EndpointBindingError,
     ForeignLeaseError,
     LeaseAlreadyHeld,
     LeaseLivenessUnknown,
     LeaseNotOwner,
+    LeaseRecoveryRequired,
     LivenessResult,
     LivenessStatus,
     ProcessIdentity,
@@ -102,6 +105,7 @@ def _stale_result(*, pid_reuse: bool = False) -> LivenessResult:
         endpoint_available=False,
         endpoint_matches=False,
         reason="fake confirmed stale authority",
+        endpoint_evidence_verified=True,
     )
 
 
@@ -181,12 +185,13 @@ def test_pid_reuse_with_same_pid_but_different_start_identity_is_stale(tmp_path:
 
 def test_generation_gap_after_crash_before_live_write_is_never_reused(tmp_path: Path):
     domain = _domain(tmp_path)
-    crashed = _manager(domain, failure_injector=CrashAt("after_generation_persist"))
-    with pytest.raises(RuntimeError, match="after_generation_persist"):
+    crashed = _manager(domain, failure_injector=CrashAt("after_generation_reservation"))
+    with pytest.raises(RuntimeError, match="after_generation_reservation"):
         crashed.acquire()
 
     assert generation_metadata_path(domain).is_file()
     assert not live_lease_path(domain).exists()
+    assert crashed.read_generation().status == "reserved"
     next_lease = _manager(domain).acquire()
     assert next_lease.lease_generation == 2
 
@@ -203,6 +208,23 @@ def test_crash_after_live_write_leaves_existing_authority_for_normal_liveness_ch
 
     existing = RuntimeLease.from_dict(json.loads(live_lease_path(domain).read_text()))
     assert existing.lease_generation == 1
+    assert _manager(domain).read_generation().status == "reserved"
+    with pytest.raises(LeaseAlreadyHeld):
+        _manager(domain, verifier=ScriptedVerifier(_live_result())).acquire()
+
+
+def test_crash_after_generation_activation_leaves_active_authority(tmp_path: Path):
+    domain = _domain(tmp_path)
+    crashed = _manager(
+        domain,
+        verifier=ScriptedVerifier(_live_result()),
+        failure_injector=CrashAt("after_generation_activation"),
+    )
+    with pytest.raises(RuntimeError, match="after_generation_activation"):
+        crashed.acquire()
+
+    assert crashed.read_generation().status == "active"
+    assert live_lease_path(domain).exists()
     with pytest.raises(LeaseAlreadyHeld):
         _manager(domain, verifier=ScriptedVerifier(_live_result())).acquire()
 
@@ -233,6 +255,56 @@ def test_confirmed_dead_process_and_unavailable_endpoint_allow_stale_takeover(tm
     second = _manager(domain, verifier=ScriptedVerifier(_stale_result())).acquire()
 
     assert second.lease_generation == first.lease_generation + 1
+
+
+def test_default_liveness_does_not_fabricate_endpoint_stale_evidence(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    domain = _domain(tmp_path)
+    lease = _manager(domain).acquire()
+    verifier = DefaultLivenessVerifier()
+
+    monkeypatch.setattr(runtime_lease_module, "_process_identity", lambda _pid: (None, None, False))
+    dead = verifier.verify(lease)
+    assert dead.status is LivenessStatus.UNKNOWN
+    assert dead.endpoint_evidence_verified is False
+    assert not dead.confirmed_stale
+
+    monkeypatch.setattr(runtime_lease_module, "_process_identity", lambda _pid: (None, "different", True))
+    pid_reuse = verifier.verify(lease)
+    assert pid_reuse.status is LivenessStatus.UNKNOWN
+    assert pid_reuse.endpoint_evidence_verified is False
+    assert not pid_reuse.confirmed_stale
+
+
+def test_impossible_generation_record_combinations_fail_closed(tmp_path: Path):
+    domain = _domain(tmp_path)
+    initial = AuthorityGenerationRecord.initial(domain)
+
+    active_zero = initial.to_dict()
+    active_zero["status"] = "active"
+    with pytest.raises(RuntimeLeaseError):
+        AuthorityGenerationRecord.from_dict(active_zero)
+
+    reserved_without_identity = initial.to_dict()
+    reserved_without_identity.update(
+        status="reserved",
+        last_lease_generation=1,
+        last_service_instance_id="service-a",
+    )
+    with pytest.raises(RuntimeLeaseError):
+        AuthorityGenerationRecord.from_dict(reserved_without_identity)
+
+    half_fence = initial.to_dict()
+    half_fence.update(
+        status="released",
+        last_lease_generation=1,
+        last_service_instance_id="service-a",
+        service_pid=os.getpid(),
+        process_start_identity="process-a",
+        fenced_service_instance_id="service-a",
+        fenced_lease_generation=None,
+    )
+    with pytest.raises(RuntimeLeaseError):
+        AuthorityGenerationRecord.from_dict(half_fence)
 
 
 def test_crash_during_release_durable_fence_prevents_old_lease_resurrection(tmp_path: Path):
@@ -374,15 +446,16 @@ def test_cross_process_acquisitions_have_exactly_one_winner(tmp_path: Path):
     assert [result[0] for result in results].count("LeaseAlreadyHeld") == 1
 
 
-def test_generation_survives_live_lease_file_deletion_and_release(tmp_path: Path):
+def test_active_generation_with_missing_live_lease_fails_closed(tmp_path: Path):
     domain = _domain(tmp_path)
     manager = _manager(domain)
     first = manager.acquire()
     live_lease_path(domain).unlink()
-    second = _manager(domain).acquire()
-    assert second.lease_generation == first.lease_generation + 1
-    _manager(domain).release(second)
-    assert manager.read_generation().last_lease_generation == 2
+    with pytest.raises(LeaseRecoveryRequired):
+        _manager(domain).acquire()
+    record = manager.read_generation()
+    assert record.status == "active"
+    assert record.last_lease_generation == first.lease_generation
 
 
 def test_runtime_lease_serialization_round_trip_and_test_root_isolation(tmp_path: Path):
