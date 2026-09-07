@@ -1,3 +1,34 @@
+## [Lossless module-level blast radius] - 2026-09-07
+
+- Added `get_module_blast_radius`, providing the complete canonical blast radius of a module in one MCP call without per-artifact N+1 queries.
+- Added lossless indexed representation with persistent module/artifact identities, deterministic shared consumer/reachability sets and automatic representation selection.
+- Removed artifact, consumer and downstream truncation from the module-level blast-radius contract. Compact output is now a lossless serialization, not a preview.
+- Preserved exact per-artifact blast-radius semantics while adding module-wide aggregate direct consumers, additional transitive downstream reachability, consumed/unconsumed artifacts and deterministic impact ranking.
+- Reused one reverse dependency graph and cached transitive closures per unique direct-consumer seed within a call.
+- Added explicit fail-closed handling for stale/unavailable graph and analytics families, missing persistent identities and incomplete indexed representations.
+- Added separate readable-output and complete-context safety policies so normal complete module context is not rejected merely for exceeding the generic 15 KiB warning threshold.
+- Real MCP certification on `contextor.core.reporting_engine.graph_analytics` confirmed complete lossless output, zero truncation and no required per-artifact follow-up calls.
+
+## [Canonical class-scope artifact correction] - 2026-09-07
+
+- Corrected canonical symbol extraction so only true module-scope `Assign` and `AnnAssign` bindings are classified as `global` artifacts.
+- Class-body assignments, annotated fields and dataclass fields are no longer flattened into unqualified module globals.
+- Preserved the existing canonical artifact contract (`class`, `function`, `method`, `global`) without introducing incomplete `Class.field` identities or downstream projection filters.
+- Full and incremental analysis now share the corrected scope semantics through the common `SymbolVisitor` extraction owner.
+- Full repository reanalysis removed 342 false class-scope globals from canonical state: global artifact count decreased from 661 to 319.
+- `contextor.core.reporting_engine.graph_analytics` decreased from 48 to 39 canonical artifacts while preserving all five real module globals and the `SharedUsageClustersHandoff` class artifact.
+- Obsolete false artifact identities were retired from the active persistent registry and retained only in recovery history as designed.
+- Canonical artifact projection, `get_artifacts_for_module` and `get_module_blast_radius` were runtime-certified against the same corrected 39-artifact set.
+
+## [Semantic invalidation of cached symbol facts] - 2026-09-07
+
+- Fixed a cache-freshness defect where a successful new full-analysis job could reuse structurally valid but semantically stale `SymbolFacts` after analyzer behavior changed.
+- Raised `SYMBOL_FACTS_SCHEMA_VERSION` from 1 to 2 and defined it explicitly as a semantic contract version, not only a serialized-shape version.
+- Cached symbol facts from older analyzer semantics are now rejected even when analyzed source path and content hash remain unchanged.
+- Preserved normal per-file cache reuse: stale symbol facts are recomputed once and current-version facts remain reusable on subsequent unchanged analyses.
+- Kept other cached fact families independent and unchanged; no repository-wide cache purge, registry reset or migration is required.
+- Real MCP full-analysis certification confirmed schema-1 facts were no longer reused, corrected schema-2 facts were published to LIVE canonical state, and the rebuilt artifact catalog matched fresh extraction.
+
 ## [MCP query latency hardening and canonical registry reuse] - 2026-09-06
 
 * Removed redundant persistent-registry reads from several public MCP query paths by reusing the already-loaded registry owned by a fresh canonical LIVE engine, while preserving snapshot/recovery fallbacks, persistent identity semantics, fail-closed behavior, and public response contracts.

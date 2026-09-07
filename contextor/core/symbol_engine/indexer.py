@@ -40,7 +40,10 @@ from contextor.core.validator.collisions import (
 )
 
 
-SYMBOL_FACTS_SCHEMA_VERSION = 1
+# Semantic contract version for SymbolFacts, not only serialized JSON shape.
+# Bump this whenever extractor classification semantics change, even when the
+# persisted fact keys and value types remain unchanged.
+SYMBOL_FACTS_SCHEMA_VERSION = 2
 REFERENCE_FACTS_SCHEMA_VERSION = 1
 COLLISION_FACTS_SCHEMA_VERSION = 1
 TEST_FACTS_SCHEMA_VERSION = 1

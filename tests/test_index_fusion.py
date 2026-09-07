@@ -138,6 +138,62 @@ def test_symbol_facts_schema_mismatch_recomputes(tmp_path, isolated_dirs, monkey
     assert result.symbol_facts_by_module["module"]["facts"]["functions"] == ["hello"]
 
 
+def test_symbol_facts_semantic_version_invalidates_stale_class_field_globals(
+    tmp_path, isolated_dirs, monkeypatch
+):
+    monkeypatch.setenv("CONTEXTOR_DISABLE_PROCESS_POOL", "1")
+    root = tmp_path / "repo"
+    root.mkdir()
+    source = root / "module.py"
+    source.write_text(
+        "MODULE_REAL = 1\n"
+        "\n"
+        "class Holder:\n"
+        "    CLASS_FIELD = 1\n",
+        encoding="utf-8",
+    )
+
+    indexer.index_repository(str(root))
+    cached = _cache_payload(root, source)["data"]
+    old_version = indexer.SYMBOL_FACTS_SCHEMA_VERSION - 1
+    cached["symbol_facts"]["schema_version"] = old_version
+    cached["symbol_facts"]["facts"]["globals"] = [
+        "CLASS_FIELD",
+        "MODULE_REAL",
+    ]
+    CacheManager(str(root)).set(source, cached)
+    indexer._CACHE_MANAGERS.pop(str(root.resolve()), None)
+
+    extraction_calls = []
+    original_extract = indexer.extract_file_symbols
+    monkeypatch.setattr(
+        indexer,
+        "extract_file_symbols",
+        lambda path, *, tree=None: (
+            extraction_calls.append(path)
+            or original_extract(path, tree=tree)
+        ),
+    )
+
+    recomputed = indexer.index_repository(str(root))
+    facts = recomputed.symbol_facts_by_module["module"]
+
+    assert len(extraction_calls) == 1
+    assert facts["schema_version"] == indexer.SYMBOL_FACTS_SCHEMA_VERSION
+    assert facts["facts"]["globals"] == ["MODULE_REAL"]
+    assert "CLASS_FIELD" not in facts["facts"]["globals"]
+    assert _cache_payload(root, source)["data"]["symbol_facts"]["schema_version"] == 2
+
+    indexer._CACHE_MANAGERS.pop(str(root.resolve()), None)
+    extraction_calls.clear()
+    warm = indexer.index_repository(str(root))
+
+    assert extraction_calls == []
+    assert warm.symbol_facts_by_module["module"]["facts"]["globals"] == [
+        "MODULE_REAL"
+    ]
+
+
 def test_symbol_failure_keeps_module_and_retries_without_negative_cache(
     tmp_path, isolated_dirs, monkeypatch
 ):
