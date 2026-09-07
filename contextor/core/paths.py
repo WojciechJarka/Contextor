@@ -35,9 +35,9 @@ def package_root() -> Path:
 
 
 def runtime_logs_dir() -> Path:
-    """Directory for Contextor installation/runtime diagnostic traces."""
+    """Canonical per-user directory for Contextor runtime diagnostic traces."""
 
-    return package_root() / "logs"
+    return state_dir() / "logs"
 
 
 # ==========================================================

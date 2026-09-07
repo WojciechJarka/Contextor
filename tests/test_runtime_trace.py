@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 
 import contextor.core.runtime_trace as trace
+from contextor.core.paths import runtime_logs_dir
 
 
 def _reset_trace_state():
@@ -29,6 +30,20 @@ def test_desktop_trace_session_headers_and_finish(tmp_path, monkeypatch):
     assert trace.active_trace_path(force_refresh=True) is None
     assert not (tmp_path / "logs" / "contextor_runtime_active.json").exists()
     assert len(records[6]["err"]) == 500
+
+
+def test_default_trace_session_uses_external_runtime_logs_root(tmp_path, monkeypatch):
+    state = tmp_path / "user-state"
+    monkeypatch.setenv("CONTEXTOR_STATE_DIR", str(state))
+    _reset_trace_state()
+    path = trace.start_desktop_trace_session()
+    try:
+        assert path is not None
+        assert path.parent == runtime_logs_dir()
+        assert path.parent == (state / "logs").resolve()
+        assert not path.parent.is_relative_to(tmp_path / "repo")
+    finally:
+        trace.finish_desktop_trace_session()
 
 
 def test_trace_noop_on_malformed_pointer(tmp_path, monkeypatch):

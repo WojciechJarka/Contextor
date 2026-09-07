@@ -14,7 +14,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import TextIO
 
-from contextor.core.paths import state_dir
+from contextor.core.paths import runtime_logs_dir
 
 
 _LOCK = threading.RLock()
@@ -56,9 +56,9 @@ class _TeeStream:
 
 
 def program_log_path() -> Path:
-    """Return the per-user desktop program log path."""
+    """Return the canonical runtime-root desktop program log path."""
 
-    return state_dir() / "logs" / "contextor-program.log"
+    return runtime_logs_dir() / "contextor-program.log"
 
 
 def configure_program_log() -> Path:

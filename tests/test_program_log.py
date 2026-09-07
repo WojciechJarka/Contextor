@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from contextor.core import paths
 from contextor.core import program_log
 from contextor.core import program_log_tail
 
@@ -72,3 +73,13 @@ def test_program_log_tail_prints_existing_lines(monkeypatch, tmp_path, capsys):
         program_log_tail.follow(path, initial_lines=1)
 
     assert capsys.readouterr().out == "second\n"
+
+
+def test_program_log_path_uses_canonical_runtime_logs_root(tmp_path, monkeypatch):
+    state = tmp_path / "user-state"
+    monkeypatch.setenv("CONTEXTOR_STATE_DIR", str(state))
+    expected_root = (state / "logs").resolve()
+
+    assert paths.runtime_logs_dir() == expected_root
+    assert program_log.program_log_path() == expected_root / "contextor-program.log"
+    assert not expected_root.exists()

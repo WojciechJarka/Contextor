@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from contextor.core import paths
 from contextor.core.live_state.runtime_domain import (
     RuntimeDomain,
     RuntimeDomainError,
@@ -62,6 +63,32 @@ def test_production_domain_is_valid_and_immutable(tmp_path: Path):
     assert domain.domain_id.startswith("rd1_")
     with pytest.raises(AttributeError):
         domain.mode = "test"  # type: ignore[misc]
+
+
+def test_production_default_logs_root_is_external_and_repo_logs_is_rejected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    repo = tmp_path / "Contextor_Repo"
+    repo.mkdir()
+    state = tmp_path / "user-state"
+    monkeypatch.setenv("CONTEXTOR_STATE_DIR", str(state))
+    domain = RuntimeDomain.create(
+        repo_id="contextor-repo",
+        repo_root=repo,
+        mode="production",
+        cache_root=tmp_path / "cache" / "contextor-repo",
+    )
+    assert domain.logs_root == (state / "logs").resolve()
+    assert not domain.logs_root.is_relative_to(repo.resolve())
+    assert domain.logs_root == paths.runtime_logs_dir()
+    with pytest.raises(RuntimeDomainError):
+        RuntimeDomain.create(
+            repo_id="contextor-repo",
+            repo_root=repo,
+            mode="production",
+            cache_root=tmp_path / "cache" / "contextor-repo",
+            logs_root=repo / "logs",
+        )
 
 
 def test_test_domain_requires_context_and_run_id(tmp_path: Path):

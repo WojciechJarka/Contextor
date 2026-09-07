@@ -76,6 +76,48 @@ def test_two_clients_observe_one_in_ram_state_and_revision(live_server):
     assert snap["state"].revision == 1
 
 
+def test_authority_status_is_independent_from_desktop_claim_status():
+    authority = {
+        "repo_id": "repo-id",
+        "root_path": "C:/repo",
+        "runtime_domain_id": "domain-id",
+        "service_instance_id": "service-id",
+        "lease_generation": 7,
+        "service_pid": os.getpid(),
+        "process_start_identity": "service-start",
+    }
+
+    def broken_claim_reader():
+        raise RuntimeError("desktop claim storage unavailable")
+
+    server = CanonicalLiveServer(
+        SimpleNamespace(files=[]),
+        authority_identity=authority,
+        desktop_claim_reader=broken_claim_reader,
+    )
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    client = LiveStateClient(server.endpoint)
+    try:
+        status = client.authority_status()
+        assert status["status"] == "ok"
+        assert status["repo_id"] == authority["repo_id"]
+        assert status["runtime_domain_id"] == authority["runtime_domain_id"]
+        assert status["service_instance_id"] == authority["service_instance_id"]
+        assert status["lease_generation"] == authority["lease_generation"]
+        assert status["service_pid"] == authority["service_pid"]
+        assert status["process_start_identity"] == authority["process_start_identity"]
+        assert "desktop_claim" not in status
+
+        claim_status = client.desktop_claim_status()
+        assert claim_status["status"] == "error"
+        assert "desktop claim storage unavailable" in claim_status["error"]
+    finally:
+        server.close()
+        thread.join(timeout=2)
+        assert not thread.is_alive()
+
+
 def test_publish_trace_uses_authoritative_revision_and_rejections_are_nonfatal(monkeypatch):
     import contextor.core.runtime_trace as runtime_trace
 
@@ -873,7 +915,7 @@ def test_connect_or_start_ownership_when_spawning_new(tmp_path, monkeypatch):
     my_pid = os.getpid()
     client = connect_or_start(repo, owner_pid=my_pid, owner_token="new-owner-token")
     try:
-        assert client.is_owner is True
+        assert client.is_owner is False
         assert client.owner_token == "new-owner-token"
         assert client.owner_pid == my_pid
         assert client.service_pid is not None
@@ -898,7 +940,7 @@ def test_owner_pid_match_without_owner_token_is_not_owner(tmp_path, monkeypatch)
         client.request("shutdown")
 
 
-def test_responsive_token_only_endpoint_matching_and_differing_tokens(tmp_path, monkeypatch):
+def test_legacy_token_only_endpoint_is_rejected_fail_closed(tmp_path, monkeypatch):
     cache = tmp_path / "cache"
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -923,26 +965,14 @@ def test_responsive_token_only_endpoint_matching_and_differing_tokens(tmp_path, 
     ep_file.write_text(json.dumps(payload), encoding="utf-8")
 
     try:
-        # Caller with matching token -> is_owner is True
-        matching_client = connect_or_start(repo, owner_token="token-xyz")
-        assert matching_client.is_owner is True
-        assert matching_client.owner_token == "token-xyz"
-
-        # Caller with differing token -> is_owner is False
-        different_client = connect_or_start(repo, owner_token="token-other")
-        assert different_client.is_owner is False
-        assert different_client.owner_token == "token-xyz"
-
-        # Caller with no token -> is_owner is False
-        no_token_client = connect_or_start(repo, owner_token=None)
-        assert no_token_client.is_owner is False
-        assert no_token_client.owner_token == "token-xyz"
+        with pytest.raises(EndpointSchemaError):
+            connect_or_start(repo, owner_token="token-xyz")
     finally:
         server.close()
         thread.join(timeout=2)
 
 
-def test_post_popen_token_match_with_different_pid_is_not_owner_and_cleans_proc(tmp_path, monkeypatch):
+def test_legacy_endpoint_is_rejected_before_post_spawn_attach(tmp_path, monkeypatch):
     cache = tmp_path / "cache"
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -966,53 +996,12 @@ def test_post_popen_token_match_with_different_pid_is_not_owner_and_cleans_proc(
     }
     ep_file.write_text(json.dumps(payload), encoding="utf-8")
 
-    # Mock subprocess.Popen so it spawns a dummy real process that is alive
-    import subprocess
-    import sys
-    from contextor.core.live_state.runtime import _is_pid_alive
-    dummy_proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(10)"])
-    dummy_pid = dummy_proc.pid
-
-    spawned = [False]
-
-    def mock_popen(*args, **kwargs):
-        spawned[0] = True
-        return dummy_proc
-
-    # Monkeypatch subprocess.Popen in connect_or_start
-    monkeypatch.setattr(subprocess, "Popen", mock_popen)
-
-    # Remove the endpoint file before calling connect_or_start to force the startup path
-    ep_file.unlink()
-
-    # Re-write the endpoint file right before connect connects in post-Popen
-    from contextor.core.live_state.ipc import LiveEndpoint
-
-    def mock_connect(r):
-        if not spawned[0]:
-            return None
-        ep_file.write_text(json.dumps(payload), encoding="utf-8")
-        return LiveStateClient(LiveEndpoint(server.endpoint.host, server.endpoint.port, server.endpoint.authkey_hex, pid=54321, owner_token="race-token"))
-
-    # When connect_or_start runs, post-Popen sees ep.pid (54321) != proc.pid (dummy_pid)
-    monkeypatch.setattr("contextor.core.live_state.runtime.connect", mock_connect)
-
     try:
-        client = connect_or_start(repo, owner_token="race-token")
-        # Invariant 1: ep.pid != proc.pid -> is_owner must be False
-        assert client.is_owner is False
-        assert client.service_pid == 54321
-
-        # Invariant 1: losing spawned proc (dummy_pid) must be terminated
-        time.sleep(0.2)
-        assert _is_pid_alive(dummy_pid) is False
+        with pytest.raises(EndpointSchemaError):
+            connect_or_start(repo, owner_token="race-token")
     finally:
         server.close()
         thread.join(timeout=2)
-        try:
-            dummy_proc.kill()
-        except OSError:
-            pass
 
 
 def test_connect_or_start_ownership_when_reconnecting_existing(tmp_path, monkeypatch):
@@ -1062,7 +1051,7 @@ def test_connect_or_start_replaces_proven_orphan_with_dead_owner(tmp_path, monke
     try:
         # connect_or_start detects owner 99999999 is dead -> stops orphan and spawns fresh owned runtime
         client = connect_or_start(repo, owner_pid=os.getpid(), owner_token="orphan-replacer")
-        assert client.is_owner is True
+        assert client.is_owner is False
         assert client.owner_token == "orphan-replacer"
         assert client.owner_pid == os.getpid()
         assert client.service_pid != orphan_pid
@@ -1074,7 +1063,7 @@ def test_connect_or_start_replaces_proven_orphan_with_dead_owner(tmp_path, monke
             pass
 
 
-def test_connect_or_start_preserves_legacy_endpoint_without_owner_pid(tmp_path, monkeypatch):
+def test_connect_or_start_rejects_legacy_endpoint_without_owner_pid(tmp_path, monkeypatch):
     cache = tmp_path / "cache"
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -1098,12 +1087,8 @@ def test_connect_or_start_preserves_legacy_endpoint_without_owner_pid(tmp_path, 
     ep_file.write_text(json.dumps(legacy_payload), encoding="utf-8")
 
     try:
-        client = connect_or_start(repo, owner_pid=12345, owner_token="caller-token")
-        # Should reuse legacy service without killing it, marked as unowned
-        assert client.is_owner is False
-        assert client.owner_pid is None
-        assert client.owner_token is None
-        assert client.service_pid == 54321
+        with pytest.raises(EndpointSchemaError):
+            connect_or_start(repo, owner_pid=12345, owner_token="caller-token")
     finally:
         server.close()
         thread.join(timeout=2)
@@ -1168,7 +1153,7 @@ def test_endpoint_cleanup_does_not_delete_newer_pid_endpoint(tmp_path, monkeypat
             pass
 
 
-def test_owner_token_identity_grants_ownership_only_to_token_holder(tmp_path, monkeypatch):
+def test_owner_token_is_metadata_only_for_protocol_clients(tmp_path, monkeypatch):
     cache = tmp_path / "cache"
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -1180,7 +1165,7 @@ def test_owner_token_identity_grants_ownership_only_to_token_holder(tmp_path, mo
 
     client_a = connect_or_start(repo, owner_pid=os.getpid(), owner_token=token_a)
     try:
-        assert client_a.is_owner is True
+        assert client_a.is_owner is False
         assert client_a.owner_token == token_a
         assert client_a.owner_pid == os.getpid()
 
@@ -1190,9 +1175,9 @@ def test_owner_token_identity_grants_ownership_only_to_token_holder(tmp_path, mo
         assert client_b.owner_token == token_a
         assert client_b.service_pid == client_a.service_pid
 
-        # Caller A reconnects with same token A -> is_owner must be True
+        # Caller A reconnects with same token A -> protocol clients remain non-owners
         client_a_reconnected = connect_or_start(repo, owner_pid=os.getpid(), owner_token=token_a)
-        assert client_a_reconnected.is_owner is True
+        assert client_a_reconnected.is_owner is False
         assert client_a_reconnected.owner_token == token_a
         assert client_a_reconnected.service_pid == client_a.service_pid
     finally:
@@ -1246,12 +1231,10 @@ def test_concurrent_connect_or_start_creates_single_service(tmp_path, monkeypatc
     # Exactly one client should be the owner, and all 3 must share the same service_pid
     service_pids = {client.service_pid for _, client in results}
     assert len(service_pids) == 1
-    owners = [token for token, client in results if client.is_owner]
-    assert len(owners) == 1
+    assert all(not client.is_owner for _, client in results)
 
-    # Cleanup the service using the owner client
-    owner_client = [c for _, c in results if c.is_owner][0]
-    owner_client.request("shutdown")
+    # Cleanup the service using any protocol client.
+    results[0][1].request("shutdown")
 
 
 def test_watchdog_terminates_runtime_when_owner_process_dies(tmp_path, monkeypatch):
@@ -1447,36 +1430,14 @@ def test_connect_or_start_slow_healthy_startup(tmp_path, monkeypatch):
     PersistentIdentityRegistry(str(repo))
     monkeypatch.setenv("CONTEXTOR_CACHE_DIR", str(cache))
 
-    # Helper script that sleeps 0.25s before writing endpoint and serving
-    helper = tmp_path / "delayed_server.py"
-    helper.write_text(
-        "import sys, time, json, os, pathlib\n"
-        "from contextor.core.live_state import CanonicalLiveServer\n"
-        "from contextor.core.live_state.runtime import endpoint_file\n"
-        "time.sleep(0.25)\n"
-        "server = CanonicalLiveServer(None, revision=1)\n"
-        "ep_file = endpoint_file(pathlib.Path(sys.argv[1]))\n"
-        "ep_file.parent.mkdir(parents=True, exist_ok=True)\n"
-        "ep_file.write_text(json.dumps({\n"
-        "    'host': server.endpoint.host,\n"
-        "    'port': server.endpoint.port,\n"
-        "    'authkey_hex': server.endpoint.authkey_hex,\n"
-        "    'pid': os.getpid(),\n"
-        "    'repo_id': 'test_repo',\n"
-        "    'root_path': sys.argv[1],\n"
-        "    'owner_token': 'delayed_token',\n"
-        "}), encoding='utf-8')\n"
-        "server.serve_forever()\n",
-        encoding="utf-8",
-    )
-
-    # Monkeypatch _spawn_runtime_subprocess to run our delayed server
+    # Delay the real authority spawn; the authority itself still publishes the
+    # complete endpoint schema only after lease acquisition and bind.
     from contextor.core.live_state import runtime as runtime_mod
     orig_spawn = runtime_mod._spawn_runtime_subprocess
 
     def mock_spawn(cmd, cwd, env):
-        delayed_cmd = [sys.executable, str(helper), str(repo)]
-        return orig_spawn(delayed_cmd, cwd, env)
+        time.sleep(0.25)
+        return orig_spawn(cmd, cwd, env)
 
     monkeypatch.setattr(runtime_mod, "_spawn_runtime_subprocess", mock_spawn)
 

@@ -5,6 +5,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from contextor.core.live_state import connect_or_start
 from contextor.core.reporting_engine.persistent_registry import PersistentIdentityRegistry
 from contextor.ui import gui
 from contextor.ui.gui import (
@@ -146,6 +147,43 @@ def test_initial_success(tmp_path, monkeypatch):
     assert controller._live_start_retry_attempt == 0
     assert controller._live_start_retry_after_id is None
     assert len(root.scheduled) == 0
+
+
+def test_second_desktop_is_rejected_before_gui_cache_touch(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    PersistentIdentityRegistry(str(repo))
+    monkeypatch.setenv("CONTEXTOR_CACHE_DIR", str(tmp_path / "cache"))
+    desktop_a = connect_or_start(repo, client_kind="desktop", desktop_instance_id="desktop-a")
+    controller = _make_controller(repo)
+    controller.desktop_instance_id = "desktop-b"
+    watcher_instances = []
+
+    class Watcher:
+        def __init__(self, *args, **kwargs):
+            watcher_instances.append(self)
+
+        def start(self):
+            pass
+
+    monkeypatch.setattr(gui, "DesktopLiveWatcher", Watcher)
+    monkeypatch.setattr(
+        gui,
+        "migrate_legacy_snapshot",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("cache touched before admission")
+        ),
+    )
+    try:
+        ContextorGUI._start_live_watcher(controller, str(repo))
+        assert watcher_instances == []
+        assert controller.live_watcher is None
+        assert any("already active" in status for status in controller._statuses)
+    finally:
+        try:
+            desktop_a.request("shutdown", timeout=1.0)
+        except Exception:
+            pass
 
 
 def test_timeout_then_success(tmp_path, monkeypatch):

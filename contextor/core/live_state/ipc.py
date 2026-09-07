@@ -14,6 +14,8 @@ from dataclasses import dataclass
 from multiprocessing.connection import Client, Listener
 from typing import Any, Callable, Mapping
 
+from contextor.core.live_state.runtime_lease import ProcessIdentity
+
 
 LIVE_PROTOCOL_VERSION = 3
 LIVE_ENDPOINT_SCHEMA_VERSION = 2
@@ -237,6 +239,10 @@ class CanonicalLiveServer:
         authkey: bytes | None = None,
         retention: int = ACTIVITY_EVENT_RETENTION,
         authority_identity: Mapping[str, Any] | None = None,
+        desktop_claim: Mapping[str, Any] | None = None,
+        desktop_claim_reader: Callable[[], Mapping[str, Any] | None] | None = None,
+        desktop_claim_acquirer: Callable[[str, int, str], Mapping[str, Any]] | None = None,
+        desktop_claim_releaser: Callable[[str, int, str], None] | None = None,
     ):
         if revision is not None and (
             isinstance(revision, bool)
@@ -281,6 +287,10 @@ class CanonicalLiveServer:
         self._stop = threading.Event()
         self._authkey = authkey or secrets.token_bytes(32)
         self._authority_identity = dict(authority_identity or {})
+        self._desktop_claim = dict(desktop_claim) if desktop_claim is not None else None
+        self._desktop_claim_reader = desktop_claim_reader
+        self._desktop_claim_acquirer = desktop_claim_acquirer
+        self._desktop_claim_releaser = desktop_claim_releaser
         self._listener = Listener(("127.0.0.1", 0), family="AF_INET", authkey=self._authkey)
         host, port = self._listener.address
         self.endpoint = LiveEndpoint(
@@ -380,6 +390,22 @@ class CanonicalLiveServer:
         )
         return event
 
+    def _claim_identity_matches_request(self, request: Mapping[str, Any]) -> bool:
+        for field in (
+            "runtime_domain_id",
+            "service_instance_id",
+            "lease_generation",
+        ):
+            if request.get(field) != self._authority_identity.get(field):
+                return False
+        return True
+
+    def _current_desktop_claim(self) -> dict[str, Any] | None:
+        if self._desktop_claim_reader is not None:
+            claim = self._desktop_claim_reader()
+            self._desktop_claim = dict(claim) if claim is not None else None
+        return copy.deepcopy(self._desktop_claim) if self._desktop_claim is not None else None
+
     def serve_forever(self) -> None:
         while not self._stop.is_set():
             try:
@@ -428,6 +454,92 @@ class CanonicalLiveServer:
                     "process_start_identity": self._authority_identity.get("process_start_identity"),
                     "endpoint_fingerprint": self.endpoint.fingerprint(),
                 }
+            if operation == "desktop_claim_status":
+                try:
+                    claim = self._current_desktop_claim()
+                except Exception as exc:
+                    return {"status": "error", "error": f"desktop_claim_unavailable: {exc}"}
+                return {"status": "ok", "desktop_claim": claim}
+            if operation == "claim_desktop":
+                if request.get("client_kind") != "desktop":
+                    return {"status": "error", "error": "desktop_claim_requires_desktop_client"}
+                desktop_id = request.get("desktop_instance_id")
+                if not isinstance(desktop_id, str) or not desktop_id.strip():
+                    return {"status": "error", "error": "desktop_instance_id_required"}
+                if (
+                    isinstance(request.get("desktop_pid"), bool)
+                    or not isinstance(request.get("desktop_pid"), int)
+                    or request.get("desktop_pid") <= 0
+                    or not isinstance(request.get("desktop_process_start_identity"), str)
+                    or not request.get("desktop_process_start_identity").strip()
+                ):
+                    return {"status": "error", "error": "desktop_process_identity_required"}
+                if not self._claim_identity_matches_request(request):
+                    return {"status": "error", "error": "desktop_claim_identity_mismatch"}
+                try:
+                    if self._desktop_claim_acquirer is not None:
+                        claim = self._desktop_claim_acquirer(
+                            desktop_id.strip(),
+                            request["desktop_pid"],
+                            request["desktop_process_start_identity"].strip(),
+                        )
+                    else:
+                        current = self._current_desktop_claim()
+                        if current is not None and current.get("desktop_instance_id") != desktop_id.strip():
+                            return {
+                                "status": "error",
+                                "error": "second_desktop_active",
+                                "desktop_claim": current,
+                            }
+                        claim = current or {
+                            "runtime_domain_id": self._authority_identity.get("runtime_domain_id"),
+                            "service_instance_id": self._authority_identity.get("service_instance_id"),
+                            "lease_generation": self._authority_identity.get("lease_generation"),
+                            "desktop_instance_id": desktop_id.strip(),
+                            "desktop_pid": request["desktop_pid"],
+                            "desktop_process_start_identity": request["desktop_process_start_identity"].strip(),
+                        }
+                except Exception as exc:
+                    if exc.__class__.__name__ == "DesktopClaimAlreadyHeld":
+                        return {
+                            "status": "error",
+                            "error": "second_desktop_active",
+                            "desktop_claim": self._current_desktop_claim(),
+                        }
+                    return {"status": "error", "error": str(exc)}
+                self._desktop_claim = dict(claim)
+                return {"status": "ok", "claimed": True, "desktop_claim": copy.deepcopy(self._desktop_claim)}
+            if operation == "release_desktop_claim":
+                if request.get("client_kind") != "desktop":
+                    return {"status": "error", "error": "desktop_claim_requires_desktop_client"}
+                desktop_id = request.get("desktop_instance_id")
+                if not isinstance(desktop_id, str) or not desktop_id.strip():
+                    return {"status": "error", "error": "desktop_instance_id_required"}
+                if (
+                    isinstance(request.get("desktop_pid"), bool)
+                    or not isinstance(request.get("desktop_pid"), int)
+                    or request.get("desktop_pid") <= 0
+                    or not isinstance(request.get("desktop_process_start_identity"), str)
+                    or not request.get("desktop_process_start_identity").strip()
+                ):
+                    return {"status": "error", "error": "desktop_process_identity_required"}
+                if not self._claim_identity_matches_request(request):
+                    return {"status": "error", "error": "desktop_claim_identity_mismatch"}
+                try:
+                    if self._desktop_claim_releaser is not None:
+                        self._desktop_claim_releaser(
+                            desktop_id.strip(),
+                            request["desktop_pid"],
+                            request["desktop_process_start_identity"].strip(),
+                        )
+                    else:
+                        current = self._current_desktop_claim()
+                        if current is not None and current.get("desktop_instance_id") != desktop_id.strip():
+                            return {"status": "error", "error": "desktop_claim_not_owned"}
+                except Exception as exc:
+                    return {"status": "error", "error": str(exc)}
+                self._desktop_claim = None
+                return {"status": "ok", "released": True, "desktop_claim": None}
             if operation == "snapshot":
                 return {"status": "ok", "revision": self._revision, "state": self._state}
             if operation == "publish":
@@ -816,6 +928,7 @@ class LiveStateClient:
         self.owner_pid = owner_pid if owner_pid is not None else getattr(endpoint, "owner_pid", None)
         self.owner_token = owner_token if owner_token is not None else getattr(endpoint, "owner_token", None)
         self.desktop_instance_id = getattr(endpoint, "desktop_instance_id", None)
+        self.desktop_process_identity: ProcessIdentity | None = None
 
     def request(
         self, operation: str, *, timeout: float = 30.0, **payload: Any
@@ -846,6 +959,41 @@ class LiveStateClient:
 
     def authority_status(self) -> dict[str, Any]:
         return self.request("authority_status")
+
+    def desktop_claim_status(self) -> dict[str, Any]:
+        return self.request("desktop_claim_status")
+
+    def claim_desktop(
+        self,
+        desktop_instance_id: str,
+        desktop_process_identity: ProcessIdentity,
+    ) -> dict[str, Any]:
+        return self.request(
+            "claim_desktop",
+            client_kind="desktop",
+            desktop_instance_id=desktop_instance_id,
+            desktop_pid=desktop_process_identity.pid,
+            desktop_process_start_identity=desktop_process_identity.process_start_identity,
+            runtime_domain_id=self.endpoint.runtime_domain_id,
+            service_instance_id=self.endpoint.service_instance_id,
+            lease_generation=self.endpoint.lease_generation,
+        )
+
+    def release_desktop_claim(
+        self,
+        desktop_instance_id: str,
+        desktop_process_identity: ProcessIdentity,
+    ) -> dict[str, Any]:
+        return self.request(
+            "release_desktop_claim",
+            client_kind="desktop",
+            desktop_instance_id=desktop_instance_id,
+            desktop_pid=desktop_process_identity.pid,
+            desktop_process_start_identity=desktop_process_identity.process_start_identity,
+            runtime_domain_id=self.endpoint.runtime_domain_id,
+            service_instance_id=self.endpoint.service_instance_id,
+            lease_generation=self.endpoint.lease_generation,
+        )
 
     def snapshot(self) -> dict[str, Any]:
         return self.request("snapshot")

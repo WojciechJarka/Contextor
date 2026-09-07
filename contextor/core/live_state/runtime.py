@@ -10,7 +10,7 @@ import sys
 import threading
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 from contextor.core.paths import repo_cache_dir
 from contextor.core.repository_identity import (
@@ -23,7 +23,9 @@ from contextor.core.live_state.runtime_lease import (
     LeaseRecoveryRequired,
     LivenessResult,
     LivenessStatus,
+    ProcessIdentity,
     RuntimeLease,
+    RuntimeLeaseError,
     RuntimeLeaseManager,
 )
 
@@ -289,6 +291,45 @@ def _status_matches_endpoint(status: dict[str, Any], endpoint: LiveEndpoint) -> 
     )
 
 
+def _validated_desktop_claim(status: Mapping[str, Any], endpoint: LiveEndpoint) -> dict[str, Any] | None:
+    claim = status.get("desktop_claim")
+    if claim is None:
+        return None
+    if not isinstance(claim, Mapping):
+        raise EndpointSchemaError("desktop_claim_status desktop_claim is malformed")
+    required = {
+        "runtime_domain_id",
+        "service_instance_id",
+        "lease_generation",
+        "desktop_instance_id",
+        "desktop_pid",
+        "desktop_process_start_identity",
+    }
+    if not required.issubset(set(claim)):
+        raise EndpointSchemaError("desktop_claim_status desktop_claim fields are malformed")
+    if (
+        claim["runtime_domain_id"] != endpoint.runtime_domain_id
+        or claim["service_instance_id"] != endpoint.service_instance_id
+        or int(claim["lease_generation"]) != endpoint.lease_generation
+        or not isinstance(claim["desktop_instance_id"], str)
+        or not claim["desktop_instance_id"].strip()
+        or isinstance(claim["desktop_pid"], bool)
+        or not isinstance(claim["desktop_pid"], int)
+        or claim["desktop_pid"] <= 0
+        or not isinstance(claim["desktop_process_start_identity"], str)
+        or not claim["desktop_process_start_identity"].strip()
+    ):
+        raise EndpointSchemaError("desktop_claim_status desktop_claim identity does not match endpoint")
+    return {
+        "runtime_domain_id": str(claim["runtime_domain_id"]),
+        "service_instance_id": str(claim["service_instance_id"]),
+        "lease_generation": int(claim["lease_generation"]),
+        "desktop_instance_id": claim["desktop_instance_id"].strip(),
+        "desktop_pid": int(claim["desktop_pid"]),
+        "desktop_process_start_identity": claim["desktop_process_start_identity"].strip(),
+    }
+
+
 class AuthorityLivenessVerifier:
     """Composite process-start and authenticated authority-status verifier."""
 
@@ -324,7 +365,7 @@ class AuthorityLivenessVerifier:
                     process_identity_matches=process_matches,
                     endpoint_available=False,
                     endpoint_matches=False,
-                    reason=f"process is stale and authority endpoint is unavailable: {endpoint_reason}",
+                    reason=f"process is stale and authority endpoint is unavailable or invalid: {endpoint_reason}",
                     endpoint_evidence_verified=True,
                 )
             return LivenessResult(
@@ -342,14 +383,31 @@ class AuthorityLivenessVerifier:
             and endpoint.pid == lease.service_pid
             and endpoint.process_start_identity == lease.process_start_identity
         )
-        if not endpoint_matches:
-            if process_stale:
+        try:
+            status = LiveStateClient(endpoint).authority_status()
+        except (OSError, EOFError, ConnectionError, TimeoutError, RuntimeError) as exc:
+            try:
+                _endpoint_image, endpoint_creation, endpoint_alive = _process_identity(endpoint.pid)
+            except Exception:
+                endpoint_alive = None
+                endpoint_creation = None
+            endpoint_is_dead = endpoint_alive is False
+            if not endpoint_matches and process_stale and endpoint_is_dead:
                 return LivenessResult.stale(
                     process_alive=bool(alive),
                     process_identity_matches=process_matches,
-                    endpoint_available=True,
-                    endpoint_matches=False,
-                    reason="stale process and mismatched authority endpoint identity",
+                    endpoint_available=False,
+                    endpoint_matches=None,
+                    reason=f"stale process and dead mismatched authority endpoint: {exc}",
+                    endpoint_evidence_verified=True,
+                )
+            if endpoint_matches and process_stale and endpoint_is_dead:
+                return LivenessResult.stale(
+                    process_alive=bool(alive),
+                    process_identity_matches=process_matches,
+                    endpoint_available=False,
+                    endpoint_matches=True,
+                    reason=f"stale process and dead authority endpoint: {exc}",
                     endpoint_evidence_verified=True,
                 )
             return LivenessResult(
@@ -357,43 +415,33 @@ class AuthorityLivenessVerifier:
                 bool(alive),
                 process_matches,
                 True,
-                False,
-                "authority endpoint identity does not match the lease",
-            )
-
-        try:
-            status = LiveStateClient(endpoint).authority_status()
-        except (OSError, EOFError, ConnectionError, TimeoutError, RuntimeError) as exc:
-            if process_stale:
-                return LivenessResult.stale(
-                    process_alive=bool(alive),
-                    process_identity_matches=process_matches,
-                    endpoint_available=False,
-                    endpoint_matches=None,
-                    reason=f"stale process and unavailable authority status: {exc}",
-                    endpoint_evidence_verified=True,
-                )
-            return LivenessResult(
-                LivenessStatus.UNKNOWN,
-                bool(alive),
-                process_matches,
-                False,
-                None,
+                endpoint_matches,
                 f"authority status unavailable: {exc}",
             )
 
         status_matches = _status_matches_endpoint(status, endpoint)
+        if not endpoint_matches:
+            if status_matches:
+                return LivenessResult(
+                    LivenessStatus.FOREIGN_LIVE,
+                    bool(alive),
+                    process_matches,
+                    True,
+                    False,
+                    "authenticated LIVE endpoint belongs to another service instance or generation",
+                    False,
+                )
+            return LivenessResult(
+                LivenessStatus.AMBIGUOUS,
+                bool(alive),
+                process_matches,
+                True,
+                False,
+                "mismatched endpoint responded but did not prove a coherent authority identity",
+                False,
+            )
         if process_matches and status_matches:
             return LivenessResult.live("exact process identity and authority status match")
-        if process_stale and not status_matches:
-            return LivenessResult.stale(
-                process_alive=bool(alive),
-                process_identity_matches=process_matches,
-                endpoint_available=True,
-                endpoint_matches=False,
-                reason="stale process and mismatched authority status",
-                endpoint_evidence_verified=True,
-            )
         return LivenessResult(
             LivenessStatus.UNKNOWN,
             bool(alive),
@@ -413,7 +461,12 @@ def _verified_existing_client(
     desktop_instance_id: str | None = None,
     owner_token: str | None = None,
 ) -> LiveStateClient | None:
-    endpoint = _read_endpoint(root, strict=True)
+    try:
+        endpoint = _read_endpoint(root, strict=True)
+    except EndpointSchemaError as exc:
+        if isinstance(exc.__cause__, PermissionError):
+            return None
+        raise
     if endpoint is None or not _endpoint_matches_domain(endpoint, domain):
         return None
     try:
@@ -464,17 +517,7 @@ def _verified_existing_client(
         return None
     client = LiveStateClient(
         endpoint,
-        is_owner=(
-            (
-                desktop_instance_id is not None
-                and endpoint.desktop_instance_id == desktop_instance_id
-            )
-            or (
-                desktop_instance_id is None
-                and endpoint.owner_token is not None
-                and endpoint.owner_token == owner_token
-            )
-        ),
+        is_owner=False,
         service_pid=endpoint.pid,
         owner_pid=endpoint.owner_pid,
         owner_token=endpoint.owner_token,
@@ -496,6 +539,38 @@ def connect(repo_path: str | Path) -> LiveStateClient | None:
         return _verified_existing_client(root, identity, domain, manager)
     except EndpointSchemaError:
         return None
+
+
+def _admit_desktop(
+    client: LiveStateClient,
+    desktop_instance_id: str,
+    desktop_process_identity: ProcessIdentity,
+) -> LiveStateClient:
+    try:
+        claim_status = client.desktop_claim_status()
+    except (OSError, EOFError, ConnectionError, TimeoutError, RuntimeError) as exc:
+        raise RuntimeError(f"Desktop admission authority is unavailable: {exc}") from exc
+    if claim_status.get("status") != "ok":
+        raise RuntimeError(
+            str(claim_status.get("error") or "Desktop admission claim status was unavailable")
+        )
+    try:
+        _validated_desktop_claim(claim_status, client.endpoint)
+    except (EndpointSchemaError, ValueError, TypeError) as exc:
+        raise RuntimeError(f"Desktop admission claim status is invalid: {exc}") from exc
+    try:
+        response = client.claim_desktop(desktop_instance_id, desktop_process_identity)
+    except (OSError, EOFError, ConnectionError, TimeoutError, RuntimeError) as exc:
+        raise RuntimeError(f"Desktop admission authority is unavailable: {exc}") from exc
+    if response.get("status") == "ok" and response.get("claimed") is True:
+        client.is_owner = True
+        client.desktop_instance_id = desktop_instance_id
+        client.desktop_claim = response.get("desktop_claim")
+        client.desktop_process_identity = desktop_process_identity
+        return client
+    if response.get("error") == "second_desktop_active":
+        raise SecondDesktopActive("repository already active in another Contextor Desktop")
+    raise RuntimeError(str(response.get("error") or "Desktop admission claim was rejected"))
 
 
 def connect_existing_with_status(
@@ -670,12 +745,24 @@ def connect_or_start(
     owner_pid: int | None = None,
     owner_token: str | None = None,
     desktop_instance_id: str | None = None,
+    desktop_process_start_identity: str | None = None,
     client_kind: str = "protocol",
     timeout: float = DEFAULT_CONNECT_TIMEOUT,
     cold_start_timeout: float = DEFAULT_COLD_START_TIMEOUT,
 ) -> LiveStateClient:
     root = Path(repo_path).expanduser().resolve()
     identity = require_repository_identity(root)
+    if client_kind == "desktop" and not isinstance(desktop_instance_id, str):
+        raise ValueError("desktop_instance_id is required for Desktop admission")
+    desktop_process_identity = None
+    if client_kind == "desktop":
+        desktop_pid = owner_pid if owner_pid is not None else os.getpid()
+        if owner_pid is None:
+            owner_pid = desktop_pid
+        if desktop_process_start_identity is None:
+            desktop_process_identity = ProcessIdentity.current(desktop_pid)
+        else:
+            desktop_process_identity = ProcessIdentity(desktop_pid, desktop_process_start_identity)
     domain = _production_domain(identity)
     manager = RuntimeLeaseManager(
         domain,
@@ -683,8 +770,8 @@ def connect_or_start(
     )
     try:
         endpoint = _read_endpoint(root, strict=True)
-    except EndpointSchemaError:
-        if endpoint_file(root).exists():
+    except EndpointSchemaError as exc:
+        if endpoint_file(root).exists() and not isinstance(exc.__cause__, PermissionError):
             raise
         endpoint = None
     if endpoint is not None and not _endpoint_matches_domain(endpoint, domain):
@@ -699,15 +786,8 @@ def connect_or_start(
         owner_token=owner_token,
     )
     if existing is not None:
-        if (
-            client_kind == "desktop"
-            and endpoint is not None
-            and endpoint.desktop_instance_id is not None
-            and endpoint.desktop_instance_id != desktop_instance_id
-        ):
-            raise SecondDesktopActive(
-                "repository already active in another Contextor Desktop"
-            )
+        if client_kind == "desktop":
+            return _admit_desktop(existing, str(desktop_instance_id), desktop_process_identity)
         return existing
 
     record = manager.read_generation()
@@ -733,16 +813,8 @@ def connect_or_start(
             owner_token=owner_token,
         )
         if existing is not None:
-            ep = _read_endpoint(root, strict=True)
-            if (
-                client_kind == "desktop"
-                and ep is not None
-                and ep.desktop_instance_id is not None
-                and ep.desktop_instance_id != desktop_instance_id
-            ):
-                raise SecondDesktopActive(
-                    "repository already active in another Contextor Desktop"
-                )
+            if client_kind == "desktop":
+                return _admit_desktop(existing, str(desktop_instance_id), desktop_process_identity)
             return existing
         try:
             lock_fd = os.open(start_lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
@@ -768,6 +840,8 @@ def connect_or_start(
             owner_token=owner_token,
         )
         if existing is not None:
+            if client_kind == "desktop":
+                return _admit_desktop(existing, str(desktop_instance_id), desktop_process_identity)
             return existing
 
         cmd = [sys.executable, "-m", "contextor.core.live_state.runtime", "--repo", str(root)]
@@ -777,6 +851,8 @@ def connect_or_start(
             cmd.extend(["--owner-token", str(owner_token)])
         if desktop_instance_id is not None:
             cmd.extend(["--desktop-instance-id", str(desktop_instance_id)])
+        if client_kind == "desktop" and desktop_process_identity is not None:
+            cmd.extend(["--desktop-process-start-identity", desktop_process_identity.process_start_identity])
 
         from contextor.core.paths import package_root
 
@@ -800,18 +876,13 @@ def connect_or_start(
                 owner_token=owner_token,
             )
             if client is not None:
-                endpoint = _read_endpoint(root, strict=True)
-                if (
-                    client_kind == "desktop"
-                    and endpoint is not None
-                    and endpoint.desktop_instance_id is not None
-                    and endpoint.desktop_instance_id != desktop_instance_id
-                ):
-                    if proc is not None and _is_pid_alive(proc.pid):
-                        _terminate_pid_tree(proc.pid)
-                    raise SecondDesktopActive(
-                        "repository already active in another Contextor Desktop"
-                    )
+                if client_kind == "desktop":
+                    try:
+                        return _admit_desktop(client, str(desktop_instance_id), desktop_process_identity)
+                    except SecondDesktopActive:
+                        if proc is not None and _is_pid_alive(proc.pid):
+                            _terminate_pid_tree(proc.pid)
+                        raise
                 return client
             if proc.poll() is not None:
                 raise RuntimeError(
@@ -909,6 +980,7 @@ def run_service(
     owner_pid: int | None = None,
     owner_token: str | None = None,
     desktop_instance_id: str | None = None,
+    desktop_process_start_identity: str | None = None,
 ) -> None:
     root = Path(repo_path).expanduser().resolve()
     identity = require_repository_identity(root)
@@ -920,8 +992,18 @@ def run_service(
     lease = None
     server = None
     published_endpoint = None
+    desktop_claim = None
+    ownership_resolved = False
     try:
         lease = manager.acquire()
+        if desktop_instance_id is not None:
+            if owner_pid is None or desktop_process_start_identity is None:
+                raise RuntimeLeaseError("Desktop claim process identity is required")
+            desktop_claim = manager.claim_desktop(
+                lease,
+                desktop_instance_id,
+                ProcessIdentity(owner_pid, desktop_process_start_identity),
+            )
         cache = migrate_legacy_snapshot(root)
         loaded = load_snapshot(
             cache,
@@ -976,6 +1058,18 @@ def run_service(
             updater=_repository_updater(root, adapter_holder),
             persister=_repository_persister(root, adapter_holder),
             authority_identity=authority_identity,
+            desktop_claim=desktop_claim,
+            desktop_claim_reader=lambda: manager.read_desktop_claim(lease),
+            desktop_claim_acquirer=lambda desktop_id, desktop_pid, desktop_start: manager.claim_desktop(
+                lease,
+                desktop_id,
+                ProcessIdentity(desktop_pid, desktop_start),
+            ),
+            desktop_claim_releaser=lambda desktop_id, desktop_pid, desktop_start: manager.release_desktop_claim(
+                lease,
+                desktop_id,
+                ProcessIdentity(desktop_pid, desktop_start),
+            ),
         )
         published_endpoint = _authority_endpoint_from_server(
             server,
@@ -1062,8 +1156,21 @@ def run_service(
         if server is not None:
             server.close()
         if lease is not None:
+            if published_endpoint is not None:
+                try:
+                    manager.reconcile_endpoint_binding(lease, published_endpoint.fingerprint())
+                except Exception as exc:
+                    _safe_trace_event(
+                        "LIVE",
+                        "AUTHORITY_BIND_RECONCILE_FAIL",
+                        repo=str(root),
+                        error=str(exc),
+                        service_instance_id=lease.service_instance_id,
+                        lease_generation=lease.lease_generation,
+                    )
             try:
                 manager.release(lease)
+                ownership_resolved = True
             except Exception as exc:
                 _safe_trace_event(
                     "LIVE",
@@ -1073,7 +1180,19 @@ def run_service(
                     service_instance_id=lease.service_instance_id,
                     lease_generation=lease.lease_generation,
                 )
-        if published_endpoint is not None:
+                try:
+                    manager.fence_owner(lease)
+                    ownership_resolved = True
+                except Exception as fence_exc:
+                    _safe_trace_event(
+                        "LIVE",
+                        "AUTHORITY_FENCE_FAIL",
+                        repo=str(root),
+                        error=str(fence_exc),
+                        service_instance_id=lease.service_instance_id,
+                        lease_generation=lease.lease_generation,
+                    )
+        if published_endpoint is not None and ownership_resolved:
             _remove_endpoint_if_exact(root, published_endpoint)
 
 
@@ -1083,12 +1202,14 @@ def main() -> None:
     parser.add_argument("--owner-pid", type=int, default=None)
     parser.add_argument("--owner-token", type=str, default=None)
     parser.add_argument("--desktop-instance-id", type=str, default=None)
+    parser.add_argument("--desktop-process-start-identity", type=str, default=None)
     args = parser.parse_args()
     run_service(
         args.repo,
         owner_pid=args.owner_pid,
         owner_token=args.owner_token,
         desktop_instance_id=args.desktop_instance_id,
+        desktop_process_start_identity=args.desktop_process_start_identity,
     )
 
 

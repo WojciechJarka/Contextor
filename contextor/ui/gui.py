@@ -22,6 +22,7 @@ from contextor.core.live_state import (
     DesktopLiveWatcher,
     SecondDesktopActive,
     connect_or_start,
+    migrate_legacy_snapshot,
 )
 from contextor.core.repository_identity import (
     RepositoryIdentityError,
@@ -841,10 +842,6 @@ class ContextorGUI:
             return
 
         try:
-            from contextor.core.live_state import migrate_legacy_snapshot
-            from contextor.core.paths import repo_cache_dir
-
-            cache = migrate_legacy_snapshot(path)
             connect_kwargs = {
                 "owner_pid": os.getpid(),
                 "owner_token": getattr(self, "owner_token", None),
@@ -859,6 +856,7 @@ class ContextorGUI:
             client = connect_or_start(path, **connect_kwargs)
             self.live_client = client
             clients[identity.repo_id] = client
+            cache = migrate_legacy_snapshot(path)
             if getattr(self, "_live_start_retry_after_id", None) is not None:
                 if hasattr(self, "root") and hasattr(self.root, "after_cancel"):
                     try:
@@ -1155,10 +1153,23 @@ class ContextorGUI:
             clients.append(live_client)
 
         gui_owner_token = getattr(self, "owner_token", None)
+        gui_desktop_id = getattr(self, "desktop_instance_id", None)
         for client in clients:
             is_owner = getattr(client, "is_owner", False)
             client_token = getattr(client, "owner_token", None)
             service_pid = getattr(client, "service_pid", None)
+
+            if (
+                gui_desktop_id is not None
+                and getattr(client, "desktop_instance_id", None) == gui_desktop_id
+                and hasattr(client, "release_desktop_claim")
+            ):
+                try:
+                    desktop_identity = getattr(client, "desktop_process_identity", None)
+                    if desktop_identity is not None:
+                        client.release_desktop_claim(gui_desktop_id, desktop_identity)
+                except Exception:
+                    pass
 
             can_shutdown = (
                 is_owner is True
