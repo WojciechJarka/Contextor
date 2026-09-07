@@ -17,6 +17,7 @@ _DIRECTIONS = ("upstream", "downstream", "both")
 _MAX_DEPTH = 4
 _STORE_ID = "store:live_snapshot"
 _UNAVAILABLE_EDGE_TYPES = {"READS", "UPDATES", "PERSISTS", "HYDRATES", "PROJECTS", "EXPOSES"}
+_STATUS_RANK = {"fresh": 0, "partial": 1, "stale": 2, "unavailable": 3}
 
 
 def _symbol(module: str, name: str) -> str:
@@ -45,18 +46,35 @@ _SPECS: dict[str, dict[str, Any]] = {
                 ),
                 "branch": "incremental",
                 "input_kind": "canonical_module_usage_facts",
+                "output": "artifact_consumption_consumer_slice",
             },
         ),
         "updates": (
             _symbol(
-                "contextor.core.analysis.incremental.plan_executor",
-                "_rebuild_consumer_slice",
+                "contextor.core.analysis.incremental.engine",
+                "IncrementalAnalysisEngine._apply_delta_and_commit",
             ),
         ),
         "materializers": (
             _symbol(
-                "contextor.core.analysis.state_manager",
-                "build_canonical_artifact_consumption",
+                "contextor.core.api.facade",
+                "ContextorFacade.analyze_project",
+            ),
+        ),
+        "installers": (
+            (
+                _symbol(
+                    "contextor.core.api.facade",
+                    "ContextorFacade.analyze_project",
+                ),
+                "full",
+            ),
+            (
+                _symbol(
+                    "contextor.core.analysis.incremental.engine",
+                    "IncrementalAnalysisEngine._apply_delta_and_commit",
+                ),
+                "incremental",
             ),
         ),
         "projections": (
@@ -88,6 +106,7 @@ _SPECS: dict[str, dict[str, Any]] = {
                 ),
                 "branch": "full",
                 "input_kind": "repository_index_parse_and_skipped_facts",
+                "output": "syntax_diagnostic_facts",
             },
             {
                 "input": "prepared_source_update",
@@ -107,8 +126,17 @@ _SPECS: dict[str, dict[str, Any]] = {
         ),
         "materializers": (
             _symbol(
-                "contextor.core.analysis.state_manager",
-                "build_syntax_diagnostics_from_index",
+                "contextor.core.api.facade",
+                "ContextorFacade.analyze_project",
+            ),
+        ),
+        "installers": (
+            (
+                _symbol(
+                    "contextor.core.api.facade",
+                    "ContextorFacade.analyze_project",
+                ),
+                "full",
             ),
         ),
         "projections": (
@@ -143,6 +171,7 @@ _SPECS: dict[str, dict[str, Any]] = {
                 ),
                 "branch": "full_baseline_reuse",
                 "input_kind": "current_module_usage_or_extraction_facts",
+                "output": "module_usage_baseline",
             },
             {
                 "input": "incremental_prepared_usage",
@@ -152,6 +181,7 @@ _SPECS: dict[str, dict[str, Any]] = {
                 ),
                 "branch": "incremental_prepared_usage",
                 "input_kind": "prepared_incremental_ast_usage_delta",
+                "output": "prepared_module_usage",
             },
             {
                 "input": "materialization_backfill",
@@ -165,8 +195,8 @@ _SPECS: dict[str, dict[str, Any]] = {
         ),
         "updates": (
             _symbol(
-                "contextor.core.analysis.incremental.preparation",
-                "prepare_source_update",
+                "contextor.core.analysis.incremental.engine",
+                "IncrementalAnalysisEngine._apply_delta_and_commit",
             ),
             _symbol(
                 "contextor.core.analysis.incremental.materialization",
@@ -175,8 +205,24 @@ _SPECS: dict[str, dict[str, Any]] = {
         ),
         "materializers": (
             _symbol(
-                "contextor.core.reference.module_usage_reuse",
-                "build_module_usage_baseline_with_reuse",
+                "contextor.core.api.facade",
+                "ContextorFacade.analyze_project",
+            ),
+        ),
+        "installers": (
+            (
+                _symbol(
+                    "contextor.core.api.facade",
+                    "ContextorFacade.analyze_project",
+                ),
+                "full_baseline_reuse",
+            ),
+            (
+                _symbol(
+                    "contextor.core.analysis.incremental.engine",
+                    "IncrementalAnalysisEngine._apply_delta_and_commit",
+                ),
+                "incremental_prepared_usage",
             ),
         ),
         "projections": (
@@ -385,17 +431,6 @@ def _build_contract(
                 branch=branch["branch"],
             ),
         )
-        _add_edge(
-            edges,
-            producer_id,
-            anchor_id,
-            "PRODUCES",
-            _evidence(
-                "explicit_producer",
-                qualified_symbol=branch["producer"],
-                branch=branch["branch"],
-            ),
-        )
         if branch.get("output"):
             output_id = _add_data_family_node(nodes, branch["output"])
             _add_edge(
@@ -421,18 +456,18 @@ def _build_contract(
                 ),
                 via=branch["producer"],
             )
-
-    # The family anchor is the canonical fact collection entering its state field.
-    _add_edge(
-        edges,
-        anchor_id,
-        state_id,
-        "MATERIALIZES",
-        _evidence(
-            "canonical_state_field",
-            canonical_state_field=f"RepositoryAnalysisState.{spec['state_field']}",
-        ),
-    )
+        else:
+            _add_edge(
+                edges,
+                producer_id,
+                anchor_id,
+                "PRODUCES",
+                _evidence(
+                    "explicit_producer",
+                    qualified_symbol=branch["producer"],
+                    branch=branch["branch"],
+                ),
+            )
 
     for materializer in spec["materializers"]:
         materializer_id = _add_symbol_node(
@@ -448,7 +483,7 @@ def _build_contract(
             state_id,
             "MATERIALIZES",
             _evidence(
-                "canonical_builder_assignment",
+                "canonical_state_installation_owner",
                 qualified_symbol=materializer,
                 canonical_state_field=f"RepositoryAnalysisState.{spec['state_field']}",
             ),
@@ -468,8 +503,29 @@ def _build_contract(
             state_id,
             "UPDATES",
             _evidence(
-                "incremental_candidate_commit",
+                "incremental_state_installation_owner",
                 qualified_symbol=updater,
+                canonical_state_field=f"RepositoryAnalysisState.{spec['state_field']}",
+            ),
+        )
+
+    for installer, branch_name in spec.get("installers", ()):
+        installer_id = _add_symbol_node(
+            nodes,
+            installer,
+            artifact_path_to_id,
+            module_path_to_id,
+            identity_gaps,
+        )
+        _add_edge(
+            edges,
+            anchor_id,
+            installer_id,
+            "READS",
+            _evidence(
+                "canonical_installation_input",
+                qualified_symbol=installer,
+                branch=branch_name,
                 canonical_state_field=f"RepositoryAnalysisState.{spec['state_field']}",
             ),
         )
@@ -578,26 +634,56 @@ def _coverage(state: Any) -> dict[str, int]:
 
 
 def _fallback_freshness(state: Any, engine: Any) -> dict[str, Any]:
-    provenance = getattr(state, "provenance", None) or getattr(engine, "provenance", None) or "snapshot"
+    provenance = getattr(state, "provenance", None) or getattr(engine, "provenance", None) or "unknown"
     revision = getattr(state, "revision", None)
     if revision is None:
         revision = getattr(engine, "revision", None)
     return {
-        "canonical_state": "stale" if getattr(state, "resync_required", False) else "fresh",
+        "canonical_state": "unavailable",
         "workspace_sync": "unverified",
         "canonical_revision": revision,
         "provenance": provenance,
         "families": {},
         "advisory_warning": None,
+        "freshness_evaluation": "failed",
     }
 
 
-def _freshness(root: Path, state: Any, engine: Any, family: str, family_state: str, coverage: dict[str, int] | None) -> dict[str, Any]:
-    try:
-        result = query_helpers.build_state_freshness(root, state, engine=engine)
-    except Exception:
+def _freshness(
+    root: Path,
+    state: Any,
+    engine: Any,
+    family: str,
+    family_state: str,
+    coverage: dict[str, int] | None,
+) -> tuple[dict[str, Any], str | None]:
+    if state is None:
         result = _fallback_freshness(state, engine)
-    result = dict(result)
+        failure_reason = "Canonical freshness evaluation failed; no canonical engine state was available."
+    else:
+        try:
+            candidate = query_helpers.build_state_freshness(root, state, engine=engine)
+            required_fields = {
+                "canonical_state",
+                "workspace_sync",
+                "canonical_revision",
+                "provenance",
+                "families",
+            }
+            if (
+                not isinstance(candidate, dict)
+                or not required_fields <= candidate.keys()
+                or not isinstance(candidate["families"], dict)
+                or candidate["canonical_state"]
+                not in {"fresh", "stale", "unknown", "unavailable"}
+            ):
+                raise TypeError("canonical freshness helper returned a non-mapping result")
+            result = dict(candidate)
+            failure_reason = None
+        except Exception:
+            result = _fallback_freshness(state, engine)
+            failure_reason = "Canonical freshness evaluation failed; canonical freshness evidence is unavailable."
+
     result["resync_required"] = bool(getattr(state, "resync_required", False))
     families = dict(result.get("families") or {})
     families[family] = family_state
@@ -615,7 +701,7 @@ def _freshness(root: Path, state: Any, engine: Any, family: str, family_state: s
             else "partial"
         )
     result["families"] = families
-    return result
+    return result, failure_reason
 
 
 def _family_gate(family: str, state: Any) -> tuple[str, dict[str, int] | None, str | None]:
@@ -704,6 +790,43 @@ def _reachable(
     return nodes, selected_edges
 
 
+def _without_downstream_edges(
+    anchor_id: str,
+    edges: dict[tuple[str, str, str], dict[str, Any]],
+) -> dict[tuple[str, str, str], dict[str, Any]]:
+    downstream_edges: set[tuple[str, str, str]] = set()
+    frontier = {anchor_id}
+    while frontier:
+        next_frontier: set[str] = set()
+        for key, edge in edges.items():
+            if edge["source"] not in frontier or key in downstream_edges:
+                continue
+            downstream_edges.add(key)
+            next_frontier.add(edge["target"])
+        frontier = next_frontier
+    return {
+        key: edge
+        for key, edge in edges.items()
+        if key not in downstream_edges
+    }
+
+
+def _canonical_state_status(canonical_state: str) -> str | None:
+    if canonical_state == "stale":
+        return "stale"
+    if canonical_state in {"unknown", "unavailable"}:
+        return "unavailable"
+    return None
+
+
+def _data_source(provenance: Any) -> str:
+    if provenance == "live":
+        return "live_canonical_state"
+    if provenance == "snapshot":
+        return "snapshot_canonical_state"
+    return "canonical_state_unavailable"
+
+
 def _serialize(result: dict[str, Any], edge_count: int) -> str:
     serialized = json.dumps(result, indent=2, ensure_ascii=False)
     return guard_large_output(
@@ -752,8 +875,9 @@ def get_dataflow_lineage(
         gate_status, coverage, gate_reason = "unavailable", None, "No usable canonical engine state was available."
     else:
         gate_status, coverage, gate_reason = _family_gate(family, state)
+    family_gate_status = gate_status
 
-    freshness = _freshness(
+    freshness, freshness_failure = _freshness(
         root,
         state,
         engine,
@@ -761,8 +885,27 @@ def get_dataflow_lineage(
         "unavailable" if state is None else gate_status,
         coverage,
     )
+    if freshness_failure is not None:
+        gate_status = "unavailable"
+        gate_reason = freshness_failure
+        freshness["families"][family] = "unavailable"
+        if coverage is not None:
+            freshness["families"]["module_usages"] = "unavailable"
     provenance = freshness.get("provenance")
-    data_source = "live_canonical_state" if provenance == "live" else "snapshot_canonical_state"
+    data_source = _data_source(provenance)
+    canonical_state_status = (
+        None
+        if freshness_failure is not None
+        else _canonical_state_status(freshness["canonical_state"])
+    )
+    canonical_state_reason = None
+    if canonical_state_status is not None:
+        canonical_state = freshness["canonical_state"]
+        canonical_state_reason = (
+            f"Canonical freshness helper reported canonical_state={canonical_state}."
+        )
+        if _STATUS_RANK[canonical_state_status] > _STATUS_RANK[gate_status]:
+            gate_status = canonical_state_status
 
     edges = all_edges
     if gate_status in {"unavailable", "stale"} or (
@@ -773,9 +916,38 @@ def get_dataflow_lineage(
             for key, edge in all_edges.items()
             if edge["type"] not in _UNAVAILABLE_EDGE_TYPES
         }
+    if freshness_failure is not None:
+        edges = _without_downstream_edges(anchor_id, edges)
+    elif canonical_state_status is not None:
+        edges = _without_downstream_edges(anchor_id, edges)
 
     unresolved = list(identity_gaps.values())
-    if gate_reason is not None and not (coverage is not None and gate_status == "partial"):
+    if canonical_state_status is not None:
+        unresolved.append(
+            _gap(
+                source=anchor_id,
+                target=state_id,
+                expected_edge="CANONICAL_STATE_FRESHNESS",
+                status=canonical_state_status,
+                reason=canonical_state_reason,
+                kind="canonical_state_freshness",
+                canonical_state=freshness["canonical_state"],
+            )
+        )
+    if freshness_failure is not None:
+        unresolved.append(
+            _gap(
+                source=anchor_id,
+                target=state_id,
+                expected_edge="CANONICAL_FRESHNESS_EVALUATION",
+                status="unavailable",
+                reason=freshness_failure,
+                kind="freshness_evaluation",
+            )
+        )
+    if gate_reason is not None and not (
+        coverage is not None and family_gate_status == "partial"
+    ):
         unresolved.append(
             _gap(
                 source=anchor_id,
@@ -795,7 +967,7 @@ def get_dataflow_lineage(
                 **({"coverage": coverage} if coverage is not None else {}),
             )
         )
-    if coverage is not None and gate_status == "partial":
+    if coverage is not None and family_gate_status == "partial":
         unresolved.append(
             _gap(
                 source=anchor_id,
@@ -809,20 +981,27 @@ def get_dataflow_lineage(
 
     reachable_nodes, selected_edges = _reachable(anchor_id, edges, direction, depth)
     reachable_nodes.add(anchor_id)
-    selected_nodes = [
-        node for node in nodes.values() if node["id"] in reachable_nodes
-    ]
     selected_edges_list = [
         edge for key, edge in edges.items() if key in selected_edges
     ]
-    selected_nodes.sort(key=lambda item: (item["type"], item["id"]))
-    selected_edges_list.sort(key=lambda item: (item["source"], item["target"], item["type"]))
-    selected_node_ids = {item["id"] for item in selected_nodes}
+    selected_node_ids = set(reachable_nodes)
     unresolved = [
         item
         for item in unresolved
         if item.get("kind") != "identity_resolution" or item.get("from") in selected_node_ids
     ]
+    support_node_ids = {anchor_id, state_id}
+    for item in unresolved:
+        for field in ("from", "to"):
+            reference = item.get(field)
+            if reference is not None:
+                support_node_ids.add(reference)
+    selected_node_ids.update(support_node_ids)
+    selected_nodes = [
+        node for node in nodes.values() if node["id"] in selected_node_ids
+    ]
+    selected_nodes.sort(key=lambda item: (item["type"], item["id"]))
+    selected_edges_list.sort(key=lambda item: (item["source"], item["target"], item["type"]))
     unresolved.sort(
         key=lambda item: (
             str(item.get("from") or ""),
