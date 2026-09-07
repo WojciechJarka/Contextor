@@ -1,70 +1,1120 @@
-# STAGE=Canonical Runtime Authority / 1 — FINAL TEST HARDENING
+# STAGE=Canonical Runtime Authority / 2 — RuntimeLease + service generation + stale fencing
 
 ## FILES_CHANGED
 
-- `tests/live_state/test_runtime_domain.py`
+- `contextor/core/live_state/runtime_lease.py`
+- `tests/live_state/test_runtime_lease.py`
 
 ## TESTS_RUN
 
-`C:\\Temp\\Contextor_Repo\\.venv\\Scripts\\python.exe -m pytest -q -rs tests/live_state/test_runtime_domain.py`
+`C:\\Temp\\Contextor_Repo\\.venv\\Scripts\\python.exe -m pytest -q tests/live_state/test_runtime_lease.py`
 
 ## TEST_RESULTS
 
-`13 passed, 1 skipped in 1.09s`.
+`25 passed in 6.56s`.
 
-The sole skip is the exact Windows `WinError 1314` symlink-privilege denial. `NotImplementedError` remains the only other skip path; every other `OSError` is re-raised.
+## EVIDENCE
+
+- Contextor canonical LIVE runtime discovery: `connect_or_start` owns the existing `live_service_start.lock`; `run_service` owns current endpoint publication/removal; `LiveEndpoint` and `CanonicalLiveServer` are in `ipc.py`; owner watchdog uses the existing Windows process-handle/`_is_pid_alive` boundary.
+- Contextor canonical process identity discovery: `contextor.mcp_process_registry.process_identity` records PID plus Windows process creation time and is reused by Stage 2; PID alone is not used.
+- Contextor persistence discovery: existing snapshot/registry paths use temp write + flush/fsync + atomic replace. Stage 2 applies the same pattern only to domain-scoped generation/live-lease metadata.
+- Existing snapshot/registry stale lock helpers were not modified or wired; no endpoint, service, GUI/MCP, coordinator, canonical revision, registry, snapshot, or observability changes were made.
 
 ## ACTUAL_DIFF
 
 ```diff
-diff --git a/tests/live_state/test_runtime_domain.py b/tests/live_state/test_runtime_domain.py
+diff --git a/contextor/core/live_state/runtime_lease.py b/contextor/core/live_state/runtime_lease.py
 new file mode 100644
-index 0000000..331d3a4
+index 0000000..3f02e09
 --- /dev/null
-+++ b/tests/live_state/test_runtime_domain.py
-@@ -0,0 +1,263 @@
++++ b/contextor/core/live_state/runtime_lease.py
+@@ -0,0 +1,1025 @@
++"""Domain-scoped authority lease and durable service-generation fencing.
++
++This module is intentionally below authority bootstrap and above the existing
++LIVE service.  It owns only the lease/generation contract: no endpoint
++publication, GUI, MCP, canonical-state, or observability wiring is performed
++here.
++"""
++
 +from __future__ import annotations
 +
-+import builtins
++import hashlib
 +import json
++import math
 +import os
++import threading
++import time
++import uuid
++from contextlib import AbstractContextManager
++from dataclasses import dataclass, replace
++from enum import Enum
 +from pathlib import Path
-+
-+import pytest
++from typing import Any, Callable, Iterable, Literal, Mapping, Protocol
 +
 +from contextor.core.live_state.runtime_domain import (
 +    RuntimeDomain,
 +    RuntimeDomainError,
++    RuntimeMode,
 +    validate_runtime_domain,
++)
++from contextor.mcp_process_registry import process_identity as _process_identity
++
++
++RUNTIME_LEASE_SCHEMA_VERSION = 1
++AUTHORITY_GENERATION_SCHEMA_VERSION = 1
++GenerationStatus = Literal["never_acquired", "allocated", "released", "fenced"]
++
++_RESOURCE_KEYS = (
++    "repo_root",
++    "cache_root",
++    "logs_root",
++    "lock_root",
++    "ipc_endpoint_root",
++)
++_LEASE_FIELDS = {
++    "schema_version",
++    "repo_id",
++    "runtime_domain_id",
++    "mode",
++    "repo_root",
++    "repo_root_fingerprint",
++    "service_instance_id",
++    "lease_generation",
++    "service_pid",
++    "process_start_identity",
++    "endpoint_fingerprint",
++    "started_at",
++    "last_heartbeat_at",
++    "owner_token",
++    "resource_root_fingerprints",
++}
++_GENERATION_FIELDS = {
++    "schema_version",
++    "repo_id",
++    "runtime_domain_id",
++    "mode",
++    "repo_root",
++    "repo_root_fingerprint",
++    "last_lease_generation",
++    "last_service_instance_id",
++    "status",
++    "fenced_service_instance_id",
++    "fenced_lease_generation",
++    "updated_at",
++    "resource_root_fingerprints",
++}
++
++
++class RuntimeLeaseError(ValueError):
++    """Base error for malformed, foreign, busy, or stale lease operations."""
++
++
++class LeaseAlreadyHeld(RuntimeLeaseError):
++    """A responsive authority already owns the domain lease."""
++
++
++class LeaseLivenessUnknown(RuntimeLeaseError):
++    """Liveness was not strong enough to permit a takeover."""
++
++
++class LeaseNotOwner(RuntimeLeaseError):
++    """The supplied service instance/generation is not the current owner."""
++
++
++class ForeignLeaseError(RuntimeLeaseError):
++    """Lease or generation metadata belongs to another domain."""
++
++
++class EndpointBindingError(RuntimeLeaseError):
++    """Endpoint fingerprint binding is invalid for the current owner."""
++
++
++class LeaseBusyError(RuntimeLeaseError):
++    """The cross-process domain lock could not be acquired in time."""
++
++
++class LivenessStatus(str, Enum):
++    LIVE = "live"
++    STALE = "stale"
++    UNKNOWN = "unknown"
++    AMBIGUOUS = "ambiguous"
++    TIMEOUT = "timeout"
++    BUSY = "busy"
++
++
++def _non_empty_text(value: Any, *, field: str) -> str:
++    if not isinstance(value, str) or not value.strip():
++        raise RuntimeLeaseError(f"{field} must be a non-empty string")
++    return value.strip()
++
++
++def _positive_int(value: Any, *, field: str, allow_zero: bool = False) -> int:
++    if isinstance(value, bool) or not isinstance(value, int):
++        raise RuntimeLeaseError(f"{field} must be an integer")
++    if value < (0 if allow_zero else 1):
++        raise RuntimeLeaseError(f"{field} must be non-negative" if allow_zero else f"{field} must be positive")
++    return value
++
++
++def _timestamp(value: Any, *, field: str) -> float:
++    if isinstance(value, bool) or not isinstance(value, (int, float)):
++        raise RuntimeLeaseError(f"{field} must be a timestamp")
++    result = float(value)
++    if not math.isfinite(result) or result < 0:
++        raise RuntimeLeaseError(f"{field} must be a finite non-negative timestamp")
++    return result
++
++
++def _canonical_path_text(value: Any, *, field: str) -> str:
++    if not isinstance(value, (str, Path)) or not str(value).strip():
++        raise RuntimeLeaseError(f"{field} must be a non-empty path")
++    try:
++        resolved = Path(value).expanduser().resolve(strict=False)
++    except (OSError, RuntimeError, ValueError) as exc:
++        raise RuntimeLeaseError(f"{field} cannot be canonicalized") from exc
++    if not resolved.is_absolute():
++        raise RuntimeLeaseError(f"{field} must be absolute")
++    return os.path.normcase(str(resolved))
++
++
++def _path_fingerprint(value: str | Path) -> str:
++    canonical = _canonical_path_text(str(value), field="resource_root")
++    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
++
++
++def _domain_resource_fingerprints(domain: RuntimeDomain) -> tuple[tuple[str, str], ...]:
++    roots = {
++        "repo_root": domain.repo_root,
++        "cache_root": domain.cache_root,
++        "logs_root": domain.logs_root,
++        "lock_root": domain.lock_root,
++        "ipc_endpoint_root": domain.ipc_endpoint_root,
++    }
++    return tuple((name, _path_fingerprint(path)) for name, path in roots.items())
++
++
++def _fingerprints_to_dict(value: tuple[tuple[str, str], ...]) -> dict[str, str]:
++    return dict(value)
++
++
++def _fingerprints_from_payload(value: Any) -> tuple[tuple[str, str], ...]:
++    if not isinstance(value, Mapping) or set(value) != set(_RESOURCE_KEYS):
++        raise RuntimeLeaseError("resource_root_fingerprints do not match schema")
++    result: list[tuple[str, str]] = []
++    for key in _RESOURCE_KEYS:
++        result.append((key, _non_empty_text(value[key], field=f"resource_root_fingerprints.{key}")))
++    return tuple(result)
++
++
++def _validate_domain_input(
++    domain: RuntimeDomain,
++    *,
++    known_production_roots: Iterable[str | Path] | None,
++    known_test_roots: Iterable[str | Path] | None,
++) -> None:
++    if not isinstance(domain, RuntimeDomain):
++        raise RuntimeLeaseError("domain must be a previously validated RuntimeDomain")
++    # RuntimeDomain.__post_init__ already performs intrinsic validation.  When
++    # the caller supplies the trusted cross-domain context, repeat that check
++    # immediately before any lease resource is touched.
++    if domain.mode == "production" or known_production_roots is not None or known_test_roots is not None:
++        try:
++            validate_runtime_domain(
++                domain,
++                expected_mode=domain.mode,
++                known_production_roots=known_production_roots,
++                known_test_roots=known_test_roots,
++            )
++        except RuntimeDomainError as exc:
++            raise RuntimeLeaseError("runtime domain validation failed") from exc
++
++
++@dataclass(frozen=True, slots=True)
++class ProcessIdentity:
++    """PID plus a process-start token; PID alone is never sufficient."""
++
++    pid: int
++    process_start_identity: str
++    executable_fingerprint: str | None = None
++
++    def __post_init__(self) -> None:
++        object.__setattr__(self, "pid", _positive_int(self.pid, field="pid"))
++        object.__setattr__(
++            self,
++            "process_start_identity",
++            _non_empty_text(self.process_start_identity, field="process_start_identity"),
++        )
++        if self.executable_fingerprint is not None:
++            object.__setattr__(
++                self,
++                "executable_fingerprint",
++                _non_empty_text(self.executable_fingerprint, field="executable_fingerprint"),
++            )
++
++    @classmethod
++    def current(cls, pid: int | None = None) -> "ProcessIdentity":
++        current_pid = os.getpid() if pid is None else _positive_int(pid, field="pid")
++        try:
++            image, creation_time, alive = _process_identity(current_pid)
++        except Exception as exc:  # pragma: no cover - platform probe boundary
++            raise RuntimeLeaseError("process identity probe failed") from exc
++        if not alive or creation_time is None:
++            raise RuntimeLeaseError("current process identity is unavailable")
++        executable = _path_fingerprint(image) if image else None
++        return cls(current_pid, str(creation_time), executable)
++
++
++@dataclass(frozen=True, slots=True)
++class LivenessResult:
++    status: LivenessStatus
++    process_alive: bool | None
++    process_identity_matches: bool | None
++    endpoint_available: bool | None
++    endpoint_matches: bool | None
++    reason: str
++
++    def __post_init__(self) -> None:
++        if not isinstance(self.status, LivenessStatus):
++            object.__setattr__(self, "status", LivenessStatus(self.status))
++        object.__setattr__(self, "reason", _non_empty_text(self.reason, field="reason"))
++
++    @property
++    def confirmed_stale(self) -> bool:
++        process_evidence = self.process_alive is False or self.process_identity_matches is False
++        endpoint_evidence = self.endpoint_available is False or self.endpoint_matches is False
++        return self.status is LivenessStatus.STALE and process_evidence and endpoint_evidence
++
++    @classmethod
++    def live(cls, reason: str = "process identity and authority are responsive") -> "LivenessResult":
++        return cls(LivenessStatus.LIVE, True, True, True, True, reason)
++
++    @classmethod
++    def stale(
++        cls,
++        *,
++        process_alive: bool | None,
++        process_identity_matches: bool | None,
++        endpoint_available: bool | None,
++        endpoint_matches: bool | None,
++        reason: str,
++    ) -> "LivenessResult":
++        return cls(
++            LivenessStatus.STALE,
++            process_alive,
++            process_identity_matches,
++            endpoint_available,
++            endpoint_matches,
++            reason,
++        )
++
++
++class LivenessVerifier(Protocol):
++    def verify(self, lease: "RuntimeLease") -> LivenessResult:
++        """Return deterministic evidence for the exact observed lease."""
++
++
++class DefaultLivenessVerifier:
++    """Use the existing process-start identity primitive without endpoint takeover."""
++
++    def verify(self, lease: "RuntimeLease") -> LivenessResult:
++        try:
++            _image, creation_time, alive = _process_identity(lease.service_pid)
++        except Exception as exc:  # pragma: no cover - platform probe boundary
++            return LivenessResult(
++                LivenessStatus.UNKNOWN,
++                None,
++                None,
++                None,
++                None,
++                f"process identity probe failed: {exc}",
++            )
++        if not alive:
++            return LivenessResult.stale(
++                process_alive=False,
++                process_identity_matches=False,
++                endpoint_available=False,
++                endpoint_matches=False,
++                reason="recorded service process is confirmed dead",
++            )
++        if creation_time is None:
++            return LivenessResult(
++                LivenessStatus.UNKNOWN,
++                True,
++                None,
++                None,
++                None,
++                "live process has no process-start identity",
++            )
++        matches = str(creation_time) == lease.process_start_identity
++        if not matches:
++            return LivenessResult.stale(
++                process_alive=True,
++                process_identity_matches=False,
++                endpoint_available=False,
++                endpoint_matches=False,
++                reason="PID is live but process-start identity does not match",
++            )
++        if lease.endpoint_fingerprint is not None:
++            return LivenessResult(
++                LivenessStatus.UNKNOWN,
++                True,
++                True,
++                None,
++                None,
++                "endpoint authority-status is not available in Stage 2",
++            )
++        return LivenessResult(
++            LivenessStatus.LIVE,
++            True,
++            True,
++            False,
++            None,
++            "process-start identity matches; endpoint is not yet bound",
++        )
++
++
++@dataclass(frozen=True, slots=True)
++class RuntimeLease:
++    schema_version: int
++    repo_id: str
++    runtime_domain_id: str
++    mode: RuntimeMode
++    repo_root: str
++    repo_root_fingerprint: str
++    service_instance_id: str
++    lease_generation: int
++    service_pid: int
++    process_start_identity: str
++    endpoint_fingerprint: str | None
++    started_at: float
++    last_heartbeat_at: float
++    owner_token: str | None
++    resource_root_fingerprints: tuple[tuple[str, str], ...]
++
++    def __post_init__(self) -> None:
++        if self.schema_version != RUNTIME_LEASE_SCHEMA_VERSION:
++            raise RuntimeLeaseError("unsupported RuntimeLease schema_version")
++        if self.mode not in ("production", "test"):
++            raise RuntimeLeaseError("mode must be production or test")
++        for field in ("repo_id", "runtime_domain_id", "service_instance_id"):
++            object.__setattr__(self, field, _non_empty_text(getattr(self, field), field=field))
++        object.__setattr__(self, "repo_root", _canonical_path_text(self.repo_root, field="repo_root"))
++        object.__setattr__(
++            self,
++            "repo_root_fingerprint",
++            _non_empty_text(self.repo_root_fingerprint, field="repo_root_fingerprint"),
++        )
++        object.__setattr__(self, "lease_generation", _positive_int(self.lease_generation, field="lease_generation"))
++        object.__setattr__(self, "service_pid", _positive_int(self.service_pid, field="service_pid"))
++        object.__setattr__(
++            self,
++            "process_start_identity",
++            _non_empty_text(self.process_start_identity, field="process_start_identity"),
++        )
++        object.__setattr__(self, "started_at", _timestamp(self.started_at, field="started_at"))
++        object.__setattr__(self, "last_heartbeat_at", _timestamp(self.last_heartbeat_at, field="last_heartbeat_at"))
++        if self.last_heartbeat_at < self.started_at:
++            raise RuntimeLeaseError("last_heartbeat_at cannot precede started_at")
++        if self.endpoint_fingerprint is not None:
++            object.__setattr__(
++                self,
++                "endpoint_fingerprint",
++                _non_empty_text(self.endpoint_fingerprint, field="endpoint_fingerprint"),
++            )
++        if self.owner_token is not None:
++            object.__setattr__(self, "owner_token", _non_empty_text(self.owner_token, field="owner_token"))
++        fingerprints = tuple(self.resource_root_fingerprints)
++        if tuple(name for name, _ in fingerprints) != _RESOURCE_KEYS:
++            raise RuntimeLeaseError("resource_root_fingerprints do not match schema")
++        fingerprints = tuple(
++            (name, _non_empty_text(value, field=f"resource_root_fingerprints.{name}"))
++            for name, value in fingerprints
++        )
++        object.__setattr__(self, "resource_root_fingerprints", fingerprints)
++        if dict(fingerprints)["repo_root"] != self.repo_root_fingerprint:
++            raise RuntimeLeaseError("repo_root_fingerprint does not match resource fingerprints")
++
++    def matches_domain(self, domain: RuntimeDomain) -> bool:
++        return (
++            self.repo_id == domain.repo_id
++            and self.runtime_domain_id == domain.domain_id
++            and self.mode == domain.mode
++            and self.repo_root == _canonical_path_text(domain.repo_root, field="repo_root")
++            and self.resource_root_fingerprints == _domain_resource_fingerprints(domain)
++        )
++
++    def owner_tuple(self) -> tuple[str, int]:
++        return self.service_instance_id, self.lease_generation
++
++    def to_dict(self) -> dict[str, Any]:
++        return {
++            "schema_version": self.schema_version,
++            "repo_id": self.repo_id,
++            "runtime_domain_id": self.runtime_domain_id,
++            "mode": self.mode,
++            "repo_root": self.repo_root,
++            "repo_root_fingerprint": self.repo_root_fingerprint,
++            "service_instance_id": self.service_instance_id,
++            "lease_generation": self.lease_generation,
++            "service_pid": self.service_pid,
++            "process_start_identity": self.process_start_identity,
++            "endpoint_fingerprint": self.endpoint_fingerprint,
++            "started_at": self.started_at,
++            "last_heartbeat_at": self.last_heartbeat_at,
++            "owner_token": self.owner_token,
++            "resource_root_fingerprints": _fingerprints_to_dict(self.resource_root_fingerprints),
++        }
++
++    def serialize(self) -> str:
++        return json.dumps(self.to_dict(), sort_keys=True, separators=(",", ":"))
++
++    @classmethod
++    def from_dict(cls, payload: Mapping[str, Any]) -> "RuntimeLease":
++        if not isinstance(payload, Mapping) or set(payload) != _LEASE_FIELDS:
++            raise RuntimeLeaseError("RuntimeLease payload fields do not match schema")
++        return cls(
++            schema_version=payload["schema_version"],
++            repo_id=payload["repo_id"],
++            runtime_domain_id=payload["runtime_domain_id"],
++            mode=payload["mode"],
++            repo_root=payload["repo_root"],
++            repo_root_fingerprint=payload["repo_root_fingerprint"],
++            service_instance_id=payload["service_instance_id"],
++            lease_generation=payload["lease_generation"],
++            service_pid=payload["service_pid"],
++            process_start_identity=payload["process_start_identity"],
++            endpoint_fingerprint=payload["endpoint_fingerprint"],
++            started_at=payload["started_at"],
++            last_heartbeat_at=payload["last_heartbeat_at"],
++            owner_token=payload["owner_token"],
++            resource_root_fingerprints=_fingerprints_from_payload(payload["resource_root_fingerprints"]),
++        )
++
++    @classmethod
++    def deserialize(cls, payload: str | Mapping[str, Any]) -> "RuntimeLease":
++        if isinstance(payload, str):
++            try:
++                value = json.loads(payload)
++            except (TypeError, ValueError) as exc:
++                raise RuntimeLeaseError("invalid RuntimeLease JSON") from exc
++        else:
++            value = payload
++        if not isinstance(value, Mapping):
++            raise RuntimeLeaseError("RuntimeLease payload must be an object")
++        return cls.from_dict(value)
++
++
++@dataclass(frozen=True, slots=True)
++class AuthorityGenerationRecord:
++    schema_version: int
++    repo_id: str
++    runtime_domain_id: str
++    mode: RuntimeMode
++    repo_root: str
++    repo_root_fingerprint: str
++    last_lease_generation: int
++    last_service_instance_id: str | None
++    status: GenerationStatus
++    fenced_service_instance_id: str | None
++    fenced_lease_generation: int | None
++    updated_at: float
++    resource_root_fingerprints: tuple[tuple[str, str], ...]
++
++    def __post_init__(self) -> None:
++        if self.schema_version != AUTHORITY_GENERATION_SCHEMA_VERSION:
++            raise RuntimeLeaseError("unsupported authority-generation schema_version")
++        if self.mode not in ("production", "test"):
++            raise RuntimeLeaseError("mode must be production or test")
++        for field in ("repo_id", "runtime_domain_id"):
++            object.__setattr__(self, field, _non_empty_text(getattr(self, field), field=field))
++        object.__setattr__(self, "repo_root", _canonical_path_text(self.repo_root, field="repo_root"))
++        object.__setattr__(
++            self,
++            "repo_root_fingerprint",
++            _non_empty_text(self.repo_root_fingerprint, field="repo_root_fingerprint"),
++        )
++        object.__setattr__(
++            self,
++            "last_lease_generation",
++            _positive_int(self.last_lease_generation, field="last_lease_generation", allow_zero=True),
++        )
++        if self.status not in ("never_acquired", "allocated", "released", "fenced"):
++            raise RuntimeLeaseError("invalid authority-generation status")
++        if self.status == "never_acquired" and self.last_lease_generation != 0:
++            raise RuntimeLeaseError("never_acquired generation must be zero")
++        if self.last_lease_generation == 0 and self.last_service_instance_id is not None:
++            raise RuntimeLeaseError("generation zero cannot have a service instance")
++        for field in ("last_service_instance_id", "fenced_service_instance_id"):
++            value = getattr(self, field)
++            if value is not None:
++                object.__setattr__(self, field, _non_empty_text(value, field=field))
++        if self.fenced_lease_generation is not None:
++            object.__setattr__(
++                self,
++                "fenced_lease_generation",
++                _positive_int(self.fenced_lease_generation, field="fenced_lease_generation"),
++            )
++            if self.fenced_service_instance_id is None:
++                raise RuntimeLeaseError("fenced generation requires a fenced service instance")
++        object.__setattr__(self, "updated_at", _timestamp(self.updated_at, field="updated_at"))
++        fingerprints = tuple(self.resource_root_fingerprints)
++        if tuple(name for name, _ in fingerprints) != _RESOURCE_KEYS:
++            raise RuntimeLeaseError("resource_root_fingerprints do not match schema")
++        object.__setattr__(
++            self,
++            "resource_root_fingerprints",
++            tuple(
++                (name, _non_empty_text(value, field=f"resource_root_fingerprints.{name}"))
++                for name, value in fingerprints
++            ),
++        )
++        if dict(self.resource_root_fingerprints)["repo_root"] != self.repo_root_fingerprint:
++            raise RuntimeLeaseError("repo_root_fingerprint does not match resource fingerprints")
++
++    @classmethod
++    def initial(cls, domain: RuntimeDomain, *, now: float | None = None) -> "AuthorityGenerationRecord":
++        fingerprints = _domain_resource_fingerprints(domain)
++        return cls(
++            schema_version=AUTHORITY_GENERATION_SCHEMA_VERSION,
++            repo_id=domain.repo_id,
++            runtime_domain_id=domain.domain_id,
++            mode=domain.mode,
++            repo_root=_canonical_path_text(domain.repo_root, field="repo_root"),
++            repo_root_fingerprint=dict(fingerprints)["repo_root"],
++            last_lease_generation=0,
++            last_service_instance_id=None,
++            status="never_acquired",
++            fenced_service_instance_id=None,
++            fenced_lease_generation=None,
++            updated_at=time.time() if now is None else now,
++            resource_root_fingerprints=fingerprints,
++        )
++
++    def matches_domain(self, domain: RuntimeDomain) -> bool:
++        return (
++            self.repo_id == domain.repo_id
++            and self.runtime_domain_id == domain.domain_id
++            and self.mode == domain.mode
++            and self.repo_root == _canonical_path_text(domain.repo_root, field="repo_root")
++            and self.resource_root_fingerprints == _domain_resource_fingerprints(domain)
++        )
++
++    def to_dict(self) -> dict[str, Any]:
++        return {
++            "schema_version": self.schema_version,
++            "repo_id": self.repo_id,
++            "runtime_domain_id": self.runtime_domain_id,
++            "mode": self.mode,
++            "repo_root": self.repo_root,
++            "repo_root_fingerprint": self.repo_root_fingerprint,
++            "last_lease_generation": self.last_lease_generation,
++            "last_service_instance_id": self.last_service_instance_id,
++            "status": self.status,
++            "fenced_service_instance_id": self.fenced_service_instance_id,
++            "fenced_lease_generation": self.fenced_lease_generation,
++            "updated_at": self.updated_at,
++            "resource_root_fingerprints": _fingerprints_to_dict(self.resource_root_fingerprints),
++        }
++
++    def serialize(self) -> str:
++        return json.dumps(self.to_dict(), sort_keys=True, separators=(",", ":"))
++
++    @classmethod
++    def from_dict(cls, payload: Mapping[str, Any]) -> "AuthorityGenerationRecord":
++        if not isinstance(payload, Mapping) or set(payload) != _GENERATION_FIELDS:
++            raise RuntimeLeaseError("authority-generation payload fields do not match schema")
++        return cls(
++            schema_version=payload["schema_version"],
++            repo_id=payload["repo_id"],
++            runtime_domain_id=payload["runtime_domain_id"],
++            mode=payload["mode"],
++            repo_root=payload["repo_root"],
++            repo_root_fingerprint=payload["repo_root_fingerprint"],
++            last_lease_generation=payload["last_lease_generation"],
++            last_service_instance_id=payload["last_service_instance_id"],
++            status=payload["status"],
++            fenced_service_instance_id=payload["fenced_service_instance_id"],
++            fenced_lease_generation=payload["fenced_lease_generation"],
++            updated_at=payload["updated_at"],
++            resource_root_fingerprints=_fingerprints_from_payload(payload["resource_root_fingerprints"]),
++        )
++
++    @classmethod
++    def deserialize(cls, payload: str | Mapping[str, Any]) -> "AuthorityGenerationRecord":
++        if isinstance(payload, str):
++            try:
++                value = json.loads(payload)
++            except (TypeError, ValueError) as exc:
++                raise RuntimeLeaseError("invalid authority-generation JSON") from exc
++        else:
++            value = payload
++        if not isinstance(value, Mapping):
++            raise RuntimeLeaseError("authority-generation payload must be an object")
++        return cls.from_dict(value)
++
++
++def generation_metadata_path(domain: RuntimeDomain) -> Path:
++    return domain.cache_root / f"authority_generation.{domain.domain_id}.json"
++
++
++def live_lease_path(domain: RuntimeDomain) -> Path:
++    return domain.cache_root / f"authority_lease.{domain.domain_id}.json"
++
++
++def domain_lock_path(domain: RuntimeDomain) -> Path:
++    return domain.lock_root / f"authority.{domain.domain_id}.lock"
++
++
++def _atomic_write_json(path: Path, payload: Mapping[str, Any]) -> None:
++    path.parent.mkdir(parents=True, exist_ok=True)
++    temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
++    try:
++        with temporary.open("w", encoding="utf-8", newline="\n") as stream:
++            json.dump(payload, stream, sort_keys=True, separators=(",", ":"))
++            stream.flush()
++            os.fsync(stream.fileno())
++        os.replace(temporary, path)
++        if os.name != "nt":
++            try:
++                directory_fd = os.open(path.parent, os.O_RDONLY)
++            except OSError:
++                directory_fd = None
++            if directory_fd is not None:
++                try:
++                    os.fsync(directory_fd)
++                finally:
++                    os.close(directory_fd)
++    finally:
++        try:
++            temporary.unlink()
++        except FileNotFoundError:
++            pass
++
++
++def _read_json(path: Path) -> Mapping[str, Any] | None:
++    try:
++        value = json.loads(path.read_text(encoding="utf-8"))
++    except FileNotFoundError:
++        return None
++    except (OSError, ValueError, TypeError) as exc:
++        raise RuntimeLeaseError(f"malformed durable JSON: {path.name}") from exc
++    if not isinstance(value, Mapping):
++        raise RuntimeLeaseError(f"durable JSON must be an object: {path.name}")
++    return value
++
++
++_THREAD_LOCKS: dict[str, threading.Lock] = {}
++_THREAD_LOCKS_GUARD = threading.Lock()
++
++
++def _thread_lock_for(path: Path) -> threading.Lock:
++    key = os.path.normcase(str(path))
++    with _THREAD_LOCKS_GUARD:
++        return _THREAD_LOCKS.setdefault(key, threading.Lock())
++
++
++class _DomainFileLock(AbstractContextManager["_DomainFileLock"]):
++    """OS-backed domain lock with an in-process guard for same-process threads."""
++
++    def __init__(self, path: Path, *, timeout: float) -> None:
++        self.path = path
++        self.timeout = timeout
++        self._thread_lock = _thread_lock_for(path)
++        self._file: Any = None
++
++    def __enter__(self) -> "_DomainFileLock":
++        if not self._thread_lock.acquire(timeout=self.timeout):
++            raise LeaseBusyError("timed out waiting for domain lock")
++        try:
++            self.path.parent.mkdir(parents=True, exist_ok=True)
++            open_deadline = time.monotonic() + self.timeout
++            while True:
++                try:
++                    self._file = self.path.open("a+b")
++                    break
++                except PermissionError as exc:
++                    if time.monotonic() >= open_deadline:
++                        raise LeaseBusyError("timed out opening cross-process domain lock") from exc
++                    time.sleep(0.01)
++            if self.path.stat().st_size == 0:
++                self._file.seek(0)
++                self._file.write(b"0")
++                self._file.flush()
++            self._file.seek(0)
++            self._acquire_os_lock()
++            return self
++        except Exception:
++            self._close()
++            self._thread_lock.release()
++            raise
++
++    def _acquire_os_lock(self) -> None:
++        deadline = time.monotonic() + self.timeout
++        while True:
++            try:
++                if os.name == "nt":
++                    import msvcrt
++
++                    self._file.seek(0)
++                    msvcrt.locking(self._file.fileno(), msvcrt.LK_NBLCK, 1)
++                else:
++                    import fcntl
++
++                    fcntl.flock(self._file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
++                return
++            except (OSError, BlockingIOError) as exc:
++                if time.monotonic() >= deadline:
++                    raise LeaseBusyError("timed out waiting for cross-process domain lock") from exc
++                time.sleep(0.01)
++
++    def _close(self) -> None:
++        if self._file is not None:
++            try:
++                if os.name == "nt":
++                    import msvcrt
++
++                    self._file.seek(0)
++                    msvcrt.locking(self._file.fileno(), msvcrt.LK_UNLCK, 1)
++                else:
++                    import fcntl
++
++                    fcntl.flock(self._file.fileno(), fcntl.LOCK_UN)
++            except OSError:
++                pass
++            try:
++                self._file.close()
++            finally:
++                self._file = None
++
++    def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> None:
++        try:
++            self._close()
++        finally:
++            self._thread_lock.release()
++
++
++FailureInjector = Callable[[str], None]
++
++
++class RuntimeLeaseManager:
++    """Acquire, fence, refresh, bind, and release one RuntimeDomain authority."""
++
++    def __init__(
++        self,
++        domain: RuntimeDomain,
++        *,
++        process_identity: ProcessIdentity | None = None,
++        liveness_verifier: LivenessVerifier | None = None,
++        known_production_roots: Iterable[str | Path] | None = None,
++        known_test_roots: Iterable[str | Path] | None = None,
++        lock_timeout: float = 10.0,
++        clock: Callable[[], float] = time.time,
++        failure_injector: FailureInjector | None = None,
++    ) -> None:
++        _validate_domain_input(
++            domain,
++            known_production_roots=known_production_roots,
++            known_test_roots=known_test_roots,
++        )
++        if lock_timeout <= 0 or not math.isfinite(lock_timeout):
++            raise RuntimeLeaseError("lock_timeout must be finite and positive")
++        self.domain = domain
++        self.process_identity = process_identity or ProcessIdentity.current()
++        self.liveness_verifier = liveness_verifier or DefaultLivenessVerifier()
++        self.lock_timeout = lock_timeout
++        self.clock = clock
++        self.failure_injector = failure_injector
++
++    def _lock(self) -> _DomainFileLock:
++        return _DomainFileLock(domain_lock_path(self.domain), timeout=self.lock_timeout)
++
++    def _now(self) -> float:
++        return _timestamp(self.clock(), field="clock")
++
++    def _inject(self, point: str) -> None:
++        if self.failure_injector is not None:
++            self.failure_injector(point)
++
++    def read_generation(self) -> AuthorityGenerationRecord:
++        with self._lock():
++            return self._read_generation()
++
++    def read_live_lease(self) -> RuntimeLease | None:
++        with self._lock():
++            return self._read_live_lease()
++
++    def _read_generation(self) -> AuthorityGenerationRecord:
++        payload = _read_json(generation_metadata_path(self.domain))
++        if payload is None:
++            return AuthorityGenerationRecord.initial(self.domain, now=self._now())
++        record = AuthorityGenerationRecord.from_dict(payload)
++        if not record.matches_domain(self.domain):
++            raise ForeignLeaseError("authority-generation metadata belongs to another domain")
++        return record
++
++    def _read_live_lease(self) -> RuntimeLease | None:
++        payload = _read_json(live_lease_path(self.domain))
++        if payload is None:
++            return None
++        lease = RuntimeLease.from_dict(payload)
++        if not lease.matches_domain(self.domain):
++            raise ForeignLeaseError("live lease belongs to another domain")
++        return lease
++
++    def _write_generation(self, record: AuthorityGenerationRecord) -> None:
++        if not record.matches_domain(self.domain):
++            raise ForeignLeaseError("refusing to write foreign generation metadata")
++        _atomic_write_json(generation_metadata_path(self.domain), record.to_dict())
++
++    def _write_live_lease(self, lease: RuntimeLease) -> None:
++        if not lease.matches_domain(self.domain):
++            raise ForeignLeaseError("refusing to write foreign live lease")
++        _atomic_write_json(live_lease_path(self.domain), lease.to_dict())
++
++    def _remove_live_lease(self) -> None:
++        try:
++            live_lease_path(self.domain).unlink()
++        except FileNotFoundError:
++            pass
++
++    def _new_lease(self, generation: int) -> RuntimeLease:
++        now = self._now()
++        fingerprints = _domain_resource_fingerprints(self.domain)
++        return RuntimeLease(
++            schema_version=RUNTIME_LEASE_SCHEMA_VERSION,
++            repo_id=self.domain.repo_id,
++            runtime_domain_id=self.domain.domain_id,
++            mode=self.domain.mode,
++            repo_root=_canonical_path_text(self.domain.repo_root, field="repo_root"),
++            repo_root_fingerprint=dict(fingerprints)["repo_root"],
++            service_instance_id=uuid.uuid4().hex,
++            lease_generation=generation,
++            service_pid=self.process_identity.pid,
++            process_start_identity=self.process_identity.process_start_identity,
++            endpoint_fingerprint=None,
++            started_at=now,
++            last_heartbeat_at=now,
++            owner_token=uuid.uuid4().hex,
++            resource_root_fingerprints=fingerprints,
++        )
++
++    @staticmethod
++    def _same_owner(left: RuntimeLease, right: RuntimeLease) -> bool:
++        return (
++            left.runtime_domain_id == right.runtime_domain_id
++            and left.service_instance_id == right.service_instance_id
++            and left.lease_generation == right.lease_generation
++        )
++
++    def _fence_stale_lease(
++        self,
++        record: AuthorityGenerationRecord,
++        lease: RuntimeLease,
++    ) -> AuthorityGenerationRecord:
++        if record.last_lease_generation != lease.lease_generation or record.last_service_instance_id != lease.service_instance_id:
++            raise ForeignLeaseError("stale lease does not match durable generation record")
++        fenced = replace(
++            record,
++            status="fenced",
++            fenced_service_instance_id=lease.service_instance_id,
++            fenced_lease_generation=lease.lease_generation,
++            updated_at=self._now(),
++        )
++        self._write_generation(fenced)
++        self._inject("after_fence_persist")
++        self._remove_live_lease()
++        return fenced
++
++    def acquire(self) -> RuntimeLease:
++        with self._lock():
++            record = self._read_generation()
++            live = self._read_live_lease()
++            if live is not None:
++                if record.status in {"released", "fenced"}:
++                    same_fenced = (
++                        record.fenced_service_instance_id == live.service_instance_id
++                        and record.fenced_lease_generation == live.lease_generation
++                    )
++                    same_released = (
++                        record.last_service_instance_id == live.service_instance_id
++                        and record.last_lease_generation == live.lease_generation
++                    )
++                    if not (same_fenced or same_released):
++                        raise ForeignLeaseError("fenced/released live lease does not match durable record")
++                    self._remove_live_lease()
++                    live = None
++                else:
++                    if (
++                        record.last_lease_generation != live.lease_generation
++                        or record.last_service_instance_id != live.service_instance_id
++                    ):
++                        raise ForeignLeaseError("live lease and generation metadata disagree")
++                    evidence = self.liveness_verifier.verify(live)
++                    if evidence.status is LivenessStatus.LIVE:
++                        raise LeaseAlreadyHeld(evidence.reason)
++                    if not evidence.confirmed_stale:
++                        raise LeaseLivenessUnknown(
++                            f"authority takeover rejected: {evidence.status.value}: {evidence.reason}"
++                        )
++                    reread = self._read_live_lease()
++                    rerecord = self._read_generation()
++                    if reread != live or rerecord != record:
++                        raise LeaseLivenessUnknown("lease changed during stale verification")
++                    record = self._fence_stale_lease(record, live)
++                    live = None
++
++            next_generation = record.last_lease_generation + 1
++            lease = self._new_lease(next_generation)
++            allocated = replace(
++                record,
++                last_lease_generation=next_generation,
++                last_service_instance_id=lease.service_instance_id,
++                status="allocated",
++                fenced_service_instance_id=None,
++                fenced_lease_generation=None,
++                updated_at=self._now(),
++            )
++            self._write_generation(allocated)
++            self._inject("after_generation_persist")
++            self._write_live_lease(lease)
++            self._inject("after_live_lease_persist")
++            return lease
++
++    def _assert_current_owner(self, lease: RuntimeLease) -> tuple[RuntimeLease, AuthorityGenerationRecord]:
++        if not isinstance(lease, RuntimeLease) or not lease.matches_domain(self.domain):
++            raise LeaseNotOwner("lease does not belong to this runtime domain")
++        current = self._read_live_lease()
++        record = self._read_generation()
++        if current is None or not self._same_owner(current, lease):
++            raise LeaseNotOwner("service instance/generation is not the current live owner")
++        if (
++            record.status != "allocated"
++            or record.last_lease_generation != lease.lease_generation
++            or record.last_service_instance_id != lease.service_instance_id
++        ):
++            raise LeaseNotOwner("service instance/generation has been durably fenced")
++        return current, record
++
++    def refresh_heartbeat(self, lease: RuntimeLease, *, now: float | None = None) -> RuntimeLease:
++        with self._lock():
++            current, _record = self._assert_current_owner(lease)
++            refreshed = replace(current, last_heartbeat_at=self._now() if now is None else _timestamp(now, field="now"))
++            if refreshed.last_heartbeat_at < refreshed.started_at:
++                raise RuntimeLeaseError("heartbeat cannot precede lease start")
++            self._write_live_lease(refreshed)
++            return refreshed
++
++    def bind_endpoint(self, lease: RuntimeLease, endpoint_fingerprint: str) -> RuntimeLease:
++        endpoint = _non_empty_text(endpoint_fingerprint, field="endpoint_fingerprint")
++        with self._lock():
++            current, _record = self._assert_current_owner(lease)
++            if current.endpoint_fingerprint is not None and current.endpoint_fingerprint != endpoint:
++                raise EndpointBindingError("endpoint fingerprint is already bound")
++            bound = replace(current, endpoint_fingerprint=endpoint)
++            self._write_live_lease(bound)
++            return bound
++
++    def release(self, lease: RuntimeLease) -> AuthorityGenerationRecord:
++        with self._lock():
++            current, record = self._assert_current_owner(lease)
++            fenced = replace(
++                record,
++                status="released",
++                fenced_service_instance_id=current.service_instance_id,
++                fenced_lease_generation=current.lease_generation,
++                updated_at=self._now(),
++            )
++            self._write_generation(fenced)
++            self._inject("before_release_live_remove")
++            self._remove_live_lease()
++            return fenced
++
++
++__all__ = [
++    "AUTHORITY_GENERATION_SCHEMA_VERSION",
++    "AuthorityGenerationRecord",
++    "DefaultLivenessVerifier",
++    "EndpointBindingError",
++    "ForeignLeaseError",
++    "GenerationStatus",
++    "LeaseAlreadyHeld",
++    "LeaseBusyError",
++    "LeaseLivenessUnknown",
++    "LeaseNotOwner",
++    "LivenessResult",
++    "LivenessStatus",
++    "LivenessVerifier",
++    "ProcessIdentity",
++    "RUNTIME_LEASE_SCHEMA_VERSION",
++    "RuntimeLease",
++    "RuntimeLeaseError",
++    "RuntimeLeaseManager",
++    "domain_lock_path",
++    "generation_metadata_path",
++    "live_lease_path",
++]
+
+```
+
+```diff
+diff --git a/tests/live_state/test_runtime_lease.py b/tests/live_state/test_runtime_lease.py
+new file mode 100644
+index 0000000..8de99da
+--- /dev/null
++++ b/tests/live_state/test_runtime_lease.py
+@@ -0,0 +1,407 @@
++from __future__ import annotations
++
++import json
++import multiprocessing
++import os
++import threading
++from pathlib import Path
++from typing import Any
++
++import pytest
++
++from contextor.core.live_state.runtime_domain import RuntimeDomain
++from contextor.core.live_state.runtime_lease import (
++    AuthorityGenerationRecord,
++    EndpointBindingError,
++    ForeignLeaseError,
++    LeaseAlreadyHeld,
++    LeaseLivenessUnknown,
++    LeaseNotOwner,
++    LivenessResult,
++    LivenessStatus,
++    ProcessIdentity,
++    RuntimeLease,
++    RuntimeLeaseError,
++    RuntimeLeaseManager,
++    generation_metadata_path,
++    live_lease_path,
 +)
 +
 +
-+def _production_domain(
-+    tmp_path: Path,
-+    *,
-+    service_instance_id: str | None = None,
-+) -> RuntimeDomain:
-+    repo = tmp_path / "repo"
-+    cache = tmp_path / "production-cache" / "ctx_repo"
-+    return RuntimeDomain.create(
-+        repo_id="ctx_repo",
-+        repo_root=repo,
-+        mode="production",
-+        cache_root=cache,
-+        logs_root=tmp_path / "production-logs",
-+        lock_root=cache / "runtime",
-+        ipc_endpoint_root=cache,
-+        service_instance_id=service_instance_id,
-+    )
++class ScriptedVerifier:
++    def __init__(self, result: LivenessResult):
++        self.result = result
++        self.calls: list[RuntimeLease] = []
++
++    def verify(self, lease: RuntimeLease) -> LivenessResult:
++        self.calls.append(lease)
++        return self.result
 +
 +
-+def _test_domain(
-+    tmp_path: Path,
-+    run_id: str = "run-1",
-+    *,
-+    service_instance_id: str | None = None,
-+) -> RuntimeDomain:
-+    context = tmp_path / "test-domain" / run_id
++class CrashAt:
++    def __init__(self, point: str):
++        self.point = point
++
++    def __call__(self, point: str) -> None:
++        if point == self.point:
++            raise RuntimeError(f"simulated crash at {point}")
++
++
++def _domain(tmp_path: Path) -> RuntimeDomain:
++    context = tmp_path / "test-domain" / "run-1"
 +    cache = context / "cache" / "ctx_repo"
 +    return RuntimeDomain.create(
 +        repo_id="ctx_repo",
@@ -74,218 +1124,353 @@ index 0000000..331d3a4
 +        logs_root=context / "logs",
 +        lock_root=cache / "runtime",
 +        ipc_endpoint_root=cache,
-+        test_run_id=run_id,
 +        test_context_root=context,
-+        service_instance_id=service_instance_id,
++        test_run_id="run-1",
 +        known_production_roots=(tmp_path / "production-cache", tmp_path / "production-logs"),
 +    )
 +
 +
-+def test_production_domain_is_valid_and_immutable(tmp_path: Path):
-+    domain = _production_domain(tmp_path)
-+    assert domain.mode == "production"
-+    assert domain.domain_id.startswith("rd1_")
-+    with pytest.raises(AttributeError):
-+        domain.mode = "test"  # type: ignore[misc]
-+
-+
-+def test_test_domain_requires_context_and_run_id(tmp_path: Path):
-+    with pytest.raises(RuntimeDomainError):
-+        RuntimeDomain.create(
-+            repo_id="ctx_repo",
-+            repo_root=tmp_path / "repo",
-+            mode="test",
-+            cache_root=tmp_path / "cache",
-+            logs_root=tmp_path / "logs",
-+            test_context_root=tmp_path,
-+            known_production_roots=(tmp_path / "production",),
-+        )
-+    with pytest.raises(RuntimeDomainError):
-+        RuntimeDomain.create(
-+            repo_id="ctx_repo",
-+            repo_root=tmp_path / "repo",
-+            mode="test",
-+            cache_root=tmp_path / "test" / "cache",
-+            logs_root=tmp_path / "test" / "logs",
-+            test_context_root=tmp_path / "test",
-+            known_production_roots=(tmp_path / "production",),
-+            test_run_id="",
-+        )
-+
-+
-+def test_production_forbids_test_run_id(tmp_path: Path):
-+    with pytest.raises(RuntimeDomainError):
-+        RuntimeDomain.create(
-+            repo_id="ctx_repo",
-+            repo_root=tmp_path / "repo",
-+            mode="production",
-+            cache_root=tmp_path / "cache",
-+            logs_root=tmp_path / "logs",
-+            test_run_id="run-1",
-+        )
-+
-+
-+def test_domain_id_is_deterministic_and_normalizes_equivalent_paths(tmp_path: Path):
-+    first = _production_domain(tmp_path)
-+    second = RuntimeDomain.create(
-+        repo_id="ctx_repo",
-+        repo_root=tmp_path / "nested" / ".." / "repo" / ".",
-+        mode="production",
-+        cache_root=tmp_path / "production-cache" / "ctx_repo" / ".",
-+        logs_root=tmp_path / "production-logs" / ".",
-+        lock_root=tmp_path / "production-cache" / "ctx_repo" / "runtime" / ".." / "runtime",
-+        ipc_endpoint_root=tmp_path / "production-cache" / "ctx_repo",
++def _manager(
++    domain: RuntimeDomain,
++    *,
++    verifier: ScriptedVerifier | None = None,
++    process_start_identity: str = "test-process-start",
++    failure_injector=None,
++) -> RuntimeLeaseManager:
++    production_roots = (
++        domain.test_context_root.parent.parent.parent / "production-cache",
++        domain.test_context_root.parent.parent.parent / "production-logs",
 +    )
-+    assert first.domain_id == second.domain_id
-+    assert first.serialize() == second.serialize()
++    return RuntimeLeaseManager(
++        domain,
++        process_identity=ProcessIdentity(os.getpid(), process_start_identity, "pytest"),
++        liveness_verifier=verifier,
++        known_production_roots=production_roots,
++        failure_injector=failure_injector,
++    )
 +
 +
-+def test_service_instance_id_is_not_part_of_stable_domain_id(tmp_path: Path):
-+    production_ids = {
-+        _production_domain(tmp_path, service_instance_id=value).domain_id
-+        for value in (None, "service-A", "service-B")
-+    }
-+    test_ids = {
-+        _test_domain(tmp_path, service_instance_id=value).domain_id
-+        for value in (None, "service-A", "service-B")
-+    }
-+    assert len(production_ids) == 1
-+    assert len(test_ids) == 1
-+    assert RuntimeDomain.deserialize(
-+        _production_domain(tmp_path, service_instance_id="service-A").serialize()
-+    ).service_instance_id == "service-A"
-+    assert RuntimeDomain.deserialize(
-+        _test_domain(tmp_path, service_instance_id="service-B").serialize()
-+    ).service_instance_id == "service-B"
++def _live_result() -> LivenessResult:
++    return LivenessResult(
++        LivenessStatus.LIVE,
++        process_alive=True,
++        process_identity_matches=True,
++        endpoint_available=True,
++        endpoint_matches=True,
++        reason="fake authority is live",
++    )
 +
 +
-+def test_distinct_test_runs_are_distinct_domains(tmp_path: Path):
-+    assert _test_domain(tmp_path, "run-1").domain_id != _test_domain(tmp_path, "run-2").domain_id
++def _stale_result(*, pid_reuse: bool = False) -> LivenessResult:
++    return LivenessResult.stale(
++        process_alive=True if pid_reuse else False,
++        process_identity_matches=False,
++        endpoint_available=False,
++        endpoint_matches=False,
++        reason="fake confirmed stale authority",
++    )
 +
 +
-+def test_serialization_round_trip_preserves_identity(tmp_path: Path):
-+    original = _test_domain(tmp_path)
-+    restored = RuntimeDomain.deserialize(original.serialize())
-+    assert restored == original
-+    assert restored.test_context_root == original.test_context_root
-+    assert restored.serialize() == original.serialize()
-+
-+
-+def test_deserialize_rejects_test_root_outside_serialized_context(tmp_path: Path):
-+    payload = json.loads(_test_domain(tmp_path).serialize())
-+    payload["cache_root"] = str(tmp_path / "outside-cache")
-+    with pytest.raises(RuntimeDomainError):
-+        RuntimeDomain.deserialize(payload)
-+
-+
-+def test_production_and_test_resources_are_mechanically_separate(tmp_path: Path):
-+    production = _production_domain(tmp_path)
-+    test = _test_domain(tmp_path)
-+    assert production.domain_id != test.domain_id
-+    validate_runtime_domain(test, expected_mode="test", test_context_root=tmp_path / "test-domain" / "run-1", known_production_roots=(tmp_path / "production-cache", tmp_path / "production-logs"))
-+    validate_runtime_domain(production, expected_mode="production")
-+
-+
-+def test_test_domain_rejects_explicit_production_resource(tmp_path: Path):
-+    production = _production_domain(tmp_path)
-+    context = tmp_path / "test-domain" / "run-1"
-+    with pytest.raises(RuntimeDomainError):
-+        RuntimeDomain.create(
-+            repo_id="ctx_repo",
-+            repo_root=tmp_path / "repo",
-+            mode="test",
-+            cache_root=production.cache_root,
-+            logs_root=context / "logs",
-+            lock_root=production.lock_root,
-+            ipc_endpoint_root=production.ipc_endpoint_root,
-+            test_run_id="run-1",
-+            test_context_root=context,
-+            known_production_roots=(production.cache_root, production.logs_root),
-+        )
-+
-+
-+def test_production_domain_rejects_explicit_test_resource(tmp_path: Path):
-+    test = _test_domain(tmp_path)
-+    with pytest.raises(RuntimeDomainError):
-+        RuntimeDomain.create(
-+            repo_id="ctx_repo",
-+            repo_root=tmp_path / "repo",
-+            mode="production",
-+            cache_root=test.cache_root,
-+            logs_root=test.logs_root,
-+            lock_root=test.lock_root,
-+            ipc_endpoint_root=test.ipc_endpoint_root,
-+            known_test_roots=(tmp_path / "test-domain" / "run-1" ,),
-+        )
-+
-+
-+def test_illegal_root_overlap_is_rejected(tmp_path: Path):
-+    with pytest.raises(RuntimeDomainError):
-+        RuntimeDomain.create(
-+            repo_id="ctx_repo",
-+            repo_root=tmp_path / "repo",
-+            mode="production",
-+            cache_root=tmp_path / "cache",
-+            logs_root=tmp_path / "cache",
-+            lock_root=tmp_path / "cache" / "runtime",
-+            ipc_endpoint_root=tmp_path / "cache",
-+        )
-+    with pytest.raises(RuntimeDomainError):
-+        RuntimeDomain.create(
-+            repo_id="ctx_repo",
-+            repo_root=tmp_path / "repo",
-+            mode="production",
-+            cache_root=tmp_path / "cache",
-+            logs_root=tmp_path / "logs",
-+            lock_root=tmp_path / "cache" / "runtime",
-+            ipc_endpoint_root=tmp_path / "cache" / "runtime",
-+        )
-+
-+
-+def test_symlink_equivalent_root_overlap_is_rejected(tmp_path: Path):
-+    cache = tmp_path / "cache"
-+    cache.mkdir()
-+    alias = tmp_path / "cache-alias"
++def _acquire_in_process(
++    domain: RuntimeDomain,
++    production_roots: tuple[Path, ...],
++    start_event: Any,
++    result_queue: Any,
++    index: int,
++) -> None:
++    start_event.wait()
 +    try:
-+        alias.symlink_to(cache, target_is_directory=True)
-+    except NotImplementedError as exc:
-+        pytest.skip(f"symlink creation denied: {exc}")
-+    except OSError as exc:
-+        if getattr(exc, "winerror", None) == 1314:
-+            pytest.skip(f"symlink creation denied: {exc}")
-+        raise
-+    with pytest.raises(RuntimeDomainError):
-+        RuntimeDomain.create(
-+            repo_id="ctx_repo",
-+            repo_root=tmp_path / "repo",
-+            mode="production",
-+            cache_root=cache,
-+            logs_root=alias,
-+            lock_root=cache / "runtime",
-+            ipc_endpoint_root=cache,
++        lease = RuntimeLeaseManager(
++            domain,
++            process_identity=ProcessIdentity(os.getpid(), f"child-{index}", "pytest"),
++            liveness_verifier=ScriptedVerifier(_live_result()),
++            known_production_roots=production_roots,
++        ).acquire()
++        result_queue.put(("winner", lease.lease_generation))
++    except BaseException as exc:  # pragma: no cover - parent assertion reports failures
++        result_queue.put((type(exc).__name__, str(exc)))
++
++
++def test_first_acquisition_allocates_generation_one_and_fresh_service_id(tmp_path: Path):
++    domain = _domain(tmp_path)
++    manager = _manager(domain)
++
++    lease = manager.acquire()
++
++    assert lease.lease_generation == 1
++    assert lease.service_instance_id
++    assert lease.owner_token
++    assert lease.endpoint_fingerprint is None
++    assert manager.read_generation().last_lease_generation == 1
++    assert manager.read_live_lease() == lease
++
++
++def test_clean_release_preserves_high_water_mark_and_next_acquisition_is_two(tmp_path: Path):
++    domain = _domain(tmp_path)
++    manager = _manager(domain)
++
++    first = manager.acquire()
++    released = manager.release(first)
++    assert released.status == "released"
++    assert released.last_lease_generation == 1
++    assert not live_lease_path(domain).exists()
++
++    second = _manager(domain).acquire()
++    assert second.lease_generation == 2
++    assert second.service_instance_id != first.service_instance_id
++
++
++def test_stale_recovery_increments_generation_and_fences_old_service(tmp_path: Path):
++    domain = _domain(tmp_path)
++    first_manager = _manager(domain)
++    first = first_manager.acquire()
++
++    stale_manager = _manager(domain, verifier=ScriptedVerifier(_stale_result()))
++    second = stale_manager.acquire()
++
++    assert second.lease_generation == 2
++    assert second.service_instance_id != first.service_instance_id
++    with pytest.raises(LeaseNotOwner):
++        first_manager.release(first)
++
++
++def test_pid_reuse_with_same_pid_but_different_start_identity_is_stale(tmp_path: Path):
++    domain = _domain(tmp_path)
++    first = _manager(domain).acquire()
++    verifier = ScriptedVerifier(_stale_result(pid_reuse=True))
++
++    second = _manager(domain, verifier=verifier).acquire()
++
++    assert verifier.calls[0].service_pid == first.service_pid
++    assert second.lease_generation == 2
++
++
++def test_generation_gap_after_crash_before_live_write_is_never_reused(tmp_path: Path):
++    domain = _domain(tmp_path)
++    crashed = _manager(domain, failure_injector=CrashAt("after_generation_persist"))
++    with pytest.raises(RuntimeError, match="after_generation_persist"):
++        crashed.acquire()
++
++    assert generation_metadata_path(domain).is_file()
++    assert not live_lease_path(domain).exists()
++    next_lease = _manager(domain).acquire()
++    assert next_lease.lease_generation == 2
++
++
++def test_crash_after_live_write_leaves_existing_authority_for_normal_liveness_check(tmp_path: Path):
++    domain = _domain(tmp_path)
++    crashed = _manager(
++        domain,
++        verifier=ScriptedVerifier(_live_result()),
++        failure_injector=CrashAt("after_live_lease_persist"),
++    )
++    with pytest.raises(RuntimeError, match="after_live_lease_persist"):
++        crashed.acquire()
++
++    existing = RuntimeLease.from_dict(json.loads(live_lease_path(domain).read_text()))
++    assert existing.lease_generation == 1
++    with pytest.raises(LeaseAlreadyHeld):
++        _manager(domain, verifier=ScriptedVerifier(_live_result())).acquire()
++
++
++@pytest.mark.parametrize(
++    "status",
++    [LivenessStatus.UNKNOWN, LivenessStatus.AMBIGUOUS, LivenessStatus.TIMEOUT, LivenessStatus.BUSY],
++)
++def test_ambiguous_timeout_or_busy_liveness_rejects_takeover(tmp_path: Path, status: LivenessStatus):
++    domain = _domain(tmp_path)
++    _manager(domain).acquire()
++    result = LivenessResult(
++        status,
++        process_alive=None,
++        process_identity_matches=None,
++        endpoint_available=None,
++        endpoint_matches=None,
++        reason="not stale evidence",
++    )
++
++    with pytest.raises(LeaseLivenessUnknown):
++        _manager(domain, verifier=ScriptedVerifier(result)).acquire()
++
++
++def test_confirmed_dead_process_and_unavailable_endpoint_allow_stale_takeover(tmp_path: Path):
++    domain = _domain(tmp_path)
++    first = _manager(domain).acquire()
++    second = _manager(domain, verifier=ScriptedVerifier(_stale_result())).acquire()
++
++    assert second.lease_generation == first.lease_generation + 1
++
++
++def test_crash_during_release_durable_fence_prevents_old_lease_resurrection(tmp_path: Path):
++    domain = _domain(tmp_path)
++    first_manager = _manager(domain)
++    first = first_manager.acquire()
++    first_manager.failure_injector = CrashAt("before_release_live_remove")
++    with pytest.raises(RuntimeError, match="before_release_live_remove"):
++        first_manager.release(first)
++
++    record = first_manager.read_generation()
++    assert record.status == "released"
++    assert live_lease_path(domain).exists()
++    second = _manager(domain, verifier=ScriptedVerifier(_live_result())).acquire()
++    assert second.lease_generation == 2
++    current = RuntimeLease.deserialize(live_lease_path(domain).read_text())
++    assert current.service_instance_id == second.service_instance_id
++    assert current.service_instance_id != first.service_instance_id
++
++
++def test_old_service_cannot_bind_endpoint_or_release_current_generation(tmp_path: Path):
++    domain = _domain(tmp_path)
++    first_manager = _manager(domain)
++    first = first_manager.acquire()
++    second = _manager(domain, verifier=ScriptedVerifier(_stale_result())).acquire()
++
++    with pytest.raises(LeaseNotOwner):
++        first_manager.bind_endpoint(first, "endpoint-old")
++    with pytest.raises(LeaseNotOwner):
++        first_manager.release(first)
++    bound = _manager(domain).bind_endpoint(second, "endpoint-new")
++    assert bound.endpoint_fingerprint == "endpoint-new"
++
++
++def test_endpoint_binding_is_owner_validated_and_one_time(tmp_path: Path):
++    domain = _domain(tmp_path)
++    manager = _manager(domain)
++    lease = manager.acquire()
++    bound = manager.bind_endpoint(lease, "endpoint-1")
++    assert manager.bind_endpoint(bound, "endpoint-1").endpoint_fingerprint == "endpoint-1"
++    with pytest.raises(EndpointBindingError):
++        manager.bind_endpoint(bound, "endpoint-2")
++
++
++def test_heartbeat_is_owner_validated_but_not_liveness_evidence(tmp_path: Path):
++    domain = _domain(tmp_path)
++    manager = _manager(domain)
++    lease = manager.acquire()
++    refreshed = manager.refresh_heartbeat(lease, now=lease.started_at + 5)
++    assert refreshed.last_heartbeat_at == lease.started_at + 5
++    assert manager.read_live_lease() == refreshed
++
++
++def test_malformed_generation_metadata_fails_closed(tmp_path: Path):
++    domain = _domain(tmp_path)
++    path = generation_metadata_path(domain)
++    path.parent.mkdir(parents=True, exist_ok=True)
++    path.write_text("{not-json", encoding="utf-8")
++    with pytest.raises(RuntimeLeaseError):
++        _manager(domain).acquire()
++
++
++def test_malformed_live_lease_metadata_fails_closed(tmp_path: Path):
++    domain = _domain(tmp_path)
++    manager = _manager(domain)
++    manager.acquire()
++    live_lease_path(domain).write_text("{}", encoding="utf-8")
++    with pytest.raises(RuntimeLeaseError):
++        _manager(domain, verifier=ScriptedVerifier(_stale_result())).acquire()
++
++
++@pytest.mark.parametrize("field", ["repo_id", "runtime_domain_id", "resource_root_fingerprints"])
++def test_foreign_lease_metadata_fails_closed(tmp_path: Path, field: str):
++    domain = _domain(tmp_path)
++    manager = _manager(domain)
++    lease = manager.acquire()
++    payload = lease.to_dict()
++    if field == "resource_root_fingerprints":
++        payload[field] = dict(payload[field])
++        payload[field]["cache_root"] = "foreign-cache-fingerprint"
++    else:
++        payload[field] = "foreign"
++    live_lease_path(domain).write_text(json.dumps(payload), encoding="utf-8")
++
++    with pytest.raises(ForeignLeaseError):
++        _manager(domain, verifier=ScriptedVerifier(_stale_result())).acquire()
++
++
++def test_concurrent_acquisitions_have_exactly_one_winner(tmp_path: Path):
++    domain = _domain(tmp_path)
++    barrier = threading.Barrier(4)
++    results: list[RuntimeLease] = []
++    errors: list[BaseException] = []
++
++    def worker(index: int) -> None:
++        try:
++            barrier.wait()
++            lease = _manager(
++                domain,
++                verifier=ScriptedVerifier(_live_result()),
++                process_start_identity=f"thread-{index}",
++            ).acquire()
++            results.append(lease)
++        except BaseException as exc:  # pragma: no cover - assertion below reports failures
++            errors.append(exc)
++
++    threads = [threading.Thread(target=worker, args=(index,)) for index in range(4)]
++    for thread in threads:
++        thread.start()
++    for thread in threads:
++        thread.join()
++
++    assert len(results) == 1
++    assert len(errors) == 3
++    assert all(isinstance(error, LeaseAlreadyHeld) for error in errors)
++
++
++def test_cross_process_acquisitions_have_exactly_one_winner(tmp_path: Path):
++    domain = _domain(tmp_path)
++    production_roots = (tmp_path / "production-cache", tmp_path / "production-logs")
++    context = multiprocessing.get_context("spawn")
++    start_event = context.Event()
++    result_queue = context.Queue()
++    processes = [
++        context.Process(
++            target=_acquire_in_process,
++            args=(domain, production_roots, start_event, result_queue, index),
 +        )
++        for index in range(2)
++    ]
++    for process in processes:
++        process.start()
++    start_event.set()
++    results = [result_queue.get(timeout=20) for _ in processes]
++    for process in processes:
++        process.join(timeout=20)
++    assert all(process.exitcode == 0 for process in processes)
++    assert [result[0] for result in results].count("winner") == 1
++    assert [result[0] for result in results].count("LeaseAlreadyHeld") == 1
 +
 +
-+def test_validation_failure_does_not_open_resources(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-+    def fail(*_args, **_kwargs):
-+        raise AssertionError("resource opened during RuntimeDomain validation")
++def test_generation_survives_live_lease_file_deletion_and_release(tmp_path: Path):
++    domain = _domain(tmp_path)
++    manager = _manager(domain)
++    first = manager.acquire()
++    live_lease_path(domain).unlink()
++    second = _manager(domain).acquire()
++    assert second.lease_generation == first.lease_generation + 1
++    _manager(domain).release(second)
++    assert manager.read_generation().last_lease_generation == 2
 +
-+    monkeypatch.setattr(builtins, "open", fail)
-+    monkeypatch.setattr(os, "open", fail)
-+    monkeypatch.setattr(Path, "open", fail)
-+    with pytest.raises(RuntimeDomainError):
-+        RuntimeDomain.create(
-+            repo_id="ctx_repo",
-+            repo_root=tmp_path / "repo",
-+            mode="test",
-+            cache_root=tmp_path / "production" / "cache",
-+            logs_root=tmp_path / "test" / "logs",
-+            lock_root=tmp_path / "production" / "cache" / "runtime",
-+            ipc_endpoint_root=tmp_path / "production" / "cache",
-+            test_run_id="run-1",
-+            test_context_root=tmp_path / "test",
-+            known_production_roots=(tmp_path / "production",),
-+        )
++
++def test_runtime_lease_serialization_round_trip_and_test_root_isolation(tmp_path: Path):
++    domain = _domain(tmp_path)
++    manager = _manager(domain)
++    lease = manager.acquire()
++    restored = RuntimeLease.from_dict(json.loads(json.dumps(lease.to_dict())))
++    assert restored == lease
++    assert set(dict(lease.resource_root_fingerprints)) == {
++        "repo_root",
++        "cache_root",
++        "logs_root",
++        "lock_root",
++        "ipc_endpoint_root",
++    }
++    assert not (tmp_path / "production-cache").exists()
++    assert not (tmp_path / "production-logs").exists()
++
++
++def test_process_identity_requires_start_token_and_is_not_pid_only():
++    with pytest.raises(RuntimeLeaseError):
++        ProcessIdentity(os.getpid(), "")
 
 ```
 
