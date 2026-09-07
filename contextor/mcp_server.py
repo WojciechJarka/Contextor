@@ -185,6 +185,9 @@ from contextor.mcp.tools.get_artifact_blast_radius import (
 from contextor.mcp.tools.get_module_blast_radius import (
     get_module_blast_radius as _get_module_blast_radius_impl,
 )
+from contextor.mcp.tools.get_dataflow_lineage import (
+    get_dataflow_lineage as _get_dataflow_lineage_impl,
+)
 from contextor.mcp.tools.get_name_collisions import (
     get_name_collisions as _get_name_collisions_impl,
 )
@@ -516,6 +519,7 @@ REGISTERED_MCP_TOOL_NAMES: tuple[str, ...] = (
     "get_name_collisions",
     "get_mcp_documentation",
     "get_module_blast_radius",
+    "get_dataflow_lineage",
 )
 
 
@@ -561,6 +565,7 @@ get_symbol_call_context = register_mcp_tool(_get_symbol_call_context_impl, name=
 get_name_collisions = register_mcp_tool(_get_name_collisions_impl, name="get_name_collisions")
 get_mcp_documentation = register_mcp_tool(_get_mcp_documentation_impl, name="get_mcp_documentation")
 get_module_blast_radius = register_mcp_tool(_get_module_blast_radius_impl, name="get_module_blast_radius")
+get_dataflow_lineage = register_mcp_tool(_get_dataflow_lineage_impl, name="get_dataflow_lineage")
 
 
 def main():

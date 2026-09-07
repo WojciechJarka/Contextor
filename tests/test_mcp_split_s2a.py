@@ -46,6 +46,7 @@ _EXPECTED_ORDER = [
     "get_name_collisions",
     "get_mcp_documentation",
     "get_module_blast_radius",
+    "get_dataflow_lineage",
 ]
 
 _IMPLEMENTATIONS = {

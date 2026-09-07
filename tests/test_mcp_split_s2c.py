@@ -25,6 +25,7 @@ _EXPECTED_ORDER = [
     "lookup_artifact_by_symbol", "search_source", "get_source_range",
     "get_symbol_call_context", "get_name_collisions",
     "get_mcp_documentation", "get_module_blast_radius",
+    "get_dataflow_lineage",
 ]
 
 _IMPLEMENTATIONS = {
