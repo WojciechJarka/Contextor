@@ -78,6 +78,43 @@ def test_all_defined_symbols_receive_collision_free_qualified_identities(tmp_pat
     assert registry.get_artifact_id("pkg.first::unused") is not None
     assert registry.get_artifact_id("run") is None
 
+
+def test_class_fields_are_not_materialized_as_artifacts(tmp_path, isolated_dirs):
+    (tmp_path / "producer.py").write_text(
+        "from dataclasses import dataclass\n"
+        "\n"
+        "MODULE_GLOBAL = 1\n"
+        "\n"
+        "@dataclass\n"
+        "class Data:\n"
+        "    field: int\n"
+        "    default: int = 0\n"
+        "\n"
+        "    def method(self):\n"
+        "        return MODULE_GLOBAL\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "consumer.py").write_text(
+        "from producer import Data, MODULE_GLOBAL\n"
+        "\n"
+        "def use():\n"
+        "    item = Data(1)\n"
+        "    return MODULE_GLOBAL + item.method()\n",
+        encoding="utf-8",
+    )
+
+    modules = build_index(str(tmp_path))
+    report = generate_artifact_usage_report(modules, str(tmp_path))
+    artifacts = report["artifacts"]
+
+    assert "producer::MODULE_GLOBAL" in artifacts
+    assert "producer::Data" in artifacts
+    assert "producer::Data.method" in artifacts
+    assert not {
+        "producer::field",
+        "producer::default",
+    } & artifacts.keys()
+
 from contextor.core.reporting_layer.artifact_usage_report_compact import compact_artifact_report
 
 def test_usage_sidecar_and_filtering(sample_repo, isolated_dirs):

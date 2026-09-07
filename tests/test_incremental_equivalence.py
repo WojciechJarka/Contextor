@@ -143,6 +143,82 @@ def test_incremental_update_synchronizes_qualified_artifact_registry(tmp_path):
     assert registry.get_artifact_id("bar") is None
 
 
+def test_incremental_full_parity_excludes_class_fields_and_retires_stale_identity(
+    tmp_path,
+):
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    target = repo_dir / "a.py"
+    target.write_text(
+        "MODULE_GLOBAL = 1\n"
+        "\n"
+        "class Data:\n"
+        "    field: int\n"
+        "    default: int = 0\n"
+        "\n"
+        "    def method(self):\n"
+        "        return MODULE_GLOBAL\n",
+        encoding="utf-8",
+    )
+
+    registry = PersistentIdentityRegistry(str(repo_dir))
+    state = bootstrap_state(repo_dir, registry)
+    with registry.transaction():
+        registry.sync_with_workspace(
+            {"a"},
+            {
+                "a::MODULE_GLOBAL",
+                "a::Data",
+                "a::Data.method",
+                "a::field",
+            },
+        )
+    target.write_text(
+        "MODULE_GLOBAL = 2\n"
+        "NEW_GLOBAL = 3\n"
+        "\n"
+        "class Data:\n"
+        "    field: int\n"
+        "    default: int = 1\n"
+        "\n"
+        "    def method(self):\n"
+        "        return MODULE_GLOBAL\n",
+        encoding="utf-8",
+    )
+
+    registry_baseline = PersistentIdentityRegistry(str(repo_dir))
+    full_state = bootstrap_state(repo_dir, registry_baseline)
+
+    from contextor.core.analysis.incremental.preparation import prepare_source_update
+
+    prepared = prepare_source_update(
+        target,
+        "a",
+        is_new=False,
+        old_module=state.modules["a"],
+        old_artifacts=state.artifacts["a"],
+        old_usage=getattr(state, "module_usages", {}).get("a"),
+    )
+    assert not prepared.has_error
+    assert set(prepared.new_artifacts["own_symbols"]) == set(
+        full_state.artifacts["a"]["own_symbols"]
+    )
+
+    expected_symbols = {"MODULE_GLOBAL", "NEW_GLOBAL", "Data", "Data.method"}
+    assert set(prepared.new_artifacts["own_symbols"]) == expected_symbols
+
+    from contextor.core.reporting_layer.artifact_usage_report import (
+        collect_qualified_artifact_identities,
+    )
+
+    with registry.transaction():
+        registry.sync_with_workspace(
+            set(full_state.modules),
+            collect_qualified_artifact_identities(full_state.artifacts),
+        )
+    assert registry.get_artifact_id("a::field") is None
+
+
 def test_incremental_update_allocates_qualified_identity_for_new_symbol(tmp_path):
     repo_dir = tmp_path / "repo"
     repo_dir.mkdir()

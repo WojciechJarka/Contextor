@@ -108,14 +108,16 @@ class SymbolVisitor(ast.NodeVisitor):
         if self.function_depth == 0:
             for target in node.targets:
                 if isinstance(target, ast.Name):
-                    self.facts.globals.add(target.id)
                     self.facts.assignments.add(target.id)
+                    if not self.class_stack:
+                        self.facts.globals.add(target.id)
         self.generic_visit(node)
 
     def visit_AnnAssign(self, node):
         if self.function_depth == 0 and isinstance(node.target, ast.Name):
-            self.facts.globals.add(node.target.id)
             self.facts.assignments.add(node.target.id)
+            if not self.class_stack:
+                self.facts.globals.add(node.target.id)
         self.generic_visit(node)
 
     def visit_Call(self, node):
