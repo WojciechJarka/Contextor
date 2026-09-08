@@ -1024,30 +1024,43 @@ def run_service(
     server_thread = None
     service_bootstrap_entered = threading.Event()
     service_terminated = threading.Event()
+    service_state_lock = threading.Lock()
     service_failure: list[BaseException] = []
+    service_ready_committed = False
     published_endpoint = None
     desktop_claim = None
     authority_emitter = None
     ownership_resolved = False
 
     def _raise_if_service_terminated(stage: str) -> None:
-        if service_failure:
+        with service_state_lock:
+            failure = service_failure[0] if service_failure else None
+            terminated = service_terminated.is_set()
+            ready_committed = service_ready_committed
+            stop_requested = bool(server is not None and server._stop.is_set())
+
+        if failure is not None:
             raise RuntimeError(
                 f"Canonical LIVE service thread failed during {stage}"
-            ) from service_failure[0]
-        if server is not None and service_terminated.is_set() and not server._stop.is_set():
+            ) from failure
+
+        if terminated and (not ready_committed or not stop_requested):
             raise RuntimeError(
                 f"Canonical LIVE service thread terminated unexpectedly during {stage}"
             )
 
     def _serve_service() -> None:
         service_bootstrap_entered.set()
+        failure: BaseException | None = None
         try:
             server.serve_forever()
         except BaseException as exc:
-            service_failure.append(exc)
+            failure = exc
         finally:
-            service_terminated.set()
+            with service_state_lock:
+                if failure is not None:
+                    service_failure.append(failure)
+                service_terminated.set()
 
     try:
         from contextor.core.runtime_trace import AuthorityEventEmitter
@@ -1192,16 +1205,31 @@ def run_service(
             )
             authority_emitter.replay_pending()
         _raise_if_service_terminated("authority event handoff")
-        if authority_emitter is not None:
-            authority_emitter.emit(
-                "RUNTIME_AUTHORITY_READY",
-                source="runtime",
-                service_instance_id=lease.service_instance_id,
-                lease_generation=lease.lease_generation,
-                status="READY",
-                decision="READY",
-                reason="endpoint, lease and authority identity parity verified",
-            )
+        # READY is the startup linearization point shared with service-thread
+        # termination. If termination acquires this lock first, startup fails
+        # and READY is never emitted. If this block wins, any later intentional
+        # stop belongs to the normal post-READY service lifetime.
+        with service_state_lock:
+            if service_failure:
+                raise RuntimeError(
+                    "Canonical LIVE service thread failed before authority readiness"
+                ) from service_failure[0]
+            if service_terminated.is_set():
+                raise RuntimeError(
+                    "Canonical LIVE service thread terminated before authority readiness"
+                )
+
+            if authority_emitter is not None:
+                authority_emitter.emit(
+                    "RUNTIME_AUTHORITY_READY",
+                    source="runtime",
+                    service_instance_id=lease.service_instance_id,
+                    lease_generation=lease.lease_generation,
+                    status="READY",
+                    decision="READY",
+                    reason="endpoint, lease and authority identity parity verified",
+                )
+            service_ready_committed = True
 
         if owner_pid is not None and owner_pid > 0:
             if sys.platform == "win32":

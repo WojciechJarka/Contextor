@@ -496,11 +496,23 @@ def test_startup_backfill_preserves_filestate_content_and_revision_parity(tmp_pa
             self._revision = revision
             self.endpoint = SimpleNamespace(host="127.0.0.1", port=1, authkey_hex="00")
             self._stop = threading.Event()
+            self.activity_epoch = "startup-backfill-test"
+
         def serve_forever(self):
-            self._stop.set()
-            return None
+            if not self._stop.wait(timeout=5.0):
+                raise RuntimeError("StubServer did not receive post-READY shutdown")
+
+        def record_authority_event(self, event):
+            if event.get("event_type") == "RUNTIME_AUTHORITY_READY":
+                self._stop.set()
+            return {
+                "accepted": True,
+                "duplicate": False,
+                "activity_epoch": self.activity_epoch,
+            }
+
         def close(self):
-            return None
+            self._stop.set()
 
     monkeypatch.setattr(runtime, "CanonicalLiveServer", StubServer)
     import contextor.core.runtime_trace as runtime_trace
@@ -584,6 +596,29 @@ def _authority_event_types(logs_root):
     return records
 
 
+def test_run_service_rejects_stop_and_return_before_ready(tmp_path, monkeypatch):
+    import contextor.core.live_state.runtime as runtime
+    from contextor.core.paths import runtime_logs_dir
+
+    repo = _runtime_service_repo(tmp_path, monkeypatch)
+
+    class PrematureStoppingServer(CanonicalLiveServer):
+        def serve_forever(self):
+            self._stop.set()
+            return None
+
+    monkeypatch.setattr(runtime, "CanonicalLiveServer", PrematureStoppingServer)
+
+    with pytest.raises(
+        RuntimeError,
+        match="service thread terminated unexpectedly during pre-endpoint bootstrap",
+    ):
+        runtime.run_service(repo)
+
+    assert not endpoint_file(repo).exists()
+    assert "RUNTIME_AUTHORITY_READY" not in _authority_event_types(runtime_logs_dir())
+
+
 def test_run_service_fails_closed_when_service_thread_raises_before_endpoint(tmp_path, monkeypatch):
     import contextor.core.live_state.runtime as runtime
     from contextor.core.paths import runtime_logs_dir
@@ -659,6 +694,10 @@ def test_normal_service_shutdown_preserves_authority_event_chronology(tmp_path, 
             break
         time.sleep(0.02)
     assert client is not None
+    deadline = time.monotonic() + 5.0
+    while time.monotonic() < deadline and "RUNTIME_AUTHORITY_READY" not in _authority_event_types(runtime_logs_dir()):
+        time.sleep(0.02)
+    assert "RUNTIME_AUTHORITY_READY" in _authority_event_types(runtime_logs_dir())
     assert client.request("shutdown").get("status") == "ok"
     service.join(timeout=5.0)
 
@@ -673,6 +712,7 @@ def test_endpoint_before_authority_replay_exposes_valid_pending_live_feed(tmp_pa
     import contextor.core.live_state.runtime as runtime
     import contextor.core.runtime_trace as runtime_trace
     from contextor import mcp_server
+    from contextor.core.paths import runtime_logs_dir
 
     repo = _runtime_service_repo(tmp_path, monkeypatch)
     replay_entered = threading.Event()
@@ -721,6 +761,11 @@ def test_endpoint_before_authority_replay_exposes_valid_pending_live_feed(tmp_pa
 
     client = runtime.connect(repo)
     assert client is not None
+    deadline = time.monotonic() + 5.0
+    while time.monotonic() < deadline and "RUNTIME_AUTHORITY_READY" not in _authority_event_types(runtime_logs_dir()):
+        completed = json.loads(mcp_server.get_live_events.fn(str(repo)))
+        time.sleep(0.02)
+    assert "RUNTIME_AUTHORITY_READY" in _authority_event_types(runtime_logs_dir())
     assert client.request("shutdown").get("status") == "ok"
     service.join(timeout=5.0)
     assert not service.is_alive()
