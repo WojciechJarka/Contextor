@@ -459,10 +459,195 @@ class CanonicalLiveServer:
         return True
 
     def _current_desktop_claim(self) -> dict[str, Any] | None:
+        # External claim readers may participate in RuntimeLease/authority
+        # callbacks. Never invoke them while holding the server state lock.
         if self._desktop_claim_reader is not None:
             claim = self._desktop_claim_reader()
-            self._desktop_claim = dict(claim) if claim is not None else None
-        return copy.deepcopy(self._desktop_claim) if self._desktop_claim is not None else None
+            normalized = dict(claim) if claim is not None else None
+            with self._lock:
+                self._desktop_claim = normalized
+                return copy.deepcopy(normalized) if normalized is not None else None
+
+        with self._lock:
+            return (
+                copy.deepcopy(self._desktop_claim)
+                if self._desktop_claim is not None
+                else None
+            )
+
+    def _dispatch_desktop_claim_status(self) -> dict[str, Any]:
+        try:
+            claim = self._current_desktop_claim()
+        except Exception as exc:
+            return {
+                "status": "error",
+                "error": f"desktop_claim_unavailable: {exc}",
+            }
+        return {"status": "ok", "desktop_claim": claim}
+
+    def _dispatch_claim_desktop(
+        self,
+        request: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        if request.get("client_kind") != "desktop":
+            return {
+                "status": "error",
+                "error": "desktop_claim_requires_desktop_client",
+            }
+
+        desktop_id = request.get("desktop_instance_id")
+        if not isinstance(desktop_id, str) or not desktop_id.strip():
+            return {
+                "status": "error",
+                "error": "desktop_instance_id_required",
+            }
+        desktop_id = desktop_id.strip()
+
+        desktop_pid = request.get("desktop_pid")
+        desktop_start = request.get("desktop_process_start_identity")
+        if (
+            isinstance(desktop_pid, bool)
+            or not isinstance(desktop_pid, int)
+            or desktop_pid <= 0
+            or not isinstance(desktop_start, str)
+            or not desktop_start.strip()
+        ):
+            return {
+                "status": "error",
+                "error": "desktop_process_identity_required",
+            }
+        desktop_start = desktop_start.strip()
+
+        if not self._claim_identity_matches_request(request):
+            return {
+                "status": "error",
+                "error": "desktop_claim_identity_mismatch",
+            }
+
+        try:
+            if self._desktop_claim_acquirer is not None:
+                # External authority callback outside self._lock.
+                claim = self._desktop_claim_acquirer(
+                    desktop_id,
+                    desktop_pid,
+                    desktop_start,
+                )
+            else:
+                current = self._current_desktop_claim()
+                if (
+                    current is not None
+                    and current.get("desktop_instance_id") != desktop_id
+                ):
+                    return {
+                        "status": "error",
+                        "error": "second_desktop_active",
+                        "desktop_claim": current,
+                    }
+                claim = current or {
+                    "runtime_domain_id": self._authority_identity.get(
+                        "runtime_domain_id"
+                    ),
+                    "service_instance_id": self._authority_identity.get(
+                        "service_instance_id"
+                    ),
+                    "lease_generation": self._authority_identity.get(
+                        "lease_generation"
+                    ),
+                    "desktop_instance_id": desktop_id,
+                    "desktop_pid": desktop_pid,
+                    "desktop_process_start_identity": desktop_start,
+                }
+        except Exception as exc:
+            if exc.__class__.__name__ == "DesktopClaimAlreadyHeld":
+                try:
+                    current = self._current_desktop_claim()
+                except Exception:
+                    current = None
+                return {
+                    "status": "error",
+                    "error": "second_desktop_active",
+                    "desktop_claim": current,
+                }
+            return {"status": "error", "error": str(exc)}
+
+        with self._lock:
+            self._desktop_claim = dict(claim)
+            result_claim = copy.deepcopy(self._desktop_claim)
+
+        return {
+            "status": "ok",
+            "claimed": True,
+            "desktop_claim": result_claim,
+        }
+
+    def _dispatch_release_desktop_claim(
+        self,
+        request: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        if request.get("client_kind") != "desktop":
+            return {
+                "status": "error",
+                "error": "desktop_claim_requires_desktop_client",
+            }
+
+        desktop_id = request.get("desktop_instance_id")
+        if not isinstance(desktop_id, str) or not desktop_id.strip():
+            return {
+                "status": "error",
+                "error": "desktop_instance_id_required",
+            }
+        desktop_id = desktop_id.strip()
+
+        desktop_pid = request.get("desktop_pid")
+        desktop_start = request.get("desktop_process_start_identity")
+        if (
+            isinstance(desktop_pid, bool)
+            or not isinstance(desktop_pid, int)
+            or desktop_pid <= 0
+            or not isinstance(desktop_start, str)
+            or not desktop_start.strip()
+        ):
+            return {
+                "status": "error",
+                "error": "desktop_process_identity_required",
+            }
+        desktop_start = desktop_start.strip()
+
+        if not self._claim_identity_matches_request(request):
+            return {
+                "status": "error",
+                "error": "desktop_claim_identity_mismatch",
+            }
+
+        try:
+            if self._desktop_claim_releaser is not None:
+                # External authority callback outside self._lock.
+                self._desktop_claim_releaser(
+                    desktop_id,
+                    desktop_pid,
+                    desktop_start,
+                )
+            else:
+                current = self._current_desktop_claim()
+                if (
+                    current is not None
+                    and current.get("desktop_instance_id") != desktop_id
+                ):
+                    return {
+                        "status": "error",
+                        "error": "desktop_claim_not_owned",
+                    }
+        except Exception as exc:
+            return {"status": "error", "error": str(exc)}
+
+        with self._lock:
+            self._desktop_claim = None
+
+        return {
+            "status": "ok",
+            "released": True,
+            "desktop_claim": None,
+        }
 
     def serve_forever(self) -> None:
         while not self._stop.is_set():
@@ -488,6 +673,17 @@ class CanonicalLiveServer:
         if not isinstance(request, dict) or not isinstance(request.get("operation"), str):
             return {"status": "error", "error": "invalid_request"}
         operation = request["operation"]
+
+        # Desktop authority callbacks cross the RuntimeLease/observability
+        # boundary and may synchronously emit back into record_authority_event.
+        # Dispatch them outside the server state lock.
+        if operation == "desktop_claim_status":
+            return self._dispatch_desktop_claim_status()
+        if operation == "claim_desktop":
+            return self._dispatch_claim_desktop(request)
+        if operation == "release_desktop_claim":
+            return self._dispatch_release_desktop_claim(request)
+
         with self._lock:
             if operation == "ping":
                 return {
@@ -512,92 +708,6 @@ class CanonicalLiveServer:
                     "process_start_identity": self._authority_identity.get("process_start_identity"),
                     "endpoint_fingerprint": self.endpoint.fingerprint(),
                 }
-            if operation == "desktop_claim_status":
-                try:
-                    claim = self._current_desktop_claim()
-                except Exception as exc:
-                    return {"status": "error", "error": f"desktop_claim_unavailable: {exc}"}
-                return {"status": "ok", "desktop_claim": claim}
-            if operation == "claim_desktop":
-                if request.get("client_kind") != "desktop":
-                    return {"status": "error", "error": "desktop_claim_requires_desktop_client"}
-                desktop_id = request.get("desktop_instance_id")
-                if not isinstance(desktop_id, str) or not desktop_id.strip():
-                    return {"status": "error", "error": "desktop_instance_id_required"}
-                if (
-                    isinstance(request.get("desktop_pid"), bool)
-                    or not isinstance(request.get("desktop_pid"), int)
-                    or request.get("desktop_pid") <= 0
-                    or not isinstance(request.get("desktop_process_start_identity"), str)
-                    or not request.get("desktop_process_start_identity").strip()
-                ):
-                    return {"status": "error", "error": "desktop_process_identity_required"}
-                if not self._claim_identity_matches_request(request):
-                    return {"status": "error", "error": "desktop_claim_identity_mismatch"}
-                try:
-                    if self._desktop_claim_acquirer is not None:
-                        claim = self._desktop_claim_acquirer(
-                            desktop_id.strip(),
-                            request["desktop_pid"],
-                            request["desktop_process_start_identity"].strip(),
-                        )
-                    else:
-                        current = self._current_desktop_claim()
-                        if current is not None and current.get("desktop_instance_id") != desktop_id.strip():
-                            return {
-                                "status": "error",
-                                "error": "second_desktop_active",
-                                "desktop_claim": current,
-                            }
-                        claim = current or {
-                            "runtime_domain_id": self._authority_identity.get("runtime_domain_id"),
-                            "service_instance_id": self._authority_identity.get("service_instance_id"),
-                            "lease_generation": self._authority_identity.get("lease_generation"),
-                            "desktop_instance_id": desktop_id.strip(),
-                            "desktop_pid": request["desktop_pid"],
-                            "desktop_process_start_identity": request["desktop_process_start_identity"].strip(),
-                        }
-                except Exception as exc:
-                    if exc.__class__.__name__ == "DesktopClaimAlreadyHeld":
-                        return {
-                            "status": "error",
-                            "error": "second_desktop_active",
-                            "desktop_claim": self._current_desktop_claim(),
-                        }
-                    return {"status": "error", "error": str(exc)}
-                self._desktop_claim = dict(claim)
-                return {"status": "ok", "claimed": True, "desktop_claim": copy.deepcopy(self._desktop_claim)}
-            if operation == "release_desktop_claim":
-                if request.get("client_kind") != "desktop":
-                    return {"status": "error", "error": "desktop_claim_requires_desktop_client"}
-                desktop_id = request.get("desktop_instance_id")
-                if not isinstance(desktop_id, str) or not desktop_id.strip():
-                    return {"status": "error", "error": "desktop_instance_id_required"}
-                if (
-                    isinstance(request.get("desktop_pid"), bool)
-                    or not isinstance(request.get("desktop_pid"), int)
-                    or request.get("desktop_pid") <= 0
-                    or not isinstance(request.get("desktop_process_start_identity"), str)
-                    or not request.get("desktop_process_start_identity").strip()
-                ):
-                    return {"status": "error", "error": "desktop_process_identity_required"}
-                if not self._claim_identity_matches_request(request):
-                    return {"status": "error", "error": "desktop_claim_identity_mismatch"}
-                try:
-                    if self._desktop_claim_releaser is not None:
-                        self._desktop_claim_releaser(
-                            desktop_id.strip(),
-                            request["desktop_pid"],
-                            request["desktop_process_start_identity"].strip(),
-                        )
-                    else:
-                        current = self._current_desktop_claim()
-                        if current is not None and current.get("desktop_instance_id") != desktop_id.strip():
-                            return {"status": "error", "error": "desktop_claim_not_owned"}
-                except Exception as exc:
-                    return {"status": "error", "error": str(exc)}
-                self._desktop_claim = None
-                return {"status": "ok", "released": True, "desktop_claim": None}
             if operation == "snapshot":
                 return {"status": "ok", "revision": self._revision, "state": self._state}
             if operation == "publish":

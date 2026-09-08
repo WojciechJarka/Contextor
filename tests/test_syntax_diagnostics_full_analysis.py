@@ -146,15 +146,18 @@ def test_real_index_repository_materializes_source_scoped_syntax_facts(tmp_path,
 
 
 def test_real_facade_materializes_real_index_syntax_facts(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
     monkeypatch.setenv("CONTEXTOR_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setenv("CONTEXTOR_STATE_DIR", str(tmp_path / "state"))
     monkeypatch.setenv("CONTEXTOR_DISABLE_PROCESS_POOL", "1")
-    (tmp_path / "valid.py").write_text("value = 1\n", encoding="utf-8")
-    (tmp_path / "broken.py").write_text("def broken(\n", encoding="utf-8")
+    (repo / "valid.py").write_text("value = 1\n", encoding="utf-8")
+    (repo / "broken.py").write_text("def broken(\n", encoding="utf-8")
 
-    errors, _ = ContextorFacade.analyze_project(str(tmp_path))
+    errors, _ = ContextorFacade.analyze_project(str(repo))
 
     assert errors == []
-    hydrated = hydrate_repository_engine(tmp_path)
+    hydrated = hydrate_repository_engine(repo)
     assert hydrated is not None
     state = hydrated.engine.state
     assert state.syntax_diagnostics_state == "fresh"

@@ -3,6 +3,7 @@ from __future__ import annotations
 import builtins
 import json
 import os
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -251,21 +252,31 @@ def test_symlink_equivalent_root_overlap_is_rejected(tmp_path: Path):
     try:
         alias.symlink_to(cache, target_is_directory=True)
     except NotImplementedError as exc:
-        pytest.skip(f"symlink creation denied: {exc}")
+        raise AssertionError(f"symlink creation unexpectedly unavailable: {exc}") from exc
     except OSError as exc:
-        if getattr(exc, "winerror", None) == 1314:
-            pytest.skip(f"symlink creation denied: {exc}")
-        raise
-    with pytest.raises(RuntimeDomainError):
-        RuntimeDomain.create(
-            repo_id="ctx_repo",
-            repo_root=tmp_path / "repo",
-            mode="production",
-            cache_root=cache,
-            logs_root=alias,
-            lock_root=cache / "runtime",
-            ipc_endpoint_root=cache,
+        if getattr(exc, "winerror", None) != 1314 or os.name != "nt":
+            raise
+        result = subprocess.run(
+            ["cmd", "/c", "mklink", "/J", str(alias), str(cache)],
+            capture_output=True,
+            text=True,
+            check=False,
         )
+        assert result.returncode == 0, result.stderr or result.stdout
+    try:
+        with pytest.raises(RuntimeDomainError):
+            RuntimeDomain.create(
+                repo_id="ctx_repo",
+                repo_root=tmp_path / "repo",
+                mode="production",
+                cache_root=cache,
+                logs_root=alias,
+                lock_root=cache / "runtime",
+                ipc_endpoint_root=cache,
+            )
+    finally:
+        if alias.exists() or alias.is_symlink():
+            alias.rmdir()
 
 
 def test_validation_failure_does_not_open_resources(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):

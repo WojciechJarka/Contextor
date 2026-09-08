@@ -6,7 +6,7 @@
   ],
   "parameters": [
     "repo_path (string, required): canonical repository root.",
-    "module (string, default \"\"): canonical dotted module name, repository-relative or absolute Python path, or active module ID.",
+    "module (string, required; runtime default \"\"): canonical dotted module name, repository-relative or absolute Python path, or active module ID. The transport default exists for transport compatibility only; blank values are rejected with `module is required.`.",
     "compact (boolean, default true): select the complete_compact serialization policy; this never bounds or samples artifacts, consumers, or downstream identities. With representation=auto, false selects readable_named and true permits indexed negotiation.",
     "fields (array of strings or null, default null): optional top-level projection. Allowed values are module, module_id, artifact_count_total, artifact_count_returned, artifacts, aggregate, data_source, and state_freshness. Projection can intentionally omit semantic collections, but does not change facts used for aggregate calculation.",
     "representation (string, default auto): lossless repeated-module encoding: auto, named, or indexed. Auto chooses the smaller complete candidate without an interaction envelope.",

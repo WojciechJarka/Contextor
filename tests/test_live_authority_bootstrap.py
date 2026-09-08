@@ -19,6 +19,7 @@ from contextor.core.live_state import (
 from contextor.core.live_state.runtime import endpoint_file
 from contextor.core.live_state import runtime as runtime_module
 from contextor.core.live_state.runtime import AuthorityLivenessVerifier
+from contextor.core.paths import runtime_logs_dir
 from contextor.core.live_state.runtime_domain import RuntimeDomain
 from contextor.core.live_state.runtime_lease import (
     LeaseLivenessUnknown,
@@ -52,6 +53,16 @@ def _stop(client) -> None:
         if connect(client.endpoint.root_path) is None:
             return
         time.sleep(0.05)
+
+
+def _authority_event_types(logs_root: Path) -> list[str]:
+    records = []
+    for path in logs_root.glob("contextor_runtime_*.jsonl"):
+        for line in path.read_text(encoding="utf-8").splitlines():
+            payload = json.loads(line)
+            if payload.get("_type") == "authority_event":
+                records.append(payload["event_type"])
+    return records
 
 
 def test_bootstrap_publishes_exact_lease_endpoint_identity(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
@@ -129,23 +140,36 @@ def test_protocol_attach_ignores_broken_desktop_claim_storage_and_desktop_admiss
         "read_desktop_claim",
         broken_claim_reader,
     )
-    service_thread = threading.Thread(
-        target=runtime_module.run_service,
-        args=(repo,),
-        kwargs={"owner_pid": os.getpid(), "owner_token": "service-owner"},
-        daemon=True,
-    )
-    service_thread.start()
-    deadline = time.monotonic() + 10.0
-    protocol = None
-    while time.monotonic() < deadline:
+    service_errors: list[BaseException] = []
+
+    def run() -> None:
         try:
-            protocol = connect_or_start(repo, client_kind="protocol", timeout=0.5)
-            break
-        except (OSError, EOFError, ConnectionError, TimeoutError, RuntimeError):
-            time.sleep(0.05)
-    assert protocol is not None
+            runtime_module.run_service(
+                repo,
+                owner_pid=os.getpid(),
+                owner_token="service-owner",
+            )
+        except BaseException as exc:
+            service_errors.append(exc)
+
+    service_thread = threading.Thread(target=run, daemon=True)
+    service_thread.start()
+    protocol = None
     try:
+        deadline = time.monotonic() + 10.0
+        while time.monotonic() < deadline:
+            try:
+                protocol = connect_or_start(repo, client_kind="protocol", timeout=0.5)
+                break
+            except (OSError, EOFError, ConnectionError, TimeoutError, RuntimeError):
+                time.sleep(0.05)
+        assert protocol is not None
+        deadline = time.monotonic() + 5.0
+        while time.monotonic() < deadline:
+            if "RUNTIME_AUTHORITY_READY" in _authority_event_types(runtime_logs_dir()):
+                break
+            time.sleep(0.05)
+        assert "RUNTIME_AUTHORITY_READY" in _authority_event_types(runtime_logs_dir())
         assert protocol.authority_status()["status"] == "ok"
         with pytest.raises(RuntimeError, match="desktop claim storage unavailable"):
             connect_or_start(repo, client_kind="desktop", desktop_instance_id="desktop-b")
@@ -158,6 +182,7 @@ def test_protocol_attach_ignores_broken_desktop_claim_storage_and_desktop_admiss
             pass
         service_thread.join(timeout=5)
         assert not service_thread.is_alive()
+        assert service_errors == []
 
 
 def test_different_repositories_may_have_independent_authorities(

@@ -7,6 +7,41 @@ import pytest
 
 pytestmark = pytest.mark.live
 
+
+@pytest.fixture(autouse=True)
+def _isolate_h3a_runtime_storage(tmp_path, monkeypatch):
+    monkeypatch.setenv("CONTEXTOR_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setenv("CONTEXTOR_STATE_DIR", str(tmp_path / "state"))
+
+
+def _start_authoritative_live(repo: Path):
+    from contextor.core.live_state import runtime as live_runtime
+    client = live_runtime.connect_or_start(repo)
+    assert client is not None
+    endpoint = client.endpoint
+    assert endpoint.schema_version == live_runtime.LIVE_ENDPOINT_SCHEMA_VERSION
+    assert endpoint.runtime_domain_id
+    assert endpoint.service_instance_id
+    assert endpoint.lease_generation is not None
+    assert endpoint.process_start_identity
+    return client
+
+
+def _stop_authoritative_live(repo: Path, client) -> None:
+    from contextor.core.live_state import connect
+    from contextor.core.live_state.runtime import endpoint_file
+
+    try:
+        client.request("shutdown", timeout=1.0)
+    except (OSError, EOFError, ConnectionError):
+        pass
+    deadline = time.monotonic() + 5.0
+    while time.monotonic() < deadline:
+        if connect(repo) is None and not endpoint_file(repo).exists():
+            return
+        time.sleep(0.02)
+    assert not endpoint_file(repo).exists()
+
 from contextor.core.api.facade import ContextorFacade
 from contextor.mcp import analysis_jobs
 from contextor.mcp import runtime as mcp_runtime
@@ -21,6 +56,8 @@ from contextor.mcp.tools.search_artifacts import search_artifacts
 
 
 def _setup_repo(tmp_path: Path) -> tuple[Path, Path]:
+    from contextor.core.repository_identity import ensure_repository_identity
+
     repo = tmp_path / "repo"
     repo.mkdir()
     pkg = repo / "pkg"
@@ -36,6 +73,7 @@ def _setup_repo(tmp_path: Path) -> tuple[Path, Path]:
         "from pkg.mod_a import compute_data\n\ndef run():\n    return compute_data(10)\n",
         encoding="utf-8",
     )
+    ensure_repository_identity(repo)
     return repo, mod_a
 
 
@@ -289,6 +327,7 @@ def test_h3a_case_i_crash_window_false_verified_prevented(tmp_path):
       WORKSPACE_SYNC != 'metadata_match'
       WORKSPACE_SYNC == 'unverified'
     """
+    from contextor.core.live_state.store import load_snapshot
     from contextor.core.paths import repo_cache_dir
     from contextor.core.analysis.state_manager import FileStateManager
     from contextor.core.live_state.store import read_metadata
@@ -372,7 +411,7 @@ def test_h3a_case_j_local_incremental_mutation_revision_sync(tmp_path):
 def test_h3a_case_k_real_remote_live_lifecycle_and_journal_separation(tmp_path):
     """Case K (Blocker 2 - Real Remote LIVE Proof & Journal Separation):
     1. Bootstrap real canonical snapshot via analyze_project;
-    2. Start real CanonicalLiveServer with updater on background thread;
+    2. Start the production authority/runtime bootstrap;
     3. Connect real client and verify initial journal revision J0 == snapshot revision (1);
     4. Execute status event (client.status('Server alive')), incrementing journal revision to J1 (2),
        WITHOUT modifying canonical source facts;
@@ -390,9 +429,6 @@ def test_h3a_case_k_real_remote_live_lifecycle_and_journal_separation(tmp_path):
        - canonical_revision == 2 (matching T1 snapshot publication)
        - FileState fingerprint matches same publication.
     """
-    import threading
-    from contextor.core.live_state import CanonicalLiveServer, LiveStateClient
-    from contextor.core.live_state.runtime import _repository_persister, _repository_updater, endpoint_file
     from contextor.core.live_state.store import load_snapshot
     from contextor.core.paths import repo_cache_dir
     from contextor.core.repository_identity import require_repository_identity
@@ -407,26 +443,8 @@ def test_h3a_case_k_real_remote_live_lifecycle_and_journal_separation(tmp_path):
     assert loaded is not None
     state, metadata = loaded
 
-    # 2. Start real CanonicalLiveServer
-    holder = {}
-    server = CanonicalLiveServer(state, revision=metadata.revision, updater=_repository_updater(repo, holder), persister=_repository_persister(repo, holder))
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-
-    # 3. Register endpoint
-    ep_file = endpoint_file(repo)
-    ep_file.parent.mkdir(parents=True, exist_ok=True)
-    ep_payload = {
-        "host": server.endpoint.host,
-        "port": server.endpoint.port,
-        "authkey_hex": server.endpoint.authkey_hex,
-        "pid": os.getpid(),
-        "repo_id": identity.repo_id,
-        "root_path": identity.root_path,
-    }
-    ep_file.write_text(json.dumps(ep_payload), encoding="utf-8")
-
-    client = LiveStateClient(server.endpoint)
+    # 2. Start the production authority/runtime bootstrap.
+    client = _start_authoritative_live(repo)
     try:
         # Initial ping
         ping0 = client.ping()
@@ -482,7 +500,7 @@ def test_h3a_case_k_real_remote_live_lifecycle_and_journal_separation(tmp_path):
         assert freshness_t1["workspace_sync"] == "verified"
         assert freshness_t1["advisory_warning"] is None
     finally:
-        server.close()
+        _stop_authoritative_live(repo, client)
 
 
 def test_h3a_case_l_legacy_filestate_missing_revision(tmp_path):
@@ -605,9 +623,6 @@ def test_h3a_case_o_live_daemon_restart_cache_invalidation_across_epochs(tmp_pat
       - workspace_sync='verified'
       - Stale P0 engine is NOT returned.
     """
-    import threading
-    from contextor.core.live_state import CanonicalLiveServer, LiveStateClient
-    from contextor.core.live_state.runtime import _repository_persister, _repository_updater, endpoint_file
     from contextor.core.live_state.store import load_snapshot
     from contextor.core.paths import repo_cache_dir
     from contextor.core.repository_identity import require_repository_identity
@@ -622,23 +637,7 @@ def test_h3a_case_o_live_daemon_restart_cache_invalidation_across_epochs(tmp_pat
     state, metadata = loaded
     p0 = metadata.revision  # 1
 
-    holder1 = {}
-    server1 = CanonicalLiveServer(state, revision=p0, updater=_repository_updater(repo, holder1), persister=_repository_persister(repo, holder1))
-    t1 = threading.Thread(target=server1.serve_forever, daemon=True)
-    t1.start()
-
-    ep_file = endpoint_file(repo)
-    ep_file.parent.mkdir(parents=True, exist_ok=True)
-    ep_file.write_text(json.dumps({
-        "host": server1.endpoint.host,
-        "port": server1.endpoint.port,
-        "authkey_hex": server1.endpoint.authkey_hex,
-        "pid": os.getpid(),
-        "repo_id": identity.repo_id,
-        "root_path": identity.root_path,
-    }), encoding="utf-8")
-
-    client1 = LiveStateClient(server1.endpoint)
+    client1 = _start_authoritative_live(repo)
     # Non-canonical status events do not mutate canonical revision
     for i in range(20):
         client1.status(f"status {i}", origin="test")
@@ -656,26 +655,10 @@ def test_h3a_case_o_live_daemon_restart_cache_invalidation_across_epochs(tmp_pat
     assert mcp_runtime._live_engine_revisions.get(str(repo)) == p0  # 1
 
     # 2. Stop S1
-    server1.close()
+    _stop_authoritative_live(repo, client1)
 
     # 3. Start Server S2 from disk snapshot (without clearing MCP cache)
-    loaded_s2 = load_snapshot(cache, expected_repo_id=identity.repo_id, expected_root_path=identity.root_path)
-    state_s2, metadata_s2 = loaded_s2
-    holder2 = {}
-    server2 = CanonicalLiveServer(state_s2, revision=metadata_s2.revision, updater=_repository_updater(repo, holder2), persister=_repository_persister(repo, holder2))
-    t2 = threading.Thread(target=server2.serve_forever, daemon=True)
-    t2.start()
-
-    ep_file.write_text(json.dumps({
-        "host": server2.endpoint.host,
-        "port": server2.endpoint.port,
-        "authkey_hex": server2.endpoint.authkey_hex,
-        "pid": os.getpid(),
-        "repo_id": identity.repo_id,
-        "root_path": identity.root_path,
-    }), encoding="utf-8")
-
-    client2 = LiveStateClient(server2.endpoint)
+    client2 = _start_authoritative_live(repo)
     try:
         # Initial journal on S2 is 1 (P0)
         assert client2.ping()["revision"] == p0
@@ -707,7 +690,7 @@ def test_h3a_case_o_live_daemon_restart_cache_invalidation_across_epochs(tmp_pat
         assert cached_eng.revision == p0 + 1
         assert mcp_runtime._live_journal_revisions.get(str(repo)) == j2
     finally:
-        server2.close()
+        _stop_authoritative_live(repo, client2)
 
 
 def test_h3a_case_p_unchanged_session_redundant_snapshot_fetch_zero(tmp_path):
@@ -715,10 +698,8 @@ def test_h3a_case_p_unchanged_session_redundant_snapshot_fetch_zero(tmp_path):
     Within the same LIVE session, repeated MCP engine calls when no journal events occur
     do NOT fetch the snapshot again from the daemon.
     """
-    import threading
     from unittest.mock import patch
-    from contextor.core.live_state import CanonicalLiveServer, LiveStateClient
-    from contextor.core.live_state.runtime import _repository_updater, endpoint_file
+    from contextor.core.live_state import LiveStateClient
     from contextor.core.live_state.store import load_snapshot
     from contextor.core.paths import repo_cache_dir
     from contextor.core.repository_identity import require_repository_identity
@@ -728,22 +709,7 @@ def test_h3a_case_p_unchanged_session_redundant_snapshot_fetch_zero(tmp_path):
     identity = require_repository_identity(repo)
     cache = repo_cache_dir(repo)
 
-    loaded = load_snapshot(cache, expected_repo_id=identity.repo_id, expected_root_path=identity.root_path)
-    state, metadata = loaded
-    server = CanonicalLiveServer(state, revision=metadata.revision, updater=_repository_updater(repo))
-    t = threading.Thread(target=server.serve_forever, daemon=True)
-    t.start()
-
-    ep_file = endpoint_file(repo)
-    ep_file.parent.mkdir(parents=True, exist_ok=True)
-    ep_file.write_text(json.dumps({
-        "host": server.endpoint.host,
-        "port": server.endpoint.port,
-        "authkey_hex": server.endpoint.authkey_hex,
-        "pid": os.getpid(),
-        "repo_id": identity.repo_id,
-        "root_path": identity.root_path,
-    }), encoding="utf-8")
+    client = _start_authoritative_live(repo)
 
     try:
         mcp_runtime._live_engines.pop(str(repo), None)
@@ -771,7 +737,7 @@ def test_h3a_case_p_unchanged_session_redundant_snapshot_fetch_zero(tmp_path):
         # Redundant snapshot fetch count is 0
         assert snapshot_call_count == 0
     finally:
-        server.close()
+        _stop_authoritative_live(repo, client)
 
 
 def test_h3a_case_q_equal_numeric_revision_cross_session_invalidation(tmp_path):
@@ -782,36 +748,11 @@ def test_h3a_case_q_equal_numeric_revision_cross_session_invalidation(tmp_path):
     Equal numeric revision R=1 across different session identities MUST force snapshot refresh and session rebind.
     Then first canonical mutation on S2 becomes R+1 = 2.
     """
-    import threading
-    from contextor.core.live_state import CanonicalLiveServer, LiveStateClient
-    from contextor.core.live_state.runtime import _repository_updater, endpoint_file
-    from contextor.core.live_state.store import load_snapshot
-    from contextor.core.paths import repo_cache_dir
-    from contextor.core.repository_identity import require_repository_identity
-
     repo, mod_a = _setup_repo(tmp_path)
     ContextorFacade.analyze_project(str(repo))
-    identity = require_repository_identity(repo)
-    cache = repo_cache_dir(repo)
 
     # 1. Start Server S1 with canonical state R=1
-    loaded = load_snapshot(cache, expected_repo_id=identity.repo_id, expected_root_path=identity.root_path)
-    state, metadata = loaded
-    assert metadata.revision == 1
-    server1 = CanonicalLiveServer(state, revision=1, updater=_repository_updater(repo))
-    t1 = threading.Thread(target=server1.serve_forever, daemon=True)
-    t1.start()
-
-    ep_file = endpoint_file(repo)
-    ep_file.parent.mkdir(parents=True, exist_ok=True)
-    ep_file.write_text(json.dumps({
-        "host": server1.endpoint.host,
-        "port": server1.endpoint.port,
-        "authkey_hex": server1.endpoint.authkey_hex,
-        "pid": os.getpid(),
-        "repo_id": identity.repo_id,
-        "root_path": identity.root_path,
-    }), encoding="utf-8")
+    client1 = _start_authoritative_live(repo)
 
     mcp_runtime._live_engines.pop(str(repo), None)
     mcp_runtime._live_journal_revisions.pop(str(repo), None)
@@ -826,25 +767,10 @@ def test_h3a_case_q_equal_numeric_revision_cross_session_invalidation(tmp_path):
     assert mcp_runtime._live_engine_revisions.get(str(repo)) == 1
     assert mcp_runtime._live_journal_revisions.get(str(repo)) == 1
 
-    server1.close()
-    t1.join(timeout=2)
+    _stop_authoritative_live(repo, client1)
 
     # 2. Start S2 from SAME persisted canonical state R=1 (restart is NOT a canonical mutation)
-    loaded_s2 = load_snapshot(cache, expected_repo_id=identity.repo_id, expected_root_path=identity.root_path)
-    state_s2, metadata_s2 = loaded_s2
-    assert metadata_s2.revision == 1
-    server2 = CanonicalLiveServer(state_s2, revision=1, updater=_repository_updater(repo))
-    t2 = threading.Thread(target=server2.serve_forever, daemon=True)
-    t2.start()
-
-    ep_file.write_text(json.dumps({
-        "host": server2.endpoint.host,
-        "port": server2.endpoint.port,
-        "authkey_hex": server2.endpoint.authkey_hex,
-        "pid": os.getpid(),
-        "repo_id": identity.repo_id,
-        "root_path": identity.root_path,
-    }), encoding="utf-8")
+    client2 = _start_authoritative_live(repo)
 
     try:
         # WITHOUT clearing MCP cache:
@@ -860,7 +786,6 @@ def test_h3a_case_q_equal_numeric_revision_cross_session_invalidation(tmp_path):
         assert mcp_runtime._live_journal_revisions.get(str(repo)) == 1
 
         # 3. First canonical mutation on S2 -> becomes R+1 = 2
-        client2 = LiveStateClient(server2.endpoint)
         upd = client2.update_file(str(mod_a), origin="desktop_watcher")
         assert upd["status"] == "ok"
         assert upd["revision"] == 2
@@ -873,13 +798,12 @@ def test_h3a_case_q_equal_numeric_revision_cross_session_invalidation(tmp_path):
         assert mcp_runtime._live_engine_revisions.get(str(repo)) == 2
         assert mcp_runtime._live_journal_revisions.get(str(repo)) == 2
     finally:
-        server2.close()
-        t2.join(timeout=2)
+        _stop_authoritative_live(repo, client2)
 
 
 def test_h3a_case_r_full_analysis_same_daemon_live_publication_sync(tmp_path):
     """Case R (H3A-H5 - Full Analysis Active LIVE Daemon Sync):
-    T0: analyze_project creates P0. Start real CanonicalLiveServer daemon holding P0.
+    T0: analyze_project creates P0. Start the production authority daemon holding P0.
         MCP hydrates P0.
     T1: modify file on disk, run ContextorFacade.analyze_project(repo) with SAME daemon active.
         WITHOUT restarting daemon and WITHOUT manually clearing MCP caches.
@@ -891,9 +815,7 @@ def test_h3a_case_r_full_analysis_same_daemon_live_publication_sync(tmp_path):
       - get_symbol_implementation: status='resolved', implementation returned
       - get_file_edit_context: canonical_revision=2, provenance='live', workspace_sync='verified'
     """
-    import threading
-    from contextor.core.live_state import CanonicalLiveServer, LiveStateClient
-    from contextor.core.live_state.runtime import _repository_updater, endpoint_file
+    from contextor.core.live_state import LiveStateClient
     from contextor.core.live_state.store import load_snapshot, read_metadata
     from contextor.core.paths import repo_cache_dir
     from contextor.core.analysis.state_manager import FileStateManager
@@ -911,20 +833,7 @@ def test_h3a_case_r_full_analysis_same_daemon_live_publication_sync(tmp_path):
     state, metadata = loaded
     p0 = metadata.revision  # 1
 
-    server = CanonicalLiveServer(state, revision=p0, updater=_repository_updater(repo))
-    t = threading.Thread(target=server.serve_forever, daemon=True)
-    t.start()
-
-    ep_file = endpoint_file(repo)
-    ep_file.parent.mkdir(parents=True, exist_ok=True)
-    ep_file.write_text(json.dumps({
-        "host": server.endpoint.host,
-        "port": server.endpoint.port,
-        "authkey_hex": server.endpoint.authkey_hex,
-        "pid": os.getpid(),
-        "repo_id": identity.repo_id,
-        "root_path": identity.root_path,
-    }), encoding="utf-8")
+    server_client = _start_authoritative_live(repo)
 
     try:
         # Clear MCP caches once before initial hydration
@@ -960,8 +869,7 @@ def test_h3a_case_r_full_analysis_same_daemon_live_publication_sync(tmp_path):
         assert sm.state_id == disk_meta.state_id
 
         # Verify LIVE daemon state via client
-        client = LiveStateClient(server.endpoint)
-        daemon_snap = client.snapshot()
+        daemon_snap = server_client.snapshot()
         daemon_state = daemon_snap.get("state")
         assert getattr(daemon_state, "revision", None) == p1
         assert getattr(daemon_state, "state_id", None) == disk_meta.state_id
@@ -987,7 +895,7 @@ def test_h3a_case_r_full_analysis_same_daemon_live_publication_sync(tmp_path):
         assert edit_res["state_freshness"]["canonical_revision"] == p1
         assert edit_res["state_freshness"]["workspace_sync"] == "verified"
     finally:
-        server.close()
+        _stop_authoritative_live(repo, server_client)
 
 
 def test_h3a_case_s_explicit_generation_mismatch_symbol_fail_closed(tmp_path):
@@ -1054,9 +962,7 @@ def test_h3a_case_t_active_daemon_successful_publish(tmp_path):
       - live_publish_revision = P1
       - live_publish_warning = None
     """
-    import threading
-    from contextor.core.live_state import CanonicalLiveServer, LiveStateClient
-    from contextor.core.live_state.runtime import _repository_updater, endpoint_file
+    from contextor.core.live_state import LiveStateClient
     from contextor.core.live_state.store import load_snapshot, read_metadata
     from contextor.core.paths import repo_cache_dir
     from contextor.core.analysis.state_manager import FileStateManager
@@ -1071,20 +977,7 @@ def test_h3a_case_t_active_daemon_successful_publish(tmp_path):
     state, metadata = loaded
     p0 = metadata.revision
 
-    server = CanonicalLiveServer(state, revision=p0, updater=_repository_updater(repo))
-    t = threading.Thread(target=server.serve_forever, daemon=True)
-    t.start()
-
-    ep_file = endpoint_file(repo)
-    ep_file.parent.mkdir(parents=True, exist_ok=True)
-    ep_file.write_text(json.dumps({
-        "host": server.endpoint.host,
-        "port": server.endpoint.port,
-        "authkey_hex": server.endpoint.authkey_hex,
-        "pid": os.getpid(),
-        "repo_id": identity.repo_id,
-        "root_path": identity.root_path,
-    }), encoding="utf-8")
+    server_client = _start_authoritative_live(repo)
 
     try:
         time.sleep(0.05)
@@ -1102,8 +995,7 @@ def test_h3a_case_t_active_daemon_successful_publish(tmp_path):
         sm = FileStateManager(str(cache))
         assert sm.revision == p1
 
-        client = LiveStateClient(server.endpoint)
-        daemon_snap = client.snapshot()
+        daemon_snap = server_client.snapshot()
         daemon_state = daemon_snap.get("state")
         assert getattr(daemon_state, "revision", None) == p1
 
@@ -1114,7 +1006,7 @@ def test_h3a_case_t_active_daemon_successful_publish(tmp_path):
         assert res.summary_data.get("live_publish_status") == "success"
         assert res.summary_data.get("live_publish_revision") == p1
     finally:
-        server.close()
+        _stop_authoritative_live(repo, server_client)
 
 
 def test_h3a_case_u_active_daemon_publish_raises_failure_semantics(tmp_path, monkeypatch):
@@ -1130,9 +1022,7 @@ def test_h3a_case_u_active_daemon_publish_raises_failure_semantics(tmp_path, mon
       - live_publish_revision = None
       - live_publish_warning contains exception info
     """
-    import threading
-    from contextor.core.live_state import CanonicalLiveServer, LiveStateClient
-    from contextor.core.live_state.runtime import _repository_updater, endpoint_file
+    from contextor.core.live_state import LiveStateClient
     from contextor.core.live_state.store import load_snapshot, read_metadata
     from contextor.core.paths import repo_cache_dir
     from contextor.core.analysis.state_manager import FileStateManager
@@ -1147,20 +1037,7 @@ def test_h3a_case_u_active_daemon_publish_raises_failure_semantics(tmp_path, mon
     state, metadata = loaded
     p0 = metadata.revision
 
-    server = CanonicalLiveServer(state, revision=p0, updater=_repository_updater(repo))
-    t = threading.Thread(target=server.serve_forever, daemon=True)
-    t.start()
-
-    ep_file = endpoint_file(repo)
-    ep_file.parent.mkdir(parents=True, exist_ok=True)
-    ep_file.write_text(json.dumps({
-        "host": server.endpoint.host,
-        "port": server.endpoint.port,
-        "authkey_hex": server.endpoint.authkey_hex,
-        "pid": os.getpid(),
-        "repo_id": identity.repo_id,
-        "root_path": identity.root_path,
-    }), encoding="utf-8")
+    server_client = _start_authoritative_live(repo)
 
     try:
         time.sleep(0.05)
@@ -1186,8 +1063,7 @@ def test_h3a_case_u_active_daemon_publish_raises_failure_semantics(tmp_path, mon
 
         # Restore publish and check daemon state is still P0
         monkeypatch.setattr(LiveStateClient, "publish", orig_publish)
-        client = LiveStateClient(server.endpoint)
-        daemon_snap = client.snapshot()
+        daemon_snap = server_client.snapshot()
         daemon_state = daemon_snap.get("state")
         assert getattr(daemon_state, "revision", None) == p0
 
@@ -1199,7 +1075,7 @@ def test_h3a_case_u_active_daemon_publish_raises_failure_semantics(tmp_path, mon
         assert "Simulated daemon socket drop" in res.live_publish_warning
         assert res.summary_data.get("live_publish_status") == "failed"
     finally:
-        server.close()
+        _stop_authoritative_live(repo, server_client)
 
 
 def test_h3a_case_v_active_daemon_publish_failure_response_dict(tmp_path, monkeypatch):
@@ -1213,9 +1089,7 @@ def test_h3a_case_v_active_daemon_publish_failure_response_dict(tmp_path, monkey
       - live_publish_revision = None
       - live_publish_warning = 'daemon_busy'
     """
-    import threading
-    from contextor.core.live_state import CanonicalLiveServer, LiveStateClient
-    from contextor.core.live_state.runtime import _repository_updater, endpoint_file
+    from contextor.core.live_state import LiveStateClient
     from contextor.core.live_state.store import load_snapshot, read_metadata
     from contextor.core.paths import repo_cache_dir
     from contextor.core.analysis.state_manager import FileStateManager
@@ -1230,20 +1104,7 @@ def test_h3a_case_v_active_daemon_publish_failure_response_dict(tmp_path, monkey
     state, metadata = loaded
     p0 = metadata.revision
 
-    server = CanonicalLiveServer(state, revision=p0, updater=_repository_updater(repo))
-    t = threading.Thread(target=server.serve_forever, daemon=True)
-    t.start()
-
-    ep_file = endpoint_file(repo)
-    ep_file.parent.mkdir(parents=True, exist_ok=True)
-    ep_file.write_text(json.dumps({
-        "host": server.endpoint.host,
-        "port": server.endpoint.port,
-        "authkey_hex": server.endpoint.authkey_hex,
-        "pid": os.getpid(),
-        "repo_id": identity.repo_id,
-        "root_path": identity.root_path,
-    }), encoding="utf-8")
+    server_client = _start_authoritative_live(repo)
 
     try:
         time.sleep(0.05)
@@ -1269,8 +1130,7 @@ def test_h3a_case_v_active_daemon_publish_failure_response_dict(tmp_path, monkey
 
         # Restore publish and check daemon state is still P0
         monkeypatch.setattr(LiveStateClient, "publish", orig_publish)
-        client = LiveStateClient(server.endpoint)
-        daemon_snap = client.snapshot()
+        daemon_snap = server_client.snapshot()
         daemon_state = daemon_snap.get("state")
         assert getattr(daemon_state, "revision", None) == p0
 
@@ -1280,7 +1140,7 @@ def test_h3a_case_v_active_daemon_publish_failure_response_dict(tmp_path, monkey
         assert res.live_publish_warning == "daemon_busy_rejecting_publish"
         assert res.summary_data.get("live_publish_status") == "failed"
     finally:
-        server.close()
+        _stop_authoritative_live(repo, server_client)
 
 
 def test_h3a_case_w_no_active_daemon_not_attempted(tmp_path):
@@ -1319,9 +1179,7 @@ def test_h3a_case_x_journal_ahead_canonical_cache_separation(tmp_path):
       - mcp_runtime._live_engine_revisions[root] == 2
       - Journal revision 20+ never ends up in canonical revision cache
     """
-    import threading
-    from contextor.core.live_state import CanonicalLiveServer, LiveStateClient
-    from contextor.core.live_state.runtime import _repository_updater, endpoint_file
+    from contextor.core.live_state import LiveStateClient
     from contextor.core.live_state.store import load_snapshot, read_metadata
     from contextor.core.paths import repo_cache_dir
     from contextor.core.analysis.state_manager import FileStateManager
@@ -1337,25 +1195,10 @@ def test_h3a_case_x_journal_ahead_canonical_cache_separation(tmp_path):
     p0 = metadata.revision
     assert p0 == 1
 
-    server = CanonicalLiveServer(state, revision=p0, updater=_repository_updater(repo))
-    t = threading.Thread(target=server.serve_forever, daemon=True)
-    t.start()
-
-    ep_file = endpoint_file(repo)
-    ep_file.parent.mkdir(parents=True, exist_ok=True)
-    ep_file.write_text(json.dumps({
-        "host": server.endpoint.host,
-        "port": server.endpoint.port,
-        "authkey_hex": server.endpoint.authkey_hex,
-        "pid": os.getpid(),
-        "repo_id": identity.repo_id,
-        "root_path": identity.root_path,
-    }), encoding="utf-8")
+    client = _start_authoritative_live(repo)
 
     try:
         time.sleep(0.05)
-        client = LiveStateClient(server.endpoint)
-
         # Generate >= 20 journal events
         for i in range(20):
             res_stat = client.status(f"journal_event_{i}", origin="test")
@@ -1404,7 +1247,7 @@ def test_h3a_case_x_journal_ahead_canonical_cache_separation(tmp_path):
         assert mcp_runtime._live_engine_revisions[str(repo)] == 2
         assert mcp_runtime._live_journal_revisions[str(repo)] == 2
     finally:
-        server.close()
+        _stop_authoritative_live(repo, client)
 
 
 def test_h3a_case_y_unknown_status_facade_fail_closed(tmp_path, monkeypatch):
@@ -1415,35 +1258,12 @@ def test_h3a_case_y_unknown_status_facade_fail_closed(tmp_path, monkeypatch):
       - live_publish_revision is None
       - live_publish_warning is not None and mentions rejected
     """
-    import threading
-    from contextor.core.live_state import CanonicalLiveServer, LiveStateClient
-    from contextor.core.live_state.runtime import _repository_updater, endpoint_file
-    from contextor.core.live_state.store import load_snapshot
-    from contextor.core.paths import repo_cache_dir
-    from contextor.core.repository_identity import require_repository_identity
+    from contextor.core.live_state import LiveStateClient
 
     repo, mod_a = _setup_repo(tmp_path)
     ContextorFacade.analyze_project(str(repo))
-    identity = require_repository_identity(repo)
-    cache = repo_cache_dir(repo)
 
-    loaded = load_snapshot(cache, expected_repo_id=identity.repo_id, expected_root_path=identity.root_path)
-    state, metadata = loaded
-
-    server = CanonicalLiveServer(state, revision=metadata.revision, updater=_repository_updater(repo))
-    t = threading.Thread(target=server.serve_forever, daemon=True)
-    t.start()
-
-    ep_file = endpoint_file(repo)
-    ep_file.parent.mkdir(parents=True, exist_ok=True)
-    ep_file.write_text(json.dumps({
-        "host": server.endpoint.host,
-        "port": server.endpoint.port,
-        "authkey_hex": server.endpoint.authkey_hex,
-        "pid": os.getpid(),
-        "repo_id": identity.repo_id,
-        "root_path": identity.root_path,
-    }), encoding="utf-8")
+    client = _start_authoritative_live(repo)
 
     try:
         time.sleep(0.05)
@@ -1466,7 +1286,7 @@ def test_h3a_case_y_unknown_status_facade_fail_closed(tmp_path, monkeypatch):
         assert res.summary_data.get("live_publish_status") == "failed"
         assert res.summary_data.get("live_publish_revision") is None
     finally:
-        server.close()
+        _stop_authoritative_live(repo, client)
 
 
 def test_h3a_case_z_unknown_status_analysis_job_fail_closed(tmp_path, monkeypatch):

@@ -1,4 +1,5 @@
 import json
+from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
@@ -18,7 +19,6 @@ from contextor.core.analysis.state_manager import (
     save_engine_state,
 )
 from contextor.core.live_state import runtime as live_runtime
-from contextor.core.live_state.ipc import LiveEndpoint
 from contextor.core.graph.graph import build_graph, build_trie, detect_package_root
 from contextor.core.reporting_engine.persistent_registry import (
     PersistentIdentityRegistry,
@@ -32,6 +32,43 @@ from contextor.core.symbol_engine.indexer import index_repository
 
 
 pytestmark = pytest.mark.live
+
+
+@pytest.fixture
+def authoritative_live_client(tmp_path, monkeypatch):
+    from contextor.core.repository_identity import ensure_repository_identity
+
+    # The analyzed repository is ``tmp_path``; runtime roots must be siblings
+    # rather than children so RuntimeDomain containment checks remain active.
+    monkeypatch.setenv(
+        "CONTEXTOR_CACHE_DIR",
+        str(tmp_path.parent / f"{tmp_path.name}-cache"),
+    )
+    monkeypatch.setenv(
+        "CONTEXTOR_STATE_DIR",
+        str(tmp_path.parent / f"{tmp_path.name}-state"),
+    )
+    ensure_repository_identity(tmp_path)
+
+    client = live_runtime.connect_or_start(tmp_path)
+    assert client is not None
+    assert client.endpoint.runtime_domain_id
+    assert client.endpoint.service_instance_id
+    assert client.endpoint.lease_generation is not None
+    assert client.endpoint.process_start_identity
+
+    yield client
+
+    try:
+        client.request("shutdown")
+    except (OSError, EOFError, ConnectionError):
+        pass
+
+    deadline = live_runtime.time.monotonic() + 5.0
+    ep_file = live_runtime.endpoint_file(tmp_path)
+    while ep_file.exists() and live_runtime.time.monotonic() < deadline:
+        live_runtime.time.sleep(0.02)
+    assert not ep_file.exists()
 
 
 def _engine_for_file(tmp_path):
@@ -267,9 +304,9 @@ def test_minimal_valid_syntax_error_query_repair_query_flow(
 
 
 def test_live_events_retries_same_owner_and_preserves_journal(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, authoritative_live_client
 ):
-    endpoint = _identity_endpoint(tmp_path)
+    endpoint = authoritative_live_client.endpoint
 
     class Client:
         def __init__(self):
@@ -285,21 +322,11 @@ def test_live_events_retries_same_owner_and_preserves_journal(
             }
 
     attempts = iter([None, Client()])
-    monkeypatch.setattr(live_runtime, "connect", lambda _root: next(attempts))
-    monkeypatch.setattr(live_runtime, "_read_endpoint", lambda _root: endpoint)
     monkeypatch.setattr(
-        live_runtime,
-        "read_repository_identity",
-        lambda _root: SimpleNamespace(
-            repo_id="repo-a", root_path=str(tmp_path.resolve())
-        ),
+        live_runtime, "_verified_existing_client", lambda *_args, **_kwargs: next(attempts)
     )
+    monkeypatch.setattr(live_runtime, "_read_endpoint", lambda _root, **_kwargs: endpoint)
     monkeypatch.setattr(live_runtime.time, "sleep", lambda _delay: None)
-    monkeypatch.setattr(
-        live_runtime,
-        "connect_or_start",
-        lambda *_args, **_kwargs: pytest.fail("connect_or_start must not run"),
-    )
 
     result = json.loads(mcp_server.get_live_events.fn(str(tmp_path)))
 
@@ -309,30 +336,18 @@ def test_live_events_retries_same_owner_and_preserves_journal(
 
 
 def test_live_events_distinguishes_transient_owner_from_absence(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, authoritative_live_client
 ):
-    endpoint = _identity_endpoint(tmp_path)
-    monkeypatch.setattr(live_runtime, "connect", lambda _root: None)
+    endpoint = authoritative_live_client.endpoint
+    monkeypatch.setattr(live_runtime, "_verified_existing_client", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(live_runtime.time, "sleep", lambda _delay: None)
-    monkeypatch.setattr(live_runtime, "_read_endpoint", lambda _root: endpoint)
+    monkeypatch.setattr(live_runtime, "_read_endpoint", lambda _root, **_kwargs: endpoint)
     monkeypatch.setattr(live_runtime, "_is_pid_alive", lambda _pid: True)
-    monkeypatch.setattr(
-        live_runtime,
-        "read_repository_identity",
-        lambda _root: SimpleNamespace(
-            repo_id="repo-a", root_path=str(tmp_path.resolve())
-        ),
-    )
-    monkeypatch.setattr(
-        live_runtime,
-        "connect_or_start",
-        lambda *_args, **_kwargs: pytest.fail("connect_or_start must not run"),
-    )
 
     transient = json.loads(mcp_server.get_live_events.fn(str(tmp_path)))
     assert transient["status"] == "transient_connection_failure"
 
-    monkeypatch.setattr(live_runtime, "_read_endpoint", lambda _root: None)
+    monkeypatch.setattr(live_runtime, "_read_endpoint", lambda _root, **_kwargs: None)
     absent = json.loads(mcp_server.get_live_events.fn(str(tmp_path)))
     assert absent["status"] == "no_live_service"
 
@@ -398,39 +413,14 @@ def test_global_search_and_static_context_do_not_leak_parse_stale_truth(
     assert implementation["static_context"]["provenance"] == "last_known_good"
 
 
-def _identity_endpoint(tmp_path, *, owner_token="owner-a", repo_id="repo-a"):
-    return LiveEndpoint(
-        "127.0.0.1",
-        12345,
-        "0011",
-        pid=321,
-        owner_pid=123,
-        owner_token=owner_token,
-        repo_id=repo_id,
-        root_path=str(tmp_path.resolve()),
-    )
-
-
 def test_same_owner_identity_allows_transient_classification(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, authoritative_live_client
 ):
-    endpoint = _identity_endpoint(tmp_path)
-    monkeypatch.setattr(live_runtime, "connect", lambda _root: None)
-    monkeypatch.setattr(live_runtime, "_read_endpoint", lambda _root: endpoint)
+    endpoint = authoritative_live_client.endpoint
+    monkeypatch.setattr(live_runtime, "_verified_existing_client", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(live_runtime, "_read_endpoint", lambda _root, **_kwargs: endpoint)
     monkeypatch.setattr(live_runtime, "_is_pid_alive", lambda _pid: True)
-    monkeypatch.setattr(
-        live_runtime,
-        "read_repository_identity",
-        lambda _root: SimpleNamespace(
-            repo_id="repo-a", root_path=str(tmp_path.resolve())
-        ),
-    )
     monkeypatch.setattr(live_runtime.time, "sleep", lambda _delay: None)
-    monkeypatch.setattr(
-        live_runtime,
-        "connect_or_start",
-        lambda *_args, **_kwargs: pytest.fail("connect_or_start must not run"),
-    )
 
     client, status = live_runtime.connect_existing_with_status(tmp_path)
 
@@ -439,26 +429,14 @@ def test_same_owner_identity_allows_transient_classification(
 
 
 def test_same_pid_with_changed_owner_identity_is_not_transient(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, authoritative_live_client
 ):
-    original = _identity_endpoint(tmp_path, owner_token="owner-a")
-    replacement = _identity_endpoint(tmp_path, owner_token="owner-b")
+    original = authoritative_live_client.endpoint
+    replacement = replace(original, owner_token="changed-owner-token")
     endpoints = iter([original, replacement])
-    monkeypatch.setattr(live_runtime, "_read_endpoint", lambda _root: next(endpoints))
-    monkeypatch.setattr(live_runtime, "connect", lambda _root: None)
-    monkeypatch.setattr(
-        live_runtime,
-        "read_repository_identity",
-        lambda _root: SimpleNamespace(
-            repo_id="repo-a", root_path=str(tmp_path.resolve())
-        ),
-    )
+    monkeypatch.setattr(live_runtime, "_read_endpoint", lambda _root, **_kwargs: next(endpoints))
+    monkeypatch.setattr(live_runtime, "_verified_existing_client", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(live_runtime.time, "sleep", lambda _delay: None)
-    monkeypatch.setattr(
-        live_runtime,
-        "connect_or_start",
-        lambda *_args, **_kwargs: pytest.fail("connect_or_start must not run"),
-    )
 
     _, status = live_runtime.connect_existing_with_status(
         tmp_path, attempts=1
@@ -468,23 +446,13 @@ def test_same_pid_with_changed_owner_identity_is_not_transient(
 
 
 def test_live_pid_with_mismatched_repository_identity_is_not_transient(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, authoritative_live_client
 ):
-    endpoint = _identity_endpoint(tmp_path, repo_id="other-repo")
-    monkeypatch.setattr(live_runtime, "_read_endpoint", lambda _root: endpoint)
-    monkeypatch.setattr(live_runtime, "_is_pid_alive", lambda _pid: True)
-    monkeypatch.setattr(
-        live_runtime,
-        "read_repository_identity",
-        lambda _root: SimpleNamespace(
-            repo_id="repo-a", root_path=str(tmp_path.resolve())
-        ),
+    endpoint = replace(
+        authoritative_live_client.endpoint,
+        repo_id="other-repository-id",
     )
-    monkeypatch.setattr(
-        live_runtime,
-        "connect_or_start",
-        lambda *_args, **_kwargs: pytest.fail("connect_or_start must not run"),
-    )
+    monkeypatch.setattr(live_runtime, "_read_endpoint", lambda _root, **_kwargs: endpoint)
 
     _, status = live_runtime.connect_existing_with_status(tmp_path)
 
@@ -492,9 +460,9 @@ def test_live_pid_with_mismatched_repository_identity_is_not_transient(
 
 
 def test_matching_owner_retry_success_preserves_revision_and_journal(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, authoritative_live_client
 ):
-    endpoint = _identity_endpoint(tmp_path)
+    endpoint = authoritative_live_client.endpoint
 
     class Client:
         def __init__(self):
@@ -510,21 +478,11 @@ def test_matching_owner_retry_success_preserves_revision_and_journal(
             }
 
     attempts = iter([None, Client()])
-    monkeypatch.setattr(live_runtime, "connect", lambda _root: next(attempts))
-    monkeypatch.setattr(live_runtime, "_read_endpoint", lambda _root: endpoint)
     monkeypatch.setattr(
-        live_runtime,
-        "read_repository_identity",
-        lambda _root: SimpleNamespace(
-            repo_id="repo-a", root_path=str(tmp_path.resolve())
-        ),
+        live_runtime, "_verified_existing_client", lambda *_args, **_kwargs: next(attempts)
     )
+    monkeypatch.setattr(live_runtime, "_read_endpoint", lambda _root, **_kwargs: endpoint)
     monkeypatch.setattr(live_runtime.time, "sleep", lambda _delay: None)
-    monkeypatch.setattr(
-        live_runtime,
-        "connect_or_start",
-        lambda *_args, **_kwargs: pytest.fail("connect_or_start must not run"),
-    )
 
     result = json.loads(mcp_server.get_live_events.fn(str(tmp_path)))
 
@@ -568,4 +526,3 @@ def test_get_live_events_adapter_after_revision_validation(tmp_path, monkeypatch
 
     res_neg999 = json.loads(mcp_server.get_live_events.fn(str(tmp_path), after_revision=-999))
     assert res_neg999["status"] == "ok"
-

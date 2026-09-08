@@ -1698,15 +1698,25 @@ def test_connect_or_start_dead_child_fast_failure(tmp_path, monkeypatch):
 
     from contextor.core.live_state import runtime as runtime_mod
     orig_spawn = runtime_mod._spawn_runtime_subprocess
+    poll_calls = 0
 
     # Mock subprocess that immediately exits with code 42
     def mock_spawn(cmd, cwd, env):
+        nonlocal poll_calls
         exit_cmd = [sys.executable, "-c", "import sys; sys.exit(42)"]
-        return orig_spawn(exit_cmd, cwd, env)
+        process = orig_spawn(exit_cmd, cwd, env)
+        original_poll = process.poll
+
+        def tracked_poll():
+            nonlocal poll_calls
+            poll_calls += 1
+            return original_poll()
+
+        process.poll = tracked_poll
+        return process
 
     monkeypatch.setattr(runtime_mod, "_spawn_runtime_subprocess", mock_spawn)
 
-    t0 = time.monotonic()
     import pytest
     with pytest.raises(RuntimeError) as exc_info:
         runtime_mod.connect_or_start(
@@ -1714,10 +1724,10 @@ def test_connect_or_start_dead_child_fast_failure(tmp_path, monkeypatch):
             timeout=0.05,
             cold_start_timeout=10.0,
         )
-    elapsed = time.monotonic() - t0
-
-    assert "exited prematurely with code 42" in str(exc_info.value)
-    assert elapsed < 1.0  # Fast failure (did not wait 10s)
+    message = str(exc_info.value)
+    assert poll_calls >= 1
+    assert "exited prematurely with code 42" in message
+    assert "startup and authority bootstrap timed out" not in message
 
 
 def test_connect_or_start_true_startup_hang(tmp_path, monkeypatch):

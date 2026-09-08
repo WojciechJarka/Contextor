@@ -1,204 +1,74 @@
+EXACT_TEST_BODY=
+`test_connect_or_start_dead_child_fast_failure` creates an isolated repo/cache/state root, replaces `_spawn_runtime_subprocess` with a real Python child that immediately exits with code 42, calls `connect_or_start(repo, timeout=0.05, cold_start_timeout=10.0)`, and requires `RuntimeError`.  Before this correction it measured the entire call with `time.monotonic()` and asserted `< 1.0s`; that elapsed interval included repository/domain/lease setup, authority START durable logging, Windows process creation/scheduling, first polling interval, and finally-lock cleanup.
+
+PRODUCTION_FAILURE_BRANCH=
+`contextor.core.live_state.runtime.connect_or_start` enters its post-spawn loop, checks `_verified_existing_client`, then executes `if proc.poll() is not None: raise RuntimeError("... exited prematurely with code ...")`.  The timeout branch is separate and only executes after `spawn_deadline` exhaustion, raising `TimeoutError("startup and authority bootstrap timed out after ...")`.  The observed failure and isolated runs use the `proc.poll()` premature-exit branch, never the timeout branch.
+
+TIMING_CONTRACT=
+The surrounding test explicitly describes the contract as reporting a dead child by exit code rather than waiting for timeout.  Its adjacent true-startup-hang test covers the distinct hard `cold_start_timeout` behavior, and the slow-healthy-startup test covers waiting past the short normal-connect timeout.  No current runtime contract exposes a sub-one-second wall-clock SLA; `cold_start_timeout=10.0` is the actual normal-startup budget in this test.
+
+CLASSIFICATION=BRITTLE_TIMING_TEST
+
+ROOT_CAUSE=
+The `< 1.0` assertion measured unrelated Windows process/fsync/scheduler and finally-cleanup latency in addition to child-death observation.  The full-suite 1.063s sample was still the expected premature-exit RuntimeError, so it did not show that production waited for the 10-second startup deadline.  Three independent isolated pytest invocations passed the old assertion; their total pytest durations were 1.45s, 1.24s, and 10.58s, illustrating why pytest/test-machine wall time is not a valid proof of this semantic contract.
+
 FILES_CHANGED=
-contextor/core/live_state/runtime.py
 tests/test_live_state_ipc.py
 
-TESTS_RUN=
-.\.venv\Scripts\python.exe -m pytest -q tests/test_live_state_ipc.py::test_run_service_rejects_stop_and_return_before_ready tests/test_live_state_ipc.py::test_run_service_fails_closed_when_service_thread_raises_before_endpoint tests/test_live_state_ipc.py::test_run_service_fails_closed_when_service_thread_dies_before_ready tests/test_live_state_ipc.py::test_normal_service_shutdown_preserves_authority_event_chronology tests/test_live_state_ipc.py::test_endpoint_before_authority_replay_exposes_valid_pending_live_feed tests/test_live_state_ipc.py::test_startup_backfill_preserves_filestate_content_and_revision_parity
-.\.venv\Scripts\python.exe -m pytest -q tests/test_live_state_ipc.py::test_connect_or_start_slow_healthy_startup (4 independent runs)
-.\.venv\Scripts\python.exe -m pytest -q tests/test_live_state_ipc.py::test_startup_backfill_preserves_filestate_content_and_revision_parity tests/test_live_state_ipc.py::test_startup_backfill_failure_leaves_previous_generation_authoritative tests/test_live_state_ipc.py::test_real_service_process_starts_connects_and_stops tests/test_live_state_ipc.py::test_connect_or_start_ownership_when_spawning_new tests/test_live_state_ipc.py::test_legacy_endpoint_is_rejected_before_post_spawn_attach tests/test_live_state_ipc.py::test_connect_or_start_slow_healthy_startup tests/test_live_state_ipc.py::test_connect_or_start_dead_child_fast_failure tests/test_live_state_ipc.py::test_connect_or_start_true_startup_hang
+IMPLEMENTATION=
+Replaced only the arbitrary elapsed-time assertion with a deterministic proof: the fake process's real `poll()` is wrapped and must be called at least once; the raised message must identify premature exit code 42 and must not be the normal startup-timeout message.  The fake child, expected exception type/message, production code, timeouts, and normal timeout/slow-startup coverage remain unchanged.
 
-TEST_RESULTS=
-Requested six-test correction set: 6 passed, 1 warning, 19.05s.
-Healthy-startup gate: 4/4 PASS with unchanged 2.0s budget; pytest durations 2.70s, 3.16s, 2.71s, 2.74s.
-Previous focused startup/authority subset: 8 passed in 13.94s.
+FOCUSED_RESULT=
+PASS — dead-child test: 1 passed in 2.09s.
+PASS — dead-child, true-startup-hang, and slow-healthy-startup: 3 passed in 5.19s; 0 skipped.
 
 PYTEST_EXIT_CODE=0
 
 ACTUAL_DIFF=
-diff --git a/contextor/core/live_state/runtime.py b/contextor/core/live_state/runtime.py
-index 14403a5..ee946d6 100644
---- a/contextor/core/live_state/runtime.py
-+++ b/contextor/core/live_state/runtime.py
-@@ -1024,30 +1024,43 @@ def run_service(
-     server_thread = None
-     service_bootstrap_entered = threading.Event()
-     service_terminated = threading.Event()
-+    service_state_lock = threading.Lock()
-     service_failure: list[BaseException] = []
-+    service_ready_committed = False
-     published_endpoint = None
-     desktop_claim = None
-     authority_emitter = None
-     ownership_resolved = False
- 
-     def _raise_if_service_terminated(stage: str) -> None:
--        if service_failure:
-+        with service_state_lock:
-+            failure = service_failure[0] if service_failure else None
-+            terminated = service_terminated.is_set()
-+            ready_committed = service_ready_committed
-+            stop_requested = bool(server is not None and server._stop.is_set())
-+
-+        if failure is not None:
-             raise RuntimeError(
-                 f"Canonical LIVE service thread failed during {stage}"
--            ) from service_failure[0]
--        if server is not None and service_terminated.is_set() and not server._stop.is_set():
-+            ) from failure
-+
-+        if terminated and (not ready_committed or not stop_requested):
-             raise RuntimeError(
-                 f"Canonical LIVE service thread terminated unexpectedly during {stage}"
-             )
- 
-     def _serve_service() -> None:
-         service_bootstrap_entered.set()
-+        failure: BaseException | None = None
-         try:
-             server.serve_forever()
-         except BaseException as exc:
--            service_failure.append(exc)
-+            failure = exc
-         finally:
--            service_terminated.set()
-+            with service_state_lock:
-+                if failure is not None:
-+                    service_failure.append(failure)
-+                service_terminated.set()
- 
-     try:
-         from contextor.core.runtime_trace import AuthorityEventEmitter
-@@ -1192,16 +1205,31 @@ def run_service(
-             )
-             authority_emitter.replay_pending()
-         _raise_if_service_terminated("authority event handoff")
--        if authority_emitter is not None:
--            authority_emitter.emit(
--                "RUNTIME_AUTHORITY_READY",
--                source="runtime",
--                service_instance_id=lease.service_instance_id,
--                lease_generation=lease.lease_generation,
--                status="READY",
--                decision="READY",
--                reason="endpoint, lease and authority identity parity verified",
--            )
-+        # READY is the startup linearization point shared with service-thread
-+        # termination. If termination acquires this lock first, startup fails
-+        # and READY is never emitted. If this block wins, any later intentional
-+        # stop belongs to the normal post-READY service lifetime.
-+        with service_state_lock:
-+            if service_failure:
-+                raise RuntimeError(
-+                    "Canonical LIVE service thread failed before authority readiness"
-+                ) from service_failure[0]
-+            if service_terminated.is_set():
-+                raise RuntimeError(
-+                    "Canonical LIVE service thread terminated before authority readiness"
-+                )
-+
-+            if authority_emitter is not None:
-+                authority_emitter.emit(
-+                    "RUNTIME_AUTHORITY_READY",
-+                    source="runtime",
-+                    service_instance_id=lease.service_instance_id,
-+                    lease_generation=lease.lease_generation,
-+                    status="READY",
-+                    decision="READY",
-+                    reason="endpoint, lease and authority identity parity verified",
-+                )
-+            service_ready_committed = True
- 
-         if owner_pid is not None and owner_pid > 0:
-             if sys.platform == "win32":
 diff --git a/tests/test_live_state_ipc.py b/tests/test_live_state_ipc.py
-index d795ba2..bbd57b4 100644
+index bbd57b4..22af278 100644
 --- a/tests/test_live_state_ipc.py
 +++ b/tests/test_live_state_ipc.py
-@@ -496,11 +496,23 @@ def test_startup_backfill_preserves_filestate_content_and_revision_parity(tmp_pa
-             self._revision = revision
-             self.endpoint = SimpleNamespace(host="127.0.0.1", port=1, authkey_hex="00")
-             self._stop = threading.Event()
-+            self.activity_epoch = "startup-backfill-test"
-+
-         def serve_forever(self):
--            self._stop.set()
--            return None
-+            if not self._stop.wait(timeout=5.0):
-+                raise RuntimeError("StubServer did not receive post-READY shutdown")
-+
-+        def record_authority_event(self, event):
-+            if event.get("event_type") == "RUNTIME_AUTHORITY_READY":
-+                self._stop.set()
-+            return {
-+                "accepted": True,
-+                "duplicate": False,
-+                "activity_epoch": self.activity_epoch,
-+            }
-+
-         def close(self):
--            return None
-+            self._stop.set()
+@@ -1698,15 +1698,25 @@ def test_connect_or_start_dead_child_fast_failure(tmp_path, monkeypatch):
  
-     monkeypatch.setattr(runtime, "CanonicalLiveServer", StubServer)
-     import contextor.core.runtime_trace as runtime_trace
-@@ -584,6 +596,29 @@ def _authority_event_types(logs_root):
-     return records
+     from contextor.core.live_state import runtime as runtime_mod
+     orig_spawn = runtime_mod._spawn_runtime_subprocess
++    poll_calls = 0
+ 
+     # Mock subprocess that immediately exits with code 42
+     def mock_spawn(cmd, cwd, env):
++        nonlocal poll_calls
+         exit_cmd = [sys.executable, "-c", "import sys; sys.exit(42)"]
+-        return orig_spawn(exit_cmd, cwd, env)
++        process = orig_spawn(exit_cmd, cwd, env)
++        original_poll = process.poll
++
++        def tracked_poll():
++            nonlocal poll_calls
++            poll_calls += 1
++            return original_poll()
++
++        process.poll = tracked_poll
++        return process
+ 
+     monkeypatch.setattr(runtime_mod, "_spawn_runtime_subprocess", mock_spawn)
+ 
+-    t0 = time.monotonic()
+     import pytest
+     with pytest.raises(RuntimeError) as exc_info:
+         runtime_mod.connect_or_start(
+@@ -1714,10 +1724,10 @@ def test_connect_or_start_dead_child_fast_failure(tmp_path, monkeypatch):
+             timeout=0.05,
+             cold_start_timeout=10.0,
+         )
+-    elapsed = time.monotonic() - t0
+-
+-    assert "exited prematurely with code 42" in str(exc_info.value)
+-    assert elapsed < 1.0  # Fast failure (did not wait 10s)
++    message = str(exc_info.value)
++    assert poll_calls >= 1
++    assert "exited prematurely with code 42" in message
++    assert "startup and authority bootstrap timed out" not in message
  
  
-+def test_run_service_rejects_stop_and_return_before_ready(tmp_path, monkeypatch):
-+    import contextor.core.live_state.runtime as runtime
-+    from contextor.core.paths import runtime_logs_dir
-+
-+    repo = _runtime_service_repo(tmp_path, monkeypatch)
-+
-+    class PrematureStoppingServer(CanonicalLiveServer):
-+        def serve_forever(self):
-+            self._stop.set()
-+            return None
-+
-+    monkeypatch.setattr(runtime, "CanonicalLiveServer", PrematureStoppingServer)
-+
-+    with pytest.raises(
-+        RuntimeError,
-+        match="service thread terminated unexpectedly during pre-endpoint bootstrap",
-+    ):
-+        runtime.run_service(repo)
-+
-+    assert not endpoint_file(repo).exists()
-+    assert "RUNTIME_AUTHORITY_READY" not in _authority_event_types(runtime_logs_dir())
-+
-+
- def test_run_service_fails_closed_when_service_thread_raises_before_endpoint(tmp_path, monkeypatch):
-     import contextor.core.live_state.runtime as runtime
-     from contextor.core.paths import runtime_logs_dir
-@@ -659,6 +694,10 @@ def test_normal_service_shutdown_preserves_authority_event_chronology(tmp_path,
-             break
-         time.sleep(0.02)
-     assert client is not None
-+    deadline = time.monotonic() + 5.0
-+    while time.monotonic() < deadline and "RUNTIME_AUTHORITY_READY" not in _authority_event_types(runtime_logs_dir()):
-+        time.sleep(0.02)
-+    assert "RUNTIME_AUTHORITY_READY" in _authority_event_types(runtime_logs_dir())
-     assert client.request("shutdown").get("status") == "ok"
-     service.join(timeout=5.0)
- 
-@@ -673,6 +712,7 @@ def test_endpoint_before_authority_replay_exposes_valid_pending_live_feed(tmp_pa
-     import contextor.core.live_state.runtime as runtime
-     import contextor.core.runtime_trace as runtime_trace
-     from contextor import mcp_server
-+    from contextor.core.paths import runtime_logs_dir
- 
-     repo = _runtime_service_repo(tmp_path, monkeypatch)
-     replay_entered = threading.Event()
-@@ -721,6 +761,11 @@ def test_endpoint_before_authority_replay_exposes_valid_pending_live_feed(tmp_pa
- 
-     client = runtime.connect(repo)
-     assert client is not None
-+    deadline = time.monotonic() + 5.0
-+    while time.monotonic() < deadline and "RUNTIME_AUTHORITY_READY" not in _authority_event_types(runtime_logs_dir()):
-+        completed = json.loads(mcp_server.get_live_events.fn(str(repo)))
-+        time.sleep(0.02)
-+    assert "RUNTIME_AUTHORITY_READY" in _authority_event_types(runtime_logs_dir())
-     assert client.request("shutdown").get("status") == "ok"
-     service.join(timeout=5.0)
-     assert not service.is_alive()
+ def test_connect_or_start_true_startup_hang(tmp_path, monkeypatch):

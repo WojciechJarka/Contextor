@@ -101,7 +101,7 @@ def test_specialized_tool_contracts__get_module_blast_radius_docs_complete():
     params_text = "\n".join(doc.get("parameters", []))
     behavior_text = "\n".join(doc.get("behavior", []))
     assert "repo_path (string, required)" in params_text
-    assert "module (string, required)" in params_text
+    assert 'module (string, required; runtime default "")' in params_text
     assert "never bounds or samples" in params_text
     assert "complete_compact serialization policy" in params_text
     assert "module_index" in behavior_text
