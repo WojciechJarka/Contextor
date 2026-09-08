@@ -837,6 +837,25 @@ class _DomainFileLock(AbstractContextManager["_DomainFileLock"]):
 FailureInjector = Callable[[str], None]
 
 
+class _LeaseEmissionLock(AbstractContextManager):
+    """Release the domain lock before emitting durable observability events."""
+
+    def __init__(self, manager: "RuntimeLeaseManager", inner: _DomainFileLock) -> None:
+        self.manager = manager
+        self.inner = inner
+
+    def __enter__(self):
+        self.inner.__enter__()
+        self.manager._lease_lock_depth += 1
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        self.manager._lease_lock_depth -= 1
+        self.inner.__exit__(exc_type, exc, tb)
+        if self.manager._lease_lock_depth == 0:
+            self.manager._drain_deferred_authority_events()
+
+
 class RuntimeLeaseManager:
     """Acquire, fence, refresh, bind, and release one RuntimeDomain authority."""
 
@@ -851,6 +870,7 @@ class RuntimeLeaseManager:
         lock_timeout: float = 10.0,
         clock: Callable[[], float] = time.time,
         failure_injector: FailureInjector | None = None,
+        authority_event_emitter: Callable[..., object] | None = None,
     ) -> None:
         _validate_domain_input(
             domain,
@@ -865,9 +885,13 @@ class RuntimeLeaseManager:
         self.lock_timeout = lock_timeout
         self.clock = clock
         self.failure_injector = failure_injector
+        self.authority_event_emitter = authority_event_emitter
+        self._lease_lock_depth = 0
+        self._deferred_authority_events: list[tuple[str, dict[str, object]]] = []
+        self._deferred_authority_lock = threading.Lock()
 
-    def _lock(self) -> _DomainFileLock:
-        return _DomainFileLock(domain_lock_path(self.domain), timeout=self.lock_timeout)
+    def _lock(self):
+        return _LeaseEmissionLock(self, _DomainFileLock(domain_lock_path(self.domain), timeout=self.lock_timeout))
 
     def _now(self) -> float:
         return _timestamp(self.clock(), field="clock")
@@ -875,6 +899,36 @@ class RuntimeLeaseManager:
     def _inject(self, point: str) -> None:
         if self.failure_injector is not None:
             self.failure_injector(point)
+
+    def _emit_authority(self, event_type: str, **fields: object) -> None:
+        if self._lease_lock_depth:
+            with self._deferred_authority_lock:
+                self._deferred_authority_events.append((event_type, dict(fields)))
+            return
+        emitter = self.authority_event_emitter
+        if emitter is None:
+            return
+        try:
+            emitter(
+                event_type,
+                repo_id=self.domain.repo_id,
+                runtime_domain_id=self.domain.domain_id,
+                source="runtime_lease",
+                **fields,
+            )
+        except Exception:
+            # Observability is secondary to the lease correctness contract.
+            return
+
+    def _emit_authority_events(self, events: list[tuple[str, dict[str, object]]]) -> None:
+        for event_type, fields in events:
+            self._emit_authority(event_type, **fields)
+
+    def _drain_deferred_authority_events(self) -> None:
+        with self._deferred_authority_lock:
+            events = self._deferred_authority_events
+            self._deferred_authority_events = []
+        self._emit_authority_events(events)
 
     def read_generation(self) -> AuthorityGenerationRecord:
         with self._lock():
@@ -1012,6 +1066,15 @@ class RuntimeLeaseManager:
                         "desktop_process_start_identity": desktop_process_identity.process_start_identity,
                     }
                     _atomic_write_json(desktop_claim_path(self.domain), new_claim)
+                    self._emit_authority(
+                        "DESKTOP_CLAIM_ACQUIRE",
+                        service_instance_id=current.service_instance_id,
+                        lease_generation=current.lease_generation,
+                        process_id=desktop_process_identity.pid,
+                        decision="ACQUIRE",
+                        status="ACTIVE",
+                        reason="desktop claim created",
+                    )
                     return new_claim
                 if (
                     claim["service_instance_id"] == current.service_instance_id
@@ -1020,6 +1083,15 @@ class RuntimeLeaseManager:
                     and claim["desktop_pid"] == desktop_process_identity.pid
                     and claim["desktop_process_start_identity"] == desktop_process_identity.process_start_identity
                 ):
+                    self._emit_authority(
+                        "DESKTOP_CLAIM_ACQUIRE",
+                        service_instance_id=current.service_instance_id,
+                        lease_generation=current.lease_generation,
+                        process_id=desktop_process_identity.pid,
+                        decision="IDEMPOTENT",
+                        status="ACTIVE",
+                        reason="desktop claim already owned by requester",
+                    )
                     return claim
                 observed_claim = dict(claim)
                 observed_authority = (
@@ -1035,16 +1107,53 @@ class RuntimeLeaseManager:
             try:
                 _image, creation_time, alive = _process_identity(observed_claim["desktop_pid"])
             except Exception as exc:
+                self._emit_authority(
+                    "DESKTOP_CLAIM_REJECT",
+                    service_instance_id=observed_claim.get("service_instance_id"),
+                    lease_generation=observed_claim.get("lease_generation"),
+                    process_id=observed_claim.get("desktop_pid"),
+                    decision="REJECT_UNKNOWN",
+                    status="UNKNOWN",
+                    reason="desktop claim process identity is unknown",
+                    error=str(exc),
+                )
                 raise LeaseLivenessUnknown("desktop claim process identity is unknown") from exc
             if alive and creation_time is not None and str(creation_time) == observed_claim["desktop_process_start_identity"]:
+                self._emit_authority(
+                    "DESKTOP_CLAIM_REJECT",
+                    service_instance_id=observed_claim.get("service_instance_id"),
+                    lease_generation=observed_claim.get("lease_generation"),
+                    process_id=observed_claim.get("desktop_pid"),
+                    decision="REJECT",
+                    status="LIVE",
+                    reason="desktop claim process is live",
+                )
                 raise DesktopClaimAlreadyHeld("repository already active in another Contextor Desktop")
             if alive and creation_time is None:
+                self._emit_authority(
+                    "DESKTOP_CLAIM_REJECT",
+                    service_instance_id=observed_claim.get("service_instance_id"),
+                    lease_generation=observed_claim.get("lease_generation"),
+                    process_id=observed_claim.get("desktop_pid"),
+                    decision="REJECT_UNKNOWN",
+                    status="UNKNOWN",
+                    reason="desktop claim process start identity is unknown",
+                )
                 raise LeaseLivenessUnknown("desktop claim process start identity is unknown")
             if alive:
                 claim_is_stale = True
             elif alive is False:
                 claim_is_stale = True
             else:
+                self._emit_authority(
+                    "DESKTOP_CLAIM_REJECT",
+                    service_instance_id=observed_claim.get("service_instance_id"),
+                    lease_generation=observed_claim.get("lease_generation"),
+                    process_id=observed_claim.get("desktop_pid"),
+                    decision="REJECT_UNKNOWN",
+                    status="UNKNOWN",
+                    reason="desktop claim process liveness is unknown",
+                )
                 raise LeaseLivenessUnknown("desktop claim process liveness is unknown")
 
             with self._lock():
@@ -1069,7 +1178,22 @@ class RuntimeLeaseManager:
                         desktop_process_start_identity=desktop_process_identity.process_start_identity,
                     )
                     _atomic_write_json(desktop_claim_path(self.domain), replacement)
+                    self._emit_authority(
+                        "DESKTOP_CLAIM_REPLACE",
+                        service_instance_id=current.service_instance_id,
+                        lease_generation=current.lease_generation,
+                        process_id=desktop_process_identity.pid,
+                        decision="REPLACE_STALE",
+                        status="ACTIVE",
+                        reason="previous desktop claim is stale or PID identity mismatched",
+                    )
                     return replacement
+        self._emit_authority(
+            "DESKTOP_CLAIM_REJECT",
+            decision="REJECT_RACE",
+            status="UNKNOWN",
+            reason="desktop claim changed during liveness verification",
+        )
         raise LeaseLivenessUnknown("desktop claim changed during liveness verification")
 
     def release_desktop_claim(
@@ -1098,6 +1222,15 @@ class RuntimeLeaseManager:
                 desktop_claim_path(self.domain).unlink()
             except FileNotFoundError:
                 pass
+            self._emit_authority(
+                "DESKTOP_CLAIM_RELEASE",
+                service_instance_id=current.service_instance_id,
+                lease_generation=current.lease_generation,
+                process_id=desktop_process_identity.pid,
+                decision="RELEASE",
+                status="RELEASED",
+                reason="exact desktop claim owner released",
+            )
 
     def _remove_desktop_claim_if_owner(self, lease: RuntimeLease) -> None:
         try:
@@ -1161,6 +1294,14 @@ class RuntimeLeaseManager:
         self._inject("after_fence_persist")
         self._remove_desktop_claim_if_owner(lease)
         self._remove_live_lease()
+        self._emit_authority(
+            "RUNTIME_LEASE_FENCE",
+            service_instance_id=lease.service_instance_id,
+            lease_generation=lease.lease_generation,
+            decision="FENCE_STALE",
+            status="FENCED",
+            reason="confirmed_stale_authority",
+        )
         return fenced
 
     @staticmethod
@@ -1201,15 +1342,43 @@ class RuntimeLeaseManager:
         active = replace(reserved, status="active", updated_at=self._now())
         self._write_generation(active)
         self._inject("after_generation_activation")
+        self._emit_authority(
+            "RUNTIME_LEASE_RESERVATION",
+            service_instance_id=lease.service_instance_id,
+            lease_generation=lease.lease_generation,
+            decision="ALLOCATE",
+            status="RESERVED",
+            reason="durable_generation_reserved",
+        )
+        self._emit_authority(
+            "RUNTIME_LEASE_ACTIVATION",
+            service_instance_id=lease.service_instance_id,
+            lease_generation=lease.lease_generation,
+            decision="ACTIVATE",
+            status="ACTIVE",
+            reason="durable_generation_active",
+        )
         return lease
 
     def acquire(self) -> RuntimeLease:
+        self._emit_authority(
+            "RUNTIME_LEASE_ACQUIRE",
+            decision="REQUEST",
+            status="REQUESTED",
+            reason="authority lease acquisition requested",
+        )
         while True:
             with self._lock():
                 record = self._read_generation()
                 live = self._read_live_lease()
                 if live is None:
                     if record.status == "active":
+                        self._emit_authority(
+                            "RUNTIME_LEASE_RECOVERY_REQUIRED",
+                            decision="REJECT_TAKEOVER",
+                            status="RECOVERY_REQUIRED",
+                            reason="active durable authority has no live lease",
+                        )
                         raise LeaseRecoveryRequired(
                             "active durable authority has no live lease; recovery is required before takeover"
                         )
@@ -1245,8 +1414,26 @@ class RuntimeLeaseManager:
                 if current_record != observed_record or current_live != observed_live:
                     continue
                 if evidence.status is LivenessStatus.LIVE:
+                    self._emit_authority(
+                        "RUNTIME_LEASE_TAKEOVER_REJECT",
+                        service_instance_id=observed_live.service_instance_id,
+                        lease_generation=observed_live.lease_generation,
+                        process_id=observed_live.service_pid,
+                        decision="REJECT_LIVE",
+                        status="LIVE",
+                        reason=evidence.reason,
+                    )
                     raise LeaseAlreadyHeld(evidence.reason)
                 if not evidence.confirmed_stale:
+                    self._emit_authority(
+                        "RUNTIME_LEASE_TAKEOVER_REJECT",
+                        service_instance_id=observed_live.service_instance_id,
+                        lease_generation=observed_live.lease_generation,
+                        process_id=observed_live.service_pid,
+                        decision="REJECT_AMBIGUOUS",
+                        status=evidence.status.value.upper(),
+                        reason=evidence.reason,
+                    )
                     raise LeaseLivenessUnknown(
                         f"authority takeover rejected: {evidence.status.value}: {evidence.reason}"
                     )
@@ -1289,6 +1476,14 @@ class RuntimeLeaseManager:
             bound = replace(current, endpoint_fingerprint=endpoint)
             self._write_live_lease(bound)
             self._write_generation(replace(record, endpoint_fingerprint=endpoint, updated_at=self._now()))
+            self._emit_authority(
+                "RUNTIME_ENDPOINT_BIND",
+                service_instance_id=current.service_instance_id,
+                lease_generation=current.lease_generation,
+                decision="BIND",
+                status="DURABLE",
+                reason="endpoint fingerprint bound to active lease",
+            )
             return bound
 
     def reconcile_endpoint_binding(self, lease: RuntimeLease, endpoint_fingerprint: str) -> RuntimeLease:
@@ -1309,6 +1504,14 @@ class RuntimeLeaseManager:
                 raise EndpointBindingError("durable generation endpoint binding conflicts")
             if record.endpoint_fingerprint is None:
                 self._write_generation(replace(record, endpoint_fingerprint=endpoint, updated_at=self._now()))
+            self._emit_authority(
+                "RUNTIME_ENDPOINT_RECONCILE",
+                service_instance_id=current.service_instance_id,
+                lease_generation=current.lease_generation,
+                decision="RECONCILE",
+                status="DURABLE",
+                reason="endpoint/live lease parity reconciled",
+            )
             return current
 
     def fence_owner(self, lease: RuntimeLease) -> AuthorityGenerationRecord:
@@ -1336,6 +1539,14 @@ class RuntimeLeaseManager:
                 self._remove_desktop_claim_if_owner(lease)
                 if current is not None:
                     self._remove_live_lease()
+                self._emit_authority(
+                    "RUNTIME_LEASE_FENCE",
+                    service_instance_id=lease.service_instance_id,
+                    lease_generation=lease.lease_generation,
+                    decision="FENCE_ALREADY_RESOLVED",
+                    status=record.status.upper(),
+                    reason="authority generation was already resolved",
+                )
                 return record
             if record.status not in {"reserved", "active"}:
                 raise LeaseNotOwner("authority generation is not fenceable")
@@ -1350,6 +1561,14 @@ class RuntimeLeaseManager:
             self._remove_desktop_claim_if_owner(lease)
             if current is not None:
                 self._remove_live_lease()
+            self._emit_authority(
+                "RUNTIME_LEASE_FENCE",
+                service_instance_id=lease.service_instance_id,
+                lease_generation=lease.lease_generation,
+                decision="FENCE_OWNER",
+                status="FENCED",
+                reason="bootstrap failure fenced exact owner",
+            )
             return fenced
 
     def release(self, lease: RuntimeLease) -> AuthorityGenerationRecord:
@@ -1366,6 +1585,14 @@ class RuntimeLeaseManager:
             self._remove_desktop_claim_if_owner(lease)
             self._inject("before_release_live_remove")
             self._remove_live_lease()
+            self._emit_authority(
+                "RUNTIME_LEASE_RELEASE",
+                service_instance_id=current.service_instance_id,
+                lease_generation=current.lease_generation,
+                decision="RELEASE",
+                status="RELEASED",
+                reason="clean authority shutdown",
+            )
             return fenced
 
 

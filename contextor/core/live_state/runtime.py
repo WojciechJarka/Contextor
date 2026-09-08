@@ -260,7 +260,25 @@ def _read_endpoint(repo_path: str | Path, *, strict: bool = False) -> LiveEndpoi
 
 
 def _production_domain(identity) -> RuntimeDomain:
-    return RuntimeDomain.from_identity(identity, mode="production")
+    try:
+        return RuntimeDomain.from_identity(identity, mode="production")
+    except Exception as exc:
+        try:
+            from contextor.core.runtime_trace import emit_authority_event
+
+            emit_authority_event(
+                "RUNTIME_DOMAIN_REJECT",
+                runtime_domain_id=f"repo:{identity.repo_id}",
+                repo_id=identity.repo_id,
+                source="runtime_domain",
+                status="REJECTED",
+                decision="FAIL_CLOSED",
+                reason="production RuntimeDomain admission rejected",
+                error=str(exc),
+            )
+        except Exception:
+            pass
+        raise
 
 
 def _endpoint_matches_domain(endpoint: LiveEndpoint, domain: RuntimeDomain) -> bool:
@@ -985,16 +1003,35 @@ def run_service(
     root = Path(repo_path).expanduser().resolve()
     identity = require_repository_identity(root)
     domain = _production_domain(identity)
-    manager = RuntimeLeaseManager(
-        domain,
-        liveness_verifier=AuthorityLivenessVerifier(domain),
-    )
+    manager = None
     lease = None
     server = None
     published_endpoint = None
     desktop_claim = None
+    authority_emitter = None
     ownership_resolved = False
     try:
+        from contextor.core.runtime_trace import AuthorityEventEmitter, _ensure_runtime_trace_session
+
+        # Authority/domain/lease events must enter the same trace session that
+        # GUI and LIVE later consume, including bootstrap failures.
+        _ensure_runtime_trace_session()
+        authority_emitter = AuthorityEventEmitter(
+            runtime_domain_id=domain.domain_id,
+            repo_id=identity.repo_id,
+        )
+        authority_emitter.emit(
+            "RUNTIME_AUTHORITY_START",
+            source="runtime",
+            status="STARTING",
+            decision="START",
+            reason="authority service bootstrap started",
+        )
+        manager = RuntimeLeaseManager(
+            domain,
+            liveness_verifier=AuthorityLivenessVerifier(domain),
+            authority_event_emitter=authority_emitter.emit,
+        )
         lease = manager.acquire()
         if desktop_instance_id is not None:
             if owner_pid is None or desktop_process_start_identity is None:
@@ -1071,6 +1108,12 @@ def run_service(
                 ProcessIdentity(desktop_pid, desktop_start),
             ),
         )
+        if authority_emitter is not None and hasattr(server, "record_authority_event") and hasattr(server, "activity_epoch"):
+            authority_emitter.attach_live_sink(
+                server.record_authority_event,
+                handoff_epoch=server.activity_epoch,
+            )
+            authority_emitter.replay_pending()
         published_endpoint = _authority_endpoint_from_server(
             server,
             identity,
@@ -1096,14 +1139,16 @@ def run_service(
             or current_record.endpoint_fingerprint != published_endpoint.fingerprint()
         ):
             raise RuntimeError("LIVE endpoint and RuntimeLease identity parity verification failed")
-        _safe_trace_event(
-            "LIVE",
-            "AUTHORITY_READY",
-            repo=str(root),
-            domain_id=domain.domain_id,
-            service_instance_id=lease.service_instance_id,
-            lease_generation=lease.lease_generation,
-        )
+        if authority_emitter is not None:
+            authority_emitter.emit(
+                "RUNTIME_AUTHORITY_READY",
+                source="runtime",
+                service_instance_id=lease.service_instance_id,
+                lease_generation=lease.lease_generation,
+                status="READY",
+                decision="READY",
+                reason="endpoint, lease and authority identity parity verified",
+            )
 
         if owner_pid is not None and owner_pid > 0:
             if sys.platform == "win32":
@@ -1143,16 +1188,24 @@ def run_service(
             ).start()
         server.serve_forever()
     except Exception as exc:
-        _safe_trace_event(
-            "LIVE",
-            "AUTHORITY_BOOTSTRAP_FAIL",
-            repo=str(root),
-            error=str(exc),
-            service_instance_id=getattr(lease, "service_instance_id", None),
-            lease_generation=getattr(lease, "lease_generation", None),
-        )
+        if authority_emitter is not None:
+            try:
+                authority_emitter.emit(
+                    "RUNTIME_AUTHORITY_BOOTSTRAP_FAIL",
+                    source="runtime",
+                    service_instance_id=getattr(lease, "service_instance_id", None),
+                    lease_generation=getattr(lease, "lease_generation", None),
+                    status="FAILED",
+                    decision="FAIL_CLOSED",
+                    reason="authority bootstrap failed",
+                    error=str(exc),
+                )
+            except Exception:
+                pass
         raise
     finally:
+        if authority_emitter is not None:
+            authority_emitter.detach_live_sink()
         if server is not None:
             server.close()
         if lease is not None:
@@ -1160,38 +1213,64 @@ def run_service(
                 try:
                     manager.reconcile_endpoint_binding(lease, published_endpoint.fingerprint())
                 except Exception as exc:
-                    _safe_trace_event(
-                        "LIVE",
-                        "AUTHORITY_BIND_RECONCILE_FAIL",
-                        repo=str(root),
-                        error=str(exc),
-                        service_instance_id=lease.service_instance_id,
-                        lease_generation=lease.lease_generation,
-                    )
+                    if authority_emitter is not None:
+                        authority_emitter.emit(
+                            "RUNTIME_ENDPOINT_RECONCILE_FAIL",
+                            source="runtime",
+                            service_instance_id=lease.service_instance_id,
+                            lease_generation=lease.lease_generation,
+                            status="FAILED",
+                            decision="FAIL_CLOSED",
+                            reason="endpoint reconciliation failed during shutdown",
+                            error=str(exc),
+                        )
             try:
                 manager.release(lease)
                 ownership_resolved = True
             except Exception as exc:
-                _safe_trace_event(
-                    "LIVE",
-                    "AUTHORITY_RELEASE_FAIL",
-                    repo=str(root),
-                    error=str(exc),
-                    service_instance_id=lease.service_instance_id,
-                    lease_generation=lease.lease_generation,
-                )
+                if authority_emitter is not None:
+                    authority_emitter.emit(
+                        "RUNTIME_LEASE_RELEASE_FAIL",
+                        source="runtime",
+                        service_instance_id=lease.service_instance_id,
+                        lease_generation=lease.lease_generation,
+                        status="FAILED",
+                        decision="FENCE_REQUIRED",
+                        reason="clean release failed; fencing required",
+                        error=str(exc),
+                    )
                 try:
                     manager.fence_owner(lease)
                     ownership_resolved = True
                 except Exception as fence_exc:
-                    _safe_trace_event(
-                        "LIVE",
-                        "AUTHORITY_FENCE_FAIL",
-                        repo=str(root),
-                        error=str(fence_exc),
-                        service_instance_id=lease.service_instance_id,
-                        lease_generation=lease.lease_generation,
-                    )
+                    if authority_emitter is not None:
+                        authority_emitter.emit(
+                            "RUNTIME_LEASE_FENCE_FAIL",
+                            source="runtime",
+                            service_instance_id=lease.service_instance_id,
+                            lease_generation=lease.lease_generation,
+                            status="FAILED",
+                            decision="FAIL_CLOSED",
+                            reason="authority fence failed",
+                            error=str(fence_exc),
+                        )
+        if authority_emitter is not None and lease is not None:
+            try:
+                authority_emitter.emit(
+                    "RUNTIME_AUTHORITY_SHUTDOWN",
+                    source="runtime",
+                    service_instance_id=lease.service_instance_id,
+                    lease_generation=lease.lease_generation,
+                    status="STOPPED" if ownership_resolved else "UNRESOLVED",
+                    decision="SHUTDOWN" if ownership_resolved else "FAIL_CLOSED",
+                    reason=(
+                        "authority service shutdown completed"
+                        if ownership_resolved
+                        else "authority shutdown could not resolve exact ownership"
+                    ),
+                )
+            except Exception:
+                pass
         if published_endpoint is not None and ownership_resolved:
             _remove_endpoint_if_exact(root, published_endpoint)
 

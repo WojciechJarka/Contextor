@@ -979,6 +979,8 @@ class ContextorGUI:
         self.live_event_feed = feed
         watchers[identity.repo_id] = self.live_watcher
         feeds[identity.repo_id] = feed
+        if hasattr(feed, "replay_authority_events"):
+            feed.replay_authority_events()
         self.live_watcher.start()
         feed.start()
 

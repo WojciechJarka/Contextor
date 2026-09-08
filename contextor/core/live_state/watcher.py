@@ -473,6 +473,7 @@ class DesktopLiveEventFeed(_PollingLiveWorker):
         super().__init__(interval=interval, thread_name="contextor-live-event-feed")
         self._last_seq: int = 0
         self._activity_epoch: str | None = None
+        self._replayed_authority_keys: set[tuple[str, int, str]] = set()
         self._poll_lock = threading.Lock()
         if initial_seq is not None:
             self._last_seq = int(initial_seq)
@@ -497,8 +498,46 @@ class DesktopLiveEventFeed(_PollingLiveWorker):
         except (TypeError, ValueError):
             self.on_status(message)
 
+    def replay_authority_events(self) -> None:
+        """Show bounded durable authority history before advancing the live cursor."""
+        try:
+            response = self.client.get_events(
+                after_seq=0,
+                category="AUTHORITY",
+                limit=None,
+            )
+        except (OSError, EOFError, TimeoutError, ConnectionError):
+            return
+        if response.get("status") != "ok":
+            return
+        for event in response.get("events", []):
+            if not isinstance(event, dict):
+                continue
+            message = self._message(event)
+            if message:
+                self._emit_status(message, event)
+            key = self._authority_key(event)
+            if key is not None:
+                self._replayed_authority_keys.add(key)
+        current_epoch = response.get("activity_epoch")
+        if current_epoch is not None:
+            self._activity_epoch = str(current_epoch)
+
+    @staticmethod
+    def _authority_key(event: dict) -> tuple[str, int, str] | None:
+        domain, sequence, event_id = event.get("runtime_domain_id"), event.get("sequence"), event.get("event_id")
+        if isinstance(domain, str) and isinstance(sequence, int) and isinstance(event_id, str):
+            return domain, sequence, event_id
+        return None
+
     def _message(self, event: dict) -> str | None:
         category = event.get("category", "LIVE_STATE")
+        if category == "AUTHORITY":
+            event_type = str(event.get("event_type") or event.get("operation") or "AUTHORITY_EVENT")
+            status = event.get("status") or "DURABLE_COMMITTED"
+            sequence = event.get("sequence")
+            suffix = f" (event {sequence})" if isinstance(sequence, int) else ""
+            return f"[LIVE] Authority {event_type}: {status}{suffix}"
         if category == "MCP_CALL":
             tool = event.get("tool", "")
             success = event.get("success", True)
@@ -629,12 +668,15 @@ class DesktopLiveEventFeed(_PollingLiveWorker):
                     if isinstance(seq, int) and seq <= self._last_seq:
                         continue
 
-                    message = self._message(event)
+                    key = self._authority_key(event) if event.get("category") == "AUTHORITY" else None
+                    message = None if key is not None and key in self._replayed_authority_keys else self._message(event)
                     if message:
                         self._emit_status(message, event)
 
                     if isinstance(seq, int):
                         self._last_seq = seq
+                        if key is not None:
+                            self._replayed_authority_keys.discard(key)
 
                 # No more pages.
                 if not response.get("truncated", False):

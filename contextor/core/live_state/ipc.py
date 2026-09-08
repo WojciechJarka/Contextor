@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+from collections import OrderedDict
 from contextlib import contextmanager
 import hashlib
 import json
@@ -19,6 +20,7 @@ from contextor.core.live_state.runtime_lease import ProcessIdentity
 
 LIVE_PROTOCOL_VERSION = 3
 LIVE_ENDPOINT_SCHEMA_VERSION = 2
+_AUTHORITY_FINGERPRINT_LIMIT = 10_000
 
 
 @dataclass(frozen=True)
@@ -283,6 +285,7 @@ class CanonicalLiveServer:
         self._persister = persister
         self._retention = retention
         self._events: list[dict[str, Any]] = []
+        self._authority_event_fingerprints: OrderedDict[tuple[str, int, str], str] = OrderedDict()
         self._lock = threading.RLock()
         self._stop = threading.Event()
         self._authkey = authkey or secrets.token_bytes(32)
@@ -389,6 +392,61 @@ class CanonicalLiveServer:
             status=event.get("status"),
         )
         return event
+
+    @property
+    def activity_epoch(self) -> str:
+        return self._activity_epoch
+
+    def record_authority_event(self, event: Mapping[str, Any]) -> dict[str, Any]:
+        """Project one already-durable authority event into the existing LIVE journal.
+
+        The durable emitter owns event identity and ordering.  This method only
+        creates the GUI/MCP projection and is idempotent on the canonical
+        ``(runtime_domain_id, sequence, event_id)`` key.
+        """
+        if not isinstance(event, Mapping):
+            return {"accepted": False, "activity_epoch": self._activity_epoch}
+        event_id = event.get("event_id")
+        domain_id = event.get("runtime_domain_id")
+        sequence = event.get("sequence")
+        if not isinstance(event_id, str) or not event_id:
+            return {"accepted": False, "activity_epoch": self._activity_epoch}
+        if not isinstance(domain_id, str) or not domain_id:
+            return {"accepted": False, "activity_epoch": self._activity_epoch}
+        if isinstance(sequence, bool) or not isinstance(sequence, int) or sequence < 1:
+            return {"accepted": False, "activity_epoch": self._activity_epoch}
+        expected_domain = self._authority_identity.get("runtime_domain_id")
+        if expected_domain is not None and domain_id != expected_domain:
+            return {"accepted": False, "activity_epoch": self._activity_epoch}
+        key = (domain_id, sequence, event_id)
+        fingerprint = hashlib.sha256(json.dumps(dict(event), ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")).hexdigest()
+        with self._lock:
+            existing = self._authority_event_fingerprints.get(key)
+            if existing is not None:
+                if existing == fingerprint:
+                    return {"accepted": True, "duplicate": True, "activity_epoch": self._activity_epoch}
+                return {"accepted": False, "conflict": True, "activity_epoch": self._activity_epoch}
+            self._authority_event_fingerprints[key] = fingerprint
+            self._authority_event_fingerprints.move_to_end(key)
+            if len(self._authority_event_fingerprints) > _AUTHORITY_FINGERPRINT_LIMIT:
+                self._authority_event_fingerprints.popitem(last=False)
+            self._activity_seq += 1
+            projected = dict(event)
+            projected.update(
+                {
+                    "seq": self._activity_seq,
+                    "category": "AUTHORITY",
+                    "operation": str(event.get("event_type") or "AUTHORITY_EVENT"),
+                    "source": event.get("source") or "authority",
+                    "origin": event.get("source") or "authority",
+                    "canonical_revision": event.get("final_revision"),
+                    "revision": self._revision,
+                    "status": event.get("status") or "DURABLE_COMMITTED",
+                }
+            )
+            self._events.append(projected)
+            del self._events[:-self._retention]
+            return {"accepted": True, "duplicate": False, "activity_epoch": self._activity_epoch}
 
     def _claim_identity_matches_request(self, request: Mapping[str, Any]) -> bool:
         for field in (
