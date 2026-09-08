@@ -1,3 +1,4 @@
+import json
 import os
 import subprocess
 import sys
@@ -496,6 +497,7 @@ def test_startup_backfill_preserves_filestate_content_and_revision_parity(tmp_pa
             self.endpoint = SimpleNamespace(host="127.0.0.1", port=1, authkey_hex="00")
             self._stop = threading.Event()
         def serve_forever(self):
+            self._stop.set()
             return None
         def close(self):
             return None
@@ -559,6 +561,170 @@ def test_startup_backfill_failure_leaves_previous_generation_authoritative(tmp_p
     reloaded = FileStateManager(str(cache))
     assert reloaded.revision == metadata.revision
     assert reloaded._state == before
+
+
+def _runtime_service_repo(tmp_path, monkeypatch):
+    from contextor.core.repository_identity import ensure_repository_identity
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    ensure_repository_identity(repo)
+    monkeypatch.setenv("CONTEXTOR_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setenv("CONTEXTOR_STATE_DIR", str(tmp_path / "state"))
+    return repo
+
+
+def _authority_event_types(logs_root):
+    records = []
+    for path in logs_root.glob("contextor_runtime_*.jsonl"):
+        for line in path.read_text(encoding="utf-8").splitlines():
+            payload = json.loads(line)
+            if payload.get("_type") == "authority_event":
+                records.append(payload["event_type"])
+    return records
+
+
+def test_run_service_fails_closed_when_service_thread_raises_before_endpoint(tmp_path, monkeypatch):
+    import contextor.core.live_state.runtime as runtime
+    from contextor.core.paths import runtime_logs_dir
+
+    repo = _runtime_service_repo(tmp_path, monkeypatch)
+
+    class FailingServer(CanonicalLiveServer):
+        def serve_forever(self):
+            raise RuntimeError("synthetic service-thread startup failure")
+
+    monkeypatch.setattr(runtime, "CanonicalLiveServer", FailingServer)
+
+    with pytest.raises(RuntimeError, match="service thread failed during pre-endpoint bootstrap"):
+        runtime.run_service(repo)
+
+    assert not endpoint_file(repo).exists()
+    assert "RUNTIME_AUTHORITY_READY" not in _authority_event_types(runtime_logs_dir())
+
+
+def test_run_service_fails_closed_when_service_thread_dies_before_ready(tmp_path, monkeypatch):
+    import contextor.core.live_state.runtime as runtime
+    from contextor.core.paths import runtime_logs_dir
+
+    repo = _runtime_service_repo(tmp_path, monkeypatch)
+    release_failure = threading.Event()
+    failure_observed = threading.Event()
+    original_endpoint = runtime._authority_endpoint_from_server
+
+    class FailingServer(CanonicalLiveServer):
+        def serve_forever(self):
+            release_failure.wait(timeout=5.0)
+            try:
+                raise RuntimeError("synthetic service-thread pre-ready failure")
+            finally:
+                failure_observed.set()
+
+    def endpoint_then_release(*args, **kwargs):
+        endpoint = original_endpoint(*args, **kwargs)
+        release_failure.set()
+        assert failure_observed.wait(timeout=2.0)
+        return endpoint
+
+    monkeypatch.setattr(runtime, "CanonicalLiveServer", FailingServer)
+    monkeypatch.setattr(runtime, "_authority_endpoint_from_server", endpoint_then_release)
+
+    with pytest.raises(RuntimeError, match="service thread failed during endpoint publication"):
+        runtime.run_service(repo)
+
+    assert not endpoint_file(repo).exists()
+    assert "RUNTIME_AUTHORITY_READY" not in _authority_event_types(runtime_logs_dir())
+
+
+def test_normal_service_shutdown_preserves_authority_event_chronology(tmp_path, monkeypatch):
+    import contextor.core.live_state.runtime as runtime
+    from contextor.core.paths import runtime_logs_dir
+
+    repo = _runtime_service_repo(tmp_path, monkeypatch)
+    failures = []
+
+    def run():
+        try:
+            runtime.run_service(repo)
+        except BaseException as exc:
+            failures.append(exc)
+
+    service = threading.Thread(target=run, daemon=True)
+    service.start()
+    deadline = time.monotonic() + 5.0
+    client = None
+    while time.monotonic() < deadline:
+        client = runtime.connect(repo)
+        if client is not None:
+            break
+        time.sleep(0.02)
+    assert client is not None
+    assert client.request("shutdown").get("status") == "ok"
+    service.join(timeout=5.0)
+
+    assert not service.is_alive()
+    assert failures == []
+    assert not endpoint_file(repo).exists()
+    event_types = _authority_event_types(runtime_logs_dir())
+    assert event_types.index("RUNTIME_AUTHORITY_START") < event_types.index("RUNTIME_AUTHORITY_READY")
+
+
+def test_endpoint_before_authority_replay_exposes_valid_pending_live_feed(tmp_path, monkeypatch):
+    import contextor.core.live_state.runtime as runtime
+    import contextor.core.runtime_trace as runtime_trace
+    from contextor import mcp_server
+
+    repo = _runtime_service_repo(tmp_path, monkeypatch)
+    replay_entered = threading.Event()
+    release_replay = threading.Event()
+    failures = []
+    original_replay = runtime_trace.AuthorityEventEmitter.replay_pending
+
+    def gated_replay(self):
+        replay_entered.set()
+        assert release_replay.wait(timeout=5.0)
+        return original_replay(self)
+
+    def run():
+        try:
+            runtime.run_service(repo)
+        except BaseException as exc:
+            failures.append(exc)
+
+    monkeypatch.setattr(runtime_trace.AuthorityEventEmitter, "replay_pending", gated_replay)
+    service = threading.Thread(target=run, daemon=True)
+    service.start()
+    deadline = time.monotonic() + 5.0
+    while time.monotonic() < deadline and not (endpoint_file(repo).exists() and replay_entered.is_set()):
+        time.sleep(0.02)
+    assert endpoint_file(repo).exists()
+    assert replay_entered.is_set()
+
+    pending = json.loads(mcp_server.get_live_events.fn(str(repo)))
+    assert pending["status"] == "ok"
+    assert pending.get("continuity") in {None, "not_requested", "continuous"}
+
+    release_replay.set()
+    deadline = time.monotonic() + 5.0
+    completed = None
+    while time.monotonic() < deadline:
+        completed = json.loads(mcp_server.get_live_events.fn(str(repo)))
+        authority_events = [event for event in completed.get("events", []) if event.get("category") == "AUTHORITY"]
+        if authority_events:
+            break
+        time.sleep(0.02)
+    assert completed is not None
+    authority_events = [event for event in completed["events"] if event.get("category") == "AUTHORITY"]
+    keys = [(event["runtime_domain_id"], event["sequence"], event["event_id"]) for event in authority_events]
+    assert authority_events
+    assert len(keys) == len(set(keys))
+
+    client = runtime.connect(repo)
+    assert client is not None
+    assert client.request("shutdown").get("status") == "ok"
+    service.join(timeout=5.0)
+    assert not service.is_alive()
+    assert failures == []
 
 
 def test_update_runs_inside_the_live_owner_and_is_visible_to_other_clients():

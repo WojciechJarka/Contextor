@@ -11,12 +11,20 @@ from contextor.core.live_state.runtime_lease import ProcessIdentity, RuntimeLeas
 
 @pytest.fixture
 def trace_logs(tmp_path, monkeypatch):
+    monkeypatch.setenv("CONTEXTOR_STATE_DIR", str(tmp_path / "state"))
     trace.finish_desktop_trace_session()
     trace._authority_emitters.clear()
+    trace._sidecar_rollovers.clear()
     monkeypatch.setattr(trace, "runtime_logs_dir", lambda: tmp_path)
+    session = trace._open_runtime_trace_session(logs_root=tmp_path)
+    trace._atomic_json(
+        trace.authority_event_state_path(tmp_path),
+        trace._authority_default_sidecar(session, session.stat().st_size),
+    )
     yield tmp_path
     trace.finish_desktop_trace_session()
     trace._authority_emitters.clear()
+    trace._sidecar_rollovers.clear()
 
 
 def _records(emitter):
@@ -429,6 +437,7 @@ def test_authority_record_offset_survives_interleaved_runtime_trace_append(trace
 
 def test_recovered_conflict_with_wrong_request_type_fails_closed(trace_logs):
     emitter = trace.AuthorityEventEmitter(runtime_domain_id="domain-a", logs_root=trace_logs)
+    emitter.emit("SEED")
     domain = _state(trace_logs)["domains"]["domain-a"]
     event = trace.AuthorityEvent(event_id="bad-conflict", timestamp="2026-01-01T00:00:00+00:00", sequence=domain["durable_high_water_sequence"] + 1, event_type="AUTHORITY_EVENT_DELIVERY_CONFLICT", runtime_domain_id="domain-a", operation_id="original-id", request_type="wrong", queue_order=1)
     trace._append_authority_record_locked(emitter.log_path, event)

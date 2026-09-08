@@ -3,6 +3,8 @@ import multiprocessing
 import os
 from pathlib import Path
 
+import pytest
+
 import contextor.core.runtime_trace as trace
 from contextor.core.paths import runtime_logs_dir
 
@@ -13,6 +15,20 @@ def _reset_trace_state():
     trace._active_path = None
     trace._active_sid = None
     trace._last_pointer_check = 0.0
+
+
+@pytest.fixture(autouse=True)
+def isolate_runtime_trace_storage(tmp_path, monkeypatch):
+    logs = tmp_path / "logs"
+    monkeypatch.setenv("CONTEXTOR_STATE_DIR", str(tmp_path / "state"))
+    monkeypatch.setattr(trace, "runtime_logs_dir", lambda: logs)
+    trace.finish_desktop_trace_session()
+    trace._authority_emitters.clear()
+    trace._sidecar_rollovers.clear()
+    yield logs
+    trace.finish_desktop_trace_session()
+    trace._authority_emitters.clear()
+    trace._sidecar_rollovers.clear()
 
 
 def test_desktop_trace_session_headers_and_finish(tmp_path, monkeypatch):
@@ -35,6 +51,7 @@ def test_desktop_trace_session_headers_and_finish(tmp_path, monkeypatch):
 def test_default_trace_session_uses_external_runtime_logs_root(tmp_path, monkeypatch):
     state = tmp_path / "user-state"
     monkeypatch.setenv("CONTEXTOR_STATE_DIR", str(state))
+    monkeypatch.setattr(trace, "runtime_logs_dir", lambda: state / "logs")
     _reset_trace_state()
     path = trace.start_desktop_trace_session()
     try:
@@ -110,3 +127,16 @@ def test_missing_runtime_active_pointer_cleanup_is_noop(tmp_path, monkeypatch):
     _reset_trace_state()
     trace.finish_desktop_trace_session()
     assert not list((tmp_path / "logs").glob("contextor_runtime_active*.json")) if (tmp_path / "logs").exists() else True
+
+
+def test_runtime_trace_fixture_never_touches_forbidden_production_like_root(tmp_path, monkeypatch):
+    forbidden = tmp_path / "forbidden-production-logs"
+    monkeypatch.setattr(trace, "runtime_logs_dir", lambda: tmp_path / "logs")
+    path = trace.start_desktop_trace_session()
+    emitter = trace.AuthorityEventEmitter(runtime_domain_id="fixture-domain")
+    emitter.emit("FIXTURE_ISOLATION")
+    assert path.parent == tmp_path / "logs"
+    assert (tmp_path / "logs" / trace._POINTER_NAME).exists()
+    assert list((tmp_path / "logs").glob("contextor_runtime_*.jsonl"))
+    assert (tmp_path / "logs" / "authority_event_state.json").exists()
+    assert not forbidden.exists()

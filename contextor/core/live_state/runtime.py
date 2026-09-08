@@ -882,6 +882,20 @@ def connect_or_start(
         else:
             env["PYTHONPATH"] = pkg_root
 
+        from contextor.core.runtime_trace import AuthorityEventEmitter
+
+        AuthorityEventEmitter(
+            runtime_domain_id=domain.domain_id,
+            repo_id=identity.repo_id,
+            logs_root=domain.logs_root,
+        ).emit(
+            "RUNTIME_AUTHORITY_START",
+            source="runtime_startup_coordinator",
+            status="STARTING",
+            decision="START",
+            reason="authority service process spawn admitted",
+        )
+        cmd.append("--authority-start-recorded")
         proc = _spawn_runtime_subprocess(cmd, root, env)
         spawn_deadline = time.monotonic() + effective_startup_budget
         while time.monotonic() < spawn_deadline:
@@ -999,6 +1013,7 @@ def run_service(
     owner_token: str | None = None,
     desktop_instance_id: str | None = None,
     desktop_process_start_identity: str | None = None,
+    authority_start_recorded: bool = False,
 ) -> None:
     root = Path(repo_path).expanduser().resolve()
     identity = require_repository_identity(root)
@@ -1006,10 +1021,34 @@ def run_service(
     manager = None
     lease = None
     server = None
+    server_thread = None
+    service_bootstrap_entered = threading.Event()
+    service_terminated = threading.Event()
+    service_failure: list[BaseException] = []
     published_endpoint = None
     desktop_claim = None
     authority_emitter = None
     ownership_resolved = False
+
+    def _raise_if_service_terminated(stage: str) -> None:
+        if service_failure:
+            raise RuntimeError(
+                f"Canonical LIVE service thread failed during {stage}"
+            ) from service_failure[0]
+        if server is not None and service_terminated.is_set() and not server._stop.is_set():
+            raise RuntimeError(
+                f"Canonical LIVE service thread terminated unexpectedly during {stage}"
+            )
+
+    def _serve_service() -> None:
+        service_bootstrap_entered.set()
+        try:
+            server.serve_forever()
+        except BaseException as exc:
+            service_failure.append(exc)
+        finally:
+            service_terminated.set()
+
     try:
         from contextor.core.runtime_trace import AuthorityEventEmitter
 
@@ -1018,13 +1057,14 @@ def run_service(
             repo_id=identity.repo_id,
             logs_root=domain.logs_root,
         )
-        authority_emitter.emit(
-            "RUNTIME_AUTHORITY_START",
-            source="runtime",
-            status="STARTING",
-            decision="START",
-            reason="authority service bootstrap started",
-        )
+        if not authority_start_recorded:
+            authority_emitter.emit(
+                "RUNTIME_AUTHORITY_START",
+                source="runtime",
+                status="STARTING",
+                decision="START",
+                reason="authority service bootstrap started",
+            )
         manager = RuntimeLeaseManager(
             domain,
             liveness_verifier=AuthorityLivenessVerifier(domain),
@@ -1106,12 +1146,19 @@ def run_service(
                 ProcessIdentity(desktop_pid, desktop_start),
             ),
         )
-        if authority_emitter is not None and hasattr(server, "record_authority_event") and hasattr(server, "activity_epoch"):
-            authority_emitter.attach_live_sink(
-                server.record_authority_event,
-                handoff_epoch=server.activity_epoch,
-            )
-            authority_emitter.replay_pending()
+        # The listener is bound by CanonicalLiveServer construction, but it is
+        # not client-usable until its accept loop runs.  Start that loop before
+        # endpoint publication; the endpoint remains private until all durable
+        # authority bindings below are verified.
+        server_thread = threading.Thread(
+            target=_serve_service,
+            name="contextor-live-service",
+            daemon=True,
+        )
+        server_thread.start()
+        if not service_bootstrap_entered.wait(timeout=0.25):
+            raise RuntimeError("Canonical LIVE service thread did not enter bootstrap")
+        _raise_if_service_terminated("pre-endpoint bootstrap")
         published_endpoint = _authority_endpoint_from_server(
             server,
             identity,
@@ -1137,6 +1184,14 @@ def run_service(
             or current_record.endpoint_fingerprint != published_endpoint.fingerprint()
         ):
             raise RuntimeError("LIVE endpoint and RuntimeLease identity parity verification failed")
+        _raise_if_service_terminated("endpoint publication")
+        if authority_emitter is not None and hasattr(server, "record_authority_event") and hasattr(server, "activity_epoch"):
+            authority_emitter.attach_live_sink(
+                server.record_authority_event,
+                handoff_epoch=server.activity_epoch,
+            )
+            authority_emitter.replay_pending()
+        _raise_if_service_terminated("authority event handoff")
         if authority_emitter is not None:
             authority_emitter.emit(
                 "RUNTIME_AUTHORITY_READY",
@@ -1184,7 +1239,8 @@ def run_service(
                 name=f"contextor-live-watchdog-{owner_pid}",
                 daemon=True,
             ).start()
-        server.serve_forever()
+        server_thread.join()
+        _raise_if_service_terminated("service lifetime")
     except Exception as exc:
         if authority_emitter is not None:
             try:
@@ -1206,6 +1262,8 @@ def run_service(
             authority_emitter.detach_live_sink()
         if server is not None:
             server.close()
+        if server_thread is not None and server_thread.is_alive():
+            server_thread.join(timeout=1.0)
         if lease is not None:
             if published_endpoint is not None:
                 try:
@@ -1280,6 +1338,7 @@ def main() -> None:
     parser.add_argument("--owner-token", type=str, default=None)
     parser.add_argument("--desktop-instance-id", type=str, default=None)
     parser.add_argument("--desktop-process-start-identity", type=str, default=None)
+    parser.add_argument("--authority-start-recorded", action="store_true")
     args = parser.parse_args()
     run_service(
         args.repo,
@@ -1287,6 +1346,7 @@ def main() -> None:
         owner_token=args.owner_token,
         desktop_instance_id=args.desktop_instance_id,
         desktop_process_start_identity=args.desktop_process_start_identity,
+        authority_start_recorded=args.authority_start_recorded,
     )
 
 
