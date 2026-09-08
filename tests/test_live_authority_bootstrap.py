@@ -38,6 +38,7 @@ def _repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str = "repo") -
     repo.mkdir()
     PersistentIdentityRegistry(str(repo))
     monkeypatch.setenv("CONTEXTOR_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setenv("CONTEXTOR_STATE_DIR", str(tmp_path / "state"))
     return repo
 
 

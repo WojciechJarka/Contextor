@@ -818,6 +818,7 @@ def test_real_service_process_starts_connects_and_stops(tmp_path, monkeypatch):
     repo.mkdir()
     PersistentIdentityRegistry(str(repo))
     monkeypatch.setenv("CONTEXTOR_CACHE_DIR", str(cache))
+    monkeypatch.setenv("CONTEXTOR_STATE_DIR", str(tmp_path / "state"))
 
     client = connect_or_start(repo)
     endpoint = endpoint_file(repo)
@@ -834,6 +835,7 @@ def test_real_process_busy_update_does_not_spawn_second_live_owner(tmp_path, mon
     repo.mkdir()
     PersistentIdentityRegistry(str(repo))
     monkeypatch.setenv("CONTEXTOR_CACHE_DIR", str(cache))
+    monkeypatch.setenv("CONTEXTOR_STATE_DIR", str(tmp_path / "state"))
     client = connect_or_start(repo, owner_pid=os.getpid(), owner_token="busy-test")
     try:
         endpoint = endpoint_file(repo)
@@ -864,6 +866,7 @@ def test_test_live_runtime_isolation_preserves_existing_live_service(
     PersistentIdentityRegistry(str(repo_a))
     PersistentIdentityRegistry(str(repo_b))
     monkeypatch.setenv("CONTEXTOR_CACHE_DIR", str(cache))
+    monkeypatch.setenv("CONTEXTOR_STATE_DIR", str(tmp_path / "state"))
 
     client_a = connect_or_start(
         repo_a, owner_pid=os.getpid(), owner_token="isolation-a"
@@ -910,6 +913,7 @@ def test_connect_or_start_ownership_when_spawning_new(tmp_path, monkeypatch):
     repo.mkdir()
     PersistentIdentityRegistry(str(repo))
     monkeypatch.setenv("CONTEXTOR_CACHE_DIR", str(cache))
+    monkeypatch.setenv("CONTEXTOR_STATE_DIR", str(tmp_path / "state"))
 
     import os
     my_pid = os.getpid()
@@ -930,6 +934,7 @@ def test_owner_pid_match_without_owner_token_is_not_owner(tmp_path, monkeypatch)
     repo.mkdir()
     PersistentIdentityRegistry(str(repo))
     monkeypatch.setenv("CONTEXTOR_CACHE_DIR", str(cache))
+    monkeypatch.setenv("CONTEXTOR_STATE_DIR", str(tmp_path / "state"))
 
     # Calling connect_or_start without owner_token must NEVER grant is_owner=True
     client = connect_or_start(repo, owner_pid=os.getpid(), owner_token=None)
@@ -946,6 +951,7 @@ def test_legacy_token_only_endpoint_is_rejected_fail_closed(tmp_path, monkeypatc
     repo.mkdir()
     PersistentIdentityRegistry(str(repo))
     monkeypatch.setenv("CONTEXTOR_CACHE_DIR", str(cache))
+    monkeypatch.setenv("CONTEXTOR_STATE_DIR", str(tmp_path / "state"))
 
     import json
     server = CanonicalLiveServer(SimpleNamespace(files=[]))
@@ -978,6 +984,7 @@ def test_legacy_endpoint_is_rejected_before_post_spawn_attach(tmp_path, monkeypa
     repo.mkdir()
     PersistentIdentityRegistry(str(repo))
     monkeypatch.setenv("CONTEXTOR_CACHE_DIR", str(cache))
+    monkeypatch.setenv("CONTEXTOR_STATE_DIR", str(tmp_path / "state"))
 
     import json
     # Start a genuine server with PID 54321 and token "race-token"
@@ -1010,6 +1017,7 @@ def test_connect_or_start_ownership_when_reconnecting_existing(tmp_path, monkeyp
     repo.mkdir()
     PersistentIdentityRegistry(str(repo))
     monkeypatch.setenv("CONTEXTOR_CACHE_DIR", str(cache))
+    monkeypatch.setenv("CONTEXTOR_STATE_DIR", str(tmp_path / "state"))
 
     first_client = connect_or_start(repo, owner_pid=os.getpid(), owner_token="first-token")
     try:
@@ -1028,6 +1036,7 @@ def test_connect_or_start_replaces_proven_orphan_with_dead_owner(tmp_path, monke
     repo.mkdir()
     PersistentIdentityRegistry(str(repo))
     monkeypatch.setenv("CONTEXTOR_CACHE_DIR", str(cache))
+    monkeypatch.setenv("CONTEXTOR_STATE_DIR", str(tmp_path / "state"))
 
     # Spawn a service with owner_pid = 99999999 (which is dead)
     import subprocess
@@ -1069,6 +1078,7 @@ def test_connect_or_start_rejects_legacy_endpoint_without_owner_pid(tmp_path, mo
     repo.mkdir()
     PersistentIdentityRegistry(str(repo))
     monkeypatch.setenv("CONTEXTOR_CACHE_DIR", str(cache))
+    monkeypatch.setenv("CONTEXTOR_STATE_DIR", str(tmp_path / "state"))
 
     import json
     server = CanonicalLiveServer(SimpleNamespace(files=[]))
@@ -1130,6 +1140,7 @@ def test_endpoint_cleanup_does_not_delete_newer_pid_endpoint(tmp_path, monkeypat
     repo.mkdir()
     PersistentIdentityRegistry(str(repo))
     monkeypatch.setenv("CONTEXTOR_CACHE_DIR", str(cache))
+    monkeypatch.setenv("CONTEXTOR_STATE_DIR", str(tmp_path / "state"))
 
     client = connect_or_start(repo)
     ep_file = endpoint_file(repo)
@@ -1159,6 +1170,7 @@ def test_owner_token_is_metadata_only_for_protocol_clients(tmp_path, monkeypatch
     repo.mkdir()
     PersistentIdentityRegistry(str(repo))
     monkeypatch.setenv("CONTEXTOR_CACHE_DIR", str(cache))
+    monkeypatch.setenv("CONTEXTOR_STATE_DIR", str(tmp_path / "state"))
 
     token_a = "token-alpha-12345"
     token_b = "token-beta-67890"
@@ -1190,6 +1202,7 @@ def test_owner_pid_reuse_or_mismatched_token_does_not_grant_ownership(tmp_path, 
     repo.mkdir()
     PersistentIdentityRegistry(str(repo))
     monkeypatch.setenv("CONTEXTOR_CACHE_DIR", str(cache))
+    monkeypatch.setenv("CONTEXTOR_STATE_DIR", str(tmp_path / "state"))
 
     token_original = "token-original-owner"
     token_recycled = "token-recycled-owner"
@@ -1211,6 +1224,7 @@ def test_concurrent_connect_or_start_creates_single_service(tmp_path, monkeypatc
     repo.mkdir()
     PersistentIdentityRegistry(str(repo))
     monkeypatch.setenv("CONTEXTOR_CACHE_DIR", str(cache))
+    monkeypatch.setenv("CONTEXTOR_STATE_DIR", str(tmp_path / "state"))
 
     results = []
     barrier = threading.Barrier(3)
@@ -1243,6 +1257,7 @@ def test_watchdog_terminates_runtime_when_owner_process_dies(tmp_path, monkeypat
     repo.mkdir()
     PersistentIdentityRegistry(str(repo))
     monkeypatch.setenv("CONTEXTOR_CACHE_DIR", str(cache))
+    monkeypatch.setenv("CONTEXTOR_STATE_DIR", str(tmp_path / "state"))
 
     from contextor.core.live_state.runtime import _is_pid_alive, connect
 
@@ -1279,6 +1294,7 @@ def test_watchdog_keeps_runtime_alive_while_owner_lives(tmp_path, monkeypatch):
     repo.mkdir()
     PersistentIdentityRegistry(str(repo))
     monkeypatch.setenv("CONTEXTOR_CACHE_DIR", str(cache))
+    monkeypatch.setenv("CONTEXTOR_STATE_DIR", str(tmp_path / "state"))
 
     # Spawn with our own current PID which stays alive
     client = connect_or_start(repo, owner_pid=os.getpid(), owner_token="test-alive")
@@ -1429,6 +1445,7 @@ def test_connect_or_start_slow_healthy_startup(tmp_path, monkeypatch):
     repo.mkdir()
     PersistentIdentityRegistry(str(repo))
     monkeypatch.setenv("CONTEXTOR_CACHE_DIR", str(cache))
+    monkeypatch.setenv("CONTEXTOR_STATE_DIR", str(tmp_path / "state"))
 
     # Delay the real authority spawn; the authority itself still publishes the
     # complete endpoint schema only after lease acquisition and bind.
@@ -1466,6 +1483,7 @@ def test_connect_or_start_dead_child_fast_failure(tmp_path, monkeypatch):
     repo.mkdir()
     PersistentIdentityRegistry(str(repo))
     monkeypatch.setenv("CONTEXTOR_CACHE_DIR", str(cache))
+    monkeypatch.setenv("CONTEXTOR_STATE_DIR", str(tmp_path / "state"))
 
     from contextor.core.live_state import runtime as runtime_mod
     orig_spawn = runtime_mod._spawn_runtime_subprocess
@@ -1499,6 +1517,7 @@ def test_connect_or_start_true_startup_hang(tmp_path, monkeypatch):
     repo.mkdir()
     PersistentIdentityRegistry(str(repo))
     monkeypatch.setenv("CONTEXTOR_CACHE_DIR", str(cache))
+    monkeypatch.setenv("CONTEXTOR_STATE_DIR", str(tmp_path / "state"))
 
     from contextor.core.live_state import runtime as runtime_mod
     orig_spawn = runtime_mod._spawn_runtime_subprocess

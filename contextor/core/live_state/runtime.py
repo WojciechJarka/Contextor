@@ -1011,14 +1011,12 @@ def run_service(
     authority_emitter = None
     ownership_resolved = False
     try:
-        from contextor.core.runtime_trace import AuthorityEventEmitter, _ensure_runtime_trace_session
+        from contextor.core.runtime_trace import AuthorityEventEmitter
 
-        # Authority/domain/lease events must enter the same trace session that
-        # GUI and LIVE later consume, including bootstrap failures.
-        _ensure_runtime_trace_session()
         authority_emitter = AuthorityEventEmitter(
             runtime_domain_id=domain.domain_id,
             repo_id=identity.repo_id,
+            logs_root=domain.logs_root,
         )
         authority_emitter.emit(
             "RUNTIME_AUTHORITY_START",

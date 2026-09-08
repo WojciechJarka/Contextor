@@ -390,3 +390,104 @@ def test_filtered_get_events_latest_seq_is_never_used_as_feed_cursor():
     feed = DesktopLiveEventFeed(Client(), lambda *_args, **_kwargs: None, initial_seq=7)
     feed.replay_authority_events()
     assert feed._last_seq == 7
+
+
+def test_explicit_authority_logs_root_never_touches_production_runtime_logs(tmp_path, monkeypatch):
+    production, isolated = tmp_path / "production-logs", tmp_path / "isolated-logs"
+    production.mkdir(); isolated.mkdir()
+    monkeypatch.setattr(trace, "runtime_logs_dir", lambda: production)
+    trace.finish_desktop_trace_session()
+    emitter = trace.AuthorityEventEmitter(runtime_domain_id="isolated-domain", logs_root=isolated)
+    emitter.emit("ISOLATED")
+    assert emitter.log_path.parent == isolated.resolve()
+    assert emitter.sidecar_path.parent == isolated.resolve()
+    assert (isolated / trace._POINTER_NAME).exists()
+    assert list(isolated.glob("contextor_runtime_*.jsonl"))
+    assert not list(production.glob("contextor_runtime_*.jsonl"))
+    assert not (production / "authority_event_state.json").exists()
+    assert not (production / trace._POINTER_NAME).exists()
+
+
+def test_authority_record_offset_survives_interleaved_runtime_trace_append(trace_logs, monkeypatch):
+    emitter = trace.AuthorityEventEmitter(runtime_domain_id="domain-a", logs_root=trace_logs)
+    real_write, injected = trace.os.write, False
+    def interleaved_write(fd, data):
+        nonlocal injected
+        if not injected and b'"_type":"authority_event"' in data:
+            injected = True
+            trace.trace_event("TEST", "INTERLEAVED")
+        return real_write(fd, data)
+    monkeypatch.setattr(trace.os, "write", interleaved_write)
+    event = emitter.emit("AUTHORITY")
+    state = _state(trace_logs)["domains"]["domain-a"]
+    recovered = trace._read_authority_record_at(emitter.log_path, state["durable_high_water_offset"], state["durable_high_water_end_offset"])
+    assert recovered.event_id == event.event_id
+    assert recovered.sequence == event.sequence
+    restarted = trace.AuthorityEventEmitter(runtime_domain_id="domain-a", logs_root=trace_logs)
+    assert restarted.emit("NEXT").sequence == 2
+
+
+def test_recovered_conflict_with_wrong_request_type_fails_closed(trace_logs):
+    emitter = trace.AuthorityEventEmitter(runtime_domain_id="domain-a", logs_root=trace_logs)
+    domain = _state(trace_logs)["domains"]["domain-a"]
+    event = trace.AuthorityEvent(event_id="bad-conflict", timestamp="2026-01-01T00:00:00+00:00", sequence=domain["durable_high_water_sequence"] + 1, event_type="AUTHORITY_EVENT_DELIVERY_CONFLICT", runtime_domain_id="domain-a", operation_id="original-id", request_type="wrong", queue_order=1)
+    trace._append_authority_record_locked(emitter.log_path, event)
+    with pytest.raises(trace.AuthorityEventRecoveryError):
+        trace.AuthorityEventEmitter(runtime_domain_id="domain-a", logs_root=trace_logs)
+
+
+def test_pending_index_hole_fails_closed(trace_logs):
+    emitter = trace.AuthorityEventEmitter(runtime_domain_id="domain-a", logs_root=trace_logs)
+    emitter.emit("ONE"); emitter.emit("TWO"); emitter.emit("THREE")
+    sidecar = _state(trace_logs); domain = sidecar["domains"]["domain-a"]
+    domain["pending_index"] = [domain["pending_index"][0], domain["pending_index"][2]]
+    domain["pending_start_sequence"], domain["pending_end_sequence"] = 1, 3
+    (trace_logs / "authority_event_state.json").write_text(json.dumps(sidecar), encoding="utf-8")
+    with pytest.raises(trace.AuthorityEventRecoveryError):
+        trace.AuthorityEventEmitter(runtime_domain_id="domain-a", logs_root=trace_logs)
+
+
+def test_corrupt_foreign_domain_blocks_healthy_domain_emitter(trace_logs):
+    left = trace.AuthorityEventEmitter(runtime_domain_id="left", logs_root=trace_logs)
+    right = trace.AuthorityEventEmitter(runtime_domain_id="right", logs_root=trace_logs)
+    left.emit("LEFT"); right.emit("RIGHT")
+    sidecar = _state(trace_logs); sidecar["domains"]["right"]["live_handoff_cursor"] = 99
+    (trace_logs / "authority_event_state.json").write_text(json.dumps(sidecar), encoding="utf-8")
+    with pytest.raises(trace.AuthorityEventRecoveryError):
+        trace.AuthorityEventEmitter(runtime_domain_id="left", logs_root=trace_logs)
+
+
+def test_schema2_zero_highwater_upgrade_remains_valid(trace_logs):
+    emitter = trace.AuthorityEventEmitter(runtime_domain_id="domain-a", logs_root=trace_logs)
+    sidecar = _state(trace_logs)
+    sidecar_v2 = {"schema_version": 2, "trace_path": sidecar["active_trace_path"], "durable_tail_offset": sidecar["durable_tail_offset"], "domains": {"domain-a": {"runtime_domain_id": "domain-a", "durable_high_water_sequence": 0, "durable_high_water_event_id": None, "durable_high_water_offset": None, "durable_high_water_end_offset": None, "live_handoff_cursor": 0, "live_handoff_epoch": None, "pending_start_sequence": None, "pending_end_sequence": None, "pending_index": []}}}
+    emitter.sidecar_path.write_text(json.dumps(sidecar_v2), encoding="utf-8")
+    recovered = trace.AuthorityEventEmitter(runtime_domain_id="domain-a", logs_root=trace_logs)
+    assert recovered.emit("FIRST").sequence == 1
+
+
+def test_append_location_bound_is_independent_from_recovery_window(
+    trace_logs,
+    monkeypatch,
+):
+    emitter = trace.AuthorityEventEmitter(
+        runtime_domain_id="domain-a",
+        logs_root=trace_logs,
+    )
+
+    monkeypatch.setattr(trace, "_AUTHORITY_RECOVERY_WINDOW", 64)
+
+    event = emitter.emit(
+        "AUTHORITY_WITH_RECOVERY_WINDOW_SMALLER_THAN_EVENT",
+        reason="x" * 256,
+    )
+
+    state = _state(trace_logs)["domains"]["domain-a"]
+    recovered = trace._read_authority_record_at(
+        emitter.log_path,
+        state["durable_high_water_offset"],
+        state["durable_high_water_end_offset"],
+    )
+
+    assert recovered.event_id == event.event_id
+    assert recovered.sequence == event.sequence

@@ -154,6 +154,7 @@ def test_second_desktop_is_rejected_before_gui_cache_touch(tmp_path, monkeypatch
     repo.mkdir()
     PersistentIdentityRegistry(str(repo))
     monkeypatch.setenv("CONTEXTOR_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setenv("CONTEXTOR_STATE_DIR", str(tmp_path / "state"))
     desktop_a = connect_or_start(repo, client_kind="desktop", desktop_instance_id="desktop-a")
     controller = _make_controller(repo)
     controller.desktop_instance_id = "desktop-b"
