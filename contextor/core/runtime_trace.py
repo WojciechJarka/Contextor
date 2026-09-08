@@ -18,7 +18,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
-from contextor.core.paths import atomic_write, runtime_logs_dir
+from contextor.core.paths import runtime_logs_dir
 
 TRACE_SCHEMA = "contextor-runtime-trace/v1"
 _POINTER_NAME = "contextor_runtime_active.json"
@@ -36,6 +36,9 @@ _AUTHORITY_STATE_NAME = "authority_event_state.json"
 _AUTHORITY_RECOVERY_WINDOW = 1024 * 1024
 _AUTHORITY_APPEND_LOCATE_WINDOW = 1024 * 1024
 _AUTHORITY_PENDING_LIMIT = 10_000
+_AUTHORITY_SIDECAR_SCHEMA = 3
+_FALLBACK_SCHEMA = 1
+_sidecar_rollovers: set[Path] = set()
 _authority_emitters: dict[tuple[str, str], "AuthorityEventEmitter"] = {}
 _authority_lock = threading.RLock()
 _operation_var: contextvars.ContextVar[str | None] = contextvars.ContextVar(
@@ -44,6 +47,156 @@ _operation_var: contextvars.ContextVar[str | None] = contextvars.ContextVar(
 
 
 AUTHORITY_EVENT_SCHEMA = "contextor-authority-event/v1"
+
+
+def _snapshot_stamp() -> str:
+    return datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S_%f")[:-3]
+
+
+def _safe_name(value: object) -> str | None:
+    if not isinstance(value, str) or not value:
+        return None
+    cleaned = "".join(char if char.isalnum() or char in "-_" else "_" for char in value)
+    return cleaned or None
+
+
+def _available_snapshot_path(directory: Path, name: str) -> Path:
+    candidate = directory / name
+    index = 1
+    while candidate.exists():
+        candidate = directory / f"{Path(name).stem}.{index}{Path(name).suffix}"
+        index += 1
+    return candidate
+
+
+def _atomic_json(path: Path, payload: Mapping[str, object]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp")
+    try:
+        with temporary.open("w", encoding="utf-8", newline="\n") as stream:
+            json.dump(payload, stream, ensure_ascii=False, sort_keys=True, indent=2)
+            stream.write("\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+        try:
+            descriptor = os.open(str(path.parent), os.O_RDONLY)
+        except OSError:
+            descriptor = None
+        if descriptor is not None:
+            try:
+                os.fsync(descriptor)
+            finally:
+                os.close(descriptor)
+    finally:
+        try:
+            temporary.unlink()
+        except FileNotFoundError:
+            pass
+
+
+def _snapshot_file(source: Path, filename: str, *, rename: bool = False) -> Path:
+    target = _available_snapshot_path(source.parent, filename)
+    if rename:
+        os.replace(source, target)
+    else:
+        with source.open("rb") as input_stream, target.open("xb") as output_stream:
+            output_stream.write(input_stream.read())
+            output_stream.flush()
+            os.fsync(output_stream.fileno())
+    return target
+
+
+def _last_good_path(logs_root: Path) -> Path:
+    # Production:
+    #   %APPDATA%\Contextor\logs -> %APPDATA%\Contextor\observability_last_good.json
+    # Explicit/test RuntimeDomain roots remain fully isolated.
+    return logs_root.resolve().parent / "observability_last_good.json"
+
+
+def _write_last_good_checkpoint(logs_root: Path, sidecar: Mapping[str, object]) -> None:
+    """Store sequence/cursor floors without ever preserving dead trace offsets."""
+    checkpoint_path = _last_good_path(logs_root)
+    domains: dict[str, object] = {}
+    try:
+        previous = json.loads(checkpoint_path.read_text(encoding="utf-8"))
+    except (FileNotFoundError, OSError, ValueError, TypeError):
+        previous = None
+    if (
+        isinstance(previous, Mapping)
+        and previous.get("schema_version") == _FALLBACK_SCHEMA
+        and previous.get("authority_schema_version") == _AUTHORITY_SIDECAR_SCHEMA
+        and isinstance(previous.get("logs_root"), str)
+        and Path(str(previous["logs_root"])).resolve() == logs_root.resolve()
+        and isinstance(previous.get("domains"), Mapping)
+    ):
+        for domain_id, raw in previous["domains"].items():
+            if not isinstance(domain_id, str) or not isinstance(raw, Mapping) or raw.get("runtime_domain_id") != domain_id:
+                continue
+            high, cursor, event_id = raw.get("durable_high_water_sequence"), raw.get("live_handoff_cursor"), raw.get("durable_high_water_event_id")
+            if (isinstance(high, bool) or not isinstance(high, int) or high < 0 or isinstance(cursor, bool) or not isinstance(cursor, int) or cursor < 0 or cursor > high):
+                continue
+            if (high == 0 and event_id is not None) or (high > 0 and (not isinstance(event_id, str) or not event_id)):
+                continue
+            domains[domain_id] = {"runtime_domain_id": domain_id, "durable_high_water_sequence": high, "durable_high_water_event_id": event_id, "live_handoff_cursor": cursor}
+    raw_domains = sidecar.get("domains")
+    if not isinstance(raw_domains, Mapping):
+        return
+    for domain_id, raw in raw_domains.items():
+        if not isinstance(domain_id, str) or not isinstance(raw, Mapping):
+            return
+        high, cursor, event_id = raw.get("durable_high_water_sequence"), raw.get("live_handoff_cursor"), raw.get("durable_high_water_event_id")
+        if (isinstance(high, bool) or not isinstance(high, int) or high < 0 or isinstance(cursor, bool) or not isinstance(cursor, int) or cursor < 0 or cursor > high):
+            return
+        if (high == 0 and event_id is not None) or (high > 0 and (not isinstance(event_id, str) or not event_id)):
+            return
+        domains[domain_id] = {
+            "runtime_domain_id": domain_id,
+            "durable_high_water_sequence": high,
+            "durable_high_water_event_id": event_id,
+            "live_handoff_cursor": cursor,
+        }
+    _atomic_json(checkpoint_path, {"schema_version": _FALLBACK_SCHEMA, "authority_schema_version": _AUTHORITY_SIDECAR_SCHEMA, "saved_at": datetime.now(timezone.utc).isoformat(timespec="milliseconds"), "logs_root": str(logs_root.resolve()), "domains": domains})
+
+
+def _load_last_good_floor(logs_root: Path, domain_id: str) -> tuple[int, dict[str, object]] | None:
+    try:
+        payload = json.loads(_last_good_path(logs_root).read_text(encoding="utf-8"))
+    except (FileNotFoundError, OSError, ValueError, TypeError):
+        return None
+    if not isinstance(payload, Mapping):
+        return None
+    if payload.get("schema_version") != _FALLBACK_SCHEMA:
+        return None
+    if payload.get("authority_schema_version") != _AUTHORITY_SIDECAR_SCHEMA:
+        return None
+    declared_logs_root = payload.get("logs_root")
+    if not isinstance(declared_logs_root, str) or not declared_logs_root:
+        return None
+    if Path(declared_logs_root).resolve() != logs_root.resolve():
+        return None
+    saved_at = payload.get("saved_at")
+    if not isinstance(saved_at, str) or not saved_at:
+        return None
+    domains = payload.get("domains")
+    raw = domains.get(domain_id) if isinstance(domains, Mapping) else None
+    if not isinstance(raw, Mapping):
+        return None
+    if raw.get("runtime_domain_id") != domain_id:
+        return None
+    high = raw.get("durable_high_water_sequence")
+    cursor = raw.get("live_handoff_cursor")
+    event_id = raw.get("durable_high_water_event_id")
+    if (isinstance(high, bool) or not isinstance(high, int) or high < 0 or isinstance(cursor, bool) or not isinstance(cursor, int) or cursor < 0 or cursor > high):
+        return None
+    if high == 0:
+        if event_id is not None:
+            return None
+    elif not isinstance(event_id, str) or not event_id:
+        return None
+    checkpoint = dict(raw)
+    checkpoint["_fallback_saved_at"] = saved_at
+    return high, checkpoint
 
 
 class AuthorityEventRecoveryError(RuntimeError):
@@ -287,8 +440,19 @@ def _read_authority_sidecar(path: Path, domain_id: str, logs_root: Path, trace_p
         raise AuthorityEventRecoveryError(f"malformed authority sidecar: {path}") from exc
     if not isinstance(payload, dict):
         raise AuthorityEventRecoveryError("authority sidecar must be an object")
-    # Upgrade the previous bounded format without resetting any sequence.
-    if payload.get("schema_version") == 2 and set(payload) == {"schema_version", "trace_path", "durable_tail_offset", "domains"}:
+    schema_version = payload.get("schema_version")
+    if schema_version == 1:
+        _snapshot_file(path, f"authority_event_state.schema-v1.pre-migration.{_snapshot_stamp()}.json", rename=True)
+        initial = _authority_default_sidecar(trace_path, trace_path.stat().st_size)
+        return _authority_default_domain(domain_id), initial
+    if schema_version == 2:
+        if set(payload) != {"schema_version", "trace_path", "durable_tail_offset", "domains"}:
+            raise AuthorityEventRecoveryError("authority schema-v2 sidecar fields do not match schema")
+        _snapshot_file(
+            path,
+            f"authority_event_state.schema-v2.pre-migration.{_snapshot_stamp()}.json",
+        )
+        _sidecar_rollovers.add(logs_root.resolve())
         old_path = payload["trace_path"]
         if not isinstance(old_path, str) or not old_path:
             raise AuthorityEventRecoveryError("authority trace_path is invalid")
@@ -303,8 +467,10 @@ def _read_authority_sidecar(path: Path, domain_id: str, logs_root: Path, trace_p
                 domain["pending_index"] = [dict(item, trace_path=old_path) for item in domain.get("pending_index", []) if isinstance(item, dict)]
                 domain["delivery_conflicts"] = []
         payload = upgraded
-    if set(payload) != {"schema_version", "active_trace_path", "durable_tail_offset", "domains"} or payload.get("schema_version") != 3:
+    if payload.get("schema_version") != _AUTHORITY_SIDECAR_SCHEMA:
         raise AuthorityEventRecoveryError("unsupported authority sidecar schema_version")
+    if set(payload) != {"schema_version", "active_trace_path", "durable_tail_offset", "domains"}:
+        raise AuthorityEventRecoveryError("authority schema-v3 sidecar fields do not match schema")
     active = payload.get("active_trace_path")
     if not isinstance(active, str) or not active:
         raise AuthorityEventRecoveryError("authority active_trace_path is invalid")
@@ -338,28 +504,22 @@ def _write_authority_sidecar(path: Path, domain_id: str, state: Mapping[str, obj
     domains = dict(payload["domains"])
     domains[domain_id] = dict(state)
     payload["domains"] = domains
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(f".{path.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp")
-    try:
-        with temporary.open("w", encoding="utf-8", newline="\n") as stream:
-            json.dump(payload, stream, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-            stream.flush()
-            os.fsync(stream.fileno())
-        os.replace(temporary, path)
-        try:
-            directory_fd = os.open(str(path.parent), os.O_RDONLY)
-        except OSError:
-            directory_fd = None
-        if directory_fd is not None:
-            try:
-                os.fsync(directory_fd)
-            finally:
-                os.close(directory_fd)
-    finally:
-        try:
-            temporary.unlink()
-        except FileNotFoundError:
-            pass
+    logs_root = path.parent.resolve()
+    if path.exists() and logs_root not in _sidecar_rollovers:
+        _snapshot_file(
+            path,
+            f"authority_event_state.schema-v{_AUTHORITY_SIDECAR_SCHEMA}.rollover.{_snapshot_stamp()}.json",
+        )
+        _sidecar_rollovers.add(logs_root)
+    _atomic_json(path, payload)
+    verified = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(verified, Mapping) or not isinstance(verified.get("domains"), Mapping):
+        raise AuthorityEventRecoveryError("authority sidecar failed post-write validation")
+    for owner_domain_id, raw_domain in verified["domains"].items():
+        if not isinstance(owner_domain_id, str) or not isinstance(raw_domain, Mapping):
+            raise AuthorityEventRecoveryError("authority sidecar failed post-write validation")
+        _validate_authority_domain_state(owner_domain_id, raw_domain, logs_root=logs_root)
+    _write_last_good_checkpoint(logs_root, verified)
 
 
 def _authority_envelope(event: AuthorityEvent) -> dict[str, object]:
@@ -507,6 +667,13 @@ class AuthorityEventEmitter:
         self.runtime_domain_id = runtime_domain_id
         self.repo_id = repo_id
         self.logs_root = (Path(logs_root) if logs_root is not None else runtime_logs_dir()).resolve()
+        storage_was_missing = (
+            not self.logs_root.exists()
+            or (
+                not authority_event_state_path(self.logs_root).exists()
+                and not _pointer_path(self.logs_root).exists()
+            )
+        )
         self.sidecar_path = authority_event_state_path(self.logs_root)
         self._lock_path = self.sidecar_path.with_name(f".{self.sidecar_path.name}.lock")
         self.log_path = _ensure_runtime_trace_session(logs_root=self.logs_root).resolve()
@@ -515,10 +682,36 @@ class AuthorityEventEmitter:
         self.live_sink: Callable[[dict[str, object]], object] | None = None
         self.live_handoff_epoch: str | None = None
         self.process_id = os.getpid() if process_id is None else process_id
+        checkpoint = _load_last_good_floor(self.logs_root, runtime_domain_id) if storage_was_missing else None
+        self._sequence_floor = checkpoint[0] if checkpoint is not None else 0
+        self._storage_reset = storage_was_missing
+        self._storage_checkpoint = checkpoint[1] if checkpoint is not None else None
         self._lock = _authority_lock
         with self._lock:
             with _AuthorityFileLock(self._lock_path):
                 self._recover_locked()
+        if self._storage_reset:
+            checkpoint_data = self._storage_checkpoint or {}
+            high = int(checkpoint_data.get("durable_high_water_sequence") or 0)
+            cursor = int(checkpoint_data.get("live_handoff_cursor") or 0)
+            event_type = "OBSERVABILITY_STORAGE_RESET" if checkpoint is not None else "OBSERVABILITY_FRESH_START"
+            fallback_saved_at = checkpoint_data.get("_fallback_saved_at")
+            self.emit(
+                event_type,
+                source="observability_last_good" if checkpoint is not None else "runtime_trace",
+                request_type="observability_storage_reset" if checkpoint is not None else "observability_fresh_start",
+                decision="RECOVERED_WITH_HISTORY_GAP" if checkpoint is not None else "FRESH_START",
+                status="RECOVERED_WITH_HISTORY_GAP" if checkpoint is not None else "FRESH_START",
+                reason=(
+                    f"logs_root_missing_or_cleared; fallback_saved_at={fallback_saved_at}; "
+                    f"previous_durable_high_water_sequence={high}; previous_live_handoff_cursor={cursor}; "
+                    f"lost_pending_start_sequence={cursor + 1 if cursor < high else 'none'}; "
+                    f"lost_pending_end_sequence={high if cursor < high else 'none'}"
+                    if checkpoint is not None
+                    else "no_valid_last_good_checkpoint"
+                ),
+            )
+            self._storage_reset = False
 
     def _recover_locked(self) -> tuple[dict[str, object], dict[str, object]]:
         sidecar_missing = not self.sidecar_path.exists()
@@ -748,8 +941,20 @@ class AuthorityEventEmitter:
                 if self.live_sink is not None:
                     self._replay_pending_locked()
                 state, payload = self._recover_locked()
+                if (
+                    self._storage_reset
+                    and self._sequence_floor > 0
+                    and int(state["durable_high_water_sequence"]) == 0
+                    and int(state["live_handoff_cursor"]) == 0
+                    and not state.get("pending_index")
+                ):
+                    state = dict(state)
+                    state["live_handoff_cursor"] = self._sequence_floor
                 # A failed secondary delivery never blocks the next durable event.
-                sequence = int(state["durable_high_water_sequence"]) + 1
+                sequence = max(
+                    int(state["durable_high_water_sequence"]),
+                    self._sequence_floor,
+                ) + 1
                 event = self._event_from_record({**fields, "event_type": event_type, "sequence": sequence})
                 index = _append_authority_record_locked(self.log_path, event)
                 state = dict(state)
@@ -777,6 +982,7 @@ class AuthorityEventEmitter:
                 payload["active_trace_path"] = str(self.log_path.resolve())
                 payload["durable_tail_offset"] = index.end_offset
                 _write_authority_sidecar(self.sidecar_path, self.runtime_domain_id, state, payload)
+                self._sequence_floor = sequence
                 self._deliver(event, state, payload)
                 return event
 
@@ -944,6 +1150,15 @@ def _open_runtime_trace_session(*, logs_root: str | Path | None = None) -> Path:
     logs = _resolved_logs_root(logs_root)
     production_logs = runtime_logs_dir().resolve()
     logs.mkdir(parents=True, exist_ok=True)
+    previous_pointer = _pointer_path(logs)
+    if previous_pointer.exists():
+        try:
+            previous_payload = json.loads(previous_pointer.read_text(encoding="utf-8"))
+        except (OSError, ValueError, TypeError):
+            previous_payload = None
+        previous_sid = _safe_name(previous_payload.get("sid")) if isinstance(previous_payload, Mapping) else None
+        prefix = f"contextor_runtime_active.sid-{previous_sid}" if previous_sid else "contextor_runtime_active"
+        _snapshot_file(previous_pointer, f"{prefix}.{_snapshot_stamp()}.json")
     started_at, stamp = _now()
     pid = os.getpid()
     sid = f"d-{pid}-{stamp}"
@@ -956,7 +1171,7 @@ def _open_runtime_trace_session(*, logs_root: str | Path | None = None) -> Path:
         handle.flush()
         os.fsync(handle.fileno())
     pointer = {"schema": TRACE_SCHEMA, "sid": sid, "file": file_name, "desktop_pid": pid, "started_at": started_at}
-    atomic_write(_pointer_path(logs), json.dumps(pointer, ensure_ascii=False, separators=(",", ":")))
+    _atomic_json(_pointer_path(logs), pointer)
     if logs == production_logs:
         with _lock:
             _active_meta, _active_path, _active_sid = pointer, path.resolve(), sid
@@ -996,7 +1211,11 @@ def finish_desktop_trace_session() -> None:
         current = _read_pointer()
         if current is not None and sid and path and current[0].get("sid") == sid and current[1] == path:
             try:
-                _pointer_path().unlink()
+                pointer_path = _pointer_path()
+                previous_sid = _safe_name(current[0].get("sid"))
+                prefix = f"contextor_runtime_active.sid-{previous_sid}" if previous_sid else "contextor_runtime_active"
+                _snapshot_file(pointer_path, f"{prefix}.{_snapshot_stamp()}.json")
+                pointer_path.unlink()
             except FileNotFoundError:
                 pass
         with _lock:

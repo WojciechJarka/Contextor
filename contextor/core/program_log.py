@@ -23,6 +23,19 @@ _PATH: Path | None = None
 _CMD_PROCESS: subprocess.Popen | None = None
 
 
+def _rollover_program_log(path: Path) -> None:
+    """Preserve the prior session's active program log exactly once."""
+    if not path.exists() or path.stat().st_size == 0:
+        return
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]
+    candidate = path.with_name(f"contextor-program.{stamp}.log")
+    suffix = 1
+    while candidate.exists():
+        candidate = path.with_name(f"contextor-program.{stamp}.{suffix}.log")
+        suffix += 1
+    path.replace(candidate)
+
+
 class _TeeStream:
     """Write to the original stream and the program log without breaking I/O."""
 
@@ -70,6 +83,7 @@ def configure_program_log() -> Path:
             return _PATH
         path = program_log_path()
         path.parent.mkdir(parents=True, exist_ok=True)
+        _rollover_program_log(path)
         _HANDLE = path.open("a", encoding="utf-8", buffering=1)
         _PATH = path
         sys.stdout = _TeeStream(sys.stdout, _HANDLE)

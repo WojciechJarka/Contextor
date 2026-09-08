@@ -42,6 +42,13 @@ def _hide_console() -> None:
 
 
 def _run_gui() -> int:
+    from contextor.ui.single_instance import DesktopSingleInstance
+
+    guard = DesktopSingleInstance.acquire()
+    if not guard.is_primary:
+        guard.signal_existing()
+        guard.close()
+        return 0
     from contextor.core.program_log import configure_program_log
     from contextor.core.runtime_trace import (
         finish_desktop_trace_session,
@@ -55,9 +62,10 @@ def _run_gui() -> int:
 
         from contextor.ui.gui import run
 
-        run()
+        run(single_instance=guard)
     finally:
         finish_desktop_trace_session()
+        guard.close()
 
     return 0
 

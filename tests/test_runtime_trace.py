@@ -90,3 +90,23 @@ def test_multiprocess_append_is_valid_json(tmp_path, monkeypatch):
     trace.finish_desktop_trace_session()
     for line in path.read_text(encoding="utf-8").splitlines():
         json.loads(line)
+
+
+def test_clean_shutdown_archives_runtime_active_pointer_before_delete(tmp_path, monkeypatch):
+    logs = tmp_path / "logs"
+    monkeypatch.setattr(trace, "runtime_logs_dir", lambda: logs)
+    _reset_trace_state()
+    path = trace.start_desktop_trace_session()
+    sid = trace._active_sid
+    trace.finish_desktop_trace_session()
+    assert not (logs / trace._POINTER_NAME).exists()
+    snapshots = list(logs.glob(f"contextor_runtime_active.sid-{sid}.*.json"))
+    assert len(snapshots) == 1
+    assert json.loads(snapshots[0].read_text(encoding="utf-8"))["file"] == path.name
+
+
+def test_missing_runtime_active_pointer_cleanup_is_noop(tmp_path, monkeypatch):
+    monkeypatch.setattr(trace, "runtime_logs_dir", lambda: tmp_path / "logs")
+    _reset_trace_state()
+    trace.finish_desktop_trace_session()
+    assert not list((tmp_path / "logs").glob("contextor_runtime_active*.json")) if (tmp_path / "logs").exists() else True

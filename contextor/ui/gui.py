@@ -1217,9 +1217,25 @@ class ContextorGUI:
         self.root.destroy()
 
 
-def run():
+def run(*, single_instance=None):
     root = tk.Tk()
     # The controller registers itself on the widget tree, which keeps it
     # alive for the lifetime of the window; no local reference needed.
     ContextorGUI(root)
+    if single_instance is not None:
+        def activate_existing_window():
+            root.deiconify()
+            try:
+                root.state("normal")
+                root.lift()
+                root.attributes("-topmost", True)
+                root.after(100, lambda: root.attributes("-topmost", False))
+                root.focus_force()
+                try:
+                    root.bell()
+                except Exception:
+                    pass
+            except Exception:
+                pass
+        single_instance.register_activation(root, activate_existing_window)
     root.mainloop()
