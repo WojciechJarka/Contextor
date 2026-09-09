@@ -5,6 +5,7 @@ import sys
 
 import pytest
 
+from contextor.core.analysis import lineage_extraction as lineage_extraction_module
 from contextor.core.analysis.incremental.preparation import prepare_source_update
 from contextor.core.analysis.lineage_extraction import (
     LineageExtractionLimits,
@@ -36,6 +37,64 @@ def test_local_occurrence_id_round_trip_and_multi_name_disambiguation():
     assert first != second
     assert parse_local_occurrence_id(first) == ("global_declaration", "0.1", 0, "x:y%z")
     assert parse_local_occurrence_id(second) == ("global_declaration", "0.1", 1, "other")
+
+
+def test_stage_1c_occurrence_kinds_round_trip():
+    for kind in (
+        "name_load",
+        "call_site",
+        "call_argument",
+        "call_result",
+        "runtime_bound_local",
+    ):
+        local_id = build_local_occurrence_id(
+            kind,
+            "0.1",
+            "value",
+            ordinal=2,
+        )
+        assert parse_local_occurrence_id(local_id) == (
+            kind,
+            "0.1",
+            2,
+            "value",
+        )
+
+
+def test_stage_1c_occurrence_cache_reuses_same_ref():
+    tree = ast.parse("value = 1\n")
+    paths, reason = lineage_extraction_module._index_ast_paths(
+        tree,
+        lineage_extraction_module.DEFAULT_LINEAGE_EXTRACTION_LIMITS,
+    )
+    assert reason is None
+    extractor = lineage_extraction_module._AnchorExtractor(paths, "pkg.py")
+    node = tree.body[0].value
+    first = extractor._occurrence("expression_result", node)
+    second = extractor._occurrence("expression_result", node)
+    assert first is second
+    assert first.local_id == second.local_id
+    assert len(extractor._ids) == 1
+
+
+def test_stage_1c_merge_frames_keeps_only_identical_occurrences():
+    tree = ast.parse("a = 1\nb = 2\nc = 3\n")
+    paths, reason = lineage_extraction_module._index_ast_paths(
+        tree,
+        lineage_extraction_module.DEFAULT_LINEAGE_EXTRACTION_LIMITS,
+    )
+    assert reason is None
+    extractor = lineage_extraction_module._AnchorExtractor(paths, "pkg.py")
+    a = ExtractedOccurrenceRef("a")
+    b1 = ExtractedOccurrenceRef("b1")
+    b2 = ExtractedOccurrenceRef("b2")
+    merged = extractor._merge_frames(
+        (
+            {"a": a, "b": b1},
+            {"a": a, "b": b2},
+        )
+    )
+    assert merged == {"a": a}
 
 
 def test_extraction_is_deterministic_source_local_and_has_parameter_lineage(monkeypatch):
