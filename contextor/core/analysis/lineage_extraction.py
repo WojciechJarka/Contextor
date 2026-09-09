@@ -458,18 +458,21 @@ class _AnchorExtractor:
 
     def _visit_Call(self, node: ast.Call, owner: str | None, walrus_owner: str | None) -> None:
         self._visit(node.func, owner, walrus_owner)
+        callable_info = self._resolve_current_local_callable(node, owner)
+        callee_ref = self._frame(owner).get(node.func.id) if isinstance(node.func, ast.Name) else None
         call_site, call_result = self._occurrence("call_site", node), self._occurrence("call_result", node)
         arguments = self._collect_call_arguments(node, owner, walrus_owner)
-        callable_info = self._resolve_current_local_callable(node, owner)
         if callable_info is not None:
             self._bind_call_arguments(arguments, callable_info)
             self._flow(source=self._return_symbolic(callable_info), target=call_result, relation=LineageRelation.CALL_RESULT, node=node, resolution_kind=ResolutionKind.CALL_EXACT, confidence=LineageConfidence.CONFIRMED)
             return
-        if isinstance(node.func, ast.Name) and self._frame(owner).get(node.func.id) is None:
+        if isinstance(node.func, ast.Name) and callee_ref is None:
             resolution_kind, confidence = ResolutionKind.UNRESOLVED_NAME, LineageConfidence.UNRESOLVED
+            dynamic_boundary = None
         else:
             resolution_kind, confidence = ResolutionKind.DYNAMIC_RUNTIME_BOUNDARY, LineageConfidence.DYNAMIC
-        self._flow(source=call_site, target=call_result, relation=LineageRelation.CALL_RESULT, node=node, resolution_kind=resolution_kind, confidence=confidence, dynamic_boundary="dynamic_call" if confidence is LineageConfidence.DYNAMIC else None)
+            dynamic_boundary = "dynamic_call"
+        self._flow(source=call_site, target=call_result, relation=LineageRelation.CALL_RESULT, node=node, resolution_kind=resolution_kind, confidence=confidence, dynamic_boundary=dynamic_boundary)
 
     def _visit_comprehension_expression(self, node: ast.AST, generators: list[ast.comprehension], values: tuple[ast.AST, ...], owner: str | None, walrus_owner: str | None) -> None:
         comprehension_id = self._add("comprehension", node, None, owner)

@@ -182,6 +182,23 @@ def test_stage_1c5_signature_stars_and_dynamic_calls_are_conservative():
     assert _stage_1c_call_result_flows(dynamic)[0].resolution_kind is ResolutionKind.DYNAMIC_RUNTIME_BOUNDARY
 
 
+def test_stage_1c5_callee_identity_is_captured_before_argument_rebind():
+    facts = _stage_1c_facts("def run(value):\n return value\nresult = run((run := other))\nlater = run(1)\n")
+    first = next(flow for flow in _stage_1c_call_result_flows(facts) if flow.evidence.start_line == 3)
+    later = next(flow for flow in _stage_1c_call_result_flows(facts) if flow.evidence.start_line == 4)
+    assert first.resolution_kind is ResolutionKind.CALL_EXACT
+    assert isinstance(first.source, ExtractedSymbolicRef) and first.source.symbol_name == "run"
+    assert later.resolution_kind is ResolutionKind.DYNAMIC_RUNTIME_BOUNDARY
+    assert later.confidence is LineageConfidence.DYNAMIC and later.dynamic_boundary == "dynamic_call"
+
+
+def test_stage_1c5_unresolved_callee_stays_unresolved_when_argument_binds_name():
+    facts = _stage_1c_facts("result = missing((missing := other))\n")
+    flow = _stage_1c_call_result_flows(facts)[0]
+    assert flow.resolution_kind is ResolutionKind.UNRESOLVED_NAME
+    assert flow.confidence is LineageConfidence.UNRESOLVED and flow.dynamic_boundary is None
+
+
 def test_stage_1c_if_branches_are_exact_inside_and_ambiguous_after_merge():
     facts = _stage_1c_facts(
         "def run(cond):\n"
