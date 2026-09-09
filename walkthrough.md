@@ -1,677 +1,83 @@
-FILES_CHANGED=
-contextor/core/live_state/store.py
-tests/test_lineage_state_lifecycle.py
+STAGE_1B_EXACT_SCOPE=
+Implement only a parsed-tree, source-local extractor which returns `ExtractedLineageSourceFacts`. 1B emits lexical/anchor/binding evidence and no `ExtractedFlowFact` or `ExtractedSurfaceFact` other than empty tuples. It has no `PersistentIdentityRegistry` import or access; no `SemanticEndpoint`, `Materialized*Fact`, `RepositoryAnalysisState`, `CandidateState`, snapshot, hydration, MCP, query, planner, or commit mutation. Its only inputs are an already parsed `ast.AST`, canonical source path, and exact source fingerprint. A source-local anchor is intentionally revision-local and is never a cross-source endpoint.
 
-TESTS_RUN=
-.venv\Scripts\python.exe -m pytest tests/test_lineage_state_lifecycle.py tests/test_live_state_store.py -q
+PARSED_SOURCE_OWNER=
+Full: `contextor.core.symbol_engine.indexer._process_single_file` owns per-file parse creation through `contextor.core.source.parse_source` (verified implementation range `indexer.py:300-505`). Incremental: `contextor.core.analysis.incremental.preparation.prepare_source_update` owns `path.read_text(...)` then `ast.parse(...)` (`preparation.py:132-277`). The latter is the exact existing live preparation seam, prior to imports, symbols, collisions, delta, and module-usage extraction. `extract_symbol_facts(..., tree=...)`, `extract_compact_reference_facts(..., tree=...)`, and `extract_module_usage_facts(..., tree, ...)` confirm the established convention that downstream extractors consume a supplied tree rather than parse for themselves.
 
-TEST_RESULTS=
-35 passed in 5.81s
+FULL_ANALYSIS_PARSE_PATH=
+`ContextorFacade.analyze_project` -> `index_repository` -> worker `_process_single_file` -> `parse_source(path)` -> same `tree` passed to `read_imports`, `extract_file_symbols`, `extract_compact_reference_facts`, collision extraction, and test facts. `RepositoryIndex` then carries run-scoped extracted products to the facade/global pipeline. On an index-cache hit, the worker currently does not retain an AST; 1B must obtain a current parsed tree in that worker before lineage extraction, never in a query path. The preferred 1B implementation is a source-input helper returning one parsed-tree/fingerprint carrier, used by the worker before its result is assembled; it prevents an ad-hoc independent lineage read/parse. A cache-only reuse path is not sufficient until it stores and validates a lineage-schema-tagged extracted slice; that cache extension is not required for 1B.
 
-ACTUAL_DIFF=
-diff --git a/contextor/core/live_state/store.py b/contextor/core/live_state/store.py
-index c96969b..9593a09 100644
---- a/contextor/core/live_state/store.py
-+++ b/contextor/core/live_state/store.py
-@@ -12,6 +12,25 @@ from dataclasses import asdict, dataclass, replace
- from pathlib import Path
- from typing import Any
- 
-+from contextor.core.domain.lineage_facts import (
-+    LINEAGE_FACTS_SEMANTIC_VERSION,
-+    LineageConfidence,
-+    LineageFamilyStatus,
-+    LineageRelation,
-+    MaterializedAnchorFact,
-+    MaterializedFlowFact,
-+    MaterializedLineageSourceFacts,
-+    MaterializedOccurrenceRef,
-+    MaterializedSurfaceFact,
-+    ProviderRef,
-+    ResolutionKind,
-+    SemanticEndpoint,
-+    SemanticInterfaceDescriptor,
-+    SourceLineageManifest,
-+    SourceSpan,
-+    SurfaceKind,
-+)
-+
- LIVE_STATE_SCHEMA_VERSION = "1.2"
- 
- 
-@@ -87,6 +106,206 @@ def _normalize_symbol_call_facts(state: Any) -> Any:
-     return state
- 
- 
-+def _revalidate_lineage_span(span: Any) -> SourceSpan:
-+    if not isinstance(span, SourceSpan):
-+        raise pickle.UnpicklingError("Invalid lineage SourceSpan.")
-+    return replace(span)
-+
-+
-+def _revalidate_lineage_endpoint(
-+    endpoint: Any,
-+) -> MaterializedOccurrenceRef | SemanticEndpoint:
-+    if isinstance(endpoint, MaterializedOccurrenceRef):
-+        return replace(endpoint)
-+    if isinstance(endpoint, SemanticEndpoint):
-+        return replace(endpoint)
-+    raise pickle.UnpicklingError("Unknown materialized lineage endpoint.")
-+
-+
-+def _revalidate_lineage_provider(provider: Any) -> ProviderRef | None:
-+    if provider is None:
-+        return None
-+    if not isinstance(provider, ProviderRef):
-+        raise pickle.UnpicklingError("Invalid lineage provider.")
-+    return replace(provider)
-+
-+
-+def _revalidate_lineage_manifest(manifest: Any) -> SourceLineageManifest:
-+    if not isinstance(manifest, SourceLineageManifest):
-+        raise pickle.UnpicklingError("Invalid lineage source manifest.")
-+    if not isinstance(manifest.status, LineageFamilyStatus):
-+        raise pickle.UnpicklingError("Invalid lineage manifest status.")
-+    rebuilt = replace(manifest)
-+    if rebuilt.semantic_version != LINEAGE_FACTS_SEMANTIC_VERSION:
-+        raise pickle.UnpicklingError(
-+            "Unsupported lineage manifest semantic version."
-+        )
-+    return rebuilt
-+
-+
-+def _revalidate_lineage_anchor(anchor: Any) -> MaterializedAnchorFact:
-+    if not isinstance(anchor, MaterializedAnchorFact):
-+        raise pickle.UnpicklingError("Invalid materialized lineage anchor.")
-+    return replace(
-+        anchor,
-+        reference=_revalidate_lineage_endpoint(anchor.reference),
-+        span=_revalidate_lineage_span(anchor.span),
-+    )
-+
-+
-+def _revalidate_lineage_flow(flow: Any) -> MaterializedFlowFact:
-+    if not isinstance(flow, MaterializedFlowFact):
-+        raise pickle.UnpicklingError("Invalid materialized lineage flow.")
-+    if not isinstance(flow.relation, LineageRelation):
-+        raise pickle.UnpicklingError("Invalid lineage relation.")
-+    if not isinstance(flow.resolution_kind, ResolutionKind):
-+        raise pickle.UnpicklingError("Invalid lineage resolution kind.")
-+    if not isinstance(flow.confidence, LineageConfidence):
-+        raise pickle.UnpicklingError("Invalid lineage confidence.")
-+    return replace(
-+        flow,
-+        source=_revalidate_lineage_endpoint(flow.source),
-+        target=_revalidate_lineage_endpoint(flow.target),
-+        evidence=_revalidate_lineage_span(flow.evidence),
-+        provider=_revalidate_lineage_provider(flow.provider),
-+    )
-+
-+
-+def _revalidate_lineage_surface(surface: Any) -> MaterializedSurfaceFact:
-+    if not isinstance(surface, MaterializedSurfaceFact):
-+        raise pickle.UnpicklingError("Invalid materialized lineage surface.")
-+    if not isinstance(surface.kind, SurfaceKind):
-+        raise pickle.UnpicklingError("Invalid lineage surface kind.")
-+    if not isinstance(surface.resolution_kind, ResolutionKind):
-+        raise pickle.UnpicklingError("Invalid lineage surface resolution kind.")
-+    if not isinstance(surface.confidence, LineageConfidence):
-+        raise pickle.UnpicklingError("Invalid lineage surface confidence.")
-+    return replace(
-+        surface,
-+        exposed=_revalidate_lineage_endpoint(surface.exposed),
-+        evidence=_revalidate_lineage_span(surface.evidence),
-+        provider=_revalidate_lineage_provider(surface.provider),
-+    )
-+
-+
-+def _revalidate_lineage_descriptor(
-+    descriptor: Any,
-+) -> SemanticInterfaceDescriptor:
-+    if not isinstance(descriptor, SemanticInterfaceDescriptor):
-+        raise pickle.UnpicklingError(
-+            "Invalid lineage semantic interface descriptor."
-+        )
-+    return replace(descriptor)
-+
-+
-+def _revalidate_lineage_slice(
-+    source_slice: Any,
-+) -> MaterializedLineageSourceFacts:
-+    if not isinstance(source_slice, MaterializedLineageSourceFacts):
-+        raise pickle.UnpicklingError(
-+            "Invalid materialized lineage source slice."
-+        )
-+    return replace(
-+        source_slice,
-+        manifest=_revalidate_lineage_manifest(source_slice.manifest),
-+        anchors=tuple(
-+            _revalidate_lineage_anchor(item)
-+            for item in source_slice.anchors
-+        ),
-+        flows=tuple(
-+            _revalidate_lineage_flow(item)
-+            for item in source_slice.flows
-+        ),
-+        surfaces=tuple(
-+            _revalidate_lineage_surface(item)
-+            for item in source_slice.surfaces
-+        ),
-+        interface_descriptors=tuple(
-+            _revalidate_lineage_descriptor(item)
-+            for item in source_slice.interface_descriptors
-+        ),
-+    )
-+
-+
-+def _normalize_lineage_facts_state(state: Any) -> Any:
-+    """Normalize/validate persisted materialized lineage without source work."""
-+
-+    if state is None or isinstance(state, dict) or not hasattr(state, "__dict__"):
-+        return state
-+
-+    try:
-+        if not hasattr(state, "lineage_facts_by_source"):
-+            state.lineage_facts_by_source = {}
-+        if not hasattr(state, "lineage_facts_state"):
-+            state.lineage_facts_state = "not_materialized"
-+        if not hasattr(state, "lineage_facts_semantic_version"):
-+            state.lineage_facts_semantic_version = None
-+
-+        raw_mapping = state.lineage_facts_by_source
-+        raw_family_state = state.lineage_facts_state
-+        raw_version = state.lineage_facts_semantic_version
-+
-+        if not isinstance(raw_mapping, dict):
-+            raise pickle.UnpicklingError(
-+                "Lineage source mapping must be a dict."
-+            )
-+        if not isinstance(raw_family_state, str):
-+            raise pickle.UnpicklingError(
-+                "Lineage family state must be a string."
-+            )
-+
-+        try:
-+            family_status = LineageFamilyStatus(raw_family_state)
-+        except ValueError as exc:
-+            raise pickle.UnpicklingError(
-+                "Unknown lineage family state."
-+            ) from exc
-+
-+        if raw_version is not None and raw_version != LINEAGE_FACTS_SEMANTIC_VERSION:
-+            raise pickle.UnpicklingError(
-+                "Unsupported lineage semantic version."
-+            )
-+
-+        if family_status is LineageFamilyStatus.NOT_MATERIALIZED:
-+            if raw_mapping:
-+                raise pickle.UnpicklingError(
-+                    "Not-materialized lineage cannot contain source slices."
-+                )
-+            if raw_version is not None:
-+                raise pickle.UnpicklingError(
-+                    "Not-materialized lineage cannot have a semantic version."
-+                )
-+        elif raw_version != LINEAGE_FACTS_SEMANTIC_VERSION:
-+            raise pickle.UnpicklingError(
-+                "Materialized lineage requires the current semantic version."
-+            )
-+
-+        normalized: dict[str, MaterializedLineageSourceFacts] = {}
-+        for source_key, source_slice in raw_mapping.items():
-+            if not isinstance(source_key, str) or not source_key:
-+                raise pickle.UnpicklingError(
-+                    "Lineage source key must be a non-empty string."
-+                )
-+            rebuilt = _revalidate_lineage_slice(source_slice)
-+            if rebuilt.manifest.source_key != source_key:
-+                raise pickle.UnpicklingError(
-+                    "Lineage mapping key does not match manifest source_key."
-+                )
-+            normalized[source_key] = rebuilt
-+
-+        state.lineage_facts_by_source = normalized
-+        state.lineage_facts_state = family_status.value
-+        state.lineage_facts_semantic_version = raw_version
-+        return state
-+
-+    except pickle.UnpicklingError:
-+        raise
-+    except (AttributeError, TypeError, ValueError) as exc:
-+        raise pickle.UnpicklingError(
-+            "Invalid persisted lineage state."
-+        ) from exc
-+
-+
- @dataclass(frozen=True)
- class LiveStateMetadata:
-     schema_version: str = LIVE_STATE_SCHEMA_VERSION
-@@ -315,7 +534,9 @@ def load_snapshot(
-             )
-             if embedded_metadata.revision != metadata.revision:
-                 return None
--            state_obj = _normalize_symbol_call_facts(payload["state"])
-+            state_obj = _normalize_lineage_facts_state(
-+                _normalize_symbol_call_facts(payload["state"])
-+            )
-             state_revision = (
-                 state_obj.get("revision") if isinstance(state_obj, dict)
-                 else getattr(state_obj, "revision", None)
-@@ -421,7 +642,9 @@ def load_snapshot(
-                     except AttributeError:
-                         pass
-             return state_obj, metadata
--        payload = _normalize_symbol_call_facts(payload)
-+        payload = _normalize_lineage_facts_state(
-+            _normalize_symbol_call_facts(payload)
-+        )
-         if payload is not None and hasattr(payload, "__dict__"):
-             if not hasattr(payload, "module_usages"):
-                 try:
-diff --git a/tests/test_lineage_state_lifecycle.py b/tests/test_lineage_state_lifecycle.py
-new file mode 100644
-index 0000000..2b59120
---- /dev/null
-+++ b/tests/test_lineage_state_lifecycle.py
-@@ -0,0 +1,400 @@
-+from pathlib import Path
-+from types import SimpleNamespace
-+
-+import pytest
-+
-+from contextor.core.analysis.incremental.engine import IncrementalAnalysisEngine
-+from contextor.core.analysis.incremental.plan_executor import _prepare_candidate_state
-+from contextor.core.analysis.state_manager import RepositoryAnalysisState
-+from contextor.core.domain.graph import ProjectGraph
-+from contextor.core.domain.lineage_facts import (
-+    LINEAGE_FACTS_SEMANTIC_VERSION,
-+    LineageConfidence,
-+    LineageFamilyStatus,
-+    LineageRelation,
-+    MaterializedAnchorFact,
-+    MaterializedFlowFact,
-+    MaterializedLineageSourceFacts,
-+    MaterializedOccurrenceRef,
-+    MaterializedSurfaceFact,
-+    ProviderRef,
-+    ResolutionKind,
-+    SemanticEndpoint,
-+    SemanticInterfaceDescriptor,
-+    SourceLineageManifest,
-+    SourceSpan,
-+    SurfaceDeclarationEvidence,
-+    SurfaceKind,
-+    build_return_slot,
-+)
-+from contextor.core.domain.module import Module
-+from contextor.core.domain.usage_facts import ModuleUsageFacts
-+from contextor.core.live_state.hydration import hydrate_repository_engine
-+from contextor.core.live_state.store import load_snapshot, save_snapshot
-+from contextor.core.paths import repo_cache_dir
-+from contextor.core.repository_identity import ensure_repository_identity
-+
-+
-+def _lineage_slice() -> MaterializedLineageSourceFacts:
-+    span = SourceSpan(1, 0, 1, 4)
-+    occurrence = MaterializedOccurrenceRef("pkg.py", "fingerprint", "occ")
-+    slot = build_return_slot("A1")
-+    semantic = SemanticEndpoint("A1", slot)
-+
-+    return MaterializedLineageSourceFacts(
-+        manifest=SourceLineageManifest(
-+            "pkg.py",
-+            "fingerprint",
-+            LINEAGE_FACTS_SEMANTIC_VERSION,
-+            LineageFamilyStatus.FRESH,
-+            1,
-+            1,
-+            1,
-+        ),
-+        anchors=(
-+            MaterializedAnchorFact(
-+                "anchor",
-+                occurrence,
-+                "assignment",
-+                span,
-+            ),
-+        ),
-+        flows=(
-+            MaterializedFlowFact(
-+                "flow",
-+                occurrence,
-+                semantic,
-+                LineageRelation.RETURNS,
-+                span,
-+                ResolutionKind.CALL_EXACT,
-+                LineageConfidence.CONFIRMED,
-+            ),
-+        ),
-+        surfaces=(
-+            MaterializedSurfaceFact(
-+                "surface",
-+                SurfaceKind.REGISTRATION,
-+                occurrence,
-+                span,
-+                ResolutionKind.DYNAMIC_RUNTIME_BOUNDARY,
-+                LineageConfidence.DYNAMIC,
-+                "registered",
-+                dynamic_boundary="runtime-registration",
-+                provider=ProviderRef("fixture", "1"),
-+                declaration_evidence=(
-+                    SurfaceDeclarationEvidence.STATIC_DECLARATION
-+                ),
-+            ),
-+        ),
-+        interface_descriptors=(
-+            SemanticInterfaceDescriptor(
-+                "A1",
-+                (slot,),
-+                "signature-digest",
-+            ),
-+        ),
-+    )
-+
-+
-+def _persist_corrupted_lineage_slice(
-+    tmp_path,
-+    source_slice,
-+    state_id,
-+):
-+    state = RepositoryAnalysisState(
-+        lineage_facts_by_source={"pkg.py": source_slice},
-+        lineage_facts_state="fresh",
-+        lineage_facts_semantic_version=LINEAGE_FACTS_SEMANTIC_VERSION,
-+    )
-+    save_snapshot(state, tmp_path, state_id)
-+    return load_snapshot(tmp_path, expected_state_id=state_id)
-+
-+
-+def test_repository_state_defaults_and_candidate_copy_are_lineage_safe():
-+    state = RepositoryAnalysisState()
-+
-+    assert state.lineage_facts_by_source == {}
-+    assert state.lineage_facts_state == "not_materialized"
-+    assert state.lineage_facts_semantic_version is None
-+
-+    source_slice = _lineage_slice()
-+    state.lineage_facts_by_source = {"pkg.py": source_slice}
-+    state.lineage_facts_state = "fresh"
-+    state.lineage_facts_semantic_version = LINEAGE_FACTS_SEMANTIC_VERSION
-+
-+    candidate = _prepare_candidate_state(state)
-+
-+    assert candidate.lineage_facts_by_source == state.lineage_facts_by_source
-+    assert candidate.lineage_facts_by_source is not state.lineage_facts_by_source
-+    assert candidate.lineage_facts_by_source["pkg.py"] is source_slice
-+    assert candidate.lineage_facts_state == "fresh"
-+    assert candidate.lineage_facts_semantic_version == "1"
-+
-+    candidate.lineage_facts_by_source.pop("pkg.py")
-+
-+    assert "pkg.py" in state.lineage_facts_by_source
-+
-+
-+def test_snapshot_round_trip_preserves_lineage_endpoint_types_and_metadata(
-+    tmp_path,
-+):
-+    source_slice = _lineage_slice()
-+    state = RepositoryAnalysisState(
-+        lineage_facts_by_source={"pkg.py": source_slice},
-+        lineage_facts_state="fresh",
-+        lineage_facts_semantic_version=LINEAGE_FACTS_SEMANTIC_VERSION,
-+    )
-+
-+    save_snapshot(state, tmp_path, "lineage")
-+
-+    loaded, _ = load_snapshot(tmp_path, expected_state_id="lineage")
-+
-+    assert loaded.lineage_facts_by_source == {"pkg.py": source_slice}
-+    loaded_slice = loaded.lineage_facts_by_source["pkg.py"]
-+
-+    assert isinstance(
-+        loaded_slice.anchors[0].reference,
-+        MaterializedOccurrenceRef,
-+    )
-+    assert isinstance(
-+        loaded_slice.flows[0].target,
-+        SemanticEndpoint,
-+    )
-+    assert loaded_slice.flows[0].target.slot == build_return_slot("A1")
-+    assert (
-+        loaded_slice.surfaces[0].declaration_evidence
-+        is SurfaceDeclarationEvidence.STATIC_DECLARATION
-+    )
-+    assert loaded_slice.surfaces[0].provider == ProviderRef("fixture", "1")
-+    assert loaded_slice.surfaces[0].dynamic_boundary == "runtime-registration"
-+
-+
-+@pytest.mark.parametrize(
-+    ("family_state", "version", "with_slice"),
-+    [
-+        ("not_materialized", "1", False),
-+        ("not_materialized", None, True),
-+        ("fresh", None, False),
-+        ("fresh", "999", False),
-+    ],
-+)
-+def test_snapshot_rejects_invalid_lineage_family_state_version_pairs(
-+    tmp_path,
-+    family_state,
-+    version,
-+    with_slice,
-+):
-+    state = RepositoryAnalysisState(
-+        lineage_facts_by_source=(
-+            {"pkg.py": _lineage_slice()} if with_slice else {}
-+        ),
-+        lineage_facts_state=family_state,
-+        lineage_facts_semantic_version=version,
-+    )
-+    save_snapshot(state, tmp_path, "invalid")
-+
-+    assert load_snapshot(tmp_path, expected_state_id="invalid") is None
-+
-+
-+def test_snapshot_rejects_mapping_manifest_key_mismatch(tmp_path):
-+    state = RepositoryAnalysisState(
-+        lineage_facts_by_source={"other.py": _lineage_slice()},
-+        lineage_facts_state="fresh",
-+        lineage_facts_semantic_version="1",
-+    )
-+    save_snapshot(state, tmp_path, "mismatch")
-+
-+    assert load_snapshot(tmp_path, expected_state_id="mismatch") is None
-+
-+
-+def test_snapshot_rejects_corrupted_materialized_endpoint(tmp_path):
-+    source_slice = _lineage_slice()
-+    flow = source_slice.flows[0]
-+    object.__setattr__(flow, "source", "not-an-endpoint")
-+
-+    state = RepositoryAnalysisState(
-+        lineage_facts_by_source={"pkg.py": source_slice},
-+        lineage_facts_state="fresh",
-+        lineage_facts_semantic_version="1",
-+    )
-+    save_snapshot(state, tmp_path, "corrupt")
-+
-+    assert load_snapshot(tmp_path, expected_state_id="corrupt") is None
-+
-+
-+@pytest.mark.parametrize("invalid_confidence", ["CONFIRMED", "not-a-confidence"])
-+def test_snapshot_rejects_non_enum_flow_confidence(
-+    tmp_path,
-+    invalid_confidence,
-+):
-+    source_slice = _lineage_slice()
-+    flow = source_slice.flows[0]
-+    object.__setattr__(flow, "confidence", invalid_confidence)
-+
-+    assert (
-+        _persist_corrupted_lineage_slice(
-+            tmp_path,
-+            source_slice,
-+            "bad-flow-confidence",
-+        )
-+        is None
-+    )
-+
-+
-+@pytest.mark.parametrize("invalid_confidence", ["DYNAMIC", "not-a-confidence"])
-+def test_snapshot_rejects_non_enum_surface_confidence(
-+    tmp_path,
-+    invalid_confidence,
-+):
-+    source_slice = _lineage_slice()
-+    surface = source_slice.surfaces[0]
-+    object.__setattr__(surface, "confidence", invalid_confidence)
-+
-+    assert (
-+        _persist_corrupted_lineage_slice(
-+            tmp_path,
-+            source_slice,
-+            "bad-surface-confidence",
-+        )
-+        is None
-+    )
-+
-+
-+def test_snapshot_rejects_malformed_semantic_slot(tmp_path):
-+    source_slice = _lineage_slice()
-+    endpoint = source_slice.flows[0].target
-+    assert isinstance(endpoint, SemanticEndpoint)
-+    object.__setattr__(endpoint, "slot", "slot:not-canonical")
-+
-+    state = RepositoryAnalysisState(
-+        lineage_facts_by_source={"pkg.py": source_slice},
-+        lineage_facts_state="fresh",
-+        lineage_facts_semantic_version="1",
-+    )
-+    save_snapshot(state, tmp_path, "bad-slot")
-+
-+    assert load_snapshot(tmp_path, expected_state_id="bad-slot") is None
-+
-+
-+def test_real_hydration_normalizes_legacy_lineage_absence_without_source_rebuild(
-+    tmp_path,
-+    monkeypatch,
-+):
-+    repo = tmp_path / "repo"
-+    repo.mkdir()
-+
-+    monkeypatch.setenv("CONTEXTOR_CACHE_DIR", str(tmp_path / "cache"))
-+    monkeypatch.setenv("CONTEXTOR_REGISTRY_DIR", str(tmp_path / "registry"))
-+
-+    identity, _ = ensure_repository_identity(repo)
-+    cache_dir = repo_cache_dir(repo)
-+
-+    module = Module(
-+        module_id="pkg",
-+        path="pkg.py",
-+        absolute_path=str(repo / "does-not-exist.py"),
-+        imports=[],
-+    )
-+    state = RepositoryAnalysisState(
-+        modules={"pkg": module},
-+        dependency_graph=ProjectGraph(
-+            hard_edges={"pkg": set()},
-+            soft_edges={"pkg": set()},
-+        ),
-+        module_usages={
-+            "pkg": ModuleUsageFacts(
-+                symbol_calls_materialized=True,
-+                reference_evidence_materialized=True,
-+            )
-+        },
-+        artifact_consumption={},
-+        artifact_consumption_state="fresh",
-+        collision_facts={"pkg": []},
-+        collisions_state="fresh",
-+    )
-+
-+    delattr(state, "lineage_facts_by_source")
-+    delattr(state, "lineage_facts_state")
-+    delattr(state, "lineage_facts_semantic_version")
-+
-+    save_snapshot(
-+        state,
-+        cache_dir,
-+        "legacy-lineage",
-+        repo_id=identity.repo_id,
-+        root_path=identity.root_path,
-+    )
-+
-+    monkeypatch.setattr(
-+        "contextor.core.live_state.runtime.connect",
-+        lambda _root: None,
-+    )
-+
-+    def forbidden_source_rebuild(*_args, **_kwargs):
-+        raise AssertionError("hydration attempted source-backed reconstruction")
-+
-+    monkeypatch.setattr(
-+        "contextor.core.reference.engine.extract_module_usage_facts",
-+        forbidden_source_rebuild,
-+    )
-+    monkeypatch.setattr(
-+        "contextor.core.reporting_engine.persistent_registry."
-+        "PersistentIdentityRegistry.sync_with_workspace",
-+        forbidden_source_rebuild,
-+    )
-+
-+    hydrated = hydrate_repository_engine(repo)
-+
-+    assert hydrated is not None
-+    assert hydrated.engine.state.lineage_facts_by_source == {}
-+    assert hydrated.engine.state.lineage_facts_state == "not_materialized"
-+    assert hydrated.engine.state.lineage_facts_semantic_version is None
-+
-+
-+def test_incremental_commit_publishes_lineage_candidate_fields(
-+    tmp_path,
-+    monkeypatch,
-+):
-+    state = RepositoryAnalysisState()
-+    source_slice = _lineage_slice()
-+    candidate = _prepare_candidate_state(state)
-+    candidate.lineage_facts_by_source = {"pkg.py": source_slice}
-+    candidate.lineage_facts_state = "fresh"
-+    candidate.lineage_facts_semantic_version = "1"
-+
-+    outcome = SimpleNamespace(
-+        identity_sync_required=False,
-+        candidate_state=candidate,
-+        affected_modules=set(),
-+        blast_radius_complete=True,
-+        execution_trace={},
-+        all_modules=set(),
-+        current_artifacts={},
-+    )
-+
-+    monkeypatch.setattr(
-+        "contextor.core.analysis.incremental.engine.execute_refresh_plan",
-+        lambda **_kwargs: outcome,
-+    )
-+
-+    engine = object.__new__(IncrementalAnalysisEngine)
-+    engine.state = state
-+    engine.root_path = Path(tmp_path)
-+    engine.registry = SimpleNamespace()
-+    engine.state_manager = SimpleNamespace(
-+        update_state=lambda _path: None,
-+    )
-+
-+    engine._apply_delta_and_commit(
-+        str(tmp_path / "pkg.py"),
-+        SimpleNamespace(),
-+        None,
-+        SimpleNamespace(),
-+        [],
-+        {},
-+        None,
-+    )
-+
-+    assert state.lineage_facts_by_source == {"pkg.py": source_slice}
-+    assert state.lineage_facts_state == "fresh"
-+    assert state.lineage_facts_semantic_version == "1"
+INCREMENTAL_PARSE_PATH=
+`IncrementalAnalysisEngine.update_file` computes canonical `source_path`, then invokes `prepare_source_update`; the latter owns the source text/tree. Insert the 1B call immediately after successful parse and before step 2 (`read_imports`). Add the immutable extracted result only to `PreparedSourceUpdate` as transient prepared data. In 1B `update_file` neither forwards it to `execute_refresh_plan` nor `_apply_delta_and_commit`; syntax-error and I/O-error returns contain no fresh slice. Deletion has no parsed source and therefore emits no slice in 1B. This preserves the existing `prepare_source_update` -> planner -> COW -> commit ordering while making no lineage state change.
 
+CANONICAL_SOURCE_KEY=
+Repository-relative POSIX Python path, exactly the `canonical_python_source_path` convention: remove a leading `./`, replace `\\` by `/`, require relative `.py`. For full workers derive it from `path.relative_to(root).as_posix()` and normalize; for incremental use the already computed `source_path` in `update_file`, not dotted `module_path`. This agrees with syntax-fact keys and the 1A2 `lineage_facts_by_source` map contract. Dotted module IDs remain contextual symbolic-resolution inputs for later stages; they are not the source key.
+
+CANONICAL_SOURCE_FINGERPRINT=
+The existing FileStateManager convention is the lowercase raw-byte SHA-256 hex digest (`FileState.sha256`; `get_tracked_sha256` at `state_manager.py:367-370`). 1B must use that value, not an AST dump, source span, mtime/size, Python qualified name, or a truncated hash. There is currently no shared tree-plus-digest carrier: full indexing parses before `FileStateManager` is populated in the reporting pipeline, and incremental parses text before its later `update_state` acknowledgement. Add one bounded source-input helper at the existing source owner which produces the parsed tree and raw-byte SHA-256 from the same read snapshot (or fails closed if it cannot prove one snapshot). Both full and incremental owners pass its digest to the extractor. This is source-level I/O owned by existing full/incremental parsing, not a repository scan and never query-time reconstruction.
+
+LOCAL_ID_EXISTING_CONVENTION=
+No reusable canonical occurrence/local-ID convention exists. Existing reference facts use line/context tuples (`SinglePassConsumerVisitor`), SymbolVisitor records coarse names, and `Module.ast_tree` is a lazy source reparse property. These are unsuitable as lineage local identity: line-only values collide, names are rebindable, and `id(ast_node)` is process-local. Existing qualified-symbol convention is structural `module_name + "::" + symbol_name` in `ExtractedSymbolicRef`; it is for later symbolic resolution, not a source-local occurrence ID.
+
+PROPOSED_LOCAL_ID_FORMAT=
+Provide only `build_local_occurrence_id(kind, ast_path, name=None)` and `parse_local_occurrence_id(value)` from the new extractor module; no consumer string-splits IDs. Canonical format: `occ:v1:<anchor-kind>:<preorder-child-path>:n:<percent-encoded-utf8-name-or->`. `preorder-child-path` is `root` or dot-separated zero-based indices from deterministic `ast.iter_child_nodes` traversal. `anchor-kind` is one closed 1B vocabulary token; names are UTF-8 percent-encoded with `:` and `%` encoded, while the anonymous sentinel is literal `-`. The pair `(kind, ast_path)` is unique within one parsed tree; name is evidence needed later to construct the already-defined structural `ExtractedSymbolicRef`, not the collision key. IDs deliberately may change after a source edit and contain neither source revision, persistent ID, nor a qualified semantic identity. A parser round-trip and duplicate-ID assertion are mandatory.
+
+REUSABLE_EXTRACTION_PRIMITIVES=
+Reuse: `ast.AST` and source-coordinate attributes; `SourceSpan`; `ExtractedAnchorFact`, `ExtractedOccurrenceRef`, `ExtractedSymbolicRef`, `ExtractedLineageSourceFacts`; `canonical_python_source_path`; and the existing supplied-tree extractor convention. Reuse only as later-stage evidence, not as 1B semantic truth: `SymbolVisitor` (top-level-biased symbols/calls), `SinglePassConsumerVisitor` (aliases, call/callback/reference event evidence), `StateMutationAnalyzer`/`ClosureAnalyzer` (heuristic summaries), and `ControlFlowAnalyzer` (complexity/depth). Do not reuse any as lexical binding identity or CFG.
+
+LEXICAL_SCOPE_OWNER=
+New 1B AST visitor in the lineage-extraction module. It maintains an explicit lexical-owner stack rooted at a module anchor, emits each scope-bearing anchor with `owner_local_id`, and records bindings under the active lexical owner. Scope-bearing anchors are module, class, sync function, async function, lambda, and each comprehension expression. Function decorators/defaults/annotations are visited in the enclosing scope before entering function scope; class bases/decorators are likewise enclosing-scope evidence. Function parameter anchors belong to the function. `global` and `nonlocal` declarations are anchors/evidence only in 1B; no binding target is resolved in 1B. This is intentionally a lexical parent map, not a runtime scope/closure result.
+
+CFG_OR_CONTROL_CONTEXT_OWNER=
+No reusable CFG exists. `contextor.core.analysis.function_analysis.ControlFlowAnalyzer` only calculates cyclomatic complexity/max nesting/raise/catch summaries; it has no blocks, successors, dominators, or stable program-point IDs. 1B does not introduce CFG/control-flow facts. If extraction needs traversal context, it uses the deterministic AST child path solely to identify local anchors. CFG, branch-sensitive flow, exceptions, and reachability remain out of scope.
+
+STAGE_1B_ANCHOR_KINDS=
+Closed vocabulary: `module`, `class`, `function`, `async_function`, `lambda`, `comprehension`, `parameter`, `binding`, `import_binding`, `global_declaration`, `nonlocal_declaration`. `binding` covers syntactically exact local `Name(Store)` targets including assignment/annotated/augmented/named-expression/for/with/except targets; destructuring emits one anchor per bound `Name`. `import_binding` records the local name introduced by `import`/`from ... import`. Attribute/subscript targets are not binding anchors in 1B; they await state flow. `return`, call-site, argument, result, read, write, and public surface anchors are deferred because their relations—not merely their locations—are the next-stage contract.
+
+SYMBOLIC_REF_CREATION_RULES=
+1B creates no flow/surface facts and therefore no standalone symbolic-target inventory beyond the structural local anchors. It must preserve enough source-local evidence for a later no-AST materializer: parsed local IDs include anchor kind and escaped declared/bound name, and the enclosing source's dotted module name is passed to later extraction/materialization as context. In 1C, construct `ExtractedSymbolicRef(kind, module_name, symbol_name, source_local_id=...)` only for an exact syntactic symbolic boundary (definition/callee/import/parameter/return/state/public target) that cannot be represented as a same-slice occurrence. Never emit a guessed dynamic target: use the relevant unresolved/dynamic resolution kind and boundary metadata. Do not use a qualified name as a substitute for a persistent semantic ID.
+
+EXTRACTOR_API_SIGNATURE=
+`def extract_lineage_source_facts(tree: ast.AST, *, source_key: str, source_fingerprint: str, limits: LineageExtractionLimits = DEFAULT_LINEAGE_EXTRACTION_LIMITS) -> ExtractedLineageSourceFacts`. It is pure with respect to repository state and filesystem: validates already-normalized inputs, iteratively walks only the supplied tree, builds sorted immutable tuples, and returns `FRESH` or `RESOURCE_LIMIT`. Companion APIs are local-ID builder/parser only. The source-input helper belongs at `contextor.core.source` and is called by parse owners, not by this extractor.
+
+FULL_ANALYSIS_INSERTION_POINT=
+In `_process_single_file`, immediately after a successful current source parse/fingerprint carrier exists and before `read_imports(...)`. Pass the exact tree, normalized relative `source_key`, and digest to `extract_lineage_source_facts`; return the resulting slice in a new transient `lineage_facts_by_source` field of `RepositoryIndex` keyed by the slice's source key. Do not attach it to `Module`, `analysis_result`, `RepositoryAnalysisState`, or `save_engine_state` in 1B. The facade may receive the transient index field but must not materialize or persist it. A cache-hit branch must follow the same source-current parse owner rather than publish an absent or stale slice.
+
+INCREMENTAL_INSERTION_POINT=
+In `prepare_source_update`, immediately after successful parsed-tree/fingerprint creation and before imports. Add `extracted_lineage_facts: ExtractedLineageSourceFacts | None = None` to `PreparedSourceUpdate`, populated only on a successful, within-limit extraction. The engine may carry this prepared immutable field through the current call frame but must not pass it to `execute_refresh_plan`, candidate state, `_apply_delta_and_commit`, registry synchronization, FileStateManager acknowledgement, or snapshots until the explicitly deferred 1E lifecycle work.
+
+ERROR_RESOURCE_LIMIT_MODEL=
+Syntax/OSError belongs to the existing parse owner: return its current error result and no fresh 1B slice. The extractor uses explicit `max_nodes` and `max_ast_depth` limits checked by an iterative traversal before creating a `FRESH` result. Breach returns one `ExtractedLineageSourceFacts` with status `RESOURCE_LIMIT`, a stable reason token (`node_limit` or `ast_depth_limit`), and empty anchors/flows/surfaces; no partial `FRESH` result and no guessed omissions. An unexpected extractor exception propagates to the owner as extraction failure rather than being converted to empty/fresh facts. Limits are configuration passed to the pure API; no global mutable singleton or filesystem/config lookup is introduced.
+
+RECEPTOR_EXTENSION_SEAM=
+Define, but do not register or implement, a pure `ExtractedLineageProvider` Protocol in the extractor module: it receives immutable `ParsedLineageSourceInput(source_key, source_fingerprint, tree)` and returns an immutable `ExtractedLineageContribution(anchors, flows, surfaces)`. A deterministic merger sorts/deduplicates and constructs the same `ExtractedLineageSourceFacts`; provider-produced dynamic flow/surface facts must carry existing `ProviderRef`, `dynamic_boundary`, resolution, and confidence validation. Providers receive no `RepositoryAnalysisState`, candidate, registry, snapshot, engine, or commit handle. The static 1B anchor visitor can be the sole provider-equivalent implementation without exposing registration. Framework/receptor discovery, dynamic runtime inputs, and provider invocation are deferred.
+
+DEFERRED_TO_1C=
+All extracted flow/surface families: assignment source-to-target; arguments to parameter symbolic boundaries; returns/result occurrences; alias/rebinding semantics; global/nonlocal resolution; attributes/state/container reads and writes; imports/calls/callbacks/function-as-value; defaults-to-parameter; inheritance/override; `__all__`, reexport, entrypoint, registration, and public declarations. 1C is also the first consumer of `ExtractedSymbolicRef` endpoints and reference-index evidence. 1B emits no relation claims.
+
+DEFERRED_TO_1D=
+Post-registry materialization: active persistent module/artifact identity lookup; derived semantic interface slot creation; conversion of extracted local occurrences/symbolic references to `MaterializedOccurrenceRef`/`SemanticEndpoint`; cross-source edge rules; interface descriptors, reverse postings, descriptor diffs, selective caller invalidation, and full canonical lineage installation/persistence. Worker/indexer allocation of registry IDs remains forbidden.
+
+DEFERRED_TO_1E=
+Incremental/LIVE lifecycle ownership: COW candidate replacement/removal, commit/deletion/syntax-recovery semantics, lineage family freshness, snapshot/hydration validation changes, resync/recovery behavior, reverse-index use, public MCP/query projection, and certification. No 1B extracted field may become durable or query-visible without this stage.
+
+EXACT_FILES_FOR_STAGE_1B=
+New: `contextor/core/analysis/lineage_extraction.py`; `tests/analysis/test_lineage_extraction.py`. Update: `contextor/core/source.py` plus focused source test only to expose an atomic parsed-tree/raw-SHA256 carrier; `contextor/core/symbol_engine/indexer.py`; `contextor/core/analysis/incremental/preparation.py`; focused indexer/preparation tests in their existing test modules (or new narrowly named modules if none exists). Do not change `contextor/core/domain/lineage_facts.py`, `contextor/core/domain/__init__.py`, `state_manager.py`, `plan_executor.py`, `engine.py`, `store.py`, facade persistence/public tools, registry, or snapshot tests.
+
+EXACT_SYMBOLS_FOR_STAGE_1B=
+New `ParsedSourceInput`/`parse_source_with_fingerprint` (source module), `LineageExtractionLimits`, `ParsedLineageSourceInput`, `ExtractedLineageContribution`, `ExtractedLineageProvider`, `build_local_occurrence_id`, `parse_local_occurrence_id`, and `extract_lineage_source_facts`; update `_process_single_file`, `RepositoryIndex`, `PreparedSourceUpdate`, and `prepare_source_update`. `index_repository` only transports the transient result. Do not modify `ContextorFacade.analyze_project`, `execute_refresh_plan`, `_apply_delta_and_commit`, or any registry function.
+
+FOCUSED_TESTS=
+1. Pure supplied-tree extraction makes deterministic, sorted, hash/equality-stable `ExtractedLineageSourceFacts` with exact source key/fingerprint and no filesystem/registry import. 2. Local-ID builder/parser round-trip, percent-escape edge cases, AST-path uniqueness, and deterministic repeat extraction. 3. Module/class/function/async/lambda/comprehension parent ownership and function decorator/default evaluation scope. 4. Parameter, ordinary/destructured, import, global, and nonlocal anchors; no attribute/subscript state anchor. 5. Output contains empty flows/surfaces and no materialized endpoint or persistent-ID-shaped allocation. 6. Node/depth limit returns empty `RESOURCE_LIMIT`, exact reason, no partial fresh slice. 7. Full `_process_single_file` passes one successful parsed tree into lineage extraction and transports source-keyed transient slice for cache-miss and cache-hit paths. 8. Incremental success carries the slice in `PreparedSourceUpdate`; syntax and I/O error paths carry none; no test observes state/candidate/snapshot mutation. 9. Parsed-tree/fingerprint helper uses the same raw SHA-256 convention as FileStateManager, including declared encoding/BOM fixture coverage.
+
+PLANNED_DIFF=
+Add the pure 1B extractor and its local-ID/lexical visitor/protocol records; add one source-owner parsed-tree+fingerprint carrier; call it at the existing full worker and incremental preparation seams; transport extracted facts only in `RepositoryIndex` and `PreparedSourceUpdate`; add focused unit and seam tests. No domain semantic-version change, no materializer, no state-field writer, no cache/snapshot schema, no persistent identity allocation, and no public API.
+
+RISKS=
+1. Existing full index cache discards the tree; publishing absent facts on cache hit would violate full-baseline coverage. Mitigation: parse through the same full owner before 1B extraction (or later add a versioned validated extracted-fact cache, not in this bounded patch). 2. Existing full and incremental parsing use different decoding paths; a new shared source carrier must preserve `source.py` PEP-263/BOM behavior, otherwise stage 1B would regress parsing. 3. SHA computation and parsing must represent one source snapshot; do not combine a stale parsed tree with a later independent fingerprint. 4. SymbolVisitor and StateMutationAnalyzer are intentionally insufficient for lexical identity; reuse would create false global/class/closure facts. 5. Iterative traversal plus explicit limits is required to avoid recursion/resource failure and partial-trust emission. 6. Adding only anchors does not yet create useful end-to-end value lineage; this is intentional and must not be exposed as a complete family before 1D/1E.
+
+READY_FOR_CONCRETE_STAGE_1B_PATCH=YES — exact full and incremental parse owners, source-key convention, existing fingerprint convention, and non-mutating insertion seams are confirmed. The only necessary new infrastructure is the bounded parsed-tree/raw-fingerprint carrier; it is local to existing parse ownership and does not reopen Stage 1A/1A2 or introduce persistence.
+
+FILES_CHANGED=NONE
+TESTS_RUN=NONE
+DIFFS=NONE
