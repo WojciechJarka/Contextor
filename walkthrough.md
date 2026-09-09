@@ -1,33 +1,138 @@
-FILES_CHANGED=
-contextor/core/source.py
-contextor/core/analysis/lineage_extraction.py
-contextor/core/symbol_engine/indexer.py
-contextor/core/analysis/incremental/preparation.py
-contextor/core/analysis/incremental/engine.py
-tests/analysis/test_lineage_extraction.py
-
-TESTS_RUN=
-.venv\Scripts\python.exe -m pytest tests/analysis/test_lineage_extraction.py -q
-.venv\Scripts\python.exe -m pytest tests/test_no_double_parse.py tests/test_index_fusion.py -q
-
-TEST_RESULTS=
-`tests/analysis/test_lineage_extraction.py`: 10 passed in 0.74s.
-
-Directly affected legacy tests: 7 passed, 4 failed. No production or test file outside the allowed scope was changed to mask these failures.
-
-FAILURES=
-`tests/test_no_double_parse.py::test_prepare_source_update_reads_and_parses_target_once` observes `Path.read_text`, while the required `parse_source_with_fingerprint` uses one raw-byte snapshot through `Path.read_bytes` to guarantee that AST and SHA-256 derive from identical bytes. Its historical assertion `len(read_calls) == 1` therefore reports zero.
-
-`tests/test_index_fusion.py::{test_source_change_invalidates_symbol_facts_then_warm_hit_is_parse_free,test_legacy_cache_is_migrated_once_then_warm_hit_is_parse_free,test_symbol_facts_schema_mismatch_recomputes}` monkeypatch `indexer.parse_source` and assert historical cache-dependent parse counts. Stage 1B requires `_process_single_file` to call `parse_source_with_fingerprint` for every current source snapshot, including cache hits, because CacheManager intentionally does not store the transient lineage slice. These assertions consequently observe zero calls to the old wrapper. Changing those tests is outside the explicitly allowed files; changing the implementation to preserve their old cache/parse semantics would violate the required Stage 1B contract.
-
-CONTEXTOR_BOUNDED_OWNERSHIP=
-After the focused test was green, `get_symbol_implementation` confirmed the bounded owners: `parse_source` (`source.py:86-88`), `_process_single_file` (`indexer.py:306-544`), and `prepare_source_update` (`preparation.py:135-291`). The served canonical generation predates this working-tree patch, so Contextor correctly returned `stale_source` instead of source content; no resync/full analysis was run.
-
-AUDIT_INVARIANTS=
-PASS: `lineage_extraction.py` imports no `PersistentIdentityRegistry`, `RepositoryAnalysisState`, or `SemanticEndpoint`; output is `ExtractedLineageSourceFacts` with `flows=()` and `surfaces=()`; raw SHA-256 is full lowercase 64 hex from the parsed snapshot; resource-limit output is empty/non-partial; global/nonlocal multi-name local IDs use deterministic ordinals; `engine.py` change is only `source_key=source_path`; CacheManager payload has no lineage slice; no lineage domain semantic-version change.
-
-BLOCKER=
-The required implementation is in the requested scope and passes its focused certification, but it cannot receive a final green result while the explicitly out-of-scope legacy tests retain incompatible source-read and cache/parse-count assumptions. Direction is needed either to authorize updating those directly affected legacy tests to the new 1B contract, or to revise the 1B source-snapshot/cache requirement.
-
-ACTUAL_DIFF=
-NOT_EMITTED: final acceptance is blocked by the scope conflict above. A complete raw unified diff must be emitted only with the final accepted result; emitting it now would present the change as completed despite the required direct-test failures.
+FILES_CHANGED=NONE
+TESTS_RUN=NONE
+MISSING_FULL_DIFF=
+diff --git a/tests/test_no_double_parse.py b/tests/test_no_double_parse.py
+index 62d1a75..5194b14 100644
+--- a/tests/test_no_double_parse.py
++++ b/tests/test_no_double_parse.py
+@@ -1,125 +1,125 @@
+ """
+ tests/test_no_double_parse.py
+ 
+ Stage 3C.1a — Instrumented No-Double-Parse and Execution Contract Tests.
+ """
+ 
+ import ast
+ from pathlib import Path
+ from unittest.mock import patch
+ import pytest
+ 
+ from contextor.core.analysis.incremental_engine import IncrementalAnalysisEngine
+ from contextor.core.analysis.incremental.preparation import prepare_source_update
+ from contextor.core.analysis.state_manager import FileStateManager, RepositoryAnalysisState
+ from contextor.core.domain.module import Module
+ from contextor.core.reporting_engine.persistent_registry import PersistentIdentityRegistry
+ 
+ 
+-def test_prepare_source_update_reads_and_parses_target_once(tmp_path):
++def test_prepare_source_update_reads_one_raw_snapshot_and_parses_once(tmp_path):
+     target = tmp_path / "target.py"
+     target.write_text(
+         "from dependency import item\n\nVALUE = item\n\ndef function():\n    return VALUE\n",
+         encoding="utf-8",
+     )
+ 
+     read_calls = []
+-    original_read_text = Path.read_text
++    original_read_bytes = Path.read_bytes
+ 
+-    def counted_read_text(path, *args, **kwargs):
++    def counted_read_bytes(path, *args, **kwargs):
+         read_calls.append(path)
+-        return original_read_text(path, *args, **kwargs)
++        return original_read_bytes(path, *args, **kwargs)
+ 
+-    with patch.object(Path, "read_text", new=counted_read_text):
++    with patch.object(Path, "read_bytes", new=counted_read_bytes):
+         with patch("ast.parse", wraps=ast.parse) as mock_parse:
+             result = prepare_source_update(
+                 target,
+                 "target",
+                 True,
+                 None,
+                 None,
+                 None,
+             )
+ 
+     assert result.error_status is None
+     assert len(read_calls) == 1
+     assert mock_parse.call_count == 1
+ 
+ 
+ def test_no_double_parse_on_modify(tmp_path):
+     f_target = tmp_path / "target.py"
+     f_target.write_text("def foo(): pass\ndef bar(): pass\n", encoding="utf-8")
+     f_consumer = tmp_path / "consumer.py"
+     f_consumer.write_text("from target import foo, bar\nfoo()\n", encoding="utf-8")
+ 
+     m_target = Module(module_id="target", path="target.py", absolute_path=str(f_target), imports=[])
+     state = RepositoryAnalysisState(modules={"target": m_target})
+     cache_dir = tmp_path / "cache"
+     cache_dir.mkdir()
+ 
+     engine = IncrementalAnalysisEngine(
+         state,
+         PersistentIdentityRegistry(str(tmp_path)),
+         FileStateManager(str(cache_dir)),
+         str(tmp_path),
+     )
+ 
+     # Initial update
+     engine.update_file(str(f_consumer))
+ 
+     # Instrument ast.parse to count AST parses during MODIFY
+     f_consumer.write_text("from target import foo, bar\nbar()\n", encoding="utf-8")
+     with patch("ast.parse", wraps=ast.parse) as mock_parse:
+         res = engine.update_file(str(f_consumer))
+         # Consumer source is parsed during delta calculation
+         assert mock_parse.call_count >= 1
+         assert res.shadow_plan is not None
+         # reparse_modules MUST be () so execution will not parse consumer a second time
+         assert res.shadow_plan.reparse_modules == ()
+ 
+ 
+ def test_no_double_parse_on_add(tmp_path):
+     f_target = tmp_path / "target.py"
+     f_target.write_text("def foo(): pass\n", encoding="utf-8")
+ 
+     state = RepositoryAnalysisState(modules={})
+     cache_dir = tmp_path / "cache"
+     cache_dir.mkdir()
+ 
+     engine = IncrementalAnalysisEngine(
+         state,
+         PersistentIdentityRegistry(str(tmp_path)),
+         FileStateManager(str(cache_dir)),
+         str(tmp_path),
+     )
+ 
+     with patch("ast.parse", wraps=ast.parse) as mock_parse:
+         res = engine.update_file(str(f_target))
+         assert mock_parse.call_count >= 1
+         assert res.shadow_plan is not None
+         assert res.shadow_plan.reparse_modules == ()
+ 
+ 
+ def test_no_parse_on_delete(tmp_path):
+     f_target = tmp_path / "target.py"
+     f_target.write_text("def foo(): pass\n", encoding="utf-8")
+ 
+     m_target = Module(module_id="target", path="target.py", absolute_path=str(f_target), imports=[])
+     state = RepositoryAnalysisState(modules={"target": m_target})
+     cache_dir = tmp_path / "cache"
+     cache_dir.mkdir()
+ 
+     engine = IncrementalAnalysisEngine(
+         state,
+         PersistentIdentityRegistry(str(tmp_path)),
+         FileStateManager(str(cache_dir)),
+         str(tmp_path),
+     )
+ 
+     f_target.unlink()
+     with patch("ast.parse", wraps=ast.parse) as mock_parse:
+         res = engine.update_file(str(f_target))
+         # Deleted file is NOT parsed from disk
+         assert mock_parse.call_count == 0
+         assert res.shadow_plan is not None
+         assert res.shadow_plan.reparse_modules == ()

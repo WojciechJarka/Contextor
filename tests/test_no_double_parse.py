@@ -16,7 +16,7 @@ from contextor.core.domain.module import Module
 from contextor.core.reporting_engine.persistent_registry import PersistentIdentityRegistry
 
 
-def test_prepare_source_update_reads_and_parses_target_once(tmp_path):
+def test_prepare_source_update_reads_one_raw_snapshot_and_parses_once(tmp_path):
     target = tmp_path / "target.py"
     target.write_text(
         "from dependency import item\n\nVALUE = item\n\ndef function():\n    return VALUE\n",
@@ -24,13 +24,13 @@ def test_prepare_source_update_reads_and_parses_target_once(tmp_path):
     )
 
     read_calls = []
-    original_read_text = Path.read_text
+    original_read_bytes = Path.read_bytes
 
-    def counted_read_text(path, *args, **kwargs):
+    def counted_read_bytes(path, *args, **kwargs):
         read_calls.append(path)
-        return original_read_text(path, *args, **kwargs)
+        return original_read_bytes(path, *args, **kwargs)
 
-    with patch.object(Path, "read_text", new=counted_read_text):
+    with patch.object(Path, "read_bytes", new=counted_read_bytes):
         with patch("ast.parse", wraps=ast.parse) as mock_parse:
             result = prepare_source_update(
                 target,

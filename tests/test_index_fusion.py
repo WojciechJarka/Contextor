@@ -24,7 +24,9 @@ def test_index_cache_miss_stores_symbol_facts(tmp_path, isolated_dirs):
     assert _cache_payload(root, source)["data"]["symbol_facts"] == record
 
 
-def test_new_format_cache_hit_does_not_parse(tmp_path, isolated_dirs, monkeypatch):
+def test_new_format_cache_hit_reuses_cached_facts_but_parses_current_source_for_lineage(
+    tmp_path, isolated_dirs, monkeypatch
+):
     monkeypatch.setenv("CONTEXTOR_DISABLE_PROCESS_POOL", "1")
     root = tmp_path / "repo"
     root.mkdir()
@@ -33,18 +35,34 @@ def test_new_format_cache_hit_does_not_parse(tmp_path, isolated_dirs, monkeypatc
     indexer.index_repository(str(root))
     indexer._CACHE_MANAGERS.pop(str(root.resolve()), None)
 
-    def forbidden_parse(path):
-        raise AssertionError(f"unexpected parse: {path}")
+    parse_calls = []
+    original_parse = indexer.parse_source_with_fingerprint
+    monkeypatch.setattr(
+        indexer,
+        "parse_source_with_fingerprint",
+        lambda path: (parse_calls.append(path) or original_parse(path)),
+    )
 
-    monkeypatch.setattr(indexer, "parse_source", forbidden_parse)
+    extraction_calls = []
+    original_extract = indexer.extract_file_symbols
+    monkeypatch.setattr(
+        indexer,
+        "extract_file_symbols",
+        lambda path, *, tree=None: (
+            extraction_calls.append(path) or original_extract(path, tree=tree)
+        ),
+    )
 
     result = indexer.index_repository(str(root))
 
+    assert len(parse_calls) == 1
+    assert extraction_calls == []
     assert result.modules["module"].imports == []
     assert result.symbol_facts_by_module["module"]["status"] == "available"
+    assert result.lineage_facts_by_source["module.py"].source_key == "module.py"
 
 
-def test_source_change_invalidates_symbol_facts_then_warm_hit_is_parse_free(
+def test_source_change_invalidates_symbol_facts_then_warm_hit_reparses_only_for_lineage(
     tmp_path, isolated_dirs, monkeypatch
 ):
     monkeypatch.setenv("CONTEXTOR_DISABLE_PROCESS_POOL", "1")
@@ -57,10 +75,10 @@ def test_source_change_invalidates_symbol_facts_then_warm_hit_is_parse_free(
     source.write_text("def new():\n    return 2\n", encoding="utf-8")
     indexer._CACHE_MANAGERS.pop(str(root.resolve()), None)
     parse_calls = []
-    original_parse = indexer.parse_source
+    original_parse = indexer.parse_source_with_fingerprint
     monkeypatch.setattr(
         indexer,
-        "parse_source",
+        "parse_source_with_fingerprint",
         lambda path: (parse_calls.append(path) or original_parse(path)),
     )
 
@@ -72,11 +90,12 @@ def test_source_change_invalidates_symbol_facts_then_warm_hit_is_parse_free(
     indexer._CACHE_MANAGERS.pop(str(root.resolve()), None)
     parse_calls.clear()
     warm = indexer.index_repository(str(root))
-    assert parse_calls == []
+    assert len(parse_calls) == 1
+    assert warm.lineage_facts_by_source["module.py"].source_key == "module.py"
     assert warm.symbol_facts_by_module["module"]["facts"]["functions"] == ["new"]
 
 
-def test_legacy_cache_is_migrated_once_then_warm_hit_is_parse_free(
+def test_legacy_cache_is_migrated_once_then_warm_hit_reparses_only_for_lineage(
     tmp_path, isolated_dirs, monkeypatch
 ):
     monkeypatch.setenv("CONTEXTOR_DISABLE_PROCESS_POOL", "1")
@@ -87,10 +106,10 @@ def test_legacy_cache_is_migrated_once_then_warm_hit_is_parse_free(
     CacheManager(str(root)).set(source, {"imports": [], "error": None})
     indexer._CACHE_MANAGERS.pop(str(root.resolve()), None)
     parse_calls = []
-    original_parse = indexer.parse_source
+    original_parse = indexer.parse_source_with_fingerprint
     monkeypatch.setattr(
         indexer,
-        "parse_source",
+        "parse_source_with_fingerprint",
         lambda path: (parse_calls.append(path) or original_parse(path)),
     )
 
@@ -102,7 +121,8 @@ def test_legacy_cache_is_migrated_once_then_warm_hit_is_parse_free(
     parse_calls.clear()
     warm = indexer.index_repository(str(root))
     assert warm.symbol_facts_by_module["module"]["status"] == "available"
-    assert parse_calls == []
+    assert len(parse_calls) == 1
+    assert warm.lineage_facts_by_source["module.py"].source_key == "module.py"
 
 
 def test_symbol_facts_schema_mismatch_recomputes(tmp_path, isolated_dirs, monkeypatch):
@@ -124,11 +144,11 @@ def test_symbol_facts_schema_mismatch_recomputes(tmp_path, isolated_dirs, monkey
         },
     )
     indexer._CACHE_MANAGERS.pop(str(root.resolve()), None)
-    original_parse = indexer.parse_source
+    original_parse = indexer.parse_source_with_fingerprint
     parse_calls = []
     monkeypatch.setattr(
         indexer,
-        "parse_source",
+        "parse_source_with_fingerprint",
         lambda path: (parse_calls.append(path) or original_parse(path)),
     )
 
