@@ -12,7 +12,14 @@ from contextor.core.analysis.lineage_extraction import (
     extract_lineage_source_facts,
     parse_local_occurrence_id,
 )
-from contextor.core.domain.lineage_facts import LineageFamilyStatus
+from contextor.core.domain.lineage_facts import (
+    ExtractedOccurrenceRef,
+    ExtractedSymbolicKind,
+    LineageConfidence,
+    LineageFamilyStatus,
+    LineageRelation,
+    ResolutionKind,
+)
 from contextor.core.source import parse_source_with_fingerprint
 from contextor.core.symbol_engine import indexer as indexer_module
 
@@ -31,19 +38,58 @@ def test_local_occurrence_id_round_trip_and_multi_name_disambiguation():
     assert parse_local_occurrence_id(second) == ("global_declaration", "0.1", 1, "other")
 
 
-def test_extraction_is_deterministic_source_local_and_relation_free(monkeypatch):
+def test_extraction_is_deterministic_source_local_and_has_parameter_lineage(monkeypatch):
     tree = ast.parse("import pkg.mod as pm\nvalue = 1\ndef run(arg):\n    local = arg\n    return local\n")
     monkeypatch.setattr("builtins.open", lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("extractor performed filesystem I/O")))
     first = extract_lineage_source_facts(tree, source_key="pkg/mod.py", source_fingerprint=FINGERPRINT)
     second = extract_lineage_source_facts(tree, source_key="pkg/mod.py", source_fingerprint=FINGERPRINT)
     assert first == second
     assert first.status is LineageFamilyStatus.FRESH
-    assert first.flows == () and first.surfaces == ()
+    assert first.flows and first.surfaces == ()
     assert len({item.local_id for item in first.anchors}) == len(first.anchors)
     module = sys.modules["contextor.core.analysis.lineage_extraction"]
     assert "PersistentIdentityRegistry" not in vars(module)
     assert "RepositoryAnalysisState" not in vars(module)
     assert "SemanticEndpoint" not in vars(module)
+
+
+def test_typed_parameter_ids_bind_and_defaults_need_no_ast_reread():
+    tree = ast.parse("def run(a, /, b=1, *items, flag=2, **extra):\n    return b\n")
+    facts = extract_lineage_source_facts(tree, source_key="pkg.py", source_fingerprint=FINGERPRINT)
+    parsed_parameters = {
+        parse_local_occurrence_id(anchor.local_id)
+        for anchor in facts.anchors
+        if anchor.kind == "parameter"
+    }
+    assert {(kind, ordinal, name) for kind, _path, ordinal, name in parsed_parameters} == {
+        ("parameter_posonly", 0, "a"),
+        ("parameter_poskw", 0, "b"),
+        ("parameter_vararg", 0, "items"),
+        ("parameter_kwonly", 0, "flag"),
+        ("parameter_varkw", 0, "extra"),
+    }
+    binds = [flow for flow in facts.flows if flow.relation is LineageRelation.BINDS]
+    assert len(binds) == 5
+    assert all(
+        flow.source.kind is ExtractedSymbolicKind.PARAMETER
+        and flow.resolution_kind is ResolutionKind.SIGNATURE_EXACT
+        and flow.confidence is LineageConfidence.CONFIRMED
+        and flow.source.source_local_id is not None
+        for flow in binds
+    )
+    for flow in binds:
+        kind, _path, _ordinal, name = parse_local_occurrence_id(flow.source.source_local_id)
+        assert kind.startswith("parameter_")
+        assert name
+    defaults = [flow for flow in facts.flows if flow.relation is LineageRelation.DEFAULTS_TO_PARAMETER]
+    assert len(defaults) == 2
+    assert all(
+        isinstance(flow.source, ExtractedOccurrenceRef)
+        and flow.target.kind is ExtractedSymbolicKind.PARAMETER
+        and flow.resolution_kind is ResolutionKind.SIGNATURE_EXACT
+        and flow.confidence is LineageConfidence.CONFIRMED
+        for flow in defaults
+    )
 
 
 def test_lexical_owners_parameters_comprehensions_and_declarations():
@@ -59,8 +105,8 @@ def test_lexical_owners_parameters_comprehensions_and_declarations():
     inner = by_name[("function", "inner")][0][0]
     assert outer.owner_local_id == module_anchor.local_id
     assert inner.owner_local_id == outer.local_id
-    assert by_name[("parameter", "x")][0][0].owner_local_id == outer.local_id
-    assert by_name[("parameter", "arg")][0][0].owner_local_id == inner.local_id
+    assert by_name[("parameter_poskw", "x")][0][0].owner_local_id == outer.local_id
+    assert by_name[("parameter_poskw", "arg")][0][0].owner_local_id == inner.local_id
     assert by_name[("binding", "y")][0][0].owner_local_id == module_anchor.local_id
     comprehension = next(anchor for anchor, (kind, *_rest) in decoded if kind == "comprehension")
     assert by_name[("binding", "item")][0][0].owner_local_id == comprehension.local_id
@@ -126,7 +172,7 @@ def test_incremental_preparation_carries_transient_lineage_and_errors_do_not(tmp
     path.write_text("value = 1\n", encoding="utf-8")
     prepared = prepare_source_update(file_path=path, module_path="pkg", is_new=True, old_module=None, old_artifacts=None, old_usage=None, source_key="pkg.py")
     assert not prepared.has_error and prepared.extracted_lineage_facts is not None
-    assert prepared.extracted_lineage_facts.flows == () and prepared.extracted_lineage_facts.surfaces == ()
+    assert prepared.extracted_lineage_facts.surfaces == ()
     path.write_text("def broken(:\n", encoding="utf-8")
     broken = prepare_source_update(file_path=path, module_path="pkg", is_new=True, old_module=None, old_artifacts=None, old_usage=None, source_key="pkg.py")
     assert broken.has_error and broken.error_status == "SYNTAX_ERROR" and broken.extracted_lineage_facts is None

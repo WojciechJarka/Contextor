@@ -1,47 +1,136 @@
-PARAMETER_LOCAL_ID_CONTRACT=
-Keep anchor kind `parameter`; local-ID kind encodes `parameter_posonly`/`parameter_poskw` with callable-local ordinal, `parameter_kwonly` with escaped name, and `parameter_vararg`/`parameter_varkw` collector kind. `ExtractedSymbolicRef(PARAMETER,module_name,callable_symbol_name,parameter_local_id)` identifies callable and parameter metadata without AST.
-
-DOMAIN_CHANGE_REQUIRED=NO — existing structured SymbolicRef/source_local_id and Stage 1A slot builders suffice.
-
-PARAMETER_FLOW=
-PARAMETER symbolic -> parameter local occurrence is BINDS/SIGNATURE_EXACT/CONFIRMED. Default expression-result -> PARAMETER symbolic is DEFAULTS_TO_PARAMETER/SIGNATURE_EXACT/CONFIRMED. Actual call argument -> PARAMETER symbolic is ARGUMENT_TO_PARAMETER only for exact local signature and exact non-star actual binding.
-
-CALL_RESULT_FLOW=
-Local exact: RETURN symbolic `(current_module,callable_symbol_name,function_anchor_id)` -> call-result, CALL_RESULT/CALL_EXACT/CONFIRMED. Import exact: RETURN symbolic `(target_module,target_symbol,import_binding_id)` -> call-result, IMPORT_EXACT/CONFIRMED. Unresolved/dynamic: call-site -> call-result with UNRESOLVED_NAME/UNRESOLVED or DYNAMIC_RUNTIME_BOUNDARY/DYNAMIC; no RETURN symbolic target.
-
-STAR_DSTAR_POLICY=
-Normal positional maps to exact posonly/poskw and deterministic excess vararg; explicit keyword maps fixed poskw/kwonly or unmatched varkw. `*expr`/`**expr` produce zero ARGUMENT_TO_PARAMETER in v1 absent fully proven literal expansion.
-
-LEXICAL_FRAME_MODEL=
-Use only definite current-frame parameters, prior unconditional local assignments, defs, and imports. No enclosing/global/nonlocal/closure/class/MRO lookup. Missing/ambiguous is unresolved.
-
-CONTROL_FLOW_INVALIDATION_MODEL=
-Clone frame per if/loop/try/match branch; collect touched names; remove touched names on merge unless all reachable paths define identical occurrence. Branch-local use can be exact; post-branch conflicting or conditional definitions are unresolved. Loop body touches invalidate on exit. No CFG.
-
-ASSIGNMENT_BOUNDARY_MODEL=
-Name assignment, valued AnnAssign, walrus: expression-result -> binding ASSIGNS. Annotation-only: no runtime flow. AugAssign requires prior proven local plus RHS; otherwise no single-source overwrite. for/with/except use runtime-bound-local occurrence without invented iterable/context/exception producer. Attribute/Subscript deferred.
-
-MINIMAL_OCCURRENCE_KINDS=
-`expression_result`, `name_load`, `call_site`, `call_argument`, `call_result`, `runtime_bound_local`; existing binding and typed parameter IDs remain anchors.
-
-IMPORT_EXACT_RULES=
-Only same-traversal proven `from m import f as x; x()` and direct `import m; m.f()` are IMPORT_EXACT. self/cls/obj dispatch is not exact. Relative import only if source-key/package-level arithmetic resolves it without repo lookup; otherwise unresolved.
-
-FAILURE_MODEL=
-Node/depth breach => empty RESOURCE_LIMIT. Duplicate/invariant/metadata impossible state => extraction exception, never RESOURCE_LIMIT. Unsupported constructs => bounded omission or unresolved/dynamic fact.
-
-CORRECTED_EXACT_FILES=
+FILES_CHANGED=
 contextor/core/analysis/lineage_extraction.py
 tests/analysis/test_lineage_extraction.py
 
-CORRECTED_EXACT_SYMBOLS=
-Extend `_ANCHOR_KINDS`, local-ID builder/parser, `_AnchorExtractor` with same-pass frame/flow collector, and `extract_lineage_source_facts`; no lifecycle/domain change.
+TESTS_RUN=
+.venv\Scripts\python.exe -m pytest tests/analysis/test_lineage_extraction.py -q
+.venv\Scripts\python.exe -m pytest tests/analysis/test_lineage_extraction.py tests/test_no_double_parse.py tests/test_index_fusion.py -q
 
-CORRECTED_FOCUSED_TESTS=
-All parameter IDs and BINDS/defaults; exact/unresolved call-result direction; normal/star arguments; local/import/method targets; branch invalidation; assignment boundaries; relative import; async/bare return; resource versus invariant failure; no deferred-family leakage.
+TEST_RESULTS=
+11 passed in 0.76s
+22 passed in 2.69s
 
-READY_FOR_CONCRETE_STAGE_1C_PATCH=YES — only extractor and focused tests change; semantic identity remains 1F.
-
-FILES_CHANGED=NONE
-TESTS_RUN=NONE
-DIFFS=NONE
+ACTUAL_DIFF=
+diff --git a/contextor/core/analysis/lineage_extraction.py b/contextor/core/analysis/lineage_extraction.py
+--- a/contextor/core/analysis/lineage_extraction.py
++++ b/contextor/core/analysis/lineage_extraction.py
+@@ -138,6 +138,13 @@ def _module_name_from_source_key(source_key: str) -> str:
+     return module_name[: -len(".__init__")] if module_name.endswith(".__init__") else module_name
+ 
+ 
++@dataclass(frozen=True)
++class _ParameterInfo:
++    local_id: str
++    name: str
++    kind: ParameterKind
++    ordinal: int
++
++
+ class _AnchorExtractor:
+@@ -225,13 +232,29 @@ class _AnchorExtractor:
+             self._flow(source=self._parameter_symbolic(callable_symbol_name, info), target=ExtractedOccurrenceRef(info.local_id), relation=LineageRelation.BINDS, node=parameter, resolution_kind=ResolutionKind.SIGNATURE_EXACT, confidence=LineageConfidence.CONFIRMED, ordinal=ordinal)
+         return tuple(info for info, _parameter in result)
+ 
++    def _default_flows(self, node: ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda, callable_symbol_name: str, parameters: tuple[_ParameterInfo, ...]) -> None:
++        positional_parameters = tuple(parameter for parameter in parameters if parameter.kind in (ParameterKind.POSITIONAL_ONLY, ParameterKind.POSITIONAL_OR_KEYWORD))
++        positional_defaults = tuple(node.args.defaults)
++        if positional_defaults:
++            for ordinal, (default, parameter) in enumerate(zip(positional_defaults, positional_parameters[-len(positional_defaults) :])):
++                self._flow(source=self._occurrence("expression_result", default), target=self._parameter_symbolic(callable_symbol_name, parameter), relation=LineageRelation.DEFAULTS_TO_PARAMETER, node=default, resolution_kind=ResolutionKind.SIGNATURE_EXACT, confidence=LineageConfidence.CONFIRMED, ordinal=ordinal)
++        kwonly_parameters = tuple(parameter for parameter in parameters if parameter.kind is ParameterKind.KEYWORD_ONLY)
++        for ordinal, (default, parameter) in enumerate(zip(node.args.kw_defaults, kwonly_parameters)):
++            if default is not None:
++                self._flow(source=self._occurrence("expression_result", default), target=self._parameter_symbolic(callable_symbol_name, parameter), relation=LineageRelation.DEFAULTS_TO_PARAMETER, node=default, resolution_kind=ResolutionKind.SIGNATURE_EXACT, confidence=LineageConfidence.CONFIRMED, ordinal=ordinal)
++
+     def _visit_function(self, node: ast.FunctionDef | ast.AsyncFunctionDef, kind: str, owner: str | None, walrus_owner: str | None) -> None:
+         function_id = self._add(kind, node, node.name, owner)
+         for decorator in node.decorator_list:
+             self._visit(decorator, owner, walrus_owner)
+         self._function_signature_evidence(node, owner, walrus_owner)
+-        self._parameter_anchors(node.args, function_id, node.name)
++        parameters = self._parameter_anchors(node.args, function_id, node.name)
++        self._default_flows(node, node.name, parameters)
+         for child in node.body:
+             self._visit(child, function_id, None)
+@@ -243,7 +266,9 @@ class _AnchorExtractor:
+     def _visit_Lambda(self, node: ast.Lambda, owner: str | None, walrus_owner: str | None) -> None:
+         lambda_id = self._add("lambda", node, None, owner)
+         self._function_signature_evidence(node, owner, walrus_owner)
+-        self._parameter_anchors(node.args, lambda_id, f"lambda@{self.paths[id(node)]}")
++        callable_symbol_name = f"lambda@{self.paths[id(node)]}"
++        parameters = self._parameter_anchors(node.args, lambda_id, callable_symbol_name)
++        self._default_flows(node, callable_symbol_name, parameters)
+         self._visit(node.body, lambda_id, None)
+@@ -363,10 +388,3 @@ __all__ = [
+     "extract_lineage_source_facts",
+     "parse_local_occurrence_id",
+ ]
+-
+-@dataclass(frozen=True)
+-class _ParameterInfo:
+-    local_id: str
+-    name: str
+-    kind: ParameterKind
+-    ordinal: int
+diff --git a/tests/analysis/test_lineage_extraction.py b/tests/analysis/test_lineage_extraction.py
+--- a/tests/analysis/test_lineage_extraction.py
++++ b/tests/analysis/test_lineage_extraction.py
+@@ -12,7 +12,14 @@ from contextor.core.analysis.lineage_extraction import (
+     extract_lineage_source_facts,
+     parse_local_occurrence_id,
+ )
+-from contextor.core.domain.lineage_facts import LineageFamilyStatus
++from contextor.core.domain.lineage_facts import (
++    ExtractedOccurrenceRef,
++    ExtractedSymbolicKind,
++    LineageConfidence,
++    LineageFamilyStatus,
++    LineageRelation,
++    ResolutionKind,
++)
+ from contextor.core.source import parse_source_with_fingerprint
+ from contextor.core.symbol_engine import indexer as indexer_module
+@@ -50,6 +57,43 @@ def test_extraction_is_deterministic_source_local_and_has_parameter_lineage(mon
+     assert "SemanticEndpoint" not in vars(module)
+ 
+ 
++def test_typed_parameter_ids_bind_and_defaults_need_no_ast_reread():
++    tree = ast.parse("def run(a, /, b=1, *items, flag=2, **extra):\n    return b\n")
++    facts = extract_lineage_source_facts(tree, source_key="pkg.py", source_fingerprint=FINGERPRINT)
++    parsed_parameters = {
++        parse_local_occurrence_id(anchor.local_id)
++        for anchor in facts.anchors
++        if anchor.kind == "parameter"
++    }
++    assert {(kind, ordinal, name) for kind, _path, ordinal, name in parsed_parameters} == {
++        ("parameter_posonly", 0, "a"),
++        ("parameter_poskw", 0, "b"),
++        ("parameter_vararg", 0, "items"),
++        ("parameter_kwonly", 0, "flag"),
++        ("parameter_varkw", 0, "extra"),
++    }
++    binds = [flow for flow in facts.flows if flow.relation is LineageRelation.BINDS]
++    assert len(binds) == 5
++    assert all(
++        flow.source.kind is ExtractedSymbolicKind.PARAMETER
++        and flow.resolution_kind is ResolutionKind.SIGNATURE_EXACT
++        and flow.confidence is LineageConfidence.CONFIRMED
++        and flow.source.source_local_id is not None
++        for flow in binds
++    )
++    for flow in binds:
++        kind, _path, _ordinal, name = parse_local_occurrence_id(flow.source.source_local_id)
++        assert kind.startswith("parameter_")
++        assert name
++    defaults = [flow for flow in facts.flows if flow.relation is LineageRelation.DEFAULTS_TO_PARAMETER]
++    assert len(defaults) == 2
++    assert all(
++        isinstance(flow.source, ExtractedOccurrenceRef)
++        and flow.target.kind is ExtractedSymbolicKind.PARAMETER
++        and flow.resolution_kind is ResolutionKind.SIGNATURE_EXACT
++        and flow.confidence is LineageConfidence.CONFIRMED
++        for flow in defaults
++    )
++
++
+ def test_lexical_owners_parameters_comprehensions_and_declarations():

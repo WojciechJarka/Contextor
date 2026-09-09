@@ -11,13 +11,21 @@ from contextor.core.domain.lineage_facts import (
     ExtractedAnchorFact,
     ExtractedFlowFact,
     ExtractedLineageSourceFacts,
+    ExtractedOccurrenceRef,
     ExtractedSurfaceFact,
+    ExtractedSymbolicKind,
+    ExtractedSymbolicRef,
+    LineageConfidence,
     LineageFamilyStatus,
+    LineageRelation,
+    ParameterKind,
+    ResolutionKind,
     SourceSpan,
 )
 
 _LOCAL_ID_VERSION: Final[str] = "v1"
 _ANCHOR_KINDS: Final[frozenset[str]] = frozenset({"module", "class", "function", "async_function", "lambda", "comprehension", "parameter", "binding", "import_binding", "global_declaration", "nonlocal_declaration"})
+_LOCAL_ID_KINDS: Final[frozenset[str]] = _ANCHOR_KINDS | frozenset({"parameter_posonly", "parameter_poskw", "parameter_kwonly", "parameter_vararg", "parameter_varkw", "expression_result"})
 _AST_PATH_RE: Final[re.Pattern[str]] = re.compile(r"^(?:root|(?:0|[1-9]\d*)(?:\.(?:0|[1-9]\d*))*)$")
 _FINGERPRINT_RE: Final[re.Pattern[str]] = re.compile(r"^[0-9a-f]{64}$")
 
@@ -68,8 +76,8 @@ def _encode_name(name: str | None) -> str:
 
 
 def build_local_occurrence_id(kind: str, ast_path: str, name: str | None = None, *, ordinal: int = 0) -> str:
-    if kind not in _ANCHOR_KINDS:
-        raise ValueError(f"Unknown lineage anchor kind: {kind}")
+    if kind not in _LOCAL_ID_KINDS:
+        raise ValueError(f"Unknown lineage local-id kind: {kind}")
     _validate_ast_path(ast_path)
     if isinstance(ordinal, bool) or not isinstance(ordinal, int) or ordinal < 0:
         raise ValueError("ordinal must be a non-negative integer.")
@@ -83,8 +91,8 @@ def parse_local_occurrence_id(value: str) -> tuple[str, str, int, str | None]:
     if len(parts) != 8 or parts[0] != "occ" or parts[1] != _LOCAL_ID_VERSION or parts[4] != "i" or parts[6] != "n":
         raise ValueError("Invalid local occurrence id.")
     kind, ast_path = parts[2], parts[3]
-    if kind not in _ANCHOR_KINDS:
-        raise ValueError("Invalid local occurrence anchor kind.")
+    if kind not in _LOCAL_ID_KINDS:
+        raise ValueError("Invalid local occurrence kind.")
     _validate_ast_path(ast_path)
     try:
         ordinal = int(parts[5])
@@ -125,23 +133,54 @@ def _index_ast_paths(tree: ast.AST, limits: LineageExtractionLimits) -> tuple[di
     return paths, None
 
 
+def _module_name_from_source_key(source_key: str) -> str:
+    module_name = source_key[:-3].replace("/", ".")
+    return module_name[: -len(".__init__")] if module_name.endswith(".__init__") else module_name
+
+
+@dataclass(frozen=True)
+class _ParameterInfo:
+    local_id: str
+    name: str
+    kind: ParameterKind
+    ordinal: int
+
+
 class _AnchorExtractor:
-    def __init__(self, paths: dict[int, str]) -> None:
+    def __init__(self, paths: dict[int, str], source_key: str) -> None:
         self.paths = paths
+        self.module_name = _module_name_from_source_key(source_key)
         self.anchors: list[ExtractedAnchorFact] = []
+        self.flows: list[ExtractedFlowFact] = []
         self._ids: set[str] = set()
+        self._flow_ids: set[str] = set()
 
-    def extract(self, tree: ast.AST) -> tuple[ExtractedAnchorFact, ...]:
+    def extract(self, tree: ast.AST) -> tuple[tuple[ExtractedAnchorFact, ...], tuple[ExtractedFlowFact, ...]]:
         self._visit(tree, None, None)
-        return tuple(sorted(self.anchors))
+        return tuple(sorted(self.anchors)), tuple(sorted(self.flows))
 
-    def _add(self, kind: str, node: ast.AST, name: str | None, owner_local_id: str | None, *, ordinal: int = 0) -> str:
-        local_id = build_local_occurrence_id(kind, self.paths[id(node)], name, ordinal=ordinal)
+    def _add(self, kind: str, node: ast.AST, name: str | None, owner_local_id: str | None, *, ordinal: int = 0, local_kind: str | None = None) -> str:
+        local_id = build_local_occurrence_id(local_kind or kind, self.paths[id(node)], name, ordinal=ordinal)
         if local_id in self._ids:
             raise ValueError(f"Duplicate lineage local id: {local_id}")
         self._ids.add(local_id)
         self.anchors.append(ExtractedAnchorFact(local_id=local_id, kind=kind, span=_source_span(node), owner_local_id=owner_local_id))
         return local_id
+
+    def _occurrence(self, kind: str, node: ast.AST, name: str | None = None, *, ordinal: int = 0) -> ExtractedOccurrenceRef:
+        local_id = build_local_occurrence_id(kind, self.paths[id(node)], name, ordinal=ordinal)
+        if local_id in self._ids: raise ValueError(f"Duplicate lineage local id: {local_id}")
+        self._ids.add(local_id)
+        return ExtractedOccurrenceRef(local_id)
+
+    def _flow(self, *, source, target, relation: LineageRelation, node: ast.AST, resolution_kind: ResolutionKind, confidence: LineageConfidence, ordinal: int = 0) -> None:
+        local_id = f"flow:v1:{relation.value}:{self.paths[id(node)]}:i:{ordinal}"
+        if local_id in self._flow_ids: raise ValueError(f"Duplicate lineage flow id: {local_id}")
+        self._flow_ids.add(local_id)
+        self.flows.append(ExtractedFlowFact(local_id, source, target, relation, _source_span(node), resolution_kind, confidence))
+
+    def _parameter_symbolic(self, callable_symbol_name: str, parameter: _ParameterInfo) -> ExtractedSymbolicRef:
+        return ExtractedSymbolicRef(ExtractedSymbolicKind.PARAMETER, self.module_name, callable_symbol_name, parameter.local_id)
 
     def _visit(self, node: ast.AST, owner_local_id: str | None, walrus_owner_local_id: str | None) -> None:
         method = getattr(self, f"_visit_{type(node).__name__}", None)
@@ -182,17 +221,36 @@ class _AnchorExtractor:
         if returns is not None:
             self._visit(returns, owner, walrus_owner)
 
-    def _parameter_anchors(self, args: ast.arguments, owner: str) -> None:
-        parameters = list(getattr(args, "posonlyargs", ())) + list(args.args) + ([args.vararg] if args.vararg is not None else []) + list(args.kwonlyargs) + ([args.kwarg] if args.kwarg is not None else [])
-        for parameter in parameters:
-            self._add("parameter", parameter, parameter.arg, owner)
+    def _parameter_anchors(self, args: ast.arguments, owner: str, callable_symbol_name: str) -> tuple[_ParameterInfo, ...]:
+        result = []
+        groups = ((getattr(args, "posonlyargs", ()), ParameterKind.POSITIONAL_ONLY, "parameter_posonly"), (args.args, ParameterKind.POSITIONAL_OR_KEYWORD, "parameter_poskw"), ((args.vararg,) if args.vararg else (), ParameterKind.VAR_POSITIONAL, "parameter_vararg"), (args.kwonlyargs, ParameterKind.KEYWORD_ONLY, "parameter_kwonly"), ((args.kwarg,) if args.kwarg else (), ParameterKind.VAR_KEYWORD, "parameter_varkw"))
+        for group, kind, local_kind in groups:
+            for ordinal, parameter in enumerate(group):
+                local_id = self._add("parameter", parameter, parameter.arg, owner, ordinal=ordinal if kind in (ParameterKind.POSITIONAL_ONLY, ParameterKind.POSITIONAL_OR_KEYWORD) else 0, local_kind=local_kind)
+                info = _ParameterInfo(local_id, parameter.arg, kind, ordinal if kind in (ParameterKind.POSITIONAL_ONLY, ParameterKind.POSITIONAL_OR_KEYWORD) else 0)
+                result.append((info, parameter))
+        for ordinal, (info, parameter) in enumerate(result):
+            self._flow(source=self._parameter_symbolic(callable_symbol_name, info), target=ExtractedOccurrenceRef(info.local_id), relation=LineageRelation.BINDS, node=parameter, resolution_kind=ResolutionKind.SIGNATURE_EXACT, confidence=LineageConfidence.CONFIRMED, ordinal=ordinal)
+        return tuple(info for info, _parameter in result)
+
+    def _default_flows(self, node: ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda, callable_symbol_name: str, parameters: tuple[_ParameterInfo, ...]) -> None:
+        positional_parameters = tuple(parameter for parameter in parameters if parameter.kind in (ParameterKind.POSITIONAL_ONLY, ParameterKind.POSITIONAL_OR_KEYWORD))
+        positional_defaults = tuple(node.args.defaults)
+        if positional_defaults:
+            for ordinal, (default, parameter) in enumerate(zip(positional_defaults, positional_parameters[-len(positional_defaults) :])):
+                self._flow(source=self._occurrence("expression_result", default), target=self._parameter_symbolic(callable_symbol_name, parameter), relation=LineageRelation.DEFAULTS_TO_PARAMETER, node=default, resolution_kind=ResolutionKind.SIGNATURE_EXACT, confidence=LineageConfidence.CONFIRMED, ordinal=ordinal)
+        kwonly_parameters = tuple(parameter for parameter in parameters if parameter.kind is ParameterKind.KEYWORD_ONLY)
+        for ordinal, (default, parameter) in enumerate(zip(node.args.kw_defaults, kwonly_parameters)):
+            if default is not None:
+                self._flow(source=self._occurrence("expression_result", default), target=self._parameter_symbolic(callable_symbol_name, parameter), relation=LineageRelation.DEFAULTS_TO_PARAMETER, node=default, resolution_kind=ResolutionKind.SIGNATURE_EXACT, confidence=LineageConfidence.CONFIRMED, ordinal=ordinal)
 
     def _visit_function(self, node: ast.FunctionDef | ast.AsyncFunctionDef, kind: str, owner: str | None, walrus_owner: str | None) -> None:
         function_id = self._add(kind, node, node.name, owner)
         for decorator in node.decorator_list:
             self._visit(decorator, owner, walrus_owner)
         self._function_signature_evidence(node, owner, walrus_owner)
-        self._parameter_anchors(node.args, function_id)
+        parameters = self._parameter_anchors(node.args, function_id, node.name)
+        self._default_flows(node, node.name, parameters)
         for child in node.body:
             self._visit(child, function_id, None)
 
@@ -205,7 +263,9 @@ class _AnchorExtractor:
     def _visit_Lambda(self, node: ast.Lambda, owner: str | None, walrus_owner: str | None) -> None:
         lambda_id = self._add("lambda", node, None, owner)
         self._function_signature_evidence(node, owner, walrus_owner)
-        self._parameter_anchors(node.args, lambda_id)
+        callable_symbol_name = f"lambda@{self.paths[id(node)]}"
+        parameters = self._parameter_anchors(node.args, lambda_id, callable_symbol_name)
+        self._default_flows(node, callable_symbol_name, parameters)
         self._visit(node.body, lambda_id, None)
 
     def _visit_comprehension_expression(self, node: ast.AST, generators: list[ast.comprehension], values: tuple[ast.AST, ...], owner: str | None, walrus_owner: str | None) -> None:
@@ -310,7 +370,8 @@ def extract_lineage_source_facts(tree: ast.AST, *, source_key: str, source_finge
     paths, limit_reason = _index_ast_paths(tree, limits)
     if limit_reason is not None:
         return ExtractedLineageSourceFacts(source_key=source_key, source_fingerprint=source_fingerprint, status=LineageFamilyStatus.RESOURCE_LIMIT, resource_limit_reason=limit_reason)
-    return ExtractedLineageSourceFacts(source_key=source_key, source_fingerprint=source_fingerprint, anchors=_AnchorExtractor(paths).extract(tree), flows=(), surfaces=(), status=LineageFamilyStatus.FRESH)
+    anchors, flows = _AnchorExtractor(paths, source_key).extract(tree)
+    return ExtractedLineageSourceFacts(source_key=source_key, source_fingerprint=source_fingerprint, anchors=anchors, flows=flows, surfaces=(), status=LineageFamilyStatus.FRESH)
 
 
 __all__ = [
