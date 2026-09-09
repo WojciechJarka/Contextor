@@ -1,74 +1,76 @@
-EXACT_TEST_BODY=
-`test_connect_or_start_dead_child_fast_failure` creates an isolated repo/cache/state root, replaces `_spawn_runtime_subprocess` with a real Python child that immediately exits with code 42, calls `connect_or_start(repo, timeout=0.05, cold_start_timeout=10.0)`, and requires `RuntimeError`.  Before this correction it measured the entire call with `time.monotonic()` and asserted `< 1.0s`; that elapsed interval included repository/domain/lease setup, authority START durable logging, Windows process creation/scheduling, first polling interval, and finally-lock cleanup.
+BASELINE_LIVE=
+HEALTHY.
 
-PRODUCTION_FAILURE_BRANCH=
-`contextor.core.live_state.runtime.connect_or_start` enters its post-spawn loop, checks `_verified_existing_client`, then executes `if proc.poll() is not None: raise RuntimeError("... exited prematurely with code ...")`.  The timeout branch is separate and only executes after `spawn_deadline` exhaustion, raising `TimeoutError("startup and authority bootstrap timed out after ...")`.  The observed failure and isolated runs use the `proc.poll()` premature-exit branch, never the timeout branch.
+Contextor MCP \`get_live_events\` before the first pytest batch:
+- LIVE reachable: YES (\`status=ok\`)
+- canonical/live revision: 446
+- activity/runtime epoch: \`4b987d9a613a4b628eee87c848e05298\`
+- service/runtime identity: not exposed by the public MCP response; not inferred
+- resync_required: false; resync_reason: null
+- activity_resync_required: false
+- latest_seq: 57
 
-TIMING_CONTRACT=
-The surrounding test explicitly describes the contract as reporting a dead child by exit code rather than waiting for timeout.  Its adjacent true-startup-hang test covers the distinct hard `cold_start_timeout` behavior, and the slow-healthy-startup test covers waiting past the short normal-connect timeout.  No current runtime contract exposes a sub-one-second wall-clock SLA; `cold_start_timeout=10.0` is the actual normal-startup budget in this test.
+BATCHES_TESTED=
+1. \`tests/live_state/\`
+   - pytest: 43 passed in 42.19s.
+   - The runner printed all tests before a short delayed process exit; it then exited 0. This was not treated as a LIVE failure.
+   - LIVE after: reachable YES; revision 446; epoch unchanged; resync_required=false; latest_seq 59.
 
-CLASSIFICATION=BRITTLE_TIMING_TEST
+2. \`tests/test_runtime_trace.py tests/test_runtime_authority_events.py\`
+   - pytest: 46 passed in 33.09s.
+   - LIVE after: reachable YES; revision 446; epoch unchanged; resync_required=false; latest_seq 60.
 
-ROOT_CAUSE=
-The `< 1.0` assertion measured unrelated Windows process/fsync/scheduler and finally-cleanup latency in addition to child-death observation.  The full-suite 1.063s sample was still the expected premature-exit RuntimeError, so it did not show that production waited for the 10-second startup deadline.  Three independent isolated pytest invocations passed the old assertion; their total pytest durations were 1.45s, 1.24s, and 10.58s, illustrating why pytest/test-machine wall time is not a valid proof of this semantic contract.
+3. \`tests/test_live_state_ipc.py\`
+   - pytest: 53 passed, 1 permitted external FastMCP/Authlib deprecation warning, 76.07s.
+   - LIVE after: reachable YES; revision 446; epoch unchanged; resync_required=false; latest_seq 61.
 
-FILES_CHANGED=
-tests/test_live_state_ipc.py
+4. \`tests/test_live_authority_bootstrap.py tests/test_live_e2e_corrections.py tests/test_live_job_object.py\`
+   - pytest: 33 passed, 1 failed, 1 permitted external FastMCP/Authlib deprecation warning, 89.00s.
+   - Ordinary test failure: \`test_real_windows_job_object_breakaway_integration\` received no \`HELPER_DONE\` line from its helper. This was not classified as a LIVE failure.
+   - LIVE after: reachable YES; revision 446; epoch unchanged; resync_required=false; latest_seq 62.
 
-IMPLEMENTATION=
-Replaced only the arbitrary elapsed-time assertion with a deterministic proof: the fake process's real `poll()` is wrapped and must be called at least once; the raised message must identify premature exit code 42 and must not be the normal startup-timeout message.  The fake child, expected exception type/message, production code, timeouts, and normal timeout/slow-startup coverage remain unchanged.
+5. \`tests/test_live_activity_status.py tests/test_live_desktop_integration.py tests/test_live_watcher_startup_reconciliation.py tests/test_gui_live_startup.py tests/test_gui_single_instance.py\`
+   - pytest: 96 passed, 1 permitted external FastMCP/Authlib deprecation warning, 54.79s.
+   - LIVE after: reachable YES; revision 446; epoch unchanged; resync_required=false; latest_seq 63.
 
-FOCUSED_RESULT=
-PASS — dead-child test: 1 passed in 2.09s.
-PASS — dead-child, true-startup-hang, and slow-healthy-startup: 3 passed in 5.19s; 0 skipped.
+6. Contextor-selected MCP/process-cleanup batch:
+   \`tests/test_mcp_split_s2b.py tests/mcp/tools/test_analysis_status_concurrency.py tests/test_mcp_regressions.py tests/test_mcp_incremental_hydration.py tests/test_full_analysis_coordination.py tests/test_live_state_store.py\`
+   - Selection basis: Contextor identifies \`get_live_events -> runtime\`, while \`analysis_jobs\` owns full-analysis/process coordination.
+   - pytest: 125 passed, 6 failed, 2 warnings, 55.45s.
+   - All six ordinary failures are in \`tests/test_full_analysis_coordination.py\`: its non-LIVE-marked lease tests attempted their test repository locks under the real per-user cache and got WinError 5 while creating unrelated \`...Contextor/cache/repo_*/runtime\` roots. One resulting thread warning came from the same failed isolated lease setup.
+   - LIVE after: reachable YES; revision 446; epoch unchanged; resync_required=false; latest_seq 67.
 
-PYTEST_EXIT_CODE=0
+BAD_BATCH=
+NONE. Every completed batch left the MCP-oracle reachable with unchanged revision 446, unchanged activity/runtime epoch, and no resync requirement.
 
-ACTUAL_DIFF=
-diff --git a/tests/test_live_state_ipc.py b/tests/test_live_state_ipc.py
-index bbd57b4..22af278 100644
---- a/tests/test_live_state_ipc.py
-+++ b/tests/test_live_state_ipc.py
-@@ -1698,15 +1698,25 @@ def test_connect_or_start_dead_child_fast_failure(tmp_path, monkeypatch):
- 
-     from contextor.core.live_state import runtime as runtime_mod
-     orig_spawn = runtime_mod._spawn_runtime_subprocess
-+    poll_calls = 0
- 
-     # Mock subprocess that immediately exits with code 42
-     def mock_spawn(cmd, cwd, env):
-+        nonlocal poll_calls
-         exit_cmd = [sys.executable, "-c", "import sys; sys.exit(42)"]
--        return orig_spawn(exit_cmd, cwd, env)
-+        process = orig_spawn(exit_cmd, cwd, env)
-+        original_poll = process.poll
-+
-+        def tracked_poll():
-+            nonlocal poll_calls
-+            poll_calls += 1
-+            return original_poll()
-+
-+        process.poll = tracked_poll
-+        return process
- 
-     monkeypatch.setattr(runtime_mod, "_spawn_runtime_subprocess", mock_spawn)
- 
--    t0 = time.monotonic()
-     import pytest
-     with pytest.raises(RuntimeError) as exc_info:
-         runtime_mod.connect_or_start(
-@@ -1714,10 +1724,10 @@ def test_connect_or_start_dead_child_fast_failure(tmp_path, monkeypatch):
-             timeout=0.05,
-             cold_start_timeout=10.0,
-         )
--    elapsed = time.monotonic() - t0
--
--    assert "exited prematurely with code 42" in str(exc_info.value)
--    assert elapsed < 1.0  # Fast failure (did not wait 10s)
-+    message = str(exc_info.value)
-+    assert poll_calls >= 1
-+    assert "exited prematurely with code 42" in message
-+    assert "startup and authority bootstrap timed out" not in message
- 
- 
- def test_connect_or_start_true_startup_hang(tmp_path, monkeypatch):
+BISECTION_HISTORY=
+NOT_STARTED: no BAD_BATCH exists. Per contract, no halves or order-dependent reduction were run.
+
+MINIMAL_REPRO=
+NONE FOUND in the permitted runtime/LIVE/GUI/MCP-process batches.
+
+ORDER_DEPENDENT=
+NOT ESTABLISHED. No selected batch caused the observed production LIVE violation, so there is no failing prefix to minimize.
+
+LIVE_BEFORE=
+reachable=YES; revision=446; activity_epoch=4b987d9a613a4b628eee87c848e05298; resync_required=false; service identity=not exposed by public MCP.
+
+LIVE_AFTER=
+reachable=YES; revision=446; activity_epoch=4b987d9a613a4b628eee87c848e05298; resync_required=false; service identity=not exposed by public MCP.
+
+AUTHORITY_EVENTS=
+The public mixed-event response remained available but its limited returned event list is ordered from the retained beginning, not a terminal authority-event tail. The authority lifecycle entries exposed in every oracle response were unchanged historical records from 2026-09-08:
+- \`RUNTIME_AUTHORITY_START\`
+- \`RUNTIME_LEASE_ACQUIRE\`
+- \`RUNTIME_LEASE_TAKEOVER_REJECT\` (UNKNOWN; refused connection)
+- \`RUNTIME_AUTHORITY_BOOTSTRAP_FAIL\`
+- \`RUNTIME_AUTHORITY_START\`
+
+No new authority lifecycle event, runtime-identity change, revision discontinuity, or resync signal was exposed after any batch. \`latest_seq\` incremented from 57 to 67, consistent with MCP activity; this alone is not an authority mutation.
+
+CLASSIFICATION=
+NO_BAD_BATCH_REPRODUCED_IN_RUNTIME_LIVE_GUI_MCP_PROCESS_SLICE.
+
+FILES_CHANGED=NONE
+DIFFS=NONE
+

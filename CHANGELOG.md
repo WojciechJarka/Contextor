@@ -1,3 +1,19 @@
+## [Canonical Runtime Authority and LIVE lifecycle hardening] - 2026-09-09
+
+- Added a canonical runtime-domain model that mechanically separates production and test resources, including repository cache, LIVE locks, IPC endpoints and runtime logs, with fail-closed overlap validation.
+- Added durable runtime authority leasing with generation fencing, stale-owner recovery, exact process identity, cross-process locking and protection against PID reuse or ambiguous takeover.
+- Reworked LIVE bootstrap around a single canonical runtime authority. Endpoint publication, lease ownership and Desktop admission now use exact repository/domain/service identities and reject competing Desktop instances before they can touch canonical state.
+- Unified runtime-authority observability with the existing runtime trace instead of maintaining a second event sink. Authority events now use durable JSONL ordering, fsync-before-ack semantics, bounded indexed replay and exact event identities.
+- Hardened authority-event recovery across crashes and trace rollovers, including pending-event replay from previous segments, duplicate idempotency, payload-conflict detection, corrupt/missing history fail-closed behavior and persistent per-domain sequence high-water marks.
+- Added stable runtime observability files for the active session, authority-event state and program log, with timestamped rollover history, legacy-sidecar migration and explicit storage-reset/history-gap diagnostics.
+- Added a last-known-good observability floor outside the runtime log directory so sequence continuity can be recovered after log-directory loss without fabricating missing history.
+- Hardened clean shutdown and crash recovery so runtime-active metadata is snapshotted before removal and unresolved authority shutdown is never falsely reported as a clean STOPPED state.
+- Fixed a LIVE IPC lifecycle deadlock by moving Desktop claim/release/status callbacks outside the canonical server-state lock while preserving local claim-state synchronization and authority semantics.
+- Added Windows single-instance Desktop behavior: launching Contextor again activates the existing GUI instead of starting a competing Desktop/LIVE owner. Activation is repeatable and marshalled safely onto the Tk GUI thread.
+- Hardened test/runtime isolation for authority traces, LIVE state and Windows filesystem-equivalence checks so automated tests no longer require privileged symbolic-link creation and production runtime resources remain protected.
+- Removed brittle wall-clock assumptions from dead-child startup verification while preserving deterministic checks that premature child exit is detected through the correct runtime branch rather than normal startup timeout.
+- Completed runtime-authority and Desktop lifecycle certification with the full automated suite passing: 1852 tests, zero failures, zero skips and no project-generated warnings; only the external FastMCP/Authlib deprecation warning remains.
+
 ## [Lossless module-level blast radius] - 2026-09-07
 
 - Added `get_module_blast_radius`, providing the complete canonical blast radius of a module in one MCP call without per-artifact N+1 queries.
