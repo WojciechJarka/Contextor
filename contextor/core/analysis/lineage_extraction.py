@@ -455,18 +455,28 @@ class _AnchorExtractor:
         self._assign_target(node.target, source, target_owner, walrus_owner)
 
     def _visit_AugAssign(self, node: ast.AugAssign, owner: str | None, walrus_owner: str | None) -> None:
-        self._value(node.value, owner, walrus_owner)
         if not isinstance(node.target, ast.Name):
             self._visit(node.target, owner, walrus_owner)
+            self._value(node.value, owner, walrus_owner)
             return
-        binding = ExtractedOccurrenceRef(self._add("binding", node.target, node.target.id, owner))
-        if node.target.id in self._blocked_names(owner):
+        blocked = node.target.id in self._blocked_names(owner)
+        prior = None if blocked else self._frame(owner).get(node.target.id)
+        if prior is not None:
+            prior_load = self._occurrence("name_load", node.target, node.target.id)
+            self._flow(
+                source=prior,
+                target=prior_load,
+                relation=LineageRelation.BINDS,
+                node=node.target,
+                resolution_kind=ResolutionKind.LEXICAL_EXACT,
+                confidence=LineageConfidence.CONFIRMED,
+            )
+        self._value(node.value, owner, walrus_owner)
+        binding = ExtractedOccurrenceRef(
+            self._add("binding", node.target, node.target.id, owner)
+        )
+        if blocked or prior is None:
             return
-        prior = self._frame(owner).get(node.target.id)
-        if prior is None:
-            return
-        prior_load = self._occurrence("name_load", node.target, node.target.id)
-        self._flow(source=prior, target=prior_load, relation=LineageRelation.BINDS, node=node.target, resolution_kind=ResolutionKind.LEXICAL_EXACT, confidence=LineageConfidence.CONFIRMED)
         self._frame(owner)[node.target.id] = binding
 
     def _visit_Import(self, node: ast.Import, owner: str | None, _walrus_owner: str | None) -> None:
