@@ -1,258 +1,103 @@
-STATUS=FINAL_PASS
-CONTEXTOR_EVIDENCE=
-- Active and deferred-capability inventories were checked before selection. All required Contextor capabilities are active; no deferred-tool discovery provider is registered for this task.
-- get_file_edit_context verified final canonical targets at LIVE revision 520: contextor.core.analysis.lineage_extraction (runtime module 351/1) and tests.analysis.test_lineage_extraction (tests module 352/1), both with fresh syntax diagnostics and no warnings.
-- Contextor search_source verified _visit_ImportFrom as the sole production target. The prior branch skipped wildcard aliases without changing the current lexical frame.
-IMPLEMENTATION=
-- _visit_ImportFrom now treats from X import * as a fail-closed lexical write barrier: it replaces the current owner frame with an empty frame and continues. It does not expand wildcard exports or inspect a target module. Non-star registration is unchanged.
-- Added regressions for invalidating prior IMPORT_EXACT and prior CALL_EXACT authority.
-FILES_CHANGED=
-- contextor/core/analysis/lineage_extraction.py
-- tests/analysis/test_lineage_extraction.py
-TESTS_RUN=
-- .venv\Scripts\python.exe -m pytest tests/analysis/test_lineage_extraction.py -q
-- .venv\Scripts\python.exe -m pytest tests/analysis/test_lineage_extraction.py tests/test_no_double_parse.py tests/test_index_fusion.py -q
-- git diff --check -- contextor/core/analysis/lineage_extraction.py tests/analysis/test_lineage_extraction.py
-TEST_RESULTS=
-- 74 passed in 1.84s
-- 85 passed in 3.39s
-- diff check passed
-FULL_DIFFS=
-warning: in the working copy of 'contextor/core/analysis/lineage_extraction.py', LF will be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'tests/analysis/test_lineage_extraction.py', LF will be replaced by CRLF the next time Git touches it
-diff --git a/contextor/core/analysis/lineage_extraction.py b/contextor/core/analysis/lineage_extraction.py
-index d1672de..8d796b2 100644
---- a/contextor/core/analysis/lineage_extraction.py
-+++ b/contextor/core/analysis/lineage_extraction.py
-@@ -800,9 +800,11 @@ class _AnchorExtractor:
-     def _visit_ImportFrom(self, node: ast.ImportFrom, owner: str | None, _walrus_owner: str | None) -> None:
-         module_name = _resolve_import_module(self.source_key, node.module, node.level)
-         for alias in node.names:
--            if alias.name != "*":
--                local_name = alias.asname or alias.name
--                self._register_import_binding(alias, owner, local_name, module_name, alias.name)
-+            if alias.name == "*":
-+                self._replace_frame(owner, {})
-+                continue
-+            local_name = alias.asname or alias.name
-+            self._register_import_binding(alias, owner, local_name, module_name, alias.name)
- 
-     def _visit_Global(self, node: ast.Global, owner: str | None, _walrus_owner: str | None) -> None:
-         for ordinal, name in enumerate(node.names):
-diff --git a/tests/analysis/test_lineage_extraction.py b/tests/analysis/test_lineage_extraction.py
-index d9e7cc7..91ca1cf 100644
---- a/tests/analysis/test_lineage_extraction.py
-+++ b/tests/analysis/test_lineage_extraction.py
-@@ -252,59 +252,174 @@ def test_stage_1c5_bare_return_has_no_edge_and_multiple_returns_share_identity()
-     assert len(returns) == 2 and returns[0] == returns[1] and returns[0].kind is ExtractedSymbolicKind.RETURN
- 
- 
--def test_stage_1c6_imported_callable_uses_import_exact_not_local_call_exact():
--    facts = _stage_1c_facts("from pkg import run\nresult = run(1)\n")
-+def test_stage_1c6_direct_from_import_call_is_import_exact():
-+    facts = _stage_1c_facts("from pkg.mod import f\nresult = f()\n")
-     flow = _stage_1c_call_result_flows(facts)[0]
-     assert flow.resolution_kind is ResolutionKind.IMPORT_EXACT and flow.confidence is LineageConfidence.CONFIRMED
--    assert isinstance(flow.source, ExtractedSymbolicRef) and flow.source.module_name == "pkg" and flow.source.symbol_name == "run"
-+    assert isinstance(flow.source, ExtractedSymbolicRef) and flow.source.kind is ExtractedSymbolicKind.RETURN
-+    assert flow.source.module_name == "pkg.mod" and flow.source.symbol_name == "f"
- 
- 
--def test_stage_1c6_from_import_alias_and_module_attribute_are_exact():
--    alias = _stage_1c_facts("from pkg.mod import produce as local\nresult = local()\n")
--    module = _stage_1c_facts("import pkg.mod as m\nresult = m.produce()\n")
--    first, second = _stage_1c_call_result_flows(alias)[0], _stage_1c_call_result_flows(module)[0]
--    assert first.resolution_kind is ResolutionKind.IMPORT_EXACT and first.source.symbol_name == "produce"
--    assert second.resolution_kind is ResolutionKind.IMPORT_EXACT and second.source.module_name == "pkg.mod"
-+def test_stage_1c6_from_import_alias_keeps_original_semantic_symbol():
-+    facts = _stage_1c_facts("from pkg.mod import f as local\nresult = local()\n")
-+    flow = _stage_1c_call_result_flows(facts)[0]
-+    assert flow.resolution_kind is ResolutionKind.IMPORT_EXACT and flow.confidence is LineageConfidence.CONFIRMED
-+    assert isinstance(flow.source, ExtractedSymbolicRef) and flow.source.kind is ExtractedSymbolicKind.RETURN
-+    assert flow.source.module_name == "pkg.mod" and flow.source.symbol_name == "f"
- 
- 
--def test_stage_1c6_relative_imports_and_escape_are_fail_closed():
--    child = _stage_1c_facts_at("from .sub import run\nresult = run()\n", "pkg/mod.py")
--    parent = _stage_1c_facts_at("from ..util import run\nresult = run()\n", "pkg/sub/mod.py")
--    escape = _stage_1c_facts_at("from ..outside import run\nresult = run()\n", "pkg/mod.py")
--    assert _stage_1c_call_result_flows(child)[0].source.module_name == "pkg.sub"
--    assert _stage_1c_call_result_flows(parent)[0].source.module_name == "pkg.util"
--    assert _stage_1c_call_result_flows(escape)[0].resolution_kind is ResolutionKind.DYNAMIC_RUNTIME_BOUNDARY
-+def test_stage_1c6_direct_imported_symbol_rebind_is_not_import_exact():
-+    facts = _stage_1c_facts("from pkg.mod import f\nf = other\nresult = f()\n")
-+    flows = _stage_1c_call_result_flows(facts)
-+    assert flows[0].resolution_kind is ResolutionKind.DYNAMIC_RUNTIME_BOUNDARY
-+    assert all(flow.resolution_kind is not ResolutionKind.IMPORT_EXACT for flow in flows)
- 
- 
--def test_stage_1c6_import_rebind_branch_star_and_nested_are_not_exact():
--    rebound = _stage_1c_facts("from pkg import run\nrun = other\nresult = run()\n")
--    branch = _stage_1c_facts("from pkg import run\nif cond:\n run = other\nresult = run()\n")
--    star = _stage_1c_facts("from pkg import *\nresult = run()\n")
--    nested = _stage_1c_facts("import pkg.mod\nresult = pkg.mod.run()\n")
--    assert _stage_1c_call_result_flows(rebound)[0].resolution_kind is ResolutionKind.DYNAMIC_RUNTIME_BOUNDARY
--    assert _stage_1c_call_result_flows(branch)[0].resolution_kind is ResolutionKind.UNRESOLVED_NAME
--    assert _stage_1c_call_result_flows(star)[0].resolution_kind is ResolutionKind.UNRESOLVED_NAME
--    assert _stage_1c_call_result_flows(nested)[0].resolution_kind is ResolutionKind.DYNAMIC_RUNTIME_BOUNDARY
-+def test_stage_1c6_branch_invalidated_imported_symbol_is_not_import_exact():
-+    facts = _stage_1c_facts("from pkg.mod import f\nif cond:\n f = other\nresult = f()\n")
-+    flows = _stage_1c_call_result_flows(facts)
-+    assert flows[0].resolution_kind is ResolutionKind.UNRESOLVED_NAME
-+    assert all(flow.resolution_kind is not ResolutionKind.IMPORT_EXACT for flow in flows)
- 
- 
--def test_stage_1c6_imported_arguments_do_not_bind_unknown_signature():
--    facts = _stage_1c_facts("from pkg import run\nresult = run(1, flag=2)\n")
--    assert _stage_1c_call_result_flows(facts)[0].resolution_kind is ResolutionKind.IMPORT_EXACT
--    assert not any(flow.relation is LineageRelation.ARGUMENT_TO_PARAMETER for flow in facts.flows)
-+def test_stage_1c6_package_alias_attribute_call_is_import_exact():
-+    facts = _stage_1c_facts("import pkg as p\nresult = p.f()\n")
-+    flow = _stage_1c_call_result_flows(facts)[0]
-+    assert flow.resolution_kind is ResolutionKind.IMPORT_EXACT and flow.confidence is LineageConfidence.CONFIRMED
-+    assert isinstance(flow.source, ExtractedSymbolicRef) and flow.source.kind is ExtractedSymbolicKind.RETURN
-+    assert flow.source.module_name == "pkg" and flow.source.symbol_name == "f"
- 
- 
--def test_stage_1c6_imported_callee_snapshot_precedes_argument_rebind():
--    facts = _stage_1c_facts("from pkg import run\nresult = run((run := other))\nlater = run(1)\n")
-+def test_stage_1c6_unaliased_dotted_import_root_attribute_is_import_exact():
-+    facts = _stage_1c_facts("import pkg.mod\nresult = pkg.f()\n")
-+    flow = _stage_1c_call_result_flows(facts)[0]
-+    assert flow.resolution_kind is ResolutionKind.IMPORT_EXACT and flow.confidence is LineageConfidence.CONFIRMED
-+    assert isinstance(flow.source, ExtractedSymbolicRef) and flow.source.module_name == "pkg" and flow.source.symbol_name == "f"
-+
-+
-+def test_stage_1c6_module_alias_rebind_is_not_import_exact():
-+    facts = _stage_1c_facts("import pkg.mod as m\nm = other\nresult = m.f()\n")
-+    flows = _stage_1c_call_result_flows(facts)
-+    assert flows[0].resolution_kind is ResolutionKind.DYNAMIC_RUNTIME_BOUNDARY
-+    assert all(flow.resolution_kind is not ResolutionKind.IMPORT_EXACT for flow in flows)
-+
-+
-+def test_stage_1c6_unrelated_assignment_does_not_invalidate_import_exactness():
-+    facts = _stage_1c_facts("from pkg.mod import f\nunrelated = other\nresult = f()\n")
-+    flow = _stage_1c_call_result_flows(facts)[0]
-+    assert flow.resolution_kind is ResolutionKind.IMPORT_EXACT and flow.confidence is LineageConfidence.CONFIRMED
-+    assert isinstance(flow.source, ExtractedSymbolicRef) and flow.source.module_name == "pkg.mod" and flow.source.symbol_name == "f"
-+
-+
-+def test_stage_1c6_instance_attribute_call_remains_dynamic_runtime_boundary():
-+    facts = _stage_1c_facts("result = obj.f()\n")
-+    flow = _stage_1c_call_result_flows(facts)[0]
-+    assert flow.resolution_kind is ResolutionKind.DYNAMIC_RUNTIME_BOUNDARY and flow.confidence is LineageConfidence.DYNAMIC
-+    assert flow.dynamic_boundary == "dynamic_call"
-+
-+
-+def test_stage_1c6_star_import_has_no_import_authority():
-+    facts = _stage_1c_facts("from pkg import *\nresult = f()\n")
-     flows = _stage_1c_call_result_flows(facts)
--    assert flows[0].resolution_kind is ResolutionKind.IMPORT_EXACT
--    assert flows[1].resolution_kind is ResolutionKind.DYNAMIC_RUNTIME_BOUNDARY
-+    assert flows[0].resolution_kind is ResolutionKind.UNRESOLVED_NAME
-+    assert all(flow.resolution_kind is not ResolutionKind.IMPORT_EXACT for flow in flows)
-+
-+
-+def test_stage_1c6_star_import_invalidates_prior_import_exact_authority():
-+    facts = _stage_1c_facts(
-+        "from old import f\n"
-+        "from new import *\n"
-+        "result = f()\n"
-+    )
-+    flow = _stage_1c_call_result_flows(facts)[0]
-+    assert flow.resolution_kind is ResolutionKind.UNRESOLVED_NAME
-+    assert flow.confidence is LineageConfidence.UNRESOLVED
-+    assert not any(
-+        item.resolution_kind is ResolutionKind.IMPORT_EXACT
-+        for item in _stage_1c_call_result_flows(facts)
-+    )
-+
-+
-+def test_stage_1c6_star_import_invalidates_prior_local_callable_authority():
-+    facts = _stage_1c_facts(
-+        "def f():\n"
-+        " return 1\n"
-+        "from new import *\n"
-+        "result = f()\n"
-+    )
-+    flow = _stage_1c_call_result_flows(facts)[0]
-+    assert flow.resolution_kind is ResolutionKind.UNRESOLVED_NAME
-+    assert flow.confidence is LineageConfidence.UNRESOLVED
-+    assert not any(
-+        item.resolution_kind is ResolutionKind.CALL_EXACT
-+        for item in _stage_1c_call_result_flows(facts)
-+    )
-+
-+
-+def test_stage_1c6_relative_child_import_resolves_from_source_key():
-+    facts = _stage_1c_facts_at("from .sub import f\nresult = f()\n", "pkg/mod.py")
-+    flow = _stage_1c_call_result_flows(facts)[0]
-+    assert flow.resolution_kind is ResolutionKind.IMPORT_EXACT and isinstance(flow.source, ExtractedSymbolicRef)
-+    assert flow.source.module_name == "pkg.sub" and flow.source.symbol_name == "f"
-+
-+
-+def test_stage_1c6_relative_parent_import_resolves_from_source_key():
-+    facts = _stage_1c_facts_at("from ..util import f\nresult = f()\n", "pkg/sub/mod.py")
-+    flow = _stage_1c_call_result_flows(facts)[0]
-+    assert flow.resolution_kind is ResolutionKind.IMPORT_EXACT and isinstance(flow.source, ExtractedSymbolicRef)
-+    assert flow.source.module_name == "pkg.util" and flow.source.symbol_name == "f"
- 
- 
- def test_stage_1c6_package_init_relative_arithmetic():
--    first = _stage_1c_facts_at("from .sub import run\nresult = run()\n", "pkg/__init__.py")
--    second = _stage_1c_facts_at("from ..util import run\nresult = run()\n", "pkg/sub/__init__.py")
--    assert _stage_1c_call_result_flows(first)[0].source.module_name == "pkg.sub"
--    assert _stage_1c_call_result_flows(second)[0].source.module_name == "pkg.util"
-+    first = _stage_1c_facts_at("from .sub import f\nresult = f()\n", "pkg/__init__.py")
-+    second = _stage_1c_facts_at("from ..util import f\nresult = f()\n", "pkg/sub/__init__.py")
-+    first_flow, second_flow = _stage_1c_call_result_flows(first)[0], _stage_1c_call_result_flows(second)[0]
-+    assert first_flow.resolution_kind is ResolutionKind.IMPORT_EXACT and first_flow.source.module_name == "pkg.sub"
-+    assert second_flow.resolution_kind is ResolutionKind.IMPORT_EXACT and second_flow.source.module_name == "pkg.util"
-+
-+
-+def test_stage_1c6_relative_current_package_import_resolves_from_source_key():
-+    facts = _stage_1c_facts_at("from . import f\nresult = f()\n", "pkg/sub/mod.py")
-+    flow = _stage_1c_call_result_flows(facts)[0]
-+    assert flow.resolution_kind is ResolutionKind.IMPORT_EXACT and isinstance(flow.source, ExtractedSymbolicRef)
-+    assert flow.source.module_name == "pkg.sub" and flow.source.symbol_name == "f"
-+
-+
-+def test_stage_1c6_relative_escape_has_no_import_exact_metadata():
-+    facts = _stage_1c_facts_at("from ..outside import f\nresult = f()\n", "pkg/mod.py")
-+    flows = _stage_1c_call_result_flows(facts)
-+    assert flows[0].resolution_kind is ResolutionKind.DYNAMIC_RUNTIME_BOUNDARY
-+    assert all(flow.resolution_kind is not ResolutionKind.IMPORT_EXACT for flow in flows)
-+
-+
-+def test_stage_1c6_imported_callee_snapshot_precedes_argument_rebind():
-+    facts = _stage_1c_facts("from pkg import f\nresult = f((f := other))\nlater = f()\n")
-+    first, later = _stage_1c_call_result_flows(facts)
-+    assert first.resolution_kind is ResolutionKind.IMPORT_EXACT and isinstance(first.source, ExtractedSymbolicRef)
-+    assert first.source.module_name == "pkg" and first.source.symbol_name == "f"
-+    assert later.resolution_kind is ResolutionKind.DYNAMIC_RUNTIME_BOUNDARY
-+
-+
-+def test_stage_1c6_imported_call_arguments_do_not_bind_parameters():
-+    facts = _stage_1c_facts("from pkg import f\nresult = f(1, flag=2)\n")
-+    flow = _stage_1c_call_result_flows(facts)[0]
-+    assert flow.resolution_kind is ResolutionKind.IMPORT_EXACT and flow.confidence is LineageConfidence.CONFIRMED
-+    assert not any(flow.relation is LineageRelation.ARGUMENT_TO_PARAMETER for flow in facts.flows)
-+
-+
-+def test_stage_1c6_nested_dotted_import_attribute_call_remains_dynamic():
-+    facts = _stage_1c_facts("import pkg.mod\nresult = pkg.mod.f()\n")
-+    flow = _stage_1c_call_result_flows(facts)[0]
-+    assert flow.resolution_kind is ResolutionKind.DYNAMIC_RUNTIME_BOUNDARY and flow.confidence is LineageConfidence.DYNAMIC
-+    assert flow.dynamic_boundary == "dynamic_call"
-+    assert not any(item.resolution_kind is ResolutionKind.IMPORT_EXACT for item in _stage_1c_call_result_flows(facts))
-+
-+
-+def test_stage_1c6_local_function_call_remains_call_exact_not_import_exact():
-+    facts = _stage_1c_facts("def f():\n return 1\nresult = f()\n")
-+    flow = _stage_1c_call_result_flows(facts)[0]
-+    assert flow.resolution_kind is ResolutionKind.CALL_EXACT and flow.confidence is LineageConfidence.CONFIRMED
-+    assert flow.resolution_kind is not ResolutionKind.IMPORT_EXACT and isinstance(flow.source, ExtractedSymbolicRef)
- 
- 
- def test_stage_1c5_dynamic_attribute_call_carries_required_boundary_metadata():
+STATUS=DISCOVERY_COMPLETE
 
+CONTEXTOR_EVIDENCE=
+- HEAD is e24f99fbfcf730e967304b2f371c8e7f9681d782; the requested discovery made no production/test edits.
+- ACTIVE-pool inspection found all Contextor tools needed: get_mcp_documentation, get_file_edit_context, get_source_range, search_source, get_symbol_implementation. Deferred-pool inspection was also performed before capability selection: no deferred Contextor capability was advertised; the only deferred-related active description was update_file, which is mutating and out of scope.
+- Current MCP docs were read before discovery calls. Fresh edit contexts: production module 351/1 and tests module 352/1, canonical revision 520, provenance live, workspace_sync verified, syntax checked_and_none.
+- Canonical source evidence: lineage_extraction.py 195-290 provides frame helpers; 480-635 provides Call/comprehension/NamedExpr; 675-900 provides 1C.4 conditional, loop, match, try, and handler frame invalidation. Tests 130-260 establish current call fallback assertions.
+
+EXISTING_FRAME_MERGE_REUSE=
+- Reuse is sufficient; no parallel frame model is warranted.
+- _clone_frame(owner) snapshots a mapping. _replace_frame(owner, frame) atomically replaces it. _merge_frames(frames) retains a name only when it exists in every frame and points to the identical occurrence reference.
+- 1C.4 already applies this exact mechanism to If body/else, For zero/body/else, While zero/body/else, Match branches, and Try reachable paths. Its known fail-closed result for diverging binding authority is absent frame entry, hence a later simple Name is UNRESOLVED rather than speculative DYNAMIC.
+- Comprehension must use the same zero/body merge on the effective walrus owner. It must not merge its local target frame into the lexical enclosing frame.
+
+CORRECTED_ACTIVE_COMPREHENSION_STATE=
+- Each active record must distinguish:
+  lookup_owner: comprehension anchor id;
+  lexical_enclosing_owner: owner that supplies visible outer bindings/imports and evaluates outermost iterable;
+  effective_walrus_owner: nearest propagated non-comprehension owner;
+  walrus_entry_frame: clone of effective_walrus_owner at this comprehension entry;
+  touched_walrus_names: set of names assigned by a NamedExpr during this comprehension or any currently executing nested descendant.
+- At enter, lookup_owner frame is a clone of lexical_enclosing_owner frame; its import frame is copied from lexical_enclosing_owner import frame. Then runtime targets overwrite only lookup_owner entries.
+- This permits enclosing reads/import calls, preserves target shadowing, and does not create synchronization anchors/flows.
+- The old pair (comprehension_id, enclosing_owner) is insufficient: inner lexical_enclosing_owner can be outer comprehension while effective_walrus_owner remains the containing function.
+
+CORRECTED_WALRUS_LIFECYCLE=
+1. NamedExpr evaluates RHS first in the current lookup owner.
+2. It assigns its target to effective_walrus_owner through existing assign_target, yielding one existing binding anchor and one existing ASSIGNS flow.
+3. While executing, write that returned binding into lookup frames of every active record whose effective_walrus_owner is the same owner; record name as touched in those records. This includes the current inner record and outer active records sharing the containing owner.
+4. On ending an inner comprehension, merge its walrus_entry_frame with the current effective owner body frame. Synchronize only its touched names in still-active matching records: set each to merged binding if present, otherwise remove it. Do not overwrite runtime targets or unrelated lookup entries.
+5. On ending outer comprehension, do the same merge. Its zero path is walrus_entry_frame; its body path is effective owner state after all nested children completed their own conservative merges.
+- Thus a walrus is visible within a body path that executed it, but is not definite after any possibly-zero comprehension.
+
+NESTED_COMPREHENSION_ALGORITHM=
+- Create comprehension_id.
+- First iterable: visit with lexical_enclosing_owner and inherited effective walrus owner. It is outside comprehension scope.
+- effective_walrus_owner = incoming walrus_owner or lexical_enclosing_owner.
+- Push active record using both owners and snapshot effective owner's frame before any body evaluation.
+- Clone lexical enclosing binding/import frames into comprehension lookup frame; runtime-bind first target; visit filters. For later generators visit iterable, bind target, then filters. Finally visit elt, or key then value.
+- A nested comprehension uses outer comprehension as lexical_enclosing_owner, but receives its parent effective_walrus_owner. Its frame therefore sees outer targets while its NamedExpr writes/mirrors against the containing function/module.
+- finally: pop record only after its effective owner zero/body merge and touched-name synchronization. Never special-case a no-generator comprehension: parsed comprehension has at least one generator.
+
+POST_COMPREHENSION_MERGE=
+- Algorithm: body_frame = clone_frame(effective_walrus_owner); merged = merge_frames((record.walrus_entry_frame, body_frame)); replace_frame(effective_walrus_owner, merged).
+- For A, no prior y versus body y binding: merged has no y; use(y) produces no exact BIND and Call use receives its normal unresolved argument lookup.
+- For B, y=old versus y=walrus binding: merged has no y; later y does not exact-bind to old or walrus.
+- For C, y is mirrored after its NamedExpr, so second y sees the walrus binding during the same executed body path. After exit y is non-definite.
+- For D/E, z is mirrored into inner lookup despite lexical enclosing owner=outer comprehension. Inner completion immediately merges inner zero/body and removes z from outer active lookup when non-definite; outer completion remains conservative.
+- For F, a local callable/import binding versus walrus rebind differ, so merge removes the name. Later direct call has callee_ref None; existing Call fallback is UNRESOLVED_NAME, confidence UNRESOLVED, dynamic_boundary None. It must be neither CALL_EXACT nor IMPORT_EXACT nor speculative DYNAMIC_RUNTIME_BOUNDARY.
+
+EXACT_CODE_INSERTION_POINTS=
+- lineage_extraction.py 195-209: add active-record state.
+- 246-286: add narrow lifecycle/synchronization helpers next to existing frame helpers.
+- 510-528: replace comprehension visitor only.
+- 555-566: return created binding from assign_target, otherwise None.
+- 626-629: after assignment, synchronize returned NamedExpr binding to active records.
+- tests/analysis/test_lineage_extraction.py: append 1C.7 focused tests after 1C.6 group; retain existing helpers for exact binds and call-result flows.
+
+LITERAL_IMPLEMENTATION_PLAN=
+1. Define private record:
+   _ActiveComprehension(lookup_owner: str, lexical_enclosing_owner: str | None, effective_walrus_owner: str | None, walrus_entry_frame: dict[str, ExtractedOccurrenceRef], touched_walrus_names: set[str]).
+   Store list self._active_comprehensions.
+2. Add begin_comprehension(comprehension_id, lexical_enclosing_owner, effective_walrus_owner):
+   entry = clone_frame(effective_walrus_owner);
+   replace_frame(comprehension_id, clone_frame(lexical_enclosing_owner));
+   import_frame(comprehension_id).clear(); import_frame(comprehension_id).update(import_frame(lexical_enclosing_owner));
+   append record.
+3. Change assign_target signature to return ExtractedOccurrenceRef | None. Preserve its existing anchor/flow behavior exactly.
+4. Add publish_executed_walrus(name, binding, effective_walrus_owner):
+   for record in active records with matching effective owner:
+     record.touched_walrus_names.add(name);
+     frame(record.lookup_owner)[name] = binding.
+   NamedExpr calls it only after successful assign_target.
+5. Add finish_comprehension(record):
+   body = clone_frame(record.effective_walrus_owner);
+   merged = merge_frames((record.walrus_entry_frame, body));
+   replace_frame(record.effective_walrus_owner, merged);
+   remove record from active stack;
+   for each still-active matching record and each name in finished.touched_walrus_names:
+     add name to parent touched set;
+     if name in merged: frame(parent.lookup_owner)[name] = merged[name]
+     else: frame(parent.lookup_owner).pop(name, None).
+6. Comprehension visitor:
+   add anchor; first.iter with lexical enclosing owner; effective owner = walrus_owner or owner; begin;
+   try runtime_bind target and visit filters; repeat later iter/target/filter; visit values;
+   finally finish.
+   Keep runtime target helper separate from normal Store visit and preserve DictComp key,value order.
+
+CORRECTED_TEST_PLAN=
+- A: [(y := x) for x in xs]; use(y). Assert y inside assignment has containing owner, but post-comprehension y has no LEXICAL_EXACT BIND.
+- B: y=old; [(y := x) for x in xs]; use(y). Assert post y has neither old nor walrus binding as exact source.
+- C: [(y := x, y) for x in xs]. Assert second y exactly binds walrus binding within body; post y non-definite.
+- D: [[((z := y), z) for y in ys] for x in xs]. Assert inner second z binds current z; post z has no exact BIND.
+- E: same nested source plus owner assertions: z binding owner is containing function/module, never outer/inner comprehension; inner lookup sees z.
+- F-local: def run; [(run := other) for x in xs]; run(). Assert later CALL_RESULT is UNRESOLVED_NAME/UNRESOLVED/no dynamic boundary; not CALL_EXACT.
+- F-import: from pkg import run; [(run := other) for x in xs]; run(). Same UNRESOLVED fallback; not IMPORT_EXACT.
+- Retain and correct prior 9-11: element/filter/nested walrus each have separate inside-executed-path visibility and after-comprehension non-definiteness assertions.
+- Retain 12-13 only with corrected fallback UNRESOLVED, not dynamic.
+- Retain target shadowing, outer iterable enclosing lookup, later generator/filter visibility, nested target isolation, Dict key-before-value, four comprehension forms, parser SyntaxError for iterable NamedExpr, unique flow IDs/no double traversal, and Stage 1C.1-1C.6 regression matrix.
+
+DOMAIN_CHANGE_REQUIRED=NO
+FILES_CHANGED=NONE
+DIFFS=NONE
