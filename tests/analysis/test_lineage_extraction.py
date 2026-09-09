@@ -127,7 +127,12 @@ def test_typed_parameter_ids_bind_and_defaults_need_no_ast_reread():
         ("parameter_kwonly", 0, "flag"),
         ("parameter_varkw", 0, "extra"),
     }
-    binds = [flow for flow in facts.flows if flow.relation is LineageRelation.BINDS]
+    binds = [
+        flow
+        for flow in facts.flows
+        if flow.relation is LineageRelation.BINDS
+        and flow.resolution_kind is ResolutionKind.SIGNATURE_EXACT
+    ]
     assert len(binds) == 5
     assert all(
         flow.source.kind is ExtractedSymbolicKind.PARAMETER
