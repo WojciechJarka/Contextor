@@ -109,6 +109,10 @@ def _stage_1c_facts(source: str):
     return extract_lineage_source_facts(ast.parse(source), source_key="pkg.py", source_fingerprint=FINGERPRINT)
 
 
+def _stage_1c_facts_at(source: str, source_key: str):
+    return extract_lineage_source_facts(ast.parse(source), source_key=source_key, source_fingerprint=FINGERPRINT)
+
+
 def _stage_1c_named(facts, kind, name):
     return [item for item in facts.anchors if item.kind == kind and parse_local_occurrence_id(item.local_id)[3] == name]
 
@@ -248,11 +252,59 @@ def test_stage_1c5_bare_return_has_no_edge_and_multiple_returns_share_identity()
     assert len(returns) == 2 and returns[0] == returns[1] and returns[0].kind is ExtractedSymbolicKind.RETURN
 
 
-def test_stage_1c5_imported_callable_does_not_become_local_call_exact():
+def test_stage_1c6_imported_callable_uses_import_exact_not_local_call_exact():
     facts = _stage_1c_facts("from pkg import run\nresult = run(1)\n")
     flow = _stage_1c_call_result_flows(facts)[0]
-    assert not any(f.resolution_kind is ResolutionKind.IMPORT_EXACT for f in facts.flows)
-    assert flow.resolution_kind is ResolutionKind.DYNAMIC_RUNTIME_BOUNDARY and flow.confidence is LineageConfidence.DYNAMIC and flow.dynamic_boundary == "dynamic_call"
+    assert flow.resolution_kind is ResolutionKind.IMPORT_EXACT and flow.confidence is LineageConfidence.CONFIRMED
+    assert isinstance(flow.source, ExtractedSymbolicRef) and flow.source.module_name == "pkg" and flow.source.symbol_name == "run"
+
+
+def test_stage_1c6_from_import_alias_and_module_attribute_are_exact():
+    alias = _stage_1c_facts("from pkg.mod import produce as local\nresult = local()\n")
+    module = _stage_1c_facts("import pkg.mod as m\nresult = m.produce()\n")
+    first, second = _stage_1c_call_result_flows(alias)[0], _stage_1c_call_result_flows(module)[0]
+    assert first.resolution_kind is ResolutionKind.IMPORT_EXACT and first.source.symbol_name == "produce"
+    assert second.resolution_kind is ResolutionKind.IMPORT_EXACT and second.source.module_name == "pkg.mod"
+
+
+def test_stage_1c6_relative_imports_and_escape_are_fail_closed():
+    child = _stage_1c_facts_at("from .sub import run\nresult = run()\n", "pkg/mod.py")
+    parent = _stage_1c_facts_at("from ..util import run\nresult = run()\n", "pkg/sub/mod.py")
+    escape = _stage_1c_facts_at("from ..outside import run\nresult = run()\n", "pkg/mod.py")
+    assert _stage_1c_call_result_flows(child)[0].source.module_name == "pkg.sub"
+    assert _stage_1c_call_result_flows(parent)[0].source.module_name == "pkg.util"
+    assert _stage_1c_call_result_flows(escape)[0].resolution_kind is ResolutionKind.DYNAMIC_RUNTIME_BOUNDARY
+
+
+def test_stage_1c6_import_rebind_branch_star_and_nested_are_not_exact():
+    rebound = _stage_1c_facts("from pkg import run\nrun = other\nresult = run()\n")
+    branch = _stage_1c_facts("from pkg import run\nif cond:\n run = other\nresult = run()\n")
+    star = _stage_1c_facts("from pkg import *\nresult = run()\n")
+    nested = _stage_1c_facts("import pkg.mod\nresult = pkg.mod.run()\n")
+    assert _stage_1c_call_result_flows(rebound)[0].resolution_kind is ResolutionKind.DYNAMIC_RUNTIME_BOUNDARY
+    assert _stage_1c_call_result_flows(branch)[0].resolution_kind is ResolutionKind.UNRESOLVED_NAME
+    assert _stage_1c_call_result_flows(star)[0].resolution_kind is ResolutionKind.UNRESOLVED_NAME
+    assert _stage_1c_call_result_flows(nested)[0].resolution_kind is ResolutionKind.DYNAMIC_RUNTIME_BOUNDARY
+
+
+def test_stage_1c6_imported_arguments_do_not_bind_unknown_signature():
+    facts = _stage_1c_facts("from pkg import run\nresult = run(1, flag=2)\n")
+    assert _stage_1c_call_result_flows(facts)[0].resolution_kind is ResolutionKind.IMPORT_EXACT
+    assert not any(flow.relation is LineageRelation.ARGUMENT_TO_PARAMETER for flow in facts.flows)
+
+
+def test_stage_1c6_imported_callee_snapshot_precedes_argument_rebind():
+    facts = _stage_1c_facts("from pkg import run\nresult = run((run := other))\nlater = run(1)\n")
+    flows = _stage_1c_call_result_flows(facts)
+    assert flows[0].resolution_kind is ResolutionKind.IMPORT_EXACT
+    assert flows[1].resolution_kind is ResolutionKind.DYNAMIC_RUNTIME_BOUNDARY
+
+
+def test_stage_1c6_package_init_relative_arithmetic():
+    first = _stage_1c_facts_at("from .sub import run\nresult = run()\n", "pkg/__init__.py")
+    second = _stage_1c_facts_at("from ..util import run\nresult = run()\n", "pkg/sub/__init__.py")
+    assert _stage_1c_call_result_flows(first)[0].source.module_name == "pkg.sub"
+    assert _stage_1c_call_result_flows(second)[0].source.module_name == "pkg.util"
 
 
 def test_stage_1c5_dynamic_attribute_call_carries_required_boundary_metadata():

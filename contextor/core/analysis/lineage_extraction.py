@@ -149,6 +149,14 @@ def _module_name_from_source_key(source_key: str) -> str:
     module_name = source_key[:-3].replace("/", ".")
     return module_name[: -len(".__init__")] if module_name.endswith(".__init__") else module_name
 
+def _resolve_import_module(source_key: str, module_name: str | None, level: int) -> str | None:
+    if level == 0: return module_name
+    package_parts = source_key.split("/")[:-1]
+    if not package_parts or level > len(package_parts): return None
+    target_parts = list(package_parts[:len(package_parts) - (level - 1)])
+    if module_name: target_parts.extend(module_name.split("."))
+    return ".".join(target_parts) if target_parts else None
+
 
 @dataclass(frozen=True)
 class _ParameterInfo:
@@ -284,6 +292,12 @@ class _AnchorExtractor:
     def _import_frame(self, owner: str | None) -> dict[str, _ImportInfo]:
         return self._imports.setdefault(owner, {})
 
+    def _register_import_binding(self, alias: ast.alias, owner: str | None, local_name: str, module_name: str | None, symbol_name: str | None) -> None:
+        binding_id = self._add("import_binding", alias, local_name, owner)
+        if local_name in self._blocked_names(owner): return
+        self._frame(owner)[local_name] = ExtractedOccurrenceRef(binding_id)
+        if module_name is not None: self._import_frame(owner)[local_name] = _ImportInfo(module_name, symbol_name, binding_id)
+
     def _value(
         self,
         node: ast.AST,
@@ -308,6 +322,21 @@ class _AnchorExtractor:
         current = self._frame(owner).get(node.func.id)
         if current is None: return None
         return self._callables_by_anchor.get(current.local_id) or self._callables_by_binding.get(current.local_id)
+
+    def _current_import_info(self, owner: str | None, local_name: str) -> _ImportInfo | None:
+        current, info = self._frame(owner).get(local_name), self._import_frame(owner).get(local_name)
+        return info if current is not None and info is not None and current.local_id == info.binding_id else None
+
+    def _resolve_current_imported_callable(self, node: ast.Call, owner: str | None) -> ExtractedSymbolicRef | None:
+        if isinstance(node.func, ast.Name):
+            info = self._current_import_info(owner, node.func.id)
+            if info is None or info.symbol_name is None: return None
+            return ExtractedSymbolicRef(ExtractedSymbolicKind.RETURN, info.module_name, info.symbol_name, info.binding_id)
+        if isinstance(node.func, ast.Attribute) and isinstance(node.func.value, ast.Name):
+            info = self._current_import_info(owner, node.func.value.id)
+            if info is None or info.symbol_name is not None: return None
+            return ExtractedSymbolicRef(ExtractedSymbolicKind.RETURN, info.module_name, node.func.attr, info.binding_id)
+        return None
 
     def _collect_call_arguments(self, node: ast.Call, owner: str | None, walrus_owner: str | None) -> tuple[_CallArgumentInfo, ...]:
         pending = [(arg, "starred" if isinstance(arg, ast.Starred) else "positional", None, index) for index, arg in enumerate(node.args)]
@@ -459,12 +488,16 @@ class _AnchorExtractor:
     def _visit_Call(self, node: ast.Call, owner: str | None, walrus_owner: str | None) -> None:
         self._visit(node.func, owner, walrus_owner)
         callable_info = self._resolve_current_local_callable(node, owner)
+        imported_return = self._resolve_current_imported_callable(node, owner)
         callee_ref = self._frame(owner).get(node.func.id) if isinstance(node.func, ast.Name) else None
         call_site, call_result = self._occurrence("call_site", node), self._occurrence("call_result", node)
         arguments = self._collect_call_arguments(node, owner, walrus_owner)
         if callable_info is not None:
             self._bind_call_arguments(arguments, callable_info)
             self._flow(source=self._return_symbolic(callable_info), target=call_result, relation=LineageRelation.CALL_RESULT, node=node, resolution_kind=ResolutionKind.CALL_EXACT, confidence=LineageConfidence.CONFIRMED)
+            return
+        if imported_return is not None:
+            self._flow(source=imported_return, target=call_result, relation=LineageRelation.CALL_RESULT, node=node, resolution_kind=ResolutionKind.IMPORT_EXACT, confidence=LineageConfidence.CONFIRMED)
             return
         if isinstance(node.func, ast.Name) and callee_ref is None:
             resolution_kind, confidence = ResolutionKind.UNRESOLVED_NAME, LineageConfidence.UNRESOLVED
@@ -762,17 +795,14 @@ class _AnchorExtractor:
     def _visit_Import(self, node: ast.Import, owner: str | None, _walrus_owner: str | None) -> None:
         for alias in node.names:
             local_name = alias.asname or alias.name.split(".", 1)[0]
-            binding_id = self._add("import_binding", alias, local_name, owner)
-            if local_name not in self._blocked_names(owner):
-                self._frame(owner)[local_name] = ExtractedOccurrenceRef(binding_id)
+            self._register_import_binding(alias, owner, local_name, alias.name if alias.asname is not None else alias.name.split(".", 1)[0], None)
 
     def _visit_ImportFrom(self, node: ast.ImportFrom, owner: str | None, _walrus_owner: str | None) -> None:
+        module_name = _resolve_import_module(self.source_key, node.module, node.level)
         for alias in node.names:
             if alias.name != "*":
                 local_name = alias.asname or alias.name
-                binding_id = self._add("import_binding", alias, local_name, owner)
-                if local_name not in self._blocked_names(owner):
-                    self._frame(owner)[local_name] = ExtractedOccurrenceRef(binding_id)
+                self._register_import_binding(alias, owner, local_name, module_name, alias.name)
 
     def _visit_Global(self, node: ast.Global, owner: str | None, _walrus_owner: str | None) -> None:
         for ordinal, name in enumerate(node.names):
