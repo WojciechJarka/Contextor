@@ -733,7 +733,6 @@ class _AnchorExtractor:
     def _visit_ExceptHandler(self, node: ast.ExceptHandler, owner: str | None, walrus_owner: str | None) -> None:
         if node.type is not None:
             self._visit(node.type, owner, walrus_owner)
-        entry_frame = self._clone_frame(owner)
         alias_name = node.name if isinstance(node.name, str) else None
         if alias_name is not None:
             binding = ExtractedOccurrenceRef(
@@ -756,7 +755,7 @@ class _AnchorExtractor:
                 )
         for child in node.body:
             self._visit(child, owner, walrus_owner)
-        exit_frame = dict(entry_frame)
+        exit_frame = self._clone_frame(owner)
         if alias_name is not None:
             exit_frame.pop(alias_name, None)
         self._replace_frame(owner, exit_frame)

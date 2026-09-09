@@ -1,13 +1,12 @@
 STATUS=FINAL_PASS
-CONTEXTOR_PRE_EDIT=Fresh Contextor edit context for contextor/core/analysis/lineage_extraction.py: module contextor.core.analysis.lineage_extraction, revision 501, no warnings, fresh syntax diagnostics. HEAD matched 58504b60bfa186c2705f312966ea983ec1dc6967 and targets were clean before this stage.
-IMPLEMENTATION=Added canonical branch-frame cloning and _merge_frames resolution for if, for/async-for, while, try/except/else/finally, and match. Removed the competing runtime target invalidation helper. Branch-local lexical flows remain emitted; only future frame resolution is conservatively merged.
-DEFERRED=CFG reachability (break/continue/return, exception sites, and match exhaustiveness), returns/local calls/star argument binding (1C.5), import exactness/rebind safety (1C.6), and comprehension/walrus expression-control edge cases (1C.7).
+CONTEXTOR_PRE_EDIT=Fresh Contextor edit context for contextor/core/analysis/lineage_extraction.py: revision 503, no warnings, fresh syntax diagnostics. HEAD was 914af62dc51b4c307de9164668cd929095747ed9 and the authorized Stage 1C.4 working changes were preserved.
+IMPLEMENTATION=_visit_ExceptHandler now derives its exit frame from the actual handler-body frame and removes only the exception alias. _visit_Try therefore merges handler rebindings instead of restoring the handler entry frame.
 FILES_CHANGED=contextor/core/analysis/lineage_extraction.py; tests/analysis/test_lineage_extraction.py
 TESTS_RUN=.venv\Scripts\python.exe -m pytest tests/analysis/test_lineage_extraction.py -q; .venv\Scripts\python.exe -m pytest tests/analysis/test_lineage_extraction.py tests/test_no_double_parse.py tests/test_index_fusion.py -q; git diff --check -- contextor/core/analysis/lineage_extraction.py tests/analysis/test_lineage_extraction.py
-TEST_RESULTS=38 passed in 1.15s; 49 passed in 3.09s; git diff --check passed (only Git LF-to-CRLF informational warnings).
+TEST_RESULTS=40 passed in 1.24s; 51 passed in 2.93s; git diff --check passed (only Git LF-to-CRLF informational warnings).
 FULL_DIFFS=
 diff --git a/contextor/core/analysis/lineage_extraction.py b/contextor/core/analysis/lineage_extraction.py
-index be9f0a3..6a36497 100644
+index be9f0a3..791a61e 100644
 --- a/contextor/core/analysis/lineage_extraction.py
 +++ b/contextor/core/analysis/lineage_extraction.py
 @@ -253,6 +253,18 @@ class _AnchorExtractor:
@@ -177,7 +176,7 @@ index be9f0a3..6a36497 100644
  
      def _visit_With(self, node: ast.With, owner: str | None, walrus_owner: str | None) -> None:
          for item in node.items:
-@@ -632,6 +701,35 @@ class _AnchorExtractor:
+@@ -632,10 +701,38 @@ class _AnchorExtractor:
              self._blocked_names(owner).add(name)
              self._frame(owner).pop(name, None)
  
@@ -213,7 +212,17 @@ index be9f0a3..6a36497 100644
      def _visit_ExceptHandler(self, node: ast.ExceptHandler, owner: str | None, walrus_owner: str | None) -> None:
          if node.type is not None:
              self._visit(node.type, owner, walrus_owner)
-@@ -663,6 +761,25 @@ class _AnchorExtractor:
+-        entry_frame = self._clone_frame(owner)
+         alias_name = node.name if isinstance(node.name, str) else None
+         if alias_name is not None:
+             binding = ExtractedOccurrenceRef(
+@@ -658,11 +755,30 @@ class _AnchorExtractor:
+                 )
+         for child in node.body:
+             self._visit(child, owner, walrus_owner)
+-        exit_frame = dict(entry_frame)
++        exit_frame = self._clone_frame(owner)
+         if alias_name is not None:
              exit_frame.pop(alias_name, None)
          self._replace_frame(owner, exit_frame)
  
@@ -240,7 +249,7 @@ index be9f0a3..6a36497 100644
          if node.pattern is not None:
              self._visit(node.pattern, owner, walrus_owner)
 diff --git a/tests/analysis/test_lineage_extraction.py b/tests/analysis/test_lineage_extraction.py
-index 9c10d2d..25364c9 100644
+index 9c10d2d..4c3901c 100644
 --- a/tests/analysis/test_lineage_extraction.py
 +++ b/tests/analysis/test_lineage_extraction.py
 @@ -95,6 +95,13 @@ def test_stage_1c_merge_frames_keeps_only_identical_occurrences():
@@ -257,7 +266,7 @@ index 9c10d2d..25364c9 100644
  
  
  def _stage_1c_facts(source: str):
-@@ -120,6 +127,171 @@ def _stage_1c_runtime_assignment(facts, name):
+@@ -120,6 +127,206 @@ def _stage_1c_runtime_assignment(facts, name):
      )
  
  
@@ -387,6 +396,41 @@ index 9c10d2d..25364c9 100644
 +    assert _stage_1c_lexical_bind_sources(facts, "value", 7) == [except_value.local_id]
 +    assert _stage_1c_lexical_bind_sources(facts, "value", 10) == []
 +    assert _stage_1c_lexical_bind_sources(facts, "stable", 11) == [stable.local_id]
++
++
++def test_stage_1c_try_merge_observes_handler_body_rebinding():
++    facts = _stage_1c_facts(
++        "def run():\n"
++        " value = 0\n"
++        " try:\n"
++        "  pass\n"
++        " except Error:\n"
++        "  value = 1\n"
++        " after = value\n"
++    )
++    assert _stage_1c_lexical_bind_sources(
++        facts,
++        "value",
++        7,
++    ) == []
++
++
++def test_stage_1c_finally_does_not_restore_pre_handler_binding_after_handler_rebind():
++    facts = _stage_1c_facts(
++        "def run():\n"
++        " value = 0\n"
++        " try:\n"
++        "  pass\n"
++        " except Error:\n"
++        "  value = 1\n"
++        " finally:\n"
++        "  seen = value\n"
++    )
++    assert _stage_1c_lexical_bind_sources(
++        facts,
++        "value",
++        9,
++    ) == []
 +
 +
 +def test_stage_1c_try_handler_starts_from_entry_not_partial_try_state():

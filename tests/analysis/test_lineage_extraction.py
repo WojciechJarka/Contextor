@@ -255,6 +255,41 @@ def test_stage_1c_try_handler_conflict_merges_to_unresolved_but_finally_is_exact
     assert _stage_1c_lexical_bind_sources(facts, "stable", 11) == [stable.local_id]
 
 
+def test_stage_1c_try_merge_observes_handler_body_rebinding():
+    facts = _stage_1c_facts(
+        "def run():\n"
+        " value = 0\n"
+        " try:\n"
+        "  pass\n"
+        " except Error:\n"
+        "  value = 1\n"
+        " after = value\n"
+    )
+    assert _stage_1c_lexical_bind_sources(
+        facts,
+        "value",
+        7,
+    ) == []
+
+
+def test_stage_1c_finally_does_not_restore_pre_handler_binding_after_handler_rebind():
+    facts = _stage_1c_facts(
+        "def run():\n"
+        " value = 0\n"
+        " try:\n"
+        "  pass\n"
+        " except Error:\n"
+        "  value = 1\n"
+        " finally:\n"
+        "  seen = value\n"
+    )
+    assert _stage_1c_lexical_bind_sources(
+        facts,
+        "value",
+        9,
+    ) == []
+
+
 def test_stage_1c_try_handler_starts_from_entry_not_partial_try_state():
     facts = _stage_1c_facts(
         "def run():\n"
