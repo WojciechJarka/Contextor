@@ -800,9 +800,11 @@ class _AnchorExtractor:
     def _visit_ImportFrom(self, node: ast.ImportFrom, owner: str | None, _walrus_owner: str | None) -> None:
         module_name = _resolve_import_module(self.source_key, node.module, node.level)
         for alias in node.names:
-            if alias.name != "*":
-                local_name = alias.asname or alias.name
-                self._register_import_binding(alias, owner, local_name, module_name, alias.name)
+            if alias.name == "*":
+                self._replace_frame(owner, {})
+                continue
+            local_name = alias.asname or alias.name
+            self._register_import_binding(alias, owner, local_name, module_name, alias.name)
 
     def _visit_Global(self, node: ast.Global, owner: str | None, _walrus_owner: str | None) -> None:
         for ordinal, name in enumerate(node.names):
