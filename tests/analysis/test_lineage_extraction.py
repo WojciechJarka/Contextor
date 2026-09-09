@@ -155,6 +155,74 @@ def test_stage_1c_for_target_is_runtime_bound_only_inside_loop_body():
     )
 
 
+def test_stage_1c_for_target_does_not_restore_prior_exact_binding_after_loop():
+    facts = _stage_1c_facts(
+        "def run(items):\n"
+        " item = 1\n"
+        " for item in items:\n"
+        "  inside = item\n"
+        " after = item\n"
+    )
+    prior = next(
+        anchor
+        for anchor in _stage_1c_named(facts, "binding", "item")
+        if anchor.span.start_line == 2
+    )
+    runtime_binding = next(
+        anchor
+        for anchor in _stage_1c_named(facts, "binding", "item")
+        if anchor.span.start_line == 3
+    )
+    inside = next(
+        flow
+        for flow in facts.flows
+        if flow.relation is LineageRelation.BINDS
+        and flow.resolution_kind is ResolutionKind.LEXICAL_EXACT
+        and flow.confidence is LineageConfidence.CONFIRMED
+        and isinstance(flow.source, ExtractedOccurrenceRef)
+        and isinstance(flow.target, ExtractedOccurrenceRef)
+        and flow.source.local_id == runtime_binding.local_id
+        and parse_local_occurrence_id(flow.target.local_id)[3] == "item"
+        and flow.evidence.start_line == 4
+    )
+    assert inside.source.local_id == runtime_binding.local_id
+    assert not any(
+        flow.relation is LineageRelation.BINDS
+        and flow.resolution_kind is ResolutionKind.LEXICAL_EXACT
+        and isinstance(flow.source, ExtractedOccurrenceRef)
+        and isinstance(flow.target, ExtractedOccurrenceRef)
+        and flow.source.local_id in {prior.local_id, runtime_binding.local_id}
+        and parse_local_occurrence_id(flow.target.local_id)[3] == "item"
+        and flow.evidence.start_line == 5
+        for flow in facts.flows
+    )
+
+
+def test_stage_1c_for_else_does_not_claim_prior_or_runtime_target_as_exact():
+    facts = _stage_1c_facts(
+        "def run(items):\n"
+        " item = 1\n"
+        " for item in items:\n"
+        "  pass\n"
+        " else:\n"
+        "  probe = item\n"
+    )
+    item_bindings = {
+        anchor.local_id
+        for anchor in _stage_1c_named(facts, "binding", "item")
+    }
+    assert not any(
+        flow.relation is LineageRelation.BINDS
+        and flow.resolution_kind is ResolutionKind.LEXICAL_EXACT
+        and isinstance(flow.source, ExtractedOccurrenceRef)
+        and isinstance(flow.target, ExtractedOccurrenceRef)
+        and flow.source.local_id in item_bindings
+        and parse_local_occurrence_id(flow.target.local_id)[3] == "item"
+        and flow.evidence.start_line == 6
+        for flow in facts.flows
+    )
+
+
 def test_stage_1c_for_destructuring_gets_independent_runtime_sources():
     facts = _stage_1c_facts(
         "def run(rows):\n"
@@ -258,6 +326,44 @@ def test_stage_1c_except_alias_is_runtime_bound_only_inside_handler():
         and isinstance(flow.target, ExtractedOccurrenceRef)
         and parse_local_occurrence_id(flow.target.local_id)[3] == "exc"
         and flow.evidence.start_line == 6
+        for flow in facts.flows
+    )
+
+
+def test_stage_1c_except_alias_does_not_restore_prior_exact_binding_after_handler():
+    facts = _stage_1c_facts(
+        "def run():\n"
+        " exc = 1\n"
+        " try:\n"
+        "  pass\n"
+        " except Error as exc:\n"
+        "  inside = exc\n"
+        " after = exc\n"
+    )
+    bindings = _stage_1c_named(facts, "binding", "exc")
+    prior = next(anchor for anchor in bindings if anchor.span.start_line == 2)
+    handler = next(anchor for anchor in bindings if anchor.span.start_line == 5)
+    inside = next(
+        flow
+        for flow in facts.flows
+        if flow.relation is LineageRelation.BINDS
+        and flow.resolution_kind is ResolutionKind.LEXICAL_EXACT
+        and flow.confidence is LineageConfidence.CONFIRMED
+        and isinstance(flow.source, ExtractedOccurrenceRef)
+        and isinstance(flow.target, ExtractedOccurrenceRef)
+        and flow.source.local_id == handler.local_id
+        and parse_local_occurrence_id(flow.target.local_id)[3] == "exc"
+        and flow.evidence.start_line == 6
+    )
+    assert inside.source.local_id == handler.local_id
+    assert not any(
+        flow.relation is LineageRelation.BINDS
+        and flow.resolution_kind is ResolutionKind.LEXICAL_EXACT
+        and isinstance(flow.source, ExtractedOccurrenceRef)
+        and isinstance(flow.target, ExtractedOccurrenceRef)
+        and flow.source.local_id in {prior.local_id, handler.local_id}
+        and parse_local_occurrence_id(flow.target.local_id)[3] == "exc"
+        and flow.evidence.start_line == 7
         for flow in facts.flows
     )
 

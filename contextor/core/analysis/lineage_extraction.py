@@ -479,6 +479,18 @@ class _AnchorExtractor:
             return
         self._visit(target, owner, walrus_owner)
 
+    def _runtime_target_names(self, target: ast.AST) -> set[str]:
+        if isinstance(target, ast.Name):
+            return {target.id}
+        if isinstance(target, (ast.Tuple, ast.List)):
+            names: set[str] = set()
+            for item in target.elts:
+                names.update(self._runtime_target_names(item))
+            return names
+        if isinstance(target, ast.Starred):
+            return self._runtime_target_names(target.value)
+        return set()
+
     def _visit_Assign(self, node: ast.Assign, owner: str | None, walrus_owner: str | None) -> None:
         source = self._value(node.value, owner, walrus_owner)
         for target in node.targets:
@@ -526,6 +538,7 @@ class _AnchorExtractor:
     def _visit_For(self, node: ast.For, owner: str | None, walrus_owner: str | None) -> None:
         self._visit(node.iter, owner, walrus_owner)
         entry_frame = self._clone_frame(owner)
+        target_names = self._runtime_target_names(node.target)
         self._runtime_bind_target(
             node.target,
             owner,
@@ -533,14 +546,18 @@ class _AnchorExtractor:
         )
         for child in node.body:
             self._visit(child, owner, walrus_owner)
-        self._replace_frame(owner, entry_frame)
+        exit_frame = dict(entry_frame)
+        for name in target_names:
+            exit_frame.pop(name, None)
+        self._replace_frame(owner, exit_frame)
         for child in node.orelse:
             self._visit(child, owner, walrus_owner)
-        self._replace_frame(owner, entry_frame)
+        self._replace_frame(owner, exit_frame)
 
     def _visit_AsyncFor(self, node: ast.AsyncFor, owner: str | None, walrus_owner: str | None) -> None:
         self._visit(node.iter, owner, walrus_owner)
         entry_frame = self._clone_frame(owner)
+        target_names = self._runtime_target_names(node.target)
         self._runtime_bind_target(
             node.target,
             owner,
@@ -548,10 +565,13 @@ class _AnchorExtractor:
         )
         for child in node.body:
             self._visit(child, owner, walrus_owner)
-        self._replace_frame(owner, entry_frame)
+        exit_frame = dict(entry_frame)
+        for name in target_names:
+            exit_frame.pop(name, None)
+        self._replace_frame(owner, exit_frame)
         for child in node.orelse:
             self._visit(child, owner, walrus_owner)
-        self._replace_frame(owner, entry_frame)
+        self._replace_frame(owner, exit_frame)
 
     def _visit_With(self, node: ast.With, owner: str | None, walrus_owner: str | None) -> None:
         for item in node.items:
@@ -616,17 +636,18 @@ class _AnchorExtractor:
         if node.type is not None:
             self._visit(node.type, owner, walrus_owner)
         entry_frame = self._clone_frame(owner)
-        if isinstance(node.name, str):
+        alias_name = node.name if isinstance(node.name, str) else None
+        if alias_name is not None:
             binding = ExtractedOccurrenceRef(
-                self._add("binding", node, node.name, owner)
+                self._add("binding", node, alias_name, owner)
             )
-            if node.name not in self._blocked_names(owner):
+            if alias_name not in self._blocked_names(owner):
                 source = self._occurrence(
                     "runtime_bound_local",
                     node,
-                    node.name,
+                    alias_name,
                 )
-                self._frame(owner)[node.name] = binding
+                self._frame(owner)[alias_name] = binding
                 self._flow(
                     source=source,
                     target=binding,
@@ -637,7 +658,10 @@ class _AnchorExtractor:
                 )
         for child in node.body:
             self._visit(child, owner, walrus_owner)
-        self._replace_frame(owner, entry_frame)
+        exit_frame = dict(entry_frame)
+        if alias_name is not None:
+            exit_frame.pop(alias_name, None)
+        self._replace_frame(owner, exit_frame)
 
     def _visit_MatchAs(self, node: ast.MatchAs, owner: str | None, walrus_owner: str | None) -> None:
         if node.pattern is not None:
