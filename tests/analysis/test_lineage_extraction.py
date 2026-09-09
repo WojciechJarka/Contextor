@@ -95,6 +95,13 @@ def test_stage_1c_merge_frames_keeps_only_identical_occurrences():
         )
     )
     assert merged == {"a": a}
+    assert extractor._merge_frames(
+        (
+            {"a": a},
+            {"a": a},
+            {"a": a},
+        )
+    ) == {"a": a}
 
 
 def _stage_1c_facts(source: str):
@@ -118,6 +125,171 @@ def _stage_1c_runtime_assignment(facts, name):
         and parse_local_occurrence_id(flow.source.local_id)[3] == name
         and parse_local_occurrence_id(flow.target.local_id)[3] == name
     )
+
+
+def _stage_1c_lexical_bind_sources(facts, name, line):
+    return [
+        flow.source.local_id
+        for flow in facts.flows
+        if flow.relation is LineageRelation.BINDS
+        and flow.resolution_kind is ResolutionKind.LEXICAL_EXACT
+        and flow.confidence is LineageConfidence.CONFIRMED
+        and isinstance(flow.source, ExtractedOccurrenceRef)
+        and isinstance(flow.target, ExtractedOccurrenceRef)
+        and parse_local_occurrence_id(flow.target.local_id)[0] == "name_load"
+        and parse_local_occurrence_id(flow.target.local_id)[3] == name
+        and flow.evidence.start_line == line
+    ]
+
+
+def test_stage_1c_if_branches_are_exact_inside_and_ambiguous_after_merge():
+    facts = _stage_1c_facts(
+        "def run(cond):\n"
+        " stable = 1\n"
+        " if cond:\n"
+        "  value = 2\n"
+        "  left = value\n"
+        " else:\n"
+        "  value = 3\n"
+        "  right = value\n"
+        " after_value = value\n"
+        " after_stable = stable\n"
+    )
+    value_bindings = _stage_1c_named(facts, "binding", "value")
+    stable = _stage_1c_named(facts, "binding", "stable")[0]
+    assert len(value_bindings) == 2
+    assert _stage_1c_lexical_bind_sources(facts, "value", 5) == [
+        next(anchor.local_id for anchor in value_bindings if anchor.span.start_line == 4)
+    ]
+    assert _stage_1c_lexical_bind_sources(facts, "value", 8) == [
+        next(anchor.local_id for anchor in value_bindings if anchor.span.start_line == 7)
+    ]
+    assert _stage_1c_lexical_bind_sources(facts, "value", 9) == []
+    assert _stage_1c_lexical_bind_sources(facts, "stable", 10) == [
+        stable.local_id
+    ]
+
+
+def test_stage_1c_if_without_else_invalidates_conditional_rebind():
+    facts = _stage_1c_facts(
+        "def run(cond):\n"
+        " value = 1\n"
+        " if cond:\n"
+        "  value = 2\n"
+        " after = value\n"
+    )
+    assert _stage_1c_lexical_bind_sources(
+        facts,
+        "value",
+        5,
+    ) == []
+
+
+def test_stage_1c_for_body_touch_invalidates_non_target_binding_after_loop():
+    facts = _stage_1c_facts(
+        "def run(items):\n"
+        " stable = 1\n"
+        " changed = 2\n"
+        " for item in items:\n"
+        "  changed = item\n"
+        " after_changed = changed\n"
+        " after_stable = stable\n"
+    )
+    stable = _stage_1c_named(facts, "binding", "stable")[0]
+    assert _stage_1c_lexical_bind_sources(
+        facts,
+        "changed",
+        6,
+    ) == []
+    assert _stage_1c_lexical_bind_sources(
+        facts,
+        "stable",
+        7,
+    ) == [stable.local_id]
+
+
+def test_stage_1c_while_body_and_else_only_bindings_are_not_exact_after_loop():
+    facts = _stage_1c_facts(
+        "def run(cond):\n"
+        " value = 1\n"
+        " while cond:\n"
+        "  value = 2\n"
+        " else:\n"
+        "  else_only = 3\n"
+        " after_value = value\n"
+        " after_else = else_only\n"
+    )
+    assert _stage_1c_lexical_bind_sources(
+        facts,
+        "value",
+        7,
+    ) == []
+    assert _stage_1c_lexical_bind_sources(
+        facts,
+        "else_only",
+        8,
+    ) == []
+
+
+def test_stage_1c_try_handler_conflict_merges_to_unresolved_but_finally_is_exact():
+    facts = _stage_1c_facts(
+        "def run():\n"
+        " try:\n"
+        "  value = 1\n"
+        "  try_seen = value\n"
+        " except Error:\n"
+        "  value = 2\n"
+        "  except_seen = value\n"
+        " finally:\n"
+        "  stable = 3\n"
+        " after_value = value\n"
+        " after_stable = stable\n"
+    )
+    value_bindings = _stage_1c_named(facts, "binding", "value")
+    try_value = next(anchor for anchor in value_bindings if anchor.span.start_line == 3)
+    except_value = next(anchor for anchor in value_bindings if anchor.span.start_line == 6)
+    stable = _stage_1c_named(facts, "binding", "stable")[0]
+    assert _stage_1c_lexical_bind_sources(facts, "value", 4) == [try_value.local_id]
+    assert _stage_1c_lexical_bind_sources(facts, "value", 7) == [except_value.local_id]
+    assert _stage_1c_lexical_bind_sources(facts, "value", 10) == []
+    assert _stage_1c_lexical_bind_sources(facts, "stable", 11) == [stable.local_id]
+
+
+def test_stage_1c_try_handler_starts_from_entry_not_partial_try_state():
+    facts = _stage_1c_facts(
+        "def run():\n"
+        " before = 1\n"
+        " try:\n"
+        "  partial = before\n"
+        "  explode()\n"
+        " except Error:\n"
+        "  seen_before = before\n"
+        "  seen_partial = partial\n"
+    )
+    before = _stage_1c_named(facts, "binding", "before")[0]
+    assert _stage_1c_lexical_bind_sources(facts, "before", 7) == [before.local_id]
+    assert _stage_1c_lexical_bind_sources(facts, "partial", 8) == []
+
+
+def test_stage_1c_match_cases_are_independent_and_no_match_path_is_preserved():
+    facts = _stage_1c_facts(
+        "def run(subject):\n"
+        " value = 0\n"
+        " match subject:\n"
+        "  case 1:\n"
+        "   value = 1\n"
+        "   first = value\n"
+        "  case 2:\n"
+        "   value = 2\n"
+        "   second = value\n"
+        " after = value\n"
+    )
+    value_bindings = _stage_1c_named(facts, "binding", "value")
+    first_case = next(anchor for anchor in value_bindings if anchor.span.start_line == 5)
+    second_case = next(anchor for anchor in value_bindings if anchor.span.start_line == 8)
+    assert _stage_1c_lexical_bind_sources(facts, "value", 6) == [first_case.local_id]
+    assert _stage_1c_lexical_bind_sources(facts, "value", 9) == [second_case.local_id]
+    assert _stage_1c_lexical_bind_sources(facts, "value", 10) == []
 
 
 def test_stage_1c_for_target_is_runtime_bound_only_inside_loop_body():

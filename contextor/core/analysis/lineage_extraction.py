@@ -253,6 +253,18 @@ class _AnchorExtractor:
                 merged[name] = first
         return merged
 
+    def _visit_block_from_frame(
+        self,
+        body: list[ast.stmt],
+        owner: str | None,
+        walrus_owner: str | None,
+        frame: dict[str, ExtractedOccurrenceRef],
+    ) -> dict[str, ExtractedOccurrenceRef]:
+        self._replace_frame(owner, frame)
+        for child in body:
+            self._visit(child, owner, walrus_owner)
+        return self._clone_frame(owner)
+
     def _blocked_names(self, owner: str | None) -> set[str]:
         return self._blocked.setdefault(owner, set())
 
@@ -479,18 +491,6 @@ class _AnchorExtractor:
             return
         self._visit(target, owner, walrus_owner)
 
-    def _runtime_target_names(self, target: ast.AST) -> set[str]:
-        if isinstance(target, ast.Name):
-            return {target.id}
-        if isinstance(target, (ast.Tuple, ast.List)):
-            names: set[str] = set()
-            for item in target.elts:
-                names.update(self._runtime_target_names(item))
-            return names
-        if isinstance(target, ast.Starred):
-            return self._runtime_target_names(target.value)
-        return set()
-
     def _visit_Assign(self, node: ast.Assign, owner: str | None, walrus_owner: str | None) -> None:
         source = self._value(node.value, owner, walrus_owner)
         for target in node.targets:
@@ -535,10 +535,33 @@ class _AnchorExtractor:
             return
         self._frame(owner)[node.target.id] = binding
 
+    def _visit_If(self, node: ast.If, owner: str | None, walrus_owner: str | None) -> None:
+        self._visit(node.test, owner, walrus_owner)
+        entry_frame = self._clone_frame(owner)
+        body_frame = self._visit_block_from_frame(
+            node.body,
+            owner,
+            walrus_owner,
+            entry_frame,
+        )
+        if node.orelse:
+            else_frame = self._visit_block_from_frame(
+                node.orelse,
+                owner,
+                walrus_owner,
+                entry_frame,
+            )
+        else:
+            else_frame = dict(entry_frame)
+        self._replace_frame(
+            owner,
+            self._merge_frames((body_frame, else_frame)),
+        )
+
     def _visit_For(self, node: ast.For, owner: str | None, walrus_owner: str | None) -> None:
         self._visit(node.iter, owner, walrus_owner)
         entry_frame = self._clone_frame(owner)
-        target_names = self._runtime_target_names(node.target)
+        self._replace_frame(owner, entry_frame)
         self._runtime_bind_target(
             node.target,
             owner,
@@ -546,18 +569,28 @@ class _AnchorExtractor:
         )
         for child in node.body:
             self._visit(child, owner, walrus_owner)
-        exit_frame = dict(entry_frame)
-        for name in target_names:
-            exit_frame.pop(name, None)
-        self._replace_frame(owner, exit_frame)
-        for child in node.orelse:
-            self._visit(child, owner, walrus_owner)
-        self._replace_frame(owner, exit_frame)
+        body_frame = self._clone_frame(owner)
+        loop_exit_frame = self._merge_frames(
+            (entry_frame, body_frame)
+        )
+        self._replace_frame(owner, loop_exit_frame)
+        if not node.orelse:
+            return
+        else_frame = self._visit_block_from_frame(
+            node.orelse,
+            owner,
+            walrus_owner,
+            loop_exit_frame,
+        )
+        self._replace_frame(
+            owner,
+            self._merge_frames((loop_exit_frame, else_frame)),
+        )
 
     def _visit_AsyncFor(self, node: ast.AsyncFor, owner: str | None, walrus_owner: str | None) -> None:
         self._visit(node.iter, owner, walrus_owner)
         entry_frame = self._clone_frame(owner)
-        target_names = self._runtime_target_names(node.target)
+        self._replace_frame(owner, entry_frame)
         self._runtime_bind_target(
             node.target,
             owner,
@@ -565,13 +598,49 @@ class _AnchorExtractor:
         )
         for child in node.body:
             self._visit(child, owner, walrus_owner)
-        exit_frame = dict(entry_frame)
-        for name in target_names:
-            exit_frame.pop(name, None)
-        self._replace_frame(owner, exit_frame)
-        for child in node.orelse:
-            self._visit(child, owner, walrus_owner)
-        self._replace_frame(owner, exit_frame)
+        body_frame = self._clone_frame(owner)
+        loop_exit_frame = self._merge_frames(
+            (entry_frame, body_frame)
+        )
+        self._replace_frame(owner, loop_exit_frame)
+        if not node.orelse:
+            return
+        else_frame = self._visit_block_from_frame(
+            node.orelse,
+            owner,
+            walrus_owner,
+            loop_exit_frame,
+        )
+        self._replace_frame(
+            owner,
+            self._merge_frames((loop_exit_frame, else_frame)),
+        )
+
+    def _visit_While(self, node: ast.While, owner: str | None, walrus_owner: str | None) -> None:
+        self._visit(node.test, owner, walrus_owner)
+        entry_frame = self._clone_frame(owner)
+        body_frame = self._visit_block_from_frame(
+            node.body,
+            owner,
+            walrus_owner,
+            entry_frame,
+        )
+        loop_exit_frame = self._merge_frames(
+            (entry_frame, body_frame)
+        )
+        self._replace_frame(owner, loop_exit_frame)
+        if not node.orelse:
+            return
+        else_frame = self._visit_block_from_frame(
+            node.orelse,
+            owner,
+            walrus_owner,
+            loop_exit_frame,
+        )
+        self._replace_frame(
+            owner,
+            self._merge_frames((loop_exit_frame, else_frame)),
+        )
 
     def _visit_With(self, node: ast.With, owner: str | None, walrus_owner: str | None) -> None:
         for item in node.items:
@@ -632,6 +701,35 @@ class _AnchorExtractor:
             self._blocked_names(owner).add(name)
             self._frame(owner).pop(name, None)
 
+    def _visit_Try(self, node: ast.Try, owner: str | None, walrus_owner: str | None) -> None:
+        entry_frame = self._clone_frame(owner)
+        normal_frame = self._visit_block_from_frame(
+            node.body,
+            owner,
+            walrus_owner,
+            entry_frame,
+        )
+        if node.orelse:
+            normal_frame = self._visit_block_from_frame(
+                node.orelse,
+                owner,
+                walrus_owner,
+                normal_frame,
+            )
+        reachable_frames = [normal_frame]
+        for handler in node.handlers:
+            self._replace_frame(owner, entry_frame)
+            self._visit(handler, owner, walrus_owner)
+            reachable_frames.append(
+                self._clone_frame(owner)
+            )
+        merged_frame = self._merge_frames(
+            tuple(reachable_frames)
+        )
+        self._replace_frame(owner, merged_frame)
+        for child in node.finalbody:
+            self._visit(child, owner, walrus_owner)
+
     def _visit_ExceptHandler(self, node: ast.ExceptHandler, owner: str | None, walrus_owner: str | None) -> None:
         if node.type is not None:
             self._visit(node.type, owner, walrus_owner)
@@ -662,6 +760,25 @@ class _AnchorExtractor:
         if alias_name is not None:
             exit_frame.pop(alias_name, None)
         self._replace_frame(owner, exit_frame)
+
+    def _visit_Match(self, node: ast.Match, owner: str | None, walrus_owner: str | None) -> None:
+        self._visit(node.subject, owner, walrus_owner)
+        entry_frame = self._clone_frame(owner)
+        reachable_frames = [dict(entry_frame)]
+        for case in node.cases:
+            self._replace_frame(owner, entry_frame)
+            self._visit(case.pattern, owner, walrus_owner)
+            if case.guard is not None:
+                self._visit(case.guard, owner, walrus_owner)
+            for child in case.body:
+                self._visit(child, owner, walrus_owner)
+            reachable_frames.append(
+                self._clone_frame(owner)
+            )
+        self._replace_frame(
+            owner,
+            self._merge_frames(tuple(reachable_frames)),
+        )
 
     def _visit_MatchAs(self, node: ast.MatchAs, owner: str | None, walrus_owner: str | None) -> None:
         if node.pattern is not None:
