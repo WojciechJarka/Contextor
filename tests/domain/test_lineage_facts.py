@@ -5,6 +5,7 @@ import sys
 import pytest
 
 from contextor.core.domain.lineage_facts import (
+    LINEAGE_FACTS_SEMANTIC_VERSION,
     ExtractedAnchorFact,
     ExtractedFlowFact,
     ExtractedLineageSourceFacts,
@@ -26,6 +27,7 @@ from contextor.core.domain.lineage_facts import (
     SemanticEndpoint,
     SourceLineageManifest,
     SourceSpan,
+    SurfaceDeclarationEvidence,
     SurfaceKind,
     build_class_attr_slot,
     build_instance_attr_slot,
@@ -114,7 +116,7 @@ def test_materialized_slice_rejects_foreign_occurrences_but_allows_semantic_boun
         MaterializedLineageSourceFacts(source_manifest, (), (MaterializedFlowFact("f", endpoint, foreign, LineageRelation.CALL_RESULT, span, ResolutionKind.CALL_EXACT, LineageConfidence.CONFIRMED),), ())
     surface_manifest = SourceLineageManifest("a.py", "a", "1", LineageFamilyStatus.FRESH, 0, 0, 1)
     with pytest.raises(ValueError, match="foreign occurrence"):
-        MaterializedLineageSourceFacts(surface_manifest, (), (), (MaterializedSurfaceFact("s", SurfaceKind.EXPORT, foreign, span, ResolutionKind.IMPORT_EXACT, LineageConfidence.CONFIRMED, "x"),))
+        MaterializedLineageSourceFacts(surface_manifest, (), (), (MaterializedSurfaceFact("s", SurfaceKind.EXPORT, foreign, span, ResolutionKind.BOUNDED_STATIC_SET, LineageConfidence.INFERRED, "x"),))
 
 
 def test_provider_pair_and_dynamic_surface_boundary_contract():
@@ -245,3 +247,209 @@ def test_domain_module_does_not_import_or_construct_persistent_registry():
     module = sys.modules["contextor.core.domain.lineage_facts"]
     assert "PersistentIdentityRegistry" not in vars(module)
     assert not any(name.endswith("persistent_registry") for name in sys.modules if name.startswith("contextor.core.domain.lineage_facts"))
+
+
+@pytest.mark.parametrize(
+    ("declaration_evidence", "resolution_kind", "confidence", "dynamic_boundary"),
+    [
+        (SurfaceDeclarationEvidence.STATIC_DECLARATION, ResolutionKind.LEXICAL_EXACT, LineageConfidence.CONFIRMED, None),
+        (SurfaceDeclarationEvidence.STATIC_DECLARATION, ResolutionKind.BOUNDED_STATIC_SET, LineageConfidence.INFERRED, None),
+        (SurfaceDeclarationEvidence.STATIC_DECLARATION, ResolutionKind.UNRESOLVED_NAME, LineageConfidence.UNRESOLVED, None),
+        (SurfaceDeclarationEvidence.STATIC_DECLARATION, ResolutionKind.DYNAMIC_RUNTIME_BOUNDARY, LineageConfidence.DYNAMIC, "runtime"),
+        (SurfaceDeclarationEvidence.STATIC_DECLARATION, ResolutionKind.PYTHON_NAME_CONVENTION, LineageConfidence.INFERRED, None),
+        (SurfaceDeclarationEvidence.LITERAL_ALL_DECLARATION, ResolutionKind.LITERAL_CONTAINER_EXACT, LineageConfidence.CONFIRMED, None),
+        (SurfaceDeclarationEvidence.LITERAL_ALL_DECLARATION, ResolutionKind.BOUNDED_STATIC_SET, LineageConfidence.INFERRED, None),
+        (SurfaceDeclarationEvidence.LITERAL_ALL_DECLARATION, ResolutionKind.UNRESOLVED_NAME, LineageConfidence.UNRESOLVED, None),
+        (SurfaceDeclarationEvidence.LITERAL_ALL_DECLARATION, ResolutionKind.DYNAMIC_RUNTIME_BOUNDARY, LineageConfidence.DYNAMIC, "runtime"),
+        (SurfaceDeclarationEvidence.LITERAL_ALL_DECLARATION, ResolutionKind.PYTHON_NAME_CONVENTION, LineageConfidence.INFERRED, None),
+        (None, ResolutionKind.PYTHON_NAME_CONVENTION, LineageConfidence.INFERRED, None),
+    ],
+)
+def test_surface_declaration_evidence_and_target_resolution_are_orthogonal(
+    declaration_evidence,
+    resolution_kind,
+    confidence,
+    dynamic_boundary,
+):
+    kind = (
+        SurfaceKind.EXPORT
+        if declaration_evidence is SurfaceDeclarationEvidence.LITERAL_ALL_DECLARATION
+        else SurfaceKind.PUBLIC_SYMBOL
+    )
+    surface = ExtractedSurfaceFact(
+        "surface",
+        kind,
+        ExtractedOccurrenceRef("occurrence"),
+        SourceSpan(1, 0, 1, 1),
+        resolution_kind,
+        confidence,
+        "name",
+        dynamic_boundary=dynamic_boundary,
+        declaration_evidence=declaration_evidence,
+    )
+    assert surface.declaration_evidence is declaration_evidence
+
+
+def test_literal_all_declaration_requires_export_surface_kind():
+    span = SourceSpan(1, 0, 1, 1)
+    ExtractedSurfaceFact(
+        "export",
+        SurfaceKind.EXPORT,
+        ExtractedOccurrenceRef("occurrence"),
+        span,
+        ResolutionKind.LITERAL_CONTAINER_EXACT,
+        LineageConfidence.CONFIRMED,
+        "name",
+        declaration_evidence=SurfaceDeclarationEvidence.LITERAL_ALL_DECLARATION,
+    )
+    for kind in (
+        SurfaceKind.PUBLIC_SYMBOL,
+        SurfaceKind.REEXPORT,
+        SurfaceKind.ENTRYPOINT,
+        SurfaceKind.REGISTRATION,
+    ):
+        with pytest.raises(ValueError, match="LITERAL_ALL_DECLARATION"):
+            ExtractedSurfaceFact(
+                "not-export",
+                kind,
+                ExtractedOccurrenceRef("occurrence"),
+                span,
+                ResolutionKind.UNRESOLVED_NAME,
+                LineageConfidence.UNRESOLVED,
+                "name",
+                declaration_evidence=SurfaceDeclarationEvidence.LITERAL_ALL_DECLARATION,
+            )
+
+
+@pytest.mark.parametrize(
+    "resolution_kind",
+    [
+        ResolutionKind.LEXICAL_EXACT,
+        ResolutionKind.IMPORT_EXACT,
+        ResolutionKind.CALL_EXACT,
+        ResolutionKind.SIGNATURE_EXACT,
+        ResolutionKind.STATIC_MRO_EXACT,
+        ResolutionKind.LITERAL_CONTAINER_EXACT,
+    ],
+)
+def test_materialized_confirmed_exact_surface_targets_require_semantic_endpoint(
+    resolution_kind,
+):
+    span = SourceSpan(1, 0, 1, 1)
+    occurrence = MaterializedOccurrenceRef("a.py", "fingerprint", "occurrence")
+    with pytest.raises(ValueError, match="confirmed exact semantic surface target"):
+        MaterializedSurfaceFact(
+            "surface",
+            SurfaceKind.EXPORT,
+            occurrence,
+            span,
+            resolution_kind,
+            LineageConfidence.CONFIRMED,
+            "name",
+        )
+    surface = MaterializedSurfaceFact(
+        "surface",
+        SurfaceKind.EXPORT,
+        SemanticEndpoint("artifact/1"),
+        span,
+        resolution_kind,
+        LineageConfidence.CONFIRMED,
+        "name",
+    )
+    assert isinstance(surface.exposed, SemanticEndpoint)
+
+
+def test_materialized_confirmed_receptor_target_requires_semantic_endpoint():
+    span = SourceSpan(1, 0, 1, 1)
+    occurrence = MaterializedOccurrenceRef("a.py", "fingerprint", "occurrence")
+    with pytest.raises(ValueError, match="confirmed exact semantic surface target"):
+        MaterializedSurfaceFact(
+            "surface",
+            SurfaceKind.REGISTRATION,
+            occurrence,
+            span,
+            ResolutionKind.RECEPTOR_PROVIDED,
+            LineageConfidence.CONFIRMED,
+            "name",
+        )
+    surface = MaterializedSurfaceFact(
+        "surface",
+        SurfaceKind.REGISTRATION,
+        SemanticEndpoint("artifact/1"),
+        span,
+        ResolutionKind.RECEPTOR_PROVIDED,
+        LineageConfidence.CONFIRMED,
+        "name",
+    )
+    assert isinstance(surface.exposed, SemanticEndpoint)
+
+
+def test_exact_reexport_uses_static_declaration_and_semantic_endpoint():
+    surface = MaterializedSurfaceFact(
+        "reexport",
+        SurfaceKind.REEXPORT,
+        SemanticEndpoint("artifact/1"),
+        SourceSpan(1, 0, 1, 1),
+        ResolutionKind.IMPORT_EXACT,
+        LineageConfidence.CONFIRMED,
+        "name",
+        declaration_evidence=SurfaceDeclarationEvidence.STATIC_DECLARATION,
+    )
+    assert surface.declaration_evidence is SurfaceDeclarationEvidence.STATIC_DECLARATION
+
+
+@pytest.mark.parametrize(
+    ("resolution_kind", "confidence", "dynamic_boundary"),
+    [
+        (ResolutionKind.BOUNDED_STATIC_SET, LineageConfidence.INFERRED, None),
+        (ResolutionKind.UNRESOLVED_NAME, LineageConfidence.UNRESOLVED, None),
+        (ResolutionKind.DYNAMIC_RUNTIME_BOUNDARY, LineageConfidence.DYNAMIC, "runtime"),
+    ],
+)
+def test_nonexact_materialized_surface_targets_can_remain_local_occurrences(
+    resolution_kind,
+    confidence,
+    dynamic_boundary,
+):
+    occurrence = MaterializedOccurrenceRef("a.py", "fingerprint", "occurrence")
+    surface = MaterializedSurfaceFact(
+        "surface",
+        SurfaceKind.EXPORT,
+        occurrence,
+        SourceSpan(1, 0, 1, 1),
+        resolution_kind,
+        confidence,
+        "name",
+        dynamic_boundary=dynamic_boundary,
+    )
+    assert surface.exposed is occurrence
+
+
+def test_surface_declaration_evidence_rejects_invalid_type_and_preserves_convention_guard():
+    span = SourceSpan(1, 0, 1, 1)
+    with pytest.raises(TypeError, match="declaration_evidence"):
+        ExtractedSurfaceFact(
+            "surface",
+            SurfaceKind.EXPORT,
+            ExtractedOccurrenceRef("occurrence"),
+            span,
+            ResolutionKind.UNRESOLVED_NAME,
+            LineageConfidence.UNRESOLVED,
+            "name",
+            declaration_evidence="STATIC_DECLARATION",  # type: ignore[arg-type]
+        )
+    with pytest.raises(ValueError, match="PYTHON_NAME_CONVENTION"):
+        ExtractedSurfaceFact(
+            "surface",
+            SurfaceKind.PUBLIC_SYMBOL,
+            ExtractedOccurrenceRef("occurrence"),
+            span,
+            ResolutionKind.PYTHON_NAME_CONVENTION,
+            LineageConfidence.CONFIRMED,
+            "name",
+            declaration_evidence=SurfaceDeclarationEvidence.STATIC_DECLARATION,
+        )
+
+
+def test_lineage_facts_semantic_version_remains_initial_version():
+    assert LINEAGE_FACTS_SEMANTIC_VERSION == "1"

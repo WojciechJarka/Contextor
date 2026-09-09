@@ -67,6 +67,11 @@ class SurfaceKind(str, Enum):
     REGISTRATION = "REGISTRATION"
 
 
+class SurfaceDeclarationEvidence(str, Enum):
+    STATIC_DECLARATION = "STATIC_DECLARATION"
+    LITERAL_ALL_DECLARATION = "LITERAL_ALL_DECLARATION"
+
+
 class LineageFamilyStatus(str, Enum):
     NOT_MATERIALIZED = "not_materialized"
     FRESH = "fresh"
@@ -238,6 +243,7 @@ class ExtractedSurfaceFact:
     declared_name: str
     dynamic_boundary: str | None = None
     provider: ProviderRef | None = None
+    declaration_evidence: SurfaceDeclarationEvidence | None = None
 
     def __post_init__(self) -> None:
         _require_token(self.local_id, "local_id")
@@ -247,6 +253,7 @@ class ExtractedSurfaceFact:
         _validate_confidence(self.resolution_kind, self.confidence)
         _validate_dynamic_boundary(self.resolution_kind, self.confidence, self.dynamic_boundary)
         _validate_provider(self.provider)
+        _validate_surface_declaration_evidence(self.kind, self.declaration_evidence)
 
 
 @dataclass(frozen=True)
@@ -318,6 +325,7 @@ class MaterializedSurfaceFact:
     declared_name: str
     dynamic_boundary: str | None = None
     provider: ProviderRef | None = None
+    declaration_evidence: SurfaceDeclarationEvidence | None = None
 
     def __post_init__(self) -> None:
         _require_token(self.local_id, "local_id")
@@ -326,6 +334,12 @@ class MaterializedSurfaceFact:
         _validate_confidence(self.resolution_kind, self.confidence)
         _validate_dynamic_boundary(self.resolution_kind, self.confidence, self.dynamic_boundary)
         _validate_provider(self.provider)
+        _validate_surface_declaration_evidence(self.kind, self.declaration_evidence)
+        _validate_materialized_surface_target(
+            self.exposed,
+            self.resolution_kind,
+            self.confidence,
+        )
 
 
 @dataclass(frozen=True)
@@ -365,7 +379,13 @@ class SemanticInterfaceDescriptor:
 
 @dataclass(frozen=True)
 class MaterializedLineageSourceFacts:
-    """Canonical source slice; all endpoints use resolved semantic identities."""
+    """Canonical source slice with local occurrences and semantic boundaries.
+
+    A ``MaterializedOccurrenceRef`` is a canonical source-local occurrence
+    belonging to this manifest's source slice.  A ``SemanticEndpoint`` is a
+    semantic/interface boundary.  Foreign or cross-source occurrences cannot
+    be stable cross-source endpoints.
+    """
 
     manifest: SourceLineageManifest
     anchors: tuple[MaterializedAnchorFact, ...] = ()
@@ -557,6 +577,16 @@ def _validate_optional_token(value: str | None, label: str) -> None:
         _require_token(value, label)
 
 
+_EXACT_SURFACE_TARGET_RESOLUTIONS = frozenset({
+    ResolutionKind.LEXICAL_EXACT,
+    ResolutionKind.IMPORT_EXACT,
+    ResolutionKind.CALL_EXACT,
+    ResolutionKind.SIGNATURE_EXACT,
+    ResolutionKind.STATIC_MRO_EXACT,
+    ResolutionKind.LITERAL_CONTAINER_EXACT,
+})
+
+
 def _validate_confidence(kind: ResolutionKind, confidence: LineageConfidence) -> None:
     required = {
         ResolutionKind.PYTHON_NAME_CONVENTION: LineageConfidence.INFERRED,
@@ -566,14 +596,10 @@ def _validate_confidence(kind: ResolutionKind, confidence: LineageConfidence) ->
     }.get(kind)
     if required is not None and confidence != required:
         raise ValueError(f"{kind.value} requires {required.value} confidence.")
-    if kind in {
-        ResolutionKind.LEXICAL_EXACT,
-        ResolutionKind.IMPORT_EXACT,
-        ResolutionKind.CALL_EXACT,
-        ResolutionKind.SIGNATURE_EXACT,
-        ResolutionKind.STATIC_MRO_EXACT,
-        ResolutionKind.LITERAL_CONTAINER_EXACT,
-    } and confidence in {LineageConfidence.UNRESOLVED, LineageConfidence.DYNAMIC}:
+    if kind in _EXACT_SURFACE_TARGET_RESOLUTIONS and confidence in {
+        LineageConfidence.UNRESOLVED,
+        LineageConfidence.DYNAMIC,
+    }:
         raise ValueError("Exact resolution kinds cannot be unresolved or dynamic.")
 
 
@@ -590,6 +616,49 @@ def _validate_dynamic_boundary(
 def _validate_provider(provider: ProviderRef | None) -> None:
     if provider is not None and not isinstance(provider, ProviderRef):
         raise TypeError("provider must be a ProviderRef or None.")
+
+
+def _validate_surface_declaration_evidence(
+    kind: SurfaceKind,
+    declaration_evidence: SurfaceDeclarationEvidence | None,
+) -> None:
+    if declaration_evidence is not None and not isinstance(
+        declaration_evidence, SurfaceDeclarationEvidence
+    ):
+        raise TypeError("declaration_evidence must be SurfaceDeclarationEvidence or None")
+    if (
+        declaration_evidence is SurfaceDeclarationEvidence.LITERAL_ALL_DECLARATION
+        and kind is not SurfaceKind.EXPORT
+    ):
+        raise ValueError(
+            "LITERAL_ALL_DECLARATION is valid only for SurfaceKind.EXPORT"
+        )
+
+
+def _claims_exact_semantic_target(
+    resolution_kind: ResolutionKind,
+    confidence: LineageConfidence,
+) -> bool:
+    return (
+        confidence is LineageConfidence.CONFIRMED
+        and (
+            resolution_kind in _EXACT_SURFACE_TARGET_RESOLUTIONS
+            or resolution_kind is ResolutionKind.RECEPTOR_PROVIDED
+        )
+    )
+
+
+def _validate_materialized_surface_target(
+    exposed: MaterializedOccurrenceRef | SemanticEndpoint,
+    resolution_kind: ResolutionKind,
+    confidence: LineageConfidence,
+) -> None:
+    if _claims_exact_semantic_target(resolution_kind, confidence) and not isinstance(
+        exposed, SemanticEndpoint
+    ):
+        raise ValueError(
+            "confirmed exact semantic surface target requires SemanticEndpoint"
+        )
 
 
 def _validate_source_status(status: LineageFamilyStatus, reason: str | None) -> None:
@@ -652,6 +721,7 @@ __all__ = [
     "SourceLineageManifest",
     "SourceSpan",
     "SurfaceFact",
+    "SurfaceDeclarationEvidence",
     "SurfaceKind",
     "build_class_attr_slot",
     "build_entrypoint_slot",
