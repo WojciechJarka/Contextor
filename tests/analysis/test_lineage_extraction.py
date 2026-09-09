@@ -15,6 +15,7 @@ from contextor.core.analysis.lineage_extraction import (
 )
 from contextor.core.domain.lineage_facts import (
     ExtractedOccurrenceRef,
+    ExtractedSymbolicRef,
     ExtractedSymbolicKind,
     LineageConfidence,
     LineageFamilyStatus,
@@ -140,6 +141,45 @@ def _stage_1c_lexical_bind_sources(facts, name, line):
         and parse_local_occurrence_id(flow.target.local_id)[3] == name
         and flow.evidence.start_line == line
     ]
+
+
+def _stage_1c_call_result_flows(facts):
+    return [flow for flow in facts.flows if flow.relation is LineageRelation.CALL_RESULT]
+
+
+def _stage_1c_argument_parameter_names(facts):
+    return [parse_local_occurrence_id(flow.target.source_local_id)[3] for flow in facts.flows if flow.relation is LineageRelation.ARGUMENT_TO_PARAMETER and isinstance(flow.target, ExtractedSymbolicRef)]
+
+
+def test_stage_1c5_local_function_call_links_return_and_argument_exactly():
+    facts = _stage_1c_facts("def produce(value):\n return value\nresult = produce(1)\n")
+    function = _stage_1c_named(facts, "function", "produce")[0]
+    returns = [flow for flow in facts.flows if flow.relation is LineageRelation.RETURNS]
+    assert len(returns) == 1 and isinstance(returns[0].target, ExtractedSymbolicRef)
+    assert returns[0].target.kind is ExtractedSymbolicKind.RETURN and returns[0].target.source_local_id == function.local_id
+    call = next(flow for flow in _stage_1c_call_result_flows(facts) if flow.resolution_kind is ResolutionKind.CALL_EXACT)
+    assert isinstance(call.source, ExtractedSymbolicRef) and call.source == returns[0].target
+    assert _stage_1c_argument_parameter_names(facts) == ["value"]
+
+
+def test_stage_1c5_lambda_rebind_and_branch_resolution_are_fail_closed():
+    lambda_facts = _stage_1c_facts("fn = lambda value: value\nresult = fn(1)\n")
+    assert next(flow for flow in _stage_1c_call_result_flows(lambda_facts) if flow.resolution_kind is ResolutionKind.CALL_EXACT)
+    rebound = _stage_1c_facts("def run():\n return 1\nrun = other\nvalue = run()\n")
+    assert _stage_1c_call_result_flows(rebound)[0].resolution_kind is ResolutionKind.DYNAMIC_RUNTIME_BOUNDARY
+    branch = _stage_1c_facts("def run():\n return 1\nif cond:\n run = other\nvalue = run()\n")
+    assert _stage_1c_call_result_flows(branch)[0].resolution_kind is ResolutionKind.UNRESOLVED_NAME
+
+
+def test_stage_1c5_signature_stars_and_dynamic_calls_are_conservative():
+    facts = _stage_1c_facts("def run(a, /, b, *rest, flag, **extra):\n return b\nresult = run(1, 2, 3, 4, flag=5, other=6)\n")
+    assert _stage_1c_argument_parameter_names(facts) == ["a", "b", "rest", "rest", "flag", "extra"]
+    stars = _stage_1c_facts("def run(a, *rest, **extra):\n return a\nresult = run(*items, **mapping)\n")
+    assert _stage_1c_argument_parameter_names(stars) == []
+    unresolved = _stage_1c_facts("result = missing(1)\n")
+    dynamic = _stage_1c_facts("result = obj.method(1)\n")
+    assert _stage_1c_call_result_flows(unresolved)[0].resolution_kind is ResolutionKind.UNRESOLVED_NAME
+    assert _stage_1c_call_result_flows(dynamic)[0].resolution_kind is ResolutionKind.DYNAMIC_RUNTIME_BOUNDARY
 
 
 def test_stage_1c_if_branches_are_exact_inside_and_ambiguous_after_merge():

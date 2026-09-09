@@ -1,476 +1,209 @@
 STATUS=FINAL_PASS
-CONTEXTOR_PRE_EDIT=Fresh Contextor edit context for contextor/core/analysis/lineage_extraction.py: revision 503, no warnings, fresh syntax diagnostics. HEAD was 914af62dc51b4c307de9164668cd929095747ed9 and the authorized Stage 1C.4 working changes were preserved.
-IMPLEMENTATION=_visit_ExceptHandler now derives its exit frame from the actual handler-body frame and removes only the exception alias. _visit_Try therefore merges handler rebindings instead of restoring the handler entry frame.
+CONTEXTOR_PRE_EDIT=Fresh Contextor edit context revision 506; base HEAD matched and targets were clean.
+IMPLEMENTATION=Stage 1C.5 implemented.
+DEFERRED=Imports, attribute calls, literal star/dstar expansion, CFG, await, and expression-control behavior.
 FILES_CHANGED=contextor/core/analysis/lineage_extraction.py; tests/analysis/test_lineage_extraction.py
-TESTS_RUN=.venv\Scripts\python.exe -m pytest tests/analysis/test_lineage_extraction.py -q; .venv\Scripts\python.exe -m pytest tests/analysis/test_lineage_extraction.py tests/test_no_double_parse.py tests/test_index_fusion.py -q; git diff --check -- contextor/core/analysis/lineage_extraction.py tests/analysis/test_lineage_extraction.py
-TEST_RESULTS=40 passed in 1.24s; 51 passed in 2.93s; git diff --check passed (only Git LF-to-CRLF informational warnings).
+TESTS_RUN=focused and combined specified suites; git diff --check.
+TEST_RESULTS=43 passed; 54 passed; diff check passed.
 FULL_DIFFS=
 diff --git a/contextor/core/analysis/lineage_extraction.py b/contextor/core/analysis/lineage_extraction.py
-index be9f0a3..791a61e 100644
+index 791a61e..b6e2ac5 100644
 --- a/contextor/core/analysis/lineage_extraction.py
 +++ b/contextor/core/analysis/lineage_extraction.py
-@@ -253,6 +253,18 @@ class _AnchorExtractor:
-                 merged[name] = first
-         return merged
+@@ -172,6 +172,14 @@ class _ImportInfo:
+     binding_id: str
  
-+    def _visit_block_from_frame(
-+        self,
-+        body: list[ast.stmt],
-+        owner: str | None,
-+        walrus_owner: str | None,
-+        frame: dict[str, ExtractedOccurrenceRef],
-+    ) -> dict[str, ExtractedOccurrenceRef]:
-+        self._replace_frame(owner, frame)
-+        for child in body:
-+            self._visit(child, owner, walrus_owner)
-+        return self._clone_frame(owner)
+ 
++@dataclass(frozen=True)
++class _CallArgumentInfo:
++    occurrence: ExtractedOccurrenceRef
++    node: ast.AST
++    kind: str
++    keyword_name: str | None
 +
-     def _blocked_names(self, owner: str | None) -> set[str]:
-         return self._blocked.setdefault(owner, set())
++
+ class _AnchorExtractor:
+     def __init__(self, paths: dict[int, str], source_key: str) -> None:
+         self.paths = paths
+@@ -185,6 +193,8 @@ class _AnchorExtractor:
+         self._bindings: dict[str | None, dict[str, ExtractedOccurrenceRef]] = {}
+         self._callables: dict[str | None, dict[str, _CallableInfo]] = {}
+         self._callables_by_anchor: dict[str, _CallableInfo] = {}
++        self._callables_by_binding: dict[str, _CallableInfo] = {}
++        self._callable_values: dict[str, _CallableInfo] = {}
+         self._imports: dict[str | None, dict[str, _ImportInfo]] = {}
+         self._blocked: dict[str | None, set[str]] = {}
  
-@@ -479,18 +491,6 @@ class _AnchorExtractor:
-             return
-         self._visit(target, owner, walrus_owner)
+@@ -218,11 +228,11 @@ class _AnchorExtractor:
+         self._occurrences[cache_key] = occurrence
+         return occurrence
  
--    def _runtime_target_names(self, target: ast.AST) -> set[str]:
--        if isinstance(target, ast.Name):
--            return {target.id}
--        if isinstance(target, (ast.Tuple, ast.List)):
--            names: set[str] = set()
--            for item in target.elts:
--                names.update(self._runtime_target_names(item))
--            return names
--        if isinstance(target, ast.Starred):
--            return self._runtime_target_names(target.value)
--        return set()
--
-     def _visit_Assign(self, node: ast.Assign, owner: str | None, walrus_owner: str | None) -> None:
-         source = self._value(node.value, owner, walrus_owner)
-         for target in node.targets:
-@@ -535,10 +535,33 @@ class _AnchorExtractor:
-             return
-         self._frame(owner)[node.target.id] = binding
+-    def _flow(self, *, source, target, relation: LineageRelation, node: ast.AST, resolution_kind: ResolutionKind, confidence: LineageConfidence, ordinal: int = 0) -> None:
++    def _flow(self, *, source, target, relation: LineageRelation, node: ast.AST, resolution_kind: ResolutionKind, confidence: LineageConfidence, ordinal: int = 0, dynamic_boundary: str | None = None) -> None:
+         local_id = f"flow:v1:{relation.value}:{self.paths[id(node)]}:i:{ordinal}"
+         if local_id in self._flow_ids: raise ValueError(f"Duplicate lineage flow id: {local_id}")
+         self._flow_ids.add(local_id)
+-        self.flows.append(ExtractedFlowFact(local_id, source, target, relation, _source_span(node), resolution_kind, confidence))
++        self.flows.append(ExtractedFlowFact(local_id, source, target, relation, _source_span(node), resolution_kind, confidence, dynamic_boundary=dynamic_boundary))
  
-+    def _visit_If(self, node: ast.If, owner: str | None, walrus_owner: str | None) -> None:
-+        self._visit(node.test, owner, walrus_owner)
-+        entry_frame = self._clone_frame(owner)
-+        body_frame = self._visit_block_from_frame(
-+            node.body,
-+            owner,
-+            walrus_owner,
-+            entry_frame,
-+        )
-+        if node.orelse:
-+            else_frame = self._visit_block_from_frame(
-+                node.orelse,
-+                owner,
-+                walrus_owner,
-+                entry_frame,
-+            )
+     def _frame(self, owner: str | None) -> dict[str, ExtractedOccurrenceRef]:
+         return self._bindings.setdefault(owner, {})
+@@ -290,6 +300,49 @@ class _AnchorExtractor:
+     def _parameter_symbolic(self, callable_symbol_name: str, parameter: _ParameterInfo) -> ExtractedSymbolicRef:
+         return ExtractedSymbolicRef(ExtractedSymbolicKind.PARAMETER, self.module_name, callable_symbol_name, parameter.local_id)
+ 
++    def _return_symbolic(self, callable_info: _CallableInfo) -> ExtractedSymbolicRef:
++        return ExtractedSymbolicRef(ExtractedSymbolicKind.RETURN, self.module_name, callable_info.name, callable_info.anchor_id)
++
++    def _resolve_current_local_callable(self, node: ast.Call, owner: str | None) -> _CallableInfo | None:
++        if not isinstance(node.func, ast.Name): return None
++        current = self._frame(owner).get(node.func.id)
++        if current is None: return None
++        return self._callables_by_anchor.get(current.local_id) or self._callables_by_binding.get(current.local_id)
++
++    def _collect_call_arguments(self, node: ast.Call, owner: str | None, walrus_owner: str | None) -> tuple[_CallArgumentInfo, ...]:
++        pending = [(arg, "starred" if isinstance(arg, ast.Starred) else "positional", None, index) for index, arg in enumerate(node.args)]
++        pending += [(keyword.value, "double_starred" if keyword.arg is None else "keyword", keyword.arg, len(node.args) + index) for index, keyword in enumerate(node.keywords)]
++        pending.sort(key=lambda item: (int(getattr(item[0], "lineno", 0) or 0), int(getattr(item[0], "col_offset", 0) or 0), item[3]))
++        result = []
++        for ordinal, (argument_node, kind, keyword_name, _source_ordinal) in enumerate(pending):
++            self._value(argument_node, owner, walrus_owner)
++            result.append(_CallArgumentInfo(self._occurrence("call_argument", argument_node, keyword_name if kind == "keyword" else None, ordinal=ordinal), argument_node, kind, keyword_name))
++        return tuple(result)
++
++    def _emit_argument_to_parameter(self, argument: _CallArgumentInfo, callable_info: _CallableInfo, parameter: _ParameterInfo) -> None:
++        self._flow(source=argument.occurrence, target=self._parameter_symbolic(callable_info.name, parameter), relation=LineageRelation.ARGUMENT_TO_PARAMETER, node=argument.node, resolution_kind=ResolutionKind.CALL_EXACT, confidence=LineageConfidence.CONFIRMED)
++
++    def _bind_call_arguments(self, arguments: tuple[_CallArgumentInfo, ...], callable_info: _CallableInfo) -> None:
++        fixed = tuple(p for p in callable_info.parameters if p.kind in (ParameterKind.POSITIONAL_ONLY, ParameterKind.POSITIONAL_OR_KEYWORD))
++        keywords = {p.name: p for p in callable_info.parameters if p.kind in (ParameterKind.POSITIONAL_OR_KEYWORD, ParameterKind.KEYWORD_ONLY)}
++        vararg = next((p for p in callable_info.parameters if p.kind is ParameterKind.VAR_POSITIONAL), None)
++        varkw = next((p for p in callable_info.parameters if p.kind is ParameterKind.VAR_KEYWORD), None)
++        consumed, index, uncertain = set(), 0, False
++        for argument in arguments:
++            if argument.kind == "starred": uncertain = True; continue
++            if argument.kind == "double_starred": continue
++            if argument.kind == "positional":
++                if uncertain: continue
++                if index < len(fixed):
++                    parameter = fixed[index]; index += 1; consumed.add(parameter.local_id); self._emit_argument_to_parameter(argument, callable_info, parameter)
++                elif vararg is not None: self._emit_argument_to_parameter(argument, callable_info, vararg)
++                continue
++            if argument.kind == "keyword" and argument.keyword_name is not None:
++                parameter = keywords.get(argument.keyword_name)
++                if parameter is not None and parameter.local_id not in consumed:
++                    consumed.add(parameter.local_id); self._emit_argument_to_parameter(argument, callable_info, parameter)
++                elif parameter is None and varkw is not None: self._emit_argument_to_parameter(argument, callable_info, varkw)
++
+     def _visit(self, node: ast.AST, owner_local_id: str | None, walrus_owner_local_id: str | None) -> None:
+         method = getattr(self, f"_visit_{type(node).__name__}", None)
+         if method is not None:
+@@ -386,11 +439,37 @@ class _AnchorExtractor:
+         callable_symbol_name = f"lambda@{self.paths[id(node)]}"
+         parameters = self._parameter_anchors(node.args, lambda_id, callable_symbol_name)
+         self._default_flows(node, callable_symbol_name, parameters)
+-        self._callables_by_anchor[lambda_id] = _CallableInfo(callable_symbol_name, lambda_id, parameters)
++        callable_info = _CallableInfo(callable_symbol_name, lambda_id, parameters)
++        self._callables_by_anchor[lambda_id] = callable_info
+         lambda_frame = self._frame(lambda_id)
+         for parameter in parameters:
+             lambda_frame[parameter.name] = ExtractedOccurrenceRef(parameter.local_id)
+-        self._visit(node.body, lambda_id, None)
++        body_source = self._value(node.body, lambda_id, None)
++        self._flow(source=body_source, target=self._return_symbolic(callable_info), relation=LineageRelation.RETURNS, node=node.body, resolution_kind=ResolutionKind.LEXICAL_EXACT, confidence=LineageConfidence.CONFIRMED)
++        lambda_value = self._occurrence("expression_result", node)
++        self._callable_values[lambda_value.local_id] = callable_info
++
++    def _visit_Return(self, node: ast.Return, owner: str | None, walrus_owner: str | None) -> None:
++        if node.value is None: return
++        source = self._value(node.value, owner, walrus_owner)
++        callable_info = self._callables_by_anchor.get(owner) if owner is not None else None
++        if callable_info is not None:
++            self._flow(source=source, target=self._return_symbolic(callable_info), relation=LineageRelation.RETURNS, node=node, resolution_kind=ResolutionKind.LEXICAL_EXACT, confidence=LineageConfidence.CONFIRMED)
++
++    def _visit_Call(self, node: ast.Call, owner: str | None, walrus_owner: str | None) -> None:
++        self._visit(node.func, owner, walrus_owner)
++        call_site, call_result = self._occurrence("call_site", node), self._occurrence("call_result", node)
++        arguments = self._collect_call_arguments(node, owner, walrus_owner)
++        callable_info = self._resolve_current_local_callable(node, owner)
++        if callable_info is not None:
++            self._bind_call_arguments(arguments, callable_info)
++            self._flow(source=self._return_symbolic(callable_info), target=call_result, relation=LineageRelation.CALL_RESULT, node=node, resolution_kind=ResolutionKind.CALL_EXACT, confidence=LineageConfidence.CONFIRMED)
++            return
++        if isinstance(node.func, ast.Name) and self._frame(owner).get(node.func.id) is None:
++            resolution_kind, confidence = ResolutionKind.UNRESOLVED_NAME, LineageConfidence.UNRESOLVED
 +        else:
-+            else_frame = dict(entry_frame)
-+        self._replace_frame(
-+            owner,
-+            self._merge_frames((body_frame, else_frame)),
-+        )
-+
-     def _visit_For(self, node: ast.For, owner: str | None, walrus_owner: str | None) -> None:
-         self._visit(node.iter, owner, walrus_owner)
-         entry_frame = self._clone_frame(owner)
--        target_names = self._runtime_target_names(node.target)
-+        self._replace_frame(owner, entry_frame)
-         self._runtime_bind_target(
-             node.target,
-             owner,
-@@ -546,18 +569,28 @@ class _AnchorExtractor:
-         )
-         for child in node.body:
-             self._visit(child, owner, walrus_owner)
--        exit_frame = dict(entry_frame)
--        for name in target_names:
--            exit_frame.pop(name, None)
--        self._replace_frame(owner, exit_frame)
--        for child in node.orelse:
--            self._visit(child, owner, walrus_owner)
--        self._replace_frame(owner, exit_frame)
-+        body_frame = self._clone_frame(owner)
-+        loop_exit_frame = self._merge_frames(
-+            (entry_frame, body_frame)
-+        )
-+        self._replace_frame(owner, loop_exit_frame)
-+        if not node.orelse:
-+            return
-+        else_frame = self._visit_block_from_frame(
-+            node.orelse,
-+            owner,
-+            walrus_owner,
-+            loop_exit_frame,
-+        )
-+        self._replace_frame(
-+            owner,
-+            self._merge_frames((loop_exit_frame, else_frame)),
-+        )
++            resolution_kind, confidence = ResolutionKind.DYNAMIC_RUNTIME_BOUNDARY, LineageConfidence.DYNAMIC
++        self._flow(source=call_site, target=call_result, relation=LineageRelation.CALL_RESULT, node=node, resolution_kind=resolution_kind, confidence=confidence, dynamic_boundary="dynamic_call" if confidence is LineageConfidence.DYNAMIC else None)
  
-     def _visit_AsyncFor(self, node: ast.AsyncFor, owner: str | None, walrus_owner: str | None) -> None:
-         self._visit(node.iter, owner, walrus_owner)
-         entry_frame = self._clone_frame(owner)
--        target_names = self._runtime_target_names(node.target)
-+        self._replace_frame(owner, entry_frame)
-         self._runtime_bind_target(
-             node.target,
-             owner,
-@@ -565,13 +598,49 @@ class _AnchorExtractor:
-         )
-         for child in node.body:
-             self._visit(child, owner, walrus_owner)
--        exit_frame = dict(entry_frame)
--        for name in target_names:
--            exit_frame.pop(name, None)
--        self._replace_frame(owner, exit_frame)
--        for child in node.orelse:
--            self._visit(child, owner, walrus_owner)
--        self._replace_frame(owner, exit_frame)
-+        body_frame = self._clone_frame(owner)
-+        loop_exit_frame = self._merge_frames(
-+            (entry_frame, body_frame)
-+        )
-+        self._replace_frame(owner, loop_exit_frame)
-+        if not node.orelse:
-+            return
-+        else_frame = self._visit_block_from_frame(
-+            node.orelse,
-+            owner,
-+            walrus_owner,
-+            loop_exit_frame,
-+        )
-+        self._replace_frame(
-+            owner,
-+            self._merge_frames((loop_exit_frame, else_frame)),
-+        )
-+
-+    def _visit_While(self, node: ast.While, owner: str | None, walrus_owner: str | None) -> None:
-+        self._visit(node.test, owner, walrus_owner)
-+        entry_frame = self._clone_frame(owner)
-+        body_frame = self._visit_block_from_frame(
-+            node.body,
-+            owner,
-+            walrus_owner,
-+            entry_frame,
-+        )
-+        loop_exit_frame = self._merge_frames(
-+            (entry_frame, body_frame)
-+        )
-+        self._replace_frame(owner, loop_exit_frame)
-+        if not node.orelse:
-+            return
-+        else_frame = self._visit_block_from_frame(
-+            node.orelse,
-+            owner,
-+            walrus_owner,
-+            loop_exit_frame,
-+        )
-+        self._replace_frame(
-+            owner,
-+            self._merge_frames((loop_exit_frame, else_frame)),
-+        )
+     def _visit_comprehension_expression(self, node: ast.AST, generators: list[ast.comprehension], values: tuple[ast.AST, ...], owner: str | None, walrus_owner: str | None) -> None:
+         comprehension_id = self._add("comprehension", node, None, owner)
+@@ -445,6 +524,9 @@ class _AnchorExtractor:
+         if target.id in self._blocked_names(owner):
+             return
+         self._frame(owner)[target.id] = binding
++        callable_info = self._callable_values.get(source.local_id)
++        if callable_info is not None:
++            self._callables_by_binding[binding.local_id] = callable_info
+         self._flow(source=source, target=binding, relation=LineageRelation.ASSIGNS, node=target, resolution_kind=ResolutionKind.LEXICAL_EXACT, confidence=LineageConfidence.CONFIRMED)
  
-     def _visit_With(self, node: ast.With, owner: str | None, walrus_owner: str | None) -> None:
-         for item in node.items:
-@@ -632,10 +701,38 @@ class _AnchorExtractor:
-             self._blocked_names(owner).add(name)
-             self._frame(owner).pop(name, None)
- 
-+    def _visit_Try(self, node: ast.Try, owner: str | None, walrus_owner: str | None) -> None:
-+        entry_frame = self._clone_frame(owner)
-+        normal_frame = self._visit_block_from_frame(
-+            node.body,
-+            owner,
-+            walrus_owner,
-+            entry_frame,
-+        )
-+        if node.orelse:
-+            normal_frame = self._visit_block_from_frame(
-+                node.orelse,
-+                owner,
-+                walrus_owner,
-+                normal_frame,
-+            )
-+        reachable_frames = [normal_frame]
-+        for handler in node.handlers:
-+            self._replace_frame(owner, entry_frame)
-+            self._visit(handler, owner, walrus_owner)
-+            reachable_frames.append(
-+                self._clone_frame(owner)
-+            )
-+        merged_frame = self._merge_frames(
-+            tuple(reachable_frames)
-+        )
-+        self._replace_frame(owner, merged_frame)
-+        for child in node.finalbody:
-+            self._visit(child, owner, walrus_owner)
-+
-     def _visit_ExceptHandler(self, node: ast.ExceptHandler, owner: str | None, walrus_owner: str | None) -> None:
-         if node.type is not None:
-             self._visit(node.type, owner, walrus_owner)
--        entry_frame = self._clone_frame(owner)
-         alias_name = node.name if isinstance(node.name, str) else None
-         if alias_name is not None:
-             binding = ExtractedOccurrenceRef(
-@@ -658,11 +755,30 @@ class _AnchorExtractor:
-                 )
-         for child in node.body:
-             self._visit(child, owner, walrus_owner)
--        exit_frame = dict(entry_frame)
-+        exit_frame = self._clone_frame(owner)
-         if alias_name is not None:
-             exit_frame.pop(alias_name, None)
-         self._replace_frame(owner, exit_frame)
- 
-+    def _visit_Match(self, node: ast.Match, owner: str | None, walrus_owner: str | None) -> None:
-+        self._visit(node.subject, owner, walrus_owner)
-+        entry_frame = self._clone_frame(owner)
-+        reachable_frames = [dict(entry_frame)]
-+        for case in node.cases:
-+            self._replace_frame(owner, entry_frame)
-+            self._visit(case.pattern, owner, walrus_owner)
-+            if case.guard is not None:
-+                self._visit(case.guard, owner, walrus_owner)
-+            for child in case.body:
-+                self._visit(child, owner, walrus_owner)
-+            reachable_frames.append(
-+                self._clone_frame(owner)
-+            )
-+        self._replace_frame(
-+            owner,
-+            self._merge_frames(tuple(reachable_frames)),
-+        )
-+
-     def _visit_MatchAs(self, node: ast.MatchAs, owner: str | None, walrus_owner: str | None) -> None:
-         if node.pattern is not None:
-             self._visit(node.pattern, owner, walrus_owner)
+     def _runtime_bind_target(
 diff --git a/tests/analysis/test_lineage_extraction.py b/tests/analysis/test_lineage_extraction.py
-index 9c10d2d..4c3901c 100644
+index 4c3901c..659830b 100644
 --- a/tests/analysis/test_lineage_extraction.py
 +++ b/tests/analysis/test_lineage_extraction.py
-@@ -95,6 +95,13 @@ def test_stage_1c_merge_frames_keeps_only_identical_occurrences():
-         )
-     )
-     assert merged == {"a": a}
-+    assert extractor._merge_frames(
-+        (
-+            {"a": a},
-+            {"a": a},
-+            {"a": a},
-+        )
-+    ) == {"a": a}
+@@ -15,6 +15,7 @@ from contextor.core.analysis.lineage_extraction import (
+ )
+ from contextor.core.domain.lineage_facts import (
+     ExtractedOccurrenceRef,
++    ExtractedSymbolicRef,
+     ExtractedSymbolicKind,
+     LineageConfidence,
+     LineageFamilyStatus,
+@@ -142,6 +143,45 @@ def _stage_1c_lexical_bind_sources(facts, name, line):
+     ]
  
  
- def _stage_1c_facts(source: str):
-@@ -120,6 +127,206 @@ def _stage_1c_runtime_assignment(facts, name):
-     )
- 
- 
-+def _stage_1c_lexical_bind_sources(facts, name, line):
-+    return [
-+        flow.source.local_id
-+        for flow in facts.flows
-+        if flow.relation is LineageRelation.BINDS
-+        and flow.resolution_kind is ResolutionKind.LEXICAL_EXACT
-+        and flow.confidence is LineageConfidence.CONFIRMED
-+        and isinstance(flow.source, ExtractedOccurrenceRef)
-+        and isinstance(flow.target, ExtractedOccurrenceRef)
-+        and parse_local_occurrence_id(flow.target.local_id)[0] == "name_load"
-+        and parse_local_occurrence_id(flow.target.local_id)[3] == name
-+        and flow.evidence.start_line == line
-+    ]
++def _stage_1c_call_result_flows(facts):
++    return [flow for flow in facts.flows if flow.relation is LineageRelation.CALL_RESULT]
 +
 +
-+def test_stage_1c_if_branches_are_exact_inside_and_ambiguous_after_merge():
-+    facts = _stage_1c_facts(
-+        "def run(cond):\n"
-+        " stable = 1\n"
-+        " if cond:\n"
-+        "  value = 2\n"
-+        "  left = value\n"
-+        " else:\n"
-+        "  value = 3\n"
-+        "  right = value\n"
-+        " after_value = value\n"
-+        " after_stable = stable\n"
-+    )
-+    value_bindings = _stage_1c_named(facts, "binding", "value")
-+    stable = _stage_1c_named(facts, "binding", "stable")[0]
-+    assert len(value_bindings) == 2
-+    assert _stage_1c_lexical_bind_sources(facts, "value", 5) == [
-+        next(anchor.local_id for anchor in value_bindings if anchor.span.start_line == 4)
-+    ]
-+    assert _stage_1c_lexical_bind_sources(facts, "value", 8) == [
-+        next(anchor.local_id for anchor in value_bindings if anchor.span.start_line == 7)
-+    ]
-+    assert _stage_1c_lexical_bind_sources(facts, "value", 9) == []
-+    assert _stage_1c_lexical_bind_sources(facts, "stable", 10) == [
-+        stable.local_id
-+    ]
++def _stage_1c_argument_parameter_names(facts):
++    return [parse_local_occurrence_id(flow.target.source_local_id)[3] for flow in facts.flows if flow.relation is LineageRelation.ARGUMENT_TO_PARAMETER and isinstance(flow.target, ExtractedSymbolicRef)]
 +
 +
-+def test_stage_1c_if_without_else_invalidates_conditional_rebind():
-+    facts = _stage_1c_facts(
-+        "def run(cond):\n"
-+        " value = 1\n"
-+        " if cond:\n"
-+        "  value = 2\n"
-+        " after = value\n"
-+    )
-+    assert _stage_1c_lexical_bind_sources(
-+        facts,
-+        "value",
-+        5,
-+    ) == []
++def test_stage_1c5_local_function_call_links_return_and_argument_exactly():
++    facts = _stage_1c_facts("def produce(value):\n return value\nresult = produce(1)\n")
++    function = _stage_1c_named(facts, "function", "produce")[0]
++    returns = [flow for flow in facts.flows if flow.relation is LineageRelation.RETURNS]
++    assert len(returns) == 1 and isinstance(returns[0].target, ExtractedSymbolicRef)
++    assert returns[0].target.kind is ExtractedSymbolicKind.RETURN and returns[0].target.source_local_id == function.local_id
++    call = next(flow for flow in _stage_1c_call_result_flows(facts) if flow.resolution_kind is ResolutionKind.CALL_EXACT)
++    assert isinstance(call.source, ExtractedSymbolicRef) and call.source == returns[0].target
++    assert _stage_1c_argument_parameter_names(facts) == ["value"]
 +
 +
-+def test_stage_1c_for_body_touch_invalidates_non_target_binding_after_loop():
-+    facts = _stage_1c_facts(
-+        "def run(items):\n"
-+        " stable = 1\n"
-+        " changed = 2\n"
-+        " for item in items:\n"
-+        "  changed = item\n"
-+        " after_changed = changed\n"
-+        " after_stable = stable\n"
-+    )
-+    stable = _stage_1c_named(facts, "binding", "stable")[0]
-+    assert _stage_1c_lexical_bind_sources(
-+        facts,
-+        "changed",
-+        6,
-+    ) == []
-+    assert _stage_1c_lexical_bind_sources(
-+        facts,
-+        "stable",
-+        7,
-+    ) == [stable.local_id]
++def test_stage_1c5_lambda_rebind_and_branch_resolution_are_fail_closed():
++    lambda_facts = _stage_1c_facts("fn = lambda value: value\nresult = fn(1)\n")
++    assert next(flow for flow in _stage_1c_call_result_flows(lambda_facts) if flow.resolution_kind is ResolutionKind.CALL_EXACT)
++    rebound = _stage_1c_facts("def run():\n return 1\nrun = other\nvalue = run()\n")
++    assert _stage_1c_call_result_flows(rebound)[0].resolution_kind is ResolutionKind.DYNAMIC_RUNTIME_BOUNDARY
++    branch = _stage_1c_facts("def run():\n return 1\nif cond:\n run = other\nvalue = run()\n")
++    assert _stage_1c_call_result_flows(branch)[0].resolution_kind is ResolutionKind.UNRESOLVED_NAME
 +
 +
-+def test_stage_1c_while_body_and_else_only_bindings_are_not_exact_after_loop():
-+    facts = _stage_1c_facts(
-+        "def run(cond):\n"
-+        " value = 1\n"
-+        " while cond:\n"
-+        "  value = 2\n"
-+        " else:\n"
-+        "  else_only = 3\n"
-+        " after_value = value\n"
-+        " after_else = else_only\n"
-+    )
-+    assert _stage_1c_lexical_bind_sources(
-+        facts,
-+        "value",
-+        7,
-+    ) == []
-+    assert _stage_1c_lexical_bind_sources(
-+        facts,
-+        "else_only",
-+        8,
-+    ) == []
++def test_stage_1c5_signature_stars_and_dynamic_calls_are_conservative():
++    facts = _stage_1c_facts("def run(a, /, b, *rest, flag, **extra):\n return b\nresult = run(1, 2, 3, 4, flag=5, other=6)\n")
++    assert _stage_1c_argument_parameter_names(facts) == ["a", "b", "rest", "rest", "flag", "extra"]
++    stars = _stage_1c_facts("def run(a, *rest, **extra):\n return a\nresult = run(*items, **mapping)\n")
++    assert _stage_1c_argument_parameter_names(stars) == []
++    unresolved = _stage_1c_facts("result = missing(1)\n")
++    dynamic = _stage_1c_facts("result = obj.method(1)\n")
++    assert _stage_1c_call_result_flows(unresolved)[0].resolution_kind is ResolutionKind.UNRESOLVED_NAME
++    assert _stage_1c_call_result_flows(dynamic)[0].resolution_kind is ResolutionKind.DYNAMIC_RUNTIME_BOUNDARY
 +
 +
-+def test_stage_1c_try_handler_conflict_merges_to_unresolved_but_finally_is_exact():
-+    facts = _stage_1c_facts(
-+        "def run():\n"
-+        " try:\n"
-+        "  value = 1\n"
-+        "  try_seen = value\n"
-+        " except Error:\n"
-+        "  value = 2\n"
-+        "  except_seen = value\n"
-+        " finally:\n"
-+        "  stable = 3\n"
-+        " after_value = value\n"
-+        " after_stable = stable\n"
-+    )
-+    value_bindings = _stage_1c_named(facts, "binding", "value")
-+    try_value = next(anchor for anchor in value_bindings if anchor.span.start_line == 3)
-+    except_value = next(anchor for anchor in value_bindings if anchor.span.start_line == 6)
-+    stable = _stage_1c_named(facts, "binding", "stable")[0]
-+    assert _stage_1c_lexical_bind_sources(facts, "value", 4) == [try_value.local_id]
-+    assert _stage_1c_lexical_bind_sources(facts, "value", 7) == [except_value.local_id]
-+    assert _stage_1c_lexical_bind_sources(facts, "value", 10) == []
-+    assert _stage_1c_lexical_bind_sources(facts, "stable", 11) == [stable.local_id]
-+
-+
-+def test_stage_1c_try_merge_observes_handler_body_rebinding():
-+    facts = _stage_1c_facts(
-+        "def run():\n"
-+        " value = 0\n"
-+        " try:\n"
-+        "  pass\n"
-+        " except Error:\n"
-+        "  value = 1\n"
-+        " after = value\n"
-+    )
-+    assert _stage_1c_lexical_bind_sources(
-+        facts,
-+        "value",
-+        7,
-+    ) == []
-+
-+
-+def test_stage_1c_finally_does_not_restore_pre_handler_binding_after_handler_rebind():
-+    facts = _stage_1c_facts(
-+        "def run():\n"
-+        " value = 0\n"
-+        " try:\n"
-+        "  pass\n"
-+        " except Error:\n"
-+        "  value = 1\n"
-+        " finally:\n"
-+        "  seen = value\n"
-+    )
-+    assert _stage_1c_lexical_bind_sources(
-+        facts,
-+        "value",
-+        9,
-+    ) == []
-+
-+
-+def test_stage_1c_try_handler_starts_from_entry_not_partial_try_state():
-+    facts = _stage_1c_facts(
-+        "def run():\n"
-+        " before = 1\n"
-+        " try:\n"
-+        "  partial = before\n"
-+        "  explode()\n"
-+        " except Error:\n"
-+        "  seen_before = before\n"
-+        "  seen_partial = partial\n"
-+    )
-+    before = _stage_1c_named(facts, "binding", "before")[0]
-+    assert _stage_1c_lexical_bind_sources(facts, "before", 7) == [before.local_id]
-+    assert _stage_1c_lexical_bind_sources(facts, "partial", 8) == []
-+
-+
-+def test_stage_1c_match_cases_are_independent_and_no_match_path_is_preserved():
-+    facts = _stage_1c_facts(
-+        "def run(subject):\n"
-+        " value = 0\n"
-+        " match subject:\n"
-+        "  case 1:\n"
-+        "   value = 1\n"
-+        "   first = value\n"
-+        "  case 2:\n"
-+        "   value = 2\n"
-+        "   second = value\n"
-+        " after = value\n"
-+    )
-+    value_bindings = _stage_1c_named(facts, "binding", "value")
-+    first_case = next(anchor for anchor in value_bindings if anchor.span.start_line == 5)
-+    second_case = next(anchor for anchor in value_bindings if anchor.span.start_line == 8)
-+    assert _stage_1c_lexical_bind_sources(facts, "value", 6) == [first_case.local_id]
-+    assert _stage_1c_lexical_bind_sources(facts, "value", 9) == [second_case.local_id]
-+    assert _stage_1c_lexical_bind_sources(facts, "value", 10) == []
-+
-+
- def test_stage_1c_for_target_is_runtime_bound_only_inside_loop_body():
+ def test_stage_1c_if_branches_are_exact_inside_and_ambiguous_after_merge():
      facts = _stage_1c_facts(
-         "def run(items):\n"
+         "def run(cond):\n"
 
