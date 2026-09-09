@@ -4,6 +4,8 @@ from dataclasses import dataclass, field
 from typing import Dict, Any, Optional
 from pathlib import Path
 
+from contextor.core.domain.lineage_facts import MaterializedLineageSourceFacts
+
 
 @dataclass
 class FileState:
@@ -93,6 +95,9 @@ class RepositoryAnalysisState:
     syntax_diagnostics_state: str = "not_materialized"
     module_usages: Dict[str, Any] = field(default_factory=dict)
     module_usages_manifest: Dict[str, Dict[str, str]] = field(default_factory=dict)
+    lineage_facts_by_source: Dict[str, MaterializedLineageSourceFacts] = field(default_factory=dict)
+    lineage_facts_state: str = "not_materialized"
+    lineage_facts_semantic_version: str | None = None
     topology_analytics: Dict[str, Any] = field(default_factory=dict)
     topology_metrics_state: str = "deferred"
     cached_analytics: Dict[str, Any] = field(default_factory=dict)

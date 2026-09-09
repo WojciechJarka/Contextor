@@ -12,6 +12,25 @@ from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Any
 
+from contextor.core.domain.lineage_facts import (
+    LINEAGE_FACTS_SEMANTIC_VERSION,
+    LineageConfidence,
+    LineageFamilyStatus,
+    LineageRelation,
+    MaterializedAnchorFact,
+    MaterializedFlowFact,
+    MaterializedLineageSourceFacts,
+    MaterializedOccurrenceRef,
+    MaterializedSurfaceFact,
+    ProviderRef,
+    ResolutionKind,
+    SemanticEndpoint,
+    SemanticInterfaceDescriptor,
+    SourceLineageManifest,
+    SourceSpan,
+    SurfaceKind,
+)
+
 LIVE_STATE_SCHEMA_VERSION = "1.2"
 
 
@@ -85,6 +104,206 @@ def _normalize_symbol_call_facts(state: Any) -> Any:
         )
     state.module_usages = normalized_usages
     return state
+
+
+def _revalidate_lineage_span(span: Any) -> SourceSpan:
+    if not isinstance(span, SourceSpan):
+        raise pickle.UnpicklingError("Invalid lineage SourceSpan.")
+    return replace(span)
+
+
+def _revalidate_lineage_endpoint(
+    endpoint: Any,
+) -> MaterializedOccurrenceRef | SemanticEndpoint:
+    if isinstance(endpoint, MaterializedOccurrenceRef):
+        return replace(endpoint)
+    if isinstance(endpoint, SemanticEndpoint):
+        return replace(endpoint)
+    raise pickle.UnpicklingError("Unknown materialized lineage endpoint.")
+
+
+def _revalidate_lineage_provider(provider: Any) -> ProviderRef | None:
+    if provider is None:
+        return None
+    if not isinstance(provider, ProviderRef):
+        raise pickle.UnpicklingError("Invalid lineage provider.")
+    return replace(provider)
+
+
+def _revalidate_lineage_manifest(manifest: Any) -> SourceLineageManifest:
+    if not isinstance(manifest, SourceLineageManifest):
+        raise pickle.UnpicklingError("Invalid lineage source manifest.")
+    if not isinstance(manifest.status, LineageFamilyStatus):
+        raise pickle.UnpicklingError("Invalid lineage manifest status.")
+    rebuilt = replace(manifest)
+    if rebuilt.semantic_version != LINEAGE_FACTS_SEMANTIC_VERSION:
+        raise pickle.UnpicklingError(
+            "Unsupported lineage manifest semantic version."
+        )
+    return rebuilt
+
+
+def _revalidate_lineage_anchor(anchor: Any) -> MaterializedAnchorFact:
+    if not isinstance(anchor, MaterializedAnchorFact):
+        raise pickle.UnpicklingError("Invalid materialized lineage anchor.")
+    return replace(
+        anchor,
+        reference=_revalidate_lineage_endpoint(anchor.reference),
+        span=_revalidate_lineage_span(anchor.span),
+    )
+
+
+def _revalidate_lineage_flow(flow: Any) -> MaterializedFlowFact:
+    if not isinstance(flow, MaterializedFlowFact):
+        raise pickle.UnpicklingError("Invalid materialized lineage flow.")
+    if not isinstance(flow.relation, LineageRelation):
+        raise pickle.UnpicklingError("Invalid lineage relation.")
+    if not isinstance(flow.resolution_kind, ResolutionKind):
+        raise pickle.UnpicklingError("Invalid lineage resolution kind.")
+    if not isinstance(flow.confidence, LineageConfidence):
+        raise pickle.UnpicklingError("Invalid lineage confidence.")
+    return replace(
+        flow,
+        source=_revalidate_lineage_endpoint(flow.source),
+        target=_revalidate_lineage_endpoint(flow.target),
+        evidence=_revalidate_lineage_span(flow.evidence),
+        provider=_revalidate_lineage_provider(flow.provider),
+    )
+
+
+def _revalidate_lineage_surface(surface: Any) -> MaterializedSurfaceFact:
+    if not isinstance(surface, MaterializedSurfaceFact):
+        raise pickle.UnpicklingError("Invalid materialized lineage surface.")
+    if not isinstance(surface.kind, SurfaceKind):
+        raise pickle.UnpicklingError("Invalid lineage surface kind.")
+    if not isinstance(surface.resolution_kind, ResolutionKind):
+        raise pickle.UnpicklingError("Invalid lineage surface resolution kind.")
+    if not isinstance(surface.confidence, LineageConfidence):
+        raise pickle.UnpicklingError("Invalid lineage surface confidence.")
+    return replace(
+        surface,
+        exposed=_revalidate_lineage_endpoint(surface.exposed),
+        evidence=_revalidate_lineage_span(surface.evidence),
+        provider=_revalidate_lineage_provider(surface.provider),
+    )
+
+
+def _revalidate_lineage_descriptor(
+    descriptor: Any,
+) -> SemanticInterfaceDescriptor:
+    if not isinstance(descriptor, SemanticInterfaceDescriptor):
+        raise pickle.UnpicklingError(
+            "Invalid lineage semantic interface descriptor."
+        )
+    return replace(descriptor)
+
+
+def _revalidate_lineage_slice(
+    source_slice: Any,
+) -> MaterializedLineageSourceFacts:
+    if not isinstance(source_slice, MaterializedLineageSourceFacts):
+        raise pickle.UnpicklingError(
+            "Invalid materialized lineage source slice."
+        )
+    return replace(
+        source_slice,
+        manifest=_revalidate_lineage_manifest(source_slice.manifest),
+        anchors=tuple(
+            _revalidate_lineage_anchor(item)
+            for item in source_slice.anchors
+        ),
+        flows=tuple(
+            _revalidate_lineage_flow(item)
+            for item in source_slice.flows
+        ),
+        surfaces=tuple(
+            _revalidate_lineage_surface(item)
+            for item in source_slice.surfaces
+        ),
+        interface_descriptors=tuple(
+            _revalidate_lineage_descriptor(item)
+            for item in source_slice.interface_descriptors
+        ),
+    )
+
+
+def _normalize_lineage_facts_state(state: Any) -> Any:
+    """Normalize/validate persisted materialized lineage without source work."""
+
+    if state is None or isinstance(state, dict) or not hasattr(state, "__dict__"):
+        return state
+
+    try:
+        if not hasattr(state, "lineage_facts_by_source"):
+            state.lineage_facts_by_source = {}
+        if not hasattr(state, "lineage_facts_state"):
+            state.lineage_facts_state = "not_materialized"
+        if not hasattr(state, "lineage_facts_semantic_version"):
+            state.lineage_facts_semantic_version = None
+
+        raw_mapping = state.lineage_facts_by_source
+        raw_family_state = state.lineage_facts_state
+        raw_version = state.lineage_facts_semantic_version
+
+        if not isinstance(raw_mapping, dict):
+            raise pickle.UnpicklingError(
+                "Lineage source mapping must be a dict."
+            )
+        if not isinstance(raw_family_state, str):
+            raise pickle.UnpicklingError(
+                "Lineage family state must be a string."
+            )
+
+        try:
+            family_status = LineageFamilyStatus(raw_family_state)
+        except ValueError as exc:
+            raise pickle.UnpicklingError(
+                "Unknown lineage family state."
+            ) from exc
+
+        if raw_version is not None and raw_version != LINEAGE_FACTS_SEMANTIC_VERSION:
+            raise pickle.UnpicklingError(
+                "Unsupported lineage semantic version."
+            )
+
+        if family_status is LineageFamilyStatus.NOT_MATERIALIZED:
+            if raw_mapping:
+                raise pickle.UnpicklingError(
+                    "Not-materialized lineage cannot contain source slices."
+                )
+            if raw_version is not None:
+                raise pickle.UnpicklingError(
+                    "Not-materialized lineage cannot have a semantic version."
+                )
+        elif raw_version != LINEAGE_FACTS_SEMANTIC_VERSION:
+            raise pickle.UnpicklingError(
+                "Materialized lineage requires the current semantic version."
+            )
+
+        normalized: dict[str, MaterializedLineageSourceFacts] = {}
+        for source_key, source_slice in raw_mapping.items():
+            if not isinstance(source_key, str) or not source_key:
+                raise pickle.UnpicklingError(
+                    "Lineage source key must be a non-empty string."
+                )
+            rebuilt = _revalidate_lineage_slice(source_slice)
+            if rebuilt.manifest.source_key != source_key:
+                raise pickle.UnpicklingError(
+                    "Lineage mapping key does not match manifest source_key."
+                )
+            normalized[source_key] = rebuilt
+
+        state.lineage_facts_by_source = normalized
+        state.lineage_facts_state = family_status.value
+        state.lineage_facts_semantic_version = raw_version
+        return state
+
+    except pickle.UnpicklingError:
+        raise
+    except (AttributeError, TypeError, ValueError) as exc:
+        raise pickle.UnpicklingError(
+            "Invalid persisted lineage state."
+        ) from exc
 
 
 @dataclass(frozen=True)
@@ -315,7 +534,9 @@ def load_snapshot(
             )
             if embedded_metadata.revision != metadata.revision:
                 return None
-            state_obj = _normalize_symbol_call_facts(payload["state"])
+            state_obj = _normalize_lineage_facts_state(
+                _normalize_symbol_call_facts(payload["state"])
+            )
             state_revision = (
                 state_obj.get("revision") if isinstance(state_obj, dict)
                 else getattr(state_obj, "revision", None)
@@ -421,7 +642,9 @@ def load_snapshot(
                     except AttributeError:
                         pass
             return state_obj, metadata
-        payload = _normalize_symbol_call_facts(payload)
+        payload = _normalize_lineage_facts_state(
+            _normalize_symbol_call_facts(payload)
+        )
         if payload is not None and hasattr(payload, "__dict__"):
             if not hasattr(payload, "module_usages"):
                 try:

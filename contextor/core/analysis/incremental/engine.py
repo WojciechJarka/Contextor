@@ -492,6 +492,11 @@ class IncrementalAnalysisEngine:
             # certify it fresh again.
             self.state.resync_required = True
         self.state.module_usages = candidate.module_usages
+        self.state.lineage_facts_by_source = candidate.lineage_facts_by_source
+        self.state.lineage_facts_state = candidate.lineage_facts_state
+        self.state.lineage_facts_semantic_version = (
+            candidate.lineage_facts_semantic_version
+        )
         self.state.trie = candidate.trie
         self.state.package_root = candidate.package_root
 

@@ -21,6 +21,7 @@ from contextor.core.analysis.state_manager import (
     validate_canonical_artifact_consumption_coverage,
 )
 from contextor.core.domain.graph import ProjectGraph
+from contextor.core.domain.lineage_facts import MaterializedLineageSourceFacts
 from contextor.core.domain.module import Module
 from contextor.core.domain.refresh_plan import RefreshPlan
 from contextor.core.domain.usage_facts import ModuleUsageFacts
@@ -44,6 +45,9 @@ class CandidateState:
     syntax_diagnostics_by_path: Dict[str, Dict[str, Any]]
     syntax_diagnostics_state: str
     module_usages: Dict[str, Any]
+    lineage_facts_by_source: Dict[str, MaterializedLineageSourceFacts]
+    lineage_facts_state: str
+    lineage_facts_semantic_version: str | None
     artifact_consumption: Dict[str, Any]
     dependency_graph: Optional[ProjectGraph]
     trie: Any
@@ -246,6 +250,18 @@ def _prepare_candidate_state(state: RepositoryAnalysisState) -> CandidateState:
         syntax_diagnostics_by_path=dict(getattr(state, "syntax_diagnostics_by_path", {}) or {}),
         syntax_diagnostics_state=getattr(state, "syntax_diagnostics_state", "not_materialized"),
         module_usages=dict(getattr(state, "module_usages", {}) or {}),
+        lineage_facts_by_source=dict(
+            getattr(state, "lineage_facts_by_source", {}) or {}
+        ),
+        lineage_facts_state=(
+            getattr(state, "lineage_facts_state", "not_materialized")
+            or "not_materialized"
+        ),
+        lineage_facts_semantic_version=getattr(
+            state,
+            "lineage_facts_semantic_version",
+            None,
+        ),
         artifact_consumption=dict(state.artifact_consumption or {}),
         dependency_graph=state.dependency_graph,
         trie=state.trie,
