@@ -435,6 +435,50 @@ class _AnchorExtractor:
         self._frame(owner)[target.id] = binding
         self._flow(source=source, target=binding, relation=LineageRelation.ASSIGNS, node=target, resolution_kind=ResolutionKind.LEXICAL_EXACT, confidence=LineageConfidence.CONFIRMED)
 
+    def _runtime_bind_target(
+        self,
+        target: ast.AST,
+        owner: str | None,
+        walrus_owner: str | None,
+    ) -> None:
+        if isinstance(target, ast.Name):
+            binding = ExtractedOccurrenceRef(
+                self._add("binding", target, target.id, owner)
+            )
+            if target.id in self._blocked_names(owner):
+                return
+            source = self._occurrence(
+                "runtime_bound_local",
+                target,
+                target.id,
+            )
+            self._frame(owner)[target.id] = binding
+            self._flow(
+                source=source,
+                target=binding,
+                relation=LineageRelation.ASSIGNS,
+                node=target,
+                resolution_kind=ResolutionKind.LEXICAL_EXACT,
+                confidence=LineageConfidence.CONFIRMED,
+            )
+            return
+        if isinstance(target, (ast.Tuple, ast.List)):
+            for item in target.elts:
+                self._runtime_bind_target(
+                    item,
+                    owner,
+                    walrus_owner,
+                )
+            return
+        if isinstance(target, ast.Starred):
+            self._runtime_bind_target(
+                target.value,
+                owner,
+                walrus_owner,
+            )
+            return
+        self._visit(target, owner, walrus_owner)
+
     def _visit_Assign(self, node: ast.Assign, owner: str | None, walrus_owner: str | None) -> None:
         source = self._value(node.value, owner, walrus_owner)
         for target in node.targets:
@@ -479,6 +523,68 @@ class _AnchorExtractor:
             return
         self._frame(owner)[node.target.id] = binding
 
+    def _visit_For(self, node: ast.For, owner: str | None, walrus_owner: str | None) -> None:
+        self._visit(node.iter, owner, walrus_owner)
+        entry_frame = self._clone_frame(owner)
+        self._runtime_bind_target(
+            node.target,
+            owner,
+            walrus_owner,
+        )
+        for child in node.body:
+            self._visit(child, owner, walrus_owner)
+        self._replace_frame(owner, entry_frame)
+        for child in node.orelse:
+            self._visit(child, owner, walrus_owner)
+        self._replace_frame(owner, entry_frame)
+
+    def _visit_AsyncFor(self, node: ast.AsyncFor, owner: str | None, walrus_owner: str | None) -> None:
+        self._visit(node.iter, owner, walrus_owner)
+        entry_frame = self._clone_frame(owner)
+        self._runtime_bind_target(
+            node.target,
+            owner,
+            walrus_owner,
+        )
+        for child in node.body:
+            self._visit(child, owner, walrus_owner)
+        self._replace_frame(owner, entry_frame)
+        for child in node.orelse:
+            self._visit(child, owner, walrus_owner)
+        self._replace_frame(owner, entry_frame)
+
+    def _visit_With(self, node: ast.With, owner: str | None, walrus_owner: str | None) -> None:
+        for item in node.items:
+            self._visit(
+                item.context_expr,
+                owner,
+                walrus_owner,
+            )
+            if item.optional_vars is not None:
+                self._runtime_bind_target(
+                    item.optional_vars,
+                    owner,
+                    walrus_owner,
+                )
+        for child in node.body:
+            self._visit(child, owner, walrus_owner)
+
+    def _visit_AsyncWith(self, node: ast.AsyncWith, owner: str | None, walrus_owner: str | None) -> None:
+        for item in node.items:
+            self._visit(
+                item.context_expr,
+                owner,
+                walrus_owner,
+            )
+            if item.optional_vars is not None:
+                self._runtime_bind_target(
+                    item.optional_vars,
+                    owner,
+                    walrus_owner,
+                )
+        for child in node.body:
+            self._visit(child, owner, walrus_owner)
+
     def _visit_Import(self, node: ast.Import, owner: str | None, _walrus_owner: str | None) -> None:
         for alias in node.names:
             local_name = alias.asname or alias.name.split(".", 1)[0]
@@ -509,10 +615,29 @@ class _AnchorExtractor:
     def _visit_ExceptHandler(self, node: ast.ExceptHandler, owner: str | None, walrus_owner: str | None) -> None:
         if node.type is not None:
             self._visit(node.type, owner, walrus_owner)
+        entry_frame = self._clone_frame(owner)
         if isinstance(node.name, str):
-            self._add("binding", node, node.name, owner)
+            binding = ExtractedOccurrenceRef(
+                self._add("binding", node, node.name, owner)
+            )
+            if node.name not in self._blocked_names(owner):
+                source = self._occurrence(
+                    "runtime_bound_local",
+                    node,
+                    node.name,
+                )
+                self._frame(owner)[node.name] = binding
+                self._flow(
+                    source=source,
+                    target=binding,
+                    relation=LineageRelation.ASSIGNS,
+                    node=node,
+                    resolution_kind=ResolutionKind.LEXICAL_EXACT,
+                    confidence=LineageConfidence.CONFIRMED,
+                )
         for child in node.body:
             self._visit(child, owner, walrus_owner)
+        self._replace_frame(owner, entry_frame)
 
     def _visit_MatchAs(self, node: ast.MatchAs, owner: str | None, walrus_owner: str | None) -> None:
         if node.pattern is not None:

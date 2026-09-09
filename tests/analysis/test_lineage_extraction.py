@@ -105,6 +105,181 @@ def _stage_1c_named(facts, kind, name):
     return [item for item in facts.anchors if item.kind == kind and parse_local_occurrence_id(item.local_id)[3] == name]
 
 
+def _stage_1c_runtime_assignment(facts, name):
+    return next(
+        flow
+        for flow in facts.flows
+        if flow.relation is LineageRelation.ASSIGNS
+        and flow.resolution_kind is ResolutionKind.LEXICAL_EXACT
+        and flow.confidence is LineageConfidence.CONFIRMED
+        and isinstance(flow.source, ExtractedOccurrenceRef)
+        and isinstance(flow.target, ExtractedOccurrenceRef)
+        and parse_local_occurrence_id(flow.source.local_id)[0] == "runtime_bound_local"
+        and parse_local_occurrence_id(flow.source.local_id)[3] == name
+        and parse_local_occurrence_id(flow.target.local_id)[3] == name
+    )
+
+
+def test_stage_1c_for_target_is_runtime_bound_only_inside_loop_body():
+    facts = _stage_1c_facts(
+        "def run(items):\n"
+        " for item in items:\n"
+        "  inside = item\n"
+        " after = item\n"
+    )
+    runtime = _stage_1c_runtime_assignment(facts, "item")
+    item_binding = _stage_1c_named(facts, "binding", "item")[0]
+    assert runtime.target.local_id == item_binding.local_id
+    inside_load = next(
+        flow
+        for flow in facts.flows
+        if flow.relation is LineageRelation.BINDS
+        and flow.resolution_kind is ResolutionKind.LEXICAL_EXACT
+        and flow.confidence is LineageConfidence.CONFIRMED
+        and isinstance(flow.source, ExtractedOccurrenceRef)
+        and isinstance(flow.target, ExtractedOccurrenceRef)
+        and flow.source.local_id == item_binding.local_id
+        and parse_local_occurrence_id(flow.target.local_id)[0] == "name_load"
+        and parse_local_occurrence_id(flow.target.local_id)[3] == "item"
+        and flow.evidence.start_line == 3
+    )
+    assert inside_load.source.local_id == item_binding.local_id
+    assert not any(
+        flow.relation is LineageRelation.BINDS
+        and flow.resolution_kind is ResolutionKind.LEXICAL_EXACT
+        and isinstance(flow.target, ExtractedOccurrenceRef)
+        and parse_local_occurrence_id(flow.target.local_id)[0] == "name_load"
+        and parse_local_occurrence_id(flow.target.local_id)[3] == "item"
+        and flow.evidence.start_line == 4
+        for flow in facts.flows
+    )
+
+
+def test_stage_1c_for_destructuring_gets_independent_runtime_sources():
+    facts = _stage_1c_facts(
+        "def run(rows):\n"
+        " for left, *rest in rows:\n"
+        "  a = left\n"
+        "  b = rest\n"
+    )
+    left_runtime = _stage_1c_runtime_assignment(facts, "left")
+    rest_runtime = _stage_1c_runtime_assignment(facts, "rest")
+    assert left_runtime.source.local_id != rest_runtime.source.local_id
+    assert parse_local_occurrence_id(left_runtime.source.local_id)[0] == "runtime_bound_local"
+    assert parse_local_occurrence_id(rest_runtime.source.local_id)[0] == "runtime_bound_local"
+    assert not any(
+        flow.relation is LineageRelation.ASSIGNS
+        and isinstance(flow.target, ExtractedOccurrenceRef)
+        and parse_local_occurrence_id(flow.target.local_id)[3] in {"left", "rest"}
+        and parse_local_occurrence_id(flow.source.local_id)[0] != "runtime_bound_local"
+        for flow in facts.flows
+    )
+
+
+def test_stage_1c_with_binding_is_runtime_bound_and_remains_available_after_body():
+    facts = _stage_1c_facts(
+        "def run(manager):\n"
+        " with manager as resource:\n"
+        "  inside = resource\n"
+        " after = resource\n"
+    )
+    runtime = _stage_1c_runtime_assignment(facts, "resource")
+    resource_binding = _stage_1c_named(facts, "binding", "resource")[0]
+    assert runtime.target.local_id == resource_binding.local_id
+    loads = [
+        flow
+        for flow in facts.flows
+        if flow.relation is LineageRelation.BINDS
+        and flow.resolution_kind is ResolutionKind.LEXICAL_EXACT
+        and flow.confidence is LineageConfidence.CONFIRMED
+        and isinstance(flow.source, ExtractedOccurrenceRef)
+        and isinstance(flow.target, ExtractedOccurrenceRef)
+        and flow.source.local_id == resource_binding.local_id
+        and parse_local_occurrence_id(flow.target.local_id)[0] == "name_load"
+        and parse_local_occurrence_id(flow.target.local_id)[3] == "resource"
+    ]
+    assert {flow.evidence.start_line for flow in loads} == {3, 4}
+
+
+def test_stage_1c_with_items_bind_sequentially_without_context_producer_flow():
+    facts = _stage_1c_facts(
+        "def run(first):\n"
+        " with first as x, x as y:\n"
+        "  result = y\n"
+    )
+    x_runtime = _stage_1c_runtime_assignment(facts, "x")
+    y_runtime = _stage_1c_runtime_assignment(facts, "y")
+    x_binding = _stage_1c_named(facts, "binding", "x")[0]
+    second_context_load = next(
+        flow
+        for flow in facts.flows
+        if flow.relation is LineageRelation.BINDS
+        and flow.resolution_kind is ResolutionKind.LEXICAL_EXACT
+        and flow.confidence is LineageConfidence.CONFIRMED
+        and isinstance(flow.source, ExtractedOccurrenceRef)
+        and isinstance(flow.target, ExtractedOccurrenceRef)
+        and flow.source.local_id == x_binding.local_id
+        and parse_local_occurrence_id(flow.target.local_id)[3] == "x"
+        and flow.evidence.start_line == 2
+    )
+    assert second_context_load.source.local_id == x_binding.local_id
+    assert parse_local_occurrence_id(x_runtime.source.local_id)[0] == "runtime_bound_local"
+    assert parse_local_occurrence_id(y_runtime.source.local_id)[0] == "runtime_bound_local"
+
+
+def test_stage_1c_except_alias_is_runtime_bound_only_inside_handler():
+    facts = _stage_1c_facts(
+        "def run():\n"
+        " try:\n"
+        "  pass\n"
+        " except Error as exc:\n"
+        "  inside = exc\n"
+        " after = exc\n"
+    )
+    runtime = _stage_1c_runtime_assignment(facts, "exc")
+    exc_binding = _stage_1c_named(facts, "binding", "exc")[0]
+    assert runtime.target.local_id == exc_binding.local_id
+    inside_load = next(
+        flow
+        for flow in facts.flows
+        if flow.relation is LineageRelation.BINDS
+        and flow.resolution_kind is ResolutionKind.LEXICAL_EXACT
+        and flow.confidence is LineageConfidence.CONFIRMED
+        and isinstance(flow.source, ExtractedOccurrenceRef)
+        and isinstance(flow.target, ExtractedOccurrenceRef)
+        and flow.source.local_id == exc_binding.local_id
+        and parse_local_occurrence_id(flow.target.local_id)[3] == "exc"
+        and flow.evidence.start_line == 5
+    )
+    assert inside_load.source.local_id == exc_binding.local_id
+    assert not any(
+        flow.relation is LineageRelation.BINDS
+        and flow.resolution_kind is ResolutionKind.LEXICAL_EXACT
+        and isinstance(flow.target, ExtractedOccurrenceRef)
+        and parse_local_occurrence_id(flow.target.local_id)[3] == "exc"
+        and flow.evidence.start_line == 6
+        for flow in facts.flows
+    )
+
+
+def test_stage_1c_async_for_and_async_with_use_runtime_bound_locals():
+    facts = _stage_1c_facts(
+        "async def run(items, manager):\n"
+        " async for item in items:\n"
+        "  seen = item\n"
+        " async with manager as resource:\n"
+        "  used = resource\n"
+    )
+    item_runtime = _stage_1c_runtime_assignment(facts, "item")
+    resource_runtime = _stage_1c_runtime_assignment(facts, "resource")
+    assert parse_local_occurrence_id(item_runtime.source.local_id)[0] == "runtime_bound_local"
+    assert parse_local_occurrence_id(resource_runtime.source.local_id)[0] == "runtime_bound_local"
+    assert item_runtime.resolution_kind is ResolutionKind.LEXICAL_EXACT
+    assert resource_runtime.resolution_kind is ResolutionKind.LEXICAL_EXACT
+    assert item_runtime.confidence is LineageConfidence.CONFIRMED
+    assert resource_runtime.confidence is LineageConfidence.CONFIRMED
+
+
 def test_stage_1c_direct_assignments_chain_through_current_frame():
     facts = _stage_1c_facts(
         "def run(arg):\n"
