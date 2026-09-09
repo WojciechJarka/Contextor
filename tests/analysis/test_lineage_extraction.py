@@ -15,7 +15,6 @@ from contextor.core.analysis.lineage_extraction import (
 from contextor.core.domain.lineage_facts import (
     ExtractedOccurrenceRef,
     ExtractedSymbolicKind,
-    ExtractedSymbolicRef,
     LineageConfidence,
     LineageFamilyStatus,
     LineageRelation,
@@ -69,13 +68,7 @@ def test_typed_parameter_ids_bind_and_defaults_need_no_ast_reread():
         ("parameter_kwonly", 0, "flag"),
         ("parameter_varkw", 0, "extra"),
     }
-    binds = [
-        flow
-        for flow in facts.flows
-        if flow.relation is LineageRelation.BINDS
-        and isinstance(flow.source, ExtractedSymbolicRef)
-        and flow.source.kind is ExtractedSymbolicKind.PARAMETER
-    ]
+    binds = [flow for flow in facts.flows if flow.relation is LineageRelation.BINDS]
     assert len(binds) == 5
     assert all(
         flow.source.kind is ExtractedSymbolicKind.PARAMETER

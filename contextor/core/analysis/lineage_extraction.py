@@ -25,7 +25,7 @@ from contextor.core.domain.lineage_facts import (
 
 _LOCAL_ID_VERSION: Final[str] = "v1"
 _ANCHOR_KINDS: Final[frozenset[str]] = frozenset({"module", "class", "function", "async_function", "lambda", "comprehension", "parameter", "binding", "import_binding", "global_declaration", "nonlocal_declaration"})
-_LOCAL_ID_KINDS: Final[frozenset[str]] = _ANCHOR_KINDS | frozenset({"parameter_posonly", "parameter_poskw", "parameter_kwonly", "parameter_vararg", "parameter_varkw", "expression_result", "name_load", "call_site", "call_argument", "call_result", "runtime_bound_local"})
+_LOCAL_ID_KINDS: Final[frozenset[str]] = _ANCHOR_KINDS | frozenset({"parameter_posonly", "parameter_poskw", "parameter_kwonly", "parameter_vararg", "parameter_varkw", "expression_result"})
 _AST_PATH_RE: Final[re.Pattern[str]] = re.compile(r"^(?:root|(?:0|[1-9]\d*)(?:\.(?:0|[1-9]\d*))*)$")
 _FINGERPRINT_RE: Final[re.Pattern[str]] = re.compile(r"^[0-9a-f]{64}$")
 
@@ -146,13 +146,6 @@ class _ParameterInfo:
     ordinal: int
 
 
-@dataclass(frozen=True)
-class _CallableInfo:
-    name: str
-    anchor_id: str
-    parameters: tuple[_ParameterInfo, ...]
-
-
 class _AnchorExtractor:
     def __init__(self, paths: dict[int, str], source_key: str) -> None:
         self.paths = paths
@@ -161,10 +154,6 @@ class _AnchorExtractor:
         self.flows: list[ExtractedFlowFact] = []
         self._ids: set[str] = set()
         self._flow_ids: set[str] = set()
-        self._occurrences: dict[tuple[str, int], ExtractedOccurrenceRef] = {}
-        self._bindings: dict[str | None, dict[str, ExtractedOccurrenceRef]] = {None: {}}
-        self._callables: dict[str | None, dict[str, _CallableInfo]] = {None: {}}
-        self._blocked: dict[str | None, set[str]] = {None: set()}
 
     def extract(self, tree: ast.AST) -> tuple[tuple[ExtractedAnchorFact, ...], tuple[ExtractedFlowFact, ...]]:
         self._visit(tree, None, None)
@@ -179,32 +168,16 @@ class _AnchorExtractor:
         return local_id
 
     def _occurrence(self, kind: str, node: ast.AST, name: str | None = None, *, ordinal: int = 0) -> ExtractedOccurrenceRef:
-        cache_key = (kind, id(node))
-        if name is None and ordinal == 0 and cache_key in self._occurrences:
-            return self._occurrences[cache_key]
         local_id = build_local_occurrence_id(kind, self.paths[id(node)], name, ordinal=ordinal)
         if local_id in self._ids: raise ValueError(f"Duplicate lineage local id: {local_id}")
         self._ids.add(local_id)
-        result = ExtractedOccurrenceRef(local_id)
-        if name is None and ordinal == 0:
-            self._occurrences[cache_key] = result
-        return result
+        return ExtractedOccurrenceRef(local_id)
 
-    def _flow(self, *, source, target, relation: LineageRelation, node: ast.AST, resolution_kind: ResolutionKind, confidence: LineageConfidence, ordinal: int = 0, dynamic_boundary: str | None = None) -> None:
+    def _flow(self, *, source, target, relation: LineageRelation, node: ast.AST, resolution_kind: ResolutionKind, confidence: LineageConfidence, ordinal: int = 0) -> None:
         local_id = f"flow:v1:{relation.value}:{self.paths[id(node)]}:i:{ordinal}"
         if local_id in self._flow_ids: raise ValueError(f"Duplicate lineage flow id: {local_id}")
         self._flow_ids.add(local_id)
-        self.flows.append(ExtractedFlowFact(local_id, source, target, relation, _source_span(node), resolution_kind, confidence, dynamic_boundary))
-
-    def _frame(self, owner: str | None) -> dict[str, ExtractedOccurrenceRef]:
-        return self._bindings.setdefault(owner, {})
-
-    def _blocked_names(self, owner: str | None) -> set[str]:
-        return self._blocked.setdefault(owner, set())
-
-    def _value(self, node: ast.AST, owner: str | None, walrus_owner: str | None) -> ExtractedOccurrenceRef:
-        self._visit(node, owner, walrus_owner)
-        return self._occurrence("expression_result", node)
+        self.flows.append(ExtractedFlowFact(local_id, source, target, relation, _source_span(node), resolution_kind, confidence))
 
     def _parameter_symbolic(self, callable_symbol_name: str, parameter: _ParameterInfo) -> ExtractedSymbolicRef:
         return ExtractedSymbolicRef(ExtractedSymbolicKind.PARAMETER, self.module_name, callable_symbol_name, parameter.local_id)
@@ -219,7 +192,6 @@ class _AnchorExtractor:
 
     def _visit_Module(self, node: ast.Module, _owner: str | None, _walrus_owner: str | None) -> None:
         module_id = self._add("module", node, None, None)
-        self._frame(module_id)
         for child in node.body:
             self._visit(child, module_id, None)
 
@@ -279,11 +251,6 @@ class _AnchorExtractor:
         self._function_signature_evidence(node, owner, walrus_owner)
         parameters = self._parameter_anchors(node.args, function_id, node.name)
         self._default_flows(node, node.name, parameters)
-        self._callables.setdefault(owner, {})[node.name] = _CallableInfo(node.name, function_id, parameters)
-        self._frame(owner)[node.name] = ExtractedOccurrenceRef(function_id)
-        self._frame(function_id)
-        for parameter in parameters:
-            self._frame(function_id)[parameter.name] = ExtractedOccurrenceRef(parameter.local_id)
         for child in node.body:
             self._visit(child, function_id, None)
 
@@ -336,77 +303,14 @@ class _AnchorExtractor:
     def _visit_Name(self, node: ast.Name, owner: str | None, _walrus_owner: str | None) -> None:
         if isinstance(node.ctx, ast.Store):
             self._add("binding", node, node.id, owner)
-        elif isinstance(node.ctx, ast.Load):
-            load = self._occurrence("name_load", node, node.id)
-            source = self._frame(owner).get(node.id)
-            if source is not None and node.id not in self._blocked_names(owner):
-                self._flow(source=source, target=load, relation=LineageRelation.BINDS, node=node, resolution_kind=ResolutionKind.LEXICAL_EXACT, confidence=LineageConfidence.CONFIRMED)
-
-    def _assign_target(self, target: ast.AST, source: ExtractedOccurrenceRef, owner: str | None, walrus_owner: str | None) -> None:
-        if isinstance(target, ast.Name):
-            binding = ExtractedOccurrenceRef(self._add("binding", target, target.id, owner))
-            self._frame(owner)[target.id] = binding
-            self._flow(source=source, target=binding, relation=LineageRelation.ASSIGNS, node=target, resolution_kind=ResolutionKind.LEXICAL_EXACT, confidence=LineageConfidence.CONFIRMED)
-        elif isinstance(target, (ast.Tuple, ast.List)):
-            for item in target.elts:
-                self._assign_target(item, source, owner, walrus_owner)
-        else:
-            self._visit(target, owner, walrus_owner)
-
-    def _visit_Assign(self, node: ast.Assign, owner: str | None, walrus_owner: str | None) -> None:
-        source = self._value(node.value, owner, walrus_owner)
-        for target in node.targets:
-            self._assign_target(target, source, owner, walrus_owner)
-
-    def _visit_AnnAssign(self, node: ast.AnnAssign, owner: str | None, walrus_owner: str | None) -> None:
-        if node.value is None:
-            self._visit(node.target, owner, walrus_owner)
-            if node.annotation is not None: self._visit(node.annotation, owner, walrus_owner)
-            return
-        self._assign_target(node.target, self._value(node.value, owner, walrus_owner), owner, walrus_owner)
 
     def _visit_NamedExpr(self, node: ast.NamedExpr, owner: str | None, walrus_owner: str | None) -> None:
-        self._assign_target(node.target, self._value(node.value, owner, walrus_owner), walrus_owner or owner, walrus_owner)
-
-    def _visit_Return(self, node: ast.Return, owner: str | None, walrus_owner: str | None) -> None:
-        if node.value is not None and owner is not None:
-            source = self._value(node.value, owner, walrus_owner)
-            name = next((info.name for infos in self._callables.values() for info in infos.values() if info.anchor_id == owner), None)
-            if name is not None:
-                self._flow(source=source, target=ExtractedSymbolicRef(ExtractedSymbolicKind.RETURN, self.module_name, name, owner), relation=LineageRelation.RETURNS, node=node, resolution_kind=ResolutionKind.LEXICAL_EXACT, confidence=LineageConfidence.CONFIRMED)
-
-    def _visit_Call(self, node: ast.Call, owner: str | None, walrus_owner: str | None) -> None:
-        self._visit(node.func, owner, walrus_owner)
-        site = self._occurrence("call_site", node)
-        actuals: list[tuple[ExtractedOccurrenceRef, ast.AST, str | None]] = []
-        for index, arg in enumerate(node.args):
-            actuals.append((self._value(arg, owner, walrus_owner), arg, None))
-        for keyword in node.keywords:
-            actuals.append((self._value(keyword.value, owner, walrus_owner), keyword.value, keyword.arg))
-        for ordinal, (value, evidence, name) in enumerate(actuals):
-            argument = self._occurrence("call_argument", evidence, name, ordinal=ordinal)
-            self._flow(source=value, target=argument, relation=LineageRelation.ASSIGNS, node=evidence, resolution_kind=ResolutionKind.LEXICAL_EXACT, confidence=LineageConfidence.CONFIRMED, ordinal=ordinal)
-        result = self._occurrence("call_result", node)
-        callable_info = self._callables.get(owner, {}).get(node.func.id) if isinstance(node.func, ast.Name) else None
-        if callable_info is not None:
-            if not any(isinstance(arg, ast.Starred) for arg in node.args) and not any(keyword.arg is None for keyword in node.keywords):
-                parameters = list(callable_info.parameters)
-                positional = [parameter for parameter in parameters if parameter.kind in (ParameterKind.POSITIONAL_ONLY, ParameterKind.POSITIONAL_OR_KEYWORD)]
-                by_keyword = {parameter.name: parameter for parameter in parameters if parameter.kind in (ParameterKind.POSITIONAL_OR_KEYWORD, ParameterKind.KEYWORD_ONLY)}
-                mappings: list[tuple[ExtractedOccurrenceRef, _ParameterInfo, ast.AST, int]] = []
-                valid = True
-                for index, (value, evidence, name) in enumerate(actuals):
-                    parameter = positional[index] if name is None and index < len(positional) else by_keyword.get(name) if name is not None else None
-                    if parameter is None: valid = False; break
-                    mappings.append((value, parameter, evidence, index))
-                if valid:
-                    for value, parameter, evidence, ordinal in mappings:
-                        self._flow(source=value, target=self._parameter_symbolic(callable_info.name, parameter), relation=LineageRelation.ARGUMENT_TO_PARAMETER, node=evidence, resolution_kind=ResolutionKind.SIGNATURE_EXACT, confidence=LineageConfidence.CONFIRMED, ordinal=ordinal)
-            self._flow(source=ExtractedSymbolicRef(ExtractedSymbolicKind.RETURN, self.module_name, callable_info.name, callable_info.anchor_id), target=result, relation=LineageRelation.CALL_RESULT, node=node, resolution_kind=ResolutionKind.CALL_EXACT, confidence=LineageConfidence.CONFIRMED)
-        elif isinstance(node.func, ast.Name):
-            self._flow(source=site, target=result, relation=LineageRelation.CALL_RESULT, node=node, resolution_kind=ResolutionKind.UNRESOLVED_NAME, confidence=LineageConfidence.UNRESOLVED)
+        target_owner = walrus_owner or owner
+        if isinstance(node.target, ast.Name):
+            self._add("binding", node.target, node.target.id, target_owner)
         else:
-            self._flow(source=site, target=result, relation=LineageRelation.CALL_RESULT, node=node, resolution_kind=ResolutionKind.DYNAMIC_RUNTIME_BOUNDARY, confidence=LineageConfidence.DYNAMIC, dynamic_boundary="dynamic_callable")
+            self._visit(node.target, target_owner, walrus_owner)
+        self._visit(node.value, owner, walrus_owner)
 
     def _visit_Import(self, node: ast.Import, owner: str | None, _walrus_owner: str | None) -> None:
         for alias in node.names:
