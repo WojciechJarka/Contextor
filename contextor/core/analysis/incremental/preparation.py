@@ -8,13 +8,15 @@ Source preparation and semantic delta construction for incremental updates:
 - PreparedModuleUpdate contract
 """
 
-import ast
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, List, Set, Dict, Any, Tuple
 
 from contextor.core.analysis.state_manager import FileDelta
+from contextor.core.analysis.lineage_extraction import extract_lineage_source_facts
+from contextor.core.domain.lineage_facts import ExtractedLineageSourceFacts
 from contextor.core.domain.usage_facts import ModuleUsageFacts, diff_usage_facts
+from contextor.core.source import SourceError, parse_source_with_fingerprint
 
 
 
@@ -30,6 +32,7 @@ class PreparedSourceUpdate:
     usage_delta: Optional[Any]
     new_collision_facts: Optional[List[Dict[str, Any]]] = None
     collision_facts_changed: bool = False
+    extracted_lineage_facts: Optional[ExtractedLineageSourceFacts] = None
     error_status: Optional[str] = None
     error_message: Optional[str] = None
     line_number: Optional[int] = None
@@ -138,6 +141,7 @@ def prepare_source_update(
     old_usage: Optional[ModuleUsageFacts],
     persistent_id: Optional[str] = None,
     old_collision_facts: Optional[List[Dict[str, Any]]] = None,
+    source_key: str | None = None,
 ) -> PreparedSourceUpdate:
     """
     Parses and extracts all necessary facts from a changed/added source file,
@@ -147,9 +151,9 @@ def prepare_source_update(
 
     # 1. Syntax validation and source reading
     try:
-        source_text = path.read_text(encoding="utf-8")
-        parsed_tree = ast.parse(source_text, filename=str(path))
-    except SyntaxError as exc:
+        parsed_input = parse_source_with_fingerprint(path)
+        parsed_tree = parsed_input.tree
+    except SourceError as exc:
         return PreparedSourceUpdate(
             module_path=module_path,
             is_new=is_new,
@@ -159,26 +163,35 @@ def prepare_source_update(
             delta=FileDelta(module_path=module_path, is_new=is_new),
             usage_delta=None,
             new_collision_facts=None,
-            collision_facts_changed=True if old_collision_facts is not None else False,
-            error_status="SYNTAX_ERROR",
-            error_message=exc.msg,
-            line_number=exc.lineno,
-            column_number=exc.offset,
+            collision_facts_changed=(True if old_collision_facts is not None else False),
+            error_status=exc.error_status,
+            error_message=exc.detail_message,
+            line_number=exc.line_number,
+            column_number=exc.column_number,
         )
-    except OSError as exc:
-        return PreparedSourceUpdate(
-            module_path=module_path,
-            is_new=is_new,
-            new_imports=[],
-            new_artifacts={},
-            new_usage=None,
-            delta=FileDelta(module_path=module_path, is_new=is_new),
-            usage_delta=None,
-            new_collision_facts=None,
-            collision_facts_changed=True if old_collision_facts is not None else False,
-            error_status="ERROR",
-            error_message=str(exc),
-        )
+
+    extracted_lineage_facts = None
+    if source_key is not None:
+        try:
+            extracted_lineage_facts = extract_lineage_source_facts(
+                parsed_tree,
+                source_key=source_key,
+                source_fingerprint=parsed_input.source_fingerprint,
+            )
+        except Exception as exc:
+            return PreparedSourceUpdate(
+                module_path=module_path,
+                is_new=is_new,
+                new_imports=[],
+                new_artifacts={},
+                new_usage=None,
+                delta=FileDelta(module_path=module_path, is_new=is_new),
+                usage_delta=None,
+                new_collision_facts=None,
+                collision_facts_changed=(True if old_collision_facts is not None else False),
+                error_status="ERROR",
+                error_message=f"lineage extraction failed: {exc}",
+            )
 
     # 2. Extract imports
     try:
@@ -274,6 +287,7 @@ def prepare_source_update(
         usage_delta=usage_delta,
         new_collision_facts=new_collision_facts,
         collision_facts_changed=collision_facts_changed,
+        extracted_lineage_facts=extracted_lineage_facts,
     )
 
 

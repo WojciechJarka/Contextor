@@ -239,6 +239,7 @@ class IncrementalAnalysisEngine:
                 old_usage=old_usage,
                 persistent_id=module_id,
                 old_collision_facts=old_collision_facts,
+                source_key=source_path,
             )
 
             if prep.has_error:

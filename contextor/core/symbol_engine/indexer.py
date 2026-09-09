@@ -18,6 +18,7 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 
 from contextor.core.analysis.cache_manager import CacheManager
+from contextor.core.analysis.lineage_extraction import extract_lineage_source_facts
 from contextor.core.analysis.test_context import (
     _extract_test_file_facts,
     is_test_context_candidate,
@@ -25,13 +26,18 @@ from contextor.core.analysis.test_context import (
 from contextor.core.domain.imports import (
     ImportRef,
 )
+from contextor.core.domain.lineage_facts import ExtractedLineageSourceFacts
 from contextor.core.domain.module import (
     Module,
 )
 from contextor.core.errors import AnalysisCancelled, checkpoint
 from contextor.core.paths import DEFAULT_IGNORED_DIRS
 from contextor.core.reference.index import extract_compact_reference_facts
-from contextor.core.source import SourceError, parse_source
+from contextor.core.source import (
+    SourceError,
+    parse_source,
+    parse_source_with_fingerprint,
+)
 from contextor.core.symbol_engine.extractor import extract_file_symbols
 from contextor.core.validator.collisions import (
     COLLISION_FACT_KEYS,
@@ -302,7 +308,39 @@ def _process_single_file(path_str: str, root_str: str) -> dict:
     path = Path(path_str)
 
     rel = path.relative_to(Path(root_str))
+    source_key = rel.as_posix()
     module_id = ".".join(rel.with_suffix("").parts)
+
+    try:
+        parsed_input = parse_source_with_fingerprint(path)
+    except SourceError as exc:
+        return {
+            "module_id": module_id,
+            "path": str(rel),
+            "absolute_path": str(path.resolve()),
+            "imports": None,
+            "error": str(exc),
+            "filename": path.name,
+            "symbol_facts": None,
+            "reference_facts": None,
+            "collision_facts": None,
+            "collision_facts_status": None,
+            "test_facts": None,
+            "test_facts_status": None,
+            "lineage_facts": None,
+            "automatic_test_context_directory": (
+                str(path.parent)
+                if is_test_context_candidate(root_str, path)
+                or path.parent == Path(root_str)
+                else None
+            ),
+        }
+    tree = parsed_input.tree
+    lineage_facts = extract_lineage_source_facts(
+        tree,
+        source_key=source_key,
+        source_fingerprint=parsed_input.source_fingerprint,
+    )
 
     # Próba odczytu z cache
     cache = _cache_manager(root_str)
@@ -341,7 +379,7 @@ def _process_single_file(path_str: str, root_str: str) -> dict:
             or (test_candidate and test_facts is None)
         ):
             try:
-                tree = parse_source(path)
+                tree = parsed_input.tree
             except SourceError as exc:
                 if symbol_facts is None:
                     symbol_facts = {
@@ -423,7 +461,7 @@ def _process_single_file(path_str: str, root_str: str) -> dict:
                 cache.set(path, rewritten)
     else:
         try:
-            tree = parse_source(path)
+            tree = parsed_input.tree
         except SourceError as exc:
             imports, error = None, str(exc)
         else:
@@ -497,6 +535,7 @@ def _process_single_file(path_str: str, root_str: str) -> dict:
         "collision_facts_status": collision_facts_status,
         "test_facts": test_facts,
         "test_facts_status": test_facts_status,
+        "lineage_facts": lineage_facts,
         "automatic_test_context_directory": (
             str(path.parent)
             if test_candidate or path.parent == Path(root_str)
@@ -551,6 +590,8 @@ class RepositoryIndex:
 
     reference_facts_by_module: dict[str, dict] = dataclasses.field(default_factory=dict)
 
+    lineage_facts_by_source: dict[str, ExtractedLineageSourceFacts] = dataclasses.field(default_factory=dict)
+
     collision_facts_by_module: dict[str, list[dict]] = dataclasses.field(default_factory=dict)
 
     test_facts_by_path: dict[str, dict] = dataclasses.field(default_factory=dict)
@@ -577,6 +618,7 @@ def index_repository(
     skipped: list[SkippedFile] = []
     symbol_facts_by_module: dict[str, dict] = {}
     reference_facts_by_module: dict[str, dict] = {}
+    lineage_facts_by_source: dict[str, ExtractedLineageSourceFacts] = {}
     collision_facts_by_module: dict[str, list[dict]] = {}
     test_facts_by_path: dict[str, dict] = {}
     automatic_test_dir_entries: dict[Path, set[str]] = {root_path: set()}
@@ -649,6 +691,9 @@ def index_repository(
                     symbol_facts_by_module[res["module_id"]] = res["symbol_facts"]
                 if res.get("reference_facts") is not None:
                     reference_facts_by_module[res["module_id"]] = res["reference_facts"]
+                extracted_lineage = res.get("lineage_facts")
+                if extracted_lineage is not None:
+                    lineage_facts_by_source[extracted_lineage.source_key] = extracted_lineage
                 cached_collision_facts = res.get("collision_facts")
                 if _valid_collision_facts(cached_collision_facts, res["module_id"]):
                     collision_facts_by_module[res["module_id"]] = cached_collision_facts["facts"]
@@ -662,6 +707,7 @@ def index_repository(
             skipped=sorted(skipped, key=lambda item: item.path),
             symbol_facts_by_module=symbol_facts_by_module,
             reference_facts_by_module=reference_facts_by_module,
+            lineage_facts_by_source=lineage_facts_by_source,
             collision_facts_by_module=collision_facts_by_module,
             test_facts_by_path=test_facts_by_path,
             automatic_test_dirs=automatic_test_dirs(),
@@ -697,6 +743,9 @@ def index_repository(
                     symbol_facts_by_module[res["module_id"]] = res["symbol_facts"]
                 if res.get("reference_facts") is not None:
                     reference_facts_by_module[res["module_id"]] = res["reference_facts"]
+                extracted_lineage = res.get("lineage_facts")
+                if extracted_lineage is not None:
+                    lineage_facts_by_source[extracted_lineage.source_key] = extracted_lineage
                 cached_collision_facts = res.get("collision_facts")
                 if _valid_collision_facts(cached_collision_facts, res["module_id"]):
                     collision_facts_by_module[res["module_id"]] = cached_collision_facts["facts"]
@@ -716,6 +765,7 @@ def index_repository(
         skipped=sorted(skipped, key=lambda item: item.path),
         symbol_facts_by_module=symbol_facts_by_module,
         reference_facts_by_module=reference_facts_by_module,
+        lineage_facts_by_source=lineage_facts_by_source,
         collision_facts_by_module=collision_facts_by_module,
         test_facts_by_path=test_facts_by_path,
         automatic_test_dirs=automatic_test_dirs(),
