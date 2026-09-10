@@ -52,6 +52,16 @@ from contextor.core.analysis.lineage_extraction_bindings import (
     visit_named_expr,
     visit_nonlocal,
 )
+from contextor.core.analysis.lineage_extraction_visitors import (
+    visit_call,
+    visit_class_def,
+    visit_function,
+    visit_import,
+    visit_import_from,
+    visit_lambda,
+    visit_module,
+    visit_return,
+)
 from contextor.core.analysis.lineage_extraction_state import _ActiveComprehension, _CallArgumentInfo, _CallableInfo, _ImportInfo, _ParameterInfo, LineageExtractionState
 from contextor.core.domain.lineage_facts import (
     ExtractedAnchorFact,
@@ -210,20 +220,10 @@ class _AnchorExtractor:
             self._visit(child, owner_local_id, walrus_owner_local_id)
 
     def _visit_Module(self, node: ast.Module, _owner: str | None, _walrus_owner: str | None) -> None:
-        module_id = self._add("module", node, None, None)
-        self._frame(module_id)
-        for child in node.body:
-            self._visit(child, module_id, None)
+        return visit_module(self.state, self.paths, node, visit=self._visit)
 
     def _visit_ClassDef(self, node: ast.ClassDef, owner: str | None, walrus_owner: str | None) -> None:
-        class_id = self._add("class", node, node.name, owner)
-        for child in (*node.decorator_list, *node.bases, *node.keywords):
-            self._visit(child, owner, walrus_owner)
-        self._frame(class_id)
-        for child in node.body:
-            self._visit(child, class_id, None)
-        if node.name not in self._blocked_names(owner):
-            self._frame(owner)[node.name] = ExtractedOccurrenceRef(class_id)
+        return visit_class_def(self.state, self.paths, node, owner, walrus_owner, visit=self._visit)
 
     def _function_signature_evidence(self, node: ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda, owner: str | None, walrus_owner: str | None) -> None:
         return function_signature_evidence(node, owner, walrus_owner, visit=self._visit)
@@ -233,22 +233,7 @@ class _AnchorExtractor:
         return default_flows(self.state, self.paths, self.module_name, node, callable_symbol_name, parameters)
 
     def _visit_function(self, node: ast.FunctionDef | ast.AsyncFunctionDef, kind: str, owner: str | None, walrus_owner: str | None) -> None:
-        function_id = self._add(kind, node, node.name, owner)
-        for decorator in node.decorator_list:
-            self._visit(decorator, owner, walrus_owner)
-        self._function_signature_evidence(node, owner, walrus_owner)
-        parameters = self._parameter_anchors(node.args, function_id, node.name)
-        self._default_flows(node, node.name, parameters)
-        callable_info = _CallableInfo(node.name, function_id, parameters)
-        self._callable_frame(owner)[node.name] = callable_info
-        self.state._callables_by_anchor[function_id] = callable_info
-        function_frame = self._frame(function_id)
-        for parameter in parameters:
-            function_frame[parameter.name] = ExtractedOccurrenceRef(parameter.local_id)
-        for child in node.body:
-            self._visit(child, function_id, None)
-        if node.name not in self._blocked_names(owner):
-            self._frame(owner)[node.name] = ExtractedOccurrenceRef(function_id)
+        return visit_function(self.state, self.paths, self.module_name, node, kind, owner, walrus_owner, visit=self._visit)
 
     def _visit_FunctionDef(self, node: ast.FunctionDef, owner: str | None, walrus_owner: str | None) -> None:
         self._visit_function(node, "function", owner, walrus_owner)
@@ -257,49 +242,13 @@ class _AnchorExtractor:
         self._visit_function(node, "async_function", owner, walrus_owner)
 
     def _visit_Lambda(self, node: ast.Lambda, owner: str | None, walrus_owner: str | None) -> None:
-        lambda_id = self._add("lambda", node, None, owner)
-        self._function_signature_evidence(node, owner, walrus_owner)
-        callable_symbol_name = f"lambda@{self.paths[id(node)]}"
-        parameters = self._parameter_anchors(node.args, lambda_id, callable_symbol_name)
-        self._default_flows(node, callable_symbol_name, parameters)
-        callable_info = _CallableInfo(callable_symbol_name, lambda_id, parameters)
-        self.state._callables_by_anchor[lambda_id] = callable_info
-        lambda_frame = self._frame(lambda_id)
-        for parameter in parameters:
-            lambda_frame[parameter.name] = ExtractedOccurrenceRef(parameter.local_id)
-        body_source = self._value(node.body, lambda_id, None)
-        self._flow(source=body_source, target=self._return_symbolic(callable_info), relation=LineageRelation.RETURNS, node=node.body, resolution_kind=ResolutionKind.LEXICAL_EXACT, confidence=LineageConfidence.CONFIRMED)
-        lambda_value = self._occurrence("expression_result", node)
-        self.state._callable_values[lambda_value.local_id] = callable_info
+        return visit_lambda(self.state, self.paths, self.module_name, node, owner, walrus_owner, visit=self._visit, value=self._value)
 
     def _visit_Return(self, node: ast.Return, owner: str | None, walrus_owner: str | None) -> None:
-        if node.value is None: return
-        source = self._value(node.value, owner, walrus_owner)
-        callable_info = self.state._callables_by_anchor.get(owner) if owner is not None else None
-        if callable_info is not None:
-            self._flow(source=source, target=self._return_symbolic(callable_info), relation=LineageRelation.RETURNS, node=node, resolution_kind=ResolutionKind.LEXICAL_EXACT, confidence=LineageConfidence.CONFIRMED)
+        return visit_return(self.state, self.paths, self.module_name, node, owner, walrus_owner, value=self._value)
 
     def _visit_Call(self, node: ast.Call, owner: str | None, walrus_owner: str | None) -> None:
-        self._visit(node.func, owner, walrus_owner)
-        callable_info = self._resolve_current_local_callable(node, owner)
-        imported_return = self._resolve_current_imported_callable(node, owner)
-        callee_ref = self._frame(owner).get(node.func.id) if isinstance(node.func, ast.Name) else None
-        call_site, call_result = self._occurrence("call_site", node), self._occurrence("call_result", node)
-        arguments = self._collect_call_arguments(node, owner, walrus_owner)
-        if callable_info is not None:
-            self._bind_call_arguments(arguments, callable_info)
-            self._flow(source=self._return_symbolic(callable_info), target=call_result, relation=LineageRelation.CALL_RESULT, node=node, resolution_kind=ResolutionKind.CALL_EXACT, confidence=LineageConfidence.CONFIRMED)
-            return
-        if imported_return is not None:
-            self._flow(source=imported_return, target=call_result, relation=LineageRelation.CALL_RESULT, node=node, resolution_kind=ResolutionKind.IMPORT_EXACT, confidence=LineageConfidence.CONFIRMED)
-            return
-        if isinstance(node.func, ast.Name) and callee_ref is None:
-            resolution_kind, confidence = ResolutionKind.UNRESOLVED_NAME, LineageConfidence.UNRESOLVED
-            dynamic_boundary = None
-        else:
-            resolution_kind, confidence = ResolutionKind.DYNAMIC_RUNTIME_BOUNDARY, LineageConfidence.DYNAMIC
-            dynamic_boundary = "dynamic_call"
-        self._flow(source=call_site, target=call_result, relation=LineageRelation.CALL_RESULT, node=node, resolution_kind=resolution_kind, confidence=confidence, dynamic_boundary=dynamic_boundary)
+        return visit_call(self.state, self.paths, self.module_name, node, owner, walrus_owner, visit=self._visit, value=self._value)
 
     def _visit_comprehension_expression(
         self,
@@ -384,18 +333,10 @@ class _AnchorExtractor:
         return visit_async_with(self.state, node, owner, walrus_owner, visit=self._visit, runtime_bind_target=self._runtime_bind_target)
 
     def _visit_Import(self, node: ast.Import, owner: str | None, _walrus_owner: str | None) -> None:
-        for alias in node.names:
-            local_name = alias.asname or alias.name.split(".", 1)[0]
-            self._register_import_binding(alias, owner, local_name, alias.name if alias.asname is not None else alias.name.split(".", 1)[0], None)
+        return visit_import(self.state, self.paths, node, owner)
 
     def _visit_ImportFrom(self, node: ast.ImportFrom, owner: str | None, _walrus_owner: str | None) -> None:
-        module_name = _resolve_import_module(self.source_key, node.module, node.level)
-        for alias in node.names:
-            if alias.name == "*":
-                self._replace_frame(owner, {})
-                continue
-            local_name = alias.asname or alias.name
-            self._register_import_binding(alias, owner, local_name, module_name, alias.name)
+        return visit_import_from(self.state, self.paths, self.source_key, node, owner)
 
     def _visit_Global(self, node: ast.Global, owner: str | None, _walrus_owner: str | None) -> None:
         visit_global(self.state, self.paths, node, owner)
