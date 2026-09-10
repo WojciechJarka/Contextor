@@ -202,10 +202,10 @@ index ae3bb54..64bdab9 100644
      if imported_return is not None:
          emit_flow(
 diff --git a/tests/analysis/test_lineage_extraction.py b/tests/analysis/test_lineage_extraction.py
-index 8161990..1e37df0 100644
+index 8161990..175f5a4 100644
 --- a/tests/analysis/test_lineage_extraction.py
 +++ b/tests/analysis/test_lineage_extraction.py
-@@ -1748,3 +1748,122 @@ def test_stage_1d2_factory_return_alias_is_not_newly_resolved():
+@@ -1748,3 +1748,141 @@ def test_stage_1d2_factory_return_alias_is_not_newly_resolved():
      )
      flows = _stage_1c_call_result_flows(facts)
      assert flows[-1].resolution_kind is not ResolutionKind.CALL_EXACT
@@ -328,5 +328,24 @@ index 8161990..1e37df0 100644
 +def test_stage_1d3_o_existing_local_callable_alias_remains_exact():
 +    facts = _stage_1c_facts("def f(): return 1\ng=f\nresult=g()\n")
 +    assert _stage_1d3_final_call(facts).resolution_kind is ResolutionKind.CALL_EXACT
++
++
++def test_stage_1d3_lambda_callable_return_summary_propagates_inner_lambda():
++    facts = _stage_1c_facts("maker=lambda:(lambda:1)\ng=maker()\nresult=g()\n")
++    flow = _stage_1d3_final_call(facts)
++    lambdas = _stage_1c_named(facts, "lambda", None)
++    inner = max(lambdas, key=lambda item: item.span.start_column)
++    assert flow.resolution_kind is ResolutionKind.CALL_EXACT
++    assert isinstance(flow.source, ExtractedSymbolicRef)
++    assert flow.source.source_local_id == inner.local_id
++
++
++def test_stage_1d3_yield_from_marks_only_nested_callable_owner():
++    facts = _stage_1c_facts(
++        "def factory():\n def f():\n  yield from ()\n return f\ng=factory()\nresult=g()\n"
++    )
++    flow = _stage_1d3_final_call(facts)
++    assert flow.resolution_kind is ResolutionKind.CALL_EXACT
++    assert isinstance(flow.source, ExtractedSymbolicRef) and flow.source.symbol_name == "f"
 ```
 
