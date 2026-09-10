@@ -1780,10 +1780,39 @@ def test_stage_1d3_c_factory_returned_lambda_assigns_exactly():
 
 
 def test_stage_1d3_d_direct_factory_result_invocation_is_exact():
-    facts = _stage_1c_facts("def factory():\n def f(): return 1\n return f\nresult=factory()()\n")
-    flow = _stage_1d3_final_call(facts)
-    assert flow.resolution_kind is ResolutionKind.CALL_EXACT
-    assert isinstance(flow.source, ExtractedSymbolicRef) and flow.source.symbol_name == "f"
+    source = "def factory():\n def f(): return 1\n return f\nresult=factory()()\n"
+    tree = ast.parse(source)
+    outer_call = tree.body[-1].value
+    assert isinstance(outer_call, ast.Call) and isinstance(outer_call.func, ast.Call)
+    paths, reason = lineage_extraction_module._index_ast_paths(
+        tree,
+        lineage_extraction_module.DEFAULT_LINEAGE_EXTRACTION_LIMITS,
+    )
+    assert reason is None
+    facts = _stage_1c_facts(source)
+    outer_target = ExtractedOccurrenceRef(
+        build_local_occurrence_id("call_result", paths[id(outer_call)])
+    )
+    inner_target = ExtractedOccurrenceRef(
+        build_local_occurrence_id("call_result", paths[id(outer_call.func)])
+    )
+    outer_flow = next(
+        flow
+        for flow in facts.flows
+        if flow.relation is LineageRelation.CALL_RESULT and flow.target == outer_target
+    )
+    inner_flow = next(
+        flow
+        for flow in facts.flows
+        if flow.relation is LineageRelation.CALL_RESULT and flow.target == inner_target
+    )
+    nested_f = _stage_1c_named(facts, "function", "f")[0]
+    assert outer_flow is not inner_flow
+    assert outer_flow.resolution_kind is ResolutionKind.CALL_EXACT
+    assert outer_flow.confidence is LineageConfidence.CONFIRMED
+    assert isinstance(outer_flow.source, ExtractedSymbolicRef)
+    assert outer_flow.source.symbol_name == "f"
+    assert outer_flow.source.source_local_id == nested_f.local_id
 
 
 def test_stage_1d3_e_terminal_return_of_proven_call_result_propagates():

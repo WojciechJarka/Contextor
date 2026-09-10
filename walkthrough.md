@@ -1,4 +1,20 @@
-# Contexdiff --git a/contextor/core/analysis/lineage_extraction.py b/contextor/core/analysis/lineage_extraction.py
+# Contextor Stage 1D.3 — frozen audit results
+
+## STATUS
+
+Production and 1D.3 tests remain frozen; no production or test changes were made during this run.
+
+## RESULTS
+
+- `tests/analysis/test_lineage_extraction.py -q`: `143 passed in 2.14s`
+- `tests/analysis/test_lineage_extraction_equivalence.py -q`: `2 passed in 0.45s`
+- Requested combined suite: `156 passed in 4.45s`
+- Initial exact `git diff --check` reported only `walkthrough.md: new blank line at EOF`; this report was normalized afterward. Final `git diff --check` passed with only CRLF conversion warnings. No production/test whitespace errors were reported.
+
+## FULL_DIFF (relative to `b92c1e1773ad85ae40b342e174631ea39103de0a`)
+
+```diff
+diff --git a/contextor/core/analysis/lineage_extraction.py b/contextor/core/analysis/lineage_extraction.py
 index fad439f..63c985a 100644
 --- a/contextor/core/analysis/lineage_extraction.py
 +++ b/contextor/core/analysis/lineage_extraction.py
@@ -202,10 +218,10 @@ index ae3bb54..64bdab9 100644
      if imported_return is not None:
          emit_flow(
 diff --git a/tests/analysis/test_lineage_extraction.py b/tests/analysis/test_lineage_extraction.py
-index 8161990..175f5a4 100644
+index 8161990..692ed4f 100644
 --- a/tests/analysis/test_lineage_extraction.py
 +++ b/tests/analysis/test_lineage_extraction.py
-@@ -1748,3 +1748,141 @@ def test_stage_1d2_factory_return_alias_is_not_newly_resolved():
+@@ -1748,3 +1748,170 @@ def test_stage_1d2_factory_return_alias_is_not_newly_resolved():
      )
      flows = _stage_1c_call_result_flows(facts)
      assert flows[-1].resolution_kind is not ResolutionKind.CALL_EXACT
@@ -241,10 +257,39 @@ index 8161990..175f5a4 100644
 +
 +
 +def test_stage_1d3_d_direct_factory_result_invocation_is_exact():
-+    facts = _stage_1c_facts("def factory():\n def f(): return 1\n return f\nresult=factory()()\n")
-+    flow = _stage_1d3_final_call(facts)
-+    assert flow.resolution_kind is ResolutionKind.CALL_EXACT
-+    assert isinstance(flow.source, ExtractedSymbolicRef) and flow.source.symbol_name == "f"
++    source = "def factory():\n def f(): return 1\n return f\nresult=factory()()\n"
++    tree = ast.parse(source)
++    outer_call = tree.body[-1].value
++    assert isinstance(outer_call, ast.Call) and isinstance(outer_call.func, ast.Call)
++    paths, reason = lineage_extraction_module._index_ast_paths(
++        tree,
++        lineage_extraction_module.DEFAULT_LINEAGE_EXTRACTION_LIMITS,
++    )
++    assert reason is None
++    facts = _stage_1c_facts(source)
++    outer_target = ExtractedOccurrenceRef(
++        build_local_occurrence_id("call_result", paths[id(outer_call)])
++    )
++    inner_target = ExtractedOccurrenceRef(
++        build_local_occurrence_id("call_result", paths[id(outer_call.func)])
++    )
++    outer_flow = next(
++        flow
++        for flow in facts.flows
++        if flow.relation is LineageRelation.CALL_RESULT and flow.target == outer_target
++    )
++    inner_flow = next(
++        flow
++        for flow in facts.flows
++        if flow.relation is LineageRelation.CALL_RESULT and flow.target == inner_target
++    )
++    nested_f = _stage_1c_named(facts, "function", "f")[0]
++    assert outer_flow is not inner_flow
++    assert outer_flow.resolution_kind is ResolutionKind.CALL_EXACT
++    assert outer_flow.confidence is LineageConfidence.CONFIRMED
++    assert isinstance(outer_flow.source, ExtractedSymbolicRef)
++    assert outer_flow.source.symbol_name == "f"
++    assert outer_flow.source.source_local_id == nested_f.local_id
 +
 +
 +def test_stage_1d3_e_terminal_return_of_proven_call_result_propagates():
@@ -348,4 +393,3 @@ index 8161990..175f5a4 100644
 +    assert flow.resolution_kind is ResolutionKind.CALL_EXACT
 +    assert isinstance(flow.source, ExtractedSymbolicRef) and flow.source.symbol_name == "f"
 ```
-
