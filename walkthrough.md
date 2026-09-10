@@ -1,395 +1,287 @@
-# Contextor Stage 1D.3 — frozen audit results
+# Contextor Stage 1D.4 — exact callback parameter registration + invocation lineage
 
-## STATUS
+STATUS: COMPLETE
 
-Production and 1D.3 tests remain frozen; no production or test changes were made during this run.
+## Result
 
-## RESULTS
+Implemented context-preserving callback lineage without specializing the body call result. Parameter registration is keyed by exact parameter local ID plus callable owner; an invocation is emitted only while the current frame still holds that original anchor. Exact argument callable identity is retained from the existing `value(...)` result and composes into `CALLBACK_REGISTERS` only for a parameter that was lexically invoked.
 
-- `tests/analysis/test_lineage_extraction.py -q`: `143 passed in 2.14s`
-- `tests/analysis/test_lineage_extraction_equivalence.py -q`: `2 passed in 0.45s`
-- Requested combined suite: `156 passed in 4.45s`
-- Initial exact `git diff --check` reported only `walkthrough.md: new blank line at EOF`; this report was normalized afterward. Final `git diff --check` passed with only CRLF conversion warnings. No production/test whitespace errors were reported.
+The ordinary callback-body `CALL_RESULT` remains `DYNAMIC_RUNTIME_BOUNDARY`; no direct `f -> callback()` `CALL_EXACT` relation is introduced.
 
-## FULL_DIFF (relative to `b92c1e1773ad85ae40b342e174631ea39103de0a`)
+## Semantic evidence A–O
+
+- A: complete `f anchor -> CALLBACK_REGISTERS -> apply::callback -> CALLBACK_INVOKES -> callback() call_site` path; callback result remains dynamic.
+- B–E: keyword, lambda, 1D.2 alias, and 1D.3 returned callable registrations are exact.
+- F: two caller anchors register independently to one parameter and one lexical invocation.
+- G: non-callable input produces no registration while the lexical invocation remains.
+- H: imported, attribute, reflection, and container sources produce no registration.
+- I: rebinding replaces the frame occurrence, so neither callback relation is emitted.
+- J: an uninvoked parameter produces neither callback relation.
+- K: `*args` and `**kwargs` transfers produce no registration.
+- L–M: async-function and lambda owners compose; no coroutine-return specialization was added.
+- N: callback invocation arguments are not bound to the actual callback signature.
+- O: existing local callable result remains `CALL_EXACT`; callback facts are additive.
+
+## Verification
+
+- `tests/analysis/test_lineage_extraction.py -q`: 161 passed.
+- `tests/analysis/test_lineage_extraction_equivalence.py -q`: 2 passed; immutable oracle unchanged.
+- Combined requested suite (`lineage`, equivalence, `test_no_double_parse`, `test_index_fusion`): 174 passed.
+- `git diff --check`: passed (only Git CRLF advisory warnings).
+- Contextor MCP pre-edit LIVE revision: 575. Desktop watcher published production edits at revisions 576–579 and test edit at 580. After LIVE restoration, `get_live_events(after_revision=575)` reports revision 581, `status=ok`, `continuity=continuous`, and `resync_required=false`.
+- All three changed production modules are LIVE revision 581 with `syntax_diagnostics.status=checked_and_none`, availability `fresh`, no warnings, no cycles, and no collisions (0 for the state module; collision family fresh).
+- The active facade still has exactly one `LineageExtractionState()` construction and exactly one dynamic `getattr(self, f"_visit_{type(node).__name__}", None)` dispatch. Textual verification found no `ast.walk` or `NodeVisitor` in the changed helpers; no helper imports the facade.
+- Deferred layer evidence: the Contextor analysis layer reports 33 modules, fresh syntax/cycle diagnostics, no clusters, and pre-existing cross-boundary-edge evidence only (not policy violations).
+
+## Files changed
+
+- `contextor/core/analysis/lineage_extraction_state.py`
+- `contextor/core/analysis/lineage_extraction_calls.py`
+- `contextor/core/analysis/lineage_extraction_visitors.py`
+- `tests/analysis/test_lineage_extraction.py`
+
+## COMPLETE raw unified full diff relative to `0f172abad9d2ae3d34f58bf0ad2b646f7ed86d99`
 
 ```diff
-diff --git a/contextor/core/analysis/lineage_extraction.py b/contextor/core/analysis/lineage_extraction.py
-index fad439f..63c985a 100644
---- a/contextor/core/analysis/lineage_extraction.py
-+++ b/contextor/core/analysis/lineage_extraction.py
-@@ -54,6 +54,7 @@ from contextor.core.analysis.lineage_extraction_visitors import (
-     visit_lambda,
-     visit_module,
-     visit_return,
-+    visit_yield,
- )
- from contextor.core.analysis.lineage_extraction_state import LineageExtractionState
- from contextor.core.domain.lineage_facts import (
-@@ -148,6 +149,12 @@ class _AnchorExtractor:
-     def _visit_Return(self, node: ast.Return, owner: str | None, walrus_owner: str | None) -> None:
-         return visit_return(self.state, self.paths, self.module_name, node, owner, walrus_owner, value=self._value)
+diff --git a/contextor/core/analysis/lineage_extraction_calls.py b/contextor/core/analysis/lineage_extraction_calls.py
+index 78a5d59..2eaaf36 100644
+--- a/contextor/core/analysis/lineage_extraction_calls.py
++++ b/contextor/core/analysis/lineage_extraction_calls.py
+@@ -48,13 +48,16 @@ def collect_call_arguments(state: LineageExtractionState, paths: dict[int, str],
+     pending.sort(key=lambda item: (int(getattr(item[0], "lineno", 0) or 0), int(getattr(item[0], "col_offset", 0) or 0), item[3]))
+     result = []
+     for ordinal, (argument_node, kind, keyword_name, _source_ordinal) in enumerate(pending):
+-        value(argument_node, owner, walrus_owner)
+-        result.append(_CallArgumentInfo(occurrence(state, paths,"call_argument", argument_node, keyword_name if kind == "keyword" else None, ordinal=ordinal), argument_node, kind, keyword_name))
++        source = value(argument_node, owner, walrus_owner)
++        result.append(_CallArgumentInfo(occurrence(state, paths,"call_argument", argument_node, keyword_name if kind == "keyword" else None, ordinal=ordinal), source, argument_node, kind, keyword_name))
+     return tuple(result)
+
+
+ def emit_argument_to_parameter(state: LineageExtractionState, paths: dict[int, str], module_name: str, argument: _CallArgumentInfo, callable_info: _CallableInfo, parameter: _ParameterInfo) -> None:
+     emit_flow(state, paths,source=argument.occurrence, target=parameter_symbolic(module_name,callable_info.name, parameter), relation=LineageRelation.ARGUMENT_TO_PARAMETER, node=argument.node, resolution_kind=ResolutionKind.CALL_EXACT, confidence=LineageConfidence.CONFIRMED)
++    actual_callable = state._callable_values.get(argument.source.local_id)
++    if parameter.local_id in state._callback_parameters and actual_callable is not None:
++        emit_flow(state, paths,source=ExtractedOccurrenceRef(actual_callable.anchor_id), target=parameter_symbolic(module_name,callable_info.name, parameter), relation=LineageRelation.CALLBACK_REGISTERS, node=argument.node, resolution_kind=ResolutionKind.CALL_EXACT, confidence=LineageConfidence.CONFIRMED)
  
-+    def _visit_Yield(self, node: ast.Yield, owner: str | None, walrus_owner: str | None) -> None:
-+        return visit_yield(self.state, node, owner, walrus_owner, visit=self._visit)
-+
-+    def _visit_YieldFrom(self, node: ast.YieldFrom, owner: str | None, walrus_owner: str | None) -> None:
-+        return visit_yield(self.state, node, owner, walrus_owner, visit=self._visit)
-+
-     def _visit_Call(self, node: ast.Call, owner: str | None, walrus_owner: str | None) -> None:
-         return visit_call(self.state, self.paths, self.module_name, node, owner, walrus_owner, visit=self._visit, value=self._value)
  
+ def bind_call_arguments(state: LineageExtractionState, paths: dict[int, str], module_name: str, arguments: tuple[_CallArgumentInfo, ...], callable_info: _CallableInfo) -> None:
+@@ -106,6 +109,7 @@ def parameter_anchors(state: LineageExtractionState, paths: dict[int, str], modu
+             local_id = add_anchor(state, paths,"parameter", parameter, parameter.arg, owner, ordinal=ordinal if kind in (ParameterKind.POSITIONAL_ONLY, ParameterKind.POSITIONAL_OR_KEYWORD) else 0, local_kind=local_kind)
+             state.declare_local(owner, parameter.arg)
+             info = _ParameterInfo(local_id, parameter.arg, kind, ordinal if kind in (ParameterKind.POSITIONAL_ONLY, ParameterKind.POSITIONAL_OR_KEYWORD) else 0)
++            state.register_parameter(owner, info)
+             result.append((info, parameter))
+     for ordinal, (info, parameter) in enumerate(result):
+         emit_flow(state, paths,source=parameter_symbolic(module_name,callable_symbol_name, info), target=ExtractedOccurrenceRef(info.local_id), relation=LineageRelation.BINDS, node=parameter, resolution_kind=ResolutionKind.SIGNATURE_EXACT, confidence=LineageConfidence.CONFIRMED, ordinal=ordinal)
 diff --git a/contextor/core/analysis/lineage_extraction_state.py b/contextor/core/analysis/lineage_extraction_state.py
-index 2f40cab..82449d6 100644
+index 82449d6..3727043 100644
 --- a/contextor/core/analysis/lineage_extraction_state.py
 +++ b/contextor/core/analysis/lineage_extraction_state.py
-@@ -21,6 +21,12 @@ class _CallableInfo:
-     parameters: tuple[_ParameterInfo, ...]
- 
- 
-+@dataclass(frozen=True)
-+class _CallableReturnRecord:
-+    node: ast.Return
-+    callable_info: _CallableInfo | None
-+
-+
+@@ -46,6 +46,7 @@ class _ActiveComprehension:
  @dataclass(frozen=True)
- class _ImportInfo:
-     module_name: str
-@@ -65,6 +71,9 @@ class LineageExtractionState:
+ class _CallArgumentInfo:
+     occurrence: ExtractedOccurrenceRef
++    source: ExtractedOccurrenceRef
+     node: ast.AST
+     kind: str
+     keyword_name: str | None
+@@ -71,6 +72,8 @@ class LineageExtractionState:
      _callables_by_anchor: dict[str, _CallableInfo] = field(default_factory=dict)
      _callables_by_binding: dict[str, _CallableInfo] = field(default_factory=dict)
      _callable_values: dict[str, _CallableInfo] = field(default_factory=dict)
-+    _return_records: dict[str, list[_CallableReturnRecord]] = field(default_factory=dict)
-+    _callable_returns: dict[str, _CallableInfo] = field(default_factory=dict)
-+    _generator_owners: set[str] = field(default_factory=set)
-     _imports: dict[str | None, dict[str, _ImportInfo]] = field(default_factory=dict)
-     _blocked: dict[str | None, set[str]] = field(default_factory=dict)
-     _active_comprehensions: list[_ActiveComprehension] = field(default_factory=list)
-@@ -106,6 +115,61 @@ class LineageExtractionState:
++    _parameters_by_local_id: dict[str, tuple[str, _ParameterInfo]] = field(default_factory=dict)
++    _callback_parameters: set[str] = field(default_factory=set)
+     _return_records: dict[str, list[_CallableReturnRecord]] = field(default_factory=dict)
+     _callable_returns: dict[str, _CallableInfo] = field(default_factory=dict)
+     _generator_owners: set[str] = field(default_factory=set)
+@@ -115,6 +118,26 @@ class LineageExtractionState:
      def import_frame(self, owner: str | None) -> dict[str, _ImportInfo]:
          return self._imports.setdefault(owner, {})
  
-+    def record_callable_return(
++    def register_parameter(self, owner: str, parameter: _ParameterInfo) -> None:
++        candidate = (owner, parameter)
++        existing = self._parameters_by_local_id.get(parameter.local_id)
++        if existing is not None and existing != candidate:
++            raise ValueError(f"Conflicting lineage parameter registration: {parameter.local_id}")
++        self._parameters_by_local_id[parameter.local_id] = candidate
++
++    def current_parameter(
 +        self,
 +        owner: str | None,
-+        node: ast.Return,
-+        callable_info: _CallableInfo | None,
-+    ) -> None:
-+        if owner is None or self._owner_kind.get(owner) not in {
-+            "function",
-+            "async_function",
-+            "lambda",
-+        }:
-+            return
-+        self._return_records.setdefault(owner, []).append(
-+            _CallableReturnRecord(node, callable_info)
-+        )
++        occurrence: ExtractedOccurrenceRef | None,
++    ) -> _ParameterInfo | None:
++        if owner is None or occurrence is None:
++            return None
++        registered = self._parameters_by_local_id.get(occurrence.local_id)
++        return registered[1] if registered is not None and registered[0] == owner else None
 +
-+    def mark_generator(self, owner: str | None) -> None:
-+        if owner is not None and self._owner_kind.get(owner) in {
-+            "function",
-+            "async_function",
-+            "lambda",
-+        }:
-+            self._generator_owners.add(owner)
++    def mark_callback_parameter(self, parameter: _ParameterInfo) -> None:
++        self._callback_parameters.add(parameter.local_id)
 +
-+    def finalize_function_callable_return(
-+        self,
-+        owner: str,
-+        node: ast.FunctionDef | ast.AsyncFunctionDef,
-+    ) -> None:
-+        self._callable_returns.pop(owner, None)
-+        records = self._return_records.get(owner, [])
-+        if (
-+            self._owner_kind.get(owner) == "function"
-+            and owner not in self._generator_owners
-+            and len(records) == 1
-+            and node.body
-+            and records[0].node is node.body[-1]
-+            and records[0].callable_info is not None
-+        ):
-+            self._callable_returns[owner] = records[0].callable_info
-+
-+    def publish_lambda_callable_return(
-+        self,
-+        owner: str,
-+        body_source: ExtractedOccurrenceRef,
-+    ) -> None:
-+        self._callable_returns.pop(owner, None)
-+        callable_info = self._callable_values.get(body_source.local_id)
-+        if (
-+            self._owner_kind.get(owner) == "lambda"
-+            and owner not in self._generator_owners
-+            and callable_info is not None
-+        ):
-+            self._callable_returns[owner] = callable_info
-+
-     def register_owner(
+     def record_callable_return(
          self,
-         owner_id: str,
+         owner: str | None,
 diff --git a/contextor/core/analysis/lineage_extraction_visitors.py b/contextor/core/analysis/lineage_extraction_visitors.py
-index ae3bb54..64bdab9 100644
+index 64bdab9..5d1b18f 100644
 --- a/contextor/core/analysis/lineage_extraction_visitors.py
 +++ b/contextor/core/analysis/lineage_extraction_visitors.py
-@@ -143,6 +143,7 @@ def visit_function(
-         )
-     for child in node.body:
-         visit(child, function_id, None)
-+    state.finalize_function_callable_return(function_id, node)
-     if node.name not in state.blocked_names(owner):
-         state.frame(owner)[node.name] = ExtractedOccurrenceRef(
-             function_id
-@@ -214,6 +215,7 @@ def visit_lambda(
-         resolution_kind=ResolutionKind.LEXICAL_EXACT,
-         confidence=LineageConfidence.CONFIRMED,
-     )
-+    state.publish_lambda_callable_return(lambda_id, body_source)
-     lambda_value = occurrence(
-         state,
-         paths,
-@@ -233,15 +235,18 @@ def visit_return(
-     *,
-     value: ValueFn,
- ) -> None:
--    if node.value is None:
--        return
--    source = value(node.value, owner, walrus_owner)
-+    source = value(node.value, owner, walrus_owner) if node.value is not None else None
-+    returned_callable = (
-+        state._callable_values.get(source.local_id)
-+        if source is not None
-+        else None
-+    )
-     callable_info = (
-         state._callables_by_anchor.get(owner)
-         if owner is not None
-         else None
-     )
--    if callable_info is not None:
-+    if callable_info is not None and source is not None:
-         emit_flow(
-             state,
-             paths,
-@@ -252,6 +257,20 @@ def visit_return(
-             resolution_kind=ResolutionKind.LEXICAL_EXACT,
-             confidence=LineageConfidence.CONFIRMED,
-         )
-+    state.record_callable_return(owner, node, returned_callable)
-+
-+
-+def visit_yield(
-+    state: LineageExtractionState,
-+    node: ast.Yield | ast.YieldFrom,
-+    owner: str | None,
-+    walrus_owner: str | None,
-+    *,
-+    visit: VisitFn,
-+) -> None:
-+    state.mark_generator(owner)
-+    if node.value is not None:
-+        visit(node.value, owner, walrus_owner)
+@@ -18,6 +18,7 @@ from contextor.core.analysis.lineage_extraction_emit import (
+     add_anchor,
+     emit_flow,
+     occurrence,
++    parameter_symbolic,
+     return_symbolic,
+ )
+ from contextor.core.analysis.lineage_extraction_state import (
+@@ -28,6 +29,7 @@ from contextor.core.domain.lineage_facts import (
+     ExtractedOccurrenceRef,
+     LineageConfidence,
+     LineageRelation,
++    ParameterKind,
+     ResolutionKind,
+ )
  
- 
- def visit_call(
-@@ -276,6 +295,14 @@ def visit_call(
+@@ -320,6 +322,25 @@ def visit_call(
+         "call_result",
          node,
-         owner,
      )
-+    if callable_info is None and isinstance(node.func, ast.Call):
-+        inner_call_result = occurrence(
++    parameter = state.current_parameter(owner, callee_ref)
++    enclosing_callable = state._callables_by_anchor.get(owner) if owner is not None else None
++    if (
++        isinstance(node.func, ast.Name)
++        and parameter is not None
++        and enclosing_callable is not None
++        and parameter.kind not in (ParameterKind.VAR_POSITIONAL, ParameterKind.VAR_KEYWORD)
++    ):
++        state.mark_callback_parameter(parameter)
++        emit_flow(
 +            state,
 +            paths,
-+            "call_result",
-+            node.func,
++            source=parameter_symbolic(module_name, enclosing_callable.name, parameter),
++            target=call_site,
++            relation=LineageRelation.CALLBACK_INVOKES,
++            node=node,
++            resolution_kind=ResolutionKind.LEXICAL_EXACT,
++            confidence=LineageConfidence.CONFIRMED,
 +        )
-+        callable_info = state._callable_values.get(inner_call_result.local_id)
-     callee_ref = (
-         state.frame(owner).get(node.func.id)
-         if isinstance(node.func, ast.Name)
-@@ -319,6 +346,9 @@ def visit_call(
-             resolution_kind=ResolutionKind.CALL_EXACT,
-             confidence=LineageConfidence.CONFIRMED,
-         )
-+        returned_callable = state._callable_returns.get(callable_info.anchor_id)
-+        if returned_callable is not None:
-+            state._callable_values[call_result.local_id] = returned_callable
-         return
-     if imported_return is not None:
-         emit_flow(
+     arguments = collect_call_arguments(
+         state,
+         paths,
 diff --git a/tests/analysis/test_lineage_extraction.py b/tests/analysis/test_lineage_extraction.py
-index 8161990..692ed4f 100644
+index 692ed4f..bcfe909 100644
 --- a/tests/analysis/test_lineage_extraction.py
 +++ b/tests/analysis/test_lineage_extraction.py
-@@ -1748,3 +1748,170 @@ def test_stage_1d2_factory_return_alias_is_not_newly_resolved():
-     )
-     flows = _stage_1c_call_result_flows(facts)
-     assert flows[-1].resolution_kind is not ResolutionKind.CALL_EXACT
+@@ -1915,3 +1915,111 @@ def test_stage_1d3_yield_from_marks_only_nested_callable_owner():
+     flow = _stage_1d3_final_call(facts)
+     assert flow.resolution_kind is ResolutionKind.CALL_EXACT
+     assert isinstance(flow.source, ExtractedSymbolicRef) and flow.source.symbol_name == "f"
 +
 +
-+def _stage_1d3_final_call(facts):
-+    return _stage_1c_call_result_flows(facts)[-1]
++def _stage_1d4_flows(facts, relation):
++    return [flow for flow in facts.flows if flow.relation is relation]
 +
 +
-+def test_stage_1d3_a_factory_returned_local_callable_assigns_exactly():
-+    facts = _stage_1c_facts(
-+        "def factory():\n def f(): return 1\n return f\ng=factory()\nresult=g()\n"
-+    )
-+    flow = _stage_1d3_final_call(facts)
-+    assert flow.resolution_kind is ResolutionKind.CALL_EXACT
-+    assert isinstance(flow.source, ExtractedSymbolicRef) and flow.source.symbol_name == "f"
-+
-+
-+def test_stage_1d3_b_factory_returned_local_alias_assigns_exactly():
-+    facts = _stage_1c_facts(
-+        "def factory():\n def f(): return 1\n g=f\n return g\nh=factory()\nresult=h()\n"
-+    )
-+    flow = _stage_1d3_final_call(facts)
-+    assert flow.resolution_kind is ResolutionKind.CALL_EXACT
-+    assert isinstance(flow.source, ExtractedSymbolicRef) and flow.source.symbol_name == "f"
-+
-+
-+def test_stage_1d3_c_factory_returned_lambda_assigns_exactly():
-+    facts = _stage_1c_facts("def factory():\n return lambda: 1\ng=factory()\nresult=g()\n")
-+    flow = _stage_1d3_final_call(facts)
-+    assert flow.resolution_kind is ResolutionKind.CALL_EXACT
-+    assert isinstance(flow.source, ExtractedSymbolicRef) and flow.source.symbol_name.startswith("lambda@")
-+
-+
-+def test_stage_1d3_d_direct_factory_result_invocation_is_exact():
-+    source = "def factory():\n def f(): return 1\n return f\nresult=factory()()\n"
++def test_stage_1d4_a_callback_path_is_composable_and_call_result_stays_dynamic():
++    source = "def apply(callback):\n return callback()\ndef f(): return 1\napply(f)\n"
 +    tree = ast.parse(source)
-+    outer_call = tree.body[-1].value
-+    assert isinstance(outer_call, ast.Call) and isinstance(outer_call.func, ast.Call)
-+    paths, reason = lineage_extraction_module._index_ast_paths(
-+        tree,
-+        lineage_extraction_module.DEFAULT_LINEAGE_EXTRACTION_LIMITS,
-+    )
-+    assert reason is None
++    callback_call = tree.body[0].body[0].value
++    paths, reason = lineage_extraction_module._index_ast_paths(tree, lineage_extraction_module.DEFAULT_LINEAGE_EXTRACTION_LIMITS)
++    assert reason is None and isinstance(callback_call, ast.Call)
 +    facts = _stage_1c_facts(source)
-+    outer_target = ExtractedOccurrenceRef(
-+        build_local_occurrence_id("call_result", paths[id(outer_call)])
-+    )
-+    inner_target = ExtractedOccurrenceRef(
-+        build_local_occurrence_id("call_result", paths[id(outer_call.func)])
-+    )
-+    outer_flow = next(
-+        flow
-+        for flow in facts.flows
-+        if flow.relation is LineageRelation.CALL_RESULT and flow.target == outer_target
-+    )
-+    inner_flow = next(
-+        flow
-+        for flow in facts.flows
-+        if flow.relation is LineageRelation.CALL_RESULT and flow.target == inner_target
-+    )
-+    nested_f = _stage_1c_named(facts, "function", "f")[0]
-+    assert outer_flow is not inner_flow
-+    assert outer_flow.resolution_kind is ResolutionKind.CALL_EXACT
-+    assert outer_flow.confidence is LineageConfidence.CONFIRMED
-+    assert isinstance(outer_flow.source, ExtractedSymbolicRef)
-+    assert outer_flow.source.symbol_name == "f"
-+    assert outer_flow.source.source_local_id == nested_f.local_id
++    callback = _stage_1c_named(facts, "parameter", "callback")[0]
++    function = _stage_1c_named(facts, "function", "f")[0]
++    registers = _stage_1d4_flows(facts, LineageRelation.CALLBACK_REGISTERS)
++    invokes = _stage_1d4_flows(facts, LineageRelation.CALLBACK_INVOKES)
++    assert len(registers) == len(invokes) == 1
++    assert registers[0].source == ExtractedOccurrenceRef(function.local_id)
++    assert isinstance(registers[0].target, ExtractedSymbolicRef) and registers[0].target.source_local_id == callback.local_id
++    assert isinstance(invokes[0].source, ExtractedSymbolicRef) and invokes[0].source.source_local_id == callback.local_id
++    assert invokes[0].target == ExtractedOccurrenceRef(build_local_occurrence_id("call_site", paths[id(callback_call)]))
++    callback_result = next(flow for flow in _stage_1c_call_result_flows(facts) if flow.evidence.start_line == 2)
++    assert callback_result.resolution_kind is ResolutionKind.DYNAMIC_RUNTIME_BOUNDARY
 +
 +
-+def test_stage_1d3_e_terminal_return_of_proven_call_result_propagates():
-+    facts = _stage_1c_facts(
-+        "def factory2():\n def factory1():\n  def f(): return 1\n  return f\n return factory1()\ng=factory2()\nresult=g()\n"
-+    )
-+    flow = _stage_1d3_final_call(facts)
-+    assert flow.resolution_kind is ResolutionKind.CALL_EXACT
-+    assert isinstance(flow.source, ExtractedSymbolicRef) and flow.source.symbol_name == "f"
++def test_stage_1d4_b_keyword_callback_registers_exactly():
++    facts = _stage_1c_facts("def apply(callback): callback()\ndef f(): pass\napply(callback=f)\n")
++    assert len(_stage_1d4_flows(facts, LineageRelation.CALLBACK_REGISTERS)) == 1
 +
 +
-+def test_stage_1d3_f_terminal_return_after_other_statements_is_exact():
-+    facts = _stage_1c_facts(
-+        "def factory():\n marker=1\n def f(): return 1\n return f\ng=factory()\nresult=g()\n"
-+    )
-+    assert _stage_1d3_final_call(facts).resolution_kind is ResolutionKind.CALL_EXACT
++def test_stage_1d4_c_lambda_callback_registers_lambda_anchor():
++    facts = _stage_1c_facts("def apply(callback): callback()\napply(lambda: 1)\n")
++    flow = _stage_1d4_flows(facts, LineageRelation.CALLBACK_REGISTERS)[0]
++    assert flow.source == ExtractedOccurrenceRef(_stage_1c_named(facts, "lambda", None)[0].local_id)
 +
 +
-+def test_stage_1d3_g_multiple_explicit_returns_fail_closed():
-+    facts = _stage_1c_facts(
-+        "def factory(flag):\n def f(): return 1\n if flag: return f\n return f\ng=factory(True)\nresult=g()\n"
-+    )
-+    assert _stage_1d3_final_call(facts).resolution_kind is not ResolutionKind.CALL_EXACT
++def test_stage_1d4_d_callable_alias_registers_original_anchor():
++    facts = _stage_1c_facts("def apply(callback): callback()\ndef f(): pass\ng=f\napply(g)\n")
++    flow = _stage_1d4_flows(facts, LineageRelation.CALLBACK_REGISTERS)[0]
++    assert flow.source == ExtractedOccurrenceRef(_stage_1c_named(facts, "function", "f")[0].local_id)
 +
 +
-+def test_stage_1d3_h_conditional_only_return_fails_closed():
-+    facts = _stage_1c_facts(
-+        "def factory(flag):\n def f(): return 1\n if flag: return f\ng=factory(True)\nresult=g()\n"
-+    )
-+    assert _stage_1d3_final_call(facts).resolution_kind is not ResolutionKind.CALL_EXACT
++def test_stage_1d4_e_returned_callable_registers_original_anchor():
++    facts = _stage_1c_facts("def apply(callback): callback()\ndef factory():\n def f(): pass\n return f\napply(factory())\n")
++    flow = _stage_1d4_flows(facts, LineageRelation.CALLBACK_REGISTERS)[0]
++    assert flow.source == ExtractedOccurrenceRef(_stage_1c_named(facts, "function", "f")[0].local_id)
 +
 +
-+def test_stage_1d3_i_mixed_callable_and_non_callable_returns_fail_closed():
-+    facts = _stage_1c_facts(
-+        "def factory(flag):\n def f(): return 1\n if flag: return f\n return 1\ng=factory(True)\nresult=g()\n"
-+    )
-+    assert _stage_1d3_final_call(facts).resolution_kind is not ResolutionKind.CALL_EXACT
++def test_stage_1d4_f_multiple_callers_register_independently_to_one_invocation():
++    facts = _stage_1c_facts("def apply(callback): callback()\ndef f(): pass\ndef g(): pass\napply(f)\napply(g)\n")
++    registers = _stage_1d4_flows(facts, LineageRelation.CALLBACK_REGISTERS)
++    assert {flow.source.local_id for flow in registers} == {item.local_id for item in _stage_1c_named(facts, "function", "f") + _stage_1c_named(facts, "function", "g")}
++    assert len(_stage_1d4_flows(facts, LineageRelation.CALLBACK_INVOKES)) == 1
++    assert next(flow for flow in _stage_1c_call_result_flows(facts) if flow.evidence.start_line == 1).resolution_kind is ResolutionKind.DYNAMIC_RUNTIME_BOUNDARY
 +
 +
-+def test_stage_1d3_j_async_factory_return_does_not_become_callable_value():
-+    facts = _stage_1c_facts(
-+        "async def factory():\n def f(): return 1\n return f\ng=factory()\nresult=g()\n"
-+    )
-+    assert _stage_1d3_final_call(facts).resolution_kind is not ResolutionKind.CALL_EXACT
++def test_stage_1d4_g_non_callable_argument_has_only_lexical_invocation():
++    facts = _stage_1c_facts("def apply(callback): callback()\napply(42)\n")
++    assert not _stage_1d4_flows(facts, LineageRelation.CALLBACK_REGISTERS)
++    assert len(_stage_1d4_flows(facts, LineageRelation.CALLBACK_INVOKES)) == 1
 +
 +
-+def test_stage_1d3_k_generator_factory_return_does_not_become_callable_value():
-+    facts = _stage_1c_facts(
-+        "def factory():\n def f(): return 1\n yield 1\n return f\ng=factory()\nresult=g()\n"
-+    )
-+    assert _stage_1d3_final_call(facts).resolution_kind is not ResolutionKind.CALL_EXACT
++@pytest.mark.parametrize("source", ("from pkg import f\ndef apply(callback): callback()\napply(f)\n", "def apply(callback): callback()\napply(obj.f)\n", "def apply(callback): callback()\napply([f][0])\n", "def apply(callback): callback()\napply(getattr(obj, 'f'))\n"))
++def test_stage_1d4_h_imported_attribute_reflection_and_container_callbacks_do_not_register(source):
++    assert not _stage_1d4_flows(_stage_1c_facts(source), LineageRelation.CALLBACK_REGISTERS)
 +
 +
-+@pytest.mark.parametrize(
-+    "source",
-+    (
-+        "from pkg import factory\ng=factory()\nresult=g()\n",
-+        "g=obj.factory()\nresult=g()\n",
-+        "g=[factory][0]()\nresult=g()\n",
-+        "g=getattr(obj, 'factory')()\nresult=g()\n",
-+    ),
-+)
-+def test_stage_1d3_l_imported_attribute_container_and_reflection_fail_closed(source):
-+    assert _stage_1d3_final_call(_stage_1c_facts(source)).resolution_kind is not ResolutionKind.CALL_EXACT
++def test_stage_1d4_i_rebound_parameter_is_not_callback_invocation_or_registration():
++    facts = _stage_1c_facts("def apply(callback):\n callback=other\n callback()\ndef f(): pass\napply(f)\n")
++    assert not _stage_1d4_flows(facts, LineageRelation.CALLBACK_INVOKES)
++    assert not _stage_1d4_flows(facts, LineageRelation.CALLBACK_REGISTERS)
 +
 +
-+def test_stage_1d3_m_module_global_return_lookup_remains_unresolved():
-+    facts = _stage_1c_facts(
-+        "def f(): return 1\ndef factory(): return f\ng=factory()\nresult=g()\n"
-+    )
-+    assert _stage_1d3_final_call(facts).resolution_kind is not ResolutionKind.CALL_EXACT
++def test_stage_1d4_j_uninvoked_parameter_does_not_register_callback():
++    facts = _stage_1c_facts("def store(callback): return 1\ndef f(): pass\nstore(f)\n")
++    assert not _stage_1d4_flows(facts, LineageRelation.CALLBACK_INVOKES)
++    assert not _stage_1d4_flows(facts, LineageRelation.CALLBACK_REGISTERS)
 +
 +
-+def test_stage_1d3_n_closure_cell_callable_value_remains_unresolved():
-+    facts = _stage_1c_facts(
-+        "def outer():\n def f(): return 1\n def factory(): return f\n g=factory()\n return g()\n"
-+    )
-+    assert _stage_1d3_final_call(facts).resolution_kind is not ResolutionKind.CALL_EXACT
++def test_stage_1d4_k_starred_and_double_starred_arguments_do_not_register():
++    facts = _stage_1c_facts("def apply(callback): callback()\ndef f(): pass\napply(*[f])\napply(**{'callback': f})\n")
++    assert not _stage_1d4_flows(facts, LineageRelation.CALLBACK_REGISTERS)
 +
 +
-+def test_stage_1d3_o_existing_local_callable_alias_remains_exact():
-+    facts = _stage_1c_facts("def f(): return 1\ng=f\nresult=g()\n")
-+    assert _stage_1d3_final_call(facts).resolution_kind is ResolutionKind.CALL_EXACT
++def test_stage_1d4_l_async_callback_owner_composes_without_coroutine_specialization():
++    facts = _stage_1c_facts("async def apply(callback): callback()\ndef f(): pass\napply(f)\n")
++    assert len(_stage_1d4_flows(facts, LineageRelation.CALLBACK_REGISTERS)) == 1
++    assert len(_stage_1d4_flows(facts, LineageRelation.CALLBACK_INVOKES)) == 1
 +
 +
-+def test_stage_1d3_lambda_callable_return_summary_propagates_inner_lambda():
-+    facts = _stage_1c_facts("maker=lambda:(lambda:1)\ng=maker()\nresult=g()\n")
-+    flow = _stage_1d3_final_call(facts)
-+    lambdas = _stage_1c_named(facts, "lambda", None)
-+    inner = max(lambdas, key=lambda item: item.span.start_column)
-+    assert flow.resolution_kind is ResolutionKind.CALL_EXACT
-+    assert isinstance(flow.source, ExtractedSymbolicRef)
-+    assert flow.source.source_local_id == inner.local_id
++def test_stage_1d4_m_lambda_callback_owner_composes():
++    facts = _stage_1c_facts("apply=lambda callback: callback()\ndef f(): pass\napply(f)\n")
++    assert len(_stage_1d4_flows(facts, LineageRelation.CALLBACK_REGISTERS)) == 1
++    assert len(_stage_1d4_flows(facts, LineageRelation.CALLBACK_INVOKES)) == 1
 +
 +
-+def test_stage_1d3_yield_from_marks_only_nested_callable_owner():
-+    facts = _stage_1c_facts(
-+        "def factory():\n def f():\n  yield from ()\n return f\ng=factory()\nresult=g()\n"
-+    )
-+    flow = _stage_1d3_final_call(facts)
-+    assert flow.resolution_kind is ResolutionKind.CALL_EXACT
-+    assert isinstance(flow.source, ExtractedSymbolicRef) and flow.source.symbol_name == "f"
++def test_stage_1d4_n_callback_arguments_are_not_bound_to_actual_callable_signature():
++    facts = _stage_1c_facts("def apply(callback): callback(1)\ndef f(value): pass\napply(f)\n")
++    invokes = _stage_1d4_flows(facts, LineageRelation.CALLBACK_INVOKES)
++    assert len(invokes) == 1
++    assert not [flow for flow in _stage_1d4_flows(facts, LineageRelation.ARGUMENT_TO_PARAMETER) if flow.evidence.start_line == 1]
++
++
++def test_stage_1d4_o_existing_callable_facts_remain_and_callback_relations_are_additive():
++    facts = _stage_1c_facts("def apply(callback): callback()\ndef f(): return 1\ng=f\napply(g)\nresult=g()\n")
++    assert len(_stage_1d4_flows(facts, LineageRelation.CALLBACK_REGISTERS)) == 1
++    assert _stage_1c_call_result_flows(facts)[-1].resolution_kind is ResolutionKind.CALL_EXACT
 ```

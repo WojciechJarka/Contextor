@@ -18,6 +18,7 @@ from contextor.core.analysis.lineage_extraction_emit import (
     add_anchor,
     emit_flow,
     occurrence,
+    parameter_symbolic,
     return_symbolic,
 )
 from contextor.core.analysis.lineage_extraction_state import (
@@ -28,6 +29,7 @@ from contextor.core.domain.lineage_facts import (
     ExtractedOccurrenceRef,
     LineageConfidence,
     LineageRelation,
+    ParameterKind,
     ResolutionKind,
 )
 
@@ -320,6 +322,25 @@ def visit_call(
         "call_result",
         node,
     )
+    parameter = state.current_parameter(owner, callee_ref)
+    enclosing_callable = state._callables_by_anchor.get(owner) if owner is not None else None
+    if (
+        isinstance(node.func, ast.Name)
+        and parameter is not None
+        and enclosing_callable is not None
+        and parameter.kind not in (ParameterKind.VAR_POSITIONAL, ParameterKind.VAR_KEYWORD)
+    ):
+        state.mark_callback_parameter(parameter)
+        emit_flow(
+            state,
+            paths,
+            source=parameter_symbolic(module_name, enclosing_callable.name, parameter),
+            target=call_site,
+            relation=LineageRelation.CALLBACK_INVOKES,
+            node=node,
+            resolution_kind=ResolutionKind.LEXICAL_EXACT,
+            confidence=LineageConfidence.CONFIRMED,
+        )
     arguments = collect_call_arguments(
         state,
         paths,

@@ -48,13 +48,16 @@ def collect_call_arguments(state: LineageExtractionState, paths: dict[int, str],
     pending.sort(key=lambda item: (int(getattr(item[0], "lineno", 0) or 0), int(getattr(item[0], "col_offset", 0) or 0), item[3]))
     result = []
     for ordinal, (argument_node, kind, keyword_name, _source_ordinal) in enumerate(pending):
-        value(argument_node, owner, walrus_owner)
-        result.append(_CallArgumentInfo(occurrence(state, paths,"call_argument", argument_node, keyword_name if kind == "keyword" else None, ordinal=ordinal), argument_node, kind, keyword_name))
+        source = value(argument_node, owner, walrus_owner)
+        result.append(_CallArgumentInfo(occurrence(state, paths,"call_argument", argument_node, keyword_name if kind == "keyword" else None, ordinal=ordinal), source, argument_node, kind, keyword_name))
     return tuple(result)
 
 
 def emit_argument_to_parameter(state: LineageExtractionState, paths: dict[int, str], module_name: str, argument: _CallArgumentInfo, callable_info: _CallableInfo, parameter: _ParameterInfo) -> None:
     emit_flow(state, paths,source=argument.occurrence, target=parameter_symbolic(module_name,callable_info.name, parameter), relation=LineageRelation.ARGUMENT_TO_PARAMETER, node=argument.node, resolution_kind=ResolutionKind.CALL_EXACT, confidence=LineageConfidence.CONFIRMED)
+    actual_callable = state._callable_values.get(argument.source.local_id)
+    if parameter.local_id in state._callback_parameters and actual_callable is not None:
+        emit_flow(state, paths,source=ExtractedOccurrenceRef(actual_callable.anchor_id), target=parameter_symbolic(module_name,callable_info.name, parameter), relation=LineageRelation.CALLBACK_REGISTERS, node=argument.node, resolution_kind=ResolutionKind.CALL_EXACT, confidence=LineageConfidence.CONFIRMED)
 
 
 def bind_call_arguments(state: LineageExtractionState, paths: dict[int, str], module_name: str, arguments: tuple[_CallArgumentInfo, ...], callable_info: _CallableInfo) -> None:
@@ -106,6 +109,7 @@ def parameter_anchors(state: LineageExtractionState, paths: dict[int, str], modu
             local_id = add_anchor(state, paths,"parameter", parameter, parameter.arg, owner, ordinal=ordinal if kind in (ParameterKind.POSITIONAL_ONLY, ParameterKind.POSITIONAL_OR_KEYWORD) else 0, local_kind=local_kind)
             state.declare_local(owner, parameter.arg)
             info = _ParameterInfo(local_id, parameter.arg, kind, ordinal if kind in (ParameterKind.POSITIONAL_ONLY, ParameterKind.POSITIONAL_OR_KEYWORD) else 0)
+            state.register_parameter(owner, info)
             result.append((info, parameter))
     for ordinal, (info, parameter) in enumerate(result):
         emit_flow(state, paths,source=parameter_symbolic(module_name,callable_symbol_name, info), target=ExtractedOccurrenceRef(info.local_id), relation=LineageRelation.BINDS, node=parameter, resolution_kind=ResolutionKind.SIGNATURE_EXACT, confidence=LineageConfidence.CONFIRMED, ordinal=ordinal)

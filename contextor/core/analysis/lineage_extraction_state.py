@@ -46,6 +46,7 @@ class _ActiveComprehension:
 @dataclass(frozen=True)
 class _CallArgumentInfo:
     occurrence: ExtractedOccurrenceRef
+    source: ExtractedOccurrenceRef
     node: ast.AST
     kind: str
     keyword_name: str | None
@@ -71,6 +72,8 @@ class LineageExtractionState:
     _callables_by_anchor: dict[str, _CallableInfo] = field(default_factory=dict)
     _callables_by_binding: dict[str, _CallableInfo] = field(default_factory=dict)
     _callable_values: dict[str, _CallableInfo] = field(default_factory=dict)
+    _parameters_by_local_id: dict[str, tuple[str, _ParameterInfo]] = field(default_factory=dict)
+    _callback_parameters: set[str] = field(default_factory=set)
     _return_records: dict[str, list[_CallableReturnRecord]] = field(default_factory=dict)
     _callable_returns: dict[str, _CallableInfo] = field(default_factory=dict)
     _generator_owners: set[str] = field(default_factory=set)
@@ -114,6 +117,26 @@ class LineageExtractionState:
 
     def import_frame(self, owner: str | None) -> dict[str, _ImportInfo]:
         return self._imports.setdefault(owner, {})
+
+    def register_parameter(self, owner: str, parameter: _ParameterInfo) -> None:
+        candidate = (owner, parameter)
+        existing = self._parameters_by_local_id.get(parameter.local_id)
+        if existing is not None and existing != candidate:
+            raise ValueError(f"Conflicting lineage parameter registration: {parameter.local_id}")
+        self._parameters_by_local_id[parameter.local_id] = candidate
+
+    def current_parameter(
+        self,
+        owner: str | None,
+        occurrence: ExtractedOccurrenceRef | None,
+    ) -> _ParameterInfo | None:
+        if owner is None or occurrence is None:
+            return None
+        registered = self._parameters_by_local_id.get(occurrence.local_id)
+        return registered[1] if registered is not None and registered[0] == owner else None
+
+    def mark_callback_parameter(self, parameter: _ParameterInfo) -> None:
+        self._callback_parameters.add(parameter.local_id)
 
     def record_callable_return(
         self,

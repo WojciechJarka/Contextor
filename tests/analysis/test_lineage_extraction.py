@@ -1915,3 +1915,111 @@ def test_stage_1d3_yield_from_marks_only_nested_callable_owner():
     flow = _stage_1d3_final_call(facts)
     assert flow.resolution_kind is ResolutionKind.CALL_EXACT
     assert isinstance(flow.source, ExtractedSymbolicRef) and flow.source.symbol_name == "f"
+
+
+def _stage_1d4_flows(facts, relation):
+    return [flow for flow in facts.flows if flow.relation is relation]
+
+
+def test_stage_1d4_a_callback_path_is_composable_and_call_result_stays_dynamic():
+    source = "def apply(callback):\n return callback()\ndef f(): return 1\napply(f)\n"
+    tree = ast.parse(source)
+    callback_call = tree.body[0].body[0].value
+    paths, reason = lineage_extraction_module._index_ast_paths(tree, lineage_extraction_module.DEFAULT_LINEAGE_EXTRACTION_LIMITS)
+    assert reason is None and isinstance(callback_call, ast.Call)
+    facts = _stage_1c_facts(source)
+    callback = _stage_1c_named(facts, "parameter", "callback")[0]
+    function = _stage_1c_named(facts, "function", "f")[0]
+    registers = _stage_1d4_flows(facts, LineageRelation.CALLBACK_REGISTERS)
+    invokes = _stage_1d4_flows(facts, LineageRelation.CALLBACK_INVOKES)
+    assert len(registers) == len(invokes) == 1
+    assert registers[0].source == ExtractedOccurrenceRef(function.local_id)
+    assert isinstance(registers[0].target, ExtractedSymbolicRef) and registers[0].target.source_local_id == callback.local_id
+    assert isinstance(invokes[0].source, ExtractedSymbolicRef) and invokes[0].source.source_local_id == callback.local_id
+    assert invokes[0].target == ExtractedOccurrenceRef(build_local_occurrence_id("call_site", paths[id(callback_call)]))
+    callback_result = next(flow for flow in _stage_1c_call_result_flows(facts) if flow.evidence.start_line == 2)
+    assert callback_result.resolution_kind is ResolutionKind.DYNAMIC_RUNTIME_BOUNDARY
+
+
+def test_stage_1d4_b_keyword_callback_registers_exactly():
+    facts = _stage_1c_facts("def apply(callback): callback()\ndef f(): pass\napply(callback=f)\n")
+    assert len(_stage_1d4_flows(facts, LineageRelation.CALLBACK_REGISTERS)) == 1
+
+
+def test_stage_1d4_c_lambda_callback_registers_lambda_anchor():
+    facts = _stage_1c_facts("def apply(callback): callback()\napply(lambda: 1)\n")
+    flow = _stage_1d4_flows(facts, LineageRelation.CALLBACK_REGISTERS)[0]
+    assert flow.source == ExtractedOccurrenceRef(_stage_1c_named(facts, "lambda", None)[0].local_id)
+
+
+def test_stage_1d4_d_callable_alias_registers_original_anchor():
+    facts = _stage_1c_facts("def apply(callback): callback()\ndef f(): pass\ng=f\napply(g)\n")
+    flow = _stage_1d4_flows(facts, LineageRelation.CALLBACK_REGISTERS)[0]
+    assert flow.source == ExtractedOccurrenceRef(_stage_1c_named(facts, "function", "f")[0].local_id)
+
+
+def test_stage_1d4_e_returned_callable_registers_original_anchor():
+    facts = _stage_1c_facts("def apply(callback): callback()\ndef factory():\n def f(): pass\n return f\napply(factory())\n")
+    flow = _stage_1d4_flows(facts, LineageRelation.CALLBACK_REGISTERS)[0]
+    assert flow.source == ExtractedOccurrenceRef(_stage_1c_named(facts, "function", "f")[0].local_id)
+
+
+def test_stage_1d4_f_multiple_callers_register_independently_to_one_invocation():
+    facts = _stage_1c_facts("def apply(callback): callback()\ndef f(): pass\ndef g(): pass\napply(f)\napply(g)\n")
+    registers = _stage_1d4_flows(facts, LineageRelation.CALLBACK_REGISTERS)
+    assert {flow.source.local_id for flow in registers} == {item.local_id for item in _stage_1c_named(facts, "function", "f") + _stage_1c_named(facts, "function", "g")}
+    assert len(_stage_1d4_flows(facts, LineageRelation.CALLBACK_INVOKES)) == 1
+    assert next(flow for flow in _stage_1c_call_result_flows(facts) if flow.evidence.start_line == 1).resolution_kind is ResolutionKind.DYNAMIC_RUNTIME_BOUNDARY
+
+
+def test_stage_1d4_g_non_callable_argument_has_only_lexical_invocation():
+    facts = _stage_1c_facts("def apply(callback): callback()\napply(42)\n")
+    assert not _stage_1d4_flows(facts, LineageRelation.CALLBACK_REGISTERS)
+    assert len(_stage_1d4_flows(facts, LineageRelation.CALLBACK_INVOKES)) == 1
+
+
+@pytest.mark.parametrize("source", ("from pkg import f\ndef apply(callback): callback()\napply(f)\n", "def apply(callback): callback()\napply(obj.f)\n", "def apply(callback): callback()\napply([f][0])\n", "def apply(callback): callback()\napply(getattr(obj, 'f'))\n"))
+def test_stage_1d4_h_imported_attribute_reflection_and_container_callbacks_do_not_register(source):
+    assert not _stage_1d4_flows(_stage_1c_facts(source), LineageRelation.CALLBACK_REGISTERS)
+
+
+def test_stage_1d4_i_rebound_parameter_is_not_callback_invocation_or_registration():
+    facts = _stage_1c_facts("def apply(callback):\n callback=other\n callback()\ndef f(): pass\napply(f)\n")
+    assert not _stage_1d4_flows(facts, LineageRelation.CALLBACK_INVOKES)
+    assert not _stage_1d4_flows(facts, LineageRelation.CALLBACK_REGISTERS)
+
+
+def test_stage_1d4_j_uninvoked_parameter_does_not_register_callback():
+    facts = _stage_1c_facts("def store(callback): return 1\ndef f(): pass\nstore(f)\n")
+    assert not _stage_1d4_flows(facts, LineageRelation.CALLBACK_INVOKES)
+    assert not _stage_1d4_flows(facts, LineageRelation.CALLBACK_REGISTERS)
+
+
+def test_stage_1d4_k_starred_and_double_starred_arguments_do_not_register():
+    facts = _stage_1c_facts("def apply(callback): callback()\ndef f(): pass\napply(*[f])\napply(**{'callback': f})\n")
+    assert not _stage_1d4_flows(facts, LineageRelation.CALLBACK_REGISTERS)
+
+
+def test_stage_1d4_l_async_callback_owner_composes_without_coroutine_specialization():
+    facts = _stage_1c_facts("async def apply(callback): callback()\ndef f(): pass\napply(f)\n")
+    assert len(_stage_1d4_flows(facts, LineageRelation.CALLBACK_REGISTERS)) == 1
+    assert len(_stage_1d4_flows(facts, LineageRelation.CALLBACK_INVOKES)) == 1
+
+
+def test_stage_1d4_m_lambda_callback_owner_composes():
+    facts = _stage_1c_facts("apply=lambda callback: callback()\ndef f(): pass\napply(f)\n")
+    assert len(_stage_1d4_flows(facts, LineageRelation.CALLBACK_REGISTERS)) == 1
+    assert len(_stage_1d4_flows(facts, LineageRelation.CALLBACK_INVOKES)) == 1
+
+
+def test_stage_1d4_n_callback_arguments_are_not_bound_to_actual_callable_signature():
+    facts = _stage_1c_facts("def apply(callback): callback(1)\ndef f(value): pass\napply(f)\n")
+    invokes = _stage_1d4_flows(facts, LineageRelation.CALLBACK_INVOKES)
+    assert len(invokes) == 1
+    assert not [flow for flow in _stage_1d4_flows(facts, LineageRelation.ARGUMENT_TO_PARAMETER) if flow.evidence.start_line == 1]
+
+
+def test_stage_1d4_o_existing_callable_facts_remain_and_callback_relations_are_additive():
+    facts = _stage_1c_facts("def apply(callback): callback()\ndef f(): return 1\ng=f\napply(g)\nresult=g()\n")
+    assert len(_stage_1d4_flows(facts, LineageRelation.CALLBACK_REGISTERS)) == 1
+    assert _stage_1c_call_result_flows(facts)[-1].resolution_kind is ResolutionKind.CALL_EXACT
