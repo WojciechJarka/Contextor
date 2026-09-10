@@ -1,227 +1,171 @@
-# Stale fusion-test parser instrumentation repair
+# Contextor Stage 1E0 — surface lineage architectural discovery + implementation design
 
-## Scope and architectural verification
+## Scope and authority
 
-Mode: `TEST_ONLY`.
+DISCOVERY_ONLY; requested source revision a350f1a7d86e059ebdff82a91d20932a7fb9e9e4.
 
-Contextor MCP verified `contextor/core/symbol_engine/indexer.py` as the fresh canonical `runtime` module (LIVE revision `581`; no syntax diagnostics). The repair intentionally leaves production untouched and updates repository-index parser instrumentation to delegate to and count `indexer.parse_source_with_fingerprint`.
+Contextor MCP was used first: active-pool inspection, centralized documentation, canonical search_source, and exact get_source_range; rg then verified owners, consumers, and tests. The active pool contains the applicable architecture/source tools. No deferred-pool discovery tool (tool_search or deferred Contextor tool) is injected in this task, so there was no callable deferred pool to inspect.
 
-## Exact stale-test inventory
+The worktree was already dirty in three tests and this report. This task changed no production, test, schema, or configuration file.
 
-All repository-index parser hooks in the three requested files were audited.
+## CURRENT_STATE
 
-| File | Stale `indexer.parse_source` hooks replaced | Result |
-| --- | ---: | --- |
-| `tests/test_collision_facts_fusion.py` | 3 | Migration and source-change paths count one canonical parse; warm current-schema test was renamed and counts one lineage parse while collision extraction remains forbidden. |
-| `tests/test_reference_fusion_integration.py` | 2 | Legacy migration, schema remigration, and warm cache count one canonical parse; warm reference extraction remains forbidden. |
-| `tests/test_test_context_fusion.py` | 2 | Non-candidate migration counts one canonical parse; warm test facts assert one parse for each of its three indexed sources and zero test-fact visitor calls. |
+### Source-local lineage
 
-No remaining `indexer.parse_source` reference exists in these three files. The direct `test_context_module.parse_source` unit-test usage was deliberately preserved because it does not exercise `index_repository`.
+* contextor/core/analysis/lineage_extraction.py::_AnchorExtractor owns the sole recursive AST traversal and one LineageExtractionState. It delegates to lineage_extraction_* helpers and finalizes captures.
+* extract_lineage_source_facts validates input, indexes AST paths once, and currently returns surfaces=() at lines 265–279. It does no I/O after receiving the AST; tests/analysis/test_lineage_extraction.py freezes this.
+* contextor/core/analysis/lineage_extraction_state.py is canonical lexical state. Owner-keyed _bindings, _imports, and _ImportInfo(module_name, symbol_name, binding_id) provide existing binding identity/import authority.
+* Existing visit_import and visit_import_from emit import anchors/bindings. A from-import alias surface must reference its existing local binding, never a new identity. Plain import is only an import binding.
 
-## Results
+### Public/export/reexport ownership
 
-Passed:
+* contextor/core/analysis/export_analysis.py::_is_public defines the current public-name rule: nonempty and no leading underscore.
+* export_analysis.extract_exports is the only production owner that combines that convention with literal top-level __all__: assignment detection, list/tuple literal strings, sorted output. PublicApiBuilder and ExportContextBuilder consume it for single-file reporting.
+* import_analysis.extract_import_usage repeats limited literal-__all__ parsing to label import usage re_exported; it is not a lineage producer.
+* contextor/core/reference/shared.py::_build_reexport_map and reference/resolution.py::_resolve_reexport are canonical repository-wide resolution. They handle transitive aliases, package init, explicit-__all__ stars, cycles, and local shadowing. They require all modules, so are not source-local.
+* Graph analytics export degree explicitly means artifact degree, not Python __all__.
 
-```text
-.venv\Scripts\python.exe -m pytest tests/test_collision_facts_fusion.py tests/test_reference_fusion_integration.py tests/test_test_context_fusion.py tests/test_index_fusion.py -q
-36 passed in 9.11s
+### Entrypoints, registrations, visibility
 
-.venv\Scripts\python.exe -m pytest tests/test_no_double_parse.py -q
-4 passed in 13.77s
+* The only ENTRYPOINT producer is reporting_engine/summary_generator.py name-pattern classification of isolated modules. It is report heuristic, not exact exposure.
+* No framework/plugin registration producer exists. Stage 1D CALLBACK_REGISTERS models local callable passing to an invoked callback parameter; tests distinguish generic register(callback=...) from that relation. It is not SurfaceKind.REGISTRATION.
+* Artifact visibility is report/filter behavior, not a Python export canonical contract.
 
-git diff --check
-exit 0 (Git emitted only configured LF-to-CRLF conversion warnings)
-```
+### Domain/state/materialization
 
-## FILES_CHANGED
+* core/domain/lineage_facts.py already defines SurfaceKind, SurfaceDeclarationEvidence, ExtractedSurfaceFact, and MaterializedSurfaceFact.
+* Both extracted/materialized source slices contain sorted/unique surfaces; fresh manifests validate count. Extracted targets are occurrence/symbolic refs; materialized targets are local occurrences or semantic endpoints.
+* Domain tests freeze: LITERAL_ALL_DECLARATION is legal only on EXPORT, and confirmed exact materialized targets require semantic endpoints.
+* EXPOSES and DECLARES_PUBLIC_NAMES exist but have no Stage 1E producer.
+* RepositoryAnalysisState, incremental candidate copy/commit, and live_state/store.py own/persist/load/validate lineage_facts_by_source and materialized surfaces. tests/test_lineage_state_lifecycle.py freezes lifecycle.
+* No extracted-to-materialized resolver, writer feeding that state, or public MCP surface projection exists. Persistence is implemented but unfed; canonical materialization/query belongs to 1F+, not 1E.
 
-- `tests/test_collision_facts_fusion.py`
-- `tests/test_reference_fusion_integration.py`
-- `tests/test_test_context_fusion.py`
-- `walkthrough.md`
+## REUSE_MAP
 
-## COMPLETE FULL_DIFF
+| Requirement | Canonical owner | 1E usage |
+|---|---|---|
+| One parsed AST traversal | _AnchorExtractor and LineageExtractionState | Collect surfaces in it; no reread/reparse/walk. |
+| Source-local identity | occurrence, anchor, binding/import frames | Existing definition/import occurrence only. |
+| Default public predicate | export_analysis._is_public | Shared narrow semantic rule; preserve underscore behavior. |
+| Literal __all__ | export_analysis.extract_exports | Migrate literal recognizer to one-pass collection; do not call it from extractor. |
+| Provider resolution | _build_reexport_map | Do not call in 1E; defer to 1F/1G. |
+| Surface boundaries | domain facts, PUBLIC_TARGET, build_public_slot | Extracted facts only; 1F maps endpoints. |
+| Storage lifecycle | state manager, plan executor, live store | Leave unchanged in 1E.1. |
 
-```diff
-diff --git a/tests/test_collision_facts_fusion.py b/tests/test_collision_facts_fusion.py
-index 4cefe56..b3c8899 100644
---- a/tests/test_collision_facts_fusion.py
-+++ b/tests/test_collision_facts_fusion.py
-@@ -54,7 +54,7 @@ def test_cold_index_facts_match_repository_extraction_and_materialize_all_fields
-         assert isinstance(fact["code"], str)
+## GAPS
 
+1. No surface collection, deterministic local-ID namespace, or emission helper.
+2. No shared one-pass literal-__all__ recognizer. Calling extract_exports creates a second top-level scan.
+3. No canonical materializer/writer/MCP projection: 1F.
+4. No exact source-local entrypoint or plugin/framework registration owner. No schema/version hole is proven.
 
--def test_warm_current_schema_has_zero_parse_and_collision_extraction(
-+def test_warm_current_schema_parses_once_for_lineage_and_zero_collision_extraction(
-     tmp_path, isolated_dirs, monkeypatch
- ):
-     _serial(monkeypatch)
-@@ -62,14 +62,22 @@ def test_warm_current_schema_has_zero_parse_and_collision_extraction(
-     indexer.index_repository(str(root))
-     indexer._CACHE_MANAGERS.pop(str(root.resolve()), None)
+## SEMANTIC_DECISIONS A–K
 
-+    parse_calls = []
-+    original_parse = indexer.parse_source_with_fingerprint
-+
-     def forbidden(*args, **kwargs):
-         raise AssertionError("unexpected warm extraction")
+### A. Ordinary module-level def/class
 
--    monkeypatch.setattr(indexer, "parse_source", forbidden)
-+    monkeypatch.setattr(
-+        indexer,
-+        "parse_source_with_fingerprint",
-+        lambda path: (parse_calls.append(path) or original_parse(path)),
-+    )
-     monkeypatch.setattr(indexer, "extract_module_collision_facts", forbidden)
-     warm = indexer.index_repository(str(root))
+Existing rule: nonempty/no-leading-underscore. In 1E.1 only top-level def/class yields PUBLIC_SYMBOL, STATIC_DECLARATION, PYTHON_NAME_CONVENTION, INFERRED. Nested symbols and assignments are excluded.
 
-     assert warm.collision_facts_by_module["module"][0]["name"] == "public"
-+    assert len(parse_calls) == 1
+### B. Literal __all__
 
+Literal __all__ = ["f", "C"] overrides default convention. Emit only deduplicated EXPORT, LITERAL_ALL_DECLARATION, LITERAL_CONTAINER_EXACT, CONFIRMED records, deterministically sorted.
 
- def test_missing_collision_field_migrates_once_and_preserves_other_fact_families(
-@@ -85,9 +93,13 @@ def test_missing_collision_field_migrates_once_and_preserves_other_fact_families
+### C. From-import exposure
 
-     parse_calls = []
-     collision_calls = []
--    real_parse = indexer.parse_source
-+    real_parse = indexer.parse_source_with_fingerprint
-     real_extract = indexer.extract_module_collision_facts
--    monkeypatch.setattr(indexer, "parse_source", lambda path: (parse_calls.append(path) or real_parse(path)))
-+    monkeypatch.setattr(
-+        indexer,
-+        "parse_source_with_fingerprint",
-+        lambda path: (parse_calls.append(path) or real_parse(path)),
-+    )
-     monkeypatch.setattr(
-         indexer,
-         "extract_module_collision_facts",
-@@ -150,8 +162,12 @@ def test_schema_mismatch_and_source_change_reextract_once(tmp_path, isolated_dir
-     indexer._CACHE_MANAGERS.pop(str(root.resolve()), None)
+A literal exported current from-import binding becomes REEXPORT, STATIC_DECLARATION, IMPORT_EXACT, CONFIRMED, pointed at that existing occurrence. Rebinding/shadowing defeats it. Provider artifact resolution is 1F.
 
-     parse_calls = []
--    real_parse = indexer.parse_source
--    monkeypatch.setattr(indexer, "parse_source", lambda path: (parse_calls.append(path) or real_parse(path)))
-+    real_parse = indexer.parse_source_with_fingerprint
-+    monkeypatch.setattr(
-+        indexer,
-+        "parse_source_with_fingerprint",
-+        lambda path: (parse_calls.append(path) or real_parse(path)),
-+    )
-     mismatched = indexer.index_repository(str(root))
-     assert len(parse_calls) == 1
-     assert mismatched.collision_facts_by_module["module"][0]["name"] == "old_name"
-diff --git a/tests/test_reference_fusion_integration.py b/tests/test_reference_fusion_integration.py
-index 421f845..7101279 100644
---- a/tests/test_reference_fusion_integration.py
-+++ b/tests/test_reference_fusion_integration.py
-@@ -41,7 +41,7 @@ def test_cold_index_emits_json_safe_reference_facts_into_combined_cache(
-     assert _payload(root, source)["reference_facts"] == record
+### D. Plain import
 
+Plain import x never creates a surface alone. Even literal module-object exports are deferred; do not label them reexports.
 
--def test_warm_reference_hit_performs_zero_parse_and_zero_extraction(
-+def test_warm_reference_hit_parses_once_for_lineage_and_zero_reference_extraction(
-     tmp_path, isolated_dirs, monkeypatch
- ):
-     monkeypatch.setenv("CONTEXTOR_DISABLE_PROCESS_POOL", "1")
-@@ -52,8 +52,12 @@ def test_warm_reference_hit_performs_zero_parse_and_zero_extraction(
-     indexer.index_repository(str(root))
-     _reset_worker_cache(root)
+### E. Unresolved literal name
 
-+    parse_calls = []
-+    original_parse = indexer.parse_source_with_fingerprint
-     monkeypatch.setattr(
--        indexer, "parse_source", lambda path: (_ for _ in ()).throw(AssertionError(path))
-+        indexer,
-+        "parse_source_with_fingerprint",
-+        lambda path: (parse_calls.append(path) or original_parse(path)),
-     )
-     monkeypatch.setattr(
-         indexer,
-@@ -63,6 +67,7 @@ def test_warm_reference_hit_performs_zero_parse_and_zero_extraction(
+Emit EXPORT with ExtractedSymbolicRef(PUBLIC_TARGET, current module, declared name, None), LITERAL_ALL_DECLARATION, UNRESOLVED_NAME, UNRESOLVED. No fake occurrence/ID or flow.
 
-     result = indexer.index_repository(str(root))
-     assert result.reference_facts_by_module["module"]["status"] == "available"
-+    assert len(parse_calls) == 1
+### F. Mutation/dynamic construction
 
+Plus-equals, append, concatenation, starred lists, comprehensions, calls/reflection, conditional merge, and non-string members lack an exact evaluator. They are outside 1E.1; add no heuristic.
 
- def test_reference_legacy_and_schema_migrations_parse_once_then_hit_warm(
-@@ -75,10 +80,12 @@ def test_reference_legacy_and_schema_migrations_parse_once_then_hit_warm(
-     source.write_text("def current(): return 1\n", encoding="utf-8")
-     CacheManager(str(root)).set(source, {"imports": [], "error": None})
-     _reset_worker_cache(root)
--    original_parse = indexer.parse_source
-+    original_parse = indexer.parse_source_with_fingerprint
-     calls = []
-     monkeypatch.setattr(
--        indexer, "parse_source", lambda path: (calls.append(path) or original_parse(path))
-+        indexer,
-+        "parse_source_with_fingerprint",
-+        lambda path: (calls.append(path) or original_parse(path)),
-     )
+### G. ENTRYPOINT
 
-     migrated = indexer.index_repository(str(root))
-@@ -97,7 +104,7 @@ def test_reference_legacy_and_schema_migrations_parse_once_then_hit_warm(
-     _reset_worker_cache(root)
-     calls.clear()
-     indexer.index_repository(str(root))
--    assert calls == []
-+    assert len(calls) == 1
+Emit none. Current owner is a report-only name heuristic; console scripts, decorators, and main guards lack an exact source-local contract.
 
+### H. REGISTRATION
 
- def test_source_change_invalidates_reference_facts_and_reassembles_reexports(
-diff --git a/tests/test_test_context_fusion.py b/tests/test_test_context_fusion.py
-index b93663a..9e50808 100644
---- a/tests/test_test_context_fusion.py
-+++ b/tests/test_test_context_fusion.py
-@@ -86,7 +86,7 @@ def test_case():
-     assert facts["has_assertions"] is expected[2]
+Emit none. Generic callback relations are not framework/plugin registration.
 
+### I. EXPOSES/DECLARES_PUBLIC_NAMES
 
--def test_cold_then_current_schema_warm_has_zero_test_fact_parse_and_visitor(
-+def test_cold_then_current_schema_warm_has_one_lineage_parse_per_source_and_zero_test_fact_visitor(
-     tmp_path, isolated_dirs, monkeypatch
- ):
-     root = tmp_path / "repo"
-@@ -96,13 +96,22 @@ def test_cold_then_current_schema_warm_has_zero_test_fact_parse_and_visitor(
-     indexer._CACHE_MANAGERS.pop(str(root.resolve()), None)
-     parse_calls = []
-     visitor_calls = []
--    original_parse = indexer.parse_source
-+    original_parse = indexer.parse_source_with_fingerprint
-     original_extract = indexer._extract_test_file_facts
--    monkeypatch.setattr(indexer, "parse_source", lambda path: (parse_calls.append(path) or original_parse(path)))
-+    monkeypatch.setattr(
-+        indexer,
-+        "parse_source_with_fingerprint",
-+        lambda path: (parse_calls.append(path) or original_parse(path)),
-+    )
-     monkeypatch.setattr(indexer, "_extract_test_file_facts", lambda tree: (visitor_calls.append(tree) or original_extract(tree)))
+Emit neither in 1E.1. ExtractedSurfaceFact is the declaration record. 1F can emit EXPOSES as public declaration/slot -> exposed semantic endpoint once materialized; DECLARES_PUBLIC_NAMES needs a concrete public/module boundary too.
 
-     warm = indexer.index_repository(str(root))
--    assert parse_calls == []
-+    assert set(parse_calls) == {
-+        root / "pkg" / "mod.py",
-+        root / "tests" / "conftest.py",
-+        source,
-+    }
-+    assert all(parse_calls.count(path) == 1 for path in parse_calls)
-     assert visitor_calls == []
-     assert str(source.resolve()) in warm.test_facts_by_path
+### J. Determinism
 
-@@ -120,8 +129,12 @@ def test_non_candidate_cache_record_is_not_migrated(tmp_path, isolated_dirs, mon
-     CacheManager(str(root)).set(source, {"imports": [], "error": None})
-     indexer._CACHE_MANAGERS.pop(str(root.resolve()), None)
-     calls = []
--    original = indexer.parse_source
--    monkeypatch.setattr(indexer, "parse_source", lambda path: (calls.append(path) or original(path)))
-+    original = indexer.parse_source_with_fingerprint
-+    monkeypatch.setattr(
-+        indexer,
-+        "parse_source_with_fingerprint",
-+        lambda path: (calls.append(path) or original(path)),
-+    )
+Use private deterministic ID surface:v1:{kind}:{ast_path}:name:{name}:i:{ordinal}, based on existing indexed AST paths. Track _surface_ids, append state.surfaces, return tuple(sorted(...)); targets never determine identity.
 
-     result = indexer.index_repository(str(root))
-     assert str(source.resolve()) not in result.test_facts_by_path
-```
+### K. Safe source-local scope
+
+1E.1: top-level def/class defaults; literal list/tuple __all__ exports of current local bindings/unresolved names; authoritative explicit-import reexports. Defer provider resolution, star/module imports, entrypoints, registrations, mutations, metadata, persistence/materialization, MCP.
+
+## PROPOSED_SUBSTAGES
+
+### 1E.1 — exact source-local declarations
+
+One-pass public top-level defs/classes and literal list/tuple __all__ records; emit PUBLIC_SYMBOL, EXPORT, REEXPORT, unresolved exports. Stop at dynamic/mutated/conditional construction, plain/star imports, nested scope, provider resolution, entrypoints, registrations, persistence, MCP.
+
+### 1E.2 — narrow semantic extraction
+
+Move only _is_public and literal-container recognition into a shared owner used by extract_exports and 1E.1. Do not migrate reporting consumers. Stop on legacy public-report equivalence drift.
+
+### 1E.3 — reexport authority hardening
+
+Test relative imports, aliases, rebinding/shadowing, rejected star/plain paths. Proves source-local authority only; no provider resolution.
+
+### 1F / 1G / 1H — out of 1E
+
+1F materializes targets/populates state/emits canonical relations. 1G owns metadata/package/provider reexports via _build_reexport_map. 1H adds provider-specific registration contracts then considers MCP.
+
+## First implementation substage
+
+### Exact targets
+
+* lineage_extraction_state.py: add surfaces list, _surface_ids, minimal helpers; reuse existing frames/import metadata.
+* lineage_extraction_emit.py: private emit_surface using existing span/path, collision guard, deterministic ID.
+* lineage_extraction_visitors.py::visit_module: capture module statements in existing execution order; no new visitor, ast.walk, or post-pass.
+* lineage_extraction.py::_AnchorExtractor.extract: return sorted anchors/flows/surfaces and pass existing result constructor.
+* export_analysis.py: no behavior change in 1E.1; helper migration is 1E.2.
+* tests/analysis/test_lineage_extraction.py and test_lineage_extraction_equivalence.py: behavior-named, no-I/O/determinism compatibility tests.
+
+### Shapes
+
+* Default: PUBLIC_SYMBOL, existing definition occurrence, definition span, PYTHON_NAME_CONVENTION/INFERRED, static declaration.
+* Literal local: EXPORT, existing occurrence, literal span, LITERAL_CONTAINER_EXACT/CONFIRMED, literal-all declaration.
+* Literal explicit import: REEXPORT, existing import occurrence, literal span, IMPORT_EXACT/CONFIRMED, static declaration.
+* Literal unresolved: EXPORT, PUBLIC_TARGET symbolic ref, literal span, UNRESOLVED_NAME/UNRESOLVED, literal-all declaration.
+* No 1E.1 declaration flows.
+
+### Test matrix
+
+Positive: public def/class and underscore exclusion; literal __all__ only confirmed sorted exports; local existing-anchor reuse; relative/aliased from-import reexports; missing literal symbolic export; repeat-run equality/no filesystem I/O.
+
+Negative: plain/unexported imports and nested defs create no surface; local shadow after import is EXPORT not REEXPORT; star/module/rebound imports do not make confirmed reexports; mutated/dynamic __all__ gets no exact export; main guards/decorator-looking calls/register(callback=...) yield neither ENTRYPOINT nor REGISTRATION; resource limit stays empty.
+
+## DO_NOT_DO
+
+* No parallel public/reexport analyzer, second NodeVisitor, ast.walk, reparse, or source reread.
+* No repository _build_reexport_map from source-local extractor.
+* No duplicate identity; reuse anchors/import bindings/symbolic refs.
+* No heuristic exports, CLI detection, plugins, registrations, or callback conflation.
+* No enum/schema/version, persistence, materialization, or MCP changes in 1E.1.
+* No 1F/1G/1H before 1E.1 acceptance.
+
+## Frozen contracts/tests
+
+* tests/analysis/test_lineage_extraction.py: source-local/no-I/O determinism, limits, Stage 1D callbacks.
+* tests/analysis/test_lineage_extraction_equivalence.py: public extractor API/parity.
+* tests/domain/test_lineage_facts.py: validation, evidence, ordering, exact endpoints.
+* tests/test_lineage_state_lifecycle.py: candidate/commit/persistence.
+* tests/test_reexport_reference_semantics.py: project-level transitive/relative/star/cycle/shadow behavior; preserve as reference tests, not 1E behavior.
+* tests/test_h2a_reference_index_equivalence.py and tests/test_reference_fusion_*: legacy __all__ public/report behavior.
+
+FILES_CHANGED=NONE
+
+DIFFS=NONE
