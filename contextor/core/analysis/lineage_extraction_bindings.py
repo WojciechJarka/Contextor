@@ -5,6 +5,7 @@ from collections.abc import Callable
 
 from contextor.core.analysis.lineage_extraction_emit import add_anchor, emit_flow, occurrence
 from contextor.core.analysis.lineage_extraction_state import LineageExtractionState
+from contextor.core.analysis.lineage_extraction_surfaces import observe_all_assignment, observe_all_augassign, observe_all_delete
 from contextor.core.domain.lineage_facts import (
     ExtractedOccurrenceRef,
     LineageConfidence,
@@ -30,6 +31,8 @@ def visit_name(
         return
     if isinstance(node.ctx, ast.Del):
         state.declare_local(owner, node.id)
+        if owner is not None and state._owner_kind.get(owner) == "module" and node.id == "__all__":
+            observe_all_delete(state)
         return
     if isinstance(node.ctx, ast.Load):
         load = occurrence(state, paths, "name_load", node, node.id)
@@ -169,7 +172,7 @@ def visit_assign(
 ) -> None:
     source = value(node.value, owner, walrus_owner)
     for target in node.targets:
-        assign_target(
+        binding = assign_target(
             state,
             paths,
             target,
@@ -178,6 +181,8 @@ def visit_assign(
             walrus_owner,
             visit=visit,
         )
+        if owner is not None and state._owner_kind.get(owner) == "module" and isinstance(target, ast.Name) and target.id == "__all__" and binding is not None:
+            observe_all_assignment(state, node, binding)
 
 
 def visit_ann_assign(
@@ -247,6 +252,8 @@ def visit_aug_assign(
     value: ValueFn,
     visit: VisitFn,
 ) -> None:
+    if owner is not None and state._owner_kind.get(owner) == "module" and isinstance(node.target, ast.Name) and node.target.id == "__all__":
+        observe_all_augassign(state)
     if not isinstance(node.target, ast.Name):
         visit(node.target, owner, walrus_owner)
         value(node.value, owner, walrus_owner)

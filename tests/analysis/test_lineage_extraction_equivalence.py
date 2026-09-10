@@ -28,7 +28,17 @@ def _canonical(value):
     raise TypeError(f"Unsupported lineage equivalence value: {type(value)!r}")
 
 
-def _hash_result(source: str, source_key: str, limits=None) -> str:
+def _hash_value(value) -> str:
+    oracle_bytes = json.dumps(
+        _canonical(value),
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(oracle_bytes).hexdigest()
+
+
+def _result(source: str, source_key: str, limits=None):
     source_fingerprint = hashlib.sha256(source.encode("utf-8")).hexdigest()
     result = lineage_extraction.extract_lineage_source_facts(
         ast.parse(source),
@@ -36,13 +46,11 @@ def _hash_result(source: str, source_key: str, limits=None) -> str:
         source_fingerprint=source_fingerprint,
         **({} if limits is None else {"limits": limits}),
     )
-    oracle_bytes = json.dumps(
-        _canonical(result),
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-    ).encode("utf-8")
-    return hashlib.sha256(oracle_bytes).hexdigest()
+    return result
+
+
+def _hash_result(source: str, source_key: str, limits=None) -> str:
+    return _hash_value(_result(source, source_key, limits))
 
 
 _CORPUS = {
@@ -120,14 +128,21 @@ _CORPUS = {
 
 
 EXPECTED_HASHES = {
-    "async_yield": "110cd0c1d520261bffe673d6e0f1df573b68ed4653be674bcb762faacdf27bf9",
+    "async_yield": "57fe7c8ab6b6468031df1a70efa1d66320485207edf99912959977059166dab7",
     "comprehension_runtime_walrus": "35f7e091b7361051933afa6ae125eabb35b0e46776960955d1d45b0826d531e9",
     "if_for_frame_merge": "f27318c046fcadc2946c58e2e56f324b8a01fb563bd627ec7f85319c2b435b7a",
     "imports_alias_wildcard": "7fbd16baf177be5d965c212678763b9a123978e62ba711950602fab6bf9ccec8",
     "relative_import": "44e82ef594399306de449f12a46d3c8bf463d47050f454537f5c2630f976ca95",
     "resource_limit": "40c592a9bfb86c5f6d4fe747fa2714a92794dafbc204e601ea4b475c07e06adb",
-    "signature_defaults_local_call": "4d6984e8211918d2e84e976d5fda32f59aed9247d52821cafc688242c6f6533b",
+    "signature_defaults_local_call": "97a3964dd7208f83b8200c12e7732e685ffde29f79ca7a1c001c69b2989a0122",
     "try_except_finally_match": "ce25c00652779c30e47b06499408efe78515eda802cdd88aa2650fda6757c60f",
+}
+
+
+LEGACY_ANCHOR_FLOW_HASHES = {
+    **EXPECTED_HASHES,
+    "async_yield": "110cd0c1d520261bffe673d6e0f1df573b68ed4653be674bcb762faacdf27bf9",
+    "signature_defaults_local_call": "4d6984e8211918d2e84e976d5fda32f59aed9247d52821cafc688242c6f6533b",
 }
 
 
@@ -136,6 +151,13 @@ def test_lineage_extraction_equivalence_oracle() -> None:
         name: _hash_result(source, source_key, limits)
         for name, (source, source_key, limits) in _CORPUS.items()
     } == EXPECTED_HASHES
+
+
+def test_lineage_extraction_surface_delta_preserves_legacy_anchors_and_flows() -> None:
+    assert {
+        name: _hash_value(dataclasses.replace(_result(source, source_key, limits), surfaces=()))
+        for name, (source, source_key, limits) in _CORPUS.items()
+    } == LEGACY_ANCHOR_FLOW_HASHES
 
 
 def test_lineage_extraction_public_compatibility() -> None:

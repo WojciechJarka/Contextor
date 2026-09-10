@@ -25,6 +25,7 @@ from contextor.core.analysis.lineage_extraction_state import (
     _CallableInfo,
     LineageExtractionState,
 )
+from contextor.core.analysis.lineage_extraction_surfaces import observe_all_mutation, record_direct_public_candidates
 from contextor.core.domain.lineage_facts import (
     ExtractedOccurrenceRef,
     LineageConfidence,
@@ -55,7 +56,12 @@ def visit_module(
     state.register_owner(module_id, None, "module", node)
     state.frame(module_id)
     for child in node.body:
-        visit(child, module_id, None)
+        state.begin_module_statement(child)
+        try:
+            visit(child, module_id, None)
+            record_direct_public_candidates(state, child, module_id)
+        finally:
+            state.end_module_statement()
 
 
 def visit_class_def(
@@ -286,6 +292,8 @@ def visit_call(
     visit: VisitFn,
     value: ValueFn,
 ) -> None:
+    if owner is not None and state._owner_kind.get(owner) == "module":
+        observe_all_mutation(state, node)
     visit(node.func, owner, walrus_owner)
     callable_info = resolve_current_local_callable(
         state,

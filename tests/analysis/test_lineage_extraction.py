@@ -23,6 +23,8 @@ from contextor.core.domain.lineage_facts import (
     LineageFamilyStatus,
     LineageRelation,
     ResolutionKind,
+    SurfaceDeclarationEvidence,
+    SurfaceKind,
 )
 from contextor.core.source import parse_source_with_fingerprint
 from contextor.core.symbol_engine import indexer as indexer_module
@@ -111,6 +113,10 @@ def _stage_1c_facts_at(source: str, source_key: str):
 
 def _stage_1c_named(facts, kind, name):
     return [item for item in facts.anchors if item.kind == kind and parse_local_occurrence_id(item.local_id)[3] == name]
+
+
+def _surfaces_by_name(facts):
+    return {surface.declared_name: surface for surface in facts.surfaces}
 
 
 def _stage_1c_runtime_assignment(facts, name):
@@ -1115,7 +1121,8 @@ def test_extraction_is_deterministic_source_local_and_has_parameter_lineage(monk
     second = extract_lineage_source_facts(tree, source_key="pkg/mod.py", source_fingerprint=FINGERPRINT)
     assert first == second
     assert first.status is LineageFamilyStatus.FRESH
-    assert first.flows and first.surfaces == ()
+    assert first.flows
+    assert {surface.declared_name for surface in first.surfaces} == {"value", "run"}
     assert len({item.local_id for item in first.anchors}) == len(first.anchors)
     module = sys.modules["contextor.core.analysis.lineage_extraction"]
     assert "PersistentIdentityRegistry" not in vars(module)
@@ -1247,7 +1254,7 @@ def test_incremental_preparation_carries_transient_lineage_and_errors_do_not(tmp
     path.write_text("value = 1\n", encoding="utf-8")
     prepared = prepare_source_update(file_path=path, module_path="pkg", is_new=True, old_module=None, old_artifacts=None, old_usage=None, source_key="pkg.py")
     assert not prepared.has_error and prepared.extracted_lineage_facts is not None
-    assert prepared.extracted_lineage_facts.surfaces == ()
+    assert [surface.declared_name for surface in prepared.extracted_lineage_facts.surfaces] == ["value"]
     path.write_text("def broken(:\n", encoding="utf-8")
     broken = prepare_source_update(file_path=path, module_path="pkg", is_new=True, old_module=None, old_artifacts=None, old_usage=None, source_key="pkg.py")
     assert broken.has_error and broken.error_status == "SYNTAX_ERROR" and broken.extracted_lineage_facts is None
@@ -2023,3 +2030,92 @@ def test_stage_1d4_o_existing_callable_facts_remain_and_callback_relations_are_a
     facts = _stage_1c_facts("def apply(callback): callback()\ndef f(): return 1\ng=f\napply(g)\nresult=g()\n")
     assert len(_stage_1d4_flows(facts, LineageRelation.CALLBACK_REGISTERS)) == 1
     assert _stage_1c_call_result_flows(facts)[-1].resolution_kind is ResolutionKind.CALL_EXACT
+
+
+def test_stage_1e1_default_module_surfaces_cover_supported_public_families_only():
+    facts = _stage_1c_facts("def f(): pass\nasync def af(): pass\nclass C: pass\nCONST = 1\n_private = 2\ndef outer():\n def nested(): pass\n local = 1\n")
+    surfaces = _surfaces_by_name(facts)
+    assert set(surfaces) == {"f", "af", "C", "CONST", "outer"}
+    assert all(surface.kind is SurfaceKind.PUBLIC_SYMBOL for surface in surfaces.values())
+    assert all(surface.resolution_kind is ResolutionKind.PYTHON_NAME_CONVENTION for surface in surfaces.values())
+    assert all(surface.confidence is LineageConfidence.INFERRED for surface in surfaces.values())
+    assert all(surface.declaration_evidence is SurfaceDeclarationEvidence.STATIC_DECLARATION for surface in surfaces.values())
+
+
+def test_stage_1e1_later_literal_all_overrides_defaults_and_reuses_local_anchor():
+    facts = _stage_1c_facts("def a(): pass\ndef b(): pass\n__all__ = ['a', 'a']\n")
+    assert [surface.declared_name for surface in facts.surfaces] == ["a"]
+    surface = facts.surfaces[0]
+    assert surface.kind is SurfaceKind.EXPORT
+    assert surface.exposed == ExtractedOccurrenceRef(_stage_1c_named(facts, "function", "a")[0].local_id)
+    assert surface.resolution_kind is ResolutionKind.LITERAL_CONTAINER_EXACT
+    assert surface.confidence is LineageConfidence.CONFIRMED
+    assert surface.declaration_evidence is SurfaceDeclarationEvidence.LITERAL_ALL_DECLARATION
+
+
+def test_stage_1e1_literal_all_allows_private_and_unresolved_symbolic_name():
+    facts = _stage_1c_facts("def _private(): pass\n__all__ = ['_private', 'missing']\n")
+    surfaces = _surfaces_by_name(facts)
+    assert surfaces["_private"].kind is SurfaceKind.EXPORT
+    missing = surfaces["missing"]
+    assert missing.kind is SurfaceKind.EXPORT
+    assert isinstance(missing.exposed, ExtractedSymbolicRef)
+    assert missing.exposed.kind is ExtractedSymbolicKind.PUBLIC_TARGET
+    assert missing.exposed.module_name == "pkg" and missing.exposed.symbol_name == "missing"
+    assert missing.resolution_kind is ResolutionKind.UNRESOLVED_NAME
+    assert missing.confidence is LineageConfidence.UNRESOLVED
+    assert not [flow for flow in facts.flows if flow.relation in {LineageRelation.EXPOSES, LineageRelation.DECLARES_PUBLIC_NAMES}]
+
+
+@pytest.mark.parametrize("source_key, source", [
+    ("pkg.py", "from provider import f as public\n__all__ = ['public']\n"),
+    ("pkg/sub/mod.py", "from ..provider import f as public\n__all__ = ['public']\n"),
+])
+def test_stage_1e1_explicit_from_import_reexport_uses_current_binding(source_key, source):
+    facts = _stage_1c_facts_at(source, source_key)
+    surface = facts.surfaces[0]
+    assert surface.kind is SurfaceKind.REEXPORT
+    assert surface.resolution_kind is ResolutionKind.IMPORT_EXACT
+    assert surface.confidence is LineageConfidence.CONFIRMED
+    assert surface.declaration_evidence is SurfaceDeclarationEvidence.STATIC_DECLARATION
+    assert surface.exposed == ExtractedOccurrenceRef(_stage_1c_named(facts, "import_binding", "public")[0].local_id)
+
+
+def test_stage_1e1_rebound_import_is_local_export_not_reexport():
+    facts = _stage_1c_facts("from provider import f as public\npublic = 1\n__all__ = ['public']\n")
+    surface = facts.surfaces[0]
+    assert surface.kind is SurfaceKind.EXPORT
+    assert surface.resolution_kind is ResolutionKind.LITERAL_CONTAINER_EXACT
+    assert surface.exposed == ExtractedOccurrenceRef(_stage_1c_named(facts, "binding", "public")[-1].local_id)
+
+
+@pytest.mark.parametrize("source", [
+    "__all__ = ['a']\n__all__ += ['b']\ndef a(): pass\n",
+    "__all__ = ['a'] + ['b']\ndef a(): pass\n",
+    "__all__ = [*names]\ndef a(): pass\n",
+    "__all__ = [name for name in names]\ndef a(): pass\n",
+    "__all__ = build_exports()\ndef a(): pass\n",
+    "__all__ = ['a']\n__all__.append('b')\ndef a(): pass\n",
+    "__all__ = ['a']\ndel __all__\ndef a(): pass\n",
+    "if cond:\n __all__ = ['a']\ndef a(): pass\n",
+])
+def test_stage_1e1_dynamic_or_ambiguous_all_suppresses_all_surfaces(source):
+    assert _stage_1c_facts(source).surfaces == ()
+
+
+def test_stage_1e1_multiple_literal_all_uses_only_last_authoritative_binding():
+    facts = _stage_1c_facts("def a(): pass\ndef b(): pass\n__all__ = ['a']\n__all__ = ['b']\n")
+    assert [surface.declared_name for surface in facts.surfaces] == ["b"]
+
+
+def test_stage_1e1_plain_import_is_not_confirmed_reexport():
+    facts = _stage_1c_facts("import provider as public\n__all__ = ['public']\n")
+    surface = facts.surfaces[0]
+    assert surface.kind is SurfaceKind.EXPORT
+    assert surface.resolution_kind is ResolutionKind.UNRESOLVED_NAME
+    assert isinstance(surface.exposed, ExtractedSymbolicRef)
+
+
+def test_stage_1e1_entrypoint_and_callback_registration_do_not_create_surface_kinds():
+    facts = _stage_1c_facts("if __name__ == '__main__':\n main()\ndef apply(callback): callback()\ndef f(): pass\napply(f)\n")
+    assert not [surface for surface in facts.surfaces if surface.kind in {SurfaceKind.ENTRYPOINT, SurfaceKind.REGISTRATION}]

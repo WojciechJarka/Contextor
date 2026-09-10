@@ -3,7 +3,7 @@ from __future__ import annotations
 import ast
 from dataclasses import dataclass, field
 
-from contextor.core.domain.lineage_facts import ExtractedAnchorFact, ExtractedFlowFact, ExtractedOccurrenceRef, ParameterKind
+from contextor.core.domain.lineage_facts import ExtractedAnchorFact, ExtractedFlowFact, ExtractedOccurrenceRef, ExtractedSurfaceFact, ParameterKind
 
 
 @dataclass(frozen=True)
@@ -64,8 +64,10 @@ class _CaptureRequest:
 class LineageExtractionState:
     anchors: list[ExtractedAnchorFact] = field(default_factory=list)
     flows: list[ExtractedFlowFact] = field(default_factory=list)
+    surfaces: list[ExtractedSurfaceFact] = field(default_factory=list)
     _ids: set[str] = field(default_factory=set)
     _flow_ids: set[str] = field(default_factory=set)
+    _surface_ids: set[str] = field(default_factory=set)
     _occurrences: dict[tuple[str, int, str | None, int], ExtractedOccurrenceRef] = field(default_factory=dict)
     _bindings: dict[str | None, dict[str, ExtractedOccurrenceRef]] = field(default_factory=dict)
     _callables: dict[str | None, dict[str, _CallableInfo]] = field(default_factory=dict)
@@ -86,6 +88,33 @@ class LineageExtractionState:
     _declared_locals: dict[str, set[str]] = field(default_factory=dict)
     _capture_requests: dict[str, _CaptureRequest] = field(default_factory=dict)
     _lexical_cells: dict[tuple[str, str], ExtractedOccurrenceRef] = field(default_factory=dict)
+    _module_direct_statement: ast.AST | None = None
+    _module_public_candidates: dict[str, tuple[ExtractedOccurrenceRef, ast.AST]] = field(default_factory=dict)
+    _all_status: str = "absent"
+    _all_binding: ExtractedOccurrenceRef | None = None
+    _all_items: tuple[tuple[str, ast.Constant], ...] = ()
+
+    def begin_module_statement(self, node: ast.AST) -> None:
+        self._module_direct_statement = node
+
+    def end_module_statement(self) -> None:
+        self._module_direct_statement = None
+
+    def is_direct_module_statement(self, node: ast.AST) -> bool:
+        return self._module_direct_statement is node
+
+    def record_module_public_candidate(self, name: str, binding: ExtractedOccurrenceRef, node: ast.AST) -> None:
+        self._module_public_candidates[name] = (binding, node)
+
+    def record_all_exact(self, binding: ExtractedOccurrenceRef, items: tuple[tuple[str, ast.Constant], ...]) -> None:
+        self._all_status = "exact"
+        self._all_binding = binding
+        self._all_items = items
+
+    def invalidate_all(self) -> None:
+        self._all_status = "dynamic_or_ambiguous"
+        self._all_binding = None
+        self._all_items = ()
 
     def frame(self, owner: str | None) -> dict[str, ExtractedOccurrenceRef]:
         return self._bindings.setdefault(owner, {})

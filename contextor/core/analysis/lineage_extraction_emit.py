@@ -4,7 +4,7 @@ import ast
 
 from contextor.core.analysis.lineage_extraction_contracts import _source_span, build_local_occurrence_id
 from contextor.core.analysis.lineage_extraction_state import _CallableInfo, _ParameterInfo, LineageExtractionState
-from contextor.core.domain.lineage_facts import ExtractedAnchorFact, ExtractedFlowFact, ExtractedOccurrenceRef, ExtractedSymbolicKind, ExtractedSymbolicRef, LineageConfidence, LineageRelation, ResolutionKind
+from contextor.core.domain.lineage_facts import ExtractedAnchorFact, ExtractedFlowFact, ExtractedOccurrenceRef, ExtractedSurfaceFact, ExtractedSymbolicKind, ExtractedSymbolicRef, LineageConfidence, LineageRelation, ResolutionKind, SurfaceDeclarationEvidence, SurfaceKind
 
 
 def add_anchor(state: LineageExtractionState, paths: dict[int, str], kind: str, node: ast.AST, name: str | None, owner_local_id: str | None, *, ordinal: int = 0, local_kind: str | None = None) -> str:
@@ -35,6 +35,14 @@ def emit_flow(state: LineageExtractionState, paths: dict[int, str], *, source, t
     if local_id in state._flow_ids: raise ValueError(f"Duplicate lineage flow id: {local_id}")
     state._flow_ids.add(local_id)
     state.flows.append(ExtractedFlowFact(local_id, source, target, relation, _source_span(node), resolution_kind, confidence, dynamic_boundary=dynamic_boundary))
+
+
+def emit_surface(state: LineageExtractionState, paths: dict[int, str], *, kind: SurfaceKind, exposed, node: ast.AST, declared_name: str, resolution_kind: ResolutionKind, confidence: LineageConfidence, declaration_evidence: SurfaceDeclarationEvidence, ordinal: int = 0) -> None:
+    local_id = f"surface:v1:{kind.value}:{paths[id(node)]}:i:{ordinal}:n:{declared_name}"
+    if local_id in state._surface_ids:
+        raise ValueError(f"Duplicate lineage surface id: {local_id}")
+    state._surface_ids.add(local_id)
+    state.surfaces.append(ExtractedSurfaceFact(local_id, kind, exposed, _source_span(node), resolution_kind, confidence, declared_name, declaration_evidence=declaration_evidence))
 
 
 def parameter_symbolic(module_name: str, callable_symbol_name: str, parameter: _ParameterInfo) -> ExtractedSymbolicRef:

@@ -57,11 +57,13 @@ from contextor.core.analysis.lineage_extraction_visitors import (
     visit_yield,
 )
 from contextor.core.analysis.lineage_extraction_state import LineageExtractionState
+from contextor.core.analysis.lineage_extraction_surfaces import finalize_surfaces
 from contextor.core.domain.lineage_facts import (
     ExtractedAnchorFact,
     ExtractedFlowFact,
     ExtractedLineageSourceFacts,
     ExtractedOccurrenceRef,
+    ExtractedSurfaceFact,
     LineageFamilyStatus,
 )
 
@@ -73,10 +75,12 @@ class _AnchorExtractor:
         self.module_name = _module_name_from_source_key(source_key)
         self.state = LineageExtractionState()
 
-    def extract(self, tree: ast.AST) -> tuple[tuple[ExtractedAnchorFact, ...], tuple[ExtractedFlowFact, ...]]:
+    def extract(self, tree: ast.AST) -> tuple[tuple[ExtractedAnchorFact, ...], tuple[ExtractedFlowFact, ...], tuple[ExtractedSurfaceFact, ...]]:
         self._visit(tree, None, None)
         finalize_captures(self.state, self.paths)
-        return tuple(sorted(self.state.anchors)), tuple(sorted(self.state.flows))
+        module_owner = next(anchor.local_id for anchor in self.state.anchors if anchor.kind == "module")
+        finalize_surfaces(self.state, self.paths, self.module_name, module_owner)
+        return tuple(sorted(self.state.anchors)), tuple(sorted(self.state.flows)), tuple(sorted(self.state.surfaces))
 
     def _publish_executed_walrus(
         self,
@@ -275,8 +279,8 @@ def extract_lineage_source_facts(tree: ast.AST, *, source_key: str, source_finge
     paths, limit_reason = _index_ast_paths(tree, limits)
     if limit_reason is not None:
         return ExtractedLineageSourceFacts(source_key=source_key, source_fingerprint=source_fingerprint, status=LineageFamilyStatus.RESOURCE_LIMIT, resource_limit_reason=limit_reason)
-    anchors, flows = _AnchorExtractor(paths, source_key).extract(tree)
-    return ExtractedLineageSourceFacts(source_key=source_key, source_fingerprint=source_fingerprint, anchors=anchors, flows=flows, surfaces=(), status=LineageFamilyStatus.FRESH)
+    anchors, flows, surfaces = _AnchorExtractor(paths, source_key).extract(tree)
+    return ExtractedLineageSourceFacts(source_key=source_key, source_fingerprint=source_fingerprint, anchors=anchors, flows=flows, surfaces=surfaces, status=LineageFamilyStatus.FRESH)
 
 
 __all__ = [
