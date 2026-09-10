@@ -1,15 +1,8 @@
 STATUS=FINAL_PASS
-CONTEXTOR_EVIDENCE=Deferred Contextor MCP pool was available. Manual incremental publication was used because get_live_events reported no_live_service after transient unreachability. Both final edit contexts are canonical_state=fresh, workspace_sync=verified, syntax=checked_and_none, canonical_revision=554. Fresh diagnostics: collision count 0; cycle count 0. Dependency direction is lineage_extraction.py -> lineage_extraction_visitors.py only. update_file reported live_state_persisted=true for both files.
-VISITOR_OWNERSHIP=Exactly the eight moved semantic implementations live in lineage_extraction_visitors.py: visit_module, visit_class_def, visit_function, visit_lambda, visit_return, visit_call, visit_import, visit_import_from. The facade retains dispatch targets and contains forwarding-only bodies for those eight methods.
-SEMANTIC_INVARIANTS=The implementation follows the frozen D5C orchestration: ordered anchors/frames, decorator/signature/default processing, callable registration order, parameter binding, local/import/dynamic call resolution, return behavior, dotted import binding, and wildcard frame replacement. Immutable equivalence hashes passed unchanged.
-DISPATCH_INVARIANT=Exactly one dynamic getattr(self, f"_visit_{type(node).__name__}", None) remains in facade _AnchorExtractor._visit. Visitors defines no _visit_* function.
-NO_SECONDARY_TRAVERSAL=Visitors contains no NodeVisitor, ast.walk, or LineageExtractionState construction. All AST descent uses injected visit/value callbacks; the only state construction remains facade _AnchorExtractor.__init__.
+VISITORS_VERIFY=Approved D5C implementation confirmed: exactly visit_module, visit_class_def, visit_function, visit_lambda, visit_return, visit_call, visit_import, visit_import_from. No def _visit_*, NodeVisitor, ast.walk, or LineageExtractionState() construction exists. Reused evidence: canonical revision 554 fresh/verified; syntax checked_and_none; collision=0; cycles=0; dependency direction PASS; 2 PASS; 97 PASS; 110 PASS; diff-check PASS.
 FILES_CHANGED=contextor/core/analysis/lineage_extraction.py; contextor/core/analysis/lineage_extraction_visitors.py
-TESTS_RUN=.venv\\Scripts\\python.exe -m pytest tests/analysis/test_lineage_extraction_equivalence.py -q; .venv\\Scripts\\python.exe -m pytest tests/analysis/test_lineage_extraction.py -q; .venv\\Scripts\\python.exe -m pytest tests/analysis/test_lineage_extraction.py tests/analysis/test_lineage_extraction_equivalence.py tests/test_no_double_parse.py tests/test_index_fusion.py -q; git diff --check 1866512e60b45aa08978571c052732c5fc76d2a3 -- contextor/core/analysis/lineage_extraction.py contextor/core/analysis/lineage_extraction_visitors.py
-TEST_RESULTS=2 passed in 0.78s; 97 passed in 1.90s; 110 passed in 4.59s; diff-check PASS.
 FULL_DIFFS=
 ```diff
-warning: in the working copy of 'contextor/core/analysis/lineage_extraction.py', LF will be replaced by CRLF the next time Git touches it
 diff --git a/contextor/core/analysis/lineage_extraction.py b/contextor/core/analysis/lineage_extraction.py
 index 1cbd85c..b3a4f57 100644
 --- a/contextor/core/analysis/lineage_extraction.py
@@ -152,4 +145,409 @@ index 1cbd85c..b3a4f57 100644
  
      def _visit_Global(self, node: ast.Global, owner: str | None, _walrus_owner: str | None) -> None:
          visit_global(self.state, self.paths, node, owner)
+warning: in the working copy of 'contextor/core/analysis/lineage_extraction_visitors.py', LF will be replaced by CRLF the next time Git touches it
+diff --git a/contextor/core/analysis/lineage_extraction_visitors.py b/contextor/core/analysis/lineage_extraction_visitors.py
+new file mode 100644
+index 0000000..9cc1511
+--- /dev/null
++++ b/contextor/core/analysis/lineage_extraction_visitors.py
+@@ -0,0 +1,398 @@
++from __future__ import annotations
++
++import ast
++from collections.abc import Callable
++
++from contextor.core.analysis.lineage_extraction_calls import (
++    bind_call_arguments,
++    collect_call_arguments,
++    default_flows,
++    function_signature_evidence,
++    parameter_anchors,
++    register_import_binding,
++    resolve_current_imported_callable,
++    resolve_current_local_callable,
++)
++from contextor.core.analysis.lineage_extraction_contracts import _resolve_import_module
++from contextor.core.analysis.lineage_extraction_emit import (
++    add_anchor,
++    emit_flow,
++    occurrence,
++    return_symbolic,
++)
++from contextor.core.analysis.lineage_extraction_state import (
++    _CallableInfo,
++    LineageExtractionState,
++)
++from contextor.core.domain.lineage_facts import (
++    ExtractedOccurrenceRef,
++    LineageConfidence,
++    LineageRelation,
++    ResolutionKind,
++)
++
++VisitFn = Callable[[ast.AST, str | None, str | None], None]
++ValueFn = Callable[[ast.AST, str | None, str | None], ExtractedOccurrenceRef]
++
++
++def visit_module(
++    state: LineageExtractionState,
++    paths: dict[int, str],
++    node: ast.Module,
++    *,
++    visit: VisitFn,
++) -> None:
++    module_id = add_anchor(
++        state,
++        paths,
++        "module",
++        node,
++        None,
++        None,
++    )
++    state.frame(module_id)
++    for child in node.body:
++        visit(child, module_id, None)
++
++
++def visit_class_def(
++    state: LineageExtractionState,
++    paths: dict[int, str],
++    node: ast.ClassDef,
++    owner: str | None,
++    walrus_owner: str | None,
++    *,
++    visit: VisitFn,
++) -> None:
++    class_id = add_anchor(
++        state,
++        paths,
++        "class",
++        node,
++        node.name,
++        owner,
++    )
++    for child in (*node.decorator_list, *node.bases, *node.keywords):
++        visit(child, owner, walrus_owner)
++    state.frame(class_id)
++    for child in node.body:
++        visit(child, class_id, None)
++    if node.name not in state.blocked_names(owner):
++        state.frame(owner)[node.name] = ExtractedOccurrenceRef(class_id)
++
++
++def visit_function(
++    state: LineageExtractionState,
++    paths: dict[int, str],
++    module_name: str,
++    node: ast.FunctionDef | ast.AsyncFunctionDef,
++    kind: str,
++    owner: str | None,
++    walrus_owner: str | None,
++    *,
++    visit: VisitFn,
++) -> None:
++    function_id = add_anchor(
++        state,
++        paths,
++        kind,
++        node,
++        node.name,
++        owner,
++    )
++    for decorator in node.decorator_list:
++        visit(decorator, owner, walrus_owner)
++    function_signature_evidence(
++        node,
++        owner,
++        walrus_owner,
++        visit=visit,
++    )
++    parameters = parameter_anchors(
++        state,
++        paths,
++        module_name,
++        node.args,
++        function_id,
++        node.name,
++    )
++    default_flows(
++        state,
++        paths,
++        module_name,
++        node,
++        node.name,
++        parameters,
++    )
++    callable_info = _CallableInfo(
++        node.name,
++        function_id,
++        parameters,
++    )
++    state.callable_frame(owner)[node.name] = callable_info
++    state._callables_by_anchor[function_id] = callable_info
++    function_frame = state.frame(function_id)
++    for parameter in parameters:
++        function_frame[parameter.name] = ExtractedOccurrenceRef(
++            parameter.local_id
++        )
++    for child in node.body:
++        visit(child, function_id, None)
++    if node.name not in state.blocked_names(owner):
++        state.frame(owner)[node.name] = ExtractedOccurrenceRef(
++            function_id
++        )
++
++
++def visit_lambda(
++    state: LineageExtractionState,
++    paths: dict[int, str],
++    module_name: str,
++    node: ast.Lambda,
++    owner: str | None,
++    walrus_owner: str | None,
++    *,
++    visit: VisitFn,
++    value: ValueFn,
++) -> None:
++    lambda_id = add_anchor(
++        state,
++        paths,
++        "lambda",
++        node,
++        None,
++        owner,
++    )
++    function_signature_evidence(
++        node,
++        owner,
++        walrus_owner,
++        visit=visit,
++    )
++    callable_symbol_name = f"lambda@{paths[id(node)]}"
++    parameters = parameter_anchors(
++        state,
++        paths,
++        module_name,
++        node.args,
++        lambda_id,
++        callable_symbol_name,
++    )
++    default_flows(
++        state,
++        paths,
++        module_name,
++        node,
++        callable_symbol_name,
++        parameters,
++    )
++    callable_info = _CallableInfo(
++        callable_symbol_name,
++        lambda_id,
++        parameters,
++    )
++    state._callables_by_anchor[lambda_id] = callable_info
++    lambda_frame = state.frame(lambda_id)
++    for parameter in parameters:
++        lambda_frame[parameter.name] = ExtractedOccurrenceRef(
++            parameter.local_id
++        )
++    body_source = value(node.body, lambda_id, None)
++    emit_flow(
++        state,
++        paths,
++        source=body_source,
++        target=return_symbolic(module_name, callable_info),
++        relation=LineageRelation.RETURNS,
++        node=node.body,
++        resolution_kind=ResolutionKind.LEXICAL_EXACT,
++        confidence=LineageConfidence.CONFIRMED,
++    )
++    lambda_value = occurrence(
++        state,
++        paths,
++        "expression_result",
++        node,
++    )
++    state._callable_values[lambda_value.local_id] = callable_info
++
++
++def visit_return(
++    state: LineageExtractionState,
++    paths: dict[int, str],
++    module_name: str,
++    node: ast.Return,
++    owner: str | None,
++    walrus_owner: str | None,
++    *,
++    value: ValueFn,
++) -> None:
++    if node.value is None:
++        return
++    source = value(node.value, owner, walrus_owner)
++    callable_info = (
++        state._callables_by_anchor.get(owner)
++        if owner is not None
++        else None
++    )
++    if callable_info is not None:
++        emit_flow(
++            state,
++            paths,
++            source=source,
++            target=return_symbolic(module_name, callable_info),
++            relation=LineageRelation.RETURNS,
++            node=node,
++            resolution_kind=ResolutionKind.LEXICAL_EXACT,
++            confidence=LineageConfidence.CONFIRMED,
++        )
++
++
++def visit_call(
++    state: LineageExtractionState,
++    paths: dict[int, str],
++    module_name: str,
++    node: ast.Call,
++    owner: str | None,
++    walrus_owner: str | None,
++    *,
++    visit: VisitFn,
++    value: ValueFn,
++) -> None:
++    visit(node.func, owner, walrus_owner)
++    callable_info = resolve_current_local_callable(
++        state,
++        node,
++        owner,
++    )
++    imported_return = resolve_current_imported_callable(
++        state,
++        node,
++        owner,
++    )
++    callee_ref = (
++        state.frame(owner).get(node.func.id)
++        if isinstance(node.func, ast.Name)
++        else None
++    )
++    call_site = occurrence(
++        state,
++        paths,
++        "call_site",
++        node,
++    )
++    call_result = occurrence(
++        state,
++        paths,
++        "call_result",
++        node,
++    )
++    arguments = collect_call_arguments(
++        state,
++        paths,
++        node,
++        owner,
++        walrus_owner,
++        value=value,
++    )
++    if callable_info is not None:
++        bind_call_arguments(
++            state,
++            paths,
++            module_name,
++            arguments,
++            callable_info,
++        )
++        emit_flow(
++            state,
++            paths,
++            source=return_symbolic(module_name, callable_info),
++            target=call_result,
++            relation=LineageRelation.CALL_RESULT,
++            node=node,
++            resolution_kind=ResolutionKind.CALL_EXACT,
++            confidence=LineageConfidence.CONFIRMED,
++        )
++        return
++    if imported_return is not None:
++        emit_flow(
++            state,
++            paths,
++            source=imported_return,
++            target=call_result,
++            relation=LineageRelation.CALL_RESULT,
++            node=node,
++            resolution_kind=ResolutionKind.IMPORT_EXACT,
++            confidence=LineageConfidence.CONFIRMED,
++        )
++        return
++    if isinstance(node.func, ast.Name) and callee_ref is None:
++        resolution_kind = ResolutionKind.UNRESOLVED_NAME
++        confidence = LineageConfidence.UNRESOLVED
++        dynamic_boundary = None
++    else:
++        resolution_kind = ResolutionKind.DYNAMIC_RUNTIME_BOUNDARY
++        confidence = LineageConfidence.DYNAMIC
++        dynamic_boundary = "dynamic_call"
++    emit_flow(
++        state,
++        paths,
++        source=call_site,
++        target=call_result,
++        relation=LineageRelation.CALL_RESULT,
++        node=node,
++        resolution_kind=resolution_kind,
++        confidence=confidence,
++        dynamic_boundary=dynamic_boundary,
++    )
++
++
++def visit_import(
++    state: LineageExtractionState,
++    paths: dict[int, str],
++    node: ast.Import,
++    owner: str | None,
++) -> None:
++    for alias in node.names:
++        local_name = alias.asname or alias.name.split(".", 1)[0]
++        register_import_binding(
++            state,
++            paths,
++            alias,
++            owner,
++            local_name,
++            (
++                alias.name
++                if alias.asname is not None
++                else alias.name.split(".", 1)[0]
++            ),
++            None,
++        )
++
++
++def visit_import_from(
++    state: LineageExtractionState,
++    paths: dict[int, str],
++    source_key: str,
++    node: ast.ImportFrom,
++    owner: str | None,
++) -> None:
++    module_name = _resolve_import_module(
++        source_key,
++        node.module,
++        node.level,
++    )
++    for alias in node.names:
++        if alias.name == "*":
++            state.replace_frame(owner, {})
++            continue
++        local_name = alias.asname or alias.name
++        register_import_binding(
++            state,
++            paths,
++            alias,
++            owner,
++            local_name,
++            module_name,
++            alias.name,
++        )
 ```
