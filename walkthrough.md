@@ -1,108 +1,141 @@
-STATUS=BLOCKED
+STATUS=COMPLETE
 
-STAGE=1D.1 exact lexical closure-cell CAPTURES implementation
-BASE=90409963f571fcb94782f7a7b7cf9d5cd2b0cfc5
+TASK=Contextor Stage 1D.2 - exact local callable alias propagation
+BASE=eb94d60b8b660fa0bb1ab88b3c3f9032506470be
 
-IMPLEMENTATION_RESULT=
-- Added deferred capture requests and one finalization after the existing single AST traversal. Finalization resolves only a lexical enclosing function/async-function/lambda cell; module ends resolution, class is transparent, and a comprehension is a same-name barrier.
-- Declared-local tracking covers stores, deletes, assignment targets, runtime targets, parameters, imports, function/class declarations, exception aliases, and match captures. global/nonlocal remain blocked and are excluded from local declarations.
-- CAPTURES emits an existing-occurrence endpoint pair: a cached synthetic `closure_cell` anchor owned by the lexical scope and the original `name_load`; relation=CAPTURES, resolution=LEXICAL_EXACT, confidence=CONFIRMED.
-- The one-line contracts addition admits `closure_cell` as a local-ID kind. It preserves the v1 local-ID grammar and is required because add_anchor validates every `local_kind` against that existing allowlist.
+IMPLEMENTATION
+- `visit_name` now publishes `_CallableInfo` from the current lexical source occurrence only: first `_callables_by_anchor[source.local_id]`, then `_callables_by_binding[source.local_id]`.
+- The published value is keyed by the transient `name_load.local_id`; existing `assign_target()` then carries it to the new current binding. No relation, schema, state family, call-result path, callback path, or import path changed.
 
-TEST_EVIDENCE=
-- `& '.\\.venv\\Scripts\\python.exe' -m pytest tests/analysis/test_lineage_extraction.py -q` => PASS, 113 passed in 2.41s.
-- `& '.\\.venv\\Scripts\\python.exe' -m pytest tests/analysis/test_lineage_extraction_equivalence.py -q` => PASS, 2 passed in 0.85s; expected corpus hash was not edited.
-- Required combined command => BLOCKED before test collection: `tests/analysis/test_lineage_extraction_binding_resolution.py` does not exist. `rg --files tests/analysis | rg 'lineage_extraction.*(binding|validation)'` returned no matching file. No substitute test path was assumed.
-- `git diff --check BASE -- <changed production/test files>` => PASS; only CRLF conversion warnings, no whitespace errors.
+SEMANTIC_EVIDENCE
+- A: `def f; g=f; g()` resolves CALL_EXACT with symbolic source `f`.
+- B: `async def f; g=f; g()` resolves CALL_EXACT with symbolic source `f`.
+- C: nested `def f; g=f; return g()` resolves CALL_EXACT with symbolic source `f`.
+- D: `def f; g=f; h=g; h()` resolves CALL_EXACT with symbolic source `f`.
+- E: `f=lambda; g=f; g()` remains CALL_EXACT with the existing lambda symbolic source.
+- F: rebind `g=42` after `g=f` has no CALL_EXACT.
+- G: divergent branch bindings (`g=f` / `g=lambda`) have no CALL_EXACT.
+- H: branch ambiguity after `g=f` and conditional `g=42` has no CALL_EXACT.
+- I: `from pkg import f; g=f; g()` has no new CALL_EXACT.
+- J: `g=factory()` has no returned-callable CALL_EXACT propagation.
 
-LIVE_CERTIFICATION=
-- Pre-edit canonical revision 556: fresh, resync_required=false.
-- Post-edit watcher journal is continuous through revision 566, resync_required=false. It records desktop_watcher UPDATED events for the changed extraction modules; syntax diagnostics have zero errors and fresh availability.
-- Post-edit minimal contexts at revision 566 for every changed production module report warnings=[], syntax_diagnostics=checked_and_none/fresh, and no diagnostic attention required.
+TESTS
+- `.venv\\Scripts\\python.exe -m pytest tests/analysis/test_lineage_extraction.py -q` -> 123 passed in 2.45s.
+- `.venv\\Scripts\\python.exe -m pytest tests/analysis/test_lineage_extraction_equivalence.py -q` -> 2 passed in 0.57s.
+- `.venv\\Scripts\\python.exe -m pytest tests/analysis/test_lineage_extraction.py tests/analysis/test_lineage_extraction_equivalence.py tests/test_no_double_parse.py tests/test_index_fusion.py -q` -> 136 passed in 4.20s.
+- `git diff --check` -> passed (only Git LF-to-CRLF warnings).
 
-CHANGED_FILES=
-- contextor/core/analysis/lineage_extraction.py
-- contextor/core/analysis/lineage_extraction_bindings.py
-- contextor/core/analysis/lineage_extraction_calls.py
-- contextor/core/analysis/lineage_extraction_comprehensions.py
-- contextor/core/analysis/lineage_extraction_control.py
-- contextor/core/analysis/lineage_extraction_contracts.py
-- contextor/core/analysis/lineage_extraction_state.py
-- contextor/core/analysis/lineage_extraction_visitors.py
-- tests/analysis/test_lineage_extraction.py
+LIVE_CONTEXTOR_EVIDENCE
+- Pre-edit LIVE revision=566, activity epoch `a5694974dc3c4cdab05b6720d6b0d74f`, resync_required=false.
+- Desktop watcher published revision 567 for `contextor/core/analysis/lineage_extraction_bindings.py` and revision 568 for `tests/analysis/test_lineage_extraction.py`; both status=UPDATED, resync_required=false.
+- Post-edit `get_file_edit_context` for the production module: canonical_state=fresh, workspace_sync=verified, provenance=live, canonical_revision=568; syntax status=checked_and_none with 0 errors; cycles and collisions families=fresh and both counts=0.
+- `get_name_collisions` for the production module: availability=fresh, total=0.
+- `get_layer_isolation` for `contextor.core.analysis`: LIVE canonical graph; diagnostics syntax_errors=0, name_collisions=0, cycles=0.
+- Textual architecture verification: exactly one facade dynamic dispatch (`lineage_extraction.py:123`); exactly one facade `LineageExtractionState()` construction (`lineage_extraction.py:73`); no helper-to-facade import back-edge in `lineage_extraction_*.py`.
 
-FULL_UNIFIED_DIFF_COMMAND=
-`git diff --no-ext-diff --unified=3 90409963f571fcb94782f7a7b7cf9d5cd2b0cfc5 -- contextor/core/analysis/lineage_extraction.py contextor/core/analysis/lineage_extraction_bindings.py contextor/core/analysis/lineage_extraction_calls.py contextor/core/analysis/lineage_extraction_comprehensions.py contextor/core/analysis/lineage_extraction_control.py contextor/core/analysis/lineage_extraction_contracts.py contextor/core/analysis/lineage_extraction_state.py contextor/core/analysis/lineage_extraction_visitors.py tests/analysis/test_lineage_extraction.py`
+FILES_CHANGED
+- `contextor/core/analysis/lineage_extraction_bindings.py`
+- `tests/analysis/test_lineage_extraction.py`
 
-CAPTURES_SEMANTIC_CONTRACT=
-- CAPTURES identifies a lexical cell (enclosing function/async-function/lambda owner, name), never a particular ASSIGNS/BINDS occurrence or current value.
-- The source is stable when the cell has sequential/conditional writes. Existing ASSIGNS, BINDS, control frames, and later value-provenance stages remain the sole representation of concrete writes/reads.
-- Compile-time local declaration in the requesting function/lambda prevents ancestor capture regardless source order. Module scope is terminal; class scope is transparent for methods.
-
-MATERIALIZER_ENDPOINT_SUPPORT=
-- Extracted flow endpoints allow only ExtractedOccurrenceRef or ExtractedSymbolicRef; extracted anchors use free-form kind:str and a source-local ID. A synthetic source-local anchor/reference therefore fits the extracted contract unchanged.
-- Materialized flow/anchor endpoints allow MaterializedOccurrenceRef or SemanticEndpoint; a same-slice occurrence is explicitly canonical. Its local ID is preserved under the source manifest. Live-store revalidation validates endpoint types, source-slice membership, relation/resolution/confidence, and provider, not an anchor-kind allowlist.
-- Current production has extraction transport (indexer, PreparedSourceUpdate) and typed state fields (lineage_facts_by_source), but no discovered producer converting extracted lineage to materialized lineage. Existing persistence supports generic materialized occurrence anchors when that phase is activated; 1D.1 remains extraction-only.
-
-CANDIDATE_1=
-REJECT. ExtractedSymbolicKind.STATE has no named function-local-cell producer or materializer. It contains only kind,module_name,symbol_name,source_local_id; tests explicitly establish no persistent owner identity. Reusing it would overload state semantics and cannot distinguish lexical owner+name safely.
-
-CANDIDATE_2=
-ACCEPT. Add one synthetic extracted anchor with kind=closure_cell and deterministic local kind=closure_cell, built from the lexical owner's defining AST path plus variable name. The anchor is owned by the enclosing function/lambda anchor and its source span is that owner's defining node. State caches (owner_id,name) to ExtractedOccurrenceRef; it is created only when finalization proves that exact cell is captured.
-
-CANDIDATE_3=
-REJECT FOR 1D.1. A new symbolic kind or SemanticSlotKind would require domain parser/validator/builders, materializer, persistence validation, semantic-version migration, and tests. Candidate 2 already preserves owner+name without semantic overloading and uses current source-slice endpoint rules.
-
-SELECTED_ENDPOINT_MODEL=
-- CAPTURES source: ExtractedOccurrenceRef with deterministic closure_cell local ID, referring to an ExtractedAnchorFact(kind=closure_cell, owner_local_id=outer function/lambda anchor).
-- Identity is the anchor's owner_local_id plus local-ID name component: lexical outer::x; it is neither x=1 nor x=2.
-- CAPTURES target: the existing original inner name_load ExtractedOccurrenceRef; evidence is the inner Name.Load span; relation=CAPTURES; resolution=LEXICAL_EXACT; confidence=CONFIRMED.
-- The generated cell anchor is source-local and revision-local, just like all extracted anchors. If/when materialized, it becomes the same-slice MaterializedOccurrenceRef, not a cross-source semantic endpoint.
-
-REQUIRED_CASE_RESULTS=
-A. Source=one closure_cell(outer,x), target=inner x load. Exactly one CAPTURES; x=1 and x=2 retain ordinary assignment/bind provenance only.
-B. Same exact source closure_cell(outer,x) and target despite conditional x=2. Conditional frame merge may make value provenance ambiguous but cannot remove lexical cell identity.
-C. Same exact closure_cell(outer,x) although x declaration is visited after inner. Deferred request finalization sees the complete declaration set.
-D. No CAPTURES. Inner's later x assignment places x in declared_locals[inner], so its earlier load cannot request/resolve outer x.
-E. Source=closure_cell(outer,x), target=method x load. Class C.x is skipped and is never source identity.
-F. No CAPTURES. Owner walk reaches module and terminates; existing module/global semantics remain unchanged.
-
-CORRECTED_FINALIZATION=
-1. register_owner(owner_id,parent_id,kind,scope_node) records parent, kind, and defining node. State retains owner-parent, owner-kind, owner-nodes, declared-locals, lexical-cells, and capture-requests.
-2. Every local-declaration producer calls declare_local(owner,name) independently of bindings and frame merge. Existing global/nonlocal only retain blocked-name behavior; they do not create a local cell.
-3. visit_name preserves current immediate local BINDS behavior. For an eligible function/async/lambda Name.Load with no current local resolution, it stores CaptureRequest(load_ref,node,request_owner,name); it does not select a concrete binding.
-4. After sole visit(tree), finalize_captures(state,paths) processes requests. Reject if requesting scope is blocked or declares name. Walk owner parents: skip class; for a comprehension that declares name, stop, otherwise skip; at an enclosing function/async/lambda, blocked means stop and declared local means select lexical cell; module/None means stop.
-5. ensure_lexical_cell(state,paths,owner,name) gets registered owner AST node, calls existing add_anchor with kind closure_cell and owner, caches ExtractedOccurrenceRef, and finalizer emits CAPTURES to saved load ref.
-6. No final bindings lookup participates in cell selection. It continues independently for value provenance only. This is one traversal plus state-only post-finalization; no secondary AST traversal/walk/visitor/source read.
-
-FILES_AND_SYMBOLS=
-- contextor/core/analysis/lineage_extraction_state.py: CaptureRequest; owner/declaration/cell/request fields and registration/query methods.
-- contextor/core/analysis/lineage_extraction_bindings.py: visit_name, assign_target, runtime_bind_target, visit_aug_assign; declaration recording and finalize_captures / ensure_lexical_cell.
-- contextor/core/analysis/lineage_extraction_calls.py: parameter_anchors, register_import_binding declaration registration.
-- contextor/core/analysis/lineage_extraction_visitors.py: visit_module, visit_class_def, visit_function, visit_lambda owner registration; definition-name declaration in parent.
-- contextor/core/analysis/lineage_extraction_control.py: except-alias and MatchAs/MatchStar/MatchMapping declaration registration.
-- contextor/core/analysis/lineage_extraction.py: only AnchorExtractor.extract, invoking finalizer after existing visit.
-- tests/analysis/test_lineage_extraction.py: 1D.1 endpoint/semantic behavior matrix.
-- No change: lineage_extraction_emit.py, lineage_facts.py, materialized domain contracts, live store, state manager, query APIs, IDs outside synthetic extracted local kind.
-
-TEST_MATRIX=
-- A: assert one closure_cell anchor owned by outer; CAPTURES source equals it, not either assignment binding; unchanged ASSIGNS remain separately present.
-- B: assert same cell CAPTURES through branch rebind; assert no source assignment identity is used.
-- C: late declaration capture.
-- D: local-before/after assignment, AnnAssign-without-value, AugAssign, parameter, import, for/with/except/match and nested definition/class shadow cases: no ancestor CAPTURES.
-- E: class transparency plus class x shadow; lambda/function through a class; no class-cell anchor.
-- F: module/global terminal plus existing global/nonlocal freeze.
-- Comprehension target barrier and walrus target owner; ensure no fabricated outer capture.
-- Determinism/equivalence: fixed cell IDs/anchor count and immutable equivalence output; existing resource-limit behavior unchanged.
-
-VERSION_SCHEMA_IMPACT=
-- Extraction schema: no domain dataclass, enum, ID grammar, relation, semantic-slot, materializer, persistence, or public API change. closure_cell is a new value in existing free string ExtractedAnchorFact.kind, paired with existing occurrence ref.
-- LINEAGE_FACTS_SEMANTIC_VERSION remains unchanged. Do not claim materialized persistence certification until a separate materializer exists and is exercised.
-
-RISKS_AND_BANS=
-- Never emit CAPTURES from an assignment/binding anchor or consult final frame authority for lexical-cell identity.
-- Never overload STATE, MODULE_GLOBAL, CLASS_ATTRIBUTE, PARAMETER_VALUE, or semantic slots.
-- Do not create cells for module/class/comprehension source authority in 1D.1; class is transparent, comprehension may only be a barrier.
-- No second AST traversal, AST node visitor, compatibility path, query-time analysis, schema/version bump, test/oracle regeneration, commit, or push.
-
-DIFFS=NONE
+FULL_DIFF
+```diff
+diff --git a/contextor/core/analysis/lineage_extraction_bindings.py b/contextor/core/analysis/lineage_extraction_bindings.py
+index 1637a61..2868b56 100644
+--- a/contextor/core/analysis/lineage_extraction_bindings.py
++++ b/contextor/core/analysis/lineage_extraction_bindings.py
+@@ -44,6 +44,12 @@ def visit_name(
+             ):
+                 state.request_capture(load, node, owner, node.id)
+             return
++        callable_info = (
++            state._callables_by_anchor.get(source.local_id)
++            or state._callables_by_binding.get(source.local_id)
++        )
++        if callable_info is not None:
++            state._callable_values[load.local_id] = callable_info
+         emit_flow(
+             state,
+             paths,
+diff --git a/tests/analysis/test_lineage_extraction.py b/tests/analysis/test_lineage_extraction.py
+index a633c9b..8161990 100644
+--- a/tests/analysis/test_lineage_extraction.py
++++ b/tests/analysis/test_lineage_extraction.py
+@@ -1674,3 +1674,77 @@ def test_stage_1d1_declaration_producers_block_outer_capture(statement):
+         + "\\n return inner\\n"
+     )
+     assert not _stage_1d_capture_flows(facts)
++
++
++def test_stage_1d2_local_function_assignment_alias_resolves_call_exactly():
++    facts = _stage_1c_facts("def f():\\n return 1\\ng=f\\nresult=g()\\n")
++    flow = _stage_1c_call_result_flows(facts)[0]
++    assert flow.resolution_kind is ResolutionKind.CALL_EXACT
++    assert isinstance(flow.source, ExtractedSymbolicRef)
++    assert flow.source.symbol_name == "f"
++
++
++def test_stage_1d2_async_function_assignment_alias_resolves_call_exactly():
++    facts = _stage_1c_facts("async def f():\\n return 1\\ng=f\\nresult=g()\\n")
++    flow = _stage_1c_call_result_flows(facts)[0]
++    assert flow.resolution_kind is ResolutionKind.CALL_EXACT
++    assert isinstance(flow.source, ExtractedSymbolicRef)
++    assert flow.source.symbol_name == "f"
++
++
++def test_stage_1d2_nested_function_assignment_alias_resolves_call_exactly():
++    facts = _stage_1c_facts(
++        "def outer():\\n def f(): return 1\\n g=f\\n return g()\\n"
++    )
++    flow = _stage_1c_call_result_flows(facts)[0]
++    assert flow.resolution_kind is ResolutionKind.CALL_EXACT
++    assert isinstance(flow.source, ExtractedSymbolicRef)
++    assert flow.source.symbol_name == "f"
++
++
++def test_stage_1d2_chained_local_function_alias_resolves_call_exactly():
++    facts = _stage_1c_facts("def f():\\n return 1\\ng=f\\nh=g\\nresult=h()\\n")
++    flow = _stage_1c_call_result_flows(facts)[0]
++    assert flow.resolution_kind is ResolutionKind.CALL_EXACT
++    assert isinstance(flow.source, ExtractedSymbolicRef)
++    assert flow.source.symbol_name == "f"
++
++
++def test_stage_1d2_lambda_assignment_alias_remains_call_exact():
++    facts = _stage_1c_facts("f=lambda:1\\ng=f\\nresult=g()\\n")
++    flow = _stage_1c_call_result_flows(facts)[0]
++    assert flow.resolution_kind is ResolutionKind.CALL_EXACT
++    assert isinstance(flow.source, ExtractedSymbolicRef)
++    assert flow.source.symbol_name.startswith("lambda@")
++
++
++def test_stage_1d2_rebound_alias_loses_local_callable_authority():
++    facts = _stage_1c_facts("def f():\\n return 1\\ng=f\\ng=42\\nresult=g()\\n")
++    assert _stage_1c_call_result_flows(facts)[0].resolution_kind is not ResolutionKind.CALL_EXACT
++
++
++def test_stage_1d2_divergent_alias_bindings_fail_closed():
++    facts = _stage_1c_facts(
++        "def f():\\n return 1\\nif flag:\\n g=f\\nelse:\\n g=lambda:2\\nresult=g()\\n"
++    )
++    assert _stage_1c_call_result_flows(facts)[0].resolution_kind is not ResolutionKind.CALL_EXACT
++
++
++def test_stage_1d2_branch_ambiguity_does_not_restore_prior_alias():
++    facts = _stage_1c_facts(
++        "def f():\\n return 1\\ng=f\\nif flag:\\n g=42\\nresult=g()\\n"
++    )
++    assert _stage_1c_call_result_flows(facts)[0].resolution_kind is not ResolutionKind.CALL_EXACT
++
++
++def test_stage_1d2_imported_callable_alias_is_not_newly_resolved():
++    facts = _stage_1c_facts("from pkg import f\\ng=f\\nresult=g()\\n")
++    assert _stage_1c_call_result_flows(facts)[0].resolution_kind is not ResolutionKind.CALL_EXACT
++
++
++def test_stage_1d2_factory_return_alias_is_not_newly_resolved():
++    facts = _stage_1c_facts(
++        "def f():\\n return 1\\ndef factory():\\n return f\\ng=factory()\\nresult=g()\\n"
++    )
++    flows = _stage_1c_call_result_flows(facts)
++    assert flows[-1].resolution_kind is not ResolutionKind.CALL_EXACT
+```

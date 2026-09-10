@@ -44,6 +44,12 @@ def visit_name(
             ):
                 state.request_capture(load, node, owner, node.id)
             return
+        callable_info = (
+            state._callables_by_anchor.get(source.local_id)
+            or state._callables_by_binding.get(source.local_id)
+        )
+        if callable_info is not None:
+            state._callable_values[load.local_id] = callable_info
         emit_flow(
             state,
             paths,

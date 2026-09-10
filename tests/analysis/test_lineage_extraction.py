@@ -1674,3 +1674,77 @@ def test_stage_1d1_declaration_producers_block_outer_capture(statement):
         + "\n return inner\n"
     )
     assert not _stage_1d_capture_flows(facts)
+
+
+def test_stage_1d2_local_function_assignment_alias_resolves_call_exactly():
+    facts = _stage_1c_facts("def f():\n return 1\ng=f\nresult=g()\n")
+    flow = _stage_1c_call_result_flows(facts)[0]
+    assert flow.resolution_kind is ResolutionKind.CALL_EXACT
+    assert isinstance(flow.source, ExtractedSymbolicRef)
+    assert flow.source.symbol_name == "f"
+
+
+def test_stage_1d2_async_function_assignment_alias_resolves_call_exactly():
+    facts = _stage_1c_facts("async def f():\n return 1\ng=f\nresult=g()\n")
+    flow = _stage_1c_call_result_flows(facts)[0]
+    assert flow.resolution_kind is ResolutionKind.CALL_EXACT
+    assert isinstance(flow.source, ExtractedSymbolicRef)
+    assert flow.source.symbol_name == "f"
+
+
+def test_stage_1d2_nested_function_assignment_alias_resolves_call_exactly():
+    facts = _stage_1c_facts(
+        "def outer():\n def f(): return 1\n g=f\n return g()\n"
+    )
+    flow = _stage_1c_call_result_flows(facts)[0]
+    assert flow.resolution_kind is ResolutionKind.CALL_EXACT
+    assert isinstance(flow.source, ExtractedSymbolicRef)
+    assert flow.source.symbol_name == "f"
+
+
+def test_stage_1d2_chained_local_function_alias_resolves_call_exactly():
+    facts = _stage_1c_facts("def f():\n return 1\ng=f\nh=g\nresult=h()\n")
+    flow = _stage_1c_call_result_flows(facts)[0]
+    assert flow.resolution_kind is ResolutionKind.CALL_EXACT
+    assert isinstance(flow.source, ExtractedSymbolicRef)
+    assert flow.source.symbol_name == "f"
+
+
+def test_stage_1d2_lambda_assignment_alias_remains_call_exact():
+    facts = _stage_1c_facts("f=lambda:1\ng=f\nresult=g()\n")
+    flow = _stage_1c_call_result_flows(facts)[0]
+    assert flow.resolution_kind is ResolutionKind.CALL_EXACT
+    assert isinstance(flow.source, ExtractedSymbolicRef)
+    assert flow.source.symbol_name.startswith("lambda@")
+
+
+def test_stage_1d2_rebound_alias_loses_local_callable_authority():
+    facts = _stage_1c_facts("def f():\n return 1\ng=f\ng=42\nresult=g()\n")
+    assert _stage_1c_call_result_flows(facts)[0].resolution_kind is not ResolutionKind.CALL_EXACT
+
+
+def test_stage_1d2_divergent_alias_bindings_fail_closed():
+    facts = _stage_1c_facts(
+        "def f():\n return 1\nif flag:\n g=f\nelse:\n g=lambda:2\nresult=g()\n"
+    )
+    assert _stage_1c_call_result_flows(facts)[0].resolution_kind is not ResolutionKind.CALL_EXACT
+
+
+def test_stage_1d2_branch_ambiguity_does_not_restore_prior_alias():
+    facts = _stage_1c_facts(
+        "def f():\n return 1\ng=f\nif flag:\n g=42\nresult=g()\n"
+    )
+    assert _stage_1c_call_result_flows(facts)[0].resolution_kind is not ResolutionKind.CALL_EXACT
+
+
+def test_stage_1d2_imported_callable_alias_is_not_newly_resolved():
+    facts = _stage_1c_facts("from pkg import f\ng=f\nresult=g()\n")
+    assert _stage_1c_call_result_flows(facts)[0].resolution_kind is not ResolutionKind.CALL_EXACT
+
+
+def test_stage_1d2_factory_return_alias_is_not_newly_resolved():
+    facts = _stage_1c_facts(
+        "def f():\n return 1\ndef factory():\n return f\ng=factory()\nresult=g()\n"
+    )
+    flows = _stage_1c_call_result_flows(facts)
+    assert flows[-1].resolution_kind is not ResolutionKind.CALL_EXACT
