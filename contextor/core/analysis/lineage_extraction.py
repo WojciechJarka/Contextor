@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import ast
-from dataclasses import dataclass
 
 from contextor.core.analysis.state_manager import canonical_python_source_path
 from contextor.core.analysis.lineage_extraction_contracts import (
@@ -13,23 +12,17 @@ from contextor.core.analysis.lineage_extraction_contracts import (
     _FINGERPRINT_RE,
     _index_ast_paths,
     _module_name_from_source_key,
-    _resolve_import_module,
-    _source_span,
     build_local_occurrence_id,
     parse_local_occurrence_id,
 )
-from contextor.core.analysis.lineage_extraction_calls import bind_call_arguments, collect_call_arguments, current_import_info, default_flows, emit_argument_to_parameter, function_signature_evidence, parameter_anchors, register_import_binding, resolve_current_imported_callable, resolve_current_local_callable
-from contextor.core.analysis.lineage_extraction_emit import add_anchor, emit_flow, occurrence, parameter_symbolic, return_symbolic
+from contextor.core.analysis.lineage_extraction_emit import occurrence
 from contextor.core.analysis.lineage_extraction_comprehensions import (
-    begin_comprehension,
-    finish_comprehension,
     publish_executed_walrus,
     visit_comprehension_expression,
 )
 from contextor.core.analysis.lineage_extraction_control import (
     visit_async_for,
     visit_async_with,
-    visit_block_from_frame,
     visit_except_handler,
     visit_for,
     visit_if,
@@ -42,7 +35,6 @@ from contextor.core.analysis.lineage_extraction_control import (
     visit_with,
 )
 from contextor.core.analysis.lineage_extraction_bindings import (
-    assign_target,
     runtime_bind_target,
     visit_ann_assign,
     visit_assign,
@@ -62,19 +54,13 @@ from contextor.core.analysis.lineage_extraction_visitors import (
     visit_module,
     visit_return,
 )
-from contextor.core.analysis.lineage_extraction_state import _ActiveComprehension, _CallArgumentInfo, _CallableInfo, _ImportInfo, _ParameterInfo, LineageExtractionState
+from contextor.core.analysis.lineage_extraction_state import LineageExtractionState
 from contextor.core.domain.lineage_facts import (
     ExtractedAnchorFact,
     ExtractedFlowFact,
     ExtractedLineageSourceFacts,
     ExtractedOccurrenceRef,
-    ExtractedSymbolicKind,
-    ExtractedSymbolicRef,
-    LineageConfidence,
     LineageFamilyStatus,
-    LineageRelation,
-    ParameterKind,
-    ResolutionKind,
 )
 
 
@@ -89,41 +75,6 @@ class _AnchorExtractor:
         self._visit(tree, None, None)
         return tuple(sorted(self.state.anchors)), tuple(sorted(self.state.flows))
 
-    def _add(self, kind: str, node: ast.AST, name: str | None, owner_local_id: str | None, *, ordinal: int = 0, local_kind: str | None = None) -> str:
-        return add_anchor(self.state, self.paths, kind, node, name, owner_local_id, ordinal=ordinal, local_kind=local_kind)
-
-    def _occurrence(self, kind: str, node: ast.AST, name: str | None = None, *, ordinal: int = 0) -> ExtractedOccurrenceRef:
-        return occurrence(self.state, self.paths, kind, node, name, ordinal=ordinal)
-
-    def _flow(self, *, source, target, relation: LineageRelation, node: ast.AST, resolution_kind: ResolutionKind, confidence: LineageConfidence, ordinal: int = 0, dynamic_boundary: str | None = None) -> None:
-        emit_flow(self.state, self.paths, source=source, target=target, relation=relation, node=node, resolution_kind=resolution_kind, confidence=confidence, ordinal=ordinal, dynamic_boundary=dynamic_boundary)
-
-    def _frame(self, owner: str | None) -> dict[str, ExtractedOccurrenceRef]:
-        return self.state.frame(owner)
-
-    def _clone_frame(self, owner: str | None) -> dict[str, ExtractedOccurrenceRef]:
-        return self.state.clone_frame(owner)
-
-    def _replace_frame(
-        self,
-        owner: str | None,
-        frame: dict[str, ExtractedOccurrenceRef],
-    ) -> None:
-        self.state.replace_frame(owner, frame)
-
-    def _begin_comprehension(
-        self,
-        lookup_owner: str,
-        lexical_enclosing_owner: str | None,
-        effective_walrus_owner: str | None,
-    ) -> _ActiveComprehension:
-        return begin_comprehension(
-            self.state,
-            lookup_owner,
-            lexical_enclosing_owner,
-            effective_walrus_owner,
-        )
-
     def _publish_executed_walrus(
         self,
         name: str,
@@ -137,48 +88,6 @@ class _AnchorExtractor:
             target_owner,
         )
 
-    def _finish_comprehension(
-        self,
-        record: _ActiveComprehension,
-    ) -> None:
-        return finish_comprehension(
-            self.state,
-            record,
-        )
-
-    def _merge_frames(
-        self,
-        frames: tuple[dict[str, ExtractedOccurrenceRef], ...],
-    ) -> dict[str, ExtractedOccurrenceRef]:
-        return self.state.merge_frames(frames)
-
-    def _visit_block_from_frame(
-        self,
-        body: list[ast.stmt],
-        owner: str | None,
-        walrus_owner: str | None,
-        frame: dict[str, ExtractedOccurrenceRef],
-    ) -> dict[str, ExtractedOccurrenceRef]:
-        return visit_block_from_frame(
-            self.state,
-            body,
-            owner,
-            walrus_owner,
-            frame,
-            visit=self._visit,
-        )
-
-    def _blocked_names(self, owner: str | None) -> set[str]:
-        return self.state.blocked_names(owner)
-
-    def _callable_frame(self, owner: str | None) -> dict[str, _CallableInfo]:
-        return self.state.callable_frame(owner)
-
-    def _import_frame(self, owner: str | None) -> dict[str, _ImportInfo]:
-        return self.state.import_frame(owner)
-
-    def _register_import_binding(self, alias: ast.alias, owner: str | None, local_name: str, module_name: str | None, symbol_name: str | None) -> None:
-        return register_import_binding(self.state, self.paths, alias, owner, local_name, module_name, symbol_name)
     def _value(
         self,
         node: ast.AST,
@@ -187,29 +96,26 @@ class _AnchorExtractor:
     ) -> ExtractedOccurrenceRef:
         self._visit(node, owner, walrus_owner)
         if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
-            return self._occurrence("name_load", node, node.id)
+            return occurrence(
+                self.state,
+                self.paths,
+                "name_load",
+                node,
+                node.id,
+            )
         if isinstance(node, ast.Call):
-            return self._occurrence("call_result", node)
-        return self._occurrence("expression_result", node)
-
-    def _parameter_symbolic(self, callable_symbol_name: str, parameter: _ParameterInfo) -> ExtractedSymbolicRef:
-        return parameter_symbolic(self.module_name, callable_symbol_name, parameter)
-
-    def _return_symbolic(self, callable_info: _CallableInfo) -> ExtractedSymbolicRef:
-        return return_symbolic(self.module_name, callable_info)
-
-    def _resolve_current_local_callable(self, node: ast.Call, owner: str | None) -> _CallableInfo | None:
-        return resolve_current_local_callable(self.state, node, owner)
-    def _current_import_info(self, owner: str | None, local_name: str) -> _ImportInfo | None:
-        return current_import_info(self.state, owner, local_name)
-    def _resolve_current_imported_callable(self, node: ast.Call, owner: str | None) -> ExtractedSymbolicRef | None:
-        return resolve_current_imported_callable(self.state, node, owner)
-    def _collect_call_arguments(self, node: ast.Call, owner: str | None, walrus_owner: str | None) -> tuple[_CallArgumentInfo, ...]:
-        return collect_call_arguments(self.state, self.paths, node, owner, walrus_owner, value=self._value)
-    def _emit_argument_to_parameter(self, argument: _CallArgumentInfo, callable_info: _CallableInfo, parameter: _ParameterInfo) -> None:
-        return emit_argument_to_parameter(self.state, self.paths, self.module_name, argument, callable_info, parameter)
-    def _bind_call_arguments(self, arguments: tuple[_CallArgumentInfo, ...], callable_info: _CallableInfo) -> None:
-        return bind_call_arguments(self.state, self.paths, self.module_name, arguments, callable_info)
+            return occurrence(
+                self.state,
+                self.paths,
+                "call_result",
+                node,
+            )
+        return occurrence(
+            self.state,
+            self.paths,
+            "expression_result",
+            node,
+        )
 
     def _visit(self, node: ast.AST, owner_local_id: str | None, walrus_owner_local_id: str | None) -> None:
         method = getattr(self, f"_visit_{type(node).__name__}", None)
@@ -224,13 +130,6 @@ class _AnchorExtractor:
 
     def _visit_ClassDef(self, node: ast.ClassDef, owner: str | None, walrus_owner: str | None) -> None:
         return visit_class_def(self.state, self.paths, node, owner, walrus_owner, visit=self._visit)
-
-    def _function_signature_evidence(self, node: ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda, owner: str | None, walrus_owner: str | None) -> None:
-        return function_signature_evidence(node, owner, walrus_owner, visit=self._visit)
-    def _parameter_anchors(self, args: ast.arguments, owner: str, callable_symbol_name: str) -> tuple[_ParameterInfo, ...]:
-        return parameter_anchors(self.state, self.paths, self.module_name, args, owner, callable_symbol_name)
-    def _default_flows(self, node: ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda, callable_symbol_name: str, parameters: tuple[_ParameterInfo, ...]) -> None:
-        return default_flows(self.state, self.paths, self.module_name, node, callable_symbol_name, parameters)
 
     def _visit_function(self, node: ast.FunctionDef | ast.AsyncFunctionDef, kind: str, owner: str | None, walrus_owner: str | None) -> None:
         return visit_function(self.state, self.paths, self.module_name, node, kind, owner, walrus_owner, visit=self._visit)
@@ -284,15 +183,6 @@ class _AnchorExtractor:
 
     def _visit_Name(self, node: ast.Name, owner: str | None, _walrus_owner: str | None) -> None:
         visit_name(self.state, self.paths, node, owner)
-
-    def _assign_target(
-        self,
-        target: ast.AST,
-        source: ExtractedOccurrenceRef,
-        owner: str | None,
-        walrus_owner: str | None,
-    ) -> ExtractedOccurrenceRef | None:
-        return assign_target(self.state, self.paths, target, source, owner, walrus_owner, visit=self._visit)
 
     def _runtime_bind_target(
         self,
