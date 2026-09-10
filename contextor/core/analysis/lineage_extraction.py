@@ -27,6 +27,17 @@ from contextor.core.analysis.lineage_extraction_comprehensions import (
     visit_comprehension_expression,
 )
 from contextor.core.analysis.lineage_extraction_control import visit_block_from_frame
+from contextor.core.analysis.lineage_extraction_bindings import (
+    assign_target,
+    runtime_bind_target,
+    visit_ann_assign,
+    visit_assign,
+    visit_aug_assign,
+    visit_global,
+    visit_name,
+    visit_named_expr,
+    visit_nonlocal,
+)
 from contextor.core.analysis.lineage_extraction_state import _ActiveComprehension, _CallArgumentInfo, _CallableInfo, _ImportInfo, _ParameterInfo, LineageExtractionState
 from contextor.core.domain.lineage_facts import (
     ExtractedAnchorFact,
@@ -309,17 +320,7 @@ class _AnchorExtractor:
         self._visit_comprehension_expression(node, node.generators, (node.key, node.value), owner, walrus_owner)
 
     def _visit_Name(self, node: ast.Name, owner: str | None, _walrus_owner: str | None) -> None:
-        if isinstance(node.ctx, ast.Store):
-            self._add("binding", node, node.id, owner)
-            return
-        if isinstance(node.ctx, ast.Load):
-            load = self._occurrence("name_load", node, node.id)
-            if node.id in self._blocked_names(owner):
-                return
-            source = self._frame(owner).get(node.id)
-            if source is None:
-                return
-            self._flow(source=source, target=load, relation=LineageRelation.BINDS, node=node, resolution_kind=ResolutionKind.LEXICAL_EXACT, confidence=LineageConfidence.CONFIRMED)
+        visit_name(self.state, self.paths, node, owner)
 
     def _assign_target(
         self,
@@ -328,18 +329,7 @@ class _AnchorExtractor:
         owner: str | None,
         walrus_owner: str | None,
     ) -> ExtractedOccurrenceRef | None:
-        if not isinstance(target, ast.Name):
-            self._visit(target, owner, walrus_owner)
-            return None
-        binding = ExtractedOccurrenceRef(self._add("binding", target, target.id, owner))
-        if target.id in self._blocked_names(owner):
-            return None
-        self._frame(owner)[target.id] = binding
-        callable_info = self.state._callable_values.get(source.local_id)
-        if callable_info is not None:
-            self.state._callables_by_binding[binding.local_id] = callable_info
-        self._flow(source=source, target=binding, relation=LineageRelation.ASSIGNS, node=target, resolution_kind=ResolutionKind.LEXICAL_EXACT, confidence=LineageConfidence.CONFIRMED)
-        return binding
+        return assign_target(self.state, self.paths, target, source, owner, walrus_owner, visit=self._visit)
 
     def _runtime_bind_target(
         self,
@@ -347,101 +337,19 @@ class _AnchorExtractor:
         owner: str | None,
         walrus_owner: str | None,
     ) -> None:
-        if isinstance(target, ast.Name):
-            binding = ExtractedOccurrenceRef(
-                self._add("binding", target, target.id, owner)
-            )
-            if target.id in self._blocked_names(owner):
-                return
-            source = self._occurrence(
-                "runtime_bound_local",
-                target,
-                target.id,
-            )
-            self._frame(owner)[target.id] = binding
-            self._flow(
-                source=source,
-                target=binding,
-                relation=LineageRelation.ASSIGNS,
-                node=target,
-                resolution_kind=ResolutionKind.LEXICAL_EXACT,
-                confidence=LineageConfidence.CONFIRMED,
-            )
-            return
-        if isinstance(target, (ast.Tuple, ast.List)):
-            for item in target.elts:
-                self._runtime_bind_target(
-                    item,
-                    owner,
-                    walrus_owner,
-                )
-            return
-        if isinstance(target, ast.Starred):
-            self._runtime_bind_target(
-                target.value,
-                owner,
-                walrus_owner,
-            )
-            return
-        self._visit(target, owner, walrus_owner)
+        runtime_bind_target(self.state, self.paths, target, owner, walrus_owner, visit=self._visit)
 
     def _visit_Assign(self, node: ast.Assign, owner: str | None, walrus_owner: str | None) -> None:
-        source = self._value(node.value, owner, walrus_owner)
-        for target in node.targets:
-            self._assign_target(target, source, owner, walrus_owner)
+        visit_assign(self.state, self.paths, node, owner, walrus_owner, value=self._value, visit=self._visit)
 
     def _visit_AnnAssign(self, node: ast.AnnAssign, owner: str | None, walrus_owner: str | None) -> None:
-        if node.value is None:
-            self._visit(node.target, owner, walrus_owner)
-            self._visit(node.annotation, owner, walrus_owner)
-            return
-        source = self._value(node.value, owner, walrus_owner)
-        self._assign_target(node.target, source, owner, walrus_owner)
-        self._visit(node.annotation, owner, walrus_owner)
+        visit_ann_assign(self.state, self.paths, node, owner, walrus_owner, value=self._value, visit=self._visit)
 
     def _visit_NamedExpr(self, node: ast.NamedExpr, owner: str | None, walrus_owner: str | None) -> None:
-        target_owner = walrus_owner or owner
-        source = self._value(node.value, owner, walrus_owner)
-        binding = self._assign_target(
-            node.target,
-            source,
-            target_owner,
-            walrus_owner,
-        )
-        if (
-            binding is not None
-            and isinstance(node.target, ast.Name)
-        ):
-            self._publish_executed_walrus(
-                node.target.id,
-                binding,
-                target_owner,
-            )
+        visit_named_expr(self.state, self.paths, node, owner, walrus_owner, value=self._value, visit=self._visit, publish_walrus=self._publish_executed_walrus)
 
     def _visit_AugAssign(self, node: ast.AugAssign, owner: str | None, walrus_owner: str | None) -> None:
-        if not isinstance(node.target, ast.Name):
-            self._visit(node.target, owner, walrus_owner)
-            self._value(node.value, owner, walrus_owner)
-            return
-        blocked = node.target.id in self._blocked_names(owner)
-        prior = None if blocked else self._frame(owner).get(node.target.id)
-        if prior is not None:
-            prior_load = self._occurrence("name_load", node.target, node.target.id)
-            self._flow(
-                source=prior,
-                target=prior_load,
-                relation=LineageRelation.BINDS,
-                node=node.target,
-                resolution_kind=ResolutionKind.LEXICAL_EXACT,
-                confidence=LineageConfidence.CONFIRMED,
-            )
-        self._value(node.value, owner, walrus_owner)
-        binding = ExtractedOccurrenceRef(
-            self._add("binding", node.target, node.target.id, owner)
-        )
-        if blocked or prior is None:
-            return
-        self._frame(owner)[node.target.id] = binding
+        visit_aug_assign(self.state, self.paths, node, owner, walrus_owner, value=self._value, visit=self._visit)
 
     def _visit_If(self, node: ast.If, owner: str | None, walrus_owner: str | None) -> None:
         self._visit(node.test, owner, walrus_owner)
@@ -597,16 +505,10 @@ class _AnchorExtractor:
             self._register_import_binding(alias, owner, local_name, module_name, alias.name)
 
     def _visit_Global(self, node: ast.Global, owner: str | None, _walrus_owner: str | None) -> None:
-        for ordinal, name in enumerate(node.names):
-            self._add("global_declaration", node, name, owner, ordinal=ordinal)
-            self._blocked_names(owner).add(name)
-            self._frame(owner).pop(name, None)
+        visit_global(self.state, self.paths, node, owner)
 
     def _visit_Nonlocal(self, node: ast.Nonlocal, owner: str | None, _walrus_owner: str | None) -> None:
-        for ordinal, name in enumerate(node.names):
-            self._add("nonlocal_declaration", node, name, owner, ordinal=ordinal)
-            self._blocked_names(owner).add(name)
-            self._frame(owner).pop(name, None)
+        visit_nonlocal(self.state, self.paths, node, owner)
 
     def _visit_Try(self, node: ast.Try, owner: str | None, walrus_owner: str | None) -> None:
         entry_frame = self._clone_frame(owner)
