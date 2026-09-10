@@ -21,6 +21,38 @@ class _LiveIntegrationFakeVar:
         self.value = value
 
 
+def test_watcher_recovery_emits_start_and_existing_result(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    class Endpoint:
+        pid = 1234
+        lease_generation = 7
+
+        def fingerprint(self):
+            return "endpoint-fingerprint"
+
+    endpoint = Endpoint()
+    initial = SimpleNamespace(endpoint=endpoint, snapshot=lambda: {"status": "ok", "state": None})
+    recovered = SimpleNamespace(endpoint=endpoint)
+    watcher = DesktopLiveWatcher(repo, initial)
+    events = []
+    import contextor.core.runtime_trace as trace
+    import contextor.core.live_state.runtime as runtime
+
+    monkeypatch.setattr(runtime, "connect_or_start", lambda *_args, **_kwargs: recovered)
+    monkeypatch.setattr(trace, "new_trace_operation", lambda _prefix: "wr-test")
+    monkeypatch.setattr(trace, "trace_event", lambda domain, event, **fields: events.append((domain, event, fields)))
+
+    assert watcher._recover_client() is recovered
+
+    assert [event for _domain, event, _fields in events] == [
+        "LIVE_WATCHER_RECOVERY_START", "LIVE_WATCHER_RECOVERY_RESULT"
+    ]
+    assert events[1][2]["result"] == "reconnected_existing"
+    assert events[1][2]["new_endpoint_fingerprint"] == "endpoint-fingerprint"
+
+
 def test_same_revision_startup_attaches_without_redundant_publish(tmp_path, monkeypatch):
     repo = tmp_path / "repo"
     repo.mkdir()

@@ -1101,23 +1101,36 @@ class LiveStateClient:
     def request(
         self, operation: str, *, timeout: float = 30.0, **payload: Any
     ) -> dict[str, Any]:
-        connection = Client(
-            self.endpoint.address,
-            family="AF_INET",
-            authkey=self.endpoint.authkey,
-        )
+        started = time.monotonic()
         try:
-            connection.send({"operation": operation, **payload})
-            import multiprocessing.connection as mpc
-            ready = mpc.wait([connection], timeout=timeout)
-            if not ready:
-                raise TimeoutError(
-                    "Canonical LIVE service did not respond within "
-                    f"{timeout:g}s for op={operation}"
-                )
-            response = connection.recv()
-        finally:
-            connection.close()
+            connection = Client(
+                self.endpoint.address,
+                family="AF_INET",
+                authkey=self.endpoint.authkey,
+            )
+            try:
+                connection.send({"operation": operation, **payload})
+                import multiprocessing.connection as mpc
+                ready = mpc.wait([connection], timeout=timeout)
+                if not ready:
+                    raise TimeoutError(
+                        "Canonical LIVE service did not respond within "
+                        f"{timeout:g}s for op={operation}"
+                    )
+                response = connection.recv()
+            finally:
+                connection.close()
+        except (OSError, EOFError, ConnectionError, TimeoutError) as exc:
+            _safe_trace_event(
+                "LIVE", "LIVE_IPC_FAILURE",
+                side="client", operation_or_request_type=operation,
+                host=getattr(self.endpoint, "host", self.endpoint.address[0]),
+                port=getattr(self.endpoint, "port", self.endpoint.address[1]),
+                exception_class=type(exc).__name__, errno=getattr(exc, "errno", None),
+                winerror=getattr(exc, "winerror", None), error=str(exc)[:500],
+                elapsed_ms=(time.monotonic() - started) * 1000.0,
+            )
+            raise
         if not isinstance(response, dict):
             raise RuntimeError("Canonical LIVE service returned an invalid response.")
         return response

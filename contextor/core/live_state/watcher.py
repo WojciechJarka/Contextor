@@ -89,6 +89,21 @@ class DesktopLiveWatcher(_PollingLiveWorker):
 
     def _recover_client(self) -> LiveStateClient | None:
         """Attempt to reconnect or restart LIVE on genuine connection failure."""
+        started = time.monotonic()
+        prior_endpoint = getattr(self.client, "endpoint", None)
+        try:
+            from contextor.core.runtime_trace import new_trace_operation, trace_event
+
+            recovery_operation_id = new_trace_operation("wr")
+            trace_event(
+                "LIVE", "LIVE_WATCHER_RECOVERY_START", op=recovery_operation_id,
+                reason="connection_failure",
+                prior_endpoint_fingerprint=(prior_endpoint.fingerprint() if prior_endpoint is not None else None),
+                prior_service_pid=getattr(prior_endpoint, "pid", None),
+                recovery_operation_id=recovery_operation_id,
+            )
+        except Exception:
+            recovery_operation_id = None
         try:
             from .runtime import connect_or_start
 
@@ -103,8 +118,40 @@ class DesktopLiveWatcher(_PollingLiveWorker):
             self.client = new_client
             if self.on_reconnect is not None:
                 self.on_reconnect(new_client)
+            try:
+                from contextor.core.runtime_trace import trace_event
+
+                new_endpoint = new_client.endpoint
+                trace_event(
+                    "LIVE", "LIVE_WATCHER_RECOVERY_RESULT", op=recovery_operation_id,
+                    result=(
+                        "reconnected_existing"
+                        if prior_endpoint is not None and new_endpoint == prior_endpoint
+                        else "started_new_owner"
+                    ),
+                    new_endpoint_fingerprint=new_endpoint.fingerprint(),
+                    new_service_pid=new_endpoint.pid,
+                    lease_generation=new_endpoint.lease_generation,
+                    elapsed_ms=(time.monotonic() - started) * 1000.0,
+                    recovery_operation_id=recovery_operation_id,
+                )
+            except Exception:
+                pass
             return new_client
         except Exception as exc:
+            try:
+                from contextor.core.runtime_trace import trace_event
+
+                trace_event(
+                    "LIVE", "LIVE_WATCHER_RECOVERY_RESULT", op=recovery_operation_id,
+                    result="failed",
+                    elapsed_ms=(time.monotonic() - started) * 1000.0,
+                    exception_class=type(exc).__name__, errno=getattr(exc, "errno", None),
+                    winerror=getattr(exc, "winerror", None), error=str(exc)[:500],
+                    recovery_operation_id=recovery_operation_id,
+                )
+            except Exception:
+                pass
             self._emit(f"LIVE recovery failed: {exc}")
             return None
 

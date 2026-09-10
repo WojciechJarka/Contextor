@@ -68,6 +68,29 @@ def _safe_trace_event(domain: str, event: str, **fields) -> None:
         pass
 
 
+def _trace_exception_fields(exc: BaseException | None) -> dict[str, object]:
+    """Return bounded, non-secret transport diagnostics."""
+    if exc is None:
+        return {}
+    return {
+        "exception_class": type(exc).__name__,
+        "errno": getattr(exc, "errno", None),
+        "winerror": getattr(exc, "winerror", None),
+        "error": str(exc)[:500],
+    }
+
+
+def _trace_endpoint_fields(endpoint: LiveEndpoint | None) -> dict[str, object]:
+    if endpoint is None:
+        return {}
+    return {
+        "endpoint_fingerprint": endpoint.fingerprint(),
+        "service_pid": endpoint.pid,
+        "lease_generation": endpoint.lease_generation,
+        "service_instance_id": endpoint.service_instance_id,
+    }
+
+
 def _is_pid_alive(pid: int | None) -> bool:
     """Check if a process with the given PID is currently active."""
     if pid is None or pid <= 0:
@@ -355,17 +378,32 @@ class AuthorityLivenessVerifier:
         self.domain = domain
 
     def verify(self, lease: RuntimeLease) -> LivenessResult:
+        def finish(result: LivenessResult, endpoint: LiveEndpoint | None = None, exc: BaseException | None = None) -> LivenessResult:
+            fields = {
+                "status": result.status.value,
+                "process_alive": result.process_alive,
+                "process_identity_matches": result.process_identity_matches,
+                "endpoint_available": result.endpoint_available,
+                "endpoint_matches": result.endpoint_matches,
+                "reason": result.reason,
+                "service_pid": lease.service_pid,
+                "lease_generation": lease.lease_generation,
+            }
+            fields.update(_trace_endpoint_fields(endpoint))
+            fields.update(_trace_exception_fields(exc))
+            _safe_trace_event("LIVE", "LIVE_LIVENESS_RESULT", **fields)
+            return result
         try:
             _image, creation_time, alive = _process_identity(lease.service_pid)
         except Exception as exc:  # pragma: no cover - platform probe boundary
-            return LivenessResult(
+            return finish(LivenessResult(
                 LivenessStatus.UNKNOWN,
                 None,
                 None,
                 None,
                 None,
                 f"process identity probe failed: {exc}",
-            )
+            ), exc=exc)
         process_matches = bool(alive and creation_time is not None and str(creation_time) == lease.process_start_identity)
         process_stale = (not alive) or (creation_time is not None and not process_matches)
         try:
@@ -378,22 +416,22 @@ class AuthorityLivenessVerifier:
 
         if endpoint is None:
             if process_stale:
-                return LivenessResult.stale(
+                return finish(LivenessResult.stale(
                     process_alive=bool(alive),
                     process_identity_matches=process_matches,
                     endpoint_available=False,
                     endpoint_matches=False,
                     reason=f"process is stale and authority endpoint is unavailable or invalid: {endpoint_reason}",
                     endpoint_evidence_verified=True,
-                )
-            return LivenessResult(
+                ), endpoint)
+            return finish(LivenessResult(
                 LivenessStatus.UNKNOWN,
                 bool(alive),
                 process_matches,
                 False,
                 None,
                 f"authority endpoint is unavailable: {endpoint_reason}",
-            )
+            ), endpoint)
 
         endpoint_matches = _endpoint_matches_domain(endpoint, self.domain) and (
             endpoint.service_instance_id == lease.service_instance_id
@@ -411,36 +449,36 @@ class AuthorityLivenessVerifier:
                 endpoint_creation = None
             endpoint_is_dead = endpoint_alive is False
             if not endpoint_matches and process_stale and endpoint_is_dead:
-                return LivenessResult.stale(
+                return finish(LivenessResult.stale(
                     process_alive=bool(alive),
                     process_identity_matches=process_matches,
                     endpoint_available=False,
                     endpoint_matches=None,
                     reason=f"stale process and dead mismatched authority endpoint: {exc}",
                     endpoint_evidence_verified=True,
-                )
+                ), endpoint, exc)
             if endpoint_matches and process_stale and endpoint_is_dead:
-                return LivenessResult.stale(
+                return finish(LivenessResult.stale(
                     process_alive=bool(alive),
                     process_identity_matches=process_matches,
                     endpoint_available=False,
                     endpoint_matches=True,
                     reason=f"stale process and dead authority endpoint: {exc}",
                     endpoint_evidence_verified=True,
-                )
-            return LivenessResult(
+                ), endpoint, exc)
+            return finish(LivenessResult(
                 LivenessStatus.UNKNOWN,
                 bool(alive),
                 process_matches,
                 True,
                 endpoint_matches,
                 f"authority status unavailable: {exc}",
-            )
+            ), endpoint, exc)
 
         status_matches = _status_matches_endpoint(status, endpoint)
         if not endpoint_matches:
             if status_matches:
-                return LivenessResult(
+                return finish(LivenessResult(
                     LivenessStatus.FOREIGN_LIVE,
                     bool(alive),
                     process_matches,
@@ -448,8 +486,8 @@ class AuthorityLivenessVerifier:
                     False,
                     "authenticated LIVE endpoint belongs to another service instance or generation",
                     False,
-                )
-            return LivenessResult(
+                ), endpoint)
+            return finish(LivenessResult(
                 LivenessStatus.AMBIGUOUS,
                 bool(alive),
                 process_matches,
@@ -457,17 +495,17 @@ class AuthorityLivenessVerifier:
                 False,
                 "mismatched endpoint responded but did not prove a coherent authority identity",
                 False,
-            )
+            ), endpoint)
         if process_matches and status_matches:
-            return LivenessResult.live("exact process identity and authority status match")
-        return LivenessResult(
+            return finish(LivenessResult.live("exact process identity and authority status match"), endpoint)
+        return finish(LivenessResult(
             LivenessStatus.UNKNOWN,
             bool(alive),
             process_matches,
             True,
             status_matches,
             "authority status did not prove the exact live owner",
-        )
+        ), endpoint)
 
 
 def _verified_existing_client(
@@ -479,13 +517,30 @@ def _verified_existing_client(
     desktop_instance_id: str | None = None,
     owner_token: str | None = None,
 ) -> LiveStateClient | None:
+    started = time.monotonic()
+
+    def reject(reason_code: str, endpoint: LiveEndpoint | None = None, exc: BaseException | None = None, **fields: object) -> None:
+        event_fields = {
+            "reason_code": reason_code,
+            "elapsed_ms": (time.monotonic() - started) * 1000.0,
+        }
+        event_fields.update(_trace_endpoint_fields(endpoint))
+        event_fields.update(fields)
+        event_fields.update(_trace_exception_fields(exc))
+        _safe_trace_event("LIVE", "LIVE_CONNECT_REJECT", **event_fields)
     try:
         endpoint = _read_endpoint(root, strict=True)
     except EndpointSchemaError as exc:
         if isinstance(exc.__cause__, PermissionError):
+            reject("ENDPOINT_SCHEMA_INVALID", exc=exc)
             return None
+        reject("ENDPOINT_SCHEMA_INVALID", exc=exc)
         raise
-    if endpoint is None or not _endpoint_matches_domain(endpoint, domain):
+    if endpoint is None:
+        reject("ENDPOINT_MISSING")
+        return None
+    if not _endpoint_matches_domain(endpoint, domain):
+        reject("DOMAIN_MISMATCH", endpoint)
         return None
     try:
         live = manager.read_live_lease()
@@ -501,26 +556,33 @@ def _verified_existing_client(
             and record.endpoint_fingerprint is None
         ):
             manager.reconcile_endpoint_binding(live, endpoint.fingerprint())
-    except Exception:
+    except Exception as exc:
+        reject("LEASE_MISMATCH", endpoint, exc)
         return None
     try:
         image, creation_time, alive = _process_identity(endpoint.pid)
-    except Exception:
+    except Exception as exc:
+        reject("PROCESS_IDENTITY_MISMATCH", endpoint, exc)
         return None
     if not alive or creation_time is None or str(creation_time) != endpoint.process_start_identity:
+        reject("PROCESS_IDENTITY_MISMATCH", endpoint, pid_alive=bool(alive))
         return None
     try:
         status = LiveStateClient(endpoint).authority_status()
-    except (OSError, EOFError, ConnectionError, TimeoutError, RuntimeError):
+    except (OSError, EOFError, ConnectionError, TimeoutError, RuntimeError) as exc:
+        reject("AUTHORITY_STATUS_TRANSPORT_ERROR", endpoint, exc, pid_alive=True)
         return None
     if not _status_matches_endpoint(status, endpoint):
+        reject("AUTHORITY_STATUS_MISMATCH", endpoint, pid_alive=True)
         return None
     try:
         lease = manager.read_live_lease()
         record = manager.read_generation()
-    except Exception:
+    except Exception as exc:
+        reject("LEASE_MISMATCH", endpoint, exc, pid_alive=True)
         return None
     if lease is None or record.status != "active":
+        reject("LEASE_MISMATCH", endpoint, pid_alive=True)
         return None
     if (
         lease.service_instance_id != endpoint.service_instance_id
@@ -532,6 +594,7 @@ def _verified_existing_client(
         or record.last_lease_generation != lease.lease_generation
         or record.endpoint_fingerprint != endpoint.fingerprint()
     ):
+        reject("LEASE_MISMATCH", endpoint, pid_alive=True)
         return None
     client = LiveStateClient(
         endpoint,
@@ -598,10 +661,22 @@ def connect_existing_with_status(
     retry_delay: float = 0.05,
 ) -> tuple[LiveStateClient | None, str]:
     """Reconnect briefly to an existing owner without starting a service."""
+    started = time.monotonic()
+
+    def result(client: LiveStateClient | None, status: str, attempts_used: int, endpoint: LiveEndpoint | None = None) -> tuple[LiveStateClient | None, str]:
+        _safe_trace_event(
+            "LIVE", "LIVE_CONNECT_RESULT",
+            result=status,
+            attempts_used=attempts_used,
+            elapsed_ms=(time.monotonic() - started) * 1000.0,
+            **_trace_endpoint_fields(endpoint),
+        )
+        return client, status
+
     root = Path(repo_path).resolve()
     identity = read_repository_identity(root)
     if identity is None:
-        return None, "endpoint_identity_unverified"
+        return result(None, "endpoint_identity_unverified", 0)
     domain = _production_domain(identity)
     manager = RuntimeLeaseManager(
         domain,
@@ -610,36 +685,53 @@ def connect_existing_with_status(
     try:
         expected = _read_endpoint(root, strict=True)
     except EndpointSchemaError:
-        return None, "endpoint_identity_unverified"
+        return result(None, "endpoint_identity_unverified", 0)
     if expected is None:
-        return None, "no_live_service"
+        return result(None, "no_live_service", 0)
     if not _endpoint_matches_domain(expected, domain):
-        return None, "endpoint_identity_unverified"
+        return result(None, "endpoint_identity_unverified", 0, expected)
 
     total_attempts = max(1, attempts)
     for attempt in range(total_attempts):
+        _safe_trace_event(
+            "LIVE", "LIVE_CONNECT_ATTEMPT",
+            attempt=attempt + 1,
+            attempts=total_attempts,
+            retry_delay=retry_delay,
+            runtime_domain_id=domain.domain_id,
+            repo_id=identity.repo_id,
+            **_trace_endpoint_fields(expected),
+        )
         client = _verified_existing_client(root, identity, domain, manager)
         if client is not None:
             current = _read_endpoint(root, strict=True)
             if current != expected or client.endpoint != expected:
-                return None, "owner_identity_changed"
-            return client, "connected"
+                _safe_trace_event(
+                    "LIVE", "LIVE_CONNECT_REJECT", reason_code="ENDPOINT_CHANGED",
+                    endpoint_changed=True, **_trace_endpoint_fields(current or expected),
+                )
+                return result(None, "owner_identity_changed", attempt + 1, current or expected)
+            return result(client, "connected", attempt + 1, expected)
         if attempt + 1 < total_attempts:
             time.sleep(max(0.0, retry_delay))
 
     try:
         endpoint = _read_endpoint(root, strict=True)
     except EndpointSchemaError:
-        return None, "endpoint_identity_unverified"
+        return result(None, "endpoint_identity_unverified", total_attempts, expected)
     if endpoint != expected:
-        return None, "owner_identity_changed"
+        _safe_trace_event(
+            "LIVE", "LIVE_CONNECT_REJECT", reason_code="ENDPOINT_CHANGED",
+            endpoint_changed=True, **_trace_endpoint_fields(endpoint or expected),
+        )
+        return result(None, "owner_identity_changed", total_attempts, endpoint or expected)
     if (
         endpoint is not None
         and endpoint.pid is not None
         and _is_pid_alive(endpoint.pid)
     ):
-        return None, "transient_connection_failure"
-    return None, "no_live_service"
+        return result(None, "transient_connection_failure", total_attempts, endpoint)
+    return result(None, "no_live_service", total_attempts, endpoint)
 
 
 CREATE_BREAKAWAY_FROM_JOB = 0x01000000

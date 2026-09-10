@@ -50,6 +50,26 @@ def test_client_request_timeout_closes_connection(monkeypatch):
     assert connection.closed is True
 
 
+def test_client_transport_failure_emits_one_bounded_trace_event(monkeypatch):
+    events = []
+    endpoint = SimpleNamespace(
+        address=("127.0.0.1", 1), authkey=b"x", host="127.0.0.1", port=1
+    )
+    monkeypatch.setattr(
+        ipc_module, "Client", lambda *_args, **_kwargs: (_ for _ in ()).throw(ConnectionRefusedError(10061, "refused"))
+    )
+    monkeypatch.setattr(ipc_module, "_safe_trace_event", lambda *_args, **kwargs: events.append(kwargs))
+
+    with pytest.raises(ConnectionRefusedError):
+        LiveStateClient(endpoint).request("authority_status")
+
+    assert len(events) == 1
+    assert events[0]["side"] == "client"
+    assert events[0]["operation_or_request_type"] == "authority_status"
+    assert events[0]["exception_class"] == "ConnectionRefusedError"
+    assert "authkey" not in json.dumps(events[0]).lower()
+
+
 @pytest.fixture
 def live_server():
     server = CanonicalLiveServer(SimpleNamespace(files=[]))

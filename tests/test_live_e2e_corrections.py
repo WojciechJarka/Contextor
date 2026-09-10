@@ -428,6 +428,63 @@ def test_same_owner_identity_allows_transient_classification(
     assert status == "transient_connection_failure"
 
 
+def test_verified_client_transport_rejection_serializes_bounded_trace(
+    tmp_path, monkeypatch, authoritative_live_client
+):
+    from contextor.core.runtime_trace import finish_desktop_trace_session, start_desktop_trace_session
+    import contextor.core.runtime_trace as trace
+
+    endpoint = authoritative_live_client.endpoint
+    trace_logs = tmp_path / "isolated-trace"
+    finish_desktop_trace_session()
+    monkeypatch.setattr(trace, "runtime_logs_dir", lambda: trace_logs)
+    path = start_desktop_trace_session()
+    assert path is not None
+
+    class RefusingClient:
+        def __init__(self, _endpoint):
+            pass
+
+        def authority_status(self):
+            raise ConnectionRefusedError(10061, "refused")
+
+    identity = live_runtime.read_repository_identity(tmp_path)
+    assert identity is not None
+    domain = live_runtime._production_domain(identity)
+    manager = live_runtime.RuntimeLeaseManager(domain)
+    monkeypatch.setattr(live_runtime, "LiveStateClient", RefusingClient)
+    try:
+        assert live_runtime._verified_existing_client(tmp_path, identity, domain, manager) is None
+    finally:
+        finish_desktop_trace_session()
+
+    records = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+    event = next(item for item in records if item.get("ev") == "LIVE_CONNECT_REJECT")
+    assert event["reason_code"] == "AUTHORITY_STATUS_TRANSPORT_ERROR"
+    assert event["exception_class"] == "ConnectionRefusedError"
+    assert "winerror" not in event
+    assert "authkey" not in json.dumps(event).lower()
+    assert "owner_token" not in json.dumps(event).lower()
+
+
+def test_trace_failure_cannot_change_transient_connection_result(
+    tmp_path, monkeypatch, authoritative_live_client
+):
+    endpoint = authoritative_live_client.endpoint
+    monkeypatch.setattr(live_runtime, "_verified_existing_client", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(live_runtime, "_read_endpoint", lambda _root, **_kwargs: endpoint)
+    monkeypatch.setattr(live_runtime, "_is_pid_alive", lambda _pid: True)
+    monkeypatch.setattr(live_runtime.time, "sleep", lambda _delay: None)
+    import contextor.core.runtime_trace as trace
+
+    monkeypatch.setattr(trace, "trace_event", lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("trace unavailable")))
+
+    client, status = live_runtime.connect_existing_with_status(tmp_path)
+
+    assert client is None
+    assert status == "transient_connection_failure"
+
+
 def test_same_pid_with_changed_owner_identity_is_not_transient(
     tmp_path, monkeypatch, authoritative_live_client
 ):
