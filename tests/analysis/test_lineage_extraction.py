@@ -2162,3 +2162,21 @@ def test_stage_1e1_surface_id_escapes_non_identifier_literal_name_deterministica
     surface = first.surfaces[0]
     assert surface.declared_name == "a:b/c"
     assert ":n:a%3Ab%2Fc" in surface.local_id
+
+
+@pytest.mark.parametrize("source", [
+    "__all__ = ['a']\n__all__[0] = 'x'\ndef a(): pass\n",
+    "__all__ = ['a']\n__all__[:] = ['x']\ndef a(): pass\n",
+    "__all__ = ['a']\n__all__[0] += 'x'\ndef a(): pass\n",
+    "__all__ = ['a']\ndel __all__[0]\ndef a(): pass\n",
+])
+def test_stage_1e1_direct_all_subscript_mutation_suppresses_exact_surfaces(source):
+    assert _stage_1c_facts(source).surfaces == ()
+
+
+def test_stage_1e1_reading_all_subscript_preserves_exact_literal_authority():
+    facts = _stage_1c_facts("__all__ = ['a']\nx = __all__[0]\ndef a(): pass\n")
+    surface = facts.surfaces[0]
+    assert surface.declared_name == "a"
+    assert surface.kind is SurfaceKind.EXPORT
+    assert surface.confidence is LineageConfidence.CONFIRMED

@@ -57,7 +57,7 @@ from contextor.core.analysis.lineage_extraction_visitors import (
     visit_yield,
 )
 from contextor.core.analysis.lineage_extraction_state import LineageExtractionState
-from contextor.core.analysis.lineage_extraction_surfaces import finalize_surfaces
+from contextor.core.analysis.lineage_extraction_surfaces import finalize_surfaces, observe_all_subscript_mutation
 from contextor.core.domain.lineage_facts import (
     ExtractedAnchorFact,
     ExtractedFlowFact,
@@ -196,6 +196,11 @@ class _AnchorExtractor:
 
     def _visit_Name(self, node: ast.Name, owner: str | None, _walrus_owner: str | None) -> None:
         visit_name(self.state, self.paths, node, owner)
+
+    def _visit_Subscript(self, node: ast.Subscript, owner: str | None, walrus_owner: str | None) -> None:
+        observe_all_subscript_mutation(self.state, node, owner)
+        self._visit(node.value, owner, walrus_owner)
+        self._visit(node.slice, owner, walrus_owner)
 
     def _runtime_bind_target(
         self,

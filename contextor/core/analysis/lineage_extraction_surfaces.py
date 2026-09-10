@@ -49,6 +49,21 @@ def observe_all_mutation(state: LineageExtractionState, node: ast.Call) -> None:
         state.invalidate_all()
 
 
+def observe_all_subscript_mutation(
+    state: LineageExtractionState,
+    node: ast.Subscript,
+    owner: str | None,
+) -> None:
+    if (
+        owner is not None
+        and state._owner_kind.get(owner) == "module"
+        and isinstance(node.ctx, (ast.Store, ast.Del))
+        and isinstance(node.value, ast.Name)
+        and node.value.id == "__all__"
+    ):
+        state.invalidate_all()
+
+
 def record_direct_public_candidates(state: LineageExtractionState, node: ast.AST, owner: str) -> None:
     if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
         names = (node.name,)
