@@ -75,7 +75,7 @@ def test_stage_1c_occurrence_cache_reuses_same_ref():
     second = extractor._occurrence("expression_result", node)
     assert first is second
     assert first.local_id == second.local_id
-    assert len(extractor._ids) == 1
+    assert len(extractor.state._ids) == 1
 
 
 def test_stage_1c_merge_frames_keeps_only_identical_occurrences():

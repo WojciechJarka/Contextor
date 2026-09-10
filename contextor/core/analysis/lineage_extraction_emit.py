@@ -7,7 +7,7 @@ from contextor.core.analysis.lineage_extraction_state import _CallableInfo, _Par
 from contextor.core.domain.lineage_facts import ExtractedAnchorFact, ExtractedFlowFact, ExtractedOccurrenceRef, ExtractedSymbolicKind, ExtractedSymbolicRef, LineageConfidence, LineageRelation, ResolutionKind
 
 
-def add_anchor(state, paths, kind, node, name, owner_local_id, *, ordinal=0, local_kind=None):
+def add_anchor(state: LineageExtractionState, paths: dict[int, str], kind: str, node: ast.AST, name: str | None, owner_local_id: str | None, *, ordinal: int = 0, local_kind: str | None = None) -> str:
     local_id = build_local_occurrence_id(local_kind or kind, paths[id(node)], name, ordinal=ordinal)
     if local_id in state._ids:
         raise ValueError(f"Duplicate lineage local id: {local_id}")
@@ -16,7 +16,7 @@ def add_anchor(state, paths, kind, node, name, owner_local_id, *, ordinal=0, loc
     return local_id
 
 
-def occurrence(state, paths, kind, node, name=None, *, ordinal=0):
+def occurrence(state: LineageExtractionState, paths: dict[int, str], kind: str, node: ast.AST, name: str | None = None, *, ordinal: int = 0) -> ExtractedOccurrenceRef:
     cache_key = (kind, id(node), name, ordinal)
     cached = state._occurrences.get(cache_key)
     if cached is not None:
@@ -30,16 +30,16 @@ def occurrence(state, paths, kind, node, name=None, *, ordinal=0):
     return result
 
 
-def emit_flow(state, paths, *, source, target, relation, node, resolution_kind, confidence, ordinal=0, dynamic_boundary=None):
+def emit_flow(state: LineageExtractionState, paths: dict[int, str], *, source, target, relation: LineageRelation, node: ast.AST, resolution_kind: ResolutionKind, confidence: LineageConfidence, ordinal: int = 0, dynamic_boundary: str | None = None) -> None:
     local_id = f"flow:v1:{relation.value}:{paths[id(node)]}:i:{ordinal}"
     if local_id in state._flow_ids: raise ValueError(f"Duplicate lineage flow id: {local_id}")
     state._flow_ids.add(local_id)
     state.flows.append(ExtractedFlowFact(local_id, source, target, relation, _source_span(node), resolution_kind, confidence, dynamic_boundary=dynamic_boundary))
 
 
-def parameter_symbolic(module_name, callable_symbol_name, parameter):
+def parameter_symbolic(module_name: str, callable_symbol_name: str, parameter: _ParameterInfo) -> ExtractedSymbolicRef:
     return ExtractedSymbolicRef(ExtractedSymbolicKind.PARAMETER, module_name, callable_symbol_name, parameter.local_id)
 
 
-def return_symbolic(module_name, callable_info):
+def return_symbolic(module_name: str, callable_info: _CallableInfo) -> ExtractedSymbolicRef:
     return ExtractedSymbolicRef(ExtractedSymbolicKind.RETURN, module_name, callable_info.name, callable_info.anchor_id)
