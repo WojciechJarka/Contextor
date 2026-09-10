@@ -90,6 +90,7 @@ def visit_class_def(
         visit(child, class_id, None)
     if node.name not in state.blocked_names(owner):
         state.frame(owner)[node.name] = ExtractedOccurrenceRef(class_id)
+        state.note_module_all_touch(owner, node.name)
 
 
 def visit_function(
@@ -156,6 +157,7 @@ def visit_function(
         state.frame(owner)[node.name] = ExtractedOccurrenceRef(
             function_id
         )
+        state.note_module_all_touch(owner, node.name)
 
 
 def visit_lambda(

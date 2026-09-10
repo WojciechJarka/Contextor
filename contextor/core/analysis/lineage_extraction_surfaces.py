@@ -19,7 +19,7 @@ def _literal_all_items(node: ast.Assign) -> tuple[tuple[str, ast.Constant], ...]
         return None
     items: list[tuple[str, ast.Constant]] = []
     for item in node.value.elts:
-        if not isinstance(item, ast.Constant) or not isinstance(item.value, str):
+        if not isinstance(item, ast.Constant) or not isinstance(item.value, str) or not item.value:
             return None
         items.append((item.value, item))
     return tuple(items)
@@ -64,14 +64,13 @@ def record_direct_public_candidates(state: LineageExtractionState, node: ast.AST
 
 
 def finalize_surfaces(state: LineageExtractionState, paths: dict[int, str], module_name: str, module_owner: str) -> None:
-    frame = state.frame(module_owner)
-    if state._all_status == "exact" and state._all_binding == frame.get("__all__"):
+    if state._all_status == "exact" and state._all_binding == state.current_module_surface_binding(module_owner, "__all__"):
         seen: set[str] = set()
         for ordinal, (name, item) in enumerate(state._all_items):
             if name in seen:
                 continue
             seen.add(name)
-            current = frame.get(name)
+            current = state.current_module_surface_binding(module_owner, name)
             candidate = state._module_public_candidates.get(name)
             imported = state.import_frame(module_owner).get(name)
             if candidate is not None and candidate[0] == current:
@@ -84,5 +83,5 @@ def finalize_surfaces(state: LineageExtractionState, paths: dict[int, str], modu
     if state._all_status != "absent":
         return
     for ordinal, (name, (binding, node)) in enumerate(sorted(state._module_public_candidates.items())):
-        if name and not name.startswith("_") and frame.get(name) == binding:
+        if name and not name.startswith("_") and state.current_module_surface_binding(module_owner, name) == binding:
             emit_surface(state, paths, kind=SurfaceKind.PUBLIC_SYMBOL, exposed=binding, node=node, declared_name=name, resolution_kind=ResolutionKind.PYTHON_NAME_CONVENTION, confidence=LineageConfidence.INFERRED, declaration_evidence=SurfaceDeclarationEvidence.STATIC_DECLARATION, ordinal=ordinal)

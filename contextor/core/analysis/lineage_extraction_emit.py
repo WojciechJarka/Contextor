@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+from urllib.parse import quote
 
 from contextor.core.analysis.lineage_extraction_contracts import _source_span, build_local_occurrence_id
 from contextor.core.analysis.lineage_extraction_state import _CallableInfo, _ParameterInfo, LineageExtractionState
@@ -38,7 +39,7 @@ def emit_flow(state: LineageExtractionState, paths: dict[int, str], *, source, t
 
 
 def emit_surface(state: LineageExtractionState, paths: dict[int, str], *, kind: SurfaceKind, exposed, node: ast.AST, declared_name: str, resolution_kind: ResolutionKind, confidence: LineageConfidence, declaration_evidence: SurfaceDeclarationEvidence, ordinal: int = 0) -> None:
-    local_id = f"surface:v1:{kind.value}:{paths[id(node)]}:i:{ordinal}:n:{declared_name}"
+    local_id = f"surface:v1:{kind.value}:{paths[id(node)]}:i:{ordinal}:n:{quote(declared_name, safe='')}"
     if local_id in state._surface_ids:
         raise ValueError(f"Duplicate lineage surface id: {local_id}")
     state._surface_ids.add(local_id)

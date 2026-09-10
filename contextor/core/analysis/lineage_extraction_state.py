@@ -93,6 +93,7 @@ class LineageExtractionState:
     _all_status: str = "absent"
     _all_binding: ExtractedOccurrenceRef | None = None
     _all_items: tuple[tuple[str, ast.Constant], ...] = ()
+    _module_surface_deleted_bindings: dict[str, str | None] = field(default_factory=dict)
 
     def begin_module_statement(self, node: ast.AST) -> None:
         self._module_direct_statement = node
@@ -115,6 +116,22 @@ class LineageExtractionState:
         self._all_status = "dynamic_or_ambiguous"
         self._all_binding = None
         self._all_items = ()
+
+    def note_module_all_touch(self, owner: str | None, name: str) -> None:
+        if owner is not None and self._owner_kind.get(owner) == "module" and name == "__all__":
+            self.invalidate_all()
+
+    def record_module_surface_delete(self, owner: str | None, name: str) -> None:
+        if owner is not None and self._owner_kind.get(owner) == "module":
+            current = self.frame(owner).get(name)
+            self._module_surface_deleted_bindings[name] = None if current is None else current.local_id
+            self.note_module_all_touch(owner, name)
+
+    def current_module_surface_binding(self, owner: str, name: str) -> ExtractedOccurrenceRef | None:
+        current = self.frame(owner).get(name)
+        if current is not None and current.local_id == self._module_surface_deleted_bindings.get(name):
+            return None
+        return current
 
     def frame(self, owner: str | None) -> dict[str, ExtractedOccurrenceRef]:
         return self._bindings.setdefault(owner, {})

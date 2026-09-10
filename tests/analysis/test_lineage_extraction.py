@@ -2119,3 +2119,46 @@ def test_stage_1e1_plain_import_is_not_confirmed_reexport():
 def test_stage_1e1_entrypoint_and_callback_registration_do_not_create_surface_kinds():
     facts = _stage_1c_facts("if __name__ == '__main__':\n main()\ndef apply(callback): callback()\ndef f(): pass\napply(f)\n")
     assert not [surface for surface in facts.surfaces if surface.kind in {SurfaceKind.ENTRYPOINT, SurfaceKind.REGISTRATION}]
+
+
+@pytest.mark.parametrize("source", [
+    "x = 1\ndel x\n",
+    "x = 1\ndel x\n__all__ = ['x']\n",
+    "from provider import x\ndel x\n__all__ = ['x']\n",
+])
+def test_stage_1e1_deleted_module_binding_never_retains_surface_authority(source):
+    facts = _stage_1c_facts(source)
+    assert not [surface for surface in facts.surfaces if surface.confidence is LineageConfidence.CONFIRMED]
+    assert not [surface for surface in facts.surfaces if surface.kind is SurfaceKind.PUBLIC_SYMBOL]
+
+
+def test_stage_1e1_later_binding_supersedes_surface_delete_tombstone():
+    facts = _stage_1c_facts("x = 1\ndel x\nx = 2\n__all__ = ['x']\n")
+    surface = facts.surfaces[0]
+    assert surface.kind is SurfaceKind.EXPORT
+    assert surface.confidence is LineageConfidence.CONFIRMED
+    assert surface.exposed == ExtractedOccurrenceRef(_stage_1c_named(facts, "binding", "x")[-1].local_id)
+
+
+@pytest.mark.parametrize("source", [
+    "__all__: list[str] = ['a']\ndef a(): pass\n",
+    "(__all__ := ['a'])\ndef a(): pass\n",
+    "import provider as __all__\ndef a(): pass\n",
+    "for __all__ in values: pass\ndef a(): pass\n",
+    "[__all__] = [['a']]\ndef a(): pass\n",
+])
+def test_stage_1e1_non_assign_all_touches_suppress_default_fallback(source):
+    assert _stage_1c_facts(source).surfaces == ()
+
+
+def test_stage_1e1_empty_literal_all_member_fails_closed_without_domain_error():
+    assert _stage_1c_facts("__all__ = ['']\ndef a(): pass\n").surfaces == ()
+
+
+def test_stage_1e1_surface_id_escapes_non_identifier_literal_name_deterministically():
+    first = _stage_1c_facts("__all__ = ['a:b/c']\n")
+    second = _stage_1c_facts("__all__ = ['a:b/c']\n")
+    assert first == second
+    surface = first.surfaces[0]
+    assert surface.declared_name == "a:b/c"
+    assert ":n:a%3Ab%2Fc" in surface.local_id

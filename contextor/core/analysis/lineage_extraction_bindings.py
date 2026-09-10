@@ -5,7 +5,7 @@ from collections.abc import Callable
 
 from contextor.core.analysis.lineage_extraction_emit import add_anchor, emit_flow, occurrence
 from contextor.core.analysis.lineage_extraction_state import LineageExtractionState
-from contextor.core.analysis.lineage_extraction_surfaces import observe_all_assignment, observe_all_augassign, observe_all_delete
+from contextor.core.analysis.lineage_extraction_surfaces import observe_all_assignment, observe_all_augassign
 from contextor.core.domain.lineage_facts import (
     ExtractedOccurrenceRef,
     LineageConfidence,
@@ -28,11 +28,11 @@ def visit_name(
     if isinstance(node.ctx, ast.Store):
         add_anchor(state, paths, "binding", node, node.id, owner)
         state.declare_local(owner, node.id)
+        state.note_module_all_touch(owner, node.id)
         return
     if isinstance(node.ctx, ast.Del):
         state.declare_local(owner, node.id)
-        if owner is not None and state._owner_kind.get(owner) == "module" and node.id == "__all__":
-            observe_all_delete(state)
+        state.record_module_surface_delete(owner, node.id)
         return
     if isinstance(node.ctx, ast.Load):
         load = occurrence(state, paths, "name_load", node, node.id)
@@ -85,6 +85,7 @@ def assign_target(
     if target.id in state.blocked_names(owner):
         return None
     state.frame(owner)[target.id] = binding
+    state.note_module_all_touch(owner, target.id)
     callable_info = state._callable_values.get(source.local_id)
     if callable_info is not None:
         state._callables_by_binding[binding.local_id] = callable_info
@@ -125,6 +126,7 @@ def runtime_bind_target(
             target.id,
         )
         state.frame(owner)[target.id] = binding
+        state.note_module_all_touch(owner, target.id)
         emit_flow(
             state,
             paths,
@@ -252,6 +254,8 @@ def visit_aug_assign(
     value: ValueFn,
     visit: VisitFn,
 ) -> None:
+    if isinstance(node.target, ast.Name):
+        state.note_module_all_touch(owner, node.target.id)
     if owner is not None and state._owner_kind.get(owner) == "module" and isinstance(node.target, ast.Name) and node.target.id == "__all__":
         observe_all_augassign(state)
     if not isinstance(node.target, ast.Name):

@@ -15,6 +15,7 @@ def register_import_binding(state: LineageExtractionState, paths: dict[int, str]
     state.declare_local(owner, local_name)
     if local_name in state.blocked_names(owner): return
     state.frame(owner)[local_name] = ExtractedOccurrenceRef(binding_id)
+    state.note_module_all_touch(owner, local_name)
     if module_name is not None: state.import_frame(owner)[local_name] = _ImportInfo(module_name, symbol_name, binding_id)
 
 

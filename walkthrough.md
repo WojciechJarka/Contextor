@@ -1,37 +1,40 @@
-# Contextor Stage 1E.1 — exact source-local module surfaces
+# Contextor Stage 1E.1 corrective pass — surface authority holes
 
-STATUS=COMPLETE
+STATUS=COMPLETE_WITH_LIVE_CERTIFICATION_BLOCKED
 
-Implemented source-local PUBLIC_SYMBOL, EXPORT, and REEXPORT declaration facts. No materialization, provider resolution, state-lifecycle redesign, MCP projection, ENTRYPOINT, REGISTRATION, or surface flows were added.
+## Exact corrective fixes
 
-## Semantic evidence A–Q
+* P0.1: Surface-only deletion tombstones preserve 1A–1D lexical frames while preventing deleted bindings from authorizing default PUBLIC_SYMBOL, explicit local EXPORT, or REEXPORT. A later different binding supersedes its tombstone.
+* P0.2: State-owned note_module_all_touch now invalidates explicit-all authority from module binding paths; direct supported Assign may then replace it with exact authority. Hooks cover assignment/runtime binding/store/delete/import/function/class/exception/match paths.
+* P0.3: empty literal strings now invalidate literal __all__ rather than reaching the token-validating domain constructor.
+* P1: surface names are percent-escaped in IDs, including colon/slash names.
+* The equivalence oracle remains unchanged for anchor/flow hashes; no expected legacy hash regeneration occurred.
 
-* A/B: direct module FunctionDef, AsyncFunctionDef, ClassDef, and direct simple Assign names use the existing non-underscore convention; final exact literal __all__ overrides defaults, including definitions before it.
-* C/D/E/F/G/H/I: exact current FromImport bindings yield REEXPORT (including relative aliases); rebound imports become local EXPORT; plain imports fail closed as unresolved EXPORT; unresolved literal names use PUBLIC_TARGET symbolic refs.
-* J/K/L/M: IDs are deterministic/distinct; last literal __all__ wins; dynamic, augmented, mutation, delete, nonliteral, starred, comprehension, call, and branch-ambiguous __all__ suppress all surface fallback; duplicate literal names deduplicate.
-* N: no ENTRYPOINT/REGISTRATION and no EXPOSES/DECLARES_PUBLIC_NAMES flows.
-* O/P/Q: deterministic/no-I/O extraction; resource-limit stays empty; strengthened oracle proves anchors+flows unchanged when surfaces are stripped.
+## Regression evidence
 
-## Oracle handling
-
-Full-result hash changed only for async_yield and signature_defaults_local_call because their new PUBLIC_SYMBOL surfaces are intentional. EXPECTED_HASHES changed only for those fixtures. The added legacy-anchor-flow oracle hashes current results with surfaces=() and matches every pre-1E expected hash byte-for-byte.
+* Deleted local/import binding: no stale confirmed surface; later exact binding becomes confirmed local EXPORT.
+* AnnAssign, walrus, import alias, for target, destructuring target for __all__ suppress fallback surfaces.
+* Empty literal __all__ member is fail-closed without an exception.
+* a:b/c emits deterministic escaped ID n:a%3Ab%2Fc.
 
 ## Tests
 
-* tests/analysis/test_lineage_extraction.py -q: 177 passed.
+* tests/analysis/test_lineage_extraction.py -q: 189 passed.
 * tests/analysis/test_lineage_extraction_equivalence.py -q: 3 passed.
-* combined required command: 192 passed.
-* git diff --check: passed (only Git LF-to-CRLF advisory warnings).
+* required combined focused command: 203 passed.
+* git diff --check: passed; only LF-to-CRLF advisory warnings.
 
-## Contextor / LIVE evidence
+## Contextor / LIVE
 
-Pre-edit LIVE revision=586, resync_required=false, and syntax/collision/cycle diagnostics fresh. Active Contextor MCP documentation/source/context tools were used first; no deferred discovery tool was injected. Post-edit get_live_events(after_revision=586) retried after 30 seconds but returned transient_connection_failure: existing LIVE owner temporarily unreachable. Watcher freshness/continuous post-edit revision and fresh registration of the new module are UNVERIFIED. update_file was not called because Desktop watcher is authority.
+Pre-edit revision=592, resync_required=false, and diagnostics fresh. Active MCP documentation, LIVE events, and canonical module contexts were checked; no deferred discovery tool was injected. Both changed-module contexts at revision 592 had fresh syntax diagnostics. Post-edit get_live_events(after_revision=592) returned transient_connection_failure (LIVE owner temporarily unreachable), so no matching later watcher revision/continuous post-edit cursor can be proved. Per task rule, update_file was not called. LIVE_CERTIFICATION=BLOCKED.
 
-One facade traversal/dispatch owner and one LineageExtractionState construction remain in lineage_extraction.py; textual verification found no ast.walk in changed extraction modules. New helper imports emitter/state only and has no facade back-edge. Post-edit MCP cycle/collision certification is blocked by the transient owner failure.
+Static certification: one LineageExtractionState construction remains in lineage_extraction.py; no new visitor/traversal/source reread was introduced; helper has no facade import/back-edge. Pre-edit diagnostics reported cycles/collisions fresh. Post-edit MCP cycle/collision certification is blocked by the unreachable owner.
 
 FILES_CHANGED:
 * contextor/core/analysis/lineage_extraction.py
 * contextor/core/analysis/lineage_extraction_bindings.py
+* contextor/core/analysis/lineage_extraction_calls.py
+* contextor/core/analysis/lineage_extraction_control.py
 * contextor/core/analysis/lineage_extraction_emit.py
 * contextor/core/analysis/lineage_extraction_state.py
 * contextor/core/analysis/lineage_extraction_visitors.py
@@ -43,7 +46,7 @@ FILES_CHANGED:
 
 ~~~diff
 diff --git a/contextor/core/analysis/lineage_extraction.py b/contextor/core/analysis/lineage_extraction.py
-index 63c985a..4483a75 100644
+index 63c985a..d9215e7 100644
 --- a/contextor/core/analysis/lineage_extraction.py
 +++ b/contextor/core/analysis/lineage_extraction.py
 @@ -1,17 +1,17 @@
@@ -412,27 +415,46 @@ index 63c985a..4483a75 100644
 +    "parse_local_occurrence_id",
 +]
 diff --git a/contextor/core/analysis/lineage_extraction_bindings.py b/contextor/core/analysis/lineage_extraction_bindings.py
-index 2868b56..bbdd8ce 100644
+index 2868b56..f356ed5 100644
 --- a/contextor/core/analysis/lineage_extraction_bindings.py
 +++ b/contextor/core/analysis/lineage_extraction_bindings.py
 @@ -5,6 +5,7 @@ from collections.abc import Callable
  
  from contextor.core.analysis.lineage_extraction_emit import add_anchor, emit_flow, occurrence
  from contextor.core.analysis.lineage_extraction_state import LineageExtractionState
-+from contextor.core.analysis.lineage_extraction_surfaces import observe_all_assignment, observe_all_augassign, observe_all_delete
++from contextor.core.analysis.lineage_extraction_surfaces import observe_all_assignment, observe_all_augassign
  from contextor.core.domain.lineage_facts import (
      ExtractedOccurrenceRef,
      LineageConfidence,
-@@ -30,6 +31,8 @@ def visit_name(
+@@ -27,9 +28,11 @@ def visit_name(
+     if isinstance(node.ctx, ast.Store):
+         add_anchor(state, paths, "binding", node, node.id, owner)
+         state.declare_local(owner, node.id)
++        state.note_module_all_touch(owner, node.id)
          return
      if isinstance(node.ctx, ast.Del):
          state.declare_local(owner, node.id)
-+        if owner is not None and state._owner_kind.get(owner) == "module" and node.id == "__all__":
-+            observe_all_delete(state)
++        state.record_module_surface_delete(owner, node.id)
          return
      if isinstance(node.ctx, ast.Load):
          load = occurrence(state, paths, "name_load", node, node.id)
-@@ -169,7 +172,7 @@ def visit_assign(
+@@ -82,6 +85,7 @@ def assign_target(
+     if target.id in state.blocked_names(owner):
+         return None
+     state.frame(owner)[target.id] = binding
++    state.note_module_all_touch(owner, target.id)
+     callable_info = state._callable_values.get(source.local_id)
+     if callable_info is not None:
+         state._callables_by_binding[binding.local_id] = callable_info
+@@ -122,6 +126,7 @@ def runtime_bind_target(
+             target.id,
+         )
+         state.frame(owner)[target.id] = binding
++        state.note_module_all_touch(owner, target.id)
+         emit_flow(
+             state,
+             paths,
+@@ -169,7 +174,7 @@ def visit_assign(
  ) -> None:
      source = value(node.value, owner, walrus_owner)
      for target in node.targets:
@@ -441,7 +463,7 @@ index 2868b56..bbdd8ce 100644
              state,
              paths,
              target,
-@@ -178,6 +181,8 @@ def visit_assign(
+@@ -178,6 +183,8 @@ def visit_assign(
              walrus_owner,
              visit=visit,
          )
@@ -450,20 +472,70 @@ index 2868b56..bbdd8ce 100644
  
  
  def visit_ann_assign(
-@@ -247,6 +252,8 @@ def visit_aug_assign(
+@@ -247,6 +254,10 @@ def visit_aug_assign(
      value: ValueFn,
      visit: VisitFn,
  ) -> None:
++    if isinstance(node.target, ast.Name):
++        state.note_module_all_touch(owner, node.target.id)
 +    if owner is not None and state._owner_kind.get(owner) == "module" and isinstance(node.target, ast.Name) and node.target.id == "__all__":
 +        observe_all_augassign(state)
      if not isinstance(node.target, ast.Name):
          visit(node.target, owner, walrus_owner)
          value(node.value, owner, walrus_owner)
+diff --git a/contextor/core/analysis/lineage_extraction_calls.py b/contextor/core/analysis/lineage_extraction_calls.py
+index 2eaaf36..0e7c5bb 100644
+--- a/contextor/core/analysis/lineage_extraction_calls.py
++++ b/contextor/core/analysis/lineage_extraction_calls.py
+@@ -15,6 +15,7 @@ def register_import_binding(state: LineageExtractionState, paths: dict[int, str]
+     state.declare_local(owner, local_name)
+     if local_name in state.blocked_names(owner): return
+     state.frame(owner)[local_name] = ExtractedOccurrenceRef(binding_id)
++    state.note_module_all_touch(owner, local_name)
+     if module_name is not None: state.import_frame(owner)[local_name] = _ImportInfo(module_name, symbol_name, binding_id)
+ 
+ 
+diff --git a/contextor/core/analysis/lineage_extraction_control.py b/contextor/core/analysis/lineage_extraction_control.py
+index c1e16f7..61ba673 100644
+--- a/contextor/core/analysis/lineage_extraction_control.py
++++ b/contextor/core/analysis/lineage_extraction_control.py
+@@ -121,6 +121,7 @@ def visit_except_handler(state: LineageExtractionState, paths: dict[int, str], n
+         if alias_name not in state.blocked_names(owner):
+             source = occurrence(state, paths, "runtime_bound_local", node, alias_name)
+             state.frame(owner)[alias_name] = binding
++            state.note_module_all_touch(owner, alias_name)
+             emit_flow(state, paths, source=source, target=binding, relation=LineageRelation.ASSIGNS, node=node, resolution_kind=ResolutionKind.LEXICAL_EXACT, confidence=LineageConfidence.CONFIRMED)
+     for child in node.body:
+         visit(child, owner, walrus_owner)
+@@ -151,12 +152,14 @@ def visit_match_as(state: LineageExtractionState, paths: dict[int, str], node: a
+     if node.name is not None:
+         add_anchor(state, paths, "binding", node, node.name, owner)
+         state.declare_local(owner, node.name)
++        state.note_module_all_touch(owner, node.name)
+ 
+ 
+ def visit_match_star(state: LineageExtractionState, paths: dict[int, str], node: ast.MatchStar, owner: str | None) -> None:
+     if node.name is not None:
+         add_anchor(state, paths, "binding", node, node.name, owner)
+         state.declare_local(owner, node.name)
++        state.note_module_all_touch(owner, node.name)
+ 
+ 
+ def visit_match_mapping(state: LineageExtractionState, paths: dict[int, str], node: ast.MatchMapping, owner: str | None, walrus_owner: str | None, *, visit: VisitFn) -> None:
+@@ -167,3 +170,4 @@ def visit_match_mapping(state: LineageExtractionState, paths: dict[int, str], no
+     if node.rest is not None:
+         add_anchor(state, paths, "binding", node, node.rest, owner)
+         state.declare_local(owner, node.rest)
++        state.note_module_all_touch(owner, node.rest)
 diff --git a/contextor/core/analysis/lineage_extraction_emit.py b/contextor/core/analysis/lineage_extraction_emit.py
-index 5e13328..b6957f1 100644
+index 5e13328..13a5433 100644
 --- a/contextor/core/analysis/lineage_extraction_emit.py
 +++ b/contextor/core/analysis/lineage_extraction_emit.py
-@@ -4,7 +4,7 @@ import ast
+@@ -1,10 +1,11 @@
+ from __future__ import annotations
+ 
+ import ast
++from urllib.parse import quote
  
  from contextor.core.analysis.lineage_extraction_contracts import _source_span, build_local_occurrence_id
  from contextor.core.analysis.lineage_extraction_state import _CallableInfo, _ParameterInfo, LineageExtractionState
@@ -472,12 +544,12 @@ index 5e13328..b6957f1 100644
  
  
  def add_anchor(state: LineageExtractionState, paths: dict[int, str], kind: str, node: ast.AST, name: str | None, owner_local_id: str | None, *, ordinal: int = 0, local_kind: str | None = None) -> str:
-@@ -37,6 +37,14 @@ def emit_flow(state: LineageExtractionState, paths: dict[int, str], *, source, t
+@@ -37,6 +38,14 @@ def emit_flow(state: LineageExtractionState, paths: dict[int, str], *, source, t
      state.flows.append(ExtractedFlowFact(local_id, source, target, relation, _source_span(node), resolution_kind, confidence, dynamic_boundary=dynamic_boundary))
  
  
 +def emit_surface(state: LineageExtractionState, paths: dict[int, str], *, kind: SurfaceKind, exposed, node: ast.AST, declared_name: str, resolution_kind: ResolutionKind, confidence: LineageConfidence, declaration_evidence: SurfaceDeclarationEvidence, ordinal: int = 0) -> None:
-+    local_id = f"surface:v1:{kind.value}:{paths[id(node)]}:i:{ordinal}:n:{declared_name}"
++    local_id = f"surface:v1:{kind.value}:{paths[id(node)]}:i:{ordinal}:n:{quote(declared_name, safe='')}"
 +    if local_id in state._surface_ids:
 +        raise ValueError(f"Duplicate lineage surface id: {local_id}")
 +    state._surface_ids.add(local_id)
@@ -488,7 +560,7 @@ index 5e13328..b6957f1 100644
      return ExtractedSymbolicRef(ExtractedSymbolicKind.PARAMETER, module_name, callable_symbol_name, parameter.local_id)
  
 diff --git a/contextor/core/analysis/lineage_extraction_state.py b/contextor/core/analysis/lineage_extraction_state.py
-index 3727043..25592c9 100644
+index 3727043..103a1e9 100644
 --- a/contextor/core/analysis/lineage_extraction_state.py
 +++ b/contextor/core/analysis/lineage_extraction_state.py
 @@ -3,7 +3,7 @@ from __future__ import annotations
@@ -511,7 +583,7 @@ index 3727043..25592c9 100644
      _occurrences: dict[tuple[str, int, str | None, int], ExtractedOccurrenceRef] = field(default_factory=dict)
      _bindings: dict[str | None, dict[str, ExtractedOccurrenceRef]] = field(default_factory=dict)
      _callables: dict[str | None, dict[str, _CallableInfo]] = field(default_factory=dict)
-@@ -86,6 +88,33 @@ class LineageExtractionState:
+@@ -86,6 +88,50 @@ class LineageExtractionState:
      _declared_locals: dict[str, set[str]] = field(default_factory=dict)
      _capture_requests: dict[str, _CaptureRequest] = field(default_factory=dict)
      _lexical_cells: dict[tuple[str, str], ExtractedOccurrenceRef] = field(default_factory=dict)
@@ -520,6 +592,7 @@ index 3727043..25592c9 100644
 +    _all_status: str = "absent"
 +    _all_binding: ExtractedOccurrenceRef | None = None
 +    _all_items: tuple[tuple[str, ast.Constant], ...] = ()
++    _module_surface_deleted_bindings: dict[str, str | None] = field(default_factory=dict)
 +
 +    def begin_module_statement(self, node: ast.AST) -> None:
 +        self._module_direct_statement = node
@@ -542,11 +615,27 @@ index 3727043..25592c9 100644
 +        self._all_status = "dynamic_or_ambiguous"
 +        self._all_binding = None
 +        self._all_items = ()
++
++    def note_module_all_touch(self, owner: str | None, name: str) -> None:
++        if owner is not None and self._owner_kind.get(owner) == "module" and name == "__all__":
++            self.invalidate_all()
++
++    def record_module_surface_delete(self, owner: str | None, name: str) -> None:
++        if owner is not None and self._owner_kind.get(owner) == "module":
++            current = self.frame(owner).get(name)
++            self._module_surface_deleted_bindings[name] = None if current is None else current.local_id
++            self.note_module_all_touch(owner, name)
++
++    def current_module_surface_binding(self, owner: str, name: str) -> ExtractedOccurrenceRef | None:
++        current = self.frame(owner).get(name)
++        if current is not None and current.local_id == self._module_surface_deleted_bindings.get(name):
++            return None
++        return current
  
      def frame(self, owner: str | None) -> dict[str, ExtractedOccurrenceRef]:
          return self._bindings.setdefault(owner, {})
 diff --git a/contextor/core/analysis/lineage_extraction_visitors.py b/contextor/core/analysis/lineage_extraction_visitors.py
-index 5d1b18f..3ace935 100644
+index 5d1b18f..8a26c16 100644
 --- a/contextor/core/analysis/lineage_extraction_visitors.py
 +++ b/contextor/core/analysis/lineage_extraction_visitors.py
 @@ -25,6 +25,7 @@ from contextor.core.analysis.lineage_extraction_state import (
@@ -571,7 +660,23 @@ index 5d1b18f..3ace935 100644
  
  
  def visit_class_def(
-@@ -286,6 +292,8 @@ def visit_call(
+@@ -84,6 +90,7 @@ def visit_class_def(
+         visit(child, class_id, None)
+     if node.name not in state.blocked_names(owner):
+         state.frame(owner)[node.name] = ExtractedOccurrenceRef(class_id)
++        state.note_module_all_touch(owner, node.name)
+ 
+ 
+ def visit_function(
+@@ -150,6 +157,7 @@ def visit_function(
+         state.frame(owner)[node.name] = ExtractedOccurrenceRef(
+             function_id
+         )
++        state.note_module_all_touch(owner, node.name)
+ 
+ 
+ def visit_lambda(
+@@ -286,6 +294,8 @@ def visit_call(
      visit: VisitFn,
      value: ValueFn,
  ) -> None:
@@ -581,7 +686,7 @@ index 5d1b18f..3ace935 100644
      callable_info = resolve_current_local_callable(
          state,
 diff --git a/tests/analysis/test_lineage_extraction.py b/tests/analysis/test_lineage_extraction.py
-index bcfe909..ab05e5f 100644
+index bcfe909..d46e3dc 100644
 --- a/tests/analysis/test_lineage_extraction.py
 +++ b/tests/analysis/test_lineage_extraction.py
 @@ -23,6 +23,8 @@ from contextor.core.domain.lineage_facts import (
@@ -623,7 +728,7 @@ index bcfe909..ab05e5f 100644
      path.write_text("def broken(:\n", encoding="utf-8")
      broken = prepare_source_update(file_path=path, module_path="pkg", is_new=True, old_module=None, old_artifacts=None, old_usage=None, source_key="pkg.py")
      assert broken.has_error and broken.error_status == "SYNTAX_ERROR" and broken.extracted_lineage_facts is None
-@@ -2023,3 +2030,92 @@ def test_stage_1d4_o_existing_callable_facts_remain_and_callback_relations_are_a
+@@ -2023,3 +2030,135 @@ def test_stage_1d4_o_existing_callable_facts_remain_and_callback_relations_are_a
      facts = _stage_1c_facts("def apply(callback): callback()\ndef f(): return 1\ng=f\napply(g)\nresult=g()\n")
      assert len(_stage_1d4_flows(facts, LineageRelation.CALLBACK_REGISTERS)) == 1
      assert _stage_1c_call_result_flows(facts)[-1].resolution_kind is ResolutionKind.CALL_EXACT
@@ -716,6 +821,49 @@ index bcfe909..ab05e5f 100644
 +def test_stage_1e1_entrypoint_and_callback_registration_do_not_create_surface_kinds():
 +    facts = _stage_1c_facts("if __name__ == '__main__':\n main()\ndef apply(callback): callback()\ndef f(): pass\napply(f)\n")
 +    assert not [surface for surface in facts.surfaces if surface.kind in {SurfaceKind.ENTRYPOINT, SurfaceKind.REGISTRATION}]
++
++
++@pytest.mark.parametrize("source", [
++    "x = 1\ndel x\n",
++    "x = 1\ndel x\n__all__ = ['x']\n",
++    "from provider import x\ndel x\n__all__ = ['x']\n",
++])
++def test_stage_1e1_deleted_module_binding_never_retains_surface_authority(source):
++    facts = _stage_1c_facts(source)
++    assert not [surface for surface in facts.surfaces if surface.confidence is LineageConfidence.CONFIRMED]
++    assert not [surface for surface in facts.surfaces if surface.kind is SurfaceKind.PUBLIC_SYMBOL]
++
++
++def test_stage_1e1_later_binding_supersedes_surface_delete_tombstone():
++    facts = _stage_1c_facts("x = 1\ndel x\nx = 2\n__all__ = ['x']\n")
++    surface = facts.surfaces[0]
++    assert surface.kind is SurfaceKind.EXPORT
++    assert surface.confidence is LineageConfidence.CONFIRMED
++    assert surface.exposed == ExtractedOccurrenceRef(_stage_1c_named(facts, "binding", "x")[-1].local_id)
++
++
++@pytest.mark.parametrize("source", [
++    "__all__: list[str] = ['a']\ndef a(): pass\n",
++    "(__all__ := ['a'])\ndef a(): pass\n",
++    "import provider as __all__\ndef a(): pass\n",
++    "for __all__ in values: pass\ndef a(): pass\n",
++    "[__all__] = [['a']]\ndef a(): pass\n",
++])
++def test_stage_1e1_non_assign_all_touches_suppress_default_fallback(source):
++    assert _stage_1c_facts(source).surfaces == ()
++
++
++def test_stage_1e1_empty_literal_all_member_fails_closed_without_domain_error():
++    assert _stage_1c_facts("__all__ = ['']\ndef a(): pass\n").surfaces == ()
++
++
++def test_stage_1e1_surface_id_escapes_non_identifier_literal_name_deterministically():
++    first = _stage_1c_facts("__all__ = ['a:b/c']\n")
++    second = _stage_1c_facts("__all__ = ['a:b/c']\n")
++    assert first == second
++    surface = first.surfaces[0]
++    assert surface.declared_name == "a:b/c"
++    assert ":n:a%3Ab%2Fc" in surface.local_id
 diff --git a/tests/analysis/test_lineage_extraction_equivalence.py b/tests/analysis/test_lineage_extraction_equivalence.py
 index 6605ac7..541a7ba 100644
 --- a/tests/analysis/test_lineage_extraction_equivalence.py
@@ -802,10 +950,10 @@ index 6605ac7..541a7ba 100644
 
 diff --git a/contextor/core/analysis/lineage_extraction_surfaces.py b/contextor/core/analysis/lineage_extraction_surfaces.py
 new file mode 100644
-index 0000000..5ba9442
+index 0000000..a5d71d4
 --- /dev/null
 +++ b/contextor/core/analysis/lineage_extraction_surfaces.py
-@@ -0,0 +1,88 @@
+@@ -0,0 +1,87 @@
 +from __future__ import annotations
 +
 +import ast
@@ -827,7 +975,7 @@ index 0000000..5ba9442
 +        return None
 +    items: list[tuple[str, ast.Constant]] = []
 +    for item in node.value.elts:
-+        if not isinstance(item, ast.Constant) or not isinstance(item.value, str):
++        if not isinstance(item, ast.Constant) or not isinstance(item.value, str) or not item.value:
 +            return None
 +        items.append((item.value, item))
 +    return tuple(items)
@@ -872,14 +1020,13 @@ index 0000000..5ba9442
 +
 +
 +def finalize_surfaces(state: LineageExtractionState, paths: dict[int, str], module_name: str, module_owner: str) -> None:
-+    frame = state.frame(module_owner)
-+    if state._all_status == "exact" and state._all_binding == frame.get("__all__"):
++    if state._all_status == "exact" and state._all_binding == state.current_module_surface_binding(module_owner, "__all__"):
 +        seen: set[str] = set()
 +        for ordinal, (name, item) in enumerate(state._all_items):
 +            if name in seen:
 +                continue
 +            seen.add(name)
-+            current = frame.get(name)
++            current = state.current_module_surface_binding(module_owner, name)
 +            candidate = state._module_public_candidates.get(name)
 +            imported = state.import_frame(module_owner).get(name)
 +            if candidate is not None and candidate[0] == current:
@@ -892,6 +1039,6 @@ index 0000000..5ba9442
 +    if state._all_status != "absent":
 +        return
 +    for ordinal, (name, (binding, node)) in enumerate(sorted(state._module_public_candidates.items())):
-+        if name and not name.startswith("_") and frame.get(name) == binding:
++        if name and not name.startswith("_") and state.current_module_surface_binding(module_owner, name) == binding:
 +            emit_surface(state, paths, kind=SurfaceKind.PUBLIC_SYMBOL, exposed=binding, node=node, declared_name=name, resolution_kind=ResolutionKind.PYTHON_NAME_CONVENTION, confidence=LineageConfidence.INFERRED, declaration_evidence=SurfaceDeclarationEvidence.STATIC_DECLARATION, ordinal=ordinal)
 ~~~

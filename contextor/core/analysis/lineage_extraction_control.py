@@ -121,6 +121,7 @@ def visit_except_handler(state: LineageExtractionState, paths: dict[int, str], n
         if alias_name not in state.blocked_names(owner):
             source = occurrence(state, paths, "runtime_bound_local", node, alias_name)
             state.frame(owner)[alias_name] = binding
+            state.note_module_all_touch(owner, alias_name)
             emit_flow(state, paths, source=source, target=binding, relation=LineageRelation.ASSIGNS, node=node, resolution_kind=ResolutionKind.LEXICAL_EXACT, confidence=LineageConfidence.CONFIRMED)
     for child in node.body:
         visit(child, owner, walrus_owner)
@@ -151,12 +152,14 @@ def visit_match_as(state: LineageExtractionState, paths: dict[int, str], node: a
     if node.name is not None:
         add_anchor(state, paths, "binding", node, node.name, owner)
         state.declare_local(owner, node.name)
+        state.note_module_all_touch(owner, node.name)
 
 
 def visit_match_star(state: LineageExtractionState, paths: dict[int, str], node: ast.MatchStar, owner: str | None) -> None:
     if node.name is not None:
         add_anchor(state, paths, "binding", node, node.name, owner)
         state.declare_local(owner, node.name)
+        state.note_module_all_touch(owner, node.name)
 
 
 def visit_match_mapping(state: LineageExtractionState, paths: dict[int, str], node: ast.MatchMapping, owner: str | None, walrus_owner: str | None, *, visit: VisitFn) -> None:
@@ -167,3 +170,4 @@ def visit_match_mapping(state: LineageExtractionState, paths: dict[int, str], no
     if node.rest is not None:
         add_anchor(state, paths, "binding", node, node.rest, owner)
         state.declare_local(owner, node.rest)
+        state.note_module_all_touch(owner, node.rest)
