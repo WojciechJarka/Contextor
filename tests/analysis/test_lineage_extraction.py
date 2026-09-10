@@ -1748,3 +1748,122 @@ def test_stage_1d2_factory_return_alias_is_not_newly_resolved():
     )
     flows = _stage_1c_call_result_flows(facts)
     assert flows[-1].resolution_kind is not ResolutionKind.CALL_EXACT
+
+
+def _stage_1d3_final_call(facts):
+    return _stage_1c_call_result_flows(facts)[-1]
+
+
+def test_stage_1d3_a_factory_returned_local_callable_assigns_exactly():
+    facts = _stage_1c_facts(
+        "def factory():\n def f(): return 1\n return f\ng=factory()\nresult=g()\n"
+    )
+    flow = _stage_1d3_final_call(facts)
+    assert flow.resolution_kind is ResolutionKind.CALL_EXACT
+    assert isinstance(flow.source, ExtractedSymbolicRef) and flow.source.symbol_name == "f"
+
+
+def test_stage_1d3_b_factory_returned_local_alias_assigns_exactly():
+    facts = _stage_1c_facts(
+        "def factory():\n def f(): return 1\n g=f\n return g\nh=factory()\nresult=h()\n"
+    )
+    flow = _stage_1d3_final_call(facts)
+    assert flow.resolution_kind is ResolutionKind.CALL_EXACT
+    assert isinstance(flow.source, ExtractedSymbolicRef) and flow.source.symbol_name == "f"
+
+
+def test_stage_1d3_c_factory_returned_lambda_assigns_exactly():
+    facts = _stage_1c_facts("def factory():\n return lambda: 1\ng=factory()\nresult=g()\n")
+    flow = _stage_1d3_final_call(facts)
+    assert flow.resolution_kind is ResolutionKind.CALL_EXACT
+    assert isinstance(flow.source, ExtractedSymbolicRef) and flow.source.symbol_name.startswith("lambda@")
+
+
+def test_stage_1d3_d_direct_factory_result_invocation_is_exact():
+    facts = _stage_1c_facts("def factory():\n def f(): return 1\n return f\nresult=factory()()\n")
+    flow = _stage_1d3_final_call(facts)
+    assert flow.resolution_kind is ResolutionKind.CALL_EXACT
+    assert isinstance(flow.source, ExtractedSymbolicRef) and flow.source.symbol_name == "f"
+
+
+def test_stage_1d3_e_terminal_return_of_proven_call_result_propagates():
+    facts = _stage_1c_facts(
+        "def factory2():\n def factory1():\n  def f(): return 1\n  return f\n return factory1()\ng=factory2()\nresult=g()\n"
+    )
+    flow = _stage_1d3_final_call(facts)
+    assert flow.resolution_kind is ResolutionKind.CALL_EXACT
+    assert isinstance(flow.source, ExtractedSymbolicRef) and flow.source.symbol_name == "f"
+
+
+def test_stage_1d3_f_terminal_return_after_other_statements_is_exact():
+    facts = _stage_1c_facts(
+        "def factory():\n marker=1\n def f(): return 1\n return f\ng=factory()\nresult=g()\n"
+    )
+    assert _stage_1d3_final_call(facts).resolution_kind is ResolutionKind.CALL_EXACT
+
+
+def test_stage_1d3_g_multiple_explicit_returns_fail_closed():
+    facts = _stage_1c_facts(
+        "def factory(flag):\n def f(): return 1\n if flag: return f\n return f\ng=factory(True)\nresult=g()\n"
+    )
+    assert _stage_1d3_final_call(facts).resolution_kind is not ResolutionKind.CALL_EXACT
+
+
+def test_stage_1d3_h_conditional_only_return_fails_closed():
+    facts = _stage_1c_facts(
+        "def factory(flag):\n def f(): return 1\n if flag: return f\ng=factory(True)\nresult=g()\n"
+    )
+    assert _stage_1d3_final_call(facts).resolution_kind is not ResolutionKind.CALL_EXACT
+
+
+def test_stage_1d3_i_mixed_callable_and_non_callable_returns_fail_closed():
+    facts = _stage_1c_facts(
+        "def factory(flag):\n def f(): return 1\n if flag: return f\n return 1\ng=factory(True)\nresult=g()\n"
+    )
+    assert _stage_1d3_final_call(facts).resolution_kind is not ResolutionKind.CALL_EXACT
+
+
+def test_stage_1d3_j_async_factory_return_does_not_become_callable_value():
+    facts = _stage_1c_facts(
+        "async def factory():\n def f(): return 1\n return f\ng=factory()\nresult=g()\n"
+    )
+    assert _stage_1d3_final_call(facts).resolution_kind is not ResolutionKind.CALL_EXACT
+
+
+def test_stage_1d3_k_generator_factory_return_does_not_become_callable_value():
+    facts = _stage_1c_facts(
+        "def factory():\n def f(): return 1\n yield 1\n return f\ng=factory()\nresult=g()\n"
+    )
+    assert _stage_1d3_final_call(facts).resolution_kind is not ResolutionKind.CALL_EXACT
+
+
+@pytest.mark.parametrize(
+    "source",
+    (
+        "from pkg import factory\ng=factory()\nresult=g()\n",
+        "g=obj.factory()\nresult=g()\n",
+        "g=[factory][0]()\nresult=g()\n",
+        "g=getattr(obj, 'factory')()\nresult=g()\n",
+    ),
+)
+def test_stage_1d3_l_imported_attribute_container_and_reflection_fail_closed(source):
+    assert _stage_1d3_final_call(_stage_1c_facts(source)).resolution_kind is not ResolutionKind.CALL_EXACT
+
+
+def test_stage_1d3_m_module_global_return_lookup_remains_unresolved():
+    facts = _stage_1c_facts(
+        "def f(): return 1\ndef factory(): return f\ng=factory()\nresult=g()\n"
+    )
+    assert _stage_1d3_final_call(facts).resolution_kind is not ResolutionKind.CALL_EXACT
+
+
+def test_stage_1d3_n_closure_cell_callable_value_remains_unresolved():
+    facts = _stage_1c_facts(
+        "def outer():\n def f(): return 1\n def factory(): return f\n g=factory()\n return g()\n"
+    )
+    assert _stage_1d3_final_call(facts).resolution_kind is not ResolutionKind.CALL_EXACT
+
+
+def test_stage_1d3_o_existing_local_callable_alias_remains_exact():
+    facts = _stage_1c_facts("def f(): return 1\ng=f\nresult=g()\n")
+    assert _stage_1d3_final_call(facts).resolution_kind is ResolutionKind.CALL_EXACT

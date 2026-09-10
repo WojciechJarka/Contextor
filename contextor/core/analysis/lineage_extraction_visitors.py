@@ -143,6 +143,7 @@ def visit_function(
         )
     for child in node.body:
         visit(child, function_id, None)
+    state.finalize_function_callable_return(function_id, node)
     if node.name not in state.blocked_names(owner):
         state.frame(owner)[node.name] = ExtractedOccurrenceRef(
             function_id
@@ -214,6 +215,7 @@ def visit_lambda(
         resolution_kind=ResolutionKind.LEXICAL_EXACT,
         confidence=LineageConfidence.CONFIRMED,
     )
+    state.publish_lambda_callable_return(lambda_id, body_source)
     lambda_value = occurrence(
         state,
         paths,
@@ -233,15 +235,18 @@ def visit_return(
     *,
     value: ValueFn,
 ) -> None:
-    if node.value is None:
-        return
-    source = value(node.value, owner, walrus_owner)
+    source = value(node.value, owner, walrus_owner) if node.value is not None else None
+    returned_callable = (
+        state._callable_values.get(source.local_id)
+        if source is not None
+        else None
+    )
     callable_info = (
         state._callables_by_anchor.get(owner)
         if owner is not None
         else None
     )
-    if callable_info is not None:
+    if callable_info is not None and source is not None:
         emit_flow(
             state,
             paths,
@@ -252,6 +257,20 @@ def visit_return(
             resolution_kind=ResolutionKind.LEXICAL_EXACT,
             confidence=LineageConfidence.CONFIRMED,
         )
+    state.record_callable_return(owner, node, returned_callable)
+
+
+def visit_yield(
+    state: LineageExtractionState,
+    node: ast.Yield | ast.YieldFrom,
+    owner: str | None,
+    walrus_owner: str | None,
+    *,
+    visit: VisitFn,
+) -> None:
+    state.mark_generator(owner)
+    if node.value is not None:
+        visit(node.value, owner, walrus_owner)
 
 
 def visit_call(
@@ -276,6 +295,14 @@ def visit_call(
         node,
         owner,
     )
+    if callable_info is None and isinstance(node.func, ast.Call):
+        inner_call_result = occurrence(
+            state,
+            paths,
+            "call_result",
+            node.func,
+        )
+        callable_info = state._callable_values.get(inner_call_result.local_id)
     callee_ref = (
         state.frame(owner).get(node.func.id)
         if isinstance(node.func, ast.Name)
@@ -319,6 +346,9 @@ def visit_call(
             resolution_kind=ResolutionKind.CALL_EXACT,
             confidence=LineageConfidence.CONFIRMED,
         )
+        returned_callable = state._callable_returns.get(callable_info.anchor_id)
+        if returned_callable is not None:
+            state._callable_values[call_result.local_id] = returned_callable
         return
     if imported_return is not None:
         emit_flow(

@@ -54,6 +54,7 @@ from contextor.core.analysis.lineage_extraction_visitors import (
     visit_lambda,
     visit_module,
     visit_return,
+    visit_yield,
 )
 from contextor.core.analysis.lineage_extraction_state import LineageExtractionState
 from contextor.core.domain.lineage_facts import (
@@ -147,6 +148,12 @@ class _AnchorExtractor:
 
     def _visit_Return(self, node: ast.Return, owner: str | None, walrus_owner: str | None) -> None:
         return visit_return(self.state, self.paths, self.module_name, node, owner, walrus_owner, value=self._value)
+
+    def _visit_Yield(self, node: ast.Yield, owner: str | None, walrus_owner: str | None) -> None:
+        return visit_yield(self.state, node, owner, walrus_owner, visit=self._visit)
+
+    def _visit_YieldFrom(self, node: ast.YieldFrom, owner: str | None, walrus_owner: str | None) -> None:
+        return visit_yield(self.state, node, owner, walrus_owner, visit=self._visit)
 
     def _visit_Call(self, node: ast.Call, owner: str | None, walrus_owner: str | None) -> None:
         return visit_call(self.state, self.paths, self.module_name, node, owner, walrus_owner, visit=self._visit, value=self._value)

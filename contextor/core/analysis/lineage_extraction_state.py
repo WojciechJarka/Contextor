@@ -22,6 +22,12 @@ class _CallableInfo:
 
 
 @dataclass(frozen=True)
+class _CallableReturnRecord:
+    node: ast.Return
+    callable_info: _CallableInfo | None
+
+
+@dataclass(frozen=True)
 class _ImportInfo:
     module_name: str
     symbol_name: str | None
@@ -65,6 +71,9 @@ class LineageExtractionState:
     _callables_by_anchor: dict[str, _CallableInfo] = field(default_factory=dict)
     _callables_by_binding: dict[str, _CallableInfo] = field(default_factory=dict)
     _callable_values: dict[str, _CallableInfo] = field(default_factory=dict)
+    _return_records: dict[str, list[_CallableReturnRecord]] = field(default_factory=dict)
+    _callable_returns: dict[str, _CallableInfo] = field(default_factory=dict)
+    _generator_owners: set[str] = field(default_factory=set)
     _imports: dict[str | None, dict[str, _ImportInfo]] = field(default_factory=dict)
     _blocked: dict[str | None, set[str]] = field(default_factory=dict)
     _active_comprehensions: list[_ActiveComprehension] = field(default_factory=list)
@@ -105,6 +114,61 @@ class LineageExtractionState:
 
     def import_frame(self, owner: str | None) -> dict[str, _ImportInfo]:
         return self._imports.setdefault(owner, {})
+
+    def record_callable_return(
+        self,
+        owner: str | None,
+        node: ast.Return,
+        callable_info: _CallableInfo | None,
+    ) -> None:
+        if owner is None or self._owner_kind.get(owner) not in {
+            "function",
+            "async_function",
+            "lambda",
+        }:
+            return
+        self._return_records.setdefault(owner, []).append(
+            _CallableReturnRecord(node, callable_info)
+        )
+
+    def mark_generator(self, owner: str | None) -> None:
+        if owner is not None and self._owner_kind.get(owner) in {
+            "function",
+            "async_function",
+            "lambda",
+        }:
+            self._generator_owners.add(owner)
+
+    def finalize_function_callable_return(
+        self,
+        owner: str,
+        node: ast.FunctionDef | ast.AsyncFunctionDef,
+    ) -> None:
+        self._callable_returns.pop(owner, None)
+        records = self._return_records.get(owner, [])
+        if (
+            self._owner_kind.get(owner) == "function"
+            and owner not in self._generator_owners
+            and len(records) == 1
+            and node.body
+            and records[0].node is node.body[-1]
+            and records[0].callable_info is not None
+        ):
+            self._callable_returns[owner] = records[0].callable_info
+
+    def publish_lambda_callable_return(
+        self,
+        owner: str,
+        body_source: ExtractedOccurrenceRef,
+    ) -> None:
+        self._callable_returns.pop(owner, None)
+        callable_info = self._callable_values.get(body_source.local_id)
+        if (
+            self._owner_kind.get(owner) == "lambda"
+            and owner not in self._generator_owners
+            and callable_info is not None
+        ):
+            self._callable_returns[owner] = callable_info
 
     def register_owner(
         self,
