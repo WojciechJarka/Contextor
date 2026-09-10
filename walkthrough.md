@@ -1,547 +1,446 @@
-STATUS=FINAL_PASS
+STATUS=BLOCKED
 
-CONTEXTOR_EVIDENCE=Fresh pre-edit context: target at canonical revision 526, workspace_sync=verified, syntax checked_and_none, with three confirmed direct consumers. Active documentation/context and the deferred Contextor tool pool were inspected before capability selection. Post-edit analyze_single_file job 5792ea3a65c7459d97af182f21b01e8d for lineage_extraction_contracts.py completed successfully. Contextor reports fresh collision and cycle families with zero diagnostics; direct collision query for the new module returned total=0. Its state-file fingerprint is marked unverified by the single-file analysis, so that freshness limitation is recorded rather than inferred away. Textual verification confirms contracts has no facade import (its only lineage_extraction mention is the requested _PUBLIC_MODULE string).
+CONTEXTOR_EVIDENCE=Pre-edit Contextor edit-context was fresh/verified at revision 530; active and deferred Contextor pools were inspected. No post-edit architecture certification was run because the mandatory frozen-suite gate failed before completion.
 
-BASELINE_ORACLE=Before the production move, created the test-only deterministic corpus/serializer and calculated immutable hashes on the untouched BASE_HEAD extraction implementation. Baseline oracle passed: 2 passed in 0.76s. EXPECTED_HASHES was then written once and was not regenerated or changed after the production move. The corpus separately covers signatures/defaults/local calls, imports/alias/wildcard invalidation, If/For merge, Try/Except/Finally/Match, comprehension/runtime/walrus, async/yield, relative import arithmetic and resource limits. Serialization uses dataclass field order, Enum values, ordered sequences, recursively canonicalized mappings, compact sorted-key JSON and SHA-256.
+STATE_OWNERSHIP=Partial implementation created LineageExtractionState as the single holder of mutable fields and moved the five private records. However, acceptance cannot be completed under the frozen-test/no-properties contradiction below.
 
-IMPLEMENTATION=Added contextor/core/analysis/lineage_extraction_contracts.py. It contains exactly the five moved constants, five public contracts and eight specified helpers. Bodies/signatures were copied mechanically. It imports only ast, re, dataclass, Final, Protocol, quote/unquote and the four required lineage-domain types; it does not import state_manager or the facade. The facade now imports/re-exports all moved public and private names it still uses, including _FINGERPRINT_RE, _index_ast_paths, _module_name_from_source_key, _resolve_import_module and _source_span. _AnchorExtractor, private state records, dispatch, visitors and the public extraction entry point remain physically in the facade.
+EMISSION_OWNERSHIP=Partial implementation created lineage_extraction_emit.py and converted facade emission methods to forwarding adapters.
 
-PUBLIC_COMPAT=PASS. Existing __all__ remains unchanged with the same eight names in the same order. The compatibility test confirms all eight facade names and confirms __module__ == contextor.core.analysis.lineage_extraction for each moved public class/function. Metadata is set in contracts without wrappers.
+DISPATCH_INVARIANT=No dispatch code was moved or changed.
 
-NO_DUPLICATES=PASS. Textual verification finds each of the four moved class definitions and eight moved helper definitions exactly once, exclusively in lineage_extraction_contracts.py; none remains defined in the facade. There is one existing extractor/traversal path only.
+ORACLE=PASS before D2 edits: 2 passed in 0.79s. The D1 oracle file and EXPECTED_HASHES were not modified.
 
-FILES_CHANGED=contextor/core/analysis/lineage_extraction.py; contextor/core/analysis/lineage_extraction_contracts.py; tests/analysis/test_lineage_extraction_equivalence.py; walkthrough.md.
+NO_DUPLICATES=Not certified because implementation is blocked before final textual/architecture verification.
 
-TESTS_RUN=
-1. .venv\Scripts\python.exe -m pytest tests/analysis/test_lineage_extraction_equivalence.py -q (baseline before move)
-2. .venv\Scripts\python.exe -m pytest tests/analysis/test_lineage_extraction_equivalence.py -q (after move)
-3. .venv\Scripts\python.exe -m pytest tests/analysis/test_lineage_extraction.py -q
-4. .venv\Scripts\python.exe -m pytest tests/analysis/test_lineage_extraction.py tests/analysis/test_lineage_extraction_equivalence.py tests/test_no_double_parse.py tests/test_index_fusion.py -q
-5. git diff --check -- contextor/core/analysis/lineage_extraction.py contextor/core/analysis/lineage_extraction_contracts.py tests/analysis/test_lineage_extraction_equivalence.py
+FILES_CHANGED=contextor/core/analysis/lineage_extraction.py; contextor/core/analysis/lineage_extraction_state.py; contextor/core/analysis/lineage_extraction_emit.py; walkthrough.md.
 
-TEST_RESULTS=Baseline oracle: 2 passed in 0.76s. Post-move oracle/compatibility: 2 passed in 0.57s. Existing lineage suite: 97 passed in 1.75s. Combined requested suite: 110 passed in 4.42s (the original 108 plus the two new oracle/compatibility tests). Diff check passed with no errors.
+TESTS_RUN=.venv\Scripts\python.exe -m pytest tests/analysis/test_lineage_extraction_equivalence.py tests/analysis/test_lineage_extraction.py -q; git diff --check -- contextor/core/analysis/lineage_extraction.py contextor/core/analysis/lineage_extraction_state.py contextor/core/analysis/lineage_extraction_emit.py
+
+TEST_RESULTS=1 failed, 98 passed. The frozen existing test tests/analysis/test_lineage_extraction.py::test_stage_1c_occurrence_cache_reuses_same_ref directly asserts len(extractor._ids) == 1. D2 simultaneously requires extractor __dict__ contain only paths/source_key/module_name/state and expressly bans compatibility @property for old state fields. With _ids moved into state, the frozen test necessarily raises AttributeError. Adding a property violates NO_PROPERTIES and state ownership; changing the test violates FILES_FROZEN. Direction is required: authorize changing that private-test assertion to extractor.state._ids, or authorize the forbidden compatibility property.
 
 FULL_DIFFS=
-diff --git a/contextor/core/analysis/lineage_extraction.py b/contextor/core/analysis/lineage_extraction.py
-index 0a9254a..6227c9a 100644
++diff --git a/contextor/core/analysis/lineage_extraction.py b/contextor/core/analysis/lineage_extraction.py
+index 6227c9a..7b186d9 100644
 --- a/contextor/core/analysis/lineage_extraction.py
 +++ b/contextor/core/analysis/lineage_extraction.py
-@@ -1,18 +1,28 @@
- from __future__ import annotations
- 
- import ast
--import re
- from dataclasses import dataclass
--from typing import Final, Protocol
--from urllib.parse import quote, unquote
- 
- from contextor.core.analysis.state_manager import canonical_python_source_path
-+from contextor.core.analysis.lineage_extraction_contracts import (
-+    DEFAULT_LINEAGE_EXTRACTION_LIMITS,
-+    ExtractedLineageContribution,
-+    ExtractedLineageProvider,
-+    LineageExtractionLimits,
-+    ParsedLineageSourceInput,
-+    _FINGERPRINT_RE,
-+    _index_ast_paths,
-+    _module_name_from_source_key,
-+    _resolve_import_module,
-+    _source_span,
-+    build_local_occurrence_id,
-+    parse_local_occurrence_id,
-+)
+@@ -18,6 +18,8 @@ from contextor.core.analysis.lineage_extraction_contracts import (
+     build_local_occurrence_id,
+     parse_local_occurrence_id,
+ )
++from contextor.core.analysis.lineage_extraction_emit import add_anchor, emit_flow, occurrence, parameter_symbolic, return_symbolic
++from contextor.core.analysis.lineage_extraction_state import _ActiveComprehension, _CallArgumentInfo, _CallableInfo, _ImportInfo, _ParameterInfo, LineageExtractionState
  from contextor.core.domain.lineage_facts import (
      ExtractedAnchorFact,
      ExtractedFlowFact,
-     ExtractedLineageSourceFacts,
-     ExtractedOccurrenceRef,
--    ExtractedSurfaceFact,
-     ExtractedSymbolicKind,
-     ExtractedSymbolicRef,
-     LineageConfidence,
-@@ -20,143 +30,8 @@ from contextor.core.domain.lineage_facts import (
-     LineageRelation,
-     ParameterKind,
-     ResolutionKind,
--    SourceSpan,
+@@ -33,112 +35,38 @@ from contextor.core.domain.lineage_facts import (
  )
  
--_LOCAL_ID_VERSION: Final[str] = "v1"
--_ANCHOR_KINDS: Final[frozenset[str]] = frozenset({"module", "class", "function", "async_function", "lambda", "comprehension", "parameter", "binding", "import_binding", "global_declaration", "nonlocal_declaration"})
--_LOCAL_ID_KINDS: Final[frozenset[str]] = _ANCHOR_KINDS | frozenset({
--    "parameter_posonly",
--    "parameter_poskw",
--    "parameter_kwonly",
--    "parameter_vararg",
--    "parameter_varkw",
--    "expression_result",
--    "name_load",
--    "call_site",
--    "call_argument",
--    "call_result",
--    "runtime_bound_local",
--})
--_AST_PATH_RE: Final[re.Pattern[str]] = re.compile(r"^(?:root|(?:0|[1-9]\d*)(?:\.(?:0|[1-9]\d*))*)$")
--_FINGERPRINT_RE: Final[re.Pattern[str]] = re.compile(r"^[0-9a-f]{64}$")
--
--
--@dataclass(frozen=True)
--class LineageExtractionLimits:
--    max_nodes: int = 100_000
--    max_ast_depth: int = 200
--
--    def __post_init__(self) -> None:
--        for label, value in (("max_nodes", self.max_nodes), ("max_ast_depth", self.max_ast_depth)):
--            if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
--                raise ValueError(f"{label} must be a positive integer.")
--
--
--DEFAULT_LINEAGE_EXTRACTION_LIMITS: Final[LineageExtractionLimits] = LineageExtractionLimits()
--
--
--@dataclass(frozen=True)
--class ParsedLineageSourceInput:
--    source_key: str
--    source_fingerprint: str
--    tree: ast.AST
--
--
--@dataclass(frozen=True)
--class ExtractedLineageContribution:
--    anchors: tuple[ExtractedAnchorFact, ...] = ()
--    flows: tuple[ExtractedFlowFact, ...] = ()
--    surfaces: tuple[ExtractedSurfaceFact, ...] = ()
--
--
--class ExtractedLineageProvider(Protocol):
--    def extract(self, source: ParsedLineageSourceInput) -> ExtractedLineageContribution: ...
--
--
--def _validate_ast_path(ast_path: str) -> None:
--    if not isinstance(ast_path, str) or _AST_PATH_RE.fullmatch(ast_path) is None:
--        raise ValueError("ast_path is not canonical.")
--
--
--def _encode_name(name: str | None) -> str:
--    if name is None:
--        return "-"
--    if not isinstance(name, str) or not name:
--        raise ValueError("name must be a non-empty string or None.")
--    return quote(name, safe="").replace("-", "%2D")
--
--
--def build_local_occurrence_id(kind: str, ast_path: str, name: str | None = None, *, ordinal: int = 0) -> str:
--    if kind not in _LOCAL_ID_KINDS:
--        raise ValueError(f"Unknown lineage local-id kind: {kind}")
--    _validate_ast_path(ast_path)
--    if isinstance(ordinal, bool) or not isinstance(ordinal, int) or ordinal < 0:
--        raise ValueError("ordinal must be a non-negative integer.")
--    return f"occ:{_LOCAL_ID_VERSION}:{kind}:{ast_path}:i:{ordinal}:n:{_encode_name(name)}"
--
--
--def parse_local_occurrence_id(value: str) -> tuple[str, str, int, str | None]:
--    if not isinstance(value, str):
--        raise ValueError("local occurrence id must be a string.")
--    parts = value.split(":")
--    if len(parts) != 8 or parts[0] != "occ" or parts[1] != _LOCAL_ID_VERSION or parts[4] != "i" or parts[6] != "n":
--        raise ValueError("Invalid local occurrence id.")
--    kind, ast_path = parts[2], parts[3]
--    if kind not in _LOCAL_ID_KINDS:
--        raise ValueError("Invalid local occurrence kind.")
--    _validate_ast_path(ast_path)
--    try:
--        ordinal = int(parts[5])
--    except ValueError as exc:
--        raise ValueError("Invalid local occurrence ordinal.") from exc
--    if ordinal < 0:
--        raise ValueError("Invalid local occurrence ordinal.")
--    name = None if parts[7] == "-" else unquote(parts[7])
--    if build_local_occurrence_id(kind, ast_path, name, ordinal=ordinal) != value:
--        raise ValueError("Local occurrence id is not canonical.")
--    return kind, ast_path, ordinal, name
--
--
--def _source_span(node: ast.AST) -> SourceSpan:
--    start_line = int(getattr(node, "lineno", 0) or 0)
--    start_column = int(getattr(node, "col_offset", 0) or 0)
--    end_line = int(getattr(node, "end_lineno", start_line) or start_line)
--    end_column = int(getattr(node, "end_col_offset", start_column) or start_column)
--    return SourceSpan(start_line, start_column, end_line, end_column)
--
--
--def _index_ast_paths(tree: ast.AST, limits: LineageExtractionLimits) -> tuple[dict[int, str], str | None]:
--    paths: dict[int, str] = {}
--    stack: list[tuple[ast.AST, str, int]] = [(tree, "root", 0)]
--    node_count = 0
--    while stack:
--        node, ast_path, depth = stack.pop()
--        node_count += 1
--        if node_count > limits.max_nodes:
--            return {}, "node_limit"
--        if depth > limits.max_ast_depth:
--            return {}, "ast_depth_limit"
--        paths[id(node)] = ast_path
--        children = list(ast.iter_child_nodes(node))
--        for index in range(len(children) - 1, -1, -1):
--            child_path = str(index) if ast_path == "root" else f"{ast_path}.{index}"
--            stack.append((children[index], child_path, depth + 1))
--    return paths, None
--
--
--def _module_name_from_source_key(source_key: str) -> str:
--    module_name = source_key[:-3].replace("/", ".")
--    return module_name[: -len(".__init__")] if module_name.endswith(".__init__") else module_name
--
--def _resolve_import_module(source_key: str, module_name: str | None, level: int) -> str | None:
--    if level == 0: return module_name
--    package_parts = source_key.split("/")[:-1]
--    if not package_parts or level > len(package_parts): return None
--    target_parts = list(package_parts[:len(package_parts) - (level - 1)])
--    if module_name: target_parts.extend(module_name.split("."))
--    return ".".join(target_parts) if target_parts else None
--
  
- @dataclass(frozen=True)
- class _ParameterInfo:
+-@dataclass(frozen=True)
+-class _ParameterInfo:
+-    local_id: str
+-    name: str
+-    kind: ParameterKind
+-    ordinal: int
+-
+-
+-@dataclass(frozen=True)
+-class _CallableInfo:
+-    name: str
+-    anchor_id: str
+-    parameters: tuple[_ParameterInfo, ...]
+-
+-
+-@dataclass(frozen=True)
+-class _ImportInfo:
+-    module_name: str
+-    symbol_name: str | None
+-    binding_id: str
+-
+-
+-@dataclass
+-class _ActiveComprehension:
+-    lookup_owner: str
+-    lexical_enclosing_owner: str | None
+-    effective_walrus_owner: str | None
+-    walrus_entry_frame: dict[str, ExtractedOccurrenceRef]
+-    touched_walrus_names: set[str]
+-
+-
+-@dataclass(frozen=True)
+-class _CallArgumentInfo:
+-    occurrence: ExtractedOccurrenceRef
+-    node: ast.AST
+-    kind: str
+-    keyword_name: str | None
+-
+-
+ class _AnchorExtractor:
+     def __init__(self, paths: dict[int, str], source_key: str) -> None:
+         self.paths = paths
+         self.source_key = source_key
+         self.module_name = _module_name_from_source_key(source_key)
+-        self.anchors: list[ExtractedAnchorFact] = []
+-        self.flows: list[ExtractedFlowFact] = []
+-        self._ids: set[str] = set()
+-        self._flow_ids: set[str] = set()
+-        self._occurrences: dict[tuple[str, int, str | None, int], ExtractedOccurrenceRef] = {}
+-        self._bindings: dict[str | None, dict[str, ExtractedOccurrenceRef]] = {}
+-        self._callables: dict[str | None, dict[str, _CallableInfo]] = {}
+-        self._callables_by_anchor: dict[str, _CallableInfo] = {}
+-        self._callables_by_binding: dict[str, _CallableInfo] = {}
+-        self._callable_values: dict[str, _CallableInfo] = {}
+-        self._imports: dict[str | None, dict[str, _ImportInfo]] = {}
+-        self._blocked: dict[str | None, set[str]] = {}
+-        self._active_comprehensions: list[_ActiveComprehension] = []
++        self.state = LineageExtractionState()
+ 
+     def extract(self, tree: ast.AST) -> tuple[tuple[ExtractedAnchorFact, ...], tuple[ExtractedFlowFact, ...]]:
+         self._visit(tree, None, None)
+-        return tuple(sorted(self.anchors)), tuple(sorted(self.flows))
++        return tuple(sorted(self.state.anchors)), tuple(sorted(self.state.flows))
+ 
+     def _add(self, kind: str, node: ast.AST, name: str | None, owner_local_id: str | None, *, ordinal: int = 0, local_kind: str | None = None) -> str:
+-        local_id = build_local_occurrence_id(local_kind or kind, self.paths[id(node)], name, ordinal=ordinal)
+-        if local_id in self._ids:
+-            raise ValueError(f"Duplicate lineage local id: {local_id}")
+-        self._ids.add(local_id)
+-        self.anchors.append(ExtractedAnchorFact(local_id=local_id, kind=kind, span=_source_span(node), owner_local_id=owner_local_id))
+-        return local_id
++        return add_anchor(self.state, self.paths, kind, node, name, owner_local_id, ordinal=ordinal, local_kind=local_kind)
+ 
+     def _occurrence(self, kind: str, node: ast.AST, name: str | None = None, *, ordinal: int = 0) -> ExtractedOccurrenceRef:
+-        cache_key = (kind, id(node), name, ordinal)
+-        cached = self._occurrences.get(cache_key)
+-        if cached is not None:
+-            return cached
+-        local_id = build_local_occurrence_id(
+-            kind,
+-            self.paths[id(node)],
+-            name,
+-            ordinal=ordinal,
+-        )
+-        if local_id in self._ids:
+-            raise ValueError(f"Duplicate lineage local id: {local_id}")
+-        self._ids.add(local_id)
+-        occurrence = ExtractedOccurrenceRef(local_id)
+-        self._occurrences[cache_key] = occurrence
+-        return occurrence
++        return occurrence(self.state, self.paths, kind, node, name, ordinal=ordinal)
+ 
+     def _flow(self, *, source, target, relation: LineageRelation, node: ast.AST, resolution_kind: ResolutionKind, confidence: LineageConfidence, ordinal: int = 0, dynamic_boundary: str | None = None) -> None:
+-        local_id = f"flow:v1:{relation.value}:{self.paths[id(node)]}:i:{ordinal}"
+-        if local_id in self._flow_ids: raise ValueError(f"Duplicate lineage flow id: {local_id}")
+-        self._flow_ids.add(local_id)
+-        self.flows.append(ExtractedFlowFact(local_id, source, target, relation, _source_span(node), resolution_kind, confidence, dynamic_boundary=dynamic_boundary))
++        emit_flow(self.state, self.paths, source=source, target=target, relation=relation, node=node, resolution_kind=resolution_kind, confidence=confidence, ordinal=ordinal, dynamic_boundary=dynamic_boundary)
+ 
+     def _frame(self, owner: str | None) -> dict[str, ExtractedOccurrenceRef]:
+-        return self._bindings.setdefault(owner, {})
++        return self.state.frame(owner)
+ 
+     def _clone_frame(self, owner: str | None) -> dict[str, ExtractedOccurrenceRef]:
+-        return dict(self._frame(owner))
++        return self.state.clone_frame(owner)
+ 
+     def _replace_frame(
+         self,
+         owner: str | None,
+         frame: dict[str, ExtractedOccurrenceRef],
+     ) -> None:
+-        self._bindings[owner] = dict(frame)
++        self.state.replace_frame(owner, frame)
+ 
+     def _begin_comprehension(
+         self,
+@@ -162,7 +90,7 @@ class _AnchorExtractor:
+         imports.update(
+             self._import_frame(lexical_enclosing_owner)
+         )
+-        self._active_comprehensions.append(record)
++        self.state._active_comprehensions.append(record)
+         return record
+ 
+     def _publish_executed_walrus(
+@@ -171,7 +99,7 @@ class _AnchorExtractor:
+         binding: ExtractedOccurrenceRef,
+         target_owner: str | None,
+     ) -> None:
+-        for record in self._active_comprehensions:
++        for record in self.state._active_comprehensions:
+             if record.effective_walrus_owner != target_owner:
+                 continue
+             record.touched_walrus_names.add(name)
+@@ -182,8 +110,8 @@ class _AnchorExtractor:
+         record: _ActiveComprehension,
+     ) -> None:
+         if (
+-            not self._active_comprehensions
+-            or self._active_comprehensions[-1] is not record
++            not self.state._active_comprehensions
++            or self.state._active_comprehensions[-1] is not record
+         ):
+             raise RuntimeError(
+                 "Comprehension lineage stack mismatch"
+@@ -198,8 +126,8 @@ class _AnchorExtractor:
+             record.effective_walrus_owner,
+             merged,
+         )
+-        self._active_comprehensions.pop()
+-        for parent in self._active_comprehensions:
++        self.state._active_comprehensions.pop()
++        for parent in self.state._active_comprehensions:
+             if (
+                 parent.effective_walrus_owner
+                 != record.effective_walrus_owner
+@@ -216,17 +144,7 @@ class _AnchorExtractor:
+         self,
+         frames: tuple[dict[str, ExtractedOccurrenceRef], ...],
+     ) -> dict[str, ExtractedOccurrenceRef]:
+-        if not frames:
+-            return {}
+-        common_names = set(frames[0])
+-        for frame in frames[1:]:
+-            common_names.intersection_update(frame)
+-        merged: dict[str, ExtractedOccurrenceRef] = {}
+-        for name in common_names:
+-            first = frames[0][name]
+-            if all(frame[name] == first for frame in frames[1:]):
+-                merged[name] = first
+-        return merged
++        return self.state.merge_frames(frames)
+ 
+     def _visit_block_from_frame(
+         self,
+@@ -241,13 +159,13 @@ class _AnchorExtractor:
+         return self._clone_frame(owner)
+ 
+     def _blocked_names(self, owner: str | None) -> set[str]:
+-        return self._blocked.setdefault(owner, set())
++        return self.state.blocked_names(owner)
+ 
+     def _callable_frame(self, owner: str | None) -> dict[str, _CallableInfo]:
+-        return self._callables.setdefault(owner, {})
++        return self.state.callable_frame(owner)
+ 
+     def _import_frame(self, owner: str | None) -> dict[str, _ImportInfo]:
+-        return self._imports.setdefault(owner, {})
++        return self.state.import_frame(owner)
+ 
+     def _register_import_binding(self, alias: ast.alias, owner: str | None, local_name: str, module_name: str | None, symbol_name: str | None) -> None:
+         binding_id = self._add("import_binding", alias, local_name, owner)
+@@ -269,16 +187,16 @@ class _AnchorExtractor:
+         return self._occurrence("expression_result", node)
+ 
+     def _parameter_symbolic(self, callable_symbol_name: str, parameter: _ParameterInfo) -> ExtractedSymbolicRef:
+-        return ExtractedSymbolicRef(ExtractedSymbolicKind.PARAMETER, self.module_name, callable_symbol_name, parameter.local_id)
++        return parameter_symbolic(self.module_name, callable_symbol_name, parameter)
+ 
+     def _return_symbolic(self, callable_info: _CallableInfo) -> ExtractedSymbolicRef:
+-        return ExtractedSymbolicRef(ExtractedSymbolicKind.RETURN, self.module_name, callable_info.name, callable_info.anchor_id)
++        return return_symbolic(self.module_name, callable_info)
+ 
+     def _resolve_current_local_callable(self, node: ast.Call, owner: str | None) -> _CallableInfo | None:
+         if not isinstance(node.func, ast.Name): return None
+         current = self._frame(owner).get(node.func.id)
+         if current is None: return None
+-        return self._callables_by_anchor.get(current.local_id) or self._callables_by_binding.get(current.local_id)
++        return self.state._callables_by_anchor.get(current.local_id) or self.state._callables_by_binding.get(current.local_id)
+ 
+     def _current_import_info(self, owner: str | None, local_name: str) -> _ImportInfo | None:
+         current, info = self._frame(owner).get(local_name), self._import_frame(owner).get(local_name)
+@@ -404,7 +322,7 @@ class _AnchorExtractor:
+         self._default_flows(node, node.name, parameters)
+         callable_info = _CallableInfo(node.name, function_id, parameters)
+         self._callable_frame(owner)[node.name] = callable_info
+-        self._callables_by_anchor[function_id] = callable_info
++        self.state._callables_by_anchor[function_id] = callable_info
+         function_frame = self._frame(function_id)
+         for parameter in parameters:
+             function_frame[parameter.name] = ExtractedOccurrenceRef(parameter.local_id)
+@@ -426,19 +344,19 @@ class _AnchorExtractor:
+         parameters = self._parameter_anchors(node.args, lambda_id, callable_symbol_name)
+         self._default_flows(node, callable_symbol_name, parameters)
+         callable_info = _CallableInfo(callable_symbol_name, lambda_id, parameters)
+-        self._callables_by_anchor[lambda_id] = callable_info
++        self.state._callables_by_anchor[lambda_id] = callable_info
+         lambda_frame = self._frame(lambda_id)
+         for parameter in parameters:
+             lambda_frame[parameter.name] = ExtractedOccurrenceRef(parameter.local_id)
+         body_source = self._value(node.body, lambda_id, None)
+         self._flow(source=body_source, target=self._return_symbolic(callable_info), relation=LineageRelation.RETURNS, node=node.body, resolution_kind=ResolutionKind.LEXICAL_EXACT, confidence=LineageConfidence.CONFIRMED)
+         lambda_value = self._occurrence("expression_result", node)
+-        self._callable_values[lambda_value.local_id] = callable_info
++        self.state._callable_values[lambda_value.local_id] = callable_info
+ 
+     def _visit_Return(self, node: ast.Return, owner: str | None, walrus_owner: str | None) -> None:
+         if node.value is None: return
+         source = self._value(node.value, owner, walrus_owner)
+-        callable_info = self._callables_by_anchor.get(owner) if owner is not None else None
++        callable_info = self.state._callables_by_anchor.get(owner) if owner is not None else None
+         if callable_info is not None:
+             self._flow(source=source, target=self._return_symbolic(callable_info), relation=LineageRelation.RETURNS, node=node, resolution_kind=ResolutionKind.LEXICAL_EXACT, confidence=LineageConfidence.CONFIRMED)
+ 
+@@ -571,9 +489,9 @@ class _AnchorExtractor:
+         if target.id in self._blocked_names(owner):
+             return None
+         self._frame(owner)[target.id] = binding
+-        callable_info = self._callable_values.get(source.local_id)
++        callable_info = self.state._callable_values.get(source.local_id)
+         if callable_info is not None:
+-            self._callables_by_binding[binding.local_id] = callable_info
++            self.state._callables_by_binding[binding.local_id] = callable_info
+         self._flow(source=source, target=binding, relation=LineageRelation.ASSIGNS, node=target, resolution_kind=ResolutionKind.LEXICAL_EXACT, confidence=LineageConfidence.CONFIRMED)
+         return binding
 
-diff --git a/contextor/core/analysis/lineage_extraction_contracts.py b/contextor/core/analysis/lineage_extraction_contracts.py
+diff --git a/contextor/core/analysis/lineage_extraction_state.py b/contextor/core/analysis/lineage_extraction_state.py
 new file mode 100644
-index 0000000..69f8908
+index 0000000..d407abc
 --- /dev/null
-+++ b/contextor/core/analysis/lineage_extraction_contracts.py
-@@ -0,0 +1,157 @@
++++ b/contextor/core/analysis/lineage_extraction_state.py
+@@ -0,0 +1,93 @@
 +from __future__ import annotations
 +
 +import ast
-+import re
-+from dataclasses import dataclass
-+from typing import Final, Protocol
-+from urllib.parse import quote, unquote
++from dataclasses import dataclass, field
 +
-+from contextor.core.domain.lineage_facts import (
-+    ExtractedAnchorFact,
-+    ExtractedFlowFact,
-+    ExtractedSurfaceFact,
-+    SourceSpan,
-+)
-+
-+_LOCAL_ID_VERSION: Final[str] = "v1"
-+_ANCHOR_KINDS: Final[frozenset[str]] = frozenset({"module", "class", "function", "async_function", "lambda", "comprehension", "parameter", "binding", "import_binding", "global_declaration", "nonlocal_declaration"})
-+_LOCAL_ID_KINDS: Final[frozenset[str]] = _ANCHOR_KINDS | frozenset({
-+    "parameter_posonly",
-+    "parameter_poskw",
-+    "parameter_kwonly",
-+    "parameter_vararg",
-+    "parameter_varkw",
-+    "expression_result",
-+    "name_load",
-+    "call_site",
-+    "call_argument",
-+    "call_result",
-+    "runtime_bound_local",
-+})
-+_AST_PATH_RE: Final[re.Pattern[str]] = re.compile(r"^(?:root|(?:0|[1-9]\d*)(?:\.(?:0|[1-9]\d*))*)$")
-+_FINGERPRINT_RE: Final[re.Pattern[str]] = re.compile(r"^[0-9a-f]{64}$")
++from contextor.core.domain.lineage_facts import ExtractedAnchorFact, ExtractedFlowFact, ExtractedOccurrenceRef, ParameterKind
 +
 +
 +@dataclass(frozen=True)
-+class LineageExtractionLimits:
-+    max_nodes: int = 100_000
-+    max_ast_depth: int = 200
-+
-+    def __post_init__(self) -> None:
-+        for label, value in (("max_nodes", self.max_nodes), ("max_ast_depth", self.max_ast_depth)):
-+            if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
-+                raise ValueError(f"{label} must be a positive integer.")
-+
-+
-+DEFAULT_LINEAGE_EXTRACTION_LIMITS: Final[LineageExtractionLimits] = LineageExtractionLimits()
++class _ParameterInfo:
++    local_id: str
++    name: str
++    kind: ParameterKind
++    ordinal: int
 +
 +
 +@dataclass(frozen=True)
-+class ParsedLineageSourceInput:
-+    source_key: str
-+    source_fingerprint: str
-+    tree: ast.AST
++class _CallableInfo:
++    name: str
++    anchor_id: str
++    parameters: tuple[_ParameterInfo, ...]
 +
 +
 +@dataclass(frozen=True)
-+class ExtractedLineageContribution:
-+    anchors: tuple[ExtractedAnchorFact, ...] = ()
-+    flows: tuple[ExtractedFlowFact, ...] = ()
-+    surfaces: tuple[ExtractedSurfaceFact, ...] = ()
++class _ImportInfo:
++    module_name: str
++    symbol_name: str | None
++    binding_id: str
 +
 +
-+class ExtractedLineageProvider(Protocol):
-+    def extract(self, source: ParsedLineageSourceInput) -> ExtractedLineageContribution: ...
++@dataclass
++class _ActiveComprehension:
++    lookup_owner: str
++    lexical_enclosing_owner: str | None
++    effective_walrus_owner: str | None
++    walrus_entry_frame: dict[str, ExtractedOccurrenceRef]
++    touched_walrus_names: set[str]
 +
 +
-+def _validate_ast_path(ast_path: str) -> None:
-+    if not isinstance(ast_path, str) or _AST_PATH_RE.fullmatch(ast_path) is None:
-+        raise ValueError("ast_path is not canonical.")
++@dataclass(frozen=True)
++class _CallArgumentInfo:
++    occurrence: ExtractedOccurrenceRef
++    node: ast.AST
++    kind: str
++    keyword_name: str | None
 +
 +
-+def _encode_name(name: str | None) -> str:
-+    if name is None:
-+        return "-"
-+    if not isinstance(name, str) or not name:
-+        raise ValueError("name must be a non-empty string or None.")
-+    return quote(name, safe="").replace("-", "%2D")
++@dataclass
++class LineageExtractionState:
++    anchors: list[ExtractedAnchorFact] = field(default_factory=list)
++    flows: list[ExtractedFlowFact] = field(default_factory=list)
++    _ids: set[str] = field(default_factory=set)
++    _flow_ids: set[str] = field(default_factory=set)
++    _occurrences: dict[tuple[str, int, str | None, int], ExtractedOccurrenceRef] = field(default_factory=dict)
++    _bindings: dict[str | None, dict[str, ExtractedOccurrenceRef]] = field(default_factory=dict)
++    _callables: dict[str | None, dict[str, _CallableInfo]] = field(default_factory=dict)
++    _callables_by_anchor: dict[str, _CallableInfo] = field(default_factory=dict)
++    _callables_by_binding: dict[str, _CallableInfo] = field(default_factory=dict)
++    _callable_values: dict[str, _CallableInfo] = field(default_factory=dict)
++    _imports: dict[str | None, dict[str, _ImportInfo]] = field(default_factory=dict)
++    _blocked: dict[str | None, set[str]] = field(default_factory=dict)
++    _active_comprehensions: list[_ActiveComprehension] = field(default_factory=list)
 +
++    def frame(self, owner: str | None) -> dict[str, ExtractedOccurrenceRef]:
++        return self._bindings.setdefault(owner, {})
 +
-+def build_local_occurrence_id(kind: str, ast_path: str, name: str | None = None, *, ordinal: int = 0) -> str:
-+    if kind not in _LOCAL_ID_KINDS:
-+        raise ValueError(f"Unknown lineage local-id kind: {kind}")
-+    _validate_ast_path(ast_path)
-+    if isinstance(ordinal, bool) or not isinstance(ordinal, int) or ordinal < 0:
-+        raise ValueError("ordinal must be a non-negative integer.")
-+    return f"occ:{_LOCAL_ID_VERSION}:{kind}:{ast_path}:i:{ordinal}:n:{_encode_name(name)}"
++    def clone_frame(self, owner: str | None) -> dict[str, ExtractedOccurrenceRef]:
++        return dict(self.frame(owner))
 +
++    def replace_frame(self, owner: str | None, frame: dict[str, ExtractedOccurrenceRef]) -> None:
++        self._bindings[owner] = dict(frame)
 +
-+def parse_local_occurrence_id(value: str) -> tuple[str, str, int, str | None]:
-+    if not isinstance(value, str):
-+        raise ValueError("local occurrence id must be a string.")
-+    parts = value.split(":")
-+    if len(parts) != 8 or parts[0] != "occ" or parts[1] != _LOCAL_ID_VERSION or parts[4] != "i" or parts[6] != "n":
-+        raise ValueError("Invalid local occurrence id.")
-+    kind, ast_path = parts[2], parts[3]
-+    if kind not in _LOCAL_ID_KINDS:
-+        raise ValueError("Invalid local occurrence kind.")
-+    _validate_ast_path(ast_path)
-+    try:
-+        ordinal = int(parts[5])
-+    except ValueError as exc:
-+        raise ValueError("Invalid local occurrence ordinal.") from exc
-+    if ordinal < 0:
-+        raise ValueError("Invalid local occurrence ordinal.")
-+    name = None if parts[7] == "-" else unquote(parts[7])
-+    if build_local_occurrence_id(kind, ast_path, name, ordinal=ordinal) != value:
-+        raise ValueError("Local occurrence id is not canonical.")
-+    return kind, ast_path, ordinal, name
++    def merge_frames(self, frames: tuple[dict[str, ExtractedOccurrenceRef], ...]) -> dict[str, ExtractedOccurrenceRef]:
++        if not frames:
++            return {}
++        common_names = set(frames[0])
++        for frame in frames[1:]:
++            common_names.intersection_update(frame)
++        merged: dict[str, ExtractedOccurrenceRef] = {}
++        for name in common_names:
++            first = frames[0][name]
++            if all(frame[name] == first for frame in frames[1:]):
++                merged[name] = first
++        return merged
 +
++    def blocked_names(self, owner: str | None) -> set[str]:
++        return self._blocked.setdefault(owner, set())
 +
-+def _source_span(node: ast.AST) -> SourceSpan:
-+    start_line = int(getattr(node, "lineno", 0) or 0)
-+    start_column = int(getattr(node, "col_offset", 0) or 0)
-+    end_line = int(getattr(node, "end_lineno", start_line) or start_line)
-+    end_column = int(getattr(node, "end_col_offset", start_column) or start_column)
-+    return SourceSpan(start_line, start_column, end_line, end_column)
++    def callable_frame(self, owner: str | None) -> dict[str, _CallableInfo]:
++        return self._callables.setdefault(owner, {})
 +
-+
-+def _index_ast_paths(tree: ast.AST, limits: LineageExtractionLimits) -> tuple[dict[int, str], str | None]:
-+    paths: dict[int, str] = {}
-+    stack: list[tuple[ast.AST, str, int]] = [(tree, "root", 0)]
-+    node_count = 0
-+    while stack:
-+        node, ast_path, depth = stack.pop()
-+        node_count += 1
-+        if node_count > limits.max_nodes:
-+            return {}, "node_limit"
-+        if depth > limits.max_ast_depth:
-+            return {}, "ast_depth_limit"
-+        paths[id(node)] = ast_path
-+        children = list(ast.iter_child_nodes(node))
-+        for index in range(len(children) - 1, -1, -1):
-+            child_path = str(index) if ast_path == "root" else f"{ast_path}.{index}"
-+            stack.append((children[index], child_path, depth + 1))
-+    return paths, None
-+
-+
-+def _module_name_from_source_key(source_key: str) -> str:
-+    module_name = source_key[:-3].replace("/", ".")
-+    return module_name[: -len(".__init__")] if module_name.endswith(".__init__") else module_name
-+
-+def _resolve_import_module(source_key: str, module_name: str | None, level: int) -> str | None:
-+    if level == 0: return module_name
-+    package_parts = source_key.split("/")[:-1]
-+    if not package_parts or level > len(package_parts): return None
-+    target_parts = list(package_parts[:len(package_parts) - (level - 1)])
-+    if module_name: target_parts.extend(module_name.split("."))
-+    return ".".join(target_parts) if target_parts else None
-+
-+
-+_PUBLIC_MODULE = "contextor.core.analysis.lineage_extraction"
-+LineageExtractionLimits.__module__ = _PUBLIC_MODULE
-+ParsedLineageSourceInput.__module__ = _PUBLIC_MODULE
-+ExtractedLineageContribution.__module__ = _PUBLIC_MODULE
-+ExtractedLineageProvider.__module__ = _PUBLIC_MODULE
-+build_local_occurrence_id.__module__ = _PUBLIC_MODULE
-+parse_local_occurrence_id.__module__ = _PUBLIC_MODULE
++    def import_frame(self, owner: str | None) -> dict[str, _ImportInfo]:
++        return self._imports.setdefault(owner, {})
 
-diff --git a/tests/analysis/test_lineage_extraction_equivalence.py b/tests/analysis/test_lineage_extraction_equivalence.py
+diff --git a/contextor/core/analysis/lineage_extraction_emit.py b/contextor/core/analysis/lineage_extraction_emit.py
 new file mode 100644
-index 0000000..6605ac7
+index 0000000..9b304b4
 --- /dev/null
-+++ b/tests/analysis/test_lineage_extraction_equivalence.py
-@@ -0,0 +1,171 @@
++++ b/contextor/core/analysis/lineage_extraction_emit.py
+@@ -0,0 +1,45 @@
 +from __future__ import annotations
 +
 +import ast
-+import dataclasses
-+import hashlib
-+import json
-+from enum import Enum
 +
-+from contextor.core.analysis import lineage_extraction
++from contextor.core.analysis.lineage_extraction_contracts import _source_span, build_local_occurrence_id
++from contextor.core.analysis.lineage_extraction_state import _CallableInfo, _ParameterInfo, LineageExtractionState
++from contextor.core.domain.lineage_facts import ExtractedAnchorFact, ExtractedFlowFact, ExtractedOccurrenceRef, ExtractedSymbolicKind, ExtractedSymbolicRef, LineageConfidence, LineageRelation, ResolutionKind
 +
 +
-+def _canonical(value):
-+    if dataclasses.is_dataclass(value) and not isinstance(value, type):
-+        return {
-+            field.name: _canonical(getattr(value, field.name))
-+            for field in dataclasses.fields(value)
-+        }
-+    if isinstance(value, Enum):
-+        return value.value
-+    if isinstance(value, (tuple, list)):
-+        return [_canonical(item) for item in value]
-+    if isinstance(value, dict):
-+        return {key: _canonical(item) for key, item in value.items()}
-+    if isinstance(value, bytes):
-+        raise TypeError("bytes are not supported by the lineage equivalence serializer.")
-+    if value is None or isinstance(value, (bool, int, float, str)):
-+        return value
-+    raise TypeError(f"Unsupported lineage equivalence value: {type(value)!r}")
++def add_anchor(state, paths, kind, node, name, owner_local_id, *, ordinal=0, local_kind=None):
++    local_id = build_local_occurrence_id(local_kind or kind, paths[id(node)], name, ordinal=ordinal)
++    if local_id in state._ids:
++        raise ValueError(f"Duplicate lineage local id: {local_id}")
++    state._ids.add(local_id)
++    state.anchors.append(ExtractedAnchorFact(local_id=local_id, kind=kind, span=_source_span(node), owner_local_id=owner_local_id))
++    return local_id
 +
 +
-+def _hash_result(source: str, source_key: str, limits=None) -> str:
-+    source_fingerprint = hashlib.sha256(source.encode("utf-8")).hexdigest()
-+    result = lineage_extraction.extract_lineage_source_facts(
-+        ast.parse(source),
-+        source_key=source_key,
-+        source_fingerprint=source_fingerprint,
-+        **({} if limits is None else {"limits": limits}),
-+    )
-+    oracle_bytes = json.dumps(
-+        _canonical(result),
-+        ensure_ascii=False,
-+        sort_keys=True,
-+        separators=(",", ":"),
-+    ).encode("utf-8")
-+    return hashlib.sha256(oracle_bytes).hexdigest()
++def occurrence(state, paths, kind, node, name=None, *, ordinal=0):
++    cache_key = (kind, id(node), name, ordinal)
++    cached = state._occurrences.get(cache_key)
++    if cached is not None:
++        return cached
++    local_id = build_local_occurrence_id(kind, paths[id(node)], name, ordinal=ordinal)
++    if local_id in state._ids:
++        raise ValueError(f"Duplicate lineage local id: {local_id}")
++    state._ids.add(local_id)
++    result = ExtractedOccurrenceRef(local_id)
++    state._occurrences[cache_key] = result
++    return result
 +
 +
-+_CORPUS = {
-+    "signature_defaults_local_call": (
-+        "def target(a, b=2, /, c=3, *args, d=4, **kwargs):\n"
-+        "    return a\n"
-+        "target(1, 2, 3, 4, d=5, extra=6)\n",
-+        "pkg/mod.py",
-+        None,
-+    ),
-+    "imports_alias_wildcard": (
-+        "from services.api import target as alias\n"
-+        "alias(1)\n"
-+        "from services.other import *\n"
-+        "alias(2)\n",
-+        "pkg/mod.py",
-+        None,
-+    ),
-+    "if_for_frame_merge": (
-+        "if condition:\n"
-+        "    value = source\n"
-+        "else:\n"
-+        "    value = other\n"
-+        "for item in items:\n"
-+        "    loop_value = item\n"
-+        "value\n"
-+        "loop_value\n",
-+        "pkg/mod.py",
-+        None,
-+    ),
-+    "try_except_finally_match": (
-+        "try:\n"
-+        "    value = source\n"
-+        "except Error as error:\n"
-+        "    value = error\n"
-+        "finally:\n"
-+        "    final = value\n"
-+        "match subject:\n"
-+        "    case {\"x\": captured}:\n"
-+        "        result = captured\n"
-+        "    case _:\n"
-+        "        result = fallback\n",
-+        "pkg/mod.py",
-+        None,
-+    ),
-+    "comprehension_runtime_walrus": (
-+        "[(outer := value) for value in items for inner in values if (flag := inner)]\n"
-+        "outer\n"
-+        "flag\n"
-+        "with manager as resource:\n"
-+        "    bound = resource\n",
-+        "pkg/mod.py",
-+        None,
-+    ),
-+    "async_yield": (
-+        "async def worker(stream, manager):\n"
-+        "    async for item in stream:\n"
-+        "        async with manager as resource:\n"
-+        "            yield item\n",
-+        "pkg/mod.py",
-+        None,
-+    ),
-+    "relative_import": (
-+        "from ..services.api import target\n"
-+        "target()\n",
-+        "pkg/sub/mod.py",
-+        None,
-+    ),
-+    "resource_limit": (
-+        "first = 1\nsecond = 2\n",
-+        "pkg/mod.py",
-+        lineage_extraction.LineageExtractionLimits(max_nodes=1, max_ast_depth=100),
-+    ),
-+}
++def emit_flow(state, paths, *, source, target, relation, node, resolution_kind, confidence, ordinal=0, dynamic_boundary=None):
++    local_id = f"flow:v1:{relation.value}:{paths[id(node)]}:i:{ordinal}"
++    if local_id in state._flow_ids: raise ValueError(f"Duplicate lineage flow id: {local_id}")
++    state._flow_ids.add(local_id)
++    state.flows.append(ExtractedFlowFact(local_id, source, target, relation, _source_span(node), resolution_kind, confidence, dynamic_boundary=dynamic_boundary))
 +
 +
-+EXPECTED_HASHES = {
-+    "async_yield": "110cd0c1d520261bffe673d6e0f1df573b68ed4653be674bcb762faacdf27bf9",
-+    "comprehension_runtime_walrus": "35f7e091b7361051933afa6ae125eabb35b0e46776960955d1d45b0826d531e9",
-+    "if_for_frame_merge": "f27318c046fcadc2946c58e2e56f324b8a01fb563bd627ec7f85319c2b435b7a",
-+    "imports_alias_wildcard": "7fbd16baf177be5d965c212678763b9a123978e62ba711950602fab6bf9ccec8",
-+    "relative_import": "44e82ef594399306de449f12a46d3c8bf463d47050f454537f5c2630f976ca95",
-+    "resource_limit": "40c592a9bfb86c5f6d4fe747fa2714a92794dafbc204e601ea4b475c07e06adb",
-+    "signature_defaults_local_call": "4d6984e8211918d2e84e976d5fda32f59aed9247d52821cafc688242c6f6533b",
-+    "try_except_finally_match": "ce25c00652779c30e47b06499408efe78515eda802cdd88aa2650fda6757c60f",
-+}
++def parameter_symbolic(module_name, callable_symbol_name, parameter):
++    return ExtractedSymbolicRef(ExtractedSymbolicKind.PARAMETER, module_name, callable_symbol_name, parameter.local_id)
 +
 +
-+def test_lineage_extraction_equivalence_oracle() -> None:
-+    assert {
-+        name: _hash_result(source, source_key, limits)
-+        for name, (source, source_key, limits) in _CORPUS.items()
-+    } == EXPECTED_HASHES
-+
-+
-+def test_lineage_extraction_public_compatibility() -> None:
-+    assert lineage_extraction.__all__ == [
-+        "DEFAULT_LINEAGE_EXTRACTION_LIMITS",
-+        "ExtractedLineageContribution",
-+        "ExtractedLineageProvider",
-+        "LineageExtractionLimits",
-+        "ParsedLineageSourceInput",
-+        "build_local_occurrence_id",
-+        "extract_lineage_source_facts",
-+        "parse_local_occurrence_id",
-+    ]
-+    for name in (
-+        "DEFAULT_LINEAGE_EXTRACTION_LIMITS",
-+        "ExtractedLineageContribution",
-+        "ExtractedLineageProvider",
-+        "LineageExtractionLimits",
-+        "ParsedLineageSourceInput",
-+        "build_local_occurrence_id",
-+        "extract_lineage_source_facts",
-+        "parse_local_occurrence_id",
-+    ):
-+        assert hasattr(lineage_extraction, name)
-+    for value in (
-+        lineage_extraction.LineageExtractionLimits,
-+        lineage_extraction.ParsedLineageSourceInput,
-+        lineage_extraction.ExtractedLineageContribution,
-+        lineage_extraction.ExtractedLineageProvider,
-+        lineage_extraction.build_local_occurrence_id,
-+        lineage_extraction.parse_local_occurrence_id,
-+    ):
-+        assert value.__module__ == "contextor.core.analysis.lineage_extraction"
++def return_symbolic(module_name, callable_info):
++    return ExtractedSymbolicRef(ExtractedSymbolicKind.RETURN, module_name, callable_info.name, callable_info.anchor_id)
