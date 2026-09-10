@@ -1,103 +1,358 @@
-STATUS=DISCOVERY_COMPLETE
+STATUS=FINAL_PASS
 
 CONTEXTOR_EVIDENCE=
-- HEAD is e24f99fbfcf730e967304b2f371c8e7f9681d782; the requested discovery made no production/test edits.
-- ACTIVE-pool inspection found all Contextor tools needed: get_mcp_documentation, get_file_edit_context, get_source_range, search_source, get_symbol_implementation. Deferred-pool inspection was also performed before capability selection: no deferred Contextor capability was advertised; the only deferred-related active description was update_file, which is mutating and out of scope.
-- Current MCP docs were read before discovery calls. Fresh edit contexts: production module 351/1 and tests module 352/1, canonical revision 520, provenance live, workspace_sync verified, syntax checked_and_none.
-- Canonical source evidence: lineage_extraction.py 195-290 provides frame helpers; 480-635 provides Call/comprehension/NamedExpr; 675-900 provides 1C.4 conditional, loop, match, try, and handler frame invalidation. Tests 130-260 establish current call fallback assertions.
+- ACTIVE and DEFERRED MCP inventories were checked. Required read capabilities were active; no deferred Contextor capability was advertised.
+- Fresh Contextor edit context for tests/analysis/test_lineage_extraction.py: module 352/1, live revision 524, workspace_sync=verified, syntax=checked_and_none.
+- Production file was frozen. Its current worktree modification predates this test-only turn and was not edited.
 
-EXISTING_FRAME_MERGE_REUSE=
-- Reuse is sufficient; no parallel frame model is warranted.
-- _clone_frame(owner) snapshots a mapping. _replace_frame(owner, frame) atomically replaces it. _merge_frames(frames) retains a name only when it exists in every frame and points to the identical occurrence reference.
-- 1C.4 already applies this exact mechanism to If body/else, For zero/body/else, While zero/body/else, Match branches, and Try reachable paths. Its known fail-closed result for diverging binding authority is absent frame entry, hence a later simple Name is UNRESOLVED rather than speculative DYNAMIC.
-- Comprehension must use the same zero/body merge on the effective walrus owner. It must not merge its local target frame into the lexical enclosing frame.
+PRODUCTION_CHANGED=NO
 
-CORRECTED_ACTIVE_COMPREHENSION_STATE=
-- Each active record must distinguish:
-  lookup_owner: comprehension anchor id;
-  lexical_enclosing_owner: owner that supplies visible outer bindings/imports and evaluates outermost iterable;
-  effective_walrus_owner: nearest propagated non-comprehension owner;
-  walrus_entry_frame: clone of effective_walrus_owner at this comprehension entry;
-  touched_walrus_names: set of names assigned by a NamedExpr during this comprehension or any currently executing nested descendant.
-- At enter, lookup_owner frame is a clone of lexical_enclosing_owner frame; its import frame is copied from lexical_enclosing_owner import frame. Then runtime targets overwrite only lookup_owner entries.
-- This permits enclosing reads/import calls, preserves target shadowing, and does not create synchronization anchors/flows.
-- The old pair (comprehension_id, enclosing_owner) is insufficient: inner lexical_enclosing_owner can be outer comprehension while effective_walrus_owner remains the containing function.
+TEST_MATRIX=
+- Split prior combined outer-iterable/target test into independent enclosing-lookup, local-shadowing, and post-exit restoration cases.
+- Split prior combined runtime-target test into independent element, filter, later-iterable, and later-target filter/value cases.
+- Added explicit prior-binding versus NamedExpr zero/body conservative-merge regression.
+- Preserved all existing Stage 1C.7 regressions and parameterized per-form/local-import cases.
 
-CORRECTED_WALRUS_LIFECYCLE=
-1. NamedExpr evaluates RHS first in the current lookup owner.
-2. It assigns its target to effective_walrus_owner through existing assign_target, yielding one existing binding anchor and one existing ASSIGNS flow.
-3. While executing, write that returned binding into lookup frames of every active record whose effective_walrus_owner is the same owner; record name as touched in those records. This includes the current inner record and outer active records sharing the containing owner.
-4. On ending an inner comprehension, merge its walrus_entry_frame with the current effective owner body frame. Synchronize only its touched names in still-active matching records: set each to merged binding if present, otherwise remove it. Do not overwrite runtime targets or unrelated lookup entries.
-5. On ending outer comprehension, do the same merge. Its zero path is walrus_entry_frame; its body path is effective owner state after all nested children completed their own conservative merges.
-- Thus a walrus is visible within a body path that executed it, but is not definite after any possibly-zero comprehension.
+FILES_CHANGED=
+- tests/analysis/test_lineage_extraction.py
+- walkthrough.md (this report only)
 
-NESTED_COMPREHENSION_ALGORITHM=
-- Create comprehension_id.
-- First iterable: visit with lexical_enclosing_owner and inherited effective walrus owner. It is outside comprehension scope.
-- effective_walrus_owner = incoming walrus_owner or lexical_enclosing_owner.
-- Push active record using both owners and snapshot effective owner's frame before any body evaluation.
-- Clone lexical enclosing binding/import frames into comprehension lookup frame; runtime-bind first target; visit filters. For later generators visit iterable, bind target, then filters. Finally visit elt, or key then value.
-- A nested comprehension uses outer comprehension as lexical_enclosing_owner, but receives its parent effective_walrus_owner. Its frame therefore sees outer targets while its NamedExpr writes/mirrors against the containing function/module.
-- finally: pop record only after its effective owner zero/body merge and touched-name synchronization. Never special-case a no-generator comprehension: parsed comprehension has at least one generator.
+TESTS_RUN=
+- .venv\Scripts\python.exe -m pytest tests/analysis/test_lineage_extraction.py -q
+- .venv\Scripts\python.exe -m pytest tests/analysis/test_lineage_extraction.py tests/test_no_double_parse.py tests/test_index_fusion.py -q
+- git diff --check -- contextor/core/analysis/lineage_extraction.py tests/analysis/test_lineage_extraction.py
 
-POST_COMPREHENSION_MERGE=
-- Algorithm: body_frame = clone_frame(effective_walrus_owner); merged = merge_frames((record.walrus_entry_frame, body_frame)); replace_frame(effective_walrus_owner, merged).
-- For A, no prior y versus body y binding: merged has no y; use(y) produces no exact BIND and Call use receives its normal unresolved argument lookup.
-- For B, y=old versus y=walrus binding: merged has no y; later y does not exact-bind to old or walrus.
-- For C, y is mirrored after its NamedExpr, so second y sees the walrus binding during the same executed body path. After exit y is non-definite.
-- For D/E, z is mirrored into inner lookup despite lexical enclosing owner=outer comprehension. Inner completion immediately merges inner zero/body and removes z from outer active lookup when non-definite; outer completion remains conservative.
-- For F, a local callable/import binding versus walrus rebind differ, so merge removes the name. Later direct call has callee_ref None; existing Call fallback is UNRESOLVED_NAME, confidence UNRESOLVED, dynamic_boundary None. It must be neither CALL_EXACT nor IMPORT_EXACT nor speculative DYNAMIC_RUNTIME_BOUNDARY.
+TEST_RESULTS=
+- PASS: 97 passed in 2.65s.
+- PASS: 108 passed in 3.82s.
+- PASS: diff check; only LF-to-CRLF workspace warnings.
 
-EXACT_CODE_INSERTION_POINTS=
-- lineage_extraction.py 195-209: add active-record state.
-- 246-286: add narrow lifecycle/synchronization helpers next to existing frame helpers.
-- 510-528: replace comprehension visitor only.
-- 555-566: return created binding from assign_target, otherwise None.
-- 626-629: after assignment, synchronize returned NamedExpr binding to active records.
-- tests/analysis/test_lineage_extraction.py: append 1C.7 focused tests after 1C.6 group; retain existing helpers for exact binds and call-result flows.
-
-LITERAL_IMPLEMENTATION_PLAN=
-1. Define private record:
-   _ActiveComprehension(lookup_owner: str, lexical_enclosing_owner: str | None, effective_walrus_owner: str | None, walrus_entry_frame: dict[str, ExtractedOccurrenceRef], touched_walrus_names: set[str]).
-   Store list self._active_comprehensions.
-2. Add begin_comprehension(comprehension_id, lexical_enclosing_owner, effective_walrus_owner):
-   entry = clone_frame(effective_walrus_owner);
-   replace_frame(comprehension_id, clone_frame(lexical_enclosing_owner));
-   import_frame(comprehension_id).clear(); import_frame(comprehension_id).update(import_frame(lexical_enclosing_owner));
-   append record.
-3. Change assign_target signature to return ExtractedOccurrenceRef | None. Preserve its existing anchor/flow behavior exactly.
-4. Add publish_executed_walrus(name, binding, effective_walrus_owner):
-   for record in active records with matching effective owner:
-     record.touched_walrus_names.add(name);
-     frame(record.lookup_owner)[name] = binding.
-   NamedExpr calls it only after successful assign_target.
-5. Add finish_comprehension(record):
-   body = clone_frame(record.effective_walrus_owner);
-   merged = merge_frames((record.walrus_entry_frame, body));
-   replace_frame(record.effective_walrus_owner, merged);
-   remove record from active stack;
-   for each still-active matching record and each name in finished.touched_walrus_names:
-     add name to parent touched set;
-     if name in merged: frame(parent.lookup_owner)[name] = merged[name]
-     else: frame(parent.lookup_owner).pop(name, None).
-6. Comprehension visitor:
-   add anchor; first.iter with lexical enclosing owner; effective owner = walrus_owner or owner; begin;
-   try runtime_bind target and visit filters; repeat later iter/target/filter; visit values;
-   finally finish.
-   Keep runtime target helper separate from normal Store visit and preserve DictComp key,value order.
-
-CORRECTED_TEST_PLAN=
-- A: [(y := x) for x in xs]; use(y). Assert y inside assignment has containing owner, but post-comprehension y has no LEXICAL_EXACT BIND.
-- B: y=old; [(y := x) for x in xs]; use(y). Assert post y has neither old nor walrus binding as exact source.
-- C: [(y := x, y) for x in xs]. Assert second y exactly binds walrus binding within body; post y non-definite.
-- D: [[((z := y), z) for y in ys] for x in xs]. Assert inner second z binds current z; post z has no exact BIND.
-- E: same nested source plus owner assertions: z binding owner is containing function/module, never outer/inner comprehension; inner lookup sees z.
-- F-local: def run; [(run := other) for x in xs]; run(). Assert later CALL_RESULT is UNRESOLVED_NAME/UNRESOLVED/no dynamic boundary; not CALL_EXACT.
-- F-import: from pkg import run; [(run := other) for x in xs]; run(). Same UNRESOLVED fallback; not IMPORT_EXACT.
-- Retain and correct prior 9-11: element/filter/nested walrus each have separate inside-executed-path visibility and after-comprehension non-definiteness assertions.
-- Retain 12-13 only with corrected fallback UNRESOLVED, not dynamic.
-- Retain target shadowing, outer iterable enclosing lookup, later generator/filter visibility, nested target isolation, Dict key-before-value, four comprehension forms, parser SyntaxError for iterable NamedExpr, unique flow IDs/no double traversal, and Stage 1C.1-1C.6 regression matrix.
-
-DOMAIN_CHANGE_REQUIRED=NO
-FILES_CHANGED=NONE
-DIFFS=NONE
+FULL_DIFFS=
+diff --git a/tests/analysis/test_lineage_extraction.py b/tests/analysis/test_lineage_extraction.py
+index 91ca1cf..3e1e708 100644
+--- a/tests/analysis/test_lineage_extraction.py
++++ b/tests/analysis/test_lineage_extraction.py
+@@ -1257,3 +1257,323 @@ def test_incremental_preparation_carries_transient_lineage_and_errors_do_not(tmp
+     assert broken.has_error and broken.error_status == "SYNTAX_ERROR" and broken.extracted_lineage_facts is None
+     missing = prepare_source_update(file_path=tmp_path / "missing.py", module_path="missing", is_new=True, old_module=None, old_artifacts=None, old_usage=None, source_key="missing.py")
+     assert missing.has_error and missing.error_status == "ERROR" and missing.extracted_lineage_facts is None
++
++
++def _stage_1c_exact_bind_flows(facts, name):
++    return [
++        flow
++        for flow in facts.flows
++        if flow.relation is LineageRelation.BINDS
++        and flow.resolution_kind is ResolutionKind.LEXICAL_EXACT
++        and flow.confidence is LineageConfidence.CONFIRMED
++        and isinstance(flow.source, ExtractedOccurrenceRef)
++        and isinstance(flow.target, ExtractedOccurrenceRef)
++        and parse_local_occurrence_id(flow.target.local_id)[3] == name
++    ]
++
++
++def test_stage_1c7_outermost_iterable_uses_enclosing_binding():
++    facts = _stage_1c_facts(
++        "def run(items):\n"
++        " outer = items\n"
++        " result = [item for item in outer]\n"
++    )
++    outer = next(
++        anchor
++        for anchor in _stage_1c_named(facts, "binding", "outer")
++        if anchor.span.start_line == 2
++    )
++    assert _stage_1c_lexical_bind_sources(facts, "outer", 3) == [
++        outer.local_id
++    ]
++
++
++def test_stage_1c7_target_is_comprehension_local_and_shadows_outer_inside():
++    facts = _stage_1c_facts(
++        "def run(items):\n"
++        " x = items\n"
++        " result = [x for x in items]\n"
++    )
++    outer = next(
++        anchor
++        for anchor in _stage_1c_named(facts, "binding", "x")
++        if anchor.span.start_line == 2
++    )
++    target = next(
++        anchor
++        for anchor in _stage_1c_named(facts, "binding", "x")
++        if anchor.span.start_line == 3
++    )
++    comprehension = next(
++        anchor for anchor in facts.anchors if anchor.kind == "comprehension"
++    )
++    assert target.owner_local_id == comprehension.local_id
++    assert target.owner_local_id != outer.owner_local_id
++    assert _stage_1c_lexical_bind_sources(facts, "x", 3) == [
++        target.local_id
++    ]
++
++
++def test_stage_1c7_target_does_not_leak_and_outer_binding_remains_exact():
++    facts = _stage_1c_facts(
++        "def run(items):\n"
++        " x = items\n"
++        " result = [x for x in items]\n"
++        " after = x\n"
++    )
++    outer = next(
++        anchor
++        for anchor in _stage_1c_named(facts, "binding", "x")
++        if anchor.span.start_line == 2
++    )
++    target = next(
++        anchor
++        for anchor in _stage_1c_named(facts, "binding", "x")
++        if anchor.span.start_line == 3
++    )
++    assert _stage_1c_lexical_bind_sources(facts, "x", 4) == [
++        outer.local_id
++    ]
++    assert target.local_id not in _stage_1c_lexical_bind_sources(facts, "x", 4)
++
++
++def test_stage_1c7_element_sees_first_runtime_target():
++    facts = _stage_1c_facts("result = [x for x in xs]\n")
++    runtime = _stage_1c_runtime_assignment(facts, "x")
++    binds = _stage_1c_exact_bind_flows(facts, "x")
++    assert len(binds) == 1
++    assert binds[0].source.local_id == runtime.target.local_id
++    assert binds[0].resolution_kind is ResolutionKind.LEXICAL_EXACT
++    assert binds[0].confidence is LineageConfidence.CONFIRMED
++
++
++def test_stage_1c7_filter_sees_first_runtime_target():
++    facts = _stage_1c_facts("result = [x for x in xs if x]\n")
++    runtime = _stage_1c_runtime_assignment(facts, "x")
++    binds = _stage_1c_exact_bind_flows(facts, "x")
++    assert len(binds) == 2
++    assert all(flow.source.local_id == runtime.target.local_id for flow in binds)
++    assert all(flow.relation is LineageRelation.BINDS for flow in binds)
++
++
++def test_stage_1c7_later_generator_iterable_sees_prior_runtime_target():
++    facts = _stage_1c_facts("result = [(x, y) for x in xs for y in x]\n")
++    runtime = _stage_1c_runtime_assignment(facts, "x")
++    binds = _stage_1c_exact_bind_flows(facts, "x")
++    assert len(binds) == 2
++    assert all(flow.source.local_id == runtime.target.local_id for flow in binds)
++    assert all(flow.confidence is LineageConfidence.CONFIRMED for flow in binds)
++
++
++def test_stage_1c7_later_target_sees_its_filter_and_final_value():
++    facts = _stage_1c_facts(
++        "result = [(x, y) for x in xs for y in ys if y]\n"
++    )
++    runtime = _stage_1c_runtime_assignment(facts, "y")
++    binds = _stage_1c_exact_bind_flows(facts, "y")
++    assert len(binds) == 2
++    assert all(flow.source.local_id == runtime.target.local_id for flow in binds)
++    assert all(flow.resolution_kind is ResolutionKind.LEXICAL_EXACT for flow in binds)
++
++
++def test_stage_1c7_nested_comprehensions_keep_targets_independent():
++    facts = _stage_1c_facts(
++        "def run(xs):\n"
++        " return [[y for y in x] for x in xs]\n"
++    )
++    comprehensions = [
++        anchor for anchor in facts.anchors if anchor.kind == "comprehension"
++    ]
++    x = _stage_1c_named(facts, "binding", "x")[0]
++    y = _stage_1c_named(facts, "binding", "y")[0]
++    assert len(comprehensions) == 2
++    assert x.owner_local_id != y.owner_local_id
++    assert any(
++        flow.source.local_id == x.local_id
++        for flow in _stage_1c_exact_bind_flows(facts, "x")
++    )
++
++
++def test_stage_1c7_walrus_is_visible_on_body_path_but_not_afterwards():
++    facts = _stage_1c_facts(
++        "def run(xs):\n"
++        " result = [(y := x, y) for x in xs]\n"
++        " after = y\n"
++    )
++    y = _stage_1c_named(facts, "binding", "y")[0]
++    y_binds = _stage_1c_exact_bind_flows(facts, "y")
++    assert any(
++        flow.source.local_id == y.local_id and flow.evidence.start_line == 2
++        for flow in y_binds
++    )
++    assert not any(flow.evidence.start_line == 3 for flow in y_binds)
++
++
++def test_stage_1c7_zero_body_walrus_rebind_invalidates_prior_authority():
++    facts = _stage_1c_facts(
++        "def run(xs, old):\n"
++        " y = old\n"
++        " result = [(y := x) for x in xs]\n"
++        " after = y\n"
++    )
++    prior = next(
++        anchor
++        for anchor in _stage_1c_named(facts, "binding", "y")
++        if anchor.span.start_line == 2
++    )
++    walrus = next(
++        anchor
++        for anchor in _stage_1c_named(facts, "binding", "y")
++        if anchor.span.start_line == 3
++    )
++    post_sources = _stage_1c_lexical_bind_sources(facts, "y", 4)
++    assert prior.local_id != walrus.local_id
++    assert post_sources == []
++    assert prior.local_id not in post_sources
++    assert walrus.local_id not in post_sources
++
++
++def test_stage_1c7_filter_walrus_visibility_and_zero_iteration_merge():
++    facts = _stage_1c_facts(
++        "def run(xs):\n"
++        " result = [y for x in xs if (y := x)]\n"
++        " after = y\n"
++    )
++    y = _stage_1c_named(facts, "binding", "y")[0]
++    y_binds = _stage_1c_exact_bind_flows(facts, "y")
++    assert any(
++        flow.source.local_id == y.local_id and flow.evidence.start_line == 2
++        for flow in y_binds
++    )
++    assert not any(flow.evidence.start_line == 3 for flow in y_binds)
++
++
++def test_stage_1c7_nested_walrus_uses_containing_owner_and_merges_conservatively():
++    facts = _stage_1c_facts(
++        "def run(xs, ys):\n"
++        " result = [[((z := y), z) for y in ys] for x in xs]\n"
++        " after = z\n"
++    )
++    function = _stage_1c_named(facts, "function", "run")[0]
++    z = _stage_1c_named(facts, "binding", "z")[0]
++    z_binds = _stage_1c_exact_bind_flows(facts, "z")
++    assert z.owner_local_id == function.local_id
++    assert any(
++        flow.source.local_id == z.local_id and flow.evidence.start_line == 2
++        for flow in z_binds
++    )
++    assert not any(flow.evidence.start_line == 3 for flow in z_binds)
++
++
++@pytest.mark.parametrize(
++    "source",
++    (
++        "def run(xs):\n result = [x for x in xs]\n",
++        "def run(xs):\n result = {x for x in xs}\n",
++        "def run(xs):\n result = (x for x in xs)\n",
++        "def run(xs):\n result = {x: x for x in xs}\n",
++    ),
++)
++def test_stage_1c7_all_comprehension_forms_have_one_local_target(source):
++    facts = _stage_1c_facts(source)
++    comprehensions = [
++        anchor for anchor in facts.anchors if anchor.kind == "comprehension"
++    ]
++    target = _stage_1c_named(facts, "binding", "x")[0]
++    runtime = _stage_1c_runtime_assignment(facts, "x")
++    assert len(comprehensions) == 1
++    assert target.owner_local_id == comprehensions[0].local_id
++    assert runtime.target.local_id == target.local_id
++
++
++def test_stage_1c7_dict_key_walrus_precedes_value_and_does_not_leak():
++    facts = _stage_1c_facts(
++        "def run(xs):\n"
++        " result = {(y := x): y for x in xs}\n"
++        " after = y\n"
++    )
++    y = _stage_1c_named(facts, "binding", "y")[0]
++    y_binds = _stage_1c_exact_bind_flows(facts, "y")
++    body_bind = next(
++        flow
++        for flow in y_binds
++        if flow.source.local_id == y.local_id
++        and flow.evidence.start_line == 2
++    )
++    assert parse_local_occurrence_id(body_bind.target.local_id)[1] > parse_local_occurrence_id(
++        y.local_id
++    )[1]
++    assert not any(flow.evidence.start_line == 3 for flow in y_binds)
++
++
++@pytest.mark.parametrize(
++    "source",
++    (
++        "def run(xs):\n def target(): return 1\n [(target := other) for x in xs]\n return target()\n",
++        "def run(xs):\n from pkg import target\n [(target := other) for x in xs]\n return target()\n",
++    ),
++)
++def test_stage_1c7_walrus_callable_and_import_rebind_are_unresolved_after_merge(
++    source,
++):
++    facts = _stage_1c_facts(source)
++    later = next(
++        flow
++        for flow in _stage_1c_call_result_flows(facts)
++        if flow.evidence.start_line == 4
++    )
++    assert later.resolution_kind is ResolutionKind.UNRESOLVED_NAME
++    assert later.confidence is LineageConfidence.UNRESOLVED
++    assert later.dynamic_boundary is None
++
++
++@pytest.mark.parametrize(
++    ("source", "resolution"),
++    (
++        (
++            "def run():\n"
++            " def produce(): return 1\n"
++            " result = [x for x in produce()]\n",
++            ResolutionKind.CALL_EXACT,
++        ),
++        (
++            "def run():\n"
++            " from pkg import produce\n"
++            " result = [x for x in produce()]\n",
++            ResolutionKind.IMPORT_EXACT,
++        ),
++    ),
++)
++def test_stage_1c7_outermost_iterable_call_uses_enclosing_authority(
++    source,
++    resolution,
++):
++    facts = _stage_1c_facts(source)
++    call = next(
++        flow
++        for flow in _stage_1c_call_result_flows(facts)
++        if flow.evidence.start_line == 3
++    )
++    assert call.resolution_kind is resolution
++    assert call.confidence is LineageConfidence.CONFIRMED
++
++
++def test_stage_1c7_iterable_walrus_is_rejected_before_extraction():
++    with pytest.raises(SyntaxError):
++        compile("[x for x in (y := xs)]", "pkg.py", "exec")
++
++
++def test_stage_1c7_runtime_target_has_one_assignment_and_unique_ids():
++    facts = _stage_1c_facts("result = [x for x in xs if x]\n")
++    assignments = [
++        flow
++        for flow in facts.flows
++        if flow.relation is LineageRelation.ASSIGNS
++        and isinstance(flow.source, ExtractedOccurrenceRef)
++        and parse_local_occurrence_id(flow.source.local_id)[0]
++        == "runtime_bound_local"
++        and parse_local_occurrence_id(flow.source.local_id)[3] == "x"
++    ]
++    assert len(assignments) == 1
++    assert len({anchor.local_id for anchor in facts.anchors}) == len(facts.anchors)
++    assert len({flow.local_id for flow in facts.flows}) == len(facts.flows)\n

@@ -180,6 +180,15 @@ class _ImportInfo:
     binding_id: str
 
 
+@dataclass
+class _ActiveComprehension:
+    lookup_owner: str
+    lexical_enclosing_owner: str | None
+    effective_walrus_owner: str | None
+    walrus_entry_frame: dict[str, ExtractedOccurrenceRef]
+    touched_walrus_names: set[str]
+
+
 @dataclass(frozen=True)
 class _CallArgumentInfo:
     occurrence: ExtractedOccurrenceRef
@@ -205,6 +214,7 @@ class _AnchorExtractor:
         self._callable_values: dict[str, _CallableInfo] = {}
         self._imports: dict[str | None, dict[str, _ImportInfo]] = {}
         self._blocked: dict[str | None, set[str]] = {}
+        self._active_comprehensions: list[_ActiveComprehension] = []
 
     def extract(self, tree: ast.AST) -> tuple[tuple[ExtractedAnchorFact, ...], tuple[ExtractedFlowFact, ...]]:
         self._visit(tree, None, None)
@@ -254,6 +264,78 @@ class _AnchorExtractor:
         frame: dict[str, ExtractedOccurrenceRef],
     ) -> None:
         self._bindings[owner] = dict(frame)
+
+    def _begin_comprehension(
+        self,
+        lookup_owner: str,
+        lexical_enclosing_owner: str | None,
+        effective_walrus_owner: str | None,
+    ) -> _ActiveComprehension:
+        record = _ActiveComprehension(
+            lookup_owner,
+            lexical_enclosing_owner,
+            effective_walrus_owner,
+            self._clone_frame(effective_walrus_owner),
+            set(),
+        )
+        self._replace_frame(
+            lookup_owner,
+            self._clone_frame(lexical_enclosing_owner),
+        )
+        imports = self._import_frame(lookup_owner)
+        imports.clear()
+        imports.update(
+            self._import_frame(lexical_enclosing_owner)
+        )
+        self._active_comprehensions.append(record)
+        return record
+
+    def _publish_executed_walrus(
+        self,
+        name: str,
+        binding: ExtractedOccurrenceRef,
+        target_owner: str | None,
+    ) -> None:
+        for record in self._active_comprehensions:
+            if record.effective_walrus_owner != target_owner:
+                continue
+            record.touched_walrus_names.add(name)
+            self._frame(record.lookup_owner)[name] = binding
+
+    def _finish_comprehension(
+        self,
+        record: _ActiveComprehension,
+    ) -> None:
+        if (
+            not self._active_comprehensions
+            or self._active_comprehensions[-1] is not record
+        ):
+            raise RuntimeError(
+                "Comprehension lineage stack mismatch"
+            )
+        body_frame = self._clone_frame(
+            record.effective_walrus_owner
+        )
+        merged = self._merge_frames(
+            (record.walrus_entry_frame, body_frame)
+        )
+        self._replace_frame(
+            record.effective_walrus_owner,
+            merged,
+        )
+        self._active_comprehensions.pop()
+        for parent in self._active_comprehensions:
+            if (
+                parent.effective_walrus_owner
+                != record.effective_walrus_owner
+            ):
+                continue
+            for name in record.touched_walrus_names:
+                parent.touched_walrus_names.add(name)
+                if name in merged:
+                    self._frame(parent.lookup_owner)[name] = merged[name]
+                else:
+                    self._frame(parent.lookup_owner).pop(name, None)
 
     def _merge_frames(
         self,
@@ -507,25 +589,73 @@ class _AnchorExtractor:
             dynamic_boundary = "dynamic_call"
         self._flow(source=call_site, target=call_result, relation=LineageRelation.CALL_RESULT, node=node, resolution_kind=resolution_kind, confidence=confidence, dynamic_boundary=dynamic_boundary)
 
-    def _visit_comprehension_expression(self, node: ast.AST, generators: list[ast.comprehension], values: tuple[ast.AST, ...], owner: str | None, walrus_owner: str | None) -> None:
-        comprehension_id = self._add("comprehension", node, None, owner)
+    def _visit_comprehension_expression(
+        self,
+        node: ast.AST,
+        generators: list[ast.comprehension],
+        values: tuple[ast.AST, ...],
+        owner: str | None,
+        walrus_owner: str | None,
+    ) -> None:
+        comprehension_id = self._add(
+            "comprehension",
+            node,
+            None,
+            owner,
+        )
         if not generators:
-            for value in values:
-                self._visit(value, comprehension_id, walrus_owner or owner)
-            return
+            raise ValueError(
+                "Parsed comprehension without generators"
+            )
         first = generators[0]
-        self._visit(first.iter, owner, walrus_owner)
-        comprehension_walrus_owner = walrus_owner or owner
-        self._visit(first.target, comprehension_id, comprehension_walrus_owner)
-        for condition in first.ifs:
-            self._visit(condition, comprehension_id, comprehension_walrus_owner)
-        for generator in generators[1:]:
-            self._visit(generator.iter, comprehension_id, comprehension_walrus_owner)
-            self._visit(generator.target, comprehension_id, comprehension_walrus_owner)
-            for condition in generator.ifs:
-                self._visit(condition, comprehension_id, comprehension_walrus_owner)
-        for value in values:
-            self._visit(value, comprehension_id, comprehension_walrus_owner)
+        self._visit(
+            first.iter,
+            owner,
+            walrus_owner,
+        )
+        effective_walrus_owner = walrus_owner or owner
+        record = self._begin_comprehension(
+            comprehension_id,
+            owner,
+            effective_walrus_owner,
+        )
+        try:
+            self._runtime_bind_target(
+                first.target,
+                comprehension_id,
+                effective_walrus_owner,
+            )
+            for condition in first.ifs:
+                self._visit(
+                    condition,
+                    comprehension_id,
+                    effective_walrus_owner,
+                )
+            for generator in generators[1:]:
+                self._visit(
+                    generator.iter,
+                    comprehension_id,
+                    effective_walrus_owner,
+                )
+                self._runtime_bind_target(
+                    generator.target,
+                    comprehension_id,
+                    effective_walrus_owner,
+                )
+                for condition in generator.ifs:
+                    self._visit(
+                        condition,
+                        comprehension_id,
+                        effective_walrus_owner,
+                    )
+            for value in values:
+                self._visit(
+                    value,
+                    comprehension_id,
+                    effective_walrus_owner,
+                )
+        finally:
+            self._finish_comprehension(record)
 
     def _visit_ListComp(self, node, owner, walrus_owner) -> None:
         self._visit_comprehension_expression(node, node.generators, (node.elt,), owner, walrus_owner)
@@ -552,18 +682,25 @@ class _AnchorExtractor:
                 return
             self._flow(source=source, target=load, relation=LineageRelation.BINDS, node=node, resolution_kind=ResolutionKind.LEXICAL_EXACT, confidence=LineageConfidence.CONFIRMED)
 
-    def _assign_target(self, target: ast.AST, source: ExtractedOccurrenceRef, owner: str | None, walrus_owner: str | None) -> None:
+    def _assign_target(
+        self,
+        target: ast.AST,
+        source: ExtractedOccurrenceRef,
+        owner: str | None,
+        walrus_owner: str | None,
+    ) -> ExtractedOccurrenceRef | None:
         if not isinstance(target, ast.Name):
             self._visit(target, owner, walrus_owner)
-            return
+            return None
         binding = ExtractedOccurrenceRef(self._add("binding", target, target.id, owner))
         if target.id in self._blocked_names(owner):
-            return
+            return None
         self._frame(owner)[target.id] = binding
         callable_info = self._callable_values.get(source.local_id)
         if callable_info is not None:
             self._callables_by_binding[binding.local_id] = callable_info
         self._flow(source=source, target=binding, relation=LineageRelation.ASSIGNS, node=target, resolution_kind=ResolutionKind.LEXICAL_EXACT, confidence=LineageConfidence.CONFIRMED)
+        return binding
 
     def _runtime_bind_target(
         self,
@@ -626,7 +763,21 @@ class _AnchorExtractor:
     def _visit_NamedExpr(self, node: ast.NamedExpr, owner: str | None, walrus_owner: str | None) -> None:
         target_owner = walrus_owner or owner
         source = self._value(node.value, owner, walrus_owner)
-        self._assign_target(node.target, source, target_owner, walrus_owner)
+        binding = self._assign_target(
+            node.target,
+            source,
+            target_owner,
+            walrus_owner,
+        )
+        if (
+            binding is not None
+            and isinstance(node.target, ast.Name)
+        ):
+            self._publish_executed_walrus(
+                node.target.id,
+                binding,
+                target_owner,
+            )
 
     def _visit_AugAssign(self, node: ast.AugAssign, owner: str | None, walrus_owner: str | None) -> None:
         if not isinstance(node.target, ast.Name):
