@@ -1,119 +1,71 @@
-# Contextor Stage 1E.1 certification cleanup — minimal facade diff + LIVE retry
+# Contextor LIVE flapping diagnosis — discovery only
 
-STATUS=SEMANTICS_FROZEN_AND_VERIFIED
+## CURRENT_LIVE_STATE
 
-`lineage_extraction.py` was restored from `c1643dc744156ed960669a795ca149017e2c91ad` and re-patched without a formatter or whole-file rewrite. Its diff relative to BASE contains exactly one import extension and `_visit_Subscript`; no unrelated whitespace or EOL hunk remains. Surface state/helper behavior and the five existing subscript regressions are unchanged.
+The last reachable canonical state was revision 603: continuous from cursor 600, `resync_required=false`, watcher events 601–603, and fresh syntax/collision/cycle facts. The post-603 calls returned `transient_connection_failure`. This status is deliberately narrower than a state-corruption result: it means the endpoint PID still existed while ownership validation could not complete.
 
-## Exact minimal facade diff proof
+## LOG_LOCATIONS
 
-The facade raw diff below is 6 additions / 1 deletion: the required import replacement plus the four-statement `_visit_Subscript` method. No additional facade hunks exist.
+* `C:\\Temp\\Contextor_Repo\\logs\\contextor_runtime_*.jsonl` — Desktop/LIVE trace sink. Latest file is 2026-09-07, so it contains no 2026-09-10 revisions 586/592/600/603.
+* `C:\\Users\\DafoO\\AppData\\Local\\Contextor\\cache\\repositories\\ctx_8efc50d8\\live_endpoint.json` — current TCP endpoint metadata.
+* Same directory: `authority_lease.*` and `authority_generation.*` — durable owner/lease state; other hashed JSON files are persisted analysis state.
+* `C:\\Temp\\Contextor_Repo\\.contextor\\mcp_processes\\*.json` — MCP process registry; `analysis_jobs\\*.json` and repository registries are MCP persistence, not a runtime error log.
+* MCP runtime stdout/stderr are not retained: `runtime._spawn_runtime_subprocess` uses `DEVNULL` for both. No distinct transport/client error sink was found.
 
-## Tests and oracle
+## CODE_PATH_FROM_GET_LIVE_EVENTS_TO_FAILURE
 
-* `.venv\\Scripts\\python.exe -m pytest tests/analysis/test_lineage_extraction.py -q` — 194 passed in 2.78s.
-* `.venv\\Scripts\\python.exe -m pytest tests/analysis/test_lineage_extraction_equivalence.py -q` — 3 passed in 0.60s.
-* `.venv\\Scripts\\python.exe -m pytest tests/analysis/test_lineage_extraction.py tests/analysis/test_lineage_extraction_equivalence.py tests/test_no_double_parse.py tests/test_index_fusion.py -q` — 208 passed in 5.49s.
-* `git diff --check` — passed after this report replacement.
-* The unchanged equivalence suite passed, proving legacy anchors and flows remain byte-for-byte equivalent when surfaces are stripped. No hash regeneration occurred.
+`contextor.mcp.tools.get_live_events.get_live_events` calls `runtime.connect_existing_with_status`; a missing client plus `transient_connection_failure` becomes the exact public JSON and wording. `connect_existing_with_status` reads `live_endpoint.json`, validates domain/PID/lease identity, runs `_verified_existing_client` three times with 0.05 s delay, and returns transient only when the endpoint has not changed and its PID remains alive. `_verified_existing_client` rejects an authority-status `OSError`, `EOFError`, `ConnectionError`, `TimeoutError`, or `RuntimeError`, lease/generation mismatch, or failed process identity. IPC is authenticated `multiprocessing.connection` over `Listener((127.0.0.1, 0), family="AF_INET")`.
 
-## LIVE / Contextor certification
+## INCIDENT_TIMELINE
 
-ACTIVE pool was inspected through Contextor MCP documentation and included `get_live_events` and `get_file_edit_context`; no DEFERRED-pool discovery tool was injected in this session. Before cleanup, `get_live_events(after_revision=600)` returned revision 603 with Desktop watcher revisions 601–603, `continuity=continuous`, `resync_required=false`, fresh syntax/collision/cycle diagnostics, and a fresh watcher update for `lineage_extraction.py` at revision 602. Both changed production modules were then LIVE-visible at revision 603 with `syntax_diagnostics=checked_and_none`, `availability=fresh`, and `materialized=true`.
+* Revisions 586, 592, 600 and post-603: no timestamped log record exists in the available sink; each is `UNKNOWN` beyond the public transient classification.
+* 2026-09-06 16:21:18–16:24:15 UTC is an independently timestamped matching incident: repeated watcher “connection lost; recovering”, recovery rejected as “Canonical LIVE service is busy”, then `[WinError 10061] No connection could be made`. Attempts recur roughly every 4–7 seconds; each recovery attempt lasts roughly 2.0–3.7 seconds.
+* Revision 603 later proved recovery without source repair, but the journal does not retain a cause event for the earlier failures.
 
-After the minimal cleanup patch, two retries (`after_revision=600` and, after 30 seconds, `after_revision=603`) returned `transient_connection_failure: Existing LIVE owner is temporarily unreachable`. Therefore a newer matching Desktop watcher revision for the cleanup patch cannot be established. `update_file` was not called.
+## PROCESS_PID_EVIDENCE
 
-LIVE_CERTIFICATION=BLOCKED_MANUAL_RESTART_REQUIRED
+Current MCP processes are alive: `codex.exe` PID 15976 started 2026-09-10 22:03:28 local, parent of MCP launcher PID 5680 (22:08:02), parent of served MCP PID 15044 (22:08:02). Registry has historical server PIDs 1180, 12408, 15044, 8444; only 15044 was observed alive in the focused current query. No current LIVE-owner PID/end-point sample was captured during a failure, so its death/restart cannot be established.
 
-User-side Desktop LIVE/MCP owner restart or reconnect is required before final post-cleanup watcher certification. This is a repeated reachability failure across consecutive attempts. No production semantics were changed beyond the frozen Stage 1E.1 direct-subscript feature.
+## TRANSPORT_EVIDENCE
 
-## Structural certification
+CONFIRMED for the 2026-09-06 incident: `WinError 10061` is TCP connection refusal, not a Python analysis failure. Its client had a durable/claimed service it regarded as busy, yet no listener accepted the connection. This fits an alive stale owner/lease record, a service that stopped listening, or an endpoint race. It does not prove which one.
 
-Textual verification confirms one `LineageExtractionState()` construction, the sole facade dynamic dispatch, the explicit `_visit_Subscript` hook, and no `ast.walk`/`NodeVisitor` occurrences. `observe_all_subscript_mutation` remains helper-only and has no helper-to-facade back-edge. The last reachable LIVE state reported zero syntax errors, zero collisions, and zero cycles, all fresh; a new graph query is blocked solely by the unreachable LIVE owner.
+## TIMEOUT_RETRY_EVIDENCE
 
-FILES_CHANGED:
+`connect_existing_with_status`: three attempts, 0.05 s delay (about 0.10 s retry window). `DEFAULT_CONNECT_TIMEOUT=10.0`; cold start is 60.0; watcher recovery explicitly calls `connect_or_start(... timeout=10.0)`. The 2026-09-06 2–4 s recovery duration is not the 0.10 s MCP reconnect window and does not demonstrate timeout starvation.
 
-* `contextor/core/analysis/lineage_extraction.py`
-* `contextor/core/analysis/lineage_extraction_surfaces.py`
-* `tests/analysis/test_lineage_extraction.py`
+## LOCK_LEASE_EVIDENCE
 
-## COMPLETE raw unified FULL_DIFF relative to BASE
+The lease stores service PID, process-start identity, endpoint fingerprint, generation, and heartbeat; each refresh acquires the domain file lock. `AuthorityLivenessVerifier` treats a failed authority-status call with an alive endpoint process as UNKNOWN rather than stale. Takeover is fail-closed for UNKNOWN, hence the observed “service is busy” while `WinError 10061` repeats. This is CONFIRMED behavior, but no current incident lease-content snapshot is available to prove contention or a stale-record transition.
 
-~~~diff
-diff --git a/contextor/core/analysis/lineage_extraction.py b/contextor/core/analysis/lineage_extraction.py
-index d9215e7..6fdd7a1 100644
---- a/contextor/core/analysis/lineage_extraction.py
-+++ b/contextor/core/analysis/lineage_extraction.py
-@@ -57,7 +57,7 @@ from contextor.core.analysis.lineage_extraction_visitors import (
-     visit_yield,
- )
- from contextor.core.analysis.lineage_extraction_state import LineageExtractionState
--from contextor.core.analysis.lineage_extraction_surfaces import finalize_surfaces
-+from contextor.core.analysis.lineage_extraction_surfaces import finalize_surfaces, observe_all_subscript_mutation
- from contextor.core.domain.lineage_facts import (
-     ExtractedAnchorFact,
-     ExtractedFlowFact,
-@@ -197,6 +197,11 @@ class _AnchorExtractor:
-     def _visit_Name(self, node: ast.Name, owner: str | None, _walrus_owner: str | None) -> None:
-         visit_name(self.state, self.paths, node, owner)
- 
-+    def _visit_Subscript(self, node: ast.Subscript, owner: str | None, walrus_owner: str | None) -> None:
-+        observe_all_subscript_mutation(self.state, node, owner)
-+        self._visit(node.value, owner, walrus_owner)
-+        self._visit(node.slice, owner, walrus_owner)
-+
-     def _runtime_bind_target(
-         self,
-         target: ast.AST,
-diff --git a/contextor/core/analysis/lineage_extraction_surfaces.py b/contextor/core/analysis/lineage_extraction_surfaces.py
-index a5d71d4..32fbb20 100644
---- a/contextor/core/analysis/lineage_extraction_surfaces.py
-+++ b/contextor/core/analysis/lineage_extraction_surfaces.py
-@@ -49,6 +49,21 @@ def observe_all_mutation(state: LineageExtractionState, node: ast.Call) -> None:
-         state.invalidate_all()
+## RESOURCE_CORRELATION
 
+No timestamped log evidence connects the named 2026-09-10 failures to pytest, indexing, persistence, a lock hold, CPU pressure, or file-change burst. The sole detailed incident is unrelated in time. Correlation is UNPROVEN.
 
-+def observe_all_subscript_mutation(
-+    state: LineageExtractionState,
-+    node: ast.Subscript,
-+    owner: str | None,
-+) -> None:
-+    if (
-+        owner is not None
-+        and state._owner_kind.get(owner) == "module"
-+        and isinstance(node.ctx, (ast.Store, ast.Del))
-+        and isinstance(node.value, ast.Name)
-+        and node.value.id == "__all__"
-+    ):
-+        state.invalidate_all()
-+
-+
- def record_direct_public_candidates(state: LineageExtractionState, node: ast.AST, owner: str) -> None:
-     if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-         names = (node.name,)
-diff --git a/tests/analysis/test_lineage_extraction.py b/tests/analysis/test_lineage_extraction.py
-index d46e3dc..ff346a8 100644
---- a/tests/analysis/test_lineage_extraction.py
-+++ b/tests/analysis/test_lineage_extraction.py
-@@ -2162,3 +2162,21 @@ def test_stage_1e1_surface_id_escapes_non_identifier_literal_name_deterministica
-     surface = first.surfaces[0]
-     assert surface.declared_name == "a:b/c"
-     assert ":n:a%3Ab%2Fc" in surface.local_id
-+
-+
-+@pytest.mark.parametrize("source", [
-+    "__all__ = ['a']\\n__all__[0] = 'x'\\ndef a(): pass\\n",
-+    "__all__ = ['a']\\n__all__[:] = ['x']\\ndef a(): pass\\n",
-+    "__all__ = ['a']\\n__all__[0] += 'x'\\ndef a(): pass\\n",
-+    "__all__ = ['a']\\ndel __all__[0]\\ndef a(): pass\\n",
-+])
-+def test_stage_1e1_direct_all_subscript_mutation_suppresses_exact_surfaces(source):
-+    assert _stage_1c_facts(source).surfaces == ()
-+
-+
-+def test_stage_1e1_reading_all_subscript_preserves_exact_literal_authority():
-+    facts = _stage_1c_facts("__all__ = ['a']\\nx = __all__[0]\\ndef a(): pass\\n")
-+    surface = facts.surfaces[0]
-+    assert surface.declared_name == "a"
-+    assert surface.kind is SurfaceKind.EXPORT
-+    assert surface.confidence is LineageConfidence.CONFIRMED
-~~~
+## AUTOMATIC_RECOVERY_PATH
+
+Desktop watcher polls every 0.75 s. A ping transport error invokes `_recover_client`, which calls `connect_or_start` (desktop timeout 10 s); recovery can reconnect to a verified existing endpoint or start a new owner only when lease liveness permits. Thus later reachability can be automatic reconnect or a later owner/endpoint replacement; the available evidence cannot distinguish them.
+
+## ROOT_CAUSE_RANKING
+
+1. LIKELY — transport/listener unavailable while durable ownership still reports live/unknown. Evidence: repeated `WinError 10061` plus “service busy” and the fail-closed liveness design.
+2. POSSIBLE — owner process alive but IPC listener stopped/unresponsive. This exactly produces the public transient status when PID identity remains alive.
+3. POSSIBLE — stale endpoint/lease or endpoint replacement race. Strict endpoint equality and identity checks intentionally surface transient/identity failures during such a transition.
+4. UNPROVEN — owner process died/respawned. No process sample exists for revisions 586/592/600/post-603.
+5. NOT EVIDENCED — LIVE canonical-state corruption, Stage 1E.1 code, pytest/indexing burst, lock contention, or timeout starvation.
+
+## LOGGING_GAPS
+
+Add design-only structured events at: `runtime._verified_existing_client` for each rejection reason and exception type/WinError; `connect_existing_with_status` for expected/current endpoint fingerprint, PID liveness, attempt number and elapsed time; `AuthorityLivenessVerifier.verify` for process/endpoint/status predicates; watcher `_recover_client` for selected recovery branch and owner/generation; IPC accept/request failure for endpoint and request type. Include service PID/start identity, lease generation, endpoint fingerprint, listener port, exception class/errno, duration, and whether endpoint changed. Persist/rotate these in the active 2026-09-10 runtime sink rather than DEVNULL.
+
+## MINIMAL_FIX_DIRECTION
+
+Design only: retain fail-closed lease safety, but make reconnect diagnosis observable and distinguish “PID alive, listener refused” from status timeout/identity mismatch/lease contention. If evidence confirms a stale alive lease with a dead listener, add a fenced recovery path only after an independent listener/identity proof; do not weaken UNKNOWN-owner protection.
+
+IS_LIVE_CANONICAL_STATE_CORRUPTED=NO evidence of corruption; historical-state continuity/freshness was healthy. Absolute proof is unavailable while owner is unreachable.
+
+IS_STAGE_1E1_CODE_IMPLICATED=NO evidence. The same signature predates Stage 1E.1 and the direct-subscript change is outside runtime/IPC/lease paths.
+
+FILES_CHANGED=NONE
+
+DIFFS=NONE
