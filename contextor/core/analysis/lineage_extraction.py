@@ -26,7 +26,21 @@ from contextor.core.analysis.lineage_extraction_comprehensions import (
     publish_executed_walrus,
     visit_comprehension_expression,
 )
-from contextor.core.analysis.lineage_extraction_control import visit_block_from_frame
+from contextor.core.analysis.lineage_extraction_control import (
+    visit_async_for,
+    visit_async_with,
+    visit_block_from_frame,
+    visit_except_handler,
+    visit_for,
+    visit_if,
+    visit_match,
+    visit_match_as,
+    visit_match_mapping,
+    visit_match_star,
+    visit_try,
+    visit_while,
+    visit_with,
+)
 from contextor.core.analysis.lineage_extraction_bindings import (
     assign_target,
     runtime_bind_target,
@@ -352,143 +366,22 @@ class _AnchorExtractor:
         visit_aug_assign(self.state, self.paths, node, owner, walrus_owner, value=self._value, visit=self._visit)
 
     def _visit_If(self, node: ast.If, owner: str | None, walrus_owner: str | None) -> None:
-        self._visit(node.test, owner, walrus_owner)
-        entry_frame = self._clone_frame(owner)
-        body_frame = self._visit_block_from_frame(
-            node.body,
-            owner,
-            walrus_owner,
-            entry_frame,
-        )
-        if node.orelse:
-            else_frame = self._visit_block_from_frame(
-                node.orelse,
-                owner,
-                walrus_owner,
-                entry_frame,
-            )
-        else:
-            else_frame = dict(entry_frame)
-        self._replace_frame(
-            owner,
-            self._merge_frames((body_frame, else_frame)),
-        )
+        return visit_if(self.state, node, owner, walrus_owner, visit=self._visit)
 
     def _visit_For(self, node: ast.For, owner: str | None, walrus_owner: str | None) -> None:
-        self._visit(node.iter, owner, walrus_owner)
-        entry_frame = self._clone_frame(owner)
-        self._replace_frame(owner, entry_frame)
-        self._runtime_bind_target(
-            node.target,
-            owner,
-            walrus_owner,
-        )
-        for child in node.body:
-            self._visit(child, owner, walrus_owner)
-        body_frame = self._clone_frame(owner)
-        loop_exit_frame = self._merge_frames(
-            (entry_frame, body_frame)
-        )
-        self._replace_frame(owner, loop_exit_frame)
-        if not node.orelse:
-            return
-        else_frame = self._visit_block_from_frame(
-            node.orelse,
-            owner,
-            walrus_owner,
-            loop_exit_frame,
-        )
-        self._replace_frame(
-            owner,
-            self._merge_frames((loop_exit_frame, else_frame)),
-        )
+        return visit_for(self.state, node, owner, walrus_owner, visit=self._visit, runtime_bind_target=self._runtime_bind_target)
 
     def _visit_AsyncFor(self, node: ast.AsyncFor, owner: str | None, walrus_owner: str | None) -> None:
-        self._visit(node.iter, owner, walrus_owner)
-        entry_frame = self._clone_frame(owner)
-        self._replace_frame(owner, entry_frame)
-        self._runtime_bind_target(
-            node.target,
-            owner,
-            walrus_owner,
-        )
-        for child in node.body:
-            self._visit(child, owner, walrus_owner)
-        body_frame = self._clone_frame(owner)
-        loop_exit_frame = self._merge_frames(
-            (entry_frame, body_frame)
-        )
-        self._replace_frame(owner, loop_exit_frame)
-        if not node.orelse:
-            return
-        else_frame = self._visit_block_from_frame(
-            node.orelse,
-            owner,
-            walrus_owner,
-            loop_exit_frame,
-        )
-        self._replace_frame(
-            owner,
-            self._merge_frames((loop_exit_frame, else_frame)),
-        )
+        return visit_async_for(self.state, node, owner, walrus_owner, visit=self._visit, runtime_bind_target=self._runtime_bind_target)
 
     def _visit_While(self, node: ast.While, owner: str | None, walrus_owner: str | None) -> None:
-        self._visit(node.test, owner, walrus_owner)
-        entry_frame = self._clone_frame(owner)
-        body_frame = self._visit_block_from_frame(
-            node.body,
-            owner,
-            walrus_owner,
-            entry_frame,
-        )
-        loop_exit_frame = self._merge_frames(
-            (entry_frame, body_frame)
-        )
-        self._replace_frame(owner, loop_exit_frame)
-        if not node.orelse:
-            return
-        else_frame = self._visit_block_from_frame(
-            node.orelse,
-            owner,
-            walrus_owner,
-            loop_exit_frame,
-        )
-        self._replace_frame(
-            owner,
-            self._merge_frames((loop_exit_frame, else_frame)),
-        )
+        return visit_while(self.state, node, owner, walrus_owner, visit=self._visit)
 
     def _visit_With(self, node: ast.With, owner: str | None, walrus_owner: str | None) -> None:
-        for item in node.items:
-            self._visit(
-                item.context_expr,
-                owner,
-                walrus_owner,
-            )
-            if item.optional_vars is not None:
-                self._runtime_bind_target(
-                    item.optional_vars,
-                    owner,
-                    walrus_owner,
-                )
-        for child in node.body:
-            self._visit(child, owner, walrus_owner)
+        return visit_with(self.state, node, owner, walrus_owner, visit=self._visit, runtime_bind_target=self._runtime_bind_target)
 
     def _visit_AsyncWith(self, node: ast.AsyncWith, owner: str | None, walrus_owner: str | None) -> None:
-        for item in node.items:
-            self._visit(
-                item.context_expr,
-                owner,
-                walrus_owner,
-            )
-            if item.optional_vars is not None:
-                self._runtime_bind_target(
-                    item.optional_vars,
-                    owner,
-                    walrus_owner,
-                )
-        for child in node.body:
-            self._visit(child, owner, walrus_owner)
+        return visit_async_with(self.state, node, owner, walrus_owner, visit=self._visit, runtime_bind_target=self._runtime_bind_target)
 
     def _visit_Import(self, node: ast.Import, owner: str | None, _walrus_owner: str | None) -> None:
         for alias in node.names:
@@ -511,100 +404,22 @@ class _AnchorExtractor:
         visit_nonlocal(self.state, self.paths, node, owner)
 
     def _visit_Try(self, node: ast.Try, owner: str | None, walrus_owner: str | None) -> None:
-        entry_frame = self._clone_frame(owner)
-        normal_frame = self._visit_block_from_frame(
-            node.body,
-            owner,
-            walrus_owner,
-            entry_frame,
-        )
-        if node.orelse:
-            normal_frame = self._visit_block_from_frame(
-                node.orelse,
-                owner,
-                walrus_owner,
-                normal_frame,
-            )
-        reachable_frames = [normal_frame]
-        for handler in node.handlers:
-            self._replace_frame(owner, entry_frame)
-            self._visit(handler, owner, walrus_owner)
-            reachable_frames.append(
-                self._clone_frame(owner)
-            )
-        merged_frame = self._merge_frames(
-            tuple(reachable_frames)
-        )
-        self._replace_frame(owner, merged_frame)
-        for child in node.finalbody:
-            self._visit(child, owner, walrus_owner)
+        return visit_try(self.state, node, owner, walrus_owner, visit=self._visit)
 
     def _visit_ExceptHandler(self, node: ast.ExceptHandler, owner: str | None, walrus_owner: str | None) -> None:
-        if node.type is not None:
-            self._visit(node.type, owner, walrus_owner)
-        alias_name = node.name if isinstance(node.name, str) else None
-        if alias_name is not None:
-            binding = ExtractedOccurrenceRef(
-                self._add("binding", node, alias_name, owner)
-            )
-            if alias_name not in self._blocked_names(owner):
-                source = self._occurrence(
-                    "runtime_bound_local",
-                    node,
-                    alias_name,
-                )
-                self._frame(owner)[alias_name] = binding
-                self._flow(
-                    source=source,
-                    target=binding,
-                    relation=LineageRelation.ASSIGNS,
-                    node=node,
-                    resolution_kind=ResolutionKind.LEXICAL_EXACT,
-                    confidence=LineageConfidence.CONFIRMED,
-                )
-        for child in node.body:
-            self._visit(child, owner, walrus_owner)
-        exit_frame = self._clone_frame(owner)
-        if alias_name is not None:
-            exit_frame.pop(alias_name, None)
-        self._replace_frame(owner, exit_frame)
+        return visit_except_handler(self.state, self.paths, node, owner, walrus_owner, visit=self._visit)
 
     def _visit_Match(self, node: ast.Match, owner: str | None, walrus_owner: str | None) -> None:
-        self._visit(node.subject, owner, walrus_owner)
-        entry_frame = self._clone_frame(owner)
-        reachable_frames = [dict(entry_frame)]
-        for case in node.cases:
-            self._replace_frame(owner, entry_frame)
-            self._visit(case.pattern, owner, walrus_owner)
-            if case.guard is not None:
-                self._visit(case.guard, owner, walrus_owner)
-            for child in case.body:
-                self._visit(child, owner, walrus_owner)
-            reachable_frames.append(
-                self._clone_frame(owner)
-            )
-        self._replace_frame(
-            owner,
-            self._merge_frames(tuple(reachable_frames)),
-        )
+        return visit_match(self.state, node, owner, walrus_owner, visit=self._visit)
 
     def _visit_MatchAs(self, node: ast.MatchAs, owner: str | None, walrus_owner: str | None) -> None:
-        if node.pattern is not None:
-            self._visit(node.pattern, owner, walrus_owner)
-        if node.name is not None:
-            self._add("binding", node, node.name, owner)
+        return visit_match_as(self.state, self.paths, node, owner, walrus_owner, visit=self._visit)
 
     def _visit_MatchStar(self, node: ast.MatchStar, owner: str | None, _walrus_owner: str | None) -> None:
-        if node.name is not None:
-            self._add("binding", node, node.name, owner)
+        return visit_match_star(self.state, self.paths, node, owner)
 
     def _visit_MatchMapping(self, node: ast.MatchMapping, owner: str | None, walrus_owner: str | None) -> None:
-        for key in node.keys:
-            self._visit(key, owner, walrus_owner)
-        for pattern in node.patterns:
-            self._visit(pattern, owner, walrus_owner)
-        if node.rest is not None:
-            self._add("binding", node, node.rest, owner)
+        return visit_match_mapping(self.state, self.paths, node, owner, walrus_owner, visit=self._visit)
 
 
 def extract_lineage_source_facts(tree: ast.AST, *, source_key: str, source_fingerprint: str, limits: LineageExtractionLimits = DEFAULT_LINEAGE_EXTRACTION_LIMITS) -> ExtractedLineageSourceFacts:
