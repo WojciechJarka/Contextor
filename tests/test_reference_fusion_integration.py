@@ -41,7 +41,7 @@ def test_cold_index_emits_json_safe_reference_facts_into_combined_cache(
     assert _payload(root, source)["reference_facts"] == record
 
 
-def test_warm_reference_hit_performs_zero_parse_and_zero_extraction(
+def test_warm_reference_hit_parses_once_for_lineage_and_zero_reference_extraction(
     tmp_path, isolated_dirs, monkeypatch
 ):
     monkeypatch.setenv("CONTEXTOR_DISABLE_PROCESS_POOL", "1")
@@ -52,8 +52,12 @@ def test_warm_reference_hit_performs_zero_parse_and_zero_extraction(
     indexer.index_repository(str(root))
     _reset_worker_cache(root)
 
+    parse_calls = []
+    original_parse = indexer.parse_source_with_fingerprint
     monkeypatch.setattr(
-        indexer, "parse_source", lambda path: (_ for _ in ()).throw(AssertionError(path))
+        indexer,
+        "parse_source_with_fingerprint",
+        lambda path: (parse_calls.append(path) or original_parse(path)),
     )
     monkeypatch.setattr(
         indexer,
@@ -63,6 +67,7 @@ def test_warm_reference_hit_performs_zero_parse_and_zero_extraction(
 
     result = indexer.index_repository(str(root))
     assert result.reference_facts_by_module["module"]["status"] == "available"
+    assert len(parse_calls) == 1
 
 
 def test_reference_legacy_and_schema_migrations_parse_once_then_hit_warm(
@@ -75,10 +80,12 @@ def test_reference_legacy_and_schema_migrations_parse_once_then_hit_warm(
     source.write_text("def current(): return 1\n", encoding="utf-8")
     CacheManager(str(root)).set(source, {"imports": [], "error": None})
     _reset_worker_cache(root)
-    original_parse = indexer.parse_source
+    original_parse = indexer.parse_source_with_fingerprint
     calls = []
     monkeypatch.setattr(
-        indexer, "parse_source", lambda path: (calls.append(path) or original_parse(path))
+        indexer,
+        "parse_source_with_fingerprint",
+        lambda path: (calls.append(path) or original_parse(path)),
     )
 
     migrated = indexer.index_repository(str(root))
@@ -97,7 +104,7 @@ def test_reference_legacy_and_schema_migrations_parse_once_then_hit_warm(
     _reset_worker_cache(root)
     calls.clear()
     indexer.index_repository(str(root))
-    assert calls == []
+    assert len(calls) == 1
 
 
 def test_source_change_invalidates_reference_facts_and_reassembles_reexports(

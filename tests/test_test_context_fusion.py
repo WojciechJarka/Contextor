@@ -86,7 +86,7 @@ def test_case():
     assert facts["has_assertions"] is expected[2]
 
 
-def test_cold_then_current_schema_warm_has_zero_test_fact_parse_and_visitor(
+def test_cold_then_current_schema_warm_has_one_lineage_parse_per_source_and_zero_test_fact_visitor(
     tmp_path, isolated_dirs, monkeypatch
 ):
     root = tmp_path / "repo"
@@ -96,13 +96,22 @@ def test_cold_then_current_schema_warm_has_zero_test_fact_parse_and_visitor(
     indexer._CACHE_MANAGERS.pop(str(root.resolve()), None)
     parse_calls = []
     visitor_calls = []
-    original_parse = indexer.parse_source
+    original_parse = indexer.parse_source_with_fingerprint
     original_extract = indexer._extract_test_file_facts
-    monkeypatch.setattr(indexer, "parse_source", lambda path: (parse_calls.append(path) or original_parse(path)))
+    monkeypatch.setattr(
+        indexer,
+        "parse_source_with_fingerprint",
+        lambda path: (parse_calls.append(path) or original_parse(path)),
+    )
     monkeypatch.setattr(indexer, "_extract_test_file_facts", lambda tree: (visitor_calls.append(tree) or original_extract(tree)))
 
     warm = indexer.index_repository(str(root))
-    assert parse_calls == []
+    assert set(parse_calls) == {
+        root / "pkg" / "mod.py",
+        root / "tests" / "conftest.py",
+        source,
+    }
+    assert all(parse_calls.count(path) == 1 for path in parse_calls)
     assert visitor_calls == []
     assert str(source.resolve()) in warm.test_facts_by_path
 
@@ -120,8 +129,12 @@ def test_non_candidate_cache_record_is_not_migrated(tmp_path, isolated_dirs, mon
     CacheManager(str(root)).set(source, {"imports": [], "error": None})
     indexer._CACHE_MANAGERS.pop(str(root.resolve()), None)
     calls = []
-    original = indexer.parse_source
-    monkeypatch.setattr(indexer, "parse_source", lambda path: (calls.append(path) or original(path)))
+    original = indexer.parse_source_with_fingerprint
+    monkeypatch.setattr(
+        indexer,
+        "parse_source_with_fingerprint",
+        lambda path: (calls.append(path) or original(path)),
+    )
 
     result = indexer.index_repository(str(root))
     assert str(source.resolve()) not in result.test_facts_by_path
