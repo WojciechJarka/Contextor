@@ -117,6 +117,7 @@ def visit_except_handler(state: LineageExtractionState, paths: dict[int, str], n
     alias_name = node.name if isinstance(node.name, str) else None
     if alias_name is not None:
         binding = ExtractedOccurrenceRef(add_anchor(state, paths, "binding", node, alias_name, owner))
+        state.declare_local(owner, alias_name)
         if alias_name not in state.blocked_names(owner):
             source = occurrence(state, paths, "runtime_bound_local", node, alias_name)
             state.frame(owner)[alias_name] = binding
@@ -149,11 +150,13 @@ def visit_match_as(state: LineageExtractionState, paths: dict[int, str], node: a
         visit(node.pattern, owner, walrus_owner)
     if node.name is not None:
         add_anchor(state, paths, "binding", node, node.name, owner)
+        state.declare_local(owner, node.name)
 
 
 def visit_match_star(state: LineageExtractionState, paths: dict[int, str], node: ast.MatchStar, owner: str | None) -> None:
     if node.name is not None:
         add_anchor(state, paths, "binding", node, node.name, owner)
+        state.declare_local(owner, node.name)
 
 
 def visit_match_mapping(state: LineageExtractionState, paths: dict[int, str], node: ast.MatchMapping, owner: str | None, walrus_owner: str | None, *, visit: VisitFn) -> None:
@@ -163,3 +166,4 @@ def visit_match_mapping(state: LineageExtractionState, paths: dict[int, str], no
         visit(pattern, owner, walrus_owner)
     if node.rest is not None:
         add_anchor(state, paths, "binding", node, node.rest, owner)
+        state.declare_local(owner, node.rest)

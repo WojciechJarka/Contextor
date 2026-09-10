@@ -50,6 +50,7 @@ def visit_module(
         None,
         None,
     )
+    state.register_owner(module_id, None, "module", node)
     state.frame(module_id)
     for child in node.body:
         visit(child, module_id, None)
@@ -72,6 +73,8 @@ def visit_class_def(
         node.name,
         owner,
     )
+    state.declare_local(owner, node.name)
+    state.register_owner(class_id, owner, "class", node)
     for child in (*node.decorator_list, *node.bases, *node.keywords):
         visit(child, owner, walrus_owner)
     state.frame(class_id)
@@ -100,6 +103,8 @@ def visit_function(
         node.name,
         owner,
     )
+    state.declare_local(owner, node.name)
+    state.register_owner(function_id, owner, kind, node)
     for decorator in node.decorator_list:
         visit(decorator, owner, walrus_owner)
     function_signature_evidence(
@@ -163,6 +168,7 @@ def visit_lambda(
         None,
         owner,
     )
+    state.register_owner(lambda_id, owner, "lambda", node)
     function_signature_evidence(
         node,
         owner,

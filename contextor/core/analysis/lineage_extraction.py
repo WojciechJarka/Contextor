@@ -35,6 +35,7 @@ from contextor.core.analysis.lineage_extraction_control import (
     visit_with,
 )
 from contextor.core.analysis.lineage_extraction_bindings import (
+    finalize_captures,
     runtime_bind_target,
     visit_ann_assign,
     visit_assign,
@@ -73,6 +74,7 @@ class _AnchorExtractor:
 
     def extract(self, tree: ast.AST) -> tuple[tuple[ExtractedAnchorFact, ...], tuple[ExtractedFlowFact, ...]]:
         self._visit(tree, None, None)
+        finalize_captures(self.state, self.paths)
         return tuple(sorted(self.state.anchors)), tuple(sorted(self.state.flows))
 
     def _publish_executed_walrus(

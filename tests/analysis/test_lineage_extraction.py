@@ -1573,3 +1573,104 @@ def test_stage_1c7_runtime_target_has_one_assignment_and_unique_ids():
     assert len(assignments) == 1
     assert len({anchor.local_id for anchor in facts.anchors}) == len(facts.anchors)
     assert len({flow.local_id for flow in facts.flows}) == len(facts.flows)
+
+
+def _stage_1d_capture_flows(facts):
+    return [flow for flow in facts.flows if flow.relation is LineageRelation.CAPTURES]
+
+
+def _stage_1d_closure_cells(facts, name):
+    return [
+        anchor
+        for anchor in facts.anchors
+        if anchor.kind == "closure_cell"
+        and parse_local_occurrence_id(anchor.local_id)[3] == name
+    ]
+
+
+@pytest.mark.parametrize(
+    "source",
+    (
+        "def outer():\n x=1\n def inner(): return x\n x=2\n return inner\n",
+        "def outer(flag):\n x=1\n def inner(): return x\n if flag: x=2\n return inner\n",
+        "def outer():\n def inner(): return x\n x=1\n return inner\n",
+    ),
+)
+def test_stage_1d1_capture_cell_is_stable_across_late_and_conditional_writes(source):
+    facts = _stage_1c_facts(source)
+    outer = _stage_1c_named(facts, "function", "outer")[0]
+    cells = _stage_1d_closure_cells(facts, "x")
+    captures = _stage_1d_capture_flows(facts)
+    assert len(cells) == len(captures) == 1
+    assert cells[0].owner_local_id == outer.local_id
+    capture = captures[0]
+    assert capture.source == ExtractedOccurrenceRef(cells[0].local_id)
+    assert capture.resolution_kind is ResolutionKind.LEXICAL_EXACT
+    assert capture.confidence is LineageConfidence.CONFIRMED
+    assert isinstance(capture.target, ExtractedOccurrenceRef)
+    assert parse_local_occurrence_id(capture.target.local_id)[:1] == ("name_load",)
+    assignment_ids = {
+        flow.target.local_id
+        for flow in facts.flows
+        if flow.relation is LineageRelation.ASSIGNS
+        and isinstance(flow.target, ExtractedOccurrenceRef)
+    }
+    assert capture.source.local_id not in assignment_ids
+
+
+def test_stage_1d1_class_is_transparent_and_outer_parameter_is_a_cell():
+    facts = _stage_1c_facts(
+        "def outer(x):\n class C:\n  x=2\n  def method(self): return x\n return C\n"
+    )
+    outer = _stage_1c_named(facts, "function", "outer")[0]
+    cell = _stage_1d_closure_cells(facts, "x")[0]
+    capture = _stage_1d_capture_flows(facts)[0]
+    assert cell.owner_local_id == outer.local_id
+    assert capture.source == ExtractedOccurrenceRef(cell.local_id)
+
+
+@pytest.mark.parametrize(
+    "source",
+    (
+        "def outer():\n x=1\n def inner():\n  y=x\n  x=2\n  return y\n return inner\n",
+        "x=1\ndef outer():\n def inner(): return x\n return inner\n",
+        "def outer():\n x=1\n def inner():\n  use(x)\n  del x\n return inner\n",
+        "def outer(xs):\n x=1\n return [lambda: x for x in xs]\n",
+    ),
+)
+def test_stage_1d1_local_global_del_and_comprehension_barriers_do_not_capture(source):
+    facts = _stage_1c_facts(source)
+    assert not _stage_1d_capture_flows(facts)
+    assert not [anchor for anchor in facts.anchors if anchor.kind == "closure_cell"]
+
+
+def test_stage_1d1_lambda_can_skip_comprehension_without_same_name_target():
+    facts = _stage_1c_facts(
+        "def outer(xs):\n y=1\n return [lambda: y for x in xs]\n"
+    )
+    outer = _stage_1c_named(facts, "function", "outer")[0]
+    cell = _stage_1d_closure_cells(facts, "y")[0]
+    capture = _stage_1d_capture_flows(facts)[0]
+    assert cell.owner_local_id == outer.local_id
+    assert capture.source == ExtractedOccurrenceRef(cell.local_id)
+
+
+@pytest.mark.parametrize(
+    "statement",
+    (
+        "x: int",
+        "x += 1",
+        "from pkg import x",
+        "for x in (): pass",
+        "with make_context() as x: pass",
+        "try:\n pass\nexcept Exception as x:\n pass",
+        "match 1:\n case x:\n  pass",
+    ),
+)
+def test_stage_1d1_declaration_producers_block_outer_capture(statement):
+    facts = _stage_1c_facts(
+        "def outer(xs, ctx, value):\n x=1\n def inner():\n  use(x)\n  "
+        + statement.replace("\n", "\n  ")
+        + "\n return inner\n"
+    )
+    assert not _stage_1d_capture_flows(facts)

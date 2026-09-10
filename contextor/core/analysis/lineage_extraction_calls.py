@@ -12,6 +12,7 @@ ValueFn = Callable[[ast.AST, str | None, str | None], ExtractedOccurrenceRef]
 
 def register_import_binding(state: LineageExtractionState, paths: dict[int, str], alias: ast.alias, owner: str | None, local_name: str, module_name: str | None, symbol_name: str | None) -> None:
     binding_id = add_anchor(state, paths,"import_binding", alias, local_name, owner)
+    state.declare_local(owner, local_name)
     if local_name in state.blocked_names(owner): return
     state.frame(owner)[local_name] = ExtractedOccurrenceRef(binding_id)
     if module_name is not None: state.import_frame(owner)[local_name] = _ImportInfo(module_name, symbol_name, binding_id)
@@ -103,6 +104,7 @@ def parameter_anchors(state: LineageExtractionState, paths: dict[int, str], modu
     for group, kind, local_kind in groups:
         for ordinal, parameter in enumerate(group):
             local_id = add_anchor(state, paths,"parameter", parameter, parameter.arg, owner, ordinal=ordinal if kind in (ParameterKind.POSITIONAL_ONLY, ParameterKind.POSITIONAL_OR_KEYWORD) else 0, local_kind=local_kind)
+            state.declare_local(owner, parameter.arg)
             info = _ParameterInfo(local_id, parameter.arg, kind, ordinal if kind in (ParameterKind.POSITIONAL_ONLY, ParameterKind.POSITIONAL_OR_KEYWORD) else 0)
             result.append((info, parameter))
     for ordinal, (info, parameter) in enumerate(result):

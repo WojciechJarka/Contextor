@@ -109,6 +109,7 @@ def visit_comprehension_expression(
         None,
         owner,
     )
+    state.register_owner(comprehension_id, owner, "comprehension", node)
     if not generators:
         raise ValueError(
             "Parsed comprehension without generators"

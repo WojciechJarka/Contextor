@@ -45,6 +45,14 @@ class _CallArgumentInfo:
     keyword_name: str | None
 
 
+@dataclass(frozen=True)
+class _CaptureRequest:
+    load: ExtractedOccurrenceRef
+    node: ast.Name
+    owner: str
+    name: str
+
+
 @dataclass
 class LineageExtractionState:
     anchors: list[ExtractedAnchorFact] = field(default_factory=list)
@@ -60,6 +68,12 @@ class LineageExtractionState:
     _imports: dict[str | None, dict[str, _ImportInfo]] = field(default_factory=dict)
     _blocked: dict[str | None, set[str]] = field(default_factory=dict)
     _active_comprehensions: list[_ActiveComprehension] = field(default_factory=list)
+    _owner_parent: dict[str, str | None] = field(default_factory=dict)
+    _owner_kind: dict[str, str] = field(default_factory=dict)
+    _owner_nodes: dict[str, ast.AST] = field(default_factory=dict)
+    _declared_locals: dict[str, set[str]] = field(default_factory=dict)
+    _capture_requests: dict[str, _CaptureRequest] = field(default_factory=dict)
+    _lexical_cells: dict[tuple[str, str], ExtractedOccurrenceRef] = field(default_factory=dict)
 
     def frame(self, owner: str | None) -> dict[str, ExtractedOccurrenceRef]:
         return self._bindings.setdefault(owner, {})
@@ -91,3 +105,68 @@ class LineageExtractionState:
 
     def import_frame(self, owner: str | None) -> dict[str, _ImportInfo]:
         return self._imports.setdefault(owner, {})
+
+    def register_owner(
+        self,
+        owner_id: str,
+        parent_id: str | None,
+        kind: str,
+        node: ast.AST,
+    ) -> None:
+        existing = (
+            self._owner_parent.get(owner_id),
+            self._owner_kind.get(owner_id),
+            self._owner_nodes.get(owner_id),
+        )
+        candidate = (parent_id, kind, node)
+        if owner_id in self._owner_kind:
+            if existing != candidate:
+                raise ValueError(f"Conflicting lineage owner registration: {owner_id}")
+            return
+        self._owner_parent[owner_id] = parent_id
+        self._owner_kind[owner_id] = kind
+        self._owner_nodes[owner_id] = node
+
+    def declare_local(self, owner: str | None, name: str) -> None:
+        if owner is None or name in self.blocked_names(owner):
+            return
+        self._declared_locals.setdefault(owner, set()).add(name)
+
+    def request_capture(
+        self,
+        load: ExtractedOccurrenceRef,
+        node: ast.Name,
+        owner: str,
+        name: str,
+    ) -> None:
+        request = _CaptureRequest(load, node, owner, name)
+        existing = self._capture_requests.get(load.local_id)
+        if existing is not None and existing != request:
+            raise ValueError(f"Conflicting lineage capture request: {load.local_id}")
+        self._capture_requests[load.local_id] = request
+
+    def resolve_capture_owner(self, request_owner: str, name: str) -> str | None:
+        if name in self.blocked_names(request_owner):
+            return None
+        if name in self._declared_locals.get(request_owner, set()):
+            return None
+        owner = self._owner_parent.get(request_owner)
+        while owner is not None:
+            kind = self._owner_kind.get(owner)
+            if kind == "class":
+                owner = self._owner_parent.get(owner)
+                continue
+            if kind == "comprehension":
+                if name in self._declared_locals.get(owner, set()):
+                    return None
+                owner = self._owner_parent.get(owner)
+                continue
+            if kind in {"function", "async_function", "lambda"}:
+                if name in self.blocked_names(owner):
+                    return None
+                if name in self._declared_locals.get(owner, set()):
+                    return owner
+                owner = self._owner_parent.get(owner)
+                continue
+            return None
+        return None

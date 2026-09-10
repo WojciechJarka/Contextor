@@ -26,6 +26,10 @@ def visit_name(
 ) -> None:
     if isinstance(node.ctx, ast.Store):
         add_anchor(state, paths, "binding", node, node.id, owner)
+        state.declare_local(owner, node.id)
+        return
+    if isinstance(node.ctx, ast.Del):
+        state.declare_local(owner, node.id)
         return
     if isinstance(node.ctx, ast.Load):
         load = occurrence(state, paths, "name_load", node, node.id)
@@ -33,6 +37,12 @@ def visit_name(
             return
         source = state.frame(owner).get(node.id)
         if source is None:
+            if (
+                owner is not None
+                and state._owner_kind.get(owner)
+                in {"function", "async_function", "lambda"}
+            ):
+                state.request_capture(load, node, owner, node.id)
             return
         emit_flow(
             state,
@@ -62,6 +72,7 @@ def assign_target(
     binding = ExtractedOccurrenceRef(
         add_anchor(state, paths, "binding", target, target.id, owner)
     )
+    state.declare_local(owner, target.id)
     if target.id in state.blocked_names(owner):
         return None
     state.frame(owner)[target.id] = binding
@@ -94,6 +105,7 @@ def runtime_bind_target(
         binding = ExtractedOccurrenceRef(
             add_anchor(state, paths, "binding", target, target.id, owner)
         )
+        state.declare_local(owner, target.id)
         if target.id in state.blocked_names(owner):
             return
         source = occurrence(
@@ -264,6 +276,7 @@ def visit_aug_assign(
             owner,
         )
     )
+    state.declare_local(owner, node.target.id)
     if blocked or prior is None:
         return
     state.frame(owner)[node.target.id] = binding
@@ -287,6 +300,7 @@ def visit_global(
         )
         state.blocked_names(owner).add(name)
         state.frame(owner).pop(name, None)
+        state._declared_locals.get(owner, set()).discard(name)
 
 
 def visit_nonlocal(
@@ -307,3 +321,54 @@ def visit_nonlocal(
         )
         state.blocked_names(owner).add(name)
         state.frame(owner).pop(name, None)
+        state._declared_locals.get(owner, set()).discard(name)
+
+
+def ensure_lexical_cell(
+    state: LineageExtractionState,
+    paths: dict[int, str],
+    owner: str,
+    name: str,
+) -> ExtractedOccurrenceRef:
+    key = (owner, name)
+    cached = state._lexical_cells.get(key)
+    if cached is not None:
+        return cached
+    node = state._owner_nodes.get(owner)
+    if node is None:
+        raise ValueError(f"Missing lineage owner node: {owner}")
+    cell = ExtractedOccurrenceRef(
+        add_anchor(
+            state,
+            paths,
+            "closure_cell",
+            node,
+            name,
+            owner,
+            local_kind="closure_cell",
+        )
+    )
+    state._lexical_cells[key] = cell
+    return cell
+
+
+def finalize_captures(
+    state: LineageExtractionState,
+    paths: dict[int, str],
+) -> None:
+    for request in sorted(
+        state._capture_requests.values(), key=lambda item: item.load.local_id
+    ):
+        owner = state.resolve_capture_owner(request.owner, request.name)
+        if owner is None:
+            continue
+        emit_flow(
+            state,
+            paths,
+            source=ensure_lexical_cell(state, paths, owner, request.name),
+            target=request.load,
+            relation=LineageRelation.CAPTURES,
+            node=request.node,
+            resolution_kind=ResolutionKind.LEXICAL_EXACT,
+            confidence=LineageConfidence.CONFIRMED,
+        )

@@ -1,85 +1,108 @@
-STATUS=FINAL_PASS
+STATUS=BLOCKED
+
+STAGE=1D.1 exact lexical closure-cell CAPTURES implementation
+BASE=90409963f571fcb94782f7a7b7cf9d5cd2b0cfc5
+
+IMPLEMENTATION_RESULT=
+- Added deferred capture requests and one finalization after the existing single AST traversal. Finalization resolves only a lexical enclosing function/async-function/lambda cell; module ends resolution, class is transparent, and a comprehension is a same-name barrier.
+- Declared-local tracking covers stores, deletes, assignment targets, runtime targets, parameters, imports, function/class declarations, exception aliases, and match captures. global/nonlocal remain blocked and are excluded from local declarations.
+- CAPTURES emits an existing-occurrence endpoint pair: a cached synthetic `closure_cell` anchor owned by the lexical scope and the original `name_load`; relation=CAPTURES, resolution=LEXICAL_EXACT, confidence=CONFIRMED.
+- The one-line contracts addition admits `closure_cell` as a local-ID kind. It preserves the v1 local-ID grammar and is required because add_anchor validates every `local_kind` against that existing allowlist.
+
+TEST_EVIDENCE=
+- `& '.\\.venv\\Scripts\\python.exe' -m pytest tests/analysis/test_lineage_extraction.py -q` => PASS, 113 passed in 2.41s.
+- `& '.\\.venv\\Scripts\\python.exe' -m pytest tests/analysis/test_lineage_extraction_equivalence.py -q` => PASS, 2 passed in 0.85s; expected corpus hash was not edited.
+- Required combined command => BLOCKED before test collection: `tests/analysis/test_lineage_extraction_binding_resolution.py` does not exist. `rg --files tests/analysis | rg 'lineage_extraction.*(binding|validation)'` returned no matching file. No substitute test path was assumed.
+- `git diff --check BASE -- <changed production/test files>` => PASS; only CRLF conversion warnings, no whitespace errors.
+
+LIVE_CERTIFICATION=
+- Pre-edit canonical revision 556: fresh, resync_required=false.
+- Post-edit watcher journal is continuous through revision 566, resync_required=false. It records desktop_watcher UPDATED events for the changed extraction modules; syntax diagnostics have zero errors and fresh availability.
+- Post-edit minimal contexts at revision 566 for every changed production module report warnings=[], syntax_diagnostics=checked_and_none/fresh, and no diagnostic attention required.
+
+CHANGED_FILES=
+- contextor/core/analysis/lineage_extraction.py
+- contextor/core/analysis/lineage_extraction_bindings.py
+- contextor/core/analysis/lineage_extraction_calls.py
+- contextor/core/analysis/lineage_extraction_comprehensions.py
+- contextor/core/analysis/lineage_extraction_control.py
+- contextor/core/analysis/lineage_extraction_contracts.py
+- contextor/core/analysis/lineage_extraction_state.py
+- contextor/core/analysis/lineage_extraction_visitors.py
+- tests/analysis/test_lineage_extraction.py
+
+FULL_UNIFIED_DIFF_COMMAND=
+`git diff --no-ext-diff --unified=3 90409963f571fcb94782f7a7b7cf9d5cd2b0cfc5 -- contextor/core/analysis/lineage_extraction.py contextor/core/analysis/lineage_extraction_bindings.py contextor/core/analysis/lineage_extraction_calls.py contextor/core/analysis/lineage_extraction_comprehensions.py contextor/core/analysis/lineage_extraction_control.py contextor/core/analysis/lineage_extraction_contracts.py contextor/core/analysis/lineage_extraction_state.py contextor/core/analysis/lineage_extraction_visitors.py tests/analysis/test_lineage_extraction.py`
+
+CAPTURES_SEMANTIC_CONTRACT=
+- CAPTURES identifies a lexical cell (enclosing function/async-function/lambda owner, name), never a particular ASSIGNS/BINDS occurrence or current value.
+- The source is stable when the cell has sequential/conditional writes. Existing ASSIGNS, BINDS, control frames, and later value-provenance stages remain the sole representation of concrete writes/reads.
+- Compile-time local declaration in the requesting function/lambda prevents ancestor capture regardless source order. Module scope is terminal; class scope is transparent for methods.
+
+MATERIALIZER_ENDPOINT_SUPPORT=
+- Extracted flow endpoints allow only ExtractedOccurrenceRef or ExtractedSymbolicRef; extracted anchors use free-form kind:str and a source-local ID. A synthetic source-local anchor/reference therefore fits the extracted contract unchanged.
+- Materialized flow/anchor endpoints allow MaterializedOccurrenceRef or SemanticEndpoint; a same-slice occurrence is explicitly canonical. Its local ID is preserved under the source manifest. Live-store revalidation validates endpoint types, source-slice membership, relation/resolution/confidence, and provider, not an anchor-kind allowlist.
+- Current production has extraction transport (indexer, PreparedSourceUpdate) and typed state fields (lineage_facts_by_source), but no discovered producer converting extracted lineage to materialized lineage. Existing persistence supports generic materialized occurrence anchors when that phase is activated; 1D.1 remains extraction-only.
+
+CANDIDATE_1=
+REJECT. ExtractedSymbolicKind.STATE has no named function-local-cell producer or materializer. It contains only kind,module_name,symbol_name,source_local_id; tests explicitly establish no persistent owner identity. Reusing it would overload state semantics and cannot distinguish lexical owner+name safely.
+
+CANDIDATE_2=
+ACCEPT. Add one synthetic extracted anchor with kind=closure_cell and deterministic local kind=closure_cell, built from the lexical owner's defining AST path plus variable name. The anchor is owned by the enclosing function/lambda anchor and its source span is that owner's defining node. State caches (owner_id,name) to ExtractedOccurrenceRef; it is created only when finalization proves that exact cell is captured.
+
+CANDIDATE_3=
+REJECT FOR 1D.1. A new symbolic kind or SemanticSlotKind would require domain parser/validator/builders, materializer, persistence validation, semantic-version migration, and tests. Candidate 2 already preserves owner+name without semantic overloading and uses current source-slice endpoint rules.
+
+SELECTED_ENDPOINT_MODEL=
+- CAPTURES source: ExtractedOccurrenceRef with deterministic closure_cell local ID, referring to an ExtractedAnchorFact(kind=closure_cell, owner_local_id=outer function/lambda anchor).
+- Identity is the anchor's owner_local_id plus local-ID name component: lexical outer::x; it is neither x=1 nor x=2.
+- CAPTURES target: the existing original inner name_load ExtractedOccurrenceRef; evidence is the inner Name.Load span; relation=CAPTURES; resolution=LEXICAL_EXACT; confidence=CONFIRMED.
+- The generated cell anchor is source-local and revision-local, just like all extracted anchors. If/when materialized, it becomes the same-slice MaterializedOccurrenceRef, not a cross-source semantic endpoint.
 
 REQUIRED_CASE_RESULTS=
-1. `outer -> inner: return x; x=1`: one CAPTURES flow from the final `outer.x` binding occurrence to the inner `x` name-load; LEXICAL_EXACT/CONFIRMED. The request is queued while visiting inner and finalized only after outer completes.
-2. `x=1; inner; x=2`: one CAPTURES flow from the final unconditional `x=2` occurrence, never the stale `x=1` occurrence.
-3. `x=1; inner; if flag: x=2`: no CAPTURES flow. Current control merge removes x because possible paths have different occurrences; finalizer must not fall back to x=1.
-4. `inner: value=x; x=2`: no CAPTURES flow for the first x. The later assignment declares x local for the whole inner function, even though it is encountered after the load.
-5. `outer.x=1; class C: x=2; method: return x`: CAPTURES from outer.x, not C.x. The class owner is transparent for methods.
-6. module `x=1; outer -> inner: return x`: no CAPTURES. The owner walk stops before module scope; current unresolved/global behavior is unchanged.
+A. Source=one closure_cell(outer,x), target=inner x load. Exactly one CAPTURES; x=1 and x=2 retain ordinary assignment/bind provenance only.
+B. Same exact source closure_cell(outer,x) and target despite conditional x=2. Conditional frame merge may make value provenance ambiguous but cannot remove lexical cell identity.
+C. Same exact closure_cell(outer,x) although x declaration is visited after inner. Deferred request finalization sees the complete declaration set.
+D. No CAPTURES. Inner's later x assignment places x in declared_locals[inner], so its earlier load cannot request/resolve outer x.
+E. Source=closure_cell(outer,x), target=method x load. Class C.x is skipped and is never source identity.
+F. No CAPTURES. Owner walk reaches module and terminates; existing module/global semantics remain unchanged.
 
-CLASS_SCOPE_RULE=
-- Owner metadata records kind: module, class, function, async_function, lambda, comprehension.
-- For a function/lambda request, class ancestors are transparent: neither their frames nor their declaration sets are candidate/blocked authority. This implements Python method lookup semantics.
-- Comprehension ancestors are not candidate authorities in 1D.1. A declaration of the queried name in an intervening comprehension is a barrier (prevents a false jump to an outer function); otherwise it may be skipped to continue to a function/lambda ancestor. This preserves the 1D.1 source restriction while not fabricating an outer capture.
-- Module is a hard terminal: it is never candidate capture authority. Global/nonlocal blocked names remain terminal exclusions exactly as today.
-
-LOCAL_DECLARATION_MODEL=
-- Add `_owner_parent: dict[str, str | None]`, `_owner_kind: dict[str, str]`, and `_declared_locals: dict[str, set[str]]` to the one LineageExtractionState. Owner and declaration data are transient extraction state only.
-- `register_owner(owner_id, parent_owner, kind)` runs immediately after every scope anchor. `declare_local(owner, name)` is idempotent and is independent of `_bindings`, blocked names, and frame merge.
-- A capture request is eligible only for a Name.Load in function/async-function/lambda owner, when name is neither a parameter/current local declaration nor current global/nonlocal blocked name. Crucially, finalization tests `_declared_locals[request.owner]`, not final frame contents.
-- Function/class definition names are declared in their enclosing owner; parameters are declarations in the new function/lambda owner. Annotation-only assignment and AugAssign declare names even when they never become final frame authority.
-
-CAPTURE_REQUEST_MODEL=
-- Add frozen private `_CaptureRequest(load: ExtractedOccurrenceRef, load_node: ast.Name, request_owner: str, name: str)`; append to `state._capture_requests`.
-- Change `visit_name` only as follows: retain existing Store behavior and existing current-frame BINDS emission. For an eligible Load that has no current-frame authority, call `state.request_capture(...)`; do not traverse ancestors and do not emit CAPTURES there.
-- Do not enqueue request when current owner declares the name (including a declaration encountered later by the time of finalization), or when it is blocked. The fast path may enqueue before later declaration is known; finalizer is authoritative.
-
-FINALIZATION_MODEL=
-- Canonical semantic owner: `LineageExtractionState.finalize_capture_requests(paths)`. State owns scope facts/requests; a small bindings helper (for example `finalize_captures(state, paths)`) owns CAPTURES emission. Facade invokes this one helper after `self._visit(tree, None, None)` and before sorting in `_AnchorExtractor.extract`; facade remains dynamic-dispatch owner only.
-- For each request, finalizer first rejects a blocked or declared-local request owner. It walks `_owner_parent`:
-  1. class: skip unconditionally;
-  2. comprehension: stop only if that scope declares the name, else skip;
-  3. function/async_function/lambda: if blocked or declared-local without final current authority, stop; if final `state.frame(owner)[name]` exists, select it and stop; otherwise continue;
-  4. module/None: stop without candidate.
-- Emit CAPTURES only for the single selected final occurrence with LEXICAL_EXACT/CONFIRMED. Use the request's original Name node for source span/flow ID and the cached load occurrence as target. No dynamic or unresolved CAPTURES facts are added.
-- This is one AST traversal plus an O(requests × ancestor depth) finalization over accumulated state; no AST walk, visitor, source reread, or query-time analysis occurs.
-
-SOURCE_OCCURRENCE_SOUNDNESS=
-- An existing concrete binding occurrence is safe only under this conservative final-scope rule: exactly one final frame occurrence in the first eligible enclosing function/lambda; no nearer local declaration, blocked declaration, comprehension barrier, or control-flow ambiguity.
-- The final frame preserves latest unconditional authority (case 2) and removes divergent conditional authority (case 3). Thus no stale earlier occurrence can be selected.
-- This does not claim runtime call-time value flow; it is a source-local lexical-cell approximation. If the existing control semantics cannot choose one occurrence, it emits no CAPTURES fact. No schema/ID/relation change is required.
-
-DECLARATION_PRODUCERS=
-- Parameters: `lineage_extraction_calls.parameter_anchors` -> declare each parameter in function/lambda owner.
-- Assign / non-value AnnAssign / NamedExpr: `lineage_extraction_bindings.assign_target`; declare every Name target recursively. For NamedExpr, declare `target_owner = walrus_owner or owner`.
-- AugAssign: `visit_aug_assign`; declare Name target even when prior authority is absent.
-- Definition declarations: `lineage_extraction_visitors.visit_function` and `visit_class_def`; declare node.name in parent owner before traversing its body. Lambda has no enclosing name declaration.
-- Imports: `lineage_extraction_calls.register_import_binding`; declare local_name even if blocked/star semantics prevents frame authority.
-- For/AsyncFor and With/AsyncWith targets: `runtime_bind_target`, recursively through Name, Tuple/List, Starred; owner passed by control/comprehension helper decides declaration scope.
-- Except alias: `lineage_extraction_control.visit_except_handler`; declare alias even though it is removed from exit frame.
-- Match names: `visit_match_as`, `visit_match_star`, `visit_match_mapping`; declare their respective names even though current implementation may only anchor them.
-- Comprehension targets: same `runtime_bind_target` but owner is comprehension_id. They must not be declared in the outer function. Comprehension walrus target is instead declared by `assign_target` in effective_walrus_owner.
-- Existing `visit_name(Store)` is only a fallback anchor path; it must call declaration recording when used, but cannot substitute for the above paths because `assign_target`/runtime/match paths often create anchors directly.
+CORRECTED_FINALIZATION=
+1. register_owner(owner_id,parent_id,kind,scope_node) records parent, kind, and defining node. State retains owner-parent, owner-kind, owner-nodes, declared-locals, lexical-cells, and capture-requests.
+2. Every local-declaration producer calls declare_local(owner,name) independently of bindings and frame merge. Existing global/nonlocal only retain blocked-name behavior; they do not create a local cell.
+3. visit_name preserves current immediate local BINDS behavior. For an eligible function/async/lambda Name.Load with no current local resolution, it stores CaptureRequest(load_ref,node,request_owner,name); it does not select a concrete binding.
+4. After sole visit(tree), finalize_captures(state,paths) processes requests. Reject if requesting scope is blocked or declares name. Walk owner parents: skip class; for a comprehension that declares name, stop, otherwise skip; at an enclosing function/async/lambda, blocked means stop and declared local means select lexical cell; module/None means stop.
+5. ensure_lexical_cell(state,paths,owner,name) gets registered owner AST node, calls existing add_anchor with kind closure_cell and owner, caches ExtractedOccurrenceRef, and finalizer emits CAPTURES to saved load ref.
+6. No final bindings lookup participates in cell selection. It continues independently for value provenance only. This is one traversal plus state-only post-finalization; no secondary AST traversal/walk/visitor/source read.
 
 FILES_AND_SYMBOLS=
-- Change `contextor/core/analysis/lineage_extraction_state.py`: private request dataclass; state fields/methods `register_owner`, `declare_local`, `request_capture`, final-scope resolver.
-- Change `contextor/core/analysis/lineage_extraction_bindings.py`: `visit_name`, `assign_target`, `runtime_bind_target`, `visit_aug_assign`; add capture-finalization helper only.
-- Change `contextor/core/analysis/lineage_extraction_calls.py`: `register_import_binding`, `parameter_anchors`.
-- Change `contextor/core/analysis/lineage_extraction_visitors.py`: `visit_module`, `visit_class_def`, `visit_function`, `visit_lambda`.
-- Change `contextor/core/analysis/lineage_extraction_control.py`: `visit_except_handler`, `visit_match_as`, `visit_match_star`, `visit_match_mapping`.
-- Change `tests/analysis/test_lineage_extraction.py`: focused behavior-named 1D.1 matrix below.
-- Minimal facade change: `contextor/core/analysis/lineage_extraction.py::_AnchorExtractor.extract` invokes finalization after its existing sole `_visit`.
-- No change: `lineage_extraction_emit.py`, domain facts/schema/enums/IDs/version, control frame merge behavior, materialization, state manager, live store, MCP/query API, equivalence oracle.
-
-EXACT_1D1_DESIGN=
-1. Register scope owner kind/parent at anchor creation; never infer from anchor string later.
-2. Record compile-time local declarations at every listed producer, regardless of branch execution, final frame membership, or whether a name is blocked.
-3. Keep current immediate BINDS behavior unchanged. Enqueue only potential captures.
-4. After traversal, resolve requests only against final canonical frames and declared-local metadata using the stated class/comprehension/module rules.
-5. Emit CAPTURES from one selected existing occurrence to original load; sort using existing extractor output contract.
+- contextor/core/analysis/lineage_extraction_state.py: CaptureRequest; owner/declaration/cell/request fields and registration/query methods.
+- contextor/core/analysis/lineage_extraction_bindings.py: visit_name, assign_target, runtime_bind_target, visit_aug_assign; declaration recording and finalize_captures / ensure_lexical_cell.
+- contextor/core/analysis/lineage_extraction_calls.py: parameter_anchors, register_import_binding declaration registration.
+- contextor/core/analysis/lineage_extraction_visitors.py: visit_module, visit_class_def, visit_function, visit_lambda owner registration; definition-name declaration in parent.
+- contextor/core/analysis/lineage_extraction_control.py: except-alias and MatchAs/MatchStar/MatchMapping declaration registration.
+- contextor/core/analysis/lineage_extraction.py: only AnchorExtractor.extract, invoking finalizer after existing visit.
+- tests/analysis/test_lineage_extraction.py: 1D.1 endpoint/semantic behavior matrix.
+- No change: lineage_extraction_emit.py, lineage_facts.py, materialized domain contracts, live store, state manager, query APIs, IDs outside synthetic extracted local kind.
 
 TEST_MATRIX=
-- Positive: required cases 1, 2, and 5; assert CAPTURES source/target local IDs, LEXICAL_EXACT, CONFIRMED, evidence line.
-- Negative: required cases 3, 4, 6; assert no CAPTURES; existing global/nonlocal no-capture behavior unchanged.
-- Declarations: parameter shadow; Assign/AnnAssign-without-value/AugAssign; NamedExpr including comprehension walrus; nested def/class name; import; for/async-for; with/async-with; except alias; MatchAs/MatchStar/MatchMapping; tuple/starred targets.
-- Scope boundaries: class transparent; comprehension target barrier; nested lambda/function capture through a transparent class; module stop.
-- Stability: unconditional later rebind selects latest; branch/loop/try/match ambiguity emits no stale capture; deterministic extraction/equivalence remains intact.
+- A: assert one closure_cell anchor owned by outer; CAPTURES source equals it, not either assignment binding; unchanged ASSIGNS remain separately present.
+- B: assert same cell CAPTURES through branch rebind; assert no source assignment identity is used.
+- C: late declaration capture.
+- D: local-before/after assignment, AnnAssign-without-value, AugAssign, parameter, import, for/with/except/match and nested definition/class shadow cases: no ancestor CAPTURES.
+- E: class transparency plus class x shadow; lambda/function through a class; no class-cell anchor.
+- F: module/global terminal plus existing global/nonlocal freeze.
+- Comprehension target barrier and walrus target owner; ensure no fabricated outer capture.
+- Determinism/equivalence: fixed cell IDs/anchor count and immutable equivalence output; existing resource-limit behavior unchanged.
+
+VERSION_SCHEMA_IMPACT=
+- Extraction schema: no domain dataclass, enum, ID grammar, relation, semantic-slot, materializer, persistence, or public API change. closure_cell is a new value in existing free string ExtractedAnchorFact.kind, paired with existing occurrence ref.
+- LINEAGE_FACTS_SEMANTIC_VERSION remains unchanged. Do not claim materialized persistence certification until a separate materializer exists and is exercised.
 
 RISKS_AND_BANS=
-- Do not implement immediate parent lookup in visit_name; it is wrong for late enclosing bindings and inner declarations encountered later.
-- Do not reuse final _bindings as localness; control merge and except cleanup erase required compile-time declaration facts.
-- Do not make classes authorities or treat module globals/nonlocal as 1D.1 captures.
-- No second AST traversal, ast.walk, NodeVisitor, secondary extractor, schema/semantic-version change, materialization/query work, test/oracle regeneration, commit, or push.
+- Never emit CAPTURES from an assignment/binding anchor or consult final frame authority for lexical-cell identity.
+- Never overload STATE, MODULE_GLOBAL, CLASS_ATTRIBUTE, PARAMETER_VALUE, or semantic slots.
+- Do not create cells for module/class/comprehension source authority in 1D.1; class is transparent, comprehension may only be a barrier.
+- No second AST traversal, AST node visitor, compatibility path, query-time analysis, schema/version bump, test/oracle regeneration, commit, or push.
 
 DIFFS=NONE
