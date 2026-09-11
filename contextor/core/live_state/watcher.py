@@ -87,7 +87,7 @@ class DesktopLiveWatcher(_PollingLiveWorker):
         if self.on_status is not None:
             self.on_status(message)
 
-    def _recover_client(self) -> LiveStateClient | None:
+    def _recover_client(self, trigger_exc: BaseException | None = None) -> LiveStateClient | None:
         """Attempt to reconnect or restart LIVE on genuine connection failure."""
         started = time.monotonic()
         prior_endpoint = getattr(self.client, "endpoint", None)
@@ -101,6 +101,10 @@ class DesktopLiveWatcher(_PollingLiveWorker):
                 prior_endpoint_fingerprint=(prior_endpoint.fingerprint() if prior_endpoint is not None else None),
                 prior_service_pid=getattr(prior_endpoint, "pid", None),
                 recovery_operation_id=recovery_operation_id,
+                exception_class=(type(trigger_exc).__name__ if trigger_exc is not None else None),
+                errno=(getattr(trigger_exc, "errno", None) if trigger_exc is not None else None),
+                winerror=(getattr(trigger_exc, "winerror", None) if trigger_exc is not None else None),
+                error=(str(trigger_exc)[:500] if trigger_exc is not None else None),
             )
         except Exception:
             recovery_operation_id = None
@@ -125,9 +129,9 @@ class DesktopLiveWatcher(_PollingLiveWorker):
                 trace_event(
                     "LIVE", "LIVE_WATCHER_RECOVERY_RESULT", op=recovery_operation_id,
                     result=(
-                        "reconnected_existing"
+                        "reconnected_same_endpoint"
                         if prior_endpoint is not None and new_endpoint == prior_endpoint
-                        else "started_new_owner"
+                        else "connected_changed_endpoint"
                     ),
                     new_endpoint_fingerprint=new_endpoint.fingerprint(),
                     new_service_pid=new_endpoint.pid,
@@ -265,7 +269,7 @@ class DesktopLiveWatcher(_PollingLiveWorker):
         if snapshot is None:
             try:
                 snapshot = self.client.snapshot()
-            except (OSError, EOFError, TimeoutError, ConnectionError):
+            except (OSError, EOFError, TimeoutError, ConnectionError) as exc:
                 return None
         manager = self._trusted_file_state(snapshot)
         if manager is None:
@@ -301,9 +305,9 @@ class DesktopLiveWatcher(_PollingLiveWorker):
         ping_started = time.monotonic()
         try:
             status = self.client.ping()
-        except (OSError, EOFError, TimeoutError, ConnectionError):
+        except (OSError, EOFError, TimeoutError, ConnectionError) as exc:
             self._emit("LIVE: connection lost; recovering...")
-            if self._recover_client() is None:
+            if self._recover_client(exc) is None:
                 raise
             status = self.client.ping()
         ping_ms = (time.monotonic() - ping_started) * 1000.0
@@ -330,7 +334,7 @@ class DesktopLiveWatcher(_PollingLiveWorker):
             current = self._scan()
             try:
                 snapshot = self.client.snapshot()
-            except (OSError, EOFError, TimeoutError, ConnectionError):
+            except (OSError, EOFError, TimeoutError, ConnectionError) as exc:
                 self._emit("LIVE: startup resync baseline could not be verified")
                 return []
             if self._trusted_file_state(snapshot) is None:
@@ -417,7 +421,7 @@ class DesktopLiveWatcher(_PollingLiveWorker):
                     trace_event("LIVE", "WATCH_UPDATE_AMBIGUOUS_RESOLVED", op=op, repo=str(self.root), path=relative, rev=status.get("revision"), retry=True)
                 update_attempted = True
                 response = self.client.update_file(path, origin="desktop_watcher", trace_op=op)
-            except (OSError, EOFError, TimeoutError, ConnectionError):
+            except (OSError, EOFError, TimeoutError, ConnectionError) as exc:
                 if update_attempted:
                     self._ambiguous_updates.add(path)
                     trace_event("LIVE", "WATCH_UPDATE_AMBIGUOUS", op=op, repo=str(self.root), path=relative, rev=status.get("revision"), exception="transport")
@@ -425,7 +429,7 @@ class DesktopLiveWatcher(_PollingLiveWorker):
                     self._emit("LIVE: update outcome ambiguous; deferring revalidation")
                     continue
                 self._emit("LIVE: connection lost during update; recovering...")
-                if self._recover_client() is None:
+                if self._recover_client(exc) is None:
                     # Earlier candidates in this poll may already have received
                     # an acknowledged canonical response.  Preserve those
                     # per-path advances before surfacing the later pre-send

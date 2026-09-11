@@ -651,21 +651,65 @@ class CanonicalLiveServer:
 
     def serve_forever(self) -> None:
         while not self._stop.is_set():
+            accept_started = time.monotonic()
             try:
                 connection = self._listener.accept()
-            except OSError:
+            except OSError as exc:
                 if self._stop.is_set():
                     break
+                _safe_trace_event(
+                    "LIVE", "LIVE_IPC_FAILURE", side="server",
+                    operation_or_request_type="accept", host=self.endpoint.host,
+                    port=self.endpoint.port, exception_class=type(exc).__name__,
+                    errno=getattr(exc, "errno", None),
+                    winerror=getattr(exc, "winerror", None), error=str(exc)[:500],
+                    elapsed_ms=(time.monotonic() - accept_started) * 1000.0,
+                )
                 raise
+            request_type = "recv"
+            request_started = time.monotonic()
             try:
-                request = connection.recv()
-                response = self._dispatch(request)
-                connection.send(response)
-            except Exception as exc:
                 try:
-                    connection.send({"status": "error", "error": str(exc)})
-                except (EOFError, OSError):
-                    pass
+                    request = connection.recv()
+                except (OSError, EOFError, ConnectionError, TimeoutError) as exc:
+                    _safe_trace_event(
+                        "LIVE", "LIVE_IPC_FAILURE", side="server",
+                        operation_or_request_type="recv", host=self.endpoint.host,
+                        port=self.endpoint.port, exception_class=type(exc).__name__,
+                        errno=getattr(exc, "errno", None),
+                        winerror=getattr(exc, "winerror", None), error=str(exc)[:500],
+                        elapsed_ms=(time.monotonic() - request_started) * 1000.0,
+                    )
+                    try:
+                        connection.send({"status": "error", "error": str(exc)})
+                    except (EOFError, OSError):
+                        pass
+                    continue
+                if isinstance(request, dict) and isinstance(request.get("operation"), str):
+                    request_type = request["operation"]
+                try:
+                    response = self._dispatch(request)
+                except Exception as exc:
+                    try:
+                        connection.send({"status": "error", "error": str(exc)})
+                    except (EOFError, OSError):
+                        pass
+                    continue
+                try:
+                    connection.send(response)
+                except (OSError, EOFError, ConnectionError, TimeoutError) as exc:
+                    _safe_trace_event(
+                        "LIVE", "LIVE_IPC_FAILURE", side="server",
+                        operation_or_request_type=(request_type if request_type != "recv" else "send"),
+                        host=self.endpoint.host, port=self.endpoint.port,
+                        exception_class=type(exc).__name__, errno=getattr(exc, "errno", None),
+                        winerror=getattr(exc, "winerror", None), error=str(exc)[:500],
+                        elapsed_ms=(time.monotonic() - request_started) * 1000.0,
+                    )
+                    try:
+                        connection.send({"status": "error", "error": str(exc)})
+                    except (EOFError, OSError):
+                        pass
             finally:
                 connection.close()
 

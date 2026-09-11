@@ -436,8 +436,8 @@ def test_verified_client_transport_rejection_serializes_bounded_trace(
 
     endpoint = authoritative_live_client.endpoint
     trace_logs = tmp_path / "isolated-trace"
-    finish_desktop_trace_session()
     monkeypatch.setattr(trace, "runtime_logs_dir", lambda: trace_logs)
+    finish_desktop_trace_session()
     path = start_desktop_trace_session()
     assert path is not None
 

@@ -1148,6 +1148,18 @@ def run_service(
             server.serve_forever()
         except BaseException as exc:
             failure = exc
+            try:
+                _safe_trace_event(
+                    "LIVE", "LIVE_SERVICE_THREAD_FAILURE",
+                    endpoint_fingerprint=server.endpoint.fingerprint(),
+                    service_pid=lease.service_pid if lease is not None else None,
+                    lease_generation=lease.lease_generation if lease is not None else None,
+                    service_instance_id=lease.service_instance_id if lease is not None else None,
+                    exception_class=type(exc).__name__, errno=getattr(exc, "errno", None),
+                    winerror=getattr(exc, "winerror", None), error=str(exc)[:500],
+                )
+            except Exception:
+                pass
         finally:
             with service_state_lock:
                 if failure is not None:

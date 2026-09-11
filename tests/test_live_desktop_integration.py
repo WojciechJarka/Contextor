@@ -49,8 +49,52 @@ def test_watcher_recovery_emits_start_and_existing_result(tmp_path, monkeypatch)
     assert [event for _domain, event, _fields in events] == [
         "LIVE_WATCHER_RECOVERY_START", "LIVE_WATCHER_RECOVERY_RESULT"
     ]
-    assert events[1][2]["result"] == "reconnected_existing"
+    assert events[1][2]["result"] == "reconnected_same_endpoint"
     assert events[1][2]["new_endpoint_fingerprint"] == "endpoint-fingerprint"
+
+
+def test_watcher_recovery_records_trigger_and_changed_endpoint(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    class Endpoint:
+        def __init__(self, pid, fingerprint):
+            self.pid = pid
+            self.lease_generation = 7
+            self._fingerprint = fingerprint
+        def fingerprint(self):
+            return self._fingerprint
+
+    initial = SimpleNamespace(endpoint=Endpoint(1234, "before"), snapshot=lambda: {"status": "ok", "state": None})
+    recovered = SimpleNamespace(endpoint=Endpoint(5678, "after"))
+    watcher = DesktopLiveWatcher(repo, initial)
+    events = []
+    import contextor.core.runtime_trace as trace
+    import contextor.core.live_state.runtime as runtime
+
+    failure = ConnectionRefusedError(10061, "refused")
+    monkeypatch.setattr(runtime, "connect_or_start", lambda *_args, **_kwargs: recovered)
+    monkeypatch.setattr(trace, "new_trace_operation", lambda _prefix: "wr-test")
+    monkeypatch.setattr(trace, "trace_event", lambda domain, event, **fields: events.append((domain, event, fields)))
+
+    assert watcher._recover_client(failure) is recovered
+    assert events[0][2]["exception_class"] == "ConnectionRefusedError"
+    assert events[0][2]["errno"] == 10061
+    assert events[0][2]["error"].endswith("refused")
+    assert events[1][2]["result"] == "connected_changed_endpoint"
+
+
+def test_watcher_trace_emitter_failure_is_fail_open(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    endpoint = SimpleNamespace(pid=1234, lease_generation=7, fingerprint=lambda: "endpoint")
+    watcher = DesktopLiveWatcher(repo, SimpleNamespace(endpoint=endpoint, snapshot=lambda: {"status": "ok", "state": None}))
+    import contextor.core.runtime_trace as trace
+    import contextor.core.live_state.runtime as runtime
+
+    monkeypatch.setattr(runtime, "connect_or_start", lambda *_args, **_kwargs: SimpleNamespace(endpoint=endpoint))
+    monkeypatch.setattr(trace, "trace_event", lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("trace failed")))
+    assert watcher._recover_client(ConnectionRefusedError(10061, "refused")) is watcher.client
 
 
 def test_same_revision_startup_attaches_without_redundant_publish(tmp_path, monkeypatch):

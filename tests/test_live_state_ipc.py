@@ -70,6 +70,110 @@ def test_client_transport_failure_emits_one_bounded_trace_event(monkeypatch):
     assert "authkey" not in json.dumps(events[0]).lower()
 
 
+def test_server_accept_failure_emits_once_and_reraises(monkeypatch):
+    events = []
+    server = CanonicalLiveServer(SimpleNamespace(files=[]))
+
+    class Listener:
+        def accept(self):
+            raise OSError(10061, "refused")
+
+        def close(self):
+            pass
+
+    server._listener = Listener()
+    monkeypatch.setattr(ipc_module, "_safe_trace_event", lambda *_args, **kwargs: events.append(kwargs))
+    try:
+        with pytest.raises(OSError):
+            server.serve_forever()
+    finally:
+        server.close()
+
+    assert len(events) == 1
+    assert events[0]["side"] == "server"
+    assert events[0]["operation_or_request_type"] == "accept"
+
+
+def test_server_stopped_accept_path_emits_no_incident(monkeypatch):
+    events = []
+    server = CanonicalLiveServer(SimpleNamespace(files=[]))
+    monkeypatch.setattr(ipc_module, "_safe_trace_event", lambda *_args, **kwargs: events.append(kwargs))
+    class Listener:
+        def accept(self):
+            server._stop.set()
+            raise OSError(10061, "stopped")
+
+        def close(self):
+            pass
+    server._listener = Listener()
+    try:
+        server.serve_forever()
+    finally:
+        server.close()
+
+    assert events == []
+
+
+@pytest.mark.parametrize("failure", [OSError("dispatch"), TimeoutError("dispatch")])
+def test_server_dispatch_transport_shaped_error_is_not_ipc_failure(monkeypatch, failure):
+    events, sent = [], []
+    server = CanonicalLiveServer(SimpleNamespace(files=[]))
+    class Connection:
+        def recv(self): return {"operation": "ping"}
+        def send(self, value): sent.append(value)
+        def close(self): server._stop.set()
+    class Listener:
+        def accept(self): return Connection()
+        def close(self): pass
+    server._listener = Listener()
+    monkeypatch.setattr(server, "_dispatch", lambda _request: (_ for _ in ()).throw(failure))
+    monkeypatch.setattr(ipc_module, "_safe_trace_event", lambda *_args, **kwargs: events.append(kwargs))
+    server.serve_forever()
+    assert events == []
+    assert sent and sent[0]["status"] == "error"
+
+
+@pytest.mark.parametrize("stage", ["recv", "send"])
+def test_server_transport_boundary_emits_once(monkeypatch, stage):
+    events = []
+    server = CanonicalLiveServer(SimpleNamespace(files=[]))
+    class Connection:
+        closed = False
+        def recv(self):
+            if stage == "recv": raise ConnectionResetError("recv")
+            return {"operation": "ping"}
+        def send(self, _value):
+            if stage == "send": raise ConnectionResetError("send")
+        def close(self):
+            self.closed = True
+            server._stop.set()
+    class Listener:
+        connection = Connection()
+        def accept(self): return self.connection
+        def close(self): pass
+    listener = Listener()
+    server._listener = listener
+    monkeypatch.setattr(ipc_module, "_safe_trace_event", lambda *_args, **kwargs: events.append(kwargs))
+    server.serve_forever()
+    assert len(events) == 1 and events[0]["side"] == "server"
+    assert events[0]["operation_or_request_type"] == ("recv" if stage == "recv" else "ping")
+    assert listener.connection.closed is True
+
+
+def test_server_trace_emitter_failure_does_not_mask_transport_failure(monkeypatch):
+    import contextor.core.runtime_trace as trace
+    server = CanonicalLiveServer(SimpleNamespace(files=[]))
+    class Listener:
+        def accept(self):
+            raise OSError(10061, "refused")
+        def close(self):
+            pass
+    server._listener = Listener()
+    monkeypatch.setattr(trace, "trace_event", lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("trace failed")))
+    with pytest.raises(OSError, match="refused"):
+        server.serve_forever()
+
+
 @pytest.fixture
 def live_server():
     server = CanonicalLiveServer(SimpleNamespace(files=[]))
@@ -644,18 +748,48 @@ def test_run_service_fails_closed_when_service_thread_raises_before_endpoint(tmp
     from contextor.core.paths import runtime_logs_dir
 
     repo = _runtime_service_repo(tmp_path, monkeypatch)
+    events = []
 
     class FailingServer(CanonicalLiveServer):
         def serve_forever(self):
             raise RuntimeError("synthetic service-thread startup failure")
 
     monkeypatch.setattr(runtime, "CanonicalLiveServer", FailingServer)
+    monkeypatch.setattr(
+        runtime, "_safe_trace_event",
+        lambda domain, event, **fields: events.append((domain, event, fields)),
+    )
 
-    with pytest.raises(RuntimeError, match="service thread failed during pre-endpoint bootstrap"):
+    with pytest.raises(RuntimeError, match="service thread failed during (pre-endpoint bootstrap|endpoint publication)"):
         runtime.run_service(repo)
 
     assert not endpoint_file(repo).exists()
     assert "RUNTIME_AUTHORITY_READY" not in _authority_event_types(runtime_logs_dir())
+    assert [(domain, event) for domain, event, _fields in events] == [
+        ("LIVE", "LIVE_SERVICE_THREAD_FAILURE")
+    ]
+    assert events[0][2]["exception_class"] == "RuntimeError"
+
+
+def test_run_service_trace_emitter_failure_does_not_mask_service_failure(tmp_path, monkeypatch):
+    import contextor.core.live_state.runtime as runtime
+
+    repo = _runtime_service_repo(tmp_path, monkeypatch)
+
+    class FailingServer(CanonicalLiveServer):
+        def serve_forever(self):
+            raise RuntimeError("synthetic service-thread startup failure")
+
+    monkeypatch.setattr(runtime, "CanonicalLiveServer", FailingServer)
+    monkeypatch.setattr(
+        runtime,
+        "_safe_trace_event",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("trace failed")),
+    )
+
+    with pytest.raises(RuntimeError, match="service thread failed during (pre-endpoint bootstrap|endpoint publication)"):
+        runtime.run_service(repo)
+    assert not endpoint_file(repo).exists()
 
 
 def test_run_service_fails_closed_when_service_thread_dies_before_ready(tmp_path, monkeypatch):
