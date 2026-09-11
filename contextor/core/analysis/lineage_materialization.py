@@ -16,12 +16,15 @@ from contextor.core.domain.lineage_facts import (
     ExtractedOccurrenceRef,
     ExtractedSymbolicKind,
     ExtractedSymbolicRef,
+    LineageConfidence,
     MaterializedAnchorFact,
     MaterializedFlowFact,
     MaterializedLineageSourceFacts,
     MaterializedOccurrenceRef,
+    MaterializedSymbolicRef,
     MaterializedSurfaceFact,
     ParameterKind,
+    ResolutionKind,
     SemanticEndpoint,
     SemanticInterfaceDescriptor,
     SourceLineageManifest,
@@ -87,11 +90,14 @@ def materialize_lineage_source_facts(
 
     def endpoint(
         reference: ExtractedOccurrenceRef | ExtractedSymbolicRef,
-    ) -> MaterializedOccurrenceRef | SemanticEndpoint:
+        kind: ResolutionKind,
+        confidence: LineageConfidence,
+    ) -> MaterializedOccurrenceRef | MaterializedSymbolicRef | SemanticEndpoint:
         if isinstance(reference, ExtractedOccurrenceRef):
             return occurrence(reference.local_id)
-        return _symbolic_endpoint(reference, resolution, occurrence, descriptors)
-
+        return _symbolic_endpoint(
+            reference, resolution, descriptors, kind, confidence, extracted
+        )
     anchors = tuple(
         sorted(
             MaterializedAnchorFact(
@@ -104,8 +110,8 @@ def materialize_lineage_source_facts(
         sorted(
             MaterializedFlowFact(
                 flow.local_id,
-                endpoint(flow.source),
-                endpoint(flow.target),
+                endpoint(flow.source, flow.resolution_kind, flow.confidence),
+                endpoint(flow.target, flow.resolution_kind, flow.confidence),
                 flow.relation,
                 flow.evidence,
                 flow.resolution_kind,
@@ -121,7 +127,7 @@ def materialize_lineage_source_facts(
             MaterializedSurfaceFact(
                 surface.local_id,
                 surface.kind,
-                endpoint(surface.exposed),
+                endpoint(surface.exposed, surface.resolution_kind, surface.confidence),
                 surface.evidence,
                 surface.resolution_kind,
                 surface.confidence,
@@ -151,25 +157,42 @@ def materialize_lineage_source_facts(
 def _symbolic_endpoint(
     reference: ExtractedSymbolicRef,
     resolution: LineageResolutionContext,
-    occurrence,
     descriptors: dict[str, SemanticInterfaceDescriptor],
-) -> MaterializedOccurrenceRef | SemanticEndpoint:
+    resolution_kind: ResolutionKind,
+    confidence: LineageConfidence,
+    extracted: ExtractedLineageSourceFacts,
+) -> MaterializedSymbolicRef | SemanticEndpoint:
+    symbolic = MaterializedSymbolicRef(
+        extracted.source_key, extracted.source_fingerprint, reference.kind,
+        reference.module_name, reference.symbol_name, reference.source_local_id,
+    )
+    if not _claims_exact_semantic_target(resolution_kind, confidence):
+        return symbolic
     owner_id = (
         resolution.active_module_ids.get(reference.module_name)
         if reference.kind is ExtractedSymbolicKind.STATE
         else resolution.active_artifact_ids.get(reference.qualified_name)
     )
     if owner_id is None:
-        return occurrence(_unresolved_local_id(reference))
-
+        return symbolic
     slot = _slot_for(reference, owner_id)
     if slot is not None:
         descriptor = resolution.interface_descriptors.get(owner_id)
         if descriptor is None or slot not in descriptor.slots:
-            return occurrence(_unresolved_local_id(reference))
+            return symbolic
         descriptors[owner_id] = descriptor
     return SemanticEndpoint(owner_id, slot)
 
+
+def _claims_exact_semantic_target(
+    resolution_kind: ResolutionKind, confidence: LineageConfidence,
+) -> bool:
+    return confidence is LineageConfidence.CONFIRMED and resolution_kind in {
+        ResolutionKind.LEXICAL_EXACT, ResolutionKind.IMPORT_EXACT,
+        ResolutionKind.CALL_EXACT, ResolutionKind.SIGNATURE_EXACT,
+        ResolutionKind.STATIC_MRO_EXACT, ResolutionKind.LITERAL_CONTAINER_EXACT,
+        ResolutionKind.RECEPTOR_PROVIDED,
+    }
 
 def _slot_for(reference: ExtractedSymbolicRef, owner_id: str) -> str | None:
     if reference.kind is ExtractedSymbolicKind.RETURN:
@@ -197,12 +220,3 @@ def _slot_for(reference: ExtractedSymbolicRef, owner_id: str) -> str | None:
             "Parameter symbolic reference must point at a parameter local id."
         ) from exc
     return build_parameter_value_slot(owner_id, kind, ordinal=ordinal, name=name)
-
-
-def _unresolved_local_id(reference: ExtractedSymbolicRef) -> str:
-    return "unresolved:v1:{kind}:m:{module}:s:{symbol}:l:{local}".format(
-        kind=reference.kind.value,
-        module=quote(reference.module_name, safe=""),
-        symbol=quote(reference.symbol_name, safe=""),
-        local=quote(reference.source_local_id or "", safe=""),
-    )

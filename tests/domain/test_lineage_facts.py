@@ -21,6 +21,7 @@ from contextor.core.domain.lineage_facts import (
     MaterializedAnchorFact,
     MaterializedLineageSourceFacts,
     MaterializedOccurrenceRef,
+    MaterializedSymbolicRef,
     MaterializedSurfaceFact,
     ParameterKind,
     ResolutionKind,
@@ -453,3 +454,37 @@ def test_surface_declaration_evidence_rejects_invalid_type_and_preserves_convent
 
 def test_lineage_facts_semantic_version_remains_initial_version():
     assert LINEAGE_FACTS_SEMANTIC_VERSION == "1"
+
+
+def test_materialized_symbolic_ref_is_slice_bound_and_never_an_occurrence():
+    span = SourceSpan(1, 0, 1, 1)
+    manifest = SourceLineageManifest(
+        "a.py", "fingerprint", "1", LineageFamilyStatus.FRESH, 0, 1, 0
+    )
+    symbolic = MaterializedSymbolicRef(
+        "a.py", "fingerprint", ExtractedSymbolicKind.PUBLIC_TARGET,
+        "pkg.mod", "missing",
+    )
+    slice_ = MaterializedLineageSourceFacts(
+        manifest, (), (
+            MaterializedFlowFact(
+                "flow", MaterializedOccurrenceRef("a.py", "fingerprint", "x"),
+                symbolic, LineageRelation.EXPOSES, span,
+                ResolutionKind.UNRESOLVED_NAME, LineageConfidence.UNRESOLVED,
+            ),
+        ), (),
+    )
+    assert slice_.flows[0].target == symbolic
+    foreign = MaterializedSymbolicRef(
+        "b.py", "other", ExtractedSymbolicKind.PUBLIC_TARGET, "pkg.mod", "missing"
+    )
+    with pytest.raises(ValueError, match="foreign occurrence"):
+        MaterializedLineageSourceFacts(
+            manifest, (), (
+                MaterializedFlowFact(
+                    "bad", MaterializedOccurrenceRef("a.py", "fingerprint", "x"),
+                    foreign, LineageRelation.EXPOSES, span,
+                    ResolutionKind.UNRESOLVED_NAME, LineageConfidence.UNRESOLVED,
+                ),
+            ), (),
+        )

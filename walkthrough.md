@@ -1,47 +1,171 @@
-# Stage 1F.1 deterministic lineage materializer
+# Stage 1F.1 corrective
 
 STATUS=PASS
-BASE=9dc96eadccc334f6284b700b7f88dadeb3ba3ed6
-HEAD=9dc96eadccc334f6284b700b7f88dadeb3ba3ed6
-
-MCP_POOL_DISCOVERY
-ACTIVE: contextor_fact_lineage, get_file_edit_context, search_source, lookup_index_entries and get_live_events are callable.
-DEFERRED: complete exposed deferred/callable inventory inspected; contextor_lineage unavailable.
-LINEAGE_TOOL_USED=contextor_fact_lineage, substitution for unavailable contextor_lineage. Its documented contract confirms active IDs only, no allocation and recovery IDs never active. New module has one covering test; watcher revision 648 is continuous with resync_required=false.
-
-MATERIALIZER_API
-contextor.core.analysis.lineage_materialization.materialize_lineage_source_facts(extracted, resolution)
-LineageResolutionContext(active_module_ids, active_artifact_ids, active_owner_ids, interface_descriptors)
-Internal-only; no public API/export/state installation added.
-
-RESOLUTION_MATRIX
-Occurrence -> MaterializedOccurrenceRef(source key/fingerprint/local id).
-DEFINITION/CALLEE/IMPORT/PUBLIC_TARGET -> exact active artifact endpoint, otherwise deterministic unresolved source-local placeholder.
-PARAMETER -> active callable plus descriptor-proven parameter-value slot; malformed ID errors; absent/ambiguous slot placeholder.
-RETURN -> active callable plus descriptor-proven return slot; absent slot placeholder.
-STATE -> active module plus descriptor-proven module-global slot; absent slot placeholder.
-Original resolution kind/confidence/boundary/provider/declaration evidence are preserved. No target is guessed. Context rejects non-active mapping values, preventing recovery/orphan endpoint use.
-
-NO_SIDE_EFFECT_PROOF
-No AST/source/filesystem/registry/state/graph/snapshot/MCP imports or mutation/allocation. Context mappings are copied to MappingProxyType. Test uses hostile builtins.open and checks input mapping unchanged.
-
-TESTS
-py_compile: PASS
-pytest -q tests/analysis/test_lineage_materialization.py tests/domain/test_lineage_facts.py: 58 passed in 1.22s
-git diff --check: PASS
-FIX_REQUIRED=NO
-
-FILES_CHANGED
-- contextor/core/analysis/lineage_materialization.py
-- tests/analysis/test_lineage_materialization.py
-
+MCP_POOL_DISCOVERY: ACTIVE contextor_fact_lineage used; DEFERRED inventory inspected, contextor_lineage unavailable.
+LINEAGE_TOOL_USED=contextor_fact_lineage
+CORRECTED_REFERENCE_UNION=MaterializedOccurrenceRef | MaterializedSymbolicRef | SemanticEndpoint.
+EXACTNESS_GATE=SemanticEndpoint requires confirmed exact extraction kind (LEXICAL_EXACT, IMPORT_EXACT, CALL_EXACT, SIGNATURE_EXACT, STATIC_MRO_EXACT, LITERAL_CONTAINER_EXACT, RECEPTOR_PROVIDED) plus exact active identity and, where needed, descriptor-proven slot. All non-exact evidence remains MaterializedSymbolicRef despite same-named active identity.
+NO_SYNTHETIC_UNRESOLVED_OCCURRENCE=PASS; _unresolved_local_id and urllib.quote removed.
+TESTS=py_compile PASS; pytest focused 64 passed in 1.20s; git diff --check PASS.
+FILES_CHANGED=contextor/core/domain/lineage_facts.py; contextor/core/analysis/lineage_materialization.py; tests/domain/test_lineage_facts.py; tests/analysis/test_lineage_materialization.py
 FULL_DIFF
+\ndiff --git a/contextor/core/domain/lineage_facts.py b/contextor/core/domain/lineage_facts.py
+index 629b284..e69256a 100644
+--- a/contextor/core/domain/lineage_facts.py
++++ b/contextor/core/domain/lineage_facts.py
+@@ -197,6 +197,26 @@ class MaterializedOccurrenceRef:
+         _require_token(self.local_id, "local_id")
+ 
+ 
++@dataclass(frozen=True, order=True)
++class MaterializedSymbolicRef:
++    """Canonical-slice symbolic boundary, never an occurrence or owner."""
++
++    source_key: str
++    source_fingerprint: str
++    kind: ExtractedSymbolicKind
++    module_name: str
++    symbol_name: str
++    source_local_id: str | None = None
++
++    def __post_init__(self) -> None:
++        _require_token(self.source_key, "source_key")
++        _require_token(self.source_fingerprint, "source_fingerprint")
++        _require_token(self.module_name, "module_name")
++        _require_token(self.symbol_name, "symbol_name")
++        if self.source_local_id is not None:
++            _require_token(self.source_local_id, "source_local_id")
++
++
+ @dataclass(frozen=True, order=True)
+ class ExtractedAnchorFact:
+     local_id: str
+@@ -280,7 +300,7 @@ class ExtractedLineageSourceFacts:
+ @dataclass(frozen=True, order=True)
+ class MaterializedAnchorFact:
+     local_id: str
+-    reference: MaterializedOccurrenceRef | SemanticEndpoint
++    reference: MaterializedOccurrenceRef | MaterializedSymbolicRef | SemanticEndpoint
+     kind: str
+     span: SourceSpan
+ 
+@@ -293,8 +313,8 @@ class MaterializedAnchorFact:
+ @dataclass(frozen=True, order=True)
+ class MaterializedFlowFact:
+     local_id: str
+-    source: MaterializedOccurrenceRef | SemanticEndpoint
+-    target: MaterializedOccurrenceRef | SemanticEndpoint
++    source: MaterializedOccurrenceRef | MaterializedSymbolicRef | SemanticEndpoint
++    target: MaterializedOccurrenceRef | MaterializedSymbolicRef | SemanticEndpoint
+     relation: LineageRelation
+     evidence: SourceSpan
+     resolution_kind: ResolutionKind
+@@ -318,7 +338,7 @@ class MaterializedFlowFact:
+ class MaterializedSurfaceFact:
+     local_id: str
+     kind: SurfaceKind
+-    exposed: MaterializedOccurrenceRef | SemanticEndpoint
++    exposed: MaterializedOccurrenceRef | MaterializedSymbolicRef | SemanticEndpoint
+     evidence: SourceSpan
+     resolution_kind: ResolutionKind
+     confidence: LineageConfidence
+@@ -649,7 +669,7 @@ def _claims_exact_semantic_target(
+ 
+ 
+ def _validate_materialized_surface_target(
+-    exposed: MaterializedOccurrenceRef | SemanticEndpoint,
++    exposed: MaterializedOccurrenceRef | MaterializedSymbolicRef | SemanticEndpoint,
+     resolution_kind: ResolutionKind,
+     confidence: LineageConfidence,
+ ) -> None:
+@@ -674,18 +694,18 @@ def _require_sorted_unique(values: tuple[object, ...], label: str) -> None:
+ 
+ 
+ def _require_materialized_reference(
+-    value: MaterializedOccurrenceRef | SemanticEndpoint,
++    value: MaterializedOccurrenceRef | MaterializedSymbolicRef | SemanticEndpoint,
+     label: str,
+ ) -> None:
+-    if not isinstance(value, (MaterializedOccurrenceRef, SemanticEndpoint)):
++    if not isinstance(value, (MaterializedOccurrenceRef, MaterializedSymbolicRef, SemanticEndpoint)):
+         raise TypeError(f"{label} require canonical occurrence or semantic endpoint references.")
+ 
+ 
+ def _require_slice_occurrence(
+-    value: MaterializedOccurrenceRef | SemanticEndpoint,
++    value: MaterializedOccurrenceRef | MaterializedSymbolicRef | SemanticEndpoint,
+     manifest: SourceLineageManifest,
+ ) -> None:
+-    if isinstance(value, MaterializedOccurrenceRef) and (
++    if isinstance(value, (MaterializedOccurrenceRef, MaterializedSymbolicRef)) and (
+         value.source_key != manifest.source_key
+         or value.source_fingerprint != manifest.source_fingerprint
+     ):
+@@ -711,6 +731,7 @@ __all__ = [
+     "MaterializedFlowFact",
+     "MaterializedLineageSourceFacts",
+     "MaterializedOccurrenceRef",
++    "MaterializedSymbolicRef",
+     "MaterializedSurfaceFact",
+     "ParameterKind",
+     "ResolutionKind",
+diff --git a/tests/domain/test_lineage_facts.py b/tests/domain/test_lineage_facts.py
+index 72d6536..cc368e5 100644
+--- a/tests/domain/test_lineage_facts.py
++++ b/tests/domain/test_lineage_facts.py
+@@ -21,6 +21,7 @@ from contextor.core.domain.lineage_facts import (
+     MaterializedAnchorFact,
+     MaterializedLineageSourceFacts,
+     MaterializedOccurrenceRef,
++    MaterializedSymbolicRef,
+     MaterializedSurfaceFact,
+     ParameterKind,
+     ResolutionKind,
+@@ -453,3 +454,37 @@ def test_surface_declaration_evidence_rejects_invalid_type_and_preserves_convent
+ 
+ def test_lineage_facts_semantic_version_remains_initial_version():
+     assert LINEAGE_FACTS_SEMANTIC_VERSION == "1"
++
++
++def test_materialized_symbolic_ref_is_slice_bound_and_never_an_occurrence():
++    span = SourceSpan(1, 0, 1, 1)
++    manifest = SourceLineageManifest(
++        "a.py", "fingerprint", "1", LineageFamilyStatus.FRESH, 0, 1, 0
++    )
++    symbolic = MaterializedSymbolicRef(
++        "a.py", "fingerprint", ExtractedSymbolicKind.PUBLIC_TARGET,
++        "pkg.mod", "missing",
++    )
++    slice_ = MaterializedLineageSourceFacts(
++        manifest, (), (
++            MaterializedFlowFact(
++                "flow", MaterializedOccurrenceRef("a.py", "fingerprint", "x"),
++                symbolic, LineageRelation.EXPOSES, span,
++                ResolutionKind.UNRESOLVED_NAME, LineageConfidence.UNRESOLVED,
++            ),
++        ), (),
++    )
++    assert slice_.flows[0].target == symbolic
++    foreign = MaterializedSymbolicRef(
++        "b.py", "other", ExtractedSymbolicKind.PUBLIC_TARGET, "pkg.mod", "missing"
++    )
++    with pytest.raises(ValueError, match="foreign occurrence"):
++        MaterializedLineageSourceFacts(
++            manifest, (), (
++                MaterializedFlowFact(
++                    "bad", MaterializedOccurrenceRef("a.py", "fingerprint", "x"),
++                    foreign, LineageRelation.EXPOSES, span,
++                    ResolutionKind.UNRESOLVED_NAME, LineageConfidence.UNRESOLVED,
++                ),
++            ), (),
++        )
+\ No newline at end of file
 diff --git a/contextor/core/analysis/lineage_materialization.py b/contextor/core/analysis/lineage_materialization.py
 new file mode 100644
-index 0000000..8cf06c6
+index 0000000..62ce81f
 --- /dev/null
 +++ b/contextor/core/analysis/lineage_materialization.py
-@@ -0,0 +1,208 @@
+@@ -0,0 +1,222 @@
 +"""Pure deterministic materialization of one lineage source slice."""
 +
 +from __future__ import annotations
@@ -60,12 +184,15 @@ index 0000000..8cf06c6
 +    ExtractedOccurrenceRef,
 +    ExtractedSymbolicKind,
 +    ExtractedSymbolicRef,
++    LineageConfidence,
 +    MaterializedAnchorFact,
 +    MaterializedFlowFact,
 +    MaterializedLineageSourceFacts,
 +    MaterializedOccurrenceRef,
++    MaterializedSymbolicRef,
 +    MaterializedSurfaceFact,
 +    ParameterKind,
++    ResolutionKind,
 +    SemanticEndpoint,
 +    SemanticInterfaceDescriptor,
 +    SourceLineageManifest,
@@ -131,11 +258,14 @@ index 0000000..8cf06c6
 +
 +    def endpoint(
 +        reference: ExtractedOccurrenceRef | ExtractedSymbolicRef,
-+    ) -> MaterializedOccurrenceRef | SemanticEndpoint:
++        kind: ResolutionKind,
++        confidence: LineageConfidence,
++    ) -> MaterializedOccurrenceRef | MaterializedSymbolicRef | SemanticEndpoint:
 +        if isinstance(reference, ExtractedOccurrenceRef):
 +            return occurrence(reference.local_id)
-+        return _symbolic_endpoint(reference, resolution, occurrence, descriptors)
-+
++        return _symbolic_endpoint(
++            reference, resolution, descriptors, kind, confidence, extracted
++        )
 +    anchors = tuple(
 +        sorted(
 +            MaterializedAnchorFact(
@@ -148,8 +278,8 @@ index 0000000..8cf06c6
 +        sorted(
 +            MaterializedFlowFact(
 +                flow.local_id,
-+                endpoint(flow.source),
-+                endpoint(flow.target),
++                endpoint(flow.source, flow.resolution_kind, flow.confidence),
++                endpoint(flow.target, flow.resolution_kind, flow.confidence),
 +                flow.relation,
 +                flow.evidence,
 +                flow.resolution_kind,
@@ -165,7 +295,7 @@ index 0000000..8cf06c6
 +            MaterializedSurfaceFact(
 +                surface.local_id,
 +                surface.kind,
-+                endpoint(surface.exposed),
++                endpoint(surface.exposed, surface.resolution_kind, surface.confidence),
 +                surface.evidence,
 +                surface.resolution_kind,
 +                surface.confidence,
@@ -195,25 +325,42 @@ index 0000000..8cf06c6
 +def _symbolic_endpoint(
 +    reference: ExtractedSymbolicRef,
 +    resolution: LineageResolutionContext,
-+    occurrence,
 +    descriptors: dict[str, SemanticInterfaceDescriptor],
-+) -> MaterializedOccurrenceRef | SemanticEndpoint:
++    resolution_kind: ResolutionKind,
++    confidence: LineageConfidence,
++    extracted: ExtractedLineageSourceFacts,
++) -> MaterializedSymbolicRef | SemanticEndpoint:
++    symbolic = MaterializedSymbolicRef(
++        extracted.source_key, extracted.source_fingerprint, reference.kind,
++        reference.module_name, reference.symbol_name, reference.source_local_id,
++    )
++    if not _claims_exact_semantic_target(resolution_kind, confidence):
++        return symbolic
 +    owner_id = (
 +        resolution.active_module_ids.get(reference.module_name)
 +        if reference.kind is ExtractedSymbolicKind.STATE
 +        else resolution.active_artifact_ids.get(reference.qualified_name)
 +    )
 +    if owner_id is None:
-+        return occurrence(_unresolved_local_id(reference))
-+
++        return symbolic
 +    slot = _slot_for(reference, owner_id)
 +    if slot is not None:
 +        descriptor = resolution.interface_descriptors.get(owner_id)
 +        if descriptor is None or slot not in descriptor.slots:
-+            return occurrence(_unresolved_local_id(reference))
++            return symbolic
 +        descriptors[owner_id] = descriptor
 +    return SemanticEndpoint(owner_id, slot)
 +
++
++def _claims_exact_semantic_target(
++    resolution_kind: ResolutionKind, confidence: LineageConfidence,
++) -> bool:
++    return confidence is LineageConfidence.CONFIRMED and resolution_kind in {
++        ResolutionKind.LEXICAL_EXACT, ResolutionKind.IMPORT_EXACT,
++        ResolutionKind.CALL_EXACT, ResolutionKind.SIGNATURE_EXACT,
++        ResolutionKind.STATIC_MRO_EXACT, ResolutionKind.LITERAL_CONTAINER_EXACT,
++        ResolutionKind.RECEPTOR_PROVIDED,
++    }
 +
 +def _slot_for(reference: ExtractedSymbolicRef, owner_id: str) -> str | None:
 +    if reference.kind is ExtractedSymbolicKind.RETURN:
@@ -241,21 +388,12 @@ index 0000000..8cf06c6
 +            "Parameter symbolic reference must point at a parameter local id."
 +        ) from exc
 +    return build_parameter_value_slot(owner_id, kind, ordinal=ordinal, name=name)
-+
-+
-+def _unresolved_local_id(reference: ExtractedSymbolicRef) -> str:
-+    return "unresolved:v1:{kind}:m:{module}:s:{symbol}:l:{local}".format(
-+        kind=reference.kind.value,
-+        module=quote(reference.module_name, safe=""),
-+        symbol=quote(reference.symbol_name, safe=""),
-+        local=quote(reference.source_local_id or "", safe=""),
-+    )
 diff --git a/tests/analysis/test_lineage_materialization.py b/tests/analysis/test_lineage_materialization.py
 new file mode 100644
-index 0000000..69d65ce
+index 0000000..6a47961
 --- /dev/null
 +++ b/tests/analysis/test_lineage_materialization.py
-@@ -0,0 +1,211 @@
+@@ -0,0 +1,257 @@
 +from __future__ import annotations
 +
 +import builtins
@@ -277,6 +415,7 @@ index 0000000..69d65ce
 +    LineageConfidence,
 +    LineageRelation,
 +    MaterializedOccurrenceRef,
++    MaterializedSymbolicRef,
 +    ParameterKind,
 +    ProviderRef,
 +    ResolutionKind,
@@ -385,8 +524,8 @@ index 0000000..69d65ce
 +        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("I/O")),
 +    )
 +    result = materialize_lineage_source_facts(facts, _context())
-+    assert isinstance(result.flows[0].target, MaterializedOccurrenceRef)
-+    assert result.flows[0].target.local_id.startswith("unresolved:v1:public_target")
++    assert isinstance(result.flows[0].target, MaterializedSymbolicRef)
++    assert result.flows[0].target.kind is ExtractedSymbolicKind.PUBLIC_TARGET
 +    assert result.surfaces[0].dynamic_boundary == "runtime"
 +    assert result.surfaces[0].provider == ProviderRef("fixture", "1")
 +
@@ -465,5 +604,51 @@ index 0000000..69d65ce
 +    result = materialize_lineage_source_facts(
 +        facts, _context(modules={"pkg.mod": "2/1"})
 +    )
-+    assert isinstance(result.flows[0].target, MaterializedOccurrenceRef)
-+    assert result.flows[0].target.local_id.startswith("unresolved:v1:state")
++    assert isinstance(result.flows[0].target, MaterializedSymbolicRef)
++    assert result.flows[0].target.kind is ExtractedSymbolicKind.STATE
++
++
++@pytest.mark.parametrize(
++    ("kind", "resolution_kind", "confidence"),
++    [
++        (ExtractedSymbolicKind.PUBLIC_TARGET, ResolutionKind.UNRESOLVED_NAME, LineageConfidence.UNRESOLVED),
++        (ExtractedSymbolicKind.PUBLIC_TARGET, ResolutionKind.DYNAMIC_RUNTIME_BOUNDARY, LineageConfidence.DYNAMIC),
++        (ExtractedSymbolicKind.PUBLIC_TARGET, ResolutionKind.PYTHON_NAME_CONVENTION, LineageConfidence.INFERRED),
++        (ExtractedSymbolicKind.PUBLIC_TARGET, ResolutionKind.BOUNDED_STATIC_SET, LineageConfidence.INFERRED),
++    ],
++)
++def test_non_exact_evidence_never_strengthens_from_same_named_active_identity(
++    kind, resolution_kind, confidence,
++):
++    span = SourceSpan(1, 0, 1, 1)
++    reference = ExtractedSymbolicRef(kind, "pkg.mod", "target")
++    kwargs = {"dynamic_boundary": "runtime"} if resolution_kind is ResolutionKind.DYNAMIC_RUNTIME_BOUNDARY else {}
++    facts = _facts(flows=(
++        ExtractedFlowFact(
++            "flow", ExtractedOccurrenceRef("x"), reference, LineageRelation.EXPOSES,
++            span, resolution_kind, confidence, **kwargs,
++        ),
++    ))
++    result = materialize_lineage_source_facts(
++        facts, _context(artifacts={"pkg.mod::target": "A9/1"})
++    )
++    target = result.flows[0].target
++    assert isinstance(target, MaterializedSymbolicRef)
++    assert (target.source_key, target.source_fingerprint) == ("pkg/mod.py", "sha256:test")
++    assert target.symbol_name == "target"
++
++
++def test_exact_surface_requires_endpoint_but_unresolved_surface_keeps_symbolic_boundary():
++    span = SourceSpan(1, 0, 1, 1)
++    reference = ExtractedSymbolicRef(ExtractedSymbolicKind.PUBLIC_TARGET, "pkg.mod", "target")
++    unresolved = _facts(surfaces=(
++        ExtractedSurfaceFact(
++            "surface", SurfaceKind.EXPORT, reference, span, ResolutionKind.UNRESOLVED_NAME,
++            LineageConfidence.UNRESOLVED, "target",
++        ),
++    ))
++    result = materialize_lineage_source_facts(
++        unresolved, _context(artifacts={"pkg.mod::target": "A9/1"})
++    )
++    assert isinstance(result.surfaces[0].exposed, MaterializedSymbolicRef)
+\ No newline at end of file

@@ -19,6 +19,7 @@ from contextor.core.domain.lineage_facts import (
     LineageConfidence,
     LineageRelation,
     MaterializedOccurrenceRef,
+    MaterializedSymbolicRef,
     ParameterKind,
     ProviderRef,
     ResolutionKind,
@@ -127,8 +128,8 @@ def test_missing_or_ambiguous_slot_stays_explicit_and_dynamic_surface_is_preserv
         lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("I/O")),
     )
     result = materialize_lineage_source_facts(facts, _context())
-    assert isinstance(result.flows[0].target, MaterializedOccurrenceRef)
-    assert result.flows[0].target.local_id.startswith("unresolved:v1:public_target")
+    assert isinstance(result.flows[0].target, MaterializedSymbolicRef)
+    assert result.flows[0].target.kind is ExtractedSymbolicKind.PUBLIC_TARGET
     assert result.surfaces[0].dynamic_boundary == "runtime"
     assert result.surfaces[0].provider == ProviderRef("fixture", "1")
 
@@ -207,5 +208,50 @@ def test_missing_exact_slot_is_an_explicit_source_local_placeholder():
     result = materialize_lineage_source_facts(
         facts, _context(modules={"pkg.mod": "2/1"})
     )
-    assert isinstance(result.flows[0].target, MaterializedOccurrenceRef)
-    assert result.flows[0].target.local_id.startswith("unresolved:v1:state")
+    assert isinstance(result.flows[0].target, MaterializedSymbolicRef)
+    assert result.flows[0].target.kind is ExtractedSymbolicKind.STATE
+
+
+@pytest.mark.parametrize(
+    ("kind", "resolution_kind", "confidence"),
+    [
+        (ExtractedSymbolicKind.PUBLIC_TARGET, ResolutionKind.UNRESOLVED_NAME, LineageConfidence.UNRESOLVED),
+        (ExtractedSymbolicKind.PUBLIC_TARGET, ResolutionKind.DYNAMIC_RUNTIME_BOUNDARY, LineageConfidence.DYNAMIC),
+        (ExtractedSymbolicKind.PUBLIC_TARGET, ResolutionKind.PYTHON_NAME_CONVENTION, LineageConfidence.INFERRED),
+        (ExtractedSymbolicKind.PUBLIC_TARGET, ResolutionKind.BOUNDED_STATIC_SET, LineageConfidence.INFERRED),
+    ],
+)
+def test_non_exact_evidence_never_strengthens_from_same_named_active_identity(
+    kind, resolution_kind, confidence,
+):
+    span = SourceSpan(1, 0, 1, 1)
+    reference = ExtractedSymbolicRef(kind, "pkg.mod", "target")
+    kwargs = {"dynamic_boundary": "runtime"} if resolution_kind is ResolutionKind.DYNAMIC_RUNTIME_BOUNDARY else {}
+    facts = _facts(flows=(
+        ExtractedFlowFact(
+            "flow", ExtractedOccurrenceRef("x"), reference, LineageRelation.EXPOSES,
+            span, resolution_kind, confidence, **kwargs,
+        ),
+    ))
+    result = materialize_lineage_source_facts(
+        facts, _context(artifacts={"pkg.mod::target": "A9/1"})
+    )
+    target = result.flows[0].target
+    assert isinstance(target, MaterializedSymbolicRef)
+    assert (target.source_key, target.source_fingerprint) == ("pkg/mod.py", "sha256:test")
+    assert target.symbol_name == "target"
+
+
+def test_exact_surface_requires_endpoint_but_unresolved_surface_keeps_symbolic_boundary():
+    span = SourceSpan(1, 0, 1, 1)
+    reference = ExtractedSymbolicRef(ExtractedSymbolicKind.PUBLIC_TARGET, "pkg.mod", "target")
+    unresolved = _facts(surfaces=(
+        ExtractedSurfaceFact(
+            "surface", SurfaceKind.EXPORT, reference, span, ResolutionKind.UNRESOLVED_NAME,
+            LineageConfidence.UNRESOLVED, "target",
+        ),
+    ))
+    result = materialize_lineage_source_facts(
+        unresolved, _context(artifacts={"pkg.mod::target": "A9/1"})
+    )
+    assert isinstance(result.surfaces[0].exposed, MaterializedSymbolicRef)

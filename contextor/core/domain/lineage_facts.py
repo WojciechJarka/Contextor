@@ -198,6 +198,26 @@ class MaterializedOccurrenceRef:
 
 
 @dataclass(frozen=True, order=True)
+class MaterializedSymbolicRef:
+    """Canonical-slice symbolic boundary, never an occurrence or owner."""
+
+    source_key: str
+    source_fingerprint: str
+    kind: ExtractedSymbolicKind
+    module_name: str
+    symbol_name: str
+    source_local_id: str | None = None
+
+    def __post_init__(self) -> None:
+        _require_token(self.source_key, "source_key")
+        _require_token(self.source_fingerprint, "source_fingerprint")
+        _require_token(self.module_name, "module_name")
+        _require_token(self.symbol_name, "symbol_name")
+        if self.source_local_id is not None:
+            _require_token(self.source_local_id, "source_local_id")
+
+
+@dataclass(frozen=True, order=True)
 class ExtractedAnchorFact:
     local_id: str
     kind: str
@@ -280,7 +300,7 @@ class ExtractedLineageSourceFacts:
 @dataclass(frozen=True, order=True)
 class MaterializedAnchorFact:
     local_id: str
-    reference: MaterializedOccurrenceRef | SemanticEndpoint
+    reference: MaterializedOccurrenceRef | MaterializedSymbolicRef | SemanticEndpoint
     kind: str
     span: SourceSpan
 
@@ -293,8 +313,8 @@ class MaterializedAnchorFact:
 @dataclass(frozen=True, order=True)
 class MaterializedFlowFact:
     local_id: str
-    source: MaterializedOccurrenceRef | SemanticEndpoint
-    target: MaterializedOccurrenceRef | SemanticEndpoint
+    source: MaterializedOccurrenceRef | MaterializedSymbolicRef | SemanticEndpoint
+    target: MaterializedOccurrenceRef | MaterializedSymbolicRef | SemanticEndpoint
     relation: LineageRelation
     evidence: SourceSpan
     resolution_kind: ResolutionKind
@@ -318,7 +338,7 @@ class MaterializedFlowFact:
 class MaterializedSurfaceFact:
     local_id: str
     kind: SurfaceKind
-    exposed: MaterializedOccurrenceRef | SemanticEndpoint
+    exposed: MaterializedOccurrenceRef | MaterializedSymbolicRef | SemanticEndpoint
     evidence: SourceSpan
     resolution_kind: ResolutionKind
     confidence: LineageConfidence
@@ -649,7 +669,7 @@ def _claims_exact_semantic_target(
 
 
 def _validate_materialized_surface_target(
-    exposed: MaterializedOccurrenceRef | SemanticEndpoint,
+    exposed: MaterializedOccurrenceRef | MaterializedSymbolicRef | SemanticEndpoint,
     resolution_kind: ResolutionKind,
     confidence: LineageConfidence,
 ) -> None:
@@ -674,18 +694,18 @@ def _require_sorted_unique(values: tuple[object, ...], label: str) -> None:
 
 
 def _require_materialized_reference(
-    value: MaterializedOccurrenceRef | SemanticEndpoint,
+    value: MaterializedOccurrenceRef | MaterializedSymbolicRef | SemanticEndpoint,
     label: str,
 ) -> None:
-    if not isinstance(value, (MaterializedOccurrenceRef, SemanticEndpoint)):
+    if not isinstance(value, (MaterializedOccurrenceRef, MaterializedSymbolicRef, SemanticEndpoint)):
         raise TypeError(f"{label} require canonical occurrence or semantic endpoint references.")
 
 
 def _require_slice_occurrence(
-    value: MaterializedOccurrenceRef | SemanticEndpoint,
+    value: MaterializedOccurrenceRef | MaterializedSymbolicRef | SemanticEndpoint,
     manifest: SourceLineageManifest,
 ) -> None:
-    if isinstance(value, MaterializedOccurrenceRef) and (
+    if isinstance(value, (MaterializedOccurrenceRef, MaterializedSymbolicRef)) and (
         value.source_key != manifest.source_key
         or value.source_fingerprint != manifest.source_fingerprint
     ):
@@ -711,6 +731,7 @@ __all__ = [
     "MaterializedFlowFact",
     "MaterializedLineageSourceFacts",
     "MaterializedOccurrenceRef",
+    "MaterializedSymbolicRef",
     "MaterializedSurfaceFact",
     "ParameterKind",
     "ResolutionKind",
