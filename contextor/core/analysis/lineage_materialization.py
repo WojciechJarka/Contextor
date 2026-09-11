@@ -5,7 +5,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Mapping
-from urllib.parse import quote
 
 from contextor.core.analysis.lineage_extraction_contracts import (
     parse_local_occurrence_id,
