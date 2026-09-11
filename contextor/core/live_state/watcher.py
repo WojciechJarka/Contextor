@@ -159,6 +159,7 @@ class DesktopLiveWatcher:
             add(path)
         for path in paths:
             self._enqueue_path(path)
+        self._startup_pending = []
 
     def _start_native_observer(self):
         observer = None
@@ -249,22 +250,27 @@ class DesktopLiveWatcher:
 
     def _run_event_worker(self) -> None:
         while not self._stop.is_set():
-            if not self._wake.wait(1.0):
+            signaled = self._wake.wait(1.0)
+            if self._stop.is_set():
+                break
+            if signaled:
+                if self._stop.wait(self.interval):
+                    break
+            else:
                 try:
                     self._check_observer_health()
                 except (OSError, RuntimeError, EOFError) as exc:
                     self._handle_poll_error(exc)
-                continue
-            if self._stop.wait(self.interval):
-                break
-            try:
-                self.poll_once()
-            except (OSError, RuntimeError, EOFError) as exc:
-                self._handle_poll_error(exc)
-            try:
-                self._check_observer_health()
-            except (OSError, RuntimeError, EOFError) as exc:
-                self._handle_poll_error(exc)
+            if self._has_pending_paths():
+                try:
+                    self.poll_once()
+                except (OSError, RuntimeError, EOFError) as exc:
+                    self._handle_poll_error(exc)
+                if signaled:
+                    try:
+                        self._check_observer_health()
+                    except (OSError, RuntimeError, EOFError) as exc:
+                        self._handle_poll_error(exc)
 
     def stop(self) -> None:
         self._stop.set()
@@ -386,7 +392,7 @@ class DesktopLiveWatcher:
             return None
         return str(path)
 
-    def _enqueue_path(self, raw_path: str | Path) -> None:
+    def _enqueue_path(self, raw_path: str | Path, *, wake: bool = True) -> None:
         path = self._normalize_watch_path(raw_path)
         if path is None:
             return
@@ -395,7 +401,8 @@ class DesktopLiveWatcher:
                 return
             self._pending_paths.append(path)
             self._pending_set.add(path)
-            self._wake.set()
+            if wake:
+                self._wake.set()
 
     def _drain_pending(self) -> list[str]:
         with self._pending_lock:
@@ -405,9 +412,13 @@ class DesktopLiveWatcher:
             self._wake.clear()
             return paths
 
+    def _has_pending_paths(self) -> bool:
+        with self._pending_lock:
+            return bool(self._pending_paths)
+
     def _requeue_paths(self, paths: list[str] | set[str]) -> None:
         for path in paths:
-            self._enqueue_path(path)
+            self._enqueue_path(path, wake=False)
 
     def _scan(self) -> dict[str, tuple[int, int]]:
         result = {}

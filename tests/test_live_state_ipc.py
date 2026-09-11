@@ -1166,12 +1166,15 @@ def test_desktop_watcher_reports_create_edit_and_delete_without_manual_update(tm
     target = tmp_path / "sample.py"
     try:
         target.write_text("value = 1\n", encoding="utf-8")
+        watcher._enqueue_path(str(target))
         assert watcher.poll_once() == [str(target)]
 
         target.write_text("value = 22\n", encoding="utf-8")
+        watcher._enqueue_path(str(target))
         assert watcher.poll_once() == [str(target)]
 
         target.unlink()
+        watcher._enqueue_path(str(target))
         assert watcher.poll_once() == [str(target)]
         snapshot = LiveStateClient(server.endpoint).snapshot()
         assert snapshot["revision"] == 3
@@ -1202,7 +1205,9 @@ def test_first_run_watcher_waits_for_initial_canonical_state(tmp_path):
     statuses = []
     watcher = DesktopLiveWatcher(tmp_path, client, on_status=statuses.append)
     try:
-        (tmp_path / "before_analysis.py").write_text("value = 1\n", encoding="utf-8")
+        before_analysis = tmp_path / "before_analysis.py"
+        before_analysis.write_text("value = 1\n", encoding="utf-8")
+        watcher._enqueue_path(str(before_analysis))
         assert watcher.poll_once() == []
         assert client.ping() == {
             "status": "ok", "protocol_version": LIVE_PROTOCOL_VERSION,
@@ -1210,11 +1215,19 @@ def test_first_run_watcher_waits_for_initial_canonical_state(tmp_path):
         }
         assert statuses == ["LIVE: no snapshot; waiting for analysis"]
 
-        client.publish(SimpleNamespace(ready=True, revision=1, state_id=identity.repo_id, modules={}))
+        manager.update_state(str(before_analysis))
+        client.publish(SimpleNamespace(
+            ready=True,
+            revision=1,
+            state_id=identity.repo_id,
+            modules={"before_analysis": object()},
+        ))
         manager.save(identity.repo_id, revision=1)
-        (tmp_path / "after_analysis.py").write_text("value = 2\n", encoding="utf-8")
+        after_analysis = tmp_path / "after_analysis.py"
+        after_analysis.write_text("value = 2\n", encoding="utf-8")
+        watcher._enqueue_path(str(after_analysis))
         response = watcher.poll_once()
-        assert response == [str(tmp_path / "after_analysis.py")]
+        assert response == [str(after_analysis)]
     finally:
         server.close()
         thread.join(timeout=2)
@@ -1241,6 +1254,7 @@ def test_desktop_watcher_reports_syntax_location(tmp_path):
     try:
         target = tmp_path / "broken.py"
         target.write_text("def broken(:\n", encoding="utf-8")
+        watcher._enqueue_path(str(target))
         assert watcher.poll_once() == [str(target)]
         assert statuses == [
             "Updating LIVE: broken.py",

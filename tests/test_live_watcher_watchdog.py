@@ -89,6 +89,22 @@ def test_idle_poll_once_never_scans_repository(tmp_path, monkeypatch):
     assert watcher.poll_once() == []
 
 
+def test_internal_deferred_requeue_does_not_hot_wake(tmp_path):
+    repo, watcher, client, _updates = _make_watcher(tmp_path)
+    statuses = []
+    watcher.on_status = statuses.append
+    path = repo / "module.py"
+    path.write_text("VALUE = 1\n", encoding="utf-8")
+    client.ping = lambda: {"status": "ok", "available": False, "revision": 1}
+
+    watcher._enqueue_path(str(path))
+
+    assert watcher.poll_once() == []
+    assert watcher._has_pending_paths() is True
+    assert watcher._wake.is_set() is False
+    assert statuses == ["LIVE: no snapshot; waiting for analysis"]
+
+
 def test_duplicate_modify_events_coalesce_to_one_pending_path(tmp_path):
     repo, watcher, _client, _updates = _make_watcher(tmp_path)
     path = str(repo / "module.py")
