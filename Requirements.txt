@@ -11,6 +11,8 @@
 
 # Fast JSON serialization for report output.
 orjson>=3.9
+# Native filesystem event monitoring for LIVE.
+watchdog>=6.0
 # MCP server integration
 mcp>=1.0.0
 fastmcp==2.12.4

@@ -73,7 +73,7 @@ echo.
 :check_deps
 echo Checking dependencies...
 
-"%VENV_PY%" -c "import orjson" >nul 2>&1
+"%VENV_PY%" -c "import orjson, watchdog" >nul 2>&1
 if errorlevel 1 goto install_deps
 
 echo [OK] Dependencies are already installed.

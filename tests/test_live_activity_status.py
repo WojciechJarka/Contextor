@@ -544,6 +544,7 @@ def test_desktop_watcher_and_mcp_update_file_single_event_semantics(tmp_path):
     try:
         time.sleep(0.05)
         py_file.write_text("x = 22\n", encoding="utf-8")
+        watcher._enqueue_path(str(py_file))
 
         changed = watcher.poll_once()
         assert str(py_file) in changed

@@ -4,8 +4,13 @@ from __future__ import annotations
 
 import threading
 import time
+from collections import deque
 from collections.abc import Callable
 from pathlib import Path
+
+from watchdog.events import FileSystemEventHandler
+from watchdog.observers import Observer
+from watchdog.observers.polling import PollingObserver
 
 from .ipc import LiveStateClient
 
@@ -52,7 +57,30 @@ class _PollingLiveWorker:
             self._thread.join(timeout=max(2.0, self.interval * 2))
 
 
-class DesktopLiveWatcher(_PollingLiveWorker):
+class _LiveFilesystemEventHandler(FileSystemEventHandler):
+    def __init__(self, enqueue: Callable[[str], None]):
+        super().__init__()
+        self._enqueue = enqueue
+
+    def on_created(self, event) -> None:
+        if not event.is_directory:
+            self._enqueue(event.src_path)
+
+    def on_modified(self, event) -> None:
+        if not event.is_directory:
+            self._enqueue(event.src_path)
+
+    def on_deleted(self, event) -> None:
+        if not event.is_directory:
+            self._enqueue(event.src_path)
+
+    def on_moved(self, event) -> None:
+        if not event.is_directory:
+            self._enqueue(event.src_path)
+            self._enqueue(event.dest_path)
+
+
+class DesktopLiveWatcher:
     def __init__(
         self,
         root: str | Path,
@@ -61,17 +89,31 @@ class DesktopLiveWatcher(_PollingLiveWorker):
         owner_pid: int | None = None,
         owner_token: str | None = None,
         desktop_instance_id: str | None = None,
-        interval: float = 0.75,
+        interval: float = 0.10,
         on_status: Callable[[str], None] | None = None,
         on_reconnect: Callable[[LiveStateClient], None] | None = None,
         on_resync: Callable[[], object] | None = None,
     ):
+        """Watch one repository and route filesystem changes through LIVE.
+
+        ``interval`` is the event debounce/coalescing interval, not a
+        filesystem polling cadence.
+        """
         self.root = Path(root).resolve()
         self.client = client
         self.owner_pid = owner_pid
         self.owner_token = owner_token
         self.desktop_instance_id = desktop_instance_id
-        super().__init__(interval=interval, thread_name="contextor-live-watcher")
+        self.interval = max(0.0, float(interval))
+        self._stop = threading.Event()
+        self._wake = threading.Event()
+        self._thread: threading.Thread | None = None
+        self._observer = None
+        self._observer_lock = threading.Lock()
+        self._pending_lock = threading.Lock()
+        self._pending_paths: deque[str] = deque()
+        self._pending_set: set[str] = set()
+        self._using_polling_fallback = False
         self.on_status = on_status
         self.on_reconnect = on_reconnect
         self.on_resync = on_resync
@@ -81,6 +123,172 @@ class DesktopLiveWatcher(_PollingLiveWorker):
         self._excluded_paths, self._ignored_dirs = self._load_watch_filters()
         self._snapshot = self._scan()
         self._startup_pending = self._startup_reconciliation_paths(self._snapshot)
+        self._event_handler = _LiveFilesystemEventHandler(self._enqueue_path)
+
+    def _observer_timeout(self) -> float:
+        return max(2.0, self.interval * 2)
+
+    def _dispose_observer(self, observer) -> None:
+        if observer is None:
+            return
+        try:
+            observer.stop()
+        except (OSError, RuntimeError):
+            pass
+        try:
+            observer.join(timeout=self._observer_timeout())
+        except (OSError, RuntimeError):
+            pass
+
+    def _reconcile_observer_start(self) -> None:
+        current = self._scan()
+        paths: list[str] = []
+        seen: set[str] = set()
+
+        def add(path: str) -> None:
+            if path not in seen:
+                seen.add(path)
+                paths.append(path)
+
+        for path in self._startup_pending:
+            add(path)
+        for path in list(self._snapshot) + list(current):
+            if self._snapshot.get(path) != current.get(path):
+                add(path)
+        for path in self._startup_reconciliation_paths(current):
+            add(path)
+        for path in paths:
+            self._enqueue_path(path)
+
+    def _start_native_observer(self):
+        observer = None
+        try:
+            observer = Observer()
+            observer.schedule(self._event_handler, str(self.root), recursive=True)
+            observer.start()
+        except (OSError, RuntimeError) as exc:
+            self._dispose_observer(observer)
+            try:
+                observer = PollingObserver(timeout=max(1.0, self.interval))
+                observer.schedule(self._event_handler, str(self.root), recursive=True)
+                observer.start()
+            except (OSError, RuntimeError) as fallback_exc:
+                self._dispose_observer(observer)
+                self._emit(
+                    "LIVE filesystem observer unavailable; polling fallback failed: "
+                    f"{fallback_exc}"
+                )
+                raise
+            self._using_polling_fallback = True
+            self._emit("LIVE filesystem observer unavailable; using polling fallback")
+        else:
+            self._using_polling_fallback = False
+        with self._observer_lock:
+            self._observer = observer
+
+    def _switch_to_polling_fallback(self, reason: str) -> None:
+        if self._stop.is_set() or self._using_polling_fallback:
+            return
+        with self._observer_lock:
+            observer = self._observer
+            self._observer = None
+        self._dispose_observer(observer)
+        try:
+            fallback = PollingObserver(timeout=max(1.0, self.interval))
+            fallback.schedule(self._event_handler, str(self.root), recursive=True)
+            fallback.start()
+        except (OSError, RuntimeError) as exc:
+            self._dispose_observer(locals().get("fallback"))
+            self._emit(
+                "LIVE filesystem observer unavailable; polling fallback failed: "
+                f"{exc}"
+            )
+            raise
+        with self._observer_lock:
+            self._observer = fallback
+        self._using_polling_fallback = True
+        self._emit(
+            "LIVE filesystem observer stopped; using polling fallback: "
+            f"{reason}"
+        )
+        self._reconcile_observer_start()
+
+    def _check_observer_health(self) -> None:
+        if self._stop.is_set() or self._using_polling_fallback:
+            return
+        with self._observer_lock:
+            observer = self._observer
+        if observer is None:
+            return
+        try:
+            alive = observer.is_alive()
+        except (OSError, RuntimeError):
+            alive = False
+        if not alive:
+            self._switch_to_polling_fallback("native observer stopped unexpectedly")
+
+    def start(self) -> None:
+        if self._thread and self._thread.is_alive():
+            return
+        self._stop.clear()
+        try:
+            self._start_native_observer()
+            self._reconcile_observer_start()
+        except Exception:
+            with self._observer_lock:
+                observer = self._observer
+                self._observer = None
+            self._dispose_observer(observer)
+            raise
+        self._thread = threading.Thread(
+            target=self._run_event_worker,
+            name="contextor-live-watcher",
+            daemon=True,
+        )
+        self._thread.start()
+
+    def _run_event_worker(self) -> None:
+        while not self._stop.is_set():
+            if not self._wake.wait(1.0):
+                try:
+                    self._check_observer_health()
+                except (OSError, RuntimeError, EOFError) as exc:
+                    self._handle_poll_error(exc)
+                continue
+            if self._stop.wait(self.interval):
+                break
+            try:
+                self.poll_once()
+            except (OSError, RuntimeError, EOFError) as exc:
+                self._handle_poll_error(exc)
+            try:
+                self._check_observer_health()
+            except (OSError, RuntimeError, EOFError) as exc:
+                self._handle_poll_error(exc)
+
+    def stop(self) -> None:
+        self._stop.set()
+        self._wake.set()
+        timeout = self._observer_timeout()
+        with self._observer_lock:
+            observer = self._observer
+        if observer is not None:
+            try:
+                observer.stop()
+            except (OSError, RuntimeError):
+                pass
+            try:
+                observer.join(timeout=timeout)
+            except (OSError, RuntimeError):
+                pass
+        thread = self._thread
+        if thread and thread is not threading.current_thread():
+            thread.join(timeout=timeout)
+        with self._observer_lock:
+            if self._observer is observer:
+                self._observer = None
+        self._thread = None
+        self._using_polling_fallback = False
 
     def _emit(self, message: str) -> None:
         """Forward a compact status message without assuming a GUI exists."""
@@ -159,22 +367,57 @@ class DesktopLiveWatcher(_PollingLiveWorker):
             self._emit(f"LIVE recovery failed: {exc}")
             return None
 
+    def _normalize_watch_path(self, raw_path: str | Path) -> str | None:
+        try:
+            path = Path(raw_path).resolve()
+            relative = path.relative_to(self.root)
+        except (OSError, ValueError):
+            return None
+        if path.suffix != ".py":
+            return None
+        if any(part in self._ignored_dirs for part in relative.parts):
+            return None
+        relative_path = relative.as_posix()
+        if any(
+            relative_path == excluded
+            or relative_path.startswith(excluded + "/")
+            for excluded in self._excluded_paths
+        ):
+            return None
+        return str(path)
+
+    def _enqueue_path(self, raw_path: str | Path) -> None:
+        path = self._normalize_watch_path(raw_path)
+        if path is None:
+            return
+        with self._pending_lock:
+            if path in self._pending_set:
+                return
+            self._pending_paths.append(path)
+            self._pending_set.add(path)
+            self._wake.set()
+
+    def _drain_pending(self) -> list[str]:
+        with self._pending_lock:
+            paths = list(self._pending_paths)
+            self._pending_paths.clear()
+            self._pending_set.clear()
+            self._wake.clear()
+            return paths
+
+    def _requeue_paths(self, paths: list[str] | set[str]) -> None:
+        for path in paths:
+            self._enqueue_path(path)
+
     def _scan(self) -> dict[str, tuple[int, int]]:
         result = {}
         for path in self.root.rglob("*.py"):
-            relative = path.relative_to(self.root)
-            if any(part in self._ignored_dirs for part in relative.parts):
-                continue
-            relative_path = relative.as_posix()
-            if any(
-                relative_path == excluded
-                or relative_path.startswith(excluded + "/")
-                for excluded in self._excluded_paths
-            ):
+            normalized = self._normalize_watch_path(path)
+            if normalized is None:
                 continue
             try:
-                stat = path.stat()
-                result[str(path)] = (stat.st_mtime_ns, stat.st_size)
+                stat = Path(normalized).stat()
+                result[normalized] = (stat.st_mtime_ns, stat.st_size)
             except OSError:
                 continue
         return result
@@ -221,23 +464,9 @@ class DesktopLiveWatcher(_PollingLiveWorker):
             or self._module_name(Path(path)) not in modules
         }
         for tracked_path in manager.tracked_paths():
-            path = Path(tracked_path)
-            try:
-                relative = path.resolve().relative_to(self.root)
-            except ValueError:
-                continue
-            relative_path = relative.as_posix()
-            if (
-                path.suffix == ".py"
-                and tracked_path not in current
-                and not any(part in self._ignored_dirs for part in relative.parts)
-                and not any(
-                    relative_path == excluded
-                    or relative_path.startswith(excluded + "/")
-                    for excluded in self._excluded_paths
-                )
-            ):
-                pending.add(tracked_path)
+            normalized = self._normalize_watch_path(tracked_path)
+            if normalized is not None and normalized not in current:
+                pending.add(normalized)
         return sorted(pending)
 
     def _trusted_file_state(self, snapshot: dict | None = None):
@@ -299,9 +528,16 @@ class DesktopLiveWatcher(_PollingLiveWorker):
         return ".".join(relative.parts)
 
     def poll_once(self) -> list[str]:
-        scan_started = time.monotonic()
-        current = self._scan()
-        scan_ms = (time.monotonic() - scan_started) * 1000.0
+        changed = self._drain_pending()
+        if not changed:
+            return []
+        current: dict[str, tuple[int, int]] = {}
+        for path in changed:
+            try:
+                stat = Path(path).stat()
+                current[path] = (stat.st_mtime_ns, stat.st_size)
+            except OSError:
+                continue
         ping_started = time.monotonic()
         try:
             status = self.client.ping()
@@ -313,7 +549,7 @@ class DesktopLiveWatcher(_PollingLiveWorker):
         ping_ms = (time.monotonic() - ping_started) * 1000.0
 
         if not status.get("available"):
-            self._snapshot = current
+            self._requeue_paths(changed)
             self._emit("LIVE: no snapshot; waiting for analysis")
             return []
         if self._startup_requires_resync:
@@ -343,19 +579,9 @@ class DesktopLiveWatcher(_PollingLiveWorker):
             self._snapshot = current
             self._startup_pending = self._startup_reconciliation_paths(current)
             self._startup_requires_resync = False
+            self._requeue_paths(self._startup_pending)
             return []
-        startup_pending = set(self._startup_pending)
-        if startup_pending:
-            startup_pending &= set(self._startup_reconciliation_paths(current))
-        changed = sorted(
-            startup_pending
-            | {
-                path
-                for path in set(self._snapshot) | set(current)
-                if self._snapshot.get(path) != current.get(path)
-            }
-        )
-        deferred: set[str] = set()
+        deferred: list[str] = []
         reconciled: list[str] = []
         next_snapshot = dict(self._snapshot)
 
@@ -381,7 +607,7 @@ class DesktopLiveWatcher(_PollingLiveWorker):
             trace_event(
                 "LIVE", "FS_CHANGE_DETECTED", op=op, repo=str(self.root),
                 path=relative, kind=kind, rev=status.get("revision"),
-                scan_ms=scan_ms, ping_ms=ping_ms, mtime_ns=mtime_ns,
+                discovery="watchdog", ping_ms=ping_ms, mtime_ns=mtime_ns,
             )
             self._emit(f"Updating LIVE: {Path(path).name}")
             update_started = time.monotonic()
@@ -397,7 +623,7 @@ class DesktopLiveWatcher(_PollingLiveWorker):
                 )
                 lease = acquire_full_analysis(self.root, owner="desktop_watcher", timeout=10.0)
             except FullAnalysisBusyError:
-                deferred.add(path)
+                deferred.append(path)
                 self._emit("LIVE: repository mutation busy; deferring watcher update")
                 continue
             try:
@@ -405,7 +631,7 @@ class DesktopLiveWatcher(_PollingLiveWorker):
                 # Re-read its exact FileState generation before mutating LIVE.
                 candidate_requires_update = self._candidate_requires_update(path, current)
                 if candidate_requires_update is None:
-                    deferred.add(path)
+                    deferred.append(path)
                     if was_ambiguous:
                         trace_event("LIVE", "WATCH_UPDATE_AMBIGUOUS_UNVERIFIED", op=op, repo=str(self.root), path=relative, reason="generation_unavailable")
                     self._emit("LIVE: generation revalidation unavailable; deferring watcher update")
@@ -425,7 +651,7 @@ class DesktopLiveWatcher(_PollingLiveWorker):
                 if update_attempted:
                     self._ambiguous_updates.add(path)
                     trace_event("LIVE", "WATCH_UPDATE_AMBIGUOUS", op=op, repo=str(self.root), path=relative, rev=status.get("revision"), exception="transport")
-                    deferred.add(path)
+                    deferred.append(path)
                     self._emit("LIVE: update outcome ambiguous; deferring revalidation")
                     continue
                 self._emit("LIVE: connection lost during update; recovering...")
@@ -439,18 +665,18 @@ class DesktopLiveWatcher(_PollingLiveWorker):
                 try:
                     recovered_snapshot = self.client.snapshot()
                 except (OSError, EOFError, TimeoutError, ConnectionError):
-                    deferred.add(path)
+                    deferred.append(path)
                     self._emit("LIVE: generation revalidation unavailable; deferring watcher update")
                     continue
                 if self._trusted_file_state(recovered_snapshot) is None:
-                    deferred.add(path)
+                    deferred.append(path)
                     self._emit("LIVE: generation revalidation unavailable; deferring watcher update")
                     continue
                 candidate_requires_update = self._candidate_requires_update(
                     path, current, recovered_snapshot
                 )
                 if candidate_requires_update is None:
-                    deferred.add(path)
+                    deferred.append(path)
                     if was_ambiguous:
                         trace_event("LIVE", "WATCH_UPDATE_AMBIGUOUS_UNVERIFIED", op=op, repo=str(self.root), path=relative, reason="generation_unavailable")
                     self._emit("LIVE: generation revalidation unavailable; deferring watcher update")
@@ -492,13 +718,13 @@ class DesktopLiveWatcher(_PollingLiveWorker):
             else:
                 self._emit(f"LIVE update error: {Path(path).name}: {result_status}")
             if not acknowledged:
-                deferred.add(path)
+                deferred.append(path)
                 continue
             acknowledge(path)
             reconciled.append(path)
         if deferred:
             self._snapshot = next_snapshot
-            self._startup_pending = sorted(deferred)
+            self._requeue_paths(deferred)
             return reconciled
         self._snapshot = next_snapshot
         self._startup_pending = []
