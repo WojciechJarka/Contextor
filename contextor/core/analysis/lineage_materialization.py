@@ -31,6 +31,7 @@ from contextor.core.domain.lineage_facts import (
     build_module_global_slot,
     build_parameter_value_slot,
     build_return_slot,
+    claims_exact_semantic_target,
 )
 
 
@@ -166,7 +167,7 @@ def _symbolic_endpoint(
         extracted.source_key, extracted.source_fingerprint, reference.kind,
         reference.module_name, reference.symbol_name, reference.source_local_id,
     )
-    if not _claims_exact_semantic_target(resolution_kind, confidence):
+    if not claims_exact_semantic_target(resolution_kind, confidence):
         return symbolic
     owner_id = (
         resolution.active_module_ids.get(reference.module_name)
@@ -183,16 +184,6 @@ def _symbolic_endpoint(
         descriptors[owner_id] = descriptor
     return SemanticEndpoint(owner_id, slot)
 
-
-def _claims_exact_semantic_target(
-    resolution_kind: ResolutionKind, confidence: LineageConfidence,
-) -> bool:
-    return confidence is LineageConfidence.CONFIRMED and resolution_kind in {
-        ResolutionKind.LEXICAL_EXACT, ResolutionKind.IMPORT_EXACT,
-        ResolutionKind.CALL_EXACT, ResolutionKind.SIGNATURE_EXACT,
-        ResolutionKind.STATIC_MRO_EXACT, ResolutionKind.LITERAL_CONTAINER_EXACT,
-        ResolutionKind.RECEPTOR_PROVIDED,
-    }
 
 def _slot_for(reference: ExtractedSymbolicRef, owner_id: str) -> str | None:
     if reference.kind is ExtractedSymbolicKind.RETURN:

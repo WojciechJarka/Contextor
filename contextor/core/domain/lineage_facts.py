@@ -300,7 +300,7 @@ class ExtractedLineageSourceFacts:
 @dataclass(frozen=True, order=True)
 class MaterializedAnchorFact:
     local_id: str
-    reference: MaterializedOccurrenceRef | MaterializedSymbolicRef | SemanticEndpoint
+    reference: MaterializedOccurrenceRef
     kind: str
     span: SourceSpan
 
@@ -655,7 +655,7 @@ def _validate_surface_declaration_evidence(
         )
 
 
-def _claims_exact_semantic_target(
+def claims_exact_semantic_target(
     resolution_kind: ResolutionKind,
     confidence: LineageConfidence,
 ) -> bool:
@@ -673,7 +673,7 @@ def _validate_materialized_surface_target(
     resolution_kind: ResolutionKind,
     confidence: LineageConfidence,
 ) -> None:
-    if _claims_exact_semantic_target(resolution_kind, confidence) and not isinstance(
+    if claims_exact_semantic_target(resolution_kind, confidence) and not isinstance(
         exposed, SemanticEndpoint
     ):
         raise ValueError(
@@ -698,7 +698,7 @@ def _require_materialized_reference(
     label: str,
 ) -> None:
     if not isinstance(value, (MaterializedOccurrenceRef, MaterializedSymbolicRef, SemanticEndpoint)):
-        raise TypeError(f"{label} require canonical occurrence or semantic endpoint references.")
+        raise TypeError(f"{label} require canonical occurrence, symbolic boundary, or semantic endpoint references.")
 
 
 def _require_slice_occurrence(
@@ -709,7 +709,7 @@ def _require_slice_occurrence(
         value.source_key != manifest.source_key
         or value.source_fingerprint != manifest.source_fingerprint
     ):
-        raise ValueError("Materialized source slice contains foreign occurrence.")
+        raise ValueError("Materialized source slice contains foreign local reference.")
 
 
 __all__ = [

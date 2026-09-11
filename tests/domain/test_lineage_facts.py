@@ -108,15 +108,15 @@ def test_materialized_slice_rejects_foreign_occurrences_but_allows_semantic_boun
     good = MaterializedLineageSourceFacts(manifest, (MaterializedAnchorFact("a", local, "binding", span),), (MaterializedFlowFact("f", local, endpoint, LineageRelation.RETURNS, span, ResolutionKind.CALL_EXACT, LineageConfidence.CONFIRMED),), (MaterializedSurfaceFact("s", SurfaceKind.EXPORT, endpoint, span, ResolutionKind.IMPORT_EXACT, LineageConfidence.CONFIRMED, "x"),))
     assert good.flows[0].target == endpoint
     anchor_manifest = SourceLineageManifest("a.py", "a", "1", LineageFamilyStatus.FRESH, 1, 0, 0)
-    with pytest.raises(ValueError, match="foreign occurrence"):
+    with pytest.raises(ValueError, match="foreign local reference"):
         MaterializedLineageSourceFacts(anchor_manifest, (MaterializedAnchorFact("a", foreign, "binding", span),), (), ())
     source_manifest = SourceLineageManifest("a.py", "a", "1", LineageFamilyStatus.FRESH, 0, 1, 0)
-    with pytest.raises(ValueError, match="foreign occurrence"):
+    with pytest.raises(ValueError, match="foreign local reference"):
         MaterializedLineageSourceFacts(source_manifest, (), (MaterializedFlowFact("f", foreign, endpoint, LineageRelation.RETURNS, span, ResolutionKind.CALL_EXACT, LineageConfidence.CONFIRMED),), ())
-    with pytest.raises(ValueError, match="foreign occurrence"):
+    with pytest.raises(ValueError, match="foreign local reference"):
         MaterializedLineageSourceFacts(source_manifest, (), (MaterializedFlowFact("f", endpoint, foreign, LineageRelation.CALL_RESULT, span, ResolutionKind.CALL_EXACT, LineageConfidence.CONFIRMED),), ())
     surface_manifest = SourceLineageManifest("a.py", "a", "1", LineageFamilyStatus.FRESH, 0, 0, 1)
-    with pytest.raises(ValueError, match="foreign occurrence"):
+    with pytest.raises(ValueError, match="foreign local reference"):
         MaterializedLineageSourceFacts(surface_manifest, (), (), (MaterializedSurfaceFact("s", SurfaceKind.EXPORT, foreign, span, ResolutionKind.BOUNDED_STATIC_SET, LineageConfidence.INFERRED, "x"),))
 
 
@@ -478,7 +478,7 @@ def test_materialized_symbolic_ref_is_slice_bound_and_never_an_occurrence():
     foreign = MaterializedSymbolicRef(
         "b.py", "other", ExtractedSymbolicKind.PUBLIC_TARGET, "pkg.mod", "missing"
     )
-    with pytest.raises(ValueError, match="foreign occurrence"):
+    with pytest.raises(ValueError, match="foreign local reference"):
         MaterializedLineageSourceFacts(
             manifest, (), (
                 MaterializedFlowFact(
