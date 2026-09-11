@@ -1053,6 +1053,12 @@ def _bounded(value: object) -> object:
     return str(value)[:_MAX_TEXT]
 
 
+def _bounded_string_list(value: object) -> object:
+    if not isinstance(value, (list, tuple)):
+        return _bounded(value)
+    return [_bounded(item) for item in value]
+
+
 def _read_pointer() -> tuple[dict[str, object], Path] | None:
     try:
         pointer = _pointer_path()
@@ -1135,13 +1141,41 @@ def _append(record: dict[str, object], path: Path) -> None:
 
 
 def _header_records(sid: str, started_at: str, desktop_pid: int, file_name: str) -> list[dict[str, object]]:
-    return [
+    records = [
         {"_type": "header", "schema": TRACE_SCHEMA, "purpose": "chronological Contextor Desktop/LIVE/MCP runtime diagnostics; one JSON object per line", "sid": sid, "started_at": started_at, "desktop_pid": desktop_pid, "file": file_name},
         {"_type": "fields", "fields": {"ts": "UTC ISO-8601 milliseconds", "mono_ms": "host monotonic milliseconds", "sid": "desktop trace session", "pid": "process id", "tid": "thread id", "d": "domain", "ev": "event", "op": "operation correlation id", "repo": "repository", "path": "repository-relative path", "kind": "change kind", "tool": "MCP tool", "rev": "observed canonical revision", "rev0": "canonical revision before transition", "rev1": "canonical revision after transition", "candidate_rev": "rejected candidate canonical revision", "seq": "activity-journal sequence", "q": "GUI queue size", "count": "count", "bytes": "byte count", "wait_ms": "queue wait milliseconds", "elapsed_ms": "elapsed milliseconds", "scan_ms": "watcher scan milliseconds", "ping_ms": "watcher ping milliseconds", "status": "compact status", "err": "bounded error", "mtime_ns": "observed file mtime", "attempt": "connection attempt number", "attempts": "connection attempt budget", "attempts_used": "attempt count consumed", "retry_delay": "retry delay seconds", "runtime_domain_id": "runtime domain identity", "repo_id": "repository identity", "endpoint_fingerprint": "hashed endpoint identity", "service_pid": "LIVE service process id", "lease_generation": "LIVE lease generation", "service_instance_id": "LIVE service instance", "reason_code": "stable diagnostic reason", "exception_class": "exception class", "errno": "OS errno", "winerror": "Windows error", "error": "bounded error text", "pid_alive": "service PID liveness", "endpoint_changed": "endpoint identity changed", "process_alive": "service process liveness", "process_identity_matches": "process start identity matches", "endpoint_available": "endpoint metadata available", "endpoint_matches": "endpoint identity matches", "reason": "evidence-neutral reason", "result": "evidence-neutral result", "side": "IPC side", "operation_or_request_type": "IPC request or transport stage", "host": "IPC endpoint host", "port": "IPC endpoint port", "prior_endpoint_fingerprint": "previous hashed endpoint identity", "prior_service_pid": "previous LIVE service process id", "new_endpoint_fingerprint": "new hashed endpoint identity", "new_service_pid": "new LIVE service process id", "recovery_operation_id": "watcher recovery operation correlation id"}},
         {"_type": "domains", "domains": ["DESKTOP", "LIVE", "MCP", "GUI"], "reserved": ["OPS"], "ops_note": "Reserved for future repository-operation coordination; not implemented here."},
         {"_type": "revision_semantics", "rev": "observed authoritative canonical revision", "rev0": "authoritative canonical revision before transition", "rev1": "authoritative canonical revision after transition", "seq": "independent activity-journal sequence", "logger_rule": "The logger never calculates or increments canonical revision or activity sequence."},
         {"_type": "events", "events": {"DESKTOP": ["SESSION_START", "SESSION_END"], "LIVE": ["FS_CHANGE_DETECTED", "WATCH_UPDATE_START", "WATCH_UPDATE_END", "WATCH_UPDATE_FAIL", "UPDATE_RECEIVED", "UPDATE_FAIL", "CLONE_END", "UPDATER_START", "UPDATER_END", "UPDATER_FAIL", "ENGINE_READY", "INCREMENTAL_END", "PERSIST_START", "SNAPSHOT_SAVE_END", "FILE_STATE_SAVE_END", "PERSIST_END", "CANONICAL_COMMIT", "UPDATE_PUBLISHED", "PUBLISH_RECEIVED", "CANONICAL_PUBLISH", "PUBLISH_FAIL", "ACTIVITY_APPEND", "SERVICE_START", "SERVICE_END", "LIVE_CONNECT_ATTEMPT", "LIVE_CONNECT_REJECT", "LIVE_CONNECT_RESULT", "LIVE_LIVENESS_RESULT", "LIVE_WATCHER_RECOVERY_START", "LIVE_WATCHER_RECOVERY_RESULT", "LIVE_IPC_FAILURE", "LIVE_SERVICE_THREAD_FAILURE"], "MCP": ["CALL_START", "IMPLEMENTATION_END", "DIAGNOSTICS_END", "TELEMETRY_END", "CALL_END", "CALL_FAIL"], "GUI": ["EVENT_BATCH_RECEIVED", "ACTIVITY_GAP", "STATUS_QUEUED", "STATUS_RENDERED"]}},
     ]
+    records[1]["fields"].update(
+        {
+            "origin": "LIVE update origin",
+            "diagnostic_kind": "canonical diagnostic family",
+            "diagnostic_key": "stable canonical diagnostic identity",
+            "collision_kind": "canonical collision kind",
+            "collision_artifact_type": "canonical collision artifact type",
+            "collision_symbol": "canonical collision symbol",
+            "collision_is_identical": "canonical collision identity flag",
+            "collision_nodes": "canonical collision modules",
+            "cycle_nodes": "canonical closed cycle",
+            "diagnostic_total": "committed diagnostic delta size",
+            "diagnostic_truncated": "journal diagnostic detail truncation",
+            "line_number": "syntax error line",
+            "column_number": "syntax error column",
+        }
+    )
+    records[4]["events"]["LIVE"].extend(
+        [
+            "LIVE_DIAGNOSTIC_SYNTAX_ERROR",
+            "LIVE_DIAGNOSTIC_SYNTAX_RECOVERED",
+            "LIVE_DIAGNOSTIC_COLLISION_ADDED",
+            "LIVE_DIAGNOSTIC_COLLISION_RESOLVED",
+            "LIVE_DIAGNOSTIC_CYCLE_ADDED",
+            "LIVE_DIAGNOSTIC_CYCLE_RESOLVED",
+        ]
+    )
+    return records
 
 
 def _open_runtime_trace_session(*, logs_root: str | Path | None = None) -> Path:
@@ -1270,10 +1304,32 @@ def trace_event(domain: str, event: str, *, op: str | None = None, rev: int | No
             if value is not None:
                 record[key] = value
         key_map = {"repo": "repo", "path": "path", "kind": "kind", "tool": "tool", "q": "q", "count": "count", "bytes": "bytes", "wait_ms": "wait_ms", "elapsed_ms": "elapsed_ms", "scan_ms": "scan_ms", "ping_ms": "ping_ms", "status": "status", "err": "err", "mtime_ns": "mtime_ns", "category": "category", "operation": "operation", "first_seq": "first_seq", "last_seq": "last_seq", "candidate_rev": "candidate_rev", "attempt": "attempt", "attempts": "attempts", "attempts_used": "attempts_used", "retry_delay": "retry_delay", "runtime_domain_id": "runtime_domain_id", "repo_id": "repo_id", "endpoint_fingerprint": "endpoint_fingerprint", "service_pid": "service_pid", "lease_generation": "lease_generation", "service_instance_id": "service_instance_id", "reason_code": "reason_code", "exception_class": "exception_class", "errno": "errno", "winerror": "winerror", "error": "error", "pid_alive": "pid_alive", "endpoint_changed": "endpoint_changed", "process_alive": "process_alive", "process_identity_matches": "process_identity_matches", "endpoint_available": "endpoint_available", "endpoint_matches": "endpoint_matches", "reason": "reason", "result": "result", "side": "side", "operation_or_request_type": "operation_or_request_type", "host": "host", "port": "port", "prior_endpoint_fingerprint": "prior_endpoint_fingerprint", "prior_service_pid": "prior_service_pid", "new_endpoint_fingerprint": "new_endpoint_fingerprint", "new_service_pid": "new_service_pid", "recovery_operation_id": "recovery_operation_id"}
+        key_map.update(
+            {
+                "origin": "origin",
+                "diagnostic_kind": "diagnostic_kind",
+                "diagnostic_key": "diagnostic_key",
+                "collision_kind": "collision_kind",
+                "collision_artifact_type": "collision_artifact_type",
+                "collision_symbol": "collision_symbol",
+                "collision_is_identical": "collision_is_identical",
+                "collision_nodes": "collision_nodes",
+                "cycle_nodes": "cycle_nodes",
+                "diagnostic_total": "diagnostic_total",
+                "diagnostic_truncated": "diagnostic_truncated",
+                "line_number": "line_number",
+                "column_number": "column_number",
+            }
+        )
+        structured_list_fields = {"collision_nodes", "cycle_nodes"}
         for key, value in fields.items():
             target = key_map.get(key)
             if target is not None and value is not None:
-                record[target] = _bounded(value)
+                record[target] = (
+                    _bounded_string_list(value)
+                    if key in structured_list_fields
+                    else _bounded(value)
+                )
         _append(record, path)
     except Exception:
         pass

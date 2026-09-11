@@ -51,6 +51,33 @@ def test_desktop_trace_session_headers_and_finish(tmp_path, monkeypatch):
     assert {"LIVE_CONNECT_ATTEMPT", "LIVE_CONNECT_REJECT", "LIVE_CONNECT_RESULT", "LIVE_LIVENESS_RESULT", "LIVE_WATCHER_RECOVERY_START", "LIVE_WATCHER_RECOVERY_RESULT", "LIVE_IPC_FAILURE", "LIVE_SERVICE_THREAD_FAILURE"} <= set(events)
 
 
+def test_diagnostic_trace_fields_and_structured_node_arrays_are_durable():
+    path = trace.start_desktop_trace_session()
+    trace.trace_event(
+        "LIVE",
+        "LIVE_DIAGNOSTIC_COLLISION_ADDED",
+        origin="desktop_watcher",
+        diagnostic_kind="collision",
+        diagnostic_key='["collision","run"]',
+        collision_kind="NAME_COLLISION",
+        collision_artifact_type="function",
+        collision_symbol="run",
+        collision_is_identical=False,
+        collision_nodes=["pkg.a", "pkg.b"],
+        diagnostic_total=4,
+        diagnostic_truncated=True,
+    )
+    trace.finish_desktop_trace_session()
+    records = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+    fields = records[1]["fields"]
+    events = records[4]["events"]["LIVE"]
+    assert {"origin", "diagnostic_kind", "diagnostic_key", "collision_nodes", "cycle_nodes", "diagnostic_total", "diagnostic_truncated"} <= set(fields)
+    assert {"LIVE_DIAGNOSTIC_SYNTAX_ERROR", "LIVE_DIAGNOSTIC_SYNTAX_RECOVERED", "LIVE_DIAGNOSTIC_COLLISION_ADDED", "LIVE_DIAGNOSTIC_COLLISION_RESOLVED", "LIVE_DIAGNOSTIC_CYCLE_ADDED", "LIVE_DIAGNOSTIC_CYCLE_RESOLVED"} <= set(events)
+    record = next(item for item in records if item.get("ev") == "LIVE_DIAGNOSTIC_COLLISION_ADDED")
+    assert record["collision_nodes"] == ["pkg.a", "pkg.b"]
+    assert record["collision_is_identical"] is False
+
+
 def test_default_trace_session_uses_external_runtime_logs_root(tmp_path, monkeypatch):
     state = tmp_path / "user-state"
     monkeypatch.setenv("CONTEXTOR_STATE_DIR", str(state))

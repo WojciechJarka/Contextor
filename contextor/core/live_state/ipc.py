@@ -89,6 +89,7 @@ class LiveEndpoint:
 
 
 ACTIVITY_EVENT_RETENTION = 10_000
+_DIAGNOSTIC_JOURNAL_LIMIT = 3
 
 
 _MISSING_REVISION = object()
@@ -226,6 +227,222 @@ def _clone_state_for_update(state: Any) -> Any:
         raise ValueError("canonical state clone returned original object")
 
     return candidate
+
+
+def _state_value(state: Any, name: str, default: Any = None) -> Any:
+    """Read one canonical-state field without assuming an object shape."""
+    try:
+        if isinstance(state, Mapping):
+            return state.get(name, default)
+        return getattr(state, name, default)
+    except Exception:
+        return default
+
+
+def _family_is_fresh(state: Any, field_name: str) -> bool:
+    return _state_value(state, field_name) == "fresh"
+
+
+def _diagnostic_key_text(kind: str, parts: tuple[Any, ...]) -> str:
+    try:
+        return json.dumps(
+            [kind, *parts], ensure_ascii=False, separators=(",", ":"), sort_keys=True
+        )
+    except (TypeError, ValueError):
+        return ""
+
+
+def _valid_optional_int(value: Any) -> bool:
+    return value is None or (isinstance(value, int) and not isinstance(value, bool))
+
+
+def _syntax_diagnostic_map(state: Any) -> dict[str, dict[str, Any]] | None:
+    if not _family_is_fresh(state, "syntax_diagnostics_state"):
+        return None
+    facts = _state_value(state, "syntax_diagnostics_by_path")
+    if not isinstance(facts, Mapping):
+        return None
+
+    result: dict[str, dict[str, Any]] = {}
+    source_paths = sorted(path for path in facts if isinstance(path, str) and path)
+    for source_path in source_paths:
+        fact = facts.get(source_path)
+        if not isinstance(fact, Mapping) or fact.get("status") != "checked_with_errors":
+            continue
+        errors = fact.get("errors")
+        if not isinstance(errors, (list, tuple)):
+            continue
+        for error in errors:
+            if not isinstance(error, Mapping):
+                continue
+            message = error.get("message")
+            line_number = error.get("line_number")
+            column_number = error.get("column_number")
+            if (
+                not isinstance(message, str)
+                or not message
+                or not _valid_optional_int(line_number)
+                or not _valid_optional_int(column_number)
+            ):
+                continue
+            key = _diagnostic_key_text(
+                "syntax", (source_path, line_number, column_number)
+            )
+            if not key:
+                continue
+            candidate = {
+                "source_path": source_path,
+                "message": message,
+                "line_number": line_number,
+                "column_number": column_number,
+            }
+            existing = result.get(key)
+            if existing is None or candidate["message"] < existing["message"]:
+                result[key] = candidate
+    return result
+
+
+def _collision_diagnostic_map(state: Any) -> dict[str, dict[str, Any]] | None:
+    if not _family_is_fresh(state, "collisions_state"):
+        return None
+    collisions = _state_value(state, "collisions")
+    if not isinstance(collisions, (list, tuple)):
+        return None
+
+    result: dict[str, dict[str, Any]] = {}
+    for collision in collisions:
+        kind = _state_value(collision, "kind")
+        artifact_type = _state_value(collision, "artifact_type")
+        is_identical = _state_value(collision, "is_identical")
+        nodes = _state_value(collision, "nodes")
+        symbol_details = _state_value(collision, "symbol_details")
+        if (
+            not isinstance(kind, str)
+            or not kind
+            or not isinstance(artifact_type, str)
+            or not artifact_type
+            or type(is_identical) is not bool
+            or not isinstance(nodes, (list, tuple, set))
+            or not isinstance(symbol_details, (list, tuple))
+            or not symbol_details
+        ):
+            continue
+        if not all(isinstance(node, str) and node for node in nodes):
+            continue
+        normalized_nodes = sorted(set(nodes))
+        if not normalized_nodes:
+            continue
+
+        names: set[str] = set()
+        malformed = False
+        for detail in symbol_details:
+            if not isinstance(detail, Mapping):
+                malformed = True
+                break
+            name = detail.get("name")
+            if isinstance(name, str) and name:
+                names.add(name)
+            detail_type = detail.get("artifact_type")
+            if detail_type:
+                if not isinstance(detail_type, str) or detail_type != artifact_type:
+                    malformed = True
+                    break
+        if malformed or len(names) != 1:
+            continue
+        collision_symbol = next(iter(names))
+        key = _diagnostic_key_text(
+            "collision",
+            (kind, artifact_type, is_identical, collision_symbol, *normalized_nodes),
+        )
+        if not key:
+            continue
+        result.setdefault(
+            key,
+            {
+                "collision_kind": kind,
+                "collision_artifact_type": artifact_type,
+                "collision_symbol": collision_symbol,
+                "collision_is_identical": is_identical,
+                "collision_nodes": normalized_nodes,
+            },
+        )
+    return result
+
+
+def _cycle_diagnostic_map(state: Any) -> dict[str, dict[str, Any]] | None:
+    if not _family_is_fresh(state, "cycles_state"):
+        return None
+    cycles = _state_value(state, "cycles")
+    if not isinstance(cycles, (list, tuple)):
+        return None
+
+    result: dict[str, dict[str, Any]] = {}
+    for cycle in cycles:
+        if (
+            not isinstance(cycle, (list, tuple))
+            or len(cycle) < 2
+            or not all(isinstance(node, str) and node for node in cycle)
+            or cycle[0] != cycle[-1]
+        ):
+            continue
+        key = _diagnostic_key_text("cycle", tuple(cycle))
+        if key:
+            result.setdefault(key, {"cycle_nodes": list(cycle)})
+    return result
+
+
+def _build_diagnostic_delta(previous_state: Any, current_state: Any) -> list[dict[str, Any]]:
+    changes: list[dict[str, Any]] = []
+    families = (
+        ("syntax", _syntax_diagnostic_map),
+        ("collision", _collision_diagnostic_map),
+        ("cycle", _cycle_diagnostic_map),
+    )
+    for kind, normalizer in families:
+        previous = normalizer(previous_state)
+        current = normalizer(current_state)
+        if previous is None or current is None:
+            continue
+        for key in sorted(set(current) - set(previous)):
+            changes.append(
+                {"action": "ADDED", "diagnostic_kind": kind, "diagnostic_key": key, **current[key]}
+            )
+        for key in sorted(set(previous) - set(current)):
+            changes.append(
+                {"action": "RESOLVED", "diagnostic_kind": kind, "diagnostic_key": key, **previous[key]}
+            )
+    kind_rank = {"syntax": 0, "collision": 1, "cycle": 2}
+    action_rank = {"ADDED": 0, "RESOLVED": 1}
+    return sorted(
+        changes,
+        key=lambda item: (
+            kind_rank[item["diagnostic_kind"]],
+            action_rank[item["action"]],
+            item["diagnostic_key"],
+        ),
+    )
+
+
+def _bounded_diagnostic_payload(changes: list[dict[str, Any]]) -> dict[str, Any] | None:
+    if not changes:
+        return None
+    return {
+        "total": len(changes),
+        "truncated": len(changes) > _DIAGNOSTIC_JOURNAL_LIMIT,
+        "items": copy.deepcopy(changes[:_DIAGNOSTIC_JOURNAL_LIMIT]),
+    }
+
+
+def _diagnostic_trace_event_name(change: Mapping[str, Any]) -> str | None:
+    names = {
+        ("syntax", "ADDED"): "LIVE_DIAGNOSTIC_SYNTAX_ERROR",
+        ("syntax", "RESOLVED"): "LIVE_DIAGNOSTIC_SYNTAX_RECOVERED",
+        ("collision", "ADDED"): "LIVE_DIAGNOSTIC_COLLISION_ADDED",
+        ("collision", "RESOLVED"): "LIVE_DIAGNOSTIC_COLLISION_RESOLVED",
+        ("cycle", "ADDED"): "LIVE_DIAGNOSTIC_CYCLE_ADDED",
+        ("cycle", "RESOLVED"): "LIVE_DIAGNOSTIC_CYCLE_RESOLVED",
+    }
+    return names.get((change.get("diagnostic_kind"), change.get("action")))
 
 
 class CanonicalLiveServer:
@@ -380,6 +597,9 @@ class CanonicalLiveServer:
                     "truncated": total > 20,
                     "items": list(affected[:20]),
                 }
+            diagnostic_changes = request.get("diagnostic_changes")
+            if isinstance(diagnostic_changes, Mapping):
+                event["diagnostic_changes"] = copy.deepcopy(diagnostic_changes)
             if request.get("message") is not None:
                 event["message"] = str(request["message"])
 
@@ -963,13 +1183,66 @@ class CanonicalLiveServer:
                 self._revision = expected_revision
                 _safe_trace_event("LIVE", "CANONICAL_COMMIT", op=trace_op, path=file_path, rev_before=previous_revision, rev_after=expected_revision)
 
+                try:
+                    diagnostic_delta = _build_diagnostic_delta(
+                        previous_state, self._state
+                    )
+                except Exception:
+                    diagnostic_delta = []
+                diagnostic_payload = _bounded_diagnostic_payload(diagnostic_delta)
+                event_request = dict(request)
+                # Request payload is untrusted metadata: only the committed-state
+                # comparison may publish diagnostic evidence.
+                event_request.pop("diagnostic_changes", None)
+                if diagnostic_payload is not None:
+                    event_request["diagnostic_changes"] = diagnostic_payload
+
                 evt = self._record_event(
                     "update_file",
-                    request,
+                    event_request,
                     result,
                     category="LIVE_STATE",
                 )
                 _safe_trace_event("LIVE", "UPDATE_PUBLISHED", op=trace_op, path=file_path, rev=self._revision, seq=evt["seq"], status=getattr(result, "status", None))
+                origin = str(event_request.get("origin") or event_request.get("source") or "unknown")
+                trace_common = {
+                    "repo": self._authority_identity.get("root_path"),
+                    "repo_id": self._authority_identity.get("repo_id"),
+                    "origin": origin,
+                    "diagnostic_total": len(diagnostic_delta),
+                    "diagnostic_truncated": len(diagnostic_delta) > _DIAGNOSTIC_JOURNAL_LIMIT,
+                }
+                for change in diagnostic_delta:
+                    event_name = _diagnostic_trace_event_name(change)
+                    if event_name is None:
+                        continue
+                    trace_fields = {
+                        **trace_common,
+                        "diagnostic_kind": change["diagnostic_kind"],
+                        "diagnostic_key": change["diagnostic_key"],
+                    }
+                    if "source_path" in change:
+                        trace_fields["path"] = change["source_path"]
+                    if change["diagnostic_kind"] == "syntax":
+                        trace_fields.update(
+                            error=change["message"],
+                            line_number=change["line_number"],
+                            column_number=change["column_number"],
+                        )
+                    elif change["diagnostic_kind"] == "collision":
+                        for field in (
+                            "collision_kind",
+                            "collision_artifact_type",
+                            "collision_symbol",
+                            "collision_is_identical",
+                            "collision_nodes",
+                        ):
+                            trace_fields[field] = change[field]
+                    else:
+                        trace_fields["cycle_nodes"] = change["cycle_nodes"]
+                    _safe_trace_event(
+                        "LIVE", event_name, op=trace_op, rev=self._revision, **trace_fields
+                    )
 
                 return {
                     "status": "ok",
@@ -1079,9 +1352,9 @@ class CanonicalLiveServer:
                             "status": e["status"],
                             "file_path": e.get("file_path"),
                         }
-                        for name in ("error", "line_number", "column_number", "blast_radius_state", "affected_modules", "message"):
+                        for name in ("error", "line_number", "column_number", "blast_radius_state", "affected_modules", "diagnostic_changes", "message"):
                             if e.get(name) is not None:
-                                item[name] = e[name]
+                                item[name] = copy.deepcopy(e[name])
                         formatted_selected.append(item)
                     selected = formatted_selected
 

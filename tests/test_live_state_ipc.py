@@ -26,6 +26,110 @@ from contextor.core.paths import repo_cache_dir
 pytestmark = pytest.mark.live
 
 
+def _diagnostic_state(*, syntax=None, collisions=None, cycles=None, freshness="fresh"):
+    return SimpleNamespace(
+        revision=0,
+        syntax_diagnostics_state=freshness,
+        syntax_diagnostics_by_path={} if syntax is None else syntax,
+        collisions_state=freshness,
+        collisions=[] if collisions is None else collisions,
+        cycles_state=freshness,
+        cycles=[] if cycles is None else cycles,
+    )
+
+
+def test_diagnostic_delta_normalizes_fresh_canonical_families_only():
+    collision = SimpleNamespace(
+        kind="NAME_COLLISION",
+        artifact_type="function",
+        is_identical=False,
+        nodes=["pkg.b", "pkg.a", "pkg.a"],
+        symbol_details=[
+            {"name": "run", "artifact_type": "function"},
+            {"name": "run", "artifact_type": "function"},
+        ],
+    )
+    current = _diagnostic_state(
+        syntax={
+            "pkg/bad.py": {
+                "status": "checked_with_errors",
+                "errors": [
+                    {"message": "invalid syntax", "line_number": 2, "column_number": 4}
+                ],
+            }
+        },
+        collisions=[collision],
+        cycles=[["pkg.a", "pkg.b", "pkg.a"]],
+    )
+    delta = ipc_module._build_diagnostic_delta(_diagnostic_state(), current)
+
+    assert [(item["diagnostic_kind"], item["action"]) for item in delta] == [
+        ("syntax", "ADDED"),
+        ("collision", "ADDED"),
+        ("cycle", "ADDED"),
+    ]
+    assert delta[1]["collision_nodes"] == ["pkg.a", "pkg.b"]
+    assert delta[2]["cycle_nodes"] == ["pkg.a", "pkg.b", "pkg.a"]
+    assert ipc_module._build_diagnostic_delta(
+        _diagnostic_state(freshness="deferred"), current
+    ) == []
+
+
+def test_update_file_publishes_only_committed_bounded_diagnostic_delta(monkeypatch):
+    trace_events = []
+    monkeypatch.setattr(
+        ipc_module,
+        "_safe_trace_event",
+        lambda domain, event, **fields: trace_events.append((domain, event, fields)),
+    )
+    syntax_errors = {
+        f"pkg/bad_{index}.py": {
+            "status": "checked_with_errors",
+            "errors": [
+                {"message": f"bad syntax {index}", "line_number": index + 1, "column_number": 0}
+            ],
+        }
+        for index in range(4)
+    }
+    phases = [syntax_errors, {}]
+
+    def updater(state, _path):
+        state.syntax_diagnostics_by_path = phases.pop(0)
+        return SimpleNamespace(status="UPDATED", file_path="pkg/change.py")
+
+    server = CanonicalLiveServer(_diagnostic_state(), updater=updater)
+    added = server._dispatch(
+        {
+            "operation": "update_file",
+            "file_path": "pkg/change.py",
+            "origin": "desktop_watcher",
+            "diagnostic_changes": {"total": 99, "truncated": False, "items": []},
+        }
+    )
+    assert added["revision"] == 1
+    added_event = server._events[-1]
+    assert added_event["diagnostic_changes"]["total"] == 4
+    assert added_event["diagnostic_changes"]["truncated"] is True
+    assert len(added_event["diagnostic_changes"]["items"]) == 3
+
+    projected = server._dispatch({"operation": "get_events", "after_revision": 0})
+    projected["events"][0]["diagnostic_changes"]["items"][0]["message"] = "mutated"
+    assert server._events[-1]["diagnostic_changes"]["items"][0]["message"] != "mutated"
+
+    resolved = server._dispatch({"operation": "update_file", "file_path": "pkg/change.py"})
+    assert resolved["revision"] == 2
+    assert server._events[-1]["diagnostic_changes"]["total"] == 4
+    assert {event for _domain, event, _fields in trace_events} >= {
+        "LIVE_DIAGNOSTIC_SYNTAX_ERROR",
+        "LIVE_DIAGNOSTIC_SYNTAX_RECOVERED",
+    }
+    assert all(
+        fields["diagnostic_total"] == 4
+        for _domain, event, fields in trace_events
+        if event.startswith("LIVE_DIAGNOSTIC_")
+    )
+
+
 def test_client_request_timeout_closes_connection(monkeypatch):
     sent = []
 

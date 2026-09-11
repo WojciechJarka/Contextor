@@ -179,6 +179,59 @@ def test_background_feed_has_single_poll_owner_and_no_duplicates(live_server_ins
         feed.stop()
 
 
+def test_desktop_feed_formats_committed_diagnostic_delta_without_replacing_syntax_message():
+    feed = DesktopLiveEventFeed(SimpleNamespace(), lambda *_args, **_kwargs: None)
+    event = {
+        "operation": "update_file",
+        "status": "SYNTAX_ERROR",
+        "file_path": "pkg/bad.py",
+        "canonical_revision": 12,
+        "error": "invalid syntax",
+        "line_number": 2,
+        "column_number": 3,
+        "diagnostic_changes": {
+            "total": 2,
+            "truncated": False,
+            "items": [
+                {"action": "ADDED", "diagnostic_kind": "syntax", "source_path": "pkg/bad.py", "line_number": 2, "column_number": 3},
+                {"action": "ADDED", "diagnostic_kind": "cycle", "cycle_nodes": ["pkg.a", "pkg.b", "pkg.a"]},
+            ],
+        },
+    }
+
+    message = feed._message(event)
+    assert message == (
+        "[LIVE] Syntax error in bad.py line 2, column 3: invalid syntax; "
+        "cycle added: pkg.a -> pkg.b -> pkg.a"
+    )
+
+
+def test_desktop_feed_formats_generic_diagnostic_delta_and_ignores_malformed_payload():
+    feed = DesktopLiveEventFeed(SimpleNamespace(), lambda *_args, **_kwargs: None)
+    event = {
+        "operation": "update_file",
+        "status": "UPDATED",
+        "file_path": "pkg/change.py",
+        "canonical_revision": 13,
+        "diagnostic_changes": {
+            "total": 4,
+            "truncated": True,
+            "items": [
+                {"action": "ADDED", "diagnostic_kind": "collision", "collision_symbol": "run", "collision_nodes": ["pkg.a", "pkg.b"]},
+                {"action": "RESOLVED", "diagnostic_kind": "cycle", "cycle_nodes": ["pkg.c", "pkg.c"]},
+                {"action": "unknown", "diagnostic_kind": "syntax"},
+            ],
+        },
+    }
+    assert feed._message(event) == (
+        "[LIVE] Diagnostics after change.py (rev 13): collision added: run [pkg.a, pkg.b]; "
+        "cycle resolved: pkg.c -> pkg.c; +1 more"
+    )
+    assert feed._message({**event, "diagnostic_changes": {"items": "bad", "total": 1}}) == (
+        "[LIVE] Watcher updated change.py (rev 13)"
+    )
+
+
 def test_explicit_inactive_repo_never_falls_through_to_other_active_repo(live_server_instance, monkeypatch, tmp_path):
     server_a, client_a = live_server_instance
     repo_a = tmp_path / "repo_a"

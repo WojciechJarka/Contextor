@@ -818,6 +818,76 @@ class DesktopLiveEventFeed(_PollingLiveWorker):
             return domain, sequence, event_id
         return None
 
+    @staticmethod
+    def _diagnostic_detail(item: object) -> str | None:
+        if not isinstance(item, dict):
+            return None
+        action = item.get("action")
+        kind = item.get("diagnostic_kind")
+        if action not in {"ADDED", "RESOLVED"}:
+            return None
+        verb = "added" if action == "ADDED" else "resolved"
+        if kind == "syntax":
+            source_path = item.get("source_path")
+            line = item.get("line_number")
+            column = item.get("column_number")
+            if (
+                not isinstance(source_path, str)
+                or not source_path
+                or (line is not None and (not isinstance(line, int) or isinstance(line, bool)))
+                or (column is not None and (not isinstance(column, int) or isinstance(column, bool)))
+            ):
+                return None
+            return f"syntax error {verb}: {source_path}:{line}:{column}"
+        if kind == "collision":
+            symbol = item.get("collision_symbol")
+            nodes = item.get("collision_nodes")
+            if (
+                not isinstance(symbol, str)
+                or not symbol
+                or not isinstance(nodes, (list, tuple))
+                or not nodes
+                or not all(isinstance(node, str) and node for node in nodes)
+            ):
+                return None
+            return f"collision {verb}: {symbol} [{', '.join(nodes)}]"
+        if kind == "cycle":
+            nodes = item.get("cycle_nodes")
+            if (
+                not isinstance(nodes, (list, tuple))
+                or not nodes
+                or not all(isinstance(node, str) and node for node in nodes)
+            ):
+                return None
+            return f"cycle {verb}: {' -> '.join(nodes)}"
+        return None
+
+    @classmethod
+    def _format_diagnostic_payload(
+        cls, payload: object, *, suppress_syntax: bool = False
+    ) -> str | None:
+        if not isinstance(payload, dict):
+            return None
+        items = payload.get("items")
+        total = payload.get("total")
+        if (
+            not isinstance(items, (list, tuple))
+            or not isinstance(total, int)
+            or isinstance(total, bool)
+            or total < len(items)
+        ):
+            return None
+        details = []
+        for item in items:
+            if suppress_syntax and isinstance(item, dict) and item.get("diagnostic_kind") == "syntax":
+                continue
+            detail = cls._diagnostic_detail(item)
+            if detail is not None:
+                details.append(detail)
+        if total > len(items):
+            details.append(f"+{total - len(items)} more")
+        return "; ".join(details) if details else None
+
     def _message(self, event: dict) -> str | None:
         category = event.get("category", "LIVE_STATE")
         if category == "AUTHORITY":
@@ -854,14 +924,25 @@ class DesktopLiveEventFeed(_PollingLiveWorker):
             rev = event.get("canonical_revision")
             rev_str = f" (rev {rev})" if rev is not None else ""
             status = event.get("status", "UPDATED")
+            diagnostic_payload = event.get("diagnostic_changes")
             if status == "SYNTAX_ERROR":
                 err = event.get("error", "syntax error")
                 line = event.get("line_number")
                 col = event.get("column_number")
                 pos = f" line {line}, column {col}" if line and col else ""
-                return f"[LIVE] Syntax error in {file_name}{pos}: {err}"
+                message = f"[LIVE] Syntax error in {file_name}{pos}: {err}"
             elif status == "RECOVERED":
-                return f"[LIVE] Syntax recovered in {file_name}{rev_str}"
+                message = f"[LIVE] Syntax recovered in {file_name}{rev_str}"
+            else:
+                message = None
+            if message is not None:
+                details = self._format_diagnostic_payload(
+                    diagnostic_payload, suppress_syntax=True
+                )
+                return f"{message}; {details}" if details else message
+            details = self._format_diagnostic_payload(diagnostic_payload)
+            if details:
+                return f"[LIVE] Diagnostics after {file_name} (rev {rev}): {details}"
             elif origin in {"desktop_watcher", "desktop"}:
                 return f"[LIVE] Watcher updated {file_name}{rev_str}"
             elif origin in {"mcp", "mcp_update"}:
