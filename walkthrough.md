@@ -1,14 +1,11 @@
-# Stage 1F.1 final corrective
+# Stage 1F.1 certification cleanup
 
 STATUS=PASS
 MCP_POOL_DISCOVERY=ACTIVE contextor_fact_lineage used; DEFERRED inventory inspected; contextor_lineage unavailable.
-SINGLE_EXACTNESS_AUTHORITY=contextor.core.domain.lineage_facts.claims_exact_semantic_target.
-MATERIALIZER_USE=imports and uses the domain helper; no local exactness function or exact-kind set remains.
-FINAL_REFERENCE_UNIONS=anchors: MaterializedOccurrenceRef only. flows/surfaces: MaterializedOccurrenceRef | MaterializedSymbolicRef | SemanticEndpoint.
-EXACTNESS=confirmed + LEXICAL_EXACT/IMPORT_EXACT/CALL_EXACT/SIGNATURE_EXACT/STATIC_MRO_EXACT/LITERAL_CONTAINER_EXACT/RECEPTOR_PROVIDED only.
-NON_EXACT=all other evidence remains MaterializedSymbolicRef even with same-named active ID.
-DIAGNOSTICS=foreign local reference; canonical occurrence, symbolic boundary, or semantic endpoint.
-VERIFY=pytest -q tests/domain/test_lineage_facts.py tests/analysis/test_lineage_materialization.py: 64 passed in 1.23s. py_compile passed previously. git diff --check passed.
+ANCHOR_RUNTIME_VALIDATOR=_require_materialized_anchor_reference; MaterializedAnchorFact accepts only MaterializedOccurrenceRef and rejects MaterializedSymbolicRef/SemanticEndpoint with TypeError.
+EXACTNESS_AUTHORITY=claims_exact_semantic_target domain helper; direct matrix covers all confirmed exact kinds including RECEPTOR_PROVIDED and representative non-exact cases.
+CLEANUP=No urllib.parse.quote import remains in lineage_materialization.py.
+VERIFY=py_compile lineage_facts.py and lineage_materialization.py PASS; pytest focused 77 passed in 1.23s; git diff --check PASS.
 FILES_CHANGED
 - contextor/core/domain/lineage_facts.py
 - contextor/core/analysis/lineage_materialization.py
@@ -16,87 +13,82 @@ FILES_CHANGED
 - tests/analysis/test_lineage_materialization.py
 FULL_DIFF
 \ndiff --git a/contextor/core/domain/lineage_facts.py b/contextor/core/domain/lineage_facts.py
-index e69256a..ea47d3e 100644
+index ea47d3e..eb93b30 100644
 --- a/contextor/core/domain/lineage_facts.py
 +++ b/contextor/core/domain/lineage_facts.py
-@@ -300,7 +300,7 @@ class ExtractedLineageSourceFacts:
+@@ -307,7 +307,7 @@ class MaterializedAnchorFact:
+     def __post_init__(self) -> None:
+         _require_token(self.local_id, "local_id")
+         _require_token(self.kind, "kind")
+-        _require_materialized_reference(self.reference, "Materialized anchors")
++        _require_materialized_anchor_reference(self.reference)
+
+
  @dataclass(frozen=True, order=True)
- class MaterializedAnchorFact:
-     local_id: str
--    reference: MaterializedOccurrenceRef | MaterializedSymbolicRef | SemanticEndpoint
-+    reference: MaterializedOccurrenceRef
-     kind: str
-     span: SourceSpan
- 
-@@ -655,7 +655,7 @@ def _validate_surface_declaration_evidence(
-         )
- 
- 
--def _claims_exact_semantic_target(
-+def claims_exact_semantic_target(
-     resolution_kind: ResolutionKind,
-     confidence: LineageConfidence,
- ) -> bool:
-@@ -673,7 +673,7 @@ def _validate_materialized_surface_target(
-     resolution_kind: ResolutionKind,
-     confidence: LineageConfidence,
- ) -> None:
--    if _claims_exact_semantic_target(resolution_kind, confidence) and not isinstance(
-+    if claims_exact_semantic_target(resolution_kind, confidence) and not isinstance(
-         exposed, SemanticEndpoint
-     ):
-         raise ValueError(
-@@ -698,7 +698,7 @@ def _require_materialized_reference(
+@@ -693,6 +693,10 @@ def _require_sorted_unique(values: tuple[object, ...], label: str) -> None:
+         raise ValueError(f"{label} must be sorted and unique.")
+
+
++def _require_materialized_anchor_reference(value: MaterializedOccurrenceRef) -> None:
++    if not isinstance(value, MaterializedOccurrenceRef):
++        raise TypeError("Materialized anchors require canonical occurrence references.")
++
+ def _require_materialized_reference(
+     value: MaterializedOccurrenceRef | MaterializedSymbolicRef | SemanticEndpoint,
      label: str,
- ) -> None:
-     if not isinstance(value, (MaterializedOccurrenceRef, MaterializedSymbolicRef, SemanticEndpoint)):
--        raise TypeError(f"{label} require canonical occurrence or semantic endpoint references.")
-+        raise TypeError(f"{label} require canonical occurrence, symbolic boundary, or semantic endpoint references.")
- 
- 
- def _require_slice_occurrence(
-@@ -709,7 +709,7 @@ def _require_slice_occurrence(
-         value.source_key != manifest.source_key
-         or value.source_fingerprint != manifest.source_fingerprint
-     ):
--        raise ValueError("Materialized source slice contains foreign occurrence.")
-+        raise ValueError("Materialized source slice contains foreign local reference.")
- 
- 
- __all__ = [
 diff --git a/tests/domain/test_lineage_facts.py b/tests/domain/test_lineage_facts.py
-index cc368e5..8a542c8 100644
+index 8a542c8..266d367 100644
 --- a/tests/domain/test_lineage_facts.py
 +++ b/tests/domain/test_lineage_facts.py
-@@ -108,15 +108,15 @@ def test_materialized_slice_rejects_foreign_occurrences_but_allows_semantic_boun
-     good = MaterializedLineageSourceFacts(manifest, (MaterializedAnchorFact("a", local, "binding", span),), (MaterializedFlowFact("f", local, endpoint, LineageRelation.RETURNS, span, ResolutionKind.CALL_EXACT, LineageConfidence.CONFIRMED),), (MaterializedSurfaceFact("s", SurfaceKind.EXPORT, endpoint, span, ResolutionKind.IMPORT_EXACT, LineageConfidence.CONFIRMED, "x"),))
-     assert good.flows[0].target == endpoint
-     anchor_manifest = SourceLineageManifest("a.py", "a", "1", LineageFamilyStatus.FRESH, 1, 0, 0)
--    with pytest.raises(ValueError, match="foreign occurrence"):
-+    with pytest.raises(ValueError, match="foreign local reference"):
-         MaterializedLineageSourceFacts(anchor_manifest, (MaterializedAnchorFact("a", foreign, "binding", span),), (), ())
-     source_manifest = SourceLineageManifest("a.py", "a", "1", LineageFamilyStatus.FRESH, 0, 1, 0)
--    with pytest.raises(ValueError, match="foreign occurrence"):
-+    with pytest.raises(ValueError, match="foreign local reference"):
-         MaterializedLineageSourceFacts(source_manifest, (), (MaterializedFlowFact("f", foreign, endpoint, LineageRelation.RETURNS, span, ResolutionKind.CALL_EXACT, LineageConfidence.CONFIRMED),), ())
--    with pytest.raises(ValueError, match="foreign occurrence"):
-+    with pytest.raises(ValueError, match="foreign local reference"):
-         MaterializedLineageSourceFacts(source_manifest, (), (MaterializedFlowFact("f", endpoint, foreign, LineageRelation.CALL_RESULT, span, ResolutionKind.CALL_EXACT, LineageConfidence.CONFIRMED),), ())
-     surface_manifest = SourceLineageManifest("a.py", "a", "1", LineageFamilyStatus.FRESH, 0, 0, 1)
--    with pytest.raises(ValueError, match="foreign occurrence"):
-+    with pytest.raises(ValueError, match="foreign local reference"):
-         MaterializedLineageSourceFacts(surface_manifest, (), (), (MaterializedSurfaceFact("s", SurfaceKind.EXPORT, foreign, span, ResolutionKind.BOUNDED_STATIC_SET, LineageConfidence.INFERRED, "x"),))
- 
- 
-@@ -478,7 +478,7 @@ def test_materialized_symbolic_ref_is_slice_bound_and_never_an_occurrence():
-     foreign = MaterializedSymbolicRef(
-         "b.py", "other", ExtractedSymbolicKind.PUBLIC_TARGET, "pkg.mod", "missing"
-     )
--    with pytest.raises(ValueError, match="foreign occurrence"):
-+    with pytest.raises(ValueError, match="foreign local reference"):
-         MaterializedLineageSourceFacts(
-             manifest, (), (
-                 MaterializedFlowFact(
+@@ -37,6 +37,7 @@ from contextor.core.domain.lineage_facts import (
+     build_parameter_value_slot,
+     build_positional_binding_slot,
+     build_return_slot,
++    claims_exact_semantic_target,
+     parse_semantic_slot,
+ )
+
+@@ -487,4 +488,37 @@ def test_materialized_symbolic_ref_is_slice_bound_and_never_an_occurrence():
+                     ResolutionKind.UNRESOLVED_NAME, LineageConfidence.UNRESOLVED,
+                 ),
+             ), (),
+-        )
+\ No newline at end of file
++        )
++
++def test_materialized_anchor_requires_actual_occurrence_at_runtime():
++    span = SourceSpan(1, 0, 1, 1)
++    occurrence = MaterializedOccurrenceRef("a.py", "fingerprint", "local")
++    assert MaterializedAnchorFact("anchor", occurrence, "binding", span).reference == occurrence
++    symbolic = MaterializedSymbolicRef(
++        "a.py", "fingerprint", ExtractedSymbolicKind.PUBLIC_TARGET, "pkg.mod", "target"
++    )
++    with pytest.raises(TypeError, match="canonical occurrence"):
++        MaterializedAnchorFact("symbolic", symbolic, "binding", span)
++    with pytest.raises(TypeError, match="canonical occurrence"):
++        MaterializedAnchorFact("endpoint", SemanticEndpoint("A1/1"), "binding", span)
++
++
++@pytest.mark.parametrize(
++    ("kind", "confidence", "expected"),
++    [
++        (ResolutionKind.LEXICAL_EXACT, LineageConfidence.CONFIRMED, True),
++        (ResolutionKind.IMPORT_EXACT, LineageConfidence.CONFIRMED, True),
++        (ResolutionKind.CALL_EXACT, LineageConfidence.CONFIRMED, True),
++        (ResolutionKind.SIGNATURE_EXACT, LineageConfidence.CONFIRMED, True),
++        (ResolutionKind.STATIC_MRO_EXACT, LineageConfidence.CONFIRMED, True),
++        (ResolutionKind.LITERAL_CONTAINER_EXACT, LineageConfidence.CONFIRMED, True),
++        (ResolutionKind.RECEPTOR_PROVIDED, LineageConfidence.CONFIRMED, True),
++        (ResolutionKind.UNRESOLVED_NAME, LineageConfidence.UNRESOLVED, False),
++        (ResolutionKind.DYNAMIC_RUNTIME_BOUNDARY, LineageConfidence.DYNAMIC, False),
++        (ResolutionKind.PYTHON_NAME_CONVENTION, LineageConfidence.INFERRED, False),
++        (ResolutionKind.BOUNDED_STATIC_SET, LineageConfidence.INFERRED, False),
++        (ResolutionKind.CALL_EXACT, LineageConfidence.INFERRED, False),
++    ],
++)
++def test_claims_exact_semantic_target_matrix(kind, confidence, expected):
++    assert claims_exact_semantic_target(kind, confidence) is expected
+\ No newline at end of file
 diff --git a/contextor/core/analysis/lineage_materialization.py b/contextor/core/analysis/lineage_materialization.py
 new file mode 100644
 index 0000000..635de75
@@ -580,3 +572,27 @@ index 0000000..6a47961
 +    )
 +    assert isinstance(result.surfaces[0].exposed, MaterializedSymbolicRef)
 \ No newline at end of file
+diff --git a/contextor/core/domain/lineage_facts.py b/contextor/core/domain/lineage_facts.py
+index ea47d3e..eb93b30 100644
+--- a/contextor/core/domain/lineage_facts.py
++++ b/contextor/core/domain/lineage_facts.py
+@@ -307,7 +307,7 @@ class MaterializedAnchorFact:
+     def __post_init__(self) -> None:
+         _require_token(self.local_id, "local_id")
+         _require_token(self.kind, "kind")
+-        _require_materialized_reference(self.reference, "Materialized anchors")
++        _require_materialized_anchor_reference(self.reference)
+
+
+ @dataclass(frozen=True, order=True)
+@@ -693,6 +693,10 @@ def _require_sorted_unique(values: tuple[object, ...], label: str) -> None:
+         raise ValueError(f"{label} must be sorted and unique.")
+
+
++def _require_materialized_anchor_reference(value: MaterializedOccurrenceRef) -> None:
++    if not isinstance(value, MaterializedOccurrenceRef):
++        raise TypeError("Materialized anchors require canonical occurrence references.")
++
+ def _require_materialized_reference(
+     value: MaterializedOccurrenceRef | MaterializedSymbolicRef | SemanticEndpoint,
+     label: str,

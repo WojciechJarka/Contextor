@@ -37,6 +37,7 @@ from contextor.core.domain.lineage_facts import (
     build_parameter_value_slot,
     build_positional_binding_slot,
     build_return_slot,
+    claims_exact_semantic_target,
     parse_semantic_slot,
 )
 
@@ -488,3 +489,36 @@ def test_materialized_symbolic_ref_is_slice_bound_and_never_an_occurrence():
                 ),
             ), (),
         )
+
+def test_materialized_anchor_requires_actual_occurrence_at_runtime():
+    span = SourceSpan(1, 0, 1, 1)
+    occurrence = MaterializedOccurrenceRef("a.py", "fingerprint", "local")
+    assert MaterializedAnchorFact("anchor", occurrence, "binding", span).reference == occurrence
+    symbolic = MaterializedSymbolicRef(
+        "a.py", "fingerprint", ExtractedSymbolicKind.PUBLIC_TARGET, "pkg.mod", "target"
+    )
+    with pytest.raises(TypeError, match="canonical occurrence"):
+        MaterializedAnchorFact("symbolic", symbolic, "binding", span)
+    with pytest.raises(TypeError, match="canonical occurrence"):
+        MaterializedAnchorFact("endpoint", SemanticEndpoint("A1/1"), "binding", span)
+
+
+@pytest.mark.parametrize(
+    ("kind", "confidence", "expected"),
+    [
+        (ResolutionKind.LEXICAL_EXACT, LineageConfidence.CONFIRMED, True),
+        (ResolutionKind.IMPORT_EXACT, LineageConfidence.CONFIRMED, True),
+        (ResolutionKind.CALL_EXACT, LineageConfidence.CONFIRMED, True),
+        (ResolutionKind.SIGNATURE_EXACT, LineageConfidence.CONFIRMED, True),
+        (ResolutionKind.STATIC_MRO_EXACT, LineageConfidence.CONFIRMED, True),
+        (ResolutionKind.LITERAL_CONTAINER_EXACT, LineageConfidence.CONFIRMED, True),
+        (ResolutionKind.RECEPTOR_PROVIDED, LineageConfidence.CONFIRMED, True),
+        (ResolutionKind.UNRESOLVED_NAME, LineageConfidence.UNRESOLVED, False),
+        (ResolutionKind.DYNAMIC_RUNTIME_BOUNDARY, LineageConfidence.DYNAMIC, False),
+        (ResolutionKind.PYTHON_NAME_CONVENTION, LineageConfidence.INFERRED, False),
+        (ResolutionKind.BOUNDED_STATIC_SET, LineageConfidence.INFERRED, False),
+        (ResolutionKind.CALL_EXACT, LineageConfidence.INFERRED, False),
+    ],
+)
+def test_claims_exact_semantic_target_matrix(kind, confidence, expected):
+    assert claims_exact_semantic_target(kind, confidence) is expected

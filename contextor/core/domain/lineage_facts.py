@@ -307,7 +307,7 @@ class MaterializedAnchorFact:
     def __post_init__(self) -> None:
         _require_token(self.local_id, "local_id")
         _require_token(self.kind, "kind")
-        _require_materialized_reference(self.reference, "Materialized anchors")
+        _require_materialized_anchor_reference(self.reference)
 
 
 @dataclass(frozen=True, order=True)
@@ -692,6 +692,10 @@ def _require_sorted_unique(values: tuple[object, ...], label: str) -> None:
     if tuple(sorted(values)) != values or len(set(values)) != len(values):
         raise ValueError(f"{label} must be sorted and unique.")
 
+
+def _require_materialized_anchor_reference(value: MaterializedOccurrenceRef) -> None:
+    if not isinstance(value, MaterializedOccurrenceRef):
+        raise TypeError("Materialized anchors require canonical occurrence references.")
 
 def _require_materialized_reference(
     value: MaterializedOccurrenceRef | MaterializedSymbolicRef | SemanticEndpoint,
