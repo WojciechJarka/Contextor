@@ -112,9 +112,21 @@ class IncrementalAnalysisEngine:
         mark_parse_error: tuple[str | None, int | None, int | None] | None = None,
         clear_parse_module: str | None = None,
         degrade_syntax_family: bool = False,
+        extracted_lineage_facts: Any | None = None,
+        invalidate_lineage: bool = False,
     ) -> None:
-        """Commit syntax and parse-freshness changes through a COW candidate."""
+        """Commit syntax, parse-freshness, and lineage changes through one COW candidate."""
         candidate = _prepare_candidate_state(self.state)
+        if invalidate_lineage:
+            candidate.lineage_facts_by_source.pop(source_path, None)
+            candidate.lineage_facts_state = "stale"
+        elif extracted_lineage_facts is not None:
+            with self.registry.read_transaction():
+                self._update_candidate_lineage_slice(
+                    candidate,
+                    source_path=source_path,
+                    extracted_lineage_facts=extracted_lineage_facts,
+                )
         if remove_syntax_fact:
             candidate.syntax_diagnostics_by_path.pop(source_path, None)
         elif syntax_fact is not None:
@@ -135,6 +147,130 @@ class IncrementalAnalysisEngine:
         self.state.syntax_diagnostics_by_path = candidate.syntax_diagnostics_by_path
         self.state.syntax_diagnostics_state = candidate.syntax_diagnostics_state
         self.state.module_parse_freshness = candidate.module_parse_freshness
+        self.state.lineage_facts_by_source = candidate.lineage_facts_by_source
+        self.state.lineage_facts_state = candidate.lineage_facts_state
+        self.state.lineage_facts_semantic_version = (
+            candidate.lineage_facts_semantic_version
+        )
+
+    def _update_candidate_lineage_slice(
+        self,
+        candidate: Any,
+        *,
+        source_path: str,
+        extracted_lineage_facts: Any | None = None,
+        delete: bool = False,
+    ) -> None:
+        """Install or remove exactly one source-keyed lineage slice on a COW candidate."""
+        from contextor.core.analysis.lineage_materialization import (
+            LineageResolutionContext,
+            materialize_lineage_source_facts,
+        )
+        from contextor.core.domain.lineage_facts import (
+            LINEAGE_FACTS_SEMANTIC_VERSION,
+            LineageFamilyStatus,
+        )
+        from contextor.core.reporting_layer.artifact_usage_report import (
+            collect_qualified_artifact_identities,
+        )
+
+        eligible_source_keys = {
+            Path(str(module.path)).as_posix()
+            for module in candidate.modules.values()
+        }
+        lineage_by_source = candidate.lineage_facts_by_source
+
+        if delete:
+            lineage_by_source.pop(source_path, None)
+            candidate.lineage_facts_semantic_version = LINEAGE_FACTS_SEMANTIC_VERSION
+        else:
+            if extracted_lineage_facts is None:
+                raise ValueError("Successful incremental lineage update requires extracted facts.")
+            if extracted_lineage_facts.source_key != source_path:
+                raise ValueError("Extracted lineage source key does not match incremental source.")
+            if source_path not in eligible_source_keys:
+                raise ValueError("Incremental lineage source is outside the active candidate.")
+
+            active_module_names = set(candidate.modules)
+            active_artifact_names = collect_qualified_artifact_identities(
+                candidate.artifacts
+            )
+            module_registry = self.registry._state["module_registry"]["path_to_id"]
+            artifact_registry = self.registry._state["artifact_registry"]["path_to_id"]
+            active_module_ids = {
+                name: module_registry[name]
+                for name in sorted(active_module_names)
+                if name in module_registry
+            }
+            active_artifact_ids = {
+                name: artifact_registry[name]
+                for name in sorted(active_artifact_names)
+                if name in artifact_registry
+            }
+            missing_module_ids = active_module_names - set(active_module_ids)
+            missing_artifact_ids = active_artifact_names - set(active_artifact_ids)
+            if missing_module_ids or missing_artifact_ids:
+                raise ValueError(
+                    "Finalized identity registry is missing active lineage owners: "
+                    f"modules={sorted(missing_module_ids)!r}, "
+                    f"artifacts={sorted(missing_artifact_ids)!r}"
+                )
+
+            resolution = LineageResolutionContext(
+                active_module_ids=active_module_ids,
+                active_artifact_ids=active_artifact_ids,
+                active_owner_ids=frozenset(
+                    (*active_module_ids.values(), *active_artifact_ids.values())
+                ),
+                interface_descriptors={},
+            )
+            materialized = materialize_lineage_source_facts(
+                extracted_lineage_facts,
+                resolution,
+            )
+            if (
+                materialized.manifest.source_key != extracted_lineage_facts.source_key
+                or materialized.manifest.source_fingerprint
+                != extracted_lineage_facts.source_fingerprint
+            ):
+                raise ValueError(
+                    "Materialized lineage manifest does not match extracted source."
+                )
+            lineage_by_source[source_path] = materialized
+            candidate.lineage_facts_semantic_version = LINEAGE_FACTS_SEMANTIC_VERSION
+
+        foreign_source_keys = set(lineage_by_source) - eligible_source_keys
+        if foreign_source_keys:
+            raise ValueError(
+                "Materialized lineage contains sources outside the active candidate: "
+                f"{sorted(foreign_source_keys)!r}"
+            )
+        missing_source_keys = eligible_source_keys - set(lineage_by_source)
+        if getattr(self.state, "resync_required", False):
+            candidate.lineage_facts_state = LineageFamilyStatus.STALE.value
+        elif missing_source_keys:
+            candidate.lineage_facts_state = (
+                LineageFamilyStatus.STALE.value
+                if candidate.lineage_facts_state == LineageFamilyStatus.STALE.value
+                else LineageFamilyStatus.DEFERRED.value
+            )
+        elif any(
+            item.manifest.status is LineageFamilyStatus.STALE
+            for item in lineage_by_source.values()
+        ):
+            candidate.lineage_facts_state = LineageFamilyStatus.STALE.value
+        elif any(
+            item.manifest.status is LineageFamilyStatus.DEFERRED
+            for item in lineage_by_source.values()
+        ):
+            candidate.lineage_facts_state = LineageFamilyStatus.DEFERRED.value
+        elif any(
+            item.manifest.status is LineageFamilyStatus.RESOURCE_LIMIT
+            for item in lineage_by_source.values()
+        ):
+            candidate.lineage_facts_state = LineageFamilyStatus.RESOURCE_LIMIT.value
+        else:
+            candidate.lineage_facts_state = LineageFamilyStatus.FRESH.value
 
     def update_file(self, file_path: str) -> IncrementalUpdateResult:
         """
@@ -265,6 +401,7 @@ class IncrementalAnalysisEngine:
                     ),
                     clear_parse_module=module_path,
                     degrade_syntax_family=prep.error_status != "SYNTAX_ERROR",
+                    invalidate_lineage=True,
                 )
                 return IncrementalUpdateResult(
                     status=prep.error_status,
@@ -305,6 +442,7 @@ class IncrementalAnalysisEngine:
                     source_path=source_path,
                     syntax_fact=checked_and_none,
                     clear_parse_module=module_path,
+                    extracted_lineage_facts=prep.extracted_lineage_facts,
                 )
                 self.state_manager.update_state(file_path)
                 return IncrementalUpdateResult(
@@ -335,6 +473,7 @@ class IncrementalAnalysisEngine:
             affected_set, blast_radius_complete, execution_trace = self._apply_delta_and_commit(
                 file_path, delta, usage_delta, plan, new_imports, new_artifacts, new_usage,
                 new_collision_facts=new_collision_facts,
+                extracted_lineage_facts=prep.extracted_lineage_facts,
                 syntax_source_path=source_path,
                 syntax_fact=checked_and_none,
                 clear_parse_module=module_path,
@@ -423,6 +562,7 @@ class IncrementalAnalysisEngine:
         mod_artifacts: dict,
         new_usage: Any,
         new_collision_facts: Optional[List[Dict[str, Any]]] = None,
+        extracted_lineage_facts: Any | None = None,
         syntax_source_path: str | None = None,
         syntax_fact: Dict[str, Any] | None = None,
         remove_syntax_fact: bool = False,
@@ -445,13 +585,40 @@ class IncrementalAnalysisEngine:
             new_collision_facts=new_collision_facts,
         )
 
-        # Persistent Identity Registry Commit
+        candidate = outcome.candidate_state
+
+        # Persistent identity sync and lineage materialization share one registry view.
         if outcome.identity_sync_required:
-            with self.registry.transaction():
-                self.registry.sync_with_workspace(outcome.all_modules, outcome.current_artifacts)
+            try:
+                with self.registry.transaction():
+                    self.registry.sync_with_workspace(
+                        outcome.all_modules,
+                        outcome.current_artifacts,
+                    )
+                    self._update_candidate_lineage_slice(
+                        candidate,
+                        source_path=syntax_source_path or "",
+                        extracted_lineage_facts=extracted_lineage_facts,
+                        delete=bool(getattr(delta, "is_deleted", False)),
+                    )
+            except Exception:
+                # A failed write transaction leaves no persisted commit; reload its
+                # in-memory view before exposing the registry again.
+                with self.registry.read_transaction():
+                    pass
+                raise
+        elif extracted_lineage_facts is not None or bool(
+            getattr(delta, "is_deleted", False)
+        ):
+            with self.registry.read_transaction():
+                self._update_candidate_lineage_slice(
+                    candidate,
+                    source_path=syntax_source_path or "",
+                    extracted_lineage_facts=extracted_lineage_facts,
+                    delete=bool(getattr(delta, "is_deleted", False)),
+                )
 
         # Canonical State Publication
-        candidate = outcome.candidate_state
         if remove_syntax_fact and syntax_source_path is not None:
             candidate.syntax_diagnostics_by_path.pop(syntax_source_path, None)
         elif syntax_fact is not None and syntax_source_path is not None:

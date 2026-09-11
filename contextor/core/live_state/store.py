@@ -21,6 +21,7 @@ from contextor.core.domain.lineage_facts import (
     MaterializedFlowFact,
     MaterializedLineageSourceFacts,
     MaterializedOccurrenceRef,
+    MaterializedSymbolicRef,
     MaterializedSurfaceFact,
     ProviderRef,
     ResolutionKind,
@@ -118,6 +119,8 @@ def _revalidate_lineage_endpoint(
     if isinstance(endpoint, MaterializedOccurrenceRef):
         return replace(endpoint)
     if isinstance(endpoint, SemanticEndpoint):
+        return replace(endpoint)
+    if isinstance(endpoint, MaterializedSymbolicRef):
         return replace(endpoint)
     raise pickle.UnpicklingError("Unknown materialized lineage endpoint.")
 
