@@ -259,6 +259,96 @@ def _initialize_repository_identity(repo_root: str | Path) -> PersistentIdentity
     return registry
 
 
+def _materialize_full_analysis_lineage(index, registry, modules, artifacts):
+    """Materialize current index lineage from finalized active identities."""
+    from contextor.core.analysis.lineage_materialization import (
+        LineageResolutionContext,
+        materialize_lineage_source_facts,
+    )
+    from contextor.core.domain.lineage_facts import (
+        LINEAGE_FACTS_SEMANTIC_VERSION,
+        LineageFamilyStatus,
+    )
+    from contextor.core.reporting_layer.artifact_usage_report import (
+        collect_qualified_artifact_identities,
+    )
+
+    eligible_source_keys = {
+        Path(str(module.path)).as_posix()
+        for module in modules.values()
+    }
+    extracted_by_source = dict(getattr(index, "lineage_facts_by_source", {}) or {})
+    foreign_source_keys = set(extracted_by_source) - eligible_source_keys
+    if foreign_source_keys:
+        raise ValueError(
+            "Extracted lineage contains sources outside the active analysis: "
+            f"{sorted(foreign_source_keys)!r}"
+        )
+
+    active_module_names = set(modules)
+    active_artifact_names = collect_qualified_artifact_identities(artifacts)
+    with registry.read_transaction():
+        module_registry = registry._state["module_registry"]["path_to_id"]
+        artifact_registry = registry._state["artifact_registry"]["path_to_id"]
+        active_module_ids = {
+            name: module_registry[name]
+            for name in sorted(active_module_names)
+            if name in module_registry
+        }
+        active_artifact_ids = {
+            name: artifact_registry[name]
+            for name in sorted(active_artifact_names)
+            if name in artifact_registry
+        }
+
+    missing_module_ids = active_module_names - set(active_module_ids)
+    missing_artifact_ids = active_artifact_names - set(active_artifact_ids)
+    if missing_module_ids or missing_artifact_ids:
+        raise ValueError(
+            "Finalized identity registry is missing active lineage owners: "
+            f"modules={sorted(missing_module_ids)!r}, "
+            f"artifacts={sorted(missing_artifact_ids)!r}"
+        )
+
+    resolution = LineageResolutionContext(
+        active_module_ids=active_module_ids,
+        active_artifact_ids=active_artifact_ids,
+        active_owner_ids=frozenset(
+            (*active_module_ids.values(), *active_artifact_ids.values())
+        ),
+        interface_descriptors={},
+    )
+    materialized_by_source = {}
+    for source_key in sorted(extracted_by_source):
+        extracted = extracted_by_source[source_key]
+        if extracted.source_key != source_key:
+            raise ValueError("Extracted lineage mapping key does not match its source key.")
+        materialized = materialize_lineage_source_facts(extracted, resolution)
+        if (
+            materialized.manifest.source_key != extracted.source_key
+            or materialized.manifest.source_fingerprint != extracted.source_fingerprint
+        ):
+            raise ValueError("Materialized lineage manifest does not match extracted source.")
+        materialized_by_source[source_key] = materialized
+
+    missing_source_keys = eligible_source_keys - set(materialized_by_source)
+    if missing_source_keys or getattr(index, "skipped", ()):
+        family_state = LineageFamilyStatus.DEFERRED.value
+    elif any(
+        item.manifest.status is LineageFamilyStatus.RESOURCE_LIMIT
+        for item in materialized_by_source.values()
+    ):
+        family_state = LineageFamilyStatus.RESOURCE_LIMIT.value
+    else:
+        family_state = LineageFamilyStatus.FRESH.value
+
+    return (
+        dict(sorted(materialized_by_source.items())),
+        family_state,
+        LINEAGE_FACTS_SEMANTIC_VERSION,
+    )
+
+
 def _resolve_repository_target(
     repo_root: str | Path,
     target: str | Path,
@@ -522,6 +612,16 @@ class ContextorFacade:
             syntax_diagnostics_by_path, syntax_diagnostics_state = (
                 build_syntax_diagnostics_from_index(index)
             )
+            (
+                lineage_facts_by_source,
+                lineage_facts_state,
+                lineage_facts_semantic_version,
+            ) = _materialize_full_analysis_lineage(
+                index,
+                registry,
+                mods,
+                raw_artifacts,
+            )
 
             state = RepositoryAnalysisState(
                 modules=mods,
@@ -535,6 +635,9 @@ class ContextorFacade:
                 syntax_diagnostics_state=syntax_diagnostics_state,
                 module_usages=module_usages,
                 module_usages_manifest=module_usages_manifest,
+                lineage_facts_by_source=lineage_facts_by_source,
+                lineage_facts_state=lineage_facts_state,
+                lineage_facts_semantic_version=lineage_facts_semantic_version,
                 metrics=metrics,
                 topology_analytics=topology_analytics,
                 topology_metrics_state="fresh",
