@@ -664,7 +664,7 @@ def test_desktop_watcher_recovers_after_live_service_death(tmp_path):
 
     recovery_called = []
 
-    def mock_recover():
+    def mock_recover(_trigger_exc=None):
         recovery_called.append(True)
         watcher.client = recovered_client
         if watcher.on_reconnect:
@@ -710,7 +710,7 @@ def test_desktop_watcher_recovery_preserves_unowned_if_another_service_wins_race
         on_reconnect=lambda c: reconnected_clients.append(c),
     )
 
-    def mock_recover():
+    def mock_recover(_trigger_exc=None):
         watcher.client = external_client
         if watcher.on_reconnect:
             watcher.on_reconnect(external_client)

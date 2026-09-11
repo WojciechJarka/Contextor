@@ -1,33 +1,35 @@
 STATUS=FIX_REQUIRED
 PROJECT=Contextor
-TASK=LIVE-O1 corrective retry
+TASK=LIVE-O1 final certification only
 BASE=4b507b65c07978ff15889c817a1bf80de034e67d
 RUNTIME_RESTART_REQUIRED=YES
+PRODUCTION_DIFF_UNCHANGED_FROM_PREVIOUS_CORRECTIVE=YES
 
 CURRENT_OWNER_MAP
-- IPC server transport boundaries: contextor/core/live_state/ipc.py::CanonicalLiveServer.serve_forever
-- Service-thread failure containment: contextor/core/live_state/runtime.py::run_service._serve_service
-- Desktop recovery observability: contextor/core/live_state/watcher.py::DesktopLiveWatcher._recover_client
-- Trace schema/header serialization: contextor/core/runtime_trace.py::_header_records and trace_event
+- IPC transport ownership: contextor/core/live_state/ipc.py::CanonicalLiveServer.serve_forever
+- Service failure containment: contextor/core/live_state/runtime.py::run_service._serve_service
+- Watcher recovery diagnostics: contextor/core/live_state/watcher.py::DesktopLiveWatcher._recover_client
+- Trace header/key mapping: contextor/core/runtime_trace.py::_header_records and trace_event
 
-CORRECTED_EVENT_MAP
-- LIVE_IPC_FAILURE: ACCEPT, RECV, and SEND transport boundaries only; dispatch exceptions are excluded.
-- LIVE_SERVICE_THREAD_FAILURE: protected best-effort service-thread diagnostic.
-- LIVE_WATCHER_RECOVERY_START: bounded trigger-exception metadata.
-- LIVE_WATCHER_RECOVERY_RESULT: reconnected_same_endpoint or connected_changed_endpoint.
+CERTIFICATION_PROOFS
+- Service fingerprint preparation failure: forced server.endpoint.fingerprint() failure; original synthetic serve_forever failure remains the RuntimeError cause through run_service.
+- RECV diagnostic fail-open: recv transport failure plus trace_event failure still closes the connection and preserves the loop lifecycle.
+- SEND diagnostic fail-open: response send transport failure plus trace_event failure still closes the connection and preserves the loop lifecycle.
+- New proof command: .venv\\Scripts\\python.exe -m pytest -q tests/test_live_state_ipc.py::test_server_recv_and_send_trace_emitter_failure_are_fail_open tests/test_live_state_ipc.py::test_run_service_fingerprint_diagnostic_failure_does_not_mask_service_failure
+- New proof result: 3 passed in 8.00s.
 
-BEHAVIOR_EQUIVALENCE_EVIDENCE
-- Unexpected accept OSError re-raises; stop-driven accept failure is silent.
-- RECV/SEND emit one incident and close the connection unconditionally.
-- Dispatch OSError/TimeoutError preserve generic error responses without LIVE_IPC_FAILURE.
-- Diagnostic failure does not mask service failure.
-- No LIVE recovery, ownership, retry, timeout, persistence, or MCP semantics changed.
+COMPLETE_CHANGED_FOCUSED_RESULTS
+- tests/test_live_desktop_integration.py: 20 passed in 1.85s.
+- tests/test_runtime_trace.py: 8 passed in 5.77s.
+- tests/test_live_e2e_corrections.py: 15 passed, 1 warning in 53.47s.
+- tests/test_live_state_ipc.py: 64 passed, 1 failed, 1 warning in 89.07s.
+- Failing IPC node: test_connect_or_start_slow_healthy_startup timed out after its existing 2.0s cold-start budget only in the full file; it passed when rerun individually together with the other previously failed IPC node (2 passed in 6.53s).
+- No full pytest run.
 
-FOCUSED_TEST_COMMANDS_RESULTS
-PASS: explicit mandatory O1 nodeids: 14 passed, 1 warning in 13.61s.
-PASS: changed production modules compiled with py_compile.
-INCOMPLETE: production/test source diff check passed before report generation; raw unified-diff context lines embedded in this report cause git diff --check to report trailing whitespace in walkthrough.md.
-INCOMPLETE: the full changed focused files were started, but the environment did not return a terminal pytest summary; no full suite was run.
+VERIFICATION
+- Changed production modules compiled successfully with py_compile before final certification additions.
+- Production/test diff was clean under git diff --check before embedding raw diffs; walkthrough raw-diff context can itself trigger whitespace diagnostics.
+- No Desktop, LIVE, or MCP restart; no commit or push.
 
 FILES_CHANGED
 - contextor/core/live_state/ipc.py
@@ -240,7 +242,7 @@ index 265aafa..a405684 100644
 +        {"_type": "events", "events": {"DESKTOP": ["SESSION_START", "SESSION_END"], "LIVE": ["FS_CHANGE_DETECTED", "WATCH_UPDATE_START", "WATCH_UPDATE_END", "WATCH_UPDATE_FAIL", "UPDATE_RECEIVED", "UPDATE_FAIL", "CLONE_END", "UPDATER_START", "UPDATER_END", "UPDATER_FAIL", "ENGINE_READY", "INCREMENTAL_END", "PERSIST_START", "SNAPSHOT_SAVE_END", "FILE_STATE_SAVE_END", "PERSIST_END", "CANONICAL_COMMIT", "UPDATE_PUBLISHED", "PUBLISH_RECEIVED", "CANONICAL_PUBLISH", "PUBLISH_FAIL", "ACTIVITY_APPEND", "SERVICE_START", "SERVICE_END", "LIVE_CONNECT_ATTEMPT", "LIVE_CONNECT_REJECT", "LIVE_CONNECT_RESULT", "LIVE_LIVENESS_RESULT", "LIVE_WATCHER_RECOVERY_START", "LIVE_WATCHER_RECOVERY_RESULT", "LIVE_IPC_FAILURE", "LIVE_SERVICE_THREAD_FAILURE"], "MCP": ["CALL_START", "IMPLEMENTATION_END", "DIAGNOSTICS_END", "TELEMETRY_END", "CALL_END", "CALL_FAIL"], "GUI": ["EVENT_BATCH_RECEIVED", "ACTIVITY_GAP", "STATUS_QUEUED", "STATUS_RENDERED"]}},
      ]
 diff --git a/tests/test_live_desktop_integration.py b/tests/test_live_desktop_integration.py
-index 11e2d4e..fa3b2a2 100644
+index 11e2d4e..e9d96ed 100644
 --- a/tests/test_live_desktop_integration.py
 +++ b/tests/test_live_desktop_integration.py
 @@ -49,10 +49,54 @@ def test_watcher_recovery_emits_start_and_existing_result(tmp_path, monkeypatch)
@@ -299,6 +301,24 @@ index 11e2d4e..fa3b2a2 100644
  def test_same_revision_startup_attaches_without_redundant_publish(tmp_path, monkeypatch):
      repo = tmp_path / "repo"
      repo.mkdir()
+@@ -620,7 +664,7 @@ def test_desktop_watcher_recovers_after_live_service_death(tmp_path):
+ 
+     recovery_called = []
+ 
+-    def mock_recover():
++    def mock_recover(_trigger_exc=None):
+         recovery_called.append(True)
+         watcher.client = recovered_client
+         if watcher.on_reconnect:
+@@ -666,7 +710,7 @@ def test_desktop_watcher_recovery_preserves_unowned_if_another_service_wins_race
+         on_reconnect=lambda c: reconnected_clients.append(c),
+     )
+ 
+-    def mock_recover():
++    def mock_recover(_trigger_exc=None):
+         watcher.client = external_client
+         if watcher.on_reconnect:
+             watcher.on_reconnect(external_client)
 diff --git a/tests/test_live_e2e_corrections.py b/tests/test_live_e2e_corrections.py
 index fa431a0..827e24d 100644
 --- a/tests/test_live_e2e_corrections.py
@@ -313,10 +333,10 @@ index fa431a0..827e24d 100644
      path = start_desktop_trace_session()
      assert path is not None
 diff --git a/tests/test_live_state_ipc.py b/tests/test_live_state_ipc.py
-index e359def..ee2af6f 100644
+index e359def..1d5ed40 100644
 --- a/tests/test_live_state_ipc.py
 +++ b/tests/test_live_state_ipc.py
-@@ -70,6 +70,110 @@ def test_client_transport_failure_emits_one_bounded_trace_event(monkeypatch):
+@@ -70,6 +70,153 @@ def test_client_transport_failure_emits_one_bounded_trace_event(monkeypatch):
      assert "authkey" not in json.dumps(events[0]).lower()
  
  
@@ -424,10 +444,53 @@ index e359def..ee2af6f 100644
 +        server.serve_forever()
 +
 +
++@pytest.mark.parametrize("stage", ["recv", "send"])
++def test_server_recv_and_send_trace_emitter_failure_are_fail_open(monkeypatch, stage):
++    import contextor.core.runtime_trace as trace
++
++    server = CanonicalLiveServer(SimpleNamespace(files=[]))
++
++    class Connection:
++        closed = False
++
++        def recv(self):
++            if stage == "recv":
++                raise ConnectionResetError("recv transport failure")
++            return {"operation": "ping"}
++
++        def send(self, _value):
++            if stage == "send":
++                raise ConnectionResetError("send transport failure")
++
++        def close(self):
++            self.closed = True
++            server._stop.set()
++
++    class Listener:
++        connection = Connection()
++
++        def accept(self):
++            return self.connection
++
++        def close(self):
++            pass
++
++    listener = Listener()
++    server._listener = listener
++    monkeypatch.setattr(
++        trace,
++        "trace_event",
++        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("trace failed")),
++    )
++
++    server.serve_forever()
++    assert listener.connection.closed is True
++
++
  @pytest.fixture
  def live_server():
      server = CanonicalLiveServer(SimpleNamespace(files=[]))
-@@ -644,18 +748,48 @@ def test_run_service_fails_closed_when_service_thread_raises_before_endpoint(tmp
+@@ -644,18 +791,79 @@ def test_run_service_fails_closed_when_service_thread_raises_before_endpoint(tmp
      from contextor.core.paths import runtime_logs_dir
  
      repo = _runtime_service_repo(tmp_path, monkeypatch)
@@ -473,6 +536,37 @@ index e359def..ee2af6f 100644
 +
 +    with pytest.raises(RuntimeError, match="service thread failed during (pre-endpoint bootstrap|endpoint publication)"):
 +        runtime.run_service(repo)
++    assert not endpoint_file(repo).exists()
++
++
++def test_run_service_fingerprint_diagnostic_failure_does_not_mask_service_failure(tmp_path, monkeypatch):
++    import contextor.core.live_state.runtime as runtime
++
++    repo = _runtime_service_repo(tmp_path, monkeypatch)
++    release_failure = threading.Event()
++    original_endpoint = runtime._authority_endpoint_from_server
++
++    class FailingServer(CanonicalLiveServer):
++        def serve_forever(self):
++            release_failure.wait(timeout=5.0)
++            raise RuntimeError("synthetic service-thread fingerprint failure")
++
++    def endpoint_then_poison_fingerprint(server, *args, **kwargs):
++        endpoint = original_endpoint(server, *args, **kwargs)
++        server.endpoint = SimpleNamespace(
++            fingerprint=lambda: (_ for _ in ()).throw(RuntimeError("fingerprint failed"))
++        )
++        release_failure.set()
++        return endpoint
++
++    monkeypatch.setattr(runtime, "CanonicalLiveServer", FailingServer)
++    monkeypatch.setattr(runtime, "_authority_endpoint_from_server", endpoint_then_poison_fingerprint)
++
++    with pytest.raises(RuntimeError, match="service thread failed during endpoint publication") as raised:
++        runtime.run_service(repo)
++
++    assert isinstance(raised.value.__cause__, RuntimeError)
++    assert str(raised.value.__cause__) == "synthetic service-thread fingerprint failure"
 +    assert not endpoint_file(repo).exists()
  
  

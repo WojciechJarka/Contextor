@@ -174,6 +174,49 @@ def test_server_trace_emitter_failure_does_not_mask_transport_failure(monkeypatc
         server.serve_forever()
 
 
+@pytest.mark.parametrize("stage", ["recv", "send"])
+def test_server_recv_and_send_trace_emitter_failure_are_fail_open(monkeypatch, stage):
+    import contextor.core.runtime_trace as trace
+
+    server = CanonicalLiveServer(SimpleNamespace(files=[]))
+
+    class Connection:
+        closed = False
+
+        def recv(self):
+            if stage == "recv":
+                raise ConnectionResetError("recv transport failure")
+            return {"operation": "ping"}
+
+        def send(self, _value):
+            if stage == "send":
+                raise ConnectionResetError("send transport failure")
+
+        def close(self):
+            self.closed = True
+            server._stop.set()
+
+    class Listener:
+        connection = Connection()
+
+        def accept(self):
+            return self.connection
+
+        def close(self):
+            pass
+
+    listener = Listener()
+    server._listener = listener
+    monkeypatch.setattr(
+        trace,
+        "trace_event",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("trace failed")),
+    )
+
+    server.serve_forever()
+    assert listener.connection.closed is True
+
+
 @pytest.fixture
 def live_server():
     server = CanonicalLiveServer(SimpleNamespace(files=[]))
@@ -789,6 +832,37 @@ def test_run_service_trace_emitter_failure_does_not_mask_service_failure(tmp_pat
 
     with pytest.raises(RuntimeError, match="service thread failed during (pre-endpoint bootstrap|endpoint publication)"):
         runtime.run_service(repo)
+    assert not endpoint_file(repo).exists()
+
+
+def test_run_service_fingerprint_diagnostic_failure_does_not_mask_service_failure(tmp_path, monkeypatch):
+    import contextor.core.live_state.runtime as runtime
+
+    repo = _runtime_service_repo(tmp_path, monkeypatch)
+    release_failure = threading.Event()
+    original_endpoint = runtime._authority_endpoint_from_server
+
+    class FailingServer(CanonicalLiveServer):
+        def serve_forever(self):
+            release_failure.wait(timeout=5.0)
+            raise RuntimeError("synthetic service-thread fingerprint failure")
+
+    def endpoint_then_poison_fingerprint(server, *args, **kwargs):
+        endpoint = original_endpoint(server, *args, **kwargs)
+        server.endpoint = SimpleNamespace(
+            fingerprint=lambda: (_ for _ in ()).throw(RuntimeError("fingerprint failed"))
+        )
+        release_failure.set()
+        return endpoint
+
+    monkeypatch.setattr(runtime, "CanonicalLiveServer", FailingServer)
+    monkeypatch.setattr(runtime, "_authority_endpoint_from_server", endpoint_then_poison_fingerprint)
+
+    with pytest.raises(RuntimeError, match="service thread failed during endpoint publication") as raised:
+        runtime.run_service(repo)
+
+    assert isinstance(raised.value.__cause__, RuntimeError)
+    assert str(raised.value.__cause__) == "synthetic service-thread fingerprint failure"
     assert not endpoint_file(repo).exists()
 
 
