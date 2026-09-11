@@ -89,9 +89,9 @@ def finalize_surfaces(state: LineageExtractionState, paths: dict[int, str], modu
             candidate = state._module_public_candidates.get(name)
             imported = state.import_frame(module_owner).get(name)
             if candidate is not None and candidate[0] == current:
-                emit_surface(state, paths, kind=SurfaceKind.EXPORT, exposed=current, node=item, declared_name=name, resolution_kind=ResolutionKind.LITERAL_CONTAINER_EXACT, confidence=LineageConfidence.CONFIRMED, declaration_evidence=SurfaceDeclarationEvidence.LITERAL_ALL_DECLARATION, ordinal=ordinal)
+                emit_surface(state, paths, kind=SurfaceKind.EXPORT, exposed=ExtractedSymbolicRef(ExtractedSymbolicKind.PUBLIC_TARGET, module_name, name, current.local_id), node=item, declared_name=name, resolution_kind=ResolutionKind.LITERAL_CONTAINER_EXACT, confidence=LineageConfidence.CONFIRMED, declaration_evidence=SurfaceDeclarationEvidence.LITERAL_ALL_DECLARATION, ordinal=ordinal)
             elif current is not None and imported is not None and imported.symbol_name is not None and imported.binding_id == current.local_id:
-                emit_surface(state, paths, kind=SurfaceKind.REEXPORT, exposed=current, node=item, declared_name=name, resolution_kind=ResolutionKind.IMPORT_EXACT, confidence=LineageConfidence.CONFIRMED, declaration_evidence=SurfaceDeclarationEvidence.STATIC_DECLARATION, ordinal=ordinal)
+                emit_surface(state, paths, kind=SurfaceKind.REEXPORT, exposed=ExtractedSymbolicRef(ExtractedSymbolicKind.PUBLIC_TARGET, imported.module_name, imported.symbol_name, current.local_id), node=item, declared_name=name, resolution_kind=ResolutionKind.IMPORT_EXACT, confidence=LineageConfidence.CONFIRMED, declaration_evidence=SurfaceDeclarationEvidence.STATIC_DECLARATION, ordinal=ordinal)
             else:
                 emit_surface(state, paths, kind=SurfaceKind.EXPORT, exposed=ExtractedSymbolicRef(ExtractedSymbolicKind.PUBLIC_TARGET, module_name, name), node=item, declared_name=name, resolution_kind=ResolutionKind.UNRESOLVED_NAME, confidence=LineageConfidence.UNRESOLVED, declaration_evidence=SurfaceDeclarationEvidence.LITERAL_ALL_DECLARATION, ordinal=ordinal)
         return

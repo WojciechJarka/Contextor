@@ -2047,7 +2047,9 @@ def test_stage_1e1_later_literal_all_overrides_defaults_and_reuses_local_anchor(
     assert [surface.declared_name for surface in facts.surfaces] == ["a"]
     surface = facts.surfaces[0]
     assert surface.kind is SurfaceKind.EXPORT
-    assert surface.exposed == ExtractedOccurrenceRef(_stage_1c_named(facts, "function", "a")[0].local_id)
+    assert isinstance(surface.exposed, ExtractedSymbolicRef)
+    assert (surface.exposed.kind, surface.exposed.module_name, surface.exposed.symbol_name) == (ExtractedSymbolicKind.PUBLIC_TARGET, "pkg", "a")
+    assert surface.exposed.source_local_id == _stage_1c_named(facts, "function", "a")[0].local_id
     assert surface.resolution_kind is ResolutionKind.LITERAL_CONTAINER_EXACT
     assert surface.confidence is LineageConfidence.CONFIRMED
     assert surface.declaration_evidence is SurfaceDeclarationEvidence.LITERAL_ALL_DECLARATION
@@ -2078,7 +2080,11 @@ def test_stage_1e1_explicit_from_import_reexport_uses_current_binding(source_key
     assert surface.resolution_kind is ResolutionKind.IMPORT_EXACT
     assert surface.confidence is LineageConfidence.CONFIRMED
     assert surface.declaration_evidence is SurfaceDeclarationEvidence.STATIC_DECLARATION
-    assert surface.exposed == ExtractedOccurrenceRef(_stage_1c_named(facts, "import_binding", "public")[0].local_id)
+    assert isinstance(surface.exposed, ExtractedSymbolicRef)
+    assert surface.exposed.kind is ExtractedSymbolicKind.PUBLIC_TARGET
+    assert surface.exposed.module_name == ("provider" if source_key == "pkg.py" else "pkg.provider")
+    assert surface.exposed.symbol_name == "f"
+    assert surface.exposed.source_local_id == _stage_1c_named(facts, "import_binding", "public")[0].local_id
 
 
 def test_stage_1e1_rebound_import_is_local_export_not_reexport():
@@ -2086,7 +2092,9 @@ def test_stage_1e1_rebound_import_is_local_export_not_reexport():
     surface = facts.surfaces[0]
     assert surface.kind is SurfaceKind.EXPORT
     assert surface.resolution_kind is ResolutionKind.LITERAL_CONTAINER_EXACT
-    assert surface.exposed == ExtractedOccurrenceRef(_stage_1c_named(facts, "binding", "public")[-1].local_id)
+    assert isinstance(surface.exposed, ExtractedSymbolicRef)
+    assert (surface.exposed.kind, surface.exposed.module_name, surface.exposed.symbol_name) == (ExtractedSymbolicKind.PUBLIC_TARGET, "pkg", "public")
+    assert surface.exposed.source_local_id == _stage_1c_named(facts, "binding", "public")[-1].local_id
 
 
 @pytest.mark.parametrize("source", [
@@ -2137,7 +2145,9 @@ def test_stage_1e1_later_binding_supersedes_surface_delete_tombstone():
     surface = facts.surfaces[0]
     assert surface.kind is SurfaceKind.EXPORT
     assert surface.confidence is LineageConfidence.CONFIRMED
-    assert surface.exposed == ExtractedOccurrenceRef(_stage_1c_named(facts, "binding", "x")[-1].local_id)
+    assert isinstance(surface.exposed, ExtractedSymbolicRef)
+    assert (surface.exposed.kind, surface.exposed.module_name, surface.exposed.symbol_name) == (ExtractedSymbolicKind.PUBLIC_TARGET, "pkg", "x")
+    assert surface.exposed.source_local_id == _stage_1c_named(facts, "binding", "x")[-1].local_id
 
 
 @pytest.mark.parametrize("source", [

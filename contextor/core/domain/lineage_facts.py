@@ -673,11 +673,12 @@ def _validate_materialized_surface_target(
     resolution_kind: ResolutionKind,
     confidence: LineageConfidence,
 ) -> None:
-    if claims_exact_semantic_target(resolution_kind, confidence) and not isinstance(
-        exposed, SemanticEndpoint
+    if claims_exact_semantic_target(resolution_kind, confidence) and isinstance(
+        exposed, MaterializedOccurrenceRef
     ):
         raise ValueError(
-            "confirmed exact semantic surface target requires SemanticEndpoint"
+            "confirmed exact semantic surface target cannot remain a bare local "
+            "occurrence; requires SemanticEndpoint or exact symbolic boundary"
         )
 
 

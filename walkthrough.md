@@ -1,338 +1,272 @@
 STATUS=PASS
-HEAD/WORKTREE_BASE=5e6109d9beaeec5f640d69d5890aaef0224f25eb (clean baseline before Stage 1F.2)
-MCP_POOL_DISCOVERY=
-ACTIVE: contextor_fact_lineage callable; contextor_lineage absent from callable inventory.
-DEFERRED: inspected available/deferred-capable tool inventory; no deferred Contextor lineage callable or deferred-tool search surface was exposed.
-LINEAGE_TOOL_USED=contextor_fact_lineage (required substitution for unavailable contextor_lineage)
-CURRENT_FULL_ANALYSIS_OWNER=contextor.core.api.facade::ContextorFacade.analyze_project
-EXACT_WIRING_POINT=after execute_global_pipeline returns, after its artifact pipeline synchronizes PersistentIdentityRegistry, immediately before RepositoryAnalysisState construction and save/publish.
-RESOLUTION_CONTEXT_CONSTRUCTION=_materialize_full_analysis_lineage reads the finalized registry in read_transaction and limits maps to current modules plus collect_qualified_artifact_identities(raw_artifacts). active_owner_ids is exactly those current map values. No recovery mapping is read. interface_descriptors is empty because this full-analysis path has no existing canonical descriptor producer; slot-bearing targets remain symbolic.
-FULL_DATA_FLOW_AFTER_CHANGE=source -> index_repository single parse/extract -> RepositoryIndex.lineage_facts_by_source -> execute_global_pipeline registry sync -> read-only LineageResolutionContext -> materialize_lineage_source_facts once per sorted source -> atomic RepositoryAnalysisState.lineage_facts_by_source installation -> save/publish.
-FAMILY_STATE_COVERAGE_RULE=fresh only when every eligible indexed source has exactly one installed current manifest and index.skipped is empty; resource_limit is retained when complete coverage includes a resource-limited slice; missing source coverage or skipped source is deferred; empty eligible source set is fresh with an empty mapping. Any foreign extracted key, key/manifest mismatch, missing finalized active ID, or materializer failure raises rather than publishing fresh state. All materialized states use LINEAGE_FACTS_SEMANTIC_VERSION.
-ONE_PARSE_SOURCE_READ_REGISTRY_ALLOCATION_PROOF=indexer extracts before cache and the integration test counted exactly one extraction for each of consumer.py/provider.py. Wiring consumes only RepositoryIndex slices. The helper uses registry.read_transaction and raw maps; its test makes get_module_id/get_artifact_id fail if called. The pure materializer contract test remains green.
-FOCUSED_TESTS=
-.venv\Scripts\python.exe -m py_compile contextor/core/api/facade.py tests/test_full_analysis_lineage_materialization.py => PASS
-.venv\Scripts\python.exe -m pytest -q tests/test_full_analysis_lineage_materialization.py tests/analysis/test_lineage_materialization.py tests/analysis/test_lineage_extraction.py => 209 passed in 4.33s
- git diff --check => PASS
-LIVE_CONTINUITY_EVIDENCE=get_live_events(after_revision=673) returned transient_connection_failure: existing LIVE owner temporarily unreachable. No update_file, restart, or probe was used. This transport condition does not invalidate the focused static evidence.
+TASK=Stage 1F.2 final end-to-end certification
+HEAD=de0cd98 Auto-commit: Cleanup and update
+MCP_DISCOVERY=ACTIVE: contextor_fact_lineage available; contextor_lineage absent from active and exposed deferred pools. contextor_fact_lineage family=lineage_facts returned invalid_family (only artifact_consumption, syntax_diagnostics, symbol_calls), so it supplied no lineage-family projection.
+
+MINOR_CLEANUP=
+- contextor/core/domain/lineage_facts.py: exact confirmed materialized surfaces reject only bare MaterializedOccurrenceRef; diagnostic now accurately permits SemanticEndpoint or exact symbolic boundary.
+- tests/test_full_analysis_lineage_materialization.py: ends with LF.
+
+FOCUSED_VALIDATION=
+- .\.venv\Scripts\python.exe -m pytest -q tests/domain/test_lineage_facts.py
+- result: 65 passed in 1.19s
+- .\.venv\Scripts\python.exe -m py_compile contextor/core/api/facade.py contextor/core/analysis/lineage_extraction_surfaces.py contextor/core/domain/lineage_facts.py
+- result: exit 0
+- git diff --check -- . ':(exclude)walkthrough.md'
+- result: exit 0
+
+REAL_FULL_ANALYSIS_COMMAND=
+CONTEXTOR_DISABLE_PROCESS_POOL=1 .\.venv\Scripts\python.exe -u -c "ContextorFacade.analyze_project(r'C:\Temp\Contextor_Repo', log=print, owner='cli_analysis'); hydrate_repository_engine(...); assert canonical lineage invariants"
+REAL_FULL_ANALYSIS_EXIT_RESULT=exit 0; errors=[]; result_type=AnalysisResult; REAL_FULL_ANALYSIS_CERTIFICATION_PASS
+PROGRESS_TAIL=
+[PROGRESS] Step 1/8: Initializing repository identity
+[PROGRESS] Step 2/8: Indexing repository files
+[PROGRESS] Step 3/8: Resolving dependency graph
+[PROGRESS] Step 4/8: Validating dependency graph
+[PROGRESS] Step 5/8: Computing metrics, cycles and debt
+[PROGRESS] Step 6/8: Generating architectural reports
+[PROGRESS] Step 7/8: Persisting canonical LIVE snapshot
+[PROGRESS] Step 8/8: Finalizing analysis
+REAL_FULL_ANALYSIS_RETURN errors=[] result_type=AnalysisResult
+REAL_FULL_ANALYSIS_CERTIFICATION_PASS
+STEP7_RESULT=PASS: canonical LIVE snapshot persistence completed and analysis continued to Step 8; no confirmed-exact-SemanticEndpoint error occurred.
+
+REAL_CANONICAL_LINEAGE_SUMMARY=
+- lineage_facts_by_source: 365 non-empty source slices
+- lineage_facts_state: fresh
+- lineage_facts_semantic_version: 1 (matches LINEAGE_FACTS_SEMANTIC_VERSION=1)
+- manifest/source-key mismatches: 0
+- surfaces: 2,893 (SemanticEndpoint=322; MaterializedSymbolicRef=11; MaterializedOccurrenceRef=2,560)
+- confirmed exact local occurrence surfaces: 0
+- duplicate/stale source keys: none observed; every mapping key equals manifest.source_key
+
+REPRESENTATIVE_REAL_SURFACES=
+- exact local EXPORT: contextor/core/analysis/activity.py, classify_symbol_activity, LITERAL_CONTAINER_EXACT/CONFIRMED -> SemanticEndpoint(A1477/1)
+- internal exact REEXPORT: contextor/core/__init__.py, build_index, IMPORT_EXACT/CONFIRMED -> SemanticEndpoint(A1561/1)
+- exact symbolic boundary: contextor/core/__init__.py, validate, IMPORT_EXACT/CONFIRMED -> MaterializedSymbolicRef(contextor.core.validator::validate); no allocation/failure
+- inferred PUBLIC_SYMBOL: contextor/__main__.py, main, PYTHON_NAME_CONVENTION/INFERRED -> MaterializedOccurrenceRef; not strengthened
+
+PERSISTENCE_FAILURE=NONE
 FILES_CHANGED=
-contextor/core/api/facade.py
-tests/test_full_analysis_lineage_materialization.py
-FULL_DIFF=diff --git a/contextor/core/api/facade.py b/contextor/core/api/facade.py
-diff --git a/contextor/core/api/facade.py b/contextor/core/api/facade.py
-index cf348ed..c2ce409 100644
---- a/contextor/core/api/facade.py
-+++ b/contextor/core/api/facade.py
-@@ -259,6 +259,96 @@ def _initialize_repository_identity(repo_root: str | Path) -> PersistentIdentity
-     return registry
+- contextor/core/analysis/lineage_extraction_surfaces.py
+- contextor/core/domain/lineage_facts.py
+- tests/analysis/test_lineage_extraction.py
+- tests/test_full_analysis_lineage_materialization.py
+- walkthrough.md
+
+COMPLETE_RAW_UNIFIED_FULL_DIFF (walkthrough.md itself intentionally excluded)=
+diff --git a/contextor/core/analysis/lineage_extraction_surfaces.py b/contextor/core/analysis/lineage_extraction_surfaces.py
+index 32fbb20..7965fd9 100644
+--- a/contextor/core/analysis/lineage_extraction_surfaces.py
++++ b/contextor/core/analysis/lineage_extraction_surfaces.py
+@@ -89,9 +89,9 @@ def finalize_surfaces(state: LineageExtractionState, paths: dict[int, str], modu
+             candidate = state._module_public_candidates.get(name)
+             imported = state.import_frame(module_owner).get(name)
+             if candidate is not None and candidate[0] == current:
+-                emit_surface(state, paths, kind=SurfaceKind.EXPORT, exposed=current, node=item, declared_name=name, resolution_kind=ResolutionKind.LITERAL_CONTAINER_EXACT, confidence=LineageConfidence.CONFIRMED, declaration_evidence=SurfaceDeclarationEvidence.LITERAL_ALL_DECLARATION, ordinal=ordinal)
++                emit_surface(state, paths, kind=SurfaceKind.EXPORT, exposed=ExtractedSymbolicRef(ExtractedSymbolicKind.PUBLIC_TARGET, module_name, name, current.local_id), node=item, declared_name=name, resolution_kind=ResolutionKind.LITERAL_CONTAINER_EXACT, confidence=LineageConfidence.CONFIRMED, declaration_evidence=SurfaceDeclarationEvidence.LITERAL_ALL_DECLARATION, ordinal=ordinal)
+             elif current is not None and imported is not None and imported.symbol_name is not None and imported.binding_id == current.local_id:
+-                emit_surface(state, paths, kind=SurfaceKind.REEXPORT, exposed=current, node=item, declared_name=name, resolution_kind=ResolutionKind.IMPORT_EXACT, confidence=LineageConfidence.CONFIRMED, declaration_evidence=SurfaceDeclarationEvidence.STATIC_DECLARATION, ordinal=ordinal)
++                emit_surface(state, paths, kind=SurfaceKind.REEXPORT, exposed=ExtractedSymbolicRef(ExtractedSymbolicKind.PUBLIC_TARGET, imported.module_name, imported.symbol_name, current.local_id), node=item, declared_name=name, resolution_kind=ResolutionKind.IMPORT_EXACT, confidence=LineageConfidence.CONFIRMED, declaration_evidence=SurfaceDeclarationEvidence.STATIC_DECLARATION, ordinal=ordinal)
+             else:
+                 emit_surface(state, paths, kind=SurfaceKind.EXPORT, exposed=ExtractedSymbolicRef(ExtractedSymbolicKind.PUBLIC_TARGET, module_name, name), node=item, declared_name=name, resolution_kind=ResolutionKind.UNRESOLVED_NAME, confidence=LineageConfidence.UNRESOLVED, declaration_evidence=SurfaceDeclarationEvidence.LITERAL_ALL_DECLARATION, ordinal=ordinal)
+         return
+diff --git a/contextor/core/domain/lineage_facts.py b/contextor/core/domain/lineage_facts.py
+index eb93b30..69e5ea1 100644
+--- a/contextor/core/domain/lineage_facts.py
++++ b/contextor/core/domain/lineage_facts.py
+@@ -673,11 +673,12 @@ def _validate_materialized_surface_target(
+     resolution_kind: ResolutionKind,
+     confidence: LineageConfidence,
+ ) -> None:
+-    if claims_exact_semantic_target(resolution_kind, confidence) and not isinstance(
+-        exposed, SemanticEndpoint
++    if claims_exact_semantic_target(resolution_kind, confidence) and isinstance(
++        exposed, MaterializedOccurrenceRef
+     ):
+         raise ValueError(
+-            "confirmed exact semantic surface target requires SemanticEndpoint"
++            "confirmed exact semantic surface target cannot remain a bare local "
++            "occurrence; requires SemanticEndpoint or exact symbolic boundary"
+         )
  
  
-+def _materialize_full_analysis_lineage(index, registry, modules, artifacts):
-+    """Materialize current index lineage from finalized active identities."""
-+    from contextor.core.analysis.lineage_materialization import (
-+        LineageResolutionContext,
-+        materialize_lineage_source_facts,
-+    )
-+    from contextor.core.domain.lineage_facts import (
-+        LINEAGE_FACTS_SEMANTIC_VERSION,
-+        LineageFamilyStatus,
-+    )
-+    from contextor.core.reporting_layer.artifact_usage_report import (
-+        collect_qualified_artifact_identities,
-+    )
-+
-+    eligible_source_keys = {
-+        Path(str(module.path)).as_posix()
-+        for module in modules.values()
-+    }
-+    extracted_by_source = dict(getattr(index, "lineage_facts_by_source", {}) or {})
-+    foreign_source_keys = set(extracted_by_source) - eligible_source_keys
-+    if foreign_source_keys:
-+        raise ValueError(
-+            "Extracted lineage contains sources outside the active analysis: "
-+            f"{sorted(foreign_source_keys)!r}"
-+        )
-+
-+    active_module_names = set(modules)
-+    active_artifact_names = collect_qualified_artifact_identities(artifacts)
-+    with registry.read_transaction():
-+        module_registry = registry._state["module_registry"]["path_to_id"]
-+        artifact_registry = registry._state["artifact_registry"]["path_to_id"]
-+        active_module_ids = {
-+            name: module_registry[name]
-+            for name in sorted(active_module_names)
-+            if name in module_registry
-+        }
-+        active_artifact_ids = {
-+            name: artifact_registry[name]
-+            for name in sorted(active_artifact_names)
-+            if name in artifact_registry
-+        }
-+
-+    missing_module_ids = active_module_names - set(active_module_ids)
-+    missing_artifact_ids = active_artifact_names - set(active_artifact_ids)
-+    if missing_module_ids or missing_artifact_ids:
-+        raise ValueError(
-+            "Finalized identity registry is missing active lineage owners: "
-+            f"modules={sorted(missing_module_ids)!r}, "
-+            f"artifacts={sorted(missing_artifact_ids)!r}"
-+        )
-+
-+    resolution = LineageResolutionContext(
-+        active_module_ids=active_module_ids,
-+        active_artifact_ids=active_artifact_ids,
-+        active_owner_ids=frozenset(
-+            (*active_module_ids.values(), *active_artifact_ids.values())
-+        ),
-+        interface_descriptors={},
-+    )
-+    materialized_by_source = {}
-+    for source_key in sorted(extracted_by_source):
-+        extracted = extracted_by_source[source_key]
-+        if extracted.source_key != source_key:
-+            raise ValueError("Extracted lineage mapping key does not match its source key.")
-+        materialized = materialize_lineage_source_facts(extracted, resolution)
-+        if (
-+            materialized.manifest.source_key != extracted.source_key
-+            or materialized.manifest.source_fingerprint != extracted.source_fingerprint
-+        ):
-+            raise ValueError("Materialized lineage manifest does not match extracted source.")
-+        materialized_by_source[source_key] = materialized
-+
-+    missing_source_keys = eligible_source_keys - set(materialized_by_source)
-+    if missing_source_keys or getattr(index, "skipped", ()):
-+        family_state = LineageFamilyStatus.DEFERRED.value
-+    elif any(
-+        item.manifest.status is LineageFamilyStatus.RESOURCE_LIMIT
-+        for item in materialized_by_source.values()
-+    ):
-+        family_state = LineageFamilyStatus.RESOURCE_LIMIT.value
-+    else:
-+        family_state = LineageFamilyStatus.FRESH.value
-+
-+    return (
-+        dict(sorted(materialized_by_source.items())),
-+        family_state,
-+        LINEAGE_FACTS_SEMANTIC_VERSION,
-+    )
-+
-+
- def _resolve_repository_target(
-     repo_root: str | Path,
-     target: str | Path,
-@@ -522,6 +612,16 @@ class ContextorFacade:
-             syntax_diagnostics_by_path, syntax_diagnostics_state = (
-                 build_syntax_diagnostics_from_index(index)
-             )
-+            (
-+                lineage_facts_by_source,
-+                lineage_facts_state,
-+                lineage_facts_semantic_version,
-+            ) = _materialize_full_analysis_lineage(
-+                index,
-+                registry,
-+                mods,
-+                raw_artifacts,
-+            )
+diff --git a/tests/analysis/test_lineage_extraction.py b/tests/analysis/test_lineage_extraction.py
+index ff346a8..de2207e 100644
+--- a/tests/analysis/test_lineage_extraction.py
++++ b/tests/analysis/test_lineage_extraction.py
+@@ -2047,7 +2047,9 @@ def test_stage_1e1_later_literal_all_overrides_defaults_and_reuses_local_anchor(
+     assert [surface.declared_name for surface in facts.surfaces] == ["a"]
+     surface = facts.surfaces[0]
+     assert surface.kind is SurfaceKind.EXPORT
+-    assert surface.exposed == ExtractedOccurrenceRef(_stage_1c_named(facts, "function", "a")[0].local_id)
++    assert isinstance(surface.exposed, ExtractedSymbolicRef)
++    assert (surface.exposed.kind, surface.exposed.module_name, surface.exposed.symbol_name) == (ExtractedSymbolicKind.PUBLIC_TARGET, "pkg", "a")
++    assert surface.exposed.source_local_id == _stage_1c_named(facts, "function", "a")[0].local_id
+     assert surface.resolution_kind is ResolutionKind.LITERAL_CONTAINER_EXACT
+     assert surface.confidence is LineageConfidence.CONFIRMED
+     assert surface.declaration_evidence is SurfaceDeclarationEvidence.LITERAL_ALL_DECLARATION
+@@ -2078,7 +2080,11 @@ def test_stage_1e1_explicit_from_import_reexport_uses_current_binding(source_key
+     assert surface.resolution_kind is ResolutionKind.IMPORT_EXACT
+     assert surface.confidence is LineageConfidence.CONFIRMED
+     assert surface.declaration_evidence is SurfaceDeclarationEvidence.STATIC_DECLARATION
+-    assert surface.exposed == ExtractedOccurrenceRef(_stage_1c_named(facts, "import_binding", "public")[0].local_id)
++    assert isinstance(surface.exposed, ExtractedSymbolicRef)
++    assert surface.exposed.kind is ExtractedSymbolicKind.PUBLIC_TARGET
++    assert surface.exposed.module_name == ("provider" if source_key == "pkg.py" else "pkg.provider")
++    assert surface.exposed.symbol_name == "f"
++    assert surface.exposed.source_local_id == _stage_1c_named(facts, "import_binding", "public")[0].local_id
  
-             state = RepositoryAnalysisState(
-                 modules=mods,
-@@ -535,6 +635,9 @@ class ContextorFacade:
-                 syntax_diagnostics_state=syntax_diagnostics_state,
-                 module_usages=module_usages,
-                 module_usages_manifest=module_usages_manifest,
-+                lineage_facts_by_source=lineage_facts_by_source,
-+                lineage_facts_state=lineage_facts_state,
-+                lineage_facts_semantic_version=lineage_facts_semantic_version,
-                 metrics=metrics,
-                 topology_analytics=topology_analytics,
-                 topology_metrics_state="fresh",
+ 
+ def test_stage_1e1_rebound_import_is_local_export_not_reexport():
+@@ -2086,7 +2092,9 @@ def test_stage_1e1_rebound_import_is_local_export_not_reexport():
+     surface = facts.surfaces[0]
+     assert surface.kind is SurfaceKind.EXPORT
+     assert surface.resolution_kind is ResolutionKind.LITERAL_CONTAINER_EXACT
+-    assert surface.exposed == ExtractedOccurrenceRef(_stage_1c_named(facts, "binding", "public")[-1].local_id)
++    assert isinstance(surface.exposed, ExtractedSymbolicRef)
++    assert (surface.exposed.kind, surface.exposed.module_name, surface.exposed.symbol_name) == (ExtractedSymbolicKind.PUBLIC_TARGET, "pkg", "public")
++    assert surface.exposed.source_local_id == _stage_1c_named(facts, "binding", "public")[-1].local_id
+ 
+ 
+ @pytest.mark.parametrize("source", [
+@@ -2137,7 +2145,9 @@ def test_stage_1e1_later_binding_supersedes_surface_delete_tombstone():
+     surface = facts.surfaces[0]
+     assert surface.kind is SurfaceKind.EXPORT
+     assert surface.confidence is LineageConfidence.CONFIRMED
+-    assert surface.exposed == ExtractedOccurrenceRef(_stage_1c_named(facts, "binding", "x")[-1].local_id)
++    assert isinstance(surface.exposed, ExtractedSymbolicRef)
++    assert (surface.exposed.kind, surface.exposed.module_name, surface.exposed.symbol_name) == (ExtractedSymbolicKind.PUBLIC_TARGET, "pkg", "x")
++    assert surface.exposed.source_local_id == _stage_1c_named(facts, "binding", "x")[-1].local_id
+ 
+ 
+ @pytest.mark.parametrize("source", [
 diff --git a/tests/test_full_analysis_lineage_materialization.py b/tests/test_full_analysis_lineage_materialization.py
-new file mode 100644
-index 0000000..9fa35a5
---- /dev/null
+index 9fa35a5..5d84ec3 100644
+--- a/tests/test_full_analysis_lineage_materialization.py
 +++ b/tests/test_full_analysis_lineage_materialization.py
-@@ -0,0 +1,183 @@
-+from contextlib import contextmanager
-+from types import SimpleNamespace
-+
-+from contextor.core.api.facade import (
-+    ContextorFacade,
-+    _materialize_full_analysis_lineage,
-+)
-+from contextor.core.domain.lineage_facts import (
-+    LINEAGE_FACTS_SEMANTIC_VERSION,
-+    ExtractedAnchorFact,
-+    ExtractedFlowFact,
-+    ExtractedLineageSourceFacts,
-+    ExtractedOccurrenceRef,
-+    ExtractedSymbolicKind,
-+    ExtractedSymbolicRef,
-+    LineageConfidence,
-+    LineageFamilyStatus,
-+    LineageRelation,
-+    MaterializedSymbolicRef,
-+    ResolutionKind,
-+    SemanticEndpoint,
-+    SourceSpan,
-+)
-+from contextor.core.analysis import state_manager
-+from contextor.core.reporting_engine.persistent_registry import PersistentIdentityRegistry
-+from contextor.core.symbol_engine import indexer
-+
-+
-+class _ReadOnlyRegistry:
-+    def __init__(self, modules, artifacts):
-+        self._state = {
-+            "module_registry": {"path_to_id": modules},
-+            "artifact_registry": {"path_to_id": artifacts},
-+        }
-+        self.read_count = 0
-+
-+    @contextmanager
-+    def read_transaction(self):
-+        self.read_count += 1
-+        yield
-+
-+    def get_module_id(self, _name):
-+        raise AssertionError("lineage materialization must not allocate module identities")
-+
-+    def get_artifact_id(self, _name):
-+        raise AssertionError("lineage materialization must not allocate artifact identities")
+@@ -1,3 +1,5 @@
++import pytest
++import ast
+ from contextlib import contextmanager
+ from types import SimpleNamespace
+ 
+@@ -16,12 +18,17 @@ from contextor.core.domain.lineage_facts import (
+     LineageConfidence,
+     LineageFamilyStatus,
+     LineageRelation,
++    MaterializedOccurrenceRef,
++    MaterializedSurfaceFact,
+     MaterializedSymbolicRef,
+     ResolutionKind,
+     SemanticEndpoint,
+     SourceSpan,
++    SurfaceDeclarationEvidence,
++    SurfaceKind,
+ )
+ from contextor.core.analysis import state_manager
++from contextor.core.analysis.lineage_extraction import extract_lineage_source_facts
+ from contextor.core.reporting_engine.persistent_registry import PersistentIdentityRegistry
+ from contextor.core.symbol_engine import indexer
+ 
+@@ -142,9 +149,9 @@ def test_real_full_analysis_installs_current_lineage_without_second_extraction(t
+     monkeypatch.setenv("CONTEXTOR_CACHE_DIR", str(tmp_path / "cache"))
+     monkeypatch.setenv("CONTEXTOR_STATE_DIR", str(tmp_path / "state"))
+     monkeypatch.setenv("CONTEXTOR_DISABLE_PROCESS_POOL", "1")
+-    (repo / "provider.py").write_text("def target():\n    return 1\n", encoding="utf-8")
++    (repo / "provider.py").write_text("def target():\n    return 1\n__all__ = [\"target\"]\n", encoding="utf-8")
+     (repo / "consumer.py").write_text(
+-        "from provider import target\nvalue = target()\n", encoding="utf-8"
++        "from provider import target as exported\n__all__ = [\"exported\"]\nvalue = exported()\n", encoding="utf-8"
+     )
+ 
+     original_extract = indexer.extract_lineage_source_facts
+@@ -181,3 +188,88 @@ def test_real_full_analysis_installs_current_lineage_without_second_extraction(t
+         source_key == source_slice.manifest.source_key
+         for source_key, source_slice in state.lineage_facts_by_source.items()
+     )
++    registry = PersistentIdentityRegistry(str(repo))
++    with registry.read_transaction():
++        provider_target_id = registry._state["artifact_registry"]["path_to_id"]["provider::target"]
++    assert state.lineage_facts_by_source["provider.py"].surfaces[0].exposed == SemanticEndpoint(provider_target_id)
++    assert state.lineage_facts_by_source["consumer.py"].surfaces[0].exposed == SemanticEndpoint(provider_target_id)
 +
 +
-+def _fresh_slice(status=LineageFamilyStatus.FRESH):
-+    span = SourceSpan(1, 0, 1, 1)
-+    return ExtractedLineageSourceFacts(
++def test_exact_surface_materialization_uses_symbolic_targets_and_preserves_external_boundary():
++    local_facts = extract_lineage_source_facts(
++        ast.parse("def target():\n    return 1\n__all__ = ['target']\n"),
 +        source_key="pkg.py",
-+        source_fingerprint="fingerprint",
-+        anchors=(ExtractedAnchorFact("local", "module", span),),
-+        flows=(
-+            ExtractedFlowFact(
-+                "dynamic",
-+                ExtractedOccurrenceRef("local"),
-+                ExtractedSymbolicRef(
-+                    ExtractedSymbolicKind.CALLEE, "pkg", "dynamic_target"
-+                ),
-+                LineageRelation.CALL_RESULT,
-+                span,
-+                ResolutionKind.DYNAMIC_RUNTIME_BOUNDARY,
-+                LineageConfidence.DYNAMIC,
-+                dynamic_boundary="dynamic_call",
-+            ),
-+            ExtractedFlowFact(
-+                "flow",
-+                ExtractedOccurrenceRef("local"),
-+                ExtractedSymbolicRef(
-+                    ExtractedSymbolicKind.DEFINITION, "pkg", "target"
-+                ),
-+                LineageRelation.CALL_RESULT,
-+                span,
-+                ResolutionKind.CALL_EXACT,
-+                LineageConfidence.CONFIRMED,
-+            ),
-+        ),
-+        status=status,
-+        resource_limit_reason="node_limit" if status is LineageFamilyStatus.RESOURCE_LIMIT else None,
++        source_fingerprint="a" * 64,
 +    )
++    local_surface = local_facts.surfaces[0]
++    assert isinstance(local_surface.exposed, ExtractedSymbolicRef)
++    assert local_surface.exposed.kind is ExtractedSymbolicKind.PUBLIC_TARGET
++    assert local_surface.exposed.module_name == "pkg"
++    assert local_surface.exposed.symbol_name == "target"
++    assert local_surface.exposed.source_local_id is not None
 +
-+
-+def _index(*, facts=None, skipped=()):
-+    return SimpleNamespace(
-+        modules={"pkg": SimpleNamespace(path="pkg.py")},
-+        lineage_facts_by_source=facts or {},
-+        skipped=list(skipped),
-+    )
-+
-+
-+def test_full_analysis_materializes_active_ids_once_with_current_manifest_and_no_allocation():
 +    registry = _ReadOnlyRegistry({"pkg": "1/1"}, {"pkg::target": "A1/1"})
-+    index = _index(facts={"pkg.py": _fresh_slice()})
-+    artifacts = {"pkg": {"own_symbols": ["target"]}}
-+
-+    first = _materialize_full_analysis_lineage(index, registry, index.modules, artifacts)
-+    second = _materialize_full_analysis_lineage(index, registry, index.modules, artifacts)
-+
-+    mapping, family_state, version = first
-+    assert first == second
-+    assert registry.read_count == 2
-+    assert set(mapping) == {"pkg.py"}
-+    assert family_state == "fresh"
-+    assert version == LINEAGE_FACTS_SEMANTIC_VERSION
-+    source_slice = mapping["pkg.py"]
-+    assert source_slice.manifest.source_key == "pkg.py"
-+    assert source_slice.manifest.source_fingerprint == "fingerprint"
-+    assert source_slice.flows[1].target == SemanticEndpoint("A1/1")
-+    assert isinstance(source_slice.flows[0].target, MaterializedSymbolicRef)
-+
-+
-+def test_full_analysis_lineage_coverage_states_are_explicit_for_resource_skip_and_empty():
-+    registry = _ReadOnlyRegistry({"pkg": "1/1"}, {"pkg::target": "A1/1"})
-+    artifacts = {"pkg": {"own_symbols": ["target"]}}
-+
-+    resource = _materialize_full_analysis_lineage(
-+        _index(facts={"pkg.py": _fresh_slice(LineageFamilyStatus.RESOURCE_LIMIT)}),
-+        registry,
-+        _index().modules,
-+        artifacts,
++    local_index = _index(facts={"pkg.py": local_facts})
++    local_mapping, local_state, _ = _materialize_full_analysis_lineage(
++        local_index, registry, local_index.modules, {"pkg": {"own_symbols": ["target"]}}
 +    )
-+    deferred = _materialize_full_analysis_lineage(
-+        _index(skipped=(SimpleNamespace(path="broken.py"),)),
-+        registry,
-+        _index().modules,
-+        artifacts,
++    assert local_state == "fresh"
++    assert local_mapping["pkg.py"].surfaces[0].exposed == SemanticEndpoint("A1/1")
++
++    external_facts = extract_lineage_source_facts(
++        ast.parse("from external import target as alias\n__all__ = ['alias']\n"),
++        source_key="pkg.py",
++        source_fingerprint="b" * 64,
 +    )
-+    empty_registry = _ReadOnlyRegistry({}, {})
-+    empty_index = SimpleNamespace(modules={}, lineage_facts_by_source={}, skipped=[])
-+    empty = _materialize_full_analysis_lineage(empty_index, empty_registry, {}, {})
++    external_surface = external_facts.surfaces[0]
++    assert external_surface.kind is SurfaceKind.REEXPORT
++    assert isinstance(external_surface.exposed, ExtractedSymbolicRef)
++    assert (
++        external_surface.exposed.module_name,
++        external_surface.exposed.symbol_name,
++    ) == ("external", "target")
++    assert external_surface.exposed.source_local_id is not None
 +
-+    assert resource[1:] == ("resource_limit", LINEAGE_FACTS_SEMANTIC_VERSION)
-+    assert deferred == ({}, "deferred", LINEAGE_FACTS_SEMANTIC_VERSION)
-+    assert empty == ({}, "fresh", LINEAGE_FACTS_SEMANTIC_VERSION)
-+
-+
-+def test_real_full_analysis_installs_current_lineage_without_second_extraction(tmp_path, monkeypatch):
-+    repo = tmp_path / "repo"
-+    repo.mkdir()
-+    monkeypatch.setenv("CONTEXTOR_CACHE_DIR", str(tmp_path / "cache"))
-+    monkeypatch.setenv("CONTEXTOR_STATE_DIR", str(tmp_path / "state"))
-+    monkeypatch.setenv("CONTEXTOR_DISABLE_PROCESS_POOL", "1")
-+    (repo / "provider.py").write_text("def target():\n    return 1\n", encoding="utf-8")
-+    (repo / "consumer.py").write_text(
-+        "from provider import target\nvalue = target()\n", encoding="utf-8"
++    external_registry = _ReadOnlyRegistry({"pkg": "1/1"}, {})
++    external_index = _index(facts={"pkg.py": external_facts})
++    external_mapping, external_state, _ = _materialize_full_analysis_lineage(
++        external_index, external_registry, external_index.modules, {"pkg": {"own_symbols": []}}
 +    )
++    assert external_state == "fresh"
++    materialized_external = external_mapping["pkg.py"].surfaces[0].exposed
++    assert isinstance(materialized_external, MaterializedSymbolicRef)
++    assert (
++        materialized_external.module_name,
++        materialized_external.symbol_name,
++    ) == ("external", "target")
 +
-+    original_extract = indexer.extract_lineage_source_facts
-+    extracted_source_keys = []
 +
-+    def counted_extract(tree, *, source_key, source_fingerprint, **kwargs):
-+        extracted_source_keys.append(source_key)
-+        return original_extract(
-+            tree,
-+            source_key=source_key,
-+            source_fingerprint=source_fingerprint,
-+            **kwargs,
++def test_inferred_public_symbol_is_not_strengthened_by_matching_active_artifact():
++    facts = extract_lineage_source_facts(
++        ast.parse("def target():\n    return 1\n"),
++        source_key="pkg.py",
++        source_fingerprint="c" * 64,
++    )
++    index = _index(facts={"pkg.py": facts})
++    mapping, state, _ = _materialize_full_analysis_lineage(
++        index,
++        _ReadOnlyRegistry({"pkg": "1/1"}, {"pkg::target": "A1/1"}),
++        index.modules,
++        {"pkg": {"own_symbols": ["target"]}},
++    )
++    assert state == "fresh"
++    assert isinstance(mapping["pkg.py"].surfaces[0].exposed, MaterializedOccurrenceRef)
++
++
++def test_domain_rejects_exact_surface_with_bare_local_occurrence():
++    with pytest.raises(ValueError, match="requires SemanticEndpoint or exact symbolic boundary"):
++        MaterializedSurfaceFact(
++            "surface",
++            SurfaceKind.EXPORT,
++            MaterializedOccurrenceRef("pkg.py", "fingerprint", "local"),
++            SourceSpan(1, 0, 1, 1),
++            ResolutionKind.LITERAL_CONTAINER_EXACT,
++            LineageConfidence.CONFIRMED,
++            "target",
++            declaration_evidence=SurfaceDeclarationEvidence.LITERAL_ALL_DECLARATION,
 +        )
-+
-+    captured_states = []
-+    original_save_engine_state = state_manager.save_engine_state
-+
-+    def capture_save_engine_state(state, *args, **kwargs):
-+        captured_states.append(state)
-+        return original_save_engine_state(state, *args, **kwargs)
-+
-+    monkeypatch.setattr(indexer, "extract_lineage_source_facts", counted_extract)
-+    monkeypatch.setattr(state_manager, "save_engine_state", capture_save_engine_state)
-+    errors, _ = ContextorFacade.analyze_project(str(repo))
-+
-+    assert errors == []
-+    assert sorted(extracted_source_keys) == ["consumer.py", "provider.py"]
-+    assert len(captured_states) == 1
-+    state = captured_states[0]
-+    assert state.lineage_facts_state == "fresh"
-+    assert state.lineage_facts_semantic_version == LINEAGE_FACTS_SEMANTIC_VERSION
-+    assert set(state.lineage_facts_by_source) == {"consumer.py", "provider.py"}
-+    assert all(
-+        source_key == source_slice.manifest.source_key
-+        for source_key, source_slice in state.lineage_facts_by_source.items()
-+    )
