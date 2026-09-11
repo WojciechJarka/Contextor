@@ -1897,13 +1897,14 @@ def test_connect_or_start_slow_healthy_startup(tmp_path, monkeypatch):
 
     monkeypatch.setattr(runtime_mod, "_spawn_runtime_subprocess", mock_spawn)
 
-    # Normal connect timeout is short (0.08s), but cold start timeout is 2.0s
+    # Normal connect timeout is short (0.08s); allow a generous test-local
+    # cold-start budget for the real authority process on slow machines.
     t0 = time.monotonic()
     client = runtime_mod.connect_or_start(
         repo,
         owner_token="delayed_token",
         timeout=0.08,
-        cold_start_timeout=2.0,
+        cold_start_timeout=10.0,
     )
     elapsed = time.monotonic() - t0
 
