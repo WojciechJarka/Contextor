@@ -20,7 +20,11 @@ from contextor.core.live_state.runtime import (
     endpoint_file,
 )
 from contextor.core.live_state.store import save_snapshot
-from contextor.core.live_state.watcher import DesktopLiveWatcher
+from contextor.core.live_state.watcher import (
+    DesktopLiveWatcher,
+    _PendingMutationIntent,
+    _WatcherMutationJob,
+)
 from contextor.core.paths import repo_cache_dir
 from contextor.core.reporting_engine.persistent_registry import (
     PersistentIdentityRegistry,
@@ -1058,6 +1062,149 @@ def test_lost_queued_update_ack_does_not_relabel_overlapping_edit(tmp_path):
         assert len({key for key, _trace_op in attempts}) == 2
     finally:
         release_first_update.set()
+        server.close()
+        thread.join(timeout=2)
+
+
+def test_stale_unknown_intent_is_superseded_by_newer_current_inflight_job(tmp_path):
+    submissions = []
+    update_started = threading.Event()
+    release_update = threading.Event()
+
+    def updater(_state, path):
+        update_started.set()
+        assert release_update.wait(timeout=5)
+        return SimpleNamespace(status="UPDATED", file_path=path)
+
+    repo, server, thread, _endpoint, client, watcher = _real_watcher_runtime(
+        tmp_path, updater
+    )
+    source = repo / "module.py"
+    path = str(source)
+
+    source.write_text("VALUE = 10\n", encoding="utf-8")
+    s1 = watcher._scan()[path]
+
+    source.write_text("VALUE = 200\n", encoding="utf-8")
+    s2 = watcher._scan()[path]
+    assert s2 != s1
+
+    watcher._snapshot = {path: s1}
+    watcher._startup_pending = []
+    watcher._candidate_requires_update = lambda *_args: True
+
+    started_at = time.monotonic()
+    watcher._inflight_updates["old-job"] = _WatcherMutationJob(
+        job_id="old-job",
+        path=path,
+        trace_op="WATCH_MODIFY",
+        idempotency_key="old-k1",
+        observed_state=s1,
+        started_at=started_at,
+    )
+    watcher._inflight_updates["current-job"] = _WatcherMutationJob(
+        job_id="current-job",
+        path=path,
+        trace_op="WATCH_MODIFY",
+        idempotency_key="current-k2",
+        observed_state=s2,
+        started_at=started_at,
+    )
+
+    original_status = client.mutation_status
+    current_job_state = {"value": "running"}
+
+    def mutation_status(job_id):
+        if job_id == "old-job":
+            return {
+                "status": "error",
+                "error": "unknown_mutation_job",
+                "job_id": job_id,
+            }
+        if job_id == "current-job":
+            if current_job_state["value"] == "running":
+                return {
+                    "status": "ok",
+                    "state": "running",
+                    "job_id": job_id,
+                }
+            return {
+                "status": "ok",
+                "state": "completed",
+                "job_id": job_id,
+                "response": {
+                    "status": "ok",
+                    "revision": 1,
+                    "seq": 1,
+                    "result": SimpleNamespace(
+                        status="UPDATED",
+                        file_path=path,
+                    ),
+                },
+            }
+        return original_status(job_id)
+
+    original_submit = client.submit_update_file
+
+    def capture_submit(file_path, **kwargs):
+        submissions.append((file_path, dict(kwargs)))
+        return original_submit(file_path, **kwargs)
+
+    client.mutation_status = mutation_status
+    client.submit_update_file = capture_submit
+
+    try:
+        watcher._enqueue_path(path)
+
+        assert watcher.poll_once() == []
+
+        assert "old-job" not in watcher._inflight_updates
+        assert "current-job" in watcher._inflight_updates
+        assert path not in watcher._pending_intents
+        assert path not in watcher._ambiguous_updates
+        assert submissions == []
+
+        current_job_state["value"] = "completed"
+
+        completed = watcher.poll_once()
+        assert completed == [path]
+        assert watcher._snapshot[path] == s2
+        assert path not in watcher._pending_intents
+        assert path not in watcher._ambiguous_updates
+        assert not watcher._inflight_updates
+
+        source.write_text("VALUE = 3000\n", encoding="utf-8")
+        s3 = watcher._scan()[path]
+        assert s3 != s2
+
+        watcher._enqueue_path(path)
+        assert watcher.poll_once() == []
+        assert update_started.wait(timeout=2)
+
+        assert len(submissions) == 1
+        submitted_path, submitted_kwargs = submissions[0]
+        assert submitted_path == path
+        assert submitted_kwargs["idempotency_key"] not in {
+            "old-k1",
+            "current-k2",
+        }
+
+        real_job_id = next(iter(watcher._inflight_updates))
+        real_job = watcher._inflight_updates[real_job_id]
+        assert real_job.observed_state == s3
+        assert real_job.idempotency_key == submitted_kwargs["idempotency_key"]
+        assert real_job.idempotency_key != "old-k1"
+
+        release_update.set()
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline and watcher._inflight_updates:
+            watcher.poll_once()
+            time.sleep(0.01)
+
+        assert watcher._snapshot[path] == s3
+        assert path not in watcher._pending_intents
+    finally:
+        release_update.set()
         server.close()
         thread.join(timeout=2)
 

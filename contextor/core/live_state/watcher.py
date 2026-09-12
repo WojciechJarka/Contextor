@@ -758,18 +758,28 @@ class DesktopLiveWatcher:
                         self._snapshot.pop(path, None)
                     reconciled.append(path)
                     continue
-                if any(
-                    job.path == path and job.observed_state == current.get(path)
-                    for job in self._inflight_updates.values()
-                ):
-                    continue
+                current_state = current.get(path)
                 pending_intent = self._pending_intents.get(path)
+                current_inflight = next(
+                    (
+                        job
+                        for job in self._inflight_updates.values()
+                        if job.path == path
+                        and job.observed_state == current_state
+                    ),
+                    None,
+                )
+                if current_inflight is not None:
+                    if pending_intent is not None:
+                        self._pending_intents.pop(path, None)
+                        self._ambiguous_updates.discard(path)
+                    continue
                 if pending_intent is None:
                     pending_intent = _PendingMutationIntent(
                         idempotency_key=uuid.uuid4().hex,
                         path=path,
                         trace_op=op,
-                        observed_state=current.get(path),
+                        observed_state=current_state,
                         started_at=update_started,
                     )
                     self._pending_intents[path] = pending_intent
