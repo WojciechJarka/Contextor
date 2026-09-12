@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import copy
-from collections import OrderedDict
+from collections import OrderedDict, deque
 from contextlib import contextmanager
 import hashlib
 import json
@@ -90,6 +90,8 @@ class LiveEndpoint:
 
 ACTIVITY_EVENT_RETENTION = 10_000
 _DIAGNOSTIC_JOURNAL_LIMIT = 3
+_MUTATION_JOB_RETENTION = 256
+_MUTATION_WORKER_JOIN_TIMEOUT = 2.0
 
 
 _MISSING_REVISION = object()
@@ -102,6 +104,204 @@ class CanonicalPersistenceConflict(RuntimeError):
         super().__init__(
             f"Canonical persistence revision conflict: current={current_revision}, requested={requested_revision}."
         )
+
+
+@dataclass
+class _MutationJob:
+    job_id: str
+    queue_order: int
+    request: dict[str, Any]
+    accepted_revision: int
+    state: str = "queued"
+    started_revision: int | None = None
+    final_revision: int | None = None
+    response: dict[str, Any] | None = None
+    error: str | None = None
+
+
+class CanonicalMutationCoordinator:
+    def __init__(
+        self,
+        executor: Callable[[dict[str, Any]], dict[str, Any]],
+        revision_reader: Callable[[], int],
+        *,
+        retention: int = _MUTATION_JOB_RETENTION,
+    ):
+        self._executor = executor
+        self._revision_reader = revision_reader
+        self._retention = retention
+        self._condition = threading.Condition()
+        self._queue: deque[str] = deque()
+        self._jobs: OrderedDict[str, _MutationJob] = OrderedDict()
+        self._thread: threading.Thread | None = None
+        self._accepting = True
+        self._stop = False
+        self._queue_order = 0
+
+    def _ensure_started_locked(self) -> None:
+        if self._thread is None:
+            self._thread = threading.Thread(
+                target=self._run,
+                name="contextor-live-mutation-worker",
+                daemon=True,
+            )
+            self._thread.start()
+
+    def submit(self, request: Mapping[str, Any]) -> dict[str, Any]:
+        try:
+            request_dict = dict(request)
+        except (TypeError, ValueError):
+            request_dict = {}
+        file_path = request_dict.get("file_path")
+        if not isinstance(file_path, str) or not file_path:
+            return {"status": "error", "error": "invalid_file_path"}
+
+        with self._condition:
+            if not self._accepting:
+                return {
+                    "status": "error",
+                    "error": "canonical_mutation_queue_closed",
+                }
+
+            self._queue_order += 1
+            job_id = "mu-" + uuid.uuid4().hex
+            accepted_revision = int(self._revision_reader())
+            job = _MutationJob(
+                job_id=job_id,
+                queue_order=self._queue_order,
+                request=request_dict,
+                accepted_revision=accepted_revision,
+            )
+            self._jobs[job_id] = job
+            self._queue.append(job_id)
+            self._ensure_started_locked()
+            self._condition.notify_all()
+            return {
+                "status": "accepted",
+                "accepted": True,
+                "job_id": job_id,
+                "queue_order": job.queue_order,
+                "accepted_revision": accepted_revision,
+                "state": job.state,
+            }
+
+    def status(self, job_id: Any) -> dict[str, Any]:
+        if not isinstance(job_id, str) or not job_id:
+            return {"status": "error", "error": "invalid_mutation_job_id"}
+
+        with self._condition:
+            job = self._jobs.get(job_id)
+            if job is None:
+                return {
+                    "status": "error",
+                    "error": "unknown_mutation_job",
+                    "job_id": job_id,
+                }
+            response: dict[str, Any] = {
+                "status": "ok",
+                "job_id": job.job_id,
+                "queue_order": job.queue_order,
+                "accepted_revision": job.accepted_revision,
+                "state": job.state,
+            }
+            if job.started_revision is not None:
+                response["started_revision"] = job.started_revision
+            if job.final_revision is not None:
+                response["final_revision"] = job.final_revision
+            if job.error is not None:
+                response["error"] = job.error
+            if job.response is not None:
+                response["response"] = copy.deepcopy(job.response)
+            return response
+
+    def _prune_terminal_locked(self) -> None:
+        terminal = {"completed", "failed", "cancelled"}
+        while sum(job.state in terminal for job in self._jobs.values()) > self._retention:
+            for job_id, job in self._jobs.items():
+                if job.state in terminal:
+                    del self._jobs[job_id]
+                    break
+            else:
+                break
+
+    def _run(self) -> None:
+        while True:
+            with self._condition:
+                while not self._queue and not self._stop:
+                    self._condition.wait()
+                if self._stop and not self._queue:
+                    return
+                job_id = self._queue.popleft()
+                job = self._jobs.get(job_id)
+                if job is None:
+                    continue
+                if job.state == "cancelled":
+                    self._prune_terminal_locked()
+                    self._condition.notify_all()
+                    continue
+                job.state = "running"
+                job.started_revision = int(self._revision_reader())
+
+            try:
+                response = self._executor(job.request)
+            except Exception as exc:
+                response = {
+                    "status": "error",
+                    "error": "canonical_mutation_execution_failed",
+                    "detail": str(exc),
+                }
+                with self._condition:
+                    job.state = "failed"
+                    job.response = response
+                    job.error = str(exc)
+                    self._prune_terminal_locked()
+                    self._condition.notify_all()
+                continue
+
+            with self._condition:
+                if isinstance(response, dict) and response.get("status") == "ok":
+                    job.state = "completed"
+                    job.response = response
+                else:
+                    job.state = "failed"
+                    if isinstance(response, dict):
+                        job.response = response
+                        error = response.get("error")
+                        job.error = str(error) if error is not None else "canonical_mutation_invalid_response"
+                    else:
+                        job.response = {
+                            "status": "error",
+                            "error": "canonical_mutation_invalid_response",
+                        }
+                        job.error = "canonical_mutation_invalid_response"
+                final_revision = job.response.get("revision") if job.response else None
+                if isinstance(final_revision, int) and not isinstance(final_revision, bool):
+                    job.final_revision = final_revision
+                self._prune_terminal_locked()
+                self._condition.notify_all()
+
+    def close(self, *, join_timeout: float = _MUTATION_WORKER_JOIN_TIMEOUT) -> None:
+        with self._condition:
+            self._accepting = False
+            self._stop = True
+            for job_id in self._queue:
+                job = self._jobs.get(job_id)
+                if job is None or job.state != "queued":
+                    continue
+                job.state = "cancelled"
+                job.error = "canonical_mutation_queue_closed"
+                job.response = {
+                    "status": "error",
+                    "error": "canonical_mutation_queue_closed",
+                    "job_id": job_id,
+                }
+            self._queue.clear()
+            self._prune_terminal_locked()
+            self._condition.notify_all()
+            thread = self._thread
+
+        if thread is not None and thread is not threading.current_thread():
+            thread.join(timeout=join_timeout)
 
 
 def _safe_trace_op(request: dict[str, Any], prefix: str) -> str | None:
@@ -504,6 +704,11 @@ class CanonicalLiveServer:
         self._events: list[dict[str, Any]] = []
         self._authority_event_fingerprints: OrderedDict[tuple[str, int, str], str] = OrderedDict()
         self._lock = threading.RLock()
+        self._mutation_execution_lock = threading.Lock()
+        self._mutation_coordinator = CanonicalMutationCoordinator(
+            self._execute_update_file,
+            self._read_revision,
+        )
         self._stop = threading.Event()
         self._authkey = authkey or secrets.token_bytes(32)
         self._authority_identity = dict(authority_identity or {})
@@ -528,6 +733,10 @@ class CanonicalLiveServer:
             process_start_identity=self._authority_identity.get("process_start_identity"),
             desktop_instance_id=self._authority_identity.get("desktop_instance_id"),
         )
+
+    def _read_revision(self) -> int:
+        with self._lock:
+            return self._revision
 
     def _record_event(
         self,
@@ -933,48 +1142,9 @@ class CanonicalLiveServer:
             finally:
                 connection.close()
 
-    def _dispatch(self, request: Any) -> dict[str, Any]:
-        if not isinstance(request, dict) or not isinstance(request.get("operation"), str):
-            return {"status": "error", "error": "invalid_request"}
-        operation = request["operation"]
-
-        # Desktop authority callbacks cross the RuntimeLease/observability
-        # boundary and may synchronously emit back into record_authority_event.
-        # Dispatch them outside the server state lock.
-        if operation == "desktop_claim_status":
-            return self._dispatch_desktop_claim_status()
-        if operation == "claim_desktop":
-            return self._dispatch_claim_desktop(request)
-        if operation == "release_desktop_claim":
-            return self._dispatch_release_desktop_claim(request)
-
-        with self._lock:
-            if operation == "ping":
-                return {
-                    "status": "ok",
-                    "protocol_version": LIVE_PROTOCOL_VERSION,
-                    "revision": self._revision,
-                    "available": self._state is not None,
-                }
-            if operation == "authority_status":
-                if not self._authority_identity:
-                    return {"status": "error", "error": "authority_identity_unavailable"}
-                return {
-                    "status": "ok",
-                    "protocol_version": LIVE_PROTOCOL_VERSION,
-                    "revision": self._revision,
-                    "repo_id": self._authority_identity.get("repo_id"),
-                    "root_path": self._authority_identity.get("root_path"),
-                    "runtime_domain_id": self._authority_identity.get("runtime_domain_id"),
-                    "service_instance_id": self._authority_identity.get("service_instance_id"),
-                    "lease_generation": self._authority_identity.get("lease_generation"),
-                    "service_pid": self._authority_identity.get("service_pid"),
-                    "process_start_identity": self._authority_identity.get("process_start_identity"),
-                    "endpoint_fingerprint": self.endpoint.fingerprint(),
-                }
-            if operation == "snapshot":
-                return {"status": "ok", "revision": self._revision, "state": self._state}
-            if operation == "publish":
+    def _execute_publish(self, request: dict[str, Any]) -> dict[str, Any]:
+        with self._mutation_execution_lock:
+            with self._lock:
                 previous_revision = self._revision
                 trace_op = _safe_trace_op(request, "p")
                 if trace_op is not None:
@@ -1028,154 +1198,173 @@ class CanonicalLiveServer:
                 evt = self._record_event("publish", request, category="LIVE_STATE")
                 _safe_trace_event("LIVE", "CANONICAL_PUBLISH", op=trace_op, rev_before=previous_revision, rev_after=self._revision, seq=evt["seq"], origin=request.get("origin"))
                 return {"status": "ok", "revision": self._revision, "seq": evt["seq"]}
-            if operation in {"status", "record_activity", "mcp_call"}:
-                cat = request.get("category", "MCP_CALL" if operation == "mcp_call" else "LIVE_STATE")
-                evt = self._record_event(operation, request, category=cat)
-                return {"status": "ok", "revision": self._revision, "seq": evt["seq"]}
-            if operation == "update_file":
+
+    def _execute_update_file(self, request: dict[str, Any]) -> dict[str, Any]:
+        with self._mutation_execution_lock:
+            with self._lock:
                 if self._state is None or self._updater is None:
                     return {
                         "status": "error",
                         "error": "live_state_unavailable",
                     }
-
                 previous_state = self._state
                 previous_revision = self._revision
                 expected_revision = previous_revision + 1
-                file_path = str(request.get("file_path", ""))
-                trace_op = _safe_trace_op(request, "u")
-                if trace_op is not None:
-                    request = {**request, "trace_op": trace_op}
-                _safe_trace_event("LIVE", "UPDATE_RECEIVED", op=trace_op, path=file_path, rev=previous_revision)
+                updater = self._updater
+                persister = self._persister
 
-                try:
-                    candidate_state = _clone_state_for_update(previous_state)
-                except Exception as exc:
-                    _safe_trace_event("LIVE", "UPDATE_FAIL", op=trace_op, path=file_path, rev=previous_revision, status="canonical_state_clone_failed", err=exc)
-                    return {
-                        "status": "error",
-                        "error": "canonical_state_clone_failed",
-                        "revision": previous_revision,
-                        "expected_revision": expected_revision,
-                        "detail": str(exc),
-                    }
-                _safe_trace_event("LIVE", "CLONE_END", op=trace_op, path=file_path, rev=previous_revision)
+            file_path = str(request.get("file_path", ""))
+            trace_op = _safe_trace_op(request, "u")
+            if trace_op is not None:
+                request = {**request, "trace_op": trace_op}
+            _safe_trace_event("LIVE", "UPDATE_RECEIVED", op=trace_op, path=file_path, rev=previous_revision)
 
-                # IMPORTANT: updater operates ONLY on candidate_state.
-                # It must never receive previous_state/self._state directly.
-                _safe_trace_event("LIVE", "UPDATER_START", op=trace_op, path=file_path)
-                updater_started = time.monotonic()
-                try:
-                    with _trace_operation_context(trace_op):
-                        result = self._updater(candidate_state, file_path)
-                except Exception as exc:
-                    _safe_trace_event("LIVE", "UPDATER_FAIL", op=trace_op, path=file_path, elapsed_ms=(time.monotonic() - updater_started) * 1000.0, err=exc)
-                    raise
-                _safe_trace_event("LIVE", "UPDATER_END", op=trace_op, path=file_path, elapsed_ms=(time.monotonic() - updater_started) * 1000.0, status=getattr(result, "status", None))
+            try:
+                candidate_state = _clone_state_for_update(previous_state)
+            except Exception as exc:
+                _safe_trace_event("LIVE", "UPDATE_FAIL", op=trace_op, path=file_path, rev=previous_revision, status="canonical_state_clone_failed", err=exc)
+                return {
+                    "status": "error",
+                    "error": "canonical_state_clone_failed",
+                    "revision": previous_revision,
+                    "expected_revision": expected_revision,
+                    "detail": str(exc),
+                }
+            _safe_trace_event("LIVE", "CLONE_END", op=trace_op, path=file_path, rev=previous_revision)
 
-                try:
-                    state_rev = _extract_state_revision(candidate_state)
-                except ValueError:
-                    _safe_trace_event("LIVE", "UPDATE_FAIL", op=trace_op, path=file_path, rev=previous_revision, status="invalid_canonical_revision", candidate_rev=_raw_state_revision(candidate_state))
-                    return {
-                        "status": "error",
-                        "error": "invalid_canonical_revision",
-                        "revision": previous_revision,
-                        "candidate_revision": _raw_state_revision(candidate_state),
-                        "expected_revision": expected_revision,
-                    }
+            # IMPORTANT: updater operates ONLY on candidate_state.
+            # It must never receive previous_state/self._state directly.
+            _safe_trace_event("LIVE", "UPDATER_START", op=trace_op, path=file_path)
+            updater_started = time.monotonic()
+            try:
+                with _trace_operation_context(trace_op):
+                    result = updater(candidate_state, file_path)
+            except Exception as exc:
+                _safe_trace_event("LIVE", "UPDATER_FAIL", op=trace_op, path=file_path, elapsed_ms=(time.monotonic() - updater_started) * 1000.0, err=exc)
+                raise
+            _safe_trace_event("LIVE", "UPDATER_END", op=trace_op, path=file_path, elapsed_ms=(time.monotonic() - updater_started) * 1000.0, status=getattr(result, "status", None))
 
-                if state_rev is None:
-                    if not _bind_state_revision(candidate_state, expected_revision):
-                        _safe_trace_event("LIVE", "UPDATE_FAIL", op=trace_op, path=file_path, rev=previous_revision, status="canonical_revision_binding_failed", candidate_rev=None)
-                        return {
-                            "status": "error",
-                            "error": "canonical_revision_binding_failed",
-                            "revision": previous_revision,
-                            "candidate_revision": None,
-                            "expected_revision": expected_revision,
-                        }
-                    state_rev = expected_revision
+            try:
+                state_rev = _extract_state_revision(candidate_state)
+            except ValueError:
+                _safe_trace_event("LIVE", "UPDATE_FAIL", op=trace_op, path=file_path, rev=previous_revision, status="invalid_canonical_revision", candidate_rev=_raw_state_revision(candidate_state))
+                return {
+                    "status": "error",
+                    "error": "invalid_canonical_revision",
+                    "revision": previous_revision,
+                    "candidate_revision": _raw_state_revision(candidate_state),
+                    "expected_revision": expected_revision,
+                }
 
-                elif state_rev == previous_revision:
-                    if not _bind_state_revision(candidate_state, expected_revision):
-                        _safe_trace_event("LIVE", "UPDATE_FAIL", op=trace_op, path=file_path, rev=previous_revision, status="canonical_revision_binding_failed", candidate_rev=state_rev)
-                        return {
-                            "status": "error",
-                            "error": "canonical_revision_binding_failed",
-                            "revision": previous_revision,
-                            "candidate_revision": state_rev,
-                            "expected_revision": expected_revision,
-                        }
-                    state_rev = expected_revision
-
-                elif state_rev < previous_revision:
-                    _safe_trace_event("LIVE", "UPDATE_FAIL", op=trace_op, path=file_path, rev=previous_revision, status="non_monotonic_canonical_revision", candidate_rev=state_rev)
-                    return {
-                        "status": "error",
-                        "error": "non_monotonic_canonical_revision",
-                        "revision": previous_revision,
-                        "candidate_revision": state_rev,
-                        "expected_revision": expected_revision,
-                    }
-
-                elif state_rev > expected_revision:
-                    _safe_trace_event("LIVE", "UPDATE_FAIL", op=trace_op, path=file_path, rev=previous_revision, status="canonical_revision_discontinuity", candidate_rev=state_rev)
-                    return {
-                        "status": "error",
-                        "error": "canonical_revision_discontinuity",
-                        "revision": previous_revision,
-                        "candidate_revision": state_rev,
-                        "expected_revision": expected_revision,
-                    }
-
-                elif state_rev != expected_revision:
-                    _safe_trace_event("LIVE", "UPDATE_FAIL", op=trace_op, path=file_path, rev=previous_revision, status="canonical_revision_discontinuity", candidate_rev=state_rev)
-                    return {
-                        "status": "error",
-                        "error": "canonical_revision_discontinuity",
-                        "revision": previous_revision,
-                        "candidate_revision": state_rev,
-                        "expected_revision": expected_revision,
-                    }
-
-                # Final parity proof before commit.
-                if _extract_state_revision(candidate_state) != expected_revision:
-                    _safe_trace_event("LIVE", "UPDATE_FAIL", op=trace_op, path=file_path, rev=previous_revision, status="canonical_revision_binding_failed", candidate_rev=_raw_state_revision(candidate_state))
+            if state_rev is None:
+                if not _bind_state_revision(candidate_state, expected_revision):
+                    _safe_trace_event("LIVE", "UPDATE_FAIL", op=trace_op, path=file_path, rev=previous_revision, status="canonical_revision_binding_failed", candidate_rev=None)
                     return {
                         "status": "error",
                         "error": "canonical_revision_binding_failed",
                         "revision": previous_revision,
-                        "candidate_revision": _raw_state_revision(candidate_state),
+                        "candidate_revision": None,
                         "expected_revision": expected_revision,
                     }
+                state_rev = expected_revision
 
-                if self._persister is not None:
-                    _safe_trace_event("LIVE", "PERSIST_START", op=trace_op, path=file_path, rev=expected_revision)
-                    try:
-                        with _trace_operation_context(trace_op):
-                            self._persister(candidate_state, expected_revision)
-                    except Exception as exc:
-                        from .store import SnapshotRevisionConflict
+            elif state_rev == previous_revision:
+                if not _bind_state_revision(candidate_state, expected_revision):
+                    _safe_trace_event("LIVE", "UPDATE_FAIL", op=trace_op, path=file_path, rev=previous_revision, status="canonical_revision_binding_failed", candidate_rev=state_rev)
+                    return {
+                        "status": "error",
+                        "error": "canonical_revision_binding_failed",
+                        "revision": previous_revision,
+                        "candidate_revision": state_rev,
+                        "expected_revision": expected_revision,
+                    }
+                state_rev = expected_revision
 
-                        status = (
-                            "canonical_persistence_revision_conflict"
-                            if isinstance(exc, (CanonicalPersistenceConflict, SnapshotRevisionConflict))
-                            else "canonical_persistence_failed"
-                        )
-                        _safe_trace_event("LIVE", "UPDATE_FAIL", op=trace_op, path=file_path, rev=previous_revision, status=status, err=exc)
-                        response = {
-                            "status": "error",
-                            "error": status,
-                            "revision": previous_revision,
-                            "expected_revision": expected_revision,
-                        }
-                        persisted_revision = getattr(exc, "current_revision", None)
-                        if persisted_revision is not None:
-                            response["persisted_revision"] = persisted_revision
-                            response["resync_required"] = True
-                        return response
-                    _safe_trace_event("LIVE", "PERSIST_END", op=trace_op, path=file_path, rev=expected_revision)
+            elif state_rev < previous_revision:
+                _safe_trace_event("LIVE", "UPDATE_FAIL", op=trace_op, path=file_path, rev=previous_revision, status="non_monotonic_canonical_revision", candidate_rev=state_rev)
+                return {
+                    "status": "error",
+                    "error": "non_monotonic_canonical_revision",
+                    "revision": previous_revision,
+                    "candidate_revision": state_rev,
+                    "expected_revision": expected_revision,
+                }
+
+            elif state_rev > expected_revision:
+                _safe_trace_event("LIVE", "UPDATE_FAIL", op=trace_op, path=file_path, rev=previous_revision, status="canonical_revision_discontinuity", candidate_rev=state_rev)
+                return {
+                    "status": "error",
+                    "error": "canonical_revision_discontinuity",
+                    "revision": previous_revision,
+                    "candidate_revision": state_rev,
+                    "expected_revision": expected_revision,
+                }
+
+            elif state_rev != expected_revision:
+                _safe_trace_event("LIVE", "UPDATE_FAIL", op=trace_op, path=file_path, rev=previous_revision, status="canonical_revision_discontinuity", candidate_rev=state_rev)
+                return {
+                    "status": "error",
+                    "error": "canonical_revision_discontinuity",
+                    "revision": previous_revision,
+                    "candidate_revision": state_rev,
+                    "expected_revision": expected_revision,
+                }
+
+            # Final parity proof before commit.
+            if _extract_state_revision(candidate_state) != expected_revision:
+                _safe_trace_event("LIVE", "UPDATE_FAIL", op=trace_op, path=file_path, rev=previous_revision, status="canonical_revision_binding_failed", candidate_rev=_raw_state_revision(candidate_state))
+                return {
+                    "status": "error",
+                    "error": "canonical_revision_binding_failed",
+                    "revision": previous_revision,
+                    "candidate_revision": _raw_state_revision(candidate_state),
+                    "expected_revision": expected_revision,
+                }
+
+            if persister is not None:
+                _safe_trace_event("LIVE", "PERSIST_START", op=trace_op, path=file_path, rev=expected_revision)
+                try:
+                    with _trace_operation_context(trace_op):
+                        persister(candidate_state, expected_revision)
+                except Exception as exc:
+                    from .store import SnapshotRevisionConflict
+
+                    status = (
+                        "canonical_persistence_revision_conflict"
+                        if isinstance(exc, (CanonicalPersistenceConflict, SnapshotRevisionConflict))
+                        else "canonical_persistence_failed"
+                    )
+                    _safe_trace_event("LIVE", "UPDATE_FAIL", op=trace_op, path=file_path, rev=previous_revision, status=status, err=exc)
+                    response = {
+                        "status": "error",
+                        "error": status,
+                        "revision": previous_revision,
+                        "expected_revision": expected_revision,
+                    }
+                    persisted_revision = getattr(exc, "current_revision", None)
+                    if persisted_revision is not None:
+                        response["persisted_revision"] = persisted_revision
+                        response["resync_required"] = True
+                    return response
+                _safe_trace_event("LIVE", "PERSIST_END", op=trace_op, path=file_path, rev=expected_revision)
+
+            with self._lock:
+                if self._revision != previous_revision or self._state is not previous_state:
+                    _safe_trace_event(
+                        "LIVE",
+                        "UPDATE_FAIL",
+                        op=trace_op,
+                        path=file_path,
+                        rev=self._revision,
+                        status="canonical_revision_changed_during_update",
+                        expected_revision=expected_revision,
+                    )
+                    return {
+                        "status": "error",
+                        "error": "canonical_revision_changed_during_update",
+                        "revision": self._revision,
+                        "expected_revision": expected_revision,
+                    }
 
                 # ATOMIC COMMIT BOUNDARY.
                 # Nothing above this line may replace/mutate active canonical ownership.
@@ -1203,54 +1392,111 @@ class CanonicalLiveServer:
                     result,
                     category="LIVE_STATE",
                 )
-                _safe_trace_event("LIVE", "UPDATE_PUBLISHED", op=trace_op, path=file_path, rev=self._revision, seq=evt["seq"], status=getattr(result, "status", None))
-                origin = str(event_request.get("origin") or event_request.get("source") or "unknown")
-                trace_common = {
-                    "repo": self._authority_identity.get("root_path"),
-                    "repo_id": self._authority_identity.get("repo_id"),
-                    "origin": origin,
-                    "diagnostic_total": len(diagnostic_delta),
-                    "diagnostic_truncated": len(diagnostic_delta) > _DIAGNOSTIC_JOURNAL_LIMIT,
-                }
-                for change in diagnostic_delta:
-                    event_name = _diagnostic_trace_event_name(change)
-                    if event_name is None:
-                        continue
-                    trace_fields = {
-                        **trace_common,
-                        "diagnostic_kind": change["diagnostic_kind"],
-                        "diagnostic_key": change["diagnostic_key"],
-                    }
-                    if "source_path" in change:
-                        trace_fields["path"] = change["source_path"]
-                    if change["diagnostic_kind"] == "syntax":
-                        trace_fields.update(
-                            error=change["message"],
-                            line_number=change["line_number"],
-                            column_number=change["column_number"],
-                        )
-                    elif change["diagnostic_kind"] == "collision":
-                        for field in (
-                            "collision_kind",
-                            "collision_artifact_type",
-                            "collision_symbol",
-                            "collision_is_identical",
-                            "collision_nodes",
-                        ):
-                            trace_fields[field] = change[field]
-                    else:
-                        trace_fields["cycle_nodes"] = change["cycle_nodes"]
-                    _safe_trace_event(
-                        "LIVE", event_name, op=trace_op, rev=self._revision, **trace_fields
-                    )
+                committed_revision = self._revision
+                committed_seq = evt["seq"]
 
+            _safe_trace_event("LIVE", "UPDATE_PUBLISHED", op=trace_op, path=file_path, rev=committed_revision, seq=committed_seq, status=getattr(result, "status", None))
+            origin = str(event_request.get("origin") or event_request.get("source") or "unknown")
+            trace_common = {
+                "repo": self._authority_identity.get("root_path"),
+                "repo_id": self._authority_identity.get("repo_id"),
+                "origin": origin,
+                "diagnostic_total": len(diagnostic_delta),
+                "diagnostic_truncated": len(diagnostic_delta) > _DIAGNOSTIC_JOURNAL_LIMIT,
+            }
+            for change in diagnostic_delta:
+                event_name = _diagnostic_trace_event_name(change)
+                if event_name is None:
+                    continue
+                trace_fields = {
+                    **trace_common,
+                    "diagnostic_kind": change["diagnostic_kind"],
+                    "diagnostic_key": change["diagnostic_key"],
+                }
+                if "source_path" in change:
+                    trace_fields["path"] = change["source_path"]
+                if change["diagnostic_kind"] == "syntax":
+                    trace_fields.update(
+                        error=change["message"],
+                        line_number=change["line_number"],
+                        column_number=change["column_number"],
+                    )
+                elif change["diagnostic_kind"] == "collision":
+                    for field in (
+                        "collision_kind",
+                        "collision_artifact_type",
+                        "collision_symbol",
+                        "collision_is_identical",
+                        "collision_nodes",
+                    ):
+                        trace_fields[field] = change[field]
+                else:
+                    trace_fields["cycle_nodes"] = change["cycle_nodes"]
+                _safe_trace_event(
+                    "LIVE", event_name, op=trace_op, rev=committed_revision, **trace_fields
+                )
+
+            return {
+                "status": "ok",
+                "activity_epoch": self._activity_epoch,
+                "revision": committed_revision,
+                "result": result,
+                "seq": committed_seq,
+            }
+
+    def _dispatch(self, request: Any) -> dict[str, Any]:
+        if not isinstance(request, dict) or not isinstance(request.get("operation"), str):
+            return {"status": "error", "error": "invalid_request"}
+        operation = request["operation"]
+
+        # Desktop authority callbacks cross the RuntimeLease/observability
+        # boundary and may synchronously emit back into record_authority_event.
+        # Dispatch them outside the server state lock.
+        if operation == "desktop_claim_status":
+            return self._dispatch_desktop_claim_status()
+        if operation == "claim_desktop":
+            return self._dispatch_claim_desktop(request)
+        if operation == "release_desktop_claim":
+            return self._dispatch_release_desktop_claim(request)
+        if operation == "submit_update_file":
+            return self._mutation_coordinator.submit(request)
+        if operation == "mutation_status":
+            return self._mutation_coordinator.status(request.get("job_id"))
+        if operation == "update_file":
+            return self._execute_update_file(request)
+        if operation == "publish":
+            return self._execute_publish(request)
+
+        with self._lock:
+            if operation == "ping":
                 return {
                     "status": "ok",
-                    "activity_epoch": self._activity_epoch,
+                    "protocol_version": LIVE_PROTOCOL_VERSION,
                     "revision": self._revision,
-                    "result": result,
-                    "seq": evt["seq"],
+                    "available": self._state is not None,
                 }
+            if operation == "authority_status":
+                if not self._authority_identity:
+                    return {"status": "error", "error": "authority_identity_unavailable"}
+                return {
+                    "status": "ok",
+                    "protocol_version": LIVE_PROTOCOL_VERSION,
+                    "revision": self._revision,
+                    "repo_id": self._authority_identity.get("repo_id"),
+                    "root_path": self._authority_identity.get("root_path"),
+                    "runtime_domain_id": self._authority_identity.get("runtime_domain_id"),
+                    "service_instance_id": self._authority_identity.get("service_instance_id"),
+                    "lease_generation": self._authority_identity.get("lease_generation"),
+                    "service_pid": self._authority_identity.get("service_pid"),
+                    "process_start_identity": self._authority_identity.get("process_start_identity"),
+                    "endpoint_fingerprint": self.endpoint.fingerprint(),
+                }
+            if operation == "snapshot":
+                return {"status": "ok", "revision": self._revision, "state": self._state}
+            if operation in {"status", "record_activity", "mcp_call"}:
+                cat = request.get("category", "MCP_CALL" if operation == "mcp_call" else "LIVE_STATE")
+                evt = self._record_event(operation, request, category=cat)
+                return {"status": "ok", "revision": self._revision, "seq": evt["seq"]}
             if operation == "get_events":
                 after_revision = request.get("after_revision")
                 after_seq = request.get("after_seq")
@@ -1387,6 +1633,7 @@ class CanonicalLiveServer:
                 self._listener.close()
             except OSError:
                 pass
+        self._mutation_coordinator.close()
 
     def __enter__(self) -> "CanonicalLiveServer":
         return self
@@ -1509,6 +1756,23 @@ class LiveStateClient:
 
     def update_file(self, file_path: str, *, origin: str = "unknown", trace_op: str | None = None) -> dict[str, Any]:
         return self.request("update_file", file_path=file_path, origin=origin, trace_op=trace_op)
+
+    def submit_update_file(
+        self,
+        file_path: str,
+        *,
+        origin: str = "unknown",
+        trace_op: str | None = None,
+    ) -> dict[str, Any]:
+        return self.request(
+            "submit_update_file",
+            file_path=file_path,
+            origin=origin,
+            trace_op=trace_op,
+        )
+
+    def mutation_status(self, job_id: str) -> dict[str, Any]:
+        return self.request("mutation_status", job_id=job_id)
 
     def get_events(
         self,
