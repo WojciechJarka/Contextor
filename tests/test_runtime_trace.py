@@ -78,6 +78,44 @@ def test_diagnostic_trace_fields_and_structured_node_arrays_are_durable():
     assert record["collision_is_identical"] is False
 
 
+def test_diagnostic_trace_records_preserve_exact_contract_fields_for_all_families():
+    path = trace.start_desktop_trace_session()
+    trace.trace_event(
+        "LIVE", "LIVE_DIAGNOSTIC_SYNTAX_ERROR", op="diag-18", rev=18,
+        origin="desktop_watcher", diagnostic_kind="syntax", diagnostic_key='["syntax","pkg/bad.py",2,1]',
+        path="pkg/bad.py", error="invalid syntax", line_number=2, column_number=1,
+        diagnostic_total=3, diagnostic_truncated=False,
+    )
+    trace.trace_event(
+        "LIVE", "LIVE_DIAGNOSTIC_COLLISION_ADDED", op="diag-18", rev=18,
+        origin="desktop_watcher", diagnostic_kind="collision", diagnostic_key='["collision","target"]',
+        collision_kind="NAME_COLLISION", collision_artifact_type="function", collision_symbol="target",
+        collision_is_identical=False, collision_nodes=["pkg.a", "pkg.b"],
+        diagnostic_total=3, diagnostic_truncated=False,
+    )
+    trace.trace_event(
+        "LIVE", "LIVE_DIAGNOSTIC_CYCLE_ADDED", op="diag-18", rev=18,
+        origin="desktop_watcher", diagnostic_kind="cycle", diagnostic_key='["cycle","pkg.a","pkg.b","pkg.a"]',
+        cycle_nodes=["pkg.a", "pkg.b", "pkg.a"], diagnostic_total=3, diagnostic_truncated=True,
+    )
+    trace.finish_desktop_trace_session()
+    records = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+    diagnostics = [item for item in records if item.get("ev", "").startswith("LIVE_DIAGNOSTIC_")]
+    assert [(item["ev"], item["rev"], item["op"], item["origin"], item["diagnostic_kind"]) for item in diagnostics] == [
+        ("LIVE_DIAGNOSTIC_SYNTAX_ERROR", 18, "diag-18", "desktop_watcher", "syntax"),
+        ("LIVE_DIAGNOSTIC_COLLISION_ADDED", 18, "diag-18", "desktop_watcher", "collision"),
+        ("LIVE_DIAGNOSTIC_CYCLE_ADDED", 18, "diag-18", "desktop_watcher", "cycle"),
+    ]
+    assert diagnostics[0]["diagnostic_key"] == '["syntax","pkg/bad.py",2,1]'
+    assert diagnostics[1]["diagnostic_key"] == '["collision","target"]'
+    assert diagnostics[2]["diagnostic_key"] == '["cycle","pkg.a","pkg.b","pkg.a"]'
+    assert diagnostics[1]["collision_nodes"] == ["pkg.a", "pkg.b"]
+    assert diagnostics[2]["cycle_nodes"] == ["pkg.a", "pkg.b", "pkg.a"]
+    assert diagnostics[1]["collision_is_identical"] is False
+    assert diagnostics[0]["diagnostic_truncated"] is False
+    assert diagnostics[2]["diagnostic_truncated"] is True
+
+
 def test_default_trace_session_uses_external_runtime_logs_root(tmp_path, monkeypatch):
     state = tmp_path / "user-state"
     monkeypatch.setenv("CONTEXTOR_STATE_DIR", str(state))

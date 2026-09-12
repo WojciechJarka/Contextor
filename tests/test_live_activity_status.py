@@ -180,9 +180,10 @@ def test_background_feed_has_single_poll_owner_and_no_duplicates(live_server_ins
 
 
 def test_desktop_feed_formats_committed_diagnostic_delta_without_replacing_syntax_message():
-    feed = DesktopLiveEventFeed(SimpleNamespace(), lambda *_args, **_kwargs: None)
+    feed = DesktopLiveEventFeed(SimpleNamespace(), lambda *_args, **_kwargs: None, initial_seq=0)
     event = {
         "operation": "update_file",
+        "origin": "desktop_watcher",
         "status": "SYNTAX_ERROR",
         "file_path": "pkg/bad.py",
         "canonical_revision": 12,
@@ -207,9 +208,10 @@ def test_desktop_feed_formats_committed_diagnostic_delta_without_replacing_synta
 
 
 def test_desktop_feed_formats_generic_diagnostic_delta_and_ignores_malformed_payload():
-    feed = DesktopLiveEventFeed(SimpleNamespace(), lambda *_args, **_kwargs: None)
+    feed = DesktopLiveEventFeed(SimpleNamespace(), lambda *_args, **_kwargs: None, initial_seq=0)
     event = {
         "operation": "update_file",
+        "origin": "desktop_watcher",
         "status": "UPDATED",
         "file_path": "pkg/change.py",
         "canonical_revision": 13,
@@ -230,6 +232,99 @@ def test_desktop_feed_formats_generic_diagnostic_delta_and_ignores_malformed_pay
     assert feed._message({**event, "diagnostic_changes": {"items": "bad", "total": 1}}) == (
         "[LIVE] Watcher updated change.py (rev 13)"
     )
+
+
+@pytest.mark.parametrize(
+    "item, expected",
+    [
+        (
+            {"action": "ADDED", "diagnostic_kind": "collision", "collision_symbol": "target", "collision_nodes": ["pkg.a", "pkg.b"]},
+            "[LIVE] Diagnostics after change.py (rev 14): collision added: target [pkg.a, pkg.b]",
+        ),
+        (
+            {"action": "RESOLVED", "diagnostic_kind": "collision", "collision_symbol": "target", "collision_nodes": ["pkg.a", "pkg.b"]},
+            "[LIVE] Diagnostics after change.py (rev 14): collision resolved: target [pkg.a, pkg.b]",
+        ),
+        (
+            {"action": "ADDED", "diagnostic_kind": "cycle", "cycle_nodes": ["pkg.a", "pkg.b", "pkg.a"]},
+            "[LIVE] Diagnostics after change.py (rev 14): cycle added: pkg.a -> pkg.b -> pkg.a",
+        ),
+        (
+            {"action": "RESOLVED", "diagnostic_kind": "cycle", "cycle_nodes": ["pkg.a", "pkg.b", "pkg.a"]},
+            "[LIVE] Diagnostics after change.py (rev 14): cycle resolved: pkg.a -> pkg.b -> pkg.a",
+        ),
+    ],
+)
+def test_desktop_feed_formats_each_collision_and_cycle_action(item, expected):
+    feed = DesktopLiveEventFeed(SimpleNamespace(), lambda *_args, **_kwargs: None, initial_seq=0)
+    event = {
+        "operation": "update_file", "origin": "desktop_watcher", "status": "UPDATED", "file_path": "pkg/change.py",
+        "canonical_revision": 14,
+        "diagnostic_changes": {"total": 1, "truncated": False, "items": [item]},
+    }
+    assert feed._message(event) == expected
+
+
+def test_desktop_feed_preserves_recovered_text_and_appends_only_non_syntax_details():
+    feed = DesktopLiveEventFeed(SimpleNamespace(), lambda *_args, **_kwargs: None, initial_seq=0)
+    event = {
+        "operation": "update_file", "origin": "desktop_watcher", "status": "RECOVERED", "file_path": "pkg/bad.py",
+        "canonical_revision": 15,
+        "diagnostic_changes": {
+            "total": 2, "truncated": False,
+            "items": [
+                {"action": "RESOLVED", "diagnostic_kind": "syntax", "source_path": "pkg/bad.py", "line_number": 2, "column_number": 1},
+                {"action": "ADDED", "diagnostic_kind": "collision", "collision_symbol": "target", "collision_nodes": ["pkg.a", "pkg.b"]},
+            ],
+        },
+    }
+    message = feed._message(event)
+    assert message == "[LIVE] Syntax recovered in bad.py (rev 15); collision added: target [pkg.a, pkg.b]"
+    assert "syntax error resolved" not in message
+
+
+def test_desktop_feed_suppresses_matching_syntax_detail_and_bounds_remaining_items():
+    feed = DesktopLiveEventFeed(SimpleNamespace(), lambda *_args, **_kwargs: None, initial_seq=0)
+    event = {
+        "operation": "update_file", "origin": "desktop_watcher", "status": "SYNTAX_ERROR", "file_path": "pkg/bad.py",
+        "canonical_revision": 16, "error": "invalid syntax", "line_number": 1, "column_number": 2,
+        "diagnostic_changes": {
+            "total": 5, "truncated": True,
+            "items": [
+                {"action": "ADDED", "diagnostic_kind": "syntax", "source_path": "pkg/bad.py", "line_number": 1, "column_number": 2},
+                {"action": "ADDED", "diagnostic_kind": "cycle", "cycle_nodes": ["pkg.a", "pkg.b", "pkg.a"]},
+                {"action": "RESOLVED", "diagnostic_kind": "collision", "collision_symbol": "target", "collision_nodes": ["pkg.a", "pkg.b"]},
+            ],
+        },
+    }
+    message = feed._message(event)
+    assert message == (
+        "[LIVE] Syntax error in bad.py line 1, column 2: invalid syntax; "
+        "cycle added: pkg.a -> pkg.b -> pkg.a; collision resolved: target [pkg.a, pkg.b]; +2 more"
+    )
+    assert "syntax error added" not in message
+    assert message.endswith("+2 more")
+
+
+def test_desktop_feed_delivers_one_diagnostic_journal_event_once_through_poll_path():
+    event = {
+        "seq": 1, "category": "LIVE_STATE", "operation": "update_file", "origin": "desktop_watcher",
+        "status": "UPDATED", "file_path": "pkg/change.py", "canonical_revision": 17,
+        "diagnostic_changes": {"total": 1, "truncated": False, "items": [
+            {"action": "ADDED", "diagnostic_kind": "cycle", "cycle_nodes": ["pkg.a", "pkg.b", "pkg.a"]}
+        ]},
+    }
+
+    class Client:
+        def get_events(self, **_kwargs):
+            return {"status": "ok", "activity_epoch": "test", "events": [event], "truncated": False}
+
+    delivered = []
+    feed = DesktopLiveEventFeed(Client(), lambda message, event=None: delivered.append((message, event)), initial_seq=0)
+    feed.poll_once()
+    assert delivered == [
+        ("[LIVE] Diagnostics after change.py (rev 17): cycle added: pkg.a -> pkg.b -> pkg.a", event)
+    ]
 
 
 def test_explicit_inactive_repo_never_falls_through_to_other_active_repo(live_server_instance, monkeypatch, tmp_path):
