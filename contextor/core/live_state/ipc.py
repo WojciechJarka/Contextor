@@ -112,6 +112,7 @@ class _MutationJob:
     queue_order: int
     request: dict[str, Any]
     accepted_revision: int
+    idempotency_key: str
     state: str = "queued"
     started_revision: int | None = None
     final_revision: int | None = None
@@ -133,6 +134,7 @@ class CanonicalMutationCoordinator:
         self._condition = threading.Condition()
         self._queue: deque[str] = deque()
         self._jobs: OrderedDict[str, _MutationJob] = OrderedDict()
+        self._idempotency_jobs: dict[str, str] = {}
         self._thread: threading.Thread | None = None
         self._accepting = True
         self._stop = False
@@ -155,8 +157,24 @@ class CanonicalMutationCoordinator:
         file_path = request_dict.get("file_path")
         if not isinstance(file_path, str) or not file_path:
             return {"status": "error", "error": "invalid_file_path"}
+        idempotency_key = request_dict.get("idempotency_key")
+        if not isinstance(idempotency_key, str) or not idempotency_key:
+            return {"status": "error", "error": "invalid_idempotency_key"}
 
         with self._condition:
+            existing_job_id = self._idempotency_jobs.get(idempotency_key)
+            if existing_job_id is not None:
+                existing_job = self._jobs.get(existing_job_id)
+                if existing_job is not None:
+                    return {
+                        "status": "accepted",
+                        "accepted": True,
+                        "job_id": existing_job.job_id,
+                        "queue_order": existing_job.queue_order,
+                        "accepted_revision": existing_job.accepted_revision,
+                        "state": existing_job.state,
+                    }
+                del self._idempotency_jobs[idempotency_key]
             if not self._accepting:
                 return {
                     "status": "error",
@@ -171,8 +189,10 @@ class CanonicalMutationCoordinator:
                 queue_order=self._queue_order,
                 request=request_dict,
                 accepted_revision=accepted_revision,
+                idempotency_key=idempotency_key,
             )
             self._jobs[job_id] = job
+            self._idempotency_jobs[idempotency_key] = job_id
             self._queue.append(job_id)
             self._ensure_started_locked()
             self._condition.notify_all()
@@ -220,6 +240,8 @@ class CanonicalMutationCoordinator:
             for job_id, job in self._jobs.items():
                 if job.state in terminal:
                     del self._jobs[job_id]
+                    if self._idempotency_jobs.get(job.idempotency_key) == job_id:
+                        del self._idempotency_jobs[job.idempotency_key]
                     break
             else:
                 break
@@ -1773,12 +1795,14 @@ class LiveStateClient:
         *,
         origin: str = "unknown",
         trace_op: str | None = None,
+        idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         return self.request(
             "submit_update_file",
             file_path=file_path,
             origin=origin,
             trace_op=trace_op,
+            idempotency_key=idempotency_key,
         )
 
     def mutation_status(self, job_id: str) -> dict[str, Any]:

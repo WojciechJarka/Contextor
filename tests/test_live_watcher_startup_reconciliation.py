@@ -910,6 +910,71 @@ def test_lost_update_response_resolves_from_real_filestate_without_retry(tmp_pat
         thread.join(timeout=2)
 
 
+def test_lost_queued_update_ack_reuses_idempotency_key_and_runs_once(tmp_path):
+    update_started = threading.Event()
+    release_update = threading.Event()
+    update_calls = []
+
+    def updater(_state, path):
+        update_calls.append(path)
+        update_started.set()
+        assert release_update.wait(timeout=5)
+        return SimpleNamespace(status="UPDATED", file_path=path)
+
+    repo, server, thread, _endpoint, client, watcher = _real_watcher_runtime(
+        tmp_path, updater
+    )
+    source = repo / "module.py"
+    source.write_text("VALUE = 1\n", encoding="utf-8")
+    watcher._snapshot = {str(source): (0, 1)}
+    watcher._candidate_requires_update = lambda *_args: True
+    original_submit = client.submit_update_file
+    attempts = []
+
+    def lose_first_ack(path, **kwargs):
+        attempts.append(kwargs["idempotency_key"])
+        response = original_submit(path, **kwargs)
+        if len(attempts) == 1:
+            raise ConnectionError("accepted response lost")
+        return response
+
+    client.submit_update_file = lose_first_ack
+    watcher._recover_client = lambda *_args: client
+    try:
+        source.write_text("VALUE = 2\n", encoding="utf-8")
+        watcher._enqueue_path(str(source))
+        expected_state = watcher._scan()[str(source)]
+
+        assert watcher.poll_once() == []
+        assert update_started.wait(timeout=2)
+        assert watcher._has_pending_paths() is True
+        assert server._revision == 0
+
+        assert watcher.poll_once() == []
+        assert len(attempts) == 2
+        assert attempts[0] == attempts[1]
+        assert len(server._mutation_coordinator._jobs) == 1
+        assert server._mutation_coordinator._idempotency_jobs[attempts[0]] in server._mutation_coordinator._jobs
+
+        release_update.set()
+        assert _poll_until(watcher, [str(source)]) == [str(source)]
+        assert update_calls == [str(source)]
+        assert watcher._snapshot[str(source)] == expected_state
+        events = client.get_events(after_revision=0, limit=None)["events"]
+        assert len([event for event in events if event["operation"] == "update_file"]) == 1
+        assert server._revision == 1
+
+        source.write_text("VALUE = 3\n", encoding="utf-8")
+        watcher._enqueue_path(str(source))
+        assert _poll_until(watcher, [str(source)]) == [str(source)]
+        assert len(update_calls) == 2
+        assert attempts[2] != attempts[0]
+    finally:
+        release_update.set()
+        server.close()
+        thread.join(timeout=2)
+
+
 def test_precommit_failure_retries_real_pending_change_once(tmp_path):
     update_count = []
 

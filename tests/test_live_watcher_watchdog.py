@@ -161,7 +161,10 @@ def test_event_path_routes_through_queued_client_submission(tmp_path):
     watcher._enqueue_path(str(path))
 
     assert watcher.poll_once() == [str(path.resolve())]
-    assert updates == [(str(path.resolve()), {"origin": "desktop_watcher", "trace_op": updates[0][1]["trace_op"]})]
+    assert updates[0][0] == str(path.resolve())
+    assert updates[0][1]["origin"] == "desktop_watcher"
+    assert updates[0][1]["trace_op"]
+    assert updates[0][1]["idempotency_key"]
 
 
 def test_delete_event_routes_missing_path_as_delete_candidate(tmp_path):

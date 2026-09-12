@@ -7,6 +7,7 @@ import pytest
 
 from contextor.core.live_state import CanonicalLiveServer, LiveStateClient
 from contextor.core.live_state.ipc import CanonicalMutationCoordinator
+from contextor.core.live_state.runtime import _repository_mutation_guard
 from contextor.core.live_state.store import SnapshotRevisionConflict
 
 
@@ -47,6 +48,16 @@ def _wait_for_terminal(client, job_id, timeout=3.0):
     raise AssertionError(f"mutation job did not become terminal: {job_id}")
 
 
+def _wait_for_coordinator_terminal(coordinator, job_id, timeout=3.0):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        status = coordinator.status(job_id)
+        if status.get("state") in {"completed", "failed", "cancelled"}:
+            return status
+        time.sleep(0.01)
+    raise AssertionError(f"mutation job did not become terminal: {job_id}")
+
+
 def test_submit_ack_is_immediate_and_does_not_publish_revision():
     started = threading.Event()
     release = threading.Event()
@@ -61,7 +72,7 @@ def test_submit_ack_is_immediate_and_does_not_publish_revision():
     with _running_server(server) as client:
         assert server._mutation_coordinator._thread is None
         started_at = time.monotonic()
-        accepted = client.submit_update_file("blocked.py", origin="test")
+        accepted = client.submit_update_file("blocked.py", origin="test", idempotency_key="blocked")
         elapsed = time.monotonic() - started_at
 
         assert elapsed < 0.5
@@ -106,7 +117,7 @@ def test_read_only_ipc_remains_responsive_while_queued_mutation_runs():
         authority_identity=authority,
     )
     with _running_server(server) as client:
-        accepted = client.submit_update_file("slow.py", origin="test")
+        accepted = client.submit_update_file("slow.py", origin="test", idempotency_key="slow")
         assert started.wait(timeout=1)
         reader = LiveStateClient(server.endpoint)
 
@@ -163,9 +174,9 @@ def test_queued_mutations_are_fifo_and_strictly_serial():
 
     server = CanonicalLiveServer(SimpleNamespace(files=[], revision=0), updater=updater)
     with _running_server(server) as client:
-        first = client.submit_update_file("a.py", origin="test")
+        first = client.submit_update_file("a.py", origin="test", idempotency_key="a")
         assert first_started.wait(timeout=1)
-        second = client.submit_update_file("b.py", origin="test")
+        second = client.submit_update_file("b.py", origin="test", idempotency_key="b")
         release_first.set()
 
         first_status = _wait_for_terminal(client, first["job_id"])
@@ -177,6 +188,145 @@ def test_queued_mutations_are_fifo_and_strictly_serial():
         assert first_status["final_revision"] == 1
         assert second_status["final_revision"] == 2
         assert client.snapshot()["state"].files == ["a.py", "b.py"]
+
+
+def test_duplicate_idempotency_key_reuses_job_and_executes_once():
+    started = threading.Event()
+    release = threading.Event()
+    executions = []
+
+    def executor(request):
+        executions.append(request)
+        started.set()
+        assert release.wait(timeout=3)
+        return {"status": "ok", "revision": 1}
+
+    coordinator = CanonicalMutationCoordinator(executor, lambda: 0)
+    try:
+        first = coordinator.submit(
+            {"file_path": "same.py", "idempotency_key": "intent-1"}
+        )
+        assert started.wait(timeout=1)
+
+        duplicate = coordinator.submit(
+            {"file_path": "same.py", "idempotency_key": "intent-1"}
+        )
+        assert duplicate["status"] == "accepted"
+        assert duplicate["job_id"] == first["job_id"]
+        assert duplicate["queue_order"] == first["queue_order"]
+        assert duplicate["accepted_revision"] == first["accepted_revision"]
+        assert duplicate["state"] == "running"
+
+        release.set()
+        terminal = _wait_for_coordinator_terminal(coordinator, first["job_id"])
+        assert terminal["state"] == "completed"
+        assert executions == [{"file_path": "same.py", "idempotency_key": "intent-1"}]
+    finally:
+        release.set()
+        coordinator.close()
+
+
+def test_different_idempotency_keys_for_same_path_create_distinct_jobs():
+    executions = []
+
+    def executor(request):
+        executions.append(request["idempotency_key"])
+        return {"status": "ok", "revision": len(executions)}
+
+    coordinator = CanonicalMutationCoordinator(executor, lambda: 0)
+    try:
+        first = coordinator.submit(
+            {"file_path": "same.py", "idempotency_key": "intent-1"}
+        )
+        second = coordinator.submit(
+            {"file_path": "same.py", "idempotency_key": "intent-2"}
+        )
+        assert first["job_id"] != second["job_id"]
+        assert first["queue_order"] == 1
+        assert second["queue_order"] == 2
+
+        assert _wait_for_coordinator_terminal(coordinator, first["job_id"])["state"] == "completed"
+        assert _wait_for_coordinator_terminal(coordinator, second["job_id"])["state"] == "completed"
+        assert executions == ["intent-1", "intent-2"]
+    finally:
+        coordinator.close()
+
+
+def test_concurrent_duplicate_submissions_enqueue_only_once():
+    submission_count = 8
+    barrier = threading.Barrier(submission_count)
+    results = [None] * submission_count
+    executions = []
+
+    def executor(_request):
+        executions.append("executed")
+        return {"status": "ok", "revision": 1}
+
+    coordinator = CanonicalMutationCoordinator(executor, lambda: 0)
+
+    def submit(index):
+        barrier.wait(timeout=3)
+        results[index] = coordinator.submit(
+            {"file_path": "same.py", "idempotency_key": "concurrent-intent"}
+        )
+
+    threads = [threading.Thread(target=submit, args=(index,)) for index in range(submission_count)]
+    try:
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=3)
+            assert not thread.is_alive()
+
+        assert all(result["status"] == "accepted" for result in results)
+        assert len({result["job_id"] for result in results}) == 1
+        job_id = results[0]["job_id"]
+        assert _wait_for_coordinator_terminal(coordinator, job_id)["state"] == "completed"
+        assert executions == ["executed"]
+    finally:
+        coordinator.close()
+
+
+def test_idempotency_mapping_is_evicted_with_terminal_job_record():
+    executions = []
+
+    def executor(request):
+        executions.append(request["idempotency_key"])
+        return {"status": "ok", "revision": len(executions)}
+
+    coordinator = CanonicalMutationCoordinator(executor, lambda: 0, retention=1)
+    try:
+        first = coordinator.submit(
+            {"file_path": "first.py", "idempotency_key": "first-intent"}
+        )
+        assert _wait_for_coordinator_terminal(coordinator, first["job_id"])["state"] == "completed"
+
+        second = coordinator.submit(
+            {"file_path": "second.py", "idempotency_key": "second-intent"}
+        )
+        assert _wait_for_coordinator_terminal(coordinator, second["job_id"])["state"] == "completed"
+        assert first["job_id"] not in coordinator._jobs
+        assert "first-intent" not in coordinator._idempotency_jobs
+
+        replacement = coordinator.submit(
+            {"file_path": "first.py", "idempotency_key": "first-intent"}
+        )
+        assert replacement["job_id"] != first["job_id"]
+        assert _wait_for_coordinator_terminal(coordinator, replacement["job_id"])["state"] == "completed"
+        assert executions == ["first-intent", "second-intent", "first-intent"]
+    finally:
+        coordinator.close()
+
+
+@pytest.mark.parametrize("invalid_key", [None, "", 123, False])
+def test_malformed_idempotency_key_is_rejected(invalid_key):
+    coordinator = CanonicalMutationCoordinator(lambda _request: {"status": "ok"}, lambda: 0)
+    try:
+        assert coordinator.submit(
+            {"file_path": "bad.py", "idempotency_key": invalid_key}
+        ) == {"status": "error", "error": "invalid_idempotency_key"}
+    finally:
+        coordinator.close()
 
 
 def test_candidate_is_invisible_during_slow_persistence():
@@ -199,7 +349,7 @@ def test_candidate_is_invisible_during_slow_persistence():
         persister=persister,
     )
     with _running_server(server) as client:
-        accepted = client.submit_update_file("persist.py", origin="test")
+        accepted = client.submit_update_file("persist.py", origin="test", idempotency_key="persist")
         assert persist_started.wait(timeout=1)
         snapshot = LiveStateClient(server.endpoint).snapshot()
         assert snapshot["revision"] == 0
@@ -240,7 +390,7 @@ def test_persistence_failure_leaves_canonical_state_revision_journal_and_diagnos
 
     server = CanonicalLiveServer(initial, updater=updater, persister=persister)
     with _running_server(server) as client:
-        accepted = client.submit_update_file("bad.py", origin="test")
+        accepted = client.submit_update_file("bad.py", origin="test", idempotency_key="bad")
         terminal = _wait_for_terminal(client, accepted["job_id"])
         assert terminal["state"] == "failed"
         assert terminal["response"]["error"] == "canonical_persistence_revision_conflict"
@@ -265,9 +415,9 @@ def test_worker_survives_failed_job_and_executes_next_job():
 
     server = CanonicalLiveServer(SimpleNamespace(files=[], revision=0), updater=updater)
     with _running_server(server) as client:
-        first = client.submit_update_file("bad.py", origin="test")
+        first = client.submit_update_file("bad.py", origin="test", idempotency_key="bad")
         assert first_started.wait(timeout=1)
-        second = client.submit_update_file("good.py", origin="test")
+        second = client.submit_update_file("good.py", origin="test", idempotency_key="good")
         first_status = _wait_for_terminal(client, first["job_id"])
         second_status = _wait_for_terminal(client, second["job_id"])
 
@@ -296,7 +446,7 @@ def test_publish_and_queued_update_are_single_writer_serialized():
         SimpleNamespace(value=0, files=[], revision=0), updater=updater
     )
     try:
-        accepted = server._mutation_coordinator.submit({"file_path": "update.py"})
+        accepted = server._mutation_coordinator.submit({"file_path": "update.py", "idempotency_key": "update"})
         assert update_started.wait(timeout=1)
 
         def publish():
@@ -342,9 +492,9 @@ def test_coordinator_close_cancels_queued_not_active_job():
         return {"status": "ok", "revision": 1}
 
     coordinator = CanonicalMutationCoordinator(lambda request: executor(request), lambda: 0)
-    first = coordinator.submit({"file_path": "first.py"})
+    first = coordinator.submit({"file_path": "first.py", "idempotency_key": "first"})
     assert first_started.wait(timeout=1)
-    second = coordinator.submit({"file_path": "second.py"})
+    second = coordinator.submit({"file_path": "second.py", "idempotency_key": "second"})
 
     coordinator.close(join_timeout=0.05)
     cancelled = coordinator.status(second["job_id"])
@@ -355,7 +505,7 @@ def test_coordinator_close_cancels_queued_not_active_job():
         "error": "canonical_mutation_queue_closed",
         "job_id": second["job_id"],
     }
-    assert coordinator.submit({"file_path": "third.py"}) == {
+    assert coordinator.submit({"file_path": "third.py", "idempotency_key": "third"}) == {
         "status": "error",
         "error": "canonical_mutation_queue_closed",
     }
@@ -448,11 +598,58 @@ def test_queued_executor_enters_mutation_guard_before_canonical_execution():
         SimpleNamespace(files=[], revision=0), updater=updater, mutation_guard=guard
     )
     with _running_server(server) as client:
-        accepted = client.submit_update_file("guarded.py", origin="test")
+        accepted = client.submit_update_file("guarded.py", origin="test", idempotency_key="guarded")
         terminal = _wait_for_terminal(client, accepted["job_id"])
         assert terminal["state"] == "completed"
         assert entered.is_set()
     assert order == ["lease", "update", "release"]
+
+
+def test_real_full_analysis_lease_blocks_worker_until_released(tmp_path):
+    from contextor.core.analysis.full_analysis_coordinator import (
+        acquire_full_analysis,
+        release_full_analysis,
+    )
+    from contextor.core.reporting_engine.persistent_registry import PersistentIdentityRegistry
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    PersistentIdentityRegistry(str(repo))
+    held_lease = acquire_full_analysis(repo, owner="analysis", timeout=1)
+    entered = threading.Event()
+    calls = []
+
+    def updater(state, path):
+        calls.append(path)
+        entered.set()
+        state.files.append(path)
+        return {"status": "UPDATED", "file_path": path}
+
+    server = CanonicalLiveServer(
+        SimpleNamespace(files=[], revision=0),
+        updater=updater,
+        mutation_guard=_repository_mutation_guard(repo),
+    )
+    try:
+        accepted = server._mutation_coordinator.submit(
+            {"file_path": "lease.py", "idempotency_key": "lease-intent"}
+        )
+        assert not entered.wait(timeout=0.2)
+
+        release_full_analysis(held_lease)
+        held_lease = None
+        terminal = _wait_for_coordinator_terminal(
+            server._mutation_coordinator, accepted["job_id"]
+        )
+        assert terminal["state"] == "completed"
+        assert calls == ["lease.py"]
+
+        released_lease = acquire_full_analysis(repo, owner="after-worker", timeout=1)
+        release_full_analysis(released_lease)
+    finally:
+        if held_lease is not None:
+            release_full_analysis(held_lease)
+        server.close()
 
 
 def test_coordinator_close_reports_undrained_active_worker_then_drains():
@@ -465,7 +662,7 @@ def test_coordinator_close_reports_undrained_active_worker_then_drains():
         return {"status": "ok", "revision": 1}
 
     coordinator = CanonicalMutationCoordinator(executor, lambda: 0)
-    accepted = coordinator.submit({"file_path": "slow.py"})
+    accepted = coordinator.submit({"file_path": "slow.py", "idempotency_key": "slow"})
     assert started.wait(timeout=1)
     assert coordinator.close(join_timeout=0.01) is False
     release.set()

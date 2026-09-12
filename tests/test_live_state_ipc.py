@@ -494,6 +494,30 @@ def live_server():
     assert not thread.is_alive()
 
 
+@pytest.mark.parametrize("invalid_key", [None, "", 123, False])
+def test_public_queued_submit_rejects_malformed_idempotency_key(live_server, invalid_key):
+    _server, client = live_server
+
+    assert client.submit_update_file(
+        "module.py", idempotency_key=invalid_key
+    ) == {"status": "error", "error": "invalid_idempotency_key"}
+
+
+def test_public_queued_submit_propagates_idempotency_key_to_coordinator(live_server):
+    server, client = live_server
+
+    accepted = client.submit_update_file(
+        "module.py", idempotency_key="public-intent"
+    )
+    duplicate = client.submit_update_file(
+        "module.py", idempotency_key="public-intent"
+    )
+
+    assert accepted["status"] == "accepted"
+    assert duplicate["job_id"] == accepted["job_id"]
+    assert server._mutation_coordinator._idempotency_jobs["public-intent"] == accepted["job_id"]
+
+
 def test_two_clients_observe_one_in_ram_state_and_revision(live_server):
     server, first = live_server
     second = LiveStateClient(server.endpoint)
