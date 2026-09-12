@@ -19,6 +19,7 @@ from contextor.core.analysis.lineage_extraction import extract_lineage_source_fa
 from contextor.core.analysis.lineage_materialization import (
     LineageResolutionContext,
     materialize_lineage_source_facts,
+    reresolve_materialized_lineage_source_facts,
 )
 from contextor.core.analysis.state_manager import RepositoryAnalysisState
 from contextor.core.domain.graph import ProjectGraph
@@ -37,6 +38,7 @@ from contextor.core.domain.lineage_facts import (
     ProviderRef,
     ResolutionKind,
     SemanticEndpoint,
+    SemanticEndpointRole,
     SemanticInterfaceDescriptor,
     SourceLineageManifest,
     SourceSpan,
@@ -505,7 +507,6 @@ def _lineage_state_for_facts(facts, registry, modules, artifacts):
     return RepositoryAnalysisState(
         modules=modules,
         artifacts=artifacts,
-        lineage_extracted_facts_by_source=dict(facts),
         lineage_facts_by_source=materialized,
         lineage_facts_state=family_state,
         lineage_facts_semantic_version=semantic_version,
@@ -544,6 +545,101 @@ def _slice_for(source_key: str) -> MaterializedLineageSourceFacts:
         _extracted(source_key),
         LineageResolutionContext({}, {}, frozenset(), {}),
     )
+
+
+def test_identity_sync_legacy_semantic_without_origin_fails_closed_to_stale(tmp_path):
+    legacy = _lineage_slice()
+    other = _slice_for("other.py")
+    state = RepositoryAnalysisState(
+        modules={"pkg": _module("pkg"), "other": _module("other")},
+        artifacts={"pkg": {"own_symbols": set()}, "other": {"own_symbols": set()}},
+        lineage_facts_by_source={"pkg.py": legacy, "other.py": other},
+        lineage_facts_state="fresh",
+        lineage_facts_semantic_version=LINEAGE_FACTS_SEMANTIC_VERSION,
+    )
+    engine, _ = _lineage_engine(
+        state,
+        _LineageRegistry({"pkg": "M:pkg", "other": "M:other"}),
+        tmp_path,
+    )
+    candidate = _prepare_candidate_state(state)
+
+    with engine.registry.read_transaction():
+        engine._update_candidate_lineage_slice(
+            candidate,
+            source_path="other.py",
+            extracted_lineage_facts=_extracted("other.py"),
+            rematerialize_all=True,
+        )
+
+    assert candidate.lineage_facts_state == LineageFamilyStatus.STALE.value
+    assert candidate.lineage_facts_by_source["pkg.py"] is legacy
+
+
+def test_snapshot_round_trip_compact_origin_reresolves_without_source_work(tmp_path):
+    facts = _cross_source_facts()
+    modules = {name: _module(name) for name in ("provider", "consumer")}
+    artifacts = {
+        "provider": {"own_symbols": {"target"}},
+        "consumer": {"own_symbols": set()},
+    }
+    registry = _LifecycleRegistry(
+        {"provider": "M:provider/1", "consumer": "M:consumer/1"},
+        {"provider::target": "A:provider/1"},
+    )
+    state = _lineage_state_for_facts(facts, registry, modules, artifacts)
+    save_snapshot(state, tmp_path, "compact-origin")
+    loaded, _ = load_snapshot(tmp_path, expected_state_id="compact-origin")
+    consumer = loaded.lineage_facts_by_source["consumer.py"]
+    assert consumer.semantic_endpoint_origins
+
+    removed = reresolve_materialized_lineage_source_facts(
+        consumer,
+        LineageResolutionContext(
+            {"consumer": "M:consumer/1"}, {}, frozenset({"M:consumer/1"}), {}
+        ),
+    )
+    assert isinstance(removed.surfaces[0].exposed, MaterializedSymbolicRef)
+    restored = reresolve_materialized_lineage_source_facts(
+        removed,
+        LineageResolutionContext(
+            {"consumer": "M:consumer/1"},
+            {"provider::target": "A:provider/2"},
+            frozenset({"M:consumer/1", "A:provider/2"}),
+            {},
+        ),
+    )
+    assert restored.surfaces[0].exposed == SemanticEndpoint("A:provider/2")
+
+
+@pytest.mark.parametrize(
+    "origins",
+    [
+        lambda origin: (origin, replace(origin, symbol_name="different")),
+        lambda origin: (replace(origin, source_key="other.py"),),
+        lambda origin: (replace(origin, source_fingerprint="other"),),
+        lambda origin: (replace(origin, fact_local_id="missing"),),
+        lambda origin: (replace(origin, endpoint_role=SemanticEndpointRole.FLOW_SOURCE),),
+    ],
+)
+def test_snapshot_rejects_corrupt_compact_origin(tmp_path, origins):
+    facts = _cross_source_facts()
+    modules = {name: _module(name) for name in ("provider", "consumer")}
+    artifacts = {
+        "provider": {"own_symbols": {"target"}},
+        "consumer": {"own_symbols": set()},
+    }
+    registry = _LifecycleRegistry(
+        {"provider": "M:provider/1", "consumer": "M:consumer/1"},
+        {"provider::target": "A:provider/1"},
+    )
+    state = _lineage_state_for_facts(facts, registry, modules, artifacts)
+    source_slice = state.lineage_facts_by_source["consumer.py"]
+    origin = source_slice.semantic_endpoint_origins[0]
+    object.__setattr__(source_slice, "semantic_endpoint_origins", origins(origin))
+    save_snapshot(state, tmp_path, "corrupt-origin")
+
+    assert load_snapshot(tmp_path, expected_state_id="corrupt-origin") is None
 
 
 def test_incremental_lineage_modify_replaces_only_changed_candidate_slice(tmp_path):
@@ -847,7 +943,6 @@ def test_identity_sync_owner_deletion_matches_fresh_full_materialization_without
         {"provider::target": "A:provider/1"},
     )
     state = _lineage_state_for_facts(facts, registry, modules, artifacts)
-    old_consumer_facts = state.lineage_extracted_facts_by_source["consumer.py"]
     candidate = _prepare_candidate_state(state)
     candidate.modules = {"consumer": modules["consumer"]}
     candidate.artifacts = {"consumer": artifacts["consumer"]}
@@ -902,9 +997,6 @@ def test_identity_sync_owner_deletion_matches_fresh_full_materialization_without
     assert state.lineage_facts_semantic_version == expected_version
     assert set(state.lineage_facts_by_source) == {"consumer.py"}
     assert state.lineage_facts_by_source == expected
-    assert state.lineage_extracted_facts_by_source == {
-        "consumer.py": old_consumer_facts
-    }
     exposed = state.lineage_facts_by_source["consumer.py"].surfaces[0].exposed
     assert isinstance(exposed, MaterializedSymbolicRef)
     assert exposed.module_name == "provider"
@@ -1067,7 +1159,6 @@ def test_identity_sync_revalidation_failure_rolls_back_registry_and_canonical_st
     original_modules = dict(state.modules)
     original_artifacts = dict(state.artifacts)
     original_lineage = dict(state.lineage_facts_by_source)
-    original_extracted = dict(state.lineage_extracted_facts_by_source)
     candidate = _prepare_candidate_state(state)
     candidate.modules = {"consumer": modules["consumer"]}
     candidate.artifacts = {"consumer": artifacts["consumer"]}
@@ -1085,13 +1176,13 @@ def test_identity_sync_revalidation_failure_rolls_back_registry_and_canonical_st
         lambda **_kwargs: outcome,
     )
 
-    def fail_on_untouched_consumer(extracted, _resolution):
-        if extracted.source_key == "consumer.py":
+    def fail_on_untouched_consumer(source_slice, _resolution):
+        if source_slice.manifest.source_key == "consumer.py":
             raise ValueError("consumer rematerialization failed")
         raise AssertionError("deleted provider should not be rematerialized")
 
     monkeypatch.setattr(
-        "contextor.core.analysis.lineage_materialization.materialize_lineage_source_facts",
+        "contextor.core.analysis.lineage_materialization.reresolve_materialized_lineage_source_facts",
         fail_on_untouched_consumer,
     )
     engine, acknowledged = _lineage_engine(state, registry, tmp_path)
@@ -1111,7 +1202,6 @@ def test_identity_sync_revalidation_failure_rolls_back_registry_and_canonical_st
     assert state.modules == original_modules
     assert state.artifacts == original_artifacts
     assert state.lineage_facts_by_source == original_lineage
-    assert state.lineage_extracted_facts_by_source == original_extracted
     assert registry._state["module_registry"]["path_to_id"]["provider"] == "M:provider/1"
     assert registry._state["artifact_registry"]["path_to_id"]["provider::target"] == "A:provider/1"
     assert acknowledged == []

@@ -7,6 +7,7 @@ import pytest
 from contextor.core.analysis.lineage_materialization import (
     LineageResolutionContext,
     materialize_lineage_source_facts,
+    reresolve_materialized_lineage_source_facts,
 )
 from contextor.core.domain.lineage_facts import (
     ExtractedAnchorFact,
@@ -24,6 +25,8 @@ from contextor.core.domain.lineage_facts import (
     ProviderRef,
     ResolutionKind,
     SemanticEndpoint,
+    SemanticEndpointOrigin,
+    SemanticEndpointRole,
     SemanticInterfaceDescriptor,
     SourceSpan,
     SurfaceDeclarationEvidence,
@@ -159,6 +162,43 @@ def test_materializer_does_not_mutate_input_mappings():
     context = _context(artifacts=artifacts)
     materialize_lineage_source_facts(_facts(), context)
     assert artifacts == {"pkg.mod::run": "A1/1"}
+
+
+def test_compact_origins_preserve_only_strengthened_endpoint_provenance():
+    span = SourceSpan(1, 0, 1, 1)
+    reference = ExtractedSymbolicRef(
+        ExtractedSymbolicKind.PUBLIC_TARGET, "pkg.mod", "target"
+    )
+    facts = _facts(flows=(
+        ExtractedFlowFact(
+            "flow", ExtractedOccurrenceRef("local"), reference,
+            LineageRelation.EXPOSES, span, ResolutionKind.IMPORT_EXACT,
+            LineageConfidence.CONFIRMED,
+        ),
+    ))
+    materialized = materialize_lineage_source_facts(
+        facts, _context(artifacts={"pkg.mod::target": "A1/1"})
+    )
+    assert materialized.flows[0].target == SemanticEndpoint("A1/1")
+    assert materialized.semantic_endpoint_origins == (
+        SemanticEndpointOrigin(
+            "pkg/mod.py", "sha256:test", "flow",
+            SemanticEndpointRole.FLOW_TARGET,
+            ExtractedSymbolicKind.PUBLIC_TARGET, "pkg.mod", "target",
+        ),
+    )
+
+    removed = reresolve_materialized_lineage_source_facts(
+        materialized, _context()
+    )
+    assert isinstance(removed.flows[0].target, MaterializedSymbolicRef)
+    assert removed.semantic_endpoint_origins == ()
+
+    restored = reresolve_materialized_lineage_source_facts(
+        removed, _context(artifacts={"pkg.mod::target": "A1/2"})
+    )
+    assert restored.flows[0].target == SemanticEndpoint("A1/2")
+    assert len(restored.semantic_endpoint_origins) == 1
 
 
 

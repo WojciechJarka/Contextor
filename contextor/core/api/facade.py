@@ -703,9 +703,6 @@ class ContextorFacade:
                 syntax_diagnostics_state=syntax_diagnostics_state,
                 module_usages=module_usages,
                 module_usages_manifest=module_usages_manifest,
-                lineage_extracted_facts_by_source=dict(
-                    getattr(index, "lineage_facts_by_source", {}) or {}
-                ),
                 lineage_facts_by_source=lineage_facts_by_source,
                 lineage_facts_state=lineage_facts_state,
                 lineage_facts_semantic_version=lineage_facts_semantic_version,

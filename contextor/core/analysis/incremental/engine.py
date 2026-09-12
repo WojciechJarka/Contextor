@@ -124,7 +124,6 @@ class IncrementalAnalysisEngine:
             )
 
             candidate.lineage_facts_by_source.pop(source_path, None)
-            candidate.lineage_extracted_facts_by_source.pop(source_path, None)
             if candidate.lineage_facts_state == LineageFamilyStatus.NOT_MATERIALIZED.value:
                 candidate.lineage_facts_state = LineageFamilyStatus.NOT_MATERIALIZED.value
                 candidate.lineage_facts_semantic_version = None
@@ -158,9 +157,6 @@ class IncrementalAnalysisEngine:
         self.state.syntax_diagnostics_by_path = candidate.syntax_diagnostics_by_path
         self.state.syntax_diagnostics_state = candidate.syntax_diagnostics_state
         self.state.module_parse_freshness = candidate.module_parse_freshness
-        self.state.lineage_extracted_facts_by_source = (
-            candidate.lineage_extracted_facts_by_source
-        )
         self.state.lineage_facts_by_source = candidate.lineage_facts_by_source
         self.state.lineage_facts_state = candidate.lineage_facts_state
         self.state.lineage_facts_semantic_version = (
@@ -176,10 +172,12 @@ class IncrementalAnalysisEngine:
         delete: bool = False,
         rematerialize_all: bool = False,
     ) -> None:
-        """Install/remove lineage and optionally rebuild all retained slices."""
+        """Install/remove lineage and re-resolve canonical slices after identity sync."""
         from contextor.core.analysis.lineage_materialization import (
+            LineageOriginUnavailableError,
             LineageResolutionContext,
             materialize_lineage_source_facts,
+            reresolve_materialized_lineage_source_facts,
         )
         from contextor.core.domain.lineage_facts import (
             LINEAGE_FACTS_SEMANTIC_VERSION,
@@ -193,12 +191,10 @@ class IncrementalAnalysisEngine:
             Path(str(module.path)).as_posix()
             for module in candidate.modules.values()
         }
-        extracted_by_source = candidate.lineage_extracted_facts_by_source
         lineage_by_source = candidate.lineage_facts_by_source
 
         if delete:
             lineage_by_source.pop(source_path, None)
-            extracted_by_source.pop(source_path, None)
             candidate.lineage_facts_semantic_version = LINEAGE_FACTS_SEMANTIC_VERSION
         else:
             if extracted_lineage_facts is None:
@@ -207,26 +203,10 @@ class IncrementalAnalysisEngine:
                 raise ValueError("Extracted lineage source key does not match incremental source.")
             if source_path not in eligible_source_keys:
                 raise ValueError("Incremental lineage source is outside the active candidate.")
-            extracted_by_source[source_path] = extracted_lineage_facts
 
-        foreign_extracted_keys = set(extracted_by_source) - eligible_source_keys
-        if foreign_extracted_keys:
-            raise ValueError(
-                "Extracted lineage contains sources outside the active candidate: "
-                f"{sorted(foreign_extracted_keys)!r}"
-            )
-        for source_key, extracted in extracted_by_source.items():
-            if extracted.source_key != source_key:
-                raise ValueError(
-                    "Extracted lineage mapping key does not match its source key."
-                )
-
-        source_keys_to_materialize = (
-            tuple(sorted(extracted_by_source))
-            if rematerialize_all
-            else (() if delete else (source_path,))
-        )
-        if source_keys_to_materialize:
+        needs_resolution = rematerialize_all or not delete
+        origin_unavailable = False
+        if needs_resolution:
             active_module_names = set(candidate.modules)
             active_artifact_names = collect_qualified_artifact_identities(
                 candidate.artifacts
@@ -260,8 +240,8 @@ class IncrementalAnalysisEngine:
                 ),
                 interface_descriptors={},
             )
-            for source_key in source_keys_to_materialize:
-                extracted = extracted_by_source[source_key]
+            if not delete:
+                extracted = extracted_lineage_facts
                 materialized = materialize_lineage_source_facts(
                     extracted,
                     resolution,
@@ -274,14 +254,19 @@ class IncrementalAnalysisEngine:
                     raise ValueError(
                         "Materialized lineage manifest does not match extracted source."
                     )
-                lineage_by_source[source_key] = materialized
+                lineage_by_source[source_path] = materialized
+            if rematerialize_all:
+                for source_key in sorted(lineage_by_source):
+                    try:
+                        lineage_by_source[source_key] = (
+                            reresolve_materialized_lineage_source_facts(
+                                lineage_by_source[source_key],
+                                resolution,
+                            )
+                        )
+                    except LineageOriginUnavailableError:
+                        origin_unavailable = True
             candidate.lineage_facts_semantic_version = LINEAGE_FACTS_SEMANTIC_VERSION
-
-        unrebuildable_source_keys = (
-            set(lineage_by_source) - set(extracted_by_source)
-            if rematerialize_all
-            else set()
-        )
 
         foreign_source_keys = set(lineage_by_source) - eligible_source_keys
         if foreign_source_keys:
@@ -292,7 +277,7 @@ class IncrementalAnalysisEngine:
         missing_source_keys = eligible_source_keys - set(lineage_by_source)
         if getattr(self.state, "resync_required", False):
             candidate.lineage_facts_state = LineageFamilyStatus.STALE.value
-        elif unrebuildable_source_keys:
+        elif origin_unavailable:
             candidate.lineage_facts_state = LineageFamilyStatus.STALE.value
         elif missing_source_keys:
             candidate.lineage_facts_state = (
@@ -707,9 +692,6 @@ class IncrementalAnalysisEngine:
             # certify it fresh again.
             self.state.resync_required = True
         self.state.module_usages = candidate.module_usages
-        self.state.lineage_extracted_facts_by_source = (
-            candidate.lineage_extracted_facts_by_source
-        )
         self.state.lineage_facts_by_source = candidate.lineage_facts_by_source
         self.state.lineage_facts_state = candidate.lineage_facts_state
         self.state.lineage_facts_semantic_version = (

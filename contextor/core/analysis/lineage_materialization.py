@@ -25,6 +25,8 @@ from contextor.core.domain.lineage_facts import (
     ParameterKind,
     ResolutionKind,
     SemanticEndpoint,
+    SemanticEndpointOrigin,
+    SemanticEndpointRole,
     SemanticInterfaceDescriptor,
     SourceLineageManifest,
     build_module_global_slot,
@@ -70,6 +72,10 @@ class LineageResolutionContext:
                 )
 
 
+class LineageOriginUnavailableError(ValueError):
+    """A legacy semantic endpoint cannot be safely re-resolved."""
+
+
 def materialize_lineage_source_facts(
     extracted: ExtractedLineageSourceFacts,
     resolution: LineageResolutionContext,
@@ -87,17 +93,37 @@ def materialize_lineage_source_facts(
         )
 
     descriptors: dict[str, SemanticInterfaceDescriptor] = {}
+    origins: list[SemanticEndpointOrigin] = []
 
     def endpoint(
         reference: ExtractedOccurrenceRef | ExtractedSymbolicRef,
         kind: ResolutionKind,
         confidence: LineageConfidence,
+        fact_local_id: str,
+        endpoint_role: SemanticEndpointRole,
     ) -> MaterializedOccurrenceRef | MaterializedSymbolicRef | SemanticEndpoint:
         if isinstance(reference, ExtractedOccurrenceRef):
             return occurrence(reference.local_id)
-        return _symbolic_endpoint(
-            reference, resolution, descriptors, kind, confidence, extracted
+        resolved = _symbolic_endpoint(
+            reference,
+            resolution,
+            descriptors,
+            kind,
+            confidence,
+            extracted.source_key,
+            extracted.source_fingerprint,
         )
+        if isinstance(resolved, SemanticEndpoint):
+            origins.append(
+                _semantic_origin(
+                    reference,
+                    extracted.source_key,
+                    extracted.source_fingerprint,
+                    fact_local_id,
+                    endpoint_role,
+                )
+            )
+        return resolved
     anchors = tuple(
         sorted(
             MaterializedAnchorFact(
@@ -106,39 +132,53 @@ def materialize_lineage_source_facts(
             for anchor in extracted.anchors
         )
     )
-    flows = tuple(
-        sorted(
-            MaterializedFlowFact(
-                flow.local_id,
-                endpoint(flow.source, flow.resolution_kind, flow.confidence),
-                endpoint(flow.target, flow.resolution_kind, flow.confidence),
-                flow.relation,
-                flow.evidence,
+    flows = tuple(sorted(
+        MaterializedFlowFact(
+            flow.local_id,
+            endpoint(
+                flow.source,
                 flow.resolution_kind,
                 flow.confidence,
-                flow.dynamic_boundary,
-                flow.provider,
-            )
-            for flow in extracted.flows
+                flow.local_id,
+                SemanticEndpointRole.FLOW_SOURCE,
+            ),
+            endpoint(
+                flow.target,
+                flow.resolution_kind,
+                flow.confidence,
+                flow.local_id,
+                SemanticEndpointRole.FLOW_TARGET,
+            ),
+            flow.relation,
+            flow.evidence,
+            flow.resolution_kind,
+            flow.confidence,
+            flow.dynamic_boundary,
+            flow.provider,
         )
-    )
-    surfaces = tuple(
-        sorted(
-            MaterializedSurfaceFact(
-                surface.local_id,
-                surface.kind,
-                endpoint(surface.exposed, surface.resolution_kind, surface.confidence),
-                surface.evidence,
+        for flow in extracted.flows
+    ))
+    surfaces = tuple(sorted(
+        MaterializedSurfaceFact(
+            surface.local_id,
+            surface.kind,
+            endpoint(
+                surface.exposed,
                 surface.resolution_kind,
                 surface.confidence,
-                surface.declared_name,
-                surface.dynamic_boundary,
-                surface.provider,
-                surface.declaration_evidence,
-            )
-            for surface in extracted.surfaces
+                surface.local_id,
+                SemanticEndpointRole.SURFACE_EXPOSED,
+            ),
+            surface.evidence,
+            surface.resolution_kind,
+            surface.confidence,
+            surface.declared_name,
+            surface.dynamic_boundary,
+            surface.provider,
+            surface.declaration_evidence,
         )
-    )
+        for surface in extracted.surfaces
+    ))
     manifest = SourceLineageManifest(
         extracted.source_key,
         extracted.source_fingerprint,
@@ -150,7 +190,159 @@ def materialize_lineage_source_facts(
         extracted.resource_limit_reason,
     )
     return MaterializedLineageSourceFacts(
-        manifest, anchors, flows, surfaces, tuple(sorted(descriptors.values()))
+        manifest,
+        anchors,
+        flows,
+        surfaces,
+        tuple(sorted(descriptors.values())),
+        tuple(sorted(origins)),
+    )
+
+
+def reresolve_materialized_lineage_source_facts(
+    materialized: MaterializedLineageSourceFacts,
+    resolution: LineageResolutionContext,
+) -> MaterializedLineageSourceFacts:
+    """Re-resolve one canonical slice without source, AST, or extracted facts."""
+
+    if not isinstance(materialized, MaterializedLineageSourceFacts):
+        raise TypeError("materialized must be MaterializedLineageSourceFacts.")
+    if not isinstance(resolution, LineageResolutionContext):
+        raise TypeError("resolution must be LineageResolutionContext.")
+
+    origins = {
+        (origin.fact_local_id, origin.endpoint_role): origin
+        for origin in materialized.semantic_endpoint_origins
+    }
+    descriptors: dict[str, SemanticInterfaceDescriptor] = {}
+    resolved_origins: list[SemanticEndpointOrigin] = []
+
+    def endpoint(
+        current: MaterializedOccurrenceRef | MaterializedSymbolicRef | SemanticEndpoint,
+        resolution_kind: ResolutionKind,
+        confidence: LineageConfidence,
+        fact_local_id: str,
+        endpoint_role: SemanticEndpointRole,
+    ) -> MaterializedOccurrenceRef | MaterializedSymbolicRef | SemanticEndpoint:
+        if isinstance(current, MaterializedOccurrenceRef):
+            return current
+        if isinstance(current, MaterializedSymbolicRef):
+            reference = ExtractedSymbolicRef(
+                current.kind,
+                current.module_name,
+                current.symbol_name,
+                current.source_local_id,
+            )
+            source_key = current.source_key
+            source_fingerprint = current.source_fingerprint
+        else:
+            origin = origins.get((fact_local_id, endpoint_role))
+            if origin is None:
+                raise LineageOriginUnavailableError(
+                    "Semantic endpoint is missing compact symbolic origin."
+                )
+            reference = ExtractedSymbolicRef(
+                origin.kind,
+                origin.module_name,
+                origin.symbol_name,
+                origin.source_local_id,
+            )
+            source_key = origin.source_key
+            source_fingerprint = origin.source_fingerprint
+        resolved = _symbolic_endpoint(
+            reference,
+            resolution,
+            descriptors,
+            resolution_kind,
+            confidence,
+            source_key,
+            source_fingerprint,
+        )
+        if isinstance(resolved, SemanticEndpoint):
+            resolved_origins.append(
+                _semantic_origin(
+                    reference,
+                    source_key,
+                    source_fingerprint,
+                    fact_local_id,
+                    endpoint_role,
+                )
+            )
+        return resolved
+
+    flows = tuple(sorted(
+        MaterializedFlowFact(
+            flow.local_id,
+            endpoint(
+                flow.source,
+                flow.resolution_kind,
+                flow.confidence,
+                flow.local_id,
+                SemanticEndpointRole.FLOW_SOURCE,
+            ),
+            endpoint(
+                flow.target,
+                flow.resolution_kind,
+                flow.confidence,
+                flow.local_id,
+                SemanticEndpointRole.FLOW_TARGET,
+            ),
+            flow.relation,
+            flow.evidence,
+            flow.resolution_kind,
+            flow.confidence,
+            flow.dynamic_boundary,
+            flow.provider,
+        )
+        for flow in materialized.flows
+    ))
+    surfaces = tuple(sorted(
+        MaterializedSurfaceFact(
+            surface.local_id,
+            surface.kind,
+            endpoint(
+                surface.exposed,
+                surface.resolution_kind,
+                surface.confidence,
+                surface.local_id,
+                SemanticEndpointRole.SURFACE_EXPOSED,
+            ),
+            surface.evidence,
+            surface.resolution_kind,
+            surface.confidence,
+            surface.declared_name,
+            surface.dynamic_boundary,
+            surface.provider,
+            surface.declaration_evidence,
+        )
+        for surface in materialized.surfaces
+    ))
+    return MaterializedLineageSourceFacts(
+        materialized.manifest,
+        materialized.anchors,
+        flows,
+        surfaces,
+        tuple(sorted(descriptors.values())),
+        tuple(sorted(resolved_origins)),
+    )
+
+
+def _semantic_origin(
+    reference: ExtractedSymbolicRef,
+    source_key: str,
+    source_fingerprint: str,
+    fact_local_id: str,
+    endpoint_role: SemanticEndpointRole,
+) -> SemanticEndpointOrigin:
+    return SemanticEndpointOrigin(
+        source_key,
+        source_fingerprint,
+        fact_local_id,
+        endpoint_role,
+        reference.kind,
+        reference.module_name,
+        reference.symbol_name,
+        reference.source_local_id,
     )
 
 
@@ -160,10 +352,11 @@ def _symbolic_endpoint(
     descriptors: dict[str, SemanticInterfaceDescriptor],
     resolution_kind: ResolutionKind,
     confidence: LineageConfidence,
-    extracted: ExtractedLineageSourceFacts,
+    source_key: str,
+    source_fingerprint: str,
 ) -> MaterializedSymbolicRef | SemanticEndpoint:
     symbolic = MaterializedSymbolicRef(
-        extracted.source_key, extracted.source_fingerprint, reference.kind,
+        source_key, source_fingerprint, reference.kind,
         reference.module_name, reference.symbol_name, reference.source_local_id,
     )
     if not claims_exact_semantic_target(resolution_kind, confidence):

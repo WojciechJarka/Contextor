@@ -110,6 +110,12 @@ class ExtractedSymbolicKind(str, Enum):
     PUBLIC_TARGET = "public_target"
 
 
+class SemanticEndpointRole(str, Enum):
+    FLOW_SOURCE = "flow_source"
+    FLOW_TARGET = "flow_target"
+    SURFACE_EXPOSED = "surface_exposed"
+
+
 @dataclass(frozen=True, order=True)
 class SourceSpan:
     """Exact source evidence; it is never semantic identity."""
@@ -211,6 +217,33 @@ class MaterializedSymbolicRef:
     def __post_init__(self) -> None:
         _require_token(self.source_key, "source_key")
         _require_token(self.source_fingerprint, "source_fingerprint")
+        _require_token(self.module_name, "module_name")
+        _require_token(self.symbol_name, "symbol_name")
+        if self.source_local_id is not None:
+            _require_token(self.source_local_id, "source_local_id")
+
+
+@dataclass(frozen=True, order=True)
+class SemanticEndpointOrigin:
+    """Compact symbolic provenance for one strengthened semantic endpoint."""
+
+    source_key: str
+    source_fingerprint: str
+    fact_local_id: str
+    endpoint_role: SemanticEndpointRole
+    kind: ExtractedSymbolicKind
+    module_name: str
+    symbol_name: str
+    source_local_id: str | None = None
+
+    def __post_init__(self) -> None:
+        _require_token(self.source_key, "source_key")
+        _require_token(self.source_fingerprint, "source_fingerprint")
+        _require_token(self.fact_local_id, "fact_local_id")
+        if not isinstance(self.endpoint_role, SemanticEndpointRole):
+            raise TypeError("endpoint_role must be SemanticEndpointRole.")
+        if not isinstance(self.kind, ExtractedSymbolicKind):
+            raise TypeError("kind must be ExtractedSymbolicKind.")
         _require_token(self.module_name, "module_name")
         _require_token(self.symbol_name, "symbol_name")
         if self.source_local_id is not None:
@@ -412,12 +445,14 @@ class MaterializedLineageSourceFacts:
     flows: tuple[MaterializedFlowFact, ...] = ()
     surfaces: tuple[MaterializedSurfaceFact, ...] = ()
     interface_descriptors: tuple[SemanticInterfaceDescriptor, ...] = ()
+    semantic_endpoint_origins: tuple[SemanticEndpointOrigin, ...] = ()
 
     def __post_init__(self) -> None:
         _require_sorted_unique(self.anchors, "anchors")
         _require_sorted_unique(self.flows, "flows")
         _require_sorted_unique(self.surfaces, "surfaces")
         _require_sorted_unique(self.interface_descriptors, "interface_descriptors")
+        _require_sorted_unique(self.semantic_endpoint_origins, "semantic_endpoint_origins")
         if self.manifest.status == LineageFamilyStatus.FRESH:
             expected = (len(self.anchors), len(self.flows), len(self.surfaces))
             actual = (
@@ -434,6 +469,32 @@ class MaterializedLineageSourceFacts:
             _require_slice_occurrence(flow.target, self.manifest)
         for surface in self.surfaces:
             _require_slice_occurrence(surface.exposed, self.manifest)
+        self._validate_semantic_endpoint_origins()
+
+    def _validate_semantic_endpoint_origins(self) -> None:
+        flow_by_id = {flow.local_id: flow for flow in self.flows}
+        surface_by_id = {surface.local_id: surface for surface in self.surfaces}
+        locators: set[tuple[str, SemanticEndpointRole]] = set()
+        for origin in self.semantic_endpoint_origins:
+            if (
+                origin.source_key != self.manifest.source_key
+                or origin.source_fingerprint != self.manifest.source_fingerprint
+            ):
+                raise ValueError("Semantic endpoint origin must belong to its slice.")
+            locator = (origin.fact_local_id, origin.endpoint_role)
+            if locator in locators:
+                raise ValueError("Semantic endpoint origins must have unique locators.")
+            locators.add(locator)
+            if origin.endpoint_role is SemanticEndpointRole.FLOW_SOURCE:
+                endpoint = getattr(flow_by_id.get(origin.fact_local_id), "source", None)
+            elif origin.endpoint_role is SemanticEndpointRole.FLOW_TARGET:
+                endpoint = getattr(flow_by_id.get(origin.fact_local_id), "target", None)
+            else:
+                endpoint = getattr(surface_by_id.get(origin.fact_local_id), "exposed", None)
+            if not isinstance(endpoint, SemanticEndpoint):
+                raise ValueError(
+                    "Semantic endpoint origin must locate a semantic endpoint."
+                )
 
 
 @dataclass(frozen=True, order=True)

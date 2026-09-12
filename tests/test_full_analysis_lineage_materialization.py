@@ -183,7 +183,6 @@ def test_real_full_analysis_installs_current_lineage_without_second_extraction(t
     state = captured_states[0]
     assert state.lineage_facts_state == "fresh"
     assert state.lineage_facts_semantic_version == LINEAGE_FACTS_SEMANTIC_VERSION
-    assert set(state.lineage_extracted_facts_by_source) == {"consumer.py", "provider.py"}
     assert set(state.lineage_facts_by_source) == {"consumer.py", "provider.py"}
     assert all(
         source_key == source_slice.manifest.source_key
