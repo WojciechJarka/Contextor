@@ -648,7 +648,13 @@ def test_desktop_watcher_recovers_after_live_service_death(tmp_path):
     recovered_client = MagicMock()
     recovered_client.ping.return_value = {"status": "ok", "available": True}
     recovered_client.snapshot.return_value = {"status": "ok"}
-    recovered_client.update_file.return_value = {"status": "ok", "result": SimpleNamespace(status="UPDATED")}
+    recovered_client.submit_update_file.return_value = {
+        "status": "accepted", "accepted": True, "job_id": "recovered-job"
+    }
+    recovered_client.mutation_status.return_value = {
+        "state": "completed",
+        "response": {"status": "ok", "result": SimpleNamespace(status="UPDATED")},
+    }
 
     def on_reconnect(client):
         reconnect_events.append(client)
@@ -673,10 +679,11 @@ def test_desktop_watcher_recovers_after_live_service_death(tmp_path):
 
     watcher._recover_client = mock_recover
     watcher._trusted_file_state = lambda _snapshot: object()
-    watcher._candidate_requires_update = lambda _path, _current: True
+    watcher._candidate_requires_update = lambda *_args: True
 
-    # Modify file so that watcher detects a change
+    # Simulate watchdog delivery for the changed path.
     py_file.write_text("x = 2000\n", encoding="utf-8")
+    watcher._enqueue_path(str(py_file))
 
     # poll_once should recover and succeed
     changed = watcher.poll_once()
@@ -691,6 +698,8 @@ def test_desktop_watcher_recovers_after_live_service_death(tmp_path):
 def test_desktop_watcher_recovery_preserves_unowned_if_another_service_wins_race(tmp_path):
     repo = tmp_path / "repo"
     repo.mkdir()
+    py_file = repo / "sample.py"
+    py_file.write_text("x = 1\n", encoding="utf-8")
 
     dead_client = MagicMock()
     dead_client.ping.side_effect = ConnectionResetError("Connection reset")
@@ -717,6 +726,7 @@ def test_desktop_watcher_recovery_preserves_unowned_if_another_service_wins_race
         return external_client
 
     watcher._recover_client = mock_recover
+    watcher._enqueue_path(str(py_file))
 
     res = watcher.poll_once()
     assert res == []
@@ -733,14 +743,20 @@ def test_desktop_watcher_syntax_error_does_not_trigger_recovery(tmp_path):
 
     live_client = MagicMock()
     live_client.ping.return_value = {"status": "ok", "available": True}
-    live_client.update_file.return_value = {
-        "status": "ok",
-        "result": SimpleNamespace(
-            status="SYNTAX_ERROR",
-            line_number=1,
-            column_number=5,
-            error="invalid syntax",
-        ),
+    live_client.submit_update_file.return_value = {
+        "status": "accepted", "accepted": True, "job_id": "syntax-job"
+    }
+    live_client.mutation_status.return_value = {
+        "state": "completed",
+        "response": {
+            "status": "ok",
+            "result": SimpleNamespace(
+                status="SYNTAX_ERROR",
+                line_number=1,
+                column_number=5,
+                error="invalid syntax",
+            ),
+        },
     }
 
     recovery_called = []
@@ -752,12 +768,13 @@ def test_desktop_watcher_syntax_error_does_not_trigger_recovery(tmp_path):
     )
     watcher._recover_client = lambda: recovery_called.append(True)
     watcher._candidate_requires_update = lambda *_args: True
+    watcher._trusted_file_state = lambda _snapshot: object()
 
     status_messages = []
     watcher.on_status = lambda msg: status_messages.append(msg)
 
-    # Initial scan
-    watcher._snapshot = {}
+    # Simulate watchdog delivery; poll_once never scans the repository itself.
+    watcher._enqueue_path(str(py_file))
     changed = watcher.poll_once()
 
     assert str(py_file) in changed

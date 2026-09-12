@@ -586,6 +586,22 @@ def test_lineage_only_noop_commit_replaces_slice_and_parse_error_invalidates_it(
     assert set(state.lineage_facts_by_source) == {"pkg.py", "other.py"}
 
 
+def test_parse_error_keeps_unmaterialized_lineage_unmaterialized(tmp_path):
+    state = RepositoryAnalysisState()
+    engine, _ = _lineage_engine(state, _LineageRegistry(), tmp_path)
+
+    engine._commit_syntax_candidate(
+        source_path="pkg.py",
+        mark_parse_error=("broken", 1, 1),
+        clear_parse_module="pkg",
+        invalidate_lineage=True,
+    )
+
+    assert state.lineage_facts_by_source == {}
+    assert state.lineage_facts_state == LineageFamilyStatus.NOT_MATERIALIZED.value
+    assert state.lineage_facts_semantic_version is None
+
+
 def test_incremental_lineage_resource_limit_and_source_key_mismatch_fail_closed(tmp_path):
     state = RepositoryAnalysisState(
         modules={"pkg": _module("pkg")},

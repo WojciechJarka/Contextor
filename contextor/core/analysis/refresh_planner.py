@@ -94,6 +94,22 @@ class RefreshPlanner:
 
         module_path = delta.module_path if delta else (usage_delta.module_path if usage_delta else "")
         usages = module_usages if module_usages is not None else {}
+        identity_registry_required = bool(
+            delta
+            and (
+                delta.artifacts_added
+                or delta.artifacts_removed
+                or delta.artifacts_changed
+            )
+        )
+
+        def compose_patch_families(patch_families: list[str]) -> tuple[str, ...]:
+            """Add registry synchronization once, in canonical family order."""
+            if not identity_registry_required or "identity_registry" in patch_families:
+                return tuple(patch_families)
+            definitions_index = patch_families.index("definitions")
+            patch_families.insert(definitions_index + 1, "identity_registry")
+            return tuple(patch_families)
 
         # 1. Module Deletion
         if delta and delta.is_deleted:
@@ -114,7 +130,7 @@ class RefreshPlanner:
             return RefreshPlan(
                 reparse_modules=(),
                 recompute_modules=tuple(sorted(recompute_set)),
-                patch_families=tuple(patch_families),
+                patch_families=compose_patch_families(patch_families),
                 graph_recomputations=("macro_metrics", "reverse_blast_radius", "advanced_graph_metrics", "cycles"),
                 refresh_completeness="complete",
                 semantic_certainty="statically_resolved",
@@ -139,7 +155,7 @@ class RefreshPlanner:
             return RefreshPlan(
                 reparse_modules=(),
                 recompute_modules=tuple(sorted(recompute_set)),
-                patch_families=tuple(patch_families),
+                patch_families=compose_patch_families(patch_families),
                 graph_recomputations=("macro_metrics", "reverse_blast_radius", "advanced_graph_metrics", "cycles"),
                 refresh_completeness="complete",
                 semantic_certainty="statically_resolved",
@@ -191,7 +207,7 @@ class RefreshPlanner:
             return RefreshPlan(
                 reparse_modules=(),
                 recompute_modules=tuple(sorted(recompute_set)),
-                patch_families=tuple(patch_families),
+                patch_families=compose_patch_families(patch_families),
                 graph_recomputations=tuple(graph_recomputations),
                 refresh_completeness="complete",
                 semantic_certainty="statically_resolved",
@@ -214,7 +230,7 @@ class RefreshPlanner:
             return RefreshPlan(
                 reparse_modules=(),
                 recompute_modules=(),
-                patch_families=tuple(patch_families),
+                patch_families=compose_patch_families(patch_families),
                 graph_recomputations=("macro_metrics", "reverse_blast_radius", "advanced_graph_metrics", "cycles"),
                 refresh_completeness="complete",
                 semantic_certainty="statically_resolved",
@@ -234,7 +250,7 @@ class RefreshPlanner:
             return RefreshPlan(
                 reparse_modules=(),
                 recompute_modules=tuple(sorted(recompute_set)),
-                patch_families=tuple(patch_families),
+                patch_families=compose_patch_families(patch_families),
                 graph_recomputations=(),
                 refresh_completeness="complete",
                 semantic_certainty="statically_resolved",
@@ -254,7 +270,7 @@ class RefreshPlanner:
         return RefreshPlan(
             reparse_modules=(),
             recompute_modules=(),
-            patch_families=tuple(patch_families),
+            patch_families=compose_patch_families(patch_families),
             graph_recomputations=(),
             refresh_completeness="complete",
             semantic_certainty="statically_resolved",

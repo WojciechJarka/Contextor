@@ -118,8 +118,18 @@ class IncrementalAnalysisEngine:
         """Commit syntax, parse-freshness, and lineage changes through one COW candidate."""
         candidate = _prepare_candidate_state(self.state)
         if invalidate_lineage:
+            from contextor.core.domain.lineage_facts import (
+                LINEAGE_FACTS_SEMANTIC_VERSION,
+                LineageFamilyStatus,
+            )
+
             candidate.lineage_facts_by_source.pop(source_path, None)
-            candidate.lineage_facts_state = "stale"
+            if candidate.lineage_facts_state == LineageFamilyStatus.NOT_MATERIALIZED.value:
+                candidate.lineage_facts_state = LineageFamilyStatus.NOT_MATERIALIZED.value
+                candidate.lineage_facts_semantic_version = None
+            else:
+                candidate.lineage_facts_state = LineageFamilyStatus.STALE.value
+                candidate.lineage_facts_semantic_version = LINEAGE_FACTS_SEMANTIC_VERSION
         elif extracted_lineage_facts is not None:
             with self.registry.read_transaction():
                 self._update_candidate_lineage_slice(

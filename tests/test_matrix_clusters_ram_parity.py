@@ -530,6 +530,11 @@ def test_early_ambiguity_in_recompute_phase_is_sticky_across_clean_later_patch(t
     engine.state.modules["other_consumer"] = Module(
         module_id="other_consumer", path="other.py", absolute_path="/other.py", imports=[]
     )
+    with engine.registry.transaction():
+        engine.registry.sync_with_workspace(
+            set(engine.state.modules),
+            aur.collect_qualified_artifact_identities(engine.state.artifacts),
+        )
 
     # Perform clean update on app_file (switches to helper2 cleanly)
     # Mock refresh planner to include 'other_consumer' in recompute_modules

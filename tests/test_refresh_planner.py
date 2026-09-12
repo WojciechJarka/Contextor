@@ -140,3 +140,30 @@ def test_11_invalid_type_bounds():
 
     with pytest.raises(ValueError):
         RefreshPlan(patch_families=("invalid_family",))
+
+
+@pytest.mark.parametrize(
+    "usage_delta",
+    [
+        None,
+        UsageDelta(
+            module_path="app.service",
+            removed_aliases=(("old", "provider.old"),),
+            added_aliases=(("new", "provider.new"),),
+        ),
+    ],
+)
+def test_mixed_import_and_artifact_change_composes_identity_registry_once(usage_delta):
+    plan = RefreshPlanner.plan_refresh(
+        FileDelta(
+            module_path="app.service",
+            imports_changed=["provider"],
+            artifacts_added=["own_func"],
+        ),
+        usage_delta=usage_delta,
+    )
+
+    assert plan.patch_families.count("identity_registry") == 1
+    assert plan.patch_families.index("identity_registry") == (
+        plan.patch_families.index("definitions") + 1
+    )
