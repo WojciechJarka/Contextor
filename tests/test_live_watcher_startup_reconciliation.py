@@ -975,6 +975,93 @@ def test_lost_queued_update_ack_reuses_idempotency_key_and_runs_once(tmp_path):
         thread.join(timeout=2)
 
 
+def test_lost_queued_update_ack_does_not_relabel_overlapping_edit(tmp_path):
+    update_started = threading.Event()
+    release_first_update = threading.Event()
+    update_calls = []
+
+    def updater(_state, path):
+        update_calls.append(path)
+        if len(update_calls) == 1:
+            update_started.set()
+            assert release_first_update.wait(timeout=5)
+        return SimpleNamespace(status="UPDATED", file_path=path)
+
+    repo, server, thread, _endpoint, client, watcher = _real_watcher_runtime(
+        tmp_path, updater
+    )
+    source = repo / "module.py"
+    path = str(source)
+    source.write_text("VALUE = 1\n", encoding="utf-8")
+    watcher._snapshot = {path: (0, 1)}
+    watcher._candidate_requires_update = lambda *_args: True
+    original_submit = client.submit_update_file
+    attempts = []
+
+    def lose_first_ack(file_path, **kwargs):
+        attempts.append((kwargs["idempotency_key"], kwargs["trace_op"]))
+        response = original_submit(file_path, **kwargs)
+        if len(attempts) == 1:
+            raise ConnectionError("accepted response lost")
+        return response
+
+    client.submit_update_file = lose_first_ack
+
+    try:
+        source.write_text("VALUE = 2\n", encoding="utf-8")
+        s1 = watcher._scan()[path]
+        watcher._enqueue_path(path)
+        assert watcher.poll_once() == []
+        assert update_started.wait(timeout=2)
+
+        intent = watcher._pending_intents[path]
+        assert intent.observed_state == s1
+        assert intent.trace_op == attempts[0][1]
+        assert len(server._mutation_coordinator._jobs) == 1
+        assert not watcher._inflight_updates
+
+        source.write_text("VALUE = 3\n", encoding="utf-8")
+        s2 = watcher._scan()[path]
+        watcher._enqueue_path(path)
+        assert watcher._pending_intents[path] is intent
+        assert watcher.poll_once() == []
+
+        assert attempts[1] == attempts[0]
+        assert len(server._mutation_coordinator._jobs) == 1
+        job_id = server._mutation_coordinator._idempotency_jobs[attempts[0][0]]
+        recovered_job = watcher._inflight_updates[job_id]
+        assert recovered_job.observed_state == s1
+        assert recovered_job.observed_state != s2
+        assert recovered_job.trace_op == intent.trace_op
+        assert recovered_job.started_at == intent.started_at
+        assert watcher._pending_intents.get(path) is None
+        assert watcher._has_pending_paths()
+
+        release_first_update.set()
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            watcher.poll_once()
+            if (
+                len(update_calls) == 2
+                and watcher._snapshot.get(path) == s2
+                and not watcher._inflight_updates
+                and not watcher._has_pending_paths()
+            ):
+                break
+            time.sleep(0.01)
+
+        assert len(update_calls) == 2
+        assert watcher._snapshot[path] == s2
+        assert len(server._mutation_coordinator._jobs) == 2
+        assert len(attempts) == 3
+        assert attempts[2][0] != attempts[0][0]
+        assert len({key for key, _trace_op in attempts}) == 2
+    finally:
+        release_first_update.set()
+        server.close()
+        thread.join(timeout=2)
+
+
 def test_precommit_failure_retries_real_pending_change_once(tmp_path):
     update_count = []
 

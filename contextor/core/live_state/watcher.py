@@ -18,6 +18,15 @@ from .ipc import LiveStateClient
 
 
 @dataclass(frozen=True)
+class _PendingMutationIntent:
+    idempotency_key: str
+    path: str
+    trace_op: str
+    observed_state: tuple[int, int] | None
+    started_at: float
+
+
+@dataclass(frozen=True)
 class _WatcherMutationJob:
     job_id: str
     path: str
@@ -132,7 +141,7 @@ class DesktopLiveWatcher:
         self._startup_requires_resync = False
         self._startup_resync_attempted = False
         self._ambiguous_updates: set[str] = set()
-        self._idempotency_keys: dict[str, str] = {}
+        self._pending_intents: dict[str, _PendingMutationIntent] = {}
         self._inflight_updates: OrderedDict[str, _WatcherMutationJob] = OrderedDict()
         self._excluded_paths, self._ignored_dirs = self._load_watch_filters()
         self._snapshot = self._scan()
@@ -601,9 +610,16 @@ class DesktopLiveWatcher:
                     continue
             if isinstance(status, dict) and status.get("error") in {"unknown_mutation_job", "invalid_mutation_job_id"}:
                 self._ambiguous_updates.add(job.path)
-                self._idempotency_keys.setdefault(job.path, job.idempotency_key)
-            elif self._idempotency_keys.get(job.path) == job.idempotency_key:
-                self._idempotency_keys.pop(job.path, None)
+                self._pending_intents.setdefault(
+                    job.path,
+                    _PendingMutationIntent(
+                        idempotency_key=job.idempotency_key,
+                        path=job.path,
+                        trace_op=job.trace_op,
+                        observed_state=job.observed_state,
+                        started_at=job.started_at,
+                    ),
+                )
             from contextor.core.runtime_trace import trace_event
             try:
                 relative = Path(job.path).resolve().relative_to(self.root).as_posix()
@@ -732,9 +748,9 @@ class DesktopLiveWatcher:
                     self._emit("LIVE: generation revalidation unavailable; deferring watcher update")
                     continue
                 if not candidate_requires_update:
+                    self._pending_intents.pop(path, None)
                     if was_ambiguous:
                         self._ambiguous_updates.discard(path)
-                        self._idempotency_keys.pop(path, None)
                         trace_event("LIVE", "WATCH_UPDATE_AMBIGUOUS_RESOLVED", op=op, repo=str(self.root), path=relative, rev=status.get("revision"), retry=False)
                     if path in current:
                         self._snapshot[path] = current[path]
@@ -747,11 +763,25 @@ class DesktopLiveWatcher:
                     for job in self._inflight_updates.values()
                 ):
                     continue
+                pending_intent = self._pending_intents.get(path)
+                if pending_intent is None:
+                    pending_intent = _PendingMutationIntent(
+                        idempotency_key=uuid.uuid4().hex,
+                        path=path,
+                        trace_op=op,
+                        observed_state=current.get(path),
+                        started_at=update_started,
+                    )
+                    self._pending_intents[path] = pending_intent
                 if was_ambiguous:
                     self._ambiguous_updates.discard(path)
-                    trace_event("LIVE", "WATCH_UPDATE_AMBIGUOUS_RESOLVED", op=op, repo=str(self.root), path=relative, rev=status.get("revision"), retry=True)
-                idempotency_key = self._idempotency_keys.setdefault(path, uuid.uuid4().hex)
-                response = self.client.submit_update_file(path, origin="desktop_watcher", trace_op=op, idempotency_key=idempotency_key)
+                    trace_event("LIVE", "WATCH_UPDATE_AMBIGUOUS_RESOLVED", op=pending_intent.trace_op, repo=str(self.root), path=relative, rev=status.get("revision"), retry=True)
+                response = self.client.submit_update_file(
+                    path,
+                    origin="desktop_watcher",
+                    trace_op=pending_intent.trace_op,
+                    idempotency_key=pending_intent.idempotency_key,
+                )
             except (OSError, EOFError, TimeoutError, ConnectionError) as exc:
                 self._ambiguous_updates.add(path)
                 trace_event("LIVE", "WATCH_UPDATE_AMBIGUOUS", op=op, repo=str(self.root), path=relative, rev=status.get("revision"), exception="transport")
@@ -768,15 +798,17 @@ class DesktopLiveWatcher:
                 deferred.append(path)
                 self._emit("LIVE: update submission was not accepted; deferring watcher update")
                 continue
-            self._idempotency_keys.pop(path, None)
+            self._pending_intents.pop(path, None)
             self._inflight_updates[job_id] = _WatcherMutationJob(
                 job_id,
-                path,
-                op,
-                idempotency_key,
-                current.get(path),
-                update_started,
+                pending_intent.path,
+                pending_intent.trace_op,
+                pending_intent.idempotency_key,
+                pending_intent.observed_state,
+                pending_intent.started_at,
             )
+            if current.get(path) != pending_intent.observed_state:
+                deferred.append(path)
         if deferred:
             self._requeue_paths(deferred)
         self._startup_pending = []
