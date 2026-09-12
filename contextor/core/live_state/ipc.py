@@ -280,7 +280,7 @@ class CanonicalMutationCoordinator:
                 self._prune_terminal_locked()
                 self._condition.notify_all()
 
-    def close(self, *, join_timeout: float = _MUTATION_WORKER_JOIN_TIMEOUT) -> None:
+    def close(self, *, join_timeout: float = _MUTATION_WORKER_JOIN_TIMEOUT) -> bool:
         with self._condition:
             self._accepting = False
             self._stop = True
@@ -302,6 +302,7 @@ class CanonicalMutationCoordinator:
 
         if thread is not None and thread is not threading.current_thread():
             thread.join(timeout=join_timeout)
+        return thread is None or not thread.is_alive()
 
 
 def _safe_trace_op(request: dict[str, Any], prefix: str) -> str | None:
@@ -662,6 +663,7 @@ class CanonicalLiveServer:
         desktop_claim_reader: Callable[[], Mapping[str, Any] | None] | None = None,
         desktop_claim_acquirer: Callable[[str, int, str], Mapping[str, Any]] | None = None,
         desktop_claim_releaser: Callable[[str, int, str], None] | None = None,
+        mutation_guard: Callable[[Mapping[str, Any], threading.Event], Any] | None = None,
     ):
         if revision is not None and (
             isinstance(revision, bool)
@@ -705,8 +707,9 @@ class CanonicalLiveServer:
         self._authority_event_fingerprints: OrderedDict[tuple[str, int, str], str] = OrderedDict()
         self._lock = threading.RLock()
         self._mutation_execution_lock = threading.Lock()
+        self._mutation_guard = mutation_guard
         self._mutation_coordinator = CanonicalMutationCoordinator(
-            self._execute_update_file,
+            self._execute_queued_update_file,
             self._read_revision,
         )
         self._stop = threading.Event()
@@ -1199,6 +1202,12 @@ class CanonicalLiveServer:
                 _safe_trace_event("LIVE", "CANONICAL_PUBLISH", op=trace_op, rev_before=previous_revision, rev_after=self._revision, seq=evt["seq"], origin=request.get("origin"))
                 return {"status": "ok", "revision": self._revision, "seq": evt["seq"]}
 
+    def _execute_queued_update_file(self, request: dict[str, Any]) -> dict[str, Any]:
+        if self._mutation_guard is None:
+            return self._execute_update_file(request)
+        with self._mutation_guard(request, self._stop):
+            return self._execute_update_file(request)
+
     def _execute_update_file(self, request: dict[str, Any]) -> dict[str, Any]:
         with self._mutation_execution_lock:
             with self._lock:
@@ -1626,14 +1635,15 @@ class CanonicalLiveServer:
                 return {"status": "ok", "revision": self._revision}
             return {"status": "error", "error": "unknown_operation"}
 
-    def close(self) -> None:
-        if not self._stop.is_set():
-            self._stop.set()
-            try:
-                self._listener.close()
-            except OSError:
-                pass
-        self._mutation_coordinator.close()
+    def close(
+        self, *, mutation_join_timeout: float = _MUTATION_WORKER_JOIN_TIMEOUT
+    ) -> bool:
+        self._stop.set()
+        try:
+            self._listener.close()
+        except OSError:
+            pass
+        return self._mutation_coordinator.close(join_timeout=mutation_join_timeout)
 
     def __enter__(self) -> "CanonicalLiveServer":
         return self

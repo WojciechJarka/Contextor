@@ -34,13 +34,25 @@ def _make_watcher(tmp_path, *, result_status: str = "UPDATED"):
         def ping(self):
             return {"status": "ok", "available": True, "revision": 1}
 
-        def update_file(self, path, **kwargs):
+        def submit_update_file(self, path, **kwargs):
             updates.append((path, kwargs))
             return {
+                "status": "accepted",
+                "accepted": True,
+                "job_id": str(len(updates)),
+            }
+
+        def mutation_status(self, job_id):
+            path, _kwargs = updates[int(job_id) - 1]
+            return {
                 "status": "ok",
-                "revision": len(updates) + 1,
-                "seq": len(updates),
-                "result": SimpleNamespace(status=result_status, file_path=path),
+                "state": "completed",
+                "response": {
+                    "status": "ok",
+                    "revision": int(job_id) + 1,
+                    "seq": int(job_id),
+                    "result": SimpleNamespace(status=result_status, file_path=path),
+                },
             }
 
     client = Client()
@@ -141,7 +153,7 @@ def test_move_enqueues_old_then_new(tmp_path):
     assert watcher._drain_pending() == [old_path, new_path]
 
 
-def test_event_path_routes_through_existing_client_update_file(tmp_path):
+def test_event_path_routes_through_queued_client_submission(tmp_path):
     repo, watcher, _client, updates = _make_watcher(tmp_path)
     path = repo / "module.py"
     path.write_text("VALUE = 1\n", encoding="utf-8")

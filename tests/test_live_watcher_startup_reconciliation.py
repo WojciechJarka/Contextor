@@ -34,6 +34,16 @@ from contextor.core.symbol_engine.indexer import index_repository
 pytestmark = pytest.mark.live
 
 
+def _poll_until(watcher, expected, *, attempts=40):
+    observed = []
+    for _ in range(attempts):
+        observed.extend(watcher.poll_once())
+        if sorted(observed) == sorted(expected):
+            return observed
+        time.sleep(0.01)
+    return observed
+
+
 def _real_watcher_runtime(tmp_path, updater):
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -125,7 +135,7 @@ def test_startup_reconciles_offline_add_modify_delete_and_is_idempotent(tmp_path
     client = LiveStateClient(server.endpoint)
     try:
         watcher = DesktopLiveWatcher(repo, client)
-        changed = watcher.poll_once()
+        changed = _poll_until(watcher, [str(added), str(existing), str(removed)])
         assert changed == sorted([str(added), str(existing), str(removed)])
 
         reconciled = client.snapshot()

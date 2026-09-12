@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import os
 import subprocess
@@ -1099,6 +1100,27 @@ def _repository_persister(root: Path, holder: dict[str, object] | None = None):
     return persist
 
 
+def _repository_mutation_guard(root: Path):
+    @contextlib.contextmanager
+    def guard(_request: Mapping[str, Any], stop_event: threading.Event):
+        from contextor.core.analysis.full_analysis_coordinator import (
+            acquire_full_analysis,
+            release_full_analysis,
+        )
+
+        lease = acquire_full_analysis(
+            root,
+            owner="live_mutation_worker",
+            is_cancelled=stop_event.is_set,
+        )
+        try:
+            yield
+        finally:
+            release_full_analysis(lease)
+
+    return guard
+
+
 def run_service(
     repo_path: str | Path,
     owner_pid: int | None = None,
@@ -1249,6 +1271,7 @@ def run_service(
             revision=revision,
             updater=_repository_updater(root, adapter_holder),
             persister=_repository_persister(root, adapter_holder),
+            mutation_guard=_repository_mutation_guard(root),
             authority_identity=authority_identity,
             desktop_claim=desktop_claim,
             desktop_claim_reader=lambda: manager.read_desktop_claim(lease),
@@ -1392,11 +1415,12 @@ def run_service(
     finally:
         if authority_emitter is not None:
             authority_emitter.detach_live_sink()
+        mutation_worker_drained = True
         if server is not None:
-            server.close()
+            mutation_worker_drained = server.close(mutation_join_timeout=30.0)
         if server_thread is not None and server_thread.is_alive():
             server_thread.join(timeout=1.0)
-        if lease is not None:
+        if lease is not None and mutation_worker_drained:
             if published_endpoint is not None:
                 try:
                     manager.reconcile_endpoint_binding(lease, published_endpoint.fingerprint())
@@ -1454,7 +1478,11 @@ def run_service(
                     reason=(
                         "authority service shutdown completed"
                         if ownership_resolved
-                        else "authority shutdown could not resolve exact ownership"
+                        else (
+                            "queued mutation worker did not drain; ownership left for fencing"
+                            if not mutation_worker_drained
+                            else "authority shutdown could not resolve exact ownership"
+                        )
                     ),
                 )
             except Exception:

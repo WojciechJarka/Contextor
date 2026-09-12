@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import threading
 import time
-from collections import deque
+from collections import OrderedDict, deque
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 
 from watchdog.events import FileSystemEventHandler
@@ -13,6 +14,15 @@ from watchdog.observers import Observer
 from watchdog.observers.polling import PollingObserver
 
 from .ipc import LiveStateClient
+
+
+@dataclass(frozen=True)
+class _WatcherMutationJob:
+    job_id: str
+    path: str
+    trace_op: str
+    observed_state: tuple[int, int] | None
+    started_at: float
 
 
 class _PollingLiveWorker:
@@ -120,6 +130,7 @@ class DesktopLiveWatcher:
         self._startup_requires_resync = False
         self._startup_resync_attempted = False
         self._ambiguous_updates: set[str] = set()
+        self._inflight_updates: OrderedDict[str, _WatcherMutationJob] = OrderedDict()
         self._excluded_paths, self._ignored_dirs = self._load_watch_filters()
         self._snapshot = self._scan()
         self._startup_pending = self._startup_reconciliation_paths(self._snapshot)
@@ -261,7 +272,7 @@ class DesktopLiveWatcher:
                     self._check_observer_health()
                 except (OSError, RuntimeError, EOFError) as exc:
                     self._handle_poll_error(exc)
-            if self._has_pending_paths():
+            if self._has_pending_paths() or self._has_inflight_updates():
                 try:
                     self.poll_once()
                 except (OSError, RuntimeError, EOFError) as exc:
@@ -416,6 +427,9 @@ class DesktopLiveWatcher:
         with self._pending_lock:
             return bool(self._pending_paths)
 
+    def _has_inflight_updates(self) -> bool:
+        return bool(self._inflight_updates)
+
     def _requeue_paths(self, paths: list[str] | set[str]) -> None:
         for path in paths:
             self._enqueue_path(path, wake=False)
@@ -538,10 +552,53 @@ class DesktopLiveWatcher:
         relative = path.resolve().relative_to(self.root).with_suffix("")
         return ".".join(relative.parts)
 
+    def _poll_inflight_updates(self) -> list[str]:
+        completed: list[str] = []
+        for job_id, job in list(self._inflight_updates.items()):
+            try:
+                status = self.client.mutation_status(job_id)
+            except (OSError, EOFError, TimeoutError, ConnectionError):
+                continue
+            state = status.get("state") if isinstance(status, dict) else None
+            if state in {"queued", "running"}:
+                continue
+            self._inflight_updates.pop(job_id, None)
+            if state == "completed":
+                response = status.get("response")
+                result = response.get("result") if isinstance(response, dict) else None
+                result_status = getattr(result, "status", None)
+                if isinstance(response, dict) and response.get("status") == "ok" and result_status in {"UPDATED", "DELETED", "UNCHANGED", "RECOVERED", "SYNTAX_ERROR"}:
+                    if job.observed_state is None:
+                        self._snapshot.pop(job.path, None)
+                    else:
+                        self._snapshot[job.path] = job.observed_state
+                    completed.append(job.path)
+                    from contextor.core.runtime_trace import trace_event
+                    trace_event("LIVE", "WATCH_UPDATE_END", op=job.trace_op, repo=str(self.root), path=Path(job.path).name, rev=response.get("revision"), seq=response.get("seq"), status=result_status, elapsed_ms=(time.monotonic() - job.started_at) * 1000.0)
+                    if result_status == "SYNTAX_ERROR":
+                        line = getattr(result, "line_number", None)
+                        column = getattr(result, "column_number", None)
+                        position = f" line {line}, column {column}" if line and column else ""
+                        self._emit(f"LIVE syntax error: {Path(job.path).name}{position}: {getattr(result, 'error', 'syntax error')}")
+                    elif result_status == "RECOVERED":
+                        self._emit(f"LIVE syntax recovery: {Path(job.path).name}")
+                    else:
+                        self._emit(f"LIVE update successful: {Path(job.path).name}")
+                    continue
+            if state in {"invalid", "unknown"} or (isinstance(status, dict) and status.get("error") in {"unknown_job_id", "invalid_job_id"}):
+                self._ambiguous_updates.add(job.path)
+            self._requeue_paths([job.path])
+            self._emit(f"LIVE update failed; deferring watcher update: {Path(job.path).name}")
+        return completed
+
     def poll_once(self) -> list[str]:
+        reconciled = self._poll_inflight_updates()
         changed = self._drain_pending()
+        if not changed and self._startup_pending:
+            changed = list(self._startup_pending)
+            self._startup_pending = []
         if not changed:
-            return []
+            return reconciled
         current: dict[str, tuple[int, int]] = {}
         for path in changed:
             try:
@@ -562,14 +619,14 @@ class DesktopLiveWatcher:
         if not status.get("available"):
             self._requeue_paths(changed)
             self._emit("LIVE: no snapshot; waiting for analysis")
-            return []
+            return reconciled
         if self._startup_requires_resync:
             if self._startup_resync_attempted:
-                return []
+                return reconciled
             self._startup_resync_attempted = True
             if self.on_resync is None:
                 self._emit("LIVE: canonical baseline requires resync")
-                return []
+                return reconciled
             try:
                 outcome = self.on_resync()
                 if not self._resync_completed(outcome):
@@ -577,13 +634,13 @@ class DesktopLiveWatcher:
                     return []
             except Exception as exc:
                 self._emit(f"LIVE: startup resync failed: {exc}")
-                return []
+                return reconciled
             current = self._scan()
             try:
                 snapshot = self.client.snapshot()
             except (OSError, EOFError, TimeoutError, ConnectionError) as exc:
                 self._emit("LIVE: startup resync baseline could not be verified")
-                return []
+                return reconciled
             if self._trusted_file_state(snapshot) is None:
                 self._emit("LIVE: startup resync baseline remains untrusted")
                 return []
@@ -591,16 +648,18 @@ class DesktopLiveWatcher:
             self._startup_pending = self._startup_reconciliation_paths(current)
             self._startup_requires_resync = False
             self._requeue_paths(self._startup_pending)
-            return []
+            return reconciled
         deferred: list[str] = []
-        reconciled: list[str] = []
-        next_snapshot = dict(self._snapshot)
-
-        def acknowledge(path: str) -> None:
-            if path in current:
-                next_snapshot[path] = current[path]
-            else:
-                next_snapshot.pop(path, None)
+        try:
+            batch_snapshot = self.client.snapshot()
+        except (OSError, EOFError, TimeoutError, ConnectionError):
+            self._requeue_paths(changed)
+            self._emit("LIVE: generation revalidation unavailable; deferring watcher update")
+            return reconciled
+        if self._trusted_file_state(batch_snapshot) is None:
+            self._requeue_paths(changed)
+            self._emit("LIVE: generation revalidation unavailable; deferring watcher update")
+            return reconciled
 
         for path in changed:
             from contextor.core.runtime_trace import new_trace_operation, trace_event
@@ -623,24 +682,11 @@ class DesktopLiveWatcher:
             self._emit(f"Updating LIVE: {Path(path).name}")
             update_started = time.monotonic()
             trace_event("LIVE", "WATCH_UPDATE_START", op=op, repo=str(self.root), path=relative)
-            lease = None
             was_ambiguous = path in self._ambiguous_updates
-            update_attempted = False
             try:
-                from contextor.core.analysis.full_analysis_coordinator import (
-                    FullAnalysisBusyError,
-                    acquire_full_analysis,
-                    release_full_analysis,
+                candidate_requires_update = self._candidate_requires_update(
+                    path, current, batch_snapshot
                 )
-                lease = acquire_full_analysis(self.root, owner="desktop_watcher", timeout=10.0)
-            except FullAnalysisBusyError:
-                deferred.append(path)
-                self._emit("LIVE: repository mutation busy; deferring watcher update")
-                continue
-            try:
-                # A full analysis may have completed while this watcher waited.
-                # Re-read its exact FileState generation before mutating LIVE.
-                candidate_requires_update = self._candidate_requires_update(path, current)
                 if candidate_requires_update is None:
                     deferred.append(path)
                     if was_ambiguous:
@@ -651,95 +697,31 @@ class DesktopLiveWatcher:
                     if was_ambiguous:
                         self._ambiguous_updates.discard(path)
                         trace_event("LIVE", "WATCH_UPDATE_AMBIGUOUS_RESOLVED", op=op, repo=str(self.root), path=relative, rev=status.get("revision"), retry=False)
-                    acknowledge(path)
+                    if path in current:
+                        self._snapshot[path] = current[path]
+                    else:
+                        self._snapshot.pop(path, None)
+                    reconciled.append(path)
                     continue
                 if was_ambiguous:
                     self._ambiguous_updates.discard(path)
                     trace_event("LIVE", "WATCH_UPDATE_AMBIGUOUS_RESOLVED", op=op, repo=str(self.root), path=relative, rev=status.get("revision"), retry=True)
-                update_attempted = True
-                response = self.client.update_file(path, origin="desktop_watcher", trace_op=op)
+                response = self.client.submit_update_file(path, origin="desktop_watcher", trace_op=op)
             except (OSError, EOFError, TimeoutError, ConnectionError) as exc:
-                if update_attempted:
-                    self._ambiguous_updates.add(path)
-                    trace_event("LIVE", "WATCH_UPDATE_AMBIGUOUS", op=op, repo=str(self.root), path=relative, rev=status.get("revision"), exception="transport")
-                    deferred.append(path)
-                    self._emit("LIVE: update outcome ambiguous; deferring revalidation")
-                    continue
-                self._emit("LIVE: connection lost during update; recovering...")
-                if self._recover_client(exc) is None:
-                    # Earlier candidates in this poll may already have received
-                    # an acknowledged canonical response.  Preserve those
-                    # per-path advances before surfacing the later pre-send
-                    # transport failure.
-                    self._snapshot = next_snapshot
-                    raise
-                try:
-                    recovered_snapshot = self.client.snapshot()
-                except (OSError, EOFError, TimeoutError, ConnectionError):
-                    deferred.append(path)
-                    self._emit("LIVE: generation revalidation unavailable; deferring watcher update")
-                    continue
-                if self._trusted_file_state(recovered_snapshot) is None:
-                    deferred.append(path)
-                    self._emit("LIVE: generation revalidation unavailable; deferring watcher update")
-                    continue
-                candidate_requires_update = self._candidate_requires_update(
-                    path, current, recovered_snapshot
-                )
-                if candidate_requires_update is None:
-                    deferred.append(path)
-                    if was_ambiguous:
-                        trace_event("LIVE", "WATCH_UPDATE_AMBIGUOUS_UNVERIFIED", op=op, repo=str(self.root), path=relative, reason="generation_unavailable")
-                    self._emit("LIVE: generation revalidation unavailable; deferring watcher update")
-                    continue
-                if candidate_requires_update is False:
-                    if was_ambiguous:
-                        self._ambiguous_updates.discard(path)
-                        trace_event("LIVE", "WATCH_UPDATE_AMBIGUOUS_RESOLVED", op=op, repo=str(self.root), path=relative, rev=recovered_snapshot.get("revision"), retry=False)
-                    acknowledge(path)
-                    continue
-                if was_ambiguous:
-                    self._ambiguous_updates.discard(path)
-                    trace_event("LIVE", "WATCH_UPDATE_AMBIGUOUS_RESOLVED", op=op, repo=str(self.root), path=relative, rev=recovered_snapshot.get("revision"), retry=True)
-                update_attempted = True
-                response = self.client.update_file(path, origin="desktop_watcher", trace_op=op)
-            finally:
-                if lease is not None:
-                    release_full_analysis(lease)
-
-            if not isinstance(response, dict) or response.get("status") != "ok":
-                error = response.get("error", "update failed") if isinstance(response, dict) else "malformed update response"
-                trace_event("LIVE", "WATCH_UPDATE_FAIL", op=op, repo=str(self.root), path=relative, elapsed_ms=(time.monotonic() - update_started) * 1000.0, err=error)
-                self._emit(f"LIVE connection error: {error}")
-                raise RuntimeError(f"LIVE update failed for {path}: {error}")
-            result = response.get("result")
-            result_status = getattr(result, "status", None)
-            trace_event("LIVE", "WATCH_UPDATE_END", op=op, repo=str(self.root), path=relative, rev=response.get("revision"), seq=response.get("seq"), status=result_status, elapsed_ms=(time.monotonic() - update_started) * 1000.0)
-            acknowledged = result_status in {"UPDATED", "DELETED", "UNCHANGED", "RECOVERED", "SYNTAX_ERROR"}
-            if result_status == "SYNTAX_ERROR":
-                line = getattr(result, "line_number", None)
-                column = getattr(result, "column_number", None)
-                error = getattr(result, "error", "syntax error")
-                position = f" line {line}, column {column}" if line and column else ""
-                self._emit(f"LIVE syntax error: {Path(path).name}{position}: {error}")
-            elif result_status == "RECOVERED":
-                self._emit(f"LIVE syntax recovery: {Path(path).name}")
-            elif result_status in {"UPDATED", "DELETED", "UNCHANGED"}:
-                self._emit(f"LIVE update successful: {Path(path).name}")
-            else:
-                self._emit(f"LIVE update error: {Path(path).name}: {result_status}")
-            if not acknowledged:
+                self._ambiguous_updates.add(path)
+                trace_event("LIVE", "WATCH_UPDATE_AMBIGUOUS", op=op, repo=str(self.root), path=relative, rev=status.get("revision"), exception="transport")
                 deferred.append(path)
                 continue
-            acknowledge(path)
-            reconciled.append(path)
+            job_id = response.get("job_id") if isinstance(response, dict) else None
+            if not isinstance(response, dict) or response.get("accepted") is not True or not isinstance(job_id, str) or not job_id:
+                deferred.append(path)
+                self._emit("LIVE: update submission was not accepted; deferring watcher update")
+                continue
+            self._inflight_updates[job_id] = _WatcherMutationJob(job_id, path, op, current.get(path), update_started)
         if deferred:
-            self._snapshot = next_snapshot
             self._requeue_paths(deferred)
-            return reconciled
-        self._snapshot = next_snapshot
         self._startup_pending = []
-        return reconciled
+        return reconciled + self._poll_inflight_updates()
 
     def _handle_poll_error(self, exc: OSError | RuntimeError | EOFError) -> None:
         self._emit(f"LIVE connection error: {exc}")
