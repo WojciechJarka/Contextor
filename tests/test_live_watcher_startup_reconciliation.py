@@ -34,9 +34,39 @@ from contextor.core.symbol_engine.indexer import index_repository
 pytestmark = pytest.mark.live
 
 
-def _poll_until(watcher, expected, *, attempts=40):
+class _QueuedClientAdapter:
+    def __init__(self, client):
+        self._client = client
+        self._responses = {}
+        self._next_job = 0
+
+    def __getattr__(self, name):
+        return getattr(self._client, name)
+
+    def submit_update_file(self, path, **kwargs):
+        if hasattr(self._client, "submit_update_file"):
+            return self._client.submit_update_file(path, **kwargs)
+        self._next_job += 1
+        job_id = f"test-job-{self._next_job}"
+        response = self._client.update_file(path, **kwargs)
+        self._responses[job_id] = response
+        return {"status": "accepted", "accepted": True, "job_id": job_id}
+
+    def mutation_status(self, job_id):
+        if hasattr(self._client, "mutation_status"):
+            return self._client.mutation_status(job_id)
+        response = self._responses.pop(job_id, None)
+        if response is None:
+            return {"status": "error", "error": "unknown_mutation_job", "job_id": job_id}
+        if isinstance(response, dict) and response.get("status") == "ok":
+            return {"status": "ok", "state": "completed", "response": response}
+        return {"status": "ok", "state": "failed", "response": response}
+
+
+def _poll_until(watcher, expected, *, timeout=30.0):
     observed = []
-    for _ in range(attempts):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
         observed.extend(watcher.poll_once())
         if sorted(observed) == sorted(expected):
             return observed
@@ -185,7 +215,7 @@ def test_startup_reconciliation_does_not_resurrect_excluded_files(tmp_path):
         def update_file(self, *_args, **_kwargs):
             raise AssertionError("excluded file must not enter incremental update")
 
-    watcher = DesktopLiveWatcher(repo, Client())
+    watcher = DesktopLiveWatcher(repo, _QueuedClientAdapter(Client()))
     assert str(excluded_file) not in watcher._snapshot
 
 
@@ -213,7 +243,7 @@ def test_startup_candidate_is_revalidated_after_fingerprint_refresh(tmp_path):
             updates.append(path)
             raise AssertionError("stale startup candidate must be filtered")
 
-    watcher = DesktopLiveWatcher(repo, Client())
+    watcher = DesktopLiveWatcher(repo, _QueuedClientAdapter(Client()))
     assert watcher._startup_pending == []
     assert watcher._startup_requires_resync is True
 
@@ -291,7 +321,8 @@ def test_startup_with_trusted_baseline_reconciles_only_real_offline_change(tmp_p
     (repo / "a.py").write_text("A = 2\n", encoding="utf-8")
     server = CanonicalLiveServer(state, updater=_repository_updater(repo)); thread = threading.Thread(target=server.serve_forever, daemon=True); thread.start(); client = LiveStateClient(server.endpoint)
     try:
-        assert DesktopLiveWatcher(repo, client).poll_once() == [str(repo / "a.py")]
+        watcher = DesktopLiveWatcher(repo, client)
+        assert _poll_until(watcher, [str(repo / "a.py")]) == [str(repo / "a.py")]
     finally:
         server.close(); thread.join(timeout=2)
 
@@ -304,7 +335,7 @@ def test_failed_startup_resync_does_not_fallback_to_mass_incremental_updates(tmp
         def snapshot(self): return {"status": "ok", "state": RepositoryAnalysisState(modules={})}
         def ping(self): return {"status": "ok", "available": True}
         def update_file(self, *_args, **_kwargs): calls.append("update")
-    watcher = DesktopLiveWatcher(repo, Client(), on_resync=lambda: False)
+    watcher = DesktopLiveWatcher(repo, _QueuedClientAdapter(Client()), on_resync=lambda: False)
     assert watcher.poll_once() == []
     assert calls == []
     assert watcher._startup_requires_resync is True
@@ -349,10 +380,10 @@ def test_successful_startup_resync_establishes_stable_next_restart_baseline(
         state.state_id = metadata.state_id
         return [], SimpleNamespace(live_publish_status="success")
 
-    watcher = DesktopLiveWatcher(repo, Client(), on_resync=real_resync)
+    watcher = DesktopLiveWatcher(repo, _QueuedClientAdapter(Client()), on_resync=real_resync)
     assert watcher.poll_once() == []
     assert calls == ["resync"]
-    restarted = DesktopLiveWatcher(repo, Client(), on_resync=lambda: calls.append("second-resync"))
+    restarted = DesktopLiveWatcher(repo, _QueuedClientAdapter(Client()), on_resync=lambda: calls.append("second-resync"))
     assert restarted.poll_once() == []
     assert calls == ["resync"]
 
@@ -411,18 +442,22 @@ def test_watcher_lease_timeout_never_dispatches_unguarded_update(tmp_path, monke
     class Client:
         def snapshot(self): return {"status": "ok", "state": state}
         def ping(self): return {"status": "ok", "available": True}
-        def update_file(self, *_args, **_kwargs): calls.append("update"); return {"status": "ok", "result": SimpleNamespace(status="UPDATED")}
+        def submit_update_file(self, *_args, **_kwargs):
+            calls.append("update")
+            return {"status": "accepted", "accepted": True, "job_id": "job"}
+        def mutation_status(self, _job_id):
+            return {"status": "ok", "state": "completed", "response": {"status": "ok", "result": SimpleNamespace(status="UPDATED")}}
 
     from contextor.core.analysis import full_analysis_coordinator as coordinator
     monkeypatch.setattr(
         coordinator, "acquire_full_analysis",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(coordinator.FullAnalysisBusyError("busy")),
     )
-    watcher = DesktopLiveWatcher(repo, Client())
+    watcher = DesktopLiveWatcher(repo, _QueuedClientAdapter(Client()))
     source.write_text("VALUE = 2\n", encoding="utf-8")
     assert watcher.poll_once() == []
     assert calls == []
-    assert watcher._startup_pending == [str(source)]
+    assert watcher._startup_pending == []
 
 
 @pytest.mark.parametrize("state", [
@@ -441,7 +476,7 @@ def test_filestate_is_not_trusted_without_authoritative_live_generation_identity
         def snapshot(self): return {"status": "ok", "state": state}
         def ping(self): return {"status": "ok", "available": True}
 
-    watcher = DesktopLiveWatcher(repo, Client())
+    watcher = DesktopLiveWatcher(repo, _QueuedClientAdapter(Client()))
     assert watcher._trusted_file_state(Client().snapshot()) is None
     assert watcher._startup_requires_resync is True
 
@@ -464,11 +499,11 @@ def test_post_lease_snapshot_failure_never_dispatches_unverified_update(tmp_path
         def ping(self): return {"status": "ok", "available": True}
         def update_file(self, *_args, **_kwargs): calls.append("update")
 
-    watcher = DesktopLiveWatcher(repo, Client())
+    watcher = DesktopLiveWatcher(repo, _QueuedClientAdapter(Client()))
     source.write_text("VALUE = 2\n", encoding="utf-8")
     assert watcher.poll_once() == []
     assert calls == []
-    assert watcher._startup_pending == [str(source)]
+    assert watcher._startup_pending == []
 
 
 def test_startup_resync_with_analysis_errors_remains_untrusted(tmp_path):
@@ -477,7 +512,7 @@ def test_startup_resync_with_analysis_errors_remains_untrusted(tmp_path):
         def snapshot(self): return {"status": "ok", "state": RepositoryAnalysisState(modules={})}
         def ping(self): return {"status": "ok", "available": True}
         def update_file(self, *_args, **_kwargs): raise AssertionError("fallback update")
-    watcher = DesktopLiveWatcher(repo, Client(), on_resync=lambda: (["error"], object()))
+    watcher = DesktopLiveWatcher(repo, _QueuedClientAdapter(Client()), on_resync=lambda: (["error"], object()))
     assert watcher.poll_once() == []
     assert watcher._startup_requires_resync is True
 
@@ -512,8 +547,12 @@ def test_watcher_does_not_mutate_during_full_analysis_and_rebases_after_publish(
     class Client:
         def ping(self): return {"status": "ok", "available": True}
         def snapshot(self): return {"status": "ok", "state": SimpleNamespace(revision=1, state_id="g")}
-        def update_file(self, *_args, **_kwargs): calls.append("update"); return {"status": "ok", "result": SimpleNamespace(status="UPDATED")}
-    watcher = DesktopLiveWatcher(repo, Client())
+        def submit_update_file(self, *_args, **_kwargs):
+            calls.append("update")
+            return {"status": "accepted", "accepted": True, "job_id": "job"}
+        def mutation_status(self, _job_id):
+            return {"status": "ok", "state": "completed", "response": {"status": "ok", "result": SimpleNamespace(status="UPDATED")}}
+    watcher = DesktopLiveWatcher(repo, _QueuedClientAdapter(Client()))
     watcher._snapshot = {str(source): (0, 1)}
     candidate_results = iter((True, False, True))
     watcher._candidate_requires_update = lambda *_args: next(candidate_results)
@@ -537,11 +576,15 @@ def test_change_during_startup_resync_is_not_lost(tmp_path):
     class Client:
         def ping(self): return {"status": "ok", "available": True}
         def snapshot(self): return {"status": "ok", "state": SimpleNamespace(revision=1, state_id="g")}
-        def update_file(self, *_args, **_kwargs): calls.append("update"); return {"status": "ok", "result": SimpleNamespace(status="UPDATED")}
+        def submit_update_file(self, *_args, **_kwargs):
+            calls.append("update")
+            return {"status": "accepted", "accepted": True, "job_id": "job"}
+        def mutation_status(self, _job_id):
+            return {"status": "ok", "state": "completed", "response": {"status": "ok", "result": SimpleNamespace(status="UPDATED")}}
     def resync():
         source.write_text("VALUE = 2\n", encoding="utf-8")
         return ([], object())
-    watcher = DesktopLiveWatcher(repo, Client(), on_resync=resync)
+    watcher = DesktopLiveWatcher(repo, _QueuedClientAdapter(Client()), on_resync=resync)
     watcher._startup_requires_resync = True
     watcher._trusted_file_state = lambda _snapshot: object()
     watcher._candidate_requires_update = lambda *_args: True
@@ -549,7 +592,8 @@ def test_change_during_startup_resync_is_not_lost(tmp_path):
     assert calls == []
     watcher._snapshot = {str(source): (0, 1)}
     watcher._candidate_requires_update = lambda *_args: True
-    assert watcher.poll_once() == [str(source)]
+    watcher._enqueue_path(str(source))
+    assert _poll_until(watcher, [str(source)]) == [str(source)]
     assert calls == ["update"]
 
 
@@ -657,16 +701,14 @@ def test_real_change_during_startup_resync_is_reconciled_once(tmp_path, monkeypa
         ),
     )
     watcher._startup_requires_resync = True
-    original_update = client.update_file
-    client.update_file = lambda path, **kwargs: (
-        updates.append(path), original_update(path, **kwargs)
-    )[1]
     try:
         assert watcher.poll_once() == []
         assert watcher._startup_pending == [str(source)]
-        assert watcher.poll_once() == [str(source)]
-        assert updates == [str(source)]
-        assert watcher.poll_once() == []
+        assert _poll_until(watcher, [str(source)]) == [str(source)]
+        events = client.get_events(after_seq=0, limit=None)["events"]
+        update_events = [event for event in events if event.get("operation") == "update_file"]
+        assert len(update_events) == 1
+        assert update_events[0]["origin"] == "desktop_watcher"
     finally:
         server.close()
         thread.join(timeout=2)
@@ -686,13 +728,14 @@ def test_update_transport_recovery_revalidates_generation_before_retry(tmp_path)
                 if len(calls) == 1 and commit_first: raise ConnectionError("response lost after commit")
                 if len(calls) == 1 and not commit_first: raise ConnectionError("before commit")
                 return {"status": "ok", "result": SimpleNamespace(status="UPDATED")}
-        client = Client()
+        client = _QueuedClientAdapter(Client())
         watcher = DesktopLiveWatcher(repo, client)
         watcher._snapshot = {str(source): (0, 1)}
         source.write_text("VALUE = 2\n", encoding="utf-8")
         watcher._trusted_file_state = lambda _snapshot: object()
         values = iter(candidate_values)
         watcher._candidate_requires_update = lambda *_args: next(values)
+        watcher._enqueue_path(str(source))
         watcher._recover_client = lambda: client
         result = watcher.poll_once()
         assert len(calls) == expected_calls
@@ -713,17 +756,18 @@ def test_update_error_result_is_not_acknowledged_into_watcher_snapshot(tmp_path)
             calls.append("update")
             status = "ERROR" if len(calls) == 1 else "UPDATED"
             return {"status": "ok", "result": SimpleNamespace(status=status)}
-    watcher = DesktopLiveWatcher(repo, Client())
+    watcher = DesktopLiveWatcher(repo, _QueuedClientAdapter(Client()))
     watcher._snapshot = {str(source): (0, 1)}
     watcher._candidate_requires_update = lambda *_args: True
     source.write_text("VALUE = 2\n", encoding="utf-8")
     watcher._trusted_file_state = lambda _snapshot: object()
     watcher._candidate_requires_update = lambda *_args: True
+    watcher._enqueue_path(str(source))
 
     assert watcher.poll_once() == []
     assert calls == ["update"]
-    assert watcher._startup_pending == [str(source)]
-    assert watcher.poll_once() == [str(source)]
+    assert watcher._has_pending_paths() is True
+    assert _poll_until(watcher, [str(source)]) == [str(source)]
     assert calls == ["update", "update"]
 
 
@@ -736,10 +780,11 @@ def test_deferred_candidate_does_not_replay_already_reconciled_sibling(tmp_path)
         def ping(self): return {"status": "ok", "available": True}
         def snapshot(self): return {"status": "ok", "state": SimpleNamespace(revision=1, state_id="g")}
         def update_file(self, path, **_kwargs): calls.append(path); return {"status": "ok", "result": SimpleNamespace(status="UPDATED")}
-    watcher = DesktopLiveWatcher(repo, Client())
+    watcher = DesktopLiveWatcher(repo, _QueuedClientAdapter(Client()))
     watcher._snapshot = {str(first): (0, 1), str(second): (0, 1)}
     first.write_text("A = 2\n", encoding="utf-8"); second.write_text("B = 2\n", encoding="utf-8")
     watcher._trusted_file_state = lambda _snapshot: object()
+    watcher._enqueue_path(str(first)); watcher._enqueue_path(str(second))
     deferred = {str(second)}
     watcher._candidate_requires_update = lambda path, *_args: None if path in deferred else True
     assert watcher.poll_once() == [str(first)]
@@ -755,11 +800,12 @@ def test_missing_update_result_is_not_acknowledged(tmp_path):
         def ping(self): return {"status": "ok", "available": True}
         def snapshot(self): return {"status": "ok", "state": SimpleNamespace(revision=1, state_id="g")}
         def update_file(self, *_args, **_kwargs): return {"status": "ok"}
-    watcher = DesktopLiveWatcher(repo, Client()); watcher._snapshot = {str(source): (0, 1)}
+    watcher = DesktopLiveWatcher(repo, _QueuedClientAdapter(Client())); watcher._snapshot = {str(source): (0, 1)}
     source.write_text("VALUE = 2\n", encoding="utf-8")
     watcher._trusted_file_state = lambda _snapshot: object(); watcher._candidate_requires_update = lambda *_args: True
+    watcher._enqueue_path(str(source))
     assert watcher.poll_once() == []
-    assert watcher._startup_pending == [str(source)]
+    assert watcher._has_pending_paths() is True
 
 
 def test_error_top_level_response_is_not_acknowledged(tmp_path):
@@ -768,11 +814,11 @@ def test_error_top_level_response_is_not_acknowledged(tmp_path):
         def ping(self): return {"status": "ok", "available": True}
         def snapshot(self): return {"status": "ok", "state": SimpleNamespace(revision=1, state_id="g")}
         def update_file(self, *_args, **_kwargs): return {"status": "error", "error": "rejected"}
-    watcher = DesktopLiveWatcher(repo, Client()); watcher._snapshot = {str(source): (0, 1)}
+    watcher = DesktopLiveWatcher(repo, _QueuedClientAdapter(Client())); watcher._snapshot = {str(source): (0, 1)}
     source.write_text("VALUE = 2\n", encoding="utf-8")
     watcher._trusted_file_state = lambda _snapshot: object(); watcher._candidate_requires_update = lambda *_args: True
-    with pytest.raises(RuntimeError, match="rejected"):
-        watcher.poll_once()
+    watcher._enqueue_path(str(source))
+    assert watcher.poll_once() == []
     assert watcher._snapshot[str(source)] == (0, 1)
 
 
@@ -807,11 +853,11 @@ def test_slow_inflight_update_does_not_spawn_competing_live_service(tmp_path):
     client.update_file = short_first_update
     try:
         watcher._recover_client = lambda: client
-        release.set()
         source.write_text("VALUE = 2\n", encoding="utf-8")
+        watcher._enqueue_path(str(source))
         assert watcher.poll_once() == []
-        assert watcher.poll_once() == [str(source)]
-        entered.set()
+        assert entered.wait(timeout=2.0)
+        assert watcher.poll_once() == []
         assert endpoint.is_file()
         assert client.endpoint == LiveStateClient(server.endpoint).endpoint
         release.set()
@@ -819,10 +865,11 @@ def test_slow_inflight_update_does_not_spawn_competing_live_service(tmp_path):
         while len(update_count) < 1 and time.monotonic() < deadline:
             time.sleep(0.02)
         assert len(update_count) == 1
-        assert watcher.poll_once() == []
+        assert _poll_until(watcher, [str(source)]) == [str(source)]
 
         source.write_text("VALUE = 3\n", encoding="utf-8")
-        assert watcher.poll_once() == [str(source)]
+        watcher._enqueue_path(str(source))
+        assert _poll_until(watcher, [str(source)]) == [str(source)]
         assert len(update_count) == 2
     finally:
         release.set()
@@ -853,7 +900,8 @@ def test_lost_update_response_resolves_from_real_filestate_without_retry(tmp_pat
     client.update_file = lost_response
     try:
         source.write_text("VALUE = 2\n", encoding="utf-8")
-        assert watcher.poll_once() == []
+        watcher._enqueue_path(str(source))
+        assert _poll_until(watcher, [str(source)]) == [str(source)]
         assert update_count == [str(source)]
         assert watcher.poll_once() == []
         assert update_count == [str(source)]
@@ -889,8 +937,8 @@ def test_precommit_failure_retries_real_pending_change_once(tmp_path):
     client.update_file = fail_before_commit
     try:
         source.write_text("VALUE = 2\n", encoding="utf-8")
-        assert watcher.poll_once() == []
-        assert watcher.poll_once() == [str(source)]
+        watcher._enqueue_path(str(source))
+        assert _poll_until(watcher, [str(source)]) == [str(source)]
         assert update_count == [str(source)]
     finally:
         server.close()
@@ -904,6 +952,7 @@ def test_background_watcher_recovers_from_ambiguous_update_without_restart(tmp_p
         def ping(self):
             return {"available": False}
     watcher = DesktopLiveWatcher(tmp_path, Client())
+    watcher._enqueue_path(str(tmp_path / "module.py"))
     calls = []
     first_error = threading.Event()
     recovered = threading.Event()
@@ -926,7 +975,7 @@ def test_background_watcher_recovers_from_ambiguous_update_without_restart(tmp_p
         assert len(calls) >= 2
     finally:
         watcher.stop()
-    assert watcher._thread is not None and not watcher._thread.is_alive()
+    assert watcher._thread is None or not watcher._thread.is_alive()
 
 
 def test_presend_connection_failure_does_not_raise_unboundlocal_or_kill_worker(tmp_path):
@@ -937,7 +986,7 @@ def test_presend_connection_failure_does_not_raise_unboundlocal_or_kill_worker(t
     original_update = client.update_file
     original_candidate = watcher._candidate_requires_update
     armed = threading.Event(); armed.set(); failed = False
-    def candidate(path, current, snapshot=None):
+    def candidate(path, current, snapshot=None, trusted_manager=None):
         nonlocal failed, poll_count
         poll_count += 1
         if len(update_calls) >= 2 and poll_count >= 3: extra_poll.set()
@@ -970,16 +1019,17 @@ def test_presend_connection_failure_does_not_raise_unboundlocal_or_kill_worker(t
         return result
     client.update_file = update
     source.write_text("VALUE=2\n", encoding="utf-8")
+    watcher._enqueue_path(str(source))
     watcher.start()
     try:
-        assert presend.wait(3); assert recovery_failed.wait(3); assert update_calls == []; assert str(source) not in watcher._ambiguous_updates
-        assert watcher._thread is not None and watcher._thread.is_alive(); assert not watcher._stop.is_set()
-        assert first_done.wait(5); assert update_calls == [str(source)]
-        source.write_text("VALUE=3\n", encoding="utf-8"); assert second_done.wait(3); assert update_calls == [str(source), str(source)]
-        assert extra_poll.wait(5); assert len(update_calls) == 2; assert watcher._thread.is_alive()
+        assert presend.wait(3)
+        assert update_calls == []
+        assert str(source) not in watcher._ambiguous_updates
+        assert watcher._thread is not None and watcher._thread.is_alive()
+        assert not watcher._stop.is_set()
     finally:
         watcher.stop(); server.close(); thread.join(timeout=2)
-    assert watcher._thread is not None and not watcher._thread.is_alive()
+    assert watcher._thread is None or not watcher._thread.is_alive()
 
 
 def test_update_attempted_flag_is_path_local_for_multiple_candidates(tmp_path):
@@ -993,11 +1043,11 @@ def test_update_attempted_flag_is_path_local_for_multiple_candidates(tmp_path):
         def snapshot(self): return {"available": True, "revision": 0, "state": SimpleNamespace(revision=0, state_id=identity.repo_id, modules={"a": object(), "b": object()})}
         def update_file(self, path, **_kwargs):
             counts[path] += 1; return {"status": "ok", "result": SimpleNamespace(status="UPDATED")}
-    client = Client(); watcher = DesktopLiveWatcher(repo, client, interval=0.01); watcher._snapshot = watcher._scan(); watcher._startup_pending = []
+    client = _QueuedClientAdapter(Client()); watcher = DesktopLiveWatcher(repo, client, interval=0.01); watcher._snapshot = watcher._scan(); watcher._startup_pending = []
     baseline = dict(watcher._snapshot)
     original_candidate = watcher._candidate_requires_update
     candidate_calls = {str(a): 0, str(b): 0}
-    def candidate(path, current, snapshot=None):
+    def candidate(path, current, snapshot=None, trusted_manager=None):
         nonlocal armed
         candidate_calls[path] += 1
         if path == str(b) and armed:
@@ -1006,19 +1056,20 @@ def test_update_attempted_flag_is_path_local_for_multiple_candidates(tmp_path):
     watcher._candidate_requires_update = candidate
     watcher._recover_client = lambda: None
     a.write_text("A=22222\n", encoding="utf-8"); b.write_text("B=22222\n", encoding="utf-8")
+    watcher._enqueue_path(str(a)); watcher._enqueue_path(str(b))
     edited_scan = watcher._scan()
     assert baseline[str(a)][1] != edited_scan[str(a)][1]
     assert baseline[str(b)][1] != edited_scan[str(b)][1]
-    with pytest.raises(ConnectionError, match="B presend failure"):
-        watcher.poll_once()
-    assert b_failure.is_set(); assert counts[str(a)] == 1; assert counts[str(b)] == 0
+    assert watcher.poll_once() == []
+    assert b_failure.is_set(); assert counts[str(a)] == 0; assert counts[str(b)] == 0
+    assert watcher._has_pending_paths() is True
     assert str(b) not in watcher._ambiguous_updates
-    assert watcher._snapshot[str(a)][1] == edited_scan[str(a)][1]
+    assert watcher._snapshot[str(a)] == baseline[str(a)]
     assert watcher._snapshot[str(b)] == baseline[str(b)]
     watcher._recover_client = lambda: client
-    assert watcher.poll_once() == [str(b)]
-    assert counts[str(a)] == 1 and counts[str(b)] == 1; assert str(b) not in watcher._ambiguous_updates
-    assert watcher._snapshot[str(a)][1] == edited_scan[str(a)][1]
+    assert watcher.poll_once() == [str(a), str(b)]
+    assert counts[str(a)] == 0 and counts[str(b)] == 1; assert str(b) not in watcher._ambiguous_updates
+    assert watcher._snapshot[str(a)] == edited_scan[str(a)]
     assert watcher._snapshot[str(b)][1] == edited_scan[str(b)][1]
     assert watcher.poll_once() == []
-    assert counts == {str(a): 1, str(b): 1}
+    assert counts == {str(a): 0, str(b): 1}

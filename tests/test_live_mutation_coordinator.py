@@ -424,3 +424,50 @@ def test_legacy_update_file_contract_remains_synchronous_and_unchanged():
             "result": {"status": "UPDATED", "file_path": "legacy.py"},
             "seq": 1,
         }]
+
+
+def test_queued_executor_enters_mutation_guard_before_canonical_execution():
+    order = []
+    entered = threading.Event()
+
+    @contextmanager
+    def guard(_request, _stop_event):
+        order.append("lease")
+        try:
+            yield
+        finally:
+            order.append("release")
+
+    def updater(state, path):
+        order.append("update")
+        state.files.append(path)
+        entered.set()
+        return {"status": "UPDATED", "file_path": path}
+
+    server = CanonicalLiveServer(
+        SimpleNamespace(files=[], revision=0), updater=updater, mutation_guard=guard
+    )
+    with _running_server(server) as client:
+        accepted = client.submit_update_file("guarded.py", origin="test")
+        terminal = _wait_for_terminal(client, accepted["job_id"])
+        assert terminal["state"] == "completed"
+        assert entered.is_set()
+    assert order == ["lease", "update", "release"]
+
+
+def test_coordinator_close_reports_undrained_active_worker_then_drains():
+    started = threading.Event()
+    release = threading.Event()
+
+    def executor(_request):
+        started.set()
+        release.wait(timeout=3)
+        return {"status": "ok", "revision": 1}
+
+    coordinator = CanonicalMutationCoordinator(executor, lambda: 0)
+    accepted = coordinator.submit({"file_path": "slow.py"})
+    assert started.wait(timeout=1)
+    assert coordinator.close(join_timeout=0.01) is False
+    release.set()
+    assert coordinator.close(join_timeout=3.0) is True
+    assert coordinator.status(accepted["job_id"])["state"] == "completed"

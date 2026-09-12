@@ -518,6 +518,7 @@ class DesktopLiveWatcher:
         path: str,
         current: dict[str, tuple[int, int]],
         snapshot: dict | None = None,
+        trusted_manager=None,
     ) -> bool | None:
         """Revalidate a queued path against the generation held after the lease wait."""
         if snapshot is None:
@@ -525,7 +526,7 @@ class DesktopLiveWatcher:
                 snapshot = self.client.snapshot()
             except (OSError, EOFError, TimeoutError, ConnectionError) as exc:
                 return None
-        manager = self._trusted_file_state(snapshot)
+        manager = trusted_manager if trusted_manager is not None else self._trusted_file_state(snapshot)
         if manager is None:
             self._startup_requires_resync = True
             return None
@@ -557,8 +558,14 @@ class DesktopLiveWatcher:
         for job_id, job in list(self._inflight_updates.items()):
             try:
                 status = self.client.mutation_status(job_id)
-            except (OSError, EOFError, TimeoutError, ConnectionError):
-                continue
+            except (OSError, EOFError, TimeoutError, ConnectionError) as exc:
+                recovered = self._recover_client(exc)
+                if recovered is None:
+                    continue
+                try:
+                    status = self.client.mutation_status(job_id)
+                except (OSError, EOFError, TimeoutError, ConnectionError):
+                    continue
             state = status.get("state") if isinstance(status, dict) else None
             if state in {"queued", "running"}:
                 continue
@@ -574,7 +581,11 @@ class DesktopLiveWatcher:
                         self._snapshot[job.path] = job.observed_state
                     completed.append(job.path)
                     from contextor.core.runtime_trace import trace_event
-                    trace_event("LIVE", "WATCH_UPDATE_END", op=job.trace_op, repo=str(self.root), path=Path(job.path).name, rev=response.get("revision"), seq=response.get("seq"), status=result_status, elapsed_ms=(time.monotonic() - job.started_at) * 1000.0)
+                    try:
+                        relative = Path(job.path).resolve().relative_to(self.root).as_posix()
+                    except ValueError:
+                        relative = job.path
+                    trace_event("LIVE", "WATCH_UPDATE_END", op=job.trace_op, repo=str(self.root), path=relative, rev=response.get("revision"), seq=response.get("seq"), status=result_status, elapsed_ms=(time.monotonic() - job.started_at) * 1000.0)
                     if result_status == "SYNTAX_ERROR":
                         line = getattr(result, "line_number", None)
                         column = getattr(result, "column_number", None)
@@ -585,8 +596,18 @@ class DesktopLiveWatcher:
                     else:
                         self._emit(f"LIVE update successful: {Path(job.path).name}")
                     continue
-            if state in {"invalid", "unknown"} or (isinstance(status, dict) and status.get("error") in {"unknown_job_id", "invalid_job_id"}):
+            if isinstance(status, dict) and status.get("error") in {"unknown_mutation_job", "invalid_mutation_job_id"}:
                 self._ambiguous_updates.add(job.path)
+            from contextor.core.runtime_trace import trace_event
+            try:
+                relative = Path(job.path).resolve().relative_to(self.root).as_posix()
+            except ValueError:
+                relative = job.path
+            trace_event(
+                "LIVE", "WATCH_UPDATE_FAIL", op=job.trace_op, repo=str(self.root),
+                path=relative, elapsed_ms=(time.monotonic() - job.started_at) * 1000.0,
+                err=(status.get("error", "malformed mutation status") if isinstance(status, dict) else "malformed mutation status"),
+            )
             self._requeue_paths([job.path])
             self._emit(f"LIVE update failed; deferring watcher update: {Path(job.path).name}")
         return completed
@@ -597,7 +618,7 @@ class DesktopLiveWatcher:
         if not changed and self._startup_pending:
             changed = list(self._startup_pending)
             self._startup_pending = []
-        if not changed:
+        if not changed and not self._startup_requires_resync:
             return reconciled
         current: dict[str, tuple[int, int]] = {}
         for path in changed:
@@ -656,7 +677,20 @@ class DesktopLiveWatcher:
             self._requeue_paths(changed)
             self._emit("LIVE: generation revalidation unavailable; deferring watcher update")
             return reconciled
-        if self._trusted_file_state(batch_snapshot) is None:
+        batch_manager = self._trusted_file_state(batch_snapshot)
+        if batch_manager is None:
+            self._requeue_paths(changed)
+            self._emit("LIVE: generation revalidation unavailable; deferring watcher update")
+            return reconciled
+
+        try:
+            candidate_decisions = {
+                path: self._candidate_requires_update(
+                    path, current, batch_snapshot, batch_manager
+                )
+                for path in changed
+            }
+        except (OSError, EOFError, TimeoutError, ConnectionError):
             self._requeue_paths(changed)
             self._emit("LIVE: generation revalidation unavailable; deferring watcher update")
             return reconciled
@@ -684,9 +718,7 @@ class DesktopLiveWatcher:
             trace_event("LIVE", "WATCH_UPDATE_START", op=op, repo=str(self.root), path=relative)
             was_ambiguous = path in self._ambiguous_updates
             try:
-                candidate_requires_update = self._candidate_requires_update(
-                    path, current, batch_snapshot
-                )
+                candidate_requires_update = candidate_decisions[path]
                 if candidate_requires_update is None:
                     deferred.append(path)
                     if was_ambiguous:
@@ -713,7 +745,13 @@ class DesktopLiveWatcher:
                 deferred.append(path)
                 continue
             job_id = response.get("job_id") if isinstance(response, dict) else None
-            if not isinstance(response, dict) or response.get("accepted") is not True or not isinstance(job_id, str) or not job_id:
+            if (
+                not isinstance(response, dict)
+                or response.get("status") != "accepted"
+                or response.get("accepted") is not True
+                or not isinstance(job_id, str)
+                or not job_id
+            ):
                 deferred.append(path)
                 self._emit("LIVE: update submission was not accepted; deferring watcher update")
                 continue

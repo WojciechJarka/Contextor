@@ -24,6 +24,17 @@ from contextor.core.analysis.state_manager import FileStateManager
 from contextor.core.paths import repo_cache_dir
 from contextor.core.domain.validation import ValidationError
 
+
+def _poll_until_reconciled(watcher, expected, timeout=10.0):
+    deadline = time.monotonic() + timeout
+    observed = []
+    while time.monotonic() < deadline:
+        observed.extend(watcher.poll_once())
+        if observed == expected:
+            return observed
+        time.sleep(0.01)
+    return observed
+
 pytestmark = pytest.mark.live
 
 
@@ -936,8 +947,9 @@ def test_startup_backfill_preserves_filestate_content_and_revision_parity(tmp_pa
                 "activity_epoch": self.activity_epoch,
             }
 
-        def close(self):
+        def close(self, **_kwargs):
             self._stop.set()
+            return True
 
     monkeypatch.setattr(runtime, "CanonicalLiveServer", StubServer)
     import contextor.core.runtime_trace as runtime_trace
@@ -1425,15 +1437,15 @@ def test_desktop_watcher_reports_create_edit_and_delete_without_manual_update(tm
     try:
         target.write_text("value = 1\n", encoding="utf-8")
         watcher._enqueue_path(str(target))
-        assert watcher.poll_once() == [str(target)]
+        assert _poll_until_reconciled(watcher, [str(target)]) == [str(target)]
 
         target.write_text("value = 22\n", encoding="utf-8")
         watcher._enqueue_path(str(target))
-        assert watcher.poll_once() == [str(target)]
+        assert _poll_until_reconciled(watcher, [str(target)]) == [str(target)]
 
         target.unlink()
         watcher._enqueue_path(str(target))
-        assert watcher.poll_once() == [str(target)]
+        assert _poll_until_reconciled(watcher, [str(target)]) == [str(target)]
         snapshot = LiveStateClient(server.endpoint).snapshot()
         assert snapshot["revision"] == 3
         assert snapshot["state"].updates == 3
@@ -1484,8 +1496,8 @@ def test_first_run_watcher_waits_for_initial_canonical_state(tmp_path):
         after_analysis = tmp_path / "after_analysis.py"
         after_analysis.write_text("value = 2\n", encoding="utf-8")
         watcher._enqueue_path(str(after_analysis))
-        response = watcher.poll_once()
-        assert response == [str(after_analysis)]
+        response = _poll_until_reconciled(watcher, [str(before_analysis), str(after_analysis)])
+        assert response == [str(before_analysis), str(after_analysis)]
     finally:
         server.close()
         thread.join(timeout=2)

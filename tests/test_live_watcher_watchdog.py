@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import threading
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -227,7 +228,13 @@ def test_syntax_error_and_recovery_contract_survives_watchdog_adapter(tmp_path):
 
         target.write_text("def repaired():\n    return 1\n", encoding="utf-8")
         watcher._enqueue_path(str(target))
-        assert watcher.poll_once() == [str(target.resolve())]
+        deadline = time.monotonic() + 5.0
+        recovered = []
+        while time.monotonic() < deadline and not recovered:
+            recovered = watcher.poll_once()
+            if not recovered:
+                time.sleep(0.01)
+        assert recovered == [str(target.resolve())]
 
         events = watcher.client.get_events(after_seq=0, limit=None)["events"]
         update_events = [event for event in events if event.get("operation") == "update_file"]
