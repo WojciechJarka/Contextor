@@ -181,6 +181,37 @@ def test_diagnostic_delta_skips_malformed_facts_and_orders_mixed_actions_determi
     )
 
 
+def test_diagnostic_delta_skips_real_collision_without_symbol_details():
+    collision = ValidationError(
+        kind="NAME_COLLISION", message="collision", nodes=["pkg.b", "pkg.a"]
+    )
+    collision.artifact_type = "function"
+    collision.is_identical = False
+    current = _diagnostic_state(collisions=[collision])
+
+    assert not any(
+        change["diagnostic_kind"] == "collision"
+        for change in ipc_module._build_diagnostic_delta(_diagnostic_state(), current)
+    )
+
+
+def test_diagnostic_delta_orders_same_kind_and_action_by_lexical_key():
+    current = _diagnostic_state(
+        syntax={
+            "pkg/z.py": {"status": "checked_with_errors", "errors": [{"message": "z", "line_number": 1, "column_number": 0}]},
+            "pkg/a.py": {"status": "checked_with_errors", "errors": [{"message": "a", "line_number": 1, "column_number": 0}]},
+        }
+    )
+    changes = ipc_module._build_diagnostic_delta(_diagnostic_state(), current)
+
+    assert [(change["diagnostic_kind"], change["action"]) for change in changes] == [
+        ("syntax", "ADDED"), ("syntax", "ADDED")
+    ]
+    assert [change["diagnostic_key"] for change in changes] == sorted(
+        change["diagnostic_key"] for change in changes
+    )
+
+
 def test_unchanged_fresh_diagnostics_do_not_add_a_journal_field():
     state = _diagnostic_state(
         syntax={"pkg/bad.py": {"status": "checked_with_errors", "errors": [{"message": "bad", "line_number": 1, "column_number": 0}]}},

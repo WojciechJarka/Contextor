@@ -234,6 +234,24 @@ def test_desktop_feed_formats_generic_diagnostic_delta_and_ignores_malformed_pay
     )
 
 
+def test_desktop_feed_falls_back_when_valid_envelope_has_only_non_renderable_items():
+    feed = DesktopLiveEventFeed(SimpleNamespace(), lambda *_args, **_kwargs: None, initial_seq=0)
+    event = {
+        "operation": "update_file", "origin": "desktop_watcher", "status": "UPDATED",
+        "file_path": "pkg/change.py", "canonical_revision": 18,
+        "diagnostic_changes": {
+            "total": 3, "truncated": False,
+            "items": [
+                {"action": "UNKNOWN", "diagnostic_kind": "syntax"},
+                {"action": "ADDED", "diagnostic_kind": "collision", "collision_nodes": ["pkg.a"]},
+                {"action": "RESOLVED", "diagnostic_kind": "cycle", "cycle_nodes": ["pkg.a", 2]},
+            ],
+        },
+    }
+
+    assert feed._message(event) == "[LIVE] Watcher updated change.py (rev 18)"
+
+
 @pytest.mark.parametrize(
     "item, expected",
     [
