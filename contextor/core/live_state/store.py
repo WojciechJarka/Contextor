@@ -14,6 +14,7 @@ from typing import Any
 
 from contextor.core.domain.lineage_facts import (
     LINEAGE_FACTS_SEMANTIC_VERSION,
+    ExtractedLineageSourceFacts,
     LineageConfidence,
     LineageFamilyStatus,
     LineageRelation,
@@ -239,18 +240,25 @@ def _normalize_lineage_facts_state(state: Any) -> Any:
     try:
         if not hasattr(state, "lineage_facts_by_source"):
             state.lineage_facts_by_source = {}
+        if not hasattr(state, "lineage_extracted_facts_by_source"):
+            state.lineage_extracted_facts_by_source = {}
         if not hasattr(state, "lineage_facts_state"):
             state.lineage_facts_state = "not_materialized"
         if not hasattr(state, "lineage_facts_semantic_version"):
             state.lineage_facts_semantic_version = None
 
         raw_mapping = state.lineage_facts_by_source
+        raw_extracted_mapping = state.lineage_extracted_facts_by_source
         raw_family_state = state.lineage_facts_state
         raw_version = state.lineage_facts_semantic_version
 
         if not isinstance(raw_mapping, dict):
             raise pickle.UnpicklingError(
                 "Lineage source mapping must be a dict."
+            )
+        if not isinstance(raw_extracted_mapping, dict):
+            raise pickle.UnpicklingError(
+                "Extracted lineage source mapping must be a dict."
             )
         if not isinstance(raw_family_state, str):
             raise pickle.UnpicklingError(
@@ -278,6 +286,10 @@ def _normalize_lineage_facts_state(state: Any) -> Any:
                 raise pickle.UnpicklingError(
                     "Not-materialized lineage cannot have a semantic version."
                 )
+            if raw_extracted_mapping:
+                raise pickle.UnpicklingError(
+                    "Not-materialized lineage cannot retain extracted source facts."
+                )
         elif raw_version != LINEAGE_FACTS_SEMANTIC_VERSION:
             raise pickle.UnpicklingError(
                 "Materialized lineage requires the current semantic version."
@@ -296,7 +308,24 @@ def _normalize_lineage_facts_state(state: Any) -> Any:
                 )
             normalized[source_key] = rebuilt
 
+        extracted_normalized: dict[str, ExtractedLineageSourceFacts] = {}
+        for source_key, extracted in raw_extracted_mapping.items():
+            if not isinstance(source_key, str) or not source_key:
+                raise pickle.UnpicklingError(
+                    "Extracted lineage source key must be a non-empty string."
+                )
+            if not isinstance(extracted, ExtractedLineageSourceFacts):
+                raise pickle.UnpicklingError(
+                    "Invalid extracted lineage source facts."
+                )
+            if extracted.source_key != source_key:
+                raise pickle.UnpicklingError(
+                    "Extracted lineage mapping key does not match source_key."
+                )
+            extracted_normalized[source_key] = extracted
+
         state.lineage_facts_by_source = normalized
+        state.lineage_extracted_facts_by_source = extracted_normalized
         state.lineage_facts_state = family_status.value
         state.lineage_facts_semantic_version = raw_version
         return state

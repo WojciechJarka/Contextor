@@ -14,6 +14,7 @@ import pytest
 
 from contextor.core.analysis.incremental.engine import IncrementalAnalysisEngine
 from contextor.core.analysis.incremental.plan_executor import _prepare_candidate_state
+from contextor.core.api.facade import _materialize_full_analysis_lineage
 from contextor.core.analysis.lineage_extraction import extract_lineage_source_facts
 from contextor.core.analysis.lineage_materialization import (
     LineageResolutionContext,
@@ -448,6 +449,69 @@ class _LineageRegistry:
             artifact_paths.setdefault(name, f"A:{name}")
 
 
+class _LifecycleRegistry(_LineageRegistry):
+    """Small transactional registry model with explicit active generations."""
+
+    def __init__(self, module_ids, artifact_ids):
+        super().__init__(module_ids, artifact_ids)
+        self._ids_by_name = {
+            **dict(module_ids),
+            **dict(artifact_ids),
+        }
+
+    def sync_with_workspace(self, modules, artifacts):
+        self._state["module_registry"]["path_to_id"] = {
+            name: self._ids_by_name[name]
+            for name in sorted(modules)
+            if name in self._ids_by_name
+        }
+        self._state["module_registry"]["id_to_path"] = {
+            owner_id: name
+            for name, owner_id in self._state["module_registry"]["path_to_id"].items()
+        }
+        self._state["artifact_registry"]["path_to_id"] = {
+            name: self._ids_by_name[name]
+            for name in sorted(artifacts)
+            if name in self._ids_by_name
+        }
+        self._state["artifact_registry"]["id_to_path"] = {
+            owner_id: name
+            for name, owner_id in self._state["artifact_registry"]["path_to_id"].items()
+        }
+
+
+def _cross_source_facts():
+    provider_source = "def target():\n    return 1\n__all__ = ['target']\n"
+    consumer_source = (
+        "from provider import target as exported\n"
+        "__all__ = ['exported']\n"
+        "value = exported()\n"
+    )
+    return {
+        "provider.py": _extracted("provider.py", provider_source),
+        "consumer.py": _extracted("consumer.py", consumer_source),
+    }
+
+
+def _lineage_state_for_facts(facts, registry, modules, artifacts):
+    index = SimpleNamespace(
+        modules=modules,
+        lineage_facts_by_source=facts,
+        skipped=[],
+    )
+    materialized, family_state, semantic_version = _materialize_full_analysis_lineage(
+        index, registry, modules, artifacts
+    )
+    return RepositoryAnalysisState(
+        modules=modules,
+        artifacts=artifacts,
+        lineage_extracted_facts_by_source=dict(facts),
+        lineage_facts_by_source=materialized,
+        lineage_facts_state=family_state,
+        lineage_facts_semantic_version=semantic_version,
+    )
+
+
 def _module(name: str) -> Module:
     return Module(
         module_id=name,
@@ -766,6 +830,291 @@ def test_identity_sync_materializes_against_new_ids_and_rolls_back_on_failure(
     assert failed_state.lineage_facts_by_source == {}
     assert failed_acknowledged == []
     assert "pkg" not in failing_registry._state["module_registry"]["path_to_id"]
+
+
+def test_identity_sync_owner_deletion_matches_fresh_full_materialization_without_reextracting_untouched_consumer(
+    tmp_path,
+    monkeypatch,
+):
+    facts = _cross_source_facts()
+    modules = {name: _module(name) for name in ("provider", "consumer")}
+    artifacts = {
+        "provider": {"own_symbols": {"target"}},
+        "consumer": {"own_symbols": set()},
+    }
+    registry = _LifecycleRegistry(
+        {"provider": "M:provider/1", "consumer": "M:consumer/1"},
+        {"provider::target": "A:provider/1"},
+    )
+    state = _lineage_state_for_facts(facts, registry, modules, artifacts)
+    old_consumer_facts = state.lineage_extracted_facts_by_source["consumer.py"]
+    candidate = _prepare_candidate_state(state)
+    candidate.modules = {"consumer": modules["consumer"]}
+    candidate.artifacts = {"consumer": artifacts["consumer"]}
+    outcome = SimpleNamespace(
+        identity_sync_required=True,
+        candidate_state=candidate,
+        affected_modules=set(),
+        blast_radius_complete=True,
+        execution_trace={},
+        all_modules={"consumer"},
+        current_artifacts=set(),
+    )
+    monkeypatch.setattr(
+        "contextor.core.analysis.incremental.engine.execute_refresh_plan",
+        lambda **_kwargs: outcome,
+    )
+    monkeypatch.setattr(
+        "contextor.core.analysis.lineage_extraction.extract_lineage_source_facts",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("untouched consumer was re-extracted")
+        ),
+    )
+    engine, _ = _lineage_engine(state, registry, tmp_path)
+
+    engine._apply_delta_and_commit(
+        str(tmp_path / "provider.py"),
+        SimpleNamespace(is_deleted=True),
+        None,
+        SimpleNamespace(),
+        [],
+        {},
+        None,
+        syntax_source_path="provider.py",
+    )
+
+    full_registry = _LifecycleRegistry(
+        {"consumer": "M:consumer/1"},
+        {},
+    )
+    expected, expected_state, expected_version = _materialize_full_analysis_lineage(
+        SimpleNamespace(
+            modules={"consumer": modules["consumer"]},
+            lineage_facts_by_source={"consumer.py": facts["consumer.py"]},
+            skipped=[],
+        ),
+        full_registry,
+        {"consumer": modules["consumer"]},
+        {"consumer": artifacts["consumer"]},
+    )
+
+    assert state.lineage_facts_state == expected_state == "fresh"
+    assert state.lineage_facts_semantic_version == expected_version
+    assert set(state.lineage_facts_by_source) == {"consumer.py"}
+    assert state.lineage_facts_by_source == expected
+    assert state.lineage_extracted_facts_by_source == {
+        "consumer.py": old_consumer_facts
+    }
+    exposed = state.lineage_facts_by_source["consumer.py"].surfaces[0].exposed
+    assert isinstance(exposed, MaterializedSymbolicRef)
+    assert exposed.module_name == "provider"
+    assert not any(
+        isinstance(endpoint, SemanticEndpoint)
+        and endpoint.owner_id == "A:provider/1"
+        for source_slice in state.lineage_facts_by_source.values()
+        for fact in (*source_slice.flows, *source_slice.surfaces)
+        for endpoint in (getattr(fact, "source", None), getattr(fact, "target", None), getattr(fact, "exposed", None))
+    )
+
+
+def test_identity_sync_owner_introduction_promotes_retained_untouched_consumer_to_full_parity(
+    tmp_path,
+    monkeypatch,
+):
+    facts = _cross_source_facts()
+    consumer_modules = {"consumer": _module("consumer")}
+    consumer_artifacts = {"consumer": {"own_symbols": set()}}
+    registry = _LifecycleRegistry({"consumer": "M:consumer/1"}, {})
+    registry._ids_by_name.update(
+        {"provider": "M:provider/1", "provider::target": "A:provider/1"}
+    )
+    state = _lineage_state_for_facts(
+        {"consumer.py": facts["consumer.py"]},
+        registry,
+        consumer_modules,
+        consumer_artifacts,
+    )
+    candidate = _prepare_candidate_state(state)
+    modules = {name: _module(name) for name in ("provider", "consumer")}
+    artifacts = {
+        "provider": {"own_symbols": {"target"}},
+        "consumer": {"own_symbols": set()},
+    }
+    candidate.modules = modules
+    candidate.artifacts = artifacts
+    outcome = SimpleNamespace(
+        identity_sync_required=True,
+        candidate_state=candidate,
+        affected_modules=set(),
+        blast_radius_complete=True,
+        execution_trace={},
+        all_modules=set(modules),
+        current_artifacts={"provider::target"},
+    )
+    monkeypatch.setattr(
+        "contextor.core.analysis.incremental.engine.execute_refresh_plan",
+        lambda **_kwargs: outcome,
+    )
+    monkeypatch.setattr(
+        "contextor.core.analysis.lineage_extraction.extract_lineage_source_facts",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("untouched consumer was re-extracted")
+        ),
+    )
+    engine, _ = _lineage_engine(state, registry, tmp_path)
+
+    engine._apply_delta_and_commit(
+        str(tmp_path / "provider.py"),
+        SimpleNamespace(is_deleted=False),
+        None,
+        SimpleNamespace(),
+        [],
+        {},
+        None,
+        extracted_lineage_facts=facts["provider.py"],
+        syntax_source_path="provider.py",
+    )
+
+    expected_registry = _LifecycleRegistry(
+        {"provider": "M:provider/1", "consumer": "M:consumer/1"},
+        {"provider::target": "A:provider/1"},
+    )
+    expected, expected_state, expected_version = _materialize_full_analysis_lineage(
+        SimpleNamespace(
+            modules=modules,
+            lineage_facts_by_source=facts,
+            skipped=[],
+        ),
+        expected_registry,
+        modules,
+        artifacts,
+    )
+
+    assert state.lineage_facts_state == expected_state == "fresh"
+    assert state.lineage_facts_semantic_version == expected_version
+    assert set(state.lineage_facts_by_source) == {"provider.py", "consumer.py"}
+    assert state.lineage_facts_by_source == expected
+    assert state.lineage_facts_by_source["consumer.py"].surfaces[0].exposed == SemanticEndpoint(
+        "A:provider/1"
+    )
+
+
+def test_identity_sync_generation_change_rematerializes_against_current_owner_id(
+    tmp_path,
+    monkeypatch,
+):
+    facts = _cross_source_facts()
+    modules = {name: _module(name) for name in ("provider", "consumer")}
+    artifacts = {
+        "provider": {"own_symbols": {"target"}},
+        "consumer": {"own_symbols": set()},
+    }
+    registry = _LifecycleRegistry(
+        {"provider": "M:provider/1", "consumer": "M:consumer/1"},
+        {"provider::target": "A:provider/1"},
+    )
+    state = _lineage_state_for_facts(facts, registry, modules, artifacts)
+    registry._ids_by_name["provider::target"] = "A:provider/2"
+    candidate = _prepare_candidate_state(state)
+    outcome = SimpleNamespace(
+        identity_sync_required=True,
+        candidate_state=candidate,
+        affected_modules=set(),
+        blast_radius_complete=True,
+        execution_trace={},
+        all_modules=set(modules),
+        current_artifacts={"provider::target"},
+    )
+    monkeypatch.setattr(
+        "contextor.core.analysis.incremental.engine.execute_refresh_plan",
+        lambda **_kwargs: outcome,
+    )
+    engine, _ = _lineage_engine(state, registry, tmp_path)
+
+    engine._apply_delta_and_commit(
+        str(tmp_path / "provider.py"),
+        SimpleNamespace(is_deleted=False),
+        None,
+        SimpleNamespace(),
+        [],
+        {},
+        None,
+        extracted_lineage_facts=facts["provider.py"],
+        syntax_source_path="provider.py",
+    )
+
+    consumer_surface = state.lineage_facts_by_source["consumer.py"].surfaces[0]
+    assert consumer_surface.exposed == SemanticEndpoint("A:provider/2")
+    assert consumer_surface.exposed != SemanticEndpoint("A:provider/1")
+    assert registry._state["artifact_registry"]["path_to_id"]["provider::target"] == "A:provider/2"
+
+
+def test_identity_sync_revalidation_failure_rolls_back_registry_and_canonical_state(
+    tmp_path,
+    monkeypatch,
+):
+    facts = _cross_source_facts()
+    modules = {name: _module(name) for name in ("provider", "consumer")}
+    artifacts = {
+        "provider": {"own_symbols": {"target"}},
+        "consumer": {"own_symbols": set()},
+    }
+    registry = _LifecycleRegistry(
+        {"provider": "M:provider/1", "consumer": "M:consumer/1"},
+        {"provider::target": "A:provider/1"},
+    )
+    state = _lineage_state_for_facts(facts, registry, modules, artifacts)
+    original_modules = dict(state.modules)
+    original_artifacts = dict(state.artifacts)
+    original_lineage = dict(state.lineage_facts_by_source)
+    original_extracted = dict(state.lineage_extracted_facts_by_source)
+    candidate = _prepare_candidate_state(state)
+    candidate.modules = {"consumer": modules["consumer"]}
+    candidate.artifacts = {"consumer": artifacts["consumer"]}
+    outcome = SimpleNamespace(
+        identity_sync_required=True,
+        candidate_state=candidate,
+        affected_modules=set(),
+        blast_radius_complete=True,
+        execution_trace={},
+        all_modules={"consumer"},
+        current_artifacts=set(),
+    )
+    monkeypatch.setattr(
+        "contextor.core.analysis.incremental.engine.execute_refresh_plan",
+        lambda **_kwargs: outcome,
+    )
+
+    def fail_on_untouched_consumer(extracted, _resolution):
+        if extracted.source_key == "consumer.py":
+            raise ValueError("consumer rematerialization failed")
+        raise AssertionError("deleted provider should not be rematerialized")
+
+    monkeypatch.setattr(
+        "contextor.core.analysis.lineage_materialization.materialize_lineage_source_facts",
+        fail_on_untouched_consumer,
+    )
+    engine, acknowledged = _lineage_engine(state, registry, tmp_path)
+
+    with pytest.raises(ValueError, match="consumer rematerialization failed"):
+        engine._apply_delta_and_commit(
+            str(tmp_path / "provider.py"),
+            SimpleNamespace(is_deleted=True),
+            None,
+            SimpleNamespace(),
+            [],
+            {},
+            None,
+            syntax_source_path="provider.py",
+        )
+
+    assert state.modules == original_modules
+    assert state.artifacts == original_artifacts
+    assert state.lineage_facts_by_source == original_lineage
+    assert state.lineage_extracted_facts_by_source == original_extracted
+    assert registry._state["module_registry"]["path_to_id"]["provider"] == "M:provider/1"
+    assert registry._state["artifact_registry"]["path_to_id"]["provider::target"] == "A:provider/1"
+    assert acknowledged == []
 
 def test_fresh_process_hydrates_materialized_symbolic_lineage_without_analysis(
     tmp_path,
