@@ -794,7 +794,7 @@ class DesktopLiveWatcher:
                 )
             except (OSError, EOFError, TimeoutError, ConnectionError) as exc:
                 self._ambiguous_updates.add(path)
-                trace_event("LIVE", "WATCH_UPDATE_AMBIGUOUS", op=op, repo=str(self.root), path=relative, rev=status.get("revision"), exception="transport")
+                trace_event("LIVE", "WATCH_UPDATE_AMBIGUOUS", op=pending_intent.trace_op, repo=str(self.root), path=relative, rev=status.get("revision"), exception="transport")
                 deferred.append(path)
                 continue
             job_id = response.get("job_id") if isinstance(response, dict) else None

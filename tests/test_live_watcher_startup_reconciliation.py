@@ -979,7 +979,9 @@ def test_lost_queued_update_ack_reuses_idempotency_key_and_runs_once(tmp_path):
         thread.join(timeout=2)
 
 
-def test_lost_queued_update_ack_does_not_relabel_overlapping_edit(tmp_path):
+def test_lost_queued_update_ack_does_not_relabel_overlapping_edit(
+    tmp_path, monkeypatch
+):
     update_started = threading.Event()
     release_first_update = threading.Event()
     update_calls = []
@@ -1011,11 +1013,28 @@ def test_lost_queued_update_ack_does_not_relabel_overlapping_edit(tmp_path):
 
     client.submit_update_file = lose_first_ack
 
+    trace_events = []
+
+    def capture_trace_event(component, event, **fields):
+        trace_events.append((component, event, fields))
+
+    monkeypatch.setattr(
+        "contextor.core.runtime_trace.trace_event",
+        capture_trace_event,
+    )
+
     try:
         source.write_text("VALUE = 2\n", encoding="utf-8")
         s1 = watcher._scan()[path]
         watcher._enqueue_path(path)
         assert watcher.poll_once() == []
+        ambiguous_events = [
+            fields
+            for component, event, fields in trace_events
+            if component == "LIVE" and event == "WATCH_UPDATE_AMBIGUOUS"
+        ]
+        assert len(ambiguous_events) == 1
+        assert ambiguous_events[0]["op"] == watcher._pending_intents[path].trace_op
         assert update_started.wait(timeout=2)
 
         intent = watcher._pending_intents[path]
