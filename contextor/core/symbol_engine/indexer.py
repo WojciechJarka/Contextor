@@ -14,6 +14,7 @@ import ast
 import dataclasses
 import os
 import re
+import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 
@@ -33,6 +34,7 @@ from contextor.core.domain.module import (
 from contextor.core.errors import AnalysisCancelled, checkpoint
 from contextor.core.paths import DEFAULT_IGNORED_DIRS
 from contextor.core.reference.index import extract_compact_reference_facts
+from contextor.core.runtime_trace import trace_event
 from contextor.core.source import (
     SourceError,
     parse_source,
@@ -328,6 +330,7 @@ def _process_single_file(path_str: str, root_str: str) -> dict:
             "test_facts": None,
             "test_facts_status": None,
             "lineage_facts": None,
+            "lineage_extract_ms": 0.0,
             "automatic_test_context_directory": (
                 str(path.parent)
                 if is_test_context_candidate(root_str, path)
@@ -336,11 +339,13 @@ def _process_single_file(path_str: str, root_str: str) -> dict:
             ),
         }
     tree = parsed_input.tree
+    lineage_extract_started = time.monotonic()
     lineage_facts = extract_lineage_source_facts(
         tree,
         source_key=source_key,
         source_fingerprint=parsed_input.source_fingerprint,
     )
+    lineage_extract_ms = (time.monotonic() - lineage_extract_started) * 1000.0
 
     # Próba odczytu z cache
     cache = _cache_manager(root_str)
@@ -536,6 +541,7 @@ def _process_single_file(path_str: str, root_str: str) -> dict:
         "test_facts": test_facts,
         "test_facts_status": test_facts_status,
         "lineage_facts": lineage_facts,
+        "lineage_extract_ms": lineage_extract_ms,
         "automatic_test_context_directory": (
             str(path.parent)
             if test_candidate or path.parent == Path(root_str)
@@ -619,6 +625,8 @@ def index_repository(
     symbol_facts_by_module: dict[str, dict] = {}
     reference_facts_by_module: dict[str, dict] = {}
     lineage_facts_by_source: dict[str, ExtractedLineageSourceFacts] = {}
+    lineage_extract_sum_ms = 0.0
+    lineage_extract_slowest: list[tuple[float, str]] = []
     collision_facts_by_module: dict[str, list[dict]] = {}
     test_facts_by_path: dict[str, dict] = {}
     automatic_test_dir_entries: dict[Path, set[str]] = {root_path: set()}
@@ -635,6 +643,27 @@ def index_repository(
             directory: frozenset(automatic_test_dir_entries[directory])
             for directory in sorted(automatic_test_dir_entries)
         }
+
+    def record_lineage_extract_timing(result: dict) -> None:
+        nonlocal lineage_extract_sum_ms
+        elapsed_ms = float(result.get("lineage_extract_ms", 0.0))
+        lineage_extract_sum_ms += elapsed_ms
+        lineage_extract_slowest.append((elapsed_ms, result["path"]))
+
+    def emit_lineage_extract_timing() -> None:
+        slowest = sorted(lineage_extract_slowest, reverse=True)[:10]
+        max_ms = slowest[0][0] if slowest else 0.0
+        top10 = ",".join(f"{path}:{elapsed_ms:.3f}" for elapsed_ms, path in slowest)
+        trace_event(
+            "ANALYSIS",
+            "FULL_ANALYSIS_LINEAGE_EXTRACTION",
+            elapsed_ms=lineage_extract_sum_ms,
+            operation="lineage_extraction",
+            result=(
+                f"sum_ms={lineage_extract_sum_ms:.3f};max_ms={max_ms:.3f};"
+                f"files={len(lineage_extract_slowest)};top10={top10}"
+            ),
+        )
 
     ignored_dirs = set(DEFAULT_IGNORED_DIRS)
 
@@ -670,6 +699,7 @@ def index_repository(
     if os.environ.get("CONTEXTOR_DISABLE_PROCESS_POOL") == "1":
         for path in files_to_process:
             res = _process_single_file(str(path), str(root_path))
+            record_lineage_extract_timing(res)
             if res["error"]:
                 line_number, column_number = _syntax_error_location(res["error"])
                 skipped.append(
@@ -702,6 +732,7 @@ def index_repository(
                 record_automatic_test_context_path(res)
             completed += 1
             checkpoint(progress_callback, res["filename"], completed, total_files)
+        emit_lineage_extract_timing()
         return RepositoryIndex(
             modules=modules,
             skipped=sorted(skipped, key=lambda item: item.path),
@@ -721,6 +752,7 @@ def index_repository(
 
         for future in as_completed(futures):
             res = future.result()
+            record_lineage_extract_timing(res)
 
             if res["error"]:
                 line_number, column_number = _syntax_error_location(res["error"])
@@ -759,6 +791,8 @@ def index_repository(
             except AnalysisCancelled:
                 executor.shutdown(wait=False, cancel_futures=True)
                 raise
+
+    emit_lineage_extract_timing()
 
     return RepositoryIndex(
         modules=modules,

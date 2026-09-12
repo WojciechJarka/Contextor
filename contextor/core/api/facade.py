@@ -263,6 +263,7 @@ def _initialize_repository_identity(repo_root: str | Path) -> PersistentIdentity
 
 def _materialize_full_analysis_lineage(index, registry, modules, artifacts):
     """Materialize current index lineage from finalized active identities."""
+    lineage_materialization_started = time.monotonic()
     from contextor.core.analysis.lineage_materialization import (
         LineageResolutionContext,
         materialize_lineage_source_facts,
@@ -321,17 +322,28 @@ def _materialize_full_analysis_lineage(index, registry, modules, artifacts):
         interface_descriptors={},
     )
     materialized_by_source = {}
+    materialize_calls_ms = 0.0
+    anchor_count = 0
+    flow_count = 0
+    surface_count = 0
+    descriptor_count = 0
     for source_key in sorted(extracted_by_source):
         extracted = extracted_by_source[source_key]
         if extracted.source_key != source_key:
             raise ValueError("Extracted lineage mapping key does not match its source key.")
+        materialize_started = time.monotonic()
         materialized = materialize_lineage_source_facts(extracted, resolution)
+        materialize_calls_ms += (time.monotonic() - materialize_started) * 1000.0
         if (
             materialized.manifest.source_key != extracted.source_key
             or materialized.manifest.source_fingerprint != extracted.source_fingerprint
         ):
             raise ValueError("Materialized lineage manifest does not match extracted source.")
         materialized_by_source[source_key] = materialized
+        anchor_count += len(materialized.anchors)
+        flow_count += len(materialized.flows)
+        surface_count += len(materialized.surfaces)
+        descriptor_count += len(materialized.interface_descriptors)
 
     missing_source_keys = eligible_source_keys - set(materialized_by_source)
     if missing_source_keys or getattr(index, "skipped", ()):
@@ -344,6 +356,21 @@ def _materialize_full_analysis_lineage(index, registry, modules, artifacts):
     else:
         family_state = LineageFamilyStatus.FRESH.value
 
+    lineage_materialization_ms = (
+        time.monotonic() - lineage_materialization_started
+    ) * 1000.0
+    trace_event(
+        "ANALYSIS",
+        "FULL_ANALYSIS_LINEAGE_MATERIALIZATION",
+        elapsed_ms=lineage_materialization_ms,
+        operation="lineage_materialization",
+        result=(
+            f"materialize_calls_ms={materialize_calls_ms:.3f};"
+            f"sources={len(materialized_by_source)};anchors={anchor_count};"
+            f"flows={flow_count};surfaces={surface_count};"
+            f"descriptors={descriptor_count}"
+        ),
+    )
     return (
         dict(sorted(materialized_by_source.items())),
         family_state,
