@@ -8,6 +8,7 @@ so they don't have to couple with internal analyzers.
 
 import json
 import os
+import time
 from pathlib import Path
 
 from contextor.core.errors import AnalysisCancelled, checkpoint
@@ -19,6 +20,7 @@ from contextor.core.hotspots import detect_hotspots
 from contextor.core.paths import DEFAULT_IGNORED_DIRS, output_dir, repo_key, state_dir
 from contextor.core.reference.engine import reset_caches
 from contextor.core.reference.index import assemble_reference_index_or_fallback
+from contextor.core.runtime_trace import trace_event
 from contextor.core.reporting_engine.debt import compute_debt
 from contextor.core.reporting_engine.generators import (
     generate_report,
@@ -446,6 +448,20 @@ class ContextorFacade:
         Returns:
             list: List of architectural validation errors, if any.
         """
+        facade_started = time.monotonic()
+
+        def emit_stage_end(stage: str, started: float) -> None:
+            elapsed_ms = (time.monotonic() - started) * 1000.0
+            trace_event(
+                "ANALYSIS",
+                "FULL_ANALYSIS_STAGE_END",
+                stage=stage,
+                operation=stage,
+                elapsed_ms=elapsed_ms,
+                result=f"stage={stage};elapsed_ms={elapsed_ms:.3f}",
+            )
+
+        identity_and_setup_started = facade_started
         progress = _StagedProgress(progress_callback, total_stages=8, log=log)
         progress.begin("Initializing repository identity")
         registry = _initialize_repository_identity(path)
@@ -457,6 +473,9 @@ class ContextorFacade:
             log("Starting directory indexing...")
         excludes, extra_dirs = _analysis_filters(path, additional_excludes)
         index_progress = progress.begin("Indexing repository files")
+        emit_stage_end("identity_and_setup", identity_and_setup_started)
+
+        indexing_started = time.monotonic()
         index = index_repository(
             path,
             excludes=excludes,
@@ -464,6 +483,10 @@ class ContextorFacade:
             progress_callback=index_progress,
         )
         modules = index.modules
+
+        emit_stage_end("indexing", indexing_started)
+
+        reference_and_collision_started = time.monotonic()
         reference_index = assemble_reference_index_or_fallback(
             modules, path, index.reference_facts_by_module
         )
@@ -479,11 +502,15 @@ class ContextorFacade:
         trie = build_trie(modules.keys())
         package_root = detect_package_root(modules, trie)
 
+        emit_stage_end("reference_and_collision", reference_and_collision_started)
+
         if log:
             log(f"Found {len(modules)} modules. Fetching graph...")
             _log_skipped(index.skipped, log)
         progress.begin("Resolving dependency graph")
         graph_progress = progress.items
+
+        graph_started = time.monotonic()
         graph, cache_hit = get_cached_graph(
             modules, 
             lambda m: build_graph(
@@ -494,9 +521,13 @@ class ContextorFacade:
             )
         )
 
+        emit_stage_end("graph", graph_started)
+
         if log:
             log(f"Graph validation (cache_hit={cache_hit})...")
         validation_progress = progress.begin("Validating dependency graph")
+
+        validation_started = time.monotonic()
         errors = validate(
             modules, 
             graph, 
@@ -505,9 +536,13 @@ class ContextorFacade:
             collision_facts=collision_facts,
         )
 
+        emit_stage_end("validation", validation_started)
+
         repo_name = Path(path).name
 
         metrics_progress = progress.begin("Computing metrics, cycles and debt")
+
+        metrics_started = time.monotonic()
         metrics, cycles, all_collisions, debt = _compute_metrics_and_debt(
             modules,
             graph,
@@ -516,10 +551,14 @@ class ContextorFacade:
             collision_facts=collision_facts,
         )
 
+        emit_stage_end("metrics", metrics_started)
+
         from datetime import datetime
         datestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
         report_progress = progress.begin("Generating architectural reports")
+
+        reports_started = time.monotonic()
         report_result = execute_global_pipeline(
             repo_name=repo_name,
             modules=modules,
@@ -543,13 +582,15 @@ class ContextorFacade:
             automatic_test_dirs=index.automatic_test_dirs,
         )
 
+        emit_stage_end("reports", reports_started)
+
         if log and report_result.get("high_risk_layers"):
             high_risk_layers = ", ".join(report_result["high_risk_layers"])
             log(f"Generated additional reports for high risk layers: {high_risk_layers}")
 
-
+        canonical_materialization_started = time.monotonic()
         analysis_result = report_result.get("_analysis_result")
-        
+
         progress.begin("Persisting canonical LIVE snapshot")
         if analysis_result:
             from contextor.core.analysis.state_manager import (
@@ -707,6 +748,11 @@ class ContextorFacade:
 
             cache_dir = str(repo_cache_dir(path))
             file_state_manager = report_result.get("_file_state_manager")
+
+            emit_stage_end(
+                "canonical_materialization", canonical_materialization_started
+            )
+            persistence_started = time.monotonic()
             current_metadata = read_metadata(cache_dir)
             target_revision = (current_metadata.revision if current_metadata else 0) + 1
             file_state_payload = (
@@ -724,6 +770,10 @@ class ContextorFacade:
                 exact_revision=target_revision,
                 file_state_payload=file_state_payload,
             )
+
+            emit_stage_end("persistence", persistence_started)
+
+            live_publish_started = time.monotonic()
             if meta is not None:
                 from contextor.core.live_state import connect
 
@@ -756,17 +806,38 @@ class ContextorFacade:
                     if log:
                         log(f"Warning: Failed to publish canonical state to live daemon: {live_publish_warning}")
 
-            if analysis_result is not None:
-                analysis_result.live_publish_status = live_publish_status
-                analysis_result.live_publish_revision = live_publish_revision
-                analysis_result.live_publish_warning = live_publish_warning
-                if hasattr(analysis_result, "summary_data") and isinstance(analysis_result.summary_data, dict):
-                    analysis_result.summary_data["live_publish_status"] = live_publish_status
-                    analysis_result.summary_data["live_publish_revision"] = live_publish_revision
-                    analysis_result.summary_data["live_publish_warning"] = live_publish_warning
+            emit_stage_end("live_publish", live_publish_started)
+
+        else:
+            emit_stage_end(
+                "canonical_materialization", canonical_materialization_started
+            )
+            skipped_stage_started = time.monotonic()
+            emit_stage_end("persistence", skipped_stage_started)
+            emit_stage_end("live_publish", time.monotonic())
+
+        finalize_started = time.monotonic()
+        if analysis_result:
+            analysis_result.live_publish_status = live_publish_status
+            analysis_result.live_publish_revision = live_publish_revision
+            analysis_result.live_publish_warning = live_publish_warning
+            if hasattr(analysis_result, "summary_data") and isinstance(analysis_result.summary_data, dict):
+                analysis_result.summary_data["live_publish_status"] = live_publish_status
+                analysis_result.summary_data["live_publish_revision"] = live_publish_revision
+                analysis_result.summary_data["live_publish_warning"] = live_publish_warning
 
         progress.begin("Finalizing analysis")
         progress.finish()
+        emit_stage_end("finalize", finalize_started)
+
+        total_ms = (time.monotonic() - facade_started) * 1000.0
+        trace_event(
+            "ANALYSIS",
+            "FULL_ANALYSIS_FACADE_END",
+            total_ms=total_ms,
+            elapsed_ms=total_ms,
+            result=f"total_ms={total_ms:.3f}",
+        )
         return errors, analysis_result
 
     @staticmethod

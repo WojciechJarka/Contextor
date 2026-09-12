@@ -1,111 +1,135 @@
 ## ACTUAL_DIFF
 
-Changed file: `contextor/core/analysis/full_analysis_coordinator.py`
+Changed file: `contextor/core/api/facade.py`
 
 ```diff
-diff --git a/contextor/core/analysis/full_analysis_coordinator.py b/contextor/core/analysis/full_analysis_coordinator.py
-index 6487d72..6d0cd31 100644
---- a/contextor/core/analysis/full_analysis_coordinator.py
-+++ b/contextor/core/analysis/full_analysis_coordinator.py
-@@ -20,6 +20,7 @@ from typing import Any, Callable
- from contextor.core.errors import AnalysisCancelled
- from contextor.core.paths import repo_cache_dir, repo_key
- from contextor.core.repository_identity import read_repository_identity
+diff --git a/contextor/core/api/facade.py b/contextor/core/api/facade.py
+index c2ce409..4f80382 100644
+--- a/contextor/core/api/facade.py
++++ b/contextor/core/api/facade.py
+@@ -10,0 +11 @@ import os
++import time
+@@ -21,0 +23 @@ from contextor.core.reference.index import assemble_reference_index_or_fallback
 +from contextor.core.runtime_trace import trace_event
-
-
- @dataclass(frozen=True, slots=True)
-@@ -294,6 +295,9 @@ def run_full_analysis_exclusive(
-     Execute full repository analysis while holding an exclusive repository lease.
-     Guarantees single-writer execution across Desktop, MCP, and CLI.
-     """
-+    repo = str(Path(path).resolve())
-+    full_started = time.monotonic()
-+    lease_wait_started = full_started
-     lease = acquire_full_analysis(
-         path,
-         owner=owner,
-@@ -302,8 +306,16 @@ def run_full_analysis_exclusive(
-         log=log,
-     )
-     try:
-+        trace_event(
-+            "ANALYSIS",
-+            "FULL_ANALYSIS_LEASE_ACQUIRED",
-+            owner=owner,
-+            repo=repo,
-+            wait_ms=(time.monotonic() - lease_wait_started) * 1000.0,
-+        )
-         if analysis_fn is not None:
--            return analysis_fn(
-+            analysis_started = time.monotonic()
-+            analysis_result = analysis_fn(
-                 str(path),
-                 log=log,
-                 progress_callback=progress_callback,
-@@ -311,14 +323,43 @@ def run_full_analysis_exclusive(
-                 owner=owner,
-                 **kwargs,
-             )
--        from contextor.core.api.facade import ContextorFacade
--        return ContextorFacade.analyze_project(
--            str(path),
--            log=log,
--            progress_callback=progress_callback,
--            additional_excludes=additional_excludes,
-+        else:
-+            from contextor.core.api.facade import ContextorFacade
+@@ -448,0 +451,14 @@ class ContextorFacade:
++        facade_started = time.monotonic()
 +
-+            analysis_started = time.monotonic()
-+            analysis_result = ContextorFacade.analyze_project(
-+                str(path),
-+                log=log,
-+                progress_callback=progress_callback,
-+                additional_excludes=additional_excludes,
-+                owner=owner,
-+                **kwargs,
++        def emit_stage_end(stage: str, started: float) -> None:
++            elapsed_ms = (time.monotonic() - started) * 1000.0
++            trace_event(
++                "ANALYSIS",
++                "FULL_ANALYSIS_STAGE_END",
++                stage=stage,
++                operation=stage,
++                elapsed_ms=elapsed_ms,
++                result=f"stage={stage};elapsed_ms={elapsed_ms:.3f}",
 +            )
-+        analysis_ms = (time.monotonic() - analysis_started) * 1000.0
-+        total_before_release_ms = (time.monotonic() - full_started) * 1000.0
++
++        identity_and_setup_started = facade_started
+@@ -459,0 +476,3 @@ class ContextorFacade:
++        emit_stage_end("identity_and_setup", identity_and_setup_started)
++
++        indexing_started = time.monotonic()
+@@ -466,0 +486,4 @@ class ContextorFacade:
++
++        emit_stage_end("indexing", indexing_started)
++
++        reference_and_collision_started = time.monotonic()
+@@ -481,0 +505,2 @@ class ContextorFacade:
++        emit_stage_end("reference_and_collision", reference_and_collision_started)
++
+@@ -486,0 +512,2 @@ class ContextorFacade:
++
++        graph_started = time.monotonic()
+@@ -496,0 +524,2 @@ class ContextorFacade:
++        emit_stage_end("graph", graph_started)
++
+@@ -499,0 +529,2 @@ class ContextorFacade:
++
++        validation_started = time.monotonic()
+@@ -507,0 +539,2 @@ class ContextorFacade:
++        emit_stage_end("validation", validation_started)
++
+@@ -510,0 +544,2 @@ class ContextorFacade:
++
++        metrics_started = time.monotonic()
+@@ -518,0 +554,2 @@ class ContextorFacade:
++        emit_stage_end("metrics", metrics_started)
++
+@@ -522,0 +560,2 @@ class ContextorFacade:
++
++        reports_started = time.monotonic()
+@@ -545,0 +585,2 @@ class ContextorFacade:
++        emit_stage_end("reports", reports_started)
++
+@@ -550 +591 @@ class ContextorFacade:
+-
++        canonical_materialization_started = time.monotonic()
+@@ -552 +593 @@ class ContextorFacade:
+-        [whitespace-only blank line]
++
+@@ -709,0 +751,5 @@ class ContextorFacade:
++
++            emit_stage_end(
++                "canonical_materialization", canonical_materialization_started
++            )
++            persistence_started = time.monotonic()
+@@ -726,0 +773,4 @@ class ContextorFacade:
++
++            emit_stage_end("persistence", persistence_started)
++
++            live_publish_started = time.monotonic()
+@@ -759,8 +809,19 @@ class ContextorFacade:
+-            if analysis_result is not None:
+-                analysis_result.live_publish_status = live_publish_status
+-                analysis_result.live_publish_revision = live_publish_revision
+-                analysis_result.live_publish_warning = live_publish_warning
+-                if hasattr(analysis_result, "summary_data") and isinstance(analysis_result.summary_data, dict):
+-                    analysis_result.summary_data["live_publish_status"] = live_publish_status
+-                    analysis_result.summary_data["live_publish_revision"] = live_publish_revision
+-                    analysis_result.summary_data["live_publish_warning"] = live_publish_warning
++            emit_stage_end("live_publish", live_publish_started)
++
++        else:
++            emit_stage_end(
++                "canonical_materialization", canonical_materialization_started
++            )
++            skipped_stage_started = time.monotonic()
++            emit_stage_end("persistence", skipped_stage_started)
++            emit_stage_end("live_publish", time.monotonic())
++
++        finalize_started = time.monotonic()
++        if analysis_result:
++            analysis_result.live_publish_status = live_publish_status
++            analysis_result.live_publish_revision = live_publish_revision
++            analysis_result.live_publish_warning = live_publish_warning
++            if hasattr(analysis_result, "summary_data") and isinstance(analysis_result.summary_data, dict):
++                analysis_result.summary_data["live_publish_status"] = live_publish_status
++                analysis_result.summary_data["live_publish_revision"] = live_publish_revision
++                analysis_result.summary_data["live_publish_warning"] = live_publish_warning
+@@ -769,0 +831,10 @@ class ContextorFacade:
++        emit_stage_end("finalize", finalize_started)
++
++        total_ms = (time.monotonic() - facade_started) * 1000.0
 +        trace_event(
 +            "ANALYSIS",
-+            "FULL_ANALYSIS_BODY_END",
-             owner=owner,
--            **kwargs,
-+            repo=repo,
-+            analysis_ms=analysis_ms,
-+            total_before_release_ms=total_before_release_ms,
-+            elapsed_ms=analysis_ms,
-+            result=(
-+                f"analysis_ms={analysis_ms:.3f};"
-+                f"total_before_release_ms={total_before_release_ms:.3f}"
-+            ),
-         )
-+        return analysis_result
-     finally:
-         release_full_analysis(lease)
-+        total_ms = (time.monotonic() - full_started) * 1000.0
-+        trace_event(
-+            "ANALYSIS",
-+            "FULL_ANALYSIS_END",
-+            owner=owner,
-+            repo=repo,
++            "FULL_ANALYSIS_FACADE_END",
 +            total_ms=total_ms,
 +            elapsed_ms=total_ms,
 +            result=f"total_ms={total_ms:.3f}",
 +        )
 ```
 
-No changes were made to `watcher.py`, `ipc.py`, `runtime.py`, or `facade.py`.
+No changes were made to watcher, IPC, runtime, or the full-analysis coordinator in this second probe.
 
 ## TEST_RESULT
 
 ```text
-.\.venv\Scripts\python.exe -m py_compile contextor/core/analysis/full_analysis_coordinator.py
+.\.venv\Scripts\python.exe -m py_compile contextor/core/api/facade.py
 PASS
 
-.\.venv\Scripts\python.exe -m pytest -q tests/test_full_analysis_coordination.py
-8 passed in 9.29s
+.\.venv\Scripts\python.exe -m pytest -q tests/test_facade_progress_staging.py tests/test_full_analysis_coordination.py
+11 passed in 12.02s
 
 git diff --check
 PASS
@@ -113,14 +137,22 @@ PASS
 
 ## MANUAL_TRACE_READOUT
 
-After one Desktop full analysis, read these three `ANALYSIS` events from the active runtime JSONL:
+After one Desktop full analysis, collect all `ANALYSIS/FULL_ANALYSIS_STAGE_END` events and the final `ANALYSIS/FULL_ANALYSIS_FACADE_END` event.
 
-1. `FULL_ANALYSIS_LEASE_ACQUIRED`: `wait_ms`.
-2. `FULL_ANALYSIS_BODY_END`: `analysis_ms` and `total_before_release_ms` (also preserved in `result`; `elapsed_ms` equals `analysis_ms`).
-3. `FULL_ANALYSIS_END`: `total_ms` (also preserved in `result`; `elapsed_ms` equals `total_ms`).
+`runtime_trace.trace_event` currently records the stage name in `operation` and in `result`; `elapsed_ms` is the stage duration. It records facade total in `FULL_ANALYSIS_FACADE_END.elapsed_ms` and `result=total_ms=...`.
 
-Interpretation:
+Use the eleven stage names in this order:
 
-- `wait_ms` near 28,000 ms with normal `analysis_ms` near 16,000 ms: delay occurs before facade, while acquiring `FullAnalysisLease`.
-- `wait_ms` near zero with `analysis_ms` near 44,000 ms: delay occurs inside `ContextorFacade.analyze_project`.
-- `total_ms - total_before_release_ms`: release/finalization time; it should remain small.
+1. `identity_and_setup`
+2. `indexing`
+3. `reference_and_collision`
+4. `graph`
+5. `validation`
+6. `metrics`
+7. `reports`
+8. `canonical_materialization`
+9. `persistence`
+10. `live_publish`
+11. `finalize`
+
+Sum the eleven `elapsed_ms` values and compare against `FULL_ANALYSIS_FACADE_END.total_ms`. The small remainder is uninstrumented glue between stage boundaries and trace overhead. Any one stage above 50% of facade total is `NEXT_DRILLDOWN_TARGET`.
