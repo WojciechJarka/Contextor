@@ -1,4 +1,4 @@
-# F2L D1N2 Walkthrough
+# F2L D1N2a Walkthrough
 
 ## STATUS
 
@@ -9,39 +9,35 @@ PASS
 - `contextor/core/lineage_query/service.py`
 - `tests/analysis/test_lineage_query_service.py`
 
-## SECTION_ORDER_PROOF
+## SELECTED_COMPLETENESS_PROOF
 
-Selection canonicalizes every request to `SYMBOL_LINEAGE_SECTION_ORDER`.
+Selection completeness now certifies only selected logical units.
 
-## CONNECTIONS_PROOF
+## INTERFACE_ISOLATION_PROOF
 
-The selected connections view retains direct incoming and outgoing typed flow matches.
+A complete selected interface remains complete despite unselected scope metadata mismatch.
 
-## PARAMETER_FLOWS_SEPARATION_PROOF
+## CONNECTIONS_ISOLATION_PROOF
 
-`parameter_flows` maps only the D1K lexical bucket and remains separate from own interface defaults.
+A complete selected connections section remains complete despite unselected ambiguous interface.
 
-## UNRESOLVED_DYNAMIC_ORTHOGONAL_PROOF
+## NON_LEXICAL_EMPTY_PROOF
 
-Dynamic boundaries remain a separately selected orthogonal section.
+Lexical empty sections are complete when the scope is authoritatively not applicable.
 
-## EMPTY_VS_OMITTED_PROOF
+## SELECTED_METADATA_PROOF
 
-An empty selected section is an empty tuple; `None` means the section was omitted.
+Metadata comparison includes only projections required by selected sections.
 
-## NO_REQUERY_PROOF
+## EMPTY_SELECTION_PROOF
 
-Selection operates on supplied facts while spies reject calls back into the aggregate and backend.
-
-## VALIDATION_PROOF
-
-The view rejects invalid facts, non-tuple selection, empty section names, duplicates, and unknown sections.
+An empty request is vacuously metadata-consistent and complete.
 
 ## TESTS_RUN
 
 ```text
 python -m py_compile contextor/core/lineage_query/service.py: PASS
-python -m pytest -q tests/analysis/test_lineage_query_service.py tests/analysis/test_lineage_query_backend.py: 81 passed in 3.95s
+python -m pytest -q tests/analysis/test_lineage_query_service.py tests/analysis/test_lineage_query_backend.py: 84 passed in 3.06s
 git diff --check -- contextor/core/lineage_query/service.py tests/analysis/test_lineage_query_service.py: PASS
 ```
 
@@ -51,146 +47,100 @@ git diff --check -- contextor/core/lineage_query/service.py tests/analysis/test_
 warning: in the working copy of 'contextor/core/lineage_query/service.py', LF will be replaced by CRLF the next time Git touches it
 warning: in the working copy of 'tests/analysis/test_lineage_query_service.py', LF will be replaced by CRLF the next time Git touches it
 diff --git a/contextor/core/lineage_query/service.py b/contextor/core/lineage_query/service.py
-index 9ade6ec..4c925d7 100644
+index 4c925d7..960b6cd 100644
 --- a/contextor/core/lineage_query/service.py
 +++ b/contextor/core/lineage_query/service.py
-@@ -54,6 +54,12 @@ _PRIMARY_SEMANTIC_SECTION_BY_RELATION = {
-     LineageRelation.DECLARES_PUBLIC_NAMES: "surfaces",
- }
+@@ -60,6 +60,11 @@ SYMBOL_LINEAGE_SECTION_ORDER = (
+     "unresolved_dynamic_boundaries",
+ )
  
-+SYMBOL_LINEAGE_SECTION_ORDER = (
-+    "interface", "connections", "bindings", "parameter_flows",
-+    "calls_interfaces", "returns", "state", "callbacks", "surfaces",
-+    "unresolved_dynamic_boundaries",
-+)
++_LEXICAL_SYMBOL_LINEAGE_SECTIONS = frozenset({
++    "bindings", "parameter_flows", "calls_interfaces", "returns",
++    "state", "callbacks", "unresolved_dynamic_boundaries",
++})
 +
  
  @dataclass(frozen=True)
  class ResolvedLineageTarget:
-@@ -393,6 +399,40 @@ class SymbolLineageFacts:
-         )
+@@ -425,13 +430,44 @@ class SelectedSymbolLineageFacts:
+         return self.facts.target
  
+     @property
+-    def metadata_consistent(self) -> bool:
++    def aggregate_metadata_consistent(self) -> bool:
+         return self.facts.metadata_consistent
  
-+@dataclass(frozen=True)
-+class SymbolLineageConnections:
-+    incoming: tuple[LineageFlowMatch, ...]
-+    outgoing: tuple[LineageFlowMatch, ...]
-+
-+
-+@dataclass(frozen=True)
-+class SelectedSymbolLineageFacts:
-+    facts: SymbolLineageFacts
-+    selected_sections: tuple[str, ...]
-+    interface: TargetInterfaceFacts | None
-+    connections: SymbolLineageConnections | None
-+    bindings: tuple[LineageFlowMatch, ...] | None
-+    parameter_flows: tuple[LineageFlowMatch, ...] | None
-+    calls_interfaces: tuple[LineageFlowMatch, ...] | None
-+    returns: tuple[LineageFlowMatch, ...] | None
-+    state: tuple[LineageFlowMatch, ...] | None
-+    callbacks: tuple[LineageFlowMatch, ...] | None
-+    surfaces: LineageSurfaceSection | None
-+    unresolved_dynamic_boundaries: tuple[LineageFlowMatch, ...] | None
-+
-+    @property
-+    def target(self) -> ResolvedLineageTarget:
-+        return self.facts.target
-+
+     @property
+-    def complete(self) -> bool:
++    def aggregate_complete(self) -> bool:
+         return self.facts.complete
+ 
 +    @property
 +    def metadata_consistent(self) -> bool:
-+        return self.facts.metadata_consistent
++        selected = set(self.selected_sections)
++        metadata: list[LineageBackendMetadata] = []
++        if "interface" in selected:
++            metadata.append(self.facts.interface.metadata)
++        if "connections" in selected or "surfaces" in selected:
++            metadata.append(self.facts.direct.metadata)
++        needs_scope = bool(selected & _LEXICAL_SYMBOL_LINEAGE_SECTIONS) or "surfaces" in selected
++        if needs_scope:
++            metadata.append(self.facts.scope.metadata)
++            if self.facts.scope_state == "not_applicable":
++                metadata.append(self.facts.interface.metadata)
++        return not metadata or all(item == metadata[0] for item in metadata[1:])
 +
 +    @property
 +    def complete(self) -> bool:
-+        return self.facts.complete
++        if not self.metadata_consistent:
++            return False
++        selected = set(self.selected_sections)
++        if "interface" in selected and not self.facts.interface.complete:
++            return False
++        if "connections" in selected and not self.facts.direct.complete:
++            return False
++        needs_scope = bool(selected & _LEXICAL_SYMBOL_LINEAGE_SECTIONS)
++        if needs_scope and self.facts.scope_state not in {"available", "not_applicable"}:
++            return False
++        if "surfaces" in selected and (not self.facts.direct.complete or self.facts.scope_state not in {"available", "not_applicable"}):
++            return False
++        return True
 +
-+
+ 
  class LineageQueryService:
      def __init__(
-         self,
-@@ -849,6 +889,35 @@ class LineageQueryService:
-             sections=sections,
-         )
- 
-+    def select_symbol_lineage_sections(self, facts: SymbolLineageFacts, sections: tuple[str, ...]) -> SelectedSymbolLineageFacts:
-+        if not isinstance(facts, SymbolLineageFacts):
-+            raise TypeError("facts must be SymbolLineageFacts.")
-+        if not isinstance(sections, tuple):
-+            raise TypeError("sections must be a tuple of section names.")
-+        if any(not isinstance(section, str) or not section for section in sections):
-+            raise ValueError("sections must contain non-empty strings.")
-+        if len(set(sections)) != len(sections):
-+            raise ValueError("sections must not contain duplicates.")
-+        requested = set(sections)
-+        unknown = tuple(sorted(requested - set(SYMBOL_LINEAGE_SECTION_ORDER)))
-+        if unknown:
-+            raise ValueError("Unknown symbol lineage sections: " + ", ".join(unknown))
-+        selected = tuple(s for s in SYMBOL_LINEAGE_SECTION_ORDER if s in requested)
-+        semantic = facts.sections
-+        return SelectedSymbolLineageFacts(
-+            facts, selected,
-+            facts.interface if "interface" in requested else None,
-+            SymbolLineageConnections(facts.direct.incoming, facts.direct.outgoing) if "connections" in requested else None,
-+            semantic.bindings if "bindings" in requested else None,
-+            semantic.parameters if "parameter_flows" in requested else None,
-+            semantic.calls_interfaces if "calls_interfaces" in requested else None,
-+            semantic.returns if "returns" in requested else None,
-+            semantic.state if "state" in requested else None,
-+            semantic.callbacks if "callbacks" in requested else None,
-+            semantic.surfaces if "surfaces" in requested else None,
-+            semantic.unresolved_dynamic if "unresolved_dynamic_boundaries" in requested else None,
-+        )
-+
-     def traverse_lexical_scope(
-         self,
-         target: ResolvedLineageTarget,
 diff --git a/tests/analysis/test_lineage_query_service.py b/tests/analysis/test_lineage_query_service.py
-index 22575c8..9f8e851 100644
+index 9f8e851..31c46c1 100644
 --- a/tests/analysis/test_lineage_query_service.py
 +++ b/tests/analysis/test_lineage_query_service.py
-@@ -2410,3 +2410,44 @@ def test_symbol_lineage_facts_metadata_mismatch_fails_closed(monkeypatch):
- def test_symbol_lineage_facts_rejects_non_target():
-     with pytest.raises(TypeError, match="target must be ResolvedLineageTarget."):
-         _service({}).symbol_lineage_facts(object())
+@@ -2451,3 +2451,29 @@ def test_symbol_lineage_selection_allows_empty_and_rejects_invalid_contract():
+         service.select_symbol_lineage_sections(facts, ("state", "state"))
+     with pytest.raises(ValueError, match="Unknown symbol lineage sections: mystery"):
+         service.select_symbol_lineage_sections(facts, ("mystery",))
 +
 +
-+def test_symbol_lineage_selection_maps_sections_without_requery(monkeypatch):
-+    from contextor.core.lineage_query import service as service_module
++def test_symbol_lineage_selection_interface_complete_is_independent_of_unselected_scope_metadata():
 +    service, backend, target, _ = _target_interface_service()
 +    _install_target_parameter_defaults(backend, target)
 +    facts = service.symbol_lineage_facts(target)
-+    monkeypatch.setattr(service, "symbol_lineage_facts", lambda *_: (_ for _ in ()).throw(AssertionError("selection requeried symbol facts")))
-+    monkeypatch.setattr(backend, "source_keys_for_owner", lambda *_: (_ for _ in ()).throw(AssertionError("selection read backend")))
-+    selected = service.select_symbol_lineage_sections(facts, tuple(reversed(service_module.SYMBOL_LINEAGE_SECTION_ORDER)))
-+    assert selected.selected_sections == service_module.SYMBOL_LINEAGE_SECTION_ORDER
-+    assert selected.interface is facts.interface
-+    assert selected.connections is not None
-+    assert selected.connections.incoming == facts.direct.incoming
-+    assert selected.parameter_flows is facts.sections.parameters
-+    assert selected.unresolved_dynamic_boundaries is facts.sections.unresolved_dynamic
++    mismatched = replace(facts, sections=replace(facts.sections, scope=replace(facts.scope, metadata=replace(facts.scope.metadata, revision=999))))
++    selected = service.select_symbol_lineage_sections(mismatched, ("interface",))
++    assert selected.aggregate_metadata_consistent is False
++    assert selected.aggregate_complete is False
++    assert selected.metadata_consistent is True
++    assert selected.complete is True
 +
 +
-+def test_symbol_lineage_selection_distinguishes_selected_empty_from_omitted():
++def test_symbol_lineage_selection_connections_ignore_unselected_interface_incompleteness():
++    service, _backend, target, _ = _target_interface_service(duplicate_definition=True)
++    selected = service.select_symbol_lineage_sections(service.symbol_lineage_facts(target), ("connections",))
++    assert selected.complete is True
++    assert selected.metadata_consistent is True
++
++
++def test_symbol_lineage_selection_empty_request_is_vacuously_complete():
 +    service, _backend, target, _ = _target_interface_service()
-+    facts = service.symbol_lineage_facts(target)
-+    selected = service.select_symbol_lineage_sections(facts, ("callbacks",))
-+    assert selected.callbacks == ()
-+    assert selected.interface is None
-+    assert selected.connections is None
-+
-+
-+def test_symbol_lineage_selection_allows_empty_and_rejects_invalid_contract():
-+    service, _backend, target, _ = _target_interface_service()
-+    facts = service.symbol_lineage_facts(target)
-+    assert service.select_symbol_lineage_sections(facts, ()).selected_sections == ()
-+    with pytest.raises(TypeError, match="facts must be SymbolLineageFacts."):
-+        service.select_symbol_lineage_sections(object(), ())
-+    with pytest.raises(TypeError, match="sections must be a tuple of section names."):
-+        service.select_symbol_lineage_sections(facts, ["interface"])
-+    with pytest.raises(ValueError, match="sections must contain non-empty strings."):
-+        service.select_symbol_lineage_sections(facts, ("",))
-+    with pytest.raises(ValueError, match="sections must not contain duplicates."):
-+        service.select_symbol_lineage_sections(facts, ("state", "state"))
-+    with pytest.raises(ValueError, match="Unknown symbol lineage sections: mystery"):
-+        service.select_symbol_lineage_sections(facts, ("mystery",))
++    selected = service.select_symbol_lineage_sections(service.symbol_lineage_facts(target), ())
++    assert selected.metadata_consistent is True
++    assert selected.complete is True
 ```

@@ -2451,3 +2451,29 @@ def test_symbol_lineage_selection_allows_empty_and_rejects_invalid_contract():
         service.select_symbol_lineage_sections(facts, ("state", "state"))
     with pytest.raises(ValueError, match="Unknown symbol lineage sections: mystery"):
         service.select_symbol_lineage_sections(facts, ("mystery",))
+
+
+def test_symbol_lineage_selection_interface_complete_is_independent_of_unselected_scope_metadata():
+    service, backend, target, _ = _target_interface_service()
+    _install_target_parameter_defaults(backend, target)
+    facts = service.symbol_lineage_facts(target)
+    mismatched = replace(facts, sections=replace(facts.sections, scope=replace(facts.scope, metadata=replace(facts.scope.metadata, revision=999))))
+    selected = service.select_symbol_lineage_sections(mismatched, ("interface",))
+    assert selected.aggregate_metadata_consistent is False
+    assert selected.aggregate_complete is False
+    assert selected.metadata_consistent is True
+    assert selected.complete is True
+
+
+def test_symbol_lineage_selection_connections_ignore_unselected_interface_incompleteness():
+    service, _backend, target, _ = _target_interface_service(duplicate_definition=True)
+    selected = service.select_symbol_lineage_sections(service.symbol_lineage_facts(target), ("connections",))
+    assert selected.complete is True
+    assert selected.metadata_consistent is True
+
+
+def test_symbol_lineage_selection_empty_request_is_vacuously_complete():
+    service, _backend, target, _ = _target_interface_service()
+    selected = service.select_symbol_lineage_sections(service.symbol_lineage_facts(target), ())
+    assert selected.metadata_consistent is True
+    assert selected.complete is True

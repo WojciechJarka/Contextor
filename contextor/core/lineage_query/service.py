@@ -60,6 +60,11 @@ SYMBOL_LINEAGE_SECTION_ORDER = (
     "unresolved_dynamic_boundaries",
 )
 
+_LEXICAL_SYMBOL_LINEAGE_SECTIONS = frozenset({
+    "bindings", "parameter_flows", "calls_interfaces", "returns",
+    "state", "callbacks", "unresolved_dynamic_boundaries",
+})
+
 
 @dataclass(frozen=True)
 class ResolvedLineageTarget:
@@ -425,12 +430,43 @@ class SelectedSymbolLineageFacts:
         return self.facts.target
 
     @property
-    def metadata_consistent(self) -> bool:
+    def aggregate_metadata_consistent(self) -> bool:
         return self.facts.metadata_consistent
 
     @property
-    def complete(self) -> bool:
+    def aggregate_complete(self) -> bool:
         return self.facts.complete
+
+    @property
+    def metadata_consistent(self) -> bool:
+        selected = set(self.selected_sections)
+        metadata: list[LineageBackendMetadata] = []
+        if "interface" in selected:
+            metadata.append(self.facts.interface.metadata)
+        if "connections" in selected or "surfaces" in selected:
+            metadata.append(self.facts.direct.metadata)
+        needs_scope = bool(selected & _LEXICAL_SYMBOL_LINEAGE_SECTIONS) or "surfaces" in selected
+        if needs_scope:
+            metadata.append(self.facts.scope.metadata)
+            if self.facts.scope_state == "not_applicable":
+                metadata.append(self.facts.interface.metadata)
+        return not metadata or all(item == metadata[0] for item in metadata[1:])
+
+    @property
+    def complete(self) -> bool:
+        if not self.metadata_consistent:
+            return False
+        selected = set(self.selected_sections)
+        if "interface" in selected and not self.facts.interface.complete:
+            return False
+        if "connections" in selected and not self.facts.direct.complete:
+            return False
+        needs_scope = bool(selected & _LEXICAL_SYMBOL_LINEAGE_SECTIONS)
+        if needs_scope and self.facts.scope_state not in {"available", "not_applicable"}:
+            return False
+        if "surfaces" in selected and (not self.facts.direct.complete or self.facts.scope_state not in {"available", "not_applicable"}):
+            return False
+        return True
 
 
 class LineageQueryService:
