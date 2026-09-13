@@ -1,4 +1,4 @@
-# F2L D1O2b Walkthrough
+# F2L D1N3b2x Walkthrough
 
 ## STATUS
 
@@ -6,1025 +6,352 @@ PASS
 
 ## FILES_CHANGED
 
-- `contextor/core/lineage_query/live_query.py`
-- `tests/analysis/test_lineage_live_query.py`
+- `contextor/mcp/lineage_response.py`
+- `tests/mcp/test_lineage_response.py`
 
-## EXACT_RESOLUTION_PROOF
+## MODULE_OWNER_PROOF
 
-Resolution remains owned by `LineageQueryService.resolve_target` over the minimal catalog.
+State flow contains canonical module owner `17/2`; named output maps it to `pkg.mod`, indexed output preserves the ID.
 
-## SINGLE_FACT_BUILD_PROOF
+## ARTIFACT_OWNER_PROOF
 
-Resolved target test records exactly one `symbol_lineage_facts` call.
+Connection semantic endpoint preserves artifact owner `A17/2` in indexed output and maps it to `pkg.mod::handler` in named output.
 
-## SINGLE_SELECTION_PROOF
+## MIXED_NAMED_PROOF
 
-Resolved target test records exactly one semantic section-selection call.
+One named payload resolves both module and artifact owner identities using `owner_names`.
 
-## NO_TRAVERSAL_PROOF
+## MIXED_INDEXED_RESOLVER_PROOF
 
-The test fails if lexical traversal is invoked.
+Indexed resolver declares `id_kinds: ["module", "artifact"]` through existing `lookup_index_entries`.
 
-## UNRESOLVED_NO_FACTS_PROOF
+## SLOT_OPAQUE_PROOF
 
-Invalid and not-found targets return no selected facts.
+Module-global and artifact-return slots remain unchanged opaque canonical strings.
 
-## AMBIGUITY_PROOF
+## AUTO_MISSING_OWNER_PROOF
 
-Duplicate identities preserve service ambiguity with no selection.
-
-## UNAVAILABLE_PROOF
-
-Stale exact-identity capability yields structured unavailable status.
-
-## CORRUPTION_FAIL_CLOSED_PROOF
-
-Owner identity inconsistency remains a propagated ValueError.
-
-## SECTION_VALIDATION_PROOF
-
-Sections are validated and canonicalized before resolution; empty core selection is accepted.
+Named/auto diagnostics list missing module and artifact owners deterministically.
 
 ## TESTS_RUN
 
 ```text
-109 passed in 6.76s
+tests/mcp/test_lineage_response.py tests/analysis/test_lineage_live_query.py tests/analysis/test_lineage_query_service.py tests/analysis/test_lineage_query_backend.py
+136 passed in 2.94s
+
+tests/mcp/test_lineage_response.py
+27 passed in 1.80s
+
+py_compile and scoped git diff --check
+PASS
 ```
 
 ## ACTUAL_DIFF
 
 ```diff
-warning: in the working copy of 'contextor/core/lineage_query/live_query.py', LF will be replaced by CRLF the next time Git touches it
-diff --git a/contextor/core/lineage_query/live_query.py b/contextor/core/lineage_query/live_query.py
-new file mode 100644
-index 0000000..349be12
---- /dev/null
-+++ b/contextor/core/lineage_query/live_query.py
-@@ -0,0 +1,281 @@
-+from __future__ import annotations
-+
-+from dataclasses import dataclass
-+from collections.abc import Mapping
-+
-+from contextor.core.lineage_query.backend import (
-+    RepositoryStateLineageBackend,
-+)
-+from contextor.core.lineage_query.service import (
-+    SYMBOL_LINEAGE_SECTION_ORDER,
-+    LineageQueryService,
-+    LineageTargetResolution,
-+    SelectedSymbolLineageFacts,
-+)
-+from contextor.core.report_query import (
-+    ARTIFACT_ID_RE,
-+    IndexCatalog,
-+)
-+
-+
-+_UNAVAILABLE_MESSAGE = (
-+    "Canonical lineage target identity catalog "
-+    "is unavailable or stale."
-+)
-+
-+
-+@dataclass(frozen=True)
-+class LiveSymbolLineageQueryResult:
-+    resolution: LineageTargetResolution
-+    selected: SelectedSymbolLineageFacts | None = None
-+    unavailable_reason: str | None = None
-+
-+
-+def _require_exact_identity_capability(
-+    backend: RepositoryStateLineageBackend,
-+) -> None:
-+    metadata = backend.metadata()
-+    if (
-+        metadata.family_state != "fresh"
-+        or metadata.query_index_state != "fresh"
-+        or not metadata.semantic_anchor_bindings_complete
-+    ):
-+        raise ValueError(_UNAVAILABLE_MESSAGE)
-+
-+
-+def _module_source_key(
-+    state: object,
-+    module_name: str,
-+) -> str | None:
-+    modules = getattr(state, "modules", {})
-+    if not isinstance(modules, Mapping):
-+        raise TypeError(
-+            "Canonical state modules must be a mapping."
-+        )
-+
-+    module = modules.get(module_name)
-+    if module is None:
-+        return None
-+
-+    raw_path = getattr(module, "path", None)
-+    if raw_path is None:
-+        return None
-+
-+    source_key = str(raw_path).replace("\\", "/")
-+    while source_key.startswith("./"):
-+        source_key = source_key[2:]
-+
-+    return source_key or None
-+
-+
-+def _install_identity(
-+    identities: dict[str, str],
-+    owner_id: str,
-+    qualified_name: str,
-+) -> None:
-+    existing = identities.get(owner_id)
-+    if (
-+        existing is not None
-+        and existing != qualified_name
-+    ):
-+        raise ValueError(
-+            "Canonical lineage owner identity is inconsistent."
-+        )
-+    identities[owner_id] = qualified_name
-+
-+
-+def build_live_lineage_target_catalog(
-+    state: object,
-+    backend: RepositoryStateLineageBackend,
-+    query: str,
-+) -> IndexCatalog:
-+    if not isinstance(
-+        backend,
-+        RepositoryStateLineageBackend,
-+    ):
-+        raise TypeError(
-+            "backend must be RepositoryStateLineageBackend."
-+        )
-+    if not isinstance(query, str):
-+        raise TypeError("query must be a string.")
-+
-+    _require_exact_identity_capability(backend)
-+
-+    raw = query.strip()
-+    identities: dict[str, str] = {}
-+
-+    if not raw:
-+        return IndexCatalog(
-+            modules={},
-+            artifacts={},
-+        )
-+
-+    if ARTIFACT_ID_RE.fullmatch(raw):
-+        owner_id = raw[0].upper() + raw[1:]
-+        source_keys = backend.source_keys_for_owner(
-+            owner_id
-+        )
-+        for source in backend.iter_sources(
-+            source_keys
-+        ):
-+            for binding in source.semantic_anchors:
-+                if binding.owner_id != owner_id:
-+                    continue
-+                _install_identity(
-+                    identities,
-+                    owner_id,
-+                    binding.qualified_name,
-+                )
-+
-+        return IndexCatalog(
-+            modules={},
-+            artifacts=dict(sorted(identities.items())),
-+        )
-+
-+    if raw.count("::") != 1:
-+        return IndexCatalog(
-+            modules={},
-+            artifacts={},
-+        )
-+
-+    module_name, symbol_name = raw.split("::", 1)
-+    if not module_name or not symbol_name:
-+        return IndexCatalog(
-+            modules={},
-+            artifacts={},
-+        )
-+
-+    source_key = _module_source_key(
-+        state,
-+        module_name,
-+    )
-+    if source_key is None:
-+        return IndexCatalog(
-+            modules={},
-+            artifacts={},
-+        )
-+
-+    source = backend.get_source(source_key)
-+    if source is None:
-+        return IndexCatalog(
-+            modules={},
-+            artifacts={},
-+        )
-+
-+    for binding in source.semantic_anchors:
-+        if binding.qualified_name != raw:
-+            continue
-+        _install_identity(
-+            identities,
-+            binding.owner_id,
-+            binding.qualified_name,
-+        )
-+
-+    return IndexCatalog(
-+        modules={},
-+        artifacts=dict(sorted(identities.items())),
-+    )
-+
-+
-+def _canonical_lineage_sections(
-+    sections: tuple[str, ...],
-+) -> tuple[str, ...]:
-+    if not isinstance(sections, tuple):
-+        raise TypeError(
-+            "sections must be a tuple of section names."
-+        )
-+    if any(
-+        not isinstance(section, str)
-+        or not section
-+        for section in sections
-+    ):
-+        raise ValueError(
-+            "sections must contain non-empty strings."
-+        )
-+    if len(set(sections)) != len(sections):
-+        raise ValueError(
-+            "sections must not contain duplicates."
-+        )
-+
-+    requested = set(sections)
-+    unknown = tuple(
-+        sorted(
-+            requested
-+            - set(SYMBOL_LINEAGE_SECTION_ORDER)
-+        )
-+    )
-+    if unknown:
-+        raise ValueError(
-+            "Unknown symbol lineage sections: "
-+            + ", ".join(unknown)
-+        )
-+
-+    return tuple(
-+        section
-+        for section in SYMBOL_LINEAGE_SECTION_ORDER
-+        if section in requested
-+    )
-+
-+
-+def query_live_symbol_lineage(
-+    state: object,
-+    query: str,
-+    sections: tuple[str, ...],
-+) -> LiveSymbolLineageQueryResult:
-+    if not isinstance(query, str):
-+        raise TypeError("query must be a string.")
-+
-+    canonical_sections = (
-+        _canonical_lineage_sections(sections)
-+    )
-+    backend = RepositoryStateLineageBackend(
-+        state
-+    )
-+
-+    try:
-+        catalog = build_live_lineage_target_catalog(
-+            state,
-+            backend,
-+            query,
-+        )
-+    except ValueError as exc:
-+        if str(exc) != _UNAVAILABLE_MESSAGE:
-+            raise
-+        return LiveSymbolLineageQueryResult(
-+            resolution=LineageTargetResolution(
-+                status="unavailable",
-+                query=query.strip(),
-+            ),
-+            unavailable_reason=str(exc),
-+        )
-+
-+    service = LineageQueryService(
-+        backend,
-+        catalog,
-+    )
-+    resolution = service.resolve_target(
-+        query
-+    )
-+
-+    if (
-+        resolution.status != "resolved"
-+        or resolution.target is None
-+    ):
-+        return LiveSymbolLineageQueryResult(
-+            resolution=resolution,
-+        )
-+
-+    facts = service.symbol_lineage_facts(
-+        resolution.target
-+    )
-+    selected = (
-+        service.select_symbol_lineage_sections(
-+            facts,
-+            canonical_sections,
-+        )
-+    )
-+
-+    return LiveSymbolLineageQueryResult(
-+        resolution=resolution,
-+        selected=selected,
-+    )
-warning: in the working copy of 'tests/analysis/test_lineage_live_query.py', LF will be replaced by CRLF the next time Git touches it
-diff --git a/tests/analysis/test_lineage_live_query.py b/tests/analysis/test_lineage_live_query.py
-new file mode 100644
-index 0000000..17fc892
---- /dev/null
-+++ b/tests/analysis/test_lineage_live_query.py
-@@ -0,0 +1,677 @@
-+from types import SimpleNamespace
-+
-+import pytest
-+
-+from contextor.core.domain.lineage_facts import (
-+    LineageFamilyStatus,
-+    MaterializedAnchorFact,
-+    MaterializedLineageSourceFacts,
-+    MaterializedOccurrenceRef,
-+    SemanticAnchorBinding,
-+    SourceLineageManifest,
-+    SourceSpan,
-+)
-+from contextor.core.lineage_query.backend import (
-+    RepositoryStateLineageBackend,
-+)
-+from contextor.core.lineage_query.index import (
-+    build_lineage_query_indexes,
-+)
-+from contextor.core.lineage_query.live_query import (
-+    LiveSymbolLineageQueryResult,
-+    build_live_lineage_target_catalog,
-+    query_live_symbol_lineage,
-+)
-+from contextor.core.lineage_query.service import (
-+    LineageQueryService,
-+)
-+
-+
-+def _source(
-+    source_key,
-+    fingerprint,
-+    identities,
-+):
-+    span = SourceSpan(1, 0, 1, 10)
-+    anchors = []
-+    bindings = []
-+
-+    for index, (owner_id, qualified_name) in enumerate(
-+        identities
-+    ):
-+        local_id = f"definition-{index}"
-+        reference = MaterializedOccurrenceRef(
-+            source_key,
-+            fingerprint,
-+            local_id,
-+        )
-+        anchors.append(
-+            MaterializedAnchorFact(
-+                local_id,
-+                reference,
-+                "function",
-+                span,
-+            )
-+        )
-+        bindings.append(
-+            SemanticAnchorBinding(
-+                owner_id,
-+                qualified_name,
-+                reference,
-+            )
-+        )
-+
-+    return MaterializedLineageSourceFacts(
-+        manifest=SourceLineageManifest(
-+            source_key=source_key,
-+            source_fingerprint=fingerprint,
-+            semantic_version="1",
-+            status=LineageFamilyStatus.FRESH,
-+            anchor_count=len(anchors),
-+            flow_count=0,
-+            surface_count=0,
-+            semantic_anchor_bindings_materialized=True,
-+            anchor_ownership_materialized=True,
-+            flow_ownership_materialized=True,
-+        ),
-+        anchors=tuple(sorted(anchors)),
-+        flows=(),
-+        surfaces=(),
-+        semantic_anchors=tuple(sorted(bindings)),
-+    )
-+
-+
-+def _fixture():
-+    provider = _source(
-+        "pkg/mod.py",
-+        "a" * 64,
-+        (
-+            ("A17/2", "pkg.mod::handler"),
-+            ("A18/1", "pkg.mod::other"),
-+        ),
-+    )
-+    unrelated = _source(
-+        "pkg/other.py",
-+        "b" * 64,
-+        (
-+            ("A99/1", "pkg.other::thing"),
-+        ),
-+    )
-+    sources = {
-+        "pkg/mod.py": provider,
-+        "pkg/other.py": unrelated,
-+    }
-+    (
-+        owner_source_index,
-+        source_owner_index,
-+        anchor_complete,
-+    ) = build_lineage_query_indexes(sources)
-+
-+    state = SimpleNamespace(
-+        revision=7,
-+        provenance="live",
-+        modules={
-+            "pkg.mod": SimpleNamespace(
-+                path="pkg/mod.py",
-+            ),
-+            "pkg.other": SimpleNamespace(
-+                path="pkg/other.py",
-+            ),
-+        },
-+        lineage_facts_state="fresh",
-+        lineage_facts_semantic_version="1",
-+        lineage_facts_by_source=sources,
-+        lineage_owner_source_index=(
-+            owner_source_index
-+        ),
-+        lineage_source_owner_index=(
-+            source_owner_index
-+        ),
-+        lineage_query_index_state="fresh",
-+        lineage_semantic_anchor_bindings_complete=(
-+            anchor_complete
-+        ),
-+    )
-+    return (
-+        state,
-+        RepositoryStateLineageBackend(state),
-+    )
-+
-+
-+def test_live_target_catalog_resolves_artifact_id_only_through_owner_index(
-+    monkeypatch,
-+):
-+    state, backend = _fixture()
-+
-+    monkeypatch.setattr(
-+        backend,
-+        "source_keys",
-+        lambda: (_ for _ in ()).throw(
-+            AssertionError("repo-wide lineage scan")
-+        ),
-+    )
-+
-+    original_iter = backend.iter_sources
-+    observed = {}
-+
-+    def iter_sources(source_keys=None):
-+        observed["source_keys"] = source_keys
-+        return original_iter(source_keys)
-+
-+    monkeypatch.setattr(
-+        backend,
-+        "iter_sources",
-+        iter_sources,
-+    )
-+
-+    catalog = build_live_lineage_target_catalog(
-+        state,
-+        backend,
-+        "a17/2",
-+    )
-+
-+    assert catalog.artifacts == {
+warning: in the working copy of 'contextor/mcp/lineage_response.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'tests/mcp/test_lineage_response.py', LF will be replaced by CRLF the next time Git touches it
+diff --git a/contextor/mcp/lineage_response.py b/contextor/mcp/lineage_response.py
+index c8f60af..30a9ac5 100644
+--- a/contextor/mcp/lineage_response.py
++++ b/contextor/mcp/lineage_response.py
+@@ -232,24 +232,24 @@ def build_symbol_lineage_represented_payload(
+     selected: SelectedSymbolLineageFacts,
+     *,
+     representation: str = "auto",
+-    artifact_names: Mapping[str, str] | None = None,
++    owner_names: Mapping[str, str] | None = None,
+     state_freshness: Mapping[str, object] | None = None,
+ ) -> dict:
+     if not isinstance(selected, SelectedSymbolLineageFacts): raise TypeError("selected must be SelectedSymbolLineageFacts.")
+     if not isinstance(representation, str): raise TypeError("representation must be a string.")
+     requested = representation.strip().lower()
+     if not mcp_rep.is_supported_representation(requested): raise ValueError("representation must be 'auto', 'indexed', or 'named'.")
+-    if artifact_names is not None:
+-        if not isinstance(artifact_names, Mapping): raise TypeError("artifact_names must be a mapping.")
+-        if any(not isinstance(k, str) or not k or not isinstance(v, str) or not v for k, v in artifact_names.items()): raise ValueError("artifact_names must map non-empty artifact IDs to non-empty names.")
++    if owner_names is not None:
++        if not isinstance(owner_names, Mapping): raise TypeError("owner_names must be a mapping.")
++        if any(not isinstance(k, str) or not k or not isinstance(v, str) or not v for k, v in owner_names.items()): raise ValueError("owner_names must map non-empty owner IDs to non-empty names.")
+     base = build_symbol_lineage_payload(
+         selected,
+         state_freshness=state_freshness,
+     )
+-    missing = tuple(owner for owner in _semantic_owner_ids(base) if artifact_names is None or owner not in artifact_names)
+-    indexed = dict(base); indexed.update({"representation": "indexed", "requested_representation": requested, "resolver": {"index_kind": "artifact", "resolve_via": "lookup_index_entries"}})
++    missing = tuple(owner for owner in _semantic_owner_ids(base) if owner_names is None or owner not in owner_names)
++    indexed = dict(base); indexed.update({"representation": "indexed", "requested_representation": requested, "resolver": {"id_kinds": ["module", "artifact"], "resolve_via": "lookup_index_entries"}})
+     indexed_bytes = mcp_rep.serialized_json_bytes(indexed)
+-    named = None if missing else _named_semantic_owners(base, artifact_names or {})
++    named = None if missing else _named_semantic_owners(base, owner_names or {})
+     if named is not None:
+         assert isinstance(named, dict); named.update({"representation": "named", "requested_representation": requested})
+     named_bytes = mcp_rep.serialized_json_bytes(named) if named is not None else None
+@@ -272,13 +272,13 @@ def _represented_response_candidate(
+     *,
+     mode: str,
+     representation: str,
+-    artifact_names: Mapping[str, str] | None,
++    owner_names: Mapping[str, str] | None,
+     state_freshness: Mapping[str, object] | None,
+ ) -> dict:
+     result = build_symbol_lineage_represented_payload(
+         selected,
+         representation=representation,
+-        artifact_names=artifact_names,
++        owner_names=owner_names,
+         state_freshness=state_freshness,
+     )
+     result["mode"] = mode
+@@ -289,7 +289,7 @@ def build_symbol_lineage_represented_preview(
+     selected: SelectedSymbolLineageFacts,
+     *,
+     representation: str = "auto",
+-    artifact_names: Mapping[str, str] | None = None,
++    owner_names: Mapping[str, str] | None = None,
+     state_freshness: Mapping[str, object] | None = None,
+     candidate_mode: str = "fetch",
+ ) -> dict:
+@@ -302,7 +302,7 @@ def build_symbol_lineage_represented_preview(
+         selected,
+         mode=candidate_mode,
+         representation=representation,
+-        artifact_names=artifact_names,
++        owner_names=owner_names,
+         state_freshness=state_freshness,
+     )
+     sections = candidate["sections"]
+@@ -362,7 +362,7 @@ def render_symbol_lineage_response(
+     mode: str = "auto",
+     sections: tuple[str, ...] | None = None,
+     representation: str = "auto",
+-    artifact_names: Mapping[str, str] | None = None,
++    owner_names: Mapping[str, str] | None = None,
+     state_freshness: Mapping[str, object] | None = None,
+     allow_large_output: bool = False,
+ ) -> str:
+@@ -396,7 +396,7 @@ def render_symbol_lineage_response(
+         result = build_symbol_lineage_represented_preview(
+             selected,
+             representation=representation,
+-            artifact_names=artifact_names,
++            owner_names=owner_names,
+             state_freshness=state_freshness,
+             candidate_mode="fetch",
+         )
+@@ -423,7 +423,7 @@ def render_symbol_lineage_response(
+         selected,
+         mode=plan.mode,
+         representation=representation,
+-        artifact_names=artifact_names,
++        owner_names=owner_names,
+         state_freshness=state_freshness,
+     )
+     candidate_bytes = (
+@@ -441,7 +441,7 @@ def render_symbol_lineage_response(
+             build_symbol_lineage_represented_preview(
+                 selected,
+                 representation=representation,
+-                artifact_names=artifact_names,
++                owner_names=owner_names,
+                 state_freshness=state_freshness,
+                 candidate_mode="auto",
+             )
+diff --git a/tests/mcp/test_lineage_response.py b/tests/mcp/test_lineage_response.py
+index d127644..b64426c 100644
+--- a/tests/mcp/test_lineage_response.py
++++ b/tests/mcp/test_lineage_response.py
+@@ -9,7 +9,7 @@ from contextor.core.domain.lineage_facts import (
+     MaterializedSurfaceFact, ResolutionKind,
+     SemanticAnchorBinding, SemanticEndpoint, SemanticInterfaceDescriptor,
+     SourceSpan, SurfaceDeclarationEvidence, SurfaceKind,
+-    build_parameter_value_slot, build_return_slot, ParameterKind,
++    build_parameter_value_slot, build_return_slot, build_module_global_slot, ParameterKind,
+ )
+ from contextor.core.lineage_query.backend import LineageBackendMetadata
+ from contextor.core.lineage_query.service import (
+@@ -32,6 +32,13 @@ from contextor.mcp.lineage_response import (
+ )
+ 
+ 
++def _owner_names_fixture():
++    return {
++        "17/2": "pkg.mod",
 +        "A17/2": "pkg.mod::handler",
 +    }
-+    assert observed["source_keys"] == (
++
++
+ def _selected_lineage_fixture():
+     target = ResolvedLineageTarget("A17/2", "pkg.mod::handler", "pkg.mod", "handler", "exact_id")
+     metadata = LineageBackendMetadata(7, "live", "fresh", "1", 1, "fresh", True)
+@@ -48,14 +55,31 @@ def _selected_lineage_fixture():
+     symbolic_ref = MaterializedSymbolicRef("pkg/mod.py", "1" * 64, ExtractedSymbolicKind.IMPORT, "pkg.dep", "value")
+     local_ref = MaterializedOccurrenceRef("pkg/mod.py", "1" * 64, "local")
+     binding_flow = LineageFlowMatch("pkg/mod.py", "1" * 64, MaterializedFlowFact("binding", symbolic_ref, local_ref, LineageRelation.BINDS, span, ResolutionKind.IMPORT_EXACT, LineageConfidence.CONFIRMED))
++    module_state_slot = build_module_global_slot(
++        "17/2",
++        "CACHE",
++    )
++    state_flow = LineageFlowMatch(
 +        "pkg/mod.py",
-+    )
-+
-+
-+def test_live_target_catalog_resolves_qualified_name_from_one_module_slice_only(
-+    monkeypatch,
-+):
-+    state, backend = _fixture()
-+
-+    monkeypatch.setattr(
-+        backend,
-+        "source_keys",
-+        lambda: (_ for _ in ()).throw(
-+            AssertionError("repo-wide lineage scan")
++        "1" * 64,
++        MaterializedFlowFact(
++            "state-read",
++            SemanticEndpoint("17/2", module_state_slot),
++            local_ref,
++            LineageRelation.READS_STATE,
++            span,
++            ResolutionKind.LEXICAL_EXACT,
++            LineageConfidence.CONFIRMED,
 +        ),
 +    )
-+    monkeypatch.setattr(
-+        backend,
-+        "iter_sources",
-+        lambda *_args, **_kwargs: (
-+            (_ for _ in ()).throw(
-+                AssertionError(
-+                    "qualified lookup iterated lineage"
-+                )
-+            )
-+        ),
-+    )
+     dynamic_flow = LineageFlowMatch("pkg/mod.py", "1" * 64, MaterializedFlowFact("dynamic", local_ref, ref, LineageRelation.ASSIGNS, span, ResolutionKind.DYNAMIC_RUNTIME_BOUNDARY, LineageConfidence.DYNAMIC, dynamic_boundary="runtime-test"))
+     surface_match = LineageSurfaceMatch("pkg/mod.py", "1" * 64, MaterializedSurfaceFact("public-handler", SurfaceKind.PUBLIC_SYMBOL, ref, span, ResolutionKind.PYTHON_NAME_CONVENTION, LineageConfidence.INFERRED, "handler", declaration_evidence=SurfaceDeclarationEvidence.STATIC_DECLARATION))
+     direct = DirectLineageFacts(target, metadata, (definition,), (incoming,), (), (surface_match,))
+     root = LineageScopeRootMatch("pkg/mod.py", "1" * 64, binding, anchor)
+-    scope = LexicalScopeFacts(target, metadata, (root,), (binding_flow, dynamic_flow), (), True)
+-    sections = SemanticLineageSections(target, scope, direct, (binding_flow, dynamic_flow), (), (), (), (), (), LineageSurfaceSection((), (surface_match,)), (dynamic_flow,))
++    scope = LexicalScopeFacts(target, metadata, (root,), (binding_flow, dynamic_flow, state_flow), (), True)
++    sections = SemanticLineageSections(target, scope, direct, (binding_flow, dynamic_flow), (), (), (), (state_flow,), (), LineageSurfaceSection((), (surface_match,)), (dynamic_flow,))
+     facts = SymbolLineageFacts(target, interface, sections)
+-    return SelectedSymbolLineageFacts(facts, SYMBOL_LINEAGE_SECTION_ORDER, interface, SymbolLineageConnections((incoming,), ()), (binding_flow, dynamic_flow), (), (), (), (), (), LineageSurfaceSection((), (surface_match,)), (dynamic_flow,))
++    return SelectedSymbolLineageFacts(facts, SYMBOL_LINEAGE_SECTION_ORDER, interface, SymbolLineageConnections((incoming,), ()), (binding_flow, dynamic_flow), (), (), (), (state_flow,), (), LineageSurfaceSection((), (surface_match,)), (dynamic_flow,))
+ 
+ 
+ def _with_repeated_connections(
+@@ -216,9 +240,7 @@ def test_symbol_lineage_named_and_indexed_representations_preserve_nonsemantic_i
+     named = build_symbol_lineage_represented_payload(
+         selected,
+         representation="named",
+-        artifact_names={
+-            "A17/2": "pkg.mod::handler",
+-        },
++        owner_names=_owner_names_fixture(),
+     )
+     indexed = build_symbol_lineage_represented_payload(
+         selected,
+@@ -243,6 +265,11 @@ def test_symbol_lineage_named_and_indexed_representations_preserve_nonsemantic_i
+         "slot": build_return_slot("A17/2"),
+     }
+ 
++    named_state = named["sections"]["state"][0]["source"]
++    indexed_state = indexed["sections"]["state"][0]["source"]
++    assert named_state == {"kind": "semantic", "owner": "pkg.mod", "slot": build_module_global_slot("17/2", "CACHE")}
++    assert indexed_state == {"kind": "semantic", "owner_id": "17/2", "slot": build_module_global_slot("17/2", "CACHE")}
 +
-+    original_get = backend.get_source
-+    observed = []
-+
-+    def get_source(source_key):
-+        observed.append(source_key)
-+        return original_get(source_key)
-+
-+    monkeypatch.setattr(
-+        backend,
-+        "get_source",
-+        get_source,
-+    )
-+
-+    catalog = build_live_lineage_target_catalog(
-+        state,
-+        backend,
-+        "pkg.mod::handler",
-+    )
-+
-+    assert catalog.artifacts == {
-+        "A17/2": "pkg.mod::handler",
-+    }
-+    assert observed == ["pkg/mod.py"]
-+
-+
-+def test_live_target_catalog_preserves_duplicate_exact_identity_for_service_ambiguity():
-+    state, backend = _fixture()
-+    source = _source(
-+        "pkg/mod.py",
-+        "c" * 64,
-+        (
-+            ("A17/2", "pkg.mod::handler"),
-+            ("A18/1", "pkg.mod::handler"),
-+        ),
-+    )
-+    state.lineage_facts_by_source[
-+        "pkg/mod.py"
-+    ] = source
-+    (
-+        owner_source_index,
-+        source_owner_index,
-+        anchor_complete,
-+    ) = build_lineage_query_indexes(
-+        state.lineage_facts_by_source
-+    )
-+    state.lineage_owner_source_index = (
-+        owner_source_index
-+    )
-+    state.lineage_source_owner_index = (
-+        source_owner_index
-+    )
-+    state.lineage_semantic_anchor_bindings_complete = (
-+        anchor_complete
-+    )
-+
-+    catalog = build_live_lineage_target_catalog(
-+        state,
-+        backend,
-+        "pkg.mod::handler",
-+    )
-+
-+    assert catalog.artifacts == {
-+        "A17/2": "pkg.mod::handler",
-+        "A18/1": "pkg.mod::handler",
-+    }
-+
-+
-+@pytest.mark.parametrize(
-+    "query",
-+    (
-+        "",
-+        "handler",
-+        "pkg.mod",
-+        "pkg.mod::",
-+        "::handler",
-+        "pkg.mod::handler::extra",
-+        "pkg.missing::handler",
-+    ),
-+)
-+def test_live_target_catalog_invalid_or_missing_exact_query_returns_empty_catalog(
-+    query,
-+):
-+    state, backend = _fixture()
-+
-+    catalog = build_live_lineage_target_catalog(
-+        state,
-+        backend,
-+        query,
-+    )
-+
-+    assert catalog.artifacts == {}
-+
-+
-+def test_live_target_catalog_fails_closed_when_identity_capability_is_not_fresh():
-+    state, backend = _fixture()
-+    state.lineage_query_index_state = "stale"
-+
-+    with pytest.raises(
-+        ValueError,
-+        match=(
-+            "Canonical lineage target identity "
-+            "catalog is unavailable or stale."
-+        ),
-+    ):
-+        build_live_lineage_target_catalog(
-+            state,
-+            backend,
-+            "pkg.mod::handler",
-+        )
-+
-+
-+def test_live_target_catalog_rejects_inconsistent_owner_identity():
-+    state, backend = _fixture()
-+
-+    conflicting = _source(
-+        "pkg/duplicate.py",
-+        "d" * 64,
-+        (
-+            ("A17/2", "pkg.other::handler"),
-+        ),
-+    )
-+    state.lineage_facts_by_source[
-+        "pkg/duplicate.py"
-+    ] = conflicting
-+    state.lineage_owner_source_index[
-+        "A17/2"
-+    ] = (
-+        "pkg/duplicate.py",
-+        "pkg/mod.py",
-+    )
-+
-+    with pytest.raises(
-+        ValueError,
-+        match=(
-+            "Canonical lineage owner identity "
-+            "is inconsistent."
-+        ),
-+    ):
-+        build_live_lineage_target_catalog(
-+            state,
-+            backend,
-+            "A17/2",
-+        )
-+
-+
-+def test_live_symbol_lineage_query_resolves_once_and_selects_canonical_sections(
-+    monkeypatch,
-+):
-+    state, _backend = _fixture()
-+
-+    original_facts = (
-+        LineageQueryService.symbol_lineage_facts
-+    )
-+    original_select = (
-+        LineageQueryService.select_symbol_lineage_sections
-+    )
-+    calls = {
-+        "facts": 0,
-+        "select": 0,
-+    }
-+
-+    def symbol_lineage_facts(
-+        service,
-+        target,
-+    ):
-+        calls["facts"] += 1
-+        return original_facts(
-+            service,
-+            target,
-+        )
-+
-+    def select_symbol_lineage_sections(
-+        service,
-+        facts,
-+        sections,
-+    ):
-+        calls["select"] += 1
-+        return original_select(
-+            service,
-+            facts,
-+            sections,
-+        )
-+
-+    monkeypatch.setattr(
-+        LineageQueryService,
-+        "symbol_lineage_facts",
-+        symbol_lineage_facts,
-+    )
-+    monkeypatch.setattr(
-+        LineageQueryService,
-+        "select_symbol_lineage_sections",
-+        select_symbol_lineage_sections,
-+    )
-+    monkeypatch.setattr(
-+        LineageQueryService,
-+        "traverse_lexical_scope",
-+        lambda *_args, **_kwargs: (
-+            (_ for _ in ()).throw(
-+                AssertionError(
-+                    "symbol lineage query must not traverse"
-+                )
-+            )
-+        ),
-+    )
-+
-+    result = query_live_symbol_lineage(
-+        state,
-+        "a17/2",
-+        (
-+            "state",
-+            "connections",
-+            "interface",
-+        ),
-+    )
-+
-+    assert isinstance(
-+        result,
-+        LiveSymbolLineageQueryResult,
-+    )
-+    assert result.resolution.status == "resolved"
-+    assert result.resolution.target is not None
-+    assert (
-+        result.resolution.target.artifact_id
-+        == "A17/2"
-+    )
-+    assert result.selected is not None
-+    assert result.selected.selected_sections == (
-+        "interface",
-+        "connections",
-+        "state",
-+    )
-+    assert result.selected.target == (
-+        result.resolution.target
-+    )
-+    assert calls == {
-+        "facts": 1,
-+        "select": 1,
-+    }
-+
-+
-+def test_live_symbol_lineage_query_resolves_exact_qualified_identity():
-+    state, _backend = _fixture()
-+
-+    result = query_live_symbol_lineage(
-+        state,
-+        "pkg.mod::handler",
-+        ("connections",),
-+    )
-+
-+    assert result.resolution.status == "resolved"
-+    assert result.resolution.target is not None
-+    assert (
-+        result.resolution.target.resolution
-+        == "exact_identity"
-+    )
-+    assert result.selected is not None
-+    assert result.selected.selected_sections == (
-+        "connections",
-+    )
-+
-+
-+@pytest.mark.parametrize(
-+    ("query", "expected_status"),
-+    (
-+        ("", "invalid"),
-+        ("handler", "invalid"),
-+        ("A404/1", "not_found"),
-+        ("pkg.missing::handler", "not_found"),
-+    ),
-+)
-+def test_live_symbol_lineage_query_unresolved_targets_never_build_facts(
-+    monkeypatch,
-+    query,
-+    expected_status,
-+):
-+    state, _backend = _fixture()
-+
-+    monkeypatch.setattr(
-+        LineageQueryService,
-+        "symbol_lineage_facts",
-+        lambda *_args, **_kwargs: (
-+            (_ for _ in ()).throw(
-+                AssertionError(
-+                    "unresolved target built facts"
-+                )
-+            )
-+        ),
-+    )
-+
-+    result = query_live_symbol_lineage(
-+        state,
-+        query,
-+        ("interface",),
-+    )
-+
-+    assert (
-+        result.resolution.status
-+        == expected_status
-+    )
-+    assert result.selected is None
-+
-+
-+def test_live_symbol_lineage_query_preserves_ambiguity_without_selection(
-+    monkeypatch,
-+):
-+    state, _backend = _fixture()
-+    source = _source(
-+        "pkg/mod.py",
-+        "c" * 64,
-+        (
-+            ("A17/2", "pkg.mod::handler"),
-+            ("A18/1", "pkg.mod::handler"),
-+        ),
-+    )
-+    state.lineage_facts_by_source[
-+        "pkg/mod.py"
-+    ] = source
-+    (
-+        owner_source_index,
-+        source_owner_index,
-+        anchor_complete,
-+    ) = build_lineage_query_indexes(
-+        state.lineage_facts_by_source
-+    )
-+    state.lineage_owner_source_index = (
-+        owner_source_index
-+    )
-+    state.lineage_source_owner_index = (
-+        source_owner_index
-+    )
-+    state.lineage_semantic_anchor_bindings_complete = (
-+        anchor_complete
-+    )
-+
-+    monkeypatch.setattr(
-+        LineageQueryService,
-+        "symbol_lineage_facts",
-+        lambda *_args, **_kwargs: (
-+            (_ for _ in ()).throw(
-+                AssertionError(
-+                    "ambiguous target built facts"
-+                )
-+            )
-+        ),
-+    )
-+
-+    result = query_live_symbol_lineage(
-+        state,
-+        "pkg.mod::handler",
-+        ("interface",),
-+    )
-+
-+    assert result.resolution.status == "ambiguous"
-+    assert result.selected is None
-+    assert tuple(
-+        candidate.artifact_id
-+        for candidate
-+        in result.resolution.candidates
-+    ) == (
-+        "A17/2",
-+        "A18/1",
-+    )
-+
-+
-+def test_live_symbol_lineage_query_reports_stale_capability_as_unavailable():
-+    state, _backend = _fixture()
-+    state.lineage_query_index_state = "stale"
-+
-+    result = query_live_symbol_lineage(
-+        state,
-+        "pkg.mod::handler",
-+        ("interface",),
-+    )
-+
-+    assert result.resolution.status == (
-+        "unavailable"
-+    )
-+    assert result.resolution.target is None
-+    assert result.selected is None
-+    assert result.unavailable_reason == (
-+        "Canonical lineage target identity "
-+        "catalog is unavailable or stale."
-+    )
-+
-+
-+def test_live_symbol_lineage_query_does_not_hide_canonical_identity_corruption():
-+    state, _backend = _fixture()
-+
-+    conflicting = _source(
-+        "pkg/duplicate.py",
-+        "d" * 64,
-+        (
-+            ("A17/2", "pkg.other::handler"),
-+        ),
-+    )
-+    state.lineage_facts_by_source[
-+        "pkg/duplicate.py"
-+    ] = conflicting
-+    state.lineage_owner_source_index[
-+        "A17/2"
-+    ] = (
-+        "pkg/duplicate.py",
-+        "pkg/mod.py",
-+    )
-+
-+    with pytest.raises(
-+        ValueError,
-+        match=(
-+            "Canonical lineage owner identity "
-+            "is inconsistent."
-+        ),
-+    ):
-+        query_live_symbol_lineage(
-+            state,
-+            "A17/2",
-+            ("interface",),
-+        )
-+
-+
-+def test_live_symbol_lineage_query_validates_section_contract_before_resolution():
-+    state, _backend = _fixture()
-+
-+    with pytest.raises(
-+        TypeError,
-+        match=(
-+            "sections must be a tuple "
-+            "of section names."
-+        ),
-+    ):
-+        query_live_symbol_lineage(
-+            state,
-+            "A404/1",
-+            ["interface"],
-+        )
-+
-+    with pytest.raises(
-+        ValueError,
-+        match=(
-+            "sections must not contain duplicates."
-+        ),
-+    ):
-+        query_live_symbol_lineage(
-+            state,
-+            "A404/1",
-+            ("state", "state"),
-+        )
-+
-+    with pytest.raises(
-+        ValueError,
-+        match=(
-+            "Unknown symbol lineage sections: mystery"
-+        ),
-+    ):
-+        query_live_symbol_lineage(
-+            state,
-+            "A404/1",
-+            ("mystery",),
-+        )
-+
-+
-+def test_live_symbol_lineage_query_allows_empty_core_selection():
-+    state, _backend = _fixture()
-+
-+    result = query_live_symbol_lineage(
-+        state,
-+        "A17/2",
-+        (),
-+    )
-+
-+    assert result.resolution.status == "resolved"
-+    assert result.selected is not None
-+    assert result.selected.selected_sections == ()
-+    assert result.selected.complete is True
+     assert (
+         named_semantic["slot"]
+         == indexed_semantic["slot"]
+@@ -294,7 +321,7 @@ def test_symbol_lineage_named_and_indexed_representations_preserve_nonsemantic_i
+ 
+     assert indexed["representation"] == "indexed"
+     assert indexed["resolver"] == {
+-        "index_kind": "artifact",
++        "id_kinds": ["module", "artifact"],
+         "resolve_via": "lookup_index_entries",
+     }
+     assert (
+@@ -309,19 +336,18 @@ def test_symbol_lineage_representation_fails_closed_and_auto_falls_back():
+         ValueError,
+         match=(
+             "Named lineage representation unavailable "
+-            "for semantic owners: A17/2"
++            "for semantic owners: 17/2, A17/2"
+         ),
+     ):
+         build_symbol_lineage_represented_payload(
+             selected,
+             representation="named",
+-            artifact_names={},
++            owner_names={},
+         )
+-
+     result = build_symbol_lineage_represented_payload(
+         selected,
+         representation="auto",
+-        artifact_names={},
++        owner_names={},
+     )
+ 
+     assert result["representation"] == "indexed"
+@@ -331,7 +357,7 @@ def test_symbol_lineage_representation_fails_closed_and_auto_falls_back():
+     )
+     assert result["representation_decision"][
+         "missing_named_owners"
+-    ] == ["A17/2"]
++    ] == ["17/2", "A17/2"]
+     assert (
+         result["representation_decision"][
+             "named_candidate_bytes"
+@@ -345,9 +371,7 @@ def test_symbol_lineage_auto_named_and_material_indexed_saving():
+     named = build_symbol_lineage_represented_payload(
+         selected,
+         representation="auto",
+-        artifact_names={
+-            "A17/2": "pkg.mod::handler",
+-        },
++        owner_names=_owner_names_fixture(),
+     )
+ 
+     named_decision = named["representation_decision"]
+@@ -388,9 +412,7 @@ def test_symbol_lineage_auto_named_and_material_indexed_saving():
+     indexed = build_symbol_lineage_represented_payload(
+         expanded,
+         representation="auto",
+-        artifact_names={
+-            "A17/2": long_name,
+-        },
++        owner_names={**_owner_names_fixture(), "A17/2": long_name},
+     )
+ 
+     indexed_decision = (
+@@ -418,19 +440,19 @@ def test_symbol_lineage_representation_validates_request_contract():
+         build_symbol_lineage_represented_payload(selected, representation=object())
+     with pytest.raises(ValueError, match="representation must be 'auto', 'indexed', or 'named'."):
+         build_symbol_lineage_represented_payload(selected, representation="other")
+-    with pytest.raises(TypeError, match="artifact_names must be a mapping."):
+-        build_symbol_lineage_represented_payload(selected, representation="named", artifact_names=[])
++    with pytest.raises(TypeError, match="owner_names must be a mapping."):
++        build_symbol_lineage_represented_payload(selected, representation="named", owner_names=[])
+     with pytest.raises(
+         ValueError,
+         match=(
+-            "artifact_names must map non-empty "
+-            "artifact IDs to non-empty names."
++            "owner_names must map non-empty "
++            "owner IDs to non-empty names."
+         ),
+     ):
+         build_symbol_lineage_represented_payload(
+             selected,
+             representation="named",
+-            artifact_names={
++            owner_names={
+                 "A17/2": "",
+             },
+         )
+@@ -494,20 +516,18 @@ def test_symbol_lineage_auto_falls_back_to_exact_representation_aware_preview():
+ 
+ def test_symbol_lineage_explicit_preview_sizes_exact_represented_fetch_candidate():
+     selected = _selected_lineage_fixture()
+-    names = {
+-        "A17/2": "pkg.mod::handler",
+-    }
++    names = _owner_names_fixture()
+ 
+     preview = build_symbol_lineage_represented_preview(
+         selected,
+         representation="named",
+-        artifact_names=names,
++        owner_names=names,
+         candidate_mode="fetch",
+     )
+     candidate = build_symbol_lineage_represented_payload(
+         selected,
+         representation="named",
+-        artifact_names=names,
++        owner_names=names,
+     )
+     candidate["mode"] = "fetch"
 ```
 

@@ -9,7 +9,7 @@ from contextor.core.domain.lineage_facts import (
     MaterializedSurfaceFact, ResolutionKind,
     SemanticAnchorBinding, SemanticEndpoint, SemanticInterfaceDescriptor,
     SourceSpan, SurfaceDeclarationEvidence, SurfaceKind,
-    build_parameter_value_slot, build_return_slot, ParameterKind,
+    build_parameter_value_slot, build_return_slot, build_module_global_slot, ParameterKind,
 )
 from contextor.core.lineage_query.backend import LineageBackendMetadata
 from contextor.core.lineage_query.service import (
@@ -32,6 +32,13 @@ from contextor.mcp.lineage_response import (
 )
 
 
+def _owner_names_fixture():
+    return {
+        "17/2": "pkg.mod",
+        "A17/2": "pkg.mod::handler",
+    }
+
+
 def _selected_lineage_fixture():
     target = ResolvedLineageTarget("A17/2", "pkg.mod::handler", "pkg.mod", "handler", "exact_id")
     metadata = LineageBackendMetadata(7, "live", "fresh", "1", 1, "fresh", True)
@@ -48,14 +55,31 @@ def _selected_lineage_fixture():
     symbolic_ref = MaterializedSymbolicRef("pkg/mod.py", "1" * 64, ExtractedSymbolicKind.IMPORT, "pkg.dep", "value")
     local_ref = MaterializedOccurrenceRef("pkg/mod.py", "1" * 64, "local")
     binding_flow = LineageFlowMatch("pkg/mod.py", "1" * 64, MaterializedFlowFact("binding", symbolic_ref, local_ref, LineageRelation.BINDS, span, ResolutionKind.IMPORT_EXACT, LineageConfidence.CONFIRMED))
+    module_state_slot = build_module_global_slot(
+        "17/2",
+        "CACHE",
+    )
+    state_flow = LineageFlowMatch(
+        "pkg/mod.py",
+        "1" * 64,
+        MaterializedFlowFact(
+            "state-read",
+            SemanticEndpoint("17/2", module_state_slot),
+            local_ref,
+            LineageRelation.READS_STATE,
+            span,
+            ResolutionKind.LEXICAL_EXACT,
+            LineageConfidence.CONFIRMED,
+        ),
+    )
     dynamic_flow = LineageFlowMatch("pkg/mod.py", "1" * 64, MaterializedFlowFact("dynamic", local_ref, ref, LineageRelation.ASSIGNS, span, ResolutionKind.DYNAMIC_RUNTIME_BOUNDARY, LineageConfidence.DYNAMIC, dynamic_boundary="runtime-test"))
     surface_match = LineageSurfaceMatch("pkg/mod.py", "1" * 64, MaterializedSurfaceFact("public-handler", SurfaceKind.PUBLIC_SYMBOL, ref, span, ResolutionKind.PYTHON_NAME_CONVENTION, LineageConfidence.INFERRED, "handler", declaration_evidence=SurfaceDeclarationEvidence.STATIC_DECLARATION))
     direct = DirectLineageFacts(target, metadata, (definition,), (incoming,), (), (surface_match,))
     root = LineageScopeRootMatch("pkg/mod.py", "1" * 64, binding, anchor)
-    scope = LexicalScopeFacts(target, metadata, (root,), (binding_flow, dynamic_flow), (), True)
-    sections = SemanticLineageSections(target, scope, direct, (binding_flow, dynamic_flow), (), (), (), (), (), LineageSurfaceSection((), (surface_match,)), (dynamic_flow,))
+    scope = LexicalScopeFacts(target, metadata, (root,), (binding_flow, dynamic_flow, state_flow), (), True)
+    sections = SemanticLineageSections(target, scope, direct, (binding_flow, dynamic_flow), (), (), (), (state_flow,), (), LineageSurfaceSection((), (surface_match,)), (dynamic_flow,))
     facts = SymbolLineageFacts(target, interface, sections)
-    return SelectedSymbolLineageFacts(facts, SYMBOL_LINEAGE_SECTION_ORDER, interface, SymbolLineageConnections((incoming,), ()), (binding_flow, dynamic_flow), (), (), (), (), (), LineageSurfaceSection((), (surface_match,)), (dynamic_flow,))
+    return SelectedSymbolLineageFacts(facts, SYMBOL_LINEAGE_SECTION_ORDER, interface, SymbolLineageConnections((incoming,), ()), (binding_flow, dynamic_flow), (), (), (), (state_flow,), (), LineageSurfaceSection((), (surface_match,)), (dynamic_flow,))
 
 
 def _with_repeated_connections(
@@ -216,9 +240,7 @@ def test_symbol_lineage_named_and_indexed_representations_preserve_nonsemantic_i
     named = build_symbol_lineage_represented_payload(
         selected,
         representation="named",
-        artifact_names={
-            "A17/2": "pkg.mod::handler",
-        },
+        owner_names=_owner_names_fixture(),
     )
     indexed = build_symbol_lineage_represented_payload(
         selected,
@@ -242,6 +264,11 @@ def test_symbol_lineage_named_and_indexed_representations_preserve_nonsemantic_i
         "owner_id": "A17/2",
         "slot": build_return_slot("A17/2"),
     }
+
+    named_state = named["sections"]["state"][0]["source"]
+    indexed_state = indexed["sections"]["state"][0]["source"]
+    assert named_state == {"kind": "semantic", "owner": "pkg.mod", "slot": build_module_global_slot("17/2", "CACHE")}
+    assert indexed_state == {"kind": "semantic", "owner_id": "17/2", "slot": build_module_global_slot("17/2", "CACHE")}
 
     assert (
         named_semantic["slot"]
@@ -294,7 +321,7 @@ def test_symbol_lineage_named_and_indexed_representations_preserve_nonsemantic_i
 
     assert indexed["representation"] == "indexed"
     assert indexed["resolver"] == {
-        "index_kind": "artifact",
+        "id_kinds": ["module", "artifact"],
         "resolve_via": "lookup_index_entries",
     }
     assert (
@@ -309,19 +336,18 @@ def test_symbol_lineage_representation_fails_closed_and_auto_falls_back():
         ValueError,
         match=(
             "Named lineage representation unavailable "
-            "for semantic owners: A17/2"
+            "for semantic owners: 17/2, A17/2"
         ),
     ):
         build_symbol_lineage_represented_payload(
             selected,
             representation="named",
-            artifact_names={},
+            owner_names={},
         )
-
     result = build_symbol_lineage_represented_payload(
         selected,
         representation="auto",
-        artifact_names={},
+        owner_names={},
     )
 
     assert result["representation"] == "indexed"
@@ -331,7 +357,7 @@ def test_symbol_lineage_representation_fails_closed_and_auto_falls_back():
     )
     assert result["representation_decision"][
         "missing_named_owners"
-    ] == ["A17/2"]
+    ] == ["17/2", "A17/2"]
     assert (
         result["representation_decision"][
             "named_candidate_bytes"
@@ -345,9 +371,7 @@ def test_symbol_lineage_auto_named_and_material_indexed_saving():
     named = build_symbol_lineage_represented_payload(
         selected,
         representation="auto",
-        artifact_names={
-            "A17/2": "pkg.mod::handler",
-        },
+        owner_names=_owner_names_fixture(),
     )
 
     named_decision = named["representation_decision"]
@@ -388,9 +412,7 @@ def test_symbol_lineage_auto_named_and_material_indexed_saving():
     indexed = build_symbol_lineage_represented_payload(
         expanded,
         representation="auto",
-        artifact_names={
-            "A17/2": long_name,
-        },
+        owner_names={**_owner_names_fixture(), "A17/2": long_name},
     )
 
     indexed_decision = (
@@ -418,19 +440,19 @@ def test_symbol_lineage_representation_validates_request_contract():
         build_symbol_lineage_represented_payload(selected, representation=object())
     with pytest.raises(ValueError, match="representation must be 'auto', 'indexed', or 'named'."):
         build_symbol_lineage_represented_payload(selected, representation="other")
-    with pytest.raises(TypeError, match="artifact_names must be a mapping."):
-        build_symbol_lineage_represented_payload(selected, representation="named", artifact_names=[])
+    with pytest.raises(TypeError, match="owner_names must be a mapping."):
+        build_symbol_lineage_represented_payload(selected, representation="named", owner_names=[])
     with pytest.raises(
         ValueError,
         match=(
-            "artifact_names must map non-empty "
-            "artifact IDs to non-empty names."
+            "owner_names must map non-empty "
+            "owner IDs to non-empty names."
         ),
     ):
         build_symbol_lineage_represented_payload(
             selected,
             representation="named",
-            artifact_names={
+            owner_names={
                 "A17/2": "",
             },
         )
@@ -494,20 +516,18 @@ def test_symbol_lineage_auto_falls_back_to_exact_representation_aware_preview():
 
 def test_symbol_lineage_explicit_preview_sizes_exact_represented_fetch_candidate():
     selected = _selected_lineage_fixture()
-    names = {
-        "A17/2": "pkg.mod::handler",
-    }
+    names = _owner_names_fixture()
 
     preview = build_symbol_lineage_represented_preview(
         selected,
         representation="named",
-        artifact_names=names,
+        owner_names=names,
         candidate_mode="fetch",
     )
     candidate = build_symbol_lineage_represented_payload(
         selected,
         representation="named",
-        artifact_names=names,
+        owner_names=names,
     )
     candidate["mode"] = "fetch"
 

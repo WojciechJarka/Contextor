@@ -232,24 +232,24 @@ def build_symbol_lineage_represented_payload(
     selected: SelectedSymbolLineageFacts,
     *,
     representation: str = "auto",
-    artifact_names: Mapping[str, str] | None = None,
+    owner_names: Mapping[str, str] | None = None,
     state_freshness: Mapping[str, object] | None = None,
 ) -> dict:
     if not isinstance(selected, SelectedSymbolLineageFacts): raise TypeError("selected must be SelectedSymbolLineageFacts.")
     if not isinstance(representation, str): raise TypeError("representation must be a string.")
     requested = representation.strip().lower()
     if not mcp_rep.is_supported_representation(requested): raise ValueError("representation must be 'auto', 'indexed', or 'named'.")
-    if artifact_names is not None:
-        if not isinstance(artifact_names, Mapping): raise TypeError("artifact_names must be a mapping.")
-        if any(not isinstance(k, str) or not k or not isinstance(v, str) or not v for k, v in artifact_names.items()): raise ValueError("artifact_names must map non-empty artifact IDs to non-empty names.")
+    if owner_names is not None:
+        if not isinstance(owner_names, Mapping): raise TypeError("owner_names must be a mapping.")
+        if any(not isinstance(k, str) or not k or not isinstance(v, str) or not v for k, v in owner_names.items()): raise ValueError("owner_names must map non-empty owner IDs to non-empty names.")
     base = build_symbol_lineage_payload(
         selected,
         state_freshness=state_freshness,
     )
-    missing = tuple(owner for owner in _semantic_owner_ids(base) if artifact_names is None or owner not in artifact_names)
-    indexed = dict(base); indexed.update({"representation": "indexed", "requested_representation": requested, "resolver": {"index_kind": "artifact", "resolve_via": "lookup_index_entries"}})
+    missing = tuple(owner for owner in _semantic_owner_ids(base) if owner_names is None or owner not in owner_names)
+    indexed = dict(base); indexed.update({"representation": "indexed", "requested_representation": requested, "resolver": {"id_kinds": ["module", "artifact"], "resolve_via": "lookup_index_entries"}})
     indexed_bytes = mcp_rep.serialized_json_bytes(indexed)
-    named = None if missing else _named_semantic_owners(base, artifact_names or {})
+    named = None if missing else _named_semantic_owners(base, owner_names or {})
     if named is not None:
         assert isinstance(named, dict); named.update({"representation": "named", "requested_representation": requested})
     named_bytes = mcp_rep.serialized_json_bytes(named) if named is not None else None
@@ -272,13 +272,13 @@ def _represented_response_candidate(
     *,
     mode: str,
     representation: str,
-    artifact_names: Mapping[str, str] | None,
+    owner_names: Mapping[str, str] | None,
     state_freshness: Mapping[str, object] | None,
 ) -> dict:
     result = build_symbol_lineage_represented_payload(
         selected,
         representation=representation,
-        artifact_names=artifact_names,
+        owner_names=owner_names,
         state_freshness=state_freshness,
     )
     result["mode"] = mode
@@ -289,7 +289,7 @@ def build_symbol_lineage_represented_preview(
     selected: SelectedSymbolLineageFacts,
     *,
     representation: str = "auto",
-    artifact_names: Mapping[str, str] | None = None,
+    owner_names: Mapping[str, str] | None = None,
     state_freshness: Mapping[str, object] | None = None,
     candidate_mode: str = "fetch",
 ) -> dict:
@@ -302,7 +302,7 @@ def build_symbol_lineage_represented_preview(
         selected,
         mode=candidate_mode,
         representation=representation,
-        artifact_names=artifact_names,
+        owner_names=owner_names,
         state_freshness=state_freshness,
     )
     sections = candidate["sections"]
@@ -362,7 +362,7 @@ def render_symbol_lineage_response(
     mode: str = "auto",
     sections: tuple[str, ...] | None = None,
     representation: str = "auto",
-    artifact_names: Mapping[str, str] | None = None,
+    owner_names: Mapping[str, str] | None = None,
     state_freshness: Mapping[str, object] | None = None,
     allow_large_output: bool = False,
 ) -> str:
@@ -396,7 +396,7 @@ def render_symbol_lineage_response(
         result = build_symbol_lineage_represented_preview(
             selected,
             representation=representation,
-            artifact_names=artifact_names,
+            owner_names=owner_names,
             state_freshness=state_freshness,
             candidate_mode="fetch",
         )
@@ -423,7 +423,7 @@ def render_symbol_lineage_response(
         selected,
         mode=plan.mode,
         representation=representation,
-        artifact_names=artifact_names,
+        owner_names=owner_names,
         state_freshness=state_freshness,
     )
     candidate_bytes = (
@@ -441,7 +441,7 @@ def render_symbol_lineage_response(
             build_symbol_lineage_represented_preview(
                 selected,
                 representation=representation,
-                artifact_names=artifact_names,
+                owner_names=owner_names,
                 state_freshness=state_freshness,
                 candidate_mode="auto",
             )
