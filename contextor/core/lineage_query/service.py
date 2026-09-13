@@ -10,6 +10,7 @@ from contextor.core.domain.lineage_facts import (
     MaterializedOccurrenceRef,
     MaterializedSurfaceFact,
     MaterializedSymbolicRef,
+    ParameterKind,
     ResolutionKind,
     SemanticAnchorBinding,
     SemanticEndpoint,
@@ -100,6 +101,19 @@ class LineageInterfaceDescriptorMatch:
 
 
 @dataclass(frozen=True)
+class TargetParameterFacts:
+    slot: str
+    kind: ParameterKind
+    ordinal: int | None
+    name: str | None
+    default_flows: tuple[LineageFlowMatch, ...]
+
+    @property
+    def has_default(self) -> bool:
+        return bool(self.default_flows)
+
+
+@dataclass(frozen=True)
 class TargetInterfaceFacts:
     target: ResolvedLineageTarget
     metadata: LineageBackendMetadata
@@ -148,6 +162,71 @@ class TargetInterfaceFacts:
             and self.metadata.query_index_state == "fresh"
             and self.metadata.semantic_anchor_bindings_complete
         )
+
+    @property
+    def callable_state(self) -> str:
+        if not self.complete:
+            return "unknown"
+        if self.descriptor_available:
+            return "callable"
+        return "non_callable"
+
+    @property
+    def signature_digest(self) -> str | None:
+        descriptor = self.descriptor
+        if descriptor is None:
+            return None
+        return descriptor.signature_digest
+
+    @property
+    def return_slot(self) -> str | None:
+        descriptor = self.descriptor
+        if descriptor is None:
+            return None
+        matches = tuple(
+            slot for slot in descriptor.slots
+            if parse_semantic_slot(slot).kind is SemanticSlotKind.RETURN
+        )
+        if len(matches) != 1:
+            return None
+        return matches[0]
+
+    @property
+    def parameter_slots(self) -> tuple[TargetParameterFacts, ...]:
+        descriptor = self.descriptor
+        if descriptor is None:
+            return ()
+        defaults_by_slot: dict[str, list[LineageFlowMatch]] = {}
+        for match in self.parameter_defaults:
+            endpoint = match.flow.target
+            if isinstance(endpoint, SemanticEndpoint) and endpoint.slot is not None:
+                defaults_by_slot.setdefault(endpoint.slot, []).append(match)
+        parameters: list[TargetParameterFacts] = []
+        for raw_slot in descriptor.slots:
+            slot = parse_semantic_slot(raw_slot)
+            if slot.kind is not SemanticSlotKind.PARAMETER_VALUE:
+                continue
+            kind = ParameterKind(slot.parts[0])
+            ordinal: int | None = None
+            name: str | None = None
+            if kind in {
+                ParameterKind.POSITIONAL_ONLY,
+                ParameterKind.POSITIONAL_OR_KEYWORD,
+            }:
+                ordinal = int(slot.parts[1])
+            elif kind is ParameterKind.KEYWORD_ONLY:
+                name = slot.parts[1]
+            parameters.append(TargetParameterFacts(
+                slot=raw_slot,
+                kind=kind,
+                ordinal=ordinal,
+                name=name,
+                default_flows=tuple(sorted(
+                    defaults_by_slot.get(raw_slot, ()), key=_flow_match_key
+                )),
+            ))
+        parameters.sort(key=_target_parameter_key)
+        return tuple(parameters)
 
 
 @dataclass(frozen=True)
@@ -911,6 +990,26 @@ class LineageQueryService:
             boundaries=tuple(boundaries),
             truncated=truncated,
         )
+
+_PARAMETER_KIND_ORDER = {
+    ParameterKind.POSITIONAL_ONLY: 0,
+    ParameterKind.POSITIONAL_OR_KEYWORD: 1,
+    ParameterKind.VAR_POSITIONAL: 2,
+    ParameterKind.KEYWORD_ONLY: 3,
+    ParameterKind.VAR_KEYWORD: 4,
+}
+
+
+def _target_parameter_key(
+    parameter: TargetParameterFacts,
+) -> tuple[int, int, str, str]:
+    return (
+        _PARAMETER_KIND_ORDER[parameter.kind],
+        parameter.ordinal if parameter.ordinal is not None else -1,
+        parameter.name or "",
+        parameter.slot,
+    )
+
 
 def _anchor_match_key(match: LineageAnchorMatch) -> tuple:
     binding = match.binding

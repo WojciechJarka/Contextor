@@ -2153,13 +2153,34 @@ def _install_target_parameter_defaults(backend, target):
         ordinal=0,
         name="other",
     )
+    positional_only_slot = build_parameter_value_slot(
+        target.artifact_id,
+        ParameterKind.POSITIONAL_ONLY,
+        ordinal=0,
+        name="ignored-posonly-name",
+    )
+    vararg_slot = build_parameter_value_slot(
+        target.artifact_id,
+        ParameterKind.VAR_POSITIONAL,
+        name="ignored-vararg-name",
+    )
+    varkw_slot = build_parameter_value_slot(
+        target.artifact_id,
+        ParameterKind.VAR_KEYWORD,
+        name="ignored-varkw-name",
+    )
     module_ref = MaterializedOccurrenceRef(
         source_key, fingerprint, "module"
     )
     descriptor = SemanticInterfaceDescriptor(
         target.artifact_id,
         tuple(sorted((
-            build_return_slot(target.artifact_id), positional_slot, keyword_slot,
+            build_return_slot(target.artifact_id),
+            positional_only_slot,
+            positional_slot,
+            vararg_slot,
+            keyword_slot,
+            varkw_slot,
         ))),
         "digest-handler-defaults",
     )
@@ -2249,3 +2270,74 @@ def test_target_interface_preserves_default_diagnostics_when_interface_capabilit
     )
     assert result.materialization_complete is False
     assert result.complete is False
+
+
+def test_target_interface_normalizes_callable_shape_without_reconstructing_source_signature():
+    service, backend, target, _descriptor = _target_interface_service()
+    descriptor, positional_slot, keyword_slot = _install_target_parameter_defaults(
+        backend, target
+    )
+    result = service.target_interface_facts(target)
+    assert result.callable_state == "callable"
+    assert result.signature_digest == "digest-handler-defaults"
+    assert result.return_slot == build_return_slot(target.artifact_id)
+    parameters = result.parameter_slots
+    assert tuple((
+        parameter.kind, parameter.ordinal, parameter.name,
+        parameter.has_default,
+    ) for parameter in parameters) == (
+        (ParameterKind.POSITIONAL_ONLY, 0, None, False),
+        (ParameterKind.POSITIONAL_OR_KEYWORD, 0, None, True),
+        (ParameterKind.VAR_POSITIONAL, None, None, False),
+        (ParameterKind.KEYWORD_ONLY, None, "mode", True),
+        (ParameterKind.VAR_KEYWORD, None, None, False),
+    )
+    assert tuple(tuple(match.flow.local_id for match in parameter.default_flows)
+                 for parameter in parameters) == (
+        (), ("a-default-positional",), (), ("b-default-keyword",), (),
+    )
+    assert parameters[1].slot == positional_slot
+    assert parameters[3].slot == keyword_slot
+    assert result.descriptor == descriptor
+
+
+def test_target_interface_authoritative_absence_normalizes_as_non_callable():
+    service, backend, target, _descriptor = _target_interface_service()
+    provider = backend.get_source("pkg/target.py")
+    assert provider is not None
+    backend._sources["pkg/target.py"] = replace(
+        provider, interface_descriptors=()
+    )
+    result = service.target_interface_facts(target)
+    assert result.complete is True
+    assert result.callable_state == "non_callable"
+    assert result.signature_digest is None
+    assert result.return_slot is None
+    assert result.parameter_slots == ()
+
+
+def test_target_interface_legacy_descriptor_is_diagnostic_but_callable_state_unknown():
+    service, backend, target, _descriptor = _target_interface_service(
+        interface_capability=False
+    )
+    _install_target_parameter_defaults(backend, target)
+    result = service.target_interface_facts(target)
+    assert result.complete is False
+    assert result.callable_state == "unknown"
+    assert result.signature_digest == "digest-handler-defaults"
+    assert result.return_slot == build_return_slot(target.artifact_id)
+    assert result.parameter_slots
+    assert any(parameter.has_default for parameter in result.parameter_slots)
+
+
+def test_target_interface_ambiguous_definition_normalizes_as_unknown():
+    service, _backend, target, _descriptor = _target_interface_service(
+        duplicate_definition=True
+    )
+    result = service.target_interface_facts(target)
+    assert result.complete is False
+    assert result.callable_state == "unknown"
+    assert result.descriptor is None
+    assert result.signature_digest is None
+    assert result.return_slot is None
+    assert result.parameter_slots == ()

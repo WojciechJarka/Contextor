@@ -21,6 +21,7 @@ from contextor.core.lineage_query.service import (
     ResolvedLineageTarget,
     SemanticLineageSections,
     TargetInterfaceFacts,
+    TargetParameterFacts,
 )
 
 __all__ = [
@@ -44,4 +45,5 @@ __all__ = [
     "ResolvedLineageTarget",
     "SemanticLineageSections",
     "TargetInterfaceFacts",
+    "TargetParameterFacts",
 ]
