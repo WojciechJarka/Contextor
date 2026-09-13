@@ -18,7 +18,12 @@ from contextor.core.lineage_query.index import (
     build_lineage_query_indexes,
 )
 from contextor.core.lineage_query.live_query import (
+    LiveSymbolLineageQueryResult,
     build_live_lineage_target_catalog,
+    query_live_symbol_lineage,
+)
+from contextor.core.lineage_query.service import (
+    LineageQueryService,
 )
 
 
@@ -340,3 +345,333 @@ def test_live_target_catalog_rejects_inconsistent_owner_identity():
             backend,
             "A17/2",
         )
+
+
+def test_live_symbol_lineage_query_resolves_once_and_selects_canonical_sections(
+    monkeypatch,
+):
+    state, _backend = _fixture()
+
+    original_facts = (
+        LineageQueryService.symbol_lineage_facts
+    )
+    original_select = (
+        LineageQueryService.select_symbol_lineage_sections
+    )
+    calls = {
+        "facts": 0,
+        "select": 0,
+    }
+
+    def symbol_lineage_facts(
+        service,
+        target,
+    ):
+        calls["facts"] += 1
+        return original_facts(
+            service,
+            target,
+        )
+
+    def select_symbol_lineage_sections(
+        service,
+        facts,
+        sections,
+    ):
+        calls["select"] += 1
+        return original_select(
+            service,
+            facts,
+            sections,
+        )
+
+    monkeypatch.setattr(
+        LineageQueryService,
+        "symbol_lineage_facts",
+        symbol_lineage_facts,
+    )
+    monkeypatch.setattr(
+        LineageQueryService,
+        "select_symbol_lineage_sections",
+        select_symbol_lineage_sections,
+    )
+    monkeypatch.setattr(
+        LineageQueryService,
+        "traverse_lexical_scope",
+        lambda *_args, **_kwargs: (
+            (_ for _ in ()).throw(
+                AssertionError(
+                    "symbol lineage query must not traverse"
+                )
+            )
+        ),
+    )
+
+    result = query_live_symbol_lineage(
+        state,
+        "a17/2",
+        (
+            "state",
+            "connections",
+            "interface",
+        ),
+    )
+
+    assert isinstance(
+        result,
+        LiveSymbolLineageQueryResult,
+    )
+    assert result.resolution.status == "resolved"
+    assert result.resolution.target is not None
+    assert (
+        result.resolution.target.artifact_id
+        == "A17/2"
+    )
+    assert result.selected is not None
+    assert result.selected.selected_sections == (
+        "interface",
+        "connections",
+        "state",
+    )
+    assert result.selected.target == (
+        result.resolution.target
+    )
+    assert calls == {
+        "facts": 1,
+        "select": 1,
+    }
+
+
+def test_live_symbol_lineage_query_resolves_exact_qualified_identity():
+    state, _backend = _fixture()
+
+    result = query_live_symbol_lineage(
+        state,
+        "pkg.mod::handler",
+        ("connections",),
+    )
+
+    assert result.resolution.status == "resolved"
+    assert result.resolution.target is not None
+    assert (
+        result.resolution.target.resolution
+        == "exact_identity"
+    )
+    assert result.selected is not None
+    assert result.selected.selected_sections == (
+        "connections",
+    )
+
+
+@pytest.mark.parametrize(
+    ("query", "expected_status"),
+    (
+        ("", "invalid"),
+        ("handler", "invalid"),
+        ("A404/1", "not_found"),
+        ("pkg.missing::handler", "not_found"),
+    ),
+)
+def test_live_symbol_lineage_query_unresolved_targets_never_build_facts(
+    monkeypatch,
+    query,
+    expected_status,
+):
+    state, _backend = _fixture()
+
+    monkeypatch.setattr(
+        LineageQueryService,
+        "symbol_lineage_facts",
+        lambda *_args, **_kwargs: (
+            (_ for _ in ()).throw(
+                AssertionError(
+                    "unresolved target built facts"
+                )
+            )
+        ),
+    )
+
+    result = query_live_symbol_lineage(
+        state,
+        query,
+        ("interface",),
+    )
+
+    assert (
+        result.resolution.status
+        == expected_status
+    )
+    assert result.selected is None
+
+
+def test_live_symbol_lineage_query_preserves_ambiguity_without_selection(
+    monkeypatch,
+):
+    state, _backend = _fixture()
+    source = _source(
+        "pkg/mod.py",
+        "c" * 64,
+        (
+            ("A17/2", "pkg.mod::handler"),
+            ("A18/1", "pkg.mod::handler"),
+        ),
+    )
+    state.lineage_facts_by_source[
+        "pkg/mod.py"
+    ] = source
+    (
+        owner_source_index,
+        source_owner_index,
+        anchor_complete,
+    ) = build_lineage_query_indexes(
+        state.lineage_facts_by_source
+    )
+    state.lineage_owner_source_index = (
+        owner_source_index
+    )
+    state.lineage_source_owner_index = (
+        source_owner_index
+    )
+    state.lineage_semantic_anchor_bindings_complete = (
+        anchor_complete
+    )
+
+    monkeypatch.setattr(
+        LineageQueryService,
+        "symbol_lineage_facts",
+        lambda *_args, **_kwargs: (
+            (_ for _ in ()).throw(
+                AssertionError(
+                    "ambiguous target built facts"
+                )
+            )
+        ),
+    )
+
+    result = query_live_symbol_lineage(
+        state,
+        "pkg.mod::handler",
+        ("interface",),
+    )
+
+    assert result.resolution.status == "ambiguous"
+    assert result.selected is None
+    assert tuple(
+        candidate.artifact_id
+        for candidate
+        in result.resolution.candidates
+    ) == (
+        "A17/2",
+        "A18/1",
+    )
+
+
+def test_live_symbol_lineage_query_reports_stale_capability_as_unavailable():
+    state, _backend = _fixture()
+    state.lineage_query_index_state = "stale"
+
+    result = query_live_symbol_lineage(
+        state,
+        "pkg.mod::handler",
+        ("interface",),
+    )
+
+    assert result.resolution.status == (
+        "unavailable"
+    )
+    assert result.resolution.target is None
+    assert result.selected is None
+    assert result.unavailable_reason == (
+        "Canonical lineage target identity "
+        "catalog is unavailable or stale."
+    )
+
+
+def test_live_symbol_lineage_query_does_not_hide_canonical_identity_corruption():
+    state, _backend = _fixture()
+
+    conflicting = _source(
+        "pkg/duplicate.py",
+        "d" * 64,
+        (
+            ("A17/2", "pkg.other::handler"),
+        ),
+    )
+    state.lineage_facts_by_source[
+        "pkg/duplicate.py"
+    ] = conflicting
+    state.lineage_owner_source_index[
+        "A17/2"
+    ] = (
+        "pkg/duplicate.py",
+        "pkg/mod.py",
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=(
+            "Canonical lineage owner identity "
+            "is inconsistent."
+        ),
+    ):
+        query_live_symbol_lineage(
+            state,
+            "A17/2",
+            ("interface",),
+        )
+
+
+def test_live_symbol_lineage_query_validates_section_contract_before_resolution():
+    state, _backend = _fixture()
+
+    with pytest.raises(
+        TypeError,
+        match=(
+            "sections must be a tuple "
+            "of section names."
+        ),
+    ):
+        query_live_symbol_lineage(
+            state,
+            "A404/1",
+            ["interface"],
+        )
+
+    with pytest.raises(
+        ValueError,
+        match=(
+            "sections must not contain duplicates."
+        ),
+    ):
+        query_live_symbol_lineage(
+            state,
+            "A404/1",
+            ("state", "state"),
+        )
+
+    with pytest.raises(
+        ValueError,
+        match=(
+            "Unknown symbol lineage sections: mystery"
+        ),
+    ):
+        query_live_symbol_lineage(
+            state,
+            "A404/1",
+            ("mystery",),
+        )
+
+
+def test_live_symbol_lineage_query_allows_empty_core_selection():
+    state, _backend = _fixture()
+
+    result = query_live_symbol_lineage(
+        state,
+        "A17/2",
+        (),
+    )
+
+    assert result.resolution.status == "resolved"
+    assert result.selected is not None
+    assert result.selected.selected_sections == ()
+    assert result.selected.complete is True

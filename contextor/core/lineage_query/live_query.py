@@ -1,9 +1,16 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from collections.abc import Mapping
 
 from contextor.core.lineage_query.backend import (
     RepositoryStateLineageBackend,
+)
+from contextor.core.lineage_query.service import (
+    SYMBOL_LINEAGE_SECTION_ORDER,
+    LineageQueryService,
+    LineageTargetResolution,
+    SelectedSymbolLineageFacts,
 )
 from contextor.core.report_query import (
     ARTIFACT_ID_RE,
@@ -15,6 +22,13 @@ _UNAVAILABLE_MESSAGE = (
     "Canonical lineage target identity catalog "
     "is unavailable or stale."
 )
+
+
+@dataclass(frozen=True)
+class LiveSymbolLineageQueryResult:
+    resolution: LineageTargetResolution
+    selected: SelectedSymbolLineageFacts | None = None
+    unavailable_reason: str | None = None
 
 
 def _require_exact_identity_capability(
@@ -160,4 +174,108 @@ def build_live_lineage_target_catalog(
     return IndexCatalog(
         modules={},
         artifacts=dict(sorted(identities.items())),
+    )
+
+
+def _canonical_lineage_sections(
+    sections: tuple[str, ...],
+) -> tuple[str, ...]:
+    if not isinstance(sections, tuple):
+        raise TypeError(
+            "sections must be a tuple of section names."
+        )
+    if any(
+        not isinstance(section, str)
+        or not section
+        for section in sections
+    ):
+        raise ValueError(
+            "sections must contain non-empty strings."
+        )
+    if len(set(sections)) != len(sections):
+        raise ValueError(
+            "sections must not contain duplicates."
+        )
+
+    requested = set(sections)
+    unknown = tuple(
+        sorted(
+            requested
+            - set(SYMBOL_LINEAGE_SECTION_ORDER)
+        )
+    )
+    if unknown:
+        raise ValueError(
+            "Unknown symbol lineage sections: "
+            + ", ".join(unknown)
+        )
+
+    return tuple(
+        section
+        for section in SYMBOL_LINEAGE_SECTION_ORDER
+        if section in requested
+    )
+
+
+def query_live_symbol_lineage(
+    state: object,
+    query: str,
+    sections: tuple[str, ...],
+) -> LiveSymbolLineageQueryResult:
+    if not isinstance(query, str):
+        raise TypeError("query must be a string.")
+
+    canonical_sections = (
+        _canonical_lineage_sections(sections)
+    )
+    backend = RepositoryStateLineageBackend(
+        state
+    )
+
+    try:
+        catalog = build_live_lineage_target_catalog(
+            state,
+            backend,
+            query,
+        )
+    except ValueError as exc:
+        if str(exc) != _UNAVAILABLE_MESSAGE:
+            raise
+        return LiveSymbolLineageQueryResult(
+            resolution=LineageTargetResolution(
+                status="unavailable",
+                query=query.strip(),
+            ),
+            unavailable_reason=str(exc),
+        )
+
+    service = LineageQueryService(
+        backend,
+        catalog,
+    )
+    resolution = service.resolve_target(
+        query
+    )
+
+    if (
+        resolution.status != "resolved"
+        or resolution.target is None
+    ):
+        return LiveSymbolLineageQueryResult(
+            resolution=resolution,
+        )
+
+    facts = service.symbol_lineage_facts(
+        resolution.target
+    )
+    selected = (
+        service.select_symbol_lineage_sections(
+            facts,
+            canonical_sections,
+        )
+    )
+
+    return LiveSymbolLineageQueryResult(
+        resolution=resolution,
+        selected=selected,
     )

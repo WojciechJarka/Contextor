@@ -1,4 +1,4 @@
-# F2L D1O2a Walkthrough
+# F2L D1O2b Walkthrough
 
 ## STATUS
 
@@ -9,35 +9,46 @@ PASS
 - `contextor/core/lineage_query/live_query.py`
 - `tests/analysis/test_lineage_live_query.py`
 
-## EXACT_ID_INDEX_PROOF
+## EXACT_RESOLUTION_PROOF
 
-Artifact-ID lookup uses only `source_keys_for_owner(owner_id)` and its candidate sources; the test forbids repo-wide `source_keys()`.
+Resolution remains owned by `LineageQueryService.resolve_target` over the minimal catalog.
 
-## QUALIFIED_SINGLE_SLICE_PROOF
+## SINGLE_FACT_BUILD_PROOF
 
-Qualified lookup reads exactly the source slice identified by `state.modules[module].path`; the test forbids iterator use.
+Resolved target test records exactly one `symbol_lineage_facts` call.
 
-## AMBIGUITY_PRESERVATION_PROOF
+## SINGLE_SELECTION_PROOF
 
-Duplicate qualified identities with distinct owners are retained in the catalog for later service-level ambiguity handling.
+Resolved target test records exactly one semantic section-selection call.
 
-## STALE_FAIL_CLOSED_PROOF
+## NO_TRAVERSAL_PROOF
 
-Stale query-index capability raises the prescribed unavailable-or-stale error before lookup.
+The test fails if lexical traversal is invoked.
 
-## NO_REGISTRY_PROOF
+## UNRESOLVED_NO_FACTS_PROOF
 
-The helper imports only canonical backend and IndexCatalog contracts, with no persistent registry or recovery catalog.
+Invalid and not-found targets return no selected facts.
 
-## NO_REPO_SCAN_PROOF
+## AMBIGUITY_PROOF
 
-Tests fail if full source enumeration is attempted in either exact lookup branch.
+Duplicate identities preserve service ambiguity with no selection.
+
+## UNAVAILABLE_PROOF
+
+Stale exact-identity capability yields structured unavailable status.
+
+## CORRUPTION_FAIL_CLOSED_PROOF
+
+Owner identity inconsistency remains a propagated ValueError.
+
+## SECTION_VALIDATION_PROOF
+
+Sections are validated and canonicalized before resolution; empty core selection is accepted.
 
 ## TESTS_RUN
 
 ```text
-.\.venv\Scripts\python.exe -m pytest -q tests\analysis\test_lineage_live_query.py tests\analysis\test_lineage_query_service.py tests\analysis\test_lineage_query_backend.py
-98 passed in 2.40s
+109 passed in 6.76s
 ```
 
 ## ACTUAL_DIFF
@@ -46,16 +57,23 @@ Tests fail if full source enumeration is attempted in either exact lookup branch
 warning: in the working copy of 'contextor/core/lineage_query/live_query.py', LF will be replaced by CRLF the next time Git touches it
 diff --git a/contextor/core/lineage_query/live_query.py b/contextor/core/lineage_query/live_query.py
 new file mode 100644
-index 0000000..7981346
+index 0000000..349be12
 --- /dev/null
 +++ b/contextor/core/lineage_query/live_query.py
-@@ -0,0 +1,163 @@
+@@ -0,0 +1,281 @@
 +from __future__ import annotations
 +
++from dataclasses import dataclass
 +from collections.abc import Mapping
 +
 +from contextor.core.lineage_query.backend import (
 +    RepositoryStateLineageBackend,
++)
++from contextor.core.lineage_query.service import (
++    SYMBOL_LINEAGE_SECTION_ORDER,
++    LineageQueryService,
++    LineageTargetResolution,
++    SelectedSymbolLineageFacts,
 +)
 +from contextor.core.report_query import (
 +    ARTIFACT_ID_RE,
@@ -67,6 +85,13 @@ index 0000000..7981346
 +    "Canonical lineage target identity catalog "
 +    "is unavailable or stale."
 +)
++
++
++@dataclass(frozen=True)
++class LiveSymbolLineageQueryResult:
++    resolution: LineageTargetResolution
++    selected: SelectedSymbolLineageFacts | None = None
++    unavailable_reason: str | None = None
 +
 +
 +def _require_exact_identity_capability(
@@ -213,13 +238,117 @@ index 0000000..7981346
 +        modules={},
 +        artifacts=dict(sorted(identities.items())),
 +    )
++
++
++def _canonical_lineage_sections(
++    sections: tuple[str, ...],
++) -> tuple[str, ...]:
++    if not isinstance(sections, tuple):
++        raise TypeError(
++            "sections must be a tuple of section names."
++        )
++    if any(
++        not isinstance(section, str)
++        or not section
++        for section in sections
++    ):
++        raise ValueError(
++            "sections must contain non-empty strings."
++        )
++    if len(set(sections)) != len(sections):
++        raise ValueError(
++            "sections must not contain duplicates."
++        )
++
++    requested = set(sections)
++    unknown = tuple(
++        sorted(
++            requested
++            - set(SYMBOL_LINEAGE_SECTION_ORDER)
++        )
++    )
++    if unknown:
++        raise ValueError(
++            "Unknown symbol lineage sections: "
++            + ", ".join(unknown)
++        )
++
++    return tuple(
++        section
++        for section in SYMBOL_LINEAGE_SECTION_ORDER
++        if section in requested
++    )
++
++
++def query_live_symbol_lineage(
++    state: object,
++    query: str,
++    sections: tuple[str, ...],
++) -> LiveSymbolLineageQueryResult:
++    if not isinstance(query, str):
++        raise TypeError("query must be a string.")
++
++    canonical_sections = (
++        _canonical_lineage_sections(sections)
++    )
++    backend = RepositoryStateLineageBackend(
++        state
++    )
++
++    try:
++        catalog = build_live_lineage_target_catalog(
++            state,
++            backend,
++            query,
++        )
++    except ValueError as exc:
++        if str(exc) != _UNAVAILABLE_MESSAGE:
++            raise
++        return LiveSymbolLineageQueryResult(
++            resolution=LineageTargetResolution(
++                status="unavailable",
++                query=query.strip(),
++            ),
++            unavailable_reason=str(exc),
++        )
++
++    service = LineageQueryService(
++        backend,
++        catalog,
++    )
++    resolution = service.resolve_target(
++        query
++    )
++
++    if (
++        resolution.status != "resolved"
++        or resolution.target is None
++    ):
++        return LiveSymbolLineageQueryResult(
++            resolution=resolution,
++        )
++
++    facts = service.symbol_lineage_facts(
++        resolution.target
++    )
++    selected = (
++        service.select_symbol_lineage_sections(
++            facts,
++            canonical_sections,
++        )
++    )
++
++    return LiveSymbolLineageQueryResult(
++        resolution=resolution,
++        selected=selected,
++    )
 warning: in the working copy of 'tests/analysis/test_lineage_live_query.py', LF will be replaced by CRLF the next time Git touches it
 diff --git a/tests/analysis/test_lineage_live_query.py b/tests/analysis/test_lineage_live_query.py
 new file mode 100644
-index 0000000..1dd32e7
+index 0000000..17fc892
 --- /dev/null
 +++ b/tests/analysis/test_lineage_live_query.py
-@@ -0,0 +1,342 @@
+@@ -0,0 +1,677 @@
 +from types import SimpleNamespace
 +
 +import pytest
@@ -240,7 +369,12 @@ index 0000000..1dd32e7
 +    build_lineage_query_indexes,
 +)
 +from contextor.core.lineage_query.live_query import (
++    LiveSymbolLineageQueryResult,
 +    build_live_lineage_target_catalog,
++    query_live_symbol_lineage,
++)
++from contextor.core.lineage_query.service import (
++    LineageQueryService,
 +)
 +
 +
@@ -562,5 +696,335 @@ index 0000000..1dd32e7
 +            backend,
 +            "A17/2",
 +        )
++
++
++def test_live_symbol_lineage_query_resolves_once_and_selects_canonical_sections(
++    monkeypatch,
++):
++    state, _backend = _fixture()
++
++    original_facts = (
++        LineageQueryService.symbol_lineage_facts
++    )
++    original_select = (
++        LineageQueryService.select_symbol_lineage_sections
++    )
++    calls = {
++        "facts": 0,
++        "select": 0,
++    }
++
++    def symbol_lineage_facts(
++        service,
++        target,
++    ):
++        calls["facts"] += 1
++        return original_facts(
++            service,
++            target,
++        )
++
++    def select_symbol_lineage_sections(
++        service,
++        facts,
++        sections,
++    ):
++        calls["select"] += 1
++        return original_select(
++            service,
++            facts,
++            sections,
++        )
++
++    monkeypatch.setattr(
++        LineageQueryService,
++        "symbol_lineage_facts",
++        symbol_lineage_facts,
++    )
++    monkeypatch.setattr(
++        LineageQueryService,
++        "select_symbol_lineage_sections",
++        select_symbol_lineage_sections,
++    )
++    monkeypatch.setattr(
++        LineageQueryService,
++        "traverse_lexical_scope",
++        lambda *_args, **_kwargs: (
++            (_ for _ in ()).throw(
++                AssertionError(
++                    "symbol lineage query must not traverse"
++                )
++            )
++        ),
++    )
++
++    result = query_live_symbol_lineage(
++        state,
++        "a17/2",
++        (
++            "state",
++            "connections",
++            "interface",
++        ),
++    )
++
++    assert isinstance(
++        result,
++        LiveSymbolLineageQueryResult,
++    )
++    assert result.resolution.status == "resolved"
++    assert result.resolution.target is not None
++    assert (
++        result.resolution.target.artifact_id
++        == "A17/2"
++    )
++    assert result.selected is not None
++    assert result.selected.selected_sections == (
++        "interface",
++        "connections",
++        "state",
++    )
++    assert result.selected.target == (
++        result.resolution.target
++    )
++    assert calls == {
++        "facts": 1,
++        "select": 1,
++    }
++
++
++def test_live_symbol_lineage_query_resolves_exact_qualified_identity():
++    state, _backend = _fixture()
++
++    result = query_live_symbol_lineage(
++        state,
++        "pkg.mod::handler",
++        ("connections",),
++    )
++
++    assert result.resolution.status == "resolved"
++    assert result.resolution.target is not None
++    assert (
++        result.resolution.target.resolution
++        == "exact_identity"
++    )
++    assert result.selected is not None
++    assert result.selected.selected_sections == (
++        "connections",
++    )
++
++
++@pytest.mark.parametrize(
++    ("query", "expected_status"),
++    (
++        ("", "invalid"),
++        ("handler", "invalid"),
++        ("A404/1", "not_found"),
++        ("pkg.missing::handler", "not_found"),
++    ),
++)
++def test_live_symbol_lineage_query_unresolved_targets_never_build_facts(
++    monkeypatch,
++    query,
++    expected_status,
++):
++    state, _backend = _fixture()
++
++    monkeypatch.setattr(
++        LineageQueryService,
++        "symbol_lineage_facts",
++        lambda *_args, **_kwargs: (
++            (_ for _ in ()).throw(
++                AssertionError(
++                    "unresolved target built facts"
++                )
++            )
++        ),
++    )
++
++    result = query_live_symbol_lineage(
++        state,
++        query,
++        ("interface",),
++    )
++
++    assert (
++        result.resolution.status
++        == expected_status
++    )
++    assert result.selected is None
++
++
++def test_live_symbol_lineage_query_preserves_ambiguity_without_selection(
++    monkeypatch,
++):
++    state, _backend = _fixture()
++    source = _source(
++        "pkg/mod.py",
++        "c" * 64,
++        (
++            ("A17/2", "pkg.mod::handler"),
++            ("A18/1", "pkg.mod::handler"),
++        ),
++    )
++    state.lineage_facts_by_source[
++        "pkg/mod.py"
++    ] = source
++    (
++        owner_source_index,
++        source_owner_index,
++        anchor_complete,
++    ) = build_lineage_query_indexes(
++        state.lineage_facts_by_source
++    )
++    state.lineage_owner_source_index = (
++        owner_source_index
++    )
++    state.lineage_source_owner_index = (
++        source_owner_index
++    )
++    state.lineage_semantic_anchor_bindings_complete = (
++        anchor_complete
++    )
++
++    monkeypatch.setattr(
++        LineageQueryService,
++        "symbol_lineage_facts",
++        lambda *_args, **_kwargs: (
++            (_ for _ in ()).throw(
++                AssertionError(
++                    "ambiguous target built facts"
++                )
++            )
++        ),
++    )
++
++    result = query_live_symbol_lineage(
++        state,
++        "pkg.mod::handler",
++        ("interface",),
++    )
++
++    assert result.resolution.status == "ambiguous"
++    assert result.selected is None
++    assert tuple(
++        candidate.artifact_id
++        for candidate
++        in result.resolution.candidates
++    ) == (
++        "A17/2",
++        "A18/1",
++    )
++
++
++def test_live_symbol_lineage_query_reports_stale_capability_as_unavailable():
++    state, _backend = _fixture()
++    state.lineage_query_index_state = "stale"
++
++    result = query_live_symbol_lineage(
++        state,
++        "pkg.mod::handler",
++        ("interface",),
++    )
++
++    assert result.resolution.status == (
++        "unavailable"
++    )
++    assert result.resolution.target is None
++    assert result.selected is None
++    assert result.unavailable_reason == (
++        "Canonical lineage target identity "
++        "catalog is unavailable or stale."
++    )
++
++
++def test_live_symbol_lineage_query_does_not_hide_canonical_identity_corruption():
++    state, _backend = _fixture()
++
++    conflicting = _source(
++        "pkg/duplicate.py",
++        "d" * 64,
++        (
++            ("A17/2", "pkg.other::handler"),
++        ),
++    )
++    state.lineage_facts_by_source[
++        "pkg/duplicate.py"
++    ] = conflicting
++    state.lineage_owner_source_index[
++        "A17/2"
++    ] = (
++        "pkg/duplicate.py",
++        "pkg/mod.py",
++    )
++
++    with pytest.raises(
++        ValueError,
++        match=(
++            "Canonical lineage owner identity "
++            "is inconsistent."
++        ),
++    ):
++        query_live_symbol_lineage(
++            state,
++            "A17/2",
++            ("interface",),
++        )
++
++
++def test_live_symbol_lineage_query_validates_section_contract_before_resolution():
++    state, _backend = _fixture()
++
++    with pytest.raises(
++        TypeError,
++        match=(
++            "sections must be a tuple "
++            "of section names."
++        ),
++    ):
++        query_live_symbol_lineage(
++            state,
++            "A404/1",
++            ["interface"],
++        )
++
++    with pytest.raises(
++        ValueError,
++        match=(
++            "sections must not contain duplicates."
++        ),
++    ):
++        query_live_symbol_lineage(
++            state,
++            "A404/1",
++            ("state", "state"),
++        )
++
++    with pytest.raises(
++        ValueError,
++        match=(
++            "Unknown symbol lineage sections: mystery"
++        ),
++    ):
++        query_live_symbol_lineage(
++            state,
++            "A404/1",
++            ("mystery",),
++        )
++
++
++def test_live_symbol_lineage_query_allows_empty_core_selection():
++    state, _backend = _fixture()
++
++    result = query_live_symbol_lineage(
++        state,
++        "A17/2",
++        (),
++    )
++
++    assert result.resolution.status == "resolved"
++    assert result.selected is not None
++    assert result.selected.selected_sections == ()
++    assert result.selected.complete is True
 ```
 
