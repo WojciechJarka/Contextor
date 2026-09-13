@@ -2410,3 +2410,44 @@ def test_symbol_lineage_facts_metadata_mismatch_fails_closed(monkeypatch):
 def test_symbol_lineage_facts_rejects_non_target():
     with pytest.raises(TypeError, match="target must be ResolvedLineageTarget."):
         _service({}).symbol_lineage_facts(object())
+
+
+def test_symbol_lineage_selection_maps_sections_without_requery(monkeypatch):
+    from contextor.core.lineage_query import service as service_module
+    service, backend, target, _ = _target_interface_service()
+    _install_target_parameter_defaults(backend, target)
+    facts = service.symbol_lineage_facts(target)
+    monkeypatch.setattr(service, "symbol_lineage_facts", lambda *_: (_ for _ in ()).throw(AssertionError("selection requeried symbol facts")))
+    monkeypatch.setattr(backend, "source_keys_for_owner", lambda *_: (_ for _ in ()).throw(AssertionError("selection read backend")))
+    selected = service.select_symbol_lineage_sections(facts, tuple(reversed(service_module.SYMBOL_LINEAGE_SECTION_ORDER)))
+    assert selected.selected_sections == service_module.SYMBOL_LINEAGE_SECTION_ORDER
+    assert selected.interface is facts.interface
+    assert selected.connections is not None
+    assert selected.connections.incoming == facts.direct.incoming
+    assert selected.parameter_flows is facts.sections.parameters
+    assert selected.unresolved_dynamic_boundaries is facts.sections.unresolved_dynamic
+
+
+def test_symbol_lineage_selection_distinguishes_selected_empty_from_omitted():
+    service, _backend, target, _ = _target_interface_service()
+    facts = service.symbol_lineage_facts(target)
+    selected = service.select_symbol_lineage_sections(facts, ("callbacks",))
+    assert selected.callbacks == ()
+    assert selected.interface is None
+    assert selected.connections is None
+
+
+def test_symbol_lineage_selection_allows_empty_and_rejects_invalid_contract():
+    service, _backend, target, _ = _target_interface_service()
+    facts = service.symbol_lineage_facts(target)
+    assert service.select_symbol_lineage_sections(facts, ()).selected_sections == ()
+    with pytest.raises(TypeError, match="facts must be SymbolLineageFacts."):
+        service.select_symbol_lineage_sections(object(), ())
+    with pytest.raises(TypeError, match="sections must be a tuple of section names."):
+        service.select_symbol_lineage_sections(facts, ["interface"])
+    with pytest.raises(ValueError, match="sections must contain non-empty strings."):
+        service.select_symbol_lineage_sections(facts, ("",))
+    with pytest.raises(ValueError, match="sections must not contain duplicates."):
+        service.select_symbol_lineage_sections(facts, ("state", "state"))
+    with pytest.raises(ValueError, match="Unknown symbol lineage sections: mystery"):
+        service.select_symbol_lineage_sections(facts, ("mystery",))

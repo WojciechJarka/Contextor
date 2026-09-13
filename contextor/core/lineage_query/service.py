@@ -54,6 +54,12 @@ _PRIMARY_SEMANTIC_SECTION_BY_RELATION = {
     LineageRelation.DECLARES_PUBLIC_NAMES: "surfaces",
 }
 
+SYMBOL_LINEAGE_SECTION_ORDER = (
+    "interface", "connections", "bindings", "parameter_flows",
+    "calls_interfaces", "returns", "state", "callbacks", "surfaces",
+    "unresolved_dynamic_boundaries",
+)
+
 
 @dataclass(frozen=True)
 class ResolvedLineageTarget:
@@ -391,6 +397,40 @@ class SymbolLineageFacts:
             and self.direct.complete
             and self.scope_state in {"available", "not_applicable"}
         )
+
+
+@dataclass(frozen=True)
+class SymbolLineageConnections:
+    incoming: tuple[LineageFlowMatch, ...]
+    outgoing: tuple[LineageFlowMatch, ...]
+
+
+@dataclass(frozen=True)
+class SelectedSymbolLineageFacts:
+    facts: SymbolLineageFacts
+    selected_sections: tuple[str, ...]
+    interface: TargetInterfaceFacts | None
+    connections: SymbolLineageConnections | None
+    bindings: tuple[LineageFlowMatch, ...] | None
+    parameter_flows: tuple[LineageFlowMatch, ...] | None
+    calls_interfaces: tuple[LineageFlowMatch, ...] | None
+    returns: tuple[LineageFlowMatch, ...] | None
+    state: tuple[LineageFlowMatch, ...] | None
+    callbacks: tuple[LineageFlowMatch, ...] | None
+    surfaces: LineageSurfaceSection | None
+    unresolved_dynamic_boundaries: tuple[LineageFlowMatch, ...] | None
+
+    @property
+    def target(self) -> ResolvedLineageTarget:
+        return self.facts.target
+
+    @property
+    def metadata_consistent(self) -> bool:
+        return self.facts.metadata_consistent
+
+    @property
+    def complete(self) -> bool:
+        return self.facts.complete
 
 
 class LineageQueryService:
@@ -847,6 +887,35 @@ class LineageQueryService:
             target=target,
             interface=interface,
             sections=sections,
+        )
+
+    def select_symbol_lineage_sections(self, facts: SymbolLineageFacts, sections: tuple[str, ...]) -> SelectedSymbolLineageFacts:
+        if not isinstance(facts, SymbolLineageFacts):
+            raise TypeError("facts must be SymbolLineageFacts.")
+        if not isinstance(sections, tuple):
+            raise TypeError("sections must be a tuple of section names.")
+        if any(not isinstance(section, str) or not section for section in sections):
+            raise ValueError("sections must contain non-empty strings.")
+        if len(set(sections)) != len(sections):
+            raise ValueError("sections must not contain duplicates.")
+        requested = set(sections)
+        unknown = tuple(sorted(requested - set(SYMBOL_LINEAGE_SECTION_ORDER)))
+        if unknown:
+            raise ValueError("Unknown symbol lineage sections: " + ", ".join(unknown))
+        selected = tuple(s for s in SYMBOL_LINEAGE_SECTION_ORDER if s in requested)
+        semantic = facts.sections
+        return SelectedSymbolLineageFacts(
+            facts, selected,
+            facts.interface if "interface" in requested else None,
+            SymbolLineageConnections(facts.direct.incoming, facts.direct.outgoing) if "connections" in requested else None,
+            semantic.bindings if "bindings" in requested else None,
+            semantic.parameters if "parameter_flows" in requested else None,
+            semantic.calls_interfaces if "calls_interfaces" in requested else None,
+            semantic.returns if "returns" in requested else None,
+            semantic.state if "state" in requested else None,
+            semantic.callbacks if "callbacks" in requested else None,
+            semantic.surfaces if "surfaces" in requested else None,
+            semantic.unresolved_dynamic if "unresolved_dynamic_boundaries" in requested else None,
         )
 
     def traverse_lexical_scope(
