@@ -21,11 +21,16 @@ from contextor.core.domain.lineage_facts import (
     MaterializedOccurrenceRef,
     MaterializedSurfaceFact,
     MaterializedSymbolicRef,
+    ParameterKind,
     ResolutionKind,
     SemanticEndpoint,
     SourceSpan,
     SurfaceDeclarationEvidence,
     SurfaceKind,
+    build_keyword_binding_slot,
+    build_parameter_value_slot,
+    build_positional_binding_slot,
+    build_return_slot,
 )
 from contextor.core.analysis import state_manager
 from contextor.core.analysis.lineage_extraction import extract_lineage_source_facts
@@ -166,6 +171,7 @@ def test_real_full_analysis_installs_current_lineage_without_second_extraction(t
             **kwargs,
         )
 
+
     captured_states = []
     original_save_engine_state = state_manager.save_engine_state
 
@@ -196,6 +202,60 @@ def test_real_full_analysis_installs_current_lineage_without_second_extraction(t
     assert state.lineage_facts_by_source["consumer.py"].surfaces[0].exposed == SemanticEndpoint(provider_target_id)
     assert provider_target_id in state.lineage_owner_source_index
     assert "provider.py" in state.lineage_owner_source_index[provider_target_id]
+
+
+def test_full_analysis_uses_callable_interface_descriptors_for_exact_slots():
+    facts = extract_lineage_source_facts(
+        ast.parse("def target(value, *, mode):\n    return value\n"),
+        source_key="pkg.py", source_fingerprint="d" * 64,
+    )
+    index = _index(facts={"pkg.py": facts})
+    owner = "A1/1"
+    mapping, family_state, version = _materialize_full_analysis_lineage(
+        index, _ReadOnlyRegistry({"pkg": "1/1"}, {"pkg::target": owner}),
+        index.modules, {"pkg": {"own_symbols": ["target"]}},
+    )
+    assert family_state == "fresh"
+    assert version == LINEAGE_FACTS_SEMANTIC_VERSION
+    source_slice = mapping["pkg.py"]
+    assert len(source_slice.interface_descriptors) == 1
+    assert source_slice.interface_descriptors[0].slots == tuple(sorted({
+        build_return_slot(owner),
+        build_parameter_value_slot(owner, ParameterKind.POSITIONAL_OR_KEYWORD, ordinal=0),
+        build_positional_binding_slot(owner, ParameterKind.POSITIONAL_OR_KEYWORD, ordinal=0),
+        build_keyword_binding_slot(owner, ParameterKind.POSITIONAL_OR_KEYWORD, name="value"),
+        build_parameter_value_slot(owner, ParameterKind.KEYWORD_ONLY, name="mode"),
+        build_keyword_binding_slot(owner, ParameterKind.KEYWORD_ONLY, name="mode"),
+    }))
+    assert sum(
+        flow.relation is LineageRelation.BINDS and isinstance(flow.source, SemanticEndpoint)
+        for flow in source_slice.flows
+    ) == 2
+    assert sum(
+        flow.relation is LineageRelation.RETURNS and isinstance(flow.target, SemanticEndpoint)
+        and flow.target.slot == build_return_slot(owner)
+        for flow in source_slice.flows
+    ) == 1
+
+
+def test_full_analysis_conflicting_callable_descriptor_stays_symbolic():
+    facts = extract_lineage_source_facts(
+        ast.parse("def target(value):\n    return value\n\ndef target(value, mode):\n    return value\n"),
+        source_key="pkg.py", source_fingerprint="e" * 64,
+    )
+    index = _index(facts={"pkg.py": facts})
+    mapping, family_state, _ = _materialize_full_analysis_lineage(
+        index, _ReadOnlyRegistry({"pkg": "1/1"}, {"pkg::target": "A1/1"}),
+        index.modules, {"pkg": {"own_symbols": ["target"]}},
+    )
+    assert family_state == "fresh"
+    source_slice = mapping["pkg.py"]
+    assert source_slice.interface_descriptors == ()
+    assert not any(
+        isinstance(endpoint, SemanticEndpoint) and endpoint.owner_id == "A1/1"
+        and endpoint.slot is not None
+        for flow in source_slice.flows for endpoint in (flow.source, flow.target)
+    )
 
 
 def test_exact_surface_materialization_uses_symbolic_targets_and_preserves_external_boundary():

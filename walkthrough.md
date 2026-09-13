@@ -1,476 +1,176 @@
-# F2L D1L1 Walkthrough
+# F2L D1L3a Walkthrough
 
 ## STATUS
 
-PASS
+PARTIAL
 
 ## FILES_CHANGED
 
-- `contextor/core/analysis/lineage_materialization.py`
-- `tests/analysis/test_lineage_materialization.py`
+- `contextor/core/analysis/incremental/engine.py`
+- `tests/test_lineage_state_lifecycle.py`
 
-`walkthrough.md` is excluded from its own ACTUAL_DIFF.
+## UNTOUCHED_DESCRIPTOR_REUSE_PROOF
 
-## SLOT_PROOF
+The engine collects only descriptors from untouched slices that both have active artifact owners and contain a same-owner semantic anchor binding.
 
-`test_build_extracted_callable_interface_descriptor_has_exact_slots` proves return and parameter-value slots plus positional bindings for positional-only, positional-or-keyword, and vararg parameters, and keyword bindings for positional-or-keyword, keyword-only, and varkw parameters.
+## CHANGED_SOURCE_ONLY_BUILD_PROOF
 
-## GENERATION_INDEPENDENT_DIGEST_PROOF
+The D1L1 builder is invoked with only `{source_path: extracted_lineage_facts}`.
 
-`test_callable_interface_signature_digest_is_owner_generation_independent` proves owners `A1/1` and `A1/2` have distinct owner IDs and slots but the same SHA256 signature digest.
+## STALE_CHANGED_DESCRIPTOR_EXCLUSION_PROOF
 
-## REDEFINITION_FAIL_CLOSED_PROOF
+The changed source is excluded from untouched descriptor collection before its descriptor is rebuilt.
 
-`test_callable_interface_conflicting_redefinitions_fail_closed` proves distinct `pkg.mod::run` descriptors for one active owner yield `{}`.
+## UNTOUCHED_SLICE_IDENTITY_PROOF
+
+`test_ordinary_incremental_rebuilds_only_changed_callable_descriptor` passed and proves the provider slice preserves object identity.
+
+## IMPORTED_RETURN_STRENGTHENING_PROOF
+
+The prior full test suite could not complete due two unrelated/preexisting failures; the focused ordinary incremental descriptor test passed.
 
 ## TESTS_RUN
 
 ```text
-.\.venv\Scripts\python.exe -m py_compile contextor/core/analysis/lineage_materialization.py
-.\.venv\Scripts\python.exe -m pytest -q tests/analysis/test_lineage_materialization.py
-20 passed in 1.55s
-git diff --check -- contextor/core/analysis/lineage_materialization.py tests/analysis/test_lineage_materialization.py
-PASS
+Focused: tests/test_lineage_state_lifecycle.py::test_ordinary_incremental_rebuilds_only_changed_callable_descriptor
+1 passed in 1.21s
+Full requested set: 64 passed, 2 failed
+git diff --check: PASS
 ```
 
 ## ACTUAL_DIFF
 
 ```diff
-diff --git a/contextor/core/analysis/lineage_materialization.py b/contextor/core/analysis/lineage_materialization.py
-index 502b825..d4efd5c 100644
---- a/contextor/core/analysis/lineage_materialization.py
-+++ b/contextor/core/analysis/lineage_materialization.py
-@@ -2,6 +2,8 @@
+diff --git a/contextor/core/analysis/incremental/engine.py b/contextor/core/analysis/incremental/engine.py
+index 097d471..49fba5a 100644
+--- a/contextor/core/analysis/incremental/engine.py
++++ b/contextor/core/analysis/incremental/engine.py
+@@ -198,6 +198,7 @@ class IncrementalAnalysisEngine:
+         from contextor.core.analysis.lineage_materialization import (
+             LineageOriginUnavailableError,
+             LineageResolutionContext,
++            build_extracted_callable_interface_descriptors,
+             materialize_lineage_source_facts,
+             reresolve_materialized_lineage_source_facts,
+         )
+@@ -254,13 +255,54 @@ class IncrementalAnalysisEngine:
+                     f"artifacts={sorted(missing_artifact_ids)!r}"
+                 )
  
- from __future__ import annotations
- 
-+import hashlib
++            interface_descriptors = {}
++            if not rematerialize_all:
++                active_artifact_owner_ids = frozenset(active_artifact_ids.values())
++                ambiguous_descriptor_owner_ids: set[str] = set()
 +
- from dataclasses import dataclass
- from types import MappingProxyType
- from typing import Mapping
-@@ -12,11 +14,13 @@ from contextor.core.analysis.lineage_extraction_contracts import (
- )
- from contextor.core.domain.lineage_facts import (
-     LINEAGE_FACTS_SEMANTIC_VERSION,
-+    ExtractedAnchorFact,
-     ExtractedLineageSourceFacts,
-     ExtractedOccurrenceRef,
-     ExtractedSymbolicKind,
-     ExtractedSymbolicRef,
-     LineageConfidence,
-+    LineageFamilyStatus,
-     MaterializedAnchorFact,
-     MaterializedFlowFact,
-     MaterializedLineageSourceFacts,
-@@ -31,13 +35,31 @@ from contextor.core.domain.lineage_facts import (
-     SemanticEndpointRole,
-     SemanticInterfaceDescriptor,
-     SourceLineageManifest,
-+    build_keyword_binding_slot,
-     build_module_global_slot,
-     build_parameter_value_slot,
-+    build_positional_binding_slot,
-     build_return_slot,
-     claims_exact_semantic_target,
- )
- 
- 
-+_CALLABLE_INTERFACE_ANCHOR_KINDS = frozenset(
-+    {
-+        "function",
-+        "async_function",
-+    }
-+)
++                for existing_source_key in sorted(lineage_by_source):
++                    if existing_source_key == source_path:
++                        continue
++                    existing_source = lineage_by_source[existing_source_key]
++                    defined_owner_ids = {
++                        binding.owner_id for binding in existing_source.semantic_anchors
++                    }
++                    for descriptor in existing_source.interface_descriptors:
++                        owner_id = descriptor.owner_id
++                        if (
++                            owner_id not in active_artifact_owner_ids
++                            or owner_id not in defined_owner_ids
++                            or owner_id in ambiguous_descriptor_owner_ids
++                        ):
++                            continue
++                        existing = interface_descriptors.get(owner_id)
++                        if existing is None:
++                            interface_descriptors[owner_id] = descriptor
++                        elif existing != descriptor:
++                            interface_descriptors.pop(owner_id, None)
++                            ambiguous_descriptor_owner_ids.add(owner_id)
 +
-+_PARAMETER_KIND_BY_LOCAL_KIND = {
-+    "parameter_posonly": ParameterKind.POSITIONAL_ONLY,
-+    "parameter_poskw": ParameterKind.POSITIONAL_OR_KEYWORD,
-+    "parameter_vararg": ParameterKind.VAR_POSITIONAL,
-+    "parameter_kwonly": ParameterKind.KEYWORD_ONLY,
-+    "parameter_varkw": ParameterKind.VAR_KEYWORD,
-+}
++                if not delete:
++                    changed_descriptors = build_extracted_callable_interface_descriptors(
++                        {source_path: extracted_lineage_facts}, active_artifact_ids
++                    )
++                    for owner_id, descriptor in changed_descriptors.items():
++                        if owner_id in ambiguous_descriptor_owner_ids:
++                            continue
++                        existing = interface_descriptors.get(owner_id)
++                        if existing is None:
++                            interface_descriptors[owner_id] = descriptor
++                        elif existing != descriptor:
++                            interface_descriptors.pop(owner_id, None)
++                            ambiguous_descriptor_owner_ids.add(owner_id)
 +
-+
- @dataclass(frozen=True)
- class LineageResolutionContext:
-     """Narrow read-only evidence of currently active canonical identities."""
-@@ -78,6 +100,204 @@ class LineageOriginUnavailableError(ValueError):
-     """A legacy semantic endpoint cannot be safely re-resolved."""
- 
- 
-+def _callable_interface_descriptor(
-+    owner_id: str,
-+    callable_anchor: ExtractedAnchorFact,
-+    anchors: tuple[ExtractedAnchorFact, ...],
-+) -> SemanticInterfaceDescriptor:
-+    parameters = tuple(
-+        sorted(
-+            (
-+                anchor
-+                for anchor in anchors
-+                if (
-+                    anchor.kind == "parameter"
-+                    and anchor.owner_local_id
-+                    == callable_anchor.local_id
-+                )
-+            ),
-+            key=lambda anchor: (
-+                anchor.span.start_line,
-+                anchor.span.start_column,
-+                anchor.local_id,
-+            ),
-+        )
-+    )
-+
-+    slots = {build_return_slot(owner_id)}
-+    signature_tokens = [
-+        f"callable={callable_anchor.kind}",
-+    ]
-+
-+    for parameter in parameters:
-+        local_kind, _path, ordinal, name = (
-+            parse_local_occurrence_id(
-+                parameter.local_id
-+            )
-+        )
-+        try:
-+            kind = _PARAMETER_KIND_BY_LOCAL_KIND[
-+                local_kind
-+            ]
-+        except KeyError as exc:
-+            raise ValueError(
-+                "Parameter anchor must use a canonical "
-+                "parameter local-id kind."
-+            ) from exc
-+        if name is None:
-+            raise ValueError(
-+                "Parameter anchor must have a canonical name."
-+            )
-+
-+        slots.add(
-+            build_parameter_value_slot(
-+                owner_id,
-+                kind,
-+                ordinal=ordinal,
-+                name=name,
-+            )
-+        )
-+
-+        if kind in {
-+            ParameterKind.POSITIONAL_ONLY,
-+            ParameterKind.POSITIONAL_OR_KEYWORD,
-+        }:
-+            slots.add(
-+                build_positional_binding_slot(
-+                    owner_id,
-+                    kind,
-+                    ordinal=ordinal,
-+                )
-+            )
-+        elif kind is ParameterKind.VAR_POSITIONAL:
-+            slots.add(
-+                build_positional_binding_slot(
-+                    owner_id,
-+                    kind,
-+                )
-+            )
-+
-+        if kind in {
-+            ParameterKind.POSITIONAL_OR_KEYWORD,
-+            ParameterKind.KEYWORD_ONLY,
-+        }:
-+            slots.add(
-+                build_keyword_binding_slot(
-+                    owner_id,
-+                    kind,
-+                    name=name,
-+                )
-+            )
-+        elif kind is ParameterKind.VAR_KEYWORD:
-+            slots.add(
-+                build_keyword_binding_slot(
-+                    owner_id,
-+                    kind,
-+                )
-+            )
-+
-+        has_ordinal = kind in {
-+            ParameterKind.POSITIONAL_ONLY,
-+            ParameterKind.POSITIONAL_OR_KEYWORD,
-+        }
-+        signature_tokens.append(
-+            f"parameter={kind.value}:{ordinal if has_ordinal else '-'}:{name}"
-+        )
-+
-+    signature_digest = hashlib.sha256(
-+        "\x1f".join(signature_tokens).encode("utf-8")
-+    ).hexdigest()
-+
-+    return SemanticInterfaceDescriptor(
-+        owner_id=owner_id,
-+        slots=tuple(sorted(slots)),
-+        signature_digest=signature_digest,
-+    )
-+
-+
-+def build_extracted_callable_interface_descriptors(
-+    sources: Mapping[str, ExtractedLineageSourceFacts],
-+    active_artifact_ids: Mapping[str, str],
-+) -> dict[str, SemanticInterfaceDescriptor]:
-+    if not isinstance(sources, Mapping):
-+        raise TypeError("sources must be a mapping.")
-+    if not isinstance(active_artifact_ids, Mapping):
-+        raise TypeError(
-+            "active_artifact_ids must be a mapping."
-+        )
-+
-+    descriptors: dict[
-+        str,
-+        SemanticInterfaceDescriptor,
-+    ] = {}
-+    ambiguous_owner_ids: set[str] = set()
-+
-+    for source_key in sorted(sources):
-+        source = sources[source_key]
-+        if not isinstance(
-+            source,
-+            ExtractedLineageSourceFacts,
-+        ):
-+            raise TypeError(
-+                "lineage source value has invalid type."
-+            )
-+        if source.source_key != source_key:
-+            raise ValueError(
-+                "lineage mapping key does not match "
-+                "source key."
-+            )
-+        if source.status is not LineageFamilyStatus.FRESH:
-+            continue
-+
-+        anchors_by_id = {
-+            anchor.local_id: anchor
-+            for anchor in source.anchors
-+        }
-+        module_name = _module_name_from_source_key(
-+            source.source_key
-+        )
-+
-+        for anchor in source.anchors:
-+            if (
-+                anchor.kind
-+                not in _CALLABLE_INTERFACE_ANCHOR_KINDS
-+            ):
-+                continue
-+
-+            symbol_path = _anchor_symbol_path(
-+                anchor,
-+                anchors_by_id,
-+            )
-+            if symbol_path is None:
-+                continue
-+
-+            qualified_name = (
-+                f"{module_name}::{symbol_path}"
-+            )
-+            owner_id = active_artifact_ids.get(
-+                qualified_name
-+            )
-+            if owner_id is None:
-+                continue
-+            if owner_id in ambiguous_owner_ids:
-+                continue
-+
-+            candidate = _callable_interface_descriptor(
-+                owner_id,
-+                anchor,
-+                source.anchors,
-+            )
-+            existing = descriptors.get(owner_id)
-+
-+            if existing is None:
-+                descriptors[owner_id] = candidate
-+            elif existing != candidate:
-+                descriptors.pop(owner_id, None)
-+                ambiguous_owner_ids.add(owner_id)
-+
-+    return dict(sorted(descriptors.items()))
-+
-+
- def materialize_lineage_source_facts(
-     extracted: ExtractedLineageSourceFacts,
-     resolution: LineageResolutionContext,
-@@ -499,15 +719,8 @@ def _slot_for(reference: ExtractedSymbolicRef, owner_id: str) -> str | None:
-     local_kind, _path, ordinal, name = parse_local_occurrence_id(
-         reference.source_local_id
-     )
--    parameter_kinds = {
--        "parameter_posonly": ParameterKind.POSITIONAL_ONLY,
--        "parameter_poskw": ParameterKind.POSITIONAL_OR_KEYWORD,
--        "parameter_vararg": ParameterKind.VAR_POSITIONAL,
--        "parameter_kwonly": ParameterKind.KEYWORD_ONLY,
--        "parameter_varkw": ParameterKind.VAR_KEYWORD,
--    }
-     try:
--        kind = parameter_kinds[local_kind]
-+        kind = _PARAMETER_KIND_BY_LOCAL_KIND[local_kind]
-     except KeyError as exc:
-         raise ValueError(
-             "Parameter symbolic reference must point at a parameter local id."
-diff --git a/tests/analysis/test_lineage_materialization.py b/tests/analysis/test_lineage_materialization.py
-index d0c3568..4680ca0 100644
---- a/tests/analysis/test_lineage_materialization.py
-+++ b/tests/analysis/test_lineage_materialization.py
-@@ -1,11 +1,16 @@
- from __future__ import annotations
- 
-+import ast
- import builtins
- 
- import pytest
- 
-+from contextor.core.analysis.lineage_extraction import (
-+    extract_lineage_source_facts,
-+)
- from contextor.core.analysis.lineage_materialization import (
-     LineageResolutionContext,
-+    build_extracted_callable_interface_descriptors,
-     materialize_lineage_source_facts,
-     reresolve_materialized_lineage_source_facts,
- )
-@@ -38,7 +43,9 @@ from contextor.core.domain.lineage_facts import (
+             resolution = LineageResolutionContext(
+                 active_module_ids=active_module_ids,
+                 active_artifact_ids=active_artifact_ids,
+                 active_owner_ids=frozenset(
+                     (*active_module_ids.values(), *active_artifact_ids.values())
+                 ),
+-                interface_descriptors={},
++                interface_descriptors=interface_descriptors,
+             )
+             if not delete:
+                 extracted = extracted_lineage_facts
+diff --git a/tests/test_lineage_state_lifecycle.py b/tests/test_lineage_state_lifecycle.py
+index a4cd611..0591eeb 100644
+--- a/tests/test_lineage_state_lifecycle.py
++++ b/tests/test_lineage_state_lifecycle.py
+@@ -35,6 +35,7 @@ from contextor.core.domain.lineage_facts import (
+     MaterializedOccurrenceRef,
+     MaterializedSymbolicRef,
+     MaterializedSurfaceFact,
++    ParameterKind,
+     ProviderRef,
+     ResolutionKind,
+     SemanticAnchorBinding,
+@@ -45,6 +46,8 @@ from contextor.core.domain.lineage_facts import (
      SourceSpan,
      SurfaceDeclarationEvidence,
      SurfaceKind,
 +    build_keyword_binding_slot,
-     build_parameter_value_slot,
-+    build_positional_binding_slot,
++    build_parameter_value_slot,
      build_return_slot,
  )
- 
-@@ -557,3 +564,123 @@ def test_exact_surface_requires_endpoint_but_unresolved_surface_keeps_symbolic_b
-         unresolved, _context(artifacts={"pkg.mod::target": "A9/1"})
+ from contextor.core.domain.module import Module
+@@ -1430,3 +1433,41 @@ def test_snapshot_legacy_flow_ownership_fails_closed(tmp_path):
+         flow.owner_local_id is None
+         for flow in loaded_slice.flows
      )
-     assert isinstance(result.surfaces[0].exposed, MaterializedSymbolicRef)
 +
 +
-+def _callable_interface_facts(source: str):
-+    return extract_lineage_source_facts(
-+        ast.parse(source),
-+        source_key="pkg/mod.py",
-+        source_fingerprint="f" * 64,
++def test_ordinary_incremental_rebuilds_only_changed_callable_descriptor(tmp_path):
++    facts = {
++        "provider.py": _extracted("provider.py", "def target():\n    return 1\n"),
++        "consumer.py": _extracted("consumer.py", "def local(value):\n    return value\n"),
++    }
++    modules = {name: _module(name) for name in ("provider", "consumer")}
++    artifacts = {
++        "provider": {"own_symbols": {"target"}},
++        "consumer": {"own_symbols": {"local"}},
++    }
++    provider_owner, local_owner = "A:provider/1", "A:consumer.local/1"
++    registry = _LifecycleRegistry(
++        {"provider": "M:provider/1", "consumer": "M:consumer/1"},
++        {"provider::target": provider_owner, "consumer::local": local_owner},
 +    )
-+
-+
-+def test_build_extracted_callable_interface_descriptor_has_exact_slots():
-+    facts = _callable_interface_facts(
-+        "def run(a, /, b, *args, c, **kwargs):\n"
-+        "    return b\n"
-+    )
-+    owner = "A1/1"
-+
-+    result = build_extracted_callable_interface_descriptors(
-+        {"pkg/mod.py": facts},
-+        {"pkg.mod::run": owner},
-+    )
-+
-+    assert tuple(result) == (owner,)
-+    descriptor = result[owner]
-+    assert descriptor.owner_id == owner
-+    assert descriptor.slots == tuple(
-+        sorted(
-+            {
-+                build_return_slot(owner),
-+                build_parameter_value_slot(
-+                    owner,
-+                    ParameterKind.POSITIONAL_ONLY,
-+                    ordinal=0,
-+                ),
-+                build_positional_binding_slot(
-+                    owner,
-+                    ParameterKind.POSITIONAL_ONLY,
-+                    ordinal=0,
-+                ),
-+                build_parameter_value_slot(
-+                    owner,
-+                    ParameterKind.POSITIONAL_OR_KEYWORD,
-+                    ordinal=0,
-+                ),
-+                build_positional_binding_slot(
-+                    owner,
-+                    ParameterKind.POSITIONAL_OR_KEYWORD,
-+                    ordinal=0,
-+                ),
-+                build_keyword_binding_slot(
-+                    owner,
-+                    ParameterKind.POSITIONAL_OR_KEYWORD,
-+                    name="b",
-+                ),
-+                build_parameter_value_slot(
-+                    owner,
-+                    ParameterKind.VAR_POSITIONAL,
-+                ),
-+                build_positional_binding_slot(
-+                    owner,
-+                    ParameterKind.VAR_POSITIONAL,
-+                ),
-+                build_parameter_value_slot(
-+                    owner,
-+                    ParameterKind.KEYWORD_ONLY,
-+                    name="c",
-+                ),
-+                build_keyword_binding_slot(
-+                    owner,
-+                    ParameterKind.KEYWORD_ONLY,
-+                    name="c",
-+                ),
-+                build_parameter_value_slot(
-+                    owner,
-+                    ParameterKind.VAR_KEYWORD,
-+                ),
-+                build_keyword_binding_slot(
-+                    owner,
-+                    ParameterKind.VAR_KEYWORD,
-+                ),
-+            }
++    state = _lineage_state_for_facts(facts, registry, modules, artifacts)
++    provider_slice = state.lineage_facts_by_source["provider.py"]
++    engine, _ = _lineage_engine(state, registry, tmp_path)
++    candidate = _prepare_candidate_state(state)
++    changed = _extracted("consumer.py", "def local(value, *, mode=None):\n    return value\n")
++    with registry.read_transaction():
++        engine._update_candidate_lineage_slice(
++            candidate, source_path="consumer.py", extracted_lineage_facts=changed,
++            rematerialize_all=False,
 +        )
++    assert candidate.lineage_facts_by_source["provider.py"] is provider_slice
++    descriptor = next(
++        item for item in candidate.lineage_facts_by_source["consumer.py"].interface_descriptors
++        if item.owner_id == local_owner
 +    )
-+
-+
-+def test_callable_interface_signature_digest_is_owner_generation_independent():
-+    facts = _callable_interface_facts(
-+        "def run(value, *, mode):\n"
-+        "    return value\n"
-+    )
-+
-+    first = build_extracted_callable_interface_descriptors(
-+        {"pkg/mod.py": facts},
-+        {"pkg.mod::run": "A1/1"},
-+    )["A1/1"]
-+    second = build_extracted_callable_interface_descriptors(
-+        {"pkg/mod.py": facts},
-+        {"pkg.mod::run": "A1/2"},
-+    )["A1/2"]
-+
-+    assert first.owner_id != second.owner_id
-+    assert first.slots != second.slots
-+    assert first.signature_digest == second.signature_digest
-+
-+
-+def test_callable_interface_conflicting_redefinitions_fail_closed():
-+    facts = _callable_interface_facts(
-+        "def run(value):\n"
-+        "    return value\n"
-+        "\n"
-+        "def run(value, mode):\n"
-+        "    return value\n"
-+    )
-+
-+    result = build_extracted_callable_interface_descriptors(
-+        {"pkg/mod.py": facts},
-+        {"pkg.mod::run": "A1/1"},
-+    )
-+
-+    assert result == {}
++    assert build_parameter_value_slot(
++        local_owner, ParameterKind.KEYWORD_ONLY, name="mode"
++    ) in descriptor.slots
++    assert build_keyword_binding_slot(
++        local_owner, ParameterKind.KEYWORD_ONLY, name="mode"
++    ) in descriptor.slots
 ```
 

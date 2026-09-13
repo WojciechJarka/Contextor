@@ -198,6 +198,7 @@ class IncrementalAnalysisEngine:
         from contextor.core.analysis.lineage_materialization import (
             LineageOriginUnavailableError,
             LineageResolutionContext,
+            build_extracted_callable_interface_descriptors,
             materialize_lineage_source_facts,
             reresolve_materialized_lineage_source_facts,
         )
@@ -254,13 +255,54 @@ class IncrementalAnalysisEngine:
                     f"artifacts={sorted(missing_artifact_ids)!r}"
                 )
 
+            interface_descriptors = {}
+            if not rematerialize_all:
+                active_artifact_owner_ids = frozenset(active_artifact_ids.values())
+                ambiguous_descriptor_owner_ids: set[str] = set()
+
+                for existing_source_key in sorted(lineage_by_source):
+                    if existing_source_key == source_path:
+                        continue
+                    existing_source = lineage_by_source[existing_source_key]
+                    defined_owner_ids = {
+                        binding.owner_id for binding in existing_source.semantic_anchors
+                    }
+                    for descriptor in existing_source.interface_descriptors:
+                        owner_id = descriptor.owner_id
+                        if (
+                            owner_id not in active_artifact_owner_ids
+                            or owner_id not in defined_owner_ids
+                            or owner_id in ambiguous_descriptor_owner_ids
+                        ):
+                            continue
+                        existing = interface_descriptors.get(owner_id)
+                        if existing is None:
+                            interface_descriptors[owner_id] = descriptor
+                        elif existing != descriptor:
+                            interface_descriptors.pop(owner_id, None)
+                            ambiguous_descriptor_owner_ids.add(owner_id)
+
+                if not delete:
+                    changed_descriptors = build_extracted_callable_interface_descriptors(
+                        {source_path: extracted_lineage_facts}, active_artifact_ids
+                    )
+                    for owner_id, descriptor in changed_descriptors.items():
+                        if owner_id in ambiguous_descriptor_owner_ids:
+                            continue
+                        existing = interface_descriptors.get(owner_id)
+                        if existing is None:
+                            interface_descriptors[owner_id] = descriptor
+                        elif existing != descriptor:
+                            interface_descriptors.pop(owner_id, None)
+                            ambiguous_descriptor_owner_ids.add(owner_id)
+
             resolution = LineageResolutionContext(
                 active_module_ids=active_module_ids,
                 active_artifact_ids=active_artifact_ids,
                 active_owner_ids=frozenset(
                     (*active_module_ids.values(), *active_artifact_ids.values())
                 ),
-                interface_descriptors={},
+                interface_descriptors=interface_descriptors,
             )
             if not delete:
                 extracted = extracted_lineage_facts

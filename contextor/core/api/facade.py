@@ -266,6 +266,7 @@ def _materialize_full_analysis_lineage(index, registry, modules, artifacts):
     lineage_materialization_started = time.monotonic()
     from contextor.core.analysis.lineage_materialization import (
         LineageResolutionContext,
+        build_extracted_callable_interface_descriptors,
         materialize_lineage_source_facts,
     )
     from contextor.core.domain.lineage_facts import (
@@ -313,13 +314,18 @@ def _materialize_full_analysis_lineage(index, registry, modules, artifacts):
             f"artifacts={sorted(missing_artifact_ids)!r}"
         )
 
+    interface_descriptors = build_extracted_callable_interface_descriptors(
+        extracted_by_source,
+        active_artifact_ids,
+    )
+
     resolution = LineageResolutionContext(
         active_module_ids=active_module_ids,
         active_artifact_ids=active_artifact_ids,
         active_owner_ids=frozenset(
             (*active_module_ids.values(), *active_artifact_ids.values())
         ),
-        interface_descriptors={},
+        interface_descriptors=interface_descriptors,
     )
     materialized_by_source = {}
     materialize_calls_ms = 0.0
