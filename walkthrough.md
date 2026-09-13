@@ -1,4 +1,4 @@
-# F2L D1O1 Walkthrough
+# F2L D1O2a Walkthrough
 
 ## STATUS
 
@@ -6,387 +6,561 @@ PASS
 
 ## FILES_CHANGED
 
-- `contextor/core/live_state/ipc.py`
-- `tests/live_state/test_ipc_canonical_query.py`
+- `contextor/core/lineage_query/live_query.py`
+- `tests/analysis/test_lineage_live_query.py`
 
-## PROTOCOL_BUMP_PROOF
+## EXACT_ID_INDEX_PROOF
 
-`LIVE_PROTOCOL_VERSION == 4` is asserted by the narrow-query transport test.
+Artifact-ID lookup uses only `source_keys_for_owner(owner_id)` and its candidate sources; the test forbids repo-wide `source_keys()`.
 
-## NARROW_RESULT_PROOF
+## QUALIFIED_SINGLE_SLICE_PROOF
 
-A 1,000,000-character state field is absent from the canonical-query response; only the handler result and revision are returned.
+Qualified lookup reads exactly the source slice identified by `state.modules[module].path`; the test forbids iterator use.
 
-## SAME_REVISION_PROOF
+## AMBIGUITY_PRESERVATION_PROOF
 
-The handler receives the identical in-memory state object under the server RLock, and the response returns the matching revision.
+Duplicate qualified identities with distinct owners are retained in the catalog for later service-level ambiguity handling.
 
-## NO_SNAPSHOT_PROOF
+## STALE_FAIL_CLOSED_PROOF
 
-The dedicated client method emits exactly one `canonical_query` request and invokes neither snapshot nor a fallback operation.
+Stale query-index capability raises the prescribed unavailable-or-stale error before lookup.
 
-## FAIL_CLOSED_PROOF
+## NO_REGISTRY_PROOF
 
-Missing state or handler, invalid query inputs, and handler failure return deterministic errors; failure detail is capped at 500 characters.
+The helper imports only canonical backend and IndexCatalog contracts, with no persistent registry or recovery catalog.
 
-## CLIENT_OPERATION_PROOF
+## NO_REPO_SCAN_PROOF
 
-The client test records `canonical_query` with the supplied query kind and payload exactly.
+Tests fail if full source enumeration is attempted in either exact lookup branch.
 
 ## TESTS_RUN
 
 ```text
-.\.venv\Scripts\python.exe -m pytest -q tests\live_state\test_ipc_canonical_query.py tests\live_state\test_runtime_domain.py tests\live_state\test_runtime_lease.py
-47 passed in 11.35s
+.\.venv\Scripts\python.exe -m pytest -q tests\analysis\test_lineage_live_query.py tests\analysis\test_lineage_query_service.py tests\analysis\test_lineage_query_backend.py
+98 passed in 2.40s
 ```
 
 ## ACTUAL_DIFF
 
 ```diff
-warning: in the working copy of 'contextor/core/live_state/ipc.py', LF will be replaced by CRLF the next time Git touches it
-diff --git a/contextor/core/live_state/ipc.py b/contextor/core/live_state/ipc.py
-index 8ce23df..3c5b4c6 100644
---- a/contextor/core/live_state/ipc.py
-+++ b/contextor/core/live_state/ipc.py
-@@ -18,7 +18,7 @@ from typing import Any, Callable, Mapping
- from contextor.core.live_state.runtime_lease import ProcessIdentity
- 
- 
--LIVE_PROTOCOL_VERSION = 3
-+LIVE_PROTOCOL_VERSION = 4
- LIVE_ENDPOINT_SCHEMA_VERSION = 2
- _AUTHORITY_FINGERPRINT_LIMIT = 10_000
- 
-@@ -678,6 +678,13 @@ class CanonicalLiveServer:
-         revision: int | None = None,
-         updater: Callable[[Any, str], Any] | None = None,
-         persister: Callable[[Any, int], Any] | None = None,
-+        canonical_query_handler: (
-+            Callable[
-+                [Any, str, Mapping[str, Any]],
-+                Any,
-+            ]
-+            | None
-+        ) = None,
-         authkey: bytes | None = None,
-         retention: int = ACTIVITY_EVENT_RETENTION,
-         authority_identity: Mapping[str, Any] | None = None,
-@@ -724,6 +731,9 @@ class CanonicalLiveServer:
-         self._activity_epoch = uuid.uuid4().hex
-         self._updater = updater
-         self._persister = persister
-+        self._canonical_query_handler = (
-+            canonical_query_handler
-+        )
-         self._retention = retention
-         self._events: list[dict[str, Any]] = []
-         self._authority_event_fingerprints: OrderedDict[tuple[str, int, str], str] = OrderedDict()
-@@ -1499,6 +1509,53 @@ class CanonicalLiveServer:
-             return self._execute_publish(request)
- 
-         with self._lock:
-+            if operation == "canonical_query":
-+                if self._state is None:
-+                    return {
-+                        "status": "error",
-+                        "error": "live_state_unavailable",
-+                    }
-+                if self._canonical_query_handler is None:
-+                    return {
-+                        "status": "error",
-+                        "error": "canonical_query_unavailable",
-+                    }
-+
-+                query_kind = request.get("query_kind")
-+                if (
-+                    not isinstance(query_kind, str)
-+                    or not query_kind
-+                ):
-+                    return {
-+                        "status": "error",
-+                        "error": "invalid_query_kind",
-+                    }
-+
-+                payload = request.get("payload", {})
-+                if not isinstance(payload, Mapping):
-+                    return {
-+                        "status": "error",
-+                        "error": "invalid_query_payload",
-+                    }
-+
-+                try:
-+                    result = self._canonical_query_handler(
-+                        self._state,
-+                        query_kind,
-+                        dict(payload),
-+                    )
-+                except Exception as exc:
-+                    return {
-+                        "status": "error",
-+                        "error": "canonical_query_failed",
-+                        "detail": str(exc)[:500],
-+                    }
-+
-+                return {
-+                    "status": "ok",
-+                    "revision": self._revision,
-+                    "result": result,
-+                }
-             if operation == "ping":
-                 return {
-                     "status": "ok",
-@@ -1775,6 +1832,22 @@ class LiveStateClient:
-     def snapshot(self) -> dict[str, Any]:
-         return self.request("snapshot")
- 
-+    def canonical_query(
-+        self,
-+        query_kind: str,
-+        *,
-+        payload: Mapping[str, Any] | None = None,
-+    ) -> dict[str, Any]:
-+        return self.request(
-+            "canonical_query",
-+            query_kind=query_kind,
-+            payload=(
-+                {}
-+                if payload is None
-+                else payload
-+            ),
-+        )
-+
-     def publish(
-         self,
-         state: Any,
-warning: in the working copy of 'tests/live_state/test_ipc_canonical_query.py', LF will be replaced by CRLF the next time Git touches it
-diff --git a/tests/live_state/test_ipc_canonical_query.py b/tests/live_state/test_ipc_canonical_query.py
+warning: in the working copy of 'contextor/core/lineage_query/live_query.py', LF will be replaced by CRLF the next time Git touches it
+diff --git a/contextor/core/lineage_query/live_query.py b/contextor/core/lineage_query/live_query.py
 new file mode 100644
-index 0000000..301c900
+index 0000000..7981346
 --- /dev/null
-+++ b/tests/live_state/test_ipc_canonical_query.py
-@@ -0,0 +1,223 @@
-+from types import SimpleNamespace
++++ b/contextor/core/lineage_query/live_query.py
+@@ -0,0 +1,163 @@
++from __future__ import annotations
 +
-+from contextor.core.live_state.ipc import (
-+    LIVE_PROTOCOL_VERSION,
-+    CanonicalLiveServer,
-+    LiveEndpoint,
-+    LiveStateClient,
++from collections.abc import Mapping
++
++from contextor.core.lineage_query.backend import (
++    RepositoryStateLineageBackend,
++)
++from contextor.core.report_query import (
++    ARTIFACT_ID_RE,
++    IndexCatalog,
 +)
 +
 +
-+def test_canonical_query_returns_only_narrow_handler_result_from_same_revision():
-+    state = SimpleNamespace(
-+        revision=7,
-+        bulk_blob="x" * 1_000_000,
-+    )
-+    observed = {}
-+
-+    def handler(current_state, query_kind, payload):
-+        observed["state"] = current_state
-+        observed["query_kind"] = query_kind
-+        observed["payload"] = payload
-+        return {
-+            "target": "A17/2",
-+            "facts": ["narrow"],
-+        }
-+
-+    server = CanonicalLiveServer(
-+        state,
-+        revision=7,
-+        canonical_query_handler=handler,
-+    )
-+    try:
-+        result = server._dispatch(
-+            {
-+                "operation": "canonical_query",
-+                "query_kind": "symbol_lineage",
-+                "payload": {
-+                    "symbol": "A17/2",
-+                },
-+            }
-+        )
-+    finally:
-+        server.close()
-+
-+    assert LIVE_PROTOCOL_VERSION == 4
-+    assert result == {
-+        "status": "ok",
-+        "revision": 7,
-+        "result": {
-+            "target": "A17/2",
-+            "facts": ["narrow"],
-+        },
-+    }
-+    assert observed["state"] is state
-+    assert observed["query_kind"] == (
-+        "symbol_lineage"
-+    )
-+    assert observed["payload"] == {
-+        "symbol": "A17/2",
-+    }
-+    assert "state" not in result
-+    assert "bulk_blob" not in repr(result)
++_UNAVAILABLE_MESSAGE = (
++    "Canonical lineage target identity catalog "
++    "is unavailable or stale."
++)
 +
 +
-+def test_canonical_query_fails_closed_when_unavailable_or_invalid():
-+    state = SimpleNamespace(revision=3)
-+
-+    no_handler = CanonicalLiveServer(
-+        state,
-+        revision=3,
-+    )
-+    try:
-+        assert no_handler._dispatch(
-+            {
-+                "operation": "canonical_query",
-+                "query_kind": "symbol_lineage",
-+            }
-+        ) == {
-+            "status": "error",
-+            "error": "canonical_query_unavailable",
-+        }
-+
-+        assert no_handler._dispatch(
-+            {
-+                "operation": "canonical_query",
-+                "query_kind": "",
-+            }
-+        ) == {
-+            "status": "error",
-+            "error": "canonical_query_unavailable",
-+        }
-+    finally:
-+        no_handler.close()
-+
-+    server = CanonicalLiveServer(
-+        state,
-+        revision=3,
-+        canonical_query_handler=(
-+            lambda *_args: {"ok": True}
-+        ),
-+    )
-+    try:
-+        assert server._dispatch(
-+            {
-+                "operation": "canonical_query",
-+                "query_kind": "",
-+            }
-+        ) == {
-+            "status": "error",
-+            "error": "invalid_query_kind",
-+        }
-+        assert server._dispatch(
-+            {
-+                "operation": "canonical_query",
-+                "query_kind": "symbol_lineage",
-+                "payload": [],
-+            }
-+        ) == {
-+            "status": "error",
-+            "error": "invalid_query_payload",
-+        }
-+    finally:
-+        server.close()
-+
-+    empty = CanonicalLiveServer(
-+        None,
-+        canonical_query_handler=(
-+            lambda *_args: {"ok": True}
-+        ),
-+    )
-+    try:
-+        assert empty._dispatch(
-+            {
-+                "operation": "canonical_query",
-+                "query_kind": "symbol_lineage",
-+            }
-+        ) == {
-+            "status": "error",
-+            "error": "live_state_unavailable",
-+        }
-+    finally:
-+        empty.close()
-+
-+
-+def test_canonical_query_handler_failure_is_bounded_and_does_not_expose_state():
-+    state = SimpleNamespace(
-+        revision=4,
-+        secret_bulk="never-return-this",
-+    )
-+
-+    def failing_handler(
-+        _state,
-+        _query_kind,
-+        _payload,
++def _require_exact_identity_capability(
++    backend: RepositoryStateLineageBackend,
++) -> None:
++    metadata = backend.metadata()
++    if (
++        metadata.family_state != "fresh"
++        or metadata.query_index_state != "fresh"
++        or not metadata.semantic_anchor_bindings_complete
 +    ):
-+        raise RuntimeError("q" * 1000)
++        raise ValueError(_UNAVAILABLE_MESSAGE)
 +
-+    server = CanonicalLiveServer(
++
++def _module_source_key(
++    state: object,
++    module_name: str,
++) -> str | None:
++    modules = getattr(state, "modules", {})
++    if not isinstance(modules, Mapping):
++        raise TypeError(
++            "Canonical state modules must be a mapping."
++        )
++
++    module = modules.get(module_name)
++    if module is None:
++        return None
++
++    raw_path = getattr(module, "path", None)
++    if raw_path is None:
++        return None
++
++    source_key = str(raw_path).replace("\\", "/")
++    while source_key.startswith("./"):
++        source_key = source_key[2:]
++
++    return source_key or None
++
++
++def _install_identity(
++    identities: dict[str, str],
++    owner_id: str,
++    qualified_name: str,
++) -> None:
++    existing = identities.get(owner_id)
++    if (
++        existing is not None
++        and existing != qualified_name
++    ):
++        raise ValueError(
++            "Canonical lineage owner identity is inconsistent."
++        )
++    identities[owner_id] = qualified_name
++
++
++def build_live_lineage_target_catalog(
++    state: object,
++    backend: RepositoryStateLineageBackend,
++    query: str,
++) -> IndexCatalog:
++    if not isinstance(
++        backend,
++        RepositoryStateLineageBackend,
++    ):
++        raise TypeError(
++            "backend must be RepositoryStateLineageBackend."
++        )
++    if not isinstance(query, str):
++        raise TypeError("query must be a string.")
++
++    _require_exact_identity_capability(backend)
++
++    raw = query.strip()
++    identities: dict[str, str] = {}
++
++    if not raw:
++        return IndexCatalog(
++            modules={},
++            artifacts={},
++        )
++
++    if ARTIFACT_ID_RE.fullmatch(raw):
++        owner_id = raw[0].upper() + raw[1:]
++        source_keys = backend.source_keys_for_owner(
++            owner_id
++        )
++        for source in backend.iter_sources(
++            source_keys
++        ):
++            for binding in source.semantic_anchors:
++                if binding.owner_id != owner_id:
++                    continue
++                _install_identity(
++                    identities,
++                    owner_id,
++                    binding.qualified_name,
++                )
++
++        return IndexCatalog(
++            modules={},
++            artifacts=dict(sorted(identities.items())),
++        )
++
++    if raw.count("::") != 1:
++        return IndexCatalog(
++            modules={},
++            artifacts={},
++        )
++
++    module_name, symbol_name = raw.split("::", 1)
++    if not module_name or not symbol_name:
++        return IndexCatalog(
++            modules={},
++            artifacts={},
++        )
++
++    source_key = _module_source_key(
 +        state,
-+        revision=4,
-+        canonical_query_handler=failing_handler,
++        module_name,
 +    )
-+    try:
-+        result = server._dispatch(
-+            {
-+                "operation": "canonical_query",
-+                "query_kind": "symbol_lineage",
-+            }
++    if source_key is None:
++        return IndexCatalog(
++            modules={},
++            artifacts={},
 +        )
-+    finally:
-+        server.close()
 +
-+    assert result["status"] == "error"
-+    assert result["error"] == (
-+        "canonical_query_failed"
-+    )
-+    assert len(result["detail"]) == 500
-+    assert "state" not in result
-+    assert "secret_bulk" not in repr(result)
-+
-+
-+def test_live_state_client_canonical_query_uses_dedicated_operation_only():
-+    client = LiveStateClient(
-+        LiveEndpoint(
-+            "127.0.0.1",
-+            1,
-+            "00" * 32,
++    source = backend.get_source(source_key)
++    if source is None:
++        return IndexCatalog(
++            modules={},
++            artifacts={},
 +        )
++
++    for binding in source.semantic_anchors:
++        if binding.qualified_name != raw:
++            continue
++        _install_identity(
++            identities,
++            binding.owner_id,
++            binding.qualified_name,
++        )
++
++    return IndexCatalog(
++        modules={},
++        artifacts=dict(sorted(identities.items())),
 +    )
+warning: in the working copy of 'tests/analysis/test_lineage_live_query.py', LF will be replaced by CRLF the next time Git touches it
+diff --git a/tests/analysis/test_lineage_live_query.py b/tests/analysis/test_lineage_live_query.py
+new file mode 100644
+index 0000000..1dd32e7
+--- /dev/null
++++ b/tests/analysis/test_lineage_live_query.py
+@@ -0,0 +1,342 @@
++from types import SimpleNamespace
++
++import pytest
++
++from contextor.core.domain.lineage_facts import (
++    LineageFamilyStatus,
++    MaterializedAnchorFact,
++    MaterializedLineageSourceFacts,
++    MaterializedOccurrenceRef,
++    SemanticAnchorBinding,
++    SourceLineageManifest,
++    SourceSpan,
++)
++from contextor.core.lineage_query.backend import (
++    RepositoryStateLineageBackend,
++)
++from contextor.core.lineage_query.index import (
++    build_lineage_query_indexes,
++)
++from contextor.core.lineage_query.live_query import (
++    build_live_lineage_target_catalog,
++)
++
++
++def _source(
++    source_key,
++    fingerprint,
++    identities,
++):
++    span = SourceSpan(1, 0, 1, 10)
++    anchors = []
++    bindings = []
++
++    for index, (owner_id, qualified_name) in enumerate(
++        identities
++    ):
++        local_id = f"definition-{index}"
++        reference = MaterializedOccurrenceRef(
++            source_key,
++            fingerprint,
++            local_id,
++        )
++        anchors.append(
++            MaterializedAnchorFact(
++                local_id,
++                reference,
++                "function",
++                span,
++            )
++        )
++        bindings.append(
++            SemanticAnchorBinding(
++                owner_id,
++                qualified_name,
++                reference,
++            )
++        )
++
++    return MaterializedLineageSourceFacts(
++        manifest=SourceLineageManifest(
++            source_key=source_key,
++            source_fingerprint=fingerprint,
++            semantic_version="1",
++            status=LineageFamilyStatus.FRESH,
++            anchor_count=len(anchors),
++            flow_count=0,
++            surface_count=0,
++            semantic_anchor_bindings_materialized=True,
++            anchor_ownership_materialized=True,
++            flow_ownership_materialized=True,
++        ),
++        anchors=tuple(sorted(anchors)),
++        flows=(),
++        surfaces=(),
++        semantic_anchors=tuple(sorted(bindings)),
++    )
++
++
++def _fixture():
++    provider = _source(
++        "pkg/mod.py",
++        "a" * 64,
++        (
++            ("A17/2", "pkg.mod::handler"),
++            ("A18/1", "pkg.mod::other"),
++        ),
++    )
++    unrelated = _source(
++        "pkg/other.py",
++        "b" * 64,
++        (
++            ("A99/1", "pkg.other::thing"),
++        ),
++    )
++    sources = {
++        "pkg/mod.py": provider,
++        "pkg/other.py": unrelated,
++    }
++    (
++        owner_source_index,
++        source_owner_index,
++        anchor_complete,
++    ) = build_lineage_query_indexes(sources)
++
++    state = SimpleNamespace(
++        revision=7,
++        provenance="live",
++        modules={
++            "pkg.mod": SimpleNamespace(
++                path="pkg/mod.py",
++            ),
++            "pkg.other": SimpleNamespace(
++                path="pkg/other.py",
++            ),
++        },
++        lineage_facts_state="fresh",
++        lineage_facts_semantic_version="1",
++        lineage_facts_by_source=sources,
++        lineage_owner_source_index=(
++            owner_source_index
++        ),
++        lineage_source_owner_index=(
++            source_owner_index
++        ),
++        lineage_query_index_state="fresh",
++        lineage_semantic_anchor_bindings_complete=(
++            anchor_complete
++        ),
++    )
++    return (
++        state,
++        RepositoryStateLineageBackend(state),
++    )
++
++
++def test_live_target_catalog_resolves_artifact_id_only_through_owner_index(
++    monkeypatch,
++):
++    state, backend = _fixture()
++
++    monkeypatch.setattr(
++        backend,
++        "source_keys",
++        lambda: (_ for _ in ()).throw(
++            AssertionError("repo-wide lineage scan")
++        ),
++    )
++
++    original_iter = backend.iter_sources
 +    observed = {}
 +
-+    def request(operation, **payload):
-+        observed["operation"] = operation
-+        observed["payload"] = payload
-+        return {
-+            "status": "ok",
-+            "revision": 9,
-+            "result": {"narrow": True},
-+        }
++    def iter_sources(source_keys=None):
++        observed["source_keys"] = source_keys
++        return original_iter(source_keys)
 +
-+    client.request = request
-+
-+    result = client.canonical_query(
-+        "symbol_lineage",
-+        payload={
-+            "symbol": "A17/2",
-+        },
++    monkeypatch.setattr(
++        backend,
++        "iter_sources",
++        iter_sources,
 +    )
 +
-+    assert result == {
-+        "status": "ok",
-+        "revision": 9,
-+        "result": {"narrow": True},
++    catalog = build_live_lineage_target_catalog(
++        state,
++        backend,
++        "a17/2",
++    )
++
++    assert catalog.artifacts == {
++        "A17/2": "pkg.mod::handler",
 +    }
-+    assert observed == {
-+        "operation": "canonical_query",
-+        "payload": {
-+            "query_kind": "symbol_lineage",
-+            "payload": {
-+                "symbol": "A17/2",
-+            },
-+        },
++    assert observed["source_keys"] == (
++        "pkg/mod.py",
++    )
++
++
++def test_live_target_catalog_resolves_qualified_name_from_one_module_slice_only(
++    monkeypatch,
++):
++    state, backend = _fixture()
++
++    monkeypatch.setattr(
++        backend,
++        "source_keys",
++        lambda: (_ for _ in ()).throw(
++            AssertionError("repo-wide lineage scan")
++        ),
++    )
++    monkeypatch.setattr(
++        backend,
++        "iter_sources",
++        lambda *_args, **_kwargs: (
++            (_ for _ in ()).throw(
++                AssertionError(
++                    "qualified lookup iterated lineage"
++                )
++            )
++        ),
++    )
++
++    original_get = backend.get_source
++    observed = []
++
++    def get_source(source_key):
++        observed.append(source_key)
++        return original_get(source_key)
++
++    monkeypatch.setattr(
++        backend,
++        "get_source",
++        get_source,
++    )
++
++    catalog = build_live_lineage_target_catalog(
++        state,
++        backend,
++        "pkg.mod::handler",
++    )
++
++    assert catalog.artifacts == {
++        "A17/2": "pkg.mod::handler",
 +    }
++    assert observed == ["pkg/mod.py"]
++
++
++def test_live_target_catalog_preserves_duplicate_exact_identity_for_service_ambiguity():
++    state, backend = _fixture()
++    source = _source(
++        "pkg/mod.py",
++        "c" * 64,
++        (
++            ("A17/2", "pkg.mod::handler"),
++            ("A18/1", "pkg.mod::handler"),
++        ),
++    )
++    state.lineage_facts_by_source[
++        "pkg/mod.py"
++    ] = source
++    (
++        owner_source_index,
++        source_owner_index,
++        anchor_complete,
++    ) = build_lineage_query_indexes(
++        state.lineage_facts_by_source
++    )
++    state.lineage_owner_source_index = (
++        owner_source_index
++    )
++    state.lineage_source_owner_index = (
++        source_owner_index
++    )
++    state.lineage_semantic_anchor_bindings_complete = (
++        anchor_complete
++    )
++
++    catalog = build_live_lineage_target_catalog(
++        state,
++        backend,
++        "pkg.mod::handler",
++    )
++
++    assert catalog.artifacts == {
++        "A17/2": "pkg.mod::handler",
++        "A18/1": "pkg.mod::handler",
++    }
++
++
++@pytest.mark.parametrize(
++    "query",
++    (
++        "",
++        "handler",
++        "pkg.mod",
++        "pkg.mod::",
++        "::handler",
++        "pkg.mod::handler::extra",
++        "pkg.missing::handler",
++    ),
++)
++def test_live_target_catalog_invalid_or_missing_exact_query_returns_empty_catalog(
++    query,
++):
++    state, backend = _fixture()
++
++    catalog = build_live_lineage_target_catalog(
++        state,
++        backend,
++        query,
++    )
++
++    assert catalog.artifacts == {}
++
++
++def test_live_target_catalog_fails_closed_when_identity_capability_is_not_fresh():
++    state, backend = _fixture()
++    state.lineage_query_index_state = "stale"
++
++    with pytest.raises(
++        ValueError,
++        match=(
++            "Canonical lineage target identity "
++            "catalog is unavailable or stale."
++        ),
++    ):
++        build_live_lineage_target_catalog(
++            state,
++            backend,
++            "pkg.mod::handler",
++        )
++
++
++def test_live_target_catalog_rejects_inconsistent_owner_identity():
++    state, backend = _fixture()
++
++    conflicting = _source(
++        "pkg/duplicate.py",
++        "d" * 64,
++        (
++            ("A17/2", "pkg.other::handler"),
++        ),
++    )
++    state.lineage_facts_by_source[
++        "pkg/duplicate.py"
++    ] = conflicting
++    state.lineage_owner_source_index[
++        "A17/2"
++    ] = (
++        "pkg/duplicate.py",
++        "pkg/mod.py",
++    )
++
++    with pytest.raises(
++        ValueError,
++        match=(
++            "Canonical lineage owner identity "
++            "is inconsistent."
++        ),
++    ):
++        build_live_lineage_target_catalog(
++            state,
++            backend,
++            "A17/2",
++        )
 ```
 
