@@ -13,6 +13,9 @@ import time
 from pathlib import Path
 from typing import Any, Mapping
 
+from contextor.core.lineage_query.live_query import (
+    query_live_symbol_lineage,
+)
 from contextor.core.paths import repo_cache_dir
 from contextor.core.repository_identity import (
     read_repository_identity,
@@ -1030,6 +1033,35 @@ def connect_or_start(
             pass
 
 
+def _repository_canonical_query_handler(
+    state: object,
+    query_kind: str,
+    payload: Mapping[str, Any],
+):
+    if query_kind != "symbol_lineage":
+        raise ValueError(
+            f"Unsupported canonical query kind: {query_kind}"
+        )
+    if not isinstance(payload, Mapping):
+        raise TypeError("canonical query payload must be a mapping.")
+
+    query = payload.get("query")
+    if not isinstance(query, str):
+        raise TypeError("symbol_lineage query must be a string.")
+
+    raw_sections = payload.get("sections")
+    if not isinstance(raw_sections, (list, tuple)):
+        raise TypeError(
+            "symbol_lineage sections must be a list or tuple."
+        )
+
+    return query_live_symbol_lineage(
+        state,
+        query,
+        tuple(raw_sections),
+    )
+
+
 def _repository_updater(root: Path, holder: dict[str, object] | None = None):
     identity = require_repository_identity(root)
     cache = repo_cache_dir(root)
@@ -1271,6 +1303,9 @@ def run_service(
             revision=revision,
             updater=_repository_updater(root, adapter_holder),
             persister=_repository_persister(root, adapter_holder),
+            canonical_query_handler=(
+                _repository_canonical_query_handler
+            ),
             mutation_guard=_repository_mutation_guard(root),
             authority_identity=authority_identity,
             desktop_claim=desktop_claim,
