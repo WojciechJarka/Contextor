@@ -350,6 +350,49 @@ class DirectLineageFacts:
         )
 
 
+@dataclass(frozen=True)
+class SymbolLineageFacts:
+    target: ResolvedLineageTarget
+    interface: TargetInterfaceFacts
+    sections: SemanticLineageSections
+
+    @property
+    def direct(self) -> DirectLineageFacts:
+        return self.sections.direct
+
+    @property
+    def scope(self) -> LexicalScopeFacts:
+        return self.sections.scope
+
+    @property
+    def metadata(self) -> LineageBackendMetadata:
+        return self.direct.metadata
+
+    @property
+    def metadata_consistent(self) -> bool:
+        return (
+            self.interface.metadata == self.direct.metadata
+            and self.direct.metadata == self.scope.metadata
+        )
+
+    @property
+    def scope_state(self) -> str:
+        if self.scope.complete:
+            return "available"
+        if self.interface.complete and not self.scope.roots:
+            return "not_applicable"
+        return "unknown"
+
+    @property
+    def complete(self) -> bool:
+        return (
+            self.metadata_consistent
+            and self.interface.complete
+            and self.direct.complete
+            and self.scope_state in {"available", "not_applicable"}
+        )
+
+
 class LineageQueryService:
     def __init__(
         self,
@@ -791,6 +834,20 @@ class LineageQueryService:
             ),
         )
 
+
+    def symbol_lineage_facts(
+        self,
+        target: ResolvedLineageTarget,
+    ) -> SymbolLineageFacts:
+        if not isinstance(target, ResolvedLineageTarget):
+            raise TypeError("target must be ResolvedLineageTarget.")
+        interface = self.target_interface_facts(target)
+        sections = self.semantic_sections(target)
+        return SymbolLineageFacts(
+            target=target,
+            interface=interface,
+            sections=sections,
+        )
 
     def traverse_lexical_scope(
         self,

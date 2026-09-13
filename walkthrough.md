@@ -1,4 +1,4 @@
-# F2L D1M3 Walkthrough
+# F2L D1N1 Walkthrough
 
 ## STATUS
 
@@ -7,317 +7,195 @@ PASS
 ## FILES_CHANGED
 
 - `contextor/core/lineage_query/service.py`
-- `contextor/core/lineage_query/__init__.py`
 - `tests/analysis/test_lineage_query_service.py`
 
-## CALLABLE_STATE_PROOF
+## COMPOSITION_PROOF
 
-A complete unique descriptor normalizes to `callable`; authoritative descriptor absence normalizes to `non_callable`; legacy and ambiguous states normalize to `unknown`.
+`symbol_lineage_facts()` calls exactly `target_interface_facts(target)` and `semantic_sections(target)` once.
 
-## PARAMETER_NORMALIZATION_PROOF
+## NON_LEXICAL_NOT_APPLICABLE_PROOF
 
-The projection exposes canonical parameter-value slots in deterministic semantic order: positional-only, positional-or-keyword, var-positional, keyword-only, and var-keyword.
+A complete non-callable exact target with zero lexical roots is authoritative `not_applicable` and remains top-level complete.
 
-## NO_FAKE_NAMES_PROOF
+## CLASS_SEMANTICS_NOTE
 
-Only keyword-only slot names are exposed. Positional and variadic slots retain `name=None`, even where fixture builder input carried names.
+Callable state and lexical scope are independent: non-callable symbols may still have an available lexical scope.
 
-## DEFAULT_ASSOCIATION_PROOF
+## AMBIGUITY_FAIL_CLOSED_PROOF
 
-Default flows are attached by exact raw parameter-value slot and preserved as ordered tuples.
+Ambiguous exact definitions produce unknown scope state and incomplete aggregate output.
 
-## RETURN_SLOT_PROOF
+## METADATA_CONSISTENCY_PROOF
 
-The selected descriptor exposes exactly one canonical return slot; no return slot is synthesized.
+Mixed interface/direct/scope metadata makes `metadata_consistent=False` and fails top-level completeness without selecting a revision.
 
-## LEGACY_DIAGNOSTIC_PROOF
+## NO_TRAVERSAL_PROOF
 
-Legacy capability false retains digest, return, parameters, and defaults diagnostically while callable state is `unknown`.
-
-## NON_CALLABLE_PROOF
-
-A complete exact definition with canonical descriptor absence exposes no shape data and reports `non_callable`.
-
-## AMBIGUITY_PROOF
-
-Multiple exact definitions retain ambiguity, expose no selected descriptor shape, and report `unknown`.
+The composition test replaces traversal with an assertion failure; the aggregate completes without invoking it.
 
 ## TESTS_RUN
 
 ```text
-python -m py_compile contextor/core/lineage_query/service.py contextor/core/lineage_query/__init__.py: PASS
-python -m pytest -q tests/analysis/test_lineage_query_service.py tests/analysis/test_lineage_query_backend.py: 73 passed in 3.59s
-git diff --check -- contextor/core/lineage_query/service.py contextor/core/lineage_query/__init__.py tests/analysis/test_lineage_query_service.py: PASS
+python -m py_compile contextor/core/lineage_query/service.py: PASS
+python -m pytest -q tests/analysis/test_lineage_query_service.py tests/analysis/test_lineage_query_backend.py: 78 passed in 2.14s
+git diff --check -- contextor/core/lineage_query/service.py tests/analysis/test_lineage_query_service.py: PASS
 ```
 
 ## ACTUAL_DIFF
 
 ```diff
-warning: in the working copy of 'contextor/core/lineage_query/__init__.py', LF will be replaced by CRLF the next time Git touches it
 warning: in the working copy of 'contextor/core/lineage_query/service.py', LF will be replaced by CRLF the next time Git touches it
 warning: in the working copy of 'tests/analysis/test_lineage_query_service.py', LF will be replaced by CRLF the next time Git touches it
-diff --git a/contextor/core/lineage_query/__init__.py b/contextor/core/lineage_query/__init__.py
-index 80ab097..d310c3a 100644
---- a/contextor/core/lineage_query/__init__.py
-+++ b/contextor/core/lineage_query/__init__.py
-@@ -21,6 +21,7 @@ from contextor.core.lineage_query.service import (
-     ResolvedLineageTarget,
-     SemanticLineageSections,
-     TargetInterfaceFacts,
-+    TargetParameterFacts,
- )
- 
- __all__ = [
-@@ -44,4 +45,5 @@ __all__ = [
-     "ResolvedLineageTarget",
-     "SemanticLineageSections",
-     "TargetInterfaceFacts",
-+    "TargetParameterFacts",
- ]
 diff --git a/contextor/core/lineage_query/service.py b/contextor/core/lineage_query/service.py
-index 37504ac..eb8eddb 100644
+index eb8eddb..9ade6ec 100644
 --- a/contextor/core/lineage_query/service.py
 +++ b/contextor/core/lineage_query/service.py
-@@ -10,6 +10,7 @@ from contextor.core.domain.lineage_facts import (
-     MaterializedOccurrenceRef,
-     MaterializedSurfaceFact,
-     MaterializedSymbolicRef,
-+    ParameterKind,
-     ResolutionKind,
-     SemanticAnchorBinding,
-     SemanticEndpoint,
-@@ -99,6 +100,19 @@ class LineageInterfaceDescriptorMatch:
-     descriptor: SemanticInterfaceDescriptor
+@@ -350,6 +350,49 @@ class DirectLineageFacts:
+         )
  
  
 +@dataclass(frozen=True)
-+class TargetParameterFacts:
-+    slot: str
-+    kind: ParameterKind
-+    ordinal: int | None
-+    name: str | None
-+    default_flows: tuple[LineageFlowMatch, ...]
++class SymbolLineageFacts:
++    target: ResolvedLineageTarget
++    interface: TargetInterfaceFacts
++    sections: SemanticLineageSections
 +
 +    @property
-+    def has_default(self) -> bool:
-+        return bool(self.default_flows)
-+
-+
- @dataclass(frozen=True)
- class TargetInterfaceFacts:
-     target: ResolvedLineageTarget
-@@ -149,6 +163,71 @@ class TargetInterfaceFacts:
-             and self.metadata.semantic_anchor_bindings_complete
-         )
- 
-+    @property
-+    def callable_state(self) -> str:
-+        if not self.complete:
-+            return "unknown"
-+        if self.descriptor_available:
-+            return "callable"
-+        return "non_callable"
++    def direct(self) -> DirectLineageFacts:
++        return self.sections.direct
 +
 +    @property
-+    def signature_digest(self) -> str | None:
-+        descriptor = self.descriptor
-+        if descriptor is None:
-+            return None
-+        return descriptor.signature_digest
++    def scope(self) -> LexicalScopeFacts:
++        return self.sections.scope
 +
 +    @property
-+    def return_slot(self) -> str | None:
-+        descriptor = self.descriptor
-+        if descriptor is None:
-+            return None
-+        matches = tuple(
-+            slot for slot in descriptor.slots
-+            if parse_semantic_slot(slot).kind is SemanticSlotKind.RETURN
++    def metadata(self) -> LineageBackendMetadata:
++        return self.direct.metadata
++
++    @property
++    def metadata_consistent(self) -> bool:
++        return (
++            self.interface.metadata == self.direct.metadata
++            and self.direct.metadata == self.scope.metadata
 +        )
-+        if len(matches) != 1:
-+            return None
-+        return matches[0]
 +
 +    @property
-+    def parameter_slots(self) -> tuple[TargetParameterFacts, ...]:
-+        descriptor = self.descriptor
-+        if descriptor is None:
-+            return ()
-+        defaults_by_slot: dict[str, list[LineageFlowMatch]] = {}
-+        for match in self.parameter_defaults:
-+            endpoint = match.flow.target
-+            if isinstance(endpoint, SemanticEndpoint) and endpoint.slot is not None:
-+                defaults_by_slot.setdefault(endpoint.slot, []).append(match)
-+        parameters: list[TargetParameterFacts] = []
-+        for raw_slot in descriptor.slots:
-+            slot = parse_semantic_slot(raw_slot)
-+            if slot.kind is not SemanticSlotKind.PARAMETER_VALUE:
-+                continue
-+            kind = ParameterKind(slot.parts[0])
-+            ordinal: int | None = None
-+            name: str | None = None
-+            if kind in {
-+                ParameterKind.POSITIONAL_ONLY,
-+                ParameterKind.POSITIONAL_OR_KEYWORD,
-+            }:
-+                ordinal = int(slot.parts[1])
-+            elif kind is ParameterKind.KEYWORD_ONLY:
-+                name = slot.parts[1]
-+            parameters.append(TargetParameterFacts(
-+                slot=raw_slot,
-+                kind=kind,
-+                ordinal=ordinal,
-+                name=name,
-+                default_flows=tuple(sorted(
-+                    defaults_by_slot.get(raw_slot, ()), key=_flow_match_key
-+                )),
-+            ))
-+        parameters.sort(key=_target_parameter_key)
-+        return tuple(parameters)
++    def scope_state(self) -> str:
++        if self.scope.complete:
++            return "available"
++        if self.interface.complete and not self.scope.roots:
++            return "not_applicable"
++        return "unknown"
 +
- 
- @dataclass(frozen=True)
- class LineageScopeRootMatch:
-@@ -912,6 +991,26 @@ class LineageQueryService:
-             truncated=truncated,
++    @property
++    def complete(self) -> bool:
++        return (
++            self.metadata_consistent
++            and self.interface.complete
++            and self.direct.complete
++            and self.scope_state in {"available", "not_applicable"}
++        )
++
++
+ class LineageQueryService:
+     def __init__(
+         self,
+@@ -792,6 +835,20 @@ class LineageQueryService:
          )
  
-+_PARAMETER_KIND_ORDER = {
-+    ParameterKind.POSITIONAL_ONLY: 0,
-+    ParameterKind.POSITIONAL_OR_KEYWORD: 1,
-+    ParameterKind.VAR_POSITIONAL: 2,
-+    ParameterKind.KEYWORD_ONLY: 3,
-+    ParameterKind.VAR_KEYWORD: 4,
-+}
+ 
++    def symbol_lineage_facts(
++        self,
++        target: ResolvedLineageTarget,
++    ) -> SymbolLineageFacts:
++        if not isinstance(target, ResolvedLineageTarget):
++            raise TypeError("target must be ResolvedLineageTarget.")
++        interface = self.target_interface_facts(target)
++        sections = self.semantic_sections(target)
++        return SymbolLineageFacts(
++            target=target,
++            interface=interface,
++            sections=sections,
++        )
 +
-+
-+def _target_parameter_key(
-+    parameter: TargetParameterFacts,
-+) -> tuple[int, int, str, str]:
-+    return (
-+        _PARAMETER_KIND_ORDER[parameter.kind],
-+        parameter.ordinal if parameter.ordinal is not None else -1,
-+        parameter.name or "",
-+        parameter.slot,
-+    )
-+
-+
- def _anchor_match_key(match: LineageAnchorMatch) -> tuple:
-     binding = match.binding
-     reference = binding.reference
+     def traverse_lexical_scope(
+         self,
+         target: ResolvedLineageTarget,
 diff --git a/tests/analysis/test_lineage_query_service.py b/tests/analysis/test_lineage_query_service.py
-index bda531f..9a1b1a4 100644
+index 9a1b1a4..22575c8 100644
 --- a/tests/analysis/test_lineage_query_service.py
 +++ b/tests/analysis/test_lineage_query_service.py
-@@ -2153,13 +2153,34 @@ def _install_target_parameter_defaults(backend, target):
-         ordinal=0,
-         name="other",
-     )
-+    positional_only_slot = build_parameter_value_slot(
-+        target.artifact_id,
-+        ParameterKind.POSITIONAL_ONLY,
-+        ordinal=0,
-+        name="ignored-posonly-name",
-+    )
-+    vararg_slot = build_parameter_value_slot(
-+        target.artifact_id,
-+        ParameterKind.VAR_POSITIONAL,
-+        name="ignored-vararg-name",
-+    )
-+    varkw_slot = build_parameter_value_slot(
-+        target.artifact_id,
-+        ParameterKind.VAR_KEYWORD,
-+        name="ignored-varkw-name",
-+    )
-     module_ref = MaterializedOccurrenceRef(
-         source_key, fingerprint, "module"
-     )
-     descriptor = SemanticInterfaceDescriptor(
-         target.artifact_id,
-         tuple(sorted((
--            build_return_slot(target.artifact_id), positional_slot, keyword_slot,
-+            build_return_slot(target.artifact_id),
-+            positional_only_slot,
-+            positional_slot,
-+            vararg_slot,
-+            keyword_slot,
-+            varkw_slot,
-         ))),
-         "digest-handler-defaults",
-     )
-@@ -2249,3 +2270,74 @@ def test_target_interface_preserves_default_diagnostics_when_interface_capabilit
-     )
-     assert result.materialization_complete is False
-     assert result.complete is False
+@@ -2341,3 +2341,72 @@ def test_target_interface_ambiguous_definition_normalizes_as_unknown():
+     assert result.signature_digest is None
+     assert result.return_slot is None
+     assert result.parameter_slots == ()
 +
 +
-+def test_target_interface_normalizes_callable_shape_without_reconstructing_source_signature():
-+    service, backend, target, _descriptor = _target_interface_service()
-+    descriptor, positional_slot, keyword_slot = _install_target_parameter_defaults(
-+        backend, target
-+    )
-+    result = service.target_interface_facts(target)
-+    assert result.callable_state == "callable"
-+    assert result.signature_digest == "digest-handler-defaults"
-+    assert result.return_slot == build_return_slot(target.artifact_id)
-+    parameters = result.parameter_slots
-+    assert tuple((
-+        parameter.kind, parameter.ordinal, parameter.name,
-+        parameter.has_default,
-+    ) for parameter in parameters) == (
-+        (ParameterKind.POSITIONAL_ONLY, 0, None, False),
-+        (ParameterKind.POSITIONAL_OR_KEYWORD, 0, None, True),
-+        (ParameterKind.VAR_POSITIONAL, None, None, False),
-+        (ParameterKind.KEYWORD_ONLY, None, "mode", True),
-+        (ParameterKind.VAR_KEYWORD, None, None, False),
-+    )
-+    assert tuple(tuple(match.flow.local_id for match in parameter.default_flows)
-+                 for parameter in parameters) == (
-+        (), ("a-default-positional",), (), ("b-default-keyword",), (),
-+    )
-+    assert parameters[1].slot == positional_slot
-+    assert parameters[3].slot == keyword_slot
-+    assert result.descriptor == descriptor
++def test_symbol_lineage_facts_composes_complete_callable_without_extra_query_paths(monkeypatch):
++    service, backend, target, _ = _target_interface_service()
++    _install_target_parameter_defaults(backend, target)
++    calls = {"interface": 0, "sections": 0}
++    interface, sections = service.target_interface_facts, service.semantic_sections
++    def interface_spy(value):
++        calls["interface"] += 1
++        return interface(value)
++    def sections_spy(value):
++        calls["sections"] += 1
++        return sections(value)
++    monkeypatch.setattr(service, "target_interface_facts", interface_spy)
++    monkeypatch.setattr(service, "semantic_sections", sections_spy)
++    monkeypatch.setattr(service, "traverse_lexical_scope", lambda *a, **k: (_ for _ in ()).throw(AssertionError("symbol aggregate used traversal")))
++    result = service.symbol_lineage_facts(target)
++    assert result.target is target
++    assert calls == {"interface": 1, "sections": 1}
++    assert result.interface.callable_state == "callable"
++    assert result.scope_state == "available"
++    assert result.metadata_consistent is True
++    assert result.complete is True
 +
 +
-+def test_target_interface_authoritative_absence_normalizes_as_non_callable():
-+    service, backend, target, _descriptor = _target_interface_service()
++def test_symbol_lineage_facts_treats_authoritative_non_lexical_symbol_as_not_applicable():
++    service, backend, target, _ = _target_interface_service()
 +    provider = backend.get_source("pkg/target.py")
 +    assert provider is not None
 +    backend._sources["pkg/target.py"] = replace(
-+        provider, interface_descriptors=()
++        provider,
++        anchors=(replace(provider.anchors[0], kind="binding"),),
++        interface_descriptors=(),
 +    )
-+    result = service.target_interface_facts(target)
++    result = service.symbol_lineage_facts(target)
++    assert result.interface.complete is True
++    assert result.interface.callable_state == "non_callable"
++    assert result.scope.roots == ()
++    assert result.scope_state == "not_applicable"
++    assert result.direct.complete is True
 +    assert result.complete is True
-+    assert result.callable_state == "non_callable"
-+    assert result.signature_digest is None
-+    assert result.return_slot is None
-+    assert result.parameter_slots == ()
 +
 +
-+def test_target_interface_legacy_descriptor_is_diagnostic_but_callable_state_unknown():
-+    service, backend, target, _descriptor = _target_interface_service(
-+        interface_capability=False
-+    )
++def test_symbol_lineage_facts_ambiguous_definition_fails_closed():
++    service, _backend, target, _ = _target_interface_service(duplicate_definition=True)
++    result = service.symbol_lineage_facts(target)
++    assert result.interface.definition_ambiguous is True
++    assert result.scope_state == "unknown"
++    assert result.complete is False
++
++
++def test_symbol_lineage_facts_metadata_mismatch_fails_closed(monkeypatch):
++    service, backend, target, _ = _target_interface_service()
 +    _install_target_parameter_defaults(backend, target)
-+    result = service.target_interface_facts(target)
++    interface, sections = service.target_interface_facts(target), service.semantic_sections(target)
++    mismatched = replace(interface, metadata=replace(interface.metadata, revision=999))
++    monkeypatch.setattr(service, "target_interface_facts", lambda _: mismatched)
++    monkeypatch.setattr(service, "semantic_sections", lambda _: sections)
++    result = service.symbol_lineage_facts(target)
++    assert result.metadata_consistent is False
++    assert result.interface.complete is True
++    assert result.direct.complete is True
++    assert result.scope_state == "available"
 +    assert result.complete is False
-+    assert result.callable_state == "unknown"
-+    assert result.signature_digest == "digest-handler-defaults"
-+    assert result.return_slot == build_return_slot(target.artifact_id)
-+    assert result.parameter_slots
-+    assert any(parameter.has_default for parameter in result.parameter_slots)
 +
 +
-+def test_target_interface_ambiguous_definition_normalizes_as_unknown():
-+    service, _backend, target, _descriptor = _target_interface_service(
-+        duplicate_definition=True
-+    )
-+    result = service.target_interface_facts(target)
-+    assert result.complete is False
-+    assert result.callable_state == "unknown"
-+    assert result.descriptor is None
-+    assert result.signature_digest is None
-+    assert result.return_slot is None
-+    assert result.parameter_slots == ()
++def test_symbol_lineage_facts_rejects_non_target():
++    with pytest.raises(TypeError, match="target must be ResolvedLineageTarget."):
++        _service({}).symbol_lineage_facts(object())
 ```

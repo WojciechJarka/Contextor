@@ -2341,3 +2341,72 @@ def test_target_interface_ambiguous_definition_normalizes_as_unknown():
     assert result.signature_digest is None
     assert result.return_slot is None
     assert result.parameter_slots == ()
+
+
+def test_symbol_lineage_facts_composes_complete_callable_without_extra_query_paths(monkeypatch):
+    service, backend, target, _ = _target_interface_service()
+    _install_target_parameter_defaults(backend, target)
+    calls = {"interface": 0, "sections": 0}
+    interface, sections = service.target_interface_facts, service.semantic_sections
+    def interface_spy(value):
+        calls["interface"] += 1
+        return interface(value)
+    def sections_spy(value):
+        calls["sections"] += 1
+        return sections(value)
+    monkeypatch.setattr(service, "target_interface_facts", interface_spy)
+    monkeypatch.setattr(service, "semantic_sections", sections_spy)
+    monkeypatch.setattr(service, "traverse_lexical_scope", lambda *a, **k: (_ for _ in ()).throw(AssertionError("symbol aggregate used traversal")))
+    result = service.symbol_lineage_facts(target)
+    assert result.target is target
+    assert calls == {"interface": 1, "sections": 1}
+    assert result.interface.callable_state == "callable"
+    assert result.scope_state == "available"
+    assert result.metadata_consistent is True
+    assert result.complete is True
+
+
+def test_symbol_lineage_facts_treats_authoritative_non_lexical_symbol_as_not_applicable():
+    service, backend, target, _ = _target_interface_service()
+    provider = backend.get_source("pkg/target.py")
+    assert provider is not None
+    backend._sources["pkg/target.py"] = replace(
+        provider,
+        anchors=(replace(provider.anchors[0], kind="binding"),),
+        interface_descriptors=(),
+    )
+    result = service.symbol_lineage_facts(target)
+    assert result.interface.complete is True
+    assert result.interface.callable_state == "non_callable"
+    assert result.scope.roots == ()
+    assert result.scope_state == "not_applicable"
+    assert result.direct.complete is True
+    assert result.complete is True
+
+
+def test_symbol_lineage_facts_ambiguous_definition_fails_closed():
+    service, _backend, target, _ = _target_interface_service(duplicate_definition=True)
+    result = service.symbol_lineage_facts(target)
+    assert result.interface.definition_ambiguous is True
+    assert result.scope_state == "unknown"
+    assert result.complete is False
+
+
+def test_symbol_lineage_facts_metadata_mismatch_fails_closed(monkeypatch):
+    service, backend, target, _ = _target_interface_service()
+    _install_target_parameter_defaults(backend, target)
+    interface, sections = service.target_interface_facts(target), service.semantic_sections(target)
+    mismatched = replace(interface, metadata=replace(interface.metadata, revision=999))
+    monkeypatch.setattr(service, "target_interface_facts", lambda _: mismatched)
+    monkeypatch.setattr(service, "semantic_sections", lambda _: sections)
+    result = service.symbol_lineage_facts(target)
+    assert result.metadata_consistent is False
+    assert result.interface.complete is True
+    assert result.direct.complete is True
+    assert result.scope_state == "available"
+    assert result.complete is False
+
+
+def test_symbol_lineage_facts_rejects_non_target():
+    with pytest.raises(TypeError, match="target must be ResolvedLineageTarget."):
+        _service({}).symbol_lineage_facts(object())
