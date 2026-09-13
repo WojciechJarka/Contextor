@@ -747,7 +747,17 @@ def test_snapshot_round_trip_compact_origin_reresolves_without_source_work(tmp_p
         lambda origin: (replace(origin, source_key="other.py"),),
         lambda origin: (replace(origin, source_fingerprint="other"),),
         lambda origin: (replace(origin, fact_local_id="missing"),),
-        lambda origin: (replace(origin, endpoint_role=SemanticEndpointRole.FLOW_SOURCE),),
+        lambda origin: (
+            replace(
+                origin,
+                endpoint_role=(
+                    SemanticEndpointRole.FLOW_TARGET
+                    if origin.endpoint_role
+                    is SemanticEndpointRole.FLOW_SOURCE
+                    else SemanticEndpointRole.FLOW_SOURCE
+                ),
+            ),
+        ),
     ],
 )
 def test_snapshot_rejects_corrupt_compact_origin(tmp_path, origins):
@@ -1605,5 +1615,4 @@ def test_ordinary_incremental_rebuilds_only_changed_callable_descriptor(
         )
         for flow in changed_slice.flows
     )
-
 
