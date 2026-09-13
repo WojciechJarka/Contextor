@@ -13,6 +13,7 @@ from contextor.core.domain.lineage_facts import (
     ResolutionKind,
     SemanticAnchorBinding,
     SemanticEndpoint,
+    SemanticInterfaceDescriptor,
 )
 from contextor.core.lineage_query.backend import (
     CanonicalLineageBackend,
@@ -87,6 +88,63 @@ class LineageSurfaceMatch:
     source_key: str
     source_fingerprint: str
     surface: MaterializedSurfaceFact
+
+
+@dataclass(frozen=True)
+class LineageInterfaceDescriptorMatch:
+    source_key: str
+    source_fingerprint: str
+    descriptor: SemanticInterfaceDescriptor
+
+
+@dataclass(frozen=True)
+class TargetInterfaceFacts:
+    target: ResolvedLineageTarget
+    metadata: LineageBackendMetadata
+    definitions: tuple[LineageAnchorMatch, ...]
+    descriptors: tuple[LineageInterfaceDescriptorMatch, ...]
+    materialization_complete: bool
+
+    @property
+    def definition_available(self) -> bool:
+        return len(self.definitions) == 1
+
+    @property
+    def definition_ambiguous(self) -> bool:
+        return len(self.definitions) > 1
+
+    @property
+    def descriptor_available(self) -> bool:
+        return (
+            self.definition_available
+            and len(self.descriptors) == 1
+        )
+
+    @property
+    def descriptor_ambiguous(self) -> bool:
+        return (
+            self.definition_ambiguous
+            or len(self.descriptors) > 1
+        )
+
+    @property
+    def descriptor(
+        self,
+    ) -> SemanticInterfaceDescriptor | None:
+        if not self.descriptor_available:
+            return None
+        return self.descriptors[0].descriptor
+
+    @property
+    def complete(self) -> bool:
+        return (
+            self.definition_available
+            and not self.descriptor_ambiguous
+            and self.materialization_complete
+            and self.metadata.family_state == "fresh"
+            and self.metadata.query_index_state == "fresh"
+            and self.metadata.semantic_anchor_bindings_complete
+        )
 
 
 @dataclass(frozen=True)
@@ -481,6 +539,79 @@ class LineageQueryService:
             roots=tuple(roots),
             flows=tuple(flows),
             nested_scopes=tuple(nested_scopes),
+            materialization_complete=materialization_complete,
+        )
+
+    def target_interface_facts(
+        self,
+        target: ResolvedLineageTarget,
+    ) -> TargetInterfaceFacts:
+        if not isinstance(target, ResolvedLineageTarget):
+            raise TypeError(
+                "target must be ResolvedLineageTarget."
+            )
+
+        metadata = self._backend.metadata()
+        definitions: list[LineageAnchorMatch] = []
+        descriptors: list[LineageInterfaceDescriptorMatch] = []
+        materialization_complete = True
+
+        source_keys = self._backend.source_keys_for_owner(
+            target.artifact_id
+        )
+        for source in self._backend.iter_sources(source_keys):
+            manifest = source.manifest
+            defining_bindings = tuple(
+                binding
+                for binding in source.semantic_anchors
+                if (
+                    binding.owner_id == target.artifact_id
+                    and binding.qualified_name == target.qualified_name
+                )
+            )
+            if not defining_bindings:
+                continue
+
+            for binding in defining_bindings:
+                definitions.append(
+                    LineageAnchorMatch(
+                        source_key=manifest.source_key,
+                        source_fingerprint=manifest.source_fingerprint,
+                        binding=binding,
+                    )
+                )
+
+            if not (
+                manifest.status.value == "fresh"
+                and manifest.interface_descriptors_materialized
+            ):
+                materialization_complete = False
+
+            for descriptor in source.interface_descriptors:
+                if descriptor.owner_id != target.artifact_id:
+                    continue
+                descriptors.append(
+                    LineageInterfaceDescriptorMatch(
+                        source_key=manifest.source_key,
+                        source_fingerprint=manifest.source_fingerprint,
+                        descriptor=descriptor,
+                    )
+                )
+
+        definitions.sort(key=_anchor_match_key)
+        descriptors.sort(
+            key=lambda item: (
+                item.source_key,
+                item.source_fingerprint,
+                item.descriptor,
+            )
+        )
+
+        return TargetInterfaceFacts(
+            target=target,
+            metadata=metadata,
+            definitions=tuple(definitions),
+            descriptors=tuple(descriptors),
             materialization_complete=materialization_complete,
         )
 

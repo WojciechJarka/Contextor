@@ -17,10 +17,12 @@ from contextor.core.domain.lineage_facts import (
     ResolutionKind,
     SemanticAnchorBinding,
     SemanticEndpoint,
+    SemanticInterfaceDescriptor,
     SourceLineageManifest,
     SourceSpan,
     SurfaceDeclarationEvidence,
     SurfaceKind,
+    build_return_slot,
 )
 from contextor.core.lineage_query import (
     LineageQueryService,
@@ -1929,3 +1931,195 @@ def test_semantic_sections_never_use_local_traversal(monkeypatch):
 
     assert result.bindings
     assert result.calls_interfaces
+
+
+def _target_interface_service(
+    *,
+    interface_capability=True,
+    duplicate_definition=False,
+):
+    owner = "A17/2"
+    qualified_name = "pkg.target::handler"
+    provider_key = "pkg/target.py"
+    provider_fp = "1" * 64
+    span = SourceSpan(1, 0, 1, 8)
+    provider_ref = MaterializedOccurrenceRef(
+        provider_key, provider_fp, "handler"
+    )
+    descriptor = SemanticInterfaceDescriptor(
+        owner, (build_return_slot(owner),), "digest-handler"
+    )
+    provider = MaterializedLineageSourceFacts(
+        manifest=SourceLineageManifest(
+            source_key=provider_key,
+            source_fingerprint=provider_fp,
+            semantic_version="1",
+            status=LineageFamilyStatus.FRESH,
+            anchor_count=1,
+            flow_count=0,
+            surface_count=0,
+            semantic_anchor_bindings_materialized=True,
+            anchor_ownership_materialized=True,
+            interface_descriptors_materialized=interface_capability,
+        ),
+        anchors=(
+            MaterializedAnchorFact(
+                "handler", provider_ref, "function", span
+            ),
+        ),
+        interface_descriptors=(descriptor,),
+        semantic_anchors=(
+            SemanticAnchorBinding(owner, qualified_name, provider_ref),
+        ),
+    )
+    consumer_key = "pkg/consumer.py"
+    consumer_fp = "2" * 64
+    consumer_ref = MaterializedOccurrenceRef(
+        consumer_key, consumer_fp, "consumer"
+    )
+    consumer = MaterializedLineageSourceFacts(
+        manifest=SourceLineageManifest(
+            source_key=consumer_key,
+            source_fingerprint=consumer_fp,
+            semantic_version="1",
+            status=LineageFamilyStatus.FRESH,
+            anchor_count=1,
+            flow_count=1,
+            surface_count=0,
+            semantic_anchor_bindings_materialized=True,
+            anchor_ownership_materialized=True,
+            flow_ownership_materialized=True,
+            interface_descriptors_materialized=True,
+        ),
+        anchors=(
+            MaterializedAnchorFact(
+                "consumer", consumer_ref, "function", span
+            ),
+        ),
+        interface_descriptors=(descriptor,),
+        flows=(
+            MaterializedFlowFact(
+                "uses-handler", SemanticEndpoint(owner, build_return_slot(owner)),
+                consumer_ref, LineageRelation.CALL_RESULT, span,
+                ResolutionKind.CALL_EXACT, LineageConfidence.CONFIRMED,
+                owner_local_id="consumer",
+            ),
+        ),
+    )
+    sources = {provider_key: provider, consumer_key: consumer}
+    if duplicate_definition:
+        duplicate_key = "pkg/duplicate.py"
+        duplicate_fp = "3" * 64
+        duplicate_ref = MaterializedOccurrenceRef(
+            duplicate_key, duplicate_fp, "handler"
+        )
+        sources[duplicate_key] = MaterializedLineageSourceFacts(
+            manifest=SourceLineageManifest(
+                source_key=duplicate_key, source_fingerprint=duplicate_fp,
+                semantic_version="1", status=LineageFamilyStatus.FRESH,
+                anchor_count=1, flow_count=0, surface_count=0,
+                semantic_anchor_bindings_materialized=True,
+                anchor_ownership_materialized=True,
+                interface_descriptors_materialized=True,
+            ),
+            anchors=(MaterializedAnchorFact(
+                "handler", duplicate_ref, "function", span
+            ),),
+            interface_descriptors=(descriptor,),
+            semantic_anchors=(SemanticAnchorBinding(
+                owner, qualified_name, duplicate_ref
+            ),),
+        )
+    owner_source_index, source_owner_index, anchor_complete = (
+        build_lineage_query_indexes(sources)
+    )
+    backend = RepositoryStateLineageBackend(SimpleNamespace(
+        revision=41, provenance="live", lineage_facts_state="fresh",
+        lineage_facts_semantic_version="1", lineage_facts_by_source=sources,
+        lineage_owner_source_index=owner_source_index,
+        lineage_source_owner_index=source_owner_index,
+        lineage_query_index_state="fresh",
+        lineage_semantic_anchor_bindings_complete=anchor_complete,
+    ))
+    service = LineageQueryService(
+        backend, IndexCatalog(modules={}, artifacts={owner: qualified_name})
+    )
+    target = service.resolve_target(owner).target
+    assert target is not None
+    return service, backend, target, descriptor
+
+
+def test_target_interface_reads_only_exact_defining_slice_and_ignores_consumer_copy(monkeypatch):
+    service, backend, target, descriptor = _target_interface_service()
+    assert backend.source_keys_for_owner(target.artifact_id) == (
+        "pkg/consumer.py", "pkg/target.py"
+    )
+    monkeypatch.setattr(backend, "source_keys", lambda: (_ for _ in ()).throw(
+        AssertionError("repo scan")
+    ))
+    result = service.target_interface_facts(target)
+    assert result.target is target
+    assert result.metadata.revision == 41
+    assert result.definition_available is True
+    assert result.definition_ambiguous is False
+    assert result.materialization_complete is True
+    assert result.complete is True
+    assert result.descriptor_available is True
+    assert result.descriptor_ambiguous is False
+    assert result.descriptor == descriptor
+    assert tuple(item.source_key for item in result.definitions) == ("pkg/target.py",)
+    assert tuple(item.source_key for item in result.descriptors) == ("pkg/target.py",)
+
+
+def test_target_interface_preserves_legacy_payload_but_fails_closed_on_capability():
+    service, _backend, target, descriptor = _target_interface_service(
+        interface_capability=False
+    )
+    result = service.target_interface_facts(target)
+    assert result.definition_available is True
+    assert result.descriptor_available is True
+    assert result.descriptor == descriptor
+    assert result.materialization_complete is False
+    assert result.complete is False
+
+
+def test_target_interface_complete_authoritative_absence_has_no_descriptor():
+    service, backend, target, _descriptor = _target_interface_service()
+    provider = backend.get_source("pkg/target.py")
+    assert provider is not None
+    backend._sources["pkg/target.py"] = replace(
+        provider,
+        interface_descriptors=(),
+    )
+
+    result = service.target_interface_facts(target)
+
+    assert result.definition_available is True
+    assert result.materialization_complete is True
+    assert result.descriptors == ()
+    assert result.descriptor_available is False
+    assert result.descriptor_ambiguous is False
+    assert result.descriptor is None
+    assert result.complete is True
+
+
+def test_target_interface_duplicate_definitions_fail_closed_without_guessing():
+    service, _backend, target, _descriptor = _target_interface_service(
+        duplicate_definition=True
+    )
+    result = service.target_interface_facts(target)
+    assert result.definition_available is False
+    assert result.definition_ambiguous is True
+    assert result.descriptor_ambiguous is True
+    assert result.descriptor is None
+    assert result.complete is False
+    assert tuple(item.source_key for item in result.definitions) == (
+        "pkg/duplicate.py", "pkg/target.py"
+    )
+
+
+def test_target_interface_rejects_non_target():
+    with pytest.raises(
+        TypeError, match="target must be ResolvedLineageTarget."
+    ):
+        _service({}).target_interface_facts(object())
