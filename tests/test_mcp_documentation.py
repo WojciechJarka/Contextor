@@ -190,7 +190,7 @@ def test_get_symbol_lineage_is_registered_with_documented_public_signature():
             "progressive disclosure."
         )
     )
-    assert str(inspect.signature(tool.fn)) == (
+    assert str(inspect.signature(tool.fn, eval_str=True)) == (
         "(repo_path: str, symbol: str, mode: str = 'auto', "
         "sections: list[str] | None = None, "
         "representation: str = 'auto', "
