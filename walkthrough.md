@@ -1,269 +1,211 @@
-# F2L D1O3 - LIVE canonical symbol-lineage handler
+# F2L D1O4 - MCP narrow LIVE symbol-lineage seam
 
 STATUS: PASS
 
 FILES_CHANGED:
-- contextor/core/live_state/runtime.py
-- tests/live_state/test_runtime_canonical_query.py
-- walkthrough.md (this report; its own diff intentionally excluded)
+- contextor/mcp/runtime.py
+- tests/mcp/test_runtime_lineage_query.py
+- walkthrough.md (report; its own diff excluded)
 
-SERVER_WIRING_PROOF:
-run_service() constructs CanonicalLiveServer with canonical_query_handler=_repository_canonical_query_handler immediately after persister.
+LIVE_ONLY_PROOF:
+Uses only connect(root); absent authority returns canonical_live_unavailable with no snapshot/disk fallback.
 
-SINGLE_QUERY_DISPATCH_PROOF:
-The handler accepts only query_kind symbol_lineage and calls query_live_symbol_lineage exactly once with the supplied canonical state.
+SINGLE_CANONICAL_QUERY_PROOF:
+After connect, exactly one canonical_query(symbol_lineage) is sent with query and list sections only.
 
-SECTION_NORMALIZATION_PROOF:
-Transport list sections are converted to a tuple before the existing core query validates ordering, duplicates, and names.
-
-SAME_STATE_PROOF:
-The server-dispatch test passes the exact state object to the handler, returns the marker typed result, and retains outer IPC revision 12.
+NO_ENGINE_PROOF:
+The new seam never calls get_or_init_engine or engine/registry hydration.
 
 NO_SNAPSHOT_PROOF:
-The handler neither snapshots nor builds an engine; the response contains only the narrow result and no state/bulk_blob.
+No client.snapshot() or client.ping() path exists.
 
-UNKNOWN_KIND_FAIL_CLOSED_PROOF:
-An unsupported query kind raises ValueError before the lineage query is reached. IPC maps handler failures to canonical_query_failed.
+NO_START_PROOF:
+No connect_or_start invocation exists; unavailable LIVE fails closed.
 
-TYPED_RESULT_PROOF:
-The server response result is the original LiveSymbolLineageQueryResult marker object, not a dictionary or JSON conversion.
+REMOTE_ERROR_PROOF:
+Non-empty server error codes are preserved and detail is bounded to 500 characters.
+
+REVISION_MATCH_PROOF:
+Outer revision must match typed freshness revision and selected metadata revision when selected facts exist.
+
+INVALID_RESULT_PROOF:
+Non-typed results and revision mismatches return canonical_query_response_invalid or canonical_query_revision_mismatch.
 
 TESTS_RUN:
-- .\.venv\Scripts\python.exe -m pytest -q tests\live_state\test_runtime_canonical_query.py tests\live_state\test_ipc_canonical_query.py tests\analysis\test_lineage_live_query.py - 42 passed in 1.37s
-- .\.venv\Scripts\python.exe -m py_compile contextor\core\live_state\runtime.py tests\live_state\test_runtime_canonical_query.py - passed
-- git diff --check -- contextor/core/live_state/runtime.py tests/live_state/test_runtime_canonical_query.py - passed
+- pytest focused set: 46 passed in 2.40s
+- py_compile: passed
+- git diff --check: passed
 
 RUNTIME_RESTART_REQUIRED: YES_BUT_DO_NOT_RESTART_YET.
 
 ## ACTUAL_DIFF
 
 ```diff
-warning: in the working copy of 'contextor/core/live_state/runtime.py', LF will be replaced by CRLF the next time Git touches it
-diff --git a/contextor/core/live_state/runtime.py b/contextor/core/live_state/runtime.py
-index 111ef30..76c49b3 100644
---- a/contextor/core/live_state/runtime.py
-+++ b/contextor/core/live_state/runtime.py
-@@ -13,6 +13,9 @@ import time
+warning: in the working copy of 'contextor/mcp/runtime.py', LF will be replaced by CRLF the next time Git touches it
+diff --git a/contextor/mcp/runtime.py b/contextor/mcp/runtime.py
+index 967b5eb..6a80e69 100644
+--- a/contextor/mcp/runtime.py
++++ b/contextor/mcp/runtime.py
+@@ -1,6 +1,12 @@
++from collections.abc import Mapping
++from dataclasses import dataclass
  from pathlib import Path
- from typing import Any, Mapping
+ from typing import Any
 
-+from contextor.core.lineage_query.live_query import (
-+    query_live_symbol_lineage,
-+)
- from contextor.core.paths import repo_cache_dir
- from contextor.core.repository_identity import (
-     read_repository_identity,
-@@ -1030,6 +1033,35 @@ def connect_or_start(
-             pass
-
-
-+def _repository_canonical_query_handler(
-+    state: object,
-+    query_kind: str,
-+    payload: Mapping[str, Any],
-+):
-+    if query_kind != "symbol_lineage":
-+        raise ValueError(
-+            f"Unsupported canonical query kind: {query_kind}"
-+        )
-+    if not isinstance(payload, Mapping):
-+        raise TypeError("canonical query payload must be a mapping.")
-+
-+    query = payload.get("query")
-+    if not isinstance(query, str):
-+        raise TypeError("symbol_lineage query must be a string.")
-+
-+    raw_sections = payload.get("sections")
-+    if not isinstance(raw_sections, (list, tuple)):
-+        raise TypeError(
-+            "symbol_lineage sections must be a list or tuple."
-+        )
-+
-+    return query_live_symbol_lineage(
-+        state,
-+        query,
-+        tuple(raw_sections),
-+    )
-+
-+
- def _repository_updater(root: Path, holder: dict[str, object] | None = None):
-     identity = require_repository_identity(root)
-     cache = repo_cache_dir(root)
-@@ -1271,6 +1303,9 @@ def run_service(
-             revision=revision,
-             updater=_repository_updater(root, adapter_holder),
-             persister=_repository_persister(root, adapter_holder),
-+            canonical_query_handler=(
-+                _repository_canonical_query_handler
-+            ),
-             mutation_guard=_repository_mutation_guard(root),
-             authority_identity=authority_identity,
-             desktop_claim=desktop_claim,
-warning: in the working copy of 'tests/live_state/test_runtime_canonical_query.py', LF will be replaced by CRLF the next time Git touches it
-diff --git a/tests/live_state/test_runtime_canonical_query.py b/tests/live_state/test_runtime_canonical_query.py
-new file mode 100644
-index 0000000..7310fe5
---- /dev/null
-+++ b/tests/live_state/test_runtime_canonical_query.py
-@@ -0,0 +1,160 @@
-+from types import SimpleNamespace
-+
-+import pytest
-+
-+from contextor.core.live_state import runtime
-+from contextor.core.live_state.ipc import (
-+    CanonicalLiveServer,
-+)
 +from contextor.core.lineage_query.live_query import (
 +    LiveSymbolLineageQueryResult,
 +)
-+from contextor.core.lineage_query.service import (
-+    LineageTargetResolution,
-+)
++
+
+ _live_engines: dict[str, Any] = {}
+ _live_engine_revisions: dict[str, int] = {}
+@@ -9,6 +15,82 @@ _live_sessions: dict[str, str] = {}
+ _live_journal_revisions: dict[str, int] = {}
+
+
++@dataclass(frozen=True)
++class LiveSymbolLineageTransportResult:
++    status: str
++    revision: int | None = None
++    result: LiveSymbolLineageQueryResult | None = None
++    error: str | None = None
++    detail: str | None = None
 +
 +
-+def _marker_result():
-+    return LiveSymbolLineageQueryResult(
-+        resolution=LineageTargetResolution(
-+            status="not_found",
-+            query="A17/2",
-+        ),
-+        state_freshness={"canonical_revision": 12},
-+    )
++def _bounded_live_query_detail(value: object) -> str | None:
++    if not isinstance(value, str):
++        return None
++    return value[:500]
 +
 +
-+def test_repository_canonical_query_handler_routes_symbol_lineage_once_and_normalizes_sections(
-+    monkeypatch,
-+):
-+    state = SimpleNamespace(revision=12, bulk_blob="x" * 1_000_000)
-+    marker = _marker_result()
-+    observed = {}
++def query_live_symbol_lineage_narrow(
++    root: Path,
++    *,
++    query: str,
++    sections: tuple[str, ...],
++) -> LiveSymbolLineageTransportResult:
++    if not isinstance(root, Path):
++        raise TypeError("root must be a Path.")
++    if not isinstance(query, str):
++        raise TypeError("query must be a string.")
++    if not isinstance(sections, tuple):
++        raise TypeError("sections must be a tuple of section names.")
++    if any(not isinstance(section, str) or not section for section in sections):
++        raise ValueError("sections must contain non-empty strings.")
 +
-+    def query_live_symbol_lineage(current_state, query, sections):
-+        observed["state"] = current_state
-+        observed["query"] = query
-+        observed["sections"] = sections
-+        return marker
-+
-+    monkeypatch.setattr(
-+        runtime,
-+        "query_live_symbol_lineage",
-+        query_live_symbol_lineage,
-+    )
-+
-+    result = runtime._repository_canonical_query_handler(
-+        state,
-+        "symbol_lineage",
-+        {"query": "A17/2", "sections": ["state", "interface"]},
-+    )
-+
-+    assert result is marker
-+    assert observed == {
-+        "state": state,
-+        "query": "A17/2",
-+        "sections": ("state", "interface"),
-+    }
-+
-+
-+def test_repository_canonical_query_handler_rejects_unknown_query_kind_before_lineage_query(
-+    monkeypatch,
-+):
-+    monkeypatch.setattr(
-+        runtime,
-+        "query_live_symbol_lineage",
-+        lambda *_args, **_kwargs: (
-+            (_ for _ in ()).throw(
-+                AssertionError("unknown query kind reached lineage query")
-+            )
-+        ),
-+    )
-+
-+    with pytest.raises(
-+        ValueError,
-+        match="Unsupported canonical query kind: other",
-+    ):
-+        runtime._repository_canonical_query_handler(
-+            SimpleNamespace(revision=1),
-+            "other",
-+            {},
-+        )
-+
-+
-+@pytest.mark.parametrize(
-+    ("payload", "message"),
-+    (
-+        ({}, "symbol_lineage query must be a string."),
-+        (
-+            {"query": "A17/2"},
-+            "symbol_lineage sections must be a list or tuple.",
-+        ),
-+        (
-+            {"query": "A17/2", "sections": "state"},
-+            "symbol_lineage sections must be a list or tuple.",
-+        ),
-+    ),
-+)
-+def test_repository_canonical_query_handler_validates_transport_payload(
-+    payload,
-+    message,
-+):
-+    with pytest.raises(TypeError, match=message):
-+        runtime._repository_canonical_query_handler(
-+            SimpleNamespace(revision=1),
-+            "symbol_lineage",
-+            payload,
-+        )
-+
-+
-+def test_repository_symbol_lineage_handler_runs_through_canonical_server_without_state_response(
-+    monkeypatch,
-+):
-+    state = SimpleNamespace(revision=12, bulk_blob="do-not-return-state")
-+    marker = _marker_result()
-+    observed = {}
-+
-+    def query_live_symbol_lineage(current_state, query, sections):
-+        observed["state"] = current_state
-+        observed["query"] = query
-+        observed["sections"] = sections
-+        return marker
-+
-+    monkeypatch.setattr(
-+        runtime,
-+        "query_live_symbol_lineage",
-+        query_live_symbol_lineage,
-+    )
-+    server = CanonicalLiveServer(
-+        state,
-+        revision=12,
-+        canonical_query_handler=(
-+            runtime._repository_canonical_query_handler
-+        ),
-+    )
++    from contextor.core.live_state import connect
 +    try:
-+        response = server._dispatch(
-+            {
-+                "operation": "canonical_query",
-+                "query_kind": "symbol_lineage",
-+                "payload": {
-+                    "query": "A17/2",
-+                    "sections": ["interface"],
-+                },
-+            }
++        client = connect(root)
++    except (OSError, EOFError, ConnectionError, TimeoutError, RuntimeError) as exc:
++        return LiveSymbolLineageTransportResult(
++            status="error", error="canonical_live_transport_error",
++            detail=_bounded_live_query_detail(str(exc)),
 +        )
-+    finally:
-+        server.close()
++    if client is None:
++        return LiveSymbolLineageTransportResult(
++            status="unavailable", error="canonical_live_unavailable"
++        )
++    try:
++        response = client.canonical_query(
++            "symbol_lineage",
++            payload={"query": query, "sections": list(sections)},
++        )
++    except (OSError, EOFError, ConnectionError, TimeoutError, RuntimeError) as exc:
++        return LiveSymbolLineageTransportResult(
++            status="error", error="canonical_query_transport_error",
++            detail=_bounded_live_query_detail(str(exc)),
++        )
++    if not isinstance(response, Mapping):
++        return LiveSymbolLineageTransportResult(
++            status="error", error="canonical_query_response_invalid"
++        )
++    if response.get("status") != "ok":
++        remote_error = response.get("error")
++        return LiveSymbolLineageTransportResult(
++            status="error",
++            error=remote_error if isinstance(remote_error, str) and remote_error else "canonical_query_failed",
++            detail=_bounded_live_query_detail(response.get("detail")),
++        )
++    revision = response.get("revision")
++    if isinstance(revision, bool) or not isinstance(revision, int) or revision < 0:
++        return LiveSymbolLineageTransportResult(status="error", error="canonical_query_response_invalid")
++    result = response.get("result")
++    if not isinstance(result, LiveSymbolLineageQueryResult):
++        return LiveSymbolLineageTransportResult(status="error", revision=revision, error="canonical_query_response_invalid")
++    if result.state_freshness.get("canonical_revision") != revision:
++        return LiveSymbolLineageTransportResult(status="error", revision=revision, error="canonical_query_revision_mismatch")
++    if result.selected is not None and result.selected.facts.metadata.revision != revision:
++        return LiveSymbolLineageTransportResult(status="error", revision=revision, error="canonical_query_revision_mismatch")
++    return LiveSymbolLineageTransportResult(status="ok", revision=revision, result=result)
 +
-+    assert response == {
-+        "status": "ok",
-+        "revision": 12,
-+        "result": marker,
-+    }
-+    assert observed == {
-+        "state": state,
-+        "query": "A17/2",
-+        "sections": ("interface",),
-+    }
-+    assert "bulk_blob" not in repr(response)
-+    assert "state" not in response
++
+ def publish_live_status(root: Path, message: str) -> None:
+     try:
+         from contextor.core.live_state import connect
+warning: in the working copy of 'tests/mcp/test_runtime_lineage_query.py', LF will be replaced by CRLF the next time Git touches it
+diff --git a/tests/mcp/test_runtime_lineage_query.py b/tests/mcp/test_runtime_lineage_query.py
+new file mode 100644
+index 0000000..76e309d
+--- /dev/null
++++ b/tests/mcp/test_runtime_lineage_query.py
+@@ -0,0 +1,59 @@
++from pathlib import Path
++
++import pytest
++
++import contextor.core.live_state as live_state
++from contextor.core.lineage_query.live_query import LiveSymbolLineageQueryResult
++from contextor.core.lineage_query.service import LineageTargetResolution
++from contextor.mcp import runtime
++
++
++def _result(revision=12):
++    return LiveSymbolLineageQueryResult(
++        resolution=LineageTargetResolution(status="not_found", query="A17/2"),
++        state_freshness={"canonical_revision": revision},
++    )
++
++
++class _Client:
++    def __init__(self, response): self.response, self.calls = response, []
++    def canonical_query(self, query_kind, *, payload=None):
++        self.calls.append((query_kind, payload)); return self.response
++    def snapshot(self): raise AssertionError("narrow query used snapshot")
++    def ping(self): raise AssertionError("narrow query used ping")
++
++
++def test_narrow_live_symbol_lineage_uses_one_canonical_query_without_snapshot_or_engine(monkeypatch):
++    marker = _result(); client = _Client({"status": "ok", "revision": 12, "result": marker})
++    monkeypatch.setattr(live_state, "connect", lambda _root: client)
++    monkeypatch.setattr(runtime, "get_or_init_engine", lambda *_: (_ for _ in ()).throw(AssertionError("engine")))
++    received = runtime.query_live_symbol_lineage_narrow(Path("C:/repo"), query="A17/2", sections=("interface", "state"))
++    assert received.status == "ok" and received.result is marker
++    assert client.calls == [("symbol_lineage", {"query": "A17/2", "sections": ["interface", "state"]})]
++
++
++def test_narrow_live_symbol_lineage_unavailable_and_errors_fail_without_fallback(monkeypatch):
++    monkeypatch.setattr(live_state, "connect", lambda _: None)
++    result = runtime.query_live_symbol_lineage_narrow(Path("C:/repo"), query="A17/2", sections=("interface",))
++    assert result.error == "canonical_live_unavailable"
++    client = _Client({"status": "error", "error": "canonical_query_failed", "detail": "x" * 1000})
++    monkeypatch.setattr(live_state, "connect", lambda _: client)
++    result = runtime.query_live_symbol_lineage_narrow(Path("C:/repo"), query="A17/2", sections=("interface",))
++    assert result.error == "canonical_query_failed" and result.detail == "x" * 500
++
++
++def test_narrow_live_symbol_lineage_fails_closed_on_invalid_or_mismatched_response(monkeypatch):
++    monkeypatch.setattr(live_state, "connect", lambda _: _Client({"status": "ok", "revision": 13, "result": _result(12)}))
++    result = runtime.query_live_symbol_lineage_narrow(Path("C:/repo"), query="A17/2", sections=("interface",))
++    assert result.error == "canonical_query_revision_mismatch" and result.revision == 13
++    monkeypatch.setattr(live_state, "connect", lambda _: _Client({"status": "ok", "revision": 12, "result": {}}))
++    result = runtime.query_live_symbol_lineage_narrow(Path("C:/repo"), query="A17/2", sections=("interface",))
++    assert result.error == "canonical_query_response_invalid"
++
++
++def test_narrow_live_symbol_lineage_validates_before_connect(monkeypatch):
++    monkeypatch.setattr(live_state, "connect", lambda _: (_ for _ in ()).throw(AssertionError("connected")))
++    with pytest.raises(TypeError): runtime.query_live_symbol_lineage_narrow("C:/repo", query="A17/2", sections=("interface",))
++    with pytest.raises(TypeError): runtime.query_live_symbol_lineage_narrow(Path("C:/repo"), query=1, sections=("interface",))
++    with pytest.raises(TypeError): runtime.query_live_symbol_lineage_narrow(Path("C:/repo"), query="A17/2", sections=["interface"])
++    with pytest.raises(ValueError): runtime.query_live_symbol_lineage_narrow(Path("C:/repo"), query="A17/2", sections=("",))
 ```

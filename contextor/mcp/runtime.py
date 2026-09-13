@@ -1,5 +1,11 @@
+from collections.abc import Mapping
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+from contextor.core.lineage_query.live_query import (
+    LiveSymbolLineageQueryResult,
+)
 
 
 _live_engines: dict[str, Any] = {}
@@ -7,6 +13,82 @@ _live_engine_revisions: dict[str, int] = {}
 _live_engine_provenance: dict[str, str] = {}
 _live_sessions: dict[str, str] = {}
 _live_journal_revisions: dict[str, int] = {}
+
+
+@dataclass(frozen=True)
+class LiveSymbolLineageTransportResult:
+    status: str
+    revision: int | None = None
+    result: LiveSymbolLineageQueryResult | None = None
+    error: str | None = None
+    detail: str | None = None
+
+
+def _bounded_live_query_detail(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    return value[:500]
+
+
+def query_live_symbol_lineage_narrow(
+    root: Path,
+    *,
+    query: str,
+    sections: tuple[str, ...],
+) -> LiveSymbolLineageTransportResult:
+    if not isinstance(root, Path):
+        raise TypeError("root must be a Path.")
+    if not isinstance(query, str):
+        raise TypeError("query must be a string.")
+    if not isinstance(sections, tuple):
+        raise TypeError("sections must be a tuple of section names.")
+    if any(not isinstance(section, str) or not section for section in sections):
+        raise ValueError("sections must contain non-empty strings.")
+
+    from contextor.core.live_state import connect
+    try:
+        client = connect(root)
+    except (OSError, EOFError, ConnectionError, TimeoutError, RuntimeError) as exc:
+        return LiveSymbolLineageTransportResult(
+            status="error", error="canonical_live_transport_error",
+            detail=_bounded_live_query_detail(str(exc)),
+        )
+    if client is None:
+        return LiveSymbolLineageTransportResult(
+            status="unavailable", error="canonical_live_unavailable"
+        )
+    try:
+        response = client.canonical_query(
+            "symbol_lineage",
+            payload={"query": query, "sections": list(sections)},
+        )
+    except (OSError, EOFError, ConnectionError, TimeoutError, RuntimeError) as exc:
+        return LiveSymbolLineageTransportResult(
+            status="error", error="canonical_query_transport_error",
+            detail=_bounded_live_query_detail(str(exc)),
+        )
+    if not isinstance(response, Mapping):
+        return LiveSymbolLineageTransportResult(
+            status="error", error="canonical_query_response_invalid"
+        )
+    if response.get("status") != "ok":
+        remote_error = response.get("error")
+        return LiveSymbolLineageTransportResult(
+            status="error",
+            error=remote_error if isinstance(remote_error, str) and remote_error else "canonical_query_failed",
+            detail=_bounded_live_query_detail(response.get("detail")),
+        )
+    revision = response.get("revision")
+    if isinstance(revision, bool) or not isinstance(revision, int) or revision < 0:
+        return LiveSymbolLineageTransportResult(status="error", error="canonical_query_response_invalid")
+    result = response.get("result")
+    if not isinstance(result, LiveSymbolLineageQueryResult):
+        return LiveSymbolLineageTransportResult(status="error", revision=revision, error="canonical_query_response_invalid")
+    if result.state_freshness.get("canonical_revision") != revision:
+        return LiveSymbolLineageTransportResult(status="error", revision=revision, error="canonical_query_revision_mismatch")
+    if result.selected is not None and result.selected.facts.metadata.revision != revision:
+        return LiveSymbolLineageTransportResult(status="error", revision=revision, error="canonical_query_revision_mismatch")
+    return LiveSymbolLineageTransportResult(status="ok", revision=revision, result=result)
 
 
 def publish_live_status(root: Path, message: str) -> None:
