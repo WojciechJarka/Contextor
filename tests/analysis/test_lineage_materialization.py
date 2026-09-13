@@ -725,3 +725,44 @@ def test_materialized_callable_interface_builder_requires_canonical_capabilities
     assert build_materialized_callable_interface_descriptors(
         {"pkg/mod.py": legacy}, {"pkg.mod::run": "A1/2"}
     ) == {}
+
+
+def test_defining_zero_flow_callable_persists_own_interface_descriptor():
+    facts = _callable_interface_facts("def ping():\n    pass\n")
+    owner = "A1/1"
+    descriptors = build_extracted_callable_interface_descriptors(
+        {"pkg/mod.py": facts}, {"pkg.mod::ping": owner}
+    )
+    result = materialize_lineage_source_facts(
+        facts, _context(artifacts={"pkg.mod::ping": owner}, descriptors=descriptors)
+    )
+    assert result.interface_descriptors == (descriptors[owner],)
+    assert descriptors[owner].slots == (build_return_slot(owner),)
+
+
+def test_zero_flow_callable_descriptor_rebind_survives_reresolution():
+    facts = _callable_interface_facts("def ping():\n    pass\n")
+    old, new = "A1/1", "A1/2"
+    descriptors = build_extracted_callable_interface_descriptors(
+        {"pkg/mod.py": facts}, {"pkg.mod::ping": old}
+    )
+    initial = materialize_lineage_source_facts(
+        facts, _context(artifacts={"pkg.mod::ping": old}, descriptors=descriptors)
+    )
+    rebound = build_materialized_callable_interface_descriptors(
+        {"pkg/mod.py": initial}, {"pkg.mod::ping": new}
+    )
+    rerun = reresolve_materialized_lineage_source_facts(
+        initial, _context(artifacts={"pkg.mod::ping": new}, descriptors=rebound)
+    )
+    assert rerun.interface_descriptors == (rebound[new],)
+
+
+def test_unrelated_resolution_descriptor_is_not_seeded_into_slice():
+    foreign = SemanticInterfaceDescriptor("A9/1", (build_return_slot("A9/1"),), "x")
+    result = materialize_lineage_source_facts(
+        _callable_interface_facts("value = 1\n"),
+        _context(artifacts={"other.mod::foreign": "A9/1"}, descriptors={"A9/1": foreign}),
+    )
+    assert result.semantic_anchors == ()
+    assert result.interface_descriptors == ()

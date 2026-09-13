@@ -346,6 +346,17 @@ def build_materialized_callable_interface_descriptors(
     return dict(sorted(descriptors.items()))
 
 
+def _seed_defining_interface_descriptors(
+    descriptors: dict[str, SemanticInterfaceDescriptor],
+    semantic_anchors: tuple[SemanticAnchorBinding, ...],
+    resolution: LineageResolutionContext,
+) -> None:
+    for binding in semantic_anchors:
+        descriptor = resolution.interface_descriptors.get(binding.owner_id)
+        if descriptor is not None:
+            descriptors[binding.owner_id] = descriptor
+
+
 def materialize_lineage_source_facts(
     extracted: ExtractedLineageSourceFacts,
     resolution: LineageResolutionContext,
@@ -411,6 +422,7 @@ def materialize_lineage_source_facts(
         resolution,
         occurrence,
     )
+    _seed_defining_interface_descriptors(descriptors, semantic_anchors, resolution)
     flows = tuple(sorted(
         MaterializedFlowFact(
             flow.local_id,
@@ -622,6 +634,7 @@ def reresolve_materialized_lineage_source_facts(
             is not None
         )
     )
+    _seed_defining_interface_descriptors(descriptors, semantic_anchors, resolution)
     return MaterializedLineageSourceFacts(
         materialized.manifest,
         materialized.anchors,

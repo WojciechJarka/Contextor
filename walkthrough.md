@@ -1,4 +1,4 @@
-# F2L D1L3b2 Walkthrough
+# F2L D1L4a Walkthrough
 
 ## STATUS
 
@@ -6,38 +6,29 @@ PASS
 
 ## FILES_CHANGED
 
-- `contextor/core/analysis/incremental/engine.py`
-- `tests/test_lineage_state_lifecycle.py`
+- `contextor/core/analysis/lineage_materialization.py`
+- `tests/analysis/test_lineage_materialization.py`
 
-## RETAINED_MATERIALIZED_REBUILD_PROOF
+## ZERO_FLOW_INITIAL_PERSISTENCE_PROOF
 
-Identity-sync rebuilds retained descriptors with the materialized builder.
+Defining zero-flow callable retains its own descriptor.
 
-## CHANGED_SOURCE_EXCLUSION_PROOF
+## ZERO_FLOW_RERESOLUTION_PROOF
 
-The retained map excludes `source_path`; changed descriptors come from extracted facts.
+Rebound zero-flow callable retains its descriptor after re-resolution.
 
-## CURRENT_GENERATION_DESCRIPTOR_PROOF
+## NO_FOREIGN_SEED_PROOF
 
-The focused generation-change test passed.
+Unrelated resolution descriptor is not seeded.
 
-## OWNER_INTRODUCTION_PARITY_PROOF
+## EXISTING_PARITY_PROOF
 
-The prior parity failure now passes.
-
-## OWNER_DELETION_PARITY_PROOF
-
-The focused deletion test passed.
-
-## ORDINARY_PATH_REGRESSION_PROOF
-
-The focused ordinary incremental test passed.
+Full requested suite passed.
 
 ## TESTS_RUN
 
 ```text
-Focused: 4 passed in 0.95s
-Full: 69 passed in 6.56s
+72 passed in 7.05s
 py_compile: PASS
 git diff --check: PASS
 ```
@@ -45,50 +36,92 @@ git diff --check: PASS
 ## ACTUAL_DIFF
 
 ```diff
-diff --git a/contextor/core/analysis/incremental/engine.py b/contextor/core/analysis/incremental/engine.py
-index 49fba5a..bbeef57 100644
---- a/contextor/core/analysis/incremental/engine.py
-+++ b/contextor/core/analysis/incremental/engine.py
-@@ -199,6 +199,7 @@ class IncrementalAnalysisEngine:
-             LineageOriginUnavailableError,
-             LineageResolutionContext,
-             build_extracted_callable_interface_descriptors,
-+            build_materialized_callable_interface_descriptors,
-             materialize_lineage_source_facts,
-             reresolve_materialized_lineage_source_facts,
-         )
-@@ -256,7 +257,32 @@ class IncrementalAnalysisEngine:
-                 )
+diff --git a/contextor/core/analysis/lineage_materialization.py b/contextor/core/analysis/lineage_materialization.py
+index 2b20ea0..a891176 100644
+--- a/contextor/core/analysis/lineage_materialization.py
++++ b/contextor/core/analysis/lineage_materialization.py
+@@ -346,6 +346,17 @@ def build_materialized_callable_interface_descriptors(
+     return dict(sorted(descriptors.items()))
  
-             interface_descriptors = {}
--            if not rematerialize_all:
-+            if rematerialize_all:
-+                retained_sources = {
-+                    key: lineage_by_source[key]
-+                    for key in sorted(lineage_by_source)
-+                    if key != source_path
-+                }
-+                interface_descriptors.update(
-+                    build_materialized_callable_interface_descriptors(
-+                        retained_sources,
-+                        active_artifact_ids,
-+                    )
-+                )
-+                if not delete:
-+                    changed_descriptors = (
-+                        build_extracted_callable_interface_descriptors(
-+                            {source_path: extracted_lineage_facts},
-+                            active_artifact_ids,
-+                        )
-+                    )
-+                    for owner_id, descriptor in changed_descriptors.items():
-+                        existing = interface_descriptors.get(owner_id)
-+                        if existing is None:
-+                            interface_descriptors[owner_id] = descriptor
-+                        elif existing != descriptor:
-+                            interface_descriptors.pop(owner_id, None)
-+            else:
-                 active_artifact_owner_ids = frozenset(active_artifact_ids.values())
-                 ambiguous_descriptor_owner_ids: set[str] = set()
+ 
++def _seed_defining_interface_descriptors(
++    descriptors: dict[str, SemanticInterfaceDescriptor],
++    semantic_anchors: tuple[SemanticAnchorBinding, ...],
++    resolution: LineageResolutionContext,
++) -> None:
++    for binding in semantic_anchors:
++        descriptor = resolution.interface_descriptors.get(binding.owner_id)
++        if descriptor is not None:
++            descriptors[binding.owner_id] = descriptor
++
++
+ def materialize_lineage_source_facts(
+     extracted: ExtractedLineageSourceFacts,
+     resolution: LineageResolutionContext,
+@@ -411,6 +422,7 @@ def materialize_lineage_source_facts(
+         resolution,
+         occurrence,
+     )
++    _seed_defining_interface_descriptors(descriptors, semantic_anchors, resolution)
+     flows = tuple(sorted(
+         MaterializedFlowFact(
+             flow.local_id,
+@@ -622,6 +634,7 @@ def reresolve_materialized_lineage_source_facts(
+             is not None
+         )
+     )
++    _seed_defining_interface_descriptors(descriptors, semantic_anchors, resolution)
+     return MaterializedLineageSourceFacts(
+         materialized.manifest,
+         materialized.anchors,
+diff --git a/tests/analysis/test_lineage_materialization.py b/tests/analysis/test_lineage_materialization.py
+index e10be20..b6d9021 100644
+--- a/tests/analysis/test_lineage_materialization.py
++++ b/tests/analysis/test_lineage_materialization.py
+@@ -725,3 +725,44 @@ def test_materialized_callable_interface_builder_requires_canonical_capabilities
+     assert build_materialized_callable_interface_descriptors(
+         {"pkg/mod.py": legacy}, {"pkg.mod::run": "A1/2"}
+     ) == {}
++
++
++def test_defining_zero_flow_callable_persists_own_interface_descriptor():
++    facts = _callable_interface_facts("def ping():\n    pass\n")
++    owner = "A1/1"
++    descriptors = build_extracted_callable_interface_descriptors(
++        {"pkg/mod.py": facts}, {"pkg.mod::ping": owner}
++    )
++    result = materialize_lineage_source_facts(
++        facts, _context(artifacts={"pkg.mod::ping": owner}, descriptors=descriptors)
++    )
++    assert result.interface_descriptors == (descriptors[owner],)
++    assert descriptors[owner].slots == (build_return_slot(owner),)
++
++
++def test_zero_flow_callable_descriptor_rebind_survives_reresolution():
++    facts = _callable_interface_facts("def ping():\n    pass\n")
++    old, new = "A1/1", "A1/2"
++    descriptors = build_extracted_callable_interface_descriptors(
++        {"pkg/mod.py": facts}, {"pkg.mod::ping": old}
++    )
++    initial = materialize_lineage_source_facts(
++        facts, _context(artifacts={"pkg.mod::ping": old}, descriptors=descriptors)
++    )
++    rebound = build_materialized_callable_interface_descriptors(
++        {"pkg/mod.py": initial}, {"pkg.mod::ping": new}
++    )
++    rerun = reresolve_materialized_lineage_source_facts(
++        initial, _context(artifacts={"pkg.mod::ping": new}, descriptors=rebound)
++    )
++    assert rerun.interface_descriptors == (rebound[new],)
++
++
++def test_unrelated_resolution_descriptor_is_not_seeded_into_slice():
++    foreign = SemanticInterfaceDescriptor("A9/1", (build_return_slot("A9/1"),), "x")
++    result = materialize_lineage_source_facts(
++        _callable_interface_facts("value = 1\n"),
++        _context(artifacts={"other.mod::foreign": "A9/1"}, descriptors={"A9/1": foreign}),
++    )
++    assert result.semantic_anchors == ()
++    assert result.interface_descriptors == ()
 ```
 
