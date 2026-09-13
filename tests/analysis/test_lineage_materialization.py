@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+import ast
 import builtins
 
 import pytest
 
+from contextor.core.analysis.lineage_extraction import (
+    extract_lineage_source_facts,
+)
 from contextor.core.analysis.lineage_materialization import (
     LineageResolutionContext,
+    build_extracted_callable_interface_descriptors,
     materialize_lineage_source_facts,
     reresolve_materialized_lineage_source_facts,
 )
@@ -38,7 +43,9 @@ from contextor.core.domain.lineage_facts import (
     SourceSpan,
     SurfaceDeclarationEvidence,
     SurfaceKind,
+    build_keyword_binding_slot,
     build_parameter_value_slot,
+    build_positional_binding_slot,
     build_return_slot,
 )
 
@@ -557,3 +564,123 @@ def test_exact_surface_requires_endpoint_but_unresolved_surface_keeps_symbolic_b
         unresolved, _context(artifacts={"pkg.mod::target": "A9/1"})
     )
     assert isinstance(result.surfaces[0].exposed, MaterializedSymbolicRef)
+
+
+def _callable_interface_facts(source: str):
+    return extract_lineage_source_facts(
+        ast.parse(source),
+        source_key="pkg/mod.py",
+        source_fingerprint="f" * 64,
+    )
+
+
+def test_build_extracted_callable_interface_descriptor_has_exact_slots():
+    facts = _callable_interface_facts(
+        "def run(a, /, b, *args, c, **kwargs):\n"
+        "    return b\n"
+    )
+    owner = "A1/1"
+
+    result = build_extracted_callable_interface_descriptors(
+        {"pkg/mod.py": facts},
+        {"pkg.mod::run": owner},
+    )
+
+    assert tuple(result) == (owner,)
+    descriptor = result[owner]
+    assert descriptor.owner_id == owner
+    assert descriptor.slots == tuple(
+        sorted(
+            {
+                build_return_slot(owner),
+                build_parameter_value_slot(
+                    owner,
+                    ParameterKind.POSITIONAL_ONLY,
+                    ordinal=0,
+                ),
+                build_positional_binding_slot(
+                    owner,
+                    ParameterKind.POSITIONAL_ONLY,
+                    ordinal=0,
+                ),
+                build_parameter_value_slot(
+                    owner,
+                    ParameterKind.POSITIONAL_OR_KEYWORD,
+                    ordinal=0,
+                ),
+                build_positional_binding_slot(
+                    owner,
+                    ParameterKind.POSITIONAL_OR_KEYWORD,
+                    ordinal=0,
+                ),
+                build_keyword_binding_slot(
+                    owner,
+                    ParameterKind.POSITIONAL_OR_KEYWORD,
+                    name="b",
+                ),
+                build_parameter_value_slot(
+                    owner,
+                    ParameterKind.VAR_POSITIONAL,
+                ),
+                build_positional_binding_slot(
+                    owner,
+                    ParameterKind.VAR_POSITIONAL,
+                ),
+                build_parameter_value_slot(
+                    owner,
+                    ParameterKind.KEYWORD_ONLY,
+                    name="c",
+                ),
+                build_keyword_binding_slot(
+                    owner,
+                    ParameterKind.KEYWORD_ONLY,
+                    name="c",
+                ),
+                build_parameter_value_slot(
+                    owner,
+                    ParameterKind.VAR_KEYWORD,
+                ),
+                build_keyword_binding_slot(
+                    owner,
+                    ParameterKind.VAR_KEYWORD,
+                ),
+            }
+        )
+    )
+
+
+def test_callable_interface_signature_digest_is_owner_generation_independent():
+    facts = _callable_interface_facts(
+        "def run(value, *, mode):\n"
+        "    return value\n"
+    )
+
+    first = build_extracted_callable_interface_descriptors(
+        {"pkg/mod.py": facts},
+        {"pkg.mod::run": "A1/1"},
+    )["A1/1"]
+    second = build_extracted_callable_interface_descriptors(
+        {"pkg/mod.py": facts},
+        {"pkg.mod::run": "A1/2"},
+    )["A1/2"]
+
+    assert first.owner_id != second.owner_id
+    assert first.slots != second.slots
+    assert first.signature_digest == second.signature_digest
+
+
+def test_callable_interface_conflicting_redefinitions_fail_closed():
+    facts = _callable_interface_facts(
+        "def run(value):\n"
+        "    return value\n"
+        "\n"
+        "def run(value, mode):\n"
+        "    return value\n"
+    )
+
+    result = build_extracted_callable_interface_descriptors(
+        {"pkg/mod.py": facts},
+        {"pkg.mod::run": "A1/1"},
+    )
+
+    assert result == {}

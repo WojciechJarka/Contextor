@@ -1,4 +1,4 @@
-# F2L D1K Walkthrough
+# F2L D1L1 Walkthrough
 
 ## STATUS
 
@@ -6,612 +6,471 @@ PASS
 
 ## FILES_CHANGED
 
-- `contextor/core/lineage_query/service.py`
-- `contextor/core/lineage_query/__init__.py`
-- `tests/analysis/test_lineage_query_service.py`
+- `contextor/core/analysis/lineage_materialization.py`
+- `tests/analysis/test_lineage_materialization.py`
 
-`walkthrough.md` is deliberately excluded from ACTUAL_DIFF.
+`walkthrough.md` is excluded from its own ACTUAL_DIFF.
 
-## COMPLETE_RELATION_MAPPING_PROOF
+## SLOT_PROOF
 
-The primary-section mapping covers exactly every `LineageRelation`; a missing relation raises `ValueError` rather than falling back.
+`test_build_extracted_callable_interface_descriptor_has_exact_slots` proves return and parameter-value slots plus positional bindings for positional-only, positional-or-keyword, and vararg parameters, and keyword bindings for positional-or-keyword, keyword-only, and varkw parameters.
 
-## PRIMARY_SECTION_PROOF
+## GENERATION_INDEPENDENT_DIGEST_PROOF
 
-Semantic sections preserve the established exact scope-flow order while projecting bindings, parameters, calls/interfaces, returns, state, callbacks, and surface flows.
+`test_callable_interface_signature_digest_is_owner_generation_independent` proves owners `A1/1` and `A1/2` have distinct owner IDs and slots but the same SHA256 signature digest.
 
-## UNCERTAINTY_ORTHOGONAL_PROOF
+## REDEFINITION_FAIL_CLOSED_PROOF
 
-Dynamic and unresolved flows remain in their primary semantic section and additionally appear in `unresolved_dynamic`.
-
-## SURFACE_COMPOSITION_PROOF
-
-Surface flows and exact direct surface facts remain separate models in one `LineageSurfaceSection`.
-
-## NESTED_SCOPE_EXCLUSION_PROOF
-
-Sections consume only `lexical_scope_facts().flows`, excluding nested-scope and definition-default flows.
-
-## AMBIGUOUS_ROOT_FAIL_CLOSED_PROOF
-
-Ambiguous roots leave lexical scope flows empty, so every flow section is empty and completion is false.
-
-## NO_TRAVERSAL_PROOF
-
-The regression patches local traversal to fail; semantic projection still succeeds because it does not invoke traversal.
+`test_callable_interface_conflicting_redefinitions_fail_closed` proves distinct `pkg.mod::run` descriptors for one active owner yield `{}`.
 
 ## TESTS_RUN
 
-- `py_compile` for service and package exports: PASS.
-- Focused pytest service/backend: PASS — 62 passed in 2.05s.
-- `git diff --check`: PASS (only CRLF conversion warnings).
+```text
+.\.venv\Scripts\python.exe -m py_compile contextor/core/analysis/lineage_materialization.py
+.\.venv\Scripts\python.exe -m pytest -q tests/analysis/test_lineage_materialization.py
+20 passed in 1.55s
+git diff --check -- contextor/core/analysis/lineage_materialization.py tests/analysis/test_lineage_materialization.py
+PASS
+```
 
 ## ACTUAL_DIFF
 
-### contextor/core/lineage_query/service.py
-
 ```diff
-diff --git a/contextor/core/lineage_query/service.py b/contextor/core/lineage_query/service.py
-index 5cbf0ee..3c08454 100644
---- a/contextor/core/lineage_query/service.py
-+++ b/contextor/core/lineage_query/service.py
-@@ -4,6 +4,7 @@ from dataclasses import dataclass
-
+diff --git a/contextor/core/analysis/lineage_materialization.py b/contextor/core/analysis/lineage_materialization.py
+index 502b825..d4efd5c 100644
+--- a/contextor/core/analysis/lineage_materialization.py
++++ b/contextor/core/analysis/lineage_materialization.py
+@@ -2,6 +2,8 @@
+ 
+ from __future__ import annotations
+ 
++import hashlib
++
+ from dataclasses import dataclass
+ from types import MappingProxyType
+ from typing import Mapping
+@@ -12,11 +14,13 @@ from contextor.core.analysis.lineage_extraction_contracts import (
+ )
  from contextor.core.domain.lineage_facts import (
+     LINEAGE_FACTS_SEMANTIC_VERSION,
++    ExtractedAnchorFact,
+     ExtractedLineageSourceFacts,
+     ExtractedOccurrenceRef,
+     ExtractedSymbolicKind,
+     ExtractedSymbolicRef,
      LineageConfidence,
-+    LineageRelation,
++    LineageFamilyStatus,
      MaterializedAnchorFact,
      MaterializedFlowFact,
-     MaterializedOccurrenceRef,
-@@ -30,6 +31,25 @@ _LEXICAL_SCOPE_KINDS = frozenset(
-     }
+     MaterializedLineageSourceFacts,
+@@ -31,13 +35,31 @@ from contextor.core.domain.lineage_facts import (
+     SemanticEndpointRole,
+     SemanticInterfaceDescriptor,
+     SourceLineageManifest,
++    build_keyword_binding_slot,
+     build_module_global_slot,
+     build_parameter_value_slot,
++    build_positional_binding_slot,
+     build_return_slot,
+     claims_exact_semantic_target,
  )
-
-+_PRIMARY_SEMANTIC_SECTION_BY_RELATION = {
-+    LineageRelation.BINDS: "bindings",
-+    LineageRelation.ASSIGNS: "bindings",
-+    LineageRelation.ALIASES: "bindings",
-+    LineageRelation.CAPTURES: "bindings",
-+    LineageRelation.ARGUMENT_TO_PARAMETER: "parameters",
-+    LineageRelation.DEFAULTS_TO_PARAMETER: "parameters",
-+    LineageRelation.CALL_RESULT: "calls_interfaces",
-+    LineageRelation.INHERITS: "calls_interfaces",
-+    LineageRelation.OVERRIDES: "calls_interfaces",
-+    LineageRelation.RETURNS: "returns",
-+    LineageRelation.READS_STATE: "state",
-+    LineageRelation.WRITES_STATE: "state",
-+    LineageRelation.CALLBACK_REGISTERS: "callbacks",
-+    LineageRelation.CALLBACK_INVOKES: "callbacks",
-+    LineageRelation.EXPOSES: "surfaces",
-+    LineageRelation.DECLARES_PUBLIC_NAMES: "surfaces",
+ 
+ 
++_CALLABLE_INTERFACE_ANCHOR_KINDS = frozenset(
++    {
++        "function",
++        "async_function",
++    }
++)
++
++_PARAMETER_KIND_BY_LOCAL_KIND = {
++    "parameter_posonly": ParameterKind.POSITIONAL_ONLY,
++    "parameter_poskw": ParameterKind.POSITIONAL_OR_KEYWORD,
++    "parameter_vararg": ParameterKind.VAR_POSITIONAL,
++    "parameter_kwonly": ParameterKind.KEYWORD_ONLY,
++    "parameter_varkw": ParameterKind.VAR_KEYWORD,
 +}
 +
-
- @dataclass(frozen=True)
- class ResolvedLineageTarget:
-@@ -147,6 +167,31 @@ class LocalLineageTraversal:
-         return self.scope.complete and self.seed_in_scope
-
-
-+@dataclass(frozen=True)
-+class LineageSurfaceSection:
-+    flows: tuple[LineageFlowMatch, ...]
-+    facts: tuple[LineageSurfaceMatch, ...]
-+
-+
-+@dataclass(frozen=True)
-+class SemanticLineageSections:
-+    target: ResolvedLineageTarget
-+    scope: LexicalScopeFacts
-+    direct: DirectLineageFacts
-+    bindings: tuple[LineageFlowMatch, ...]
-+    parameters: tuple[LineageFlowMatch, ...]
-+    calls_interfaces: tuple[LineageFlowMatch, ...]
-+    returns: tuple[LineageFlowMatch, ...]
-+    state: tuple[LineageFlowMatch, ...]
-+    callbacks: tuple[LineageFlowMatch, ...]
-+    surfaces: LineageSurfaceSection
-+    unresolved_dynamic: tuple[LineageFlowMatch, ...]
-+
-+    @property
-+    def complete(self) -> bool:
-+        return self.scope.complete and self.direct.complete
-+
 +
  @dataclass(frozen=True)
- class DirectLineageFacts:
-     target: ResolvedLineageTarget
-@@ -439,6 +484,71 @@ class LineageQueryService:
-             materialization_complete=materialization_complete,
-         )
-
-+    def semantic_sections(
-+        self,
-+        target: ResolvedLineageTarget,
-+    ) -> SemanticLineageSections:
-+        if not isinstance(target, ResolvedLineageTarget):
+ class LineageResolutionContext:
+     """Narrow read-only evidence of currently active canonical identities."""
+@@ -78,6 +100,204 @@ class LineageOriginUnavailableError(ValueError):
+     """A legacy semantic endpoint cannot be safely re-resolved."""
+ 
+ 
++def _callable_interface_descriptor(
++    owner_id: str,
++    callable_anchor: ExtractedAnchorFact,
++    anchors: tuple[ExtractedAnchorFact, ...],
++) -> SemanticInterfaceDescriptor:
++    parameters = tuple(
++        sorted(
++            (
++                anchor
++                for anchor in anchors
++                if (
++                    anchor.kind == "parameter"
++                    and anchor.owner_local_id
++                    == callable_anchor.local_id
++                )
++            ),
++            key=lambda anchor: (
++                anchor.span.start_line,
++                anchor.span.start_column,
++                anchor.local_id,
++            ),
++        )
++    )
++
++    slots = {build_return_slot(owner_id)}
++    signature_tokens = [
++        f"callable={callable_anchor.kind}",
++    ]
++
++    for parameter in parameters:
++        local_kind, _path, ordinal, name = (
++            parse_local_occurrence_id(
++                parameter.local_id
++            )
++        )
++        try:
++            kind = _PARAMETER_KIND_BY_LOCAL_KIND[
++                local_kind
++            ]
++        except KeyError as exc:
++            raise ValueError(
++                "Parameter anchor must use a canonical "
++                "parameter local-id kind."
++            ) from exc
++        if name is None:
++            raise ValueError(
++                "Parameter anchor must have a canonical name."
++            )
++
++        slots.add(
++            build_parameter_value_slot(
++                owner_id,
++                kind,
++                ordinal=ordinal,
++                name=name,
++            )
++        )
++
++        if kind in {
++            ParameterKind.POSITIONAL_ONLY,
++            ParameterKind.POSITIONAL_OR_KEYWORD,
++        }:
++            slots.add(
++                build_positional_binding_slot(
++                    owner_id,
++                    kind,
++                    ordinal=ordinal,
++                )
++            )
++        elif kind is ParameterKind.VAR_POSITIONAL:
++            slots.add(
++                build_positional_binding_slot(
++                    owner_id,
++                    kind,
++                )
++            )
++
++        if kind in {
++            ParameterKind.POSITIONAL_OR_KEYWORD,
++            ParameterKind.KEYWORD_ONLY,
++        }:
++            slots.add(
++                build_keyword_binding_slot(
++                    owner_id,
++                    kind,
++                    name=name,
++                )
++            )
++        elif kind is ParameterKind.VAR_KEYWORD:
++            slots.add(
++                build_keyword_binding_slot(
++                    owner_id,
++                    kind,
++                )
++            )
++
++        has_ordinal = kind in {
++            ParameterKind.POSITIONAL_ONLY,
++            ParameterKind.POSITIONAL_OR_KEYWORD,
++        }
++        signature_tokens.append(
++            f"parameter={kind.value}:{ordinal if has_ordinal else '-'}:{name}"
++        )
++
++    signature_digest = hashlib.sha256(
++        "\x1f".join(signature_tokens).encode("utf-8")
++    ).hexdigest()
++
++    return SemanticInterfaceDescriptor(
++        owner_id=owner_id,
++        slots=tuple(sorted(slots)),
++        signature_digest=signature_digest,
++    )
++
++
++def build_extracted_callable_interface_descriptors(
++    sources: Mapping[str, ExtractedLineageSourceFacts],
++    active_artifact_ids: Mapping[str, str],
++) -> dict[str, SemanticInterfaceDescriptor]:
++    if not isinstance(sources, Mapping):
++        raise TypeError("sources must be a mapping.")
++    if not isinstance(active_artifact_ids, Mapping):
++        raise TypeError(
++            "active_artifact_ids must be a mapping."
++        )
++
++    descriptors: dict[
++        str,
++        SemanticInterfaceDescriptor,
++    ] = {}
++    ambiguous_owner_ids: set[str] = set()
++
++    for source_key in sorted(sources):
++        source = sources[source_key]
++        if not isinstance(
++            source,
++            ExtractedLineageSourceFacts,
++        ):
 +            raise TypeError(
-+                "target must be ResolvedLineageTarget."
++                "lineage source value has invalid type."
 +            )
++        if source.source_key != source_key:
++            raise ValueError(
++                "lineage mapping key does not match "
++                "source key."
++            )
++        if source.status is not LineageFamilyStatus.FRESH:
++            continue
 +
-+        scope = self.lexical_scope_facts(target)
-+        direct = self.direct_facts(target)
-+
-+        buckets: dict[str, list[LineageFlowMatch]] = {
-+            "bindings": [],
-+            "parameters": [],
-+            "calls_interfaces": [],
-+            "returns": [],
-+            "state": [],
-+            "callbacks": [],
-+            "surfaces": [],
++        anchors_by_id = {
++            anchor.local_id: anchor
++            for anchor in source.anchors
 +        }
-+        unresolved_dynamic: list[LineageFlowMatch] = []
-+
-+        for match in scope.flows:
-+            try:
-+                section_name = (
-+                    _PRIMARY_SEMANTIC_SECTION_BY_RELATION[
-+                        match.flow.relation
-+                    ]
-+                )
-+            except KeyError as exc:
-+                raise ValueError(
-+                    "Canonical lineage relation has no "
-+                    "semantic section."
-+                ) from exc
-+
-+            buckets[section_name].append(match)
-+
-+            if _terminal_flow_reason(match.flow) in {
-+                "dynamic",
-+                "unresolved",
-+            }:
-+                unresolved_dynamic.append(match)
-+
-+        return SemanticLineageSections(
-+            target=target,
-+            scope=scope,
-+            direct=direct,
-+            bindings=tuple(buckets["bindings"]),
-+            parameters=tuple(buckets["parameters"]),
-+            calls_interfaces=tuple(
-+                buckets["calls_interfaces"]
-+            ),
-+            returns=tuple(buckets["returns"]),
-+            state=tuple(buckets["state"]),
-+            callbacks=tuple(buckets["callbacks"]),
-+            surfaces=LineageSurfaceSection(
-+                flows=tuple(buckets["surfaces"]),
-+                facts=direct.surfaces,
-+            ),
-+            unresolved_dynamic=tuple(
-+                unresolved_dynamic
-+            ),
++        module_name = _module_name_from_source_key(
++            source.source_key
 +        )
 +
-
-     def traverse_lexical_scope(
-         self,
-```
-
-### contextor/core/lineage_query/__init__.py
-
-```diff
-diff --git a/contextor/core/lineage_query/__init__.py b/contextor/core/lineage_query/__init__.py
-index 29ed990..6f6a35a 100644
---- a/contextor/core/lineage_query/__init__.py
-+++ b/contextor/core/lineage_query/__init__.py
-@@ -12,11 +12,13 @@ from contextor.core.lineage_query.service import (
-     LineageQueryService,
-     LineageScopeRootMatch,
-     LineageSurfaceMatch,
-+    LineageSurfaceSection,
-     LineageTargetResolution,
-     LineageTraversalBoundary,
-     LineageTraversalStep,
-     LocalLineageTraversal,
-     ResolvedLineageTarget,
-+    SemanticLineageSections,
- )
-
- __all__ = [
-@@ -30,10 +32,12 @@ __all__ = [
-     "LineageQueryService",
-     "LineageScopeRootMatch",
-     "LineageSurfaceMatch",
-+    "LineageSurfaceSection",
-     "LineageTargetResolution",
-     "LineageTraversalBoundary",
-     "LineageTraversalStep",
-     "LocalLineageTraversal",
-     "RepositoryStateLineageBackend",
-     "ResolvedLineageTarget",
-+    "SemanticLineageSections",
- ]
-```
-
-### tests/analysis/test_lineage_query_service.py
-
-```diff
-diff --git a/tests/analysis/test_lineage_query_service.py b/tests/analysis/test_lineage_query_service.py
-index 4172a0b..96fed8b 100644
---- a/tests/analysis/test_lineage_query_service.py
-+++ b/tests/analysis/test_lineage_query_service.py
-@@ -1557,3 +1557,375 @@ def test_local_traversal_reports_true_truncation_from_minimal_depth_frontier():
-         "b_outer_call",
++        for anchor in source.anchors:
++            if (
++                anchor.kind
++                not in _CALLABLE_INTERFACE_ANCHOR_KINDS
++            ):
++                continue
++
++            symbol_path = _anchor_symbol_path(
++                anchor,
++                anchors_by_id,
++            )
++            if symbol_path is None:
++                continue
++
++            qualified_name = (
++                f"{module_name}::{symbol_path}"
++            )
++            owner_id = active_artifact_ids.get(
++                qualified_name
++            )
++            if owner_id is None:
++                continue
++            if owner_id in ambiguous_owner_ids:
++                continue
++
++            candidate = _callable_interface_descriptor(
++                owner_id,
++                anchor,
++                source.anchors,
++            )
++            existing = descriptors.get(owner_id)
++
++            if existing is None:
++                descriptors[owner_id] = candidate
++            elif existing != candidate:
++                descriptors.pop(owner_id, None)
++                ambiguous_owner_ids.add(owner_id)
++
++    return dict(sorted(descriptors.items()))
++
++
+ def materialize_lineage_source_facts(
+     extracted: ExtractedLineageSourceFacts,
+     resolution: LineageResolutionContext,
+@@ -499,15 +719,8 @@ def _slot_for(reference: ExtractedSymbolicRef, owner_id: str) -> str | None:
+     local_kind, _path, ordinal, name = parse_local_occurrence_id(
+         reference.source_local_id
      )
-     assert result.truncated is True
-+def _append_scope_surface(backend, surface):
-+    source = backend.get_source("pkg/target.py")
-+    assert source is not None
-+    backend._sources["pkg/target.py"] = replace(
-+        source,
-+        manifest=replace(
-+            source.manifest,
-+            surface_count=(
-+                source.manifest.surface_count + 1
-+            ),
-+        ),
-+        surfaces=tuple(
-+            sorted(
-+                (
-+                    *source.surfaces,
-+                    surface,
-+                )
-+            )
-+        ),
+-    parameter_kinds = {
+-        "parameter_posonly": ParameterKind.POSITIONAL_ONLY,
+-        "parameter_poskw": ParameterKind.POSITIONAL_OR_KEYWORD,
+-        "parameter_vararg": ParameterKind.VAR_POSITIONAL,
+-        "parameter_kwonly": ParameterKind.KEYWORD_ONLY,
+-        "parameter_varkw": ParameterKind.VAR_KEYWORD,
+-    }
+     try:
+-        kind = parameter_kinds[local_kind]
++        kind = _PARAMETER_KIND_BY_LOCAL_KIND[local_kind]
+     except KeyError as exc:
+         raise ValueError(
+             "Parameter symbolic reference must point at a parameter local id."
+diff --git a/tests/analysis/test_lineage_materialization.py b/tests/analysis/test_lineage_materialization.py
+index d0c3568..4680ca0 100644
+--- a/tests/analysis/test_lineage_materialization.py
++++ b/tests/analysis/test_lineage_materialization.py
+@@ -1,11 +1,16 @@
+ from __future__ import annotations
+ 
++import ast
+ import builtins
+ 
+ import pytest
+ 
++from contextor.core.analysis.lineage_extraction import (
++    extract_lineage_source_facts,
++)
+ from contextor.core.analysis.lineage_materialization import (
+     LineageResolutionContext,
++    build_extracted_callable_interface_descriptors,
+     materialize_lineage_source_facts,
+     reresolve_materialized_lineage_source_facts,
+ )
+@@ -38,7 +43,9 @@ from contextor.core.domain.lineage_facts import (
+     SourceSpan,
+     SurfaceDeclarationEvidence,
+     SurfaceKind,
++    build_keyword_binding_slot,
+     build_parameter_value_slot,
++    build_positional_binding_slot,
+     build_return_slot,
+ )
+ 
+@@ -557,3 +564,123 @@ def test_exact_surface_requires_endpoint_but_unresolved_surface_keeps_symbolic_b
+         unresolved, _context(artifacts={"pkg.mod::target": "A9/1"})
+     )
+     assert isinstance(result.surfaces[0].exposed, MaterializedSymbolicRef)
++
++
++def _callable_interface_facts(source: str):
++    return extract_lineage_source_facts(
++        ast.parse(source),
++        source_key="pkg/mod.py",
++        source_fingerprint="f" * 64,
 +    )
 +
 +
-+def _append_semantic_section_flow(
-+    backend,
-+    local_id,
-+    relation,
-+    *,
-+    resolution_kind=ResolutionKind.LEXICAL_EXACT,
-+    confidence=LineageConfidence.CONFIRMED,
-+    dynamic_boundary=None,
-+):
-+    fp = "d" * 64
-+    _append_scope_flow(
-+        backend,
-+        MaterializedFlowFact(
-+            local_id,
-+            MaterializedOccurrenceRef(
-+                "pkg/target.py",
-+                fp,
-+                f"{local_id}-source",
-+            ),
-+            MaterializedOccurrenceRef(
-+                "pkg/target.py",
-+                fp,
-+                f"{local_id}-target",
-+            ),
-+            relation,
-+            SourceSpan(30, 0, 30, 5),
-+            resolution_kind,
-+            confidence,
-+            dynamic_boundary=dynamic_boundary,
-+            owner_local_id="outer",
-+        ),
++def test_build_extracted_callable_interface_descriptor_has_exact_slots():
++    facts = _callable_interface_facts(
++        "def run(a, /, b, *args, c, **kwargs):\n"
++        "    return b\n"
++    )
++    owner = "A1/1"
++
++    result = build_extracted_callable_interface_descriptors(
++        {"pkg/mod.py": facts},
++        {"pkg.mod::run": owner},
 +    )
 +
-+
-+def test_semantic_section_relation_mapping_covers_domain_exactly():
-+    from contextor.core.lineage_query import service as service_module
-+
-+    assert set(
-+        service_module._PRIMARY_SEMANTIC_SECTION_BY_RELATION
-+    ) == set(LineageRelation)
-+
-+    assert (
-+        service_module._PRIMARY_SEMANTIC_SECTION_BY_RELATION
-+        == {
-+            LineageRelation.BINDS: "bindings",
-+            LineageRelation.ASSIGNS: "bindings",
-+            LineageRelation.ALIASES: "bindings",
-+            LineageRelation.CAPTURES: "bindings",
-+            LineageRelation.ARGUMENT_TO_PARAMETER: "parameters",
-+            LineageRelation.DEFAULTS_TO_PARAMETER: "parameters",
-+            LineageRelation.CALL_RESULT: "calls_interfaces",
-+            LineageRelation.INHERITS: "calls_interfaces",
-+            LineageRelation.OVERRIDES: "calls_interfaces",
-+            LineageRelation.RETURNS: "returns",
-+            LineageRelation.READS_STATE: "state",
-+            LineageRelation.WRITES_STATE: "state",
-+            LineageRelation.CALLBACK_REGISTERS: "callbacks",
-+            LineageRelation.CALLBACK_INVOKES: "callbacks",
-+            LineageRelation.EXPOSES: "surfaces",
-+            LineageRelation.DECLARES_PUBLIC_NAMES: "surfaces",
-+        }
-+    )
-+
-+
-+def test_semantic_sections_project_exact_scope_flows_by_meaning():
-+    service, backend, target = _lexical_scope_service()
-+
-+    _append_semantic_section_flow(
-+        backend,
-+        "c_parameter",
-+        LineageRelation.ARGUMENT_TO_PARAMETER,
-+    )
-+    _append_semantic_section_flow(
-+        backend,
-+        "d_return",
-+        LineageRelation.RETURNS,
-+    )
-+    _append_semantic_section_flow(
-+        backend,
-+        "e_state_read",
-+        LineageRelation.READS_STATE,
-+    )
-+    _append_semantic_section_flow(
-+        backend,
-+        "f_state_write",
-+        LineageRelation.WRITES_STATE,
-+    )
-+    _append_semantic_section_flow(
-+        backend,
-+        "g_callback_register",
-+        LineageRelation.CALLBACK_REGISTERS,
-+    )
-+    _append_semantic_section_flow(
-+        backend,
-+        "h_callback_invoke",
-+        LineageRelation.CALLBACK_INVOKES,
-+    )
-+    _append_semantic_section_flow(
-+        backend,
-+        "i_exposes",
-+        LineageRelation.EXPOSES,
-+    )
-+    _append_semantic_section_flow(
-+        backend,
-+        "j_alias",
-+        LineageRelation.ALIASES,
-+    )
-+    _append_semantic_section_flow(
-+        backend,
-+        "k_inherits",
-+        LineageRelation.INHERITS,
-+    )
-+
-+    result = service.semantic_sections(target)
-+
-+    assert result.complete is True
-+
-+    assert tuple(
-+        item.flow.local_id
-+        for item in result.bindings
-+    ) == (
-+        "a_outer_bind",
-+        "j_alias",
-+    )
-+    assert tuple(
-+        item.flow.local_id
-+        for item in result.parameters
-+    ) == (
-+        "c_parameter",
-+    )
-+    assert tuple(
-+        item.flow.local_id
-+        for item in result.calls_interfaces
-+    ) == (
-+        "b_outer_call",
-+        "k_inherits",
-+    )
-+    assert tuple(
-+        item.flow.local_id
-+        for item in result.returns
-+    ) == (
-+        "d_return",
-+    )
-+    assert tuple(
-+        item.flow.local_id
-+        for item in result.state
-+    ) == (
-+        "e_state_read",
-+        "f_state_write",
-+    )
-+    assert tuple(
-+        item.flow.local_id
-+        for item in result.callbacks
-+    ) == (
-+        "g_callback_register",
-+        "h_callback_invoke",
-+    )
-+    assert tuple(
-+        item.flow.local_id
-+        for item in result.surfaces.flows
-+    ) == (
-+        "i_exposes",
-+    )
-+    assert result.unresolved_dynamic == ()
-+
-+
-+def test_semantic_sections_keep_uncertainty_orthogonal_to_primary_section():
-+    service, backend, target = _lexical_scope_service()
-+
-+    _append_semantic_section_flow(
-+        backend,
-+        "z_dynamic_assignment",
-+        LineageRelation.ASSIGNS,
-+        resolution_kind=(
-+            ResolutionKind.DYNAMIC_RUNTIME_BOUNDARY
-+        ),
-+        confidence=LineageConfidence.DYNAMIC,
-+        dynamic_boundary="runtime-assignment",
-+    )
-+
-+    result = service.semantic_sections(target)
-+
-+    assert tuple(
-+        item.flow.local_id
-+        for item in result.bindings
-+    ) == (
-+        "a_outer_bind",
-+        "z_dynamic_assignment",
-+    )
-+    assert tuple(
-+        item.flow.local_id
-+        for item in result.unresolved_dynamic
-+    ) == (
-+        "z_dynamic_assignment",
-+    )
-+
-+
-+def test_semantic_sections_include_exact_artifact_surfaces():
-+    service, backend, target = _lexical_scope_service()
-+    fp = "d" * 64
-+    outer = MaterializedOccurrenceRef(
-+        "pkg/target.py",
-+        fp,
-+        "outer",
-+    )
-+
-+    surface = MaterializedSurfaceFact(
-+        "public-outer",
-+        SurfaceKind.PUBLIC_SYMBOL,
-+        outer,
-+        SourceSpan(1, 0, 1, 8),
-+        ResolutionKind.PYTHON_NAME_CONVENTION,
-+        LineageConfidence.INFERRED,
-+        "outer",
-+        declaration_evidence=(
-+            SurfaceDeclarationEvidence.STATIC_DECLARATION
-+        ),
-+    )
-+    _append_scope_surface(backend, surface)
-+
-+    result = service.semantic_sections(target)
-+
-+    assert result.surfaces.flows == ()
-+    assert tuple(
-+        item.surface.local_id
-+        for item in result.surfaces.facts
-+    ) == (
-+        "public-outer",
-+    )
-+    assert result.surfaces.facts[0].surface is surface
-+
-+
-+def test_semantic_sections_do_not_pull_nested_scope_flows():
-+    service, _, target = _lexical_scope_service()
-+
-+    result = service.semantic_sections(target)
-+
-+    all_section_flow_ids = {
-+        item.flow.local_id
-+        for section in (
-+            result.bindings,
-+            result.parameters,
-+            result.calls_interfaces,
-+            result.returns,
-+            result.state,
-+            result.callbacks,
-+            result.surfaces.flows,
++    assert tuple(result) == (owner,)
++    descriptor = result[owner]
++    assert descriptor.owner_id == owner
++    assert descriptor.slots == tuple(
++        sorted(
++            {
++                build_return_slot(owner),
++                build_parameter_value_slot(
++                    owner,
++                    ParameterKind.POSITIONAL_ONLY,
++                    ordinal=0,
++                ),
++                build_positional_binding_slot(
++                    owner,
++                    ParameterKind.POSITIONAL_ONLY,
++                    ordinal=0,
++                ),
++                build_parameter_value_slot(
++                    owner,
++                    ParameterKind.POSITIONAL_OR_KEYWORD,
++                    ordinal=0,
++                ),
++                build_positional_binding_slot(
++                    owner,
++                    ParameterKind.POSITIONAL_OR_KEYWORD,
++                    ordinal=0,
++                ),
++                build_keyword_binding_slot(
++                    owner,
++                    ParameterKind.POSITIONAL_OR_KEYWORD,
++                    name="b",
++                ),
++                build_parameter_value_slot(
++                    owner,
++                    ParameterKind.VAR_POSITIONAL,
++                ),
++                build_positional_binding_slot(
++                    owner,
++                    ParameterKind.VAR_POSITIONAL,
++                ),
++                build_parameter_value_slot(
++                    owner,
++                    ParameterKind.KEYWORD_ONLY,
++                    name="c",
++                ),
++                build_keyword_binding_slot(
++                    owner,
++                    ParameterKind.KEYWORD_ONLY,
++                    name="c",
++                ),
++                build_parameter_value_slot(
++                    owner,
++                    ParameterKind.VAR_KEYWORD,
++                ),
++                build_keyword_binding_slot(
++                    owner,
++                    ParameterKind.VAR_KEYWORD,
++                ),
++            }
 +        )
-+        for item in section
-+    }
-+
-+    assert "c_inner_return" not in all_section_flow_ids
-+    assert (
-+        "d_comprehension_assign"
-+        not in all_section_flow_ids
-+    )
-+    assert "e_definition_default" not in all_section_flow_ids
-+
-+
-+def test_semantic_sections_preserve_fail_closed_scope_state():
-+    service, _, target = _lexical_scope_service(
-+        flow_ownership=False,
 +    )
 +
-+    result = service.semantic_sections(target)
 +
-+    assert result.scope.complete is False
-+    assert result.complete is False
-+    assert result.bindings
-+    assert result.calls_interfaces
-+
-+
-+def test_semantic_sections_preserve_ambiguous_root_fail_closed():
-+    service, backend, target = _lexical_scope_service()
-+    source = backend.get_source("pkg/target.py")
-+    assert source is not None
-+
-+    duplicate_ref = MaterializedOccurrenceRef(
-+        "pkg/target.py",
-+        "d" * 64,
-+        "outer-redefined",
-+    )
-+    duplicate_anchor = MaterializedAnchorFact(
-+        "outer-redefined",
-+        duplicate_ref,
-+        "function",
-+        SourceSpan(20, 0, 22, 1),
-+        owner_local_id="module",
-+    )
-+    duplicate_binding = SemanticAnchorBinding(
-+        target.artifact_id,
-+        target.qualified_name,
-+        duplicate_ref,
++def test_callable_interface_signature_digest_is_owner_generation_independent():
++    facts = _callable_interface_facts(
++        "def run(value, *, mode):\n"
++        "    return value\n"
 +    )
 +
-+    backend._sources["pkg/target.py"] = replace(
-+        source,
-+        manifest=replace(
-+            source.manifest,
-+            anchor_count=(
-+                source.manifest.anchor_count + 1
-+            ),
-+        ),
-+        anchors=tuple(
-+            sorted(
-+                (
-+                    *source.anchors,
-+                    duplicate_anchor,
-+                )
-+            )
-+        ),
-+        semantic_anchors=tuple(
-+            sorted(
-+                (
-+                    *source.semantic_anchors,
-+                    duplicate_binding,
-+                )
-+            )
-+        ),
++    first = build_extracted_callable_interface_descriptors(
++        {"pkg/mod.py": facts},
++        {"pkg.mod::run": "A1/1"},
++    )["A1/1"]
++    second = build_extracted_callable_interface_descriptors(
++        {"pkg/mod.py": facts},
++        {"pkg.mod::run": "A1/2"},
++    )["A1/2"]
++
++    assert first.owner_id != second.owner_id
++    assert first.slots != second.slots
++    assert first.signature_digest == second.signature_digest
++
++
++def test_callable_interface_conflicting_redefinitions_fail_closed():
++    facts = _callable_interface_facts(
++        "def run(value):\n"
++        "    return value\n"
++        "\n"
++        "def run(value, mode):\n"
++        "    return value\n"
 +    )
 +
-+    result = service.semantic_sections(target)
-+
-+    assert result.scope.root_ambiguous is True
-+    assert result.scope.flows == ()
-+    assert result.complete is False
-+    assert result.bindings == ()
-+    assert result.parameters == ()
-+    assert result.calls_interfaces == ()
-+    assert result.returns == ()
-+    assert result.state == ()
-+    assert result.callbacks == ()
-+    assert result.surfaces.flows == ()
-+
-+
-+def test_semantic_sections_never_use_local_traversal(monkeypatch):
-+    service, _, target = _lexical_scope_service()
-+
-+    monkeypatch.setattr(
-+        service,
-+        "traverse_lexical_scope",
-+        lambda *args, **kwargs: (_ for _ in ()).throw(
-+            AssertionError("semantic projection used traversal")
-+        ),
++    result = build_extracted_callable_interface_descriptors(
++        {"pkg/mod.py": facts},
++        {"pkg.mod::run": "A1/1"},
 +    )
 +
-+    result = service.semantic_sections(target)
-+
-+    assert result.bindings
-+    assert result.calls_interfaces
++    assert result == {}
 ```
+
