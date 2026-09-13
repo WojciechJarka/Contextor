@@ -1,4 +1,4 @@
-# F2L D1N3b4 Walkthrough
+# F2L D1O1 Walkthrough
 
 ## STATUS
 
@@ -6,384 +6,387 @@ PASS
 
 ## FILES_CHANGED
 
-- `contextor/mcp/lineage_response.py`
-- `tests/mcp/test_lineage_response.py`
+- `contextor/core/live_state/ipc.py`
+- `tests/live_state/test_ipc_canonical_query.py`
 
-## FRESHNESS_PAYLOAD_PROOF
+## PROTOCOL_BUMP_PROOF
 
-Supplied read-only `state_freshness` is serialized into the base candidate, neutral preview, represented payload, represented preview, and renderer output only when present.
+`LIVE_PROTOCOL_VERSION == 4` is asserted by the narrow-query transport test.
 
-## REPRESENTED_SIZE_PROOF
+## NARROW_RESULT_PROOF
 
-The represented-preview test compares its candidate bytes directly with the exact represented indexed fetch candidate containing freshness.
+A 1,000,000-character state field is absent from the canonical-query response; only the handler result and revision are returned.
 
-## AUTO_THRESHOLD_FRESHNESS_PROOF
+## SAME_REVISION_PROOF
 
-A supplied 5000-character advisory envelope makes an otherwise compact canonical candidate exceed 5120 bytes and returns a represented auto preview whose candidate-byte fields agree exactly.
+The handler receives the identical in-memory state object under the server RLock, and the response returns the matching revision.
 
-## NO_MUTATION_PROOF
+## NO_SNAPSHOT_PROOF
 
-The payload test retains equality of the supplied freshness mapping to its original shallow copy; response construction uses `dict(state_freshness)`.
+The dedicated client method emits exactly one `canonical_query` request and invokes neither snapshot nor a fallback operation.
 
-## NO_QUERY_PROOF
+## FAIL_CLOSED_PROOF
 
-The response layer receives only `SelectedSymbolLineageFacts`, optional names, and optional JSON-safe freshness. No runtime, backend, state, registry, source, AST, or materialization API is called.
+Missing state or handler, invalid query inputs, and handler failure return deterministic errors; failure detail is capped at 500 characters.
+
+## CLIENT_OPERATION_PROOF
+
+The client test records `canonical_query` with the supplied query kind and payload exactly.
 
 ## TESTS_RUN
 
 ```text
-.\.venv\Scripts\python.exe -m pytest -q tests\mcp\test_lineage_response.py tests\analysis\test_lineage_query_service.py tests\analysis\test_lineage_query_backend.py
-113 passed in 3.38s
-
-.\.venv\Scripts\python.exe -m py_compile contextor\mcp\lineage_response.py tests\mcp\test_lineage_response.py
-PASS
-
-git diff --check -- contextor/mcp/lineage_response.py tests/mcp/test_lineage_response.py
-PASS
+.\.venv\Scripts\python.exe -m pytest -q tests\live_state\test_ipc_canonical_query.py tests\live_state\test_runtime_domain.py tests\live_state\test_runtime_lease.py
+47 passed in 11.35s
 ```
 
 ## ACTUAL_DIFF
 
 ```diff
-warning: in the working copy of 'contextor/mcp/lineage_response.py', LF will be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'tests/mcp/test_lineage_response.py', LF will be replaced by CRLF the next time Git touches it
-diff --git a/contextor/mcp/lineage_response.py b/contextor/mcp/lineage_response.py
-index 405f5a0..c8f60af 100644
---- a/contextor/mcp/lineage_response.py
-+++ b/contextor/mcp/lineage_response.py
-@@ -110,15 +110,100 @@ def _section_payloads(selected: SelectedSymbolLineageFacts) -> dict[str, object]
-     return {name: values[name] for name in selected.selected_sections}
+warning: in the working copy of 'contextor/core/live_state/ipc.py', LF will be replaced by CRLF the next time Git touches it
+diff --git a/contextor/core/live_state/ipc.py b/contextor/core/live_state/ipc.py
+index 8ce23df..3c5b4c6 100644
+--- a/contextor/core/live_state/ipc.py
++++ b/contextor/core/live_state/ipc.py
+@@ -18,7 +18,7 @@ from typing import Any, Callable, Mapping
+ from contextor.core.live_state.runtime_lease import ProcessIdentity
  
  
--def build_symbol_lineage_payload(selected: SelectedSymbolLineageFacts) -> dict:
--    if not isinstance(selected, SelectedSymbolLineageFacts): raise TypeError("selected must be SelectedSymbolLineageFacts.")
-+def build_symbol_lineage_payload(
-+    selected: SelectedSymbolLineageFacts,
-+    *,
-+    state_freshness: Mapping[str, object] | None = None,
-+) -> dict:
-+    if not isinstance(
-+        selected,
-+        SelectedSymbolLineageFacts,
-+    ):
-+        raise TypeError(
-+            "selected must be SelectedSymbolLineageFacts."
+-LIVE_PROTOCOL_VERSION = 3
++LIVE_PROTOCOL_VERSION = 4
+ LIVE_ENDPOINT_SCHEMA_VERSION = 2
+ _AUTHORITY_FINGERPRINT_LIMIT = 10_000
+ 
+@@ -678,6 +678,13 @@ class CanonicalLiveServer:
+         revision: int | None = None,
+         updater: Callable[[Any, str], Any] | None = None,
+         persister: Callable[[Any, int], Any] | None = None,
++        canonical_query_handler: (
++            Callable[
++                [Any, str, Mapping[str, Any]],
++                Any,
++            ]
++            | None
++        ) = None,
+         authkey: bytes | None = None,
+         retention: int = ACTIVITY_EVENT_RETENTION,
+         authority_identity: Mapping[str, Any] | None = None,
+@@ -724,6 +731,9 @@ class CanonicalLiveServer:
+         self._activity_epoch = uuid.uuid4().hex
+         self._updater = updater
+         self._persister = persister
++        self._canonical_query_handler = (
++            canonical_query_handler
 +        )
-+    if (
-+        state_freshness is not None
-+        and not isinstance(state_freshness, Mapping)
-+    ):
-+        raise TypeError(
-+            "state_freshness must be a mapping."
-+        )
-+
-     target = selected.target
--    return {"status": "resolved", "target": {"artifact_id": target.artifact_id, "qualified_name": target.qualified_name, "module": target.module_name, "symbol": target.symbol_name, "resolution": target.resolution}, "selected_sections": list(selected.selected_sections), "complete": selected.complete, "metadata_consistent": selected.metadata_consistent, "scope_state": selected.facts.scope_state, "sections": _section_payloads(selected)}
-+    result = {
-+        "status": "resolved",
-+        "target": {
-+            "artifact_id": target.artifact_id,
-+            "qualified_name": target.qualified_name,
-+            "module": target.module_name,
-+            "symbol": target.symbol_name,
-+            "resolution": target.resolution,
-+        },
-+        "selected_sections": list(
-+            selected.selected_sections
-+        ),
-+        "complete": selected.complete,
-+        "metadata_consistent": (
-+            selected.metadata_consistent
-+        ),
-+        "scope_state": selected.facts.scope_state,
-+    }
+         self._retention = retention
+         self._events: list[dict[str, Any]] = []
+         self._authority_event_fingerprints: OrderedDict[tuple[str, int, str], str] = OrderedDict()
+@@ -1499,6 +1509,53 @@ class CanonicalLiveServer:
+             return self._execute_publish(request)
  
-+    if state_freshness is not None:
-+        result["state_freshness"] = dict(
-+            state_freshness
-+        )
- 
--def build_symbol_lineage_preview(selected: SelectedSymbolLineageFacts) -> dict:
--    payload = build_symbol_lineage_payload(selected)
--    return {"status": "resolved", "mode": "preview", "target": payload["target"], "available_sections": list(selected.selected_sections), "complete": selected.complete, "metadata_consistent": selected.metadata_consistent, "scope_state": selected.facts.scope_state, "candidate_response_bytes": mcp_rep.serialized_json_bytes(payload), "section_sizes": {name: {"payload_bytes": mcp_rep.serialized_json_bytes(value)} for name, value in payload["sections"].items()}}
-+    result["sections"] = _section_payloads(
-+        selected
-+    )
-+    return result
+         with self._lock:
++            if operation == "canonical_query":
++                if self._state is None:
++                    return {
++                        "status": "error",
++                        "error": "live_state_unavailable",
++                    }
++                if self._canonical_query_handler is None:
++                    return {
++                        "status": "error",
++                        "error": "canonical_query_unavailable",
++                    }
 +
++                query_kind = request.get("query_kind")
++                if (
++                    not isinstance(query_kind, str)
++                    or not query_kind
++                ):
++                    return {
++                        "status": "error",
++                        "error": "invalid_query_kind",
++                    }
 +
-+def build_symbol_lineage_preview(
-+    selected: SelectedSymbolLineageFacts,
-+    *,
-+    state_freshness: Mapping[str, object] | None = None,
-+) -> dict:
-+    payload = build_symbol_lineage_payload(
-+        selected,
-+        state_freshness=state_freshness,
-+    )
-+    result = {
-+        "status": "resolved",
-+        "mode": "preview",
-+        "target": payload["target"],
-+        "available_sections": list(
-+            selected.selected_sections
-+        ),
-+        "complete": selected.complete,
-+        "metadata_consistent": (
-+            selected.metadata_consistent
-+        ),
-+        "scope_state": selected.facts.scope_state,
-+        "candidate_response_bytes": (
-+            mcp_rep.serialized_json_bytes(
-+                payload
-+            )
-+        ),
-+        "section_sizes": {
-+            name: {
-+                "payload_bytes": (
-+                    mcp_rep.serialized_json_bytes(
-+                        value
++                payload = request.get("payload", {})
++                if not isinstance(payload, Mapping):
++                    return {
++                        "status": "error",
++                        "error": "invalid_query_payload",
++                    }
++
++                try:
++                    result = self._canonical_query_handler(
++                        self._state,
++                        query_kind,
++                        dict(payload),
 +                    )
-+                ),
++                except Exception as exc:
++                    return {
++                        "status": "error",
++                        "error": "canonical_query_failed",
++                        "detail": str(exc)[:500],
++                    }
++
++                return {
++                    "status": "ok",
++                    "revision": self._revision,
++                    "result": result,
++                }
+             if operation == "ping":
+                 return {
+                     "status": "ok",
+@@ -1775,6 +1832,22 @@ class LiveStateClient:
+     def snapshot(self) -> dict[str, Any]:
+         return self.request("snapshot")
+ 
++    def canonical_query(
++        self,
++        query_kind: str,
++        *,
++        payload: Mapping[str, Any] | None = None,
++    ) -> dict[str, Any]:
++        return self.request(
++            "canonical_query",
++            query_kind=query_kind,
++            payload=(
++                {}
++                if payload is None
++                else payload
++            ),
++        )
++
+     def publish(
+         self,
+         state: Any,
+warning: in the working copy of 'tests/live_state/test_ipc_canonical_query.py', LF will be replaced by CRLF the next time Git touches it
+diff --git a/tests/live_state/test_ipc_canonical_query.py b/tests/live_state/test_ipc_canonical_query.py
+new file mode 100644
+index 0000000..301c900
+--- /dev/null
++++ b/tests/live_state/test_ipc_canonical_query.py
+@@ -0,0 +1,223 @@
++from types import SimpleNamespace
++
++from contextor.core.live_state.ipc import (
++    LIVE_PROTOCOL_VERSION,
++    CanonicalLiveServer,
++    LiveEndpoint,
++    LiveStateClient,
++)
++
++
++def test_canonical_query_returns_only_narrow_handler_result_from_same_revision():
++    state = SimpleNamespace(
++        revision=7,
++        bulk_blob="x" * 1_000_000,
++    )
++    observed = {}
++
++    def handler(current_state, query_kind, payload):
++        observed["state"] = current_state
++        observed["query_kind"] = query_kind
++        observed["payload"] = payload
++        return {
++            "target": "A17/2",
++            "facts": ["narrow"],
++        }
++
++    server = CanonicalLiveServer(
++        state,
++        revision=7,
++        canonical_query_handler=handler,
++    )
++    try:
++        result = server._dispatch(
++            {
++                "operation": "canonical_query",
++                "query_kind": "symbol_lineage",
++                "payload": {
++                    "symbol": "A17/2",
++                },
 +            }
-+            for name, value
-+            in payload["sections"].items()
++        )
++    finally:
++        server.close()
++
++    assert LIVE_PROTOCOL_VERSION == 4
++    assert result == {
++        "status": "ok",
++        "revision": 7,
++        "result": {
++            "target": "A17/2",
++            "facts": ["narrow"],
 +        },
 +    }
-+    if "state_freshness" in payload:
-+        result["state_freshness"] = payload[
-+            "state_freshness"
-+        ]
-+    return result
- 
- 
- def _semantic_owner_ids(value: object) -> tuple[str, ...]:
-@@ -143,7 +228,13 @@ def _named_semantic_owners(value: object, owner_names: Mapping[str, str]) -> obj
-     return {key: _named_semantic_owners(item, owner_names) for key, item in value.items()}
- 
- 
--def build_symbol_lineage_represented_payload(selected: SelectedSymbolLineageFacts, *, representation: str = "auto", artifact_names: Mapping[str, str] | None = None) -> dict:
-+def build_symbol_lineage_represented_payload(
-+    selected: SelectedSymbolLineageFacts,
-+    *,
-+    representation: str = "auto",
-+    artifact_names: Mapping[str, str] | None = None,
-+    state_freshness: Mapping[str, object] | None = None,
-+) -> dict:
-     if not isinstance(selected, SelectedSymbolLineageFacts): raise TypeError("selected must be SelectedSymbolLineageFacts.")
-     if not isinstance(representation, str): raise TypeError("representation must be a string.")
-     requested = representation.strip().lower()
-@@ -151,7 +242,10 @@ def build_symbol_lineage_represented_payload(selected: SelectedSymbolLineageFact
-     if artifact_names is not None:
-         if not isinstance(artifact_names, Mapping): raise TypeError("artifact_names must be a mapping.")
-         if any(not isinstance(k, str) or not k or not isinstance(v, str) or not v for k, v in artifact_names.items()): raise ValueError("artifact_names must map non-empty artifact IDs to non-empty names.")
--    base = build_symbol_lineage_payload(selected)
-+    base = build_symbol_lineage_payload(
-+        selected,
-+        state_freshness=state_freshness,
++    assert observed["state"] is state
++    assert observed["query_kind"] == (
++        "symbol_lineage"
 +    )
-     missing = tuple(owner for owner in _semantic_owner_ids(base) if artifact_names is None or owner not in artifact_names)
-     indexed = dict(base); indexed.update({"representation": "indexed", "requested_representation": requested, "resolver": {"index_kind": "artifact", "resolve_via": "lookup_index_entries"}})
-     indexed_bytes = mcp_rep.serialized_json_bytes(indexed)
-@@ -179,11 +273,13 @@ def _represented_response_candidate(
-     mode: str,
-     representation: str,
-     artifact_names: Mapping[str, str] | None,
-+    state_freshness: Mapping[str, object] | None,
- ) -> dict:
-     result = build_symbol_lineage_represented_payload(
-         selected,
-         representation=representation,
-         artifact_names=artifact_names,
-+        state_freshness=state_freshness,
-     )
-     result["mode"] = mode
-     return result
-@@ -194,6 +290,7 @@ def build_symbol_lineage_represented_preview(
-     *,
-     representation: str = "auto",
-     artifact_names: Mapping[str, str] | None = None,
-+    state_freshness: Mapping[str, object] | None = None,
-     candidate_mode: str = "fetch",
- ) -> dict:
-     if candidate_mode not in {"auto", "fetch"}:
-@@ -206,6 +303,7 @@ def build_symbol_lineage_represented_preview(
-         mode=candidate_mode,
-         representation=representation,
-         artifact_names=artifact_names,
-+        state_freshness=state_freshness,
-     )
-     sections = candidate["sections"]
- 
-@@ -247,6 +345,11 @@ def build_symbol_lineage_represented_preview(
-         },
-     }
- 
-+    if "state_freshness" in candidate:
-+        result["state_freshness"] = candidate[
-+            "state_freshness"
-+        ]
-+
-     if "resolver" in candidate:
-         result["resolver"] = candidate["resolver"]
- 
-@@ -260,6 +363,7 @@ def render_symbol_lineage_response(
-     sections: tuple[str, ...] | None = None,
-     representation: str = "auto",
-     artifact_names: Mapping[str, str] | None = None,
-+    state_freshness: Mapping[str, object] | None = None,
-     allow_large_output: bool = False,
- ) -> str:
-     if not isinstance(
-@@ -293,6 +397,7 @@ def render_symbol_lineage_response(
-             selected,
-             representation=representation,
-             artifact_names=artifact_names,
-+            state_freshness=state_freshness,
-             candidate_mode="fetch",
-         )
-         serialized = json.dumps(
-@@ -319,6 +424,7 @@ def render_symbol_lineage_response(
-         mode=plan.mode,
-         representation=representation,
-         artifact_names=artifact_names,
-+        state_freshness=state_freshness,
-     )
-     candidate_bytes = (
-         mcp_rep.serialized_json_bytes(
-@@ -336,6 +442,7 @@ def render_symbol_lineage_response(
-                 selected,
-                 representation=representation,
-                 artifact_names=artifact_names,
-+                state_freshness=state_freshness,
-                 candidate_mode="auto",
-             )
-         )
-diff --git a/tests/mcp/test_lineage_response.py b/tests/mcp/test_lineage_response.py
-index 5739464..d127644 100644
---- a/tests/mcp/test_lineage_response.py
-+++ b/tests/mcp/test_lineage_response.py
-@@ -103,6 +103,24 @@ def _with_empty_selected_sections(selected):
-     )
- 
- 
-+def _state_freshness_fixture(
-+    *,
-+    advisory_warning=None,
-+):
-+    return {
-+        "canonical_state": "fresh",
-+        "workspace_sync": "verified",
-+        "canonical_revision": 7,
-+        "provenance": "live",
-+        "families": {
-+            "module": "fresh",
-+            "graph": "fresh",
-+            "lineage": "fresh",
-+        },
-+        "advisory_warning": advisory_warning,
++    assert observed["payload"] == {
++        "symbol": "A17/2",
 +    }
++    assert "state" not in result
++    assert "bulk_blob" not in repr(result)
 +
 +
- def test_auto_plans_complete_symbol_candidate_for_size_decision():
-     assert plan_symbol_lineage_response(mode=" AUTO ") == SymbolLineageResponsePlan("auto", SYMBOL_LINEAGE_SECTION_ORDER, True, True)
- 
-@@ -663,3 +681,96 @@ def test_symbol_lineage_renderer_validates_allow_large_output():
-             _selected_lineage_fixture(),
-             allow_large_output=1,
-         )
++def test_canonical_query_fails_closed_when_unavailable_or_invalid():
++    state = SimpleNamespace(revision=3)
++
++    no_handler = CanonicalLiveServer(
++        state,
++        revision=3,
++    )
++    try:
++        assert no_handler._dispatch(
++            {
++                "operation": "canonical_query",
++                "query_kind": "symbol_lineage",
++            }
++        ) == {
++            "status": "error",
++            "error": "canonical_query_unavailable",
++        }
++
++        assert no_handler._dispatch(
++            {
++                "operation": "canonical_query",
++                "query_kind": "",
++            }
++        ) == {
++            "status": "error",
++            "error": "canonical_query_unavailable",
++        }
++    finally:
++        no_handler.close()
++
++    server = CanonicalLiveServer(
++        state,
++        revision=3,
++        canonical_query_handler=(
++            lambda *_args: {"ok": True}
++        ),
++    )
++    try:
++        assert server._dispatch(
++            {
++                "operation": "canonical_query",
++                "query_kind": "",
++            }
++        ) == {
++            "status": "error",
++            "error": "invalid_query_kind",
++        }
++        assert server._dispatch(
++            {
++                "operation": "canonical_query",
++                "query_kind": "symbol_lineage",
++                "payload": [],
++            }
++        ) == {
++            "status": "error",
++            "error": "invalid_query_payload",
++        }
++    finally:
++        server.close()
++
++    empty = CanonicalLiveServer(
++        None,
++        canonical_query_handler=(
++            lambda *_args: {"ok": True}
++        ),
++    )
++    try:
++        assert empty._dispatch(
++            {
++                "operation": "canonical_query",
++                "query_kind": "symbol_lineage",
++            }
++        ) == {
++            "status": "error",
++            "error": "live_state_unavailable",
++        }
++    finally:
++        empty.close()
 +
 +
-+def test_symbol_lineage_payload_preserves_supplied_freshness_without_mutation():
-+    selected = _selected_lineage_fixture()
-+    freshness = _state_freshness_fixture()
-+    original = dict(freshness)
-+
-+    result = build_symbol_lineage_payload(
-+        selected,
-+        state_freshness=freshness,
++def test_canonical_query_handler_failure_is_bounded_and_does_not_expose_state():
++    state = SimpleNamespace(
++        revision=4,
++        secret_bulk="never-return-this",
 +    )
 +
-+    assert result["state_freshness"] == freshness
-+    assert freshness == original
-+
-+
-+def test_symbol_lineage_represented_preview_sizes_candidate_with_freshness():
-+    selected = _selected_lineage_fixture()
-+    freshness = _state_freshness_fixture()
-+
-+    preview = build_symbol_lineage_represented_preview(
-+        selected,
-+        representation="indexed",
-+        state_freshness=freshness,
-+        candidate_mode="fetch",
-+    )
-+    candidate = build_symbol_lineage_represented_payload(
-+        selected,
-+        representation="indexed",
-+        state_freshness=freshness,
-+    )
-+    candidate["mode"] = "fetch"
-+
-+    assert preview["state_freshness"] == freshness
-+    assert preview["candidate_response_bytes"] == (
-+        mcp_rep.serialized_json_bytes(
-+            candidate
-+        )
-+    )
-+
-+
-+def test_symbol_lineage_auto_threshold_includes_freshness_envelope():
-+    selected = _with_empty_selected_sections(
-+        _selected_lineage_fixture()
-+    )
-+    freshness = _state_freshness_fixture(
-+        advisory_warning="x" * 5000,
-+    )
-+
-+    result = json.loads(
-+        render_symbol_lineage_response(
-+            selected,
-+            mode="auto",
-+            representation="indexed",
-+            state_freshness=freshness,
-+        )
-+    )
-+
-+    assert result["mode"] == "preview"
-+    assert result["state_freshness"] == freshness
-+    assert (
-+        result["auto_fetch"]["candidate_response_bytes"]
-+        > SYMBOL_LINEAGE_AUTO_FETCH_THRESHOLD_BYTES
-+    )
-+    assert (
-+        result["candidate_response_bytes"]
-+        == result["auto_fetch"][
-+            "candidate_response_bytes"
-+        ]
-+    )
-+
-+
-+def test_symbol_lineage_freshness_contract_rejects_non_mapping():
-+    selected = _selected_lineage_fixture()
-+
-+    with pytest.raises(
-+        TypeError,
-+        match="state_freshness must be a mapping.",
++    def failing_handler(
++        _state,
++        _query_kind,
++        _payload,
 +    ):
-+        build_symbol_lineage_payload(
-+            selected,
-+            state_freshness=[],
-+        )
++        raise RuntimeError("q" * 1000)
 +
-+    with pytest.raises(
-+        TypeError,
-+        match="state_freshness must be a mapping.",
-+    ):
-+        render_symbol_lineage_response(
-+            selected,
-+            representation="indexed",
-+            state_freshness=[],
++    server = CanonicalLiveServer(
++        state,
++        revision=4,
++        canonical_query_handler=failing_handler,
++    )
++    try:
++        result = server._dispatch(
++            {
++                "operation": "canonical_query",
++                "query_kind": "symbol_lineage",
++            }
 +        )
++    finally:
++        server.close()
++
++    assert result["status"] == "error"
++    assert result["error"] == (
++        "canonical_query_failed"
++    )
++    assert len(result["detail"]) == 500
++    assert "state" not in result
++    assert "secret_bulk" not in repr(result)
++
++
++def test_live_state_client_canonical_query_uses_dedicated_operation_only():
++    client = LiveStateClient(
++        LiveEndpoint(
++            "127.0.0.1",
++            1,
++            "00" * 32,
++        )
++    )
++    observed = {}
++
++    def request(operation, **payload):
++        observed["operation"] = operation
++        observed["payload"] = payload
++        return {
++            "status": "ok",
++            "revision": 9,
++            "result": {"narrow": True},
++        }
++
++    client.request = request
++
++    result = client.canonical_query(
++        "symbol_lineage",
++        payload={
++            "symbol": "A17/2",
++        },
++    )
++
++    assert result == {
++        "status": "ok",
++        "revision": 9,
++        "result": {"narrow": True},
++    }
++    assert observed == {
++        "operation": "canonical_query",
++        "payload": {
++            "query_kind": "symbol_lineage",
++            "payload": {
++                "symbol": "A17/2",
++            },
++        },
++    }
 ```
 

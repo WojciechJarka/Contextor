@@ -18,7 +18,7 @@ from typing import Any, Callable, Mapping
 from contextor.core.live_state.runtime_lease import ProcessIdentity
 
 
-LIVE_PROTOCOL_VERSION = 3
+LIVE_PROTOCOL_VERSION = 4
 LIVE_ENDPOINT_SCHEMA_VERSION = 2
 _AUTHORITY_FINGERPRINT_LIMIT = 10_000
 
@@ -678,6 +678,13 @@ class CanonicalLiveServer:
         revision: int | None = None,
         updater: Callable[[Any, str], Any] | None = None,
         persister: Callable[[Any, int], Any] | None = None,
+        canonical_query_handler: (
+            Callable[
+                [Any, str, Mapping[str, Any]],
+                Any,
+            ]
+            | None
+        ) = None,
         authkey: bytes | None = None,
         retention: int = ACTIVITY_EVENT_RETENTION,
         authority_identity: Mapping[str, Any] | None = None,
@@ -724,6 +731,9 @@ class CanonicalLiveServer:
         self._activity_epoch = uuid.uuid4().hex
         self._updater = updater
         self._persister = persister
+        self._canonical_query_handler = (
+            canonical_query_handler
+        )
         self._retention = retention
         self._events: list[dict[str, Any]] = []
         self._authority_event_fingerprints: OrderedDict[tuple[str, int, str], str] = OrderedDict()
@@ -1499,6 +1509,53 @@ class CanonicalLiveServer:
             return self._execute_publish(request)
 
         with self._lock:
+            if operation == "canonical_query":
+                if self._state is None:
+                    return {
+                        "status": "error",
+                        "error": "live_state_unavailable",
+                    }
+                if self._canonical_query_handler is None:
+                    return {
+                        "status": "error",
+                        "error": "canonical_query_unavailable",
+                    }
+
+                query_kind = request.get("query_kind")
+                if (
+                    not isinstance(query_kind, str)
+                    or not query_kind
+                ):
+                    return {
+                        "status": "error",
+                        "error": "invalid_query_kind",
+                    }
+
+                payload = request.get("payload", {})
+                if not isinstance(payload, Mapping):
+                    return {
+                        "status": "error",
+                        "error": "invalid_query_payload",
+                    }
+
+                try:
+                    result = self._canonical_query_handler(
+                        self._state,
+                        query_kind,
+                        dict(payload),
+                    )
+                except Exception as exc:
+                    return {
+                        "status": "error",
+                        "error": "canonical_query_failed",
+                        "detail": str(exc)[:500],
+                    }
+
+                return {
+                    "status": "ok",
+                    "revision": self._revision,
+                    "result": result,
+                }
             if operation == "ping":
                 return {
                     "status": "ok",
@@ -1774,6 +1831,22 @@ class LiveStateClient:
 
     def snapshot(self) -> dict[str, Any]:
         return self.request("snapshot")
+
+    def canonical_query(
+        self,
+        query_kind: str,
+        *,
+        payload: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        return self.request(
+            "canonical_query",
+            query_kind=query_kind,
+            payload=(
+                {}
+                if payload is None
+                else payload
+            ),
+        )
 
     def publish(
         self,
