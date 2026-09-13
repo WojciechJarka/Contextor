@@ -71,6 +71,7 @@ def _lineage_slice() -> MaterializedLineageSourceFacts:
             1,
             1,
             semantic_anchor_bindings_materialized=True,
+            anchor_ownership_materialized=True,
         ),
         anchors=(
             MaterializedAnchorFact(
@@ -224,6 +225,88 @@ def test_snapshot_legacy_semantic_anchor_fields_fail_closed(tmp_path):
     assert loaded_slice.manifest.semantic_anchor_bindings_materialized is False
     assert loaded_slice.semantic_anchors == ()
     assert loaded.lineage_query_index_state == "fresh"
+
+
+def test_snapshot_preserves_materialized_anchor_ownership(tmp_path):
+    source_key = "owned.py"
+    fingerprint = "o" * 64
+    span = SourceSpan(1, 0, 2, 1)
+    parent = MaterializedAnchorFact(
+        "owner",
+        MaterializedOccurrenceRef(source_key, fingerprint, "owner"),
+        "function",
+        span,
+    )
+    child = MaterializedAnchorFact(
+        "child",
+        MaterializedOccurrenceRef(source_key, fingerprint, "child"),
+        "binding",
+        span,
+        owner_local_id="owner",
+    )
+    source_slice = MaterializedLineageSourceFacts(
+        manifest=SourceLineageManifest(
+            source_key,
+            fingerprint,
+            LINEAGE_FACTS_SEMANTIC_VERSION,
+            LineageFamilyStatus.FRESH,
+            2,
+            0,
+            0,
+            semantic_anchor_bindings_materialized=True,
+            anchor_ownership_materialized=True,
+        ),
+        anchors=tuple(sorted((parent, child))),
+    )
+    state = RepositoryAnalysisState(
+        lineage_facts_by_source={source_key: source_slice},
+        lineage_facts_state="fresh",
+        lineage_facts_semantic_version=LINEAGE_FACTS_SEMANTIC_VERSION,
+    )
+
+    save_snapshot(state, tmp_path, "anchor-ownership")
+    loaded, _ = load_snapshot(
+        tmp_path,
+        expected_state_id="anchor-ownership",
+    )
+
+    loaded_slice = loaded.lineage_facts_by_source[source_key]
+    loaded_by_id = {
+        anchor.local_id: anchor
+        for anchor in loaded_slice.anchors
+    }
+    assert loaded_slice.manifest.anchor_ownership_materialized is True
+    assert loaded_by_id["child"].owner_local_id == "owner"
+
+
+def test_snapshot_legacy_anchor_ownership_fails_closed(tmp_path):
+    source_slice = _lineage_slice()
+    object.__delattr__(
+        source_slice.manifest,
+        "anchor_ownership_materialized",
+    )
+    for anchor in source_slice.anchors:
+        if hasattr(anchor, "owner_local_id"):
+            object.__delattr__(anchor, "owner_local_id")
+
+    state = RepositoryAnalysisState(
+        lineage_facts_by_source={"pkg.py": source_slice},
+        lineage_facts_state="fresh",
+        lineage_facts_semantic_version=LINEAGE_FACTS_SEMANTIC_VERSION,
+    )
+
+    save_snapshot(state, tmp_path, "legacy-anchor-ownership")
+    loaded, _ = load_snapshot(
+        tmp_path,
+        expected_state_id="legacy-anchor-ownership",
+    )
+
+    loaded_slice = loaded.lineage_facts_by_source["pkg.py"]
+    assert loaded_slice.manifest.anchor_ownership_materialized is False
+    assert all(
+        anchor.owner_local_id is None
+        for anchor in loaded_slice.anchors
+    )
 
 
 @pytest.mark.parametrize(

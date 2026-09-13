@@ -129,7 +129,11 @@ def materialize_lineage_source_facts(
     anchors = tuple(
         sorted(
             MaterializedAnchorFact(
-                anchor.local_id, occurrence(anchor.local_id), anchor.kind, anchor.span
+                local_id=anchor.local_id,
+                reference=occurrence(anchor.local_id),
+                kind=anchor.kind,
+                span=anchor.span,
+                owner_local_id=anchor.owner_local_id,
             )
             for anchor in extracted.anchors
         )
@@ -196,6 +200,7 @@ def materialize_lineage_source_facts(
         len(surfaces),
         extracted.resource_limit_reason,
         semantic_anchor_bindings_materialized=True,
+        anchor_ownership_materialized=True,
     )
     return MaterializedLineageSourceFacts(
         manifest,

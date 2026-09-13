@@ -150,6 +150,13 @@ def _revalidate_lineage_manifest(manifest: Any) -> SourceLineageManifest:
                 False,
             )
         ),
+        anchor_ownership_materialized=bool(
+            getattr(
+                manifest,
+                "anchor_ownership_materialized",
+                False,
+            )
+        ),
     )
     if rebuilt.semantic_version != LINEAGE_FACTS_SEMANTIC_VERSION:
         raise pickle.UnpicklingError(
@@ -165,6 +172,7 @@ def _revalidate_lineage_anchor(anchor: Any) -> MaterializedAnchorFact:
         anchor,
         reference=_revalidate_lineage_endpoint(anchor.reference),
         span=_revalidate_lineage_span(anchor.span),
+        owner_local_id=getattr(anchor, "owner_local_id", None),
     )
 
 

@@ -336,11 +336,16 @@ class MaterializedAnchorFact:
     reference: MaterializedOccurrenceRef
     kind: str
     span: SourceSpan
+    owner_local_id: str | None = None
 
     def __post_init__(self) -> None:
         _require_token(self.local_id, "local_id")
         _require_token(self.kind, "kind")
         _require_materialized_anchor_reference(self.reference)
+        if self.owner_local_id is not None:
+            _require_token(self.owner_local_id, "owner_local_id")
+            if self.owner_local_id == self.local_id:
+                raise ValueError("Materialized anchor cannot own itself.")
 
 
 @dataclass(frozen=True, order=True)
@@ -424,6 +429,7 @@ class SourceLineageManifest:
     surface_count: int
     resource_limit_reason: str | None = None
     semantic_anchor_bindings_materialized: bool = False
+    anchor_ownership_materialized: bool = False
 
     def __post_init__(self) -> None:
         _require_token(self.source_key, "source_key")
@@ -435,6 +441,8 @@ class SourceLineageManifest:
             raise TypeError(
                 "semantic_anchor_bindings_materialized must be boolean."
             )
+        if not isinstance(self.anchor_ownership_materialized, bool):
+            raise TypeError("anchor_ownership_materialized must be boolean.")
         _validate_source_status(self.status, self.resource_limit_reason)
 
 
@@ -491,8 +499,30 @@ class MaterializedLineageSourceFacts:
             )
             if expected != actual:
                 raise ValueError("Fresh lineage manifest counts must match facts.")
+        anchor_ids = {anchor.local_id for anchor in self.anchors}
+        anchor_owners: dict[str, str | None] = {}
         for anchor in self.anchors:
             _require_slice_occurrence(anchor.reference, self.manifest)
+            if (
+                anchor.owner_local_id is not None
+                and anchor.owner_local_id not in anchor_ids
+            ):
+                raise ValueError(
+                    "Materialized anchor owner must reference an anchor in its slice."
+                )
+            anchor_owners[anchor.local_id] = anchor.owner_local_id
+
+        for local_id in anchor_owners:
+            seen: set[str] = set()
+            current: str | None = local_id
+            while current is not None:
+                if current in seen:
+                    raise ValueError(
+                        "Materialized anchor ownership contains a cycle."
+                    )
+                seen.add(current)
+                current = anchor_owners.get(current)
+
         for flow in self.flows:
             _require_slice_occurrence(flow.source, self.manifest)
             _require_slice_occurrence(flow.target, self.manifest)

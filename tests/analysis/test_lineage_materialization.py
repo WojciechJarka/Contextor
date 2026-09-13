@@ -18,7 +18,11 @@ from contextor.core.domain.lineage_facts import (
     ExtractedSymbolicRef,
     ExtractedSurfaceFact,
     LineageConfidence,
+    LineageFamilyStatus,
     LineageRelation,
+    LINEAGE_FACTS_SEMANTIC_VERSION,
+    MaterializedAnchorFact,
+    MaterializedLineageSourceFacts,
     MaterializedOccurrenceRef,
     MaterializedSymbolicRef,
     ParameterKind,
@@ -29,6 +33,7 @@ from contextor.core.domain.lineage_facts import (
     SemanticEndpointOrigin,
     SemanticEndpointRole,
     SemanticInterfaceDescriptor,
+    SourceLineageManifest,
     SourceSpan,
     SurfaceDeclarationEvidence,
     SurfaceKind,
@@ -71,6 +76,84 @@ def test_materializer_is_deterministic_and_preserves_local_anchors_and_flows():
         "pkg/mod.py", "sha256:test", "anchor"
     )
     assert first.flows[0].resolution_kind is ResolutionKind.LEXICAL_EXACT
+
+
+def test_materialized_slice_rejects_missing_or_cyclic_anchor_owner():
+    span = SourceSpan(1, 0, 1, 1)
+    source_key = "pkg.py"
+    fingerprint = "f" * 64
+
+    parent_ref = MaterializedOccurrenceRef(
+        source_key,
+        fingerprint,
+        "parent",
+    )
+    child_ref = MaterializedOccurrenceRef(
+        source_key,
+        fingerprint,
+        "child",
+    )
+    manifest = SourceLineageManifest(
+        source_key,
+        fingerprint,
+        LINEAGE_FACTS_SEMANTIC_VERSION,
+        LineageFamilyStatus.FRESH,
+        1,
+        0,
+        0,
+        semantic_anchor_bindings_materialized=True,
+        anchor_ownership_materialized=True,
+    )
+
+    with pytest.raises(ValueError, match="owner must reference"):
+        MaterializedLineageSourceFacts(
+            manifest=manifest,
+            anchors=(
+                MaterializedAnchorFact(
+                    "child",
+                    child_ref,
+                    "binding",
+                    span,
+                    owner_local_id="missing",
+                ),
+            ),
+        )
+
+    cycle_manifest = SourceLineageManifest(
+        source_key,
+        fingerprint,
+        LINEAGE_FACTS_SEMANTIC_VERSION,
+        LineageFamilyStatus.FRESH,
+        2,
+        0,
+        0,
+        semantic_anchor_bindings_materialized=True,
+        anchor_ownership_materialized=True,
+    )
+    with pytest.raises(ValueError, match="ownership contains a cycle"):
+        MaterializedLineageSourceFacts(
+            manifest=cycle_manifest,
+            anchors=tuple(
+                sorted(
+                    (
+                        MaterializedAnchorFact(
+                            "parent",
+                            parent_ref,
+                            "function",
+                            span,
+                            owner_local_id="child",
+                        ),
+                        MaterializedAnchorFact(
+                            "child",
+                            child_ref,
+                            "binding",
+                            span,
+                            owner_local_id="parent",
+                        ),
+                    )
+                )
+            ),
+        )
 
 
 def test_materializer_builds_and_reresolves_exact_semantic_anchor_bindings():
@@ -122,6 +205,14 @@ def test_materializer_builds_and_reresolves_exact_semantic_anchor_bindings():
             MaterializedOccurrenceRef("pkg/mod.py", "sha256:test", method_anchor),
         ),
     )
+    anchors_by_id = {
+        anchor.local_id: anchor
+        for anchor in initial.anchors
+    }
+    assert initial.manifest.anchor_ownership_materialized is True
+    assert anchors_by_id[module_anchor].owner_local_id is None
+    assert anchors_by_id[class_anchor].owner_local_id == module_anchor
+    assert anchors_by_id[method_anchor].owner_local_id == class_anchor
 
     reresolved = reresolve_materialized_lineage_source_facts(
         initial,
@@ -136,6 +227,8 @@ def test_materializer_builds_and_reresolves_exact_semantic_anchor_bindings():
         "A1/1",
         "A2/2",
     )
+    assert reresolved.anchors == initial.anchors
+    assert reresolved.manifest.anchor_ownership_materialized is True
 
     removed = reresolve_materialized_lineage_source_facts(
         reresolved,
