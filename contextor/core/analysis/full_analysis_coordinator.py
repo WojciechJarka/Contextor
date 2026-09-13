@@ -8,6 +8,7 @@ across Desktop GUI, MCP server, and CLI processes using native OS file locking.
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 import json
 import os
 import threading
@@ -48,6 +49,8 @@ ORPHAN_RECOVERY_TIMEOUT_SECONDS = 5.0
 
 _PROCESS_LOCKS: dict[str, threading.Lock] = {}
 _PROCESS_LOCKS_GUARD = threading.Lock()
+_ADMISSION_LOCKS: dict[str, threading.Lock] = {}
+_ADMISSION_LOCKS_GUARD = threading.Lock()
 
 
 def _get_process_lock(
@@ -59,6 +62,114 @@ def _get_process_lock(
             lock = threading.Lock()
             _PROCESS_LOCKS[repo_key_str] = lock
         return lock
+
+
+def _get_admission_lock(
+    repo_key_str: str,
+) -> threading.Lock:
+    with _ADMISSION_LOCKS_GUARD:
+        lock = _ADMISSION_LOCKS.get(repo_key_str)
+        if lock is None:
+            lock = threading.Lock()
+            _ADMISSION_LOCKS[repo_key_str] = lock
+        return lock
+
+
+def _acquire_process_lock_until(
+    lock: threading.Lock,
+    *,
+    deadline: float | None,
+    poll_interval: float,
+    is_cancelled: Callable[[], bool] | None,
+    cancel_message: str,
+    timeout_message: str,
+) -> None:
+    while True:
+        if is_cancelled and is_cancelled():
+            raise AnalysisCancelled(cancel_message)
+        if lock.acquire(blocking=False):
+            return
+        if deadline is not None and time.monotonic() >= deadline:
+            raise FullAnalysisBusyError(timeout_message)
+        time.sleep(min(max(poll_interval, 0.01), 0.25))
+
+
+@contextmanager
+def _canonical_writer_admission(
+    *,
+    lock_file: Path,
+    key: str,
+    repo_id: str,
+    owner: str,
+    writer_kind: str,
+    deadline: float | None,
+    poll_interval: float,
+    is_cancelled: Callable[[], bool] | None,
+):
+    process_lock = _get_admission_lock(key)
+    started = time.monotonic()
+    _acquire_process_lock_until(
+        process_lock,
+        deadline=deadline,
+        poll_interval=poll_interval,
+        is_cancelled=is_cancelled,
+        cancel_message=(
+            "Canonical writer admission cancelled while waiting for local gate."
+        ),
+        timeout_message=(
+            "Timed out waiting for canonical writer admission gate for "
+            f"{repo_id}"
+        ),
+    )
+    fd = -1
+    os_locked = False
+    admission_path = lock_file.with_name("canonical_writer.admission.lock")
+    try:
+        fd = _prepare_lock_fd(admission_path)
+        while True:
+            if is_cancelled and is_cancelled():
+                raise AnalysisCancelled(
+                    "Canonical writer admission cancelled while waiting for "
+                    "repository gate."
+                )
+            if _try_lock_fd(fd):
+                os_locked = True
+                break
+            if deadline is not None and time.monotonic() >= deadline:
+                raise FullAnalysisBusyError(
+                    "Timed out waiting for canonical writer admission gate for "
+                    f"{repo_id}"
+                )
+            time.sleep(min(max(poll_interval, 0.01), 0.25))
+        trace_event(
+            "ANALYSIS",
+            "CANONICAL_WRITER_ADMISSION_ACQUIRED",
+            repo_id=repo_id,
+            owner=owner,
+            writer_kind=writer_kind,
+            wait_ms=(time.monotonic() - started) * 1000.0,
+        )
+        yield
+    finally:
+        if fd >= 0:
+            if os_locked:
+                _unlock_fd(fd)
+            else:
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
+        try:
+            process_lock.release()
+        except RuntimeError:
+            pass
+        trace_event(
+            "ANALYSIS",
+            "CANONICAL_WRITER_ADMISSION_RELEASED",
+            repo_id=repo_id,
+            owner=owner,
+            writer_kind=writer_kind,
+        )
 
 
 def _prepare_lock_fd(lock_path: Path) -> int:
@@ -267,6 +378,7 @@ def acquire_full_analysis(
     repo_path: str | Path,
     *,
     owner: str = "desktop_analysis",
+    writer_kind: str = "full_analysis",
     timeout: float | None = None,
     poll_interval: float = 0.25,
     is_cancelled: Callable[[], bool] | None = None,
@@ -277,6 +389,9 @@ def acquire_full_analysis(
     Blocks if another process or thread holds the lease until released,
     timed out, or cancelled.
     """
+    if writer_kind not in {"full_analysis", "live_mutation"}:
+        raise ValueError("writer_kind must be 'full_analysis' or 'live_mutation'")
+
     lock_file, key, repo_id = _resolve_lock_path(repo_path)
     proc_lock = _get_process_lock(key)
 
@@ -287,179 +402,146 @@ def acquire_full_analysis(
         else None
     )
 
-    while True:
-        if is_cancelled and is_cancelled():
-            raise AnalysisCancelled(
-                "Full analysis cancelled while waiting for local lock."
-            )
-
-        if proc_lock.acquire(blocking=False):
-            break
-
-        if (
-            deadline is not None
-            and time.monotonic() >= deadline
-        ):
-            raise FullAnalysisBusyError(
+    with _canonical_writer_admission(
+        lock_file=lock_file,
+        key=key,
+        repo_id=repo_id,
+        owner=str(owner),
+        writer_kind=writer_kind,
+        deadline=deadline,
+        poll_interval=poll_interval,
+        is_cancelled=is_cancelled,
+    ):
+        _acquire_process_lock_until(
+            proc_lock,
+            deadline=deadline,
+            poll_interval=poll_interval,
+            is_cancelled=is_cancelled,
+            cancel_message="Full analysis cancelled while waiting for local lock.",
+            timeout_message=(
                 "Timed out waiting for in-process full analysis lock for "
                 f"{repo_id}"
-            )
-
-        time.sleep(
-            min(max(poll_interval, 0.01), 0.25)
+            ),
         )
+        fd = -1
+        logged_waiting = False
+        logged_recovery = False
+        orphan_recovery_deadline: float | None = None
+        unknown_owner_deadline: float | None = None
+        try:
+            fd = _prepare_lock_fd(lock_file)
 
-    fd = -1
-    logged_waiting = False
-    logged_recovery = False
-    orphan_recovery_deadline: float | None = None
-    unknown_owner_deadline: float | None = None
-
-    try:
-        fd = _prepare_lock_fd(lock_file)
-
-        while True:
-            if is_cancelled and is_cancelled():
-                raise AnalysisCancelled(
-                    "Full analysis cancelled while waiting for repository lease."
-                )
-
-            previous_metadata = _read_lease_metadata(fd)
-            if previous_metadata is None:
-                previous_metadata = _read_lease_metadata_file(
-                    _lease_metadata_path(lock_file)
-                )
-            if _try_lock_fd(fd):
-                previous_owner_state, previous_owner_reason = _lease_owner_state(
-                    previous_metadata
-                )
-                if previous_owner_state == "orphaned" and not logged_recovery:
-                    _log_orphan_recovery(
-                        log,
-                        repo_id,
-                        previous_owner_reason,
+            while True:
+                if is_cancelled and is_cancelled():
+                    raise AnalysisCancelled(
+                        "Full analysis cancelled while waiting for repository lease."
                     )
-                    logged_recovery = True
-                token = uuid.uuid4().hex
 
-                owner_image, owner_process_start_identity, _ = _process_identity(
-                    os.getpid()
-                )
-
-                metadata = {
-                    "pid": os.getpid(),
-                    "token": token,
-                    "owner": str(owner),
-                    "repo_id": str(repo_id),
-                    "timestamp": time.time(),
-                }
-                if owner_image:
-                    metadata["executable"] = owner_image
-                if owner_process_start_identity is not None:
-                    metadata["process_start_identity"] = owner_process_start_identity
-
-                _write_lease_metadata_file(
-                    _lease_metadata_path(lock_file),
-                    metadata,
-                )
-
-                # Metadata is diagnostic only.
-                # OS lock ownership is authoritative.
-                os.ftruncate(fd, 0)
-                os.lseek(fd, 0, os.SEEK_SET)
-                os.write(
-                    fd,
-                    json.dumps(metadata).encode("utf-8"),
-                )
-                os.fsync(fd)
-
-                # Ensure byte 0 remains inside the locked file after metadata write.
-                os.lseek(fd, 0, os.SEEK_SET)
-
-                return FullAnalysisLease(
-                    repo_key=key,
-                    token=token,
-                    owner=str(owner),
-                    lock_path=str(lock_file),
-                    repo_id=str(repo_id),
-                    lock_fd=fd,
-                    owner_pid=os.getpid(),
-                    owner_process_start_identity=owner_process_start_identity,
-                )
-
-            if not logged_waiting:
-                if log:
-                    log(
-                        f"Waiting for full analysis lease on repository {repo_id}..."
+                previous_metadata = _read_lease_metadata(fd)
+                if previous_metadata is None:
+                    previous_metadata = _read_lease_metadata_file(
+                        _lease_metadata_path(lock_file)
                     )
-                    owner_state, owner_reason = _lease_owner_state(previous_metadata)
-                    if owner_state == "active":
-                        log(
-                            "Full analysis lease has a valid active owner "
-                            f"({owner_reason})."
+                if _try_lock_fd(fd):
+                    previous_owner_state, previous_owner_reason = _lease_owner_state(
+                        previous_metadata
+                    )
+                    if previous_owner_state == "orphaned" and not logged_recovery:
+                        _log_orphan_recovery(
+                            log,
+                            repo_id,
+                            previous_owner_reason,
                         )
-                    elif owner_state == "unknown":
-                        log(
-                            "Full analysis lease owner could not be verified; "
-                            f"continuing to wait ({owner_reason})."
-                        )
-                logged_waiting = True
+                        logged_recovery = True
+                    token = uuid.uuid4().hex
 
-            owner_state, owner_reason = _lease_owner_state(previous_metadata)
-            if owner_state == "orphaned":
-                unknown_owner_deadline = None
-                if orphan_recovery_deadline is None:
-                    orphan_recovery_deadline = min(
-                        deadline
-                        if deadline is not None
-                        else time.monotonic() + ORPHAN_RECOVERY_TIMEOUT_SECONDS,
-                        time.monotonic() + ORPHAN_RECOVERY_TIMEOUT_SECONDS,
+                    owner_image, owner_process_start_identity, _ = _process_identity(
+                        os.getpid()
                     )
-                if not logged_recovery:
-                    _log_orphan_recovery(log, repo_id, owner_reason)
-                    logged_recovery = True
-                if time.monotonic() >= orphan_recovery_deadline:
-                    raise FullAnalysisBusyError(
-                        f"Timed out recovering orphaned full analysis lease for "
-                        f"{repo_id}"
+
+                    metadata = {
+                        "pid": os.getpid(),
+                        "token": token,
+                        "owner": str(owner),
+                        "repo_id": str(repo_id),
+                        "timestamp": time.time(),
+                    }
+                    if owner_image:
+                        metadata["executable"] = owner_image
+                    if owner_process_start_identity is not None:
+                        metadata["process_start_identity"] = owner_process_start_identity
+
+                    _write_lease_metadata_file(
+                        _lease_metadata_path(lock_file),
+                        metadata,
                     )
-            elif owner_state == "unknown":
-                orphan_recovery_deadline = None
-                if unknown_owner_deadline is None:
-                    unknown_owner_deadline = min(
-                        deadline
-                        if deadline is not None
-                        else time.monotonic() + ORPHAN_RECOVERY_TIMEOUT_SECONDS,
-                        time.monotonic() + ORPHAN_RECOVERY_TIMEOUT_SECONDS,
+
+                    # Metadata is diagnostic only.
+                    # OS lock ownership is authoritative.
+                    os.ftruncate(fd, 0)
+                    os.lseek(fd, 0, os.SEEK_SET)
+                    os.write(
+                        fd,
+                        json.dumps(metadata).encode("utf-8"),
                     )
-                if time.monotonic() >= unknown_owner_deadline:
-                    raise FullAnalysisBusyError(
-                        f"Timed out waiting because full analysis lease owner "
-                        f"could not be verified for {repo_id}"
+                    os.fsync(fd)
+
+                    # Ensure byte 0 remains inside the locked file after metadata write.
+                    os.lseek(fd, 0, os.SEEK_SET)
+
+                    lease = FullAnalysisLease(
+                        repo_key=key,
+                        token=token,
+                        owner=str(owner),
+                        lock_path=str(lock_file),
+                        repo_id=str(repo_id),
+                        lock_fd=fd,
+                        owner_pid=os.getpid(),
+                        owner_process_start_identity=owner_process_start_identity,
                     )
-            else:
-                orphan_recovery_deadline = None
-                unknown_owner_deadline = None
+                    fd = -1
+                    return lease
 
-            if (
-                deadline is not None
-                and time.monotonic() >= deadline
-            ):
-                raise FullAnalysisBusyError(
-                    f"Repository {repo_id} is currently locked for full analysis"
-                )
+                if not logged_waiting:
+                    if log:
+                        log(f"Waiting for full analysis lease on repository {repo_id}...")
+                        owner_state, owner_reason = _lease_owner_state(previous_metadata)
+                        if owner_state == "active":
+                            log("Full analysis lease has a valid active owner " f"({owner_reason}).")
+                        elif owner_state == "unknown":
+                            log("Full analysis lease owner could not be verified; " f"continuing to wait ({owner_reason}).")
+                    logged_waiting = True
 
-            time.sleep(min(max(poll_interval, 0.01), 0.25))
-
-    except Exception:
-        if fd >= 0:
-            try:
-                os.close(fd)
-            except OSError:
-                pass
-
-        proc_lock.release()
-        raise
+                owner_state, owner_reason = _lease_owner_state(previous_metadata)
+                if owner_state == "orphaned":
+                    unknown_owner_deadline = None
+                    if orphan_recovery_deadline is None:
+                        orphan_recovery_deadline = min(deadline if deadline is not None else time.monotonic() + ORPHAN_RECOVERY_TIMEOUT_SECONDS, time.monotonic() + ORPHAN_RECOVERY_TIMEOUT_SECONDS)
+                    if not logged_recovery:
+                        _log_orphan_recovery(log, repo_id, owner_reason)
+                        logged_recovery = True
+                    if time.monotonic() >= orphan_recovery_deadline:
+                        raise FullAnalysisBusyError(f"Timed out recovering orphaned full analysis lease for {repo_id}")
+                elif owner_state == "unknown":
+                    orphan_recovery_deadline = None
+                    if unknown_owner_deadline is None:
+                        unknown_owner_deadline = min(deadline if deadline is not None else time.monotonic() + ORPHAN_RECOVERY_TIMEOUT_SECONDS, time.monotonic() + ORPHAN_RECOVERY_TIMEOUT_SECONDS)
+                    if time.monotonic() >= unknown_owner_deadline:
+                        raise FullAnalysisBusyError(f"Timed out waiting because full analysis lease owner could not be verified for {repo_id}")
+                else:
+                    orphan_recovery_deadline = None
+                    unknown_owner_deadline = None
+                if deadline is not None and time.monotonic() >= deadline:
+                    raise FullAnalysisBusyError(f"Repository {repo_id} is currently locked for full analysis")
+                time.sleep(min(max(poll_interval, 0.01), 0.25))
+        except Exception:
+            if fd >= 0:
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
+            proc_lock.release()
+            raise
 
 
 def release_full_analysis(
@@ -506,6 +588,7 @@ def run_full_analysis_exclusive(
     lease = acquire_full_analysis(
         path,
         owner=owner,
+        writer_kind="full_analysis",
         timeout=timeout,
         is_cancelled=is_cancelled,
         log=log,

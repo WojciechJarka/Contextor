@@ -781,3 +781,136 @@ def test_exception_in_analysis_releases_lease(tmp_path: Path):
         timeout=1.0,
     )
     assert executed is True
+
+
+def test_waiting_full_analysis_runs_before_next_live_mutation(tmp_path: Path):
+    repo = tmp_path / "repo_admission_order"
+    repo.mkdir()
+    ctx = multiprocessing.get_context("spawn")
+    ready = ctx.Event()
+    results = ctx.Queue()
+    holder = ctx.Process(
+        target=_worker_os_lock_hold,
+        args=(str(repo), "mutation_a", ready, results, 30.0),
+    )
+    holder.start()
+    full_waiting = threading.Event()
+    full_acquired = threading.Event()
+    mutation_b_acquired = threading.Event()
+    release_full = threading.Event()
+    acquisition_order: list[str] = []
+
+    def acquire_full():
+        lease = acquire_full_analysis(
+            repo,
+            owner="full",
+            writer_kind="full_analysis",
+            log=lambda message: full_waiting.set()
+            if "Waiting for full analysis lease" in message
+            else None,
+            poll_interval=0.01,
+        )
+        acquisition_order.append("full")
+        full_acquired.set()
+        release_full.wait(timeout=5)
+        release_full_analysis(lease)
+
+    def acquire_mutation_b():
+        lease = acquire_full_analysis(
+            repo,
+            owner="mutation_b",
+            writer_kind="live_mutation",
+            poll_interval=0.01,
+        )
+        acquisition_order.append("mutation_b")
+        mutation_b_acquired.set()
+        release_full_analysis(lease)
+
+    full_thread = threading.Thread(target=acquire_full)
+    mutation_thread = threading.Thread(target=acquire_mutation_b)
+    try:
+        assert ready.wait(timeout=15)
+        assert results.get(timeout=2)["status"] == "acquired"
+        full_thread.start()
+        assert full_waiting.wait(timeout=5)
+        mutation_thread.start()
+        holder.terminate()
+        holder.join(timeout=3)
+        assert full_acquired.wait(timeout=5)
+        assert not mutation_b_acquired.is_set()
+        release_full.set()
+        assert mutation_b_acquired.wait(timeout=5)
+        assert acquisition_order == ["full", "mutation_b"]
+    finally:
+        release_full.set()
+        if holder.is_alive():
+            holder.terminate()
+        holder.join(timeout=3)
+        full_thread.join(timeout=5)
+        mutation_thread.join(timeout=5)
+
+
+def test_admission_timeout_does_not_leak_locks(tmp_path: Path):
+    repo = tmp_path / "repo_admission_timeout"
+    repo.mkdir()
+    ctx = multiprocessing.get_context("spawn")
+    ready = ctx.Event()
+    results = ctx.Queue()
+    holder = ctx.Process(
+        target=_worker_os_lock_hold,
+        args=(str(repo), "a", ready, results, 30.0),
+    )
+    holder.start()
+    full_waiting = threading.Event()
+    release_full = threading.Event()
+    full_acquired = threading.Event()
+
+    def wait_for_execution():
+        lease = acquire_full_analysis(
+            repo, owner="full", writer_kind="full_analysis",
+            log=lambda message: full_waiting.set() if "Waiting for full analysis lease" in message else None,
+            poll_interval=0.01,
+        )
+        full_acquired.set()
+        release_full.wait(timeout=5)
+        release_full_analysis(lease)
+
+    thread = threading.Thread(target=wait_for_execution)
+    try:
+        assert ready.wait(timeout=15)
+        assert results.get(timeout=2)["status"] == "acquired"
+        thread.start()
+        assert full_waiting.wait(timeout=5)
+        with pytest.raises(FullAnalysisBusyError):
+            acquire_full_analysis(repo, owner="b", writer_kind="live_mutation", timeout=0.05, poll_interval=0.01)
+        holder.terminate()
+        holder.join(timeout=3)
+        assert full_acquired.wait(timeout=5)
+        release_full.set()
+        thread.join(timeout=5)
+        lease = acquire_full_analysis(repo, owner="after", writer_kind="live_mutation", timeout=1)
+        release_full_analysis(lease)
+    finally:
+        release_full.set()
+        if holder.is_alive():
+            holder.terminate()
+        holder.join(timeout=3)
+        thread.join(timeout=5)
+
+
+def test_admission_cancellation_does_not_leak_locks(tmp_path: Path):
+    repo = tmp_path / "repo_admission_cancel"
+    repo.mkdir()
+    holder = acquire_full_analysis(repo, owner="a", writer_kind="live_mutation")
+    cancelled = threading.Event()
+    cancelled.set()
+    try:
+        with pytest.raises(AnalysisCancelled):
+            acquire_full_analysis(
+                repo, owner="cancelled", writer_kind="live_mutation",
+                is_cancelled=cancelled.is_set, poll_interval=0.01,
+            )
+    finally:
+        release_full_analysis(holder)
+    lease = acquire_full_analysis(repo, owner="after", writer_kind="live_mutation", timeout=1)
+    release_full_analysis(lease)

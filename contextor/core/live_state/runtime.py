@@ -1143,6 +1143,7 @@ def _repository_mutation_guard(root: Path):
         lease = acquire_full_analysis(
             root,
             owner="live_mutation_worker",
+            writer_kind="live_mutation",
             is_cancelled=stop_event.is_set,
         )
         try:
