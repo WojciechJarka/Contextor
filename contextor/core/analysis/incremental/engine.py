@@ -1,4 +1,5 @@
 import threading
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional, List, Set, Dict, Iterable, Tuple, Any
@@ -7,6 +8,7 @@ from contextor.core.domain.graph import ProjectGraph
 from contextor.core.analysis.state_manager import FileStateManager, RepositoryAnalysisState, FileDelta
 from contextor.core.domain.usage_facts import ModuleUsageFacts
 from contextor.core.reporting_engine.persistent_registry import PersistentIdentityRegistry
+from contextor.core.runtime_trace import trace_event
 
 from contextor.core.analysis.incremental.graph_ops import (
     LocalDegreeDeltaResult,
@@ -37,6 +39,24 @@ from contextor.core.analysis.state_manager import (
     mark_module_parse_failure,
     validate_canonical_artifact_consumption_coverage,
 )
+
+
+def _trace_incremental_phase(
+    event: str,
+    *,
+    started: float | None = None,
+    **fields: object,
+) -> None:
+    payload = dict(fields)
+    if started is not None:
+        payload["elapsed_ms"] = (
+            time.monotonic() - started
+        ) * 1000.0
+    trace_event(
+        "LIVE",
+        event,
+        **payload,
+    )
 
 
 @dataclass
@@ -488,6 +508,15 @@ class IncrementalAnalysisEngine:
                     module_usages=self.state.module_usages,
                     collision_facts_changed=collision_facts_changed,
                 )
+                _trace_incremental_phase(
+                    "INCREMENTAL_APPLY_START",
+                    result=(
+                        f"artifacts_added={len(delta.artifacts_added)};"
+                        f"artifacts_removed={len(delta.artifacts_removed)};"
+                        f"artifacts_changed={len(delta.artifacts_changed)};"
+                        f"patch_families={','.join(plan.patch_families)}"
+                    ),
+                )
                 affected_set, blast_radius_complete, execution_trace = self._apply_delta_and_commit(
                     file_path, delta, usage_delta, plan, [], {}, ModuleUsageFacts(),
                     new_collision_facts=None,
@@ -628,6 +657,15 @@ class IncrementalAnalysisEngine:
                 )
 
             # 3. Apply and Commit driven by RefreshPlan
+            _trace_incremental_phase(
+                "INCREMENTAL_APPLY_START",
+                result=(
+                    f"artifacts_added={len(delta.artifacts_added)};"
+                    f"artifacts_removed={len(delta.artifacts_removed)};"
+                    f"artifacts_changed={len(delta.artifacts_changed)};"
+                    f"patch_families={','.join(plan.patch_families)}"
+                ),
+            )
             affected_set, blast_radius_complete, execution_trace = self._apply_delta_and_commit(
                 file_path, delta, usage_delta, plan, new_imports, new_artifacts, new_usage,
                 new_collision_facts=new_collision_facts,
@@ -730,17 +768,43 @@ class IncrementalAnalysisEngine:
         Executes planned RefreshPlan phases and performs atomic persistent & RAM commit.
         """
         resync_required = bool(getattr(self.state, "resync_required", False))
-        outcome = execute_refresh_plan(
-            state=self.state,
-            delta=delta,
-            usage_delta=usage_delta,
-            plan=plan,
-            new_imports=new_imports,
-            new_artifacts=mod_artifacts,
-            new_usage=new_usage,
-            root_path=self.root_path,
-            file_path=file_path,
-            new_collision_facts=new_collision_facts,
+        execute_started = time.monotonic()
+        _trace_incremental_phase(
+            "INCREMENTAL_EXECUTE_PLAN_START",
+        )
+        try:
+            outcome = execute_refresh_plan(
+                state=self.state,
+                delta=delta,
+                usage_delta=usage_delta,
+                plan=plan,
+                new_imports=new_imports,
+                new_artifacts=mod_artifacts,
+                new_usage=new_usage,
+                root_path=self.root_path,
+                file_path=file_path,
+                new_collision_facts=new_collision_facts,
+            )
+        except Exception as exc:
+            _trace_incremental_phase(
+                "INCREMENTAL_EXECUTE_PLAN_FAIL",
+                started=execute_started,
+                error=str(exc),
+            )
+            raise
+        _trace_incremental_phase(
+            "INCREMENTAL_EXECUTE_PLAN_END",
+            started=execute_started,
+            result=(
+                f"identity_sync_required="
+                f"{outcome.identity_sync_required};"
+                f"patch_families="
+                f"{','.join(outcome.execution_trace.get('patch_families', ()))};"
+                f"recompute_count="
+                f"{len(outcome.execution_trace.get('recompute_modules', ()))};"
+                f"graph_count="
+                f"{len(outcome.execution_trace.get('graph_recomputations', ()))}"
+            ),
         )
 
         candidate = outcome.candidate_state
@@ -749,16 +813,77 @@ class IncrementalAnalysisEngine:
         if outcome.identity_sync_required:
             try:
                 with self.registry.transaction():
-                    self.registry.sync_with_workspace(
-                        outcome.all_modules,
-                        outcome.current_artifacts,
+                    registry_started = time.monotonic()
+                    _trace_incremental_phase(
+                        "INCREMENTAL_REGISTRY_SYNC_START",
+                        count=len(outcome.current_artifacts),
                     )
-                    self._update_candidate_lineage_slice(
-                        candidate,
-                        source_path=syntax_source_path or "",
-                        extracted_lineage_facts=extracted_lineage_facts,
-                        delete=bool(getattr(delta, "is_deleted", False)),
-                        rematerialize_all=True,
+                    try:
+                        self.registry.sync_with_workspace(
+                            outcome.all_modules,
+                            outcome.current_artifacts,
+                        )
+                    except Exception as exc:
+                        _trace_incremental_phase(
+                            "INCREMENTAL_REGISTRY_SYNC_FAIL",
+                            started=registry_started,
+                            error=str(exc),
+                        )
+                        raise
+                    missing_after_sync = sorted(
+                        outcome.current_artifacts
+                        - set(
+                            self.registry._state[
+                                "artifact_registry"
+                            ]["path_to_id"]
+                        )
+                    )
+                    _trace_incremental_phase(
+                        "INCREMENTAL_REGISTRY_SYNC_END",
+                        started=registry_started,
+                        count=len(missing_after_sync),
+                        result=(
+                            "missing_after_sync="
+                            + ",".join(
+                                missing_after_sync[:5]
+                            )
+                        ),
+                    )
+
+                    lineage_started = time.monotonic()
+                    _trace_incremental_phase(
+                        "INCREMENTAL_LINEAGE_START",
+                        result="rematerialize_all=true",
+                    )
+                    try:
+                        self._update_candidate_lineage_slice(
+                            candidate,
+                            source_path=(
+                                syntax_source_path or ""
+                            ),
+                            extracted_lineage_facts=(
+                                extracted_lineage_facts
+                            ),
+                            delete=bool(
+                                getattr(
+                                    delta,
+                                    "is_deleted",
+                                    False,
+                                )
+                            ),
+                            rematerialize_all=True,
+                        )
+                    except Exception as exc:
+                        _trace_incremental_phase(
+                            "INCREMENTAL_LINEAGE_FAIL",
+                            started=lineage_started,
+                            error=str(exc),
+                        )
+                        raise
+                    _trace_incremental_phase(
+                        "INCREMENTAL_LINEAGE_END",
+                        started=lineage_started,
+                        result="rematerialize_all=true",
                     )
             except Exception:
                 # A failed write transaction leaves no persisted commit; reload its
@@ -769,12 +894,44 @@ class IncrementalAnalysisEngine:
         elif extracted_lineage_facts is not None or bool(
             getattr(delta, "is_deleted", False)
         ):
+            _trace_incremental_phase(
+                "INCREMENTAL_REGISTRY_SYNC_SKIP",
+                result="identity_sync_required=false",
+            )
             with self.registry.read_transaction():
-                self._update_candidate_lineage_slice(
-                    candidate,
-                    source_path=syntax_source_path or "",
-                    extracted_lineage_facts=extracted_lineage_facts,
-                    delete=bool(getattr(delta, "is_deleted", False)),
+                lineage_started = time.monotonic()
+                _trace_incremental_phase(
+                    "INCREMENTAL_LINEAGE_START",
+                    result="rematerialize_all=false",
+                )
+                try:
+                    self._update_candidate_lineage_slice(
+                        candidate,
+                        source_path=(
+                            syntax_source_path or ""
+                        ),
+                        extracted_lineage_facts=(
+                            extracted_lineage_facts
+                        ),
+                        delete=bool(
+                            getattr(
+                                delta,
+                                "is_deleted",
+                                False,
+                            )
+                        ),
+                    )
+                except Exception as exc:
+                    _trace_incremental_phase(
+                        "INCREMENTAL_LINEAGE_FAIL",
+                        started=lineage_started,
+                        error=str(exc),
+                    )
+                    raise
+                _trace_incremental_phase(
+                    "INCREMENTAL_LINEAGE_END",
+                    started=lineage_started,
+                    result="rematerialize_all=false",
                 )
 
         # Canonical State Publication
@@ -834,7 +991,15 @@ class IncrementalAnalysisEngine:
         self.state.package_root = candidate.package_root
 
         # FileStateManager acknowledgement
+        file_state_started = time.monotonic()
+        _trace_incremental_phase(
+            "INCREMENTAL_FILE_STATE_START",
+        )
         self.state_manager.update_state(file_path)
+        _trace_incremental_phase(
+            "INCREMENTAL_FILE_STATE_END",
+            started=file_state_started,
+        )
 
         return outcome.affected_modules, outcome.blast_radius_complete, outcome.execution_trace
 
