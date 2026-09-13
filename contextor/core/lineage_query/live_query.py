@@ -1,8 +1,11 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from collections.abc import Mapping
 
+from contextor.core.analysis.state_manager import (
+    module_current_truth,
+)
 from contextor.core.lineage_query.backend import (
     RepositoryStateLineageBackend,
 )
@@ -43,6 +46,8 @@ class LiveSymbolLineageQueryResult:
     resolution: LineageTargetResolution
     selected: SelectedSymbolLineageFacts | None = None
     unavailable_reason: str | None = None
+    owner_names: dict[str, str] = field(default_factory=dict)
+    state_freshness: dict[str, object] = field(default_factory=dict)
 
 
 def _selected_lineage_flow_matches(
@@ -215,6 +220,62 @@ def build_selected_lineage_owner_names(
             endpoint_role=SemanticEndpointRole.SURFACE_EXPOSED,
         )
     return dict(sorted(owner_names.items()))
+
+
+def build_live_lineage_state_freshness(
+    state: object,
+    backend: RepositoryStateLineageBackend,
+    *,
+    target_module: str | None = None,
+) -> dict[str, object]:
+    if not isinstance(backend, RepositoryStateLineageBackend):
+        raise TypeError("backend must be RepositoryStateLineageBackend.")
+    if (
+        target_module is not None
+        and (not isinstance(target_module, str) or not target_module)
+    ):
+        raise ValueError(
+            "target_module must be a non-empty string or None."
+        )
+
+    metadata = backend.metadata()
+    if target_module is None:
+        module_truth = {"state": "fresh"}
+    else:
+        module_truth = module_current_truth(state, target_module)
+    module_state = str(module_truth.get("state", "fresh"))
+    resync_required = bool(getattr(state, "resync_required", False))
+    canonical_state = (
+        "stale"
+        if resync_required or module_state == "stale"
+        else "fresh"
+    )
+
+    advisory_warning = None
+    if resync_required:
+        advisory_warning = "Canonical state requires resynchronization."
+    elif module_state == "stale":
+        advisory_warning = (
+            module_truth.get("reason")
+            or "Target module canonical facts are last-known-good."
+        )
+
+    return {
+        "canonical_state": canonical_state,
+        "workspace_sync": "unverified",
+        "canonical_revision": metadata.revision,
+        "provenance": metadata.provenance,
+        "families": {
+            "module": module_state,
+            "lineage": metadata.family_state,
+            "lineage_query_index": metadata.query_index_state,
+        },
+        "lineage_semantic_version": metadata.semantic_version,
+        "semantic_anchor_bindings_complete": (
+            metadata.semantic_anchor_bindings_complete
+        ),
+        "advisory_warning": advisory_warning,
+    }
 
 
 def _require_exact_identity_capability(
@@ -433,6 +494,12 @@ def query_live_symbol_lineage(
                 query=query.strip(),
             ),
             unavailable_reason=str(exc),
+            state_freshness=(
+                build_live_lineage_state_freshness(
+                    state,
+                    backend,
+                )
+            ),
         )
 
     service = LineageQueryService(
@@ -449,6 +516,12 @@ def query_live_symbol_lineage(
     ):
         return LiveSymbolLineageQueryResult(
             resolution=resolution,
+            state_freshness=(
+                build_live_lineage_state_freshness(
+                    state,
+                    backend,
+                )
+            ),
         )
 
     facts = service.symbol_lineage_facts(
@@ -460,8 +533,19 @@ def query_live_symbol_lineage(
             canonical_sections,
         )
     )
+    owner_names = build_selected_lineage_owner_names(
+        backend,
+        selected,
+    )
+    state_freshness = build_live_lineage_state_freshness(
+        state,
+        backend,
+        target_module=resolution.target.module_name,
+    )
 
     return LiveSymbolLineageQueryResult(
         resolution=resolution,
         selected=selected,
+        owner_names=owner_names,
+        state_freshness=state_freshness,
     )

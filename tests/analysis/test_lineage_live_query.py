@@ -30,6 +30,7 @@ from contextor.core.lineage_query.index import (
 from contextor.core.lineage_query.live_query import (
     LiveSymbolLineageQueryResult,
     build_selected_lineage_owner_names,
+    build_live_lineage_state_freshness,
     build_live_lineage_target_catalog,
     query_live_symbol_lineage,
 )
@@ -913,14 +914,142 @@ def test_selected_owner_names_reject_conflicting_canonical_name_for_same_owner()
     state.lineage_owner_source_index = owner_source_index
     state.lineage_source_owner_index = source_owner_index
     state.lineage_semantic_anchor_bindings_complete = anchor_complete
-    result = query_live_symbol_lineage(
-        state, "A17/2", ("calls_interfaces",)
-    )
-    assert result.selected is not None
-    backend = RepositoryStateLineageBackend(state)
-
     with pytest.raises(
         ValueError,
         match="Canonical semantic owner identity is inconsistent.",
     ):
-        build_selected_lineage_owner_names(backend, result.selected)
+        query_live_symbol_lineage(
+            state,
+            "A17/2",
+            ("calls_interfaces",),
+        )
+
+
+def test_live_lineage_state_freshness_is_ram_only_and_revision_bound():
+    state, backend = _fixture()
+
+    result = build_live_lineage_state_freshness(
+        state,
+        backend,
+        target_module="pkg.mod",
+    )
+
+    assert result == {
+        "canonical_state": "fresh",
+        "workspace_sync": "unverified",
+        "canonical_revision": 7,
+        "provenance": "live",
+        "families": {
+            "module": "fresh",
+            "lineage": "fresh",
+            "lineage_query_index": "fresh",
+        },
+        "lineage_semantic_version": "1",
+        "semantic_anchor_bindings_complete": True,
+        "advisory_warning": None,
+    }
+
+
+def test_live_lineage_state_freshness_marks_last_known_good_target_module_stale():
+    state, backend = _fixture()
+    state.module_parse_freshness = {
+        "pkg.mod": {"state": "stale", "error": "syntax failure"},
+    }
+
+    result = build_live_lineage_state_freshness(
+        state,
+        backend,
+        target_module="pkg.mod",
+    )
+
+    assert result["canonical_state"] == "stale"
+    assert result["workspace_sync"] == "unverified"
+    assert result["families"]["module"] == "stale"
+    assert result["advisory_warning"] == (
+        "Current source could not be parsed; canonical facts are "
+        "last-known-good."
+    )
+
+
+def test_live_lineage_state_freshness_marks_resync_required():
+    state, backend = _fixture()
+    state.resync_required = True
+
+    result = build_live_lineage_state_freshness(
+        state,
+        backend,
+        target_module="pkg.mod",
+    )
+
+    assert result["canonical_state"] == "stale"
+    assert result["advisory_warning"] == (
+        "Canonical state requires resynchronization."
+    )
+
+
+def test_live_symbol_lineage_result_carries_selected_owner_names_and_same_revision_freshness():
+    state, _backend, _selected = _owner_name_projection_fixture()
+
+    result = query_live_symbol_lineage(
+        state,
+        "A17/2",
+        ("calls_interfaces", "state"),
+    )
+
+    assert result.resolution.status == "resolved"
+    assert result.selected is not None
+    assert result.owner_names == {
+        "17/2": "pkg.mod",
+        "A18/1": "pkg.mod::other",
+    }
+    assert result.state_freshness["canonical_revision"] == 11
+    assert result.state_freshness["provenance"] == "live"
+    assert result.state_freshness["families"]["lineage"] == "fresh"
+    assert (
+        result.selected.facts.metadata.revision
+        == result.state_freshness["canonical_revision"]
+    )
+
+
+def test_unresolved_and_unavailable_live_symbol_results_have_no_owner_names_but_keep_freshness():
+    state, _backend = _fixture()
+
+    missing = query_live_symbol_lineage(
+        state,
+        "A404/1",
+        ("interface",),
+    )
+
+    assert missing.resolution.status == "not_found"
+    assert missing.selected is None
+    assert missing.owner_names == {}
+    assert missing.state_freshness["canonical_revision"] == 7
+
+    state.lineage_query_index_state = "stale"
+    unavailable = query_live_symbol_lineage(
+        state,
+        "A17/2",
+        ("interface",),
+    )
+
+    assert unavailable.resolution.status == "unavailable"
+    assert unavailable.selected is None
+    assert unavailable.owner_names == {}
+    assert (
+        unavailable.state_freshness["families"]["lineage_query_index"]
+        == "stale"
+    )
+
+
+def test_live_lineage_state_freshness_validates_target_module():
+    state, backend = _fixture()
+
+    with pytest.raises(
+        ValueError,
+        match="target_module must be a non-empty string or None.",
+    ):
+        build_live_lineage_state_freshness(
+            state,
+            backend,
+            target_module="",
+        )
