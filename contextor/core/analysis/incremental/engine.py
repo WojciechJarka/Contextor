@@ -122,6 +122,9 @@ class IncrementalAnalysisEngine:
                 LINEAGE_FACTS_SEMANTIC_VERSION,
                 LineageFamilyStatus,
             )
+            from contextor.core.lineage_query.index import (
+                build_lineage_query_indexes,
+            )
 
             candidate.lineage_facts_by_source.pop(source_path, None)
             if candidate.lineage_facts_state == LineageFamilyStatus.NOT_MATERIALIZED.value:
@@ -130,6 +133,19 @@ class IncrementalAnalysisEngine:
             else:
                 candidate.lineage_facts_state = LineageFamilyStatus.STALE.value
                 candidate.lineage_facts_semantic_version = LINEAGE_FACTS_SEMANTIC_VERSION
+            (
+                candidate.lineage_owner_source_index,
+                candidate.lineage_source_owner_index,
+                candidate.lineage_semantic_anchor_bindings_complete,
+            ) = build_lineage_query_indexes(candidate.lineage_facts_by_source)
+            candidate.lineage_query_index_state = (
+                "not_materialized"
+                if candidate.lineage_facts_state
+                == LineageFamilyStatus.NOT_MATERIALIZED.value
+                else "fresh"
+            )
+            if candidate.lineage_query_index_state != "fresh":
+                candidate.lineage_semantic_anchor_bindings_complete = False
         elif extracted_lineage_facts is not None:
             with self.registry.read_transaction():
                 self._update_candidate_lineage_slice(
@@ -161,6 +177,12 @@ class IncrementalAnalysisEngine:
         self.state.lineage_facts_state = candidate.lineage_facts_state
         self.state.lineage_facts_semantic_version = (
             candidate.lineage_facts_semantic_version
+        )
+        self.state.lineage_owner_source_index = candidate.lineage_owner_source_index
+        self.state.lineage_source_owner_index = candidate.lineage_source_owner_index
+        self.state.lineage_query_index_state = candidate.lineage_query_index_state
+        self.state.lineage_semantic_anchor_bindings_complete = (
+            candidate.lineage_semantic_anchor_bindings_complete
         )
 
     def _update_candidate_lineage_slice(
@@ -302,6 +324,43 @@ class IncrementalAnalysisEngine:
             candidate.lineage_facts_state = LineageFamilyStatus.RESOURCE_LIMIT.value
         else:
             candidate.lineage_facts_state = LineageFamilyStatus.FRESH.value
+
+        from contextor.core.lineage_query.index import (
+            build_lineage_query_indexes,
+            patch_lineage_query_indexes,
+            semantic_anchor_bindings_complete,
+        )
+
+        if rematerialize_all or candidate.lineage_query_index_state != "fresh":
+            (
+                candidate.lineage_owner_source_index,
+                candidate.lineage_source_owner_index,
+                candidate.lineage_semantic_anchor_bindings_complete,
+            ) = build_lineage_query_indexes(lineage_by_source)
+        else:
+            (
+                candidate.lineage_owner_source_index,
+                candidate.lineage_source_owner_index,
+            ) = patch_lineage_query_indexes(
+                candidate.lineage_owner_source_index,
+                candidate.lineage_source_owner_index,
+                source_key=source_path,
+                source=(
+                    None if delete else lineage_by_source.get(source_path)
+                ),
+            )
+            candidate.lineage_semantic_anchor_bindings_complete = (
+                semantic_anchor_bindings_complete(lineage_by_source)
+            )
+
+        candidate.lineage_query_index_state = (
+            "not_materialized"
+            if candidate.lineage_facts_state
+            == LineageFamilyStatus.NOT_MATERIALIZED.value
+            else "fresh"
+        )
+        if candidate.lineage_query_index_state != "fresh":
+            candidate.lineage_semantic_anchor_bindings_complete = False
 
     def update_file(self, file_path: str) -> IncrementalUpdateResult:
         """
@@ -696,6 +755,12 @@ class IncrementalAnalysisEngine:
         self.state.lineage_facts_state = candidate.lineage_facts_state
         self.state.lineage_facts_semantic_version = (
             candidate.lineage_facts_semantic_version
+        )
+        self.state.lineage_owner_source_index = candidate.lineage_owner_source_index
+        self.state.lineage_source_owner_index = candidate.lineage_source_owner_index
+        self.state.lineage_query_index_state = candidate.lineage_query_index_state
+        self.state.lineage_semantic_anchor_bindings_complete = (
+            candidate.lineage_semantic_anchor_bindings_complete
         )
         self.state.trie = candidate.trie
         self.state.package_root = candidate.package_root

@@ -130,6 +130,10 @@ def _persist_corrupted_lineage_slice(
         lineage_facts_state="fresh",
         lineage_facts_semantic_version=LINEAGE_FACTS_SEMANTIC_VERSION,
     )
+    object.__delattr__(state, "lineage_owner_source_index")
+    object.__delattr__(state, "lineage_source_owner_index")
+    object.__delattr__(state, "lineage_query_index_state")
+    object.__delattr__(state, "lineage_semantic_anchor_bindings_complete")
     save_snapshot(state, tmp_path, state_id)
     return load_snapshot(tmp_path, expected_state_id=state_id)
 
@@ -192,6 +196,8 @@ def test_snapshot_round_trip_preserves_lineage_endpoint_types_and_metadata(
     assert loaded_slice.surfaces[0].provider == ProviderRef("fixture", "1")
     assert loaded_slice.surfaces[0].dynamic_boundary == "runtime-registration"
     assert loaded_slice.semantic_anchors == source_slice.semantic_anchors
+    assert loaded.lineage_query_index_state == "fresh"
+    assert loaded.lineage_owner_source_index
 
 
 def test_snapshot_legacy_semantic_anchor_fields_fail_closed(tmp_path):
@@ -217,6 +223,7 @@ def test_snapshot_legacy_semantic_anchor_fields_fail_closed(tmp_path):
 
     assert loaded_slice.manifest.semantic_anchor_bindings_materialized is False
     assert loaded_slice.semantic_anchors == ()
+    assert loaded.lineage_query_index_state == "fresh"
 
 
 @pytest.mark.parametrize(
@@ -701,6 +708,8 @@ def test_incremental_lineage_modify_replaces_only_changed_candidate_slice(tmp_pa
     assert candidate.lineage_facts_by_source["other.py"] is other
     assert candidate.lineage_facts_state == "fresh"
     assert candidate.lineage_facts_semantic_version == LINEAGE_FACTS_SEMANTIC_VERSION
+    assert candidate.lineage_query_index_state == "fresh"
+    assert "pkg.py" in candidate.lineage_source_owner_index
 
 
 def test_incremental_lineage_delete_removes_only_deleted_slice(tmp_path):
@@ -729,6 +738,8 @@ def test_incremental_lineage_delete_removes_only_deleted_slice(tmp_path):
 
     assert candidate.lineage_facts_by_source == {"other.py": other}
     assert candidate.lineage_facts_state == "fresh"
+    assert candidate.lineage_query_index_state == "fresh"
+    assert "pkg.py" not in candidate.lineage_source_owner_index
 
 
 def test_lineage_only_noop_commit_replaces_slice_and_parse_error_invalidates_it(tmp_path):
@@ -767,6 +778,8 @@ def test_lineage_only_noop_commit_replaces_slice_and_parse_error_invalidates_it(
     assert state.lineage_facts_by_source["other.py"] is other
     assert state.lineage_facts_state == "stale"
     assert state.lineage_facts_semantic_version == LINEAGE_FACTS_SEMANTIC_VERSION
+    assert state.lineage_query_index_state == "fresh"
+    assert "pkg.py" not in state.lineage_source_owner_index
 
     engine._commit_syntax_candidate(
         source_path="pkg.py",
@@ -1170,6 +1183,8 @@ def test_identity_sync_generation_change_rematerializes_against_current_owner_id
     assert consumer_surface.exposed == SemanticEndpoint("A:provider/2")
     assert consumer_surface.exposed != SemanticEndpoint("A:provider/1")
     assert registry._state["artifact_registry"]["path_to_id"]["provider::target"] == "A:provider/2"
+    assert "A:provider/1" not in state.lineage_owner_source_index
+    assert "A:provider/2" in state.lineage_owner_source_index
 
 
 def test_identity_sync_revalidation_failure_rolls_back_registry_and_canonical_state(

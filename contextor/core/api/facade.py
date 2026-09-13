@@ -690,6 +690,20 @@ class ContextorFacade:
                 mods,
                 raw_artifacts,
             )
+            from contextor.core.lineage_query.index import (
+                build_lineage_query_indexes,
+            )
+
+            (
+                lineage_owner_source_index,
+                lineage_source_owner_index,
+                lineage_semantic_anchor_bindings_complete,
+            ) = build_lineage_query_indexes(lineage_facts_by_source)
+            lineage_query_index_state = (
+                "not_materialized"
+                if lineage_facts_state == "not_materialized"
+                else "fresh"
+            )
 
             state = RepositoryAnalysisState(
                 modules=mods,
@@ -706,6 +720,14 @@ class ContextorFacade:
                 lineage_facts_by_source=lineage_facts_by_source,
                 lineage_facts_state=lineage_facts_state,
                 lineage_facts_semantic_version=lineage_facts_semantic_version,
+                lineage_owner_source_index=lineage_owner_source_index,
+                lineage_source_owner_index=lineage_source_owner_index,
+                lineage_query_index_state=lineage_query_index_state,
+                lineage_semantic_anchor_bindings_complete=(
+                    lineage_semantic_anchor_bindings_complete
+                    if lineage_query_index_state == "fresh"
+                    else False
+                ),
                 metrics=metrics,
                 topology_analytics=topology_analytics,
                 topology_metrics_state="fresh",

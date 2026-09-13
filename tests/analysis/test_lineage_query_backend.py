@@ -39,6 +39,10 @@ def _state():
             provenance="live",
             lineage_facts_state="fresh",
             lineage_facts_semantic_version=LINEAGE_FACTS_SEMANTIC_VERSION,
+            lineage_owner_source_index={},
+            lineage_source_owner_index={"pkg/a.py": (), "pkg/b.py": ()},
+            lineage_query_index_state="fresh",
+            lineage_semantic_anchor_bindings_complete=True,
             lineage_facts_by_source={
                 "pkg/b.py": source_b,
                 "pkg/a.py": source_a,
@@ -60,6 +64,7 @@ def test_repository_state_backend_exposes_canonical_metadata():
         family_state="fresh",
         semantic_version=LINEAGE_FACTS_SEMANTIC_VERSION,
         source_count=2,
+        query_index_state="fresh",
         semantic_anchor_bindings_complete=True,
     )
 
@@ -88,6 +93,7 @@ def test_repository_state_backend_defaults_to_not_materialized():
         family_state="not_materialized",
         semantic_version=None,
         source_count=0,
+        query_index_state="not_materialized",
         semantic_anchor_bindings_complete=False,
     )
     assert backend.source_keys() == ()
@@ -135,3 +141,48 @@ def test_repository_state_backend_rejects_string_as_source_collection():
 
     with pytest.raises(TypeError, match="iterable of source-key strings"):
         backend.iter_sources("pkg/a.py")
+
+
+def test_owner_lookup_reads_only_prebuilt_index(monkeypatch):
+    state, _, _ = _state()
+    state.lineage_owner_source_index = {"A17/2": ("pkg/a.py",)}
+    backend = RepositoryStateLineageBackend(state)
+    monkeypatch.setattr(
+        backend,
+        "source_keys",
+        lambda: (_ for _ in ()).throw(AssertionError("repo scan")),
+    )
+    monkeypatch.setattr(
+        backend,
+        "get_source",
+        lambda _key: (_ for _ in ()).throw(AssertionError("slice read")),
+    )
+
+    assert backend.source_keys_for_owner("A17/2") == ("pkg/a.py",)
+
+
+def test_metadata_does_not_scan_sources(monkeypatch):
+    state, _, _ = _state()
+    backend = RepositoryStateLineageBackend(state)
+    monkeypatch.setattr(
+        backend,
+        "source_keys",
+        lambda: (_ for _ in ()).throw(AssertionError("repo scan")),
+    )
+    monkeypatch.setattr(
+        backend,
+        "get_source",
+        lambda _key: (_ for _ in ()).throw(AssertionError("slice read")),
+    )
+
+    assert backend.metadata().query_index_state == "fresh"
+
+
+@pytest.mark.parametrize("index_state", ["stale", "not_materialized"])
+def test_owner_lookup_fails_closed_without_fresh_index(index_state):
+    state, _, _ = _state()
+    state.lineage_query_index_state = index_state
+    backend = RepositoryStateLineageBackend(state)
+
+    with pytest.raises(ValueError, match="unavailable or stale"):
+        backend.source_keys_for_owner("A17/2")

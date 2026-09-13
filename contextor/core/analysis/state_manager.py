@@ -98,6 +98,10 @@ class RepositoryAnalysisState:
     lineage_facts_by_source: Dict[str, MaterializedLineageSourceFacts] = field(default_factory=dict)
     lineage_facts_state: str = "not_materialized"
     lineage_facts_semantic_version: str | None = None
+    lineage_owner_source_index: Dict[str, tuple[str, ...]] = field(default_factory=dict)
+    lineage_source_owner_index: Dict[str, tuple[str, ...]] = field(default_factory=dict)
+    lineage_query_index_state: str = "not_materialized"
+    lineage_semantic_anchor_bindings_complete: bool = False
     topology_analytics: Dict[str, Any] = field(default_factory=dict)
     topology_metrics_state: str = "deferred"
     cached_analytics: Dict[str, Any] = field(default_factory=dict)

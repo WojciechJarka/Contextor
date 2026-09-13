@@ -12,6 +12,40 @@ from typing import Optional, Any
 from contextor.core.analysis.state_manager import RepositoryAnalysisState
 
 
+def ensure_lineage_query_index(state: RepositoryAnalysisState) -> None:
+    """Ensure the RAM lineage access index exists without source work."""
+    from contextor.core.lineage_query.index import build_lineage_query_indexes
+
+    family_state = getattr(state, "lineage_facts_state", "not_materialized")
+    sources = getattr(state, "lineage_facts_by_source", {}) or {}
+    if family_state == "not_materialized":
+        state.lineage_owner_source_index = {}
+        state.lineage_source_owner_index = {}
+        state.lineage_query_index_state = "not_materialized"
+        state.lineage_semantic_anchor_bindings_complete = False
+        return
+    if (
+        getattr(state, "lineage_query_index_state", None) == "fresh"
+        and isinstance(getattr(state, "lineage_owner_source_index", None), dict)
+        and isinstance(getattr(state, "lineage_source_owner_index", None), dict)
+    ):
+        return
+    try:
+        owner_source_index, source_owner_index, anchor_complete = (
+            build_lineage_query_indexes(sources)
+        )
+    except (TypeError, ValueError):
+        state.lineage_owner_source_index = {}
+        state.lineage_source_owner_index = {}
+        state.lineage_query_index_state = "stale"
+        state.lineage_semantic_anchor_bindings_complete = False
+        return
+    state.lineage_owner_source_index = owner_source_index
+    state.lineage_source_owner_index = source_owner_index
+    state.lineage_query_index_state = "fresh"
+    state.lineage_semantic_anchor_bindings_complete = anchor_complete
+
+
 def module_usages_require_materialization(state: RepositoryAnalysisState) -> bool:
     """Return whether a missing or legacy usage slice needs canonical extraction."""
     usages = getattr(state, "module_usages", None)
@@ -509,6 +543,7 @@ def materialize_incremental_state(state: RepositoryAnalysisState) -> None:
     6. ensure_collisions (RAM-only)
     7. ensure_dependency_matrix (RAM-only, after artifact_consumption is resolved)
     8. ensure_shared_usage_clusters (RAM-only, after artifact_consumption is resolved)
+    9. ensure_lineage_query_index (RAM-only access index over canonical lineage)
     """
     ensure_artifact_consumption(state)
     ensure_module_usages(state)
@@ -518,3 +553,4 @@ def materialize_incremental_state(state: RepositoryAnalysisState) -> None:
     ensure_collisions(state)
     ensure_dependency_matrix(state)
     ensure_shared_usage_clusters(state)
+    ensure_lineage_query_index(state)

@@ -26,6 +26,7 @@ from contextor.core.lineage_query import (
     RepositoryStateLineageBackend,
     ResolvedLineageTarget,
 )
+from contextor.core.lineage_query.index import build_lineage_query_indexes
 from contextor.core.report_query import IndexCatalog
 
 
@@ -300,16 +301,24 @@ def _direct_service(*, family_state="fresh"):
         ),
     )
 
+    sources = {
+        "pkg/b.py": source_b,
+        "pkg/a.py": source_a,
+    }
+    owner_source_index, source_owner_index, anchor_complete = (
+        build_lineage_query_indexes(sources)
+    )
     backend = RepositoryStateLineageBackend(
         SimpleNamespace(
             revision=21,
             provenance="live",
             lineage_facts_state=family_state,
             lineage_facts_semantic_version="1",
-            lineage_facts_by_source={
-                "pkg/b.py": source_b,
-                "pkg/a.py": source_a,
-            },
+            lineage_facts_by_source=sources,
+            lineage_owner_source_index=owner_source_index,
+            lineage_source_owner_index=source_owner_index,
+            lineage_query_index_state="fresh",
+            lineage_semantic_anchor_bindings_complete=anchor_complete,
         )
     )
     service = LineageQueryService(
@@ -420,11 +429,19 @@ def test_direct_facts_seed_ordinary_symbol_from_semantic_anchor_binding():
         surfaces=(surface,),
         semantic_anchors=(binding,),
     )
+    sources = {source_key: source}
+    owner_source_index, source_owner_index, anchor_complete = (
+        build_lineage_query_indexes(sources)
+    )
     backend = RepositoryStateLineageBackend(
         SimpleNamespace(
             lineage_facts_state="fresh",
             lineage_facts_semantic_version="1",
-            lineage_facts_by_source={source_key: source},
+            lineage_facts_by_source=sources,
+            lineage_owner_source_index=owner_source_index,
+            lineage_source_owner_index=source_owner_index,
+            lineage_query_index_state="fresh",
+            lineage_semantic_anchor_bindings_complete=anchor_complete,
         )
     )
     service = LineageQueryService(
@@ -454,9 +471,24 @@ def test_direct_facts_are_incomplete_when_fresh_slice_lacks_anchor_materializati
         "semantic_anchor_bindings_materialized",
         False,
     )
+    backend._state.lineage_semantic_anchor_bindings_complete = False
 
     result = service.direct_facts(target)
 
     assert result.metadata.family_state == "fresh"
     assert result.metadata.semantic_anchor_bindings_complete is False
     assert result.complete is False
+
+
+def test_direct_facts_never_enumerates_repo_wide_source_keys(monkeypatch):
+    service, backend, target, _ = _direct_service()
+    monkeypatch.setattr(
+        backend,
+        "source_keys",
+        lambda: (_ for _ in ()).throw(AssertionError("repo scan")),
+    )
+
+    result = service.direct_facts(target)
+
+    assert result.incoming
+    assert result.outgoing

@@ -22,6 +22,7 @@ class LineageBackendMetadata:
     family_state: str
     semantic_version: str | None
     source_count: int
+    query_index_state: str
     semantic_anchor_bindings_complete: bool
 
 
@@ -106,13 +107,15 @@ class RepositoryStateLineageBackend:
                 "Canonical lineage semantic version must be a non-empty string or None."
             )
 
-        semantic_anchor_bindings_complete = (
-            family_state == LineageFamilyStatus.FRESH.value
-            and all(
-                self.get_source(source_key)
-                .manifest.semantic_anchor_bindings_materialized
-                for source_key in self.source_keys()
-            )
+        query_index_state = getattr(
+            self._state,
+            "lineage_query_index_state",
+            "not_materialized",
+        )
+        if query_index_state not in {"not_materialized", "fresh", "stale"}:
+            raise ValueError("Canonical lineage query index state is invalid.")
+        semantic_anchor_bindings_complete = bool(
+            getattr(self._state, "lineage_semantic_anchor_bindings_complete", False)
         )
         return LineageBackendMetadata(
             revision=raw_revision,
@@ -120,7 +123,12 @@ class RepositoryStateLineageBackend:
             family_state=family_state,
             semantic_version=semantic_version,
             source_count=len(self._sources),
-            semantic_anchor_bindings_complete=semantic_anchor_bindings_complete,
+            query_index_state=query_index_state,
+            semantic_anchor_bindings_complete=(
+                semantic_anchor_bindings_complete
+                if query_index_state == "fresh"
+                else False
+            ),
         )
 
     def source_keys(self) -> tuple[str, ...]:
@@ -156,33 +164,18 @@ class RepositoryStateLineageBackend:
         if not isinstance(owner_id, str) or not owner_id:
             raise ValueError("owner_id must be a non-empty string.")
 
-        matches: list[str] = []
-        for source_key in self.source_keys():
-            source = self.get_source(source_key)
-            assert source is not None
-            flow_match = any(
-                (
-                    isinstance(flow.source, SemanticEndpoint)
-                    and flow.source.owner_id == owner_id
-                )
-                or (
-                    isinstance(flow.target, SemanticEndpoint)
-                    and flow.target.owner_id == owner_id
-                )
-                for flow in source.flows
-            )
-            surface_match = any(
-                isinstance(surface.exposed, SemanticEndpoint)
-                and surface.exposed.owner_id == owner_id
-                for surface in source.surfaces
-            )
-            anchor_match = any(
-                binding.owner_id == owner_id
-                for binding in source.semantic_anchors
-            )
-            if flow_match or surface_match or anchor_match:
-                matches.append(source_key)
-        return tuple(matches)
+        if getattr(self._state, "lineage_query_index_state", "not_materialized") != "fresh":
+            raise ValueError("Canonical lineage query index is unavailable or stale.")
+        raw_index = getattr(self._state, "lineage_owner_source_index", {})
+        if not isinstance(raw_index, Mapping):
+            raise TypeError("lineage_owner_source_index must be a mapping.")
+        source_keys = raw_index.get(owner_id, ())
+        if not isinstance(source_keys, tuple) or any(
+            not isinstance(source_key, str) or not source_key
+            for source_key in source_keys
+        ):
+            raise TypeError("lineage_owner_source_index contains invalid source keys.")
+        return source_keys
 
     def iter_sources(
         self,

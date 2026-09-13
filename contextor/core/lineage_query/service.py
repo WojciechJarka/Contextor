@@ -67,6 +67,7 @@ class DirectLineageFacts:
     def complete(self) -> bool:
         return (
             self.metadata.family_state == "fresh"
+            and self.metadata.query_index_state == "fresh"
             and self.metadata.semantic_anchor_bindings_complete
         )
 

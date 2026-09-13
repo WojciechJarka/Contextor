@@ -352,6 +352,34 @@ def _normalize_lineage_facts_state(state: Any) -> Any:
         ) from exc
 
 
+def _normalize_lineage_query_index_state(state: Any) -> Any:
+    """Rebuild the derived index during hydration, never during a query."""
+    if state is None or isinstance(state, dict) or not hasattr(state, "__dict__"):
+        return state
+    from contextor.core.lineage_query.index import build_lineage_query_indexes
+
+    family_state = getattr(state, "lineage_facts_state", "not_materialized")
+    sources = getattr(state, "lineage_facts_by_source", {}) or {}
+    if family_state == "not_materialized":
+        state.lineage_owner_source_index = {}
+        state.lineage_source_owner_index = {}
+        state.lineage_query_index_state = "not_materialized"
+        state.lineage_semantic_anchor_bindings_complete = False
+        return state
+    try:
+        (
+            state.lineage_owner_source_index,
+            state.lineage_source_owner_index,
+            state.lineage_semantic_anchor_bindings_complete,
+        ) = build_lineage_query_indexes(sources)
+    except (TypeError, ValueError) as exc:
+        raise pickle.UnpicklingError(
+            "Invalid canonical lineage query index inputs."
+        ) from exc
+    state.lineage_query_index_state = "fresh"
+    return state
+
+
 @dataclass(frozen=True)
 class LiveStateMetadata:
     schema_version: str = LIVE_STATE_SCHEMA_VERSION
@@ -580,8 +608,10 @@ def load_snapshot(
             )
             if embedded_metadata.revision != metadata.revision:
                 return None
-            state_obj = _normalize_lineage_facts_state(
-                _normalize_symbol_call_facts(payload["state"])
+            state_obj = _normalize_lineage_query_index_state(
+                _normalize_lineage_facts_state(
+                    _normalize_symbol_call_facts(payload["state"])
+                )
             )
             state_revision = (
                 state_obj.get("revision") if isinstance(state_obj, dict)
@@ -688,8 +718,10 @@ def load_snapshot(
                     except AttributeError:
                         pass
             return state_obj, metadata
-        payload = _normalize_lineage_facts_state(
-            _normalize_symbol_call_facts(payload)
+        payload = _normalize_lineage_query_index_state(
+            _normalize_lineage_facts_state(
+                _normalize_symbol_call_facts(payload)
+            )
         )
         if payload is not None and hasattr(payload, "__dict__"):
             if not hasattr(payload, "module_usages"):

@@ -183,6 +183,7 @@ def test_real_full_analysis_installs_current_lineage_without_second_extraction(t
     state = captured_states[0]
     assert state.lineage_facts_state == "fresh"
     assert state.lineage_facts_semantic_version == LINEAGE_FACTS_SEMANTIC_VERSION
+    assert state.lineage_query_index_state == "fresh"
     assert set(state.lineage_facts_by_source) == {"consumer.py", "provider.py"}
     assert all(
         source_key == source_slice.manifest.source_key
@@ -193,6 +194,8 @@ def test_real_full_analysis_installs_current_lineage_without_second_extraction(t
         provider_target_id = registry._state["artifact_registry"]["path_to_id"]["provider::target"]
     assert state.lineage_facts_by_source["provider.py"].surfaces[0].exposed == SemanticEndpoint(provider_target_id)
     assert state.lineage_facts_by_source["consumer.py"].surfaces[0].exposed == SemanticEndpoint(provider_target_id)
+    assert provider_target_id in state.lineage_owner_source_index
+    assert "provider.py" in state.lineage_owner_source_index[provider_target_id]
 
 
 def test_exact_surface_materialization_uses_symbolic_targets_and_preserves_external_boundary():

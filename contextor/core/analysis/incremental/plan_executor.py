@@ -48,6 +48,10 @@ class CandidateState:
     lineage_facts_by_source: Dict[str, MaterializedLineageSourceFacts]
     lineage_facts_state: str
     lineage_facts_semantic_version: str | None
+    lineage_owner_source_index: Dict[str, tuple[str, ...]]
+    lineage_source_owner_index: Dict[str, tuple[str, ...]]
+    lineage_query_index_state: str
+    lineage_semantic_anchor_bindings_complete: bool
     artifact_consumption: Dict[str, Any]
     dependency_graph: Optional[ProjectGraph]
     trie: Any
@@ -261,6 +265,20 @@ def _prepare_candidate_state(state: RepositoryAnalysisState) -> CandidateState:
             state,
             "lineage_facts_semantic_version",
             None,
+        ),
+        lineage_owner_source_index=dict(
+            getattr(state, "lineage_owner_source_index", {}) or {}
+        ),
+        lineage_source_owner_index=dict(
+            getattr(state, "lineage_source_owner_index", {}) or {}
+        ),
+        lineage_query_index_state=getattr(
+            state,
+            "lineage_query_index_state",
+            "not_materialized",
+        ),
+        lineage_semantic_anchor_bindings_complete=bool(
+            getattr(state, "lineage_semantic_anchor_bindings_complete", False)
         ),
         artifact_consumption=dict(state.artifact_consumption or {}),
         dependency_graph=state.dependency_graph,
