@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 from contextor.core.domain.lineage_facts import (
     LineageConfidence,
+    LineageRelation,
     MaterializedAnchorFact,
     MaterializedFlowFact,
     MaterializedOccurrenceRef,
@@ -29,6 +30,25 @@ _LEXICAL_SCOPE_KINDS = frozenset(
         "comprehension",
     }
 )
+
+_PRIMARY_SEMANTIC_SECTION_BY_RELATION = {
+    LineageRelation.BINDS: "bindings",
+    LineageRelation.ASSIGNS: "bindings",
+    LineageRelation.ALIASES: "bindings",
+    LineageRelation.CAPTURES: "bindings",
+    LineageRelation.ARGUMENT_TO_PARAMETER: "parameters",
+    LineageRelation.DEFAULTS_TO_PARAMETER: "parameters",
+    LineageRelation.CALL_RESULT: "calls_interfaces",
+    LineageRelation.INHERITS: "calls_interfaces",
+    LineageRelation.OVERRIDES: "calls_interfaces",
+    LineageRelation.RETURNS: "returns",
+    LineageRelation.READS_STATE: "state",
+    LineageRelation.WRITES_STATE: "state",
+    LineageRelation.CALLBACK_REGISTERS: "callbacks",
+    LineageRelation.CALLBACK_INVOKES: "callbacks",
+    LineageRelation.EXPOSES: "surfaces",
+    LineageRelation.DECLARES_PUBLIC_NAMES: "surfaces",
+}
 
 
 @dataclass(frozen=True)
@@ -145,6 +165,31 @@ class LocalLineageTraversal:
     @property
     def traversal_available(self) -> bool:
         return self.scope.complete and self.seed_in_scope
+
+
+@dataclass(frozen=True)
+class LineageSurfaceSection:
+    flows: tuple[LineageFlowMatch, ...]
+    facts: tuple[LineageSurfaceMatch, ...]
+
+
+@dataclass(frozen=True)
+class SemanticLineageSections:
+    target: ResolvedLineageTarget
+    scope: LexicalScopeFacts
+    direct: DirectLineageFacts
+    bindings: tuple[LineageFlowMatch, ...]
+    parameters: tuple[LineageFlowMatch, ...]
+    calls_interfaces: tuple[LineageFlowMatch, ...]
+    returns: tuple[LineageFlowMatch, ...]
+    state: tuple[LineageFlowMatch, ...]
+    callbacks: tuple[LineageFlowMatch, ...]
+    surfaces: LineageSurfaceSection
+    unresolved_dynamic: tuple[LineageFlowMatch, ...]
+
+    @property
+    def complete(self) -> bool:
+        return self.scope.complete and self.direct.complete
 
 
 @dataclass(frozen=True)
@@ -437,6 +482,71 @@ class LineageQueryService:
             flows=tuple(flows),
             nested_scopes=tuple(nested_scopes),
             materialization_complete=materialization_complete,
+        )
+
+    def semantic_sections(
+        self,
+        target: ResolvedLineageTarget,
+    ) -> SemanticLineageSections:
+        if not isinstance(target, ResolvedLineageTarget):
+            raise TypeError(
+                "target must be ResolvedLineageTarget."
+            )
+
+        scope = self.lexical_scope_facts(target)
+        direct = self.direct_facts(target)
+
+        buckets: dict[str, list[LineageFlowMatch]] = {
+            "bindings": [],
+            "parameters": [],
+            "calls_interfaces": [],
+            "returns": [],
+            "state": [],
+            "callbacks": [],
+            "surfaces": [],
+        }
+        unresolved_dynamic: list[LineageFlowMatch] = []
+
+        for match in scope.flows:
+            try:
+                section_name = (
+                    _PRIMARY_SEMANTIC_SECTION_BY_RELATION[
+                        match.flow.relation
+                    ]
+                )
+            except KeyError as exc:
+                raise ValueError(
+                    "Canonical lineage relation has no "
+                    "semantic section."
+                ) from exc
+
+            buckets[section_name].append(match)
+
+            if _terminal_flow_reason(match.flow) in {
+                "dynamic",
+                "unresolved",
+            }:
+                unresolved_dynamic.append(match)
+
+        return SemanticLineageSections(
+            target=target,
+            scope=scope,
+            direct=direct,
+            bindings=tuple(buckets["bindings"]),
+            parameters=tuple(buckets["parameters"]),
+            calls_interfaces=tuple(
+                buckets["calls_interfaces"]
+            ),
+            returns=tuple(buckets["returns"]),
+            state=tuple(buckets["state"]),
+            callbacks=tuple(buckets["callbacks"]),
+            surfaces=LineageSurfaceSection(
+                flows=tuple(buckets["surfaces"]),
+                facts=direct.surfaces,
+            ),
+            unresolved_dynamic=tuple(
+                unresolved_dynamic
+            ),
         )
 
 

@@ -12,11 +12,13 @@ from contextor.core.lineage_query.service import (
     LineageQueryService,
     LineageScopeRootMatch,
     LineageSurfaceMatch,
+    LineageSurfaceSection,
     LineageTargetResolution,
     LineageTraversalBoundary,
     LineageTraversalStep,
     LocalLineageTraversal,
     ResolvedLineageTarget,
+    SemanticLineageSections,
 )
 
 __all__ = [
@@ -30,10 +32,12 @@ __all__ = [
     "LineageQueryService",
     "LineageScopeRootMatch",
     "LineageSurfaceMatch",
+    "LineageSurfaceSection",
     "LineageTargetResolution",
     "LineageTraversalBoundary",
     "LineageTraversalStep",
     "LocalLineageTraversal",
     "RepositoryStateLineageBackend",
     "ResolvedLineageTarget",
+    "SemanticLineageSections",
 ]
