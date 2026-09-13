@@ -1,110 +1,68 @@
-# F2L D1L4b Correctness Repair Walkthrough
+# F2L D1L4b Final Test Walkthrough
 
 ## STATUS
 
 PASS
 
-## INITIAL_TRUE_PROOF
+## SNAPSHOT_LEGACY_FALSE_PROOF
 
-New materialization preserves true capability.
+The legacy snapshot test deletes the persisted capability attribute; load normalization restores it as false.
 
-## CURRENT_TRUE_PRESERVATION_PROOF
+## PAYLOAD_PRESERVATION_PROOF
 
-Generic re-resolution preserves the existing manifest.
+The test asserts the descriptor tuple matches the payload captured before snapshot save.
 
-## LEGACY_FALSE_PRESERVATION_PROOF
+## FAMILY_FRESH_PROOF
 
-The new test proves generic re-resolution keeps legacy false.
-
-## SNAPSHOT_PAYLOAD_PRESERVATION_PROOF
-
-Store normalization remains unchanged and preserves payload.
-
-## CAPABILITY_VALIDATION_PROOF
-
-New validation tests cover missing anchor capabilities and non-boolean flag.
+The loaded lineage family remains `fresh`.
 
 ## TESTS_RUN
 
 ```text
-74 passed in 8.26s
-git diff --check: PASS
+RUN_1: 1 passed in 1.40s
+RUN_2: 75 passed in 7.43s
+git diff --check -- tests/test_lineage_state_lifecycle.py: PASS
 ```
 
 ## ACTUAL_DIFF
 
 ```diff
-diff --git a/contextor/core/analysis/lineage_materialization.py b/contextor/core/analysis/lineage_materialization.py
-index 0232ba2..96ce8c3 100644
---- a/contextor/core/analysis/lineage_materialization.py
-+++ b/contextor/core/analysis/lineage_materialization.py
-@@ -4,7 +4,7 @@ from __future__ import annotations
+diff --git a/tests/test_lineage_state_lifecycle.py b/tests/test_lineage_state_lifecycle.py
+index 8259633..b441b08 100644
+--- a/tests/test_lineage_state_lifecycle.py
++++ b/tests/test_lineage_state_lifecycle.py
+@@ -1445,6 +1445,27 @@ def test_snapshot_legacy_flow_ownership_fails_closed(tmp_path):
+     )
  
- import hashlib
  
--from dataclasses import dataclass, replace
-+from dataclasses import dataclass
- from types import MappingProxyType
- from typing import Mapping
- 
-@@ -636,15 +636,8 @@ def reresolve_materialized_lineage_source_facts(
++def test_snapshot_legacy_interface_descriptor_capability_fails_closed_without_dropping_payload(tmp_path):
++    facts = {"pkg.py": _extracted("pkg.py", "def ping():\n    pass\n")}
++    modules = {"pkg": _module("pkg")}
++    artifacts = {"pkg": {"own_symbols": {"ping"}}}
++    registry = _LifecycleRegistry(
++        {"pkg": "M:pkg/1"}, {"pkg::ping": "A:pkg.ping/1"}
++    )
++    state = _lineage_state_for_facts(facts, registry, modules, artifacts)
++    source_slice = state.lineage_facts_by_source["pkg.py"]
++    assert source_slice.manifest.interface_descriptors_materialized is True
++    assert source_slice.interface_descriptors
++    expected_descriptors = source_slice.interface_descriptors
++    object.__delattr__(source_slice.manifest, "interface_descriptors_materialized")
++    save_snapshot(state, tmp_path, "legacy-interface-descriptors")
++    loaded, _ = load_snapshot(tmp_path, expected_state_id="legacy-interface-descriptors")
++    loaded_slice = loaded.lineage_facts_by_source["pkg.py"]
++    assert loaded.lineage_facts_state == "fresh"
++    assert loaded_slice.manifest.interface_descriptors_materialized is False
++    assert loaded_slice.interface_descriptors == expected_descriptors
++
++
+ def test_ordinary_incremental_rebuilds_only_changed_callable_descriptor(
+     tmp_path,
+     monkeypatch,
+@@ -1615,4 +1636,3 @@ def test_ordinary_incremental_rebuilds_only_changed_callable_descriptor(
          )
+         for flow in changed_slice.flows
      )
-     _seed_defining_interface_descriptors(descriptors, semantic_anchors, resolution)
--    manifest = replace(
--        materialized.manifest,
--        interface_descriptors_materialized=(
--            materialized.manifest.semantic_anchor_bindings_materialized
--            and materialized.manifest.anchor_ownership_materialized
--        ),
--    )
-     return MaterializedLineageSourceFacts(
--        manifest,
-+        materialized.manifest,
-         materialized.anchors,
-         flows,
-         surfaces,
-diff --git a/tests/analysis/test_lineage_materialization.py b/tests/analysis/test_lineage_materialization.py
-index c99a805..e1e67ba 100644
---- a/tests/analysis/test_lineage_materialization.py
-+++ b/tests/analysis/test_lineage_materialization.py
-@@ -770,3 +770,37 @@ def test_unrelated_resolution_descriptor_is_not_seeded_into_slice():
-     )
-     assert result.semantic_anchors == ()
-     assert result.interface_descriptors == ()
-+
-+
-+def test_legacy_interface_descriptor_capability_stays_false_after_generic_reresolution():
-+    facts = _callable_interface_facts("def ping():\n    pass\n")
-+    old, new = "A1/1", "A1/2"
-+    descriptors = build_extracted_callable_interface_descriptors(
-+        {"pkg/mod.py": facts}, {"pkg.mod::ping": old}
-+    )
-+    materialized = materialize_lineage_source_facts(
-+        facts, _context(artifacts={"pkg.mod::ping": old}, descriptors=descriptors)
-+    )
-+    legacy = replace(
-+        materialized,
-+        manifest=replace(materialized.manifest, interface_descriptors_materialized=False),
-+    )
-+    rebound = build_materialized_callable_interface_descriptors(
-+        {"pkg/mod.py": legacy}, {"pkg.mod::ping": new}
-+    )
-+    rerun = reresolve_materialized_lineage_source_facts(
-+        legacy, _context(artifacts={"pkg.mod::ping": new}, descriptors=rebound)
-+    )
-+    assert rerun.manifest.interface_descriptors_materialized is False
-+    assert rerun.interface_descriptors == (rebound[new],)
-+
-+
-+def test_interface_descriptor_capability_requires_anchor_capabilities():
-+    manifest = SourceLineageManifest(
-+        "pkg.py", "fingerprint", LINEAGE_FACTS_SEMANTIC_VERSION,
-+        LineageFamilyStatus.FRESH, 0, 0, 0,
-+    )
-+    with pytest.raises(ValueError, match="require semantic anchor bindings and anchor ownership"):
-+        replace(manifest, interface_descriptors_materialized=True)
-+    with pytest.raises(TypeError, match="interface_descriptors_materialized must be boolean"):
-+        replace(manifest, interface_descriptors_materialized="yes")
+-
 ```
 
