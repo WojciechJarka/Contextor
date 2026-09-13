@@ -1435,39 +1435,175 @@ def test_snapshot_legacy_flow_ownership_fails_closed(tmp_path):
     )
 
 
-def test_ordinary_incremental_rebuilds_only_changed_callable_descriptor(tmp_path):
-    facts = {
-        "provider.py": _extracted("provider.py", "def target():\n    return 1\n"),
-        "consumer.py": _extracted("consumer.py", "def local(value):\n    return value\n"),
-    }
-    modules = {name: _module(name) for name in ("provider", "consumer")}
-    artifacts = {
-        "provider": {"own_symbols": {"target"}},
-        "consumer": {"own_symbols": {"local"}},
-    }
-    provider_owner, local_owner = "A:provider/1", "A:consumer.local/1"
-    registry = _LifecycleRegistry(
-        {"provider": "M:provider/1", "consumer": "M:consumer/1"},
-        {"provider::target": provider_owner, "consumer::local": local_owner},
+def test_ordinary_incremental_rebuilds_only_changed_callable_descriptor(
+    tmp_path,
+    monkeypatch,
+):
+    provider_source = (
+        "def target():\n"
+        "    return 1\n"
     )
-    state = _lineage_state_for_facts(facts, registry, modules, artifacts)
-    provider_slice = state.lineage_facts_by_source["provider.py"]
-    engine, _ = _lineage_engine(state, registry, tmp_path)
+    consumer_before = (
+        "from provider import target\n"
+        "\n"
+        "def local(value):\n"
+        "    return value\n"
+        "\n"
+        "old = target()\n"
+    )
+    consumer_after = (
+        "from provider import target\n"
+        "\n"
+        "def local(value, *, mode=None):\n"
+        "    return value\n"
+        "\n"
+        "new = target()\n"
+    )
+
+    facts = {
+        "provider.py": _extracted(
+            "provider.py",
+            provider_source,
+        ),
+        "consumer.py": _extracted(
+            "consumer.py",
+            consumer_before,
+        ),
+    }
+    modules = {
+        "provider": _module("provider"),
+        "consumer": _module("consumer"),
+    }
+    artifacts = {
+        "provider": {
+            "own_symbols": {"target"},
+        },
+        "consumer": {
+            "own_symbols": {"local"},
+        },
+    }
+    provider_owner = "A:provider/1"
+    local_owner = "A:consumer.local/1"
+    registry = _LifecycleRegistry(
+        {
+            "provider": "M:provider/1",
+            "consumer": "M:consumer/1",
+        },
+        {
+            "provider::target": provider_owner,
+            "consumer::local": local_owner,
+        },
+    )
+
+    state = _lineage_state_for_facts(
+        facts,
+        registry,
+        modules,
+        artifacts,
+    )
+    provider_slice = (
+        state.lineage_facts_by_source["provider.py"]
+    )
+    old_consumer_slice = (
+        state.lineage_facts_by_source["consumer.py"]
+    )
+
+    assert any(
+        descriptor.owner_id == provider_owner
+        for descriptor
+        in provider_slice.interface_descriptors
+    )
+
+    engine, _ = _lineage_engine(
+        state,
+        registry,
+        tmp_path,
+    )
     candidate = _prepare_candidate_state(state)
-    changed = _extracted("consumer.py", "def local(value, *, mode=None):\n    return value\n")
+
+    from contextor.core.analysis import (
+        lineage_materialization as materialization_module,
+    )
+
+    original_builder = (
+        materialization_module
+        .build_extracted_callable_interface_descriptors
+    )
+    builder_source_sets = []
+
+    def counted_builder(
+        sources,
+        active_artifact_ids,
+    ):
+        builder_source_sets.append(
+            tuple(sorted(sources))
+        )
+        return original_builder(
+            sources,
+            active_artifact_ids,
+        )
+
+    monkeypatch.setattr(
+        materialization_module,
+        "build_extracted_callable_interface_descriptors",
+        counted_builder,
+    )
+
+    changed = _extracted(
+        "consumer.py",
+        consumer_after,
+    )
+
     with registry.read_transaction():
         engine._update_candidate_lineage_slice(
-            candidate, source_path="consumer.py", extracted_lineage_facts=changed,
+            candidate,
+            source_path="consumer.py",
+            extracted_lineage_facts=changed,
             rematerialize_all=False,
         )
-    assert candidate.lineage_facts_by_source["provider.py"] is provider_slice
-    descriptor = next(
-        item for item in candidate.lineage_facts_by_source["consumer.py"].interface_descriptors
-        if item.owner_id == local_owner
+
+    assert builder_source_sets == [
+        ("consumer.py",),
+    ]
+    assert (
+        candidate.lineage_facts_by_source[
+            "provider.py"
+        ]
+        is provider_slice
+    )
+
+    changed_slice = (
+        candidate.lineage_facts_by_source[
+            "consumer.py"
+        ]
+    )
+    assert changed_slice is not old_consumer_slice
+
+    local_descriptor = next(
+        descriptor
+        for descriptor
+        in changed_slice.interface_descriptors
+        if descriptor.owner_id == local_owner
     )
     assert build_parameter_value_slot(
-        local_owner, ParameterKind.KEYWORD_ONLY, name="mode"
-    ) in descriptor.slots
+        local_owner,
+        ParameterKind.KEYWORD_ONLY,
+        name="mode",
+    ) in local_descriptor.slots
     assert build_keyword_binding_slot(
-        local_owner, ParameterKind.KEYWORD_ONLY, name="mode"
-    ) in descriptor.slots
+        local_owner,
+        ParameterKind.KEYWORD_ONLY,
+        name="mode",
+    ) in local_descriptor.slots
+
+    assert any(
+        flow.relation is LineageRelation.CALL_RESULT
+        and flow.source
+        == SemanticEndpoint(
+            provider_owner,
+            build_return_slot(provider_owner),
+        )
+        for flow in changed_slice.flows
+    )
+
+
