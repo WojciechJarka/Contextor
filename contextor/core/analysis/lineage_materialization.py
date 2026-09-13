@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from types import MappingProxyType
 from typing import Mapping
 
@@ -487,6 +487,7 @@ def materialize_lineage_source_facts(
         semantic_anchor_bindings_materialized=True,
         anchor_ownership_materialized=True,
         flow_ownership_materialized=flow_ownership_materialized,
+        interface_descriptors_materialized=True,
     )
     return MaterializedLineageSourceFacts(
         manifest,
@@ -635,8 +636,15 @@ def reresolve_materialized_lineage_source_facts(
         )
     )
     _seed_defining_interface_descriptors(descriptors, semantic_anchors, resolution)
-    return MaterializedLineageSourceFacts(
+    manifest = replace(
         materialized.manifest,
+        interface_descriptors_materialized=(
+            materialized.manifest.semantic_anchor_bindings_materialized
+            and materialized.manifest.anchor_ownership_materialized
+        ),
+    )
+    return MaterializedLineageSourceFacts(
+        manifest,
         materialized.anchors,
         flows,
         surfaces,

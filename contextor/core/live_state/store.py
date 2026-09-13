@@ -164,6 +164,9 @@ def _revalidate_lineage_manifest(manifest: Any) -> SourceLineageManifest:
                 False,
             )
         ),
+        interface_descriptors_materialized=bool(
+            getattr(manifest, "interface_descriptors_materialized", False)
+        ),
     )
     if rebuilt.semantic_version != LINEAGE_FACTS_SEMANTIC_VERSION:
         raise pickle.UnpicklingError(

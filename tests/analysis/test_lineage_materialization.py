@@ -720,7 +720,11 @@ def test_materialized_callable_interface_builder_requires_canonical_capabilities
     )
     legacy = replace(
         materialized,
-        manifest=replace(materialized.manifest, anchor_ownership_materialized=False),
+        manifest=replace(
+            materialized.manifest,
+            anchor_ownership_materialized=False,
+            interface_descriptors_materialized=False,
+        ),
     )
     assert build_materialized_callable_interface_descriptors(
         {"pkg/mod.py": legacy}, {"pkg.mod::run": "A1/2"}

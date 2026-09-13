@@ -1,4 +1,4 @@
-# F2L D1L4a Walkthrough
+# F2L D1L4b Walkthrough
 
 ## STATUS
 
@@ -6,29 +6,35 @@ PASS
 
 ## FILES_CHANGED
 
+- `contextor/core/domain/lineage_facts.py`
 - `contextor/core/analysis/lineage_materialization.py`
+- `contextor/core/live_state/store.py`
 - `tests/analysis/test_lineage_materialization.py`
 
-## ZERO_FLOW_INITIAL_PERSISTENCE_PROOF
+## INITIAL_CAPABILITY_PROOF
 
-Defining zero-flow callable retains its own descriptor.
+New materialization sets the capability true.
 
-## ZERO_FLOW_RERESOLUTION_PROOF
+## CAPABILITY_DEPENDENCY_PROOF
 
-Rebound zero-flow callable retains its descriptor after re-resolution.
+Manifest validation requires semantic anchor and anchor ownership capabilities.
 
-## NO_FOREIGN_SEED_PROOF
+## LEGACY_FALSE_PRESERVES_PAYLOAD_PROOF
 
-Unrelated resolution descriptor is not seeded.
+Snapshot normalization reads missing fields as false.
 
-## EXISTING_PARITY_PROOF
+## RERESOLUTION_UPGRADE_PROOF
 
-Full requested suite passed.
+Re-resolution sets the capability from canonical anchor capabilities.
+
+## NO_VERSION_BUMP_PROOF
+
+No semantic or live-state schema version was changed.
 
 ## TESTS_RUN
 
 ```text
-72 passed in 7.05s
+72 passed in 6.62s
 py_compile: PASS
 git diff --check: PASS
 ```
@@ -37,91 +43,101 @@ git diff --check: PASS
 
 ```diff
 diff --git a/contextor/core/analysis/lineage_materialization.py b/contextor/core/analysis/lineage_materialization.py
-index 2b20ea0..a891176 100644
+index a891176..0232ba2 100644
 --- a/contextor/core/analysis/lineage_materialization.py
 +++ b/contextor/core/analysis/lineage_materialization.py
-@@ -346,6 +346,17 @@ def build_materialized_callable_interface_descriptors(
-     return dict(sorted(descriptors.items()))
+@@ -4,7 +4,7 @@ from __future__ import annotations
  
+ import hashlib
  
-+def _seed_defining_interface_descriptors(
-+    descriptors: dict[str, SemanticInterfaceDescriptor],
-+    semantic_anchors: tuple[SemanticAnchorBinding, ...],
-+    resolution: LineageResolutionContext,
-+) -> None:
-+    for binding in semantic_anchors:
-+        descriptor = resolution.interface_descriptors.get(binding.owner_id)
-+        if descriptor is not None:
-+            descriptors[binding.owner_id] = descriptor
-+
-+
- def materialize_lineage_source_facts(
-     extracted: ExtractedLineageSourceFacts,
-     resolution: LineageResolutionContext,
-@@ -411,6 +422,7 @@ def materialize_lineage_source_facts(
-         resolution,
-         occurrence,
+-from dataclasses import dataclass
++from dataclasses import dataclass, replace
+ from types import MappingProxyType
+ from typing import Mapping
+ 
+@@ -487,6 +487,7 @@ def materialize_lineage_source_facts(
+         semantic_anchor_bindings_materialized=True,
+         anchor_ownership_materialized=True,
+         flow_ownership_materialized=flow_ownership_materialized,
++        interface_descriptors_materialized=True,
      )
-+    _seed_defining_interface_descriptors(descriptors, semantic_anchors, resolution)
-     flows = tuple(sorted(
-         MaterializedFlowFact(
-             flow.local_id,
-@@ -622,6 +634,7 @@ def reresolve_materialized_lineage_source_facts(
-             is not None
+     return MaterializedLineageSourceFacts(
+         manifest,
+@@ -635,8 +636,15 @@ def reresolve_materialized_lineage_source_facts(
          )
      )
-+    _seed_defining_interface_descriptors(descriptors, semantic_anchors, resolution)
-     return MaterializedLineageSourceFacts(
+     _seed_defining_interface_descriptors(descriptors, semantic_anchors, resolution)
+-    return MaterializedLineageSourceFacts(
++    manifest = replace(
          materialized.manifest,
++        interface_descriptors_materialized=(
++            materialized.manifest.semantic_anchor_bindings_materialized
++            and materialized.manifest.anchor_ownership_materialized
++        ),
++    )
++    return MaterializedLineageSourceFacts(
++        manifest,
          materialized.anchors,
+         flows,
+         surfaces,
+diff --git a/contextor/core/domain/lineage_facts.py b/contextor/core/domain/lineage_facts.py
+index 40d66cb..0b203ef 100644
+--- a/contextor/core/domain/lineage_facts.py
++++ b/contextor/core/domain/lineage_facts.py
+@@ -437,6 +437,7 @@ class SourceLineageManifest:
+     semantic_anchor_bindings_materialized: bool = False
+     anchor_ownership_materialized: bool = False
+     flow_ownership_materialized: bool = False
++    interface_descriptors_materialized: bool = False
+ 
+     def __post_init__(self) -> None:
+         _require_token(self.source_key, "source_key")
+@@ -452,6 +453,15 @@ class SourceLineageManifest:
+             raise TypeError("anchor_ownership_materialized must be boolean.")
+         if not isinstance(self.flow_ownership_materialized, bool):
+             raise TypeError("flow_ownership_materialized must be boolean.")
++        if not isinstance(self.interface_descriptors_materialized, bool):
++            raise TypeError("interface_descriptors_materialized must be boolean.")
++        if self.interface_descriptors_materialized and (
++            not self.semantic_anchor_bindings_materialized
++            or not self.anchor_ownership_materialized
++        ):
++            raise ValueError(
++                "Materialized interface descriptors require semantic anchor bindings and anchor ownership."
++            )
+         _validate_source_status(self.status, self.resource_limit_reason)
+ 
+ 
+diff --git a/contextor/core/live_state/store.py b/contextor/core/live_state/store.py
+index b13fb03..fd3a7d6 100644
+--- a/contextor/core/live_state/store.py
++++ b/contextor/core/live_state/store.py
+@@ -164,6 +164,9 @@ def _revalidate_lineage_manifest(manifest: Any) -> SourceLineageManifest:
+                 False,
+             )
+         ),
++        interface_descriptors_materialized=bool(
++            getattr(manifest, "interface_descriptors_materialized", False)
++        ),
+     )
+     if rebuilt.semantic_version != LINEAGE_FACTS_SEMANTIC_VERSION:
+         raise pickle.UnpicklingError(
 diff --git a/tests/analysis/test_lineage_materialization.py b/tests/analysis/test_lineage_materialization.py
-index e10be20..b6d9021 100644
+index b6d9021..c99a805 100644
 --- a/tests/analysis/test_lineage_materialization.py
 +++ b/tests/analysis/test_lineage_materialization.py
-@@ -725,3 +725,44 @@ def test_materialized_callable_interface_builder_requires_canonical_capabilities
+@@ -720,7 +720,11 @@ def test_materialized_callable_interface_builder_requires_canonical_capabilities
+     )
+     legacy = replace(
+         materialized,
+-        manifest=replace(materialized.manifest, anchor_ownership_materialized=False),
++        manifest=replace(
++            materialized.manifest,
++            anchor_ownership_materialized=False,
++            interface_descriptors_materialized=False,
++        ),
+     )
      assert build_materialized_callable_interface_descriptors(
          {"pkg/mod.py": legacy}, {"pkg.mod::run": "A1/2"}
-     ) == {}
-+
-+
-+def test_defining_zero_flow_callable_persists_own_interface_descriptor():
-+    facts = _callable_interface_facts("def ping():\n    pass\n")
-+    owner = "A1/1"
-+    descriptors = build_extracted_callable_interface_descriptors(
-+        {"pkg/mod.py": facts}, {"pkg.mod::ping": owner}
-+    )
-+    result = materialize_lineage_source_facts(
-+        facts, _context(artifacts={"pkg.mod::ping": owner}, descriptors=descriptors)
-+    )
-+    assert result.interface_descriptors == (descriptors[owner],)
-+    assert descriptors[owner].slots == (build_return_slot(owner),)
-+
-+
-+def test_zero_flow_callable_descriptor_rebind_survives_reresolution():
-+    facts = _callable_interface_facts("def ping():\n    pass\n")
-+    old, new = "A1/1", "A1/2"
-+    descriptors = build_extracted_callable_interface_descriptors(
-+        {"pkg/mod.py": facts}, {"pkg.mod::ping": old}
-+    )
-+    initial = materialize_lineage_source_facts(
-+        facts, _context(artifacts={"pkg.mod::ping": old}, descriptors=descriptors)
-+    )
-+    rebound = build_materialized_callable_interface_descriptors(
-+        {"pkg/mod.py": initial}, {"pkg.mod::ping": new}
-+    )
-+    rerun = reresolve_materialized_lineage_source_facts(
-+        initial, _context(artifacts={"pkg.mod::ping": new}, descriptors=rebound)
-+    )
-+    assert rerun.interface_descriptors == (rebound[new],)
-+
-+
-+def test_unrelated_resolution_descriptor_is_not_seeded_into_slice():
-+    foreign = SemanticInterfaceDescriptor("A9/1", (build_return_slot("A9/1"),), "x")
-+    result = materialize_lineage_source_facts(
-+        _callable_interface_facts("value = 1\n"),
-+        _context(artifacts={"other.mod::foreign": "A9/1"}, descriptors={"A9/1": foreign}),
-+    )
-+    assert result.semantic_anchors == ()
-+    assert result.interface_descriptors == ()
 ```
 

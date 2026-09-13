@@ -437,6 +437,7 @@ class SourceLineageManifest:
     semantic_anchor_bindings_materialized: bool = False
     anchor_ownership_materialized: bool = False
     flow_ownership_materialized: bool = False
+    interface_descriptors_materialized: bool = False
 
     def __post_init__(self) -> None:
         _require_token(self.source_key, "source_key")
@@ -452,6 +453,15 @@ class SourceLineageManifest:
             raise TypeError("anchor_ownership_materialized must be boolean.")
         if not isinstance(self.flow_ownership_materialized, bool):
             raise TypeError("flow_ownership_materialized must be boolean.")
+        if not isinstance(self.interface_descriptors_materialized, bool):
+            raise TypeError("interface_descriptors_materialized must be boolean.")
+        if self.interface_descriptors_materialized and (
+            not self.semantic_anchor_bindings_materialized
+            or not self.anchor_ownership_materialized
+        ):
+            raise ValueError(
+                "Materialized interface descriptors require semantic anchor bindings and anchor ownership."
+            )
         _validate_source_status(self.status, self.resource_limit_reason)
 
 
