@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from collections.abc import Mapping
 
 from contextor.core.domain.lineage_facts import MaterializedOccurrenceRef, MaterializedSymbolicRef, SemanticEndpoint
 from contextor.core.lineage_query.service import (
     SYMBOL_LINEAGE_SECTION_ORDER,
     LineageFlowMatch, LineageSurfaceMatch, SelectedSymbolLineageFacts, TargetInterfaceFacts,
 )
-from contextor.mcp.representation import serialized_json_bytes
+from contextor.mcp import representation as mcp_rep
 
 
 SYMBOL_LINEAGE_MODES = ("auto", "preview", "fetch")
@@ -112,4 +113,56 @@ def build_symbol_lineage_payload(selected: SelectedSymbolLineageFacts) -> dict:
 
 def build_symbol_lineage_preview(selected: SelectedSymbolLineageFacts) -> dict:
     payload = build_symbol_lineage_payload(selected)
-    return {"status": "resolved", "mode": "preview", "target": payload["target"], "available_sections": list(selected.selected_sections), "complete": selected.complete, "metadata_consistent": selected.metadata_consistent, "scope_state": selected.facts.scope_state, "candidate_response_bytes": serialized_json_bytes(payload), "section_sizes": {name: {"payload_bytes": serialized_json_bytes(value)} for name, value in payload["sections"].items()}}
+    return {"status": "resolved", "mode": "preview", "target": payload["target"], "available_sections": list(selected.selected_sections), "complete": selected.complete, "metadata_consistent": selected.metadata_consistent, "scope_state": selected.facts.scope_state, "candidate_response_bytes": mcp_rep.serialized_json_bytes(payload), "section_sizes": {name: {"payload_bytes": mcp_rep.serialized_json_bytes(value)} for name, value in payload["sections"].items()}}
+
+
+def _semantic_owner_ids(value: object) -> tuple[str, ...]:
+    owners: set[str] = set()
+    def visit(item: object) -> None:
+        if isinstance(item, dict):
+            if item.get("kind") == "semantic" and isinstance(item.get("owner_id"), str): owners.add(item["owner_id"])
+            for child in item.values(): visit(child)
+        elif isinstance(item, list):
+            for child in item: visit(child)
+    visit(value)
+    return tuple(sorted(owners))
+
+
+def _named_semantic_owners(value: object, owner_names: Mapping[str, str]) -> object:
+    if isinstance(value, list): return [_named_semantic_owners(item, owner_names) for item in value]
+    if not isinstance(value, dict): return value
+    if value.get("kind") == "semantic" and isinstance(value.get("owner_id"), str):
+        result: dict[str, object] = {"kind": "semantic", "owner": owner_names[value["owner_id"]]}
+        if "slot" in value: result["slot"] = value["slot"]
+        return result
+    return {key: _named_semantic_owners(item, owner_names) for key, item in value.items()}
+
+
+def build_symbol_lineage_represented_payload(selected: SelectedSymbolLineageFacts, *, representation: str = "auto", artifact_names: Mapping[str, str] | None = None) -> dict:
+    if not isinstance(selected, SelectedSymbolLineageFacts): raise TypeError("selected must be SelectedSymbolLineageFacts.")
+    if not isinstance(representation, str): raise TypeError("representation must be a string.")
+    requested = representation.strip().lower()
+    if not mcp_rep.is_supported_representation(requested): raise ValueError("representation must be 'auto', 'indexed', or 'named'.")
+    if artifact_names is not None:
+        if not isinstance(artifact_names, Mapping): raise TypeError("artifact_names must be a mapping.")
+        if any(not isinstance(k, str) or not k or not isinstance(v, str) or not v for k, v in artifact_names.items()): raise ValueError("artifact_names must map non-empty artifact IDs to non-empty names.")
+    base = build_symbol_lineage_payload(selected)
+    missing = tuple(owner for owner in _semantic_owner_ids(base) if artifact_names is None or owner not in artifact_names)
+    indexed = dict(base); indexed.update({"representation": "indexed", "requested_representation": requested, "resolver": {"index_kind": "artifact", "resolve_via": "lookup_index_entries"}})
+    indexed_bytes = mcp_rep.serialized_json_bytes(indexed)
+    named = None if missing else _named_semantic_owners(base, artifact_names or {})
+    if named is not None:
+        assert isinstance(named, dict); named.update({"representation": "named", "requested_representation": requested})
+    named_bytes = mcp_rep.serialized_json_bytes(named) if named is not None else None
+    if requested == "named":
+        if named is None: raise ValueError("Named lineage representation unavailable for semantic owners: " + ", ".join(missing))
+        result, reason = named, "explicit_named"
+    elif requested == "indexed": result, reason = indexed, "explicit_indexed"
+    elif named is None: result, reason = indexed, "auto_indexed_named_identity_unavailable"
+    elif named_bytes - indexed_bytes >= mcp_rep.AUTO_NEGOTIATION_MIN_BYTES_SAVED: result, reason = indexed, "auto_indexed_material_saving"
+    else: result, reason = named, "auto_named"
+    decision: dict[str, object] = {"selected": result["representation"], "reason": reason, "indexed_candidate_bytes": indexed_bytes, "named_candidate_bytes": named_bytes, "minimum_auto_saving_bytes": mcp_rep.AUTO_NEGOTIATION_MIN_BYTES_SAVED}
+    if named_bytes is not None: decision["bytes_saved_by_indexed"] = named_bytes - indexed_bytes
+    if missing: decision["missing_named_owners"] = list(missing)
+    result["representation_decision"] = decision
+    return result

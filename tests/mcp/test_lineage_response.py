@@ -24,6 +24,7 @@ from contextor.mcp.lineage_response import (
     SymbolLineageResponsePlan,
     build_symbol_lineage_payload,
     build_symbol_lineage_preview,
+    build_symbol_lineage_represented_payload,
     plan_symbol_lineage_response,
 )
 
@@ -142,3 +143,42 @@ def test_symbol_lineage_payload_preserves_selected_empty_vs_omitted_and_preview_
     assert preview["candidate_response_bytes"] == serialized_json_bytes(payload)
     for name, value in payload["sections"].items():
         assert preview["section_sizes"][name] == {"payload_bytes": serialized_json_bytes(value)}
+
+
+def test_symbol_lineage_named_and_indexed_representations_preserve_nonsemantic_identities():
+    selected = _selected_lineage_fixture()
+    named = build_symbol_lineage_represented_payload(selected, representation="named", artifact_names={"A17/2": "pkg.mod::handler"})
+    assert named["sections"]["connections"]["incoming"][0]["target"] == {"kind": "semantic", "owner": "pkg.mod::handler", "slot": build_return_slot("A17/2")}
+    assert named["sections"]["bindings"][0]["source"]["kind"] == "symbolic"
+    indexed = build_symbol_lineage_represented_payload(selected, representation="indexed")
+    assert indexed["resolver"] == {"index_kind": "artifact", "resolve_via": "lookup_index_entries"}
+    assert indexed["representation_decision"]["reason"] == "explicit_indexed"
+
+
+def test_symbol_lineage_representation_fails_closed_and_auto_falls_back():
+    selected = _selected_lineage_fixture()
+    with pytest.raises(ValueError, match="Named lineage representation unavailable for semantic owners: A17/2"):
+        build_symbol_lineage_represented_payload(selected, representation="named", artifact_names={})
+    result = build_symbol_lineage_represented_payload(selected, representation="auto", artifact_names={})
+    assert result["representation"] == "indexed"
+    assert result["representation_decision"]["missing_named_owners"] == ["A17/2"]
+
+
+def test_symbol_lineage_auto_named_and_material_indexed_saving():
+    selected = _selected_lineage_fixture()
+    named = build_symbol_lineage_represented_payload(selected, representation="auto", artifact_names={"A17/2": "pkg.mod::handler"})
+    assert named["representation"] == "named"
+    repeated = tuple(replace(selected.connections.incoming[0], flow=replace(selected.connections.incoming[0].flow, local_id=f"incoming-{i}")) for i in range(20))
+    expanded = replace(selected, connections=SymbolLineageConnections(repeated, ()))
+    indexed = build_symbol_lineage_represented_payload(expanded, representation="auto", artifact_names={"A17/2": "pkg." + ("very_long_component." * 8) + "handler"})
+    assert indexed["representation"] == "indexed"
+
+
+def test_symbol_lineage_representation_validates_request_contract():
+    selected = _selected_lineage_fixture()
+    with pytest.raises(TypeError, match="representation must be a string."):
+        build_symbol_lineage_represented_payload(selected, representation=object())
+    with pytest.raises(ValueError, match="representation must be 'auto', 'indexed', or 'named'."):
+        build_symbol_lineage_represented_payload(selected, representation="other")
+    with pytest.raises(TypeError, match="artifact_names must be a mapping."):
+        build_symbol_lineage_represented_payload(selected, representation="named", artifact_names=[])
