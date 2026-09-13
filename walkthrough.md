@@ -1,357 +1,534 @@
-# F2L D1N3b2x Walkthrough
+# F2L D1O2c1 — selected canonical owner-name projection
 
-## STATUS
+STATUS: PASS
 
-PASS
+FILES_CHANGED:
+- `contextor/core/lineage_query/live_query.py`
+- `tests/analysis/test_lineage_live_query.py`
+- `walkthrough.md` (this report; its own diff intentionally excluded)
 
-## FILES_CHANGED
+MODULE_OWNER_ORIGIN_PROOF:
+A selected STATE-origin endpoint with owner ID `17/2` resolves only through its exact `SemanticEndpointOrigin.kind == ExtractedSymbolicKind.STATE`, producing `pkg.mod`. No owner-ID-prefix or slot inference is used.
 
-- `contextor/mcp/lineage_response.py`
-- `tests/mcp/test_lineage_response.py`
+ARTIFACT_OWNER_ORIGIN_PROOF:
+A selected non-STATE CALLEE-origin endpoint with owner ID `A18/1` resolves from its exact canonical origin to `pkg.mod::other`.
 
-## MODULE_OWNER_PROOF
+SELECTED_ONLY_PROOF:
+The selected query contains `calls_interfaces` and `state`; an unselected callback endpoint `A99/1` is present in the source slice but is absent from the result.
 
-State flow contains canonical module owner `17/2`; named output maps it to `pkg.mod`, indexed output preserves the ID.
+NO_REPO_SCAN_PROOF:
+The focused test replaces `backend.source_keys` and `backend.iter_sources` with failures. The helper passes while calling cached `backend.get_source` exactly once for `pkg/mod.py`.
 
-## ARTIFACT_OWNER_PROOF
+MISSING_ORIGIN_FAIL_CLOSED_PROOF:
+Removing the selected `state-read` origin raises `ValueError: Canonical semantic owner name origin is unavailable.`
 
-Connection semantic endpoint preserves artifact owner `A17/2` in indexed output and maps it to `pkg.mod::handler` in named output.
+CONFLICT_FAIL_CLOSED_PROOF:
+Two selected origins resolving `A18/1` to different names raise `ValueError: Canonical semantic owner identity is inconsistent.`
 
-## MIXED_NAMED_PROOF
+TESTS_RUN:
+- `.\\.venv\\Scripts\\python.exe -m pytest -q tests\\analysis\\test_lineage_live_query.py tests\\analysis\\test_lineage_query_service.py tests\\analysis\\test_lineage_query_backend.py tests\\mcp\\test_lineage_response.py` — **139 passed in 3.36s**
+- `.\\.venv\\Scripts\\python.exe -m py_compile contextor\\core\\lineage_query\\live_query.py tests\\analysis\\test_lineage_live_query.py` — passed
+- `git diff --check -- contextor/core/lineage_query/live_query.py tests/analysis/test_lineage_live_query.py` — passed
 
-One named payload resolves both module and artifact owner identities using `owner_names`.
-
-## MIXED_INDEXED_RESOLVER_PROOF
-
-Indexed resolver declares `id_kinds: ["module", "artifact"]` through existing `lookup_index_entries`.
-
-## SLOT_OPAQUE_PROOF
-
-Module-global and artifact-return slots remain unchanged opaque canonical strings.
-
-## AUTO_MISSING_OWNER_PROOF
-
-Named/auto diagnostics list missing module and artifact owners deterministically.
-
-## TESTS_RUN
-
-```text
-tests/mcp/test_lineage_response.py tests/analysis/test_lineage_live_query.py tests/analysis/test_lineage_query_service.py tests/analysis/test_lineage_query_backend.py
-136 passed in 2.94s
-
-tests/mcp/test_lineage_response.py
-27 passed in 1.80s
-
-py_compile and scoped git diff --check
-PASS
-```
+RUNTIME_RESTART_REQUIRED: STILL_YES_FROM_D1O1_BUT_DO_NOT_RESTART_YET.
 
 ## ACTUAL_DIFF
 
 ```diff
-warning: in the working copy of 'contextor/mcp/lineage_response.py', LF will be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'tests/mcp/test_lineage_response.py', LF will be replaced by CRLF the next time Git touches it
-diff --git a/contextor/mcp/lineage_response.py b/contextor/mcp/lineage_response.py
-index c8f60af..30a9ac5 100644
---- a/contextor/mcp/lineage_response.py
-+++ b/contextor/mcp/lineage_response.py
-@@ -232,24 +232,24 @@ def build_symbol_lineage_represented_payload(
-     selected: SelectedSymbolLineageFacts,
-     *,
-     representation: str = "auto",
--    artifact_names: Mapping[str, str] | None = None,
-+    owner_names: Mapping[str, str] | None = None,
-     state_freshness: Mapping[str, object] | None = None,
- ) -> dict:
-     if not isinstance(selected, SelectedSymbolLineageFacts): raise TypeError("selected must be SelectedSymbolLineageFacts.")
-     if not isinstance(representation, str): raise TypeError("representation must be a string.")
-     requested = representation.strip().lower()
-     if not mcp_rep.is_supported_representation(requested): raise ValueError("representation must be 'auto', 'indexed', or 'named'.")
--    if artifact_names is not None:
--        if not isinstance(artifact_names, Mapping): raise TypeError("artifact_names must be a mapping.")
--        if any(not isinstance(k, str) or not k or not isinstance(v, str) or not v for k, v in artifact_names.items()): raise ValueError("artifact_names must map non-empty artifact IDs to non-empty names.")
-+    if owner_names is not None:
-+        if not isinstance(owner_names, Mapping): raise TypeError("owner_names must be a mapping.")
-+        if any(not isinstance(k, str) or not k or not isinstance(v, str) or not v for k, v in owner_names.items()): raise ValueError("owner_names must map non-empty owner IDs to non-empty names.")
-     base = build_symbol_lineage_payload(
-         selected,
-         state_freshness=state_freshness,
-     )
--    missing = tuple(owner for owner in _semantic_owner_ids(base) if artifact_names is None or owner not in artifact_names)
--    indexed = dict(base); indexed.update({"representation": "indexed", "requested_representation": requested, "resolver": {"index_kind": "artifact", "resolve_via": "lookup_index_entries"}})
-+    missing = tuple(owner for owner in _semantic_owner_ids(base) if owner_names is None or owner not in owner_names)
-+    indexed = dict(base); indexed.update({"representation": "indexed", "requested_representation": requested, "resolver": {"id_kinds": ["module", "artifact"], "resolve_via": "lookup_index_entries"}})
-     indexed_bytes = mcp_rep.serialized_json_bytes(indexed)
--    named = None if missing else _named_semantic_owners(base, artifact_names or {})
-+    named = None if missing else _named_semantic_owners(base, owner_names or {})
-     if named is not None:
-         assert isinstance(named, dict); named.update({"representation": "named", "requested_representation": requested})
-     named_bytes = mcp_rep.serialized_json_bytes(named) if named is not None else None
-@@ -272,13 +272,13 @@ def _represented_response_candidate(
-     *,
-     mode: str,
-     representation: str,
--    artifact_names: Mapping[str, str] | None,
-+    owner_names: Mapping[str, str] | None,
-     state_freshness: Mapping[str, object] | None,
- ) -> dict:
-     result = build_symbol_lineage_represented_payload(
-         selected,
-         representation=representation,
--        artifact_names=artifact_names,
-+        owner_names=owner_names,
-         state_freshness=state_freshness,
-     )
-     result["mode"] = mode
-@@ -289,7 +289,7 @@ def build_symbol_lineage_represented_preview(
-     selected: SelectedSymbolLineageFacts,
-     *,
-     representation: str = "auto",
--    artifact_names: Mapping[str, str] | None = None,
-+    owner_names: Mapping[str, str] | None = None,
-     state_freshness: Mapping[str, object] | None = None,
-     candidate_mode: str = "fetch",
- ) -> dict:
-@@ -302,7 +302,7 @@ def build_symbol_lineage_represented_preview(
-         selected,
-         mode=candidate_mode,
-         representation=representation,
--        artifact_names=artifact_names,
-+        owner_names=owner_names,
-         state_freshness=state_freshness,
-     )
-     sections = candidate["sections"]
-@@ -362,7 +362,7 @@ def render_symbol_lineage_response(
-     mode: str = "auto",
-     sections: tuple[str, ...] | None = None,
-     representation: str = "auto",
--    artifact_names: Mapping[str, str] | None = None,
-+    owner_names: Mapping[str, str] | None = None,
-     state_freshness: Mapping[str, object] | None = None,
-     allow_large_output: bool = False,
- ) -> str:
-@@ -396,7 +396,7 @@ def render_symbol_lineage_response(
-         result = build_symbol_lineage_represented_preview(
-             selected,
-             representation=representation,
--            artifact_names=artifact_names,
-+            owner_names=owner_names,
-             state_freshness=state_freshness,
-             candidate_mode="fetch",
-         )
-@@ -423,7 +423,7 @@ def render_symbol_lineage_response(
-         selected,
-         mode=plan.mode,
-         representation=representation,
--        artifact_names=artifact_names,
-+        owner_names=owner_names,
-         state_freshness=state_freshness,
-     )
-     candidate_bytes = (
-@@ -441,7 +441,7 @@ def render_symbol_lineage_response(
-             build_symbol_lineage_represented_preview(
-                 selected,
-                 representation=representation,
--                artifact_names=artifact_names,
-+                owner_names=owner_names,
-                 state_freshness=state_freshness,
-                 candidate_mode="auto",
-             )
-diff --git a/tests/mcp/test_lineage_response.py b/tests/mcp/test_lineage_response.py
-index d127644..b64426c 100644
---- a/tests/mcp/test_lineage_response.py
-+++ b/tests/mcp/test_lineage_response.py
-@@ -9,7 +9,7 @@ from contextor.core.domain.lineage_facts import (
-     MaterializedSurfaceFact, ResolutionKind,
-     SemanticAnchorBinding, SemanticEndpoint, SemanticInterfaceDescriptor,
-     SourceSpan, SurfaceDeclarationEvidence, SurfaceKind,
--    build_parameter_value_slot, build_return_slot, ParameterKind,
-+    build_parameter_value_slot, build_return_slot, build_module_global_slot, ParameterKind,
+warning: in the working copy of 'contextor/core/lineage_query/live_query.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'tests/analysis/test_lineage_live_query.py', LF will be replaced by CRLF the next time Git touches it
+diff --git a/contextor/core/lineage_query/live_query.py b/contextor/core/lineage_query/live_query.py
+index 349be12..dd952d9 100644
+--- a/contextor/core/lineage_query/live_query.py
++++ b/contextor/core/lineage_query/live_query.py
+@@ -6,9 +6,16 @@ from collections.abc import Mapping
+ from contextor.core.lineage_query.backend import (
+     RepositoryStateLineageBackend,
  )
- from contextor.core.lineage_query.backend import LineageBackendMetadata
++from contextor.core.domain.lineage_facts import (
++    ExtractedSymbolicKind,
++    SemanticEndpoint,
++    SemanticEndpointRole,
++)
  from contextor.core.lineage_query.service import (
-@@ -32,6 +32,13 @@ from contextor.mcp.lineage_response import (
+     SYMBOL_LINEAGE_SECTION_ORDER,
++    LineageFlowMatch,
+     LineageQueryService,
++    LineageSurfaceMatch,
+     LineageTargetResolution,
+     SelectedSymbolLineageFacts,
  )
- 
- 
-+def _owner_names_fixture():
-+    return {
-+        "17/2": "pkg.mod",
-+        "A17/2": "pkg.mod::handler",
-+    }
+@@ -23,6 +30,13 @@ _UNAVAILABLE_MESSAGE = (
+     "is unavailable or stale."
+ )
+
++_OWNER_NAME_ORIGIN_UNAVAILABLE = (
++    "Canonical semantic owner name origin is unavailable."
++)
++_OWNER_NAME_INCONSISTENT = (
++    "Canonical semantic owner identity is inconsistent."
++)
++
+
+ @dataclass(frozen=True)
+ class LiveSymbolLineageQueryResult:
+@@ -31,6 +45,178 @@ class LiveSymbolLineageQueryResult:
+     unavailable_reason: str | None = None
+
+
++def _selected_lineage_flow_matches(
++    selected: SelectedSymbolLineageFacts,
++) -> tuple[LineageFlowMatch, ...]:
++    matches: dict[tuple[str, str, str], LineageFlowMatch] = {}
++
++    def add(items: tuple[LineageFlowMatch, ...]) -> None:
++        for match in items:
++            key = (
++                match.source_key,
++                match.source_fingerprint,
++                match.flow.local_id,
++            )
++            existing = matches.get(key)
++            if existing is not None and existing != match:
++                raise ValueError(
++                    "Selected lineage flow identity is inconsistent."
++                )
++            matches[key] = match
++
++    if selected.interface is not None:
++        add(selected.interface.parameter_defaults)
++    if selected.connections is not None:
++        add(selected.connections.incoming)
++        add(selected.connections.outgoing)
++    for name in (
++        "bindings",
++        "parameter_flows",
++        "calls_interfaces",
++        "returns",
++        "state",
++        "callbacks",
++        "unresolved_dynamic_boundaries",
++    ):
++        value = getattr(selected, name)
++        if value is not None:
++            add(value)
++    if selected.surfaces is not None:
++        add(selected.surfaces.flows)
++    return tuple(matches[key] for key in sorted(matches))
 +
 +
- def _selected_lineage_fixture():
-     target = ResolvedLineageTarget("A17/2", "pkg.mod::handler", "pkg.mod", "handler", "exact_id")
-     metadata = LineageBackendMetadata(7, "live", "fresh", "1", 1, "fresh", True)
-@@ -48,14 +55,31 @@ def _selected_lineage_fixture():
-     symbolic_ref = MaterializedSymbolicRef("pkg/mod.py", "1" * 64, ExtractedSymbolicKind.IMPORT, "pkg.dep", "value")
-     local_ref = MaterializedOccurrenceRef("pkg/mod.py", "1" * 64, "local")
-     binding_flow = LineageFlowMatch("pkg/mod.py", "1" * 64, MaterializedFlowFact("binding", symbolic_ref, local_ref, LineageRelation.BINDS, span, ResolutionKind.IMPORT_EXACT, LineageConfidence.CONFIRMED))
-+    module_state_slot = build_module_global_slot(
-+        "17/2",
-+        "CACHE",
++def _selected_lineage_surface_matches(
++    selected: SelectedSymbolLineageFacts,
++) -> tuple[LineageSurfaceMatch, ...]:
++    if selected.surfaces is None:
++        return ()
++    return tuple(
++        sorted(
++            selected.surfaces.facts,
++            key=lambda match: (
++                match.source_key,
++                match.source_fingerprint,
++                match.surface.local_id,
++            ),
++        )
 +    )
-+    state_flow = LineageFlowMatch(
-+        "pkg/mod.py",
-+        "1" * 64,
-+        MaterializedFlowFact(
++
++
++def _owner_name_from_origin(origin) -> str:
++    if origin.kind is ExtractedSymbolicKind.STATE:
++        return origin.module_name
++    return f"{origin.module_name}::{origin.symbol_name}"
++
++
++def _install_owner_name(
++    owner_names: dict[str, str],
++    owner_id: str,
++    owner_name: str,
++) -> None:
++    existing = owner_names.get(owner_id)
++    if existing is not None and existing != owner_name:
++        raise ValueError(_OWNER_NAME_INCONSISTENT)
++    owner_names[owner_id] = owner_name
++
++
++def build_selected_lineage_owner_names(
++    backend: RepositoryStateLineageBackend,
++    selected: SelectedSymbolLineageFacts,
++) -> dict[str, str]:
++    if not isinstance(backend, RepositoryStateLineageBackend):
++        raise TypeError("backend must be RepositoryStateLineageBackend.")
++    if not isinstance(selected, SelectedSymbolLineageFacts):
++        raise TypeError("selected must be SelectedSymbolLineageFacts.")
++
++    owner_names: dict[str, str] = {}
++    source_cache = {}
++    origin_cache = {}
++
++    def origin_for(
++        source_key: str,
++        source_fingerprint: str,
++        fact_local_id: str,
++        endpoint_role: SemanticEndpointRole,
++    ):
++        source = source_cache.get(source_key)
++        if source is None:
++            source = backend.get_source(source_key)
++            if source is None:
++                raise ValueError(_OWNER_NAME_ORIGIN_UNAVAILABLE)
++            source_cache[source_key] = source
++        if source.manifest.source_fingerprint != source_fingerprint:
++            raise ValueError(_OWNER_NAME_ORIGIN_UNAVAILABLE)
++        cache_key = (
++            source_key,
++            source_fingerprint,
++            fact_local_id,
++            endpoint_role,
++        )
++        cached = origin_cache.get(cache_key)
++        if cached is not None:
++            return cached
++        matches = tuple(
++            origin
++            for origin in source.semantic_endpoint_origins
++            if (
++                origin.fact_local_id == fact_local_id
++                and origin.endpoint_role is endpoint_role
++            )
++        )
++        if len(matches) != 1:
++            raise ValueError(_OWNER_NAME_ORIGIN_UNAVAILABLE)
++        origin_cache[cache_key] = matches[0]
++        return matches[0]
++
++    def resolve(
++        endpoint,
++        *,
++        source_key: str,
++        source_fingerprint: str,
++        fact_local_id: str,
++        endpoint_role: SemanticEndpointRole,
++    ) -> None:
++        if not isinstance(endpoint, SemanticEndpoint):
++            return
++        origin = origin_for(
++            source_key,
++            source_fingerprint,
++            fact_local_id,
++            endpoint_role,
++        )
++        _install_owner_name(
++            owner_names,
++            endpoint.owner_id,
++            _owner_name_from_origin(origin),
++        )
++
++    for match in _selected_lineage_flow_matches(selected):
++        resolve(
++            match.flow.source,
++            source_key=match.source_key,
++            source_fingerprint=match.source_fingerprint,
++            fact_local_id=match.flow.local_id,
++            endpoint_role=SemanticEndpointRole.FLOW_SOURCE,
++        )
++        resolve(
++            match.flow.target,
++            source_key=match.source_key,
++            source_fingerprint=match.source_fingerprint,
++            fact_local_id=match.flow.local_id,
++            endpoint_role=SemanticEndpointRole.FLOW_TARGET,
++        )
++    for match in _selected_lineage_surface_matches(selected):
++        resolve(
++            match.surface.exposed,
++            source_key=match.source_key,
++            source_fingerprint=match.source_fingerprint,
++            fact_local_id=match.surface.local_id,
++            endpoint_role=SemanticEndpointRole.SURFACE_EXPOSED,
++        )
++    return dict(sorted(owner_names.items()))
++
++
+ def _require_exact_identity_capability(
+     backend: RepositoryStateLineageBackend,
+ ) -> None:
+diff --git a/tests/analysis/test_lineage_live_query.py b/tests/analysis/test_lineage_live_query.py
+index 17fc892..f02a65b 100644
+--- a/tests/analysis/test_lineage_live_query.py
++++ b/tests/analysis/test_lineage_live_query.py
+@@ -1,15 +1,25 @@
++from dataclasses import replace
+ from types import SimpleNamespace
+ 
+ import pytest
+ 
+ from contextor.core.domain.lineage_facts import (
++    ExtractedSymbolicKind,
++    LineageConfidence,
+     LineageFamilyStatus,
++    LineageRelation,
+     MaterializedAnchorFact,
++    MaterializedFlowFact,
+     MaterializedLineageSourceFacts,
+     MaterializedOccurrenceRef,
++    ResolutionKind,
++    SemanticEndpoint,
+     SemanticAnchorBinding,
++    SemanticEndpointOrigin,
++    SemanticEndpointRole,
+     SourceLineageManifest,
+     SourceSpan,
++    build_module_global_slot,
+ )
+ from contextor.core.lineage_query.backend import (
+     RepositoryStateLineageBackend,
+@@ -19,6 +29,7 @@ from contextor.core.lineage_query.index import (
+ )
+ from contextor.core.lineage_query.live_query import (
+     LiveSymbolLineageQueryResult,
++    build_selected_lineage_owner_names,
+     build_live_lineage_target_catalog,
+     query_live_symbol_lineage,
+ )
+@@ -675,3 +686,241 @@ def test_live_symbol_lineage_query_allows_empty_core_selection():
+     assert result.selected is not None
+     assert result.selected.selected_sections == ()
+     assert result.selected.complete is True
++
++
++def _owner_name_projection_fixture():
++    source_key = "pkg/mod.py"
++    fingerprint = "e" * 64
++    span = SourceSpan(1, 0, 1, 10)
++    target_ref = MaterializedOccurrenceRef(
++        source_key, fingerprint, "definition-0"
++    )
++    local_ref = MaterializedOccurrenceRef(
++        source_key, fingerprint, "local"
++    )
++    target_anchor = MaterializedAnchorFact(
++        "definition-0", target_ref, "function", span
++    )
++    target_binding = SemanticAnchorBinding(
++        "A17/2", "pkg.mod::handler", target_ref
++    )
++    state_flow = MaterializedFlowFact(
++        "state-read",
++        SemanticEndpoint(
++            "17/2", build_module_global_slot("17/2", "CACHE")
++        ),
++        local_ref,
++        LineageRelation.READS_STATE,
++        span,
++        ResolutionKind.LEXICAL_EXACT,
++        LineageConfidence.CONFIRMED,
++        owner_local_id="definition-0",
++    )
++    call_flow = MaterializedFlowFact(
++        "call-other",
++        local_ref,
++        SemanticEndpoint("A18/1"),
++        LineageRelation.CALL_RESULT,
++        span,
++        ResolutionKind.CALL_EXACT,
++        LineageConfidence.CONFIRMED,
++        owner_local_id="definition-0",
++    )
++    unselected_flow = MaterializedFlowFact(
++        "callback-hidden",
++        local_ref,
++        SemanticEndpoint("A99/1"),
++        LineageRelation.CALLBACK_INVOKES,
++        span,
++        ResolutionKind.CALL_EXACT,
++        LineageConfidence.CONFIRMED,
++        owner_local_id="definition-0",
++    )
++    origins = (
++        SemanticEndpointOrigin(
++            source_key,
++            fingerprint,
 +            "state-read",
-+            SemanticEndpoint("17/2", module_state_slot),
-+            local_ref,
-+            LineageRelation.READS_STATE,
-+            span,
-+            ResolutionKind.LEXICAL_EXACT,
-+            LineageConfidence.CONFIRMED,
++            SemanticEndpointRole.FLOW_SOURCE,
++            ExtractedSymbolicKind.STATE,
++            "pkg.mod",
++            "CACHE",
++        ),
++        SemanticEndpointOrigin(
++            source_key,
++            fingerprint,
++            "call-other",
++            SemanticEndpointRole.FLOW_TARGET,
++            ExtractedSymbolicKind.CALLEE,
++            "pkg.mod",
++            "other",
++        ),
++        SemanticEndpointOrigin(
++            source_key,
++            fingerprint,
++            "callback-hidden",
++            SemanticEndpointRole.FLOW_TARGET,
++            ExtractedSymbolicKind.CALLEE,
++            "pkg.callbacks",
++            "hidden",
 +        ),
 +    )
-     dynamic_flow = LineageFlowMatch("pkg/mod.py", "1" * 64, MaterializedFlowFact("dynamic", local_ref, ref, LineageRelation.ASSIGNS, span, ResolutionKind.DYNAMIC_RUNTIME_BOUNDARY, LineageConfidence.DYNAMIC, dynamic_boundary="runtime-test"))
-     surface_match = LineageSurfaceMatch("pkg/mod.py", "1" * 64, MaterializedSurfaceFact("public-handler", SurfaceKind.PUBLIC_SYMBOL, ref, span, ResolutionKind.PYTHON_NAME_CONVENTION, LineageConfidence.INFERRED, "handler", declaration_evidence=SurfaceDeclarationEvidence.STATIC_DECLARATION))
-     direct = DirectLineageFacts(target, metadata, (definition,), (incoming,), (), (surface_match,))
-     root = LineageScopeRootMatch("pkg/mod.py", "1" * 64, binding, anchor)
--    scope = LexicalScopeFacts(target, metadata, (root,), (binding_flow, dynamic_flow), (), True)
--    sections = SemanticLineageSections(target, scope, direct, (binding_flow, dynamic_flow), (), (), (), (), (), LineageSurfaceSection((), (surface_match,)), (dynamic_flow,))
-+    scope = LexicalScopeFacts(target, metadata, (root,), (binding_flow, dynamic_flow, state_flow), (), True)
-+    sections = SemanticLineageSections(target, scope, direct, (binding_flow, dynamic_flow), (), (), (), (state_flow,), (), LineageSurfaceSection((), (surface_match,)), (dynamic_flow,))
-     facts = SymbolLineageFacts(target, interface, sections)
--    return SelectedSymbolLineageFacts(facts, SYMBOL_LINEAGE_SECTION_ORDER, interface, SymbolLineageConnections((incoming,), ()), (binding_flow, dynamic_flow), (), (), (), (), (), LineageSurfaceSection((), (surface_match,)), (dynamic_flow,))
-+    return SelectedSymbolLineageFacts(facts, SYMBOL_LINEAGE_SECTION_ORDER, interface, SymbolLineageConnections((incoming,), ()), (binding_flow, dynamic_flow), (), (), (), (state_flow,), (), LineageSurfaceSection((), (surface_match,)), (dynamic_flow,))
- 
- 
- def _with_repeated_connections(
-@@ -216,9 +240,7 @@ def test_symbol_lineage_named_and_indexed_representations_preserve_nonsemantic_i
-     named = build_symbol_lineage_represented_payload(
-         selected,
-         representation="named",
--        artifact_names={
--            "A17/2": "pkg.mod::handler",
--        },
-+        owner_names=_owner_names_fixture(),
-     )
-     indexed = build_symbol_lineage_represented_payload(
-         selected,
-@@ -243,6 +265,11 @@ def test_symbol_lineage_named_and_indexed_representations_preserve_nonsemantic_i
-         "slot": build_return_slot("A17/2"),
-     }
- 
-+    named_state = named["sections"]["state"][0]["source"]
-+    indexed_state = indexed["sections"]["state"][0]["source"]
-+    assert named_state == {"kind": "semantic", "owner": "pkg.mod", "slot": build_module_global_slot("17/2", "CACHE")}
-+    assert indexed_state == {"kind": "semantic", "owner_id": "17/2", "slot": build_module_global_slot("17/2", "CACHE")}
++    source = MaterializedLineageSourceFacts(
++        manifest=SourceLineageManifest(
++            source_key=source_key,
++            source_fingerprint=fingerprint,
++            semantic_version="1",
++            status=LineageFamilyStatus.FRESH,
++            anchor_count=1,
++            flow_count=3,
++            surface_count=0,
++            semantic_anchor_bindings_materialized=True,
++            anchor_ownership_materialized=True,
++            flow_ownership_materialized=True,
++        ),
++        anchors=(target_anchor,),
++        flows=tuple(sorted((
++            state_flow, call_flow, unselected_flow,
++        ))),
++        surfaces=(),
++        semantic_endpoint_origins=tuple(sorted(origins)),
++        semantic_anchors=(target_binding,),
++    )
++    sources = {source_key: source}
++    (
++        owner_source_index,
++        source_owner_index,
++        anchor_complete,
++    ) = build_lineage_query_indexes(sources)
++    state = SimpleNamespace(
++        revision=11,
++        provenance="live",
++        modules={"pkg.mod": SimpleNamespace(path=source_key)},
++        lineage_facts_state="fresh",
++        lineage_facts_semantic_version="1",
++        lineage_facts_by_source=sources,
++        lineage_owner_source_index=owner_source_index,
++        lineage_source_owner_index=source_owner_index,
++        lineage_query_index_state="fresh",
++        lineage_semantic_anchor_bindings_complete=anchor_complete,
++    )
++    backend = RepositoryStateLineageBackend(state)
++    result = query_live_symbol_lineage(
++        state, "A17/2", ("calls_interfaces", "state")
++    )
++    assert result.resolution.status == "resolved"
++    assert result.selected is not None
++    return state, backend, result.selected
 +
-     assert (
-         named_semantic["slot"]
-         == indexed_semantic["slot"]
-@@ -294,7 +321,7 @@ def test_symbol_lineage_named_and_indexed_representations_preserve_nonsemantic_i
- 
-     assert indexed["representation"] == "indexed"
-     assert indexed["resolver"] == {
--        "index_kind": "artifact",
-+        "id_kinds": ["module", "artifact"],
-         "resolve_via": "lookup_index_entries",
-     }
-     assert (
-@@ -309,19 +336,18 @@ def test_symbol_lineage_representation_fails_closed_and_auto_falls_back():
-         ValueError,
-         match=(
-             "Named lineage representation unavailable "
--            "for semantic owners: A17/2"
-+            "for semantic owners: 17/2, A17/2"
-         ),
-     ):
-         build_symbol_lineage_represented_payload(
-             selected,
-             representation="named",
--            artifact_names={},
-+            owner_names={},
-         )
--
-     result = build_symbol_lineage_represented_payload(
-         selected,
-         representation="auto",
--        artifact_names={},
-+        owner_names={},
-     )
- 
-     assert result["representation"] == "indexed"
-@@ -331,7 +357,7 @@ def test_symbol_lineage_representation_fails_closed_and_auto_falls_back():
-     )
-     assert result["representation_decision"][
-         "missing_named_owners"
--    ] == ["A17/2"]
-+    ] == ["17/2", "A17/2"]
-     assert (
-         result["representation_decision"][
-             "named_candidate_bytes"
-@@ -345,9 +371,7 @@ def test_symbol_lineage_auto_named_and_material_indexed_saving():
-     named = build_symbol_lineage_represented_payload(
-         selected,
-         representation="auto",
--        artifact_names={
--            "A17/2": "pkg.mod::handler",
--        },
-+        owner_names=_owner_names_fixture(),
-     )
- 
-     named_decision = named["representation_decision"]
-@@ -388,9 +412,7 @@ def test_symbol_lineage_auto_named_and_material_indexed_saving():
-     indexed = build_symbol_lineage_represented_payload(
-         expanded,
-         representation="auto",
--        artifact_names={
--            "A17/2": long_name,
--        },
-+        owner_names={**_owner_names_fixture(), "A17/2": long_name},
-     )
- 
-     indexed_decision = (
-@@ -418,19 +440,19 @@ def test_symbol_lineage_representation_validates_request_contract():
-         build_symbol_lineage_represented_payload(selected, representation=object())
-     with pytest.raises(ValueError, match="representation must be 'auto', 'indexed', or 'named'."):
-         build_symbol_lineage_represented_payload(selected, representation="other")
--    with pytest.raises(TypeError, match="artifact_names must be a mapping."):
--        build_symbol_lineage_represented_payload(selected, representation="named", artifact_names=[])
-+    with pytest.raises(TypeError, match="owner_names must be a mapping."):
-+        build_symbol_lineage_represented_payload(selected, representation="named", owner_names=[])
-     with pytest.raises(
-         ValueError,
-         match=(
--            "artifact_names must map non-empty "
--            "artifact IDs to non-empty names."
-+            "owner_names must map non-empty "
-+            "owner IDs to non-empty names."
-         ),
-     ):
-         build_symbol_lineage_represented_payload(
-             selected,
-             representation="named",
--            artifact_names={
-+            owner_names={
-                 "A17/2": "",
-             },
-         )
-@@ -494,20 +516,18 @@ def test_symbol_lineage_auto_falls_back_to_exact_representation_aware_preview():
- 
- def test_symbol_lineage_explicit_preview_sizes_exact_represented_fetch_candidate():
-     selected = _selected_lineage_fixture()
--    names = {
--        "A17/2": "pkg.mod::handler",
--    }
-+    names = _owner_names_fixture()
- 
-     preview = build_symbol_lineage_represented_preview(
-         selected,
-         representation="named",
--        artifact_names=names,
-+        owner_names=names,
-         candidate_mode="fetch",
-     )
-     candidate = build_symbol_lineage_represented_payload(
-         selected,
-         representation="named",
--        artifact_names=names,
-+        owner_names=names,
-     )
-     candidate["mode"] = "fetch"
++
++def test_selected_owner_names_use_canonical_origins_for_module_and_artifact_owners_only(
++    monkeypatch,
++):
++    _state, backend, selected = _owner_name_projection_fixture()
++    monkeypatch.setattr(
++        backend,
++        "source_keys",
++        lambda: (_ for _ in ()).throw(
++            AssertionError("owner-name projection scanned lineage")
++        ),
++    )
++    monkeypatch.setattr(
++        backend,
++        "iter_sources",
++        lambda *_args, **_kwargs: (
++            (_ for _ in ()).throw(
++                AssertionError("owner-name projection iterated lineage")
++            )
++        ),
++    )
++    original_get = backend.get_source
++    observed = []
++
++    def get_source(source_key):
++        observed.append(source_key)
++        return original_get(source_key)
++
++    monkeypatch.setattr(backend, "get_source", get_source)
++    owner_names = build_selected_lineage_owner_names(backend, selected)
++
++    assert owner_names == {
++        "17/2": "pkg.mod",
++        "A18/1": "pkg.mod::other",
++    }
++    assert "A99/1" not in owner_names
++    assert observed == ["pkg/mod.py"]
++
++
++def test_selected_owner_names_fail_closed_when_selected_semantic_origin_is_missing():
++    state, _backend, selected = _owner_name_projection_fixture()
++    source = state.lineage_facts_by_source["pkg/mod.py"]
++    state.lineage_facts_by_source["pkg/mod.py"] = replace(
++        source,
++        semantic_endpoint_origins=tuple(
++            origin
++            for origin in source.semantic_endpoint_origins
++            if origin.fact_local_id != "state-read"
++        ),
++    )
++    backend = RepositoryStateLineageBackend(state)
++
++    with pytest.raises(
++        ValueError,
++        match="Canonical semantic owner name origin is unavailable.",
++    ):
++        build_selected_lineage_owner_names(backend, selected)
++
++
++def test_selected_owner_names_reject_conflicting_canonical_name_for_same_owner():
++    state, _backend, _selected = _owner_name_projection_fixture()
++    source = state.lineage_facts_by_source["pkg/mod.py"]
++    span = SourceSpan(2, 0, 2, 10)
++    local_ref = MaterializedOccurrenceRef(
++        "pkg/mod.py", "e" * 64, "local-conflict"
++    )
++    conflict_flow = MaterializedFlowFact(
++        "call-conflict",
++        local_ref,
++        SemanticEndpoint("A18/1"),
++        LineageRelation.CALL_RESULT,
++        span,
++        ResolutionKind.CALL_EXACT,
++        LineageConfidence.CONFIRMED,
++        owner_local_id="definition-0",
++    )
++    conflict_origin = SemanticEndpointOrigin(
++        "pkg/mod.py",
++        "e" * 64,
++        "call-conflict",
++        SemanticEndpointRole.FLOW_TARGET,
++        ExtractedSymbolicKind.CALLEE,
++        "pkg.other",
++        "other",
++    )
++    state.lineage_facts_by_source["pkg/mod.py"] = replace(
++        source,
++        manifest=replace(source.manifest, flow_count=4),
++        flows=tuple(sorted((*source.flows, conflict_flow))),
++        semantic_endpoint_origins=tuple(
++            sorted((*source.semantic_endpoint_origins, conflict_origin))
++        ),
++    )
++    (
++        owner_source_index,
++        source_owner_index,
++        anchor_complete,
++    ) = build_lineage_query_indexes(state.lineage_facts_by_source)
++    state.lineage_owner_source_index = owner_source_index
++    state.lineage_source_owner_index = source_owner_index
++    state.lineage_semantic_anchor_bindings_complete = anchor_complete
++    result = query_live_symbol_lineage(
++        state, "A17/2", ("calls_interfaces",)
++    )
++    assert result.selected is not None
++    backend = RepositoryStateLineageBackend(state)
++
++    with pytest.raises(
++        ValueError,
++        match="Canonical semantic owner identity is inconsistent.",
++    ):
++        build_selected_lineage_owner_names(backend, result.selected)
 ```
-

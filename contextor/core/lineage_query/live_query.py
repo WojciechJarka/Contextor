@@ -6,9 +6,16 @@ from collections.abc import Mapping
 from contextor.core.lineage_query.backend import (
     RepositoryStateLineageBackend,
 )
+from contextor.core.domain.lineage_facts import (
+    ExtractedSymbolicKind,
+    SemanticEndpoint,
+    SemanticEndpointRole,
+)
 from contextor.core.lineage_query.service import (
     SYMBOL_LINEAGE_SECTION_ORDER,
+    LineageFlowMatch,
     LineageQueryService,
+    LineageSurfaceMatch,
     LineageTargetResolution,
     SelectedSymbolLineageFacts,
 )
@@ -23,12 +30,191 @@ _UNAVAILABLE_MESSAGE = (
     "is unavailable or stale."
 )
 
+_OWNER_NAME_ORIGIN_UNAVAILABLE = (
+    "Canonical semantic owner name origin is unavailable."
+)
+_OWNER_NAME_INCONSISTENT = (
+    "Canonical semantic owner identity is inconsistent."
+)
+
 
 @dataclass(frozen=True)
 class LiveSymbolLineageQueryResult:
     resolution: LineageTargetResolution
     selected: SelectedSymbolLineageFacts | None = None
     unavailable_reason: str | None = None
+
+
+def _selected_lineage_flow_matches(
+    selected: SelectedSymbolLineageFacts,
+) -> tuple[LineageFlowMatch, ...]:
+    matches: dict[tuple[str, str, str], LineageFlowMatch] = {}
+
+    def add(items: tuple[LineageFlowMatch, ...]) -> None:
+        for match in items:
+            key = (
+                match.source_key,
+                match.source_fingerprint,
+                match.flow.local_id,
+            )
+            existing = matches.get(key)
+            if existing is not None and existing != match:
+                raise ValueError(
+                    "Selected lineage flow identity is inconsistent."
+                )
+            matches[key] = match
+
+    if selected.interface is not None:
+        add(selected.interface.parameter_defaults)
+    if selected.connections is not None:
+        add(selected.connections.incoming)
+        add(selected.connections.outgoing)
+    for name in (
+        "bindings",
+        "parameter_flows",
+        "calls_interfaces",
+        "returns",
+        "state",
+        "callbacks",
+        "unresolved_dynamic_boundaries",
+    ):
+        value = getattr(selected, name)
+        if value is not None:
+            add(value)
+    if selected.surfaces is not None:
+        add(selected.surfaces.flows)
+    return tuple(matches[key] for key in sorted(matches))
+
+
+def _selected_lineage_surface_matches(
+    selected: SelectedSymbolLineageFacts,
+) -> tuple[LineageSurfaceMatch, ...]:
+    if selected.surfaces is None:
+        return ()
+    return tuple(
+        sorted(
+            selected.surfaces.facts,
+            key=lambda match: (
+                match.source_key,
+                match.source_fingerprint,
+                match.surface.local_id,
+            ),
+        )
+    )
+
+
+def _owner_name_from_origin(origin) -> str:
+    if origin.kind is ExtractedSymbolicKind.STATE:
+        return origin.module_name
+    return f"{origin.module_name}::{origin.symbol_name}"
+
+
+def _install_owner_name(
+    owner_names: dict[str, str],
+    owner_id: str,
+    owner_name: str,
+) -> None:
+    existing = owner_names.get(owner_id)
+    if existing is not None and existing != owner_name:
+        raise ValueError(_OWNER_NAME_INCONSISTENT)
+    owner_names[owner_id] = owner_name
+
+
+def build_selected_lineage_owner_names(
+    backend: RepositoryStateLineageBackend,
+    selected: SelectedSymbolLineageFacts,
+) -> dict[str, str]:
+    if not isinstance(backend, RepositoryStateLineageBackend):
+        raise TypeError("backend must be RepositoryStateLineageBackend.")
+    if not isinstance(selected, SelectedSymbolLineageFacts):
+        raise TypeError("selected must be SelectedSymbolLineageFacts.")
+
+    owner_names: dict[str, str] = {}
+    source_cache = {}
+    origin_cache = {}
+
+    def origin_for(
+        source_key: str,
+        source_fingerprint: str,
+        fact_local_id: str,
+        endpoint_role: SemanticEndpointRole,
+    ):
+        source = source_cache.get(source_key)
+        if source is None:
+            source = backend.get_source(source_key)
+            if source is None:
+                raise ValueError(_OWNER_NAME_ORIGIN_UNAVAILABLE)
+            source_cache[source_key] = source
+        if source.manifest.source_fingerprint != source_fingerprint:
+            raise ValueError(_OWNER_NAME_ORIGIN_UNAVAILABLE)
+        cache_key = (
+            source_key,
+            source_fingerprint,
+            fact_local_id,
+            endpoint_role,
+        )
+        cached = origin_cache.get(cache_key)
+        if cached is not None:
+            return cached
+        matches = tuple(
+            origin
+            for origin in source.semantic_endpoint_origins
+            if (
+                origin.fact_local_id == fact_local_id
+                and origin.endpoint_role is endpoint_role
+            )
+        )
+        if len(matches) != 1:
+            raise ValueError(_OWNER_NAME_ORIGIN_UNAVAILABLE)
+        origin_cache[cache_key] = matches[0]
+        return matches[0]
+
+    def resolve(
+        endpoint,
+        *,
+        source_key: str,
+        source_fingerprint: str,
+        fact_local_id: str,
+        endpoint_role: SemanticEndpointRole,
+    ) -> None:
+        if not isinstance(endpoint, SemanticEndpoint):
+            return
+        origin = origin_for(
+            source_key,
+            source_fingerprint,
+            fact_local_id,
+            endpoint_role,
+        )
+        _install_owner_name(
+            owner_names,
+            endpoint.owner_id,
+            _owner_name_from_origin(origin),
+        )
+
+    for match in _selected_lineage_flow_matches(selected):
+        resolve(
+            match.flow.source,
+            source_key=match.source_key,
+            source_fingerprint=match.source_fingerprint,
+            fact_local_id=match.flow.local_id,
+            endpoint_role=SemanticEndpointRole.FLOW_SOURCE,
+        )
+        resolve(
+            match.flow.target,
+            source_key=match.source_key,
+            source_fingerprint=match.source_fingerprint,
+            fact_local_id=match.flow.local_id,
+            endpoint_role=SemanticEndpointRole.FLOW_TARGET,
+        )
+    for match in _selected_lineage_surface_matches(selected):
+        resolve(
+            match.surface.exposed,
+            source_key=match.source_key,
+            source_fingerprint=match.source_fingerprint,
+            fact_local_id=match.surface.local_id,
+            endpoint_role=SemanticEndpointRole.SURFACE_EXPOSED,
+        )
+    return dict(sorted(owner_names.items()))
 
 
 def _require_exact_identity_capability(
