@@ -14,6 +14,8 @@ from contextor.core.domain.lineage_facts import (
     SemanticAnchorBinding,
     SemanticEndpoint,
     SemanticInterfaceDescriptor,
+    SemanticSlotKind,
+    parse_semantic_slot,
 )
 from contextor.core.lineage_query.backend import (
     CanonicalLineageBackend,
@@ -103,6 +105,7 @@ class TargetInterfaceFacts:
     metadata: LineageBackendMetadata
     definitions: tuple[LineageAnchorMatch, ...]
     descriptors: tuple[LineageInterfaceDescriptorMatch, ...]
+    parameter_defaults: tuple[LineageFlowMatch, ...]
     materialization_complete: bool
 
     @property
@@ -554,6 +557,7 @@ class LineageQueryService:
         metadata = self._backend.metadata()
         definitions: list[LineageAnchorMatch] = []
         descriptors: list[LineageInterfaceDescriptorMatch] = []
+        parameter_defaults: list[LineageFlowMatch] = []
         materialization_complete = True
 
         source_keys = self._backend.source_keys_for_owner(
@@ -598,6 +602,32 @@ class LineageQueryService:
                     )
                 )
 
+            for flow in source.flows:
+                if (
+                    flow.relation
+                    is not LineageRelation.DEFAULTS_TO_PARAMETER
+                ):
+                    continue
+                endpoint = flow.target
+                if (
+                    not isinstance(endpoint, SemanticEndpoint)
+                    or endpoint.owner_id != target.artifact_id
+                    or endpoint.slot is None
+                ):
+                    continue
+                slot = parse_semantic_slot(endpoint.slot)
+                if slot.kind is not SemanticSlotKind.PARAMETER_VALUE:
+                    continue
+                parameter_defaults.append(
+                    LineageFlowMatch(
+                        source_key=manifest.source_key,
+                        source_fingerprint=(
+                            manifest.source_fingerprint
+                        ),
+                        flow=flow,
+                    )
+                )
+
         definitions.sort(key=_anchor_match_key)
         descriptors.sort(
             key=lambda item: (
@@ -606,12 +636,14 @@ class LineageQueryService:
                 item.descriptor,
             )
         )
+        parameter_defaults.sort(key=_flow_match_key)
 
         return TargetInterfaceFacts(
             target=target,
             metadata=metadata,
             definitions=tuple(definitions),
             descriptors=tuple(descriptors),
+            parameter_defaults=tuple(parameter_defaults),
             materialization_complete=materialization_complete,
         )
 
