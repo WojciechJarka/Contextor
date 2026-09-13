@@ -62,6 +62,7 @@ def visit_name(
             node=node,
             resolution_kind=ResolutionKind.LEXICAL_EXACT,
             confidence=LineageConfidence.CONFIRMED,
+            owner_local_id=owner,
         )
 
 
@@ -98,6 +99,7 @@ def assign_target(
         node=target,
         resolution_kind=ResolutionKind.LEXICAL_EXACT,
         confidence=LineageConfidence.CONFIRMED,
+        owner_local_id=owner,
     )
     return binding
 
@@ -136,6 +138,7 @@ def runtime_bind_target(
             node=target,
             resolution_kind=ResolutionKind.LEXICAL_EXACT,
             confidence=LineageConfidence.CONFIRMED,
+            owner_local_id=owner,
         )
         return
     if isinstance(target, (ast.Tuple, ast.List)):
@@ -281,6 +284,7 @@ def visit_aug_assign(
             node=node.target,
             resolution_kind=ResolutionKind.LEXICAL_EXACT,
             confidence=LineageConfidence.CONFIRMED,
+            owner_local_id=owner,
         )
     value(node.value, owner, walrus_owner)
     binding = ExtractedOccurrenceRef(
@@ -376,16 +380,22 @@ def finalize_captures(
     for request in sorted(
         state._capture_requests.values(), key=lambda item: item.load.local_id
     ):
-        owner = state.resolve_capture_owner(request.owner, request.name)
-        if owner is None:
+        capture_owner = state.resolve_capture_owner(request.owner, request.name)
+        if capture_owner is None:
             continue
         emit_flow(
             state,
             paths,
-            source=ensure_lexical_cell(state, paths, owner, request.name),
+            source=ensure_lexical_cell(
+                state,
+                paths,
+                capture_owner,
+                request.name,
+            ),
             target=request.load,
             relation=LineageRelation.CAPTURES,
             node=request.node,
             resolution_kind=ResolutionKind.LEXICAL_EXACT,
             confidence=LineageConfidence.CONFIRMED,
+            owner_local_id=request.owner,
         )

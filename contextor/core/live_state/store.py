@@ -157,6 +157,13 @@ def _revalidate_lineage_manifest(manifest: Any) -> SourceLineageManifest:
                 False,
             )
         ),
+        flow_ownership_materialized=bool(
+            getattr(
+                manifest,
+                "flow_ownership_materialized",
+                False,
+            )
+        ),
     )
     if rebuilt.semantic_version != LINEAGE_FACTS_SEMANTIC_VERSION:
         raise pickle.UnpicklingError(
@@ -191,6 +198,7 @@ def _revalidate_lineage_flow(flow: Any) -> MaterializedFlowFact:
         target=_revalidate_lineage_endpoint(flow.target),
         evidence=_revalidate_lineage_span(flow.evidence),
         provider=_revalidate_lineage_provider(flow.provider),
+        owner_local_id=getattr(flow, "owner_local_id", None),
     )
 
 

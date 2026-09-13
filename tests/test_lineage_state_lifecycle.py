@@ -72,6 +72,7 @@ def _lineage_slice() -> MaterializedLineageSourceFacts:
             1,
             semantic_anchor_bindings_materialized=True,
             anchor_ownership_materialized=True,
+            flow_ownership_materialized=True,
         ),
         anchors=(
             MaterializedAnchorFact(
@@ -90,6 +91,7 @@ def _lineage_slice() -> MaterializedLineageSourceFacts:
                 span,
                 ResolutionKind.CALL_EXACT,
                 LineageConfidence.CONFIRMED,
+                owner_local_id="anchor",
             ),
         ),
         surfaces=(
@@ -197,6 +199,8 @@ def test_snapshot_round_trip_preserves_lineage_endpoint_types_and_metadata(
     assert loaded_slice.surfaces[0].provider == ProviderRef("fixture", "1")
     assert loaded_slice.surfaces[0].dynamic_boundary == "runtime-registration"
     assert loaded_slice.semantic_anchors == source_slice.semantic_anchors
+    assert loaded_slice.flows[0].owner_local_id == "anchor"
+    assert loaded_slice.manifest.flow_ownership_materialized is True
     assert loaded.lineage_query_index_state == "fresh"
     assert loaded.lineage_owner_source_index
 
@@ -1354,6 +1358,7 @@ def test_fresh_process_hydrates_materialized_symbolic_lineage_without_analysis(
         "symbolic-flow", symbolic, SemanticEndpoint("A1"), LineageRelation.RETURNS,
         SourceSpan(2, 0, 2, 1), ResolutionKind.IMPORT_EXACT,
         LineageConfidence.CONFIRMED,
+        owner_local_id="anchor",
     )
     source = replace(
         source,
@@ -1396,3 +1401,32 @@ print(json.dumps({"source": hydrated.source, "lineage": len(state.lineage_facts_
     )
     assert completed.returncode == 0, completed.stderr
     assert json.loads(completed.stdout) == {"source": "snapshot", "lineage": 1}
+
+
+def test_snapshot_legacy_flow_ownership_fails_closed(tmp_path):
+    source_slice = _lineage_slice()
+    object.__delattr__(
+        source_slice.manifest,
+        "flow_ownership_materialized",
+    )
+    for flow in source_slice.flows:
+        object.__delattr__(flow, "owner_local_id")
+
+    state = RepositoryAnalysisState(
+        lineage_facts_by_source={"pkg.py": source_slice},
+        lineage_facts_state="fresh",
+        lineage_facts_semantic_version=LINEAGE_FACTS_SEMANTIC_VERSION,
+    )
+
+    save_snapshot(state, tmp_path, "legacy-flow-ownership")
+    loaded, _ = load_snapshot(
+        tmp_path,
+        expected_state_id="legacy-flow-ownership",
+    )
+
+    loaded_slice = loaded.lineage_facts_by_source["pkg.py"]
+    assert loaded_slice.manifest.flow_ownership_materialized is False
+    assert all(
+        flow.owner_local_id is None
+        for flow in loaded_slice.flows
+    )

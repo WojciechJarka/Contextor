@@ -137,6 +137,7 @@ def visit_function(
         node,
         node.name,
         parameters,
+        owner_local_id=owner,
     )
     callable_info = _CallableInfo(
         node.name,
@@ -202,6 +203,7 @@ def visit_lambda(
         node,
         callable_symbol_name,
         parameters,
+        owner_local_id=owner,
     )
     callable_info = _CallableInfo(
         callable_symbol_name,
@@ -224,6 +226,7 @@ def visit_lambda(
         node=node.body,
         resolution_kind=ResolutionKind.LEXICAL_EXACT,
         confidence=LineageConfidence.CONFIRMED,
+        owner_local_id=lambda_id,
     )
     state.publish_lambda_callable_return(lambda_id, body_source)
     lambda_value = occurrence(
@@ -266,6 +269,7 @@ def visit_return(
             node=node,
             resolution_kind=ResolutionKind.LEXICAL_EXACT,
             confidence=LineageConfidence.CONFIRMED,
+            owner_local_id=owner,
         )
     state.record_callable_return(owner, node, returned_callable)
 
@@ -350,6 +354,7 @@ def visit_call(
             node=node,
             resolution_kind=ResolutionKind.LEXICAL_EXACT,
             confidence=LineageConfidence.CONFIRMED,
+            owner_local_id=owner,
         )
     arguments = collect_call_arguments(
         state,
@@ -366,6 +371,7 @@ def visit_call(
             module_name,
             arguments,
             callable_info,
+            owner_local_id=owner,
         )
         emit_flow(
             state,
@@ -376,6 +382,7 @@ def visit_call(
             node=node,
             resolution_kind=ResolutionKind.CALL_EXACT,
             confidence=LineageConfidence.CONFIRMED,
+            owner_local_id=owner,
         )
         returned_callable = state._callable_returns.get(callable_info.anchor_id)
         if returned_callable is not None:
@@ -391,6 +398,7 @@ def visit_call(
             node=node,
             resolution_kind=ResolutionKind.IMPORT_EXACT,
             confidence=LineageConfidence.CONFIRMED,
+            owner_local_id=owner,
         )
         return
     if isinstance(node.func, ast.Name) and callee_ref is None:
@@ -411,6 +419,7 @@ def visit_call(
         resolution_kind=resolution_kind,
         confidence=confidence,
         dynamic_boundary=dynamic_boundary,
+        owner_local_id=owner,
     )
 
 

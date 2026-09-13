@@ -166,6 +166,7 @@ def materialize_lineage_source_facts(
             flow.confidence,
             flow.dynamic_boundary,
             flow.provider,
+            flow.owner_local_id,
         )
         for flow in extracted.flows
     ))
@@ -190,6 +191,10 @@ def materialize_lineage_source_facts(
         )
         for surface in extracted.surfaces
     ))
+    flow_ownership_materialized = all(
+        flow.owner_local_id is not None
+        for flow in extracted.flows
+    )
     manifest = SourceLineageManifest(
         extracted.source_key,
         extracted.source_fingerprint,
@@ -201,6 +206,7 @@ def materialize_lineage_source_facts(
         extracted.resource_limit_reason,
         semantic_anchor_bindings_materialized=True,
         anchor_ownership_materialized=True,
+        flow_ownership_materialized=flow_ownership_materialized,
     )
     return MaterializedLineageSourceFacts(
         manifest,
@@ -307,6 +313,7 @@ def reresolve_materialized_lineage_source_facts(
             flow.confidence,
             flow.dynamic_boundary,
             flow.provider,
+            flow.owner_local_id,
         )
         for flow in materialized.flows
     ))

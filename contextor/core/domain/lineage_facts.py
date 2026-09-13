@@ -275,11 +275,14 @@ class ExtractedFlowFact:
     confidence: LineageConfidence
     dynamic_boundary: str | None = None
     provider: ProviderRef | None = None
+    owner_local_id: str | None = None
 
     def __post_init__(self) -> None:
         _require_token(self.local_id, "local_id")
         if not isinstance(self.source, (ExtractedOccurrenceRef, ExtractedSymbolicRef)) or not isinstance(self.target, (ExtractedOccurrenceRef, ExtractedSymbolicRef)):
             raise TypeError("Extracted flow endpoints must be extracted occurrence or symbolic references.")
+        if self.owner_local_id is not None:
+            _require_token(self.owner_local_id, "owner_local_id")
         _validate_confidence(self.resolution_kind, self.confidence)
         _validate_dynamic_boundary(self.resolution_kind, self.confidence, self.dynamic_boundary)
         _validate_provider(self.provider)
@@ -377,9 +380,12 @@ class MaterializedFlowFact:
     confidence: LineageConfidence
     dynamic_boundary: str | None = None
     provider: ProviderRef | None = None
+    owner_local_id: str | None = None
 
     def __post_init__(self) -> None:
         _require_token(self.local_id, "local_id")
+        if self.owner_local_id is not None:
+            _require_token(self.owner_local_id, "owner_local_id")
         _require_materialized_reference(self.source, "Materialized flow source")
         _require_materialized_reference(self.target, "Materialized flow target")
         if isinstance(self.source, MaterializedOccurrenceRef) and isinstance(self.target, MaterializedOccurrenceRef):
@@ -430,6 +436,7 @@ class SourceLineageManifest:
     resource_limit_reason: str | None = None
     semantic_anchor_bindings_materialized: bool = False
     anchor_ownership_materialized: bool = False
+    flow_ownership_materialized: bool = False
 
     def __post_init__(self) -> None:
         _require_token(self.source_key, "source_key")
@@ -443,6 +450,8 @@ class SourceLineageManifest:
             )
         if not isinstance(self.anchor_ownership_materialized, bool):
             raise TypeError("anchor_ownership_materialized must be boolean.")
+        if not isinstance(self.flow_ownership_materialized, bool):
+            raise TypeError("flow_ownership_materialized must be boolean.")
         _validate_source_status(self.status, self.resource_limit_reason)
 
 
@@ -526,6 +535,20 @@ class MaterializedLineageSourceFacts:
         for flow in self.flows:
             _require_slice_occurrence(flow.source, self.manifest)
             _require_slice_occurrence(flow.target, self.manifest)
+            if (
+                flow.owner_local_id is not None
+                and flow.owner_local_id not in anchor_ids
+            ):
+                raise ValueError(
+                    "Materialized flow owner must reference an anchor in its slice."
+                )
+            if (
+                self.manifest.flow_ownership_materialized
+                and flow.owner_local_id is None
+            ):
+                raise ValueError(
+                    "Materialized flow ownership is incomplete."
+                )
         for surface in self.surfaces:
             _require_slice_occurrence(surface.exposed, self.manifest)
         anchor_references = {anchor.reference for anchor in self.anchors}

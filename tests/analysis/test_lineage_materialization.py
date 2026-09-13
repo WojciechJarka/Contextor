@@ -22,6 +22,7 @@ from contextor.core.domain.lineage_facts import (
     LineageRelation,
     LINEAGE_FACTS_SEMANTIC_VERSION,
     MaterializedAnchorFact,
+    MaterializedFlowFact,
     MaterializedLineageSourceFacts,
     MaterializedOccurrenceRef,
     MaterializedSymbolicRef,
@@ -62,9 +63,14 @@ def test_materializer_is_deterministic_and_preserves_local_anchors_and_flows():
         anchors=(ExtractedAnchorFact("anchor", "binding", span),),
         flows=(
             ExtractedFlowFact(
-                "flow", ExtractedOccurrenceRef("anchor"), ExtractedOccurrenceRef("use"),
-                LineageRelation.ASSIGNS, span, ResolutionKind.LEXICAL_EXACT,
+                "flow",
+                ExtractedOccurrenceRef("anchor"),
+                ExtractedOccurrenceRef("use"),
+                LineageRelation.ASSIGNS,
+                span,
+                ResolutionKind.LEXICAL_EXACT,
                 LineageConfidence.CONFIRMED,
+                owner_local_id="anchor",
             ),
         ),
     )
@@ -76,6 +82,8 @@ def test_materializer_is_deterministic_and_preserves_local_anchors_and_flows():
         "pkg/mod.py", "sha256:test", "anchor"
     )
     assert first.flows[0].resolution_kind is ResolutionKind.LEXICAL_EXACT
+    assert first.flows[0].owner_local_id == "anchor"
+    assert first.manifest.flow_ownership_materialized is True
 
 
 def test_materialized_slice_rejects_missing_or_cyclic_anchor_owner():
@@ -155,6 +163,93 @@ def test_materialized_slice_rejects_missing_or_cyclic_anchor_owner():
             ),
         )
 
+
+def test_materialized_flow_ownership_rejects_missing_or_foreign_owner():
+    span = SourceSpan(1, 0, 1, 1)
+    source_key = "pkg.py"
+    fingerprint = "f" * 64
+    owner = MaterializedOccurrenceRef(source_key, fingerprint, "owner")
+    value = MaterializedOccurrenceRef(source_key, fingerprint, "value")
+    manifest = SourceLineageManifest(
+        source_key,
+        fingerprint,
+        LINEAGE_FACTS_SEMANTIC_VERSION,
+        LineageFamilyStatus.FRESH,
+        1,
+        1,
+        0,
+        semantic_anchor_bindings_materialized=True,
+        anchor_ownership_materialized=True,
+        flow_ownership_materialized=True,
+    )
+    anchors = (MaterializedAnchorFact("owner", owner, "function", span),)
+    with pytest.raises(ValueError, match="ownership is incomplete"):
+        MaterializedLineageSourceFacts(
+            manifest=manifest,
+            anchors=anchors,
+            flows=(
+                MaterializedFlowFact(
+                    "flow",
+                    owner,
+                    value,
+                    LineageRelation.ASSIGNS,
+                    span,
+                    ResolutionKind.LEXICAL_EXACT,
+                    LineageConfidence.CONFIRMED,
+                ),
+            ),
+        )
+    with pytest.raises(ValueError, match="owner must reference"):
+        MaterializedLineageSourceFacts(
+            manifest=manifest,
+            anchors=anchors,
+            flows=(
+                MaterializedFlowFact(
+                    "flow",
+                    owner,
+                    value,
+                    LineageRelation.ASSIGNS,
+                    span,
+                    ResolutionKind.LEXICAL_EXACT,
+                    LineageConfidence.CONFIRMED,
+                    owner_local_id="missing",
+                ),
+            ),
+        )
+
+
+def test_reresolution_preserves_materialized_flow_ownership():
+    span = SourceSpan(1, 0, 1, 1)
+    facts = _facts(
+        anchors=(ExtractedAnchorFact("owner", "function", span),),
+        flows=(
+            ExtractedFlowFact(
+                "flow",
+                ExtractedOccurrenceRef("owner"),
+                ExtractedSymbolicRef(
+                    ExtractedSymbolicKind.DEFINITION,
+                    "pkg.mod",
+                    "target",
+                ),
+                LineageRelation.BINDS,
+                span,
+                ResolutionKind.LEXICAL_EXACT,
+                LineageConfidence.CONFIRMED,
+                owner_local_id="owner",
+            ),
+        ),
+    )
+    initial = materialize_lineage_source_facts(
+        facts,
+        _context(artifacts={"pkg.mod::target": "A1/1"}),
+    )
+    rerun = reresolve_materialized_lineage_source_facts(
+        initial,
+        _context(artifacts={"pkg.mod::target": "A1/2"}),
+    )
+    assert initial.manifest.flow_ownership_materialized is True
+    assert rerun.manifest.flow_ownership_materialized is True
+    assert rerun.flows[0].owner_local_id == "owner"
 
 def test_materializer_builds_and_reresolves_exact_semantic_anchor_bindings():
     span = SourceSpan(1, 0, 1, 1)

@@ -54,14 +54,14 @@ def collect_call_arguments(state: LineageExtractionState, paths: dict[int, str],
     return tuple(result)
 
 
-def emit_argument_to_parameter(state: LineageExtractionState, paths: dict[int, str], module_name: str, argument: _CallArgumentInfo, callable_info: _CallableInfo, parameter: _ParameterInfo) -> None:
-    emit_flow(state, paths,source=argument.occurrence, target=parameter_symbolic(module_name,callable_info.name, parameter), relation=LineageRelation.ARGUMENT_TO_PARAMETER, node=argument.node, resolution_kind=ResolutionKind.CALL_EXACT, confidence=LineageConfidence.CONFIRMED)
+def emit_argument_to_parameter(state: LineageExtractionState, paths: dict[int, str], module_name: str, argument: _CallArgumentInfo, callable_info: _CallableInfo, parameter: _ParameterInfo, *, owner_local_id: str | None) -> None:
+    emit_flow(state, paths,source=argument.occurrence, target=parameter_symbolic(module_name,callable_info.name, parameter), relation=LineageRelation.ARGUMENT_TO_PARAMETER, node=argument.node, resolution_kind=ResolutionKind.CALL_EXACT, confidence=LineageConfidence.CONFIRMED, owner_local_id=owner_local_id)
     actual_callable = state._callable_values.get(argument.source.local_id)
     if parameter.local_id in state._callback_parameters and actual_callable is not None:
-        emit_flow(state, paths,source=ExtractedOccurrenceRef(actual_callable.anchor_id), target=parameter_symbolic(module_name,callable_info.name, parameter), relation=LineageRelation.CALLBACK_REGISTERS, node=argument.node, resolution_kind=ResolutionKind.CALL_EXACT, confidence=LineageConfidence.CONFIRMED)
+        emit_flow(state, paths,source=ExtractedOccurrenceRef(actual_callable.anchor_id), target=parameter_symbolic(module_name,callable_info.name, parameter), relation=LineageRelation.CALLBACK_REGISTERS, node=argument.node, resolution_kind=ResolutionKind.CALL_EXACT, confidence=LineageConfidence.CONFIRMED, owner_local_id=owner_local_id)
 
 
-def bind_call_arguments(state: LineageExtractionState, paths: dict[int, str], module_name: str, arguments: tuple[_CallArgumentInfo, ...], callable_info: _CallableInfo) -> None:
+def bind_call_arguments(state: LineageExtractionState, paths: dict[int, str], module_name: str, arguments: tuple[_CallArgumentInfo, ...], callable_info: _CallableInfo, *, owner_local_id: str | None) -> None:
     fixed = tuple(p for p in callable_info.parameters if p.kind in (ParameterKind.POSITIONAL_ONLY, ParameterKind.POSITIONAL_OR_KEYWORD))
     keywords = {p.name: p for p in callable_info.parameters if p.kind in (ParameterKind.POSITIONAL_OR_KEYWORD, ParameterKind.KEYWORD_ONLY)}
     vararg = next((p for p in callable_info.parameters if p.kind is ParameterKind.VAR_POSITIONAL), None)
@@ -73,14 +73,14 @@ def bind_call_arguments(state: LineageExtractionState, paths: dict[int, str], mo
         if argument.kind == "positional":
             if uncertain: continue
             if index < len(fixed):
-                parameter = fixed[index]; index += 1; consumed.add(parameter.local_id); emit_argument_to_parameter(state, paths, module_name,argument, callable_info, parameter)
-            elif vararg is not None: emit_argument_to_parameter(state, paths, module_name,argument, callable_info, vararg)
+                parameter = fixed[index]; index += 1; consumed.add(parameter.local_id); emit_argument_to_parameter(state, paths, module_name,argument, callable_info, parameter, owner_local_id=owner_local_id)
+            elif vararg is not None: emit_argument_to_parameter(state, paths, module_name,argument, callable_info, vararg, owner_local_id=owner_local_id)
             continue
         if argument.kind == "keyword" and argument.keyword_name is not None:
             parameter = keywords.get(argument.keyword_name)
             if parameter is not None and parameter.local_id not in consumed:
-                consumed.add(parameter.local_id); emit_argument_to_parameter(state, paths, module_name,argument, callable_info, parameter)
-            elif parameter is None and varkw is not None: emit_argument_to_parameter(state, paths, module_name,argument, callable_info, varkw)
+                consumed.add(parameter.local_id); emit_argument_to_parameter(state, paths, module_name,argument, callable_info, parameter, owner_local_id=owner_local_id)
+            elif parameter is None and varkw is not None: emit_argument_to_parameter(state, paths, module_name,argument, callable_info, varkw, owner_local_id=owner_local_id)
 
 def function_signature_evidence(node: ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda, owner: str | None, walrus_owner: str | None, *, visit: VisitFn) -> None:
     args = node.args
@@ -113,17 +113,17 @@ def parameter_anchors(state: LineageExtractionState, paths: dict[int, str], modu
             state.register_parameter(owner, info)
             result.append((info, parameter))
     for ordinal, (info, parameter) in enumerate(result):
-        emit_flow(state, paths,source=parameter_symbolic(module_name,callable_symbol_name, info), target=ExtractedOccurrenceRef(info.local_id), relation=LineageRelation.BINDS, node=parameter, resolution_kind=ResolutionKind.SIGNATURE_EXACT, confidence=LineageConfidence.CONFIRMED, ordinal=ordinal)
+        emit_flow(state, paths,source=parameter_symbolic(module_name,callable_symbol_name, info), target=ExtractedOccurrenceRef(info.local_id), relation=LineageRelation.BINDS, node=parameter, resolution_kind=ResolutionKind.SIGNATURE_EXACT, confidence=LineageConfidence.CONFIRMED, owner_local_id=owner, ordinal=ordinal)
     return tuple(info for info, _parameter in result)
 
 
-def default_flows(state: LineageExtractionState, paths: dict[int, str], module_name: str, node: ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda, callable_symbol_name: str, parameters: tuple[_ParameterInfo, ...]) -> None:
+def default_flows(state: LineageExtractionState, paths: dict[int, str], module_name: str, node: ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda, callable_symbol_name: str, parameters: tuple[_ParameterInfo, ...], *, owner_local_id: str | None) -> None:
     positional_parameters = tuple(parameter for parameter in parameters if parameter.kind in (ParameterKind.POSITIONAL_ONLY, ParameterKind.POSITIONAL_OR_KEYWORD))
     positional_defaults = tuple(node.args.defaults)
     if positional_defaults:
         for ordinal, (default, parameter) in enumerate(zip(positional_defaults, positional_parameters[-len(positional_defaults) :])):
-            emit_flow(state, paths,source=occurrence(state, paths,"expression_result", default), target=parameter_symbolic(module_name,callable_symbol_name, parameter), relation=LineageRelation.DEFAULTS_TO_PARAMETER, node=default, resolution_kind=ResolutionKind.SIGNATURE_EXACT, confidence=LineageConfidence.CONFIRMED, ordinal=ordinal)
+            emit_flow(state, paths,source=occurrence(state, paths,"expression_result", default), target=parameter_symbolic(module_name,callable_symbol_name, parameter), relation=LineageRelation.DEFAULTS_TO_PARAMETER, node=default, resolution_kind=ResolutionKind.SIGNATURE_EXACT, confidence=LineageConfidence.CONFIRMED, owner_local_id=owner_local_id, ordinal=ordinal)
     kwonly_parameters = tuple(parameter for parameter in parameters if parameter.kind is ParameterKind.KEYWORD_ONLY)
     for ordinal, (default, parameter) in enumerate(zip(node.args.kw_defaults, kwonly_parameters)):
         if default is not None:
-            emit_flow(state, paths,source=occurrence(state, paths,"expression_result", default), target=parameter_symbolic(module_name,callable_symbol_name, parameter), relation=LineageRelation.DEFAULTS_TO_PARAMETER, node=default, resolution_kind=ResolutionKind.SIGNATURE_EXACT, confidence=LineageConfidence.CONFIRMED, ordinal=ordinal)
+            emit_flow(state, paths,source=occurrence(state, paths,"expression_result", default), target=parameter_symbolic(module_name,callable_symbol_name, parameter), relation=LineageRelation.DEFAULTS_TO_PARAMETER, node=default, resolution_kind=ResolutionKind.SIGNATURE_EXACT, confidence=LineageConfidence.CONFIRMED, owner_local_id=owner_local_id, ordinal=ordinal)

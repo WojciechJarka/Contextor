@@ -122,7 +122,17 @@ def visit_except_handler(state: LineageExtractionState, paths: dict[int, str], n
             source = occurrence(state, paths, "runtime_bound_local", node, alias_name)
             state.frame(owner)[alias_name] = binding
             state.note_module_all_touch(owner, alias_name)
-            emit_flow(state, paths, source=source, target=binding, relation=LineageRelation.ASSIGNS, node=node, resolution_kind=ResolutionKind.LEXICAL_EXACT, confidence=LineageConfidence.CONFIRMED)
+            emit_flow(
+                state,
+                paths,
+                source=source,
+                target=binding,
+                relation=LineageRelation.ASSIGNS,
+                node=node,
+                resolution_kind=ResolutionKind.LEXICAL_EXACT,
+                confidence=LineageConfidence.CONFIRMED,
+                owner_local_id=owner,
+            )
     for child in node.body:
         visit(child, owner, walrus_owner)
     exit_frame = state.clone_frame(owner)

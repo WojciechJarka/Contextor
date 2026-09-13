@@ -31,11 +31,37 @@ def occurrence(state: LineageExtractionState, paths: dict[int, str], kind: str, 
     return result
 
 
-def emit_flow(state: LineageExtractionState, paths: dict[int, str], *, source, target, relation: LineageRelation, node: ast.AST, resolution_kind: ResolutionKind, confidence: LineageConfidence, ordinal: int = 0, dynamic_boundary: str | None = None) -> None:
+def emit_flow(
+    state: LineageExtractionState,
+    paths: dict[int, str],
+    *,
+    source,
+    target,
+    relation: LineageRelation,
+    node: ast.AST,
+    resolution_kind: ResolutionKind,
+    confidence: LineageConfidence,
+    owner_local_id: str | None,
+    ordinal: int = 0,
+    dynamic_boundary: str | None = None,
+) -> None:
     local_id = f"flow:v1:{relation.value}:{paths[id(node)]}:i:{ordinal}"
-    if local_id in state._flow_ids: raise ValueError(f"Duplicate lineage flow id: {local_id}")
+    if local_id in state._flow_ids:
+        raise ValueError(f"Duplicate lineage flow id: {local_id}")
     state._flow_ids.add(local_id)
-    state.flows.append(ExtractedFlowFact(local_id, source, target, relation, _source_span(node), resolution_kind, confidence, dynamic_boundary=dynamic_boundary))
+    state.flows.append(
+        ExtractedFlowFact(
+            local_id,
+            source,
+            target,
+            relation,
+            _source_span(node),
+            resolution_kind,
+            confidence,
+            dynamic_boundary=dynamic_boundary,
+            owner_local_id=owner_local_id,
+        )
+    )
 
 
 def emit_surface(state: LineageExtractionState, paths: dict[int, str], *, kind: SurfaceKind, exposed, node: ast.AST, declared_name: str, resolution_kind: ResolutionKind, confidence: LineageConfidence, declaration_evidence: SurfaceDeclarationEvidence, ordinal: int = 0) -> None:

@@ -2190,3 +2190,51 @@ def test_stage_1e1_reading_all_subscript_preserves_exact_literal_authority():
     assert surface.declared_name == "a"
     assert surface.kind is SurfaceKind.EXPORT
     assert surface.confidence is LineageConfidence.CONFIRMED
+
+
+def test_flow_lexical_owner_separates_outer_and_nested_function_scopes():
+    facts = _stage_1c_facts(
+        "def outer(value):\n"
+        " x = value\n"
+        " def inner():\n"
+        "  y = x\n"
+        "  return y\n"
+        " result = inner()\n"
+        " return result\n"
+    )
+    outer = _stage_1c_named(facts, "function", "outer")[0]
+    inner = _stage_1c_named(facts, "function", "inner")[0]
+    outer_assign = next(flow for flow in facts.flows if flow.relation is LineageRelation.ASSIGNS and flow.evidence.start_line == 2)
+    inner_assign = next(flow for flow in facts.flows if flow.relation is LineageRelation.ASSIGNS and flow.evidence.start_line == 4)
+    inner_return = next(flow for flow in facts.flows if flow.relation is LineageRelation.RETURNS and flow.evidence.start_line == 5)
+    outer_call = next(flow for flow in facts.flows if flow.relation is LineageRelation.CALL_RESULT and flow.evidence.start_line == 6)
+    outer_return = next(flow for flow in facts.flows if flow.relation is LineageRelation.RETURNS and flow.evidence.start_line == 7)
+    assert outer_assign.owner_local_id == outer.local_id
+    assert inner_assign.owner_local_id == inner.local_id
+    assert inner_return.owner_local_id == inner.local_id
+    assert outer_call.owner_local_id == outer.local_id
+    assert outer_return.owner_local_id == outer.local_id
+
+
+def test_flow_lexical_owner_assigns_defaults_to_defining_scope():
+    facts = _stage_1c_facts("seed = 1\ndef outer(value=seed):\n return value\n")
+    module = next(anchor for anchor in facts.anchors if anchor.kind == "module")
+    outer = _stage_1c_named(facts, "function", "outer")[0]
+    default_flow = next(flow for flow in facts.flows if flow.relation is LineageRelation.DEFAULTS_TO_PARAMETER)
+    parameter_bind = next(flow for flow in facts.flows if flow.relation is LineageRelation.BINDS and isinstance(flow.target, ExtractedOccurrenceRef) and parse_local_occurrence_id(flow.target.local_id)[0] == "parameter_poskw")
+    return_flow = next(flow for flow in facts.flows if flow.relation is LineageRelation.RETURNS)
+    assert default_flow.owner_local_id == module.local_id
+    assert parameter_bind.owner_local_id == outer.local_id
+    assert return_flow.owner_local_id == outer.local_id
+
+
+def test_flow_lexical_owner_assigns_capture_to_consuming_scope():
+    facts = _stage_1c_facts(
+        "def outer(x):\n"
+        " def inner():\n"
+        "  return x\n"
+        " return inner\n"
+    )
+    inner = _stage_1c_named(facts, "function", "inner")[0]
+    capture = next(flow for flow in facts.flows if flow.relation is LineageRelation.CAPTURES)
+    assert capture.owner_local_id == inner.local_id
