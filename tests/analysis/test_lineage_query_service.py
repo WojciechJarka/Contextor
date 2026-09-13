@@ -1078,3 +1078,370 @@ def test_lexical_scope_facts_fail_closed_for_multiple_exact_roots():
     assert result.complete is False
     assert result.flows == ()
     assert result.nested_scopes == ()
+def _append_scope_flow(backend, flow):
+    source = backend.get_source("pkg/target.py")
+    assert source is not None
+    backend._sources["pkg/target.py"] = replace(
+        source,
+        manifest=replace(
+            source.manifest,
+            flow_count=source.manifest.flow_count + 1,
+        ),
+        flows=tuple(
+            sorted(
+                (
+                    *source.flows,
+                    flow,
+                )
+            )
+        ),
+    )
+
+
+def test_local_traversal_downstream_is_deterministic_and_bounded():
+    service, _, target = _lexical_scope_service()
+    seed = MaterializedOccurrenceRef(
+        "pkg/target.py",
+        "d" * 64,
+        "outer",
+    )
+
+    depth_one = service.traverse_lexical_scope(
+        target,
+        seed,
+        direction="downstream",
+        max_depth=1,
+    )
+    depth_two = service.traverse_lexical_scope(
+        target,
+        seed,
+        direction="downstream",
+        max_depth=2,
+    )
+
+    assert depth_one.traversal_available is True
+    assert depth_one.seed_in_scope is True
+    assert tuple(
+        (step.depth, step.flow.flow.local_id)
+        for step in depth_one.steps
+    ) == (
+        (1, "a_outer_bind"),
+    )
+    assert depth_one.truncated is True
+
+    assert tuple(
+        (step.depth, step.flow.flow.local_id)
+        for step in depth_two.steps
+    ) == (
+        (1, "a_outer_bind"),
+        (2, "b_outer_call"),
+    )
+    assert depth_two.truncated is False
+
+
+def test_local_traversal_upstream_reverses_exact_local_edges():
+    service, _, target = _lexical_scope_service()
+    seed = MaterializedOccurrenceRef(
+        "pkg/target.py",
+        "d" * 64,
+        "outer-result",
+    )
+
+    result = service.traverse_lexical_scope(
+        target,
+        seed,
+        direction="upstream",
+        max_depth=2,
+    )
+
+    assert result.traversal_available is True
+    assert tuple(
+        (step.depth, step.flow.flow.local_id)
+        for step in result.steps
+    ) == (
+        (1, "b_outer_call"),
+        (2, "a_outer_bind"),
+    )
+    assert result.boundaries == ()
+    assert result.truncated is False
+
+
+def test_local_traversal_symbolic_endpoint_is_terminal_boundary():
+    service, backend, target = _lexical_scope_service()
+    outer_result = MaterializedOccurrenceRef(
+        "pkg/target.py",
+        "d" * 64,
+        "outer-result",
+    )
+    symbolic = MaterializedSymbolicRef(
+        source_key="pkg/target.py",
+        source_fingerprint="d" * 64,
+        kind=ExtractedSymbolicKind.RETURN,
+        module_name="external.pkg",
+        symbol_name="result",
+    )
+    _append_scope_flow(
+        backend,
+        MaterializedFlowFact(
+            "z_symbolic_boundary",
+            outer_result,
+            symbolic,
+            LineageRelation.RETURNS,
+            SourceSpan(10, 0, 10, 5),
+            ResolutionKind.LEXICAL_EXACT,
+            LineageConfidence.CONFIRMED,
+            owner_local_id="outer",
+        ),
+    )
+
+    result = service.traverse_lexical_scope(
+        target,
+        MaterializedOccurrenceRef(
+            "pkg/target.py",
+            "d" * 64,
+            "outer",
+        ),
+        direction="downstream",
+        max_depth=3,
+    )
+
+    assert tuple(
+        step.flow.flow.local_id
+        for step in result.steps
+    ) == (
+        "a_outer_bind",
+        "b_outer_call",
+        "z_symbolic_boundary",
+    )
+    assert len(result.boundaries) == 1
+    assert result.boundaries[0].endpoint == symbolic
+    assert result.boundaries[0].reason == "symbolic"
+
+
+def test_local_traversal_semantic_endpoint_is_terminal_boundary():
+    service, backend, target = _lexical_scope_service()
+    outer_result = MaterializedOccurrenceRef(
+        "pkg/target.py",
+        "d" * 64,
+        "outer-result",
+    )
+    semantic = SemanticEndpoint("A99/1")
+    _append_scope_flow(
+        backend,
+        MaterializedFlowFact(
+            "z_semantic_boundary",
+            outer_result,
+            semantic,
+            LineageRelation.CALL_RESULT,
+            SourceSpan(10, 0, 10, 5),
+            ResolutionKind.CALL_EXACT,
+            LineageConfidence.CONFIRMED,
+            owner_local_id="outer",
+        ),
+    )
+
+    result = service.traverse_lexical_scope(
+        target,
+        MaterializedOccurrenceRef(
+            "pkg/target.py",
+            "d" * 64,
+            "outer",
+        ),
+        direction="downstream",
+        max_depth=3,
+    )
+
+    assert result.boundaries[-1].endpoint == semantic
+    assert result.boundaries[-1].reason == "semantic"
+
+
+def test_local_traversal_dynamic_edge_is_terminal_even_with_occurrence_endpoint():
+    service, backend, target = _lexical_scope_service()
+    fp = "d" * 64
+    outer_result = MaterializedOccurrenceRef(
+        "pkg/target.py",
+        fp,
+        "outer-result",
+    )
+    dynamic_result = MaterializedOccurrenceRef(
+        "pkg/target.py",
+        fp,
+        "dynamic-result",
+    )
+    after_dynamic = MaterializedOccurrenceRef(
+        "pkg/target.py",
+        fp,
+        "after-dynamic",
+    )
+    _append_scope_flow(
+        backend,
+        MaterializedFlowFact(
+            "y_dynamic",
+            outer_result,
+            dynamic_result,
+            LineageRelation.CALL_RESULT,
+            SourceSpan(10, 0, 10, 5),
+            ResolutionKind.DYNAMIC_RUNTIME_BOUNDARY,
+            LineageConfidence.DYNAMIC,
+            dynamic_boundary="dynamic_call",
+            owner_local_id="outer",
+        ),
+    )
+    _append_scope_flow(
+        backend,
+        MaterializedFlowFact(
+            "z_after_dynamic",
+            dynamic_result,
+            after_dynamic,
+            LineageRelation.ASSIGNS,
+            SourceSpan(11, 0, 11, 5),
+            ResolutionKind.LEXICAL_EXACT,
+            LineageConfidence.CONFIRMED,
+            owner_local_id="outer",
+        ),
+    )
+
+    result = service.traverse_lexical_scope(
+        target,
+        MaterializedOccurrenceRef(
+            "pkg/target.py",
+            fp,
+            "outer",
+        ),
+        direction="downstream",
+        max_depth=3,
+    )
+
+    returned = tuple(
+        step.flow.flow.local_id
+        for step in result.steps
+    )
+    assert returned == (
+        "a_outer_bind",
+        "b_outer_call",
+        "y_dynamic",
+    )
+    assert "z_after_dynamic" not in returned
+    assert result.boundaries[-1].endpoint == dynamic_result
+    assert result.boundaries[-1].reason == "dynamic"
+
+
+def test_local_traversal_cycle_is_bounded_without_duplicate_flows():
+    service, backend, target = _lexical_scope_service()
+    fp = "d" * 64
+    _append_scope_flow(
+        backend,
+        MaterializedFlowFact(
+            "z_cycle",
+            MaterializedOccurrenceRef(
+                "pkg/target.py",
+                fp,
+                "outer-result",
+            ),
+            MaterializedOccurrenceRef(
+                "pkg/target.py",
+                fp,
+                "outer",
+            ),
+            LineageRelation.ALIASES,
+            SourceSpan(10, 0, 10, 5),
+            ResolutionKind.LEXICAL_EXACT,
+            LineageConfidence.CONFIRMED,
+            owner_local_id="outer",
+        ),
+    )
+
+    result = service.traverse_lexical_scope(
+        target,
+        MaterializedOccurrenceRef(
+            "pkg/target.py",
+            fp,
+            "outer",
+        ),
+        direction="downstream",
+        max_depth=3,
+    )
+
+    assert tuple(
+        step.flow.flow.local_id
+        for step in result.steps
+    ) == (
+        "a_outer_bind",
+        "b_outer_call",
+        "z_cycle",
+    )
+    assert result.truncated is False
+
+
+def test_local_traversal_fails_closed_when_scope_is_incomplete():
+    service, _, target = _lexical_scope_service(
+        flow_ownership=False,
+    )
+    seed = MaterializedOccurrenceRef(
+        "pkg/target.py",
+        "d" * 64,
+        "outer",
+    )
+
+    result = service.traverse_lexical_scope(
+        target,
+        seed,
+        direction="downstream",
+        max_depth=2,
+    )
+
+    assert result.scope.complete is False
+    assert result.seed_in_scope is True
+    assert result.traversal_available is False
+    assert result.steps == ()
+    assert result.boundaries == ()
+    assert result.truncated is False
+
+
+def test_local_traversal_rejects_seed_outside_exact_scope():
+    service, _, target = _lexical_scope_service()
+
+    result = service.traverse_lexical_scope(
+        target,
+        MaterializedOccurrenceRef(
+            "pkg/target.py",
+            "d" * 64,
+            "not-in-scope",
+        ),
+        direction="downstream",
+        max_depth=2,
+    )
+
+    assert result.seed_in_scope is False
+    assert result.traversal_available is False
+    assert result.steps == ()
+
+
+@pytest.mark.parametrize(
+    ("direction", "max_depth", "exception"),
+    [
+        ("sideways", 1, ValueError),
+        ("downstream", 0, ValueError),
+        ("downstream", 4, ValueError),
+        ("downstream", True, ValueError),
+    ],
+)
+def test_local_traversal_rejects_invalid_bounds(
+    direction,
+    max_depth,
+    exception,
+):
+    service, _, target = _lexical_scope_service()
+    seed = MaterializedOccurrenceRef(
+        "pkg/target.py",
+        "d" * 64,
+        "outer",
+    )
+
+    with pytest.raises(exception):
+        service.traverse_lexical_scope(
+            target,
+            seed,
+            direction=direction,
+            max_depth=max_depth,
+        )

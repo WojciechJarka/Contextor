@@ -3,10 +3,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from contextor.core.domain.lineage_facts import (
+    LineageConfidence,
     MaterializedAnchorFact,
     MaterializedFlowFact,
     MaterializedOccurrenceRef,
     MaterializedSurfaceFact,
+    MaterializedSymbolicRef,
+    ResolutionKind,
     SemanticAnchorBinding,
     SemanticEndpoint,
 )
@@ -107,6 +110,41 @@ class LexicalScopeFacts:
             and self.metadata.query_index_state == "fresh"
             and self.metadata.semantic_anchor_bindings_complete
         )
+
+
+@dataclass(frozen=True)
+class LineageTraversalStep:
+    depth: int
+    flow: LineageFlowMatch
+
+
+@dataclass(frozen=True)
+class LineageTraversalBoundary:
+    depth: int
+    flow: LineageFlowMatch
+    endpoint: (
+        MaterializedOccurrenceRef
+        | MaterializedSymbolicRef
+        | SemanticEndpoint
+    )
+    reason: str
+
+
+@dataclass(frozen=True)
+class LocalLineageTraversal:
+    target: ResolvedLineageTarget
+    scope: LexicalScopeFacts
+    seed: MaterializedOccurrenceRef
+    direction: str
+    max_depth: int
+    seed_in_scope: bool
+    steps: tuple[LineageTraversalStep, ...]
+    boundaries: tuple[LineageTraversalBoundary, ...]
+    truncated: bool
+
+    @property
+    def traversal_available(self) -> bool:
+        return self.scope.complete and self.seed_in_scope
 
 
 @dataclass(frozen=True)
@@ -402,6 +440,201 @@ class LineageQueryService:
         )
 
 
+    def traverse_lexical_scope(
+        self,
+        target: ResolvedLineageTarget,
+        seed: MaterializedOccurrenceRef,
+        *,
+        direction: str,
+        max_depth: int = 1,
+    ) -> LocalLineageTraversal:
+        if not isinstance(target, ResolvedLineageTarget):
+            raise TypeError(
+                "target must be ResolvedLineageTarget."
+            )
+        if not isinstance(seed, MaterializedOccurrenceRef):
+            raise TypeError(
+                "seed must be MaterializedOccurrenceRef."
+            )
+        if direction not in {"upstream", "downstream"}:
+            raise ValueError(
+                "direction must be 'upstream' or 'downstream'."
+            )
+        if (
+            isinstance(max_depth, bool)
+            or not isinstance(max_depth, int)
+            or not 1 <= max_depth <= 3
+        ):
+            raise ValueError(
+                "max_depth must be an integer from 1 to 3."
+            )
+
+        scope = self.lexical_scope_facts(target)
+
+        scope_occurrences: set[
+            MaterializedOccurrenceRef
+        ] = set()
+        for match in scope.flows:
+            if isinstance(
+                match.flow.source,
+                MaterializedOccurrenceRef,
+            ):
+                scope_occurrences.add(match.flow.source)
+            if isinstance(
+                match.flow.target,
+                MaterializedOccurrenceRef,
+            ):
+                scope_occurrences.add(match.flow.target)
+
+        seed_in_scope = seed in scope_occurrences
+        if not scope.complete or not seed_in_scope:
+            return LocalLineageTraversal(
+                target=target,
+                scope=scope,
+                seed=seed,
+                direction=direction,
+                max_depth=max_depth,
+                seed_in_scope=seed_in_scope,
+                steps=(),
+                boundaries=(),
+                truncated=False,
+            )
+
+        adjacency: dict[
+            MaterializedOccurrenceRef,
+            list[LineageFlowMatch],
+        ] = {}
+        for match in scope.flows:
+            endpoint = (
+                match.flow.source
+                if direction == "downstream"
+                else match.flow.target
+            )
+            if not isinstance(
+                endpoint,
+                MaterializedOccurrenceRef,
+            ):
+                continue
+            adjacency.setdefault(endpoint, []).append(match)
+
+        for matches in adjacency.values():
+            matches.sort(key=_flow_match_key)
+
+        queue: list[
+            tuple[MaterializedOccurrenceRef, int]
+        ] = [(seed, 0)]
+        queue_index = 0
+        visited_occurrences = {seed}
+        selected_flows: set[tuple] = set()
+        steps: list[LineageTraversalStep] = []
+        boundaries: list[LineageTraversalBoundary] = []
+        truncated = False
+
+        while queue_index < len(queue):
+            current, current_depth = queue[queue_index]
+            queue_index += 1
+
+            for match in adjacency.get(current, ()):
+                flow_key = _flow_match_identity(match)
+                if flow_key in selected_flows:
+                    continue
+
+                step_depth = current_depth + 1
+                selected_flows.add(flow_key)
+                steps.append(
+                    LineageTraversalStep(
+                        depth=step_depth,
+                        flow=match,
+                    )
+                )
+
+                next_endpoint = (
+                    match.flow.target
+                    if direction == "downstream"
+                    else match.flow.source
+                )
+
+                terminal_reason = _terminal_flow_reason(
+                    match.flow
+                )
+                if terminal_reason is not None:
+                    boundaries.append(
+                        LineageTraversalBoundary(
+                            depth=step_depth,
+                            flow=match,
+                            endpoint=next_endpoint,
+                            reason=terminal_reason,
+                        )
+                    )
+                    continue
+
+                if isinstance(
+                    next_endpoint,
+                    MaterializedSymbolicRef,
+                ):
+                    boundaries.append(
+                        LineageTraversalBoundary(
+                            depth=step_depth,
+                            flow=match,
+                            endpoint=next_endpoint,
+                            reason="symbolic",
+                        )
+                    )
+                    continue
+
+                if isinstance(
+                    next_endpoint,
+                    SemanticEndpoint,
+                ):
+                    boundaries.append(
+                        LineageTraversalBoundary(
+                            depth=step_depth,
+                            flow=match,
+                            endpoint=next_endpoint,
+                            reason="semantic",
+                        )
+                    )
+                    continue
+
+                if not isinstance(
+                    next_endpoint,
+                    MaterializedOccurrenceRef,
+                ):
+                    raise TypeError(
+                        "Canonical lineage flow has an "
+                        "unsupported endpoint type."
+                    )
+
+                if step_depth < max_depth:
+                    if next_endpoint not in visited_occurrences:
+                        visited_occurrences.add(next_endpoint)
+                        queue.append(
+                            (next_endpoint, step_depth)
+                        )
+                    continue
+
+                if any(
+                    _flow_match_identity(candidate)
+                    not in selected_flows
+                    for candidate in adjacency.get(
+                        next_endpoint,
+                        (),
+                    )
+                ):
+                    truncated = True
+
+        return LocalLineageTraversal(
+            target=target,
+            scope=scope,
+            seed=seed,
+            direction=direction,
+            max_depth=max_depth,
+            seed_in_scope=True,
+            steps=tuple(steps),
+            boundaries=tuple(boundaries),
+            truncated=truncated,
+        )
+
 def _anchor_match_key(match: LineageAnchorMatch) -> tuple:
     binding = match.binding
     reference = binding.reference
@@ -465,6 +698,33 @@ def _flow_match_key(match: LineageFlowMatch) -> tuple:
         evidence.end_column,
     )
 
+
+def _flow_match_identity(
+    match: LineageFlowMatch,
+) -> tuple[str, str, str]:
+    return (
+        match.source_key,
+        match.source_fingerprint,
+        match.flow.local_id,
+    )
+
+
+def _terminal_flow_reason(
+    flow: MaterializedFlowFact,
+) -> str | None:
+    if (
+        flow.resolution_kind
+        is ResolutionKind.DYNAMIC_RUNTIME_BOUNDARY
+        or flow.confidence is LineageConfidence.DYNAMIC
+    ):
+        return "dynamic"
+    if (
+        flow.resolution_kind
+        is ResolutionKind.UNRESOLVED_NAME
+        or flow.confidence is LineageConfidence.UNRESOLVED
+    ):
+        return "unresolved"
+    return None
 
 def _surface_match_key(match: LineageSurfaceMatch) -> tuple:
     surface = match.surface
