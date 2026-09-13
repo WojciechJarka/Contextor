@@ -62,6 +62,7 @@ from contextor.ui.theme import (
 
 LIVE_START_MAX_ATTEMPTS = 4
 LIVE_START_RETRY_DELAYS_MS = (1000, 2000, 5000)
+FULL_ANALYSIS_SHUTDOWN_WAIT_SECONDS = 1.5
 
 class ContextorGUI:
     """
@@ -691,7 +692,7 @@ class ContextorGUI:
 
         self.progress_bar.is_cancelled = False
 
-        run_with_progress(
+        self._full_analysis_done = run_with_progress(
             self.root,
             self.progress_bar,
             task,
@@ -1138,6 +1139,13 @@ class ContextorGUI:
         # coordinator finally/release before this process exits.
         if hasattr(self, "progress_bar"):
             self.progress_bar.is_cancelled = True
+
+        full_analysis_done = getattr(self, "_full_analysis_done", None)
+        if full_analysis_done is not None and not full_analysis_done.is_set():
+            # Wait only for the task body. The daemon worker is allowed to
+            # finish UI callbacks after this bound; process exit remains the
+            # safe fallback for a task that ignores cooperative cancellation.
+            full_analysis_done.wait(timeout=FULL_ANALYSIS_SHUTDOWN_WAIT_SECONDS)
 
         if getattr(self, "_live_start_retry_after_id", None) is not None:
             if hasattr(self, "root") and hasattr(self.root, "after_cancel"):

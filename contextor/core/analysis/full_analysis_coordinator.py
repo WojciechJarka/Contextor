@@ -217,12 +217,17 @@ def _lease_owner_state(
         return "orphaned", f"{description} is not alive"
 
     expected_image = str(metadata.get("executable") or "")
-    if image and expected_image:
-        if Path(image).name.casefold() != Path(expected_image).name.casefold():
-            return "orphaned", f"{description} has a reused process identity"
+    if not expected_image:
+        return "unknown", f"{description} identity metadata unavailable"
+    if not image:
+        return "unknown", f"{description} executable identity unavailable"
+    if Path(image).name.casefold() != Path(expected_image).name.casefold():
+        return "orphaned", f"{description} has a reused process identity"
 
     expected_start = metadata.get("process_start_identity")
-    if expected_start is not None and process_start_identity is not None:
+    if expected_start is not None:
+        if process_start_identity is None:
+            return "unknown", f"{description} start identity unavailable"
         try:
             if int(expected_start) != int(process_start_identity):
                 return "orphaned", f"{description} has a reused process identity"
@@ -308,6 +313,7 @@ def acquire_full_analysis(
     logged_waiting = False
     logged_recovery = False
     orphan_recovery_deadline: float | None = None
+    unknown_owner_deadline: float | None = None
 
     try:
         fd = _prepare_lock_fd(lock_file)
@@ -401,6 +407,7 @@ def acquire_full_analysis(
 
             owner_state, owner_reason = _lease_owner_state(previous_metadata)
             if owner_state == "orphaned":
+                unknown_owner_deadline = None
                 if orphan_recovery_deadline is None:
                     orphan_recovery_deadline = min(
                         deadline
@@ -416,6 +423,23 @@ def acquire_full_analysis(
                         f"Timed out recovering orphaned full analysis lease for "
                         f"{repo_id}"
                     )
+            elif owner_state == "unknown":
+                orphan_recovery_deadline = None
+                if unknown_owner_deadline is None:
+                    unknown_owner_deadline = min(
+                        deadline
+                        if deadline is not None
+                        else time.monotonic() + ORPHAN_RECOVERY_TIMEOUT_SECONDS,
+                        time.monotonic() + ORPHAN_RECOVERY_TIMEOUT_SECONDS,
+                    )
+                if time.monotonic() >= unknown_owner_deadline:
+                    raise FullAnalysisBusyError(
+                        f"Timed out waiting because full analysis lease owner "
+                        f"could not be verified for {repo_id}"
+                    )
+            else:
+                orphan_recovery_deadline = None
+                unknown_owner_deadline = None
 
             if (
                 deadline is not None

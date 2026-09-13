@@ -148,6 +148,9 @@ def run_with_progress(
 
     The task function can take a log_callback argument (optional),
     and a progress_callback argument (optional).
+
+    Returns an event set after the task body has completed, before any
+    queued terminal UI callback runs.
     """
 
     def set_buttons_state(state):
@@ -171,6 +174,7 @@ def run_with_progress(
         "total": 0,
         "filename": "",
     }
+    task_done = threading.Event()
 
     def refresh_eta():
         """Keep ETA alive while an opaque report/write stage is running."""
@@ -278,13 +282,16 @@ def run_with_progress(
             result = task(**kwargs)
         except AnalysisCancelled:
             # Expected outcome of pressing Stop - not a failure.
+            task_done.set()
             root.after(0, finish_cancelled)
         except Exception as exc:
             import traceback
 
             traceback.print_exc()
+            task_done.set()
             root.after(0, finish_error, exc)
         else:
+            task_done.set()
             root.after(0, finish_success, result)
 
     set_buttons_state("disabled")
@@ -305,3 +312,4 @@ def run_with_progress(
 
     thread = threading.Thread(target=worker, daemon=True)
     thread.start()
+    return task_done

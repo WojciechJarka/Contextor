@@ -1,10 +1,18 @@
 """Desktop adapter tests for publishing and watching shared canonical LIVE state."""
 
+import threading
+import time
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
 
+from contextor.core.analysis.full_analysis_coordinator import (
+    FullAnalysisBusyError,
+    acquire_full_analysis,
+    release_full_analysis,
+)
+from contextor.core.errors import AnalysisCancelled
 from contextor.core.live_state.watcher import DesktopLiveWatcher
 from contextor.core.reporting_engine.persistent_registry import PersistentIdentityRegistry
 from contextor.core.repository_identity import read_repository_identity
@@ -559,6 +567,108 @@ def test_closing_gui_cancels_active_analysis_before_cleanup(monkeypatch):
     gui.ContextorGUI.on_closing(controller)
 
     assert progress_bar.is_cancelled is True
+
+
+def test_closing_gui_waits_for_active_analysis_lease_release(
+    tmp_path,
+    monkeypatch,
+):
+    """Desktop close cancels the real worker before the next owner acquires."""
+    import contextor.core.live_state as live_state
+
+    repo = tmp_path / "repo_shutdown_lease"
+    repo.mkdir()
+    analysis_started = threading.Event()
+    cancellation_observed = threading.Event()
+
+    class FakeRoot:
+        def __init__(self):
+            self.destroyed = False
+
+        def after(self, delay, callback, *args):
+            if delay == 0:
+                callback(*args)
+
+        def geometry(self):
+            return "900x700+10+20"
+
+        def destroy(self):
+            self.destroyed = True
+
+    class FakeProgress:
+        def __init__(self):
+            self.is_cancelled = False
+            self.indet = SimpleNamespace(
+                start=lambda *_args: None,
+                stop=lambda: None,
+            )
+            self.det = {}
+            self.flicker_label = SimpleNamespace(config=lambda **_kwargs: None)
+            self.time_label = SimpleNamespace(config=lambda **_kwargs: None)
+
+    def fake_analyze_project(_path, *, progress_callback=None, **_kwargs):
+        assert progress_callback is not None
+        analysis_started.set()
+        while progress_callback(0, 1, "module.py"):
+            time.sleep(0.01)
+        cancellation_observed.set()
+        time.sleep(0.15)
+        raise AnalysisCancelled("shutdown cancellation")
+
+    monkeypatch.setattr(live_state, "connect", lambda _path: None)
+    monkeypatch.setattr(
+        gui.ContextorFacade,
+        "analyze_project",
+        fake_analyze_project,
+    )
+    monkeypatch.setattr(gui, "close_cmd_log", lambda: None)
+    monkeypatch.setattr(gui, "save_state", lambda **_payload: None)
+
+    root = FakeRoot()
+    progress_bar = FakeProgress()
+    controller = SimpleNamespace(
+        root=root,
+        progress_bar=progress_bar,
+        log_box=None,
+        cpu_indicator=None,
+        stop_btn=None,
+        live_clients={},
+        live_client=None,
+        live_watchers={},
+        live_event_feeds={},
+        theme_mode="dark",
+        repo_path_var=SimpleNamespace(get=lambda: str(repo)),
+        layer_path_var=SimpleNamespace(get=lambda: ""),
+        file_path_var=SimpleNamespace(get=lambda: ""),
+        _busy_buttons=lambda: [],
+    )
+
+    gui.ContextorGUI.analyze(controller)
+    assert analysis_started.wait(timeout=2.0)
+
+    with pytest.raises(FullAnalysisBusyError):
+        acquire_full_analysis(
+            repo,
+            owner="contender_before_shutdown",
+            timeout=0.1,
+            poll_interval=0.01,
+        )
+
+    gui.ContextorGUI.on_closing(controller)
+
+    assert cancellation_observed.is_set()
+    assert controller._full_analysis_done.is_set()
+    assert root.destroyed is True
+
+    restarted_lease = acquire_full_analysis(
+        repo,
+        owner="desktop_restart",
+        timeout=0.5,
+    )
+    try:
+        assert restarted_lease.owner == "desktop_restart"
+    finally:
+        release_full_analysis(restarted_lease)
 
 
 def test_closing_gui_does_not_shut_down_unowned_live_client(monkeypatch):

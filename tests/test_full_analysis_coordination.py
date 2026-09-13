@@ -11,6 +11,7 @@ Complete test suite certifying the single-writer full-analysis coordinator:
 
 from __future__ import annotations
 
+import json
 import multiprocessing
 import os
 import threading
@@ -23,8 +24,11 @@ import pytest
 from contextor.core.analysis.full_analysis_coordinator import (
     FullAnalysisBusyError,
     FullAnalysisLease,
+    _lease_metadata_path,
+    _prepare_lock_fd,
     _resolve_lock_path,
     _try_lock_fd,
+    _unlock_fd,
     acquire_full_analysis,
     release_full_analysis,
     run_full_analysis_exclusive,
@@ -166,18 +170,25 @@ def _worker_try_acquire(repo_path: str, owner: str, timeout: float, result_queue
 def _worker_try_acquire_with_log(
     repo_path: str,
     owner: str,
-    timeout: float,
+    timeout: float | None,
     result_queue,
+    active_owner_event=None,
 ):
     """Attempt a lease and return the owner diagnostic observed while waiting."""
     messages: list[str] = []
+
+    def record(message: str):
+        messages.append(message)
+        if active_owner_event is not None and "valid active owner" in message:
+            active_owner_event.set()
+
     try:
         lease = acquire_full_analysis(
             repo_path,
             owner=owner,
             timeout=timeout,
             poll_interval=0.05,
-            log=messages.append,
+            log=record,
         )
         release_full_analysis(lease)
         result_queue.put({"status": "ok", "owner": owner, "messages": messages})
@@ -336,6 +347,144 @@ def test_live_owner_is_reported_and_cannot_be_stolen(tmp_path: Path, isolated_di
         if p_a.is_alive():
             p_a.terminate()
         p_a.join(timeout=3.0)
+
+
+def test_live_owner_with_no_timeout_is_not_treated_as_unknown(
+    tmp_path: Path,
+    isolated_dirs,
+):
+    """A verified live owner may wait without an artificial unknown-owner deadline."""
+    repo = tmp_path / "repo_live_owner_no_timeout"
+    repo.mkdir()
+
+    ctx = multiprocessing.get_context("spawn")
+    ready_a = ctx.Event()
+    results_a = ctx.Queue()
+    results_b = ctx.Queue()
+    active_owner_b = ctx.Event()
+    p_a = ctx.Process(
+        target=_worker_os_lock_hold,
+        args=(str(repo), "live_owner", ready_a, results_a, 15.0),
+    )
+    p_b = None
+    p_a.start()
+
+    try:
+        assert ready_a.wait(timeout=15.0)
+        assert results_a.get(timeout=2.0)["status"] == "acquired"
+
+        p_b = ctx.Process(
+            target=_worker_try_acquire_with_log,
+            args=(str(repo), "contender", None, results_b, active_owner_b),
+        )
+        p_b.start()
+        assert active_owner_b.wait(timeout=3.0)
+
+        p_a.terminate()
+        p_a.join(timeout=3.0)
+
+        result_b = results_b.get(timeout=3.0)
+        assert result_b["status"] == "ok", result_b
+        assert any(
+            "valid active owner" in message and "live_owner" in message
+            for message in result_b["messages"]
+        ), result_b
+    finally:
+        if p_b is not None and p_b.is_alive():
+            p_b.terminate()
+        if p_b is not None:
+            p_b.join(timeout=3.0)
+        if p_a.is_alive():
+            p_a.terminate()
+        p_a.join(timeout=3.0)
+
+
+def test_unknown_owner_metadata_has_bounded_failure(
+    tmp_path: Path,
+    monkeypatch,
+):
+    """An occupied lock with unreadable metadata cannot create an infinite wait."""
+    from contextor.core.analysis import full_analysis_coordinator as fac
+
+    monkeypatch.setattr(fac, "ORPHAN_RECOVERY_TIMEOUT_SECONDS", 0.2)
+    repo = tmp_path / "repo_unknown_owner"
+    repo.mkdir()
+    lock_file, _, _ = _resolve_lock_path(repo)
+    fd = _prepare_lock_fd(lock_file)
+    assert _try_lock_fd(fd)
+
+    try:
+        os.ftruncate(fd, 0)
+        os.lseek(fd, 0, os.SEEK_SET)
+        os.write(fd, b"{invalid metadata")
+        os.fsync(fd)
+        _lease_metadata_path(lock_file).unlink(missing_ok=True)
+
+        messages: list[str] = []
+        started = time.monotonic()
+        with pytest.raises(
+            FullAnalysisBusyError,
+            match="owner could not be verified",
+        ):
+            acquire_full_analysis(
+                repo,
+                owner="unknown_contender",
+                timeout=None,
+                poll_interval=0.02,
+                log=messages.append,
+            )
+
+        assert time.monotonic() - started < 1.0
+        assert any("owner could not be verified" in message for message in messages)
+    finally:
+        _unlock_fd(fd)
+
+
+def test_legacy_owner_metadata_has_bounded_failure(
+    tmp_path: Path,
+    monkeypatch,
+):
+    """Legacy metadata without process identity is unknown, not silently live."""
+    from contextor.core.analysis import full_analysis_coordinator as fac
+
+    monkeypatch.setattr(fac, "ORPHAN_RECOVERY_TIMEOUT_SECONDS", 0.2)
+    repo = tmp_path / "repo_legacy_owner"
+    repo.mkdir()
+    lock_file, _, _ = _resolve_lock_path(repo)
+    fd = _prepare_lock_fd(lock_file)
+    assert _try_lock_fd(fd)
+
+    try:
+        legacy_metadata = {
+            "pid": os.getpid(),
+            "token": "legacy-token",
+            "owner": "legacy_holder",
+            "repo_id": "legacy-repo",
+            "timestamp": time.time(),
+        }
+        os.ftruncate(fd, 0)
+        os.lseek(fd, 0, os.SEEK_SET)
+        os.write(fd, json.dumps(legacy_metadata).encode("utf-8"))
+        os.fsync(fd)
+        _lease_metadata_path(lock_file).unlink(missing_ok=True)
+        monkeypatch.setattr(fac, "_read_lease_metadata", lambda _fd: legacy_metadata)
+
+        messages: list[str] = []
+        with pytest.raises(
+            FullAnalysisBusyError,
+            match="owner could not be verified",
+        ):
+            acquire_full_analysis(
+                repo,
+                owner="legacy_contender",
+                timeout=None,
+                poll_interval=0.02,
+                log=messages.append,
+            )
+
+        assert any("identity metadata unavailable" in message for message in messages)
+    finally:
+        _unlock_fd(fd)
 
 
 def test_orphan_recovery_is_atomic_for_two_contenders(
