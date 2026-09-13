@@ -1,358 +1,383 @@
-# F2L D1B — read-only canonical lineage storage seam
+# F2L D1C — exact-only lineage target resolution
 
 ## STATUS
 
 PASS
 
-Dodano minimalny `RepositoryStateLineageBackend` nad już załadowanym canonical state. Backend zwraca te same immutable `MaterializedLineageSourceFacts` instances, nie kopiuje mappingu ani slices, i nie wykonuje source I/O, AST/extraction/materialization, registry allocation ani MCP work.
-
-Pierwszy `FILE=` w dostarczonym bloku kończył się na katalogu; literalny import `contextor.core.lineage_query.backend` w tym samym bloku jednoznacznie wskazał utworzenie `contextor/core/lineage_query/backend.py`.
+Dodano `LineageQueryService.resolve_target` z exact-only resolution dla aktywnych artifact identities: syntaktyczny artifact ID oraz case-sensitive `module::symbol`. Brakujący ID kończy się `not_found`; duplicate active identity kończy się `ambiguous`; recovery catalog, plain leaf, fuzzy i lineage slices nie są używane.
 
 ## FILES_CHANGED
 
-- `contextor/core/lineage_query/backend.py`
+- `contextor/core/lineage_query/service.py`
 - `contextor/core/lineage_query/__init__.py`
-- `tests/analysis/test_lineage_query_backend.py`
+- `tests/analysis/test_lineage_query_service.py`
 - `walkthrough.md` — raport tasku; jego własny diff nie jest częścią `ACTUAL_DIFF`.
 
 ## TESTS_RUN
 
 | Command | Result |
 |---|---|
-| `.\\.venv\\Scripts\\python.exe -m pytest -q tests/analysis/test_lineage_query_backend.py` | PASS — `7 passed in 28.11s` |
-| `.\\.venv\\Scripts\\python.exe -m py_compile contextor/core/lineage_query/backend.py contextor/core/lineage_query/__init__.py` | PASS |
-| `git diff --no-index --check -- /dev/null contextor/core/lineage_query/backend.py` | PASS — bez błędów whitespace; exit `1` oczekiwany dla nowego pliku porównywanego z `/dev/null` |
+| `.\\.venv\\Scripts\\python.exe -m pytest -q tests/analysis/test_lineage_query_service.py tests/analysis/test_lineage_query_backend.py` | PASS — `20 passed in 0.91s` |
+| `.\\.venv\\Scripts\\python.exe -m py_compile contextor/core/lineage_query/service.py contextor/core/lineage_query/__init__.py` | PASS |
+| `git diff --no-index --check -- /dev/null contextor/core/lineage_query/service.py` | PASS — bez błędów whitespace; exit `1` oczekiwany dla nowego pliku porównywanego z `/dev/null` |
 | `git diff --no-index --check -- /dev/null contextor/core/lineage_query/__init__.py` | PASS — bez błędów whitespace; exit `1` oczekiwany dla nowego pliku porównywanego z `/dev/null` |
-| `git diff --no-index --check -- /dev/null tests/analysis/test_lineage_query_backend.py` | PASS — bez błędów whitespace; exit `1` oczekiwany dla nowego pliku porównywanego z `/dev/null` |
+| `git diff --no-index --check -- /dev/null tests/analysis/test_lineage_query_service.py` | PASS — bez błędów whitespace; exit `1` oczekiwany dla nowego pliku porównywanego z `/dev/null` |
 
 ## ACTUAL_DIFF
 
 ```diff
-diff --git a/contextor/core/lineage_query/backend.py b/contextor/core/lineage_query/backend.py
+diff --git a/contextor/core/lineage_query/service.py b/contextor/core/lineage_query/service.py
 new file mode 100644
-index 0000000..8e8c204
+index 0000000..cf28a2a
 --- /dev/null
-+++ b/contextor/core/lineage_query/backend.py
-@@ -0,0 +1,160 @@
++++ b/contextor/core/lineage_query/service.py
+@@ -0,0 +1,133 @@
 +from __future__ import annotations
 +
-+from collections.abc import Iterable, Mapping
 +from dataclasses import dataclass
-+from typing import Protocol, runtime_checkable
 +
-+from contextor.core.domain.lineage_facts import (
-+    LineageFamilyStatus,
-+    MaterializedLineageSourceFacts,
-+    SourceLineageManifest,
-+)
-+
-+
-+_MISSING = object()
++from contextor.core.lineage_query.backend import CanonicalLineageBackend
++from contextor.core.report_query import ARTIFACT_ID_RE, IndexCatalog
 +
 +
 +@dataclass(frozen=True)
-+class LineageBackendMetadata:
-+    revision: int | None
-+    provenance: str
-+    family_state: str
-+    semantic_version: str | None
-+    source_count: int
++class ResolvedLineageTarget:
++    artifact_id: str
++    qualified_name: str
++    module_name: str
++    symbol_name: str
++    resolution: str
 +
 +
-+@runtime_checkable
-+class CanonicalLineageBackend(Protocol):
-+    def metadata(self) -> LineageBackendMetadata: ...
++@dataclass(frozen=True)
++class LineageTargetResolution:
++    status: str
++    query: str
++    target: ResolvedLineageTarget | None = None
++    candidates: tuple[ResolvedLineageTarget, ...] = ()
 +
-+    def source_keys(self) -> tuple[str, ...]: ...
 +
-+    def get_source(
++class LineageQueryService:
++    def __init__(
 +        self,
-+        source_key: str,
-+    ) -> MaterializedLineageSourceFacts | None: ...
++        backend: CanonicalLineageBackend,
++        catalog: IndexCatalog,
++    ) -> None:
++        if not isinstance(backend, CanonicalLineageBackend):
++            raise TypeError("backend must implement CanonicalLineageBackend.")
++        if not isinstance(catalog, IndexCatalog):
++            raise TypeError("catalog must be IndexCatalog.")
++        self._backend = backend
++        self._catalog = catalog
 +
-+    def get_manifest(
-+        self,
-+        source_key: str,
-+    ) -> SourceLineageManifest | None: ...
++    def resolve_target(self, query: str) -> LineageTargetResolution:
++        if not isinstance(query, str):
++            raise TypeError("query must be a string.")
 +
-+    def iter_sources(
-+        self,
-+        source_keys: Iterable[str] | None = None,
-+    ) -> tuple[MaterializedLineageSourceFacts, ...]: ...
++        raw = query.strip()
++        if not raw:
++            return LineageTargetResolution(
++                status="invalid",
++                query=raw,
++            )
 +
-+
-+class RepositoryStateLineageBackend:
-+    """Read-only lineage backend over one already-hydrated canonical state."""
-+
-+    def __init__(self, state: object) -> None:
-+        raw_sources = getattr(state, "lineage_facts_by_source", {})
-+        if raw_sources is None:
-+            raw_sources = {}
-+        if not isinstance(raw_sources, Mapping):
-+            raise TypeError("lineage_facts_by_source must be a mapping.")
-+
-+        for source_key in raw_sources:
-+            if not isinstance(source_key, str) or not source_key:
-+                raise TypeError(
-+                    "lineage_facts_by_source keys must be non-empty strings."
++        if ARTIFACT_ID_RE.fullmatch(raw):
++            artifact_id = raw[0].upper() + raw[1:]
++            qualified_name = self._catalog.artifacts.get(artifact_id)
++            if qualified_name is None:
++                return LineageTargetResolution(
++                    status="not_found",
++                    query=raw,
 +                )
-+
-+        self._state = state
-+        self._sources = raw_sources
-+
-+    def metadata(self) -> LineageBackendMetadata:
-+        raw_revision = getattr(self._state, "revision", None)
-+        if raw_revision is not None and (
-+            isinstance(raw_revision, bool) or not isinstance(raw_revision, int)
-+        ):
-+            raise TypeError("Canonical lineage revision must be an integer or None.")
-+
-+        raw_provenance = getattr(self._state, "provenance", "snapshot") or "snapshot"
-+        if not isinstance(raw_provenance, str):
-+            raise TypeError("Canonical lineage provenance must be a string.")
-+
-+        raw_family_state = getattr(
-+            self._state,
-+            "lineage_facts_state",
-+            LineageFamilyStatus.NOT_MATERIALIZED.value,
-+        )
-+        try:
-+            family_state = LineageFamilyStatus(raw_family_state).value
-+        except (TypeError, ValueError) as exc:
-+            raise ValueError(
-+                "Canonical lineage family state is invalid."
-+            ) from exc
-+
-+        semantic_version = getattr(
-+            self._state,
-+            "lineage_facts_semantic_version",
-+            None,
-+        )
-+        if semantic_version is not None and (
-+            not isinstance(semantic_version, str) or not semantic_version
-+        ):
-+            raise TypeError(
-+                "Canonical lineage semantic version must be a non-empty string or None."
++            return LineageTargetResolution(
++                status="resolved",
++                query=raw,
++                target=_target(
++                    artifact_id,
++                    str(qualified_name),
++                    resolution="exact_id",
++                ),
 +            )
 +
-+        return LineageBackendMetadata(
-+            revision=raw_revision,
-+            provenance=raw_provenance,
-+            family_state=family_state,
-+            semantic_version=semantic_version,
-+            source_count=len(self._sources),
++        if raw.count("::") != 1:
++            return LineageTargetResolution(
++                status="invalid",
++                query=raw,
++            )
++
++        module_name, symbol_name = raw.split("::", 1)
++        if not module_name or not symbol_name:
++            return LineageTargetResolution(
++                status="invalid",
++                query=raw,
++            )
++
++        matches = tuple(
++            _target(
++                str(artifact_id),
++                str(qualified_name),
++                resolution="exact_identity",
++            )
++            for artifact_id, qualified_name in sorted(
++                self._catalog.artifacts.items(),
++                key=lambda item: (str(item[1]), str(item[0])),
++            )
++            if str(qualified_name) == raw
 +        )
 +
-+    def source_keys(self) -> tuple[str, ...]:
-+        return tuple(sorted(self._sources))
-+
-+    def get_source(
-+        self,
-+        source_key: str,
-+    ) -> MaterializedLineageSourceFacts | None:
-+        if not isinstance(source_key, str) or not source_key:
-+            raise ValueError("source_key must be a non-empty string.")
-+
-+        value = self._sources.get(source_key, _MISSING)
-+        if value is _MISSING:
-+            return None
-+        if not isinstance(value, MaterializedLineageSourceFacts):
-+            raise TypeError(
-+                f"Canonical lineage slice {source_key!r} has invalid type."
++        if not matches:
++            return LineageTargetResolution(
++                status="not_found",
++                query=raw,
 +            )
-+        return value
++        if len(matches) > 1:
++            return LineageTargetResolution(
++                status="ambiguous",
++                query=raw,
++                candidates=matches,
++            )
++        return LineageTargetResolution(
++            status="resolved",
++            query=raw,
++            target=matches[0],
++        )
 +
-+    def get_manifest(
-+        self,
-+        source_key: str,
-+    ) -> SourceLineageManifest | None:
-+        source = self.get_source(source_key)
-+        return source.manifest if source is not None else None
 +
-+    def iter_sources(
-+        self,
-+        source_keys: Iterable[str] | None = None,
-+    ) -> tuple[MaterializedLineageSourceFacts, ...]:
-+        if source_keys is None:
-+            keys = self.source_keys()
-+        else:
-+            if isinstance(source_keys, (str, bytes)):
-+                raise TypeError("source_keys must be an iterable of source-key strings.")
-+
-+            requested: set[str] = set()
-+            for source_key in source_keys:
-+                if not isinstance(source_key, str) or not source_key:
-+                    raise ValueError(
-+                        "source_keys must contain only non-empty strings."
-+                    )
-+                requested.add(source_key)
-+            keys = tuple(sorted(requested))
-+
-+        result: list[MaterializedLineageSourceFacts] = []
-+        for source_key in keys:
-+            source = self.get_source(source_key)
-+            if source is not None:
-+                result.append(source)
-+        return tuple(result)
++def _target(
++    artifact_id: str,
++    qualified_name: str,
++    *,
++    resolution: str,
++) -> ResolvedLineageTarget:
++    if qualified_name.count("::") != 1:
++        raise ValueError(
++            "Active artifact identity must be canonical module::symbol."
++        )
++    module_name, symbol_name = qualified_name.split("::", 1)
++    if not module_name or not symbol_name:
++        raise ValueError(
++            "Active artifact identity must be canonical module::symbol."
++        )
++    return ResolvedLineageTarget(
++        artifact_id=artifact_id,
++        qualified_name=qualified_name,
++        module_name=module_name,
++        symbol_name=symbol_name,
++        resolution=resolution,
++    )
 diff --git a/contextor/core/lineage_query/__init__.py b/contextor/core/lineage_query/__init__.py
 new file mode 100644
-index 0000000..daddd76
+index 0000000..293738a
 --- /dev/null
 +++ b/contextor/core/lineage_query/__init__.py
-@@ -0,0 +1,11 @@
+@@ -0,0 +1,19 @@
 +from contextor.core.lineage_query.backend import (
 +    CanonicalLineageBackend,
 +    LineageBackendMetadata,
 +    RepositoryStateLineageBackend,
 +)
++from contextor.core.lineage_query.service import (
++    LineageQueryService,
++    LineageTargetResolution,
++    ResolvedLineageTarget,
++)
 +
 +__all__ = [
 +    "CanonicalLineageBackend",
 +    "LineageBackendMetadata",
++    "LineageQueryService",
++    "LineageTargetResolution",
 +    "RepositoryStateLineageBackend",
++    "ResolvedLineageTarget",
 +]
-diff --git a/tests/analysis/test_lineage_query_backend.py b/tests/analysis/test_lineage_query_backend.py
+diff --git a/tests/analysis/test_lineage_query_service.py b/tests/analysis/test_lineage_query_service.py
 new file mode 100644
-index 0000000..f6ef6f0
+index 0000000..fcd4482
 --- /dev/null
-+++ b/tests/analysis/test_lineage_query_backend.py
-@@ -0,0 +1,134 @@
++++ b/tests/analysis/test_lineage_query_service.py
+@@ -0,0 +1,180 @@
 +from types import SimpleNamespace
 +
 +import pytest
 +
-+from contextor.core.domain.lineage_facts import (
-+    LINEAGE_FACTS_SEMANTIC_VERSION,
-+    LineageFamilyStatus,
-+    MaterializedLineageSourceFacts,
-+    SourceLineageManifest,
-+)
 +from contextor.core.lineage_query import (
-+    CanonicalLineageBackend,
-+    LineageBackendMetadata,
++    LineageQueryService,
 +    RepositoryStateLineageBackend,
++    ResolvedLineageTarget,
 +)
++from contextor.core.report_query import IndexCatalog
 +
 +
-+def _slice(source_key: str) -> MaterializedLineageSourceFacts:
-+    return MaterializedLineageSourceFacts(
-+        manifest=SourceLineageManifest(
-+            source_key=source_key,
-+            source_fingerprint="f" * 64,
-+            semantic_version=LINEAGE_FACTS_SEMANTIC_VERSION,
-+            status=LineageFamilyStatus.FRESH,
-+            anchor_count=0,
-+            flow_count=0,
-+            surface_count=0,
-+        )
-+    )
-+
-+
-+def _state():
-+    source_a = _slice("pkg/a.py")
-+    source_b = _slice("pkg/b.py")
-+    return (
++def _service(artifacts: dict[str, str]) -> LineageQueryService:
++    backend = RepositoryStateLineageBackend(
 +        SimpleNamespace(
-+            revision=11,
-+            provenance="live",
 +            lineage_facts_state="fresh",
-+            lineage_facts_semantic_version=LINEAGE_FACTS_SEMANTIC_VERSION,
-+            lineage_facts_by_source={
-+                "pkg/b.py": source_b,
-+                "pkg/a.py": source_a,
-+            },
-+        ),
-+        source_a,
-+        source_b,
-+    )
-+
-+
-+def test_repository_state_backend_exposes_canonical_metadata():
-+    state, _, _ = _state()
-+    backend = RepositoryStateLineageBackend(state)
-+
-+    assert isinstance(backend, CanonicalLineageBackend)
-+    assert backend.metadata() == LineageBackendMetadata(
-+        revision=11,
-+        provenance="live",
-+        family_state="fresh",
-+        semantic_version=LINEAGE_FACTS_SEMANTIC_VERSION,
-+        source_count=2,
-+    )
-+
-+
-+def test_repository_state_backend_preserves_slice_identity_and_order():
-+    state, source_a, source_b = _state()
-+    backend = RepositoryStateLineageBackend(state)
-+
-+    assert backend.source_keys() == ("pkg/a.py", "pkg/b.py")
-+    assert backend.get_source("pkg/a.py") is source_a
-+    assert backend.get_manifest("pkg/a.py") is source_a.manifest
-+    assert backend.get_source("pkg/missing.py") is None
-+    assert backend.get_manifest("pkg/missing.py") is None
-+
-+    assert backend.iter_sources(
-+        ["pkg/b.py", "pkg/a.py", "pkg/a.py", "pkg/missing.py"]
-+    ) == (source_a, source_b)
-+
-+
-+def test_repository_state_backend_defaults_to_not_materialized():
-+    backend = RepositoryStateLineageBackend(SimpleNamespace())
-+
-+    assert backend.metadata() == LineageBackendMetadata(
-+        revision=None,
-+        provenance="snapshot",
-+        family_state="not_materialized",
-+        semantic_version=None,
-+        source_count=0,
-+    )
-+    assert backend.source_keys() == ()
-+    assert backend.iter_sources() == ()
-+
-+
-+def test_repository_state_backend_rejects_invalid_storage_shape():
-+    with pytest.raises(TypeError, match="must be a mapping"):
-+        RepositoryStateLineageBackend(
-+            SimpleNamespace(lineage_facts_by_source=[])
-+        )
-+
-+    with pytest.raises(TypeError, match="non-empty strings"):
-+        RepositoryStateLineageBackend(
-+            SimpleNamespace(lineage_facts_by_source={1: _slice("pkg/a.py")})
-+        )
-+
-+
-+def test_repository_state_backend_fails_closed_on_invalid_slice():
-+    backend = RepositoryStateLineageBackend(
-+        SimpleNamespace(
-+            lineage_facts_by_source={"pkg/a.py": object()}
-+        )
-+    )
-+
-+    with pytest.raises(TypeError, match="invalid type"):
-+        backend.get_source("pkg/a.py")
-+
-+
-+def test_repository_state_backend_rejects_invalid_family_state():
-+    backend = RepositoryStateLineageBackend(
-+        SimpleNamespace(
-+            lineage_facts_state="pretend_fresh",
 +            lineage_facts_by_source={},
 +        )
 +    )
++    return LineageQueryService(
++        backend,
++        IndexCatalog(
++            modules={},
++            artifacts=artifacts,
++        ),
++    )
 +
-+    with pytest.raises(ValueError, match="family state is invalid"):
-+        backend.metadata()
++
++def test_resolves_active_artifact_id_exactly():
++    service = _service(
++        {"A17/2": "pkg.mod::handler"}
++    )
++
++    result = service.resolve_target("a17/2")
++
++    assert result.status == "resolved"
++    assert result.target == ResolvedLineageTarget(
++        artifact_id="A17/2",
++        qualified_name="pkg.mod::handler",
++        module_name="pkg.mod",
++        symbol_name="handler",
++        resolution="exact_id",
++    )
++    assert result.candidates == ()
 +
 +
-+def test_repository_state_backend_rejects_string_as_source_collection():
-+    state, _, _ = _state()
-+    backend = RepositoryStateLineageBackend(state)
++def test_resolves_exact_qualified_identity_to_same_owner():
++    service = _service(
++        {"A17/2": "pkg.mod::handler"}
++    )
 +
-+    with pytest.raises(TypeError, match="iterable of source-key strings"):
-+        backend.iter_sources("pkg/a.py")
++    result = service.resolve_target("pkg.mod::handler")
++
++    assert result.status == "resolved"
++    assert result.target == ResolvedLineageTarget(
++        artifact_id="A17/2",
++        qualified_name="pkg.mod::handler",
++        module_name="pkg.mod",
++        symbol_name="handler",
++        resolution="exact_identity",
++    )
++
++
++def test_missing_syntactic_artifact_id_never_falls_back():
++    service = _service(
++        {"A17/2": "pkg.mod::handler"}
++    )
++
++    result = service.resolve_target("A999/1")
++
++    assert result.status == "not_found"
++    assert result.target is None
++    assert result.candidates == ()
++
++
++@pytest.mark.parametrize(
++    "query",
++    [
++        "",
++        "handler",
++        "pkg.mod",
++        "pkg.mod::",
++        "::handler",
++        "pkg.mod::handler::extra",
++    ],
++)
++def test_non_exact_target_shapes_are_rejected(query):
++    service = _service(
++        {"A17/2": "pkg.mod::handler"}
++    )
++
++    result = service.resolve_target(query)
++
++    assert result.status == "invalid"
++    assert result.target is None
++
++
++def test_resolution_is_case_sensitive_for_qualified_identity():
++    service = _service(
++        {"A17/2": "pkg.mod::Handler"}
++    )
++
++    result = service.resolve_target("pkg.mod::handler")
++
++    assert result.status == "not_found"
++
++
++def test_duplicate_active_identity_fails_closed_as_ambiguous():
++    service = _service(
++        {
++            "A18/1": "pkg.mod::handler",
++            "A17/2": "pkg.mod::handler",
++        }
++    )
++
++    result = service.resolve_target("pkg.mod::handler")
++
++    assert result.status == "ambiguous"
++    assert result.target is None
++    assert tuple(item.artifact_id for item in result.candidates) == (
++        "A17/2",
++        "A18/1",
++    )
++
++
++def test_recovery_catalog_is_not_used_for_lineage_resolution():
++    backend = RepositoryStateLineageBackend(
++        SimpleNamespace(
++            lineage_facts_state="fresh",
++            lineage_facts_by_source={},
++        )
++    )
++    service = LineageQueryService(
++        backend,
++        IndexCatalog(
++            modules={},
++            artifacts={},
++            recovered_artifacts={
++                "A17/2": "pkg.mod::handler",
++            },
++        ),
++    )
++
++    by_id = service.resolve_target("A17/2")
++    by_name = service.resolve_target("pkg.mod::handler")
++
++    assert by_id.status == "not_found"
++    assert by_name.status == "not_found"
++
++
++def test_resolution_does_not_read_or_iterate_lineage_slices():
++    class ResolutionOnlyBackend:
++        def metadata(self):
++            raise AssertionError("resolution must not read lineage metadata")
++
++        def source_keys(self):
++            raise AssertionError("resolution must not enumerate lineage")
++
++        def get_source(self, source_key):
++            raise AssertionError("resolution must not read lineage")
++
++        def get_manifest(self, source_key):
++            raise AssertionError("resolution must not read lineage")
++
++        def iter_sources(self, source_keys=None):
++            raise AssertionError("resolution must not iterate lineage")
++
++    service = LineageQueryService(
++        ResolutionOnlyBackend(),
++        IndexCatalog(
++            modules={},
++            artifacts={"A17/2": "pkg.mod::handler"},
++        ),
++    )
++
++    result = service.resolve_target("pkg.mod::handler")
++
++    assert result.status == "resolved"
++    assert result.target is not None
++    assert result.target.artifact_id == "A17/2"
 ```
 
 ## GATE
 
-Zatrzymano po D1B. Oczekiwana jest komenda `proceduj` przed kolejnym krokiem.
+Zatrzymano po D1C. Oczekiwana jest komenda `proceduj` przed kolejnym krokiem.
