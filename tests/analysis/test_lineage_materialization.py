@@ -770,3 +770,37 @@ def test_unrelated_resolution_descriptor_is_not_seeded_into_slice():
     )
     assert result.semantic_anchors == ()
     assert result.interface_descriptors == ()
+
+
+def test_legacy_interface_descriptor_capability_stays_false_after_generic_reresolution():
+    facts = _callable_interface_facts("def ping():\n    pass\n")
+    old, new = "A1/1", "A1/2"
+    descriptors = build_extracted_callable_interface_descriptors(
+        {"pkg/mod.py": facts}, {"pkg.mod::ping": old}
+    )
+    materialized = materialize_lineage_source_facts(
+        facts, _context(artifacts={"pkg.mod::ping": old}, descriptors=descriptors)
+    )
+    legacy = replace(
+        materialized,
+        manifest=replace(materialized.manifest, interface_descriptors_materialized=False),
+    )
+    rebound = build_materialized_callable_interface_descriptors(
+        {"pkg/mod.py": legacy}, {"pkg.mod::ping": new}
+    )
+    rerun = reresolve_materialized_lineage_source_facts(
+        legacy, _context(artifacts={"pkg.mod::ping": new}, descriptors=rebound)
+    )
+    assert rerun.manifest.interface_descriptors_materialized is False
+    assert rerun.interface_descriptors == (rebound[new],)
+
+
+def test_interface_descriptor_capability_requires_anchor_capabilities():
+    manifest = SourceLineageManifest(
+        "pkg.py", "fingerprint", LINEAGE_FACTS_SEMANTIC_VERSION,
+        LineageFamilyStatus.FRESH, 0, 0, 0,
+    )
+    with pytest.raises(ValueError, match="require semantic anchor bindings and anchor ownership"):
+        replace(manifest, interface_descriptors_materialized=True)
+    with pytest.raises(TypeError, match="interface_descriptors_materialized must be boolean"):
+        replace(manifest, interface_descriptors_materialized="yes")
