@@ -1,4 +1,4 @@
-# F2L D1N3b2 Walkthrough
+# F2L D1N3b3 Walkthrough
 
 ## STATUS
 
@@ -6,312 +6,622 @@ PASS
 
 ## FILES_CHANGED
 
+- `contextor/mcp/lineage_response.py`
 - `tests/mcp/test_lineage_response.py`
 
-## NAMED_SEMANTIC_OWNER_PROOF
+## AUTO_FULL_PROOF
 
-Named changes the canonical semantic endpoint from `owner_id: "A17/2"` to `owner: "pkg.mod::handler"`; indexed preserves `owner_id`.
+An empty canonical-section fixture produces an indexed auto candidate at or below 5120 bytes and returns the full `mode: "auto"` payload.
 
-## SYMBOLIC_STABILITY_PROOF
+## AUTO_PREVIEW_PROOF
 
-The test asserts the same symbolic `symbol_kind` and `qualified_name` in named and indexed responses.
+A 30-connection full canonical candidate exceeds 5120 bytes and deterministically returns a representation-aware preview with matching `candidate_response_bytes` and `auto_fetch.decision: "preview"`.
 
-## OCCURRENCE_STABILITY_PROOF
+## REPRESENTED_PREVIEW_SIZE_PROOF
 
-The test asserts the same occurrence `source` and `local_id` in named and indexed responses.
+Explicit named preview reports bytes for the exact represented fetch candidate and every represented section; it does not include `sections`.
 
-## SLOT_OPAQUE_PROOF
+## FETCH_SELECTION_PROOF
 
-The test asserts the same canonical `build_return_slot("A17/2")` string in both representations.
+Fetch accepts only the supplied canonicalized explicit section selection and returns exactly `interface` and `connections`.
 
-## TARGET_ANCHOR_PROOF
+## PLAN_MISMATCH_PROOF
 
-The test asserts top-level `target.artifact_id` and `target.qualified_name` remain `A17/2` and `pkg.mod::handler` in both representations.
+A mismatch between supplied selected sections and the response plan fails closed with the required ValueError.
 
-## AUTO_NAMED_THRESHOLD_PROOF
+## OUTPUT_GUARD_PROOF
 
-The auto-named test asserts `bytes_saved_by_indexed < mcp_rep.AUTO_NEGOTIATION_MIN_BYTES_SAVED` and the same decision threshold.
+An 80-connection explicit fetch returns the existing 15 KiB confirmation response unless `allow_large_output=True`, which returns the full payload.
 
-## AUTO_INDEXED_THRESHOLD_PROOF
+## AUTO_BEFORE_GUARD_PROOF
 
-The long-owner fixture asserts `bytes_saved_by_indexed >= mcp_rep.AUTO_NEGOTIATION_MIN_BYTES_SAVED`, exact candidate-byte subtraction, and `auto_indexed_material_saving`.
+The 80-connection auto candidate returns a resolved preview before the 15 KiB guard can return `confirmation_required`.
 
-## AUTO_MISSING_NAME_PROOF
+## NO_QUERY_PROOF
 
-Named fails closed with the exact owner diagnostic; auto selects indexed with `auto_indexed_named_identity_unavailable`, `missing_named_owners == ["A17/2"]`, and `named_candidate_bytes is None`.
+Renderer helpers operate solely on supplied `SelectedSymbolLineageFacts` and an optional supplied artifact-name map; no query, backend, state, registry, source, AST, or materialization APIs are invoked.
 
 ## TESTS_RUN
 
 ```text
 .\.venv\Scripts\python.exe -m pytest -q tests\mcp\test_lineage_response.py tests\analysis\test_lineage_query_service.py tests\analysis\test_lineage_query_backend.py
-101 passed in 2.58s
+109 passed in 2.35s
 
-.\.venv\Scripts\python.exe -m py_compile tests\mcp\test_lineage_response.py
+.\.venv\Scripts\python.exe -m py_compile contextor\mcp\lineage_response.py tests\mcp\test_lineage_response.py
 PASS
 
-git diff --check -- tests/mcp/test_lineage_response.py
+git diff --check -- contextor/mcp/lineage_response.py tests/mcp/test_lineage_response.py
 PASS
 ```
 
 ## ACTUAL_DIFF
 
 ```diff
-diff --git a/tests/mcp/test_lineage_response.py b/tests/mcp/test_lineage_response.py
-index a39d29c..765cb34 100644
---- a/tests/mcp/test_lineage_response.py
-+++ b/tests/mcp/test_lineage_response.py
-@@ -19,7 +19,7 @@ from contextor.core.lineage_query.service import (
-     SelectedSymbolLineageFacts, SemanticLineageSections, SymbolLineageConnections,
-     SymbolLineageFacts, TargetInterfaceFacts,
+warning: in the working copy of 'contextor/mcp/lineage_response.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'tests/mcp/test_lineage_response.py', LF will be replaced by CRLF the next time Git touches it
+diff --git a/contextor/mcp/lineage_response.py b/contextor/mcp/lineage_response.py
+index a05b0dc..405f5a0 100644
+--- a/contextor/mcp/lineage_response.py
++++ b/contextor/mcp/lineage_response.py
+@@ -1,5 +1,6 @@
+ from __future__ import annotations
+ 
++import json
+ from dataclasses import dataclass
+ from collections.abc import Mapping
+ 
+@@ -9,9 +10,13 @@ from contextor.core.lineage_query.service import (
+     LineageFlowMatch, LineageSurfaceMatch, SelectedSymbolLineageFacts, TargetInterfaceFacts,
  )
--from contextor.mcp.representation import serialized_json_bytes
-+from contextor.mcp import representation as mcp_rep
- from contextor.mcp.lineage_response import (
-     SymbolLineageResponsePlan,
-     build_symbol_lineage_payload,
-@@ -140,38 +140,210 @@ def test_symbol_lineage_payload_preserves_selected_empty_vs_omitted_and_preview_
-     assert preview["available_sections"] == list(SYMBOL_LINEAGE_SECTION_ORDER)
-     assert "unresolved_dynamic_boundaries" in preview["section_sizes"]
-     assert "surfaces" in preview["section_sizes"]
--    assert preview["candidate_response_bytes"] == serialized_json_bytes(payload)
-+    assert preview["candidate_response_bytes"] == mcp_rep.serialized_json_bytes(payload)
-     for name, value in payload["sections"].items():
--        assert preview["section_sizes"][name] == {"payload_bytes": serialized_json_bytes(value)}
-+        assert preview["section_sizes"][name] == {"payload_bytes": mcp_rep.serialized_json_bytes(value)}
+ from contextor.mcp import representation as mcp_rep
++from contextor.mcp.output_guard import (
++    guard_large_output,
++)
  
  
- def test_symbol_lineage_named_and_indexed_representations_preserve_nonsemantic_identities():
-     selected = _selected_lineage_fixture()
--    named = build_symbol_lineage_represented_payload(selected, representation="named", artifact_names={"A17/2": "pkg.mod::handler"})
--    assert named["sections"]["connections"]["incoming"][0]["target"] == {"kind": "semantic", "owner": "pkg.mod::handler", "slot": build_return_slot("A17/2")}
--    assert named["sections"]["bindings"][0]["source"]["kind"] == "symbolic"
--    indexed = build_symbol_lineage_represented_payload(selected, representation="indexed")
--    assert indexed["resolver"] == {"index_kind": "artifact", "resolve_via": "lookup_index_entries"}
--    assert indexed["representation_decision"]["reason"] == "explicit_indexed"
-+    named = build_symbol_lineage_represented_payload(
-+        selected,
-+        representation="named",
-+        artifact_names={
-+            "A17/2": "pkg.mod::handler",
-+        },
-+    )
-+    indexed = build_symbol_lineage_represented_payload(
-+        selected,
-+        representation="indexed",
-+    )
-+
-+    named_semantic = named["sections"][
-+        "connections"
-+    ]["incoming"][0]["target"]
-+    indexed_semantic = indexed["sections"][
-+        "connections"
-+    ]["incoming"][0]["target"]
-+
-+    assert named_semantic == {
-+        "kind": "semantic",
-+        "owner": "pkg.mod::handler",
-+        "slot": build_return_slot("A17/2"),
-+    }
-+    assert indexed_semantic == {
-+        "kind": "semantic",
-+        "owner_id": "A17/2",
-+        "slot": build_return_slot("A17/2"),
-+    }
-+
-+    assert (
-+        named_semantic["slot"]
-+        == indexed_semantic["slot"]
-+        == build_return_slot("A17/2")
-+    )
-+
-+    expected_symbolic = {
-+        "kind": "symbolic",
-+        "symbol_kind": "import",
-+        "qualified_name": "pkg.dep::value",
-+    }
-+    assert (
-+        named["sections"]["bindings"][0]["source"]
-+        == expected_symbolic
-+    )
-+    assert (
-+        indexed["sections"]["bindings"][0]["source"]
-+        == expected_symbolic
-+    )
-+
-+    expected_occurrence = {
-+        "kind": "occurrence",
-+        "source": "pkg/mod.py",
-+        "local_id": "local",
-+    }
-+    assert (
-+        named["sections"]["bindings"][0]["target"]
-+        == expected_occurrence
-+    )
-+    assert (
-+        indexed["sections"]["bindings"][0]["target"]
-+        == expected_occurrence
-+    )
-+
-+    assert named["target"]["artifact_id"] == "A17/2"
-+    assert indexed["target"]["artifact_id"] == "A17/2"
-+    assert (
-+        named["target"]["qualified_name"]
-+        == indexed["target"]["qualified_name"]
-+        == "pkg.mod::handler"
-+    )
-+
-+    assert named["representation"] == "named"
-+    assert (
-+        named["representation_decision"]["reason"]
-+        == "explicit_named"
-+    )
-+    assert "resolver" not in named
-+
-+    assert indexed["representation"] == "indexed"
-+    assert indexed["resolver"] == {
-+        "index_kind": "artifact",
-+        "resolve_via": "lookup_index_entries",
-+    }
-+    assert (
-+        indexed["representation_decision"]["reason"]
-+        == "explicit_indexed"
-+    )
+ SYMBOL_LINEAGE_MODES = ("auto", "preview", "fetch")
++SYMBOL_LINEAGE_AUTO_FETCH_THRESHOLD_BYTES = 5120
  
  
- def test_symbol_lineage_representation_fails_closed_and_auto_falls_back():
-     selected = _selected_lineage_fixture()
--    with pytest.raises(ValueError, match="Named lineage representation unavailable for semantic owners: A17/2"):
--        build_symbol_lineage_represented_payload(selected, representation="named", artifact_names={})
--    result = build_symbol_lineage_represented_payload(selected, representation="auto", artifact_names={})
-+    with pytest.raises(
-+        ValueError,
-+        match=(
-+            "Named lineage representation unavailable "
-+            "for semantic owners: A17/2"
-+        ),
-+    ):
-+        build_symbol_lineage_represented_payload(
-+            selected,
-+            representation="named",
-+            artifact_names={},
-+        )
+ @dataclass(frozen=True)
+@@ -166,3 +171,216 @@ def build_symbol_lineage_represented_payload(selected: SelectedSymbolLineageFact
+     if missing: decision["missing_named_owners"] = list(missing)
+     result["representation_decision"] = decision
+     return result
 +
++
++def _represented_response_candidate(
++    selected: SelectedSymbolLineageFacts,
++    *,
++    mode: str,
++    representation: str,
++    artifact_names: Mapping[str, str] | None,
++) -> dict:
 +    result = build_symbol_lineage_represented_payload(
 +        selected,
-+        representation="auto",
-+        artifact_names={},
++        representation=representation,
++        artifact_names=artifact_names,
 +    )
++    result["mode"] = mode
++    return result
 +
-     assert result["representation"] == "indexed"
--    assert result["representation_decision"]["missing_named_owners"] == ["A17/2"]
-+    assert (
-+        result["representation_decision"]["reason"]
-+        == "auto_indexed_named_identity_unavailable"
-+    )
-+    assert result["representation_decision"][
-+        "missing_named_owners"
-+    ] == ["A17/2"]
-+    assert (
-+        result["representation_decision"][
-+            "named_candidate_bytes"
-+        ]
-+        is None
-+    )
- 
- 
- def test_symbol_lineage_auto_named_and_material_indexed_saving():
-     selected = _selected_lineage_fixture()
--    named = build_symbol_lineage_represented_payload(selected, representation="auto", artifact_names={"A17/2": "pkg.mod::handler"})
-+    named = build_symbol_lineage_represented_payload(
++
++def build_symbol_lineage_represented_preview(
++    selected: SelectedSymbolLineageFacts,
++    *,
++    representation: str = "auto",
++    artifact_names: Mapping[str, str] | None = None,
++    candidate_mode: str = "fetch",
++) -> dict:
++    if candidate_mode not in {"auto", "fetch"}:
++        raise ValueError(
++            "candidate_mode must be 'auto' or 'fetch'."
++        )
++
++    candidate = _represented_response_candidate(
 +        selected,
-+        representation="auto",
-+        artifact_names={
-+            "A17/2": "pkg.mod::handler",
++        mode=candidate_mode,
++        representation=representation,
++        artifact_names=artifact_names,
++    )
++    sections = candidate["sections"]
++
++    result = {
++        "status": "resolved",
++        "mode": "preview",
++        "target": candidate["target"],
++        "available_sections": list(
++            selected.selected_sections
++        ),
++        "complete": selected.complete,
++        "metadata_consistent": (
++            selected.metadata_consistent
++        ),
++        "scope_state": selected.facts.scope_state,
++        "representation": candidate[
++            "representation"
++        ],
++        "requested_representation": candidate[
++            "requested_representation"
++        ],
++        "representation_decision": candidate[
++            "representation_decision"
++        ],
++        "candidate_response_bytes": (
++            mcp_rep.serialized_json_bytes(
++                candidate
++            )
++        ),
++        "section_sizes": {
++            name: {
++                "payload_bytes": (
++                    mcp_rep.serialized_json_bytes(
++                        value
++                    )
++                ),
++            }
++            for name, value in sections.items()
 +        },
++    }
++
++    if "resolver" in candidate:
++        result["resolver"] = candidate["resolver"]
++
++    return result
++
++
++def render_symbol_lineage_response(
++    selected: SelectedSymbolLineageFacts,
++    *,
++    mode: str = "auto",
++    sections: tuple[str, ...] | None = None,
++    representation: str = "auto",
++    artifact_names: Mapping[str, str] | None = None,
++    allow_large_output: bool = False,
++) -> str:
++    if not isinstance(
++        selected,
++        SelectedSymbolLineageFacts,
++    ):
++        raise TypeError(
++            "selected must be SelectedSymbolLineageFacts."
++        )
++    if not isinstance(allow_large_output, bool):
++        raise TypeError(
++            "allow_large_output must be a boolean."
++        )
++
++    plan = plan_symbol_lineage_response(
++        mode=mode,
++        sections=sections,
 +    )
 +
-+    named_decision = named["representation_decision"]
-     assert named["representation"] == "named"
--    repeated = tuple(replace(selected.connections.incoming[0], flow=replace(selected.connections.incoming[0].flow, local_id=f"incoming-{i}")) for i in range(20))
--    expanded = replace(selected, connections=SymbolLineageConnections(repeated, ()))
--    indexed = build_symbol_lineage_represented_payload(expanded, representation="auto", artifact_names={"A17/2": "pkg." + ("very_long_component." * 8) + "handler"})
-+    assert named_decision["reason"] == "auto_named"
-+    assert (
-+        named_decision["bytes_saved_by_indexed"]
-+        < mcp_rep.AUTO_NEGOTIATION_MIN_BYTES_SAVED
-+    )
-+    assert (
-+        named_decision["minimum_auto_saving_bytes"]
-+        == mcp_rep.AUTO_NEGOTIATION_MIN_BYTES_SAVED
-+    )
++    if (
++        selected.selected_sections
++        != plan.candidate_sections
++    ):
++        raise ValueError(
++            "selected sections do not match "
++            "the response plan."
++        )
 +
-+    repeated = tuple(
-+        replace(
-+            selected.connections.incoming[0],
-+            flow=replace(
-+                selected.connections.incoming[0].flow,
-+                local_id=f"incoming-{index:02d}",
++    if plan.mode == "preview":
++        result = build_symbol_lineage_represented_preview(
++            selected,
++            representation=representation,
++            artifact_names=artifact_names,
++            candidate_mode="fetch",
++        )
++        serialized = json.dumps(
++            result,
++            indent=2,
++            ensure_ascii=False,
++        )
++        return guard_large_output(
++            serialized,
++            allow_large_output=(
++                allow_large_output
++            ),
++            requested_count=len(
++                selected.selected_sections
++            ),
++            retry_instruction=(
++                "Retry preview with "
++                "allow_large_output=true."
 +            ),
 +        )
-+        for index in range(20)
++
++    candidate = _represented_response_candidate(
++        selected,
++        mode=plan.mode,
++        representation=representation,
++        artifact_names=artifact_names,
 +    )
-+    expanded = replace(
++    candidate_bytes = (
++        mcp_rep.serialized_json_bytes(
++            candidate
++        )
++    )
++
++    if (
++        plan.mode == "auto"
++        and candidate_bytes
++        > SYMBOL_LINEAGE_AUTO_FETCH_THRESHOLD_BYTES
++    ):
++        preview = (
++            build_symbol_lineage_represented_preview(
++                selected,
++                representation=representation,
++                artifact_names=artifact_names,
++                candidate_mode="auto",
++            )
++        )
++        preview["auto_fetch"] = {
++            "threshold_bytes": (
++                SYMBOL_LINEAGE_AUTO_FETCH_THRESHOLD_BYTES
++            ),
++            "candidate_response_bytes": (
++                candidate_bytes
++            ),
++            "decision": "preview",
++        }
++        serialized = json.dumps(
++            preview,
++            indent=2,
++            ensure_ascii=False,
++        )
++        return guard_large_output(
++            serialized,
++            allow_large_output=(
++                allow_large_output
++            ),
++            requested_count=len(
++                selected.selected_sections
++            ),
++            retry_instruction=(
++                "Retry preview with "
++                "allow_large_output=true."
++            ),
++        )
++
++    serialized = json.dumps(
++        candidate,
++        indent=2,
++        ensure_ascii=False,
++    )
++
++    return guard_large_output(
++        serialized,
++        allow_large_output=allow_large_output,
++        requested_count=len(
++            selected.selected_sections
++        ),
++        retry_instruction=(
++            "Retry with fewer lineage sections "
++            "or allow_large_output=true."
++        ),
++    )
+diff --git a/tests/mcp/test_lineage_response.py b/tests/mcp/test_lineage_response.py
+index 765cb34..5739464 100644
+--- a/tests/mcp/test_lineage_response.py
++++ b/tests/mcp/test_lineage_response.py
+@@ -21,11 +21,14 @@ from contextor.core.lineage_query.service import (
+ )
+ from contextor.mcp import representation as mcp_rep
+ from contextor.mcp.lineage_response import (
++    SYMBOL_LINEAGE_AUTO_FETCH_THRESHOLD_BYTES,
+     SymbolLineageResponsePlan,
+     build_symbol_lineage_payload,
+     build_symbol_lineage_preview,
+     build_symbol_lineage_represented_payload,
++    build_symbol_lineage_represented_preview,
+     plan_symbol_lineage_response,
++    render_symbol_lineage_response,
+ )
+ 
+ 
+@@ -55,6 +58,51 @@ def _selected_lineage_fixture():
+     return SelectedSymbolLineageFacts(facts, SYMBOL_LINEAGE_SECTION_ORDER, interface, SymbolLineageConnections((incoming,), ()), (binding_flow, dynamic_flow), (), (), (), (), (), LineageSurfaceSection((), (surface_match,)), (dynamic_flow,))
+ 
+ 
++def _with_repeated_connections(
++    selected,
++    count,
++):
++    template = selected.connections.incoming[0]
++    repeated = tuple(
++        replace(
++            template,
++            flow=replace(
++                template.flow,
++                local_id=f"incoming-{index:03d}",
++            ),
++        )
++        for index in range(count)
++    )
++    return replace(
 +        selected,
 +        connections=SymbolLineageConnections(
 +            repeated,
 +            (),
 +        ),
 +    )
-+    long_name = (
-+        "pkg."
-+        + ("very_long_component." * 8)
-+        + "handler"
++
++
++def _with_empty_selected_sections(selected):
++    return replace(
++        selected,
++        interface=replace(
++            selected.interface,
++            definitions=(),
++            descriptors=(),
++            parameter_defaults=(),
++        ),
++        connections=SymbolLineageConnections((), ()),
++        bindings=(),
++        parameter_flows=(),
++        calls_interfaces=(),
++        returns=(),
++        state=(),
++        callbacks=(),
++        surfaces=LineageSurfaceSection((), ()),
++        unresolved_dynamic_boundaries=(),
 +    )
 +
-+    indexed = build_symbol_lineage_represented_payload(
-+        expanded,
-+        representation="auto",
-+        artifact_names={
-+            "A17/2": long_name,
-+        },
++
+ def test_auto_plans_complete_symbol_candidate_for_size_decision():
+     assert plan_symbol_lineage_response(mode=" AUTO ") == SymbolLineageResponsePlan("auto", SYMBOL_LINEAGE_SECTION_ORDER, True, True)
+ 
+@@ -368,3 +416,250 @@ def test_symbol_lineage_representation_validates_request_contract():
+                 "A17/2": "",
+             },
+         )
++
++
++def test_symbol_lineage_auto_returns_full_payload_below_threshold():
++    selected = _with_empty_selected_sections(
++        _selected_lineage_fixture()
 +    )
 +
-+    indexed_decision = (
-+        indexed["representation_decision"]
++    rendered = render_symbol_lineage_response(
++        selected,
++        mode="auto",
++        representation="indexed",
 +    )
-     assert indexed["representation"] == "indexed"
++    result = json.loads(rendered)
++
++    assert result["status"] == "resolved"
++    assert result["mode"] == "auto"
++    assert result["representation"] == "indexed"
++    assert "sections" in result
++    assert "auto_fetch" not in result
 +    assert (
-+        indexed_decision["reason"]
-+        == "auto_indexed_material_saving"
++        mcp_rep.serialized_json_bytes(result)
++        <= SYMBOL_LINEAGE_AUTO_FETCH_THRESHOLD_BYTES
++    )
++
++
++def test_symbol_lineage_auto_falls_back_to_exact_representation_aware_preview():
++    selected = _with_repeated_connections(
++        _selected_lineage_fixture(),
++        30,
++    )
++
++    rendered = render_symbol_lineage_response(
++        selected,
++        mode="auto",
++        representation="indexed",
++    )
++    result = json.loads(rendered)
++
++    assert result["status"] == "resolved"
++    assert result["mode"] == "preview"
++    assert result["representation"] == "indexed"
++    assert "sections" not in result
++    assert result["auto_fetch"]["decision"] == "preview"
++    assert result["auto_fetch"]["threshold_bytes"] == (
++        SYMBOL_LINEAGE_AUTO_FETCH_THRESHOLD_BYTES
 +    )
 +    assert (
-+        indexed_decision["bytes_saved_by_indexed"]
-+        >= mcp_rep.AUTO_NEGOTIATION_MIN_BYTES_SAVED
++        result["auto_fetch"]["candidate_response_bytes"]
++        > SYMBOL_LINEAGE_AUTO_FETCH_THRESHOLD_BYTES
 +    )
 +    assert (
-+        indexed_decision["named_candidate_bytes"]
-+        - indexed_decision["indexed_candidate_bytes"]
-+        == indexed_decision["bytes_saved_by_indexed"]
++        result["candidate_response_bytes"]
++        == result["auto_fetch"][
++            "candidate_response_bytes"
++        ]
 +    )
- 
- 
- def test_symbol_lineage_representation_validates_request_contract():
-@@ -182,3 +354,17 @@ def test_symbol_lineage_representation_validates_request_contract():
-         build_symbol_lineage_represented_payload(selected, representation="other")
-     with pytest.raises(TypeError, match="artifact_names must be a mapping."):
-         build_symbol_lineage_represented_payload(selected, representation="named", artifact_names=[])
++
++
++def test_symbol_lineage_explicit_preview_sizes_exact_represented_fetch_candidate():
++    selected = _selected_lineage_fixture()
++    names = {
++        "A17/2": "pkg.mod::handler",
++    }
++
++    preview = build_symbol_lineage_represented_preview(
++        selected,
++        representation="named",
++        artifact_names=names,
++        candidate_mode="fetch",
++    )
++    candidate = build_symbol_lineage_represented_payload(
++        selected,
++        representation="named",
++        artifact_names=names,
++    )
++    candidate["mode"] = "fetch"
++
++    assert preview["mode"] == "preview"
++    assert preview["representation"] == "named"
++    assert "sections" not in preview
++    assert preview["candidate_response_bytes"] == (
++        mcp_rep.serialized_json_bytes(
++            candidate
++        )
++    )
++    for name, value in candidate[
++        "sections"
++    ].items():
++        assert preview["section_sizes"][name] == {
++            "payload_bytes": (
++                mcp_rep.serialized_json_bytes(
++                    value
++                )
++            )
++        }
++
++
++def test_symbol_lineage_fetch_returns_only_explicit_selected_sections():
++    selected = _selected_lineage_fixture()
++    reduced = replace(
++        selected,
++        selected_sections=(
++            "interface",
++            "connections",
++        ),
++        bindings=None,
++        parameter_flows=None,
++        calls_interfaces=None,
++        returns=None,
++        state=None,
++        callbacks=None,
++        surfaces=None,
++        unresolved_dynamic_boundaries=None,
++    )
++
++    rendered = render_symbol_lineage_response(
++        reduced,
++        mode="fetch",
++        sections=(
++            "connections",
++            "interface",
++        ),
++        representation="indexed",
++    )
++    result = json.loads(rendered)
++
++    assert result["status"] == "resolved"
++    assert result["mode"] == "fetch"
++    assert result["selected_sections"] == [
++        "interface",
++        "connections",
++    ]
++    assert tuple(result["sections"]) == (
++        "interface",
++        "connections",
++    )
++
++
++def test_symbol_lineage_renderer_fails_closed_on_selection_plan_mismatch():
++    selected = _selected_lineage_fixture()
++
 +    with pytest.raises(
 +        ValueError,
 +        match=(
-+            "artifact_names must map non-empty "
-+            "artifact IDs to non-empty names."
++            "selected sections do not match "
++            "the response plan."
 +        ),
 +    ):
-+        build_symbol_lineage_represented_payload(
++        render_symbol_lineage_response(
 +            selected,
-+            representation="named",
-+            artifact_names={
-+                "A17/2": "",
-+            },
++            mode="fetch",
++            sections=("interface",),
++            representation="indexed",
++        )
++
++
++def test_symbol_lineage_fetch_uses_existing_large_output_guard():
++    selected = _with_repeated_connections(
++        _selected_lineage_fixture(),
++        80,
++    )
++    reduced = replace(
++        selected,
++        selected_sections=("connections",),
++        interface=None,
++        bindings=None,
++        parameter_flows=None,
++        calls_interfaces=None,
++        returns=None,
++        state=None,
++        callbacks=None,
++        surfaces=None,
++        unresolved_dynamic_boundaries=None,
++    )
++
++    guarded = json.loads(
++        render_symbol_lineage_response(
++            reduced,
++            mode="fetch",
++            sections=("connections",),
++            representation="indexed",
++        )
++    )
++
++    assert guarded["status"] == (
++        "confirmation_required"
++    )
++    assert guarded["warning_threshold_bytes"] == (
++        15 * 1024
++    )
++    assert guarded["retry"] == {
++        "allow_large_output": True,
++    }
++
++    full = json.loads(
++        render_symbol_lineage_response(
++            reduced,
++            mode="fetch",
++            sections=("connections",),
++            representation="indexed",
++            allow_large_output=True,
++        )
++    )
++
++    assert full["status"] == "resolved"
++    assert full["mode"] == "fetch"
++    assert "sections" in full
++    assert (
++        mcp_rep.serialized_json_bytes(full)
++        > 15 * 1024
++    )
++
++
++def test_symbol_lineage_auto_progressive_disclosure_precedes_large_output_guard():
++    selected = _with_repeated_connections(
++        _selected_lineage_fixture(),
++        80,
++    )
++
++    result = json.loads(
++        render_symbol_lineage_response(
++            selected,
++            mode="auto",
++            representation="indexed",
++        )
++    )
++
++    assert result["status"] == "resolved"
++    assert result["mode"] == "preview"
++    assert "sections" not in result
++    assert result["auto_fetch"]["decision"] == "preview"
++    assert result["status"] != (
++        "confirmation_required"
++    )
++
++
++def test_symbol_lineage_renderer_validates_allow_large_output():
++    with pytest.raises(
++        TypeError,
++        match=(
++            "allow_large_output must be a boolean."
++        ),
++    ):
++        render_symbol_lineage_response(
++            _selected_lineage_fixture(),
++            allow_large_output=1,
 +        )
 ```
+

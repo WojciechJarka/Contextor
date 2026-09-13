@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from collections.abc import Mapping
 
@@ -9,9 +10,13 @@ from contextor.core.lineage_query.service import (
     LineageFlowMatch, LineageSurfaceMatch, SelectedSymbolLineageFacts, TargetInterfaceFacts,
 )
 from contextor.mcp import representation as mcp_rep
+from contextor.mcp.output_guard import (
+    guard_large_output,
+)
 
 
 SYMBOL_LINEAGE_MODES = ("auto", "preview", "fetch")
+SYMBOL_LINEAGE_AUTO_FETCH_THRESHOLD_BYTES = 5120
 
 
 @dataclass(frozen=True)
@@ -166,3 +171,216 @@ def build_symbol_lineage_represented_payload(selected: SelectedSymbolLineageFact
     if missing: decision["missing_named_owners"] = list(missing)
     result["representation_decision"] = decision
     return result
+
+
+def _represented_response_candidate(
+    selected: SelectedSymbolLineageFacts,
+    *,
+    mode: str,
+    representation: str,
+    artifact_names: Mapping[str, str] | None,
+) -> dict:
+    result = build_symbol_lineage_represented_payload(
+        selected,
+        representation=representation,
+        artifact_names=artifact_names,
+    )
+    result["mode"] = mode
+    return result
+
+
+def build_symbol_lineage_represented_preview(
+    selected: SelectedSymbolLineageFacts,
+    *,
+    representation: str = "auto",
+    artifact_names: Mapping[str, str] | None = None,
+    candidate_mode: str = "fetch",
+) -> dict:
+    if candidate_mode not in {"auto", "fetch"}:
+        raise ValueError(
+            "candidate_mode must be 'auto' or 'fetch'."
+        )
+
+    candidate = _represented_response_candidate(
+        selected,
+        mode=candidate_mode,
+        representation=representation,
+        artifact_names=artifact_names,
+    )
+    sections = candidate["sections"]
+
+    result = {
+        "status": "resolved",
+        "mode": "preview",
+        "target": candidate["target"],
+        "available_sections": list(
+            selected.selected_sections
+        ),
+        "complete": selected.complete,
+        "metadata_consistent": (
+            selected.metadata_consistent
+        ),
+        "scope_state": selected.facts.scope_state,
+        "representation": candidate[
+            "representation"
+        ],
+        "requested_representation": candidate[
+            "requested_representation"
+        ],
+        "representation_decision": candidate[
+            "representation_decision"
+        ],
+        "candidate_response_bytes": (
+            mcp_rep.serialized_json_bytes(
+                candidate
+            )
+        ),
+        "section_sizes": {
+            name: {
+                "payload_bytes": (
+                    mcp_rep.serialized_json_bytes(
+                        value
+                    )
+                ),
+            }
+            for name, value in sections.items()
+        },
+    }
+
+    if "resolver" in candidate:
+        result["resolver"] = candidate["resolver"]
+
+    return result
+
+
+def render_symbol_lineage_response(
+    selected: SelectedSymbolLineageFacts,
+    *,
+    mode: str = "auto",
+    sections: tuple[str, ...] | None = None,
+    representation: str = "auto",
+    artifact_names: Mapping[str, str] | None = None,
+    allow_large_output: bool = False,
+) -> str:
+    if not isinstance(
+        selected,
+        SelectedSymbolLineageFacts,
+    ):
+        raise TypeError(
+            "selected must be SelectedSymbolLineageFacts."
+        )
+    if not isinstance(allow_large_output, bool):
+        raise TypeError(
+            "allow_large_output must be a boolean."
+        )
+
+    plan = plan_symbol_lineage_response(
+        mode=mode,
+        sections=sections,
+    )
+
+    if (
+        selected.selected_sections
+        != plan.candidate_sections
+    ):
+        raise ValueError(
+            "selected sections do not match "
+            "the response plan."
+        )
+
+    if plan.mode == "preview":
+        result = build_symbol_lineage_represented_preview(
+            selected,
+            representation=representation,
+            artifact_names=artifact_names,
+            candidate_mode="fetch",
+        )
+        serialized = json.dumps(
+            result,
+            indent=2,
+            ensure_ascii=False,
+        )
+        return guard_large_output(
+            serialized,
+            allow_large_output=(
+                allow_large_output
+            ),
+            requested_count=len(
+                selected.selected_sections
+            ),
+            retry_instruction=(
+                "Retry preview with "
+                "allow_large_output=true."
+            ),
+        )
+
+    candidate = _represented_response_candidate(
+        selected,
+        mode=plan.mode,
+        representation=representation,
+        artifact_names=artifact_names,
+    )
+    candidate_bytes = (
+        mcp_rep.serialized_json_bytes(
+            candidate
+        )
+    )
+
+    if (
+        plan.mode == "auto"
+        and candidate_bytes
+        > SYMBOL_LINEAGE_AUTO_FETCH_THRESHOLD_BYTES
+    ):
+        preview = (
+            build_symbol_lineage_represented_preview(
+                selected,
+                representation=representation,
+                artifact_names=artifact_names,
+                candidate_mode="auto",
+            )
+        )
+        preview["auto_fetch"] = {
+            "threshold_bytes": (
+                SYMBOL_LINEAGE_AUTO_FETCH_THRESHOLD_BYTES
+            ),
+            "candidate_response_bytes": (
+                candidate_bytes
+            ),
+            "decision": "preview",
+        }
+        serialized = json.dumps(
+            preview,
+            indent=2,
+            ensure_ascii=False,
+        )
+        return guard_large_output(
+            serialized,
+            allow_large_output=(
+                allow_large_output
+            ),
+            requested_count=len(
+                selected.selected_sections
+            ),
+            retry_instruction=(
+                "Retry preview with "
+                "allow_large_output=true."
+            ),
+        )
+
+    serialized = json.dumps(
+        candidate,
+        indent=2,
+        ensure_ascii=False,
+    )
+
+    return guard_large_output(
+        serialized,
+        allow_large_output=allow_large_output,
+        requested_count=len(
+            selected.selected_sections
+        ),
+        retry_instruction=(
+            "Retry with fewer lineage sections "
+            "or allow_large_output=true."
+        ),
+    )
