@@ -119,6 +119,11 @@
       "short_description": "Return a bounded callers/callees neighborhood from canonical intra-module symbol-call facts without a repository scan or source-derived call reconstruction."
     },
     {
+      "tool": "get_symbol_lineage",
+      "filename": "get_symbol_lineage.json",
+      "short_description": "Read canonical static value/data lineage for one exact symbol from LIVE state with bounded progressive disclosure."
+    },
+    {
       "tool": "get_name_collisions",
       "filename": "get_name_collisions.json",
       "short_description": "Return bounded canonical name-collision diagnostics with explicit freshness, semantic filters and progressive representations."

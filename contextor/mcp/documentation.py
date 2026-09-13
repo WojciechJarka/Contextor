@@ -144,6 +144,10 @@ def query_documentation(
             }
         return {
             "version": index["version"],
+            "documentation_hint": (
+                "For full documentation of a tool, call "
+                "get_mcp_documentation with tool=<tool_name>."
+            ),
             "tools": [
                 {
                     "tool": entry["tool"],

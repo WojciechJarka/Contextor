@@ -1,329 +1,285 @@
-# D1P1 — get_symbol_lineage MCP adapter
+# F2L D1P2 — public registration and documentation
 
-STATUS: success
+STATUS: BLOCKED
 
 FILES_CHANGED:
-- contextor/mcp/tools/get_symbol_lineage.py
-- tests/mcp/tools/test_get_symbol_lineage.py
+- contextor/mcp_server.py
+- contextor/mcp/docs/index.json
+- contextor/mcp/docs/get_symbol_lineage.json
+- contextor/mcp/documentation.py
+- contextor/mcp/docs/get_mcp_documentation.json
+- tests/test_mcp_documentation.py
 
-PLANNER_FIRST_PROOF: The adapter validates representation and output options, then calls plan_symbol_lineage_response before resolving the repository path or making the LIVE query. The parametrized invalid-presentation test makes any LIVE call fail and passes.
+REGISTRATION_PROOF: get_symbol_lineage is imported, listed in the public tool tuple after get_symbol_call_context, and registered through register_mcp_tool without a literal description.
 
-SINGLE_NARROW_QUERY_PROOF: The resolved path makes exactly one call to mcp_runtime.query_live_symbol_lineage_narrow with plan.candidate_sections. No engine, snapshot, registry, source, or direct connection path is used.
+PUBLIC_SIGNATURE_PROOF: BLOCKED. The required D1P1 adapter begins with from __future__ import annotations. Python therefore preserves all annotations as strings, and FastMCP exposes str(inspect.signature(tool.fn)) with quoted annotations. The exact D1P2 assertion requires unquoted annotations. Satisfying it would require changing the forbidden D1P1 adapter or changing the explicitly supplied D1P2 test assertion.
 
-FETCH_SECTION_CANONICALIZATION_PROOF: The fetch test confirms canonical ("interface", "state") is sent to LIVE while the original public-order tuple ("state", "interface") is preserved for the renderer.
+DOC_PARITY_PROOF: The indexed JSON entry, matching full per-tool JSON document, and registration have been added atomically. The existing public docs-parity test passes.
 
-TRANSPORT_ERROR_PROOF: A non-ok D1O4 transport result is mapped to normal MCP error JSON preserving error, bounded detail, and canonical_revision, without renderer invocation.
+INDEX_DESCRIPTION_PROOF: The index short description exactly matches the required public FastMCP description; its assertion passes.
 
-SEMANTIC_STATUS_PROOF: unavailable, invalid, not_found, and ambiguous retain their distinct semantic statuses; non-resolved responses retain the core-provided state_freshness unchanged.
+DOCUMENTATION_HINT_PROOF: The default index response now includes the prescribed documentation_hint.
 
-AMBIGUITY_PROOF: The ambiguous test asserts both exact candidates are returned in core order with no adapter-side selection.
+LAZY_DOC_LOAD_PROOF: The default-index test still observes only documentation.INDEX_PATH; get_symbol_lineage lazy-document test confirms index, index, selected document loading order.
 
-RENDER_DELEGATION_PROOF: Resolved results pass selected facts, owner_names, state_freshness, mode, public requested sections, representation, and allow_large_output directly to render_symbol_lineage_response.
-
-NO_ENGINE_PROOF: The no-engine test replaces get_or_init_engine with an assertion failure; the adapter resolves successfully through the narrow LIVE transport.
+LEGACY_SIGNATURE_PROOF: Existing legacy signature coverage passes unchanged.
 
 TESTS_RUN:
-- .\.venv\Scripts\python.exe -m pytest -q tests\mcp\tools\test_get_symbol_lineage.py tests\mcp\test_runtime_lineage_query.py tests\mcp\test_lineage_response.py
-  Result: 52 passed in 10.22s
-- .\.venv\Scripts\python.exe -m py_compile contextor\mcp\tools\get_symbol_lineage.py tests\mcp\tools\test_get_symbol_lineage.py
+- .\.venv\Scripts\python.exe -m pytest -q tests\test_mcp_documentation.py tests\mcp\tools\test_public_mcp_docs_parity.py tests\mcp\tools\test_get_symbol_lineage.py
+  Result: 27 passed, 1 failed.
+  Failure: test_get_symbol_lineage_is_registered_with_documented_public_signature; quoted annotations from D1P1 future-annotations conflict with required unquoted literal signature.
+- .\.venv\Scripts\python.exe -m py_compile contextor\mcp_server.py contextor\mcp\documentation.py tests\test_mcp_documentation.py
   Result: passed
-- git diff --check -- contextor/mcp/tools/get_symbol_lineage.py tests/mcp/tools/test_get_symbol_lineage.py
+- JSON validation for index.json, get_symbol_lineage.json, and get_mcp_documentation.json
+  Result: passed
+- git diff --check for the six D1P2 files
   Result: passed
 
 ## ACTUAL_DIFF
 
 ```diff
-diff --git a/contextor/mcp/tools/get_symbol_lineage.py b/contextor/mcp/tools/get_symbol_lineage.py
-new file mode 100644
-index 0000000..7a1e171
---- /dev/null
-+++ b/contextor/mcp/tools/get_symbol_lineage.py
-@@ -0,0 +1,168 @@
-+from __future__ import annotations
-+
-+import json
-+from pathlib import Path
-+
-+from contextor.core.lineage_query.service import (
-+    LineageTargetResolution,
-+    ResolvedLineageTarget,
+contextor/mcp_server.py
+diff --git a/contextor/mcp_server.py b/contextor/mcp_server.py
+index d9126af..8c5bb61 100644
+--- a/contextor/mcp_server.py
++++ b/contextor/mcp_server.py
+@@ -197,6 +197,9 @@ from contextor.mcp.tools.get_source_range import get_source_range as _get_source
+ from contextor.mcp.tools.get_symbol_call_context import (
+     get_symbol_call_context as _get_symbol_call_context_impl,
+ )
++from contextor.mcp.tools.get_symbol_lineage import (
++    get_symbol_lineage as _get_symbol_lineage_impl,
 +)
-+from contextor.mcp import representation as mcp_rep
-+from contextor.mcp import runtime as mcp_runtime
-+from contextor.mcp.lineage_response import (
-+    plan_symbol_lineage_response,
-+    render_symbol_lineage_response,
+ from contextor.mcp.tools.get_artifacts_for_module import (
+     get_artifacts_for_module as _get_artifacts_for_module_impl,
+ )
+@@ -516,6 +519,7 @@ REGISTERED_MCP_TOOL_NAMES: tuple[str, ...] = (
+     "search_source",
+     "get_source_range",
+     "get_symbol_call_context",
++    "get_symbol_lineage",
+     "get_name_collisions",
+     "get_mcp_documentation",
+     "get_module_blast_radius",
+@@ -562,6 +566,10 @@ lookup_artifact_by_symbol = register_mcp_tool(_lookup_artifact_by_symbol_impl, n
+ search_source = register_mcp_tool(_search_source_impl, name="search_source")
+ get_source_range = register_mcp_tool(_get_source_range_impl, name="get_source_range")
+ get_symbol_call_context = register_mcp_tool(_get_symbol_call_context_impl, name="get_symbol_call_context")
++get_symbol_lineage = register_mcp_tool(
++    _get_symbol_lineage_impl,
++    name="get_symbol_lineage",
 +)
-+
-+
-+def _error(code: str, **details) -> str:
-+    return json.dumps(
-+        {"status": "error", "error": code, **details},
-+        indent=2,
-+        ensure_ascii=False,
-+    )
-+
-+
-+def _target_payload(target: ResolvedLineageTarget) -> dict:
-+    return {
-+        "artifact_id": target.artifact_id,
-+        "qualified_name": target.qualified_name,
-+        "module": target.module_name,
-+        "symbol": target.symbol_name,
-+        "resolution": target.resolution,
-+    }
-+
-+
-+def _resolution_response(
-+    resolution: LineageTargetResolution,
-+    *,
-+    state_freshness: dict[str, object],
-+    unavailable_reason: str | None = None,
-+) -> str:
-+    if resolution.status == "unavailable":
-+        return json.dumps(
-+            {
-+                "status": "unavailable",
-+                "symbol": resolution.query,
-+                "reason": unavailable_reason,
-+                "state_freshness": state_freshness,
-+            },
-+            indent=2,
-+            ensure_ascii=False,
-+        )
-+    if resolution.status == "invalid":
-+        return json.dumps(
-+            {
-+                "status": "invalid",
-+                "error": "exact_symbol_required",
-+                "symbol": resolution.query,
-+                "expected": "active artifact ID or exact module::symbol identity",
-+                "state_freshness": state_freshness,
-+            },
-+            indent=2,
-+            ensure_ascii=False,
-+        )
-+    if resolution.status == "not_found":
-+        return json.dumps(
-+            {"status": "not_found", "symbol": resolution.query, "state_freshness": state_freshness},
-+            indent=2,
-+            ensure_ascii=False,
-+        )
-+    if resolution.status == "ambiguous":
-+        return json.dumps(
-+            {
-+                "status": "ambiguous",
-+                "symbol": resolution.query,
-+                "candidates": [_target_payload(candidate) for candidate in resolution.candidates],
-+                "state_freshness": state_freshness,
-+            },
-+            indent=2,
-+            ensure_ascii=False,
-+        )
-+    return _error(
-+        "canonical_lineage_resolution_invalid",
-+        resolution_status=resolution.status,
-+    )
-+
-+
-+def get_symbol_lineage(
-+    repo_path: str,
-+    symbol: str,
-+    mode: str = "auto",
-+    sections: list[str] | None = None,
-+    representation: str = "auto",
-+    allow_large_output: bool = False,
-+) -> str:
-+    if not isinstance(repo_path, str):
-+        return _error("invalid_repo_path", expected="string")
-+    if not isinstance(symbol, str):
-+        return _error(
-+            "invalid_symbol",
-+            expected="active artifact ID or exact module::symbol identity",
-+        )
-+    if sections is not None and not isinstance(sections, list):
-+        return _error("invalid_sections", expected="list of section names or null")
-+    if not isinstance(representation, str):
-+        return _error(
-+            "invalid_representation",
-+            allowed=sorted(mcp_rep.ALLOWED_REPRESENTATIONS),
-+        )
-+    normalized_representation = representation.strip().lower()
-+    if not mcp_rep.is_supported_representation(normalized_representation):
-+        return _error(
-+            "invalid_representation",
-+            allowed=sorted(mcp_rep.ALLOWED_REPRESENTATIONS),
-+        )
-+    if not isinstance(allow_large_output, bool):
-+        return _error("invalid_allow_large_output")
-+
-+    requested_sections = None if sections is None else tuple(sections)
-+    try:
-+        plan = plan_symbol_lineage_response(mode=mode, sections=requested_sections)
-+    except (TypeError, ValueError) as exc:
-+        return _error("invalid_request", message=str(exc))
-+
-+    root = Path(repo_path).expanduser().resolve()
-+    if not root.is_dir():
-+        return _error("repository_not_found", repo_path=str(root))
-+
-+    transport = mcp_runtime.query_live_symbol_lineage_narrow(
-+        root,
-+        query=symbol,
-+        sections=plan.candidate_sections,
-+    )
-+    if transport.status != "ok":
-+        details = {}
-+        if transport.detail is not None:
-+            details["detail"] = transport.detail
-+        if transport.revision is not None:
-+            details["canonical_revision"] = transport.revision
-+        return _error(transport.error or "canonical_live_query_failed", **details)
-+
-+    result = transport.result
-+    if result is None:
-+        return _error("canonical_query_response_invalid")
-+    resolution = result.resolution
-+    if resolution.status != "resolved" or resolution.target is None:
-+        return _resolution_response(
-+            resolution,
-+            state_freshness=result.state_freshness,
-+            unavailable_reason=result.unavailable_reason,
-+        )
-+    if result.selected is None:
-+        return _error(
-+            "canonical_query_response_invalid",
-+            message="Resolved lineage target returned no selected facts.",
-+        )
-+    try:
-+        return render_symbol_lineage_response(
-+            result.selected,
-+            mode=plan.mode,
-+            sections=requested_sections,
-+            representation=normalized_representation,
-+            owner_names=result.owner_names,
-+            state_freshness=result.state_freshness,
-+            allow_large_output=allow_large_output,
-+        )
-+    except (TypeError, ValueError) as exc:
-+        return _error("lineage_response_failed", message=str(exc))
+ get_name_collisions = register_mcp_tool(_get_name_collisions_impl, name="get_name_collisions")
+ get_mcp_documentation = register_mcp_tool(_get_mcp_documentation_impl, name="get_mcp_documentation")
+ get_module_blast_radius = register_mcp_tool(_get_module_blast_radius_impl, name="get_module_blast_radius")
 
-diff --git a/tests/mcp/tools/test_get_symbol_lineage.py b/tests/mcp/tools/test_get_symbol_lineage.py
+contextor/mcp/documentation.py
+diff --git a/contextor/mcp/documentation.py b/contextor/mcp/documentation.py
+index 6b4e0fb..5f0c5eb 100644
+--- a/contextor/mcp/documentation.py
++++ b/contextor/mcp/documentation.py
+@@ -144,6 +144,10 @@ def query_documentation(
+             }
+         return {
+             "version": index["version"],
++            "documentation_hint": (
++                "For full documentation of a tool, call "
++                "get_mcp_documentation with tool=<tool_name>."
++            ),
+             "tools": [
+                 {
+                     "tool": entry["tool"],
+
+contextor/mcp/docs/index.json
+diff --git a/contextor/mcp/docs/index.json b/contextor/mcp/docs/index.json
+index 77d47e0..df59a38 100644
+--- a/contextor/mcp/docs/index.json
++++ b/contextor/mcp/docs/index.json
+@@ -118,6 +118,11 @@
+       "filename": "get_symbol_call_context.json",
+       "short_description": "Return a bounded callers/callees neighborhood from canonical intra-module symbol-call facts without a repository scan or source-derived call reconstruction."
+     },
++    {
++      "tool": "get_symbol_lineage",
++      "filename": "get_symbol_lineage.json",
++      "short_description": "Read canonical static value/data lineage for one exact symbol from LIVE state with bounded progressive disclosure."
++    },
+     {
+       "tool": "get_name_collisions",
+       "filename": "get_name_collisions.json",
+
+diff --git a/contextor/mcp/docs/get_symbol_lineage.json b/contextor/mcp/docs/get_symbol_lineage.json
 new file mode 100644
-index 0000000..e5fc4c7
+index 0000000..a94852e
 --- /dev/null
-+++ b/tests/mcp/tools/test_get_symbol_lineage.py
-@@ -0,0 +1,111 @@
-+import json
-+from types import SimpleNamespace
++++ b/contextor/mcp/docs/get_symbol_lineage.json
+@@ -0,0 +1,51 @@
++{
++  "version": "1.0.0",
++  "tool": "get_symbol_lineage",
++  "purpose": [
++    "Return canonical static value/data lineage for one exact symbol from the already-materialized LIVE lineage state without reconstructing lineage from source or loading the complete RepositoryAnalysisState into the MCP process."
++  ],
++  "parameters": [
++    "repo_path (string, required): canonical repository root.",
++    "symbol (string, required): active artifact ID or exact module::symbol identity; plain leaves and fuzzy identities are not accepted.",
++    "mode (auto|preview|fetch, default \"auto\"): progressive disclosure mode. auto evaluates all canonical lineage sections and returns the complete represented payload only when it fits the 5120-byte auto threshold; preview returns section costs without section payloads; fetch requires an explicit non-empty sections list.",
++    "sections (array or null, default null): explicit semantic sections for fetch mode only. Valid names are interface, connections, bindings, parameter_flows, calls_interfaces, returns, state, callbacks, surfaces, and unresolved_dynamic_boundaries.",
++    "representation (named|indexed|auto, default \"auto\"): semantic-owner identity representation. named uses canonical module/artifact names when available; indexed retains canonical owner IDs; auto applies exact serialized-size negotiation.",
++    "allow_large_output (boolean, default false): approve a selected final payload above the shared 15360-byte output threshold."
++  ],
++  "behavior": [
++    "Exact target resolution is canonical and fail-closed. Active artifact IDs and exact module::symbol identities are accepted; unqualified leaves, fuzzy matches, and recovery identities are not promoted to targets.",
++    "The MCP process does not hydrate an IncrementalAnalysisEngine or request a canonical state snapshot. It connects only to an already-running verified LIVE authority and sends one narrow canonical_query request containing the target and planned semantic sections.",
++    "The LIVE owner answers from its already-hydrated canonical RAM lineage state under one server revision lock. Query execution does not parse source, read the persistent identity registry, materialize lineage, or enumerate all lineage slices for exact target lookup.",
++    "Semantic sections are selected before transport. auto and preview request the complete canonical section set; fetch sends only the requested sections in canonical section order.",
++    "Sections describe the target interface, direct cross-source connections, bindings, parameter flows, calls/interfaces, returns, state access, callbacks, surfaces, and unresolved/dynamic boundaries. get_symbol_lineage does not perform recursive lineage traversal.",
++    "Representation applies only to canonical SemanticEndpoint owners. Semantic owners may be module IDs or artifact IDs. Indexed output exposes lookup_index_entries as the resolver for both ID kinds; occurrence and symbolic endpoint identities are not rewritten.",
++    "auto selects indexed representation only when named identities are unavailable or indexed output saves at least 512 serialized bytes; otherwise it emits named output.",
++    "For mode=auto, a represented complete candidate above 5120 UTF-8 bytes becomes a representation-aware preview before the general large-output guard runs. A candidate exactly at 5120 bytes may be returned.",
++    "The selected final response uses the shared 15360-byte output guard. Explicit fetch above that threshold requires allow_large_output=true.",
++    "invalid, not_found, ambiguous, unavailable, and resolved are distinct semantic outcomes. Ambiguous exact identities are returned as candidates and are never guessed."
++  ],
++  "freshness": [
++    "Requires an already-running verified canonical LIVE authority. The tool does not start LIVE and does not fall back to snapshot/disk hydration when LIVE is absent.",
++    "The response freshness envelope is derived from the same canonical RAM revision as the lineage facts. Outer IPC revision, lineage freshness revision, and selected-facts metadata revision must agree or the MCP transport fails closed.",
++    "workspace_sync is unverified in this narrow server-side lineage path because the tool intentionally performs no source-file hash or FileState read. canonical_state still reports retained last-known-good module state and resync requirements from canonical RAM lifecycle metadata.",
++    "The lineage and lineage-query-index families must be fresh with complete semantic anchor bindings for exact target resolution; otherwise the semantic result is unavailable rather than a fabricated not_found."
++  ],
++  "errors": [
++    "Invalid mode, section selection, representation, allow_large_output, repository path, or symbol shape returns a controlled error response before lineage execution where applicable.",
++    "canonical_live_unavailable means no verified running LIVE authority exists; the tool does not start one automatically.",
++    "canonical_live_transport_error and canonical_query_transport_error report authority/IPC transport failure without snapshot fallback.",
++    "canonical_query_response_invalid and canonical_query_revision_mismatch fail closed on malformed or cross-revision narrow responses.",
++    "lineage_response_failed reports a presentation-contract failure after a resolved canonical query.",
++    "Semantic target outcomes invalid, not_found, ambiguous, and unavailable are returned as their own statuses rather than collapsed into transport errors."
++  ],
++  "usage_notes": [
++    "Use mode=\"auto\" first for ordinary symbol inspection. If it returns preview because the complete result exceeds 5120 bytes, request mode=\"fetch\" with only the semantic sections needed for the current decision.",
++    "Use representation=\"auto\" unless stable compact IDs are specifically useful. Indexed semantic-owner IDs can be resolved in batches with lookup_index_entries.",
++    "Use get_symbol_implementation when literal Python signature text, parameter spelling, docstrings, or implementation source is required; get_symbol_lineage intentionally reports canonical semantic lineage rather than reconstructing source syntax.",
++    "Use get_symbol_call_context when the task specifically needs the existing bounded intra-module caller/callee neighborhood. get_symbol_lineage provides broader canonical value/data relationships but does not recursively walk a call graph."
++  ],
++  "examples": [
++    "get_symbol_lineage(repo_path, \"pkg.module::handler\", mode=\"auto\", representation=\"auto\")",
++    "get_symbol_lineage(repo_path, \"A2496/1\", mode=\"fetch\", sections=[\"interface\", \"connections\", \"state\"], representation=\"indexed\")"
++  ]
++}
+
+contextor/mcp/docs/get_mcp_documentation.json
+diff --git a/contextor/mcp/docs/get_mcp_documentation.json b/contextor/mcp/docs/get_mcp_documentation.json
+index 02a97e3..aed2f55 100644
+--- a/contextor/mcp/docs/get_mcp_documentation.json
++++ b/contextor/mcp/docs/get_mcp_documentation.json
+@@ -11,9 +11,9 @@
+   ],
+   "behavior": [
+     "1. Passive documentation discovery endpoint: zero repository, LIVE state, or report reads.",
+-    "2. When tool, tools, and sections are omitted (default), returns the versioned compact tool index with minimal summaries.",
++    "2. When tool, tools, and sections are omitted (default), returns the versioned compact tool index plus documentation_hint explaining how to fetch one tool's complete documentation.",
+     "3. Passing tool selects a single tool's full documentation. Passing tools selects a deterministic subset of tools.",
+-    "4. Passing sections restricts returned documentation to the requested sections. Passing sections without tool/tools applies the section filter to every tool in the index.",
++    "4. Passing sections restricts returned documentation to the requested sections for explicitly selected tool(s). Passing sections without tool/tools returns tool_selection_required.",
+     "5. Passing conflicting tool and tools parameters returns a controlled diagnostic.",
+     "6. Unknown tools or sections return invalid_documentation_query with available options."
+   ],
+@@ -24,7 +24,7 @@
+     "Unknown tools or sections return ``invalid_documentation_query`` with deterministic unknown and available lists."
+   ],
+   "usage_notes": [
+-    "Use the default index for discovery, then request complete documentation only for tools relevant to the current task."
++    "Use the default index and documentation_hint for discovery, then call get_mcp_documentation with tool=<tool_name> to request complete documentation only for tools relevant to the current task."
+   ],
+   "examples": [
+     "Use ``tools=['get_module_context']`` for one complete tool document, or pass selected ``sections`` for a narrower response."
+
+tests/test_mcp_documentation.py
+diff --git a/tests/test_mcp_documentation.py b/tests/test_mcp_documentation.py
+index 5512ce5..cf32bb2 100644
+--- a/tests/test_mcp_documentation.py
++++ b/tests/test_mcp_documentation.py
+@@ -72,7 +72,11 @@ def test_documentation_default_returns_only_index(monkeypatch):
+     result = json.loads(mcp_server.get_mcp_documentation.fn())
+ 
+     assert result["version"]
+-    assert len(result["tools"]) == 27
++    assert len(result["tools"]) == 28
++    assert result["documentation_hint"] == (
++        "For full documentation of a tool, call "
++        "get_mcp_documentation with tool=<tool_name>."
++    )
+     assert loaded == [documentation.INDEX_PATH]
+ 
+ 
+@@ -164,3 +168,69 @@ def test_documentation_reader_paths_are_package_local(monkeypatch):
+     docs_root = documentation.DOCS_DIR.resolve()
+     assert read_paths
+     assert all(path.parent == docs_root for path in read_paths)
 +
-+import pytest
 +
-+from contextor.core.lineage_query.live_query import LiveSymbolLineageQueryResult
-+from contextor.core.lineage_query.service import (
-+    SYMBOL_LINEAGE_SECTION_ORDER,
-+    LineageTargetResolution,
-+    ResolvedLineageTarget,
-+)
-+from contextor.mcp import runtime as mcp_runtime
-+from contextor.mcp.runtime import LiveSymbolLineageTransportResult
-+from contextor.mcp.tools import get_symbol_lineage as tool
++def test_get_symbol_lineage_is_registered_with_documented_public_signature():
++    tool = mcp_server.mcp._tool_manager._tools[
++        "get_symbol_lineage"
++    ]
++    index = documentation.load_documentation_index()
++    entry = next(
++        item
++        for item in index["tools"]
++        if item["tool"] == "get_symbol_lineage"
++    )
 +
-+
-+def _freshness(revision=12):
-+    return {"canonical_state": "fresh", "workspace_sync": "unverified", "canonical_revision": revision, "provenance": "live"}
-+
-+
-+def _target(artifact_id="A17/2", qualified_name="pkg.mod::handler"):
-+    module_name, symbol_name = qualified_name.split("::", 1)
-+    return ResolvedLineageTarget(artifact_id=artifact_id, qualified_name=qualified_name, module_name=module_name, symbol_name=symbol_name, resolution="exact_id")
-+
-+
-+def _transport_result(resolution, *, selected=None, owner_names=None, revision=12, unavailable_reason=None):
-+    return LiveSymbolLineageTransportResult(
-+        status="ok", revision=revision,
-+        result=LiveSymbolLineageQueryResult(resolution=resolution, selected=selected, unavailable_reason=unavailable_reason, owner_names={} if owner_names is None else owner_names, state_freshness=_freshness(revision)),
++    assert (
++        tool.description
++        == entry["short_description"]
++        == (
++            "Read canonical static value/data lineage for one "
++            "exact symbol from LIVE state with bounded "
++            "progressive disclosure."
++        )
++    )
++    assert str(inspect.signature(tool.fn)) == (
++        "(repo_path: str, symbol: str, mode: str = 'auto', "
++        "sections: list[str] | None = None, "
++        "representation: str = 'auto', "
++        "allow_large_output: bool = False) -> str"
 +    )
 +
 +
-+def test_get_symbol_lineage_auto_plans_before_one_narrow_query_and_delegates_render(tmp_path, monkeypatch):
-+    marker, target, observed = SimpleNamespace(), _target(), {}
-+    def narrow(root, *, query, sections):
-+        observed["narrow"] = {"root": root, "query": query, "sections": sections}
-+        return _transport_result(LineageTargetResolution(status="resolved", query="A17/2", target=target), selected=marker, owner_names={"A17/2": "pkg.mod::handler"})
-+    def render(selected, **kwargs):
-+        observed["render"] = {"selected": selected, **kwargs}
-+        return '{"status":"resolved"}'
-+    monkeypatch.setattr(mcp_runtime, "query_live_symbol_lineage_narrow", narrow)
-+    monkeypatch.setattr(tool, "render_symbol_lineage_response", render)
-+    result = tool.get_symbol_lineage(str(tmp_path), "A17/2", mode="auto", representation="named")
-+    assert json.loads(result) == {"status": "resolved"}
-+    assert observed["narrow"] == {"root": tmp_path.resolve(), "query": "A17/2", "sections": SYMBOL_LINEAGE_SECTION_ORDER}
-+    assert observed["render"] == {"selected": marker, "mode": "auto", "sections": None, "representation": "named", "owner_names": {"A17/2": "pkg.mod::handler"}, "state_freshness": _freshness(), "allow_large_output": False}
++def test_get_symbol_lineage_documentation_is_lazy_and_complete(
++    monkeypatch,
++):
++    loaded = []
++    original = documentation._read_json
 +
++    def tracked(path):
++        loaded.append(path)
++        return original(path)
 +
-+def test_get_symbol_lineage_fetch_sends_canonical_section_order_but_preserves_request_for_renderer(tmp_path, monkeypatch):
-+    marker, target, observed = SimpleNamespace(), _target(), {}
-+    def narrow(_root, *, query, sections):
-+        observed["query"], observed["sections"] = query, sections
-+        return _transport_result(LineageTargetResolution(status="resolved", query=query, target=target), selected=marker)
-+    def render(_selected, **kwargs):
-+        observed["render_sections"] = kwargs["sections"]
-+        return '{"status":"resolved"}'
-+    monkeypatch.setattr(mcp_runtime, "query_live_symbol_lineage_narrow", narrow)
-+    monkeypatch.setattr(tool, "render_symbol_lineage_response", render)
-+    result = tool.get_symbol_lineage(str(tmp_path), "pkg.mod::handler", mode="fetch", sections=["state", "interface"], representation="indexed", allow_large_output=True)
-+    assert json.loads(result)["status"] == "resolved"
-+    assert observed["sections"] == ("interface", "state")
-+    assert observed["render_sections"] == ("state", "interface")
++    monkeypatch.setattr(
++        documentation,
++        "_read_json",
++        tracked,
++    )
++    result = documentation.query_documentation(
++        tool="get_symbol_lineage",
++    )
 +
-+
-+@pytest.mark.parametrize(("kwargs", "error"), (({"mode": "bad"}, "invalid_request"), ({"mode": "fetch", "sections": None}, "invalid_request"), ({"mode": "auto", "sections": ["state"]}, "invalid_request"), ({"representation": "other"}, "invalid_representation"), ({"allow_large_output": 1}, "invalid_allow_large_output")))
-+def test_get_symbol_lineage_invalid_presentation_request_never_queries_live(tmp_path, monkeypatch, kwargs, error):
-+    monkeypatch.setattr(mcp_runtime, "query_live_symbol_lineage_narrow", lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("invalid request queried LIVE")))
-+    result = json.loads(tool.get_symbol_lineage(str(tmp_path), "A17/2", **kwargs))
-+    assert result["status"] == "error"
-+    assert result["error"] == error
-+
-+
-+def test_get_symbol_lineage_maps_transport_failure_without_renderer(tmp_path, monkeypatch):
-+    monkeypatch.setattr(mcp_runtime, "query_live_symbol_lineage_narrow", lambda *_args, **_kwargs: LiveSymbolLineageTransportResult(status="error", revision=15, error="canonical_query_transport_error", detail="transport-down"))
-+    monkeypatch.setattr(tool, "render_symbol_lineage_response", lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("transport failure rendered")))
-+    result = json.loads(tool.get_symbol_lineage(str(tmp_path), "A17/2"))
-+    assert result == {"status": "error", "error": "canonical_query_transport_error", "detail": "transport-down", "canonical_revision": 15}
-+
-+
-+@pytest.mark.parametrize(("resolution", "expected_status"), ((LineageTargetResolution(status="invalid", query="handler"), "invalid"), (LineageTargetResolution(status="not_found", query="A404/1"), "not_found"), (LineageTargetResolution(status="unavailable", query="A17/2"), "unavailable")))
-+def test_get_symbol_lineage_preserves_nonresolved_semantic_status_and_freshness(tmp_path, monkeypatch, resolution, expected_status):
-+    monkeypatch.setattr(mcp_runtime, "query_live_symbol_lineage_narrow", lambda *_args, **_kwargs: _transport_result(resolution, unavailable_reason="lineage unavailable" if expected_status == "unavailable" else None))
-+    monkeypatch.setattr(tool, "render_symbol_lineage_response", lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("unresolved target rendered")))
-+    result = json.loads(tool.get_symbol_lineage(str(tmp_path), resolution.query))
-+    assert result["status"] == expected_status
-+    assert result["state_freshness"] == _freshness()
-+
-+
-+def test_get_symbol_lineage_preserves_ambiguity_candidates_without_guessing(tmp_path, monkeypatch):
-+    first, second = _target("A17/2", "pkg.mod::handler"), _target("A18/1", "pkg.mod::handler")
-+    resolution = LineageTargetResolution(status="ambiguous", query="pkg.mod::handler", candidates=(first, second))
-+    monkeypatch.setattr(mcp_runtime, "query_live_symbol_lineage_narrow", lambda *_args, **_kwargs: _transport_result(resolution))
-+    result = json.loads(tool.get_symbol_lineage(str(tmp_path), "pkg.mod::handler"))
-+    assert result["status"] == "ambiguous"
-+    assert [candidate["artifact_id"] for candidate in result["candidates"]] == ["A17/2", "A18/1"]
-+
-+
-+def test_get_symbol_lineage_rejects_resolved_result_without_selected_facts(tmp_path, monkeypatch):
-+    target = _target()
-+    monkeypatch.setattr(mcp_runtime, "query_live_symbol_lineage_narrow", lambda *_args, **_kwargs: _transport_result(LineageTargetResolution(status="resolved", query="A17/2", target=target), selected=None))
-+    result = json.loads(tool.get_symbol_lineage(str(tmp_path), "A17/2"))
-+    assert result["status"] == "error"
-+    assert result["error"] == "canonical_query_response_invalid"
-+
-+
-+def test_get_symbol_lineage_does_not_use_engine_path(tmp_path, monkeypatch):
-+    target, marker = _target(), SimpleNamespace()
-+    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("tool hydrated engine")))
-+    monkeypatch.setattr(mcp_runtime, "query_live_symbol_lineage_narrow", lambda *_args, **_kwargs: _transport_result(LineageTargetResolution(status="resolved", query="A17/2", target=target), selected=marker))
-+    monkeypatch.setattr(tool, "render_symbol_lineage_response", lambda *_args, **_kwargs: '{"status":"resolved"}')
-+    assert json.loads(tool.get_symbol_lineage(str(tmp_path), "A17/2"))["status"] == "resolved"
++    assert list(result["tools"]) == [
++        "get_symbol_lineage"
++    ]
++    document = result["tools"][
++        "get_symbol_lineage"
++    ]
++    assert list(document) == list(
++        documentation.DOCUMENTATION_SECTIONS
++    )
++    assert loaded == [
++        documentation.INDEX_PATH,
++        documentation.INDEX_PATH,
++        (
++            documentation.DOCS_DIR
++            / "get_symbol_lineage.json"
++        ),
++    ]
 ```
 

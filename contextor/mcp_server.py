@@ -197,6 +197,9 @@ from contextor.mcp.tools.get_source_range import get_source_range as _get_source
 from contextor.mcp.tools.get_symbol_call_context import (
     get_symbol_call_context as _get_symbol_call_context_impl,
 )
+from contextor.mcp.tools.get_symbol_lineage import (
+    get_symbol_lineage as _get_symbol_lineage_impl,
+)
 from contextor.mcp.tools.get_artifacts_for_module import (
     get_artifacts_for_module as _get_artifacts_for_module_impl,
 )
@@ -516,6 +519,7 @@ REGISTERED_MCP_TOOL_NAMES: tuple[str, ...] = (
     "search_source",
     "get_source_range",
     "get_symbol_call_context",
+    "get_symbol_lineage",
     "get_name_collisions",
     "get_mcp_documentation",
     "get_module_blast_radius",
@@ -562,6 +566,10 @@ lookup_artifact_by_symbol = register_mcp_tool(_lookup_artifact_by_symbol_impl, n
 search_source = register_mcp_tool(_search_source_impl, name="search_source")
 get_source_range = register_mcp_tool(_get_source_range_impl, name="get_source_range")
 get_symbol_call_context = register_mcp_tool(_get_symbol_call_context_impl, name="get_symbol_call_context")
+get_symbol_lineage = register_mcp_tool(
+    _get_symbol_lineage_impl,
+    name="get_symbol_lineage",
+)
 get_name_collisions = register_mcp_tool(_get_name_collisions_impl, name="get_name_collisions")
 get_mcp_documentation = register_mcp_tool(_get_mcp_documentation_impl, name="get_mcp_documentation")
 get_module_blast_radius = register_mcp_tool(_get_module_blast_radius_impl, name="get_module_blast_radius")

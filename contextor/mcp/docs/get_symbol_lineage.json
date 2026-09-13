@@ -1,0 +1,51 @@
+{
+  "version": "1.0.0",
+  "tool": "get_symbol_lineage",
+  "purpose": [
+    "Return canonical static value/data lineage for one exact symbol from the already-materialized LIVE lineage state without reconstructing lineage from source or loading the complete RepositoryAnalysisState into the MCP process."
+  ],
+  "parameters": [
+    "repo_path (string, required): canonical repository root.",
+    "symbol (string, required): active artifact ID or exact module::symbol identity; plain leaves and fuzzy identities are not accepted.",
+    "mode (auto|preview|fetch, default \"auto\"): progressive disclosure mode. auto evaluates all canonical lineage sections and returns the complete represented payload only when it fits the 5120-byte auto threshold; preview returns section costs without section payloads; fetch requires an explicit non-empty sections list.",
+    "sections (array or null, default null): explicit semantic sections for fetch mode only. Valid names are interface, connections, bindings, parameter_flows, calls_interfaces, returns, state, callbacks, surfaces, and unresolved_dynamic_boundaries.",
+    "representation (named|indexed|auto, default \"auto\"): semantic-owner identity representation. named uses canonical module/artifact names when available; indexed retains canonical owner IDs; auto applies exact serialized-size negotiation.",
+    "allow_large_output (boolean, default false): approve a selected final payload above the shared 15360-byte output threshold."
+  ],
+  "behavior": [
+    "Exact target resolution is canonical and fail-closed. Active artifact IDs and exact module::symbol identities are accepted; unqualified leaves, fuzzy matches, and recovery identities are not promoted to targets.",
+    "The MCP process does not hydrate an IncrementalAnalysisEngine or request a canonical state snapshot. It connects only to an already-running verified LIVE authority and sends one narrow canonical_query request containing the target and planned semantic sections.",
+    "The LIVE owner answers from its already-hydrated canonical RAM lineage state under one server revision lock. Query execution does not parse source, read the persistent identity registry, materialize lineage, or enumerate all lineage slices for exact target lookup.",
+    "Semantic sections are selected before transport. auto and preview request the complete canonical section set; fetch sends only the requested sections in canonical section order.",
+    "Sections describe the target interface, direct cross-source connections, bindings, parameter flows, calls/interfaces, returns, state access, callbacks, surfaces, and unresolved/dynamic boundaries. get_symbol_lineage does not perform recursive lineage traversal.",
+    "Representation applies only to canonical SemanticEndpoint owners. Semantic owners may be module IDs or artifact IDs. Indexed output exposes lookup_index_entries as the resolver for both ID kinds; occurrence and symbolic endpoint identities are not rewritten.",
+    "auto selects indexed representation only when named identities are unavailable or indexed output saves at least 512 serialized bytes; otherwise it emits named output.",
+    "For mode=auto, a represented complete candidate above 5120 UTF-8 bytes becomes a representation-aware preview before the general large-output guard runs. A candidate exactly at 5120 bytes may be returned.",
+    "The selected final response uses the shared 15360-byte output guard. Explicit fetch above that threshold requires allow_large_output=true.",
+    "invalid, not_found, ambiguous, unavailable, and resolved are distinct semantic outcomes. Ambiguous exact identities are returned as candidates and are never guessed."
+  ],
+  "freshness": [
+    "Requires an already-running verified canonical LIVE authority. The tool does not start LIVE and does not fall back to snapshot/disk hydration when LIVE is absent.",
+    "The response freshness envelope is derived from the same canonical RAM revision as the lineage facts. Outer IPC revision, lineage freshness revision, and selected-facts metadata revision must agree or the MCP transport fails closed.",
+    "workspace_sync is unverified in this narrow server-side lineage path because the tool intentionally performs no source-file hash or FileState read. canonical_state still reports retained last-known-good module state and resync requirements from canonical RAM lifecycle metadata.",
+    "The lineage and lineage-query-index families must be fresh with complete semantic anchor bindings for exact target resolution; otherwise the semantic result is unavailable rather than a fabricated not_found."
+  ],
+  "errors": [
+    "Invalid mode, section selection, representation, allow_large_output, repository path, or symbol shape returns a controlled error response before lineage execution where applicable.",
+    "canonical_live_unavailable means no verified running LIVE authority exists; the tool does not start one automatically.",
+    "canonical_live_transport_error and canonical_query_transport_error report authority/IPC transport failure without snapshot fallback.",
+    "canonical_query_response_invalid and canonical_query_revision_mismatch fail closed on malformed or cross-revision narrow responses.",
+    "lineage_response_failed reports a presentation-contract failure after a resolved canonical query.",
+    "Semantic target outcomes invalid, not_found, ambiguous, and unavailable are returned as their own statuses rather than collapsed into transport errors."
+  ],
+  "usage_notes": [
+    "Use mode=\"auto\" first for ordinary symbol inspection. If it returns preview because the complete result exceeds 5120 bytes, request mode=\"fetch\" with only the semantic sections needed for the current decision.",
+    "Use representation=\"auto\" unless stable compact IDs are specifically useful. Indexed semantic-owner IDs can be resolved in batches with lookup_index_entries.",
+    "Use get_symbol_implementation when literal Python signature text, parameter spelling, docstrings, or implementation source is required; get_symbol_lineage intentionally reports canonical semantic lineage rather than reconstructing source syntax.",
+    "Use get_symbol_call_context when the task specifically needs the existing bounded intra-module caller/callee neighborhood. get_symbol_lineage provides broader canonical value/data relationships but does not recursively walk a call graph."
+  ],
+  "examples": [
+    "get_symbol_lineage(repo_path, \"pkg.module::handler\", mode=\"auto\", representation=\"auto\")",
+    "get_symbol_lineage(repo_path, \"A2496/1\", mode=\"fetch\", sections=[\"interface\", \"connections\", \"state\"], representation=\"indexed\")"
+  ]
+}

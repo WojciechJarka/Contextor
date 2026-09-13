@@ -11,9 +11,9 @@
   ],
   "behavior": [
     "1. Passive documentation discovery endpoint: zero repository, LIVE state, or report reads.",
-    "2. When tool, tools, and sections are omitted (default), returns the versioned compact tool index with minimal summaries.",
+    "2. When tool, tools, and sections are omitted (default), returns the versioned compact tool index plus documentation_hint explaining how to fetch one tool's complete documentation.",
     "3. Passing tool selects a single tool's full documentation. Passing tools selects a deterministic subset of tools.",
-    "4. Passing sections restricts returned documentation to the requested sections. Passing sections without tool/tools applies the section filter to every tool in the index.",
+    "4. Passing sections restricts returned documentation to the requested sections for explicitly selected tool(s). Passing sections without tool/tools returns tool_selection_required.",
     "5. Passing conflicting tool and tools parameters returns a controlled diagnostic.",
     "6. Unknown tools or sections return invalid_documentation_query with available options."
   ],
@@ -24,7 +24,7 @@
     "Unknown tools or sections return ``invalid_documentation_query`` with deterministic unknown and available lists."
   ],
   "usage_notes": [
-    "Use the default index for discovery, then request complete documentation only for tools relevant to the current task."
+    "Use the default index and documentation_hint for discovery, then call get_mcp_documentation with tool=<tool_name> to request complete documentation only for tools relevant to the current task."
   ],
   "examples": [
     "Use ``tools=['get_module_context']`` for one complete tool document, or pass selected ``sections`` for a narrower response."

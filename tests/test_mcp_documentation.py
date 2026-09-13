@@ -72,7 +72,11 @@ def test_documentation_default_returns_only_index(monkeypatch):
     result = json.loads(mcp_server.get_mcp_documentation.fn())
 
     assert result["version"]
-    assert len(result["tools"]) == 27
+    assert len(result["tools"]) == 28
+    assert result["documentation_hint"] == (
+        "For full documentation of a tool, call "
+        "get_mcp_documentation with tool=<tool_name>."
+    )
     assert loaded == [documentation.INDEX_PATH]
 
 
@@ -164,3 +168,69 @@ def test_documentation_reader_paths_are_package_local(monkeypatch):
     docs_root = documentation.DOCS_DIR.resolve()
     assert read_paths
     assert all(path.parent == docs_root for path in read_paths)
+
+
+def test_get_symbol_lineage_is_registered_with_documented_public_signature():
+    tool = mcp_server.mcp._tool_manager._tools[
+        "get_symbol_lineage"
+    ]
+    index = documentation.load_documentation_index()
+    entry = next(
+        item
+        for item in index["tools"]
+        if item["tool"] == "get_symbol_lineage"
+    )
+
+    assert (
+        tool.description
+        == entry["short_description"]
+        == (
+            "Read canonical static value/data lineage for one "
+            "exact symbol from LIVE state with bounded "
+            "progressive disclosure."
+        )
+    )
+    assert str(inspect.signature(tool.fn)) == (
+        "(repo_path: str, symbol: str, mode: str = 'auto', "
+        "sections: list[str] | None = None, "
+        "representation: str = 'auto', "
+        "allow_large_output: bool = False) -> str"
+    )
+
+
+def test_get_symbol_lineage_documentation_is_lazy_and_complete(
+    monkeypatch,
+):
+    loaded = []
+    original = documentation._read_json
+
+    def tracked(path):
+        loaded.append(path)
+        return original(path)
+
+    monkeypatch.setattr(
+        documentation,
+        "_read_json",
+        tracked,
+    )
+    result = documentation.query_documentation(
+        tool="get_symbol_lineage",
+    )
+
+    assert list(result["tools"]) == [
+        "get_symbol_lineage"
+    ]
+    document = result["tools"][
+        "get_symbol_lineage"
+    ]
+    assert list(document) == list(
+        documentation.DOCUMENTATION_SECTIONS
+    )
+    assert loaded == [
+        documentation.INDEX_PATH,
+        documentation.INDEX_PATH,
+        (
+            documentation.DOCS_DIR
+            / "get_symbol_lineage.json"
+        ),
+    ]
