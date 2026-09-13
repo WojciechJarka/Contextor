@@ -410,6 +410,7 @@ def build_state_freshness(
         "artifact_consumption": getattr(state, "artifact_consumption_state", "deferred"),
         "cycles": getattr(state, "cycles_state", "deferred"),
         "collisions": getattr(state, "collisions_state", "deferred"),
+        "lineage": getattr(state, "lineage_facts_state", "not_materialized"),
     }
 
     # 6. Advisory Warning
@@ -517,4 +518,3 @@ def is_explicit_generation_mismatch(
         if state_id_mismatch or rev_mismatch:
             return True
     return False
-
