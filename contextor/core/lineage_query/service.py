@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from contextor.core.domain.lineage_facts import (
+    MaterializedAnchorFact,
     MaterializedFlowFact,
     MaterializedOccurrenceRef,
     MaterializedSurfaceFact,
@@ -14,6 +15,17 @@ from contextor.core.lineage_query.backend import (
     LineageBackendMetadata,
 )
 from contextor.core.report_query import ARTIFACT_ID_RE, IndexCatalog
+
+
+_LEXICAL_SCOPE_KINDS = frozenset(
+    {
+        "class",
+        "function",
+        "async_function",
+        "lambda",
+        "comprehension",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -52,6 +64,45 @@ class LineageSurfaceMatch:
     source_key: str
     source_fingerprint: str
     surface: MaterializedSurfaceFact
+
+
+@dataclass(frozen=True)
+class LineageScopeRootMatch:
+    source_key: str
+    source_fingerprint: str
+    binding: SemanticAnchorBinding
+    anchor: MaterializedAnchorFact
+
+
+@dataclass(frozen=True)
+class LineageLocalAnchorMatch:
+    source_key: str
+    source_fingerprint: str
+    anchor: MaterializedAnchorFact
+
+
+@dataclass(frozen=True)
+class LexicalScopeFacts:
+    target: ResolvedLineageTarget
+    metadata: LineageBackendMetadata
+    roots: tuple[LineageScopeRootMatch, ...]
+    flows: tuple[LineageFlowMatch, ...]
+    nested_scopes: tuple[LineageLocalAnchorMatch, ...]
+    materialization_complete: bool
+
+    @property
+    def scope_available(self) -> bool:
+        return bool(self.roots)
+
+    @property
+    def complete(self) -> bool:
+        return (
+            self.scope_available
+            and self.materialization_complete
+            and self.metadata.family_state == "fresh"
+            and self.metadata.query_index_state == "fresh"
+            and self.metadata.semantic_anchor_bindings_complete
+        )
 
 
 @dataclass(frozen=True)
@@ -244,6 +295,104 @@ class LineageQueryService:
             surfaces=tuple(surfaces),
         )
 
+    def lexical_scope_facts(
+        self,
+        target: ResolvedLineageTarget,
+    ) -> LexicalScopeFacts:
+        if not isinstance(target, ResolvedLineageTarget):
+            raise TypeError("target must be ResolvedLineageTarget.")
+
+        metadata = self._backend.metadata()
+        roots: list[LineageScopeRootMatch] = []
+        flows: list[LineageFlowMatch] = []
+        nested_scopes: list[LineageLocalAnchorMatch] = []
+        materialization_complete = True
+
+        source_keys = self._backend.source_keys_for_owner(
+            target.artifact_id
+        )
+        for source in self._backend.iter_sources(source_keys):
+            manifest = source.manifest
+            anchors_by_id = {
+                anchor.local_id: anchor
+                for anchor in source.anchors
+            }
+            root_ids: set[str] = set()
+
+            for binding in source.semantic_anchors:
+                if binding.owner_id != target.artifact_id:
+                    continue
+                anchor = anchors_by_id.get(
+                    binding.reference.local_id
+                )
+                if (
+                    anchor is None
+                    or anchor.kind not in _LEXICAL_SCOPE_KINDS
+                ):
+                    continue
+                root_ids.add(anchor.local_id)
+                roots.append(
+                    LineageScopeRootMatch(
+                        source_key=manifest.source_key,
+                        source_fingerprint=(
+                            manifest.source_fingerprint
+                        ),
+                        binding=binding,
+                        anchor=anchor,
+                    )
+                )
+
+            if not root_ids:
+                continue
+
+            if not (
+                manifest.status.value == "fresh"
+                and manifest.anchor_ownership_materialized
+                and manifest.flow_ownership_materialized
+            ):
+                materialization_complete = False
+
+            for flow in source.flows:
+                if flow.owner_local_id not in root_ids:
+                    continue
+                flows.append(
+                    LineageFlowMatch(
+                        source_key=manifest.source_key,
+                        source_fingerprint=(
+                            manifest.source_fingerprint
+                        ),
+                        flow=flow,
+                    )
+                )
+
+            for anchor in source.anchors:
+                if (
+                    anchor.owner_local_id in root_ids
+                    and anchor.kind in _LEXICAL_SCOPE_KINDS
+                ):
+                    nested_scopes.append(
+                        LineageLocalAnchorMatch(
+                            source_key=manifest.source_key,
+                            source_fingerprint=(
+                                manifest.source_fingerprint
+                            ),
+                            anchor=anchor,
+                        )
+                    )
+
+        roots.sort(key=_scope_root_match_key)
+        flows.sort(key=_flow_match_key)
+        nested_scopes.sort(key=_local_anchor_match_key)
+
+        return LexicalScopeFacts(
+            target=target,
+            metadata=metadata,
+            roots=tuple(roots),
+            flows=tuple(flows),
+            nested_scopes=tuple(nested_scopes),
+            materialization_complete=materialization_complete,
+        )
+
 
 def _anchor_match_key(match: LineageAnchorMatch) -> tuple:
     binding = match.binding
@@ -254,6 +403,43 @@ def _anchor_match_key(match: LineageAnchorMatch) -> tuple:
         binding.owner_id,
         binding.qualified_name,
         reference.local_id,
+    )
+
+
+def _scope_root_match_key(
+    match: LineageScopeRootMatch,
+) -> tuple:
+    binding = match.binding
+    anchor = match.anchor
+    span = anchor.span
+    return (
+        match.source_key,
+        match.source_fingerprint,
+        binding.owner_id,
+        binding.qualified_name,
+        anchor.local_id,
+        anchor.kind,
+        span.start_line,
+        span.start_column,
+        span.end_line,
+        span.end_column,
+    )
+
+
+def _local_anchor_match_key(
+    match: LineageLocalAnchorMatch,
+) -> tuple:
+    anchor = match.anchor
+    span = anchor.span
+    return (
+        match.source_key,
+        match.source_fingerprint,
+        anchor.local_id,
+        anchor.kind,
+        span.start_line,
+        span.start_column,
+        span.end_line,
+        span.end_column,
     )
 
 

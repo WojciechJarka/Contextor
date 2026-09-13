@@ -492,3 +492,502 @@ def test_direct_facts_never_enumerates_repo_wide_source_keys(monkeypatch):
 
     assert result.incoming
     assert result.outgoing
+def _lexical_scope_service(
+    *,
+    family_state="fresh",
+    anchor_ownership=True,
+    flow_ownership=True,
+):
+    owner = "A17/2"
+    other_owner = "A99/1"
+    source_key = "pkg/target.py"
+    reference_key = "pkg/reference.py"
+    fp = "d" * 64
+    ref_fp = "e" * 64
+    span = SourceSpan(1, 0, 1, 8)
+
+    module_ref = MaterializedOccurrenceRef(
+        source_key,
+        fp,
+        "module",
+    )
+    outer_ref = MaterializedOccurrenceRef(
+        source_key,
+        fp,
+        "outer",
+    )
+    inner_ref = MaterializedOccurrenceRef(
+        source_key,
+        fp,
+        "inner",
+    )
+    comprehension_ref = MaterializedOccurrenceRef(
+        source_key,
+        fp,
+        "comprehension",
+    )
+    local_ref = MaterializedOccurrenceRef(
+        source_key,
+        fp,
+        "local",
+    )
+
+    module_anchor = MaterializedAnchorFact(
+        "module",
+        module_ref,
+        "module",
+        span,
+    )
+    outer_anchor = MaterializedAnchorFact(
+        "outer",
+        outer_ref,
+        "function",
+        span,
+        owner_local_id="module",
+    )
+    inner_anchor = MaterializedAnchorFact(
+        "inner",
+        inner_ref,
+        "function",
+        span,
+        owner_local_id="outer",
+    )
+    comprehension_anchor = MaterializedAnchorFact(
+        "comprehension",
+        comprehension_ref,
+        "comprehension",
+        span,
+        owner_local_id="outer",
+    )
+    local_anchor = MaterializedAnchorFact(
+        "local",
+        local_ref,
+        "binding",
+        span,
+        owner_local_id="outer",
+    )
+    semantic_binding = SemanticAnchorBinding(
+        owner,
+        "pkg.target::outer",
+        outer_ref,
+    )
+
+    source = MaterializedLineageSourceFacts(
+        manifest=SourceLineageManifest(
+            source_key=source_key,
+            source_fingerprint=fp,
+            semantic_version="1",
+            status=LineageFamilyStatus.FRESH,
+            anchor_count=5,
+            flow_count=5,
+            surface_count=0,
+            semantic_anchor_bindings_materialized=True,
+            anchor_ownership_materialized=anchor_ownership,
+            flow_ownership_materialized=flow_ownership,
+        ),
+        anchors=tuple(
+            sorted(
+                (
+                    module_anchor,
+                    outer_anchor,
+                    inner_anchor,
+                    comprehension_anchor,
+                    local_anchor,
+                )
+            )
+        ),
+        flows=tuple(
+            sorted(
+                (
+                    MaterializedFlowFact(
+                        "a_outer_bind",
+                        outer_ref,
+                        local_ref,
+                        LineageRelation.BINDS,
+                        span,
+                        ResolutionKind.LEXICAL_EXACT,
+                        LineageConfidence.CONFIRMED,
+                        owner_local_id="outer",
+                    ),
+                    MaterializedFlowFact(
+                        "b_outer_call",
+                        local_ref,
+                        MaterializedOccurrenceRef(
+                            source_key,
+                            fp,
+                            "outer-result",
+                        ),
+                        LineageRelation.CALL_RESULT,
+                        span,
+                        ResolutionKind.CALL_EXACT,
+                        LineageConfidence.CONFIRMED,
+                        owner_local_id="outer",
+                    ),
+                    MaterializedFlowFact(
+                        "c_inner_return",
+                        inner_ref,
+                        MaterializedOccurrenceRef(
+                            source_key,
+                            fp,
+                            "inner-result",
+                        ),
+                        LineageRelation.RETURNS,
+                        span,
+                        ResolutionKind.LEXICAL_EXACT,
+                        LineageConfidence.CONFIRMED,
+                        owner_local_id="inner",
+                    ),
+                    MaterializedFlowFact(
+                        "d_comprehension_assign",
+                        comprehension_ref,
+                        MaterializedOccurrenceRef(
+                            source_key,
+                            fp,
+                            "comprehension-result",
+                        ),
+                        LineageRelation.ASSIGNS,
+                        span,
+                        ResolutionKind.LEXICAL_EXACT,
+                        LineageConfidence.CONFIRMED,
+                        owner_local_id="comprehension",
+                    ),
+                    MaterializedFlowFact(
+                        "e_definition_default",
+                        module_ref,
+                        outer_ref,
+                        LineageRelation.DEFAULTS_TO_PARAMETER,
+                        span,
+                        ResolutionKind.SIGNATURE_EXACT,
+                        LineageConfidence.CONFIRMED,
+                        owner_local_id="module",
+                    ),
+                )
+            )
+        ),
+        semantic_anchors=(semantic_binding,),
+    )
+
+    reference_owner_ref = MaterializedOccurrenceRef(
+        reference_key,
+        ref_fp,
+        "reference-owner",
+    )
+    reference = MaterializedLineageSourceFacts(
+        manifest=SourceLineageManifest(
+            source_key=reference_key,
+            source_fingerprint=ref_fp,
+            semantic_version="1",
+            status=LineageFamilyStatus.FRESH,
+            anchor_count=1,
+            flow_count=1,
+            surface_count=0,
+            semantic_anchor_bindings_materialized=True,
+            anchor_ownership_materialized=True,
+            flow_ownership_materialized=True,
+        ),
+        anchors=(
+            MaterializedAnchorFact(
+                "reference-owner",
+                reference_owner_ref,
+                "function",
+                span,
+            ),
+        ),
+        flows=(
+            MaterializedFlowFact(
+                "reference-to-target",
+                SemanticEndpoint(owner),
+                reference_owner_ref,
+                LineageRelation.CALL_RESULT,
+                span,
+                ResolutionKind.CALL_EXACT,
+                LineageConfidence.CONFIRMED,
+                owner_local_id="reference-owner",
+            ),
+        ),
+    )
+
+    sources = {
+        source_key: source,
+        reference_key: reference,
+    }
+    owner_source_index, source_owner_index, anchor_complete = (
+        build_lineage_query_indexes(sources)
+    )
+    backend = RepositoryStateLineageBackend(
+        SimpleNamespace(
+            revision=31,
+            provenance="live",
+            lineage_facts_state=family_state,
+            lineage_facts_semantic_version="1",
+            lineage_facts_by_source=sources,
+            lineage_owner_source_index=owner_source_index,
+            lineage_source_owner_index=source_owner_index,
+            lineage_query_index_state="fresh",
+            lineage_semantic_anchor_bindings_complete=(
+                anchor_complete
+            ),
+        )
+    )
+    service = LineageQueryService(
+        backend,
+        IndexCatalog(
+            modules={},
+            artifacts={
+                owner: "pkg.target::outer",
+                other_owner: "pkg.other::thing",
+            },
+        ),
+    )
+    resolved = service.resolve_target(owner)
+    assert resolved.status == "resolved"
+    assert resolved.target is not None
+    return service, backend, resolved.target
+
+
+def test_lexical_scope_facts_return_only_exact_root_owned_flows():
+    service, _, target = _lexical_scope_service()
+
+    result = service.lexical_scope_facts(target)
+
+    assert result.target is target
+    assert result.metadata.revision == 31
+    assert result.scope_available is True
+    assert result.materialization_complete is True
+    assert result.complete is True
+
+    assert len(result.roots) == 1
+    assert result.roots[0].source_key == "pkg/target.py"
+    assert result.roots[0].binding.owner_id == "A17/2"
+    assert result.roots[0].anchor.local_id == "outer"
+    assert result.roots[0].anchor.kind == "function"
+
+    assert tuple(
+        item.flow.local_id
+        for item in result.flows
+    ) == (
+        "a_outer_bind",
+        "b_outer_call",
+    )
+
+    assert tuple(
+        item.anchor.local_id
+        for item in result.nested_scopes
+    ) == (
+        "comprehension",
+        "inner",
+    )
+
+    assert all(
+        item.source_key == "pkg/target.py"
+        for item in (
+            *result.roots,
+            *result.flows,
+            *result.nested_scopes,
+        )
+    )
+
+
+def test_lexical_scope_facts_do_not_cross_into_nested_scopes():
+    service, _, target = _lexical_scope_service()
+
+    result = service.lexical_scope_facts(target)
+
+    returned = {
+        item.flow.local_id
+        for item in result.flows
+    }
+    assert "c_inner_return" not in returned
+    assert "d_comprehension_assign" not in returned
+    assert "e_definition_default" not in returned
+
+
+def test_lexical_scope_facts_ignore_candidate_slice_without_semantic_root():
+    service, backend, target = _lexical_scope_service()
+
+    assert backend.source_keys_for_owner(
+        target.artifact_id
+    ) == (
+        "pkg/reference.py",
+        "pkg/target.py",
+    )
+
+    result = service.lexical_scope_facts(target)
+
+    assert all(
+        item.source_key != "pkg/reference.py"
+        for item in (
+            *result.roots,
+            *result.flows,
+            *result.nested_scopes,
+        )
+    )
+
+
+def test_lexical_scope_facts_are_incomplete_without_flow_ownership():
+    service, _, target = _lexical_scope_service(
+        flow_ownership=False,
+    )
+
+    result = service.lexical_scope_facts(target)
+
+    assert result.scope_available is True
+    assert result.materialization_complete is False
+    assert result.complete is False
+    assert tuple(
+        item.flow.local_id
+        for item in result.flows
+    ) == (
+        "a_outer_bind",
+        "b_outer_call",
+    )
+
+
+def test_lexical_scope_facts_are_incomplete_without_anchor_ownership():
+    service, _, target = _lexical_scope_service(
+        anchor_ownership=False,
+    )
+
+    result = service.lexical_scope_facts(target)
+
+    assert result.scope_available is True
+    assert result.materialization_complete is False
+    assert result.complete is False
+
+
+def test_lexical_scope_facts_expose_stale_family_fail_closed():
+    service, _, target = _lexical_scope_service(
+        family_state="stale",
+    )
+
+    result = service.lexical_scope_facts(target)
+
+    assert result.scope_available is True
+    assert result.metadata.family_state == "stale"
+    assert result.complete is False
+    assert result.flows
+
+
+def test_lexical_scope_facts_never_enumerate_repo_wide_source_keys(
+    monkeypatch,
+):
+    service, backend, target = _lexical_scope_service()
+    monkeypatch.setattr(
+        backend,
+        "source_keys",
+        lambda: (_ for _ in ()).throw(
+            AssertionError("repo scan")
+        ),
+    )
+
+    result = service.lexical_scope_facts(target)
+
+    assert result.complete is True
+    assert result.flows
+
+
+def test_lexical_scope_facts_do_not_treat_plain_binding_as_scope():
+    owner = "A17/2"
+    source_key = "pkg/value.py"
+    fingerprint = "f" * 64
+    span = SourceSpan(1, 0, 1, 5)
+    binding_ref = MaterializedOccurrenceRef(
+        source_key,
+        fingerprint,
+        "value-binding",
+    )
+    module_ref = MaterializedOccurrenceRef(
+        source_key,
+        fingerprint,
+        "module",
+    )
+    source = MaterializedLineageSourceFacts(
+        manifest=SourceLineageManifest(
+            source_key=source_key,
+            source_fingerprint=fingerprint,
+            semantic_version="1",
+            status=LineageFamilyStatus.FRESH,
+            anchor_count=2,
+            flow_count=1,
+            surface_count=0,
+            semantic_anchor_bindings_materialized=True,
+            anchor_ownership_materialized=True,
+            flow_ownership_materialized=True,
+        ),
+        anchors=tuple(
+            sorted(
+                (
+                    MaterializedAnchorFact(
+                        "module",
+                        module_ref,
+                        "module",
+                        span,
+                    ),
+                    MaterializedAnchorFact(
+                        "value-binding",
+                        binding_ref,
+                        "binding",
+                        span,
+                        owner_local_id="module",
+                    ),
+                )
+            )
+        ),
+        flows=(
+            MaterializedFlowFact(
+                "module-assignment",
+                module_ref,
+                binding_ref,
+                LineageRelation.ASSIGNS,
+                span,
+                ResolutionKind.LEXICAL_EXACT,
+                LineageConfidence.CONFIRMED,
+                owner_local_id="module",
+            ),
+        ),
+        semantic_anchors=(
+            SemanticAnchorBinding(
+                owner,
+                "pkg.value::value",
+                binding_ref,
+            ),
+        ),
+    )
+    sources = {source_key: source}
+    owner_source_index, source_owner_index, anchor_complete = (
+        build_lineage_query_indexes(sources)
+    )
+    backend = RepositoryStateLineageBackend(
+        SimpleNamespace(
+            lineage_facts_state="fresh",
+            lineage_facts_semantic_version="1",
+            lineage_facts_by_source=sources,
+            lineage_owner_source_index=owner_source_index,
+            lineage_source_owner_index=source_owner_index,
+            lineage_query_index_state="fresh",
+            lineage_semantic_anchor_bindings_complete=(
+                anchor_complete
+            ),
+        )
+    )
+    service = LineageQueryService(
+        backend,
+        IndexCatalog(
+            modules={},
+            artifacts={
+                owner: "pkg.value::value",
+            },
+        ),
+    )
+    resolved = service.resolve_target(owner)
+    assert resolved.target is not None
+
+    result = service.lexical_scope_facts(
+        resolved.target
+    )
+
+    assert result.roots == ()
+    assert result.flows == ()
+    assert result.nested_scopes == ()
+    assert result.scope_available is False
+    assert result.complete is False
