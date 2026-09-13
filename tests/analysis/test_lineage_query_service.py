@@ -1445,3 +1445,115 @@ def test_local_traversal_rejects_invalid_bounds(
             direction=direction,
             max_depth=max_depth,
         )
+def test_local_traversal_does_not_report_false_truncation_for_converging_paths():
+    service, backend, target = _lexical_scope_service()
+    fp = "d" * 64
+    outer = MaterializedOccurrenceRef(
+        "pkg/target.py",
+        fp,
+        "outer",
+    )
+    outer_result = MaterializedOccurrenceRef(
+        "pkg/target.py",
+        fp,
+        "outer-result",
+    )
+    tail = MaterializedOccurrenceRef(
+        "pkg/target.py",
+        fp,
+        "tail",
+    )
+
+    _append_scope_flow(
+        backend,
+        MaterializedFlowFact(
+            "aa_shortcut",
+            outer,
+            outer_result,
+            LineageRelation.ALIASES,
+            SourceSpan(10, 0, 10, 5),
+            ResolutionKind.LEXICAL_EXACT,
+            LineageConfidence.CONFIRMED,
+            owner_local_id="outer",
+        ),
+    )
+    _append_scope_flow(
+        backend,
+        MaterializedFlowFact(
+            "z_tail",
+            outer_result,
+            tail,
+            LineageRelation.ASSIGNS,
+            SourceSpan(11, 0, 11, 5),
+            ResolutionKind.LEXICAL_EXACT,
+            LineageConfidence.CONFIRMED,
+            owner_local_id="outer",
+        ),
+    )
+
+    result = service.traverse_lexical_scope(
+        target,
+        outer,
+        direction="downstream",
+        max_depth=2,
+    )
+
+    assert tuple(
+        (step.depth, step.flow.flow.local_id)
+        for step in result.steps
+    ) == (
+        (1, "a_outer_bind"),
+        (1, "aa_shortcut"),
+        (2, "b_outer_call"),
+        (2, "z_tail"),
+    )
+    assert result.truncated is False
+
+
+def test_local_traversal_reports_true_truncation_from_minimal_depth_frontier():
+    service, backend, target = _lexical_scope_service()
+    fp = "d" * 64
+    outer_result = MaterializedOccurrenceRef(
+        "pkg/target.py",
+        fp,
+        "outer-result",
+    )
+    tail = MaterializedOccurrenceRef(
+        "pkg/target.py",
+        fp,
+        "tail",
+    )
+
+    _append_scope_flow(
+        backend,
+        MaterializedFlowFact(
+            "z_tail",
+            outer_result,
+            tail,
+            LineageRelation.ASSIGNS,
+            SourceSpan(11, 0, 11, 5),
+            ResolutionKind.LEXICAL_EXACT,
+            LineageConfidence.CONFIRMED,
+            owner_local_id="outer",
+        ),
+    )
+
+    result = service.traverse_lexical_scope(
+        target,
+        MaterializedOccurrenceRef(
+            "pkg/target.py",
+            fp,
+            "outer",
+        ),
+        direction="downstream",
+        max_depth=2,
+    )
+
+    assert tuple(
+        step.flow.flow.local_id
+        for step in result.steps
+    ) == (
+        "a_outer_bind",
+        "b_outer_call",
+    )
+    assert result.truncated is True

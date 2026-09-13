@@ -524,11 +524,10 @@ class LineageQueryService:
             tuple[MaterializedOccurrenceRef, int]
         ] = [(seed, 0)]
         queue_index = 0
-        visited_occurrences = {seed}
+        reached_occurrence_depths = {seed: 0}
         selected_flows: set[tuple] = set()
         steps: list[LineageTraversalStep] = []
         boundaries: list[LineageTraversalBoundary] = []
-        truncated = False
 
         while queue_index < len(queue):
             current, current_depth = queue[queue_index]
@@ -605,23 +604,28 @@ class LineageQueryService:
                         "unsupported endpoint type."
                     )
 
-                if step_depth < max_depth:
-                    if next_endpoint not in visited_occurrences:
-                        visited_occurrences.add(next_endpoint)
+                if next_endpoint not in reached_occurrence_depths:
+                    reached_occurrence_depths[
+                        next_endpoint
+                    ] = step_depth
+                    if step_depth < max_depth:
                         queue.append(
                             (next_endpoint, step_depth)
                         )
-                    continue
 
-                if any(
-                    _flow_match_identity(candidate)
-                    not in selected_flows
-                    for candidate in adjacency.get(
-                        next_endpoint,
-                        (),
-                    )
-                ):
-                    truncated = True
+        truncated = any(
+            depth == max_depth
+            and any(
+                _flow_match_identity(candidate)
+                not in selected_flows
+                for candidate in adjacency.get(
+                    occurrence,
+                    (),
+                )
+            )
+            for occurrence, depth
+            in reached_occurrence_depths.items()
+        )
 
         return LocalLineageTraversal(
             target=target,
