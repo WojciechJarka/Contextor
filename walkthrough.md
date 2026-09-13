@@ -1,4 +1,4 @@
-# F2L D1N2a Walkthrough
+# F2L D1N3a Walkthrough
 
 ## STATUS
 
@@ -6,141 +6,150 @@ PASS
 
 ## FILES_CHANGED
 
-- `contextor/core/lineage_query/service.py`
-- `tests/analysis/test_lineage_query_service.py`
+- `contextor/mcp/lineage_response.py`
+- `tests/mcp/test_lineage_response.py`
 
-## SELECTED_COMPLETENESS_PROOF
+## AUTO_CONTRACT_PROOF
 
-Selection completeness now certifies only selected logical units.
+Auto plans every canonical section, includes a candidate payload, and delegates size decision.
 
-## INTERFACE_ISOLATION_PROOF
+## PREVIEW_CONTRACT_PROOF
 
-A complete selected interface remains complete despite unselected scope metadata mismatch.
+Preview plans every canonical section without heavy payload.
 
-## CONNECTIONS_ISOLATION_PROOF
+## FETCH_CONTRACT_PROOF
 
-A complete selected connections section remains complete despite unselected ambiguous interface.
+Fetch requires explicit non-empty selection and includes selected payload.
 
-## NON_LEXICAL_EMPTY_PROOF
+## CANONICAL_ORDER_PROOF
 
-Lexical empty sections are complete when the scope is authoritatively not applicable.
+Fetch canonicalizes selection independently of request order.
 
-## SELECTED_METADATA_PROOF
+## NO_QUERY_PROOF
 
-Metadata comparison includes only projections required by selected sections.
+The planner accepts only request values and contains no service, backend, or facts input.
 
-## EMPTY_SELECTION_PROOF
+## VALIDATION_PROOF
 
-An empty request is vacuously metadata-consistent and complete.
+Tests cover invalid modes, selection types, empty values, duplicates, unknown sections, and prohibited auto/preview selection.
 
 ## TESTS_RUN
 
 ```text
-python -m py_compile contextor/core/lineage_query/service.py: PASS
-python -m pytest -q tests/analysis/test_lineage_query_service.py tests/analysis/test_lineage_query_backend.py: 84 passed in 3.06s
-git diff --check -- contextor/core/lineage_query/service.py tests/analysis/test_lineage_query_service.py: PASS
+python -m py_compile contextor/mcp/lineage_response.py: PASS
+python -m pytest -q tests/mcp/test_lineage_response.py tests/analysis/test_lineage_query_service.py tests/analysis/test_lineage_query_backend.py: 94 passed in 2.35s
+git diff --check -- contextor/mcp/lineage_response.py tests/mcp/test_lineage_response.py: PASS
 ```
 
 ## ACTUAL_DIFF
 
 ```diff
-warning: in the working copy of 'contextor/core/lineage_query/service.py', LF will be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'tests/analysis/test_lineage_query_service.py', LF will be replaced by CRLF the next time Git touches it
-diff --git a/contextor/core/lineage_query/service.py b/contextor/core/lineage_query/service.py
-index 4c925d7..960b6cd 100644
---- a/contextor/core/lineage_query/service.py
-+++ b/contextor/core/lineage_query/service.py
-@@ -60,6 +60,11 @@ SYMBOL_LINEAGE_SECTION_ORDER = (
-     "unresolved_dynamic_boundaries",
- )
- 
-+_LEXICAL_SYMBOL_LINEAGE_SECTIONS = frozenset({
-+    "bindings", "parameter_flows", "calls_interfaces", "returns",
-+    "state", "callbacks", "unresolved_dynamic_boundaries",
-+})
+warning: in the working copy of 'contextor/mcp/lineage_response.py', LF will be replaced by CRLF the next time Git touches it
+diff --git a/contextor/mcp/lineage_response.py b/contextor/mcp/lineage_response.py
+new file mode 100644
+index 0000000..88901b7
+--- /dev/null
++++ b/contextor/mcp/lineage_response.py
+@@ -0,0 +1,51 @@
++from __future__ import annotations
 +
- 
- @dataclass(frozen=True)
- class ResolvedLineageTarget:
-@@ -425,13 +430,44 @@ class SelectedSymbolLineageFacts:
-         return self.facts.target
- 
-     @property
--    def metadata_consistent(self) -> bool:
-+    def aggregate_metadata_consistent(self) -> bool:
-         return self.facts.metadata_consistent
- 
-     @property
--    def complete(self) -> bool:
-+    def aggregate_complete(self) -> bool:
-         return self.facts.complete
- 
-+    @property
-+    def metadata_consistent(self) -> bool:
-+        selected = set(self.selected_sections)
-+        metadata: list[LineageBackendMetadata] = []
-+        if "interface" in selected:
-+            metadata.append(self.facts.interface.metadata)
-+        if "connections" in selected or "surfaces" in selected:
-+            metadata.append(self.facts.direct.metadata)
-+        needs_scope = bool(selected & _LEXICAL_SYMBOL_LINEAGE_SECTIONS) or "surfaces" in selected
-+        if needs_scope:
-+            metadata.append(self.facts.scope.metadata)
-+            if self.facts.scope_state == "not_applicable":
-+                metadata.append(self.facts.interface.metadata)
-+        return not metadata or all(item == metadata[0] for item in metadata[1:])
++from dataclasses import dataclass
 +
-+    @property
-+    def complete(self) -> bool:
-+        if not self.metadata_consistent:
-+            return False
-+        selected = set(self.selected_sections)
-+        if "interface" in selected and not self.facts.interface.complete:
-+            return False
-+        if "connections" in selected and not self.facts.direct.complete:
-+            return False
-+        needs_scope = bool(selected & _LEXICAL_SYMBOL_LINEAGE_SECTIONS)
-+        if needs_scope and self.facts.scope_state not in {"available", "not_applicable"}:
-+            return False
-+        if "surfaces" in selected and (not self.facts.direct.complete or self.facts.scope_state not in {"available", "not_applicable"}):
-+            return False
-+        return True
-+
- 
- class LineageQueryService:
-     def __init__(
-diff --git a/tests/analysis/test_lineage_query_service.py b/tests/analysis/test_lineage_query_service.py
-index 9f8e851..31c46c1 100644
---- a/tests/analysis/test_lineage_query_service.py
-+++ b/tests/analysis/test_lineage_query_service.py
-@@ -2451,3 +2451,29 @@ def test_symbol_lineage_selection_allows_empty_and_rejects_invalid_contract():
-         service.select_symbol_lineage_sections(facts, ("state", "state"))
-     with pytest.raises(ValueError, match="Unknown symbol lineage sections: mystery"):
-         service.select_symbol_lineage_sections(facts, ("mystery",))
++from contextor.core.lineage_query.service import (
++    SYMBOL_LINEAGE_SECTION_ORDER,
++)
 +
 +
-+def test_symbol_lineage_selection_interface_complete_is_independent_of_unselected_scope_metadata():
-+    service, backend, target, _ = _target_interface_service()
-+    _install_target_parameter_defaults(backend, target)
-+    facts = service.symbol_lineage_facts(target)
-+    mismatched = replace(facts, sections=replace(facts.sections, scope=replace(facts.scope, metadata=replace(facts.scope.metadata, revision=999))))
-+    selected = service.select_symbol_lineage_sections(mismatched, ("interface",))
-+    assert selected.aggregate_metadata_consistent is False
-+    assert selected.aggregate_complete is False
-+    assert selected.metadata_consistent is True
-+    assert selected.complete is True
++SYMBOL_LINEAGE_MODES = ("auto", "preview", "fetch")
 +
 +
-+def test_symbol_lineage_selection_connections_ignore_unselected_interface_incompleteness():
-+    service, _backend, target, _ = _target_interface_service(duplicate_definition=True)
-+    selected = service.select_symbol_lineage_sections(service.symbol_lineage_facts(target), ("connections",))
-+    assert selected.complete is True
-+    assert selected.metadata_consistent is True
++@dataclass(frozen=True)
++class SymbolLineageResponsePlan:
++    mode: str
++    candidate_sections: tuple[str, ...]
++    include_payload: bool
++    requires_size_decision: bool
 +
 +
-+def test_symbol_lineage_selection_empty_request_is_vacuously_complete():
-+    service, _backend, target, _ = _target_interface_service()
-+    selected = service.select_symbol_lineage_sections(service.symbol_lineage_facts(target), ())
-+    assert selected.metadata_consistent is True
-+    assert selected.complete is True
++def plan_symbol_lineage_response(*, mode: str = "auto", sections: tuple[str, ...] | None = None) -> SymbolLineageResponsePlan:
++    if not isinstance(mode, str):
++        raise TypeError("mode must be a string.")
++    normalized_mode = mode.strip().lower()
++    if normalized_mode not in SYMBOL_LINEAGE_MODES:
++        raise ValueError("mode must be 'auto', 'preview', or 'fetch'.")
++    if sections is not None:
++        if not isinstance(sections, tuple):
++            raise TypeError("sections must be a tuple of section names.")
++        if any(not isinstance(section, str) or not section for section in sections):
++            raise ValueError("sections must contain non-empty strings.")
++        if len(set(sections)) != len(sections):
++            raise ValueError("sections must not contain duplicates.")
++        unknown = tuple(sorted(set(sections) - set(SYMBOL_LINEAGE_SECTION_ORDER)))
++        if unknown:
++            raise ValueError("Unknown symbol lineage sections: " + ", ".join(unknown))
++    if normalized_mode in {"auto", "preview"}:
++        if sections is not None:
++            raise ValueError(f"{normalized_mode} mode does not accept an explicit section selection.")
++        return SymbolLineageResponsePlan(
++            normalized_mode, SYMBOL_LINEAGE_SECTION_ORDER,
++            normalized_mode == "auto", normalized_mode == "auto",
++        )
++    if not sections:
++        raise ValueError("fetch mode requires at least one section.")
++    requested = set(sections)
++    return SymbolLineageResponsePlan(
++        "fetch",
++        tuple(s for s in SYMBOL_LINEAGE_SECTION_ORDER if s in requested),
++        True, False,
++    )
+warning: in the working copy of 'tests/mcp/test_lineage_response.py', LF will be replaced by CRLF the next time Git touches it
+diff --git a/tests/mcp/test_lineage_response.py b/tests/mcp/test_lineage_response.py
+new file mode 100644
+index 0000000..225c5f0
+--- /dev/null
++++ b/tests/mcp/test_lineage_response.py
+@@ -0,0 +1,43 @@
++import pytest
++
++from contextor.core.lineage_query.service import SYMBOL_LINEAGE_SECTION_ORDER
++from contextor.mcp.lineage_response import SymbolLineageResponsePlan, plan_symbol_lineage_response
++
++
++def test_auto_plans_complete_symbol_candidate_for_size_decision():
++    assert plan_symbol_lineage_response(mode=" AUTO ") == SymbolLineageResponsePlan("auto", SYMBOL_LINEAGE_SECTION_ORDER, True, True)
++
++
++def test_preview_plans_all_sections_without_payload():
++    assert plan_symbol_lineage_response(mode="preview") == SymbolLineageResponsePlan("preview", SYMBOL_LINEAGE_SECTION_ORDER, False, False)
++
++
++def test_fetch_requires_explicit_sections_and_canonicalizes_order():
++    assert plan_symbol_lineage_response(mode="fetch", sections=("state", "interface", "connections")) == SymbolLineageResponsePlan("fetch", ("interface", "connections", "state"), True, False)
++
++
++@pytest.mark.parametrize("mode", ("auto", "preview"))
++def test_auto_and_preview_reject_explicit_sections(mode):
++    with pytest.raises(ValueError, match=f"{mode} mode does not accept an explicit section selection."):
++        plan_symbol_lineage_response(mode=mode, sections=("interface",))
++
++
++@pytest.mark.parametrize("sections", (None, ()))
++def test_fetch_requires_non_empty_selection(sections):
++    with pytest.raises(ValueError, match="fetch mode requires at least one section."):
++        plan_symbol_lineage_response(mode="fetch", sections=sections)
++
++
++def test_response_plan_rejects_invalid_contract():
++    with pytest.raises(TypeError, match="mode must be a string."):
++        plan_symbol_lineage_response(mode=object())
++    with pytest.raises(ValueError, match="mode must be 'auto', 'preview', or 'fetch'."):
++        plan_symbol_lineage_response(mode="other")
++    with pytest.raises(TypeError, match="sections must be a tuple of section names."):
++        plan_symbol_lineage_response(mode="fetch", sections=["interface"])
++    with pytest.raises(ValueError, match="sections must contain non-empty strings."):
++        plan_symbol_lineage_response(mode="fetch", sections=("",))
++    with pytest.raises(ValueError, match="sections must not contain duplicates."):
++        plan_symbol_lineage_response(mode="fetch", sections=("state", "state"))
++    with pytest.raises(ValueError, match="Unknown symbol lineage sections: mystery"):
++        plan_symbol_lineage_response(mode="fetch", sections=("mystery",))
 ```

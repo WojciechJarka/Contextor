@@ -2477,3 +2477,39 @@ def test_symbol_lineage_selection_empty_request_is_vacuously_complete():
     selected = service.select_symbol_lineage_sections(service.symbol_lineage_facts(target), ())
     assert selected.metadata_consistent is True
     assert selected.complete is True
+
+
+def test_symbol_lineage_selection_non_lexical_empty_section_is_authoritatively_complete():
+    service, backend, target, _ = _target_interface_service()
+    provider = backend.get_source("pkg/target.py")
+    assert provider is not None
+    backend._sources["pkg/target.py"] = replace(
+        provider,
+        anchors=(replace(provider.anchors[0], kind="binding"),),
+        interface_descriptors=(),
+    )
+    facts = service.symbol_lineage_facts(target)
+    assert facts.interface.complete is True
+    assert facts.interface.callable_state == "non_callable"
+    assert facts.scope.roots == ()
+    assert facts.scope_state == "not_applicable"
+    selected = service.select_symbol_lineage_sections(facts, ("callbacks",))
+    assert selected.callbacks == ()
+    assert selected.metadata_consistent is True
+    assert selected.complete is True
+
+
+def test_symbol_lineage_selection_combined_sections_fail_on_selected_metadata_mismatch():
+    service, backend, target, _ = _target_interface_service()
+    _install_target_parameter_defaults(backend, target)
+    facts = service.symbol_lineage_facts(target)
+    mismatched = replace(facts, interface=replace(
+        facts.interface,
+        metadata=replace(facts.interface.metadata, revision=999),
+    ))
+    selected = service.select_symbol_lineage_sections(
+        mismatched, ("interface", "connections")
+    )
+    assert selected.aggregate_metadata_consistent is False
+    assert selected.metadata_consistent is False
+    assert selected.complete is False
