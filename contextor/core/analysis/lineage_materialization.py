@@ -298,6 +298,54 @@ def build_extracted_callable_interface_descriptors(
     return dict(sorted(descriptors.items()))
 
 
+def build_materialized_callable_interface_descriptors(
+    sources: Mapping[str, MaterializedLineageSourceFacts],
+    active_artifact_ids: Mapping[str, str],
+) -> dict[str, SemanticInterfaceDescriptor]:
+    if not isinstance(sources, Mapping):
+        raise TypeError("sources must be a mapping.")
+    if not isinstance(active_artifact_ids, Mapping):
+        raise TypeError("active_artifact_ids must be a mapping.")
+
+    descriptors: dict[str, SemanticInterfaceDescriptor] = {}
+    ambiguous_owner_ids: set[str] = set()
+    for source_key in sorted(sources):
+        source = sources[source_key]
+        if not isinstance(source, MaterializedLineageSourceFacts):
+            raise TypeError("lineage source value has invalid type.")
+        if source.manifest.source_key != source_key:
+            raise ValueError("lineage mapping key does not match source manifest.")
+        if (
+            source.manifest.status is not LineageFamilyStatus.FRESH
+            or not source.manifest.semantic_anchor_bindings_materialized
+            or not source.manifest.anchor_ownership_materialized
+        ):
+            continue
+        anchors = tuple(
+            ExtractedAnchorFact(anchor.local_id, anchor.kind, anchor.span, anchor.owner_local_id)
+            for anchor in source.anchors
+        )
+        anchors_by_id = {anchor.local_id: anchor for anchor in anchors}
+        for binding in source.semantic_anchors:
+            owner_id = active_artifact_ids.get(binding.qualified_name)
+            if owner_id is None or owner_id in ambiguous_owner_ids:
+                continue
+            callable_anchor = anchors_by_id.get(binding.reference.local_id)
+            if (
+                callable_anchor is None
+                or callable_anchor.kind not in _CALLABLE_INTERFACE_ANCHOR_KINDS
+            ):
+                continue
+            candidate = _callable_interface_descriptor(owner_id, callable_anchor, anchors)
+            existing = descriptors.get(owner_id)
+            if existing is None:
+                descriptors[owner_id] = candidate
+            elif existing != candidate:
+                descriptors.pop(owner_id, None)
+                ambiguous_owner_ids.add(owner_id)
+    return dict(sorted(descriptors.items()))
+
+
 def materialize_lineage_source_facts(
     extracted: ExtractedLineageSourceFacts,
     resolution: LineageResolutionContext,

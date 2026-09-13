@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ast
 import builtins
+from dataclasses import replace
 
 import pytest
 
@@ -11,6 +12,7 @@ from contextor.core.analysis.lineage_extraction import (
 from contextor.core.analysis.lineage_materialization import (
     LineageResolutionContext,
     build_extracted_callable_interface_descriptors,
+    build_materialized_callable_interface_descriptors,
     materialize_lineage_source_facts,
     reresolve_materialized_lineage_source_facts,
 )
@@ -684,3 +686,42 @@ def test_callable_interface_conflicting_redefinitions_fail_closed():
     )
 
     assert result == {}
+
+
+def test_materialized_callable_interface_descriptor_rebinds_owner_generation():
+    facts = _callable_interface_facts("def run(value, *, mode):\n    return value\n")
+    old_owner, new_owner = "A1/1", "A1/2"
+    old = build_extracted_callable_interface_descriptors(
+        {"pkg/mod.py": facts}, {"pkg.mod::run": old_owner}
+    )
+    materialized = materialize_lineage_source_facts(
+        facts, _context(artifacts={"pkg.mod::run": old_owner}, descriptors=old)
+    )
+    rebound = build_materialized_callable_interface_descriptors(
+        {"pkg/mod.py": materialized}, {"pkg.mod::run": new_owner}
+    )
+    assert tuple(rebound) == (new_owner,)
+    descriptor = rebound[new_owner]
+    assert descriptor.signature_digest == old[old_owner].signature_digest
+    assert build_return_slot(new_owner) in descriptor.slots
+    assert build_keyword_binding_slot(
+        new_owner, ParameterKind.KEYWORD_ONLY, name="mode"
+    ) in descriptor.slots
+    assert all(old_owner not in slot for slot in descriptor.slots)
+
+
+def test_materialized_callable_interface_builder_requires_canonical_capabilities():
+    facts = _callable_interface_facts("def run(value):\n    return value\n")
+    descriptors = build_extracted_callable_interface_descriptors(
+        {"pkg/mod.py": facts}, {"pkg.mod::run": "A1/1"}
+    )
+    materialized = materialize_lineage_source_facts(
+        facts, _context(artifacts={"pkg.mod::run": "A1/1"}, descriptors=descriptors)
+    )
+    legacy = replace(
+        materialized,
+        manifest=replace(materialized.manifest, anchor_ownership_materialized=False),
+    )
+    assert build_materialized_callable_interface_descriptors(
+        {"pkg/mod.py": legacy}, {"pkg.mod::run": "A1/2"}
+    ) == {}
