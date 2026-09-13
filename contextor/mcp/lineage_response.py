@@ -110,15 +110,100 @@ def _section_payloads(selected: SelectedSymbolLineageFacts) -> dict[str, object]
     return {name: values[name] for name in selected.selected_sections}
 
 
-def build_symbol_lineage_payload(selected: SelectedSymbolLineageFacts) -> dict:
-    if not isinstance(selected, SelectedSymbolLineageFacts): raise TypeError("selected must be SelectedSymbolLineageFacts.")
+def build_symbol_lineage_payload(
+    selected: SelectedSymbolLineageFacts,
+    *,
+    state_freshness: Mapping[str, object] | None = None,
+) -> dict:
+    if not isinstance(
+        selected,
+        SelectedSymbolLineageFacts,
+    ):
+        raise TypeError(
+            "selected must be SelectedSymbolLineageFacts."
+        )
+    if (
+        state_freshness is not None
+        and not isinstance(state_freshness, Mapping)
+    ):
+        raise TypeError(
+            "state_freshness must be a mapping."
+        )
+
     target = selected.target
-    return {"status": "resolved", "target": {"artifact_id": target.artifact_id, "qualified_name": target.qualified_name, "module": target.module_name, "symbol": target.symbol_name, "resolution": target.resolution}, "selected_sections": list(selected.selected_sections), "complete": selected.complete, "metadata_consistent": selected.metadata_consistent, "scope_state": selected.facts.scope_state, "sections": _section_payloads(selected)}
+    result = {
+        "status": "resolved",
+        "target": {
+            "artifact_id": target.artifact_id,
+            "qualified_name": target.qualified_name,
+            "module": target.module_name,
+            "symbol": target.symbol_name,
+            "resolution": target.resolution,
+        },
+        "selected_sections": list(
+            selected.selected_sections
+        ),
+        "complete": selected.complete,
+        "metadata_consistent": (
+            selected.metadata_consistent
+        ),
+        "scope_state": selected.facts.scope_state,
+    }
+
+    if state_freshness is not None:
+        result["state_freshness"] = dict(
+            state_freshness
+        )
+
+    result["sections"] = _section_payloads(
+        selected
+    )
+    return result
 
 
-def build_symbol_lineage_preview(selected: SelectedSymbolLineageFacts) -> dict:
-    payload = build_symbol_lineage_payload(selected)
-    return {"status": "resolved", "mode": "preview", "target": payload["target"], "available_sections": list(selected.selected_sections), "complete": selected.complete, "metadata_consistent": selected.metadata_consistent, "scope_state": selected.facts.scope_state, "candidate_response_bytes": mcp_rep.serialized_json_bytes(payload), "section_sizes": {name: {"payload_bytes": mcp_rep.serialized_json_bytes(value)} for name, value in payload["sections"].items()}}
+def build_symbol_lineage_preview(
+    selected: SelectedSymbolLineageFacts,
+    *,
+    state_freshness: Mapping[str, object] | None = None,
+) -> dict:
+    payload = build_symbol_lineage_payload(
+        selected,
+        state_freshness=state_freshness,
+    )
+    result = {
+        "status": "resolved",
+        "mode": "preview",
+        "target": payload["target"],
+        "available_sections": list(
+            selected.selected_sections
+        ),
+        "complete": selected.complete,
+        "metadata_consistent": (
+            selected.metadata_consistent
+        ),
+        "scope_state": selected.facts.scope_state,
+        "candidate_response_bytes": (
+            mcp_rep.serialized_json_bytes(
+                payload
+            )
+        ),
+        "section_sizes": {
+            name: {
+                "payload_bytes": (
+                    mcp_rep.serialized_json_bytes(
+                        value
+                    )
+                ),
+            }
+            for name, value
+            in payload["sections"].items()
+        },
+    }
+    if "state_freshness" in payload:
+        result["state_freshness"] = payload[
+            "state_freshness"
+        ]
+    return result
 
 
 def _semantic_owner_ids(value: object) -> tuple[str, ...]:
@@ -143,7 +228,13 @@ def _named_semantic_owners(value: object, owner_names: Mapping[str, str]) -> obj
     return {key: _named_semantic_owners(item, owner_names) for key, item in value.items()}
 
 
-def build_symbol_lineage_represented_payload(selected: SelectedSymbolLineageFacts, *, representation: str = "auto", artifact_names: Mapping[str, str] | None = None) -> dict:
+def build_symbol_lineage_represented_payload(
+    selected: SelectedSymbolLineageFacts,
+    *,
+    representation: str = "auto",
+    artifact_names: Mapping[str, str] | None = None,
+    state_freshness: Mapping[str, object] | None = None,
+) -> dict:
     if not isinstance(selected, SelectedSymbolLineageFacts): raise TypeError("selected must be SelectedSymbolLineageFacts.")
     if not isinstance(representation, str): raise TypeError("representation must be a string.")
     requested = representation.strip().lower()
@@ -151,7 +242,10 @@ def build_symbol_lineage_represented_payload(selected: SelectedSymbolLineageFact
     if artifact_names is not None:
         if not isinstance(artifact_names, Mapping): raise TypeError("artifact_names must be a mapping.")
         if any(not isinstance(k, str) or not k or not isinstance(v, str) or not v for k, v in artifact_names.items()): raise ValueError("artifact_names must map non-empty artifact IDs to non-empty names.")
-    base = build_symbol_lineage_payload(selected)
+    base = build_symbol_lineage_payload(
+        selected,
+        state_freshness=state_freshness,
+    )
     missing = tuple(owner for owner in _semantic_owner_ids(base) if artifact_names is None or owner not in artifact_names)
     indexed = dict(base); indexed.update({"representation": "indexed", "requested_representation": requested, "resolver": {"index_kind": "artifact", "resolve_via": "lookup_index_entries"}})
     indexed_bytes = mcp_rep.serialized_json_bytes(indexed)
@@ -179,11 +273,13 @@ def _represented_response_candidate(
     mode: str,
     representation: str,
     artifact_names: Mapping[str, str] | None,
+    state_freshness: Mapping[str, object] | None,
 ) -> dict:
     result = build_symbol_lineage_represented_payload(
         selected,
         representation=representation,
         artifact_names=artifact_names,
+        state_freshness=state_freshness,
     )
     result["mode"] = mode
     return result
@@ -194,6 +290,7 @@ def build_symbol_lineage_represented_preview(
     *,
     representation: str = "auto",
     artifact_names: Mapping[str, str] | None = None,
+    state_freshness: Mapping[str, object] | None = None,
     candidate_mode: str = "fetch",
 ) -> dict:
     if candidate_mode not in {"auto", "fetch"}:
@@ -206,6 +303,7 @@ def build_symbol_lineage_represented_preview(
         mode=candidate_mode,
         representation=representation,
         artifact_names=artifact_names,
+        state_freshness=state_freshness,
     )
     sections = candidate["sections"]
 
@@ -247,6 +345,11 @@ def build_symbol_lineage_represented_preview(
         },
     }
 
+    if "state_freshness" in candidate:
+        result["state_freshness"] = candidate[
+            "state_freshness"
+        ]
+
     if "resolver" in candidate:
         result["resolver"] = candidate["resolver"]
 
@@ -260,6 +363,7 @@ def render_symbol_lineage_response(
     sections: tuple[str, ...] | None = None,
     representation: str = "auto",
     artifact_names: Mapping[str, str] | None = None,
+    state_freshness: Mapping[str, object] | None = None,
     allow_large_output: bool = False,
 ) -> str:
     if not isinstance(
@@ -293,6 +397,7 @@ def render_symbol_lineage_response(
             selected,
             representation=representation,
             artifact_names=artifact_names,
+            state_freshness=state_freshness,
             candidate_mode="fetch",
         )
         serialized = json.dumps(
@@ -319,6 +424,7 @@ def render_symbol_lineage_response(
         mode=plan.mode,
         representation=representation,
         artifact_names=artifact_names,
+        state_freshness=state_freshness,
     )
     candidate_bytes = (
         mcp_rep.serialized_json_bytes(
@@ -336,6 +442,7 @@ def render_symbol_lineage_response(
                 selected,
                 representation=representation,
                 artifact_names=artifact_names,
+                state_freshness=state_freshness,
                 candidate_mode="auto",
             )
         )

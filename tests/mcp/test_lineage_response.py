@@ -103,6 +103,24 @@ def _with_empty_selected_sections(selected):
     )
 
 
+def _state_freshness_fixture(
+    *,
+    advisory_warning=None,
+):
+    return {
+        "canonical_state": "fresh",
+        "workspace_sync": "verified",
+        "canonical_revision": 7,
+        "provenance": "live",
+        "families": {
+            "module": "fresh",
+            "graph": "fresh",
+            "lineage": "fresh",
+        },
+        "advisory_warning": advisory_warning,
+    }
+
+
 def test_auto_plans_complete_symbol_candidate_for_size_decision():
     assert plan_symbol_lineage_response(mode=" AUTO ") == SymbolLineageResponsePlan("auto", SYMBOL_LINEAGE_SECTION_ORDER, True, True)
 
@@ -662,4 +680,97 @@ def test_symbol_lineage_renderer_validates_allow_large_output():
         render_symbol_lineage_response(
             _selected_lineage_fixture(),
             allow_large_output=1,
+        )
+
+
+def test_symbol_lineage_payload_preserves_supplied_freshness_without_mutation():
+    selected = _selected_lineage_fixture()
+    freshness = _state_freshness_fixture()
+    original = dict(freshness)
+
+    result = build_symbol_lineage_payload(
+        selected,
+        state_freshness=freshness,
+    )
+
+    assert result["state_freshness"] == freshness
+    assert freshness == original
+
+
+def test_symbol_lineage_represented_preview_sizes_candidate_with_freshness():
+    selected = _selected_lineage_fixture()
+    freshness = _state_freshness_fixture()
+
+    preview = build_symbol_lineage_represented_preview(
+        selected,
+        representation="indexed",
+        state_freshness=freshness,
+        candidate_mode="fetch",
+    )
+    candidate = build_symbol_lineage_represented_payload(
+        selected,
+        representation="indexed",
+        state_freshness=freshness,
+    )
+    candidate["mode"] = "fetch"
+
+    assert preview["state_freshness"] == freshness
+    assert preview["candidate_response_bytes"] == (
+        mcp_rep.serialized_json_bytes(
+            candidate
+        )
+    )
+
+
+def test_symbol_lineage_auto_threshold_includes_freshness_envelope():
+    selected = _with_empty_selected_sections(
+        _selected_lineage_fixture()
+    )
+    freshness = _state_freshness_fixture(
+        advisory_warning="x" * 5000,
+    )
+
+    result = json.loads(
+        render_symbol_lineage_response(
+            selected,
+            mode="auto",
+            representation="indexed",
+            state_freshness=freshness,
+        )
+    )
+
+    assert result["mode"] == "preview"
+    assert result["state_freshness"] == freshness
+    assert (
+        result["auto_fetch"]["candidate_response_bytes"]
+        > SYMBOL_LINEAGE_AUTO_FETCH_THRESHOLD_BYTES
+    )
+    assert (
+        result["candidate_response_bytes"]
+        == result["auto_fetch"][
+            "candidate_response_bytes"
+        ]
+    )
+
+
+def test_symbol_lineage_freshness_contract_rejects_non_mapping():
+    selected = _selected_lineage_fixture()
+
+    with pytest.raises(
+        TypeError,
+        match="state_freshness must be a mapping.",
+    ):
+        build_symbol_lineage_payload(
+            selected,
+            state_freshness=[],
+        )
+
+    with pytest.raises(
+        TypeError,
+        match="state_freshness must be a mapping.",
+    ):
+        render_symbol_lineage_response(
+            selected,
+            representation="indexed",
+            state_freshness=[],
         )
