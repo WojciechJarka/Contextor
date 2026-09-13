@@ -1,3 +1,4 @@
+from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
@@ -753,6 +754,7 @@ def test_lexical_scope_facts_return_only_exact_root_owned_flows():
     assert result.target is target
     assert result.metadata.revision == 31
     assert result.scope_available is True
+    assert result.root_ambiguous is False
     assert result.materialization_complete is True
     assert result.complete is True
 
@@ -991,3 +993,88 @@ def test_lexical_scope_facts_do_not_treat_plain_binding_as_scope():
     assert result.nested_scopes == ()
     assert result.scope_available is False
     assert result.complete is False
+def test_lexical_scope_facts_fail_closed_for_multiple_exact_roots():
+    service, backend, target = _lexical_scope_service()
+    source = backend.get_source("pkg/target.py")
+    assert source is not None
+
+    duplicate_ref = MaterializedOccurrenceRef(
+        "pkg/target.py",
+        "d" * 64,
+        "outer-redefined",
+    )
+    duplicate_anchor = MaterializedAnchorFact(
+        "outer-redefined",
+        duplicate_ref,
+        "function",
+        SourceSpan(20, 0, 22, 1),
+        owner_local_id="module",
+    )
+    duplicate_flow = MaterializedFlowFact(
+        "z_redefined_return",
+        duplicate_ref,
+        MaterializedOccurrenceRef(
+            "pkg/target.py",
+            "d" * 64,
+            "redefined-result",
+        ),
+        LineageRelation.RETURNS,
+        SourceSpan(21, 1, 21, 10),
+        ResolutionKind.LEXICAL_EXACT,
+        LineageConfidence.CONFIRMED,
+        owner_local_id="outer-redefined",
+    )
+    duplicate_binding = SemanticAnchorBinding(
+        target.artifact_id,
+        target.qualified_name,
+        duplicate_ref,
+    )
+
+    replacement = replace(
+        source,
+        manifest=replace(
+            source.manifest,
+            anchor_count=source.manifest.anchor_count + 1,
+            flow_count=source.manifest.flow_count + 1,
+        ),
+        anchors=tuple(
+            sorted(
+                (
+                    *source.anchors,
+                    duplicate_anchor,
+                )
+            )
+        ),
+        flows=tuple(
+            sorted(
+                (
+                    *source.flows,
+                    duplicate_flow,
+                )
+            )
+        ),
+        semantic_anchors=tuple(
+            sorted(
+                (
+                    *source.semantic_anchors,
+                    duplicate_binding,
+                )
+            )
+        ),
+    )
+    backend._sources["pkg/target.py"] = replacement
+
+    result = service.lexical_scope_facts(target)
+
+    assert tuple(
+        item.anchor.local_id
+        for item in result.roots
+    ) == (
+        "outer",
+        "outer-redefined",
+    )
+    assert result.scope_available is False
+    assert result.root_ambiguous is True
+    assert result.complete is False
+    assert result.flows == ()
+    assert result.nested_scopes == ()

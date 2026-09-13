@@ -92,7 +92,11 @@ class LexicalScopeFacts:
 
     @property
     def scope_available(self) -> bool:
-        return bool(self.roots)
+        return len(self.roots) == 1
+
+    @property
+    def root_ambiguous(self) -> bool:
+        return len(self.roots) > 1
 
     @property
     def complete(self) -> bool:
@@ -383,6 +387,10 @@ class LineageQueryService:
         roots.sort(key=_scope_root_match_key)
         flows.sort(key=_flow_match_key)
         nested_scopes.sort(key=_local_anchor_match_key)
+
+        if len(roots) != 1:
+            flows.clear()
+            nested_scopes.clear()
 
         return LexicalScopeFacts(
             target=target,
