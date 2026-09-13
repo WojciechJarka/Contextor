@@ -48,6 +48,27 @@ def test_coordinator_lease_acquisition_and_release(tmp_path: Path):
     release_full_analysis(lease)
 
 
+def test_normal_shutdown_releases_lease_for_next_desktop_instance(
+    tmp_path: Path,
+):
+    """A clean owner shutdown leaves the next instance free to acquire."""
+    repo_dir = tmp_path / "repo_normal_shutdown"
+    repo_dir.mkdir()
+
+    owner_a = acquire_full_analysis(repo_dir, owner="desktop_a")
+    release_full_analysis(owner_a)
+
+    owner_b = acquire_full_analysis(
+        repo_dir,
+        owner="desktop_b",
+        timeout=0.5,
+    )
+    try:
+        assert owner_b.owner == "desktop_b"
+    finally:
+        release_full_analysis(owner_b)
+
+
 def test_lease_is_held_during_publication(tmp_path: Path, monkeypatch):
     """
     Requirement 5: Deterministic lifecycle order proving lease is held during publication:
@@ -142,6 +163,66 @@ def _worker_try_acquire(repo_path: str, owner: str, timeout: float, result_queue
         result_queue.put({"status": "error", "error": str(exc), "owner": owner})
 
 
+def _worker_try_acquire_with_log(
+    repo_path: str,
+    owner: str,
+    timeout: float,
+    result_queue,
+):
+    """Attempt a lease and return the owner diagnostic observed while waiting."""
+    messages: list[str] = []
+    try:
+        lease = acquire_full_analysis(
+            repo_path,
+            owner=owner,
+            timeout=timeout,
+            poll_interval=0.05,
+            log=messages.append,
+        )
+        release_full_analysis(lease)
+        result_queue.put({"status": "ok", "owner": owner, "messages": messages})
+    except FullAnalysisBusyError:
+        result_queue.put(
+            {"status": "busy", "owner": owner, "messages": messages}
+        )
+    except Exception as exc:
+        result_queue.put(
+            {
+                "status": "error",
+                "error": str(exc),
+                "owner": owner,
+                "messages": messages,
+            }
+        )
+
+
+def _worker_race_for_orphan_recovery(
+    repo_path: str,
+    owner: str,
+    start_event,
+    release_event,
+    result_queue,
+):
+    """Compete for an orphaned lease while the winner holds it for the loser."""
+    start_event.wait(timeout=5.0)
+    try:
+        lease = acquire_full_analysis(
+            repo_path,
+            owner=owner,
+            timeout=1.0,
+            poll_interval=0.05,
+        )
+        result_queue.put({"status": "acquired", "owner": owner})
+        release_event.wait(timeout=5.0)
+        release_full_analysis(lease)
+    except FullAnalysisBusyError:
+        result_queue.put({"status": "busy", "owner": owner})
+    except Exception as exc:
+        result_queue.put(
+            {"status": "error", "owner": owner, "error": str(exc)}
+        )
+
+
 def test_cross_process_os_lock_and_process_death_recovery(tmp_path: Path, isolated_dirs):
     """
     Requirement 11: Cross-process exclusion and OS-held file lock auto-recovery on process termination.
@@ -217,6 +298,96 @@ def test_cross_process_os_lock_and_process_death_recovery(tmp_path: Path, isolat
     finally:
         if p_a.is_alive():
             p_a.terminate()
+
+
+def test_live_owner_is_reported_and_cannot_be_stolen(tmp_path: Path, isolated_dirs):
+    """A live owner remains authoritative while a contender waits."""
+    repo = tmp_path / "repo_live_owner"
+    repo.mkdir()
+
+    ctx = multiprocessing.get_context("spawn")
+    ready_a = ctx.Event()
+    results_a = ctx.Queue()
+    results_b = ctx.Queue()
+    p_a = ctx.Process(
+        target=_worker_os_lock_hold,
+        args=(str(repo), "live_owner", ready_a, results_a, 15.0),
+    )
+    p_a.start()
+
+    try:
+        assert ready_a.wait(timeout=15.0)
+        assert results_a.get(timeout=2.0)["status"] == "acquired"
+
+        p_b = ctx.Process(
+            target=_worker_try_acquire_with_log,
+            args=(str(repo), "contender", 0.5, results_b),
+        )
+        p_b.start()
+        p_b.join(timeout=3.0)
+        result_b = results_b.get(timeout=2.0)
+
+        assert result_b["status"] == "busy"
+        assert any(
+            "valid active owner" in message and "live_owner" in message
+            for message in result_b["messages"]
+        ), result_b
+    finally:
+        if p_a.is_alive():
+            p_a.terminate()
+        p_a.join(timeout=3.0)
+
+
+def test_orphan_recovery_is_atomic_for_two_contenders(
+    tmp_path: Path,
+    isolated_dirs,
+):
+    """After owner death, exactly one simultaneous contender owns the lease."""
+    repo = tmp_path / "repo_orphan_race"
+    repo.mkdir()
+
+    ctx = multiprocessing.get_context("spawn")
+    ready_a = ctx.Event()
+    results_a = ctx.Queue()
+    p_a = ctx.Process(
+        target=_worker_os_lock_hold,
+        args=(str(repo), "orphan_owner", ready_a, results_a, 15.0),
+    )
+    p_a.start()
+
+    start_event = ctx.Event()
+    release_event = ctx.Event()
+    results = ctx.Queue()
+    contenders = [
+        ctx.Process(
+            target=_worker_race_for_orphan_recovery,
+            args=(str(repo), f"contender_{index}", start_event, release_event, results),
+        )
+        for index in (1, 2)
+    ]
+
+    try:
+        assert ready_a.wait(timeout=15.0)
+        assert results_a.get(timeout=2.0)["status"] == "acquired"
+        p_a.terminate()
+        p_a.join(timeout=3.0)
+
+        for contender in contenders:
+            contender.start()
+        start_event.set()
+
+        observed = [results.get(timeout=3.0) for _ in contenders]
+        assert sorted(item["status"] for item in observed) == [
+            "acquired",
+            "busy",
+        ]
+    finally:
+        release_event.set()
+        for contender in contenders:
+            contender.join(timeout=3.0)
+        if p_a.is_alive():
+            p_a.terminate()
+            p_a.join(timeout=3.0)
 
 
 def test_mcp_single_publication_root_cause_regression(tmp_path: Path, monkeypatch):

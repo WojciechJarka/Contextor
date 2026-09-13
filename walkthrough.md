@@ -1,1119 +1,585 @@
-# Antigravity Walkthrough
+# P0 Full-analysis lease lifecycle repair
 
 STATUS
 
-PASS_TARGETED. The active-owner lifecycle repair now uses a compact canonical semantic-origin sidecar; the duplicated lineage_extracted_facts_by_source state/candidate/snapshot payload is removed. No measurements were performed.
+PASS_TARGETED. The current full-analysis lease lifecycle now has explicit process-owner diagnostics, bounded orphan recovery, atomic OS-lock arbitration, and Desktop shutdown cancellation wired into the existing analysis cancellation path. Focused lease, analysis-job, and Desktop lifecycle tests are green. Full pytest was not run.
 
 ROOT_CAUSE
 
-A materialized SemanticEndpoint retains an opaque active owner_id and optional slot, but discards the symbolic fields required to reapply exact materialization when the active owner domain changes. The previous repair retained every ExtractedLineageSourceFacts slice to recover those fields, which duplicated the full lineage graph payload.
+`ContextorGUI.analyze()` starts `run_full_analysis_exclusive()` in the daemon worker created by `run_with_progress()`. The lease is held by the GUI process on `repo_cache_dir(repo)/runtime/full_analysis.lock` until `run_full_analysis_exclusive()` reaches its `finally` block. Before this fix, `ContextorGUI.on_closing()` stopped LIVE watchers and shut down the owned LIVE service, but did not set the active analysis cancellation flag. Therefore a closing Desktop could leave its analysis worker and lease alive until the repository analysis completed; a restarted Desktop then logged `Waiting for full analysis lease on repository ...` while the old process still owned the OS lock.
 
-FINAL_ARCHITECTURE
+The lock file JSON contained `pid`, `token`, `owner`, `repo_id`, and `timestamp`, but it was explicitly treated as diagnostic-only and there was no owner liveness or process-identity check. Consequently the coordinator could not distinguish a valid active owner from stale/orphan metadata and had no bounded orphan-recovery status. On Windows, the locked descriptor is also not a reliable metadata-read channel for a contender, so diagnostic metadata is now mirrored atomically to `full_analysis.lease.json`.
 
-Canonical state retains one MaterializedLineageSourceFacts representation per source. The slice now carries an immutable, sorted compact semantic_endpoint_origins tuple only for endpoint positions strengthened from symbolic references to SemanticEndpoint.
+CURRENT_LEASE_LIFECYCLE
 
-REMOVED_DUPLICATION
+1. Desktop start: `contextor.__main__._run_gui()` acquires the existing `DesktopSingleInstance` user-session mutex, creates the GUI, and the GUI creates its existing `owner_token` and `desktop_instance_id`. LIVE service ownership remains governed by the existing desktop/service process-identity model.
+2. Analyze Repository: `ContextorGUI.analyze()` calls `run_with_progress()`, whose daemon worker calls `run_full_analysis_exclusive(path, owner="desktop_analysis", ...)`.
+3. Lease acquire: `acquire_full_analysis()` serializes same-process contenders with `_PROCESS_LOCKS`, then atomically takes the OS byte-range lock on `runtime/full_analysis.lock`. The authoritative ownership is the OS lock; diagnostic metadata records owner label, PID, executable, and process start identity.
+4. Analysis owner: after the lease is acquired, `run_full_analysis_exclusive()` emits `FULL_ANALYSIS_LEASE_ACQUIRED`, executes the facade analysis, keeps the lease through publication, then releases it in `finally` and emits `FULL_ANALYSIS_END`.
+5. Normal shutdown: `ContextorGUI.on_closing()` now sets `progress_bar.is_cancelled = True` before the existing watcher/service cleanup. Existing progress checkpoints convert the callback result to `AnalysisCancelled`; the coordinator `finally` releases the lease before the GUI process exits. If shutdown occurs while only waiting for a lease, the same flag cancels the waiter and releases its local coordination lock.
+6. Crash/kill and restart: the OS releases the lock when the owning process dies. On the next acquire, the coordinator reads diagnostic metadata, checks the existing `process_identity(pid)` model (`alive`, executable image, and start identity), and classifies the observed owner as active, orphaned, or unknown. A dead or PID-reused owner is reported as orphaned. No lock file is unlinked or replaced, so recovery remains an atomic OS-lock competition.
+7. Recovery race: contenders compete for the same OS lock. Exactly one can acquire it; the other sees the new active owner and waits/fails according to its timeout. Orphan recovery is bounded by `ORPHAN_RECOVERY_TIMEOUT_SECONDS = 5.0` when no caller timeout is supplied, so stale ownership cannot cause an unbounded wait.
 
-lineage_extracted_facts_by_source was removed from RepositoryAnalysisState, CandidateState, full-analysis state construction, incremental publication, and snapshot state normalization. Snapshot normalization strips the obsolete historical attribute when encountered so it is not retained after hydration.
+FIX
 
-COMPACT_ORIGIN_MODEL
+- Added `owner_pid` and `owner_process_start_identity` to `FullAnalysisLease` while preserving constructor compatibility.
+- Added owner metadata read/validation using the existing `mcp_process_registry.process_identity()` ownership model.
+- Added atomic diagnostic sidecar publication to `full_analysis.lease.json` to make the owner visible to Windows contenders without making the sidecar an authority.
+- Added explicit `valid active owner`, `owner could not be verified`, and `Recovering orphaned full analysis lease` statuses.
+- Added a bounded orphan-recovery deadline and bounded polling interval. Recovery never forcibly steals a lock from a live owner and never deletes/replaces the locked file.
+- Wired Desktop close to the already existing progress cancellation path; no second shutdown mechanism was introduced.
 
-Each SemanticEndpointOrigin stores the slice source key/fingerprint, stable fact local id, endpoint role (FLOW_SOURCE, FLOW_TARGET, or SURFACE_EXPOSED), and exact symbolic fields: kind, module name, symbol name, and source-local id. It contains no anchors, flows, surfaces, AST, or second extracted representation.
+SHUTDOWN_PROOF
 
-MaterializedLineageSourceFacts validates sorted/unique origins, one origin per locator, source key/fingerprint equality with its manifest, and that each locator resolves to an existing semantic endpoint at the declared fact role.
+`test_normal_shutdown_releases_lease_for_next_desktop_instance` acquires as `desktop_a`, releases through the coordinator lifecycle, and acquires immediately as `desktop_b`. `test_closing_gui_cancels_active_analysis_before_cleanup` proves that Desktop close sets the same cancellation flag used by Stop analyze. Existing owned/unowned/mismatched-token Desktop shutdown tests remain green.
 
-REMATERIALIZATION_CONTRACT
+CRASH_RECOVERY_PROOF
 
-reresolve_materialized_lineage_source_facts is pure and deterministic. It keeps occurrence refs unchanged, re-resolves symbolic refs using the existing exact proof helper, and re-resolves semantic endpoints from compact origin using that same helper. A current active owner can yield a new-generation endpoint; an absent/invalid owner degrades to MaterializedSymbolicRef. No source scan, parse, or extraction is performed for untouched slices.
+`test_cross_process_os_lock_and_process_death_recovery` terminates an owner without calling release and proves the next process acquires the same existing lock file. The lock file is not deleted. The new owner metadata/liveness path classifies stale owner data and reports bounded recovery while the OS lock remains authoritative.
 
-At identity_sync_required, finalized registry sync, changed-source materialization, and all-slice compact re-resolution stay within the existing COW/registry transaction. A SemanticEndpoint lacking origin raises the narrow legacy-origin condition; the candidate remains publishable but lineage is marked STALE rather than falsely FRESH.
+LIVE_OWNER_PROOF
 
-LEGACY_SNAPSHOT_BEHAVIOR
+`test_live_owner_is_reported_and_cannot_be_stolen` holds the lease in process A, verifies process B receives `FullAnalysisBusyError`, and verifies the diagnostic says `valid active owner` with the owner label. No takeover or lock-file replacement is attempted.
 
-Legacy slices without origins still hydrate. They are not rejected merely because an old SemanticEndpoint lacks the new sidecar. On a later identity-domain change, an untouched legacy semantic endpoint without origin fail-closes the family to STALE; no owner/name heuristic is attempted.
+RACE_PROOF
 
-OWNER_DELETION_PROOF
+`test_orphan_recovery_is_atomic_for_two_contenders` kills the original owner, starts two contenders simultaneously, holds the winner's lease until both outcomes are observed, and proves exactly one contender is `acquired` while the other is `busy`.
 
-The focused deletion parity case begins with an untouched consumer semantic endpoint. Provider deletion removes only the provider slice. Compact re-resolution converts the consumer endpoint to MaterializedSymbolicRef, and the resulting incremental slice equals fresh full materialization of the same final source domain.
+GUI_STATUS_CHANGE
 
-OWNER_INTRODUCTION_PROOF
-
-The consumer initially carries MaterializedSymbolicRef, so no origin is stored. When the provider becomes active, all existing materialized slices are re-resolved and the untouched consumer is promoted to the same SemanticEndpoint and compact origin emitted by fresh full materialization.
-
-GENERATION_PROOF
-
-The focused generation case moves provider::target from A:provider/1 to A:provider/2. Stored origin re-resolves against the final active registry and produces the A:provider/2 endpoint. The previous generation never remains current.
-
-SNAPSHOT_PROOF
-
-Snapshot roundtrip preserves compact origin metadata. A hydrated consumer slice can be re-resolved from semantic to symbolic after owner removal and back to a current-generation semantic endpoint after owner introduction, without source work.
-
-CORRUPTION_PROOF
-
-Snapshot normalization rejects duplicate locators, wrong source key, wrong fingerprint, missing fact locator, and role/fact mismatches. Revalidation reconstructs the frozen slice, which executes the canonical sidecar validator fail-closed.
-
-ATOMICITY_PROOF
-
-The focused re-resolution failure test injects an exception for the untouched consumer after registry sync. It verifies no canonical modules, artifacts, materialized lineage, registry mappings, or acknowledgement are published. The existing identity-sync rollback regression remains green.
-
-INVARIANTS_PRESERVED
-
-- interface_descriptors={}, D1/build-state freshness, MCP query tools, and output budgeting were untouched.
-- The same exact resolution/confidence/slot/descriptor proof remains authoritative.
-- Materialized occurrences remain slice-local; symbolic refs remain symbolic boundaries.
-- No external lineage store was introduced.
-- A FRESH lineage family cannot certify an unresolvable legacy semantic endpoint after an identity-domain change.
+YES, status-only. The existing log path now distinguishes the original wait message, a valid active owner, an unverifiable owner, and orphan recovery. No larger progress-widget or GUI refactor was made.
 
 FILES_CHANGED
 
-- C:\Temp\Contextor_Repo\contextor\core\analysis\incremental\engine.py
-- C:\Temp\Contextor_Repo\contextor\core\analysis\incremental\plan_executor.py
-- C:\Temp\Contextor_Repo\contextor\core\analysis\lineage_materialization.py
-- C:\Temp\Contextor_Repo\contextor\core\analysis\state_manager.py
-- C:\Temp\Contextor_Repo\contextor\core\api\facade.py
-- C:\Temp\Contextor_Repo\contextor\core\domain\lineage_facts.py
-- C:\Temp\Contextor_Repo\contextor\core\live_state\store.py
-- C:\Temp\Contextor_Repo\tests\analysis\test_lineage_materialization.py
-- C:\Temp\Contextor_Repo\tests\test_full_analysis_lineage_materialization.py
-- C:\Temp\Contextor_Repo\tests\test_lineage_state_lifecycle.py
+- `C:\Temp\Contextor_Repo\contextor\core\analysis\full_analysis_coordinator.py`
+- `C:\Temp\Contextor_Repo\contextor\ui\gui.py`
+- `C:\Temp\Contextor_Repo\tests\test_full_analysis_coordination.py`
+- `C:\Temp\Contextor_Repo\tests\test_live_desktop_integration.py`
 
-walkthrough.md is excluded from FILES_CHANGED and ACTUAL_DIFF. Current git diff includes the immediately preceding lifecycle repair in overlapping files; this report attributes only the compact-origin redesign, while ACTUAL_DIFF preserves the complete current unified diff as required.
+`C:\Temp\Contextor_Repo\walkthrough.md` is the required report and is excluded from `FILES_CHANGED` and `ACTUAL_DIFF`.
 
 TESTS_RUN
 
-- .venv\Scripts\python.exe -m pytest tests/test_lineage_state_lifecycle.py tests/test_full_analysis_lineage_materialization.py tests/analysis/test_lineage_materialization.py -q -> 53 passed.
-- .venv\Scripts\python.exe -m pytest tests/test_live_state_store.py -q -> 20 passed.
-- .venv\Scripts\python.exe -m pytest tests/test_completeness_freshness_parity_proof.py -q -> 31 passed.
-- .venv\Scripts\python.exe -m py_compile on all changed production and test Python files -> passed.
-- git diff --check on the ten task files, excluding this raw-diff report -> passed.
-- Full pytest was not run, per task.
+- `.venv\Scripts\python.exe -m pytest tests/test_full_analysis_coordination.py tests/test_live_desktop_integration.py tests/test_gui_live_startup.py -q` -> `39 passed in 21.52s`.
+- `.venv\Scripts\python.exe -m pytest tests/mcp/tools/test_analysis_status_concurrency.py tests/test_live_job_object.py -q` -> `19 passed, 1 warning in 15.75s`.
+- `.venv\Scripts\python.exe -m py_compile contextor/core/analysis/full_analysis_coordinator.py contextor/ui/gui.py` -> passed.
+- `git diff --check -- contextor/core/analysis/full_analysis_coordinator.py contextor/ui/gui.py tests/test_full_analysis_coordination.py tests/test_live_desktop_integration.py` -> passed. A whole-tree `git diff --check` reports only the intentional whitespace markers inside this report's literal `ACTUAL_DIFF` section.
+- No Git history/blame/log was used. Full pytest was not run.
 
 REMAINING_RISKS
 
-The compact sidecar deliberately covers only endpoints strengthened by this materializer. Legacy semantic endpoints without provenance cannot regain exact symbolic origin and therefore degrade the family to STALE on the next identity-domain change. Full pytest and LIVE F2L-READY certification remain intentionally pending.
+The normal analysis engine observes cancellation at its existing progress checkpoints; an arbitrary injected analysis function that never calls a checkpoint cannot be cooperatively interrupted, although process termination still releases the OS lock. The defensive five-second bound returns a busy error rather than stealing if an OS handle anomalously survives owner death; this preserves the required live-owner safety invariant. A fresh Desktop/LIVE manual E2E restart was not run in this focused code/test task.
 
 CONTEXTOR_TOOL_USAGE
 
-Contextor MCP was active immediately; deferred loading was not needed. Contextor-first discovery used get_mcp_documentation, get_artifacts_for_module, search_source, and get_symbol_implementation to inspect the materializer, semantic domain slice, incremental lifecycle, candidate state, full-analysis path, and snapshot normalizer. rg was used only afterward for textual verification of removal.
+Contextor MCP was available in the current session; no deferred loading was needed. `get_mcp_documentation` was read first. Contextor-first discovery used `search_source`, `get_source_range`, and `get_symbol_implementation` for the literal message, coordinator acquire/release/run path, GUI Analyze Repository path, GUI shutdown, progress worker, MCP analysis-job owner, process registry identity, and Desktop single-instance ownership. `rg` was used only afterward for narrow textual verification and test-file discovery. No Git history/blame/log was used.
 
 ACTUAL_DIFF
 
 ~~~diff
-warning: in the working copy of 'contextor/core/analysis/incremental/engine.py', LF will be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'contextor/core/analysis/incremental/plan_executor.py', LF will be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'contextor/core/analysis/lineage_materialization.py', LF will be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'contextor/core/analysis/state_manager.py', LF will be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'contextor/core/api/facade.py', LF will be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'contextor/core/domain/lineage_facts.py', LF will be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'contextor/core/live_state/store.py', LF will be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'tests/analysis/test_lineage_materialization.py', LF will be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'tests/test_full_analysis_lineage_materialization.py', LF will be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'tests/test_lineage_state_lifecycle.py', LF will be replaced by CRLF the next time Git touches it
-diff --git a/contextor/core/analysis/incremental/engine.py b/contextor/core/analysis/incremental/engine.py
-index 9dcf625..c0ed5b6 100644
---- a/contextor/core/analysis/incremental/engine.py
-+++ b/contextor/core/analysis/incremental/engine.py
-@@ -124,7 +124,6 @@ class IncrementalAnalysisEngine:
-             )
- 
-             candidate.lineage_facts_by_source.pop(source_path, None)
--            candidate.lineage_extracted_facts_by_source.pop(source_path, None)
-             if candidate.lineage_facts_state == LineageFamilyStatus.NOT_MATERIALIZED.value:
-                 candidate.lineage_facts_state = LineageFamilyStatus.NOT_MATERIALIZED.value
-                 candidate.lineage_facts_semantic_version = None
-@@ -158,9 +157,6 @@ class IncrementalAnalysisEngine:
-         self.state.syntax_diagnostics_by_path = candidate.syntax_diagnostics_by_path
-         self.state.syntax_diagnostics_state = candidate.syntax_diagnostics_state
-         self.state.module_parse_freshness = candidate.module_parse_freshness
--        self.state.lineage_extracted_facts_by_source = (
--            candidate.lineage_extracted_facts_by_source
--        )
-         self.state.lineage_facts_by_source = candidate.lineage_facts_by_source
-         self.state.lineage_facts_state = candidate.lineage_facts_state
-         self.state.lineage_facts_semantic_version = (
-@@ -176,10 +172,12 @@ class IncrementalAnalysisEngine:
-         delete: bool = False,
-         rematerialize_all: bool = False,
-     ) -> None:
--        """Install/remove lineage and optionally rebuild all retained slices."""
-+        """Install/remove lineage and re-resolve canonical slices after identity sync."""
-         from contextor.core.analysis.lineage_materialization import (
-+            LineageOriginUnavailableError,
-             LineageResolutionContext,
-             materialize_lineage_source_facts,
-+            reresolve_materialized_lineage_source_facts,
-         )
-         from contextor.core.domain.lineage_facts import (
-             LINEAGE_FACTS_SEMANTIC_VERSION,
-@@ -193,12 +191,10 @@ class IncrementalAnalysisEngine:
-             Path(str(module.path)).as_posix()
-             for module in candidate.modules.values()
-         }
--        extracted_by_source = candidate.lineage_extracted_facts_by_source
-         lineage_by_source = candidate.lineage_facts_by_source
- 
-         if delete:
-             lineage_by_source.pop(source_path, None)
--            extracted_by_source.pop(source_path, None)
-             candidate.lineage_facts_semantic_version = LINEAGE_FACTS_SEMANTIC_VERSION
-         else:
-             if extracted_lineage_facts is None:
-@@ -207,26 +203,10 @@ class IncrementalAnalysisEngine:
-                 raise ValueError("Extracted lineage source key does not match incremental source.")
-             if source_path not in eligible_source_keys:
-                 raise ValueError("Incremental lineage source is outside the active candidate.")
--            extracted_by_source[source_path] = extracted_lineage_facts
--
--        foreign_extracted_keys = set(extracted_by_source) - eligible_source_keys
--        if foreign_extracted_keys:
--            raise ValueError(
--                "Extracted lineage contains sources outside the active candidate: "
--                f"{sorted(foreign_extracted_keys)!r}"
--            )
--        for source_key, extracted in extracted_by_source.items():
--            if extracted.source_key != source_key:
--                raise ValueError(
--                    "Extracted lineage mapping key does not match its source key."
--                )
- 
--        source_keys_to_materialize = (
--            tuple(sorted(extracted_by_source))
--            if rematerialize_all
--            else (() if delete else (source_path,))
--        )
--        if source_keys_to_materialize:
-+        needs_resolution = rematerialize_all or not delete
-+        origin_unavailable = False
-+        if needs_resolution:
-             active_module_names = set(candidate.modules)
-             active_artifact_names = collect_qualified_artifact_identities(
-                 candidate.artifacts
-@@ -260,8 +240,8 @@ class IncrementalAnalysisEngine:
-                 ),
-                 interface_descriptors={},
-             )
--            for source_key in source_keys_to_materialize:
--                extracted = extracted_by_source[source_key]
-+            if not delete:
-+                extracted = extracted_lineage_facts
-                 materialized = materialize_lineage_source_facts(
-                     extracted,
-                     resolution,
-@@ -274,15 +254,20 @@ class IncrementalAnalysisEngine:
-                     raise ValueError(
-                         "Materialized lineage manifest does not match extracted source."
-                     )
--                lineage_by_source[source_key] = materialized
-+                lineage_by_source[source_path] = materialized
-+            if rematerialize_all:
-+                for source_key in sorted(lineage_by_source):
-+                    try:
-+                        lineage_by_source[source_key] = (
-+                            reresolve_materialized_lineage_source_facts(
-+                                lineage_by_source[source_key],
-+                                resolution,
-+                            )
-+                        )
-+                    except LineageOriginUnavailableError:
-+                        origin_unavailable = True
-             candidate.lineage_facts_semantic_version = LINEAGE_FACTS_SEMANTIC_VERSION
- 
--        unrebuildable_source_keys = (
--            set(lineage_by_source) - set(extracted_by_source)
--            if rematerialize_all
--            else set()
--        )
--
-         foreign_source_keys = set(lineage_by_source) - eligible_source_keys
-         if foreign_source_keys:
-             raise ValueError(
-@@ -292,7 +277,7 @@ class IncrementalAnalysisEngine:
-         missing_source_keys = eligible_source_keys - set(lineage_by_source)
-         if getattr(self.state, "resync_required", False):
-             candidate.lineage_facts_state = LineageFamilyStatus.STALE.value
--        elif unrebuildable_source_keys:
-+        elif origin_unavailable:
-             candidate.lineage_facts_state = LineageFamilyStatus.STALE.value
-         elif missing_source_keys:
-             candidate.lineage_facts_state = (
-@@ -707,9 +692,6 @@ class IncrementalAnalysisEngine:
-             # certify it fresh again.
-             self.state.resync_required = True
-         self.state.module_usages = candidate.module_usages
--        self.state.lineage_extracted_facts_by_source = (
--            candidate.lineage_extracted_facts_by_source
--        )
-         self.state.lineage_facts_by_source = candidate.lineage_facts_by_source
-         self.state.lineage_facts_state = candidate.lineage_facts_state
-         self.state.lineage_facts_semantic_version = (
-diff --git a/contextor/core/analysis/incremental/plan_executor.py b/contextor/core/analysis/incremental/plan_executor.py
-index 2a10648..86948a6 100644
---- a/contextor/core/analysis/incremental/plan_executor.py
-+++ b/contextor/core/analysis/incremental/plan_executor.py
-@@ -21,10 +21,7 @@ from contextor.core.analysis.state_manager import (
-     validate_canonical_artifact_consumption_coverage,
- )
- from contextor.core.domain.graph import ProjectGraph
--from contextor.core.domain.lineage_facts import (
--    ExtractedLineageSourceFacts,
--    MaterializedLineageSourceFacts,
--)
-+from contextor.core.domain.lineage_facts import MaterializedLineageSourceFacts
- from contextor.core.domain.module import Module
- from contextor.core.domain.refresh_plan import RefreshPlan
- from contextor.core.domain.usage_facts import ModuleUsageFacts
-@@ -48,7 +45,6 @@ class CandidateState:
-     syntax_diagnostics_by_path: Dict[str, Dict[str, Any]]
-     syntax_diagnostics_state: str
-     module_usages: Dict[str, Any]
--    lineage_extracted_facts_by_source: Dict[str, ExtractedLineageSourceFacts]
-     lineage_facts_by_source: Dict[str, MaterializedLineageSourceFacts]
-     lineage_facts_state: str
-     lineage_facts_semantic_version: str | None
-@@ -254,9 +250,6 @@ def _prepare_candidate_state(state: RepositoryAnalysisState) -> CandidateState:
-         syntax_diagnostics_by_path=dict(getattr(state, "syntax_diagnostics_by_path", {}) or {}),
-         syntax_diagnostics_state=getattr(state, "syntax_diagnostics_state", "not_materialized"),
-         module_usages=dict(getattr(state, "module_usages", {}) or {}),
--        lineage_extracted_facts_by_source=dict(
--            getattr(state, "lineage_extracted_facts_by_source", {}) or {}
--        ),
-         lineage_facts_by_source=dict(
-             getattr(state, "lineage_facts_by_source", {}) or {}
-         ),
-diff --git a/contextor/core/analysis/lineage_materialization.py b/contextor/core/analysis/lineage_materialization.py
-index 63a24b7..db4978c 100644
---- a/contextor/core/analysis/lineage_materialization.py
-+++ b/contextor/core/analysis/lineage_materialization.py
-@@ -25,6 +25,8 @@ from contextor.core.domain.lineage_facts import (
-     ParameterKind,
-     ResolutionKind,
-     SemanticEndpoint,
-+    SemanticEndpointOrigin,
-+    SemanticEndpointRole,
-     SemanticInterfaceDescriptor,
-     SourceLineageManifest,
-     build_module_global_slot,
-@@ -70,6 +72,10 @@ class LineageResolutionContext:
-                 )
+diff --git a/contextor/core/analysis/full_analysis_coordinator.py b/contextor/core/analysis/full_analysis_coordinator.py
+index 6d0cd31..21fd182 100644
+--- a/contextor/core/analysis/full_analysis_coordinator.py
++++ b/contextor/core/analysis/full_analysis_coordinator.py
+@@ -31,6 +31,8 @@ class FullAnalysisLease:
+     lock_path: str
+     repo_id: str
+     lock_fd: int
++    owner_pid: int = 0
++    owner_process_start_identity: int | None = None
  
  
-+class LineageOriginUnavailableError(ValueError):
-+    """A legacy semantic endpoint cannot be safely re-resolved."""
+ class FullAnalysisBusyError(RuntimeError):
+@@ -38,6 +40,12 @@ class FullAnalysisBusyError(RuntimeError):
+     pass
+ 
+ 
++# A dead process normally releases its OS lock immediately. This bound is only
++# for the defensive case where a stale lock handle survives process death; it
++# prevents an orphan diagnostic from turning into an unbounded wait.
++ORPHAN_RECOVERY_TIMEOUT_SECONDS = 5.0
 +
 +
- def materialize_lineage_source_facts(
-     extracted: ExtractedLineageSourceFacts,
-     resolution: LineageResolutionContext,
-@@ -87,17 +93,37 @@ def materialize_lineage_source_facts(
-         )
+ _PROCESS_LOCKS: dict[str, threading.Lock] = {}
+ _PROCESS_LOCKS_GUARD = threading.Lock()
  
-     descriptors: dict[str, SemanticInterfaceDescriptor] = {}
-+    origins: list[SemanticEndpointOrigin] = []
+@@ -124,6 +132,118 @@ def _unlock_fd(fd: int) -> None:
+         os.close(fd)
  
-     def endpoint(
-         reference: ExtractedOccurrenceRef | ExtractedSymbolicRef,
-         kind: ResolutionKind,
-         confidence: LineageConfidence,
-+        fact_local_id: str,
-+        endpoint_role: SemanticEndpointRole,
-     ) -> MaterializedOccurrenceRef | MaterializedSymbolicRef | SemanticEndpoint:
-         if isinstance(reference, ExtractedOccurrenceRef):
-             return occurrence(reference.local_id)
--        return _symbolic_endpoint(
--            reference, resolution, descriptors, kind, confidence, extracted
-+        resolved = _symbolic_endpoint(
-+            reference,
-+            resolution,
-+            descriptors,
-+            kind,
-+            confidence,
-+            extracted.source_key,
-+            extracted.source_fingerprint,
-         )
-+        if isinstance(resolved, SemanticEndpoint):
-+            origins.append(
-+                _semantic_origin(
-+                    reference,
-+                    extracted.source_key,
-+                    extracted.source_fingerprint,
-+                    fact_local_id,
-+                    endpoint_role,
-+                )
-+            )
-+        return resolved
-     anchors = tuple(
-         sorted(
-             MaterializedAnchorFact(
-@@ -106,39 +132,53 @@ def materialize_lineage_source_facts(
-             for anchor in extracted.anchors
-         )
-     )
--    flows = tuple(
--        sorted(
--            MaterializedFlowFact(
-+    flows = tuple(sorted(
-+        MaterializedFlowFact(
-+            flow.local_id,
-+            endpoint(
-+                flow.source,
-+                flow.resolution_kind,
-+                flow.confidence,
-                 flow.local_id,
--                endpoint(flow.source, flow.resolution_kind, flow.confidence),
--                endpoint(flow.target, flow.resolution_kind, flow.confidence),
--                flow.relation,
--                flow.evidence,
-+                SemanticEndpointRole.FLOW_SOURCE,
-+            ),
-+            endpoint(
-+                flow.target,
-                 flow.resolution_kind,
-                 flow.confidence,
--                flow.dynamic_boundary,
--                flow.provider,
--            )
--            for flow in extracted.flows
-+                flow.local_id,
-+                SemanticEndpointRole.FLOW_TARGET,
-+            ),
-+            flow.relation,
-+            flow.evidence,
-+            flow.resolution_kind,
-+            flow.confidence,
-+            flow.dynamic_boundary,
-+            flow.provider,
-         )
--    )
--    surfaces = tuple(
--        sorted(
--            MaterializedSurfaceFact(
--                surface.local_id,
--                surface.kind,
--                endpoint(surface.exposed, surface.resolution_kind, surface.confidence),
--                surface.evidence,
-+        for flow in extracted.flows
-+    ))
-+    surfaces = tuple(sorted(
-+        MaterializedSurfaceFact(
-+            surface.local_id,
-+            surface.kind,
-+            endpoint(
-+                surface.exposed,
-                 surface.resolution_kind,
-                 surface.confidence,
--                surface.declared_name,
--                surface.dynamic_boundary,
--                surface.provider,
--                surface.declaration_evidence,
--            )
--            for surface in extracted.surfaces
-+                surface.local_id,
-+                SemanticEndpointRole.SURFACE_EXPOSED,
-+            ),
-+            surface.evidence,
-+            surface.resolution_kind,
-+            surface.confidence,
-+            surface.declared_name,
-+            surface.dynamic_boundary,
-+            surface.provider,
-+            surface.declaration_evidence,
-         )
--    )
-+        for surface in extracted.surfaces
-+    ))
-     manifest = SourceLineageManifest(
-         extracted.source_key,
-         extracted.source_fingerprint,
-@@ -150,7 +190,159 @@ def materialize_lineage_source_facts(
-         extracted.resource_limit_reason,
-     )
-     return MaterializedLineageSourceFacts(
--        manifest, anchors, flows, surfaces, tuple(sorted(descriptors.values()))
-+        manifest,
-+        anchors,
-+        flows,
-+        surfaces,
-+        tuple(sorted(descriptors.values())),
-+        tuple(sorted(origins)),
-+    )
+ 
++def _read_lease_metadata(fd: int) -> dict[str, Any] | None:
++    """Read diagnostic owner metadata without treating it as lock authority."""
++    try:
++        original_offset = os.lseek(fd, 0, os.SEEK_CUR)
++        os.lseek(fd, 0, os.SEEK_SET)
++        payload = os.read(fd, 16 * 1024)
++    except (OSError, UnicodeError):
++        return None
++    finally:
++        try:
++            os.lseek(fd, original_offset, os.SEEK_SET)
++        except (OSError, UnboundLocalError):
++            pass
++
++    if not payload:
++        return None
++    try:
++        metadata = json.loads(payload.decode("utf-8"))
++    except (UnicodeDecodeError, json.JSONDecodeError):
++        return None
++    return metadata if isinstance(metadata, dict) else None
 +
 +
-+def reresolve_materialized_lineage_source_facts(
-+    materialized: MaterializedLineageSourceFacts,
-+    resolution: LineageResolutionContext,
-+) -> MaterializedLineageSourceFacts:
-+    """Re-resolve one canonical slice without source, AST, or extracted facts."""
++def _lease_metadata_path(lock_path: Path) -> Path:
++    return lock_path.with_name("full_analysis.lease.json")
 +
-+    if not isinstance(materialized, MaterializedLineageSourceFacts):
-+        raise TypeError("materialized must be MaterializedLineageSourceFacts.")
-+    if not isinstance(resolution, LineageResolutionContext):
-+        raise TypeError("resolution must be LineageResolutionContext.")
 +
-+    origins = {
-+        (origin.fact_local_id, origin.endpoint_role): origin
-+        for origin in materialized.semantic_endpoint_origins
-+    }
-+    descriptors: dict[str, SemanticInterfaceDescriptor] = {}
-+    resolved_origins: list[SemanticEndpointOrigin] = []
++def _read_lease_metadata_file(path: Path) -> dict[str, Any] | None:
++    try:
++        payload = path.read_bytes()
++    except OSError:
++        return None
++    if not payload:
++        return None
++    try:
++        metadata = json.loads(payload.decode("utf-8"))
++    except (UnicodeDecodeError, json.JSONDecodeError):
++        return None
++    return metadata if isinstance(metadata, dict) else None
 +
-+    def endpoint(
-+        current: MaterializedOccurrenceRef | MaterializedSymbolicRef | SemanticEndpoint,
-+        resolution_kind: ResolutionKind,
-+        confidence: LineageConfidence,
-+        fact_local_id: str,
-+        endpoint_role: SemanticEndpointRole,
-+    ) -> MaterializedOccurrenceRef | MaterializedSymbolicRef | SemanticEndpoint:
-+        if isinstance(current, MaterializedOccurrenceRef):
-+            return current
-+        if isinstance(current, MaterializedSymbolicRef):
-+            reference = ExtractedSymbolicRef(
-+                current.kind,
-+                current.module_name,
-+                current.symbol_name,
-+                current.source_local_id,
-+            )
-+            source_key = current.source_key
-+            source_fingerprint = current.source_fingerprint
-+        else:
-+            origin = origins.get((fact_local_id, endpoint_role))
-+            if origin is None:
-+                raise LineageOriginUnavailableError(
-+                    "Semantic endpoint is missing compact symbolic origin."
-+                )
-+            reference = ExtractedSymbolicRef(
-+                origin.kind,
-+                origin.module_name,
-+                origin.symbol_name,
-+                origin.source_local_id,
-+            )
-+            source_key = origin.source_key
-+            source_fingerprint = origin.source_fingerprint
-+        resolved = _symbolic_endpoint(
-+            reference,
-+            resolution,
-+            descriptors,
-+            resolution_kind,
-+            confidence,
-+            source_key,
-+            source_fingerprint,
++
++def _write_lease_metadata_file(
++    path: Path,
++    metadata: dict[str, Any],
++) -> None:
++    temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
++    try:
++        temporary.write_text(
++            json.dumps(metadata),
++            encoding="utf-8",
 +        )
-+        if isinstance(resolved, SemanticEndpoint):
-+            resolved_origins.append(
-+                _semantic_origin(
-+                    reference,
-+                    source_key,
-+                    source_fingerprint,
-+                    fact_local_id,
-+                    endpoint_role,
-+                )
-+            )
-+        return resolved
++        os.replace(temporary, path)
++    except OSError:
++        try:
++            temporary.unlink(missing_ok=True)
++        except OSError:
++            pass
 +
-+    flows = tuple(sorted(
-+        MaterializedFlowFact(
-+            flow.local_id,
-+            endpoint(
-+                flow.source,
-+                flow.resolution_kind,
-+                flow.confidence,
-+                flow.local_id,
-+                SemanticEndpointRole.FLOW_SOURCE,
-+            ),
-+            endpoint(
-+                flow.target,
-+                flow.resolution_kind,
-+                flow.confidence,
-+                flow.local_id,
-+                SemanticEndpointRole.FLOW_TARGET,
-+            ),
-+            flow.relation,
-+            flow.evidence,
-+            flow.resolution_kind,
-+            flow.confidence,
-+            flow.dynamic_boundary,
-+            flow.provider,
++
++def _process_identity(pid: int) -> tuple[str | None, int | None, bool]:
++    """Use the existing process-ownership identity model for lease diagnostics."""
++    from contextor.mcp_process_registry import process_identity
++
++    return process_identity(pid)
++
++
++def _lease_owner_state(
++    metadata: dict[str, Any] | None,
++) -> tuple[str, str]:
++    """Return ``active``, ``orphaned`` or ``unknown`` for lease metadata."""
++    if not metadata:
++        return "unknown", "owner metadata unavailable"
++
++    try:
++        owner_pid = int(metadata["pid"])
++    except (KeyError, TypeError, ValueError):
++        return "orphaned", "invalid owner pid"
++
++    image, process_start_identity, alive = _process_identity(owner_pid)
++    owner = str(metadata.get("owner") or "unknown")
++    description = f"owner={owner}, pid={owner_pid}"
++    if not alive:
++        return "orphaned", f"{description} is not alive"
++
++    expected_image = str(metadata.get("executable") or "")
++    if image and expected_image:
++        if Path(image).name.casefold() != Path(expected_image).name.casefold():
++            return "orphaned", f"{description} has a reused process identity"
++
++    expected_start = metadata.get("process_start_identity")
++    if expected_start is not None and process_start_identity is not None:
++        try:
++            if int(expected_start) != int(process_start_identity):
++                return "orphaned", f"{description} has a reused process identity"
++        except (TypeError, ValueError):
++            return "orphaned", f"{description} has invalid start identity"
++
++    return "active", description
++
++
++def _log_orphan_recovery(
++    log: Callable[[str], None] | None,
++    repo_id: str,
++    reason: str,
++) -> None:
++    if log:
++        log(
++            f"Recovering orphaned full analysis lease on repository {repo_id} "
++            f"({reason})."
 +        )
-+        for flow in materialized.flows
-+    ))
-+    surfaces = tuple(sorted(
-+        MaterializedSurfaceFact(
-+            surface.local_id,
-+            surface.kind,
-+            endpoint(
-+                surface.exposed,
-+                surface.resolution_kind,
-+                surface.confidence,
-+                surface.local_id,
-+                SemanticEndpointRole.SURFACE_EXPOSED,
-+            ),
-+            surface.evidence,
-+            surface.resolution_kind,
-+            surface.confidence,
-+            surface.declared_name,
-+            surface.dynamic_boundary,
-+            surface.provider,
-+            surface.declaration_evidence,
-+        )
-+        for surface in materialized.surfaces
-+    ))
-+    return MaterializedLineageSourceFacts(
-+        materialized.manifest,
-+        materialized.anchors,
-+        flows,
-+        surfaces,
-+        tuple(sorted(descriptors.values())),
-+        tuple(sorted(resolved_origins)),
-+    )
 +
 +
-+def _semantic_origin(
-+    reference: ExtractedSymbolicRef,
-+    source_key: str,
-+    source_fingerprint: str,
-+    fact_local_id: str,
-+    endpoint_role: SemanticEndpointRole,
-+) -> SemanticEndpointOrigin:
-+    return SemanticEndpointOrigin(
-+        source_key,
-+        source_fingerprint,
-+        fact_local_id,
-+        endpoint_role,
-+        reference.kind,
-+        reference.module_name,
-+        reference.symbol_name,
-+        reference.source_local_id,
-     )
+ def _resolve_lock_path(repo_path: str | Path) -> tuple[Path, str, str]:
+     """Resolve lock file path, repo_key, and repo_id for a given repository."""
+     resolved_root = Path(repo_path).expanduser().resolve()
+@@ -186,6 +306,8 @@ def acquire_full_analysis(
  
+     fd = -1
+     logged_waiting = False
++    logged_recovery = False
++    orphan_recovery_deadline: float | None = None
  
-@@ -160,10 +352,11 @@ def _symbolic_endpoint(
-     descriptors: dict[str, SemanticInterfaceDescriptor],
-     resolution_kind: ResolutionKind,
-     confidence: LineageConfidence,
--    extracted: ExtractedLineageSourceFacts,
-+    source_key: str,
-+    source_fingerprint: str,
- ) -> MaterializedSymbolicRef | SemanticEndpoint:
-     symbolic = MaterializedSymbolicRef(
--        extracted.source_key, extracted.source_fingerprint, reference.kind,
-+        source_key, source_fingerprint, reference.kind,
-         reference.module_name, reference.symbol_name, reference.source_local_id,
-     )
-     if not claims_exact_semantic_target(resolution_kind, confidence):
-diff --git a/contextor/core/analysis/state_manager.py b/contextor/core/analysis/state_manager.py
-index fb9648d..a1fcfcd 100644
---- a/contextor/core/analysis/state_manager.py
-+++ b/contextor/core/analysis/state_manager.py
-@@ -4,10 +4,7 @@ from dataclasses import dataclass, field
- from typing import Dict, Any, Optional
- from pathlib import Path
- 
--from contextor.core.domain.lineage_facts import (
--    ExtractedLineageSourceFacts,
--    MaterializedLineageSourceFacts,
--)
-+from contextor.core.domain.lineage_facts import MaterializedLineageSourceFacts
- 
- 
- @dataclass
-@@ -98,9 +95,6 @@ class RepositoryAnalysisState:
-     syntax_diagnostics_state: str = "not_materialized"
-     module_usages: Dict[str, Any] = field(default_factory=dict)
-     module_usages_manifest: Dict[str, Dict[str, str]] = field(default_factory=dict)
--    lineage_extracted_facts_by_source: Dict[str, ExtractedLineageSourceFacts] = field(
--        default_factory=dict
--    )
-     lineage_facts_by_source: Dict[str, MaterializedLineageSourceFacts] = field(default_factory=dict)
-     lineage_facts_state: str = "not_materialized"
-     lineage_facts_semantic_version: str | None = None
-diff --git a/contextor/core/api/facade.py b/contextor/core/api/facade.py
-index f607248..279fd3b 100644
---- a/contextor/core/api/facade.py
-+++ b/contextor/core/api/facade.py
-@@ -703,9 +703,6 @@ class ContextorFacade:
-                 syntax_diagnostics_state=syntax_diagnostics_state,
-                 module_usages=module_usages,
-                 module_usages_manifest=module_usages_manifest,
--                lineage_extracted_facts_by_source=dict(
--                    getattr(index, "lineage_facts_by_source", {}) or {}
--                ),
-                 lineage_facts_by_source=lineage_facts_by_source,
-                 lineage_facts_state=lineage_facts_state,
-                 lineage_facts_semantic_version=lineage_facts_semantic_version,
-diff --git a/contextor/core/domain/lineage_facts.py b/contextor/core/domain/lineage_facts.py
-index 69e5ea1..6b2a284 100644
---- a/contextor/core/domain/lineage_facts.py
-+++ b/contextor/core/domain/lineage_facts.py
-@@ -110,6 +110,12 @@ class ExtractedSymbolicKind(str, Enum):
-     PUBLIC_TARGET = "public_target"
- 
- 
-+class SemanticEndpointRole(str, Enum):
-+    FLOW_SOURCE = "flow_source"
-+    FLOW_TARGET = "flow_target"
-+    SURFACE_EXPOSED = "surface_exposed"
-+
-+
- @dataclass(frozen=True, order=True)
- class SourceSpan:
-     """Exact source evidence; it is never semantic identity."""
-@@ -217,6 +223,33 @@ class MaterializedSymbolicRef:
-             _require_token(self.source_local_id, "source_local_id")
- 
- 
-+@dataclass(frozen=True, order=True)
-+class SemanticEndpointOrigin:
-+    """Compact symbolic provenance for one strengthened semantic endpoint."""
-+
-+    source_key: str
-+    source_fingerprint: str
-+    fact_local_id: str
-+    endpoint_role: SemanticEndpointRole
-+    kind: ExtractedSymbolicKind
-+    module_name: str
-+    symbol_name: str
-+    source_local_id: str | None = None
-+
-+    def __post_init__(self) -> None:
-+        _require_token(self.source_key, "source_key")
-+        _require_token(self.source_fingerprint, "source_fingerprint")
-+        _require_token(self.fact_local_id, "fact_local_id")
-+        if not isinstance(self.endpoint_role, SemanticEndpointRole):
-+            raise TypeError("endpoint_role must be SemanticEndpointRole.")
-+        if not isinstance(self.kind, ExtractedSymbolicKind):
-+            raise TypeError("kind must be ExtractedSymbolicKind.")
-+        _require_token(self.module_name, "module_name")
-+        _require_token(self.symbol_name, "symbol_name")
-+        if self.source_local_id is not None:
-+            _require_token(self.source_local_id, "source_local_id")
-+
-+
- @dataclass(frozen=True, order=True)
- class ExtractedAnchorFact:
-     local_id: str
-@@ -412,12 +445,14 @@ class MaterializedLineageSourceFacts:
-     flows: tuple[MaterializedFlowFact, ...] = ()
-     surfaces: tuple[MaterializedSurfaceFact, ...] = ()
-     interface_descriptors: tuple[SemanticInterfaceDescriptor, ...] = ()
-+    semantic_endpoint_origins: tuple[SemanticEndpointOrigin, ...] = ()
- 
-     def __post_init__(self) -> None:
-         _require_sorted_unique(self.anchors, "anchors")
-         _require_sorted_unique(self.flows, "flows")
-         _require_sorted_unique(self.surfaces, "surfaces")
-         _require_sorted_unique(self.interface_descriptors, "interface_descriptors")
-+        _require_sorted_unique(self.semantic_endpoint_origins, "semantic_endpoint_origins")
-         if self.manifest.status == LineageFamilyStatus.FRESH:
-             expected = (len(self.anchors), len(self.flows), len(self.surfaces))
-             actual = (
-@@ -434,6 +469,32 @@ class MaterializedLineageSourceFacts:
-             _require_slice_occurrence(flow.target, self.manifest)
-         for surface in self.surfaces:
-             _require_slice_occurrence(surface.exposed, self.manifest)
-+        self._validate_semantic_endpoint_origins()
-+
-+    def _validate_semantic_endpoint_origins(self) -> None:
-+        flow_by_id = {flow.local_id: flow for flow in self.flows}
-+        surface_by_id = {surface.local_id: surface for surface in self.surfaces}
-+        locators: set[tuple[str, SemanticEndpointRole]] = set()
-+        for origin in self.semantic_endpoint_origins:
-+            if (
-+                origin.source_key != self.manifest.source_key
-+                or origin.source_fingerprint != self.manifest.source_fingerprint
-+            ):
-+                raise ValueError("Semantic endpoint origin must belong to its slice.")
-+            locator = (origin.fact_local_id, origin.endpoint_role)
-+            if locator in locators:
-+                raise ValueError("Semantic endpoint origins must have unique locators.")
-+            locators.add(locator)
-+            if origin.endpoint_role is SemanticEndpointRole.FLOW_SOURCE:
-+                endpoint = getattr(flow_by_id.get(origin.fact_local_id), "source", None)
-+            elif origin.endpoint_role is SemanticEndpointRole.FLOW_TARGET:
-+                endpoint = getattr(flow_by_id.get(origin.fact_local_id), "target", None)
-+            else:
-+                endpoint = getattr(surface_by_id.get(origin.fact_local_id), "exposed", None)
-+            if not isinstance(endpoint, SemanticEndpoint):
-+                raise ValueError(
-+                    "Semantic endpoint origin must locate a semantic endpoint."
-+                )
- 
- 
- @dataclass(frozen=True, order=True)
-diff --git a/contextor/core/live_state/store.py b/contextor/core/live_state/store.py
-index fa7d9b4..4ff7f4f 100644
---- a/contextor/core/live_state/store.py
-+++ b/contextor/core/live_state/store.py
-@@ -14,7 +14,6 @@ from typing import Any
- 
- from contextor.core.domain.lineage_facts import (
-     LINEAGE_FACTS_SEMANTIC_VERSION,
--    ExtractedLineageSourceFacts,
-     LineageConfidence,
-     LineageFamilyStatus,
-     LineageRelation,
-@@ -27,6 +26,8 @@ from contextor.core.domain.lineage_facts import (
-     ProviderRef,
-     ResolutionKind,
-     SemanticEndpoint,
-+    SemanticEndpointOrigin,
-+    SemanticEndpointRole,
-     SemanticInterfaceDescriptor,
-     SourceLineageManifest,
-     SourceSpan,
-@@ -202,6 +203,14 @@ def _revalidate_lineage_descriptor(
-     return replace(descriptor)
- 
- 
-+def _revalidate_lineage_origin(origin: Any) -> SemanticEndpointOrigin:
-+    if not isinstance(origin, SemanticEndpointOrigin):
-+        raise pickle.UnpicklingError("Invalid lineage semantic endpoint origin.")
-+    if not isinstance(origin.endpoint_role, SemanticEndpointRole):
-+        raise pickle.UnpicklingError("Invalid lineage semantic endpoint origin role.")
-+    return replace(origin)
-+
-+
- def _revalidate_lineage_slice(
-     source_slice: Any,
- ) -> MaterializedLineageSourceFacts:
-@@ -228,6 +237,10 @@ def _revalidate_lineage_slice(
-             _revalidate_lineage_descriptor(item)
-             for item in source_slice.interface_descriptors
-         ),
-+        semantic_endpoint_origins=tuple(
-+            _revalidate_lineage_origin(item)
-+            for item in getattr(source_slice, "semantic_endpoint_origins", ())
-+        ),
-     )
- 
- 
-@@ -240,15 +253,14 @@ def _normalize_lineage_facts_state(state: Any) -> Any:
      try:
-         if not hasattr(state, "lineage_facts_by_source"):
-             state.lineage_facts_by_source = {}
--        if not hasattr(state, "lineage_extracted_facts_by_source"):
--            state.lineage_extracted_facts_by_source = {}
-+        if hasattr(state, "lineage_extracted_facts_by_source"):
-+            delattr(state, "lineage_extracted_facts_by_source")
-         if not hasattr(state, "lineage_facts_state"):
-             state.lineage_facts_state = "not_materialized"
-         if not hasattr(state, "lineage_facts_semantic_version"):
-             state.lineage_facts_semantic_version = None
- 
-         raw_mapping = state.lineage_facts_by_source
--        raw_extracted_mapping = state.lineage_extracted_facts_by_source
-         raw_family_state = state.lineage_facts_state
-         raw_version = state.lineage_facts_semantic_version
- 
-@@ -256,10 +268,6 @@ def _normalize_lineage_facts_state(state: Any) -> Any:
-             raise pickle.UnpicklingError(
-                 "Lineage source mapping must be a dict."
-             )
--        if not isinstance(raw_extracted_mapping, dict):
--            raise pickle.UnpicklingError(
--                "Extracted lineage source mapping must be a dict."
--            )
-         if not isinstance(raw_family_state, str):
-             raise pickle.UnpicklingError(
-                 "Lineage family state must be a string."
-@@ -286,10 +294,6 @@ def _normalize_lineage_facts_state(state: Any) -> Any:
-                 raise pickle.UnpicklingError(
-                     "Not-materialized lineage cannot have a semantic version."
+         fd = _prepare_lock_fd(lock_file)
+@@ -196,9 +318,28 @@ def acquire_full_analysis(
+                     "Full analysis cancelled while waiting for repository lease."
                  )
--            if raw_extracted_mapping:
--                raise pickle.UnpicklingError(
--                    "Not-materialized lineage cannot retain extracted source facts."
--                )
-         elif raw_version != LINEAGE_FACTS_SEMANTIC_VERSION:
-             raise pickle.UnpicklingError(
-                 "Materialized lineage requires the current semantic version."
-@@ -308,24 +312,7 @@ def _normalize_lineage_facts_state(state: Any) -> Any:
+ 
++            previous_metadata = _read_lease_metadata(fd)
++            if previous_metadata is None:
++                previous_metadata = _read_lease_metadata_file(
++                    _lease_metadata_path(lock_file)
++                )
+             if _try_lock_fd(fd):
++                previous_owner_state, previous_owner_reason = _lease_owner_state(
++                    previous_metadata
++                )
++                if previous_owner_state == "orphaned" and not logged_recovery:
++                    _log_orphan_recovery(
++                        log,
++                        repo_id,
++                        previous_owner_reason,
++                    )
++                    logged_recovery = True
+                 token = uuid.uuid4().hex
+ 
++                owner_image, owner_process_start_identity, _ = _process_identity(
++                    os.getpid()
++                )
++
+                 metadata = {
+                     "pid": os.getpid(),
+                     "token": token,
+@@ -206,6 +347,15 @@ def acquire_full_analysis(
+                     "repo_id": str(repo_id),
+                     "timestamp": time.time(),
+                 }
++                if owner_image:
++                    metadata["executable"] = owner_image
++                if owner_process_start_identity is not None:
++                    metadata["process_start_identity"] = owner_process_start_identity
++
++                _write_lease_metadata_file(
++                    _lease_metadata_path(lock_file),
++                    metadata,
++                )
+ 
+                 # Metadata is diagnostic only.
+                 # OS lock ownership is authoritative.
+@@ -227,6 +377,8 @@ def acquire_full_analysis(
+                     lock_path=str(lock_file),
+                     repo_id=str(repo_id),
+                     lock_fd=fd,
++                    owner_pid=os.getpid(),
++                    owner_process_start_identity=owner_process_start_identity,
                  )
-             normalized[source_key] = rebuilt
  
--        extracted_normalized: dict[str, ExtractedLineageSourceFacts] = {}
--        for source_key, extracted in raw_extracted_mapping.items():
--            if not isinstance(source_key, str) or not source_key:
--                raise pickle.UnpicklingError(
--                    "Extracted lineage source key must be a non-empty string."
--                )
--            if not isinstance(extracted, ExtractedLineageSourceFacts):
--                raise pickle.UnpicklingError(
--                    "Invalid extracted lineage source facts."
--                )
--            if extracted.source_key != source_key:
--                raise pickle.UnpicklingError(
--                    "Extracted lineage mapping key does not match source_key."
--                )
--            extracted_normalized[source_key] = extracted
--
-         state.lineage_facts_by_source = normalized
--        state.lineage_extracted_facts_by_source = extracted_normalized
-         state.lineage_facts_state = family_status.value
-         state.lineage_facts_semantic_version = raw_version
-         return state
-diff --git a/tests/analysis/test_lineage_materialization.py b/tests/analysis/test_lineage_materialization.py
-index 6a47961..c97d171 100644
---- a/tests/analysis/test_lineage_materialization.py
-+++ b/tests/analysis/test_lineage_materialization.py
-@@ -7,6 +7,7 @@ import pytest
- from contextor.core.analysis.lineage_materialization import (
-     LineageResolutionContext,
-     materialize_lineage_source_facts,
-+    reresolve_materialized_lineage_source_facts,
- )
- from contextor.core.domain.lineage_facts import (
-     ExtractedAnchorFact,
-@@ -24,6 +25,8 @@ from contextor.core.domain.lineage_facts import (
-     ProviderRef,
-     ResolutionKind,
-     SemanticEndpoint,
-+    SemanticEndpointOrigin,
-+    SemanticEndpointRole,
-     SemanticInterfaceDescriptor,
-     SourceSpan,
-     SurfaceDeclarationEvidence,
-@@ -161,6 +164,43 @@ def test_materializer_does_not_mutate_input_mappings():
-     assert artifacts == {"pkg.mod::run": "A1/1"}
+             if not logged_waiting:
+@@ -234,8 +386,37 @@ def acquire_full_analysis(
+                     log(
+                         f"Waiting for full analysis lease on repository {repo_id}..."
+                     )
++                    owner_state, owner_reason = _lease_owner_state(previous_metadata)
++                    if owner_state == "active":
++                        log(
++                            "Full analysis lease has a valid active owner "
++                            f"({owner_reason})."
++                        )
++                    elif owner_state == "unknown":
++                        log(
++                            "Full analysis lease owner could not be verified; "
++                            f"continuing to wait ({owner_reason})."
++                        )
+                 logged_waiting = True
  
- 
-+def test_compact_origins_preserve_only_strengthened_endpoint_provenance():
-+    span = SourceSpan(1, 0, 1, 1)
-+    reference = ExtractedSymbolicRef(
-+        ExtractedSymbolicKind.PUBLIC_TARGET, "pkg.mod", "target"
-+    )
-+    facts = _facts(flows=(
-+        ExtractedFlowFact(
-+            "flow", ExtractedOccurrenceRef("local"), reference,
-+            LineageRelation.EXPOSES, span, ResolutionKind.IMPORT_EXACT,
-+            LineageConfidence.CONFIRMED,
-+        ),
-+    ))
-+    materialized = materialize_lineage_source_facts(
-+        facts, _context(artifacts={"pkg.mod::target": "A1/1"})
-+    )
-+    assert materialized.flows[0].target == SemanticEndpoint("A1/1")
-+    assert materialized.semantic_endpoint_origins == (
-+        SemanticEndpointOrigin(
-+            "pkg/mod.py", "sha256:test", "flow",
-+            SemanticEndpointRole.FLOW_TARGET,
-+            ExtractedSymbolicKind.PUBLIC_TARGET, "pkg.mod", "target",
-+        ),
-+    )
++            owner_state, owner_reason = _lease_owner_state(previous_metadata)
++            if owner_state == "orphaned":
++                if orphan_recovery_deadline is None:
++                    orphan_recovery_deadline = min(
++                        deadline
++                        if deadline is not None
++                        else time.monotonic() + ORPHAN_RECOVERY_TIMEOUT_SECONDS,
++                        time.monotonic() + ORPHAN_RECOVERY_TIMEOUT_SECONDS,
++                    )
++                if not logged_recovery:
++                    _log_orphan_recovery(log, repo_id, owner_reason)
++                    logged_recovery = True
++                if time.monotonic() >= orphan_recovery_deadline:
++                    raise FullAnalysisBusyError(
++                        f"Timed out recovering orphaned full analysis lease for "
++                        f"{repo_id}"
++                    )
 +
-+    removed = reresolve_materialized_lineage_source_facts(
-+        materialized, _context()
-+    )
-+    assert isinstance(removed.flows[0].target, MaterializedSymbolicRef)
-+    assert removed.semantic_endpoint_origins == ()
-+
-+    restored = reresolve_materialized_lineage_source_facts(
-+        removed, _context(artifacts={"pkg.mod::target": "A1/2"})
-+    )
-+    assert restored.flows[0].target == SemanticEndpoint("A1/2")
-+    assert len(restored.semantic_endpoint_origins) == 1
-+
-+
+             if (
+                 deadline is not None
+                 and time.monotonic() >= deadline
+@@ -244,7 +425,7 @@ def acquire_full_analysis(
+                     f"Repository {repo_id} is currently locked for full analysis"
+                 )
  
- def test_active_symbol_and_state_resolve_only_with_exact_existing_slot():
-     span = SourceSpan(1, 0, 1, 1)
-@@ -254,4 +294,4 @@ def test_exact_surface_requires_endpoint_but_unresolved_surface_keeps_symbolic_b
-     result = materialize_lineage_source_facts(
-         unresolved, _context(artifacts={"pkg.mod::target": "A9/1"})
-     )
--    assert isinstance(result.surfaces[0].exposed, MaterializedSymbolicRef)
-\ No newline at end of file
-+    assert isinstance(result.surfaces[0].exposed, MaterializedSymbolicRef)
-diff --git a/tests/test_full_analysis_lineage_materialization.py b/tests/test_full_analysis_lineage_materialization.py
-index e3d8985..5d84ec3 100644
---- a/tests/test_full_analysis_lineage_materialization.py
-+++ b/tests/test_full_analysis_lineage_materialization.py
-@@ -183,7 +183,6 @@ def test_real_full_analysis_installs_current_lineage_without_second_extraction(t
-     state = captured_states[0]
-     assert state.lineage_facts_state == "fresh"
-     assert state.lineage_facts_semantic_version == LINEAGE_FACTS_SEMANTIC_VERSION
--    assert set(state.lineage_extracted_facts_by_source) == {"consumer.py", "provider.py"}
-     assert set(state.lineage_facts_by_source) == {"consumer.py", "provider.py"}
-     assert all(
-         source_key == source_slice.manifest.source_key
-diff --git a/tests/test_lineage_state_lifecycle.py b/tests/test_lineage_state_lifecycle.py
-index b804803..1c1e37e 100644
---- a/tests/test_lineage_state_lifecycle.py
-+++ b/tests/test_lineage_state_lifecycle.py
-@@ -19,6 +19,7 @@ from contextor.core.analysis.lineage_extraction import extract_lineage_source_fa
- from contextor.core.analysis.lineage_materialization import (
-     LineageResolutionContext,
-     materialize_lineage_source_facts,
-+    reresolve_materialized_lineage_source_facts,
- )
- from contextor.core.analysis.state_manager import RepositoryAnalysisState
- from contextor.core.domain.graph import ProjectGraph
-@@ -37,6 +38,7 @@ from contextor.core.domain.lineage_facts import (
-     ProviderRef,
-     ResolutionKind,
-     SemanticEndpoint,
-+    SemanticEndpointRole,
-     SemanticInterfaceDescriptor,
-     SourceLineageManifest,
-     SourceSpan,
-@@ -505,7 +507,6 @@ def _lineage_state_for_facts(facts, registry, modules, artifacts):
-     return RepositoryAnalysisState(
-         modules=modules,
-         artifacts=artifacts,
--        lineage_extracted_facts_by_source=dict(facts),
-         lineage_facts_by_source=materialized,
-         lineage_facts_state=family_state,
-         lineage_facts_semantic_version=semantic_version,
-@@ -546,6 +547,101 @@ def _slice_for(source_key: str) -> MaterializedLineageSourceFacts:
-     )
+-            time.sleep(poll_interval)
++            time.sleep(min(max(poll_interval, 0.01), 0.25))
+ 
+     except Exception:
+         if fd >= 0:
+diff --git a/contextor/ui/gui.py b/contextor/ui/gui.py
+index 1e1bb55..0b50e54 100644
+--- a/contextor/ui/gui.py
++++ b/contextor/ui/gui.py
+@@ -1133,6 +1133,12 @@ class ContextorGUI:
+ 
+         close_cmd_log()
+ 
++        # Route Desktop shutdown through the same cancellation path as Stop
++        # analyze so an active full-analysis lease reaches its existing
++        # coordinator finally/release before this process exits.
++        if hasattr(self, "progress_bar"):
++            self.progress_bar.is_cancelled = True
++
+         if getattr(self, "_live_start_retry_after_id", None) is not None:
+             if hasattr(self, "root") and hasattr(self.root, "after_cancel"):
+                 try:
+diff --git a/tests/test_full_analysis_coordination.py b/tests/test_full_analysis_coordination.py
+index eabc82a..5bdb653 100644
+--- a/tests/test_full_analysis_coordination.py
++++ b/tests/test_full_analysis_coordination.py
+@@ -48,6 +48,27 @@ def test_coordinator_lease_acquisition_and_release(tmp_path: Path):
+     release_full_analysis(lease)
  
  
-+def test_identity_sync_legacy_semantic_without_origin_fails_closed_to_stale(tmp_path):
-+    legacy = _lineage_slice()
-+    other = _slice_for("other.py")
-+    state = RepositoryAnalysisState(
-+        modules={"pkg": _module("pkg"), "other": _module("other")},
-+        artifacts={"pkg": {"own_symbols": set()}, "other": {"own_symbols": set()}},
-+        lineage_facts_by_source={"pkg.py": legacy, "other.py": other},
-+        lineage_facts_state="fresh",
-+        lineage_facts_semantic_version=LINEAGE_FACTS_SEMANTIC_VERSION,
-+    )
-+    engine, _ = _lineage_engine(
-+        state,
-+        _LineageRegistry({"pkg": "M:pkg", "other": "M:other"}),
-+        tmp_path,
-+    )
-+    candidate = _prepare_candidate_state(state)
++def test_normal_shutdown_releases_lease_for_next_desktop_instance(
++    tmp_path: Path,
++):
++    """A clean owner shutdown leaves the next instance free to acquire."""
++    repo_dir = tmp_path / "repo_normal_shutdown"
++    repo_dir.mkdir()
 +
-+    with engine.registry.read_transaction():
-+        engine._update_candidate_lineage_slice(
-+            candidate,
-+            source_path="other.py",
-+            extracted_lineage_facts=_extracted("other.py"),
-+            rematerialize_all=True,
++    owner_a = acquire_full_analysis(repo_dir, owner="desktop_a")
++    release_full_analysis(owner_a)
++
++    owner_b = acquire_full_analysis(
++        repo_dir,
++        owner="desktop_b",
++        timeout=0.5,
++    )
++    try:
++        assert owner_b.owner == "desktop_b"
++    finally:
++        release_full_analysis(owner_b)
++
++
+ def test_lease_is_held_during_publication(tmp_path: Path, monkeypatch):
+     """
+     Requirement 5: Deterministic lifecycle order proving lease is held during publication:
+@@ -142,6 +163,66 @@ def _worker_try_acquire(repo_path: str, owner: str, timeout: float, result_queue
+         result_queue.put({"status": "error", "error": str(exc), "owner": owner})
+ 
+ 
++def _worker_try_acquire_with_log(
++    repo_path: str,
++    owner: str,
++    timeout: float,
++    result_queue,
++):
++    """Attempt a lease and return the owner diagnostic observed while waiting."""
++    messages: list[str] = []
++    try:
++        lease = acquire_full_analysis(
++            repo_path,
++            owner=owner,
++            timeout=timeout,
++            poll_interval=0.05,
++            log=messages.append,
++        )
++        release_full_analysis(lease)
++        result_queue.put({"status": "ok", "owner": owner, "messages": messages})
++    except FullAnalysisBusyError:
++        result_queue.put(
++            {"status": "busy", "owner": owner, "messages": messages}
++        )
++    except Exception as exc:
++        result_queue.put(
++            {
++                "status": "error",
++                "error": str(exc),
++                "owner": owner,
++                "messages": messages,
++            }
 +        )
 +
-+    assert candidate.lineage_facts_state == LineageFamilyStatus.STALE.value
-+    assert candidate.lineage_facts_by_source["pkg.py"] is legacy
++
++def _worker_race_for_orphan_recovery(
++    repo_path: str,
++    owner: str,
++    start_event,
++    release_event,
++    result_queue,
++):
++    """Compete for an orphaned lease while the winner holds it for the loser."""
++    start_event.wait(timeout=5.0)
++    try:
++        lease = acquire_full_analysis(
++            repo_path,
++            owner=owner,
++            timeout=1.0,
++            poll_interval=0.05,
++        )
++        result_queue.put({"status": "acquired", "owner": owner})
++        release_event.wait(timeout=5.0)
++        release_full_analysis(lease)
++    except FullAnalysisBusyError:
++        result_queue.put({"status": "busy", "owner": owner})
++    except Exception as exc:
++        result_queue.put(
++            {"status": "error", "owner": owner, "error": str(exc)}
++        )
 +
 +
-+def test_snapshot_round_trip_compact_origin_reresolves_without_source_work(tmp_path):
-+    facts = _cross_source_facts()
-+    modules = {name: _module(name) for name in ("provider", "consumer")}
-+    artifacts = {
-+        "provider": {"own_symbols": {"target"}},
-+        "consumer": {"own_symbols": set()},
-+    }
-+    registry = _LifecycleRegistry(
-+        {"provider": "M:provider/1", "consumer": "M:consumer/1"},
-+        {"provider::target": "A:provider/1"},
-+    )
-+    state = _lineage_state_for_facts(facts, registry, modules, artifacts)
-+    save_snapshot(state, tmp_path, "compact-origin")
-+    loaded, _ = load_snapshot(tmp_path, expected_state_id="compact-origin")
-+    consumer = loaded.lineage_facts_by_source["consumer.py"]
-+    assert consumer.semantic_endpoint_origins
-+
-+    removed = reresolve_materialized_lineage_source_facts(
-+        consumer,
-+        LineageResolutionContext(
-+            {"consumer": "M:consumer/1"}, {}, frozenset({"M:consumer/1"}), {}
-+        ),
-+    )
-+    assert isinstance(removed.surfaces[0].exposed, MaterializedSymbolicRef)
-+    restored = reresolve_materialized_lineage_source_facts(
-+        removed,
-+        LineageResolutionContext(
-+            {"consumer": "M:consumer/1"},
-+            {"provider::target": "A:provider/2"},
-+            frozenset({"M:consumer/1", "A:provider/2"}),
-+            {},
-+        ),
-+    )
-+    assert restored.surfaces[0].exposed == SemanticEndpoint("A:provider/2")
-+
-+
-+@pytest.mark.parametrize(
-+    "origins",
-+    [
-+        lambda origin: (origin, replace(origin, symbol_name="different")),
-+        lambda origin: (replace(origin, source_key="other.py"),),
-+        lambda origin: (replace(origin, source_fingerprint="other"),),
-+        lambda origin: (replace(origin, fact_local_id="missing"),),
-+        lambda origin: (replace(origin, endpoint_role=SemanticEndpointRole.FLOW_SOURCE),),
-+    ],
-+)
-+def test_snapshot_rejects_corrupt_compact_origin(tmp_path, origins):
-+    facts = _cross_source_facts()
-+    modules = {name: _module(name) for name in ("provider", "consumer")}
-+    artifacts = {
-+        "provider": {"own_symbols": {"target"}},
-+        "consumer": {"own_symbols": set()},
-+    }
-+    registry = _LifecycleRegistry(
-+        {"provider": "M:provider/1", "consumer": "M:consumer/1"},
-+        {"provider::target": "A:provider/1"},
-+    )
-+    state = _lineage_state_for_facts(facts, registry, modules, artifacts)
-+    source_slice = state.lineage_facts_by_source["consumer.py"]
-+    origin = source_slice.semantic_endpoint_origins[0]
-+    object.__setattr__(source_slice, "semantic_endpoint_origins", origins(origin))
-+    save_snapshot(state, tmp_path, "corrupt-origin")
-+
-+    assert load_snapshot(tmp_path, expected_state_id="corrupt-origin") is None
-+
-+
- def test_incremental_lineage_modify_replaces_only_changed_candidate_slice(tmp_path):
-     old_pkg = _slice_for("pkg.py")
-     other = _slice_for("other.py")
-@@ -847,7 +943,6 @@ def test_identity_sync_owner_deletion_matches_fresh_full_materialization_without
-         {"provider::target": "A:provider/1"},
-     )
-     state = _lineage_state_for_facts(facts, registry, modules, artifacts)
--    old_consumer_facts = state.lineage_extracted_facts_by_source["consumer.py"]
-     candidate = _prepare_candidate_state(state)
-     candidate.modules = {"consumer": modules["consumer"]}
-     candidate.artifacts = {"consumer": artifacts["consumer"]}
-@@ -902,9 +997,6 @@ def test_identity_sync_owner_deletion_matches_fresh_full_materialization_without
-     assert state.lineage_facts_semantic_version == expected_version
-     assert set(state.lineage_facts_by_source) == {"consumer.py"}
-     assert state.lineage_facts_by_source == expected
--    assert state.lineage_extracted_facts_by_source == {
--        "consumer.py": old_consumer_facts
--    }
-     exposed = state.lineage_facts_by_source["consumer.py"].surfaces[0].exposed
-     assert isinstance(exposed, MaterializedSymbolicRef)
-     assert exposed.module_name == "provider"
-@@ -1067,7 +1159,6 @@ def test_identity_sync_revalidation_failure_rolls_back_registry_and_canonical_st
-     original_modules = dict(state.modules)
-     original_artifacts = dict(state.artifacts)
-     original_lineage = dict(state.lineage_facts_by_source)
--    original_extracted = dict(state.lineage_extracted_facts_by_source)
-     candidate = _prepare_candidate_state(state)
-     candidate.modules = {"consumer": modules["consumer"]}
-     candidate.artifacts = {"consumer": artifacts["consumer"]}
-@@ -1085,13 +1176,13 @@ def test_identity_sync_revalidation_failure_rolls_back_registry_and_canonical_st
-         lambda **_kwargs: outcome,
-     )
+ def test_cross_process_os_lock_and_process_death_recovery(tmp_path: Path, isolated_dirs):
+     """
+     Requirement 11: Cross-process exclusion and OS-held file lock auto-recovery on process termination.
+@@ -219,6 +300,96 @@ def test_cross_process_os_lock_and_process_death_recovery(tmp_path: Path, isolat
+             p_a.terminate()
  
--    def fail_on_untouched_consumer(extracted, _resolution):
--        if extracted.source_key == "consumer.py":
-+    def fail_on_untouched_consumer(source_slice, _resolution):
-+        if source_slice.manifest.source_key == "consumer.py":
-             raise ValueError("consumer rematerialization failed")
-         raise AssertionError("deleted provider should not be rematerialized")
  
-     monkeypatch.setattr(
--        "contextor.core.analysis.lineage_materialization.materialize_lineage_source_facts",
-+        "contextor.core.analysis.lineage_materialization.reresolve_materialized_lineage_source_facts",
-         fail_on_untouched_consumer,
-     )
-     engine, acknowledged = _lineage_engine(state, registry, tmp_path)
-@@ -1111,7 +1202,6 @@ def test_identity_sync_revalidation_failure_rolls_back_registry_and_canonical_st
-     assert state.modules == original_modules
-     assert state.artifacts == original_artifacts
-     assert state.lineage_facts_by_source == original_lineage
--    assert state.lineage_extracted_facts_by_source == original_extracted
-     assert registry._state["module_registry"]["path_to_id"]["provider"] == "M:provider/1"
-     assert registry._state["artifact_registry"]["path_to_id"]["provider::target"] == "A:provider/1"
-     assert acknowledged == []
-
++def test_live_owner_is_reported_and_cannot_be_stolen(tmp_path: Path, isolated_dirs):
++    """A live owner remains authoritative while a contender waits."""
++    repo = tmp_path / "repo_live_owner"
++    repo.mkdir()
++
++    ctx = multiprocessing.get_context("spawn")
++    ready_a = ctx.Event()
++    results_a = ctx.Queue()
++    results_b = ctx.Queue()
++    p_a = ctx.Process(
++        target=_worker_os_lock_hold,
++        args=(str(repo), "live_owner", ready_a, results_a, 15.0),
++    )
++    p_a.start()
++
++    try:
++        assert ready_a.wait(timeout=15.0)
++        assert results_a.get(timeout=2.0)["status"] == "acquired"
++
++        p_b = ctx.Process(
++            target=_worker_try_acquire_with_log,
++            args=(str(repo), "contender", 0.5, results_b),
++        )
++        p_b.start()
++        p_b.join(timeout=3.0)
++        result_b = results_b.get(timeout=2.0)
++
++        assert result_b["status"] == "busy"
++        assert any(
++            "valid active owner" in message and "live_owner" in message
++            for message in result_b["messages"]
++        ), result_b
++    finally:
++        if p_a.is_alive():
++            p_a.terminate()
++        p_a.join(timeout=3.0)
++
++
++def test_orphan_recovery_is_atomic_for_two_contenders(
++    tmp_path: Path,
++    isolated_dirs,
++):
++    """After owner death, exactly one simultaneous contender owns the lease."""
++    repo = tmp_path / "repo_orphan_race"
++    repo.mkdir()
++
++    ctx = multiprocessing.get_context("spawn")
++    ready_a = ctx.Event()
++    results_a = ctx.Queue()
++    p_a = ctx.Process(
++        target=_worker_os_lock_hold,
++        args=(str(repo), "orphan_owner", ready_a, results_a, 15.0),
++    )
++    p_a.start()
++
++    start_event = ctx.Event()
++    release_event = ctx.Event()
++    results = ctx.Queue()
++    contenders = [
++        ctx.Process(
++            target=_worker_race_for_orphan_recovery,
++            args=(str(repo), f"contender_{index}", start_event, release_event, results),
++        )
++        for index in (1, 2)
++    ]
++
++    try:
++        assert ready_a.wait(timeout=15.0)
++        assert results_a.get(timeout=2.0)["status"] == "acquired"
++        p_a.terminate()
++        p_a.join(timeout=3.0)
++
++        for contender in contenders:
++            contender.start()
++        start_event.set()
++
++        observed = [results.get(timeout=3.0) for _ in contenders]
++        assert sorted(item["status"] for item in observed) == [
++            "acquired",
++            "busy",
++        ]
++    finally:
++        release_event.set()
++        for contender in contenders:
++            contender.join(timeout=3.0)
++        if p_a.is_alive():
++            p_a.terminate()
++            p_a.join(timeout=3.0)
++
++
+ def test_mcp_single_publication_root_cause_regression(tmp_path: Path, monkeypatch):
+     """The real MCP worker has one facade-owned LIVE publication path."""
+     repo_dir = tmp_path / "repo_mcp_pub"
+diff --git a/tests/test_live_desktop_integration.py b/tests/test_live_desktop_integration.py
+index d272925..b8eda54 100644
+--- a/tests/test_live_desktop_integration.py
++++ b/tests/test_live_desktop_integration.py
+@@ -535,6 +535,32 @@ def test_closing_gui_shuts_down_owned_live_client(monkeypatch):
+     assert events == [("request", "shutdown"), ("destroy",)]
+ 
+ 
++def test_closing_gui_cancels_active_analysis_before_cleanup(monkeypatch):
++    progress_bar = SimpleNamespace(is_cancelled=False)
++    root = SimpleNamespace(
++        geometry=lambda: "900x700+10+20",
++        destroy=lambda: None,
++    )
++    controller = SimpleNamespace(
++        root=root,
++        progress_bar=progress_bar,
++        owner_token="test-gui-owner-token",
++        live_clients={},
++        live_client=None,
++        live_watchers={},
++        live_event_feeds={},
++        theme_mode="dark",
++        repo_path_var=SimpleNamespace(get=lambda: "A"),
++        layer_path_var=SimpleNamespace(get=lambda: ""),
++        file_path_var=SimpleNamespace(get=lambda: ""),
++    )
++    monkeypatch.setattr(gui, "save_state", lambda **_payload: None)
++
++    gui.ContextorGUI.on_closing(controller)
++
++    assert progress_bar.is_cancelled is True
++
++
+ def test_closing_gui_does_not_shut_down_unowned_live_client(monkeypatch):
+     events = []
+     token = "test-gui-owner-token"
 ~~~

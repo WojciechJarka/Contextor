@@ -31,11 +31,19 @@ class FullAnalysisLease:
     lock_path: str
     repo_id: str
     lock_fd: int
+    owner_pid: int = 0
+    owner_process_start_identity: int | None = None
 
 
 class FullAnalysisBusyError(RuntimeError):
     """Raised when the full analysis lease cannot be acquired."""
     pass
+
+
+# A dead process normally releases its OS lock immediately. This bound is only
+# for the defensive case where a stale lock handle survives process death; it
+# prevents an orphan diagnostic from turning into an unbounded wait.
+ORPHAN_RECOVERY_TIMEOUT_SECONDS = 5.0
 
 
 _PROCESS_LOCKS: dict[str, threading.Lock] = {}
@@ -124,6 +132,118 @@ def _unlock_fd(fd: int) -> None:
         os.close(fd)
 
 
+def _read_lease_metadata(fd: int) -> dict[str, Any] | None:
+    """Read diagnostic owner metadata without treating it as lock authority."""
+    try:
+        original_offset = os.lseek(fd, 0, os.SEEK_CUR)
+        os.lseek(fd, 0, os.SEEK_SET)
+        payload = os.read(fd, 16 * 1024)
+    except (OSError, UnicodeError):
+        return None
+    finally:
+        try:
+            os.lseek(fd, original_offset, os.SEEK_SET)
+        except (OSError, UnboundLocalError):
+            pass
+
+    if not payload:
+        return None
+    try:
+        metadata = json.loads(payload.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return None
+    return metadata if isinstance(metadata, dict) else None
+
+
+def _lease_metadata_path(lock_path: Path) -> Path:
+    return lock_path.with_name("full_analysis.lease.json")
+
+
+def _read_lease_metadata_file(path: Path) -> dict[str, Any] | None:
+    try:
+        payload = path.read_bytes()
+    except OSError:
+        return None
+    if not payload:
+        return None
+    try:
+        metadata = json.loads(payload.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return None
+    return metadata if isinstance(metadata, dict) else None
+
+
+def _write_lease_metadata_file(
+    path: Path,
+    metadata: dict[str, Any],
+) -> None:
+    temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        temporary.write_text(
+            json.dumps(metadata),
+            encoding="utf-8",
+        )
+        os.replace(temporary, path)
+    except OSError:
+        try:
+            temporary.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
+def _process_identity(pid: int) -> tuple[str | None, int | None, bool]:
+    """Use the existing process-ownership identity model for lease diagnostics."""
+    from contextor.mcp_process_registry import process_identity
+
+    return process_identity(pid)
+
+
+def _lease_owner_state(
+    metadata: dict[str, Any] | None,
+) -> tuple[str, str]:
+    """Return ``active``, ``orphaned`` or ``unknown`` for lease metadata."""
+    if not metadata:
+        return "unknown", "owner metadata unavailable"
+
+    try:
+        owner_pid = int(metadata["pid"])
+    except (KeyError, TypeError, ValueError):
+        return "orphaned", "invalid owner pid"
+
+    image, process_start_identity, alive = _process_identity(owner_pid)
+    owner = str(metadata.get("owner") or "unknown")
+    description = f"owner={owner}, pid={owner_pid}"
+    if not alive:
+        return "orphaned", f"{description} is not alive"
+
+    expected_image = str(metadata.get("executable") or "")
+    if image and expected_image:
+        if Path(image).name.casefold() != Path(expected_image).name.casefold():
+            return "orphaned", f"{description} has a reused process identity"
+
+    expected_start = metadata.get("process_start_identity")
+    if expected_start is not None and process_start_identity is not None:
+        try:
+            if int(expected_start) != int(process_start_identity):
+                return "orphaned", f"{description} has a reused process identity"
+        except (TypeError, ValueError):
+            return "orphaned", f"{description} has invalid start identity"
+
+    return "active", description
+
+
+def _log_orphan_recovery(
+    log: Callable[[str], None] | None,
+    repo_id: str,
+    reason: str,
+) -> None:
+    if log:
+        log(
+            f"Recovering orphaned full analysis lease on repository {repo_id} "
+            f"({reason})."
+        )
+
+
 def _resolve_lock_path(repo_path: str | Path) -> tuple[Path, str, str]:
     """Resolve lock file path, repo_key, and repo_id for a given repository."""
     resolved_root = Path(repo_path).expanduser().resolve()
@@ -186,6 +306,8 @@ def acquire_full_analysis(
 
     fd = -1
     logged_waiting = False
+    logged_recovery = False
+    orphan_recovery_deadline: float | None = None
 
     try:
         fd = _prepare_lock_fd(lock_file)
@@ -196,8 +318,27 @@ def acquire_full_analysis(
                     "Full analysis cancelled while waiting for repository lease."
                 )
 
+            previous_metadata = _read_lease_metadata(fd)
+            if previous_metadata is None:
+                previous_metadata = _read_lease_metadata_file(
+                    _lease_metadata_path(lock_file)
+                )
             if _try_lock_fd(fd):
+                previous_owner_state, previous_owner_reason = _lease_owner_state(
+                    previous_metadata
+                )
+                if previous_owner_state == "orphaned" and not logged_recovery:
+                    _log_orphan_recovery(
+                        log,
+                        repo_id,
+                        previous_owner_reason,
+                    )
+                    logged_recovery = True
                 token = uuid.uuid4().hex
+
+                owner_image, owner_process_start_identity, _ = _process_identity(
+                    os.getpid()
+                )
 
                 metadata = {
                     "pid": os.getpid(),
@@ -206,6 +347,15 @@ def acquire_full_analysis(
                     "repo_id": str(repo_id),
                     "timestamp": time.time(),
                 }
+                if owner_image:
+                    metadata["executable"] = owner_image
+                if owner_process_start_identity is not None:
+                    metadata["process_start_identity"] = owner_process_start_identity
+
+                _write_lease_metadata_file(
+                    _lease_metadata_path(lock_file),
+                    metadata,
+                )
 
                 # Metadata is diagnostic only.
                 # OS lock ownership is authoritative.
@@ -227,6 +377,8 @@ def acquire_full_analysis(
                     lock_path=str(lock_file),
                     repo_id=str(repo_id),
                     lock_fd=fd,
+                    owner_pid=os.getpid(),
+                    owner_process_start_identity=owner_process_start_identity,
                 )
 
             if not logged_waiting:
@@ -234,7 +386,36 @@ def acquire_full_analysis(
                     log(
                         f"Waiting for full analysis lease on repository {repo_id}..."
                     )
+                    owner_state, owner_reason = _lease_owner_state(previous_metadata)
+                    if owner_state == "active":
+                        log(
+                            "Full analysis lease has a valid active owner "
+                            f"({owner_reason})."
+                        )
+                    elif owner_state == "unknown":
+                        log(
+                            "Full analysis lease owner could not be verified; "
+                            f"continuing to wait ({owner_reason})."
+                        )
                 logged_waiting = True
+
+            owner_state, owner_reason = _lease_owner_state(previous_metadata)
+            if owner_state == "orphaned":
+                if orphan_recovery_deadline is None:
+                    orphan_recovery_deadline = min(
+                        deadline
+                        if deadline is not None
+                        else time.monotonic() + ORPHAN_RECOVERY_TIMEOUT_SECONDS,
+                        time.monotonic() + ORPHAN_RECOVERY_TIMEOUT_SECONDS,
+                    )
+                if not logged_recovery:
+                    _log_orphan_recovery(log, repo_id, owner_reason)
+                    logged_recovery = True
+                if time.monotonic() >= orphan_recovery_deadline:
+                    raise FullAnalysisBusyError(
+                        f"Timed out recovering orphaned full analysis lease for "
+                        f"{repo_id}"
+                    )
 
             if (
                 deadline is not None
@@ -244,7 +425,7 @@ def acquire_full_analysis(
                     f"Repository {repo_id} is currently locked for full analysis"
                 )
 
-            time.sleep(poll_interval)
+            time.sleep(min(max(poll_interval, 0.01), 0.25))
 
     except Exception:
         if fd >= 0:

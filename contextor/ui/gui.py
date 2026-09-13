@@ -1133,6 +1133,12 @@ class ContextorGUI:
 
         close_cmd_log()
 
+        # Route Desktop shutdown through the same cancellation path as Stop
+        # analyze so an active full-analysis lease reaches its existing
+        # coordinator finally/release before this process exits.
+        if hasattr(self, "progress_bar"):
+            self.progress_bar.is_cancelled = True
+
         if getattr(self, "_live_start_retry_after_id", None) is not None:
             if hasattr(self, "root") and hasattr(self.root, "after_cancel"):
                 try:

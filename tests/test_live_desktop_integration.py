@@ -535,6 +535,32 @@ def test_closing_gui_shuts_down_owned_live_client(monkeypatch):
     assert events == [("request", "shutdown"), ("destroy",)]
 
 
+def test_closing_gui_cancels_active_analysis_before_cleanup(monkeypatch):
+    progress_bar = SimpleNamespace(is_cancelled=False)
+    root = SimpleNamespace(
+        geometry=lambda: "900x700+10+20",
+        destroy=lambda: None,
+    )
+    controller = SimpleNamespace(
+        root=root,
+        progress_bar=progress_bar,
+        owner_token="test-gui-owner-token",
+        live_clients={},
+        live_client=None,
+        live_watchers={},
+        live_event_feeds={},
+        theme_mode="dark",
+        repo_path_var=SimpleNamespace(get=lambda: "A"),
+        layer_path_var=SimpleNamespace(get=lambda: ""),
+        file_path_var=SimpleNamespace(get=lambda: ""),
+    )
+    monkeypatch.setattr(gui, "save_state", lambda **_payload: None)
+
+    gui.ContextorGUI.on_closing(controller)
+
+    assert progress_bar.is_cancelled is True
+
+
 def test_closing_gui_does_not_shut_down_unowned_live_client(monkeypatch):
     events = []
     token = "test-gui-owner-token"
