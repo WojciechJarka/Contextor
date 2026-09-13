@@ -25,6 +25,7 @@ from contextor.core.domain.lineage_facts import (
     MaterializedSurfaceFact,
     ProviderRef,
     ResolutionKind,
+    SemanticAnchorBinding,
     SemanticEndpoint,
     SemanticEndpointOrigin,
     SemanticEndpointRole,
@@ -140,7 +141,16 @@ def _revalidate_lineage_manifest(manifest: Any) -> SourceLineageManifest:
         raise pickle.UnpicklingError("Invalid lineage source manifest.")
     if not isinstance(manifest.status, LineageFamilyStatus):
         raise pickle.UnpicklingError("Invalid lineage manifest status.")
-    rebuilt = replace(manifest)
+    rebuilt = replace(
+        manifest,
+        semantic_anchor_bindings_materialized=bool(
+            getattr(
+                manifest,
+                "semantic_anchor_bindings_materialized",
+                False,
+            )
+        ),
+    )
     if rebuilt.semantic_version != LINEAGE_FACTS_SEMANTIC_VERSION:
         raise pickle.UnpicklingError(
             "Unsupported lineage manifest semantic version."
@@ -211,6 +221,19 @@ def _revalidate_lineage_origin(origin: Any) -> SemanticEndpointOrigin:
     return replace(origin)
 
 
+def _revalidate_lineage_semantic_anchor(
+    binding: Any,
+) -> SemanticAnchorBinding:
+    if not isinstance(binding, SemanticAnchorBinding):
+        raise pickle.UnpicklingError(
+            "Invalid lineage semantic anchor binding."
+        )
+    return replace(
+        binding,
+        reference=_revalidate_lineage_endpoint(binding.reference),
+    )
+
+
 def _revalidate_lineage_slice(
     source_slice: Any,
 ) -> MaterializedLineageSourceFacts:
@@ -240,6 +263,10 @@ def _revalidate_lineage_slice(
         semantic_endpoint_origins=tuple(
             _revalidate_lineage_origin(item)
             for item in getattr(source_slice, "semantic_endpoint_origins", ())
+        ),
+        semantic_anchors=tuple(
+            _revalidate_lineage_semantic_anchor(item)
+            for item in getattr(source_slice, "semantic_anchors", ())
         ),
     )
 

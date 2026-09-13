@@ -25,6 +25,7 @@ def _slice(source_key: str) -> MaterializedLineageSourceFacts:
             anchor_count=0,
             flow_count=0,
             surface_count=0,
+            semantic_anchor_bindings_materialized=True,
         )
     )
 
@@ -59,6 +60,7 @@ def test_repository_state_backend_exposes_canonical_metadata():
         family_state="fresh",
         semantic_version=LINEAGE_FACTS_SEMANTIC_VERSION,
         source_count=2,
+        semantic_anchor_bindings_complete=True,
     )
 
 
@@ -86,6 +88,7 @@ def test_repository_state_backend_defaults_to_not_materialized():
         family_state="not_materialized",
         semantic_version=None,
         source_count=0,
+        semantic_anchor_bindings_complete=False,
     )
     assert backend.source_keys() == ()
     assert backend.iter_sources() == ()

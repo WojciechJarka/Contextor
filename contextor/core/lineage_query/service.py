@@ -2,7 +2,17 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from contextor.core.lineage_query.backend import CanonicalLineageBackend
+from contextor.core.domain.lineage_facts import (
+    MaterializedFlowFact,
+    MaterializedOccurrenceRef,
+    MaterializedSurfaceFact,
+    SemanticAnchorBinding,
+    SemanticEndpoint,
+)
+from contextor.core.lineage_query.backend import (
+    CanonicalLineageBackend,
+    LineageBackendMetadata,
+)
 from contextor.core.report_query import ARTIFACT_ID_RE, IndexCatalog
 
 
@@ -21,6 +31,44 @@ class LineageTargetResolution:
     query: str
     target: ResolvedLineageTarget | None = None
     candidates: tuple[ResolvedLineageTarget, ...] = ()
+
+
+@dataclass(frozen=True)
+class LineageAnchorMatch:
+    source_key: str
+    source_fingerprint: str
+    binding: SemanticAnchorBinding
+
+
+@dataclass(frozen=True)
+class LineageFlowMatch:
+    source_key: str
+    source_fingerprint: str
+    flow: MaterializedFlowFact
+
+
+@dataclass(frozen=True)
+class LineageSurfaceMatch:
+    source_key: str
+    source_fingerprint: str
+    surface: MaterializedSurfaceFact
+
+
+@dataclass(frozen=True)
+class DirectLineageFacts:
+    target: ResolvedLineageTarget
+    metadata: LineageBackendMetadata
+    anchors: tuple[LineageAnchorMatch, ...]
+    incoming: tuple[LineageFlowMatch, ...]
+    outgoing: tuple[LineageFlowMatch, ...]
+    surfaces: tuple[LineageSurfaceMatch, ...]
+
+    @property
+    def complete(self) -> bool:
+        return (
+            self.metadata.family_state == "fresh"
+            and self.metadata.semantic_anchor_bindings_complete
+        )
 
 
 class LineageQueryService:
@@ -107,6 +155,136 @@ class LineageQueryService:
             query=raw,
             target=matches[0],
         )
+
+    def direct_facts(
+        self,
+        target: ResolvedLineageTarget,
+    ) -> DirectLineageFacts:
+        if not isinstance(target, ResolvedLineageTarget):
+            raise TypeError("target must be ResolvedLineageTarget.")
+
+        metadata = self._backend.metadata()
+        anchors: list[LineageAnchorMatch] = []
+        incoming: list[LineageFlowMatch] = []
+        outgoing: list[LineageFlowMatch] = []
+        surfaces: list[LineageSurfaceMatch] = []
+
+        source_keys = self._backend.source_keys_for_owner(target.artifact_id)
+        for source in self._backend.iter_sources(source_keys):
+            manifest = source.manifest
+            anchor_refs: set[MaterializedOccurrenceRef] = set()
+            for binding in source.semantic_anchors:
+                if binding.owner_id != target.artifact_id:
+                    continue
+                anchor_refs.add(binding.reference)
+                anchors.append(
+                    LineageAnchorMatch(
+                        source_key=manifest.source_key,
+                        source_fingerprint=manifest.source_fingerprint,
+                        binding=binding,
+                    )
+                )
+
+            for flow in source.flows:
+                match = LineageFlowMatch(
+                    source_key=manifest.source_key,
+                    source_fingerprint=manifest.source_fingerprint,
+                    flow=flow,
+                )
+                target_matches = (
+                    isinstance(flow.target, SemanticEndpoint)
+                    and flow.target.owner_id == target.artifact_id
+                ) or (
+                    isinstance(flow.target, MaterializedOccurrenceRef)
+                    and flow.target in anchor_refs
+                )
+                source_matches = (
+                    isinstance(flow.source, SemanticEndpoint)
+                    and flow.source.owner_id == target.artifact_id
+                ) or (
+                    isinstance(flow.source, MaterializedOccurrenceRef)
+                    and flow.source in anchor_refs
+                )
+                if target_matches:
+                    incoming.append(match)
+                if source_matches:
+                    outgoing.append(match)
+
+            for surface in source.surfaces:
+                if (
+                    (
+                        isinstance(surface.exposed, SemanticEndpoint)
+                        and surface.exposed.owner_id == target.artifact_id
+                    )
+                    or (
+                        isinstance(surface.exposed, MaterializedOccurrenceRef)
+                        and surface.exposed in anchor_refs
+                    )
+                ):
+                    surfaces.append(
+                        LineageSurfaceMatch(
+                            source_key=manifest.source_key,
+                            source_fingerprint=manifest.source_fingerprint,
+                            surface=surface,
+                        )
+                    )
+
+        anchors.sort(key=_anchor_match_key)
+        incoming.sort(key=_flow_match_key)
+        outgoing.sort(key=_flow_match_key)
+        surfaces.sort(key=_surface_match_key)
+
+        return DirectLineageFacts(
+            target=target,
+            metadata=metadata,
+            anchors=tuple(anchors),
+            incoming=tuple(incoming),
+            outgoing=tuple(outgoing),
+            surfaces=tuple(surfaces),
+        )
+
+
+def _anchor_match_key(match: LineageAnchorMatch) -> tuple:
+    binding = match.binding
+    reference = binding.reference
+    return (
+        match.source_key,
+        match.source_fingerprint,
+        binding.owner_id,
+        binding.qualified_name,
+        reference.local_id,
+    )
+
+
+def _flow_match_key(match: LineageFlowMatch) -> tuple:
+    flow = match.flow
+    evidence = flow.evidence
+    return (
+        match.source_key,
+        match.source_fingerprint,
+        flow.local_id,
+        flow.relation.value,
+        evidence.start_line,
+        evidence.start_column,
+        evidence.end_line,
+        evidence.end_column,
+    )
+
+
+def _surface_match_key(match: LineageSurfaceMatch) -> tuple:
+    surface = match.surface
+    evidence = surface.evidence
+    return (
+        match.source_key,
+        match.source_fingerprint,
+        surface.local_id,
+        surface.kind.value,
+        surface.declared_name,
+        evidence.start_line,
+        evidence.start_column,
+        evidence.end_line,
+        evidence.end_column,
+    )
 
 
 def _target(

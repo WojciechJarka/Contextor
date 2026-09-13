@@ -7,6 +7,7 @@ from typing import Protocol, runtime_checkable
 from contextor.core.domain.lineage_facts import (
     LineageFamilyStatus,
     MaterializedLineageSourceFacts,
+    SemanticEndpoint,
     SourceLineageManifest,
 )
 
@@ -21,6 +22,7 @@ class LineageBackendMetadata:
     family_state: str
     semantic_version: str | None
     source_count: int
+    semantic_anchor_bindings_complete: bool
 
 
 @runtime_checkable
@@ -38,6 +40,11 @@ class CanonicalLineageBackend(Protocol):
         self,
         source_key: str,
     ) -> SourceLineageManifest | None: ...
+
+    def source_keys_for_owner(
+        self,
+        owner_id: str,
+    ) -> tuple[str, ...]: ...
 
     def iter_sources(
         self,
@@ -99,12 +106,21 @@ class RepositoryStateLineageBackend:
                 "Canonical lineage semantic version must be a non-empty string or None."
             )
 
+        semantic_anchor_bindings_complete = (
+            family_state == LineageFamilyStatus.FRESH.value
+            and all(
+                self.get_source(source_key)
+                .manifest.semantic_anchor_bindings_materialized
+                for source_key in self.source_keys()
+            )
+        )
         return LineageBackendMetadata(
             revision=raw_revision,
             provenance=raw_provenance,
             family_state=family_state,
             semantic_version=semantic_version,
             source_count=len(self._sources),
+            semantic_anchor_bindings_complete=semantic_anchor_bindings_complete,
         )
 
     def source_keys(self) -> tuple[str, ...]:
@@ -132,6 +148,41 @@ class RepositoryStateLineageBackend:
     ) -> SourceLineageManifest | None:
         source = self.get_source(source_key)
         return source.manifest if source is not None else None
+
+    def source_keys_for_owner(
+        self,
+        owner_id: str,
+    ) -> tuple[str, ...]:
+        if not isinstance(owner_id, str) or not owner_id:
+            raise ValueError("owner_id must be a non-empty string.")
+
+        matches: list[str] = []
+        for source_key in self.source_keys():
+            source = self.get_source(source_key)
+            assert source is not None
+            flow_match = any(
+                (
+                    isinstance(flow.source, SemanticEndpoint)
+                    and flow.source.owner_id == owner_id
+                )
+                or (
+                    isinstance(flow.target, SemanticEndpoint)
+                    and flow.target.owner_id == owner_id
+                )
+                for flow in source.flows
+            )
+            surface_match = any(
+                isinstance(surface.exposed, SemanticEndpoint)
+                and surface.exposed.owner_id == owner_id
+                for surface in source.surfaces
+            )
+            anchor_match = any(
+                binding.owner_id == owner_id
+                for binding in source.semantic_anchors
+            )
+            if flow_match or surface_match or anchor_match:
+                matches.append(source_key)
+        return tuple(matches)
 
     def iter_sources(
         self,

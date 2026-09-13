@@ -344,6 +344,24 @@ class MaterializedAnchorFact:
 
 
 @dataclass(frozen=True, order=True)
+class SemanticAnchorBinding:
+    owner_id: str
+    qualified_name: str
+    reference: MaterializedOccurrenceRef
+
+    def __post_init__(self) -> None:
+        _require_token(self.owner_id, "owner_id")
+        if self.qualified_name.count("::") != 1:
+            raise ValueError(
+                "Semantic anchor qualified_name must be canonical module::symbol."
+            )
+        module_name, symbol_name = self.qualified_name.split("::", 1)
+        _require_token(module_name, "semantic anchor module_name")
+        _require_token(symbol_name, "semantic anchor symbol_name")
+        _require_materialized_anchor_reference(self.reference)
+
+
+@dataclass(frozen=True, order=True)
 class MaterializedFlowFact:
     local_id: str
     source: MaterializedOccurrenceRef | MaterializedSymbolicRef | SemanticEndpoint
@@ -405,6 +423,7 @@ class SourceLineageManifest:
     flow_count: int
     surface_count: int
     resource_limit_reason: str | None = None
+    semantic_anchor_bindings_materialized: bool = False
 
     def __post_init__(self) -> None:
         _require_token(self.source_key, "source_key")
@@ -412,6 +431,10 @@ class SourceLineageManifest:
         _require_token(self.semantic_version, "semantic_version")
         if min(self.anchor_count, self.flow_count, self.surface_count) < 0:
             raise ValueError("Lineage manifest counts must be non-negative.")
+        if not isinstance(self.semantic_anchor_bindings_materialized, bool):
+            raise TypeError(
+                "semantic_anchor_bindings_materialized must be boolean."
+            )
         _validate_source_status(self.status, self.resource_limit_reason)
 
 
@@ -446,6 +469,7 @@ class MaterializedLineageSourceFacts:
     surfaces: tuple[MaterializedSurfaceFact, ...] = ()
     interface_descriptors: tuple[SemanticInterfaceDescriptor, ...] = ()
     semantic_endpoint_origins: tuple[SemanticEndpointOrigin, ...] = ()
+    semantic_anchors: tuple[SemanticAnchorBinding, ...] = ()
 
     def __post_init__(self) -> None:
         _require_sorted_unique(self.anchors, "anchors")
@@ -453,6 +477,11 @@ class MaterializedLineageSourceFacts:
         _require_sorted_unique(self.surfaces, "surfaces")
         _require_sorted_unique(self.interface_descriptors, "interface_descriptors")
         _require_sorted_unique(self.semantic_endpoint_origins, "semantic_endpoint_origins")
+        _require_sorted_unique(self.semantic_anchors, "semantic_anchors")
+        if self.semantic_anchors and not self.manifest.semantic_anchor_bindings_materialized:
+            raise ValueError(
+                "Semantic anchors require materialized semantic anchor bindings."
+            )
         if self.manifest.status == LineageFamilyStatus.FRESH:
             expected = (len(self.anchors), len(self.flows), len(self.surfaces))
             actual = (
@@ -469,6 +498,13 @@ class MaterializedLineageSourceFacts:
             _require_slice_occurrence(flow.target, self.manifest)
         for surface in self.surfaces:
             _require_slice_occurrence(surface.exposed, self.manifest)
+        anchor_references = {anchor.reference for anchor in self.anchors}
+        for semantic_anchor in self.semantic_anchors:
+            _require_slice_occurrence(semantic_anchor.reference, self.manifest)
+            if semantic_anchor.reference not in anchor_references:
+                raise ValueError(
+                    "Semantic anchor must reference a materialized anchor in its slice."
+                )
         self._validate_semantic_endpoint_origins()
 
     def _validate_semantic_endpoint_origins(self) -> None:
@@ -801,6 +837,7 @@ __all__ = [
     "MaterializedSurfaceFact",
     "ParameterKind",
     "ResolutionKind",
+    "SemanticAnchorBinding",
     "SemanticEndpoint",
     "SemanticInterfaceDescriptor",
     "SemanticSlot",

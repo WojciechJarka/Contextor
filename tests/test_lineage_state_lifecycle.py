@@ -37,6 +37,7 @@ from contextor.core.domain.lineage_facts import (
     MaterializedSurfaceFact,
     ProviderRef,
     ResolutionKind,
+    SemanticAnchorBinding,
     SemanticEndpoint,
     SemanticEndpointRole,
     SemanticInterfaceDescriptor,
@@ -69,6 +70,7 @@ def _lineage_slice() -> MaterializedLineageSourceFacts:
             1,
             1,
             1,
+            semantic_anchor_bindings_materialized=True,
         ),
         anchors=(
             MaterializedAnchorFact(
@@ -111,6 +113,9 @@ def _lineage_slice() -> MaterializedLineageSourceFacts:
                 (slot,),
                 "signature-digest",
             ),
+        ),
+        semantic_anchors=(
+            SemanticAnchorBinding("A1", "pkg::thing", occurrence),
         ),
     )
 
@@ -186,6 +191,32 @@ def test_snapshot_round_trip_preserves_lineage_endpoint_types_and_metadata(
     )
     assert loaded_slice.surfaces[0].provider == ProviderRef("fixture", "1")
     assert loaded_slice.surfaces[0].dynamic_boundary == "runtime-registration"
+    assert loaded_slice.semantic_anchors == source_slice.semantic_anchors
+
+
+def test_snapshot_legacy_semantic_anchor_fields_fail_closed(tmp_path):
+    source_slice = _lineage_slice()
+    object.__delattr__(
+        source_slice.manifest,
+        "semantic_anchor_bindings_materialized",
+    )
+    object.__delattr__(source_slice, "semantic_anchors")
+    state = RepositoryAnalysisState(
+        lineage_facts_by_source={"pkg.py": source_slice},
+        lineage_facts_state="fresh",
+        lineage_facts_semantic_version=LINEAGE_FACTS_SEMANTIC_VERSION,
+    )
+
+    save_snapshot(state, tmp_path, "legacy-semantic-anchors")
+
+    loaded, _ = load_snapshot(
+        tmp_path,
+        expected_state_id="legacy-semantic-anchors",
+    )
+    loaded_slice = loaded.lineage_facts_by_source["pkg.py"]
+
+    assert loaded_slice.manifest.semantic_anchor_bindings_materialized is False
+    assert loaded_slice.semantic_anchors == ()
 
 
 @pytest.mark.parametrize(

@@ -24,6 +24,7 @@ from contextor.core.domain.lineage_facts import (
     ParameterKind,
     ProviderRef,
     ResolutionKind,
+    SemanticAnchorBinding,
     SemanticEndpoint,
     SemanticEndpointOrigin,
     SemanticEndpointRole,
@@ -70,6 +71,79 @@ def test_materializer_is_deterministic_and_preserves_local_anchors_and_flows():
         "pkg/mod.py", "sha256:test", "anchor"
     )
     assert first.flows[0].resolution_kind is ResolutionKind.LEXICAL_EXACT
+
+
+def test_materializer_builds_and_reresolves_exact_semantic_anchor_bindings():
+    span = SourceSpan(1, 0, 1, 1)
+    module_anchor = "occ:v1:module:root:i:0:n:pkg"
+    class_anchor = "occ:v1:class:0:i:0:n:Thing"
+    method_anchor = "occ:v1:function:0.0:i:0:n:run"
+    facts = _facts(
+        anchors=tuple(
+            sorted(
+                (
+                    ExtractedAnchorFact(module_anchor, "module", span),
+                    ExtractedAnchorFact(
+                        class_anchor,
+                        "class",
+                        span,
+                        module_anchor,
+                    ),
+                    ExtractedAnchorFact(
+                        method_anchor,
+                        "function",
+                        span,
+                        class_anchor,
+                    ),
+                )
+            )
+        ),
+    )
+    initial = materialize_lineage_source_facts(
+        facts,
+        _context(
+            artifacts={
+                "pkg.mod::Thing": "A1/1",
+                "pkg.mod::Thing.run": "A2/1",
+            }
+        ),
+    )
+
+    assert initial.manifest.semantic_anchor_bindings_materialized is True
+    assert initial.semantic_anchors == (
+        SemanticAnchorBinding(
+            "A1/1",
+            "pkg.mod::Thing",
+            MaterializedOccurrenceRef("pkg/mod.py", "sha256:test", class_anchor),
+        ),
+        SemanticAnchorBinding(
+            "A2/1",
+            "pkg.mod::Thing.run",
+            MaterializedOccurrenceRef("pkg/mod.py", "sha256:test", method_anchor),
+        ),
+    )
+
+    reresolved = reresolve_materialized_lineage_source_facts(
+        initial,
+        _context(
+            artifacts={
+                "pkg.mod::Thing": "A1/1",
+                "pkg.mod::Thing.run": "A2/2",
+            }
+        ),
+    )
+    assert tuple(binding.owner_id for binding in reresolved.semantic_anchors) == (
+        "A1/1",
+        "A2/2",
+    )
+
+    removed = reresolve_materialized_lineage_source_facts(
+        reresolved,
+        _context(artifacts={"pkg.mod::Thing": "A1/1"}),
+    )
+    assert tuple(binding.qualified_name for binding in removed.semantic_anchors) == (
+        "pkg.mod::Thing",
+    )
 
 
 def test_exact_active_return_parameter_and_descriptor_slots_are_materialized():

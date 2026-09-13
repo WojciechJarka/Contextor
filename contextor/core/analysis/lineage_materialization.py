@@ -7,6 +7,7 @@ from types import MappingProxyType
 from typing import Mapping
 
 from contextor.core.analysis.lineage_extraction_contracts import (
+    _module_name_from_source_key,
     parse_local_occurrence_id,
 )
 from contextor.core.domain.lineage_facts import (
@@ -24,6 +25,7 @@ from contextor.core.domain.lineage_facts import (
     MaterializedSurfaceFact,
     ParameterKind,
     ResolutionKind,
+    SemanticAnchorBinding,
     SemanticEndpoint,
     SemanticEndpointOrigin,
     SemanticEndpointRole,
@@ -132,6 +134,11 @@ def materialize_lineage_source_facts(
             for anchor in extracted.anchors
         )
     )
+    semantic_anchors = _semantic_anchor_bindings(
+        extracted,
+        resolution,
+        occurrence,
+    )
     flows = tuple(sorted(
         MaterializedFlowFact(
             flow.local_id,
@@ -188,6 +195,7 @@ def materialize_lineage_source_facts(
         len(flows),
         len(surfaces),
         extracted.resource_limit_reason,
+        semantic_anchor_bindings_materialized=True,
     )
     return MaterializedLineageSourceFacts(
         manifest,
@@ -196,6 +204,7 @@ def materialize_lineage_source_facts(
         surfaces,
         tuple(sorted(descriptors.values())),
         tuple(sorted(origins)),
+        semantic_anchors,
     )
 
 
@@ -317,6 +326,22 @@ def reresolve_materialized_lineage_source_facts(
         )
         for surface in materialized.surfaces
     ))
+    semantic_anchors = tuple(
+        sorted(
+            SemanticAnchorBinding(
+                owner_id,
+                binding.qualified_name,
+                binding.reference,
+            )
+            for binding in materialized.semantic_anchors
+            if (
+                owner_id := resolution.active_artifact_ids.get(
+                    binding.qualified_name
+                )
+            )
+            is not None
+        )
+    )
     return MaterializedLineageSourceFacts(
         materialized.manifest,
         materialized.anchors,
@@ -324,7 +349,80 @@ def reresolve_materialized_lineage_source_facts(
         surfaces,
         tuple(sorted(descriptors.values())),
         tuple(sorted(resolved_origins)),
+        semantic_anchors,
     )
+
+
+def _semantic_anchor_bindings(
+    extracted: ExtractedLineageSourceFacts,
+    resolution: LineageResolutionContext,
+    occurrence,
+) -> tuple[SemanticAnchorBinding, ...]:
+    anchors_by_id = {
+        anchor.local_id: anchor
+        for anchor in extracted.anchors
+    }
+    module_name = _module_name_from_source_key(extracted.source_key)
+    result: list[SemanticAnchorBinding] = []
+
+    for anchor in extracted.anchors:
+        if anchor.kind not in {
+            "class",
+            "function",
+            "async_function",
+            "binding",
+            "import_binding",
+        }:
+            continue
+
+        symbol_path = _anchor_symbol_path(anchor, anchors_by_id)
+        if symbol_path is None:
+            continue
+
+        qualified_name = f"{module_name}::{symbol_path}"
+        owner_id = resolution.active_artifact_ids.get(qualified_name)
+        if owner_id is None:
+            continue
+
+        result.append(
+            SemanticAnchorBinding(
+                owner_id,
+                qualified_name,
+                occurrence(anchor.local_id),
+            )
+        )
+
+    return tuple(sorted(result))
+
+
+def _anchor_symbol_path(anchor, anchors_by_id) -> str | None:
+    parts: list[str] = []
+    current = anchor
+    seen: set[str] = set()
+
+    while current.kind != "module":
+        if current.local_id in seen:
+            raise ValueError("Lineage anchor ownership contains a cycle.")
+        seen.add(current.local_id)
+
+        try:
+            _kind, _path, _ordinal, name = parse_local_occurrence_id(
+                current.local_id
+            )
+        except ValueError:
+            return None
+        if not name:
+            return None
+        parts.append(name)
+
+        owner_local_id = current.owner_local_id
+        if owner_local_id is None:
+            return None
+        current = anchors_by_id.get(owner_local_id)
+        if current is None:
+            return None
+
+    return ".".join(reversed(parts))
 
 
 def _semantic_origin(
