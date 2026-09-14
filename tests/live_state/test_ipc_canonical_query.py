@@ -221,3 +221,56 @@ def test_live_state_client_canonical_query_uses_dedicated_operation_only():
             },
         },
     }
+
+
+def test_publish_rebinds_snapshot_or_missing_provenance_to_live_before_serving():
+    initial = SimpleNamespace(revision=3)
+    server = CanonicalLiveServer(
+        initial,
+        revision=3,
+        canonical_query_handler=(
+            lambda current_state, _query_kind, _payload: current_state.provenance
+        ),
+    )
+    replacement = SimpleNamespace(revision=4, provenance="snapshot")
+    missing_provenance = SimpleNamespace(revision=5)
+    try:
+        published = server._dispatch(
+            {
+                "operation": "publish",
+                "state": replacement,
+                "origin": "desktop_analysis",
+            }
+        )
+        first_query = server._dispatch(
+            {
+                "operation": "canonical_query",
+                "query_kind": "symbol_lineage",
+                "payload": {},
+            }
+        )
+        republished = server._dispatch(
+            {
+                "operation": "publish",
+                "state": missing_provenance,
+                "origin": "desktop_analysis",
+            }
+        )
+        second_query = server._dispatch(
+            {
+                "operation": "canonical_query",
+                "query_kind": "symbol_lineage",
+                "payload": {},
+            }
+        )
+    finally:
+        server.close()
+
+    assert published["status"] == "ok"
+    assert published["revision"] == 4
+    assert replacement.provenance == "live"
+    assert first_query["result"] == "live"
+    assert republished["status"] == "ok"
+    assert republished["revision"] == 5
+    assert missing_provenance.provenance == "live"
+    assert second_query["result"] == "live"

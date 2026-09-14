@@ -156,5 +156,6 @@ def test_repository_symbol_lineage_handler_runs_through_canonical_server_without
         "query": "A17/2",
         "sections": ("interface",),
     }
+    assert state.provenance == "live"
     assert "bulk_blob" not in repr(response)
     assert "state" not in response

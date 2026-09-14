@@ -436,6 +436,19 @@ def _bind_state_revision(state: Any, revision: int) -> bool:
     return getattr(state, "revision", None) == revision
 
 
+def _mark_live_state_provenance(state: Any) -> None:
+    """Mark state currently owned by CanonicalLiveServer as LIVE-authoritative."""
+    if state is None:
+        return
+    if isinstance(state, dict):
+        state["provenance"] = "live"
+        return
+    try:
+        setattr(state, "provenance", "live")
+    except (AttributeError, TypeError):
+        return
+
+
 def _clone_state_for_update(state: Any) -> Any:
     if state is None:
         raise ValueError("canonical state unavailable")
@@ -704,6 +717,7 @@ class CanonicalLiveServer:
             )
 
         self._state = state
+        _mark_live_state_provenance(self._state)
         state_rev = _extract_state_revision(state)
 
         if isinstance(state_rev, int) and state_rev >= 0:
@@ -1228,6 +1242,7 @@ class CanonicalLiveServer:
                         }
                     state_rev = expected_revision
 
+                _mark_live_state_provenance(state)
                 self._state = state
                 self._revision = state_rev
                 evt = self._record_event("publish", request, category="LIVE_STATE")
