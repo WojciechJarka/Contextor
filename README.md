@@ -1,319 +1,622 @@
-# Contextor
+# Contextor MCP
 
-Contextor
+**Architectural intelligence for AI coding agents working with Python repositories.**
 
-Contextor MCP is an architectural intelligence layer that allows Large Language Models (LLMs) to autonomously explore, understand, and reason about complex Python repositories through the Model Context Protocol (MCP).
+Contextor MCP gives Large Language Models a persistent, queryable model of a Python codebase instead of forcing them to rediscover the repository through repeated file scans, grep searches, and large source dumps.
 
-Instead of sending entire codebases into an AI context window, Contextor automatically builds a persistent architectural map of the repository and provides the LLM with only the precise context required for the current task — dramatically reducing token usage, inference cost, and unnecessary code scanning.
+It analyzes the repository statically, maintains canonical architectural state, and exposes focused MCP tools that answer questions such as:
 
-Through static analysis, Contextor discovers project structure, dependencies, symbol ownership, artifact relationships, architectural risks, and technical debt without ever executing the analyzed code.
+- Where is the canonical owner of this behavior?
+- What calls or consumes this symbol?
+- What depends on this module?
+- What will be affected if this artifact changes?
+- Which tests are structurally connected to this code?
+- What is the safest context to inspect before editing a file?
+- How does a value or semantic fact flow through the system?
+- Did an edit remain inside the expected architectural flow?
 
-Contextor acts as a bridge between software repositories and AI agents, giving LLMs architectural awareness similar to having an always-updated technical map of the entire codebase.
+Contextor MCP does not tell an AI agent how to write the code.
 
----
-
-## What Contextor MCP Does
-
-- **Semantic & Architectural Diffing:**  
-  Unlike Git, which tracks character-by-character textual changes, Contextor tracks *structural health*. It detects if a new commit accidentally introduced a circular dependency, inflated technical debt, or violated layer boundaries (e.g., Core layer calling UI).
-- **Dependency Graph Building:**  
-  Extracts module dependencies, including hard imports and soft textual references, to construct a complete architectural graph of the project.
-- **Architectural Debt Calculation:**  
-  Calculates structural risk indicators by detecting isolated modules, namespace collisions, dependency hotspots, and architectural inconsistencies.
-- **Artifact Consumption Tracking (Blast Radius):**  
-  Analyzes how symbols (classes, functions) are consumed throughout the repository. Reports evidence-backed direct static consumers from calls, API imports, and detectable reflection patterns. Dynamic Python behavior can make this radius incomplete, so it is presented with its evidence scope rather than as mathematically exact.
-- **Context Generation for LLMs:**  
-  Generates ultra-compact, indexed JSON matrices and Markdown reports designed specifically for Large Language Models. It acts as a structural "GPS" for AI, saving thousands of tokens by delivering precise architectural context instead of raw, concatenated source files.
+It tells the agent **where to look, what is connected, which state is authoritative, and when deeper inspection is necessary.**
 
 ---
 
-## What Contextor MCP Does NOT Do
+## Why Contextor MCP Exists
 
-- **Textual Code Diffing (Like Git):**  
-  Contextor MCP is not a version control system. It will not show you that line 42 changed `foo` to `bar` or track whitespace changes. For exact textual "search & replace" diffs, use Git. Contextor focuses exclusively on the *architectural consequences* of those changes.
-- **Dynamic Analysis:**  
-  Contextor MCP does not execute analyzed code. All analysis is performed through rapid static repository inspection.
-- **Deep Runtime Type Inference & Reflection Frameworks:**  
-  Contextor MCP relies on AST parsing and deterministic symbol analysis rather than runtime execution. Dynamic dispatch patterns (e.g., `getattr()`, `__import__`, dependency injection) and heavy reflection used by frameworks like Django or FastAPI cannot be perfectly resolved through static analysis alone. For "pure" Python code, accuracy is extremely high, but for heavily dynamic framework "magic", the structural graph may be incomplete. Contextor partially addresses this through *soft reference* detection (pattern-based textual matching).
-- **Automated Code Modification:**  
-  Contextor MCP does not rewrite code, fix bugs, or format files. It provides the map and the metrics; you (or your LLM) perform the surgery.
-- **Security Auditing:**  
-  Contextor MCP identifies structural risks and technical debt, but it is not a dedicated SAST security vulnerability scanner.
+A typical coding agent working on an unfamiliar repository starts with textual exploration:
 
----
+~~~text
+search → grep → open files → more search → reconstruct architecture → edit
+~~~
 
-## Model Context Protocol (MCP) Integration
+That works, but it forces the model to repeatedly infer system structure from fragments of source code.
 
-Contextor natively supports the **Model Context Protocol**, allowing Large Language Models (like Claude) to autonomously explore your repository's architecture without flooding their context window.
+Contextor MCP changes the workflow:
 
-- **Contextor Query Layer:** Instead of serving raw, massive JSON files, the server exposes highly targeted endpoints (e.g., `get_project_architecture`, `get_module_context`, `get_artifact_blast_radius`).
-- **Non-blocking Analysis Jobs:** Repository, layer, and single-file analyses return durable job IDs with progress status, so long report runs do not time out the MCP client.
-- **Shared Canonical LIVE:** One authenticated localhost owner keeps the current repository state in RAM for both desktop and MCP. The desktop watcher publishes file changes automatically after the initial full analysis; revisioned disk snapshots are used only for recovery.
-- **LIVE-first Context:** Project architecture, file-edit safety, artifact blast radius and layer isolation use current LIVE state first. Saved reports enrich expensive metrics and historical evidence but are not required for structural answers.
-- **Bounded Context:** By merging data from multiple reports, the server delivers compact synthesized insights, resolves requested registry IDs, and exposes limits plus truncation counters for larger collections.
-- **Architectural Regression Analysis:** `get_report_diff` compares consecutive canonical runs—including working-tree states on the same commit—and surfaces changes in structural metrics, layers and technical debt.
-- **Focused Refactor Evidence:** Nested-layer isolation and static test-reachability paths through aliases, re-exports and facades give the LLM compact evidence without claiming runtime coverage.
-- **Versioned LIVE Queries:** `describe_canonical_state` publishes the safe schema and operator contract, while `query_canonical_projection` performs bounded JSON queries over normalized modules, artifacts, and dependencies without evaluating Python expressions.
-- **MCP Server Restart Boundary:** `update_file` synchronizes code on disk with Contextor's canonical state, but it cannot reload Python code already executing inside the MCP process. When the edited target is `contextor/mcp_server.py`, the response sets `runtime_restart_required: true`; restart the MCP server and verify the changed endpoint live before treating runtime behavior as current.
+~~~text
+architecture → owner → dependencies / lineage → exact implementation → edit → verification
+~~~
 
-### First run and warm LIVE iterations
+The LLM still performs the reasoning and writes the code.
 
-Contextor needs one complete repository-wide architectural baseline before it
-can answer scoped questions safely. Therefore, the first analysis of a newly
-registered repository builds the full module index, dependency graph and
-artifact-consumption state even when the requested operation is only a layer
-or a single file. A cold layer/single-file run can consequently take roughly
-as long as the first repository analysis.
+Contextor MCP supplies the architectural context needed to perform that reasoning without reconstructing the repository from scratch every time.
 
-After that baseline exists, desktop, CLI and MCP layer/single-file analyses
-reuse the canonical LIVE state (or its recovery snapshot). A single-file run
-refreshes only the selected file incrementally; both scoped workflows reuse
-the existing module graph and artifact evidence instead of reparsing the whole
-repository. Full indexing remains a correctness fallback when canonical state
-is missing, incomplete, belongs to another repository root, or must be rebuilt
-after analysis-scope/exclusion changes.
+This is especially useful for large existing codebases, where locating the correct owner, lifecycle, dependency boundary, or semantic flow can consume more context than the actual implementation change.
 
 ---
 
-# Features
+## Core Idea
 
-- Static Python repository analysis
-- AST-based source inspection
-- Dependency graph generation
-- Hard import and soft reference analysis
-- Symbol ownership tracking
-- Artifact consumption mapping
-- Circular dependency detection
-- Namespace collision detection
-- Architectural hotspot identification
-- Technical debt scoring
-- LLM-ready context generation
-- JSON reporting
-- Single-file architectural analysis
-- Separation of logical layers (e.g. core vs tests) for distinct, isolated architectural reports
-- Comprehensive global and per-layer metrics (density, in/out degree, internal vs external connections)
-- Hotspot classification and technical debt scoring directly linked to architectural action items
-- Dedicated name collision reporting with zero-conflict validation
-- json parsing engine (for extraction of info about single file or single symbol from full artifacts report)
-- Stable canonical report names plus immutable timestamped snapshot subfolders for repository, layer, and single-file runs; high-risk layer packages use the same history model
-- Git integration for commit and branch tracking
-- Automated JSON report diffing engine detecting regressions in technical debt, hotspots, and architectural bottlenecks
-- Detailed single-file Git patches bridging the gap between local changes and architectural impact
-- **Model Context Protocol (MCP) Server** enabling direct, autonomous integration with LLMs (e.g. Claude Desktop, Antigravity)
-- **Graph Analytics Report** — per-module `fan_in`, `fan_out`, `export_degree`, `visibility`, architectural `layer`, graph-centrality scores (`betweenness`, `pagerank`, `hub_score`, `bridge_score`), Jaccard-similarity clusters, and a weighted Module Dependency Matrix; generated for all three report levels (full repo, layer, single file)
-- **Persistent Identity Registry** — a transactional, atomic indexing layer that maintains globally stable, generation-based string identifiers (e.g. 17/4, A5/2) for modules and artifacts across runs. It isolates repository identity state inside .contextor/ (automatically gitignored), providing consistent identity resolution, recovery of removed objects, and collision-free identifier reuse without polluting generated reports or repository history.
+Contextor MCP builds and maintains a canonical model of the repository.
 
----
+That model contains much more than filenames and imports. Depending on the analysis family, it includes:
 
-# Prerequisites
+- modules and persistent module identities;
+- symbols and persistent artifact identities;
+- hard and soft dependencies;
+- direct and transitive consumers;
+- artifact usage;
+- intra-module symbol calls;
+- semantic ownership;
+- callable interfaces;
+- semantic anchors;
+- data and call flows;
+- exposed surfaces;
+- syntax diagnostics;
+- dependency topology;
+- cycles and architectural hotspots;
+- layer relationships;
+- technical-debt signals;
+- test reachability;
+- Git and report-history context.
 
-- **Python 3.10 or newer.** Contextor uses `X | Y` type annotations,
-  which are evaluated at import time and are a syntax error on 3.9.
-- **Tkinter**, for the graphical interface. Bundled with Python on
-  Windows and macOS; on Debian/Ubuntu install `python3-tk`. Not needed
-  for the CLI.
-- Git (optional, required for repository context information). Must be
-  installed and available in your system's `PATH`.
-
-The only third-party runtime dependency is `orjson`.
+The analyzed application code is never executed.
 
 ---
 
-# Installation
+## Architecture-First Agentic Coding
 
-Unpack the ZIP of the last release.
+Contextor MCP is designed around **progressive disclosure**.
 
-To ensure your system's Python environment remains clean and stable, Contextor relies on isolated virtual environments. 
+An agent should not need to load an entire repository to understand one change.
 
-Simply double-click **`run_contextor.bat`**. 
+A typical workflow can look like:
 
-This script will automatically create an isolated Python virtual environment (`venv`) inside the project folder, install all required dependencies there, and launch the Contextor interface. This guarantees your global Python environment remains completely untouched and safe.
+~~~text
+1. Identify the relevant module or symbol.
+2. Ask Contextor MCP for ownership and architectural context.
+3. Inspect call context, consumers, blast radius, or semantic lineage when needed.
+4. Retrieve only the exact implementation or source range required.
+5. Edit the code.
+6. Run focused tests.
+7. Query Contextor MCP again to verify that the resulting flow and ownership remain coherent.
+~~~
 
----
+This makes textual search a verification mechanism rather than the primary mechanism for discovering the architecture.
 
-# Project Layout
+Contextor MCP can therefore participate on both sides of an edit.
 
-```
-contextor/              the installable package
-    __main__.py         entry point (python -m contextor)
-    cli.py              command-line interface
-    core/               analysis engine
-    ui/                 Tkinter interface
-    repo_generator/     source bundling tool
-main.py                 launcher for running from a source checkout
-tests/                  test suite
-```
+**Pre-edit**
 
----
+- locate the canonical owner;
+- establish call paths and dependencies;
+- determine blast radius;
+- identify relevant tests;
+- constrain the safe edit surface.
 
-# How to Use
+**Post-edit**
 
-Contextor provides both a Command-Line Interface (CLI) and a Graphical User Interface (GUI).
-
-## Using the GUI
-
-The easiest way to start Contextor is:
-
-```bash
-python main.py --gui
-```
-
-Or, once installed:
-
-```bash
-python -m contextor --gui
-```
-
-On Windows, you can also use:
-
-```bash
-run_contextor.bat
-```
-
-The launcher will:
-- Detect the Python installation.
-- Verify required dependencies.
-- Install missing requirements when necessary.
-- Start the Contextor graphical interface.
-
-Then:
-- Select the target repository.
-- Configure exclusion rules for directories or specific files.
-- Generate architectural reports.
-- Inspect project layers, dependencies, and relationships.
-
-## Using the CLI
-
-Run an automated repository analysis:
-
-```bash
-python main.py /path/to/your/project
-```
-
-Contextor will:
-- build the repository index;
-- analyze dependencies;
-- resolve symbol relationships;
-- detect architectural cycles;
-- calculate technical debt indicators;
-- generate JSON and Markdown reports.
-
-Or, once installed, from any directory:
-
-```bash
-contextor /path/to/your/project
-```
-
-Additional options:
-
-```bash
-contextor --help                       # full option list
-contextor PROJECT --layer PROJECT/core # add a per-layer report
-contextor PROJECT --file PROJECT/x.py  # add a single-file deep dive
-contextor PROJECT --output ./reports   # choose the output directory
-contextor PROJECT --quiet              # suppress progress logging
-```
-
-Exit codes: `0` no issues, `1` validation errors reported,
-`2` invalid arguments, `130` cancelled.
-
-Generated reports are saved into the `output/` directory next to the
-Contextor installation, regardless of the directory you launch from.
-Override the location with `--output` or the `CONTEXTOR_OUTPUT_DIR`
-environment variable.
-
-Each analysis keeps stable canonical filenames for MCP clients and also writes
-a historical copy under `output/<repository>_<timestamp>/`. The canonical files
-represent the latest run; timestamped subfolders are suitable for comparisons.
+- verify ownership;
+- verify call paths;
+- verify canonical semantic flow;
+- detect unexpected architectural changes;
+- confirm that the edited code remains connected to the intended lifecycle.
 
 ---
 
-# Files Contextor Writes
+## Canonical LIVE State
 
-Contextor keeps analyzed repositories read-only. Stable identity dictionaries
-live in the installation-owned central registry, with one directory per root and
-repository ID (for example `MyRepo__ctx_1234abcd`).
+Contextor MCP maintains repository analysis as canonical state rather than treating every query as an isolated scan.
 
-| Location | Contents | Override |
-|---|---|---|
-| `output/` next to the installation | Generated reports | `CONTEXTOR_OUTPUT_DIR` |
-| `.contextor/repositories/<repo_name>__<repo_id>/` next to the installation | Central Persistent Identity Registry | `CONTEXTOR_REGISTRY_DIR` |
-| User cache directory | Parse and graph caches, keyed per repository | `CONTEXTOR_CACHE_DIR` |
-| User config directory | GUI state, exclude configuration | `CONTEXTOR_STATE_DIR` |
+A complete repository analysis establishes the baseline.
+
+After that, supported changes can be maintained incrementally through the LIVE system.
+
+The canonical state is revisioned and can contain independently fresh or stale analysis families. Queries use explicit freshness contracts and fail closed when required evidence is unavailable or no longer trustworthy.
+
+This means an MCP answer can distinguish between:
+
+~~~text
+known and fresh
+known but stale
+not materialized
+deferred
+resource limited
+ambiguous
+unavailable
+~~~
+
+instead of silently presenting incomplete architectural information as current truth.
 
 ---
 
-# Generated Output
+## Universal Semantic Lineage
 
-Contextor generates structured architectural reports designed for both developers and AI systems.
+Contextor MCP includes canonical semantic lineage as a first-class repository-analysis family.
 
-Generated reports include:
-- repository architecture overview;
-- dependency relationships;
-- symbol ownership and usage information;
-- artifact consumption data;
+Lineage represents relationships that are difficult to express with imports or a traditional call graph alone, including:
+
+- semantic ownership;
+- symbol anchors;
+- call and value flows;
+- parameter and return relationships;
+- state relationships;
+- exposed or registered surfaces;
+- callable interface descriptors;
+- symbolic boundaries that cannot be resolved safely.
+
+Lineage uses persistent canonical identities where exact resolution is possible and preserves explicit symbolic boundaries where it is not.
+
+This allows an agent to ask how a symbol or fact participates in the wider system without rebuilding those relationships from source during every query.
+
+---
+
+## Persistent Identity
+
+Modules and artifacts receive stable, generation-aware identities.
+
+Examples:
+
+~~~text
+17/4
+A5/2
+~~~
+
+These identities survive normal repository evolution and allow Contextor MCP to reason about the same architectural object across analyses even when textual reports or paths change.
+
+Removed identities are retained through recovery history rather than silently reassigned to unrelated objects.
+
+Persistent identities are repository-scoped.
+
+---
+
+## Dependency and Blast-Radius Analysis
+
+Contextor MCP models both direct dependencies and wider architectural impact.
+
+It can expose:
+
+- hard imports;
+- soft references;
+- direct consumers;
+- transitive downstream modules;
+- artifact-level blast radius;
+- module-level blast radius;
+- isolated modules;
+- dependency cycles;
+- hotspots;
+- graph centrality;
+- bridge behavior;
+- architectural layers;
+- dependency matrices;
+- shared-usage clusters.
+
+The goal is not merely to answer:
+
+> Where is this symbol referenced?
+
+but also:
+
+> What part of the system depends on this behavior, and how far can a change propagate?
+
+---
+
+## Editing Context
+
+Contextor MCP can construct focused context for code modification without requiring the agent to inspect the entire repository.
+
+Depending on the request, edit context can include:
+
+- the target module;
+- architectural role;
+- imports and dependencies;
+- owned artifacts;
+- consumers;
+- relevant tests;
+- syntax diagnostics;
+- blast-radius evidence;
+- exact symbol implementations;
+- source ranges;
+- canonical freshness information.
+
+This supports small, evidence-driven patches rather than broad exploratory context loading.
+
+---
+
+## Test Reachability
+
+Contextor MCP can locate tests structurally connected to production code.
+
+Reachability can follow relationships such as:
+
+- direct imports;
+- aliases;
+- re-exports;
+- public facades.
+
+This is static evidence, not a claim of runtime coverage.
+
+The purpose is to help an agent identify the smallest relevant test surface before escalating to larger test suites.
+
+---
+
+## Architectural Analysis
+
+Contextor MCP also provides repository-level architectural analysis, including:
+
+- dependency graph generation;
+- circular dependencies;
+- namespace collisions;
+- isolated modules;
 - architectural hotspots;
-- technical debt indicators;
-- cycle detection results;
-- graph analytics (fan-in/out, centrality, Jaccard clusters, Module Dependency Matrix);
-- LLM-ready context snapshots.
+- layer violations;
+- fan-in and fan-out;
+- PageRank;
+- betweenness;
+- hub and authority scores;
+- bridge scores;
+- technical-debt indicators;
+- dependency matrices;
+- shared-usage relationships.
 
-The generated context allows Large Language Models to reason about complex repositories with architectural awareness instead of relying only on raw source files.
-
----
-
-# How Contextor Works
-
-Contextor uses static analysis techniques:
-- Python AST parsing;
-- deterministic symbol extraction;
-- dependency graph construction;
-- relationship mapping;
-- architectural heuristics.
-
-The analyzed code is never executed.
+These signals can be queried directly or persisted in generated reports.
 
 ---
 
-# License
+## Semantic and Architectural Diffs
 
-This project is distributed under the:
+Git answers:
+
+> What text changed?
+
+Contextor MCP can additionally answer:
+
+> What architectural facts changed?
+
+Canonical report comparison can expose changes such as:
+
+- dependency topology;
+- module relationships;
+- hotspots;
+- layers;
+- architectural metrics;
+- technical debt.
+
+Git remains the authority for exact textual diffs.
+
+Contextor MCP supplies architectural consequences and context.
+
+---
+
+## MCP Interface
+
+Contextor MCP exposes focused tools rather than requiring an LLM to consume one massive analysis document.
+
+The available tool families include operations for:
+
+### Analysis
+
+- full repository analysis;
+- layer analysis;
+- single-file analysis;
+- asynchronous analysis status;
+- LIVE events.
+
+### Repository architecture
+
+- project architecture;
+- module context;
+- layer isolation;
+- canonical-state description and bounded projections.
+
+### Symbols and source
+
+- artifact lookup;
+- artifacts owned by a module;
+- symbol implementation;
+- symbol call context;
+- symbol lineage;
+- source ranges;
+- source search.
+
+### Change planning
+
+- file edit context;
+- artifact blast radius;
+- module blast radius;
+- tests covering a target;
+- report comparison.
+
+### Canonical semantic facts
+
+- universal symbol lineage;
+- canonical fact lineage;
+- persistent identity-backed relationships.
+
+### Documentation
+
+Contextor MCP exposes its own MCP documentation so agents can discover tool purpose, parameters, freshness requirements, representations, and failure contracts without relying on README documentation alone.
+
+---
+
+## Bounded and Indexed Responses
+
+Large repositories can produce more architectural data than should be placed directly into an LLM context window.
+
+Contextor MCP therefore supports bounded responses and, where appropriate, indexed representations using persistent identities.
+
+Large result sets can use progressive disclosure instead of forcing the complete payload into a single answer.
+
+The objective is not merely smaller JSON.
+
+It is to deliver **the smallest context that preserves the information needed for the current reasoning step.**
+
+---
+
+## Full Analysis and Warm Iterations
+
+A repository needs one complete analysis before Contextor MCP can safely provide the full canonical model.
+
+The initial analysis establishes identities and repository-wide analysis families.
+
+After that, LIVE and incremental workflows can reuse canonical state for supported changes.
+
+Layer and single-file analysis can therefore operate against existing canonical repository state rather than rebuilding the entire repository every time.
+
+A full rebuild remains the correctness fallback when required state is:
+
+- missing;
+- stale;
+- incomplete;
+- incompatible;
+- associated with another repository identity;
+- invalidated by scope or exclusion changes.
+
+---
+
+## Static Analysis and Dynamic Python
+
+Contextor MCP does not execute the analyzed repository.
+
+Analysis is based on deterministic static evidence such as:
+
+- Python AST;
+- symbol extraction;
+- import relationships;
+- source-level references;
+- canonical identities;
+- interface descriptors;
+- materialized semantic facts.
+
+Dynamic Python behavior cannot always be resolved exactly.
+
+Examples include:
+
+- runtime dependency injection;
+- dynamic imports;
+- `getattr`;
+- monkey patching;
+- framework-generated behavior;
+- runtime registration;
+- reflection.
+
+Contextor MCP does not fabricate certainty in these cases.
+
+Where exact semantic resolution is unavailable, the model can retain explicit symbolic or dynamic boundaries instead.
+
+---
+
+## What Contextor MCP Does Not Do
+
+Contextor MCP is not:
+
+- a version-control system;
+- a replacement for Git;
+- a code formatter;
+- an autonomous code-writing engine;
+- a runtime profiler;
+- a debugger;
+- a full Python type checker;
+- a security vulnerability scanner;
+- a substitute for executing tests.
+
+It provides architectural and semantic intelligence to developers and AI coding agents.
+
+The developer or agent still performs the actual code modification and validation.
+
+---
+
+## GUI, CLI and MCP
+
+Contextor MCP can be used through:
+
+- the graphical desktop interface;
+- the command-line interface;
+- the MCP server.
+
+### GUI
+
+From a source checkout:
+
+~~~bash
+python main.py --gui
+~~~
+
+Or:
+
+~~~bash
+python -m contextor --gui
+~~~
+
+On Windows the bundled launcher can also be used:
+
+~~~bash
+run_contextor.bat
+~~~
+
+### CLI
+
+Analyze a repository:
+
+~~~bash
+contextor /path/to/project
+~~~
+
+Examples:
+
+~~~bash
+contextor PROJECT --layer PROJECT/core
+contextor PROJECT --file PROJECT/module.py
+contextor PROJECT --output ./reports
+contextor PROJECT --quiet
+~~~
+
+### MCP Server
+
+The package exposes:
+
+~~~bash
+contextor-mcp
+~~~
+
+Configure this command as an MCP server in a compatible client.
+
+MCP analysis operations are non-blocking where appropriate and expose job/status information rather than forcing long repository analyses into one synchronous request.
+
+---
+
+## Installation
+
+### Requirements
+
+- Python 3.10 or newer
+- Git for Git-aware repository context
+- Tkinter when using the desktop GUI
+
+Runtime dependencies are installed from the package configuration and include the MCP and LIVE components required by Contextor MCP.
+
+For development:
+
+~~~bash
+pip install -e ".[dev]"
+~~~
+
+For a normal editable installation:
+
+~~~bash
+pip install -e .
+~~~
+
+The Windows launcher can create and manage an isolated virtual environment for desktop use.
+
+---
+
+## Files and Repository Safety
+
+Contextor MCP does not execute or modify the source code of the repository being analyzed as part of analysis.
+
+Generated reports, persistent identities, caches, configuration, LIVE metadata, and recovery state are maintained separately from analyzed source according to the configured Contextor storage locations.
+
+Persistent repository identity prevents state from unrelated repository roots from being silently mixed.
+
+---
+
+## Generated Reports
+
+Although MCP queries can work directly from canonical state, Contextor MCP can also generate persistent architectural reports.
+
+These include information such as:
+
+- repository architecture;
+- dependencies;
+- symbol ownership;
+- artifact consumption;
+- graph analytics;
+- cycles;
+- hotspots;
+- technical-debt indicators;
+- layer analysis;
+- single-file context;
+- Git-aware architectural comparisons.
+
+Stable canonical report names can coexist with timestamped historical snapshots.
+
+Reports are useful for inspection and historical comparison, but the MCP query layer is not limited to reading static report files.
+
+---
+
+## Design Principles
+
+Contextor MCP follows several core principles:
+
+**Canonical state over query-time reconstruction**  
+Architectural facts that can remain current should be maintained as repository state rather than repeatedly reconstructed for every LLM request.
+
+**Persistent identity over fragile text matching**  
+Modules and artifacts should remain identifiable across repository evolution.
+
+**Progressive disclosure over context dumping**  
+Return only the information required for the current reasoning step.
+
+**Fail closed over fabricated certainty**  
+Stale, incomplete, ambiguous, or unavailable evidence must remain explicit.
+
+**Static evidence over runtime guessing**  
+Dynamic boundaries are represented honestly rather than resolved speculatively.
+
+**Architecture before text search**  
+Use structural knowledge to locate the correct code; use source search for exact textual verification.
+
+---
+
+## License
+
+Contextor MCP is distributed under the:
 
 **Contextor Community License v1.0**
 
-Contextor is released under a source-available license with a non-commercial restriction.
+The software is source-available under a non-commercial license.
 
-**This license is not an OSI-approved Open Source license.**
+It may be used, modified, and distributed for:
 
-The software may be used, modified, and distributed for:
 - personal use;
 - educational purposes;
 - academic research;
 - scientific research;
-- non-commercial research projects;
+- non-commercial research;
 - hobby projects;
 - evaluation and testing.
 
 Commercial use, including use by commercial organizations or integration into commercial products and services, requires a separate commercial license.
 
-For complete licensing terms, please see the `LICENSE` file.
+This is **not an OSI-approved Open Source license**.
+
+See `LICENSE` for the complete terms.
 
 ---
 
-# Disclaimer
+## Disclaimer
 
-## No Warranty / Liability
+Contextor MCP is provided “as is”, without warranty of any kind.
 
-This software is provided "as is", without warranty of any kind, express or implied.
+Static architectural analysis has inherent limits, particularly in highly dynamic Python systems.
 
-The authors are not responsible for any consequences, data loss, architectural decisions, or damages resulting from the use of this tool.
-
-Generated reports represent static architectural analysis and should be reviewed before making significant changes to production systems.
+Architectural information produced by Contextor MCP should therefore be treated as engineering evidence rather than a substitute for tests, runtime observation, or developer review.
 
 ---
 
-# Contact
+## Contact
 
-For commercial licensing inquiries or other questions:
+For commercial licensing or other inquiries:
 
 [wojciech.jarka77@gmail.com](mailto:wojciech.jarka77@gmail.com)

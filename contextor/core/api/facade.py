@@ -261,17 +261,27 @@ def _initialize_repository_identity(repo_root: str | Path) -> PersistentIdentity
     return registry
 
 
-def _materialize_full_analysis_lineage(index, registry, modules, artifacts):
+def _materialize_full_analysis_lineage(
+    index,
+    registry,
+    modules,
+    artifacts,
+    previous_state=None,
+):
     """Materialize current index lineage from finalized active identities."""
     lineage_materialization_started = time.monotonic()
     from contextor.core.analysis.lineage_materialization import (
+        LineageOriginUnavailableError,
         LineageResolutionContext,
         build_extracted_callable_interface_descriptors,
+        materialized_lineage_source_matches_resolution,
         materialize_lineage_source_facts,
+        reresolve_materialized_lineage_source_facts,
     )
     from contextor.core.domain.lineage_facts import (
         LINEAGE_FACTS_SEMANTIC_VERSION,
         LineageFamilyStatus,
+        MaterializedLineageSourceFacts,
     )
     from contextor.core.reporting_layer.artifact_usage_report import (
         collect_qualified_artifact_identities,
@@ -327,7 +337,34 @@ def _materialize_full_analysis_lineage(index, registry, modules, artifacts):
         ),
         interface_descriptors=interface_descriptors,
     )
+    previous_lineage_by_source = {}
+    previous_state_reusable = (
+        previous_state is not None
+        and not getattr(previous_state, "resync_required", False)
+        and getattr(previous_state, "lineage_facts_state", None) == "fresh"
+        and getattr(previous_state, "lineage_query_index_state", None) == "fresh"
+        and getattr(previous_state, "lineage_facts_semantic_version", None)
+        == LINEAGE_FACTS_SEMANTIC_VERSION
+        and getattr(
+            previous_state,
+            "lineage_semantic_anchor_bindings_complete",
+            None,
+        )
+        is True
+        and isinstance(
+            getattr(previous_state, "lineage_facts_by_source", None),
+            dict,
+        )
+    )
+    if previous_state_reusable:
+        previous_lineage_by_source = previous_state.lineage_facts_by_source
     materialized_by_source = {}
+    reuse_sources = 0
+    reresolve_sources = 0
+    materialize_sources = 0
+    reresolve_fallback_sources = 0
+    reuse_gate_ms = 0.0
+    reresolve_calls_ms = 0.0
     materialize_calls_ms = 0.0
     anchor_count = 0
     flow_count = 0
@@ -337,9 +374,46 @@ def _materialize_full_analysis_lineage(index, registry, modules, artifacts):
         extracted = extracted_by_source[source_key]
         if extracted.source_key != source_key:
             raise ValueError("Extracted lineage mapping key does not match its source key.")
-        materialize_started = time.monotonic()
-        materialized = materialize_lineage_source_facts(extracted, resolution)
-        materialize_calls_ms += (time.monotonic() - materialize_started) * 1000.0
+        materialized = None
+        previous_materialized = previous_lineage_by_source.get(source_key)
+        previous_source_reusable = (
+            isinstance(previous_materialized, MaterializedLineageSourceFacts)
+            and previous_materialized.manifest.source_key == source_key
+            and previous_materialized.manifest.source_fingerprint == extracted.source_fingerprint
+            and previous_materialized.manifest.semantic_version == LINEAGE_FACTS_SEMANTIC_VERSION
+            and previous_materialized.manifest.status is LineageFamilyStatus.FRESH
+            and previous_materialized.manifest.semantic_anchor_bindings_materialized is True
+            and previous_materialized.manifest.anchor_ownership_materialized is True
+            and previous_materialized.manifest.flow_ownership_materialized is True
+            and previous_materialized.manifest.interface_descriptors_materialized is True
+        )
+        if previous_source_reusable:
+            reuse_gate_started = time.monotonic()
+            matches_resolution = materialized_lineage_source_matches_resolution(
+                previous_materialized, resolution
+            )
+            reuse_gate_ms += (time.monotonic() - reuse_gate_started) * 1000.0
+            if matches_resolution:
+                materialized = previous_materialized
+                reuse_sources += 1
+            else:
+                reresolve_started = time.monotonic()
+                try:
+                    materialized = reresolve_materialized_lineage_source_facts(
+                        previous_materialized, resolution
+                    )
+                except LineageOriginUnavailableError:
+                    materialized = None
+                    reresolve_fallback_sources += 1
+                else:
+                    reresolve_sources += 1
+                finally:
+                    reresolve_calls_ms += (time.monotonic() - reresolve_started) * 1000.0
+        if materialized is None:
+            materialize_started = time.monotonic()
+            materialized = materialize_lineage_source_facts(extracted, resolution)
+            materialize_calls_ms += (time.monotonic() - materialize_started) * 1000.0
+            materialize_sources += 1
         if (
             materialized.manifest.source_key != extracted.source_key
             or materialized.manifest.source_fingerprint != extracted.source_fingerprint
@@ -371,6 +445,12 @@ def _materialize_full_analysis_lineage(index, registry, modules, artifacts):
         elapsed_ms=lineage_materialization_ms,
         operation="lineage_materialization",
         result=(
+            f"reuse_sources={reuse_sources};"
+            f"reresolve_sources={reresolve_sources};"
+            f"materialize_sources={materialize_sources};"
+            f"reresolve_fallback_sources={reresolve_fallback_sources};"
+            f"reuse_gate_ms={reuse_gate_ms:.3f};"
+            f"reresolve_calls_ms={reresolve_calls_ms:.3f};"
             f"materialize_calls_ms={materialize_calls_ms:.3f};"
             f"sources={len(materialized_by_source)};anchors={anchor_count};"
             f"flows={flow_count};surfaces={surface_count};"
@@ -695,6 +775,11 @@ class ContextorFacade:
                 registry,
                 mods,
                 raw_artifacts,
+                previous_state=(
+                    previous_canonical_state.state
+                    if previous_canonical_state
+                    else None
+                ),
             )
             from contextor.core.lineage_query.index import (
                 build_lineage_query_indexes,

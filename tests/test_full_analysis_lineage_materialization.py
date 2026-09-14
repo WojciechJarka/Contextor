@@ -1,7 +1,9 @@
-import pytest
 import ast
 from contextlib import contextmanager
+from dataclasses import replace
 from types import SimpleNamespace
+
+import pytest
 
 from contextor.core.api.facade import (
     ContextorFacade,
@@ -91,6 +93,41 @@ def _fresh_slice(status=LineageFamilyStatus.FRESH):
         ),
         status=status,
         resource_limit_reason="node_limit" if status is LineageFamilyStatus.RESOURCE_LIMIT else None,
+    )
+
+
+def _owned_fresh_slice(*, fingerprint="fingerprint"):
+    span = SourceSpan(1, 0, 1, 1)
+    module_anchor = "occ:v1:module:root:i:0:n:pkg"
+    return ExtractedLineageSourceFacts(
+        source_key="pkg.py",
+        source_fingerprint=fingerprint,
+        anchors=(ExtractedAnchorFact(module_anchor, "module", span),),
+        flows=(
+            ExtractedFlowFact(
+                "flow",
+                ExtractedOccurrenceRef(module_anchor),
+                ExtractedSymbolicRef(
+                    ExtractedSymbolicKind.DEFINITION, "pkg", "target"
+                ),
+                LineageRelation.CALL_RESULT,
+                span,
+                ResolutionKind.CALL_EXACT,
+                LineageConfidence.CONFIRMED,
+                owner_local_id=module_anchor,
+            ),
+        ),
+    )
+
+
+def _previous_lineage_state(lineage_facts_by_source):
+    return SimpleNamespace(
+        resync_required=False,
+        lineage_facts_state="fresh",
+        lineage_query_index_state="fresh",
+        lineage_facts_semantic_version=LINEAGE_FACTS_SEMANTIC_VERSION,
+        lineage_semantic_anchor_bindings_complete=True,
+        lineage_facts_by_source=lineage_facts_by_source,
     )
 
 
@@ -336,3 +373,120 @@ def test_domain_rejects_exact_surface_with_bare_local_occurrence():
             "target",
             declaration_evidence=SurfaceDeclarationEvidence.LITERAL_ALL_DECLARATION,
         )
+
+
+def test_full_analysis_reuses_exact_previous_lineage_slice_object():
+    facts = _owned_fresh_slice()
+    index = _index(facts={"pkg.py": facts})
+    artifacts = {"pkg": {"own_symbols": ["target"]}}
+    registry = _ReadOnlyRegistry({"pkg": "1/1"}, {"pkg::target": "A1/1"})
+
+    first_mapping, _, _ = _materialize_full_analysis_lineage(
+        index, registry, index.modules, artifacts
+    )
+    previous = first_mapping["pkg.py"]
+
+    second_mapping, family_state, version = _materialize_full_analysis_lineage(
+        index,
+        registry,
+        index.modules,
+        artifacts,
+        previous_state=_previous_lineage_state(first_mapping),
+    )
+
+    assert family_state == "fresh"
+    assert version == LINEAGE_FACTS_SEMANTIC_VERSION
+    assert second_mapping["pkg.py"] is previous
+
+
+def test_full_analysis_materializes_changed_source_fingerprint():
+    artifacts = {"pkg": {"own_symbols": ["target"]}}
+    registry = _ReadOnlyRegistry({"pkg": "1/1"}, {"pkg::target": "A1/1"})
+    first_index = _index(facts={"pkg.py": _owned_fresh_slice(fingerprint="old")})
+    first_mapping, _, _ = _materialize_full_analysis_lineage(
+        first_index, registry, first_index.modules, artifacts
+    )
+    second_index = _index(facts={"pkg.py": _owned_fresh_slice(fingerprint="new")})
+
+    second_mapping, _, _ = _materialize_full_analysis_lineage(
+        second_index,
+        registry,
+        second_index.modules,
+        artifacts,
+        previous_state=_previous_lineage_state(first_mapping),
+    )
+
+    assert second_mapping["pkg.py"] is not first_mapping["pkg.py"]
+    assert second_mapping["pkg.py"].manifest.source_fingerprint == "new"
+
+
+def test_full_analysis_reresolves_changed_global_identity_without_materializing(
+    monkeypatch,
+):
+    from contextor.core.analysis import lineage_materialization
+
+    facts = _owned_fresh_slice()
+    index = _index(facts={"pkg.py": facts})
+    artifacts = {"pkg": {"own_symbols": ["target"]}}
+    first_registry = _ReadOnlyRegistry({"pkg": "1/1"}, {"pkg::target": "A1/1"})
+    first_mapping, _, _ = _materialize_full_analysis_lineage(
+        index, first_registry, index.modules, artifacts
+    )
+
+    def fail_materialize(*_args, **_kwargs):
+        raise AssertionError("global identity change must reresolve, not materialize")
+
+    monkeypatch.setattr(
+        lineage_materialization,
+        "materialize_lineage_source_facts",
+        fail_materialize,
+    )
+    second_registry = _ReadOnlyRegistry({"pkg": "1/1"}, {"pkg::target": "A1/2"})
+    second_mapping, _, _ = _materialize_full_analysis_lineage(
+        index,
+        second_registry,
+        index.modules,
+        artifacts,
+        previous_state=_previous_lineage_state(first_mapping),
+    )
+
+    assert second_mapping["pkg.py"] is not first_mapping["pkg.py"]
+    assert second_mapping["pkg.py"].flows[0].target == SemanticEndpoint("A1/2")
+
+
+def test_full_analysis_falls_back_to_materialization_for_missing_origin(monkeypatch):
+    from contextor.core.analysis import lineage_materialization
+
+    facts = _owned_fresh_slice()
+    index = _index(facts={"pkg.py": facts})
+    artifacts = {"pkg": {"own_symbols": ["target"]}}
+    registry = _ReadOnlyRegistry({"pkg": "1/1"}, {"pkg::target": "A1/1"})
+    first_mapping, _, _ = _materialize_full_analysis_lineage(
+        index, registry, index.modules, artifacts
+    )
+    previous = first_mapping["pkg.py"]
+    legacy_previous = replace(previous, semantic_endpoint_origins=())
+    calls = []
+    original_materialize = lineage_materialization.materialize_lineage_source_facts
+
+    def counted_materialize(*args, **kwargs):
+        calls.append(1)
+        return original_materialize(*args, **kwargs)
+
+    monkeypatch.setattr(
+        lineage_materialization,
+        "materialize_lineage_source_facts",
+        counted_materialize,
+    )
+    second_mapping, _, _ = _materialize_full_analysis_lineage(
+        index,
+        registry,
+        index.modules,
+        artifacts,
+        previous_state=_previous_lineage_state({"pkg.py": legacy_previous}),
+    )
+
+    assert calls == [1]
+    assert second_mapping["pkg.py"] is not legacy_previous
+    assert second_mapping["pkg.py"].flows[0].target == SemanticEndpoint("A1/1")
+    assert second_mapping["pkg.py"].semantic_endpoint_origins
