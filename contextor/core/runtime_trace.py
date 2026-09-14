@@ -44,6 +44,12 @@ _authority_lock = threading.RLock()
 _operation_var: contextvars.ContextVar[str | None] = contextvars.ContextVar(
     "contextor_trace_operation", default=None
 )
+_trace_capture_var: contextvars.ContextVar[
+    tuple[list[dict[str, object]], ...]
+] = contextvars.ContextVar(
+    "contextor_trace_captures",
+    default=(),
+)
 
 
 AUTHORITY_EVENT_SCHEMA = "contextor-authority-event/v1"
@@ -1287,18 +1293,26 @@ def trace_operation(op: str):
         _operation_var.reset(token)
 
 
+@contextlib.contextmanager
+def capture_trace_events():
+    events: list[dict[str, object]] = []
+    token = _trace_capture_var.set((*_trace_capture_var.get(), events))
+    try:
+        yield events
+    finally:
+        _trace_capture_var.reset(token)
+
+
 def trace_event(domain: str, event: str, *, op: str | None = None, rev: int | None = None, rev_before: int | None = None, rev_after: int | None = None, seq: int | None = None, **fields: object) -> None:
     """Best-effort one-line diagnostic append; never raises."""
     try:
         path = active_trace_path()
-        if path is None:
-            return
         with _lock:
             sid = _active_sid
-        if sid is None:
-            return
         ts, _ = _now()
-        record: dict[str, object] = {"ts": ts, "mono_ms": int(time.monotonic() * 1000), "sid": sid, "pid": os.getpid(), "tid": threading.get_ident(), "d": domain, "ev": event}
+        record: dict[str, object] = {"ts": ts, "mono_ms": int(time.monotonic() * 1000), "pid": os.getpid(), "tid": threading.get_ident(), "d": domain, "ev": event}
+        if sid is not None:
+            record["sid"] = sid
         actual_op = op or current_trace_operation()
         if actual_op is not None:
             record["op"] = _bounded(actual_op)
@@ -1332,6 +1346,13 @@ def trace_event(domain: str, event: str, *, op: str | None = None, rev: int | No
                     if key in structured_list_fields
                     else _bounded(value)
                 )
+        for capture in _trace_capture_var.get():
+            try:
+                capture.append(dict(record))
+            except Exception:
+                pass
+        if path is None or sid is None:
+            return
         _append(record, path)
     except Exception:
         pass
@@ -1353,4 +1374,5 @@ __all__ = [
     "trace_event",
     "current_trace_operation",
     "trace_operation",
+    "capture_trace_events",
 ]

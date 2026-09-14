@@ -238,3 +238,55 @@ def test_runtime_trace_fixture_never_touches_forbidden_production_like_root(tmp_
     assert list((tmp_path / "logs").glob("contextor_runtime_*.jsonl"))
     assert (tmp_path / "logs" / "authority_event_state.json").exists()
     assert not forbidden.exists()
+
+
+def test_scoped_trace_capture_works_without_published_session():
+    with trace.capture_trace_events() as events:
+        with trace.trace_operation("p-test"):
+            trace.trace_event(
+                "ANALYSIS",
+                "FULL_ANALYSIS_STAGE_END",
+                operation="indexing",
+                elapsed_ms=12.5,
+            )
+    assert len(events) == 1
+    assert events[0]["d"] == "ANALYSIS"
+    assert events[0]["ev"] == "FULL_ANALYSIS_STAGE_END"
+    assert events[0]["op"] == "p-test"
+    assert events[0]["operation"] == "indexing"
+    assert events[0]["elapsed_ms"] == 12.5
+    assert "sid" not in events[0]
+
+    trace.trace_event("ANALYSIS", "FULL_ANALYSIS_STAGE_END")
+    assert len(events) == 1
+
+
+def test_scoped_trace_capture_matches_durable_record():
+    path = trace.start_desktop_trace_session()
+    with trace.capture_trace_events() as events:
+        trace.trace_event(
+            "ANALYSIS",
+            "CAPTURE_DURABLE_MATCH",
+            operation="indexing",
+            elapsed_ms=12.5,
+        )
+    trace.finish_desktop_trace_session()
+
+    records = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+    durable_record = next(item for item in records if item.get("ev") == "CAPTURE_DURABLE_MATCH")
+    assert events[0] == durable_record
+
+
+def test_nested_trace_captures_are_scoped():
+    with trace.capture_trace_events() as outer:
+        trace.trace_event("ANALYSIS", "CAPTURE_OUTER_A")
+        with trace.capture_trace_events() as inner:
+            trace.trace_event("ANALYSIS", "CAPTURE_INNER_B")
+        trace.trace_event("ANALYSIS", "CAPTURE_OUTER_C")
+
+    assert [event["ev"] for event in outer] == [
+        "CAPTURE_OUTER_A",
+        "CAPTURE_INNER_B",
+        "CAPTURE_OUTER_C",
+    ]
+    assert [event["ev"] for event in inner] == ["CAPTURE_INNER_B"]
