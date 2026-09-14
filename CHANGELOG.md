@@ -1,3 +1,42 @@
+2026-09-14 Patch
+Added canonical universal lineage as a first-class repository-analysis family, covering symbol ownership, semantic anchors, call/data-flow relationships, exposed surfaces and callable interface descriptors without relying on query-time source rescans.
+Added deterministic full-analysis lineage materialization from extracted source facts and finalized persistent module/artifact identities, with explicit fresh, deferred and resource-limited family states.
+Added canonical lineage semantic-version tracking, source manifests and source-fingerprint validation so lineage freshness and compatibility are independently auditable.
+Added persistent lineage owner/source query indexes to canonical repository state, including completeness validation for semantic anchor bindings and fail-closed handling of incomplete materialization.
+Extended incremental analysis so universal lineage participates in canonical state refresh rather than existing as a one-off reporting artifact, preserving the long-term LIVE model for repository-wide architectural signals.
+Added callable-interface extraction and materialization needed to represent Python call semantics beyond simple direct AST name matching, while preserving stable persistent symbol identities.
+Added canonical intra-module symbol-call context support and completed the get_symbol_call_context tool path on top of materialized repository facts rather than ad-hoc query-time analysis.
+Added the public get_symbol_lineage MCP query path, including canonical backend, query service, response planning, indexed/preview representation handling and progressive disclosure for large lineage payloads.
+Completed public registration, documentation and runtime dogfood for get_symbol_lineage; exact-symbol lookup, indexed large-output handling and canonical LIVE-backed retrieval were verified end to end.
+Kept lineage and other MCP query tools read-only with respect to canonical state: query execution does not materialize missing analysis families or mutate repository state.
+Added broader phase-level runtime tracing for full analysis and incremental LIVE updates, making indexing, canonical materialization, persistence, publication, cloning and updater execution independently measurable.
+Identified full-analysis performance regressions after universal-lineage integration and isolated their major contributors instead of treating total wall time as a single opaque metric.
+Identified large canonical-state serialization and cloning costs, including the lineage-heavy state footprint, while keeping optimization of those paths separate from correctness fixes.
+Identified a canonical-writer starvation case where a long-running LIVE mutation could hold the repository execution lease while a queued full analysis waited behind later mutation work.
+Added canonical-writer admission ordering across processes using a short-lived per-repository admission turnstile in front of the existing execution lease.
+Preserved the existing single-writer execution lock and mutation queue while enforcing priority ordering such that an already-running mutation completes, a waiting full analysis runs next, and subsequently queued LIVE mutations resume afterward.
+Added explicit canonical writer kinds for full_analysis, live_mutation and Desktop startup_publish, with shared timeout/cancellation semantics and no parallel scheduler or duplicate ownership model.
+Hardened canonical-writer admission cleanup so process-local locks are released even when native lock teardown fails, without weakening OS-lock authority.
+Added durable runtime-trace coverage for canonical-writer admission acquisition/release and full-analysis lease/body/end events, including writer owner and writer kind.
+Added spawned-process regressions proving cross-process A -> FULL -> B ordering, timeout recovery, cancellation while waiting and post-failure lock reuse.
+Diagnosed the long Desktop cold start as synchronous LIVE bootstrap work executing on the Tk main thread rather than as a slow Tk/UI construction problem.
+Moved heavy Desktop LIVE startup off the Tk thread while preserving the existing LIVE attach, generation/revision validation, startup reconciliation, watcher, event-feed and retry semantics.
+Moved startup cache pruning and stale-exclusion filesystem checks out of the pre-paint path, allowing the main window to render before background maintenance begins.
+Added non-blocking public LIVE startup with per-repository in-flight deduplication, while retaining the former deterministic startup implementation as an internal blocking path for background execution and focused testing.
+Added close-time guards so daemon startup work cannot attach new LIVE components after Desktop shutdown begins, without making window close wait for long-running startup threads.
+Hardened repository-identity UI updates so background LIVE initialization marshals Tk variable changes back onto the GUI thread.
+Added dedicated regressions proving that public LIVE startup returns before a blocked connection completes, duplicate starts collapse to one worker, shutdown prevents new background startup and post-paint cache cleanup does not block the caller.
+Preserved watcher startup reconciliation and Desktop integration semantics while adapting deterministic tests to exercise the internal blocking startup path directly.
+Closed the race introduced by immediate GUI availability where background startup could otherwise publish an older cached canonical state while a user-triggered full analysis was already running.
+Wrapped only the Desktop startup cache-publish operation in the existing canonical-writer coordinator using non-blocking startup_publish admission.
+When another canonical writer is active, Desktop startup now skips stale cache publication immediately but still starts the watcher and LIVE event feed, allowing the authoritative analysis or mutation to complete normally.
+Added integration regressions proving that a busy canonical writer suppresses startup cache publication without delaying watcher startup, while a free writer still permits the existing cached-state publication path.
+Runtime-certified canonical-writer ordering and asynchronous Desktop startup together: Desktop now becomes usable immediately while LIVE initialization continues in the background, and a repository analysis started immediately after restart no longer collides with LIVE bootstrap.
+Reduced observed Desktop first-paint latency from the previous tens-of-seconds main-thread stall to effectively immediate rendering while leaving heavy LIVE readiness work asynchronous.
+Revalidated durable authority-event replay after the startup changes: the final sidecar reached its durable high-water mark with an equal LIVE handoff cursor, no pending replay range and no delivery conflicts.
+Verified a clean runtime trace after log cleanup and restart; the previously observed malformed JSONL record did not reproduce and was not converted into a permissive recovery workaround without evidence of a program-generated corruption bug.
+Completed runtime certification of the combined W1/W1a canonical-writer changes and G1/G1C/G1D Desktop startup changes with full analysis, LIVE authorization and background startup active concurrently.
+
 ## [Canonical Runtime Authority and LIVE lifecycle hardening] - 2026-09-09
 
 - Added a canonical runtime-domain model that mechanically separates production and test resources, including repository cache, LIVE locks, IPC endpoints and runtime logs, with fail-closed overlap validation.
