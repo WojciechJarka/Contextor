@@ -1,62 +1,355 @@
-# P0_LINEAGE_ORACLE_REFRESH
+# P1A — Extracted lineage cache codec
 
 ## STATUS
 
 SUCCESS
 
-Zaktualizowano wyłącznie zapisane oracle hashes w `tests/analysis/test_lineage_extraction_equivalence.py` do audytowanej semantyki `ExtractedFlowFact.owner_local_id`. Nie zmieniono kodu produkcyjnego, logiki testów, corpusu ani serializacji.
-
-## FOCUSED_PYTEST
-
-`..venv\Scripts\python.exe -m pytest -q tests\analysis\test_lineage_extraction_equivalence.py`
-
-`3 passed in 0.50s`
+Implemented the requested internal, versioned, lossless JSON-safe codec for ExtractedLineageSourceFacts. Indexer and CacheManager were not changed; __all__ was preserved.
 
 ## VALIDATION
 
-`git diff --check -- tests/analysis/test_lineage_extraction_equivalence.py`
+.\\.venv\\Scripts\\python.exe -m pytest -q tests\\analysis\\test_lineage_cache_codec.py tests\\analysis\\test_lineage_extraction_equivalence.py
 
-Passed (no diff-check findings).
+6 passed in 0.94s
+
+git diff --check -- contextor/core/analysis/lineage_extraction.py tests/analysis/test_lineage_cache_codec.py passed.
 
 ## FILES_CHANGED
 
-- `tests/analysis/test_lineage_extraction_equivalence.py`
+- contextor/core/analysis/lineage_extraction.py
+- tests/analysis/test_lineage_cache_codec.py
 
 ## FULL_DIFFS
 
-```diff
-diff --git a/tests/analysis/test_lineage_extraction_equivalence.py b/tests/analysis/test_lineage_extraction_equivalence.py
-index 541a7ba..9d74ac6 100644
---- a/tests/analysis/test_lineage_extraction_equivalence.py
-+++ b/tests/analysis/test_lineage_extraction_equivalence.py
-@@ -128,21 +128,21 @@ _CORPUS = {
+\`\`\`diff
+warning: in the working copy of 'contextor/core/analysis/lineage_extraction.py', LF will be replaced by CRLF the next time Git touches it
+diff --git a/contextor/core/analysis/lineage_extraction.py b/contextor/core/analysis/lineage_extraction.py
+index 6fdd7a1..bb8e1aa 100644
+--- a/contextor/core/analysis/lineage_extraction.py
++++ b/contextor/core/analysis/lineage_extraction.py
+@@ -64,9 +64,322 @@ from contextor.core.domain.lineage_facts import (
+     ExtractedLineageSourceFacts,
+     ExtractedOccurrenceRef,
+     ExtractedSurfaceFact,
++    ExtractedSymbolicKind,
++    ExtractedSymbolicRef,
++    LineageConfidence,
+     LineageFamilyStatus,
++    LineageRelation,
++    ProviderRef,
++    ResolutionKind,
++    SourceSpan,
++    SurfaceDeclarationEvidence,
++    SurfaceKind,
+ )
  
++LINEAGE_EXTRACTION_CACHE_SCHEMA_VERSION = 1
++
++_LINEAGE_CACHE_TOP_LEVEL_KEYS = frozenset(
++    {
++        "schema_version",
++        "source_key",
++        "source_fingerprint",
++        "status",
++        "resource_limit_reason",
++        "anchors",
++        "flows",
++        "surfaces",
++    }
++)
++_LINEAGE_CACHE_ANCHOR_KEYS = frozenset(
++    {"local_id", "kind", "span", "owner_local_id"}
++)
++_LINEAGE_CACHE_FLOW_KEYS = frozenset(
++    {
++        "local_id",
++        "source",
++        "target",
++        "relation",
++        "evidence",
++        "resolution_kind",
++        "confidence",
++        "dynamic_boundary",
++        "provider",
++        "owner_local_id",
++    }
++)
++_LINEAGE_CACHE_SURFACE_KEYS = frozenset(
++    {
++        "local_id",
++        "kind",
++        "exposed",
++        "evidence",
++        "resolution_kind",
++        "confidence",
++        "declared_name",
++        "dynamic_boundary",
++        "provider",
++        "declaration_evidence",
++    }
++)
++_LINEAGE_CACHE_OCCURRENCE_REF_KEYS = frozenset({"type", "local_id"})
++_LINEAGE_CACHE_SYMBOLIC_REF_KEYS = frozenset(
++    {"type", "kind", "module_name", "symbol_name", "source_local_id"}
++)
++_LINEAGE_CACHE_PROVIDER_KEYS = frozenset({"provider_id", "provider_version"})
++_LINEAGE_CACHE_STATUSES = frozenset(
++    {
++        LineageFamilyStatus.FRESH,
++        LineageFamilyStatus.RESOURCE_LIMIT,
++    }
++)
++
++
++def _serialize_lineage_span(span: SourceSpan) -> list[int]:
++    return [
++        span.start_line,
++        span.start_column,
++        span.end_line,
++        span.end_column,
++    ]
++
++
++def _deserialize_lineage_span(payload: object) -> SourceSpan:
++    if (
++        not isinstance(payload, list)
++        or len(payload) != 4
++        or any(
++            isinstance(value, bool) or not isinstance(value, int)
++            for value in payload
++        )
++    ):
++        raise ValueError("Cached lineage span must contain exactly four integers.")
++    return SourceSpan(*payload)
++
++
++def _serialize_lineage_ref(
++    ref: ExtractedOccurrenceRef | ExtractedSymbolicRef,
++) -> dict:
++    if isinstance(ref, ExtractedOccurrenceRef):
++        return {
++            "type": "occurrence",
++            "local_id": ref.local_id,
++        }
++    if isinstance(ref, ExtractedSymbolicRef):
++        return {
++            "type": "symbolic",
++            "kind": ref.kind.value,
++            "module_name": ref.module_name,
++            "symbol_name": ref.symbol_name,
++            "source_local_id": ref.source_local_id,
++        }
++    raise TypeError("Unsupported extracted lineage reference.")
++
++
++def _deserialize_lineage_ref(
++    payload: object,
++) -> ExtractedOccurrenceRef | ExtractedSymbolicRef:
++    if not isinstance(payload, dict):
++        raise ValueError("Cached lineage reference must be an object.")
++
++    ref_type = payload.get("type")
++    if ref_type == "occurrence":
++        if set(payload) != _LINEAGE_CACHE_OCCURRENCE_REF_KEYS:
++            raise ValueError("Malformed cached occurrence reference.")
++        return ExtractedOccurrenceRef(local_id=payload["local_id"])
++
++    if ref_type == "symbolic":
++        if set(payload) != _LINEAGE_CACHE_SYMBOLIC_REF_KEYS:
++            raise ValueError("Malformed cached symbolic reference.")
++        return ExtractedSymbolicRef(
++            kind=ExtractedSymbolicKind(payload["kind"]),
++            module_name=payload["module_name"],
++            symbol_name=payload["symbol_name"],
++            source_local_id=payload["source_local_id"],
++        )
++
++    raise ValueError("Unknown cached lineage reference type.")
++
++
++def _serialize_lineage_provider(provider: ProviderRef | None) -> dict | None:
++    if provider is None:
++        return None
++    return {
++        "provider_id": provider.provider_id,
++        "provider_version": provider.provider_version,
++    }
++
++
++def _deserialize_lineage_provider(payload: object) -> ProviderRef | None:
++    if payload is None:
++        return None
++    if not isinstance(payload, dict) or set(payload) != _LINEAGE_CACHE_PROVIDER_KEYS:
++        raise ValueError("Malformed cached lineage provider.")
++    return ProviderRef(
++        provider_id=payload["provider_id"],
++        provider_version=payload["provider_version"],
++    )
++
++
++def serialize_extracted_lineage_source_facts(
++    facts: ExtractedLineageSourceFacts,
++) -> dict:
++    if not isinstance(facts, ExtractedLineageSourceFacts):
++        raise TypeError("facts must be ExtractedLineageSourceFacts.")
++    if facts.status not in _LINEAGE_CACHE_STATUSES:
++        raise ValueError("Extracted lineage cache supports only fresh/resource_limit.")
++
++    return {
++        "schema_version": LINEAGE_EXTRACTION_CACHE_SCHEMA_VERSION,
++        "source_key": facts.source_key,
++        "source_fingerprint": facts.source_fingerprint,
++        "status": facts.status.value,
++        "resource_limit_reason": facts.resource_limit_reason,
++        "anchors": [
++            {
++                "local_id": anchor.local_id,
++                "kind": anchor.kind,
++                "span": _serialize_lineage_span(anchor.span),
++                "owner_local_id": anchor.owner_local_id,
++            }
++            for anchor in facts.anchors
++        ],
++        "flows": [
++            {
++                "local_id": flow.local_id,
++                "source": _serialize_lineage_ref(flow.source),
++                "target": _serialize_lineage_ref(flow.target),
++                "relation": flow.relation.value,
++                "evidence": _serialize_lineage_span(flow.evidence),
++                "resolution_kind": flow.resolution_kind.value,
++                "confidence": flow.confidence.value,
++                "dynamic_boundary": flow.dynamic_boundary,
++                "provider": _serialize_lineage_provider(flow.provider),
++                "owner_local_id": flow.owner_local_id,
++            }
++            for flow in facts.flows
++        ],
++        "surfaces": [
++            {
++                "local_id": surface.local_id,
++                "kind": surface.kind.value,
++                "exposed": _serialize_lineage_ref(surface.exposed),
++                "evidence": _serialize_lineage_span(surface.evidence),
++                "resolution_kind": surface.resolution_kind.value,
++                "confidence": surface.confidence.value,
++                "declared_name": surface.declared_name,
++                "dynamic_boundary": surface.dynamic_boundary,
++                "provider": _serialize_lineage_provider(surface.provider),
++                "declaration_evidence": (
++                    surface.declaration_evidence.value
++                    if surface.declaration_evidence is not None
++                    else None
++                ),
++            }
++            for surface in facts.surfaces
++        ],
++    }
++
++
++def deserialize_extracted_lineage_source_facts(
++    payload: object,
++    *,
++    source_key: str,
++    source_fingerprint: str,
++) -> ExtractedLineageSourceFacts | None:
++    try:
++        if not isinstance(payload, dict):
++            return None
++        if set(payload) != _LINEAGE_CACHE_TOP_LEVEL_KEYS:
++            return None
++        if payload["schema_version"] != LINEAGE_EXTRACTION_CACHE_SCHEMA_VERSION:
++            return None
++        if payload["source_key"] != source_key:
++            return None
++        if payload["source_fingerprint"] != source_fingerprint:
++            return None
++
++        status = LineageFamilyStatus(payload["status"])
++        if status not in _LINEAGE_CACHE_STATUSES:
++            return None
++
++        anchors_payload = payload["anchors"]
++        flows_payload = payload["flows"]
++        surfaces_payload = payload["surfaces"]
++        if not isinstance(anchors_payload, list):
++            return None
++        if not isinstance(flows_payload, list):
++            return None
++        if not isinstance(surfaces_payload, list):
++            return None
++
++        anchors = []
++        for item in anchors_payload:
++            if not isinstance(item, dict) or set(item) != _LINEAGE_CACHE_ANCHOR_KEYS:
++                return None
++            anchors.append(
++                ExtractedAnchorFact(
++                    local_id=item["local_id"],
++                    kind=item["kind"],
++                    span=_deserialize_lineage_span(item["span"]),
++                    owner_local_id=item["owner_local_id"],
++                )
++            )
++
++        flows = []
++        for item in flows_payload:
++            if not isinstance(item, dict) or set(item) != _LINEAGE_CACHE_FLOW_KEYS:
++                return None
++            flows.append(
++                ExtractedFlowFact(
++                    local_id=item["local_id"],
++                    source=_deserialize_lineage_ref(item["source"]),
++                    target=_deserialize_lineage_ref(item["target"]),
++                    relation=LineageRelation(item["relation"]),
++                    evidence=_deserialize_lineage_span(item["evidence"]),
++                    resolution_kind=ResolutionKind(item["resolution_kind"]),
++                    confidence=LineageConfidence(item["confidence"]),
++                    dynamic_boundary=item["dynamic_boundary"],
++                    provider=_deserialize_lineage_provider(item["provider"]),
++                    owner_local_id=item["owner_local_id"],
++                )
++            )
++
++        surfaces = []
++        for item in surfaces_payload:
++            if not isinstance(item, dict) or set(item) != _LINEAGE_CACHE_SURFACE_KEYS:
++                return None
++            declaration_evidence = item["declaration_evidence"]
++            surfaces.append(
++                ExtractedSurfaceFact(
++                    local_id=item["local_id"],
++                    kind=SurfaceKind(item["kind"]),
++                    exposed=_deserialize_lineage_ref(item["exposed"]),
++                    evidence=_deserialize_lineage_span(item["evidence"]),
++                    resolution_kind=ResolutionKind(item["resolution_kind"]),
++                    confidence=LineageConfidence(item["confidence"]),
++                    declared_name=item["declared_name"],
++                    dynamic_boundary=item["dynamic_boundary"],
++                    provider=_deserialize_lineage_provider(item["provider"]),
++                    declaration_evidence=(
++                        None
++                        if declaration_evidence is None
++                        else SurfaceDeclarationEvidence(declaration_evidence)
++                    ),
++                )
++            )
++
++        return ExtractedLineageSourceFacts(
++            source_key=source_key,
++            source_fingerprint=source_fingerprint,
++            anchors=tuple(anchors),
++            flows=tuple(flows),
++            surfaces=tuple(surfaces),
++            status=status,
++            resource_limit_reason=payload["resource_limit_reason"],
++        )
++    except (KeyError, TypeError, ValueError):
++        return None
++
  
- EXPECTED_HASHES = {
--    "async_yield": "57fe7c8ab6b6468031df1a70efa1d66320485207edf99912959977059166dab7",
--    "comprehension_runtime_walrus": "35f7e091b7361051933afa6ae125eabb35b0e46776960955d1d45b0826d531e9",
--    "if_for_frame_merge": "f27318c046fcadc2946c58e2e56f324b8a01fb563bd627ec7f85319c2b435b7a",
--    "imports_alias_wildcard": "7fbd16baf177be5d965c212678763b9a123978e62ba711950602fab6bf9ccec8",
--    "relative_import": "44e82ef594399306de449f12a46d3c8bf463d47050f454537f5c2630f976ca95",
-+    "async_yield": "e6c709d1a5ef347b04ed888dd9fa055dbc5a24c33eb14ea1a489b60a15c7d731",
-+    "comprehension_runtime_walrus": "efbd682411093e174775282b2ce9d7012106d09c5180d73f5fbdd54ec45a2a6e",
-+    "if_for_frame_merge": "b12603da08418eef897fe090bc05a7783fd877ed6c2bfb5a1bfdcd20c7cdc305",
-+    "imports_alias_wildcard": "ad52d65bb4140b3e8ea6f21781c68e749f240358b5683e8648199972db597682",
-+    "relative_import": "10ee12f15c6cfc5ecb82511e18081534eb68b9e647ae0ec3d71f3611e510fb2e",
-     "resource_limit": "40c592a9bfb86c5f6d4fe747fa2714a92794dafbc204e601ea4b475c07e06adb",
--    "signature_defaults_local_call": "97a3964dd7208f83b8200c12e7732e685ffde29f79ca7a1c001c69b2989a0122",
--    "try_except_finally_match": "ce25c00652779c30e47b06499408efe78515eda802cdd88aa2650fda6757c60f",
-+    "signature_defaults_local_call": "514593c03cb9b3dda00b0e2289a15781b7a7b2e131a89cb6e2f3e2fb2ad09d3c",
-+    "try_except_finally_match": "a1384557b901a8f8634f06da6e36c4df91007699f69b24a71d59c1b81da00299",
- }
- 
- 
- LEGACY_ANCHOR_FLOW_HASHES = {
-     **EXPECTED_HASHES,
--    "async_yield": "110cd0c1d520261bffe673d6e0f1df573b68ed4653be674bcb762faacdf27bf9",
--    "signature_defaults_local_call": "4d6984e8211918d2e84e976d5fda32f59aed9247d52821cafc688242c6f6533b",
-+    "async_yield": "49eaf024dbbea341d333f1e705037be68c0fce45c6acaed23ad93a850d381016",
-+    "signature_defaults_local_call": "c7ff95a059aeeb7c5a3dc978f6a982fda491029286e0eeb8abe937fea4a2dfb5",
- }
- 
-```
+ class _AnchorExtractor:
+     def __init__(self, paths: dict[int, str], source_key: str) -> None:
+
+\`\`\`
+
