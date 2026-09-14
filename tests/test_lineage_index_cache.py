@@ -166,3 +166,65 @@ def test_stale_lineage_schema_is_migrated_once(
     )
 
     indexer.index_repository(str(repo))
+
+
+def test_source_content_change_invalidates_cached_lineage(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    source = repo / "mod.py"
+    source.write_text(
+        "def f(value):\n"
+        "    return value + 1\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setenv("CONTEXTOR_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setenv("CONTEXTOR_DISABLE_PROCESS_POOL", "1")
+    indexer._CACHE_MANAGERS.clear()
+
+    first = indexer.index_repository(str(repo))
+    first_lineage = first.lineage_facts_by_source["mod.py"]
+
+    source.write_text(
+        "def f(value):\n"
+        "    return value + 2\n",
+        encoding="utf-8",
+    )
+
+    original_extract = indexer.extract_lineage_source_facts
+    calls = 0
+
+    def counted_extract(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        return original_extract(*args, **kwargs)
+
+    monkeypatch.setattr(
+        indexer,
+        "extract_lineage_source_facts",
+        counted_extract,
+    )
+
+    second = indexer.index_repository(str(repo))
+    second_lineage = second.lineage_facts_by_source["mod.py"]
+
+    assert calls == 1
+    assert second_lineage.source_fingerprint != first_lineage.source_fingerprint
+
+    def fail_extract(*args, **kwargs):
+        raise AssertionError(
+            "unchanged source after refresh must reuse cached lineage"
+        )
+
+    monkeypatch.setattr(
+        indexer,
+        "extract_lineage_source_facts",
+        fail_extract,
+    )
+
+    third = indexer.index_repository(str(repo))
+
+    assert third.lineage_facts_by_source["mod.py"] == second_lineage
