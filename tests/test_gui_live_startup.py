@@ -111,6 +111,99 @@ def _wait_for_live_start(controller, timeout=5.0):
     raise AssertionError("LIVE startup background thread did not finish")
 
 
+def test_public_live_start_returns_before_blocking_connect_finishes(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    PersistentIdentityRegistry(str(repo))
+    controller = _make_controller(repo)
+    connect_entered, allow_connect = threading.Event(), threading.Event()
+
+    class Client:
+        def publish(self, *_args, **_kwargs): pass
+    class Watcher:
+        def __init__(self, *_args, **_kwargs): self.started = False
+        def start(self): self.started = True
+    class Feed:
+        def __init__(self, *_args, **_kwargs): pass
+        def start(self): pass
+    def connect(*_args, **_kwargs):
+        connect_entered.set()
+        assert allow_connect.wait(timeout=5)
+        return Client()
+    monkeypatch.setattr(gui, "connect_or_start", connect)
+    monkeypatch.setattr(gui, "DesktopLiveWatcher", Watcher)
+    monkeypatch.setattr(gui, "DesktopLiveEventFeed", Feed)
+    monkeypatch.setattr("contextor.core.analysis.state_manager.load_engine_state", lambda *_a, **_k: None)
+    started = time.monotonic()
+    ContextorGUI._start_live_watcher(controller, str(repo))
+    assert time.monotonic() - started < 0.25
+    assert connect_entered.wait(timeout=2)
+    assert controller.live_watcher is None
+    allow_connect.set()
+    _wait_for_live_start(controller)
+    assert controller.live_watcher.started is True
+
+
+def test_duplicate_public_start_while_inflight_creates_one_worker(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    PersistentIdentityRegistry(str(repo))
+    controller = _make_controller(repo)
+    entered, allow = threading.Event(), threading.Event()
+    calls = 0
+    def connect(*_args, **_kwargs):
+        nonlocal calls
+        calls += 1
+        entered.set()
+        assert allow.wait(timeout=5)
+        return SimpleNamespace()
+    monkeypatch.setattr(gui, "connect_or_start", connect)
+    monkeypatch.setattr(gui, "DesktopLiveWatcher", lambda *_a, **_k: SimpleNamespace(start=lambda: None))
+    monkeypatch.setattr(gui, "DesktopLiveEventFeed", lambda *_a, **_k: SimpleNamespace(start=lambda: None))
+    monkeypatch.setattr("contextor.core.analysis.state_manager.load_engine_state", lambda *_a, **_k: None)
+    ContextorGUI._start_live_watcher(controller, str(repo))
+    assert entered.wait(timeout=2)
+    ContextorGUI._start_live_watcher(controller, str(repo))
+    with controller._live_start_lock:
+        assert len(controller._live_start_inflight) == len(controller._live_start_threads) == 1
+    assert calls == 1
+    allow.set()
+    _wait_for_live_start(controller)
+    assert calls == 1
+
+
+def test_closing_prevents_new_background_live_start(tmp_path, monkeypatch):
+    controller = _make_controller(tmp_path)
+    controller._closing = True
+    connect = MagicMock()
+    monkeypatch.setattr(gui, "connect_or_start", connect)
+    ContextorGUI._start_live_watcher(controller, str(tmp_path))
+    connect.assert_not_called()
+    assert controller._live_start_inflight == set()
+    assert controller._live_start_threads == {}
+
+
+def test_post_paint_tasks_do_not_wait_for_cache_cleanup(tmp_path, monkeypatch):
+    controller = _make_controller("")
+    entered, allow = threading.Event(), threading.Event()
+    thread_ids = []
+    def cleanup():
+        thread_ids.append(threading.get_ident())
+        entered.set()
+        assert allow.wait(timeout=5)
+        return {"cache": {"errors": []}}
+    monkeypatch.setattr(gui, "prune_startup_caches", cleanup)
+    controller._check_stale_excludes = MagicMock()
+    controller._start_live_watcher = MagicMock()
+    main_id = threading.get_ident()
+    started = time.monotonic()
+    ContextorGUI._start_post_paint_tasks(controller)
+    assert time.monotonic() - started < 0.25
+    assert entered.wait(timeout=2)
+    assert thread_ids[0] != main_id
+    allow.set()
+
+
 def test_initial_success(tmp_path, monkeypatch):
     repo = tmp_path / "repo"
     repo.mkdir()

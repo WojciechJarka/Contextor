@@ -182,3 +182,61 @@ watcher construction, start, and retry; it does not join daemon startup threads.
 ```powershell
 git diff --no-ext-diff -- contextor/ui/gui.py tests/test_gui_live_startup.py tests/test_live_desktop_integration.py
 ```
+
+# P0 G1C — Desktop first-paint regression certification
+
+## STATUS
+
+PASS
+
+## CONTEXTOR_DISCOVERY
+
+Contextor MCP revision 1027 confirmed the public async wrapper, blocking
+implementation, post-paint scheduling, stale-exclude worker, identity UI guard,
+and close flag. No production defect was exposed by the new regressions.
+
+## FILES_CHANGED_G1C
+
+- `tests/test_gui_live_startup.py`
+
+## PUBLIC_START_NONBLOCKING_PROOF
+
+The public-start regression blocks `connect_or_start` behind an Event and proves
+the public call returns in under 250ms before connection completion.
+
+## INFLIGHT_DEDUP_PROOF
+
+Two public starts for the same repository while the first connect is blocked
+produce one connect call, one inflight key, and one startup thread.
+
+## CLOSE_PROOF
+
+With `_closing=True`, public start creates neither a connect call nor inflight
+state nor a startup thread.
+
+## POST_PAINT_NONBLOCKING_PROOF
+
+The cleanup regression blocks cache pruning and proves post-paint dispatch
+returns in under 250ms while cleanup runs outside the caller thread.
+
+## LIVE_DESKTOP_INTEGRATION_CHANGE_REASON
+
+The existing integration tests were adapted to call the blocking implementation
+directly because they assert deterministic heavy-path state attachment and
+generation behavior; their assertions were not weakened.
+
+## PRODUCTION_CHANGED_IN_G1C
+
+NO
+
+## TEST_RESULTS
+
+- `pytest -q tests/test_gui_live_startup.py tests/test_live_watcher_startup_reconciliation.py tests/test_live_watcher_watchdog.py tests/test_live_desktop_integration.py`: PASS, `79 passed in 41.06s`
+- `py_compile contextor/ui/gui.py`: PASS
+- `git diff --check`: PASS
+
+## FULL_DIFFS
+
+The full unified diffs are retained in the prior G1 sections for the production
+boundary and integration-harness adaptations; G1C itself adds only the four
+dedicated regressions in `tests/test_gui_live_startup.py`.
