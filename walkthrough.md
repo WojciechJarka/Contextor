@@ -1,238 +1,77 @@
-# P0 L3A retry — lineage reuse gate
+# P0 L3A1 — lineage reuse gate hardening
 
 ## STATUS
 
-SUCCESS. Implemented the supplied fail-closed per-source resolution gate and corrected fixture. No full analysis, benchmark, full pytest, facade, persistence, LIVE, or MCP change.
+SUCCESS. Added only the two requested hardening tests; production code was not changed in this step.
 
-## CONTEXTOR_DISCOVERY
+## CONTEXTOR_VERIFICATION
 
-Before the edit, Contextor confirmed `materialize_lineage_source_facts` as the existing single-slice materializer and its direct helpers `_semantic_anchor_bindings` and `_seed_defining_interface_descriptors`; `reresolve_materialized_lineage_source_facts` remains the existing resolution lifecycle.
-
-After the edit, Contextor resolved the new predicate at `lineage_materialization.py:360-526`, but correctly returned `stale_source` because the working-tree change is not canonical LIVE state. Its call-context query also failed closed as stale. No incremental LIVE/MCP publication was performed because it is outside scope. Current source, compilation, and focused tests establish the implementation; Contextor stale state does not assert a parallel lifecycle.
-
-## IMPLEMENTATION
-
-Added `materialized_lineage_source_matches_resolution(materialized, resolution)` immediately before the materializer. It fails closed unless the manifest has current semantic version, fresh status, and all materialization capabilities. It reconstructs expected semantic anchors/descriptors under current active identity mappings, re-resolves symbolic/semantic endpoints using compact origins, and returns true only for exact equality.
-
-Added the requested owned-flow fixture and four tests: unchanged resolution; changed owner identity; symbolic endpoint that becomes resolvable; and semantic endpoint without origin.
+Contextor at fresh LIVE revision 1046 resolves `materialized_lineage_source_matches_resolution`. Its direct callees are the existing `_anchor_symbol_path` and `_seed_defining_interface_descriptors`. Existing `reresolve_materialized_lineage_source_facts` also uses `_seed_defining_interface_descriptors`. This confirms descriptor and semantic-anchor invalidation travel through existing canonical resolution machinery, not a parallel lifecycle.
 
 ## VALIDATION
 
-- `.\\.venv\\Scripts\\python.exe -m py_compile contextor\\core\\analysis\\lineage_materialization.py tests\\analysis\\test_lineage_materialization.py` — passed.
-- `.\\.venv\\Scripts\\python.exe -m pytest -q tests\\analysis\\test_lineage_materialization.py` — **31 passed in 3.02s**.
-- Source/test `git diff --check` passed before embedding the required raw unified
-  diffs. The literal diff block below retains unified-diff context blank-space
-  lines, so repository-wide `git diff --check` flags only those report lines.
+- `.\.venv\Scripts\python.exe -m pytest -q tests\analysis\test_lineage_materialization.py` — **33 passed in 3.48s**.
+- Production code unchanged by L3A1.
+- `git diff --check` passed before embedding the required raw diffs; the raw diff block may retain context blank-space lines.
 
 ## FILES_CHANGED
 
-- `contextor/core/analysis/lineage_materialization.py`
-- `tests/analysis/test_lineage_materialization.py`
+- `tests/analysis/test_lineage_materialization.py` (L3A1 tests).
+- No production-file diff remains in this working tree; the pre-existing L3A predicate was already canonical/tracked before this report diff was captured.
 
 ## FULL_DIFFS
 
 ```diff
-warning: in the working copy of 'contextor/core/analysis/lineage_materialization.py', LF will be replaced by CRLF the next time Git touches it
 warning: in the working copy of 'tests/analysis/test_lineage_materialization.py', LF will be replaced by CRLF the next time Git touches it
-diff --git a/contextor/core/analysis/lineage_materialization.py b/contextor/core/analysis/lineage_materialization.py
-index 96ce8c3..57bfa19 100644
---- a/contextor/core/analysis/lineage_materialization.py
-+++ b/contextor/core/analysis/lineage_materialization.py
-@@ -357,6 +357,174 @@ def _seed_defining_interface_descriptors(
-             descriptors[binding.owner_id] = descriptor
- 
- 
-+def materialized_lineage_source_matches_resolution(
-+    materialized: MaterializedLineageSourceFacts,
-+    resolution: LineageResolutionContext,
-+) -> bool:
-+    """Return True only when one canonical slice still matches current resolution."""
-+    if not isinstance(materialized, MaterializedLineageSourceFacts):
-+        raise TypeError("materialized must be MaterializedLineageSourceFacts.")
-+    if not isinstance(resolution, LineageResolutionContext):
-+        raise TypeError("resolution must be LineageResolutionContext.")
-+
-+    manifest = materialized.manifest
-+    if (
-+        manifest.semantic_version != LINEAGE_FACTS_SEMANTIC_VERSION
-+        or manifest.status is not LineageFamilyStatus.FRESH
-+        or not manifest.semantic_anchor_bindings_materialized
-+        or not manifest.anchor_ownership_materialized
-+        or not manifest.flow_ownership_materialized
-+        or not manifest.interface_descriptors_materialized
-+    ):
-+        return False
-+
-+    extracted_anchors = tuple(
-+        ExtractedAnchorFact(
-+            anchor.local_id,
-+            anchor.kind,
-+            anchor.span,
-+            anchor.owner_local_id,
-+        )
-+        for anchor in materialized.anchors
-+    )
-+    anchors_by_id = {
-+        anchor.local_id: anchor
-+        for anchor in extracted_anchors
-+    }
-+    references_by_id = {
-+        anchor.local_id: anchor.reference
-+        for anchor in materialized.anchors
-+    }
-+    module_name = _module_name_from_source_key(manifest.source_key)
-+
-+    expected_semantic_anchors: list[SemanticAnchorBinding] = []
-+    for anchor in extracted_anchors:
-+        if anchor.kind not in {
-+            "class",
-+            "function",
-+            "async_function",
-+            "binding",
-+            "import_binding",
-+        }:
-+            continue
-+
-+        symbol_path = _anchor_symbol_path(anchor, anchors_by_id)
-+        if symbol_path is None:
-+            continue
-+
-+        qualified_name = f"{module_name}::{symbol_path}"
-+        owner_id = resolution.active_artifact_ids.get(qualified_name)
-+        if owner_id is None:
-+            continue
-+
-+        reference = references_by_id.get(anchor.local_id)
-+        if reference is None:
-+            return False
-+
-+        expected_semantic_anchors.append(
-+            SemanticAnchorBinding(
-+                owner_id,
-+                qualified_name,
-+                reference,
-+            )
-+        )
-+
-+    expected_semantic_anchors_tuple = tuple(sorted(expected_semantic_anchors))
-+    if expected_semantic_anchors_tuple != materialized.semantic_anchors:
-+        return False
-+
-+    expected_descriptors: dict[str, SemanticInterfaceDescriptor] = {}
-+    _seed_defining_interface_descriptors(
-+        expected_descriptors,
-+        expected_semantic_anchors_tuple,
-+        resolution,
-+    )
-+
-+    origins = {
-+        (origin.fact_local_id, origin.endpoint_role): origin
-+        for origin in materialized.semantic_endpoint_origins
-+    }
-+
-+    def endpoint_matches(
-+        current: MaterializedOccurrenceRef
-+        | MaterializedSymbolicRef
-+        | SemanticEndpoint,
-+        resolution_kind: ResolutionKind,
-+        confidence: LineageConfidence,
-+        fact_local_id: str,
-+        endpoint_role: SemanticEndpointRole,
-+    ) -> bool:
-+        if isinstance(current, MaterializedOccurrenceRef):
-+            return True
-+
-+        if isinstance(current, MaterializedSymbolicRef):
-+            reference = ExtractedSymbolicRef(
-+                current.kind,
-+                current.module_name,
-+                current.symbol_name,
-+                current.source_local_id,
-+            )
-+            source_key = current.source_key
-+            source_fingerprint = current.source_fingerprint
-+        elif isinstance(current, SemanticEndpoint):
-+            origin = origins.get((fact_local_id, endpoint_role))
-+            if origin is None:
-+                return False
-+            reference = ExtractedSymbolicRef(
-+                origin.kind,
-+                origin.module_name,
-+                origin.symbol_name,
-+                origin.source_local_id,
-+            )
-+            source_key = origin.source_key
-+            source_fingerprint = origin.source_fingerprint
-+        else:
-+            return False
-+
-+        expected = _symbolic_endpoint(
-+            reference,
-+            resolution,
-+            expected_descriptors,
-+            resolution_kind,
-+            confidence,
-+            source_key,
-+            source_fingerprint,
-+        )
-+        return expected == current
-+
-+    for flow in materialized.flows:
-+        if not endpoint_matches(
-+            flow.source,
-+            flow.resolution_kind,
-+            flow.confidence,
-+            flow.local_id,
-+            SemanticEndpointRole.FLOW_SOURCE,
-+        ):
-+            return False
-+        if not endpoint_matches(
-+            flow.target,
-+            flow.resolution_kind,
-+            flow.confidence,
-+            flow.local_id,
-+            SemanticEndpointRole.FLOW_TARGET,
-+        ):
-+            return False
-+
-+    for surface in materialized.surfaces:
-+        if not endpoint_matches(
-+            surface.exposed,
-+            surface.resolution_kind,
-+            surface.confidence,
-+            surface.local_id,
-+            SemanticEndpointRole.SURFACE_EXPOSED,
-+        ):
-+            return False
-+
-+    return (
-+        tuple(sorted(expected_descriptors.values()))
-+        == materialized.interface_descriptors
-+    )
-+
- def materialize_lineage_source_facts(
-     extracted: ExtractedLineageSourceFacts,
-     resolution: LineageResolutionContext,
 diff --git a/tests/analysis/test_lineage_materialization.py b/tests/analysis/test_lineage_materialization.py
-index e1e67ba..1553677 100644
+index 1553677..d8832c4 100644
 --- a/tests/analysis/test_lineage_materialization.py
 +++ b/tests/analysis/test_lineage_materialization.py
-@@ -13,6 +13,7 @@ from contextor.core.analysis.lineage_materialization import (
-     LineageResolutionContext,
-     build_extracted_callable_interface_descriptors,
-     build_materialized_callable_interface_descriptors,
-+    materialized_lineage_source_matches_resolution,
-     materialize_lineage_source_facts,
-     reresolve_materialized_lineage_source_facts,
- )
-@@ -804,3 +805,108 @@ def test_interface_descriptor_capability_requires_anchor_capabilities():
-         replace(manifest, interface_descriptors_materialized=True)
-     with pytest.raises(TypeError, match="interface_descriptors_materialized must be boolean"):
-         replace(manifest, interface_descriptors_materialized="yes")
+@@ -910,3 +910,149 @@ def test_materialized_lineage_source_rejects_semantic_endpoint_without_origin():
+         legacy_like,
+         context,
+     ) is False
 +
-+def _owned_exact_target_facts():
++def test_materialized_lineage_source_rejects_changed_interface_descriptor():
 +    span = SourceSpan(1, 0, 1, 1)
-+    return _facts(
++    owner_id = "A9/1"
++    parameter_id = "occ:v1:parameter_poskw:0:i:0:n:value"
++    parameter_slot = build_parameter_value_slot(
++        owner_id,
++        ParameterKind.POSITIONAL_OR_KEYWORD,
++        ordinal=0,
++    )
++    keyword_slot = build_keyword_binding_slot(
++        owner_id,
++        ParameterKind.POSITIONAL_OR_KEYWORD,
++        name="value",
++    )
++    descriptor_v1 = SemanticInterfaceDescriptor(
++        owner_id,
++        tuple(
++            sorted(
++                (
++                    parameter_slot,
++                    build_return_slot(owner_id),
++                )
++            )
++        ),
++        "digest-v1",
++    )
++    descriptor_v2 = SemanticInterfaceDescriptor(
++        owner_id,
++        tuple(
++            sorted(
++                (
++                    parameter_slot,
++                    keyword_slot,
++                    build_return_slot(owner_id),
++                )
++            )
++        ),
++        "digest-v2",
++    )
++    facts = _facts(
 +        anchors=(
 +            ExtractedAnchorFact(
 +                "owner",
@@ -245,93 +84,97 @@ index e1e67ba..1553677 100644
 +                "flow",
 +                ExtractedOccurrenceRef("owner"),
 +                ExtractedSymbolicRef(
-+                    ExtractedSymbolicKind.PUBLIC_TARGET,
++                    ExtractedSymbolicKind.PARAMETER,
 +                    "pkg.mod",
-+                    "target",
++                    "run",
++                    parameter_id,
 +                ),
-+                LineageRelation.EXPOSES,
++                LineageRelation.ARGUMENT_TO_PARAMETER,
 +                span,
-+                ResolutionKind.IMPORT_EXACT,
++                ResolutionKind.CALL_EXACT,
 +                LineageConfidence.CONFIRMED,
 +                owner_local_id="owner",
 +            ),
 +        ),
 +    )
-+
-+
-+def test_materialized_lineage_source_matches_unchanged_resolution():
-+    facts = _owned_exact_target_facts()
-+    context = _context(
-+        artifacts={"pkg.mod::target": "A1/1"},
++    original_resolution = _context(
++        artifacts={"pkg.mod::run": owner_id},
++        descriptors={owner_id: descriptor_v1},
 +    )
 +    materialized = materialize_lineage_source_facts(
 +        facts,
-+        context,
++        original_resolution,
 +    )
-+
 +    assert materialized.manifest.flow_ownership_materialized is True
++    assert materialized.flows[0].target == SemanticEndpoint(
++        owner_id,
++        parameter_slot,
++    )
++    assert materialized.interface_descriptors == (descriptor_v1,)
 +    assert materialized_lineage_source_matches_resolution(
 +        materialized,
-+        context,
++        original_resolution,
 +    ) is True
-+
-+
-+def test_materialized_lineage_source_rejects_changed_resolution():
-+    facts = _owned_exact_target_facts()
-+    materialized = materialize_lineage_source_facts(
-+        facts,
-+        _context(
-+            artifacts={"pkg.mod::target": "A1/1"},
-+        ),
++    changed_resolution = _context(
++        artifacts={"pkg.mod::run": owner_id},
++        descriptors={owner_id: descriptor_v2},
 +    )
-+
-+    assert materialized.manifest.flow_ownership_materialized is True
 +    assert materialized_lineage_source_matches_resolution(
 +        materialized,
-+        _context(
-+            artifacts={"pkg.mod::target": "A1/2"},
-+        ),
++        changed_resolution,
 +    ) is False
 +
 +
-+def test_materialized_lineage_source_rejects_symbolic_endpoint_that_now_resolves():
-+    facts = _owned_exact_target_facts()
-+    materialized = materialize_lineage_source_facts(
-+        facts,
-+        _context(),
-+    )
-+
-+    assert materialized.manifest.flow_ownership_materialized is True
-+    assert isinstance(
-+        materialized.flows[0].target,
-+        MaterializedSymbolicRef,
-+    )
-+    assert materialized_lineage_source_matches_resolution(
-+        materialized,
-+        _context(
-+            artifacts={"pkg.mod::target": "A1/1"},
++def test_materialized_lineage_source_rejects_changed_semantic_anchor_binding():
++    span = SourceSpan(1, 0, 1, 1)
++    module_anchor = "occ:v1:module:root:i:0:n:pkg"
++    class_anchor = "occ:v1:class:0:i:0:n:Thing"
++    facts = _facts(
++        anchors=tuple(
++            sorted(
++                (
++                    ExtractedAnchorFact(
++                        module_anchor,
++                        "module",
++                        span,
++                    ),
++                    ExtractedAnchorFact(
++                        class_anchor,
++                        "class",
++                        span,
++                        module_anchor,
++                    ),
++                )
++            )
 +        ),
-+    ) is False
-+
-+
-+def test_materialized_lineage_source_rejects_semantic_endpoint_without_origin():
-+    facts = _owned_exact_target_facts()
-+    context = _context(
-+        artifacts={"pkg.mod::target": "A1/1"},
++    )
++    original_resolution = _context(
++        artifacts={"pkg.mod::Thing": "A1/1"},
 +    )
 +    materialized = materialize_lineage_source_facts(
 +        facts,
-+        context,
++        original_resolution,
 +    )
-+    assert materialized.manifest.flow_ownership_materialized is True
-+
-+    legacy_like = replace(
-+        materialized,
-+        semantic_endpoint_origins=(),
++    assert materialized.semantic_anchors == (
++        SemanticAnchorBinding(
++            "A1/1",
++            "pkg.mod::Thing",
++            MaterializedOccurrenceRef(
++                "pkg/mod.py",
++                "sha256:test",
++                class_anchor,
++            ),
++        ),
 +    )
-+
 +    assert materialized_lineage_source_matches_resolution(
-+        legacy_like,
-+        context,
++        materialized,
++        original_resolution,
++    ) is True
++    changed_resolution = _context(
++        artifacts={"pkg.mod::Thing": "A1/2"},
++    )
++    assert materialized_lineage_source_matches_resolution(
++        materialized,
++        changed_resolution,
 +    ) is False
 ```
