@@ -377,7 +377,8 @@ def _materialize_full_analysis_lineage(
         materialized = None
         previous_materialized = previous_lineage_by_source.get(source_key)
         previous_source_reusable = (
-            isinstance(previous_materialized, MaterializedLineageSourceFacts)
+            extracted.status is LineageFamilyStatus.FRESH
+            and isinstance(previous_materialized, MaterializedLineageSourceFacts)
             and previous_materialized.manifest.source_key == source_key
             and previous_materialized.manifest.source_fingerprint == extracted.source_fingerprint
             and previous_materialized.manifest.semantic_version == LINEAGE_FACTS_SEMANTIC_VERSION

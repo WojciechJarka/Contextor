@@ -490,3 +490,42 @@ def test_full_analysis_falls_back_to_materialization_for_missing_origin(monkeypa
     assert second_mapping["pkg.py"] is not legacy_previous
     assert second_mapping["pkg.py"].flows[0].target == SemanticEndpoint("A1/1")
     assert second_mapping["pkg.py"].semantic_endpoint_origins
+
+
+def test_full_analysis_does_not_reuse_previous_fresh_slice_when_current_extraction_is_resource_limited():
+    fresh_facts = _owned_fresh_slice()
+    fresh_index = _index(facts={"pkg.py": fresh_facts})
+    artifacts = {"pkg": {"own_symbols": ["target"]}}
+    registry = _ReadOnlyRegistry(
+        {"pkg": "1/1"},
+        {"pkg::target": "A1/1"},
+    )
+    first_mapping, _, _ = _materialize_full_analysis_lineage(
+        fresh_index,
+        registry,
+        fresh_index.modules,
+        artifacts,
+    )
+    previous = first_mapping["pkg.py"]
+
+    limited_facts = replace(
+        fresh_facts,
+        status=LineageFamilyStatus.RESOURCE_LIMIT,
+        resource_limit_reason="node_limit",
+    )
+    limited_index = _index(facts={"pkg.py": limited_facts})
+
+    second_mapping, family_state, version = _materialize_full_analysis_lineage(
+        limited_index,
+        registry,
+        limited_index.modules,
+        artifacts,
+        previous_state=_previous_lineage_state(first_mapping),
+    )
+
+    current = second_mapping["pkg.py"]
+    assert current is not previous
+    assert current.manifest.status is LineageFamilyStatus.RESOURCE_LIMIT
+    assert current.manifest.resource_limit_reason == "node_limit"
+    assert family_state == "resource_limit"
+    assert version == LINEAGE_FACTS_SEMANTIC_VERSION
