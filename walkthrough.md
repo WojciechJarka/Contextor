@@ -1,145 +1,100 @@
-# P1A2 — Lineage cache codec fail-closed
+# P1B1 — Indexer lineage warm cache
 
 ## STATUS
 
 SUCCESS
 
-Schema version now rejects bool and float values explicitly. The codec rejects malformed payloads fail-closed without changing JSON shape, indexer, CacheManager, __all__, or codec architecture.
+The existing extracted-lineage codec is wired into the per-file cache. A newly written cache entry now lets the next warm index skip extract_lineage_source_facts. The parser remains before CacheManager.get; no parse fast path, legacy migration, CacheManager change, or ProcessPool change was added.
 
 ## VALIDATION
 
-.\\.venv\\Scripts\\python.exe -m pytest -q tests\\analysis\\test_lineage_cache_codec.py tests\\analysis\\test_lineage_extraction_equivalence.py
+.\\.venv\\Scripts\\python.exe -m pytest -q tests\\test_lineage_index_cache.py tests\\analysis\\test_lineage_cache_codec.py tests\\analysis\\test_lineage_extraction_equivalence.py
 
-16 passed in 1.44s
+17 passed in 24.22s
 
-git diff --check -- contextor/core/analysis/lineage_extraction.py tests/analysis/test_lineage_cache_codec.py passed.
+git diff --check -- contextor/core/symbol_engine/indexer.py tests/test_lineage_index_cache.py passed.
 
 ## FILES_CHANGED
 
-- contextor/core/analysis/lineage_extraction.py
-- tests/analysis/test_lineage_cache_codec.py
+- contextor/core/symbol_engine/indexer.py
+- tests/test_lineage_index_cache.py
 
 ## FULL_DIFFS
 
 \`\`\`diff
-warning: in the working copy of 'contextor/core/analysis/lineage_extraction.py', LF will be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'tests/analysis/test_lineage_cache_codec.py', LF will be replaced by CRLF the next time Git touches it
-diff --git a/contextor/core/analysis/lineage_extraction.py b/contextor/core/analysis/lineage_extraction.py
-index bb8e1aa..551e57a 100644
---- a/contextor/core/analysis/lineage_extraction.py
-+++ b/contextor/core/analysis/lineage_extraction.py
-@@ -291,7 +291,12 @@ def deserialize_extracted_lineage_source_facts(
-             return None
-         if set(payload) != _LINEAGE_CACHE_TOP_LEVEL_KEYS:
-             return None
--        if payload["schema_version"] != LINEAGE_EXTRACTION_CACHE_SCHEMA_VERSION:
-+        schema_version = payload["schema_version"]
-+        if (
-+            isinstance(schema_version, bool)
-+            or not isinstance(schema_version, int)
-+            or schema_version != LINEAGE_EXTRACTION_CACHE_SCHEMA_VERSION
-+        ):
-             return None
-         if payload["source_key"] != source_key:
-             return None
-diff --git a/tests/analysis/test_lineage_cache_codec.py b/tests/analysis/test_lineage_cache_codec.py
-index 37b5e4c..0118316 100644
---- a/tests/analysis/test_lineage_cache_codec.py
-+++ b/tests/analysis/test_lineage_cache_codec.py
-@@ -1,3 +1,7 @@
-+import copy
-+
-+import pytest
-+
- from contextor.core.analysis.lineage_extraction import (
-     LINEAGE_EXTRACTION_CACHE_SCHEMA_VERSION,
-     deserialize_extracted_lineage_source_facts,
-@@ -37,6 +41,7 @@ def test_extracted_lineage_cache_codec_round_trip_fresh() -> None:
-                 local_id="module",
-                 kind="module",
-                 span=span,
-+                owner_local_id="root",
-             ),
-         ),
-         flows=(
-@@ -123,3 +128,77 @@ def test_extracted_lineage_cache_codec_rejects_wrong_schema() -> None:
-         )
-         is None
-     )
-+
-+
-+@pytest.mark.parametrize(
-+    "mutate",
-+    [
-+        lambda payload: payload.__setitem__("schema_version", True),
-+        lambda payload: payload.__setitem__("schema_version", 1.0),
-+        lambda payload: payload.__setitem__("source_key", "other.py"),
-+        lambda payload: payload.__setitem__("source_fingerprint", "2" * 64),
-+        lambda payload: payload.pop("status"),
-+        lambda payload: payload.__setitem__("unexpected", "value"),
-+        lambda payload: payload["flows"][0]["source"].__setitem__("type", "unknown"),
-+        lambda payload: payload["flows"][0].__setitem__("relation", "UNKNOWN"),
-+        lambda payload: payload["flows"][0].__setitem__("evidence", [1, 0, 1]),
-+        lambda payload: payload["flows"][0].__setitem__(
-+            "provider",
-+            {"provider_id": "fixture-provider"},
-+        ),
-+    ],
-+    ids=[
-+        "boolean-schema",
-+        "float-schema",
-+        "wrong-source-key",
-+        "wrong-source-fingerprint",
-+        "missing-top-level-key",
-+        "extra-top-level-key",
-+        "unknown-ref-type",
-+        "unknown-enum",
-+        "malformed-span",
-+        "malformed-provider",
-+    ],
+warning: in the working copy of 'contextor/core/symbol_engine/indexer.py', LF will be replaced by CRLF the next time Git touches it
+diff --git a/contextor/core/symbol_engine/indexer.py b/contextor/core/symbol_engine/indexer.py
+index df741c0..2fe8191 100644
+--- a/contextor/core/symbol_engine/indexer.py
++++ b/contextor/core/symbol_engine/indexer.py
+@@ -19,7 +19,11 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
+ from pathlib import Path
+ 
+ from contextor.core.analysis.cache_manager import CacheManager
+-from contextor.core.analysis.lineage_extraction import extract_lineage_source_facts
++from contextor.core.analysis.lineage_extraction import (
++    deserialize_extracted_lineage_source_facts,
++    extract_lineage_source_facts,
++    serialize_extracted_lineage_source_facts,
 +)
-+def test_extracted_lineage_cache_codec_rejects_malformed_payloads(mutate) -> None:
-+    span = SourceSpan(1, 0, 1, 8)
-+    facts = ExtractedLineageSourceFacts(
-+        source_key="pkg/mod.py",
-+        source_fingerprint=_FINGERPRINT,
-+        anchors=(
-+            ExtractedAnchorFact(
-+                local_id="module",
-+                kind="module",
-+                span=span,
-+            ),
-+        ),
-+        flows=(
-+            ExtractedFlowFact(
-+                local_id="flow",
-+                source=ExtractedOccurrenceRef("local"),
-+                target=ExtractedSymbolicRef(
-+                    ExtractedSymbolicKind.IMPORT,
-+                    "pkg.dep",
-+                    "value",
-+                    "local",
-+                ),
-+                relation=LineageRelation.BINDS,
-+                evidence=span,
-+                resolution_kind=ResolutionKind.IMPORT_EXACT,
-+                confidence=LineageConfidence.CONFIRMED,
-+                provider=ProviderRef("fixture-provider", "1"),
-+                owner_local_id="module",
-+            ),
-+        ),
-+    )
-+    payload = copy.deepcopy(serialize_extracted_lineage_source_facts(facts))
-+    mutate(payload)
-+
-+    assert (
-+        deserialize_extracted_lineage_source_facts(
-+            payload,
-+            source_key="pkg/mod.py",
-+            source_fingerprint=_FINGERPRINT,
+ from contextor.core.analysis.test_context import (
+     _extract_test_file_facts,
+     is_test_context_candidate,
+@@ -339,18 +343,29 @@ def _process_single_file(path_str: str, root_str: str) -> dict:
+             ),
+         }
+     tree = parsed_input.tree
+-    lineage_extract_started = time.monotonic()
+-    lineage_facts = extract_lineage_source_facts(
+-        tree,
+-        source_key=source_key,
+-        source_fingerprint=parsed_input.source_fingerprint,
+-    )
+-    lineage_extract_ms = (time.monotonic() - lineage_extract_started) * 1000.0
+ 
+     # Próba odczytu z cache
+     cache = _cache_manager(root_str)
+     cached_data = cache.get(path)
+ 
++    lineage_facts = None
++    if cached_data is not None:
++        lineage_facts = deserialize_extracted_lineage_source_facts(
++            cached_data.get("lineage_facts"),
++            source_key=source_key,
++            source_fingerprint=parsed_input.source_fingerprint,
 +        )
-+        is None
-+    )
++
++    lineage_extract_ms = 0.0
++    if lineage_facts is None:
++        lineage_extract_started = time.monotonic()
++        lineage_facts = extract_lineage_source_facts(
++            tree,
++            source_key=source_key,
++            source_fingerprint=parsed_input.source_fingerprint,
++        )
++        lineage_extract_ms = (time.monotonic() - lineage_extract_started) * 1000.0
++
+     symbol_facts = None
+     reference_facts = None
+     collision_facts = None
+@@ -450,6 +465,9 @@ def _process_single_file(path_str: str, root_str: str) -> dict:
+                     else:
+                         test_facts_status = _TEST_FACTS_AVAILABLE
+                 rewritten = dict(cached_data)
++                rewritten["lineage_facts"] = serialize_extracted_lineage_source_facts(
++                    lineage_facts
++                )
+                 if collision_facts is None:
+                     rewritten.pop("collision_facts", None)
+                 if _valid_symbol_facts(symbol_facts):
+@@ -516,6 +534,7 @@ def _process_single_file(path_str: str, root_str: str) -> dict:
+         cache_data = {
+             "imports": [dataclasses.asdict(imp) for imp in imports or []],
+             "error": error,
++            "lineage_facts": serialize_extracted_lineage_source_facts(lineage_facts),
+         }
+         if symbol_facts and symbol_facts.get("status") == _SYMBOL_FACTS_AVAILABLE:
+             cache_data["symbol_facts"] = symbol_facts
 
 \`\`\`
 
