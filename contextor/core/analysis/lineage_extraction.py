@@ -291,7 +291,12 @@ def deserialize_extracted_lineage_source_facts(
             return None
         if set(payload) != _LINEAGE_CACHE_TOP_LEVEL_KEYS:
             return None
-        if payload["schema_version"] != LINEAGE_EXTRACTION_CACHE_SCHEMA_VERSION:
+        schema_version = payload["schema_version"]
+        if (
+            isinstance(schema_version, bool)
+            or not isinstance(schema_version, int)
+            or schema_version != LINEAGE_EXTRACTION_CACHE_SCHEMA_VERSION
+        ):
             return None
         if payload["source_key"] != source_key:
             return None
