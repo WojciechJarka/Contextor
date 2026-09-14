@@ -45,9 +45,6 @@ class CacheManager:
 
         self._dir_ready = False
 
-        # Avoids re-reading a file to hash it twice (get() then set()).
-        self._hash_cache: dict[str, str | None] = {}
-
     # ------------------------------------------------------
     # INTERNALS
     # ------------------------------------------------------
@@ -69,11 +66,6 @@ class CacheManager:
         Zwraca hash zawartości pliku.
         """
 
-        key = str(file_path)
-
-        if key in self._hash_cache:
-            return self._hash_cache[key]
-
         digest: str | None = None
 
         path = Path(file_path)
@@ -90,8 +82,6 @@ class CacheManager:
 
             except OSError:
                 digest = None
-
-        self._hash_cache[key] = digest
 
         return digest
 
