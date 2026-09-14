@@ -349,12 +349,14 @@ def _process_single_file(path_str: str, root_str: str) -> dict:
     cached_data = cache.get(path)
 
     lineage_facts = None
+    cached_lineage_valid = False
     if cached_data is not None:
         lineage_facts = deserialize_extracted_lineage_source_facts(
             cached_data.get("lineage_facts"),
             source_key=source_key,
             source_fingerprint=parsed_input.source_fingerprint,
         )
+        cached_lineage_valid = lineage_facts is not None
 
     lineage_extract_ms = 0.0
     if lineage_facts is None:
@@ -393,7 +395,8 @@ def _process_single_file(path_str: str, root_str: str) -> dict:
             test_facts_status = _TEST_FACTS_AVAILABLE
 
         if not error and (
-            symbol_facts is None
+            not cached_lineage_valid
+            or symbol_facts is None
             or reference_facts is None
             or collision_facts is None
             or (test_candidate and test_facts is None)
