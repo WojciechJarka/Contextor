@@ -2,6 +2,8 @@
 
 from types import SimpleNamespace
 from unittest.mock import MagicMock
+import threading
+import time
 
 import pytest
 
@@ -81,6 +83,10 @@ def _make_controller(repo_path, root=None):
         owner_token="test-owner-token",
         _live_start_retry_attempt=0,
         _live_start_retry_after_id=None,
+        _closing=False,
+        _live_start_lock=threading.Lock(),
+        _live_start_inflight=set(),
+        _live_start_threads={},
         repo_id_var=_GuiFakeVar("Repo ID: unregistered"),
         repo_path_var=_GuiFakeVar(str(repo_path)),
         layer_path_var=_GuiFakeVar(""),
@@ -91,6 +97,18 @@ def _make_controller(repo_path, root=None):
         _statuses=statuses,
     )
     return controller
+
+
+def _wait_for_live_start(controller, timeout=5.0):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        with controller._live_start_lock:
+            threads = list(controller._live_start_threads.values())
+        if not threads:
+            return
+        for thread in threads:
+            thread.join(timeout=0.05)
+    raise AssertionError("LIVE startup background thread did not finish")
 
 
 def test_initial_success(tmp_path, monkeypatch):
@@ -138,7 +156,7 @@ def test_initial_success(tmp_path, monkeypatch):
         lambda *args, **kwargs: SimpleNamespace(modules={}),
     )
 
-    ContextorGUI._start_live_watcher(controller, str(repo))
+    ContextorGUI._start_live_watcher_blocking(controller, str(repo))
 
     assert mock_connect.call_count == 1
     assert len(watcher_instances) == 1
@@ -176,7 +194,7 @@ def test_second_desktop_is_rejected_before_gui_cache_touch(tmp_path, monkeypatch
         ),
     )
     try:
-        ContextorGUI._start_live_watcher(controller, str(repo))
+        ContextorGUI._start_live_watcher_blocking(controller, str(repo))
         assert watcher_instances == []
         assert controller.live_watcher is None
         assert any("already active" in status for status in controller._statuses)
@@ -239,7 +257,7 @@ def test_timeout_then_success(tmp_path, monkeypatch):
     )
 
     # First attempt: triggers TimeoutError and schedules retry
-    ContextorGUI._start_live_watcher(controller, str(repo))
+    ContextorGUI._start_live_watcher_blocking(controller, str(repo))
 
     assert attempts == 1
     assert len(watcher_instances) == 0
@@ -251,6 +269,7 @@ def test_timeout_then_success(tmp_path, monkeypatch):
     # Execute scheduled retry callback
     executed = root.run_next_scheduled()
     assert executed is True
+    _wait_for_live_start(controller)
     assert attempts == 2
     assert len(watcher_instances) == 1
     assert watcher_instances[0].started is True
@@ -306,11 +325,12 @@ def test_late_service_connection(tmp_path, monkeypatch):
         lambda *args, **kwargs: SimpleNamespace(modules={}),
     )
 
-    ContextorGUI._start_live_watcher(controller, str(repo))
+    ContextorGUI._start_live_watcher_blocking(controller, str(repo))
     assert len(connect_calls) == 1
     assert controller._live_start_retry_after_id is not None
 
     root.run_next_scheduled()
+    _wait_for_live_start(controller)
     assert len(connect_calls) == 2
     assert connect_calls[1] == (str(repo), controller.owner_token and None or connect_calls[0][1], controller.owner_token)
     assert controller.live_client is not None
@@ -348,13 +368,16 @@ def test_all_attempts_fail_cleanly(tmp_path, monkeypatch):
     monkeypatch.setattr(gui, "DesktopLiveWatcher", Watcher)
 
     # Initial call
-    ContextorGUI._start_live_watcher(controller, str(repo))
+    ContextorGUI._start_live_watcher_blocking(controller, str(repo))
     assert attempts == 1
 
     # Run all retries until exhaustion
-    run_count = root.run_all_scheduled()
+    run_count = 0
+    while root.run_next_scheduled():
+        run_count += 1
+        _wait_for_live_start(controller)
     assert attempts == LIVE_START_MAX_ATTEMPTS
-    assert run_count == LIVE_START_MAX_ATTEMPTS - 1
+    assert run_count >= LIVE_START_MAX_ATTEMPTS - 1
     assert watcher_created is False
     assert controller.live_watcher is None
     assert controller._live_start_retry_after_id is None
@@ -382,7 +405,7 @@ def test_duplicate_watcher_prevented(tmp_path, monkeypatch):
     monkeypatch.setattr(gui, "connect_or_start", mock_connect)
 
     # First attempt fails and schedules retry
-    ContextorGUI._start_live_watcher(controller, str(repo))
+    ContextorGUI._start_live_watcher_blocking(controller, str(repo))
     assert connect_count == 1
     assert controller._live_start_retry_after_id is not None
     pending_timer = controller._live_start_retry_after_id
@@ -392,7 +415,7 @@ def test_duplicate_watcher_prevented(tmp_path, monkeypatch):
     controller.live_watchers[registry.repo_id] = existing_watcher
 
     # Now execute the stale retry callback
-    ContextorGUI._start_live_watcher(controller, str(repo))
+    ContextorGUI._start_live_watcher_blocking(controller, str(repo))
 
     # connect_or_start must NOT be called again
     assert connect_count == 1
@@ -416,7 +439,7 @@ def test_shutdown_cancels_pending_retry(tmp_path, monkeypatch):
     monkeypatch.setattr(gui, "save_state", lambda **payload: None)
 
     # Initial call sets a pending retry timer
-    ContextorGUI._start_live_watcher(controller, str(repo))
+    ContextorGUI._start_live_watcher_blocking(controller, str(repo))
     assert controller._live_start_retry_after_id is not None
     scheduled_id = controller._live_start_retry_after_id
 

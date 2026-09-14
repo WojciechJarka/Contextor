@@ -135,3 +135,50 @@ both admission records and verifies the acquired JSONL record preserves
 ```powershell
 git diff --no-ext-diff -- contextor/core/analysis/full_analysis_coordinator.py contextor/core/live_state/runtime.py contextor/core/runtime_trace.py tests/test_full_analysis_coordination.py tests/test_runtime_trace.py
 ```
+
+# P0 G1 — Desktop first-paint repair
+
+## STATUS
+
+PARTIAL: production boundary and existing GUI/LIVE regressions are verified; the requested new dedicated public-start/cache-post-paint tests remain to be added before final certification.
+
+## CONTEXTOR_DISCOVERY
+
+Contextor LIVE revision 1018 confirmed `ContextorGUI` startup, watcher, feed,
+identity, close, and watcher-start ownership. `prune_startup_caches` is owned by
+`contextor.core.paths` and consumed by GUI.
+
+## FILES_CHANGED
+
+- `contextor/ui/gui.py`
+- `tests/test_gui_live_startup.py`
+- `tests/test_live_desktop_integration.py`
+
+## MAIN_THREAD_BEFORE / IMPLEMENTED_THREAD_BOUNDARY
+
+The pre-paint cache cleanup and stale-exclude scan now start after paint in
+daemon workers. The public watcher-start API only deduplicates and starts a
+daemon thread; the former heavy flow is `_start_live_watcher_blocking`.
+
+## FIRST_PAINT_CONTRACT
+
+`__init__` builds UI, registers close, then schedules post-paint tasks after
+50ms. No cache prune or stale-exclude filesystem work runs inline before paint.
+
+## INFLIGHT_DEDUP_PROOF / CLOSE_RACE_PROOF
+
+The wrapper keys in-flight startups by resolved path under a lock. Closing sets
+`_closing` before shutdown work, and the blocking path checks it before attach,
+watcher construction, start, and retry; it does not join daemon startup threads.
+
+## TEST_RESULTS
+
+- `pytest -q tests/test_gui_live_startup.py tests/test_live_desktop_integration.py`: PASS, `29 passed in 10.44s`
+- `py_compile contextor/ui/gui.py`: PASS
+- `git diff --check`: PASS
+
+## FULL_DIFFS
+
+```powershell
+git diff --no-ext-diff -- contextor/ui/gui.py tests/test_gui_live_startup.py tests/test_live_desktop_integration.py
+```

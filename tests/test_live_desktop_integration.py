@@ -144,7 +144,7 @@ def test_same_revision_startup_attaches_without_redundant_publish(tmp_path, monk
         lambda *_args, **_kwargs: state,
     )
 
-    gui.ContextorGUI._start_live_watcher(controller, str(repo))
+    gui.ContextorGUI._start_live_watcher_blocking(controller, str(repo))
 
     assert events == []
     assert "LIVE: shared state attached; watcher active" in statuses
@@ -189,7 +189,7 @@ def test_same_revision_different_state_id_does_not_attach_as_same_generation(tmp
         lambda *_args, **_kwargs: loaded,
     )
 
-    gui.ContextorGUI._start_live_watcher(controller, str(repo))
+    gui.ContextorGUI._start_live_watcher_blocking(controller, str(repo))
 
     assert events == []
     assert "LIVE: generation conflict; analysis required" in statuses
@@ -235,7 +235,7 @@ def test_same_revision_missing_state_id_does_not_start_live_components(tmp_path,
         lambda *_args, **_kwargs: loaded,
     )
 
-    gui.ContextorGUI._start_live_watcher(controller, str(repo))
+    gui.ContextorGUI._start_live_watcher_blocking(controller, str(repo))
 
     assert "LIVE: generation conflict; analysis required" in statuses
     assert watcher_starts == []
@@ -291,7 +291,7 @@ def test_desktop_publishes_latest_snapshot_and_replaces_existing_watcher(
         lambda *_args, **_kwargs: state,
     )
 
-    gui.ContextorGUI._start_live_watcher(controller, str(repo))
+    gui.ContextorGUI._start_live_watcher_blocking(controller, str(repo))
 
     assert events[0] == ("publish", state, "desktop_analysis")
     assert events[-2:] == [("start",), ("feed-start",)]
@@ -339,7 +339,7 @@ def test_desktop_refuses_live_for_unregistered_repository(tmp_path, monkeypatch)
         lambda *_args, **_kwargs: None,
     )
 
-    gui.ContextorGUI._start_live_watcher(controller, str(repo))
+    gui.ContextorGUI._start_live_watcher_blocking(controller, str(repo))
 
     assert events == [
         ("status", "LIVE: repository not registered; run an analysis"),
@@ -425,9 +425,9 @@ def test_switching_repositories_keeps_previous_watcher_active(tmp_path, monkeypa
         lambda *_args, **_kwargs: SimpleNamespace(modules={}),
     )
 
-    gui.ContextorGUI._start_live_watcher(controller, str(first))
+    gui.ContextorGUI._start_live_watcher_blocking(controller, str(first))
     first_watcher = controller.live_watchers[first_registry.repo_id]
-    gui.ContextorGUI._start_live_watcher(controller, str(second))
+    gui.ContextorGUI._start_live_watcher_blocking(controller, str(second))
 
     assert controller.live_watchers == {
         first_registry.repo_id: first_watcher,

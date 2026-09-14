@@ -112,17 +112,30 @@ class ContextorGUI:
         self._live_status_draining = False
         self.last_live_state: dict[str, Any] | None = None
 
-        cache_cleanup = prune_startup_caches()
-        if any(section["errors"] for section in cache_cleanup.values()):
-            self.live_status_var.set("LIVE: cache cleanup incomplete")
-
-        self._check_stale_excludes()
+        self._closing = False
+        self._live_start_lock = threading.Lock()
+        self._live_start_inflight: set[str] = set()
+        self._live_start_threads: dict[str, threading.Thread] = {}
         self._build_ui()
-
-        if self.repo_path_var.get() and Path(self.repo_path_var.get()).is_dir():
-            self.root.after_idle(lambda: self._start_live_watcher(self.repo_path_var.get()))
-
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
+        self.root.after(50, self._start_post_paint_tasks)
+
+    def _start_post_paint_tasks(self):
+        if getattr(self, "_closing", False):
+            return
+        self._set_live_status("LIVE: initializing in background")
+        def cleanup_worker():
+            try:
+                cache_cleanup = prune_startup_caches()
+                if any(section["errors"] for section in cache_cleanup.values()):
+                    self._set_live_status("LIVE: cache cleanup incomplete")
+            except Exception as exc:
+                self._set_live_status(f"LIVE: cache cleanup failed: {exc}")
+        threading.Thread(target=cleanup_worker, name="contextor-startup-cache-cleanup", daemon=True).start()
+        self._check_stale_excludes()
+        repo_path = self.repo_path_var.get()
+        if repo_path and Path(repo_path).is_dir():
+            self._start_live_watcher(repo_path)
 
     def open_exclude_window(self):
         if self.exclude_win and self.exclude_win.winfo_exists():
@@ -170,18 +183,29 @@ class ContextorGUI:
         in the project or if they returned. Triggers prompt if true.
         """
         repo_saved = self.repo_path_var.get()
-        if repo_saved:
-            conflicts = check_stale_excludes(repo_saved)
-            if conflicts:
-                answer = messagebox.askyesno(
-                    "Outdated exclusions",
-                    "Detected files/directories that returned to the repo.\n\nReapply exclusions?\n\n"
-                    + "\n".join(conflicts),
-                )
+        if not repo_saved or getattr(self, "_closing", False):
+            return
+        def worker():
+            try:
+                conflicts = check_stale_excludes(repo_saved)
+            except Exception:
+                return
+            if not conflicts or getattr(self, "_closing", False):
+                return
+            def prompt():
+                if getattr(self, "_closing", False):
+                    return
+                if self.repo_path_var.get() != repo_saved:
+                    return
+                answer = messagebox.askyesno("Outdated exclusions", "Detected files/directories that returned to the repo.\n\nReapply exclusions?\n\n" + "\n".join(conflicts))
                 if answer:
                     from contextor.ui.exclude_gui import reapply_excludes
-
                     reapply_excludes(repo_saved, conflicts)
+            try:
+                self.root.after(0, prompt)
+            except Exception:
+                pass
+        threading.Thread(target=worker, name="contextor-startup-exclude-check", daemon=True).start()
 
     def _build_ui(self):
         """
@@ -809,7 +833,41 @@ class ContextorGUI:
             self._live_status_draining = False
 
     def _start_live_watcher(self, path, initial_seq: int | None = None):
+        if getattr(self, "_closing", False):
+            return
+        try:
+            path_key = str(Path(path).expanduser().resolve())
+        except Exception:
+            path_key = str(path)
+        lock = getattr(self, "_live_start_lock", None)
+        if lock is None:
+            lock = self._live_start_lock = threading.Lock()
+        inflight = getattr(self, "_live_start_inflight", None)
+        if inflight is None:
+            inflight = self._live_start_inflight = set()
+        threads = getattr(self, "_live_start_threads", None)
+        if threads is None:
+            threads = self._live_start_threads = {}
+        with lock:
+            if getattr(self, "_closing", False) or path_key in inflight:
+                return
+            inflight.add(path_key)
+        def runner():
+            try:
+                ContextorGUI._start_live_watcher_blocking(self, path, initial_seq=initial_seq)
+            finally:
+                with lock:
+                    inflight.discard(path_key)
+                    threads.pop(path_key, None)
+        thread = threading.Thread(target=runner, name="contextor-live-desktop-start", daemon=True)
+        with lock:
+            threads[path_key] = thread
+        thread.start()
+
+    def _start_live_watcher_blocking(self, path, initial_seq: int | None = None):
         """Connect and retain one independent LIVE watcher per repository ID."""
+        if getattr(self, "_closing", False):
+            return
         try:
             identity = ContextorGUI._refresh_repo_identity(self, path)
         except RepositoryIdentityError as exc:
@@ -855,6 +913,8 @@ class ContextorGUI:
             if "client_kind" in parameters:
                 connect_kwargs["client_kind"] = "desktop"
             client = connect_or_start(path, **connect_kwargs)
+            if getattr(self, "_closing", False):
+                return
             self.live_client = client
             clients[identity.repo_id] = client
             cache = migrate_legacy_snapshot(path)
@@ -872,6 +932,8 @@ class ContextorGUI:
             self._set_live_status(f"LIVE: {exc}")
             return
         except (OSError, EOFError, RuntimeError, TimeoutError, RepositoryIdentityError) as exc:
+            if getattr(self, "_closing", False):
+                return
             current_attempt = getattr(self, "_live_start_retry_attempt", 0) + 1
             self._live_start_retry_attempt = current_attempt
             if current_attempt < LIVE_START_MAX_ATTEMPTS:
@@ -953,6 +1015,8 @@ class ContextorGUI:
                 timeout=30.0,
             )
 
+        if getattr(self, "_closing", False):
+            return
         self.live_watcher = DesktopLiveWatcher(
             path,
             client,
@@ -982,20 +1046,37 @@ class ContextorGUI:
         feeds[identity.repo_id] = feed
         if hasattr(feed, "replay_authority_events"):
             feed.replay_authority_events()
+        if getattr(self, "_closing", False):
+            return
         self.live_watcher.start()
         feed.start()
 
     def _refresh_repo_identity(self, path):
         """Refresh the permanent repository identity shown beside LIVE status."""
-
         try:
             identity = read_repository_identity(path)
-        except RepositoryIdentityError:
-            self.repo_id_var.set("Repo ID: invalid")
-            raise
-        self.repo_id_var.set(
-            f"Repo ID: {identity.repo_id}" if identity else "Repo ID: unregistered"
-        )
+            label = f"Repo ID: {identity.repo_id}" if identity else "Repo ID: unregistered"
+        except RepositoryIdentityError as exc:
+            label = "Repo ID: invalid"
+            identity = None
+            identity_error = exc
+        else:
+            identity_error = None
+        def apply_label():
+            if getattr(self, "_closing", False):
+                return
+            repo_path_var = getattr(self, "repo_path_var", None)
+            if repo_path_var is None or repo_path_var.get() == str(path):
+                self.repo_id_var.set(label)
+        if threading.current_thread() is threading.main_thread():
+            apply_label()
+        else:
+            try:
+                self.root.after(0, apply_label)
+            except Exception:
+                pass
+        if identity_error is not None:
+            raise identity_error
         return identity
 
     def analyze_layer(self):
@@ -1132,6 +1213,7 @@ class ContextorGUI:
         import re
         import time
 
+        self._closing = True
         close_cmd_log()
 
         # Route Desktop shutdown through the same cancellation path as Stop
