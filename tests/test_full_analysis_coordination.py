@@ -155,6 +155,36 @@ def _worker_os_lock_hold(repo_path: str, owner: str, ready_event, result_queue, 
         raise
 
 
+def _worker_acquire_writer_kind(
+    repo_path: str,
+    owner: str,
+    writer_kind: str,
+    waiting_event,
+    acquired_event,
+    release_event,
+    result_queue,
+):
+    def log(message: str):
+        if "Waiting for full analysis lease" in message:
+            waiting_event.set()
+
+    try:
+        lease = acquire_full_analysis(
+            repo_path,
+            owner=owner,
+            writer_kind=writer_kind,
+            timeout=5.0,
+            poll_interval=0.01,
+            log=log,
+        )
+        acquired_event.set()
+        result_queue.put({"status": "acquired", "owner": owner})
+        release_event.wait(timeout=5.0)
+        release_full_analysis(lease)
+    except Exception as exc:
+        result_queue.put({"status": "error", "owner": owner, "error": repr(exc)})
+
+
 def _worker_try_acquire(repo_path: str, owner: str, timeout: float, result_queue):
     """Worker process that attempts to acquire lease."""
     try:
@@ -901,16 +931,83 @@ def test_admission_timeout_does_not_leak_locks(tmp_path: Path):
 def test_admission_cancellation_does_not_leak_locks(tmp_path: Path):
     repo = tmp_path / "repo_admission_cancel"
     repo.mkdir()
-    holder = acquire_full_analysis(repo, owner="a", writer_kind="live_mutation")
-    cancelled = threading.Event()
-    cancelled.set()
+    ctx = multiprocessing.get_context("spawn")
+    ready, results = ctx.Event(), ctx.Queue()
+    holder = ctx.Process(target=_worker_os_lock_hold, args=(str(repo), "a", ready, results, 30.0))
+    full_waiting, full_acquired, release_full = threading.Event(), threading.Event(), threading.Event()
+
+    def wait_for_full():
+        lease = acquire_full_analysis(
+            repo, owner="full", writer_kind="full_analysis", poll_interval=0.01,
+            log=lambda message: full_waiting.set() if "Waiting for full analysis lease" in message else None,
+        )
+        full_acquired.set()
+        release_full.wait(timeout=5)
+        release_full_analysis(lease)
+
+    thread = threading.Thread(target=wait_for_full)
+    holder.start()
     try:
+        assert ready.wait(timeout=15)
+        assert results.get(timeout=2)["status"] == "acquired"
+        thread.start()
+        assert full_waiting.wait(timeout=5)
+        cancellation_checks = 0
+
+        def is_cancelled():
+            nonlocal cancellation_checks
+            cancellation_checks += 1
+            return cancellation_checks >= 3
+
         with pytest.raises(AnalysisCancelled):
             acquire_full_analysis(
                 repo, owner="cancelled", writer_kind="live_mutation",
-                is_cancelled=cancelled.is_set, poll_interval=0.01,
+                is_cancelled=is_cancelled, poll_interval=0.01,
             )
+        assert cancellation_checks >= 3
     finally:
-        release_full_analysis(holder)
+        if holder.is_alive():
+            holder.terminate()
+        holder.join(timeout=3)
+        assert full_acquired.wait(timeout=5)
+        release_full.set()
+        thread.join(timeout=5)
     lease = acquire_full_analysis(repo, owner="after", writer_kind="live_mutation", timeout=1)
     release_full_analysis(lease)
+
+
+def test_cross_process_waiting_full_analysis_precedes_later_live_mutation(tmp_path: Path):
+    repo = tmp_path / "repo_admission_cross_process"
+    repo.mkdir()
+    ctx = multiprocessing.get_context("spawn")
+    ready, holder_results = ctx.Event(), ctx.Queue()
+    holder = ctx.Process(target=_worker_os_lock_hold, args=(str(repo), "a", ready, holder_results, 30.0))
+    full_waiting, full_acquired, release_full = ctx.Event(), ctx.Event(), ctx.Event()
+    mutation_waiting, mutation_acquired, release_mutation = ctx.Event(), ctx.Event(), ctx.Event()
+    results = ctx.Queue()
+    full = ctx.Process(target=_worker_acquire_writer_kind, args=(str(repo), "full", "full_analysis", full_waiting, full_acquired, release_full, results))
+    mutation = ctx.Process(target=_worker_acquire_writer_kind, args=(str(repo), "mutation_b", "live_mutation", mutation_waiting, mutation_acquired, release_mutation, results))
+    holder.start()
+    try:
+        assert ready.wait(timeout=15)
+        assert holder_results.get(timeout=2)["status"] == "acquired"
+        full.start()
+        assert full_waiting.wait(timeout=5)
+        mutation.start()
+        holder.terminate()
+        holder.join(timeout=3)
+        assert full_acquired.wait(timeout=5)
+        assert not mutation_acquired.is_set()
+        assert results.get(timeout=2)["owner"] == "full"
+        release_full.set()
+        assert mutation_acquired.wait(timeout=5)
+        assert results.get(timeout=2)["owner"] == "mutation_b"
+        release_mutation.set()
+    finally:
+        release_full.set()
+        release_mutation.set()
+        for process in (holder, full, mutation):
+            if process.is_alive():
+                process.terminate()
+            process.join(timeout=5)
+            assert not process.is_alive()

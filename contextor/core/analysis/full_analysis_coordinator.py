@@ -151,25 +151,28 @@ def _canonical_writer_admission(
         )
         yield
     finally:
-        if fd >= 0:
-            if os_locked:
-                _unlock_fd(fd)
-            else:
-                try:
-                    os.close(fd)
-                except OSError:
-                    pass
         try:
-            process_lock.release()
-        except RuntimeError:
-            pass
-        trace_event(
-            "ANALYSIS",
-            "CANONICAL_WRITER_ADMISSION_RELEASED",
-            repo_id=repo_id,
-            owner=owner,
-            writer_kind=writer_kind,
-        )
+            if fd >= 0:
+                if os_locked:
+                    _unlock_fd(fd)
+                else:
+                    try:
+                        os.close(fd)
+                    except OSError:
+                        pass
+        finally:
+            try:
+                process_lock.release()
+            except RuntimeError:
+                pass
+            if os_locked:
+                trace_event(
+                    "ANALYSIS",
+                    "CANONICAL_WRITER_ADMISSION_RELEASED",
+                    repo_id=repo_id,
+                    owner=owner,
+                    writer_kind=writer_kind,
+                )
 
 
 def _prepare_lock_fd(lock_path: Path) -> int:

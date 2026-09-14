@@ -75,3 +75,63 @@ git diff --no-ext-diff -- contextor/core/analysis/full_analysis_coordinator.py c
 
 They are intentionally excluded from this report's own diff and remain directly
 reviewable from the repository working tree.
+
+# P0 W1a — admission cleanup and trace contract
+
+## STATUS
+
+PASS. Desktop/LIVE runtime certification remains pending a user-owned service restart.
+
+## CONTEXTOR_DISCOVERY
+
+MCP revision 1011 verified `_canonical_writer_admission` and
+`acquire_full_analysis` in the coordinator, the LIVE mutation guard call site,
+and the existing runtime-trace header/event writer. The W1 call paths matched
+the supplied W1a contract.
+
+## FILES_CHANGED
+
+- `contextor/core/analysis/full_analysis_coordinator.py`
+- `contextor/core/runtime_trace.py`
+- `tests/test_full_analysis_coordination.py`
+- `tests/test_runtime_trace.py`
+
+## CLEANUP_PROOF
+
+Admission cleanup is now nested: release of the in-process admission lock runs
+even if native `_unlock_fd` fails. The release trace is emitted only after a
+real OS admission acquisition (`os_locked=True`). Acquisition ordering is
+unchanged.
+
+## CROSS_PROCESS_ORDER_PROOF
+
+The added spawned-process scenario holds A's execution lease, waits until F's
+lease log proves F owns admission while waiting, then starts B. It proves F is
+the first acquisition result, B remains unacquired while F holds execution,
+and B is the second result after F is released.
+
+## CANCELLATION_WHILE_WAITING_PROOF
+
+The replacement cancellation test makes F own admission and wait on A's OS
+execution lease. C polls the occupied process admission at least twice before
+its third cancellation check raises `AnalysisCancelled`; after A/F release, a
+new writer acquires and releases normally.
+
+## TRACE_SCHEMA_PROOF
+
+`ANALYSIS`, both admission events, all three full-analysis events, and the
+`owner`/`writer_kind` header fields are declared. The durability test writes
+both admission records and verifies the acquired JSONL record preserves
+`repo_id`, owner, writer kind, and `wait_ms=12.5`.
+
+## TEST_RESULTS
+
+- `pytest -q tests/test_full_analysis_coordination.py tests/test_live_mutation_coordinator.py tests/test_runtime_trace.py`: PASS, `50 passed in 37.57s`
+- `py_compile` for coordinator, LIVE runtime, and runtime trace: PASS
+- `git diff --check`: PASS
+
+## FULL_DIFFS
+
+```powershell
+git diff --no-ext-diff -- contextor/core/analysis/full_analysis_coordinator.py contextor/core/live_state/runtime.py contextor/core/runtime_trace.py tests/test_full_analysis_coordination.py tests/test_runtime_trace.py
+```

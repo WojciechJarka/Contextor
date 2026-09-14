@@ -47,8 +47,38 @@ def test_desktop_trace_session_headers_and_finish(tmp_path, monkeypatch):
     assert not (tmp_path / "logs" / "contextor_runtime_active.json").exists()
     assert len(records[6]["err"]) == 500
     fields, events = records[1]["fields"], records[4]["events"]["LIVE"]
-    assert {"attempt", "attempts", "attempts_used", "retry_delay", "runtime_domain_id", "repo_id", "endpoint_fingerprint", "service_pid", "lease_generation", "service_instance_id", "reason_code", "exception_class", "errno", "winerror", "error", "pid_alive", "endpoint_changed", "process_alive", "process_identity_matches", "endpoint_available", "endpoint_matches", "reason", "result", "side", "operation_or_request_type", "prior_endpoint_fingerprint", "prior_service_pid", "new_endpoint_fingerprint", "new_service_pid", "recovery_operation_id"} <= set(fields)
+    assert {"attempt", "attempts", "attempts_used", "retry_delay", "runtime_domain_id", "repo_id", "endpoint_fingerprint", "service_pid", "lease_generation", "service_instance_id", "reason_code", "exception_class", "errno", "winerror", "error", "pid_alive", "endpoint_changed", "process_alive", "process_identity_matches", "endpoint_available", "endpoint_matches", "reason", "result", "side", "operation_or_request_type", "prior_endpoint_fingerprint", "prior_service_pid", "new_endpoint_fingerprint", "new_service_pid", "recovery_operation_id", "owner", "writer_kind"} <= set(fields)
+    assert "ANALYSIS" in records[2]["domains"]
     assert {"LIVE_CONNECT_ATTEMPT", "LIVE_CONNECT_REJECT", "LIVE_CONNECT_RESULT", "LIVE_LIVENESS_RESULT", "LIVE_WATCHER_RECOVERY_START", "LIVE_WATCHER_RECOVERY_RESULT", "LIVE_IPC_FAILURE", "LIVE_SERVICE_THREAD_FAILURE"} <= set(events)
+
+
+def test_canonical_writer_analysis_trace_is_self_describing_and_durable():
+    path = trace.start_desktop_trace_session()
+    trace.trace_event(
+        "ANALYSIS",
+        "CANONICAL_WRITER_ADMISSION_ACQUIRED",
+        repo_id="repo-test",
+        owner="desktop_analysis",
+        writer_kind="full_analysis",
+        wait_ms=12.5,
+    )
+    trace.trace_event(
+        "ANALYSIS",
+        "CANONICAL_WRITER_ADMISSION_RELEASED",
+        repo_id="repo-test",
+        owner="desktop_analysis",
+        writer_kind="full_analysis",
+    )
+    trace.finish_desktop_trace_session()
+    records = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+    assert "ANALYSIS" in records[2]["domains"]
+    assert {"CANONICAL_WRITER_ADMISSION_ACQUIRED", "CANONICAL_WRITER_ADMISSION_RELEASED", "FULL_ANALYSIS_LEASE_ACQUIRED", "FULL_ANALYSIS_BODY_END", "FULL_ANALYSIS_END"} <= set(records[4]["events"]["ANALYSIS"])
+    assert {"owner", "writer_kind"} <= set(records[1]["fields"])
+    acquired = next(item for item in records if item.get("ev") == "CANONICAL_WRITER_ADMISSION_ACQUIRED")
+    assert acquired["repo_id"] == "repo-test"
+    assert acquired["owner"] == "desktop_analysis"
+    assert acquired["writer_kind"] == "full_analysis"
+    assert acquired["wait_ms"] == 12.5
 
 
 def test_diagnostic_trace_fields_and_structured_node_arrays_are_durable():
