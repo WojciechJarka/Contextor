@@ -81,6 +81,23 @@ def test_legacy_cache_without_lineage_is_migrated_once(
 
     indexer.index_repository(str(repo))
 
+    assert calls == 1
+
+    migrated_data = cache.get(source)
+    assert migrated_data is not None
+    assert "lineage_facts" in migrated_data
+
+    def fail_extract(*args, **kwargs):
+        raise AssertionError("migrated lineage cache must skip extraction")
+
+    monkeypatch.setattr(
+        indexer,
+        "extract_lineage_source_facts",
+        fail_extract,
+    )
+
+    indexer.index_repository(str(repo))
+
 
 def test_stale_lineage_schema_is_migrated_once(
     tmp_path: Path,
@@ -141,23 +158,6 @@ def test_stale_lineage_schema_is_migrated_once(
 
     def fail_extract(*args, **kwargs):
         raise AssertionError("current-schema lineage cache must skip extraction")
-
-    monkeypatch.setattr(
-        indexer,
-        "extract_lineage_source_facts",
-        fail_extract,
-    )
-
-    indexer.index_repository(str(repo))
-
-    assert calls == 1
-
-    migrated_data = cache.get(source)
-    assert migrated_data is not None
-    assert "lineage_facts" in migrated_data
-
-    def fail_extract(*args, **kwargs):
-        raise AssertionError("migrated lineage cache must skip extraction")
 
     monkeypatch.setattr(
         indexer,
