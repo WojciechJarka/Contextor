@@ -1,4 +1,4 @@
-# CPA8D_EXACT_PROFILE_TIMELINE
+# CPA9_PROCESS_ISOLATED_PROFILE_EXECUTION
 
 ## STATUS
 
@@ -6,55 +6,58 @@ SUCCESS.
 
 ## HEAD
 
-`40be6957a7b30820daa5cee8ccf6f064fa1fc6e0` — matches EXPECTED_HEAD.
+`e0e5f761802270e04b8a2f34becca7d075d3ddcf`
 
-## PROFILE_ANALYSIS_TIMELINE
+## BASE_DRIFT
 
-| Time UTC | Domain | Event | Operation | Details |
-| --- | --- | --- | --- | --- |
-| 21:15:52.938 | MCP | CALL_START | m-5704-5 | tool=contextor_profile_analysis, PID 5704, TID 15244 |
-| 21:15:52.947 | ANALYSIS | CANONICAL_WRITER_ADMISSION_ACQUIRED | profile-5704-6 | owner=mcp_analysis, wait_ms=0.0 |
-| 21:15:52.977 | ANALYSIS | CANONICAL_WRITER_ADMISSION_RELEASED | profile-5704-6 | admission released |
-| 21:15:52.977 | ANALYSIS | FULL_ANALYSIS_LEASE_ACQUIRED | profile-5704-6 | wait_ms=47.0000000204891 |
-| 21:16:02.530 | ANALYSIS | FULL_ANALYSIS_STAGE_END | profile-5704-6 | stage=identity_and_setup, elapsed_ms=9546.999999962281 |
+WALKTHROUGH_ONLY relative to `40be6957a7b30820daa5cee8ccf6f064fa1fc6e0` before CPA9 edits.
 
-## COMPLETED_STAGES
+## FILES_CHANGED
 
-- identity_and_setup: 9546.999999962281 ms
+- contextor/core/analysis/profile_worker.py
+- contextor/mcp/tools/contextor_profile_analysis.py
+- contextor/mcp/docs/contextor_profile_analysis.json
+- tests/test_profile_worker.py
+- tests/mcp/tools/test_contextor_profile_analysis.py
+- walkthrough.md
 
-## LAST_COMPLETED_STAGE
+## IMPLEMENTATION
 
-`identity_and_setup`, 9546.999999962281 ms.
+Public MCP profile execution now launches `python -u -m contextor.core.analysis.profile_worker`. The worker validates stdin JSON, invokes existing `run_analysis_profile`, and returns compact JSON on stdout. The worker has `multiprocessing.freeze_support()` under the main guard.
 
-## INDEX_EVIDENCE_IF_PRESENT
+## TESTS
 
-Absent.
+Specified suite: 18 passed in 3.98s (one external Authlib deprecation warning). `py_compile` and scoped `git diff --check` passed.
 
-## LINEAGE_EVIDENCE_IF_PRESENT
+## SUBPROCESS_CONTRACT
 
-Absent.
+MCP sends `{repo_path, exclude_paths}` through stdin; worker results are read only from stdout. Invalid worker exits and invalid JSON are surfaced as RuntimeError. No temp artifacts or persistent profile files are created.
 
-## FULL_ANALYSIS_TERMINAL
+## PROCESSPOOL_PRESERVATION
 
-Absent: no `FULL_ANALYSIS_BODY_END` or `FULL_ANALYSIS_END` exists for `profile-5704-6`.
+The existing CPA6 runner remains unmodified and continues through the normal production full-analysis/indexer ProcessPool path. No process-pool disabling flag was introduced.
 
-## MCP_TERMINAL
+## PUBLIC_SIGNATURE
 
-Absent: only MCP `CALL_START` exists for `m-5704-5`; no `IMPLEMENTATION_END`, `DIAGNOSTICS_END`, `TELEMETRY_END`, `CALL_END`, or `CALL_FAIL` exists.
+Unchanged: `(repo_path: str, exclude_paths: list[str] | None = None) -> str`.
 
-## OS_LOCK_STATE
+## DOCS_PARITY
 
-`OS_LOCK_HELD_BY_OTHER_PROCESS=true`.
+Runtime documentation now describes the dedicated worker process and isolated normal ProcessPool.
 
-## OWNER_PROCESS_STATE
+## CONTEXTOR_FLOW_VERIFY
 
-Lease metadata identifies `owner=mcp_analysis`, PID 5704, and token `db07cd5803874e95864c6001f372851b`. PID 5704 is alive at the matching process start identity `134338937640301652`; image: `C:\SpiralProphet\python\WPy64-31090\python-3.10.9.amd64\python.exe`.
+Not refreshed: new symbols may be out of sync in LIVE. No full analysis ran.
 
-## CLASSIFICATION
+## FULL_DIFFS
 
-`ANALYSIS_STILL_RUNNING`.
+Available from current scoped Git diff for all five task files; no commit was created.
 
-## IMPLICATION
+## COMMIT_SHA
 
-CPA8B passed identity/setup; it must not be labelled as a hang in that phase. The previous absence of stages was caused by filtering ANALYSIS events on `owner`, a field stage events do not carry. No profile, analysis, update, test, restart, or code change was performed.
+Not created.
+
+## RUNTIME_RESTART_REQUIRED
+
+YES. End the existing old MCP runtime PID 5704 to release its hung lease/workers, then launch a fresh MCP runtime to load the subprocess profile path. No restart or process termination was performed.
 
