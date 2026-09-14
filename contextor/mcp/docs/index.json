@@ -139,6 +139,11 @@
       "short_description": "Return Contextor self-architecture lineage for one canonical fact family: production, staging, canonical state, lifecycle writers, persistence, hydration, and public projection."
     },
     {
+      "tool": "contextor_profile_analysis",
+      "filename": "contextor_profile_analysis.json",
+      "short_description": "Run one non-blocking-admission full-analysis diagnostic profile and return critical-path bottlenecks with deterministic structured evidence. Absolute wall time is diagnostic, not benchmark-authoritative."
+    },
+    {
       "tool": "get_mcp_documentation",
       "filename": "get_mcp_documentation.json",
       "short_description": "Return centralized MCP documentation, optionally filtered by tool names and sections. This passive tool reads no repository, LIVE state, or output reports."

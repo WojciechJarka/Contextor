@@ -207,6 +207,9 @@ from contextor.mcp.tools.lookup_artifact_by_symbol import (
     lookup_artifact_by_symbol as _lookup_artifact_by_symbol_impl,
 )
 from contextor.mcp.tools.analyze_project import analyze_project as _analyze_project_impl
+from contextor.mcp.tools.contextor_profile_analysis import (
+    contextor_profile_analysis as _contextor_profile_analysis_impl,
+)
 from contextor.mcp.tools.analyze_layer import analyze_layer as _analyze_layer_impl
 from contextor.mcp.tools.analyze_single_file import (
     analyze_single_file as _analyze_single_file_impl,
@@ -524,6 +527,7 @@ REGISTERED_MCP_TOOL_NAMES: tuple[str, ...] = (
     "get_mcp_documentation",
     "get_module_blast_radius",
     "contextor_fact_lineage",
+    "contextor_profile_analysis",
 )
 
 
@@ -574,6 +578,10 @@ get_name_collisions = register_mcp_tool(_get_name_collisions_impl, name="get_nam
 get_mcp_documentation = register_mcp_tool(_get_mcp_documentation_impl, name="get_mcp_documentation")
 get_module_blast_radius = register_mcp_tool(_get_module_blast_radius_impl, name="get_module_blast_radius")
 contextor_fact_lineage = register_mcp_tool(_contextor_fact_lineage_impl, name="contextor_fact_lineage")
+contextor_profile_analysis = register_mcp_tool(
+    _contextor_profile_analysis_impl,
+    name="contextor_profile_analysis",
+)
 
 
 def main():

@@ -72,7 +72,7 @@ def test_documentation_default_returns_only_index(monkeypatch):
     result = json.loads(mcp_server.get_mcp_documentation.fn())
 
     assert result["version"]
-    assert len(result["tools"]) == 28
+    assert len(result["tools"]) == 29
     assert result["documentation_hint"] == (
         "For full documentation of a tool, call "
         "get_mcp_documentation with tool=<tool_name>."
@@ -168,6 +168,24 @@ def test_documentation_reader_paths_are_package_local(monkeypatch):
     docs_root = documentation.DOCS_DIR.resolve()
     assert read_paths
     assert all(path.parent == docs_root for path in read_paths)
+
+
+def test_contextor_profile_analysis_is_registered_and_documented():
+    tool = mcp_server.mcp._tool_manager._tools[
+        "contextor_profile_analysis"
+    ]
+    index = documentation.load_documentation_index()
+    entry = next(
+        item
+        for item in index["tools"]
+        if item["tool"] == "contextor_profile_analysis"
+    )
+
+    assert tool.description == entry["short_description"]
+    assert str(inspect.signature(tool.fn, eval_str=True)) == (
+        "(repo_path: str, exclude_paths: list[str] | None = None) -> str"
+    )
+    assert index["tools"][-1]["tool"] == "get_mcp_documentation"
 
 
 def test_get_symbol_lineage_is_registered_with_documented_public_signature():
