@@ -23,7 +23,7 @@ _EXPECTED_ORDER = [
     "query_canonical_projection", "extract_indexed_report_context",
     "lookup_index_entries", "get_artifacts_for_module",
     "lookup_artifact_by_symbol", "search_source", "get_source_range",
-    "get_symbol_call_context", "get_name_collisions",
+    "get_symbol_call_context", "get_symbol_lineage", "get_name_collisions",
     "get_mcp_documentation", "get_module_blast_radius",
     "contextor_fact_lineage",
 ]

@@ -446,7 +446,7 @@ def test_foreign_live_endpoint_blocks_stale_takeover(
         def authority_status(self):
             return {
                 "status": "ok",
-                "protocol_version": 3,
+                "protocol_version": runtime_module.LIVE_PROTOCOL_VERSION,
                 "repo_id": foreign_endpoint.repo_id,
                 "root_path": foreign_endpoint.root_path,
                 "runtime_domain_id": foreign_endpoint.runtime_domain_id,

@@ -831,10 +831,10 @@ def test_mcp_analyze_project_wrapper_and_canonical_publish_equivalence(live_serv
     assert events[1]["canonical_revision"] == 2
 
 
-def test_all_27_registered_mcp_tools_telemetry_against_fastmcp_registry(monkeypatch):
+def test_all_28_registered_mcp_tools_telemetry_against_fastmcp_registry(monkeypatch):
     fastmcp_tool_names = set(mcp._tool_manager._tools.keys())
     assert set(REGISTERED_MCP_TOOL_NAMES) == fastmcp_tool_names
-    assert len(REGISTERED_MCP_TOOL_NAMES) == 27
+    assert len(REGISTERED_MCP_TOOL_NAMES) == 28
 
     calls_emitted = []
 

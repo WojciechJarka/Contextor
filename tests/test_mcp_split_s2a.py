@@ -43,6 +43,7 @@ _EXPECTED_ORDER = [
     "search_source",
     "get_source_range",
     "get_symbol_call_context",
+    "get_symbol_lineage",
     "get_name_collisions",
     "get_mcp_documentation",
     "get_module_blast_radius",
