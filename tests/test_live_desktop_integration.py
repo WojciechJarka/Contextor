@@ -300,6 +300,64 @@ def test_desktop_publishes_latest_snapshot_and_replaces_existing_watcher(
     assert controller.repo_id_var.value == f"Repo ID: {registry.repo_id}"
 
 
+def test_desktop_skips_cache_publish_when_canonical_writer_is_busy_but_starts_watcher(tmp_path, monkeypatch):
+    repo = tmp_path / "repo_busy"
+    repo.mkdir()
+    PersistentIdentityRegistry(str(repo))
+    state = SimpleNamespace(modules={}, revision=7)
+    publish_calls, statuses, starts = [], [], []
+    class Client:
+        def snapshot(self): return {}
+        def publish(self, *_args, **_kwargs): publish_calls.append(True)
+    class Watcher:
+        def __init__(self, *_args, **_kwargs): pass
+        def start(self): starts.append("watcher")
+    class Feed:
+        def __init__(self, *_args, **_kwargs): pass
+        def start(self): starts.append("feed")
+    controller = SimpleNamespace(live_watcher=None, live_event_feed=None, live_watchers={}, live_event_feeds={}, repo_id_var=_LiveIntegrationFakeVar(), _set_live_status=statuses.append)
+    monkeypatch.setattr(gui, "connect_or_start", lambda *_a, **_k: Client())
+    monkeypatch.setattr(gui, "DesktopLiveWatcher", Watcher)
+    monkeypatch.setattr(gui, "DesktopLiveEventFeed", Feed)
+    monkeypatch.setattr("contextor.core.analysis.state_manager.load_engine_state", lambda *_a, **_k: state)
+    held = acquire_full_analysis(repo, owner="test_full_analysis", writer_kind="full_analysis", timeout=1.0)
+    try:
+        gui.ContextorGUI._start_live_watcher_blocking(controller, str(repo))
+    finally:
+        release_full_analysis(held)
+    assert publish_calls == []
+    assert "LIVE: canonical writer busy; cache publish skipped" in statuses
+    assert starts == ["watcher", "feed"]
+
+
+def test_desktop_startup_publish_uses_startup_publish_writer_kind(tmp_path, monkeypatch):
+    repo = tmp_path / "repo_kind"
+    repo.mkdir()
+    PersistentIdentityRegistry(str(repo))
+    state = SimpleNamespace(modules={}, revision=7)
+    calls, events = [], []
+    lease = object()
+    class Client:
+        def snapshot(self): return {}
+        def publish(self, *_args, **_kwargs): events.append("publish"); return {"status": "ok"}
+    class Watcher:
+        def __init__(self, *_a, **_k): pass
+        def start(self): pass
+    class Feed:
+        def __init__(self, *_a, **_k): pass
+        def start(self): pass
+    controller = SimpleNamespace(live_watcher=None, live_event_feed=None, live_watchers={}, live_event_feeds={}, repo_id_var=_LiveIntegrationFakeVar(), _set_live_status=lambda _m: None)
+    monkeypatch.setattr(gui, "connect_or_start", lambda *_a, **_k: Client())
+    monkeypatch.setattr(gui, "DesktopLiveWatcher", Watcher)
+    monkeypatch.setattr(gui, "DesktopLiveEventFeed", Feed)
+    monkeypatch.setattr("contextor.core.analysis.state_manager.load_engine_state", lambda *_a, **_k: state)
+    monkeypatch.setattr(gui, "acquire_full_analysis", lambda *a, **k: calls.append((a, k)) or lease)
+    monkeypatch.setattr(gui, "release_full_analysis", lambda value: events.append(("release", value)))
+    gui.ContextorGUI._start_live_watcher_blocking(controller, str(repo))
+    assert calls[0][1] == {"owner": "desktop_startup_publish", "writer_kind": "startup_publish", "timeout": 0.0, "poll_interval": 0.01}
+    assert events == ["publish", ("release", lease)]
+
+
 def test_desktop_refuses_live_for_unregistered_repository(tmp_path, monkeypatch):
     repo = tmp_path / "repo"
     repo.mkdir()

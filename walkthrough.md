@@ -245,9 +245,7 @@ dedicated regressions in `tests/test_gui_live_startup.py`.
 
 ## STATUS
 
-PARTIAL: the production lease boundary and accepted writer kind are verified by
-the focused suite; the two requested dedicated desktop-integration publish tests
-remain to be added.
+PASS
 
 ## CONTEXTOR_DISCOVERY
 
@@ -269,6 +267,18 @@ Startup cache attach now obtains `startup_publish` with `timeout=0.0` only for
 
 ## TEST_RESULTS
 
-- focused G1D suite: `98 passed in 76.54s`
+- focused G1D suite: `100 passed in 68.87s`
 - py_compile coordinator and GUI: PASS
 - git diff --check: PASS
+
+## BUSY_WRITER_SKIP_PROOF
+
+The integration regression holds a real full-analysis lease, proves startup
+does not call `publish`, emits the busy-skip status, and still constructs and
+starts both watcher and feed.
+
+## FREE_WRITER_PUBLISH_PROOF
+
+The existing latest-snapshot test remains green. The new argument regression
+proves startup acquires `startup_publish` with the exact owner, zero timeout,
+and polling interval, publishes, then releases that exact lease once.
