@@ -37,6 +37,7 @@ from contextor.core.domain.lineage_facts import (
 from contextor.core.analysis import state_manager
 from contextor.core.analysis.lineage_extraction import extract_lineage_source_facts
 from contextor.core.reporting_engine.persistent_registry import PersistentIdentityRegistry
+from contextor.core.runtime_trace import capture_trace_events
 from contextor.core.symbol_engine import indexer
 
 
@@ -397,6 +398,70 @@ def test_full_analysis_reuses_exact_previous_lineage_slice_object():
     assert family_state == "fresh"
     assert version == LINEAGE_FACTS_SEMANTIC_VERSION
     assert second_mapping["pkg.py"] is previous
+
+
+def test_full_analysis_lineage_materialization_emits_structured_reuse_evidence():
+    facts = _owned_fresh_slice()
+    index = _index(facts={"pkg.py": facts})
+    artifacts = {"pkg": {"own_symbols": ["target"]}}
+    registry = _ReadOnlyRegistry(
+        {"pkg": "1/1"},
+        {"pkg::target": "A1/1"},
+    )
+
+    first_mapping, _, _ = _materialize_full_analysis_lineage(
+        index,
+        registry,
+        index.modules,
+        artifacts,
+    )
+    previous = first_mapping["pkg.py"]
+
+    with capture_trace_events() as events:
+        second_mapping, family_state, version = _materialize_full_analysis_lineage(
+            index,
+            registry,
+            index.modules,
+            artifacts,
+            previous_state=_previous_lineage_state(first_mapping),
+        )
+
+    matching_events = [
+        item
+        for item in events
+        if item.get("ev") == "FULL_ANALYSIS_LINEAGE_MATERIALIZATION"
+    ]
+
+    assert len(matching_events) == 1
+    event = matching_events[0]
+
+    assert family_state == "fresh"
+    assert version == LINEAGE_FACTS_SEMANTIC_VERSION
+    assert second_mapping["pkg.py"] is previous
+
+    assert event["operation"] == "lineage_materialization"
+    assert (
+        event["timing_semantics"]
+        == "critical_path_subphase_with_nested_components"
+    )
+
+    assert event["reuse_sources"] == 1
+    assert event["reresolve_sources"] == 0
+    assert event["materialize_sources"] == 0
+    assert event["reresolve_fallback_sources"] == 0
+
+    assert event["lineage_sources"] == 1
+    assert event["lineage_anchors"] == len(previous.anchors)
+    assert event["lineage_flows"] == len(previous.flows)
+    assert event["lineage_surfaces"] == len(previous.surfaces)
+    assert event["lineage_descriptors"] == len(
+        previous.interface_descriptors
+    )
+
+    assert event["elapsed_ms"] >= 0.0
+    assert event["reuse_gate_ms"] >= 0.0
+    assert event["reresolve_calls_ms"] == 0.0
+    assert event["materialize_calls_ms"] == 0.0
 
 
 def test_full_analysis_materializes_changed_source_fingerprint():

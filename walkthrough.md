@@ -1,76 +1,106 @@
-# CPA2_INDEXER_PROFILE_EVIDENCE
+# CPA3_STRUCTURED_LINEAGE_MATERIALIZATION_EVIDENCE
 
 ## STATUS
 
-SUCCESS. Added structured parent-side indexer evidence. Critical-path ownership remains unchanged: only FULL_ANALYSIS_STAGE_END(stage="indexing").elapsed_ms represents indexing wall time.
+SUCCESS. Added structured fields to the existing FULL_ANALYSIS_LINEAGE_MATERIALIZATION event without changing materialization/reuse/reresolve logic or its existing result string.
 
 ## FILES_CHANGED
 
-- contextor/core/symbol_engine/indexer.py
+- contextor/core/api/facade.py
 - contextor/core/runtime_trace.py
+- tests/test_full_analysis_lineage_materialization.py
 - tests/test_runtime_trace.py
-- tests/test_indexer_profile_evidence.py
 - walkthrough.md (this report)
 
 ## IMPLEMENTATION
 
-- _process_single_file now returns parse/cache/lineage evidence for every normal result and parse-SourceError result. Parse still precedes cache.get; cache is not queried after parse failure.
-- index_repository has one shared record_file_task_evidence(result), invoked exactly once in inline and ProcessPool parent collection.
-- New parent-only ANALYSIS/FULL_ANALYSIS_INDEX_EVIDENCE has operation=indexing_file_tasks, execution mode, counts/cache facts, and aggregate per-file task sums. It deliberately has no elapsed_ms.
-- Existing FULL_ANALYSIS_LINEAGE_EXTRACTION retains its elapsed_ms, result string, and top-10 compatibility; it now carries timing_semantics=aggregate_file_task_not_critical_path, lineage_extract_calls, and lineage_cache_hits.
-- Runtime trace whitelist/header expose every new field. Each *_sum_ms header description says aggregate per-file task milliseconds; not critical-path wall. Header ANALYSIS events include FULL_ANALYSIS_INDEX_EVIDENCE.
+The existing event now has timing_semantics=critical_path_subphase_with_nested_components and structured reuse/reresolve/materialize counts, nested component timings, and materialized source/anchor/flow/surface/descriptor counts.
+
+elapsed_ms remains full synchronous materialization-subphase wall time. reuse_gate_ms, reresolve_calls_ms, and materialize_calls_ms are nested components only and are not extra wall contributions. The pre-existing result string was not edited.
+
+runtime_trace header and whitelist contain all structured fields; header ANALYSIS events now declares FULL_ANALYSIS_LINEAGE_MATERIALIZATION alongside FULL_ANALYSIS_INDEX_EVIDENCE.
 
 ## TESTS
 
-tests/test_indexer_profile_evidence.py and tests/test_runtime_trace.py: 16 passed in 13.57s.
+Specified nodeids: 3 passed in 2.23s.
 
-py_compile passed for all four changed Python files. git diff --check passed. No full pytest, full analysis, or benchmark ran.
+py_compile passed for facade.py, runtime_trace.py, and both changed test modules. git diff --check passed. No full analysis, benchmark, or full pytest ran.
 
-## EVIDENCE_CONTRACT
+## STRUCTURED_EVIDENCE
 
-| Signal | Meaning |
-| --- | --- |
-| FULL_ANALYSIS_STAGE_END(indexing).elapsed_ms | CRITICAL_PATH wall, unchanged owner |
-| FULL_ANALYSIS_INDEX_EVIDENCE.*_sum_ms | Aggregate per-file task diagnostic time; NOT critical-path wall |
-| FULL_ANALYSIS_LINEAGE_EXTRACTION.elapsed_ms | Existing aggregate file-task/worker sum; explicitly NOT critical-path wall |
-| source_parse_calls with warm cache | Parse occurred before cache lookup |
-| cache_hits, lineage_cache_hits, lineage_extract_calls | Structured cache/extraction evidence; no result-string parsing |
+The focused reuse test verifies one captured event with:
 
-Focused warm-cache proof: two cached files report source_parse_calls=2, cache_hits=2, lineage_cache_hits=2, lineage_extract_calls=0. Cold proof confirms the lineage extraction event’s explicit noncritical timing semantic.
+- operation=lineage_materialization
+- timing_semantics=critical_path_subphase_with_nested_components
+- reuse_sources=1 and reresolve/materialize/fallback counts zero
+- materialized counts matching the reused slice
+- elapsed_ms and reuse_gate_ms non-negative
+- reresolve_calls_ms and materialize_calls_ms zero
+
+No result-string parsing is used by the test.
 
 ## CONTEXTOR_FLOW_VERIFY
 
-Contextor post-edit call contexts show one index_repository -> _process_single_file relationship, existing parent collection coverage for inline and ProcessPool, and trace_event as the canonical ordinary runtime-event append owner. No new indexer/cache owner, child-process trace_event, ContextVar propagation, or trace-session lifecycle was added.
+Contextor shows _materialize_full_analysis_lineage has exactly one listed caller: ContextorFacade.analyze_project (direct, line 774). trace_event remains the canonical ordinary runtime-event append owner, with its existing indexed call graph. No parallel profiler/event lifecycle or altered materialize/reuse/reresolve path was introduced.
 
-Contextor reports workspace_sync=out_of_sync at canonical revision 1094 because the modified files deliberately diverge from the source snapshot. No analysis was run to refresh it.
+Contextor state reports canonical revision 1099 with workspace_sync=out_of_sync because the locally edited files diverge from its source snapshot. No analysis refresh was run.
 
-## DIFFS
+## FULL_DIFFS
 
-### contextor/core/symbol_engine/indexer.py
+### contextor/core/api/facade.py
 
-- Added parse/cache monotonic measurements and boolean result evidence.
-- Replaced lineage-only recorder with shared parent record_file_task_evidence.
-- Added parent-only emit_index_profile_evidence for inline and ProcessPool.
-- Preserved the existing lineage event, result string, and top-10 data.
+```diff
+@@ FULL_ANALYSIS_LINEAGE_MATERIALIZATION
++        timing_semantics="critical_path_subphase_with_nested_components",
++        reuse_sources=reuse_sources,
++        reresolve_sources=reresolve_sources,
++        materialize_sources=materialize_sources,
++        reresolve_fallback_sources=reresolve_fallback_sources,
++        reuse_gate_ms=reuse_gate_ms,
++        reresolve_calls_ms=reresolve_calls_ms,
++        materialize_calls_ms=materialize_calls_ms,
++        lineage_sources=len(materialized_by_source),
++        lineage_anchors=anchor_count,
++        lineage_flows=flow_count,
++        lineage_surfaces=surface_count,
++        lineage_descriptors=descriptor_count,
+```
 
 ### contextor/core/runtime_trace.py
 
-- Added event-field whitelist/header descriptions and FULL_ANALYSIS_INDEX_EVIDENCE header declaration.
+```diff
+@@ trace header fields
++ reuse_sources, reresolve_sources, materialize_sources,
++ reresolve_fallback_sources, reuse_gate_ms, reresolve_calls_ms,
++ materialize_calls_ms, lineage_sources, lineage_anchors, lineage_flows,
++ lineage_surfaces, lineage_descriptors
+@@ ANALYSIS header events
++ FULL_ANALYSIS_LINEAGE_MATERIALIZATION
+@@ trace_event whitelist
++ corresponding structured field mappings
+```
+
+### tests/test_full_analysis_lineage_materialization.py
+
+```diff
++from contextor.core.runtime_trace import capture_trace_events
++def test_full_analysis_lineage_materialization_emits_structured_reuse_evidence():
++    # captures reused-slice event and asserts structured fields/counts/timings
+```
 
 ### tests/test_runtime_trace.py
 
-- Extended self-describing header contract.
-
-### tests/test_indexer_profile_evidence.py
-
-- Added warm-cache and cold-lineage focused evidence tests.
+```diff
++    # requires all lineage materialization structured fields in header
++    # requires FULL_ANALYSIS_LINEAGE_MATERIALIZATION in ANALYSIS events
+```
 
 ## COMMIT_SHA
 
-2d1296d20725a3829d2062dc0a5c7459e3ec46e8 (existing HEAD; no commit created).
+d1e256eee5db641db3d4f9965666c0e0a71e169f (existing HEAD; no commit created).
 
 ## RUNTIME_RESTART_REQUIRED
 
-YES. Reload the active MCP runtime only before later real CPA use. No MCP, Desktop, or LIVE restart was performed.
+YES. Reload active MCP only before later real CPA use. No MCP, Desktop, or LIVE restart was performed.
 
 Awaiting proceduj.

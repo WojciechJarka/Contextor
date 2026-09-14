@@ -78,9 +78,16 @@ def test_canonical_writer_analysis_trace_is_self_describing_and_durable():
         "file_tasks", "source_parse_calls", "source_parse_failures",
         "cache_get_calls", "cache_hits", "cache_misses", "lineage_cache_hits",
         "lineage_extract_calls", "source_parse_sum_ms", "cache_get_sum_ms",
-        "lineage_extract_sum_ms",
+        "lineage_extract_sum_ms", "reuse_sources", "reresolve_sources",
+        "materialize_sources", "reresolve_fallback_sources",
+        "reuse_gate_ms", "reresolve_calls_ms", "materialize_calls_ms",
+        "lineage_sources", "lineage_anchors", "lineage_flows",
+        "lineage_surfaces", "lineage_descriptors",
     } <= set(records[1]["fields"])
-    assert "FULL_ANALYSIS_INDEX_EVIDENCE" in records[4]["events"]["ANALYSIS"]
+    assert {
+        "FULL_ANALYSIS_INDEX_EVIDENCE",
+        "FULL_ANALYSIS_LINEAGE_MATERIALIZATION",
+    } <= set(records[4]["events"]["ANALYSIS"])
     acquired = next(item for item in records if item.get("ev") == "CANONICAL_WRITER_ADMISSION_ACQUIRED")
     assert acquired["repo_id"] == "repo-test"
     assert acquired["owner"] == "desktop_analysis"

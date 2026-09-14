@@ -445,6 +445,19 @@ def _materialize_full_analysis_lineage(
         "FULL_ANALYSIS_LINEAGE_MATERIALIZATION",
         elapsed_ms=lineage_materialization_ms,
         operation="lineage_materialization",
+        timing_semantics="critical_path_subphase_with_nested_components",
+        reuse_sources=reuse_sources,
+        reresolve_sources=reresolve_sources,
+        materialize_sources=materialize_sources,
+        reresolve_fallback_sources=reresolve_fallback_sources,
+        reuse_gate_ms=reuse_gate_ms,
+        reresolve_calls_ms=reresolve_calls_ms,
+        materialize_calls_ms=materialize_calls_ms,
+        lineage_sources=len(materialized_by_source),
+        lineage_anchors=anchor_count,
+        lineage_flows=flow_count,
+        lineage_surfaces=surface_count,
+        lineage_descriptors=descriptor_count,
         result=(
             f"reuse_sources={reuse_sources};"
             f"reresolve_sources={reresolve_sources};"

@@ -1184,9 +1184,26 @@ def _header_records(sid: str, started_at: str, desktop_pid: int, file_name: str)
             "source_parse_sum_ms": "aggregate per-file task milliseconds; not critical-path wall",
             "cache_get_sum_ms": "aggregate per-file task milliseconds; not critical-path wall",
             "lineage_extract_sum_ms": "aggregate per-file task milliseconds; not critical-path wall",
+            "reuse_sources": "lineage sources reused without rematerialization",
+            "reresolve_sources": "lineage sources reresolved against changed global resolution",
+            "materialize_sources": "lineage sources fully materialized",
+            "reresolve_fallback_sources": "lineage reresolve attempts that fell back to materialization",
+            "reuse_gate_ms": "critical-path nested lineage reuse-gate milliseconds",
+            "reresolve_calls_ms": "critical-path nested lineage reresolution milliseconds",
+            "materialize_calls_ms": "critical-path nested lineage materialization milliseconds",
+            "lineage_sources": "materialized lineage source count",
+            "lineage_anchors": "materialized lineage anchor count",
+            "lineage_flows": "materialized lineage flow count",
+            "lineage_surfaces": "materialized lineage surface count",
+            "lineage_descriptors": "materialized lineage interface descriptor count",
         }
     )
-    records[4]["events"]["ANALYSIS"].append("FULL_ANALYSIS_INDEX_EVIDENCE")
+    records[4]["events"]["ANALYSIS"].extend(
+        [
+            "FULL_ANALYSIS_INDEX_EVIDENCE",
+            "FULL_ANALYSIS_LINEAGE_MATERIALIZATION",
+        ]
+    )
     records[4]["events"]["LIVE"].extend(
         [
             "LIVE_DIAGNOSTIC_SYNTAX_ERROR",
@@ -1362,6 +1379,18 @@ def trace_event(domain: str, event: str, *, op: str | None = None, rev: int | No
                 "source_parse_sum_ms": "source_parse_sum_ms",
                 "cache_get_sum_ms": "cache_get_sum_ms",
                 "lineage_extract_sum_ms": "lineage_extract_sum_ms",
+                "reuse_sources": "reuse_sources",
+                "reresolve_sources": "reresolve_sources",
+                "materialize_sources": "materialize_sources",
+                "reresolve_fallback_sources": "reresolve_fallback_sources",
+                "reuse_gate_ms": "reuse_gate_ms",
+                "reresolve_calls_ms": "reresolve_calls_ms",
+                "materialize_calls_ms": "materialize_calls_ms",
+                "lineage_sources": "lineage_sources",
+                "lineage_anchors": "lineage_anchors",
+                "lineage_flows": "lineage_flows",
+                "lineage_surfaces": "lineage_surfaces",
+                "lineage_descriptors": "lineage_descriptors",
             }
         )
         structured_list_fields = {"collision_nodes", "cycle_nodes"}
