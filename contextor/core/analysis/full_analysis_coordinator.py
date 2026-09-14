@@ -605,6 +605,7 @@ def run_full_analysis_exclusive(
             owner=owner,
             repo=repo,
             wait_ms=(time.monotonic() - lease_wait_started) * 1000.0,
+            timing_semantics="critical_path_lease_wait",
         )
         if analysis_fn is not None:
             analysis_started = time.monotonic()
@@ -638,6 +639,7 @@ def run_full_analysis_exclusive(
             analysis_ms=analysis_ms,
             total_before_release_ms=total_before_release_ms,
             elapsed_ms=analysis_ms,
+            timing_semantics="critical_path_analysis_body",
             result=(
                 f"analysis_ms={analysis_ms:.3f};"
                 f"total_before_release_ms={total_before_release_ms:.3f}"
@@ -654,5 +656,6 @@ def run_full_analysis_exclusive(
             repo=repo,
             total_ms=total_ms,
             elapsed_ms=total_ms,
+            timing_semantics="critical_path_total",
             result=f"total_ms={total_ms:.3f}",
         )

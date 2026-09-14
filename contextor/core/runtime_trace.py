@@ -1173,6 +1173,10 @@ def _header_records(sid: str, started_at: str, desktop_pid: int, file_name: str)
             "column_number": "syntax error column",
             "execution_mode": "indexer execution mode",
             "timing_semantics": "timing interpretation contract",
+            "stage": "full-analysis stage name",
+            "analysis_ms": "critical-path analysis body milliseconds; same interval as FULL_ANALYSIS_BODY_END.elapsed_ms",
+            "total_before_release_ms": "overlapping critical-path total from coordinator start through analysis body end; includes lease wait; not additive",
+            "total_ms": "critical-path full coordinator milliseconds including lease wait, analysis body, and lease release; not additive",
             "file_tasks": "completed per-file task count",
             "source_parse_calls": "source parse call count",
             "source_parse_failures": "source parse failure count",
@@ -1202,6 +1206,7 @@ def _header_records(sid: str, started_at: str, desktop_pid: int, file_name: str)
         [
             "FULL_ANALYSIS_INDEX_EVIDENCE",
             "FULL_ANALYSIS_LINEAGE_MATERIALIZATION",
+            "FULL_ANALYSIS_STAGE_END",
         ]
     )
     records[4]["events"]["LIVE"].extend(
@@ -1368,6 +1373,10 @@ def trace_event(domain: str, event: str, *, op: str | None = None, rev: int | No
                 "column_number": "column_number",
                 "execution_mode": "execution_mode",
                 "timing_semantics": "timing_semantics",
+                "stage": "stage",
+                "analysis_ms": "analysis_ms",
+                "total_before_release_ms": "total_before_release_ms",
+                "total_ms": "total_ms",
                 "file_tasks": "file_tasks",
                 "source_parse_calls": "source_parse_calls",
                 "source_parse_failures": "source_parse_failures",

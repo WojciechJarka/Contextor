@@ -75,6 +75,7 @@ def test_canonical_writer_analysis_trace_is_self_describing_and_durable():
     assert {"CANONICAL_WRITER_ADMISSION_ACQUIRED", "CANONICAL_WRITER_ADMISSION_RELEASED", "FULL_ANALYSIS_LEASE_ACQUIRED", "FULL_ANALYSIS_BODY_END", "FULL_ANALYSIS_END"} <= set(records[4]["events"]["ANALYSIS"])
     assert {
         "owner", "writer_kind", "execution_mode", "timing_semantics",
+        "stage", "analysis_ms", "total_before_release_ms", "total_ms",
         "file_tasks", "source_parse_calls", "source_parse_failures",
         "cache_get_calls", "cache_hits", "cache_misses", "lineage_cache_hits",
         "lineage_extract_calls", "source_parse_sum_ms", "cache_get_sum_ms",
@@ -87,12 +88,35 @@ def test_canonical_writer_analysis_trace_is_self_describing_and_durable():
     assert {
         "FULL_ANALYSIS_INDEX_EVIDENCE",
         "FULL_ANALYSIS_LINEAGE_MATERIALIZATION",
+        "FULL_ANALYSIS_STAGE_END",
     } <= set(records[4]["events"]["ANALYSIS"])
     acquired = next(item for item in records if item.get("ev") == "CANONICAL_WRITER_ADMISSION_ACQUIRED")
     assert acquired["repo_id"] == "repo-test"
     assert acquired["owner"] == "desktop_analysis"
     assert acquired["writer_kind"] == "full_analysis"
     assert acquired["wait_ms"] == 12.5
+
+
+def test_full_analysis_stage_evidence_is_structured_in_memory():
+    with trace.capture_trace_events() as events:
+        trace.trace_event(
+            "ANALYSIS",
+            "FULL_ANALYSIS_STAGE_END",
+            stage="indexing",
+            operation="indexing",
+            elapsed_ms=12.5,
+            timing_semantics="critical_path_stage",
+            result="stage=indexing;elapsed_ms=12.500",
+        )
+
+    assert len(events) == 1
+    event = events[0]
+    assert event["ev"] == "FULL_ANALYSIS_STAGE_END"
+    assert event["stage"] == "indexing"
+    assert event["operation"] == "indexing"
+    assert event["elapsed_ms"] == 12.5
+    assert event["timing_semantics"] == "critical_path_stage"
+    assert event["result"] == "stage=indexing;elapsed_ms=12.500"
 
 
 def test_diagnostic_trace_fields_and_structured_node_arrays_are_durable():

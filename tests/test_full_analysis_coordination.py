@@ -34,6 +34,7 @@ from contextor.core.analysis.full_analysis_coordinator import (
     run_full_analysis_exclusive,
 )
 from contextor.core.errors import AnalysisCancelled
+from contextor.core.runtime_trace import capture_trace_events, trace_operation
 from contextor.core.live_state.ipc import CanonicalLiveServer, LiveStateClient
 from contextor.mcp import analysis_jobs
 from contextor.mcp import runtime as mcp_runtime
@@ -151,6 +152,51 @@ def test_lease_is_held_during_publication(tmp_path: Path, monkeypatch):
         "lease_released",
     ]
     assert event_log == expected_order
+
+
+def test_profile_operation_scopes_full_analysis_coordinator_evidence(tmp_path: Path):
+    repo_dir = tmp_path / "repo_profile_trace"
+    repo_dir.mkdir()
+
+    def fake_analysis(path, **kwargs):
+        return "analysis-ok"
+
+    with trace_operation("profile-test"), capture_trace_events() as events:
+        result = run_full_analysis_exclusive(
+            repo_dir,
+            owner="mcp_analysis",
+            analysis_fn=fake_analysis,
+        )
+
+    assert result == "analysis-ok"
+
+    analysis_events = [
+        item
+        for item in events
+        if item.get("d") == "ANALYSIS"
+    ]
+    assert analysis_events
+    assert all(item.get("op") == "profile-test" for item in analysis_events)
+
+    by_event = {
+        item["ev"]: item
+        for item in analysis_events
+    }
+
+    lease = by_event["FULL_ANALYSIS_LEASE_ACQUIRED"]
+    assert lease["timing_semantics"] == "critical_path_lease_wait"
+    assert lease["wait_ms"] >= 0.0
+
+    body = by_event["FULL_ANALYSIS_BODY_END"]
+    assert body["timing_semantics"] == "critical_path_analysis_body"
+    assert body["analysis_ms"] >= 0.0
+    assert body["elapsed_ms"] == body["analysis_ms"]
+    assert body["total_before_release_ms"] >= body["analysis_ms"]
+
+    end = by_event["FULL_ANALYSIS_END"]
+    assert end["timing_semantics"] == "critical_path_total"
+    assert end["total_ms"] >= body["total_before_release_ms"]
+    assert end["elapsed_ms"] == end["total_ms"]
 
 
 def _worker_os_lock_hold(repo_path: str, owner: str, ready_event, result_queue, hold_seconds: float):

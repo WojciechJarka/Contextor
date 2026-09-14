@@ -585,6 +585,7 @@ class ContextorFacade:
                 stage=stage,
                 operation=stage,
                 elapsed_ms=elapsed_ms,
+                timing_semantics="critical_path_stage",
                 result=f"stage={stage};elapsed_ms={elapsed_ms:.3f}",
             )
 

@@ -1,106 +1,102 @@
-# CPA3_STRUCTURED_LINEAGE_MATERIALIZATION_EVIDENCE
+# CPA4_CRITICAL_PATH_STRUCTURED_EVIDENCE
 
 ## STATUS
 
-SUCCESS. Added structured fields to the existing FULL_ANALYSIS_LINEAGE_MATERIALIZATION event without changing materialization/reuse/reresolve logic or its existing result string.
+SUCCESS. Existing critical-path events now carry structured timing semantics, and focused evidence proves one trace_operation scopes coordinator-side ANALYSIS events. No profiler or event lifecycle was added.
 
 ## FILES_CHANGED
 
 - contextor/core/api/facade.py
+- contextor/core/analysis/full_analysis_coordinator.py
 - contextor/core/runtime_trace.py
-- tests/test_full_analysis_lineage_materialization.py
 - tests/test_runtime_trace.py
+- tests/test_full_analysis_coordination.py
 - walkthrough.md (this report)
 
 ## IMPLEMENTATION
 
-The existing event now has timing_semantics=critical_path_subphase_with_nested_components and structured reuse/reresolve/materialize counts, nested component timings, and materialized source/anchor/flow/surface/descriptor counts.
-
-elapsed_ms remains full synchronous materialization-subphase wall time. reuse_gate_ms, reresolve_calls_ms, and materialize_calls_ms are nested components only and are not extra wall contributions. The pre-existing result string was not edited.
-
-runtime_trace header and whitelist contain all structured fields; header ANALYSIS events now declares FULL_ANALYSIS_LINEAGE_MATERIALIZATION alongside FULL_ANALYSIS_INDEX_EVIDENCE.
+- FULL_ANALYSIS_STAGE_END now has timing_semantics=critical_path_stage.
+- FULL_ANALYSIS_LEASE_ACQUIRED now has timing_semantics=critical_path_lease_wait.
+- FULL_ANALYSIS_BODY_END now has timing_semantics=critical_path_analysis_body.
+- FULL_ANALYSIS_END now has timing_semantics=critical_path_total.
+- runtime_trace header/whitelist now supports stage, analysis_ms, total_before_release_ms, and total_ms. Header documents overlap/non-additivity of coordinator totals.
+- Header ANALYSIS events now declares FULL_ANALYSIS_STAGE_END.
+- Existing result strings and coordinator acquire/release ordering are unchanged.
 
 ## TESTS
 
-Specified nodeids: 3 passed in 2.23s.
+Specified nodeids: 3 passed in 2.04s.
 
-py_compile passed for facade.py, runtime_trace.py, and both changed test modules. git diff --check passed. No full analysis, benchmark, or full pytest ran.
+py_compile passed for all five changed Python files. git diff --check passed. No full analysis, benchmark, or full pytest ran.
 
-## STRUCTURED_EVIDENCE
+## CRITICAL_PATH_CONTRACT
 
-The focused reuse test verifies one captured event with:
+| Event / fields | Meaning |
+| --- | --- |
+| FULL_ANALYSIS_STAGE_END.elapsed_ms | one synchronous facade stage wall; critical_path_stage |
+| FULL_ANALYSIS_LEASE_ACQUIRED.wait_ms | lease wait; critical_path_lease_wait |
+| FULL_ANALYSIS_BODY_END.analysis_ms and elapsed_ms | same analysis-body interval; critical_path_analysis_body |
+| FULL_ANALYSIS_BODY_END.total_before_release_ms | overlapping coordinator total through body end; includes wait; not additive |
+| FULL_ANALYSIS_END.total_ms and elapsed_ms | same full coordinator interval; critical_path_total; not additive |
 
-- operation=lineage_materialization
-- timing_semantics=critical_path_subphase_with_nested_components
-- reuse_sources=1 and reresolve/materialize/fallback counts zero
-- materialized counts matching the reused slice
-- elapsed_ms and reuse_gate_ms non-negative
-- reresolve_calls_ms and materialize_calls_ms zero
+## OP_CORRELATION
 
-No result-string parsing is used by the test.
+The focused coordinator test runs run_full_analysis_exclusive under trace_operation("profile-test") and capture_trace_events(). All captured ANALYSIS events have op=profile-test. It verifies lease/body/end timing semantics and equality relationships without introducing a coordinator/facade run-id parameter.
 
 ## CONTEXTOR_FLOW_VERIFY
 
-Contextor shows _materialize_full_analysis_lineage has exactly one listed caller: ContextorFacade.analyze_project (direct, line 774). trace_event remains the canonical ordinary runtime-event append owner, with its existing indexed call graph. No parallel profiler/event lifecycle or altered materialize/reuse/reresolve path was introduced.
+Contextor confirms run_full_analysis_exclusive retains direct acquire_full_analysis and release_full_analysis callees only; no second coordinator exists. ContextorFacade.analyze_project retains its existing facade call graph including _materialize_full_analysis_lineage. trace_event remains the one canonical ordinary-event owner (existing indexed graph, 2 callers and 7 callees). No parallel trace lifecycle was created.
 
-Contextor state reports canonical revision 1099 with workspace_sync=out_of_sync because the locally edited files diverge from its source snapshot. No analysis refresh was run.
+Canonical revision was 1103 with workspace_sync=out_of_sync because edited local files diverge from Contextor source state. No analysis refresh was run.
 
 ## FULL_DIFFS
 
 ### contextor/core/api/facade.py
 
 ```diff
-@@ FULL_ANALYSIS_LINEAGE_MATERIALIZATION
-+        timing_semantics="critical_path_subphase_with_nested_components",
-+        reuse_sources=reuse_sources,
-+        reresolve_sources=reresolve_sources,
-+        materialize_sources=materialize_sources,
-+        reresolve_fallback_sources=reresolve_fallback_sources,
-+        reuse_gate_ms=reuse_gate_ms,
-+        reresolve_calls_ms=reresolve_calls_ms,
-+        materialize_calls_ms=materialize_calls_ms,
-+        lineage_sources=len(materialized_by_source),
-+        lineage_anchors=anchor_count,
-+        lineage_flows=flow_count,
-+        lineage_surfaces=surface_count,
-+        lineage_descriptors=descriptor_count,
+@@ FULL_ANALYSIS_STAGE_END
++ timing_semantics="critical_path_stage",
+```
+
+### contextor/core/analysis/full_analysis_coordinator.py
+
+```diff
+@@ FULL_ANALYSIS_LEASE_ACQUIRED
++ timing_semantics="critical_path_lease_wait",
+@@ FULL_ANALYSIS_BODY_END
++ timing_semantics="critical_path_analysis_body",
+@@ FULL_ANALYSIS_END
++ timing_semantics="critical_path_total",
 ```
 
 ### contextor/core/runtime_trace.py
 
 ```diff
-@@ trace header fields
-+ reuse_sources, reresolve_sources, materialize_sources,
-+ reresolve_fallback_sources, reuse_gate_ms, reresolve_calls_ms,
-+ materialize_calls_ms, lineage_sources, lineage_anchors, lineage_flows,
-+ lineage_surfaces, lineage_descriptors
-@@ ANALYSIS header events
-+ FULL_ANALYSIS_LINEAGE_MATERIALIZATION
-@@ trace_event whitelist
-+ corresponding structured field mappings
-```
-
-### tests/test_full_analysis_lineage_materialization.py
-
-```diff
-+from contextor.core.runtime_trace import capture_trace_events
-+def test_full_analysis_lineage_materialization_emits_structured_reuse_evidence():
-+    # captures reused-slice event and asserts structured fields/counts/timings
++ header fields: stage, analysis_ms, total_before_release_ms, total_ms
++ ANALYSIS header event: FULL_ANALYSIS_STAGE_END
++ trace_event whitelist mappings for all four fields
 ```
 
 ### tests/test_runtime_trace.py
 
 ```diff
-+    # requires all lineage materialization structured fields in header
-+    # requires FULL_ANALYSIS_LINEAGE_MATERIALIZATION in ANALYSIS events
++ header field/event assertions for stage and coordinator timing fields
++ test_full_analysis_stage_evidence_is_structured_in_memory
+```
+
+### tests/test_full_analysis_coordination.py
+
+```diff
++ imports capture_trace_events, trace_operation
++ test_profile_operation_scopes_full_analysis_coordinator_evidence
 ```
 
 ## COMMIT_SHA
 
-d1e256eee5db641db3d4f9965666c0e0a71e169f (existing HEAD; no commit created).
+6bd727f91c98d2f2928a4530f8ffb022a321a752 (existing HEAD; no commit created).
 
 ## RUNTIME_RESTART_REQUIRED
 
-YES. Reload active MCP only before later real CPA use. No MCP, Desktop, or LIVE restart was performed.
+YES. Reload active MCP only before later real CPA usage. No MCP, Desktop, or LIVE restart was performed.
 
 Awaiting proceduj.
