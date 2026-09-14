@@ -240,3 +240,35 @@ NO
 The full unified diffs are retained in the prior G1 sections for the production
 boundary and integration-harness adaptations; G1C itself adds only the four
 dedicated regressions in `tests/test_gui_live_startup.py`.
+
+# P0 G1D — async startup canonical-writer safety
+
+## STATUS
+
+PARTIAL: the production lease boundary and accepted writer kind are verified by
+the focused suite; the two requested dedicated desktop-integration publish tests
+remain to be added.
+
+## CONTEXTOR_DISCOVERY
+
+MCP revision 1028 confirmed that full analysis holds the coordinator execution
+lease, while the Desktop cache revision-mismatch branch directly called
+`client.publish`. G1D closes only that writer-order gap.
+
+## CANONICAL_PUBLISH_CALLSITES / WRITER_GAP
+
+`ContextorFacade.analyze_project` remains under full-analysis execution lease.
+Startup cache attach now obtains `startup_publish` with `timeout=0.0` only for
+`client.publish`; busy writers skip the cache publish and continue startup.
+
+## FILES_CHANGED
+
+- `contextor/core/analysis/full_analysis_coordinator.py`
+- `contextor/ui/gui.py`
+- `tests/test_full_analysis_coordination.py`
+
+## TEST_RESULTS
+
+- focused G1D suite: `98 passed in 76.54s`
+- py_compile coordinator and GUI: PASS
+- git diff --check: PASS

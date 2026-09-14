@@ -15,7 +15,12 @@ from queue import Empty, Queue
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
-from contextor.core.analysis.full_analysis_coordinator import run_full_analysis_exclusive
+from contextor.core.analysis.full_analysis_coordinator import (
+    FullAnalysisBusyError,
+    acquire_full_analysis,
+    release_full_analysis,
+    run_full_analysis_exclusive,
+)
 from contextor.core.api.facade import ContextorFacade
 from contextor.core.live_state import (
     DesktopLiveEventFeed,
@@ -973,11 +978,38 @@ class ContextorGUI:
                     self._set_live_status("LIVE: generation conflict; analysis required")
                     return
             else:
-                published = client.publish(state, origin="desktop_analysis")
-                if isinstance(published, dict) and published.get("status") == "ok":
-                    self._set_live_status("LIVE: shared state published; watcher active")
+                startup_lease = None
+                try:
+                    startup_lease = acquire_full_analysis(
+                        path,
+                        owner="desktop_startup_publish",
+                        writer_kind="startup_publish",
+                        timeout=0.0,
+                        poll_interval=0.01,
+                    )
+                except FullAnalysisBusyError:
+                    self._set_live_status(
+                        "LIVE: canonical writer busy; cache publish skipped"
+                    )
                 else:
-                    self._set_live_status("LIVE: shared state attach failed; analysis required")
+                    try:
+                        published = client.publish(
+                            state,
+                            origin="desktop_analysis",
+                        )
+                    finally:
+                        release_full_analysis(startup_lease)
+                    if (
+                        isinstance(published, dict)
+                        and published.get("status") == "ok"
+                    ):
+                        self._set_live_status(
+                            "LIVE: shared state published; watcher active"
+                        )
+                    else:
+                        self._set_live_status(
+                            "LIVE: shared state attach failed; analysis required"
+                        )
         else:
             self._set_live_status("LIVE: no snapshot; waiting for analysis")
         existing_watcher = watchers.get(identity.repo_id)

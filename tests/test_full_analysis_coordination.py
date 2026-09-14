@@ -52,6 +52,20 @@ def test_coordinator_lease_acquisition_and_release(tmp_path: Path):
     release_full_analysis(lease)
 
 
+def test_startup_publish_writer_kind_is_accepted(tmp_path: Path):
+    repo = tmp_path / "startup_publish"
+    repo.mkdir()
+    lease = acquire_full_analysis(
+        repo,
+        owner="startup",
+        writer_kind="startup_publish",
+        timeout=1.0,
+    )
+    release_full_analysis(lease)
+    with pytest.raises(ValueError):
+        acquire_full_analysis(repo, writer_kind="invalid")
+
+
 def test_normal_shutdown_releases_lease_for_next_desktop_instance(
     tmp_path: Path,
 ):
