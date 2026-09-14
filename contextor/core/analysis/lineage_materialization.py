@@ -357,6 +357,174 @@ def _seed_defining_interface_descriptors(
             descriptors[binding.owner_id] = descriptor
 
 
+def materialized_lineage_source_matches_resolution(
+    materialized: MaterializedLineageSourceFacts,
+    resolution: LineageResolutionContext,
+) -> bool:
+    """Return True only when one canonical slice still matches current resolution."""
+    if not isinstance(materialized, MaterializedLineageSourceFacts):
+        raise TypeError("materialized must be MaterializedLineageSourceFacts.")
+    if not isinstance(resolution, LineageResolutionContext):
+        raise TypeError("resolution must be LineageResolutionContext.")
+
+    manifest = materialized.manifest
+    if (
+        manifest.semantic_version != LINEAGE_FACTS_SEMANTIC_VERSION
+        or manifest.status is not LineageFamilyStatus.FRESH
+        or not manifest.semantic_anchor_bindings_materialized
+        or not manifest.anchor_ownership_materialized
+        or not manifest.flow_ownership_materialized
+        or not manifest.interface_descriptors_materialized
+    ):
+        return False
+
+    extracted_anchors = tuple(
+        ExtractedAnchorFact(
+            anchor.local_id,
+            anchor.kind,
+            anchor.span,
+            anchor.owner_local_id,
+        )
+        for anchor in materialized.anchors
+    )
+    anchors_by_id = {
+        anchor.local_id: anchor
+        for anchor in extracted_anchors
+    }
+    references_by_id = {
+        anchor.local_id: anchor.reference
+        for anchor in materialized.anchors
+    }
+    module_name = _module_name_from_source_key(manifest.source_key)
+
+    expected_semantic_anchors: list[SemanticAnchorBinding] = []
+    for anchor in extracted_anchors:
+        if anchor.kind not in {
+            "class",
+            "function",
+            "async_function",
+            "binding",
+            "import_binding",
+        }:
+            continue
+
+        symbol_path = _anchor_symbol_path(anchor, anchors_by_id)
+        if symbol_path is None:
+            continue
+
+        qualified_name = f"{module_name}::{symbol_path}"
+        owner_id = resolution.active_artifact_ids.get(qualified_name)
+        if owner_id is None:
+            continue
+
+        reference = references_by_id.get(anchor.local_id)
+        if reference is None:
+            return False
+
+        expected_semantic_anchors.append(
+            SemanticAnchorBinding(
+                owner_id,
+                qualified_name,
+                reference,
+            )
+        )
+
+    expected_semantic_anchors_tuple = tuple(sorted(expected_semantic_anchors))
+    if expected_semantic_anchors_tuple != materialized.semantic_anchors:
+        return False
+
+    expected_descriptors: dict[str, SemanticInterfaceDescriptor] = {}
+    _seed_defining_interface_descriptors(
+        expected_descriptors,
+        expected_semantic_anchors_tuple,
+        resolution,
+    )
+
+    origins = {
+        (origin.fact_local_id, origin.endpoint_role): origin
+        for origin in materialized.semantic_endpoint_origins
+    }
+
+    def endpoint_matches(
+        current: MaterializedOccurrenceRef
+        | MaterializedSymbolicRef
+        | SemanticEndpoint,
+        resolution_kind: ResolutionKind,
+        confidence: LineageConfidence,
+        fact_local_id: str,
+        endpoint_role: SemanticEndpointRole,
+    ) -> bool:
+        if isinstance(current, MaterializedOccurrenceRef):
+            return True
+
+        if isinstance(current, MaterializedSymbolicRef):
+            reference = ExtractedSymbolicRef(
+                current.kind,
+                current.module_name,
+                current.symbol_name,
+                current.source_local_id,
+            )
+            source_key = current.source_key
+            source_fingerprint = current.source_fingerprint
+        elif isinstance(current, SemanticEndpoint):
+            origin = origins.get((fact_local_id, endpoint_role))
+            if origin is None:
+                return False
+            reference = ExtractedSymbolicRef(
+                origin.kind,
+                origin.module_name,
+                origin.symbol_name,
+                origin.source_local_id,
+            )
+            source_key = origin.source_key
+            source_fingerprint = origin.source_fingerprint
+        else:
+            return False
+
+        expected = _symbolic_endpoint(
+            reference,
+            resolution,
+            expected_descriptors,
+            resolution_kind,
+            confidence,
+            source_key,
+            source_fingerprint,
+        )
+        return expected == current
+
+    for flow in materialized.flows:
+        if not endpoint_matches(
+            flow.source,
+            flow.resolution_kind,
+            flow.confidence,
+            flow.local_id,
+            SemanticEndpointRole.FLOW_SOURCE,
+        ):
+            return False
+        if not endpoint_matches(
+            flow.target,
+            flow.resolution_kind,
+            flow.confidence,
+            flow.local_id,
+            SemanticEndpointRole.FLOW_TARGET,
+        ):
+            return False
+
+    for surface in materialized.surfaces:
+        if not endpoint_matches(
+            surface.exposed,
+            surface.resolution_kind,
+            surface.confidence,
+            surface.local_id,
+            SemanticEndpointRole.SURFACE_EXPOSED,
+        ):
+            return False
+
+    return (
+        tuple(sorted(expected_descriptors.values()))
+        == materialized.interface_descriptors
+    )
+
 def materialize_lineage_source_facts(
     extracted: ExtractedLineageSourceFacts,
     resolution: LineageResolutionContext,

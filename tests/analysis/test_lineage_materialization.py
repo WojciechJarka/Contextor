@@ -13,6 +13,7 @@ from contextor.core.analysis.lineage_materialization import (
     LineageResolutionContext,
     build_extracted_callable_interface_descriptors,
     build_materialized_callable_interface_descriptors,
+    materialized_lineage_source_matches_resolution,
     materialize_lineage_source_facts,
     reresolve_materialized_lineage_source_facts,
 )
@@ -804,3 +805,108 @@ def test_interface_descriptor_capability_requires_anchor_capabilities():
         replace(manifest, interface_descriptors_materialized=True)
     with pytest.raises(TypeError, match="interface_descriptors_materialized must be boolean"):
         replace(manifest, interface_descriptors_materialized="yes")
+
+def _owned_exact_target_facts():
+    span = SourceSpan(1, 0, 1, 1)
+    return _facts(
+        anchors=(
+            ExtractedAnchorFact(
+                "owner",
+                "binding",
+                span,
+            ),
+        ),
+        flows=(
+            ExtractedFlowFact(
+                "flow",
+                ExtractedOccurrenceRef("owner"),
+                ExtractedSymbolicRef(
+                    ExtractedSymbolicKind.PUBLIC_TARGET,
+                    "pkg.mod",
+                    "target",
+                ),
+                LineageRelation.EXPOSES,
+                span,
+                ResolutionKind.IMPORT_EXACT,
+                LineageConfidence.CONFIRMED,
+                owner_local_id="owner",
+            ),
+        ),
+    )
+
+
+def test_materialized_lineage_source_matches_unchanged_resolution():
+    facts = _owned_exact_target_facts()
+    context = _context(
+        artifacts={"pkg.mod::target": "A1/1"},
+    )
+    materialized = materialize_lineage_source_facts(
+        facts,
+        context,
+    )
+
+    assert materialized.manifest.flow_ownership_materialized is True
+    assert materialized_lineage_source_matches_resolution(
+        materialized,
+        context,
+    ) is True
+
+
+def test_materialized_lineage_source_rejects_changed_resolution():
+    facts = _owned_exact_target_facts()
+    materialized = materialize_lineage_source_facts(
+        facts,
+        _context(
+            artifacts={"pkg.mod::target": "A1/1"},
+        ),
+    )
+
+    assert materialized.manifest.flow_ownership_materialized is True
+    assert materialized_lineage_source_matches_resolution(
+        materialized,
+        _context(
+            artifacts={"pkg.mod::target": "A1/2"},
+        ),
+    ) is False
+
+
+def test_materialized_lineage_source_rejects_symbolic_endpoint_that_now_resolves():
+    facts = _owned_exact_target_facts()
+    materialized = materialize_lineage_source_facts(
+        facts,
+        _context(),
+    )
+
+    assert materialized.manifest.flow_ownership_materialized is True
+    assert isinstance(
+        materialized.flows[0].target,
+        MaterializedSymbolicRef,
+    )
+    assert materialized_lineage_source_matches_resolution(
+        materialized,
+        _context(
+            artifacts={"pkg.mod::target": "A1/1"},
+        ),
+    ) is False
+
+
+def test_materialized_lineage_source_rejects_semantic_endpoint_without_origin():
+    facts = _owned_exact_target_facts()
+    context = _context(
+        artifacts={"pkg.mod::target": "A1/1"},
+    )
+    materialized = materialize_lineage_source_facts(
+        facts,
+        context,
+    )
+    assert materialized.manifest.flow_ownership_materialized is True
+
+    legacy_like = replace(
+        materialized,
+        semantic_endpoint_origins=(),
+    )
+
+    assert materialized_lineage_source_matches_resolution(
+        legacy_like,
+        context,
+    ) is False
