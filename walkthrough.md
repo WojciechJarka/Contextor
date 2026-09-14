@@ -1,152 +1,103 @@
-# LIVEL1_CANONICAL_LIVE_PROVENANCE
+# MCPD1_CONTENT_ONLY_TRANSPORT
 
 ## STATUS
 
-SUCCESS. Implemented only canonical LIVE-state provenance semantics. No snapshot loader, lineage freshness/materialization, watcher, hydration, transport, or MCP tool behavior changed.
+SUCCESS. The central FastMCP registration now passes `output_schema=None`; JSON-as-string tool payload semantics are unchanged. No LIVE code, diagnostics, representation, output guard, telemetry, individual tool annotations, or documentation changed.
 
 ## FILES_CHANGED
 
-- `contextor/core/live_state/ipc.py`
-- `tests/live_state/test_ipc_canonical_query.py`
-- `tests/live_state/test_runtime_canonical_query.py`
+- `contextor/mcp_server.py`
+- `tests/test_mcp_transport_output.py`
+- `walkthrough.md` (this report)
 
-## FOCUSED_TESTS
+## IMPLEMENTATION
 
-The requested parent `.venv` path was absent; used the repository interpreter at `.venv\\Scripts\\python.exe`.
+`contextor.mcp_server::register_mcp_tool` now registers through:
 
-`& .\\.venv\\Scripts\\python.exe -m pytest -q tests\\live_state\\test_ipc_canonical_query.py tests\\live_state\\test_runtime_canonical_query.py tests\\analysis\\test_lineage_live_query.py tests\\mcp\\test_runtime_lineage_query.py`
+```python
+return mcp.tool(name=tool_name, description=desc, output_schema=None)(wrapped)
+```
 
-`54 passed in 2.19s`
+The pre-existing `_instrument_mcp_tool(func, tool_name)` call remains immediately before registration. The synthetic regression test registers a `-> str` JSON tool through that real central function, asserts `registered.output_schema is None`, runs it, asserts `ToolResult.structured_content is None`, asserts one text content item, validates JSON status, and unconditionally removes the synthetic tool in `finally`.
 
-`git diff --check -- contextor/core/live_state/ipc.py tests/live_state/test_ipc_canonical_query.py tests/live_state/test_runtime_canonical_query.py` passed; only Git LF-to-CRLF warnings were emitted.
+## TESTS
 
-## CONTEXTOR_POST_EDIT_EVIDENCE
+```
+& .\.venv\Scripts\python.exe -m pytest -q \
+  tests\test_mcp_transport_output.py \
+  tests\test_mcp_diagnostics.py::test_wrapper_injects_health_for_analytical_not_found \
+  tests\test_mcp_diagnostics.py::test_wrapper_applies_shared_guard_after_diagnostics_injection \
+  tests\test_mcp_diagnostics.py::test_wrapper_retry_guidance_matches_tool_signature \
+  tests\test_mcp_diagnostics.py::test_registered_name_collision_tool_and_shared_summary_wrapper \
+  tests\test_live_activity_status.py::test_all_28_registered_mcp_tools_telemetry_against_fastmcp_registry
+```
 
-`contextor.core.live_state.ipc::CanonicalLiveServer._execute_publish` remains the canonical publish owner: after all revision gates it marks the candidate's provenance `live`, assigns `self._state`, sets `self._revision`, and records `CANONICAL_PUBLISH`.
+Result: **6 passed** in 11.81s. One pre-existing third-party Authlib deprecation warning from FastMCP dependency loading. `py_compile` passed for both changed Python files; `git diff --check` passed.
 
-`CanonicalLiveServer._dispatch` still passes exactly `self._state` to its canonical query handler under the server lock. `contextor.core.live_state.runtime::_repository_canonical_query_handler` then passes that same state directly to `query_live_symbol_lineage`.
+## DOCS_REVIEW
 
-## RUNTIME_RESTART_REQUIRED
+`DOCS_CHANGED=NO`. Focused search of `contextor/mcp/docs` found no explicit `structuredContent`, `outputSchema`, or `output_schema` contract.
 
-YES. The active LIVE authority process still has the old `ipc.py` loaded. I did not restart it; live runtime output will not show `provenance=live` until the user manually restarts the authority/Desktop process.
+## CONTEXTOR_FLOW_VERIFY
+
+Contextor `get_symbol_call_context` confirms the existing direct edge:
+
+```
+contextor.mcp_server::register_mcp_tool
+  -> contextor.mcp_server::_instrument_mcp_tool
+```
+
+No parallel registration path was introduced by this edit. Contextor correctly marks source implementations as `stale_source` / `workspace_sync=out_of_sync` because the local file changed after canonical revision 1090. No analysis was run merely to refresh it.
 
 ## COMMIT_SHA
 
-Not created.
+`be39ec9538d1e08248a457c9722f8fc881938120` (existing HEAD; no commit created).
 
-## RAW_GIT_DIFFS
+## RUNTIME_RESTART_REQUIRED
+
+YES. Reload/restart the active Contextor MCP process before a real wire/model-context verification. Desktop/LIVE authority restart is not required by this change.
+
+## DIFFS
+
+### contextor/mcp_server.py
 
 ```diff
-diff --git a/contextor/core/live_state/ipc.py b/contextor/core/live_state/ipc.py
-index 3c5b4c6..25a6ab4 100644
---- a/contextor/core/live_state/ipc.py
-+++ b/contextor/core/live_state/ipc.py
-@@ -436,6 +436,19 @@ def _bind_state_revision(state: Any, revision: int) -> bool:
-     return getattr(state, "revision", None) == revision
-+
-+
-+def _mark_live_state_provenance(state: Any) -> None:
-+    """Mark state currently owned by CanonicalLiveServer as LIVE-authoritative."""
-+    if state is None:
-+        return
-+    if isinstance(state, dict):
-+        state["provenance"] = "live"
-+        return
-+    try:
-+        setattr(state, "provenance", "live")
-+    except (AttributeError, TypeError):
-+        return
-+
-+
- def _clone_state_for_update(state: Any) -> Any:
-     if state is None:
-         raise ValueError("canonical state unavailable")
-@@ -704,6 +717,7 @@ class CanonicalLiveServer:
-             )
-+
-         self._state = state
-+        _mark_live_state_provenance(self._state)
-         state_rev = _extract_state_revision(state)
-+
-         if isinstance(state_rev, int) and state_rev >= 0:
-@@ -1228,6 +1242,7 @@ class CanonicalLiveServer:
-                         }
-                     state_rev = expected_revision
-+
-+                _mark_live_state_provenance(state)
-                 self._state = state
-                 self._revision = state_rev
-                 evt = self._record_event("publish", request, category="LIVE_STATE")
-diff --git a/tests/live_state/test_ipc_canonical_query.py b/tests/live_state/test_ipc_canonical_query.py
-index 301c900..294ebdf 100644
---- a/tests/live_state/test_ipc_canonical_query.py
-+++ b/tests/live_state/test_ipc_canonical_query.py
-@@ -221,3 +221,56 @@ def test_live_state_client_canonical_query_uses_dedicated_operation_only():
-             },
-         },
-     }
-+
-+
-+def test_publish_rebinds_snapshot_or_missing_provenance_to_live_before_serving():
-+    initial = SimpleNamespace(revision=3)
-+    server = CanonicalLiveServer(
-+        initial,
-+        revision=3,
-+        canonical_query_handler=(
-+            lambda current_state, _query_kind, _payload: current_state.provenance
-+        ),
-+    )
-+    replacement = SimpleNamespace(revision=4, provenance="snapshot")
-+    missing_provenance = SimpleNamespace(revision=5)
-+    try:
-+        published = server._dispatch(
-+            {
-+                "operation": "publish",
-+                "state": replacement,
-+                "origin": "desktop_analysis",
-+            }
-+        )
-+        first_query = server._dispatch(
-+            {
-+                "operation": "canonical_query",
-+                "query_kind": "symbol_lineage",
-+                "payload": {},
-+            }
-+        )
-+        republished = server._dispatch(
-+            {
-+                "operation": "publish",
-+                "state": missing_provenance,
-+                "origin": "desktop_analysis",
-+            }
-+        )
-+        second_query = server._dispatch(
-+            {
-+                "operation": "canonical_query",
-+                "query_kind": "symbol_lineage",
-+                "payload": {},
-+            }
-+        )
-+    finally:
-+        server.close()
-+
-+    assert published["status"] == "ok"
-+    assert published["revision"] == 4
-+    assert replacement.provenance == "live"
-+    assert first_query["result"] == "live"
-+    assert republished["status"] == "ok"
-+    assert republished["revision"] == 5
-+    assert missing_provenance.provenance == "live"
-+    assert second_query["result"] == "live"
-diff --git a/tests/live_state/test_runtime_canonical_query.py b/tests/live_state/test_runtime_canonical_query.py
-index 7310fe5..1b34f22 100644
---- a/tests/live_state/test_runtime_canonical_query.py
-+++ b/tests/live_state/test_runtime_canonical_query.py
-@@ -156,5 +156,6 @@ def test_repository_symbol_lineage_handler_runs_through_canonical_server_without
-         "query": "A17/2",
-         "sections": ("interface",),
-     }
-+    assert state.provenance == "live"
-     assert "bulk_blob" not in repr(response)
-     assert "state" not in response
+@@
+-    return mcp.tool(name=tool_name, description=desc)(wrapped)
++    return mcp.tool(name=tool_name, description=desc, output_schema=None)(wrapped)
 ```
+
+### tests/test_mcp_transport_output.py
+
+```python
+import asyncio
+import json
+
+from fastmcp.tools.tool import ToolResult
+
+from contextor.mcp_server import mcp, register_mcp_tool
+
+
+def test_registered_string_tool_emits_content_without_structured_content():
+    name = "synthetic_transport_output"
+
+    def synthetic_transport_output() -> str:
+        return json.dumps({"status": "synthetic_ok"})
+
+    registered = register_mcp_tool(
+        synthetic_transport_output,
+        name=name,
+        description="Synthetic transport-output regression tool.",
+    )
+    try:
+        assert registered.output_schema is None
+        result = asyncio.run(registered.run({}))
+        assert isinstance(result, ToolResult)
+        assert result.structured_content is None
+        assert len(result.content) == 1
+        assert json.loads(result.content[0].text)["status"] == "synthetic_ok"
+    finally:
+        mcp.remove_tool(name)
+```
+
+Awaiting `proceduj`.

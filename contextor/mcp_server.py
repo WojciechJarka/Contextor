@@ -492,7 +492,7 @@ def register_mcp_tool(
     tool_name = name or func.__name__
     desc = description or short_description(tool_name)
     wrapped = _instrument_mcp_tool(func, tool_name)
-    return mcp.tool(name=tool_name, description=desc)(wrapped)
+    return mcp.tool(name=tool_name, description=desc, output_schema=None)(wrapped)
 
 
 REGISTERED_MCP_TOOL_NAMES: tuple[str, ...] = (
