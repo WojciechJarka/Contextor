@@ -1171,8 +1171,22 @@ def _header_records(sid: str, started_at: str, desktop_pid: int, file_name: str)
             "diagnostic_truncated": "journal diagnostic detail truncation",
             "line_number": "syntax error line",
             "column_number": "syntax error column",
+            "execution_mode": "indexer execution mode",
+            "timing_semantics": "timing interpretation contract",
+            "file_tasks": "completed per-file task count",
+            "source_parse_calls": "source parse call count",
+            "source_parse_failures": "source parse failure count",
+            "cache_get_calls": "cache get call count",
+            "cache_hits": "cache hit count",
+            "cache_misses": "cache miss count",
+            "lineage_cache_hits": "lineage cache hit count",
+            "lineage_extract_calls": "lineage extraction call count",
+            "source_parse_sum_ms": "aggregate per-file task milliseconds; not critical-path wall",
+            "cache_get_sum_ms": "aggregate per-file task milliseconds; not critical-path wall",
+            "lineage_extract_sum_ms": "aggregate per-file task milliseconds; not critical-path wall",
         }
     )
+    records[4]["events"]["ANALYSIS"].append("FULL_ANALYSIS_INDEX_EVIDENCE")
     records[4]["events"]["LIVE"].extend(
         [
             "LIVE_DIAGNOSTIC_SYNTAX_ERROR",
@@ -1335,6 +1349,19 @@ def trace_event(domain: str, event: str, *, op: str | None = None, rev: int | No
                 "diagnostic_truncated": "diagnostic_truncated",
                 "line_number": "line_number",
                 "column_number": "column_number",
+                "execution_mode": "execution_mode",
+                "timing_semantics": "timing_semantics",
+                "file_tasks": "file_tasks",
+                "source_parse_calls": "source_parse_calls",
+                "source_parse_failures": "source_parse_failures",
+                "cache_get_calls": "cache_get_calls",
+                "cache_hits": "cache_hits",
+                "cache_misses": "cache_misses",
+                "lineage_cache_hits": "lineage_cache_hits",
+                "lineage_extract_calls": "lineage_extract_calls",
+                "source_parse_sum_ms": "source_parse_sum_ms",
+                "cache_get_sum_ms": "cache_get_sum_ms",
+                "lineage_extract_sum_ms": "lineage_extract_sum_ms",
             }
         )
         structured_list_fields = {"collision_nodes", "cycle_nodes"}

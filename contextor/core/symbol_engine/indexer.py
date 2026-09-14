@@ -317,9 +317,11 @@ def _process_single_file(path_str: str, root_str: str) -> dict:
     source_key = rel.as_posix()
     module_id = ".".join(rel.with_suffix("").parts)
 
+    source_parse_started = time.monotonic()
     try:
         parsed_input = parse_source_with_fingerprint(path)
     except SourceError as exc:
+        source_parse_ms = (time.monotonic() - source_parse_started) * 1000.0
         return {
             "module_id": module_id,
             "path": str(rel),
@@ -335,6 +337,14 @@ def _process_single_file(path_str: str, root_str: str) -> dict:
             "test_facts_status": None,
             "lineage_facts": None,
             "lineage_extract_ms": 0.0,
+            "source_parse_called": True,
+            "source_parse_ms": source_parse_ms,
+            "source_parse_failed": True,
+            "cache_get_called": False,
+            "cache_get_ms": 0.0,
+            "cache_hit": False,
+            "lineage_cache_hit": False,
+            "lineage_extract_called": False,
             "automatic_test_context_directory": (
                 str(path.parent)
                 if is_test_context_candidate(root_str, path)
@@ -342,13 +352,17 @@ def _process_single_file(path_str: str, root_str: str) -> dict:
                 else None
             ),
         }
+    source_parse_ms = (time.monotonic() - source_parse_started) * 1000.0
     tree = parsed_input.tree
 
     # Próba odczytu z cache
     cache = _cache_manager(root_str)
+    cache_get_started = time.monotonic()
     cached_data = cache.get(path)
+    cache_get_ms = (time.monotonic() - cache_get_started) * 1000.0
 
     lineage_facts = None
+    lineage_cache_hit = False
     cached_lineage_valid = False
     if cached_data is not None:
         lineage_facts = deserialize_extracted_lineage_source_facts(
@@ -356,10 +370,13 @@ def _process_single_file(path_str: str, root_str: str) -> dict:
             source_key=source_key,
             source_fingerprint=parsed_input.source_fingerprint,
         )
+        lineage_cache_hit = lineage_facts is not None
         cached_lineage_valid = lineage_facts is not None
 
     lineage_extract_ms = 0.0
+    lineage_extract_called = False
     if lineage_facts is None:
+        lineage_extract_called = True
         lineage_extract_started = time.monotonic()
         lineage_facts = extract_lineage_source_facts(
             tree,
@@ -564,6 +581,14 @@ def _process_single_file(path_str: str, root_str: str) -> dict:
         "test_facts_status": test_facts_status,
         "lineage_facts": lineage_facts,
         "lineage_extract_ms": lineage_extract_ms,
+        "source_parse_called": True,
+        "source_parse_ms": source_parse_ms,
+        "source_parse_failed": False,
+        "cache_get_called": True,
+        "cache_get_ms": cache_get_ms,
+        "cache_hit": cached_data is not None,
+        "lineage_cache_hit": lineage_cache_hit,
+        "lineage_extract_called": lineage_extract_called,
         "automatic_test_context_directory": (
             str(path.parent)
             if test_candidate or path.parent == Path(root_str)
@@ -647,6 +672,15 @@ def index_repository(
     symbol_facts_by_module: dict[str, dict] = {}
     reference_facts_by_module: dict[str, dict] = {}
     lineage_facts_by_source: dict[str, ExtractedLineageSourceFacts] = {}
+    file_tasks = 0
+    source_parse_calls = 0
+    source_parse_failures = 0
+    cache_get_calls = 0
+    cache_hits = 0
+    lineage_cache_hits = 0
+    lineage_extract_calls = 0
+    source_parse_sum_ms = 0.0
+    cache_get_sum_ms = 0.0
     lineage_extract_sum_ms = 0.0
     lineage_extract_slowest: list[tuple[float, str]] = []
     collision_facts_by_module: dict[str, list[dict]] = {}
@@ -666,11 +700,48 @@ def index_repository(
             for directory in sorted(automatic_test_dir_entries)
         }
 
-    def record_lineage_extract_timing(result: dict) -> None:
-        nonlocal lineage_extract_sum_ms
+    def record_file_task_evidence(result: dict) -> None:
+        nonlocal file_tasks, source_parse_calls, source_parse_failures
+        nonlocal cache_get_calls, cache_hits, lineage_cache_hits, lineage_extract_calls
+        nonlocal source_parse_sum_ms, cache_get_sum_ms, lineage_extract_sum_ms
+        file_tasks += 1
         elapsed_ms = float(result.get("lineage_extract_ms", 0.0))
         lineage_extract_sum_ms += elapsed_ms
         lineage_extract_slowest.append((elapsed_ms, result["path"]))
+        if result.get("source_parse_called") is True:
+            source_parse_calls += 1
+        if result.get("source_parse_failed") is True:
+            source_parse_failures += 1
+        if result.get("cache_get_called") is True:
+            cache_get_calls += 1
+        if result.get("cache_hit") is True:
+            cache_hits += 1
+        if result.get("lineage_cache_hit") is True:
+            lineage_cache_hits += 1
+        if result.get("lineage_extract_called") is True:
+            lineage_extract_calls += 1
+        source_parse_sum_ms += float(result.get("source_parse_ms", 0.0))
+        cache_get_sum_ms += float(result.get("cache_get_ms", 0.0))
+
+    def emit_index_profile_evidence(execution_mode: str) -> None:
+        trace_event(
+            "ANALYSIS",
+            "FULL_ANALYSIS_INDEX_EVIDENCE",
+            operation="indexing_file_tasks",
+            execution_mode=execution_mode,
+            timing_semantics="aggregate_file_task_not_critical_path",
+            file_tasks=file_tasks,
+            source_parse_calls=source_parse_calls,
+            source_parse_failures=source_parse_failures,
+            cache_get_calls=cache_get_calls,
+            cache_hits=cache_hits,
+            cache_misses=cache_get_calls - cache_hits,
+            lineage_cache_hits=lineage_cache_hits,
+            lineage_extract_calls=lineage_extract_calls,
+            source_parse_sum_ms=source_parse_sum_ms,
+            cache_get_sum_ms=cache_get_sum_ms,
+            lineage_extract_sum_ms=lineage_extract_sum_ms,
+        )
 
     def emit_lineage_extract_timing() -> None:
         slowest = sorted(lineage_extract_slowest, reverse=True)[:10]
@@ -681,6 +752,9 @@ def index_repository(
             "FULL_ANALYSIS_LINEAGE_EXTRACTION",
             elapsed_ms=lineage_extract_sum_ms,
             operation="lineage_extraction",
+            timing_semantics="aggregate_file_task_not_critical_path",
+            lineage_extract_calls=lineage_extract_calls,
+            lineage_cache_hits=lineage_cache_hits,
             result=(
                 f"sum_ms={lineage_extract_sum_ms:.3f};max_ms={max_ms:.3f};"
                 f"files={len(lineage_extract_slowest)};top10={top10}"
@@ -721,7 +795,7 @@ def index_repository(
     if os.environ.get("CONTEXTOR_DISABLE_PROCESS_POOL") == "1":
         for path in files_to_process:
             res = _process_single_file(str(path), str(root_path))
-            record_lineage_extract_timing(res)
+            record_file_task_evidence(res)
             if res["error"]:
                 line_number, column_number = _syntax_error_location(res["error"])
                 skipped.append(
@@ -754,6 +828,7 @@ def index_repository(
                 record_automatic_test_context_path(res)
             completed += 1
             checkpoint(progress_callback, res["filename"], completed, total_files)
+        emit_index_profile_evidence("inline")
         emit_lineage_extract_timing()
         return RepositoryIndex(
             modules=modules,
@@ -774,7 +849,7 @@ def index_repository(
 
         for future in as_completed(futures):
             res = future.result()
-            record_lineage_extract_timing(res)
+            record_file_task_evidence(res)
 
             if res["error"]:
                 line_number, column_number = _syntax_error_location(res["error"])
@@ -814,6 +889,7 @@ def index_repository(
                 executor.shutdown(wait=False, cancel_futures=True)
                 raise
 
+    emit_index_profile_evidence("process_pool")
     emit_lineage_extract_timing()
 
     return RepositoryIndex(
