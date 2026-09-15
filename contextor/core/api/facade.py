@@ -1054,13 +1054,36 @@ class ContextorFacade:
                 "canonical_materialization", canonical_materialization_started
             )
             persistence_started = time.monotonic()
+
+            component_started = time.monotonic()
             current_metadata = read_metadata(cache_dir)
-            target_revision = (current_metadata.revision if current_metadata else 0) + 1
+            target_revision = (
+                current_metadata.revision
+                if current_metadata
+                else 0
+            ) + 1
+            emit_stage_component_end(
+                "persistence",
+                "metadata_and_revision",
+                component_started,
+            )
+
+            component_started = time.monotonic()
             file_state_payload = (
-                file_state_manager.build_payload(datestamp or "", target_revision)
+                file_state_manager.build_payload(
+                    datestamp or "",
+                    target_revision,
+                )
                 if file_state_manager is not None
                 else None
             )
+            emit_stage_component_end(
+                "persistence",
+                "file_state_payload",
+                component_started,
+            )
+
+            component_started = time.monotonic()
             meta = save_engine_state(
                 state,
                 cache_dir,
@@ -1070,6 +1093,16 @@ class ContextorFacade:
                 root_path=path,
                 exact_revision=target_revision,
                 file_state_payload=file_state_payload,
+            )
+            emit_stage_component_end(
+                "persistence",
+                "snapshot_save",
+                component_started,
+                status=(
+                    "success"
+                    if meta is not None
+                    else "failed"
+                ),
             )
 
             emit_stage_end("persistence", persistence_started)
@@ -1174,6 +1207,24 @@ class ContextorFacade:
                 "canonical_materialization", canonical_materialization_started
             )
             skipped_stage_started = time.monotonic()
+            emit_stage_component(
+                "persistence",
+                "metadata_and_revision",
+                0.0,
+                status="skipped",
+            )
+            emit_stage_component(
+                "persistence",
+                "file_state_payload",
+                0.0,
+                status="skipped",
+            )
+            emit_stage_component(
+                "persistence",
+                "snapshot_save",
+                0.0,
+                status="skipped",
+            )
             emit_stage_end("persistence", skipped_stage_started)
             emit_stage_component(
                 "live_publish",

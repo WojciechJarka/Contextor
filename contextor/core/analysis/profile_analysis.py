@@ -61,6 +61,11 @@ _REQUIRED_STAGE_COMPONENTS = {
         "shared_usage_clusters",
         "publish_preparation",
     ),
+    "persistence": (
+        "metadata_and_revision",
+        "file_state_payload",
+        "snapshot_save",
+    ),
     "live_publish": (
         "connect",
         "publish",
@@ -102,6 +107,12 @@ _COMPONENT_REASON_CODES = {
         "shared_usage_clusters": "shared_usage_clusters_cost",
         "publish_preparation": "canonical_publish_preparation_cost",
         "__residual__": "canonical_materialization_residual_cost",
+    },
+    "persistence": {
+        "metadata_and_revision": "persistence_metadata_revision_cost",
+        "file_state_payload": "persistence_file_state_payload_cost",
+        "snapshot_save": "snapshot_save_cost",
+        "__residual__": "persistence_residual_cost",
     },
     "live_publish": {
         "connect": "live_connect_cost",
@@ -298,6 +309,7 @@ def _stage_component_reason(
             "identity_and_setup": "identity_setup_no_work",
             "reports": "reports_no_work",
             "canonical_materialization": "canonical_materialization_no_work",
+            "persistence": "persistence_no_work",
             "live_publish": "live_publish_not_attempted",
         }
         return zero_reason[stage], evidence

@@ -522,6 +522,136 @@ The prescribed Step 2 script reached the controlled update but its process outpu
 FILES_CHANGED=NONE
 DIFFS=NONE
 
+## CPA10F_RUNTIME_PROFILE_CERTIFICATION
+
+TOOL=contextor_profile_analysis
+DOCUMENTATION_LOOKUP=Contextor MCP documentation returned controlled "Documentation identity mismatch" for this tool; the exposed Contextor MCP tool schema was then used directly.
+REPO_PATH=C:\\Temp\\Contextor_Repo
+OPERATION_ID=profile-2096-1
+PROFILE_STATUS=ok
+ABSOLUTE_WALL_AUTHORITATIVE=false
+TOTAL_MS=82359.0
+ANALYSIS_BODY_MS=81625.0
+TOTAL_BEFORE_RELEASE_MS=82344.0
+LEASE_WAIT_MS=172.0
+STAGE_SUM_MS=81187.0
+UNATTRIBUTED_ANALYSIS_MS=438.0
+
+STAGE_ATTRIBUTION_KEYS=identity_and_setup,reports,canonical_materialization,live_publish (exactly four required wide stages)
+
+### identity_and_setup
+
+progress_setup_ms=0.0
+repository_identity_ms=62.0
+authoritative_state_resolution_ms=8141.0
+cache_reset_ms=0.0
+analysis_filters_and_index_progress_ms=0.0
+component_sum_ms=8203.0
+residual_ms=0.0
+coverage_pct=100.0
+dominant_component=authoritative_state_resolution
+reason_code=authoritative_state_resolution_cost
+critical_path_ms=8203.0
+RECONSTRUCTION=8203.0+0.0=8203.0 (exact)
+
+### reports
+
+basic_report_preparation_ms=94.0
+artifact_pipeline_ms=2578.0
+sanity_check_ms=0.0
+layer_reports_ms=312.0
+git_state_ms=0.0
+high_risk_writes_ms=0.0
+global_report_write_ms=188.0
+incremental_file_state_ms=187.0
+finalization_ms=0.0
+component_sum_ms=3359.0
+residual_ms=16.0
+coverage_pct=99.53
+dominant_component=artifact_pipeline
+reason_code=artifact_pipeline_cost
+critical_path_ms=3375.0
+RECONSTRUCTION=3359.0+16.0=3375.0 (exact)
+
+### canonical_materialization
+
+setup_and_imports_ms=0.0
+topology_analytics_ms=125.0
+collision_canonicalization_ms=141.0
+artifact_consumption_ms=78.0
+module_usage_reuse_ms=1047.0
+canonical_validation_ms=31.0
+lineage_materialization_ms=6266.0
+lineage_query_indexes_ms=125.0
+state_construction_ms=0.0
+dependency_matrix_ms=94.0
+shared_usage_clusters_ms=578.0
+publish_preparation_ms=0.0
+component_sum_ms=8485.0
+residual_ms=0.0
+coverage_pct=100.0
+dominant_component=lineage_materialization
+reason_code=lineage_reuse_gate_cost
+critical_path_ms=8485.0
+RECONSTRUCTION=8485.0+0.0=8485.0 (exact)
+lineage_reason_code=lineage_reuse_gate_cost
+lineage_elapsed_ms=6250.0
+lineage_sources=397
+reuse_sources=397
+reresolve_sources=0
+materialize_sources=0
+reresolve_fallback_sources=0
+reuse_gate_ms=3500.0
+reresolve_calls_ms=0.0
+materialize_calls_ms=0.0
+
+### live_publish
+
+connect_ms=31.0
+publish_ms=11062.0
+status_handling_ms=0.0
+component_sum_ms=11093.0
+residual_ms=0.0
+coverage_pct=100.0
+stage_status=success
+dominant_component=publish
+reason_code=live_publish_ipc_cost
+critical_path_ms=11093.0
+RECONSTRUCTION=11093.0+0.0=11093.0 (exact)
+
+### Full current bottleneck ranking
+
+RANK=1; STAGE=indexing; CRITICAL_PATH_MS=45562.0; SHARE_OF_ANALYSIS_PCT=55.82; REASON_CODE=cold_or_partial_cache_work; DOMINANT_COMPONENT=unavailable
+RANK=2; STAGE=live_publish; CRITICAL_PATH_MS=11093.0; SHARE_OF_ANALYSIS_PCT=13.59; REASON_CODE=live_publish_ipc_cost; DOMINANT_COMPONENT=publish
+RANK=3; STAGE=canonical_materialization; CRITICAL_PATH_MS=8485.0; SHARE_OF_ANALYSIS_PCT=10.4; REASON_CODE=lineage_reuse_gate_cost; DOMINANT_COMPONENT=lineage_materialization
+RANK=4; STAGE=identity_and_setup; CRITICAL_PATH_MS=8203.0; SHARE_OF_ANALYSIS_PCT=10.05; REASON_CODE=authoritative_state_resolution_cost; DOMINANT_COMPONENT=authoritative_state_resolution
+RANK=5; STAGE=persistence; CRITICAL_PATH_MS=3797.0; SHARE_OF_ANALYSIS_PCT=4.65; REASON_CODE=unattributed; DOMINANT_COMPONENT=unavailable
+
+REMAINING_UNATTRIBUTED_STAGE=persistence
+CRITICAL_PATH_MS=3797.0
+RANK=5
+MATERIALITY=persistence remains a material top-5 bottleneck; no attribution was attempted or inferred.
+
+PERSISTENCE_MS=3797.0
+PERSISTENCE_IN_TOP5=YES
+PERSISTENCE_ATTRIBUTED=NO
+
+AGGREGATE_WORKER_DIAGNOSTICS=source_parse_sum_ms=10967.0; cache_get_sum_ms=29574.0; lineage_extract_sum_ms=1142.0; lineage_extract_event_sum_ms=1142.0; timing_semantics=aggregate_file_task_not_critical_path
+
+CONTRACT_CHECK=PASS — all four stage_attribution entries have reason_code != unattributed, dominant_component for positive stage time, component_sum_ms, residual_ms, coverage_pct, and rounding-safe reconstruction of stage critical_path_ms.
+CPA10F_IMPLEMENTATION=PASS
+CPA10F_RUNTIME_PROFILE_CERTIFICATION=PASS
+PROFILE_TOP5_ATTRIBUTION=PARTIAL (persistence rank 5 remains reason_code=unattributed)
+CPA10_OVERALL=OPEN
+NO_RUNTIME_RESTART=YES
+NO_ADDITIONAL_FULL_ANALYSIS=YES
+NO_MANUAL_TRACE_PARSING=YES
+NO_CUSTOM_PROFILER=YES
+
+FILES_CHANGED=NONE
+DIFFS=NONE
+
+
 
 ## CPA10F_PROFILE_STAGE_COMPONENT_ATTRIBUTION
 
@@ -1909,6 +2039,249 @@ Source: `C:\\Users\\DafoO\\AppData\\Roaming\\Contextor\\logs\\contextor_runtime_
 FULL_ANALYSIS_44S_CAUSAL_LINK=NOT_SUPPORTED
 
 There is no trace here from a specific full-analysis run waiting on this particular mutation/lease. Similar wall-clock magnitudes alone are not causal evidence.
+
+FILES_CHANGED=NONE
+DIFFS=NONE
+
+## CPA10G_PERSISTENCE_STAGE_ATTRIBUTION
+
+STATUS=IMPLEMENTATION_COMPLETE_TESTS_PASS
+HEAD_BEFORE=15b8f4e5c930d5bab8fd7159d745fe2eeb1ef2da
+HEAD_AFTER=15b8f4e5c930d5bab8fd7159d745fe2eeb1ef2da
+FILES_CHANGED=4 (the exact requested production/test/docs files; walkthrough.md excluded)
+PY_COMPILE=PASS
+TESTS=PASS — 57 passed in 24.57s
+PROFILE_RUN=NOT_RUN
+PROFILE_WORKER_RESTART_REQUIRED=NO
+MCP_SERVER_RESTART_REQUIRED=NO_FOR_PROFILE_EXECUTION
+DESKTOP_RUNTIME_RESTART_REQUIRED=YES_BEFORE_DESKTOP_CERTIFICATION
+
+IMPLEMENTATION_SCOPE=Persistence stage now has exactly three non-overlapping critical-path components: metadata_and_revision, file_state_payload, snapshot_save. Existing save/revision/snapshot semantics and operation order were preserved; no store.py telemetry or optimization was added.
+PROFILE_CONTRACT=persistence is included in _REQUIRED_STAGE_COMPONENTS and _COMPONENT_REASON_CODES; existing _stage_component_reason and generic stage_attribution/bottleneck paths handle it without a persistence special case.
+CONTEXTOR_FIRST_VERIFICATION=Contextor resolved ContextorFacade.analyze_project and _stage_component_reason with workspace_sync=verified. Call-context queries resolved analyze_project and build_analysis_profile with workspace_sync=verified; canonical revision 1152. No runtime profile was run.
+
+ACTUAL_DIFF=
+```diff
+diff --git a/contextor/core/analysis/profile_analysis.py b/contextor/core/analysis/profile_analysis.py
+index 17f3e8f..3566f44 100644
+--- a/contextor/core/analysis/profile_analysis.py
++++ b/contextor/core/analysis/profile_analysis.py
+@@ -61,6 +61,11 @@ _REQUIRED_STAGE_COMPONENTS = {
+         "shared_usage_clusters",
+         "publish_preparation",
+     ),
++    "persistence": (
++        "metadata_and_revision",
++        "file_state_payload",
++        "snapshot_save",
++    ),
+     "live_publish": (
+         "connect",
+         "publish",
+@@ -103,6 +108,12 @@ _COMPONENT_REASON_CODES = {
+         "publish_preparation": "canonical_publish_preparation_cost",
+         "__residual__": "canonical_materialization_residual_cost",
+     },
++    "persistence": {
++        "metadata_and_revision": "persistence_metadata_revision_cost",
++        "file_state_payload": "persistence_file_state_payload_cost",
++        "snapshot_save": "snapshot_save_cost",
++        "__residual__": "persistence_residual_cost",
++    },
+     "live_publish": {
+         "connect": "live_connect_cost",
+         "publish": "live_publish_ipc_cost",
+@@ -298,6 +309,7 @@ def _stage_component_reason(
+             "identity_and_setup": "identity_setup_no_work",
+             "reports": "reports_no_work",
+             "canonical_materialization": "canonical_materialization_no_work",
++            "persistence": "persistence_no_work",
+             "live_publish": "live_publish_not_attempted",
+         }
+         return zero_reason[stage], evidence
+diff --git a/contextor/core/api/facade.py b/contextor/core/api/facade.py
+index 980ad5c..1feadcb 100644
+--- a/contextor/core/api/facade.py
++++ b/contextor/core/api/facade.py
+@@ -1054,13 +1054,36 @@ class ContextorFacade:
+                 "canonical_materialization", canonical_materialization_started
+             )
+             persistence_started = time.monotonic()
++
++            component_started = time.monotonic()
+             current_metadata = read_metadata(cache_dir)
+-            target_revision = (current_metadata.revision if current_metadata else 0) + 1
++            target_revision = (
++                current_metadata.revision
++                if current_metadata
++                else 0
++            ) + 1
++            emit_stage_component_end(
++                "persistence",
++                "metadata_and_revision",
++                component_started,
++            )
++
++            component_started = time.monotonic()
+             file_state_payload = (
+-                file_state_manager.build_payload(datestamp or "", target_revision)
++                file_state_manager.build_payload(
++                    datestamp or "",
++                    target_revision,
++                )
+                 if file_state_manager is not None
+                 else None
+             )
++            emit_stage_component_end(
++                "persistence",
++                "file_state_payload",
++                component_started,
++            )
++
++            component_started = time.monotonic()
+             meta = save_engine_state(
+                 state,
+                 cache_dir,
+@@ -1071,6 +1094,16 @@ class ContextorFacade:
+                 exact_revision=target_revision,
+                 file_state_payload=file_state_payload,
+             )
++            emit_stage_component_end(
++                "persistence",
++                "snapshot_save",
++                component_started,
++                status=(
++                    "success"
++                    if meta is not None
++                    else "failed"
++                ),
++            )
+ 
+             emit_stage_end("persistence", persistence_started)
+ 
+@@ -1174,6 +1207,24 @@ class ContextorFacade:
+                 "canonical_materialization", canonical_materialization_started
+             )
+             skipped_stage_started = time.monotonic()
++            emit_stage_component(
++                "persistence",
++                "metadata_and_revision",
++                0.0,
++                status="skipped",
++            )
++            emit_stage_component(
++                "persistence",
++                "file_state_payload",
++                0.0,
++                status="skipped",
++            )
++            emit_stage_component(
++                "persistence",
++                "snapshot_save",
++                0.0,
++                status="skipped",
++            )
+             emit_stage_end("persistence", skipped_stage_started)
+             emit_stage_component(
+                 "live_publish",
+diff --git a/contextor/mcp/docs/contextor_profile_analysis.json b/contextor/mcp/docs/contextor_profile_analysis.json
+index 7f4b893..a71a1ac 100644
+--- a/contextor/mcp/docs/contextor_profile_analysis.json
++++ b/contextor/mcp/docs/contextor_profile_analysis.json
+@@ -1,11 +1,11 @@
+ {
+-  "version": "1.1.0",
++  "version": "1.2.0",
+   "tool": "contextor_profile_analysis",
+   "purpose": ["Run one repository-wide diagnostic profile through the real production full-analysis path and return a compact, deterministic breakdown of where the analysis spends time and which structured evidence explains known bottlenecks."],
+   "parameters": ["repo_path (string, required): canonical repository root to profile.", "exclude_paths (array of strings or null, optional, default null): additional per-run repository-relative exclusions forwarded unchanged to the production full-analysis path."],
+-  "behavior": ["1. The MCP coroutine launches a dedicated Contextor profile worker process so the MCP event loop does not execute the synchronous analysis body and the worker's normal full-analysis ProcessPool is isolated from the MCP server process.\n2. The runner attempts the existing canonical full-analysis writer with timeout=0.0; if another writer already owns the repository, status=busy with reason_code=full_analysis_busy is returned instead of waiting and contaminating the sample.\n3. Evidence is captured in memory from the existing runtime trace path under one scoped profile operation; the tool creates no second trace session and reads no JSONL.\n4. Bottleneck ranking uses only FULL_ANALYSIS_STAGE_END critical-path wall timings. Aggregate worker/file-task sums are reported separately and never participate in that ranking.\n5. The wide stages identity_and_setup, reports, canonical_materialization, and live_publish emit non-overlapping structured stage-component evidence; the profiler selects the dominant measured component or measured residual, while canonical lineage retains nested lineage attribution."],
++  "behavior": ["1. The MCP coroutine launches a dedicated Contextor profile worker process so the MCP event loop does not execute the synchronous analysis body and the worker's normal full-analysis ProcessPool is isolated from the MCP server process.\n2. The runner attempts the existing canonical full-analysis writer with timeout=0.0; if another writer already owns the repository, status=busy with reason_code=full_analysis_busy is returned instead of waiting and contaminating the sample.\n3. Evidence is captured in memory from the existing runtime trace path under one scoped profile operation; the tool creates no second trace session and reads no JSONL.\n4. Bottleneck ranking uses only FULL_ANALYSIS_STAGE_END critical-path wall timings. Aggregate worker/file-task sums are reported separately and never participate in that ranking.\n5. The wide stages identity_and_setup, reports, canonical_materialization, persistence, and live_publish emit non-overlapping structured stage-component evidence; the profiler selects the dominant measured component or measured residual, while canonical lineage retains nested lineage attribution."],
+   "freshness": ["The tool executes a real full repository analysis and therefore refreshes the same canonical analysis state and LIVE publication path as the normal production full-analysis owner when the run succeeds.", "The returned profile describes only the analysis executed by this call. It is not a historical profiler report and is not persisted as a separate profiling artifact."],
+   "errors": ["A missing or non-directory repo_path returns an Error string before starting the profile runner.", "status=busy with reason_code=full_analysis_busy means another canonical full-analysis writer already owns the repository; retry later rather than treating the result as a performance sample.", "status=incomplete means required structured profile evidence was missing or duplicated.", "status=invalid_evidence means captured timing/evidence contracts were internally inconsistent.", "Unexpected production analysis failures propagate through the normal central MCP wrapper and are not converted into profiler guesses."],
+-  "usage_notes": ["Use this tool to identify which analysis stages dominate and why, not to establish clean-machine absolute benchmark time. The response explicitly marks absolute_wall_authoritative=false because caller/runtime load can inflate wall duration.", "One run is normally sufficient for architectural diagnosis. Repeat only when confirming a specific optimization or investigating unstable evidence.", "Do not add aggregate source_parse_sum_ms, cache_get_sum_ms, or lineage_extract_sum_ms to critical-path stage durations; those values are aggregate file-task diagnostics and may exceed wall time under parallel execution.", "stage_attribution returns component timings, component_sum_ms, residual_ms, coverage_pct, and dominant_component for identity_and_setup, reports, canonical_materialization, and live_publish.", "residual_ms is the critical-path portion of a stage not covered by named components and must not be heuristically allocated."] ,
+-  "examples": ["Call contextor_profile_analysis(repo_path=\"C:\\\\Temp\\\\Contextor_Repo\") and inspect bottlenecks first. Evidence-backed reason_code examples include artifact_pipeline_cost, lineage_reuse_gate_cost, live_publish_ipc_cost, and repository_identity_cost."]
++  "usage_notes": ["Use this tool to identify which analysis stages dominate and why, not to establish clean-machine absolute benchmark time. The response explicitly marks absolute_wall_authoritative=false because caller/runtime load can inflate wall duration.", "One run is normally sufficient for architectural diagnosis. Repeat only when confirming a specific optimization or investigating unstable evidence.", "Do not add aggregate source_parse_sum_ms, cache_get_sum_ms, or lineage_extract_sum_ms to critical-path stage durations; those values are aggregate file-task diagnostics and may exceed wall time under parallel execution.", "stage_attribution returns component timings, component_sum_ms, residual_ms, coverage_pct, and dominant_component for identity_and_setup, reports, canonical_materialization, persistence, and live_publish.", "residual_ms is the critical-path portion of a stage not covered by named components and must not be heuristically allocated."],
++  "examples": ["Call contextor_profile_analysis(repo_path=\"C:\\\\Temp\\\\Contextor_Repo\") and inspect bottlenecks first. Evidence-backed reason_code examples include artifact_pipeline_cost, lineage_reuse_gate_cost, live_publish_ipc_cost, repository_identity_cost, and snapshot_save_cost."]
+ }
+diff --git a/tests/test_profile_analysis.py b/tests/test_profile_analysis.py
+index 265b86c..7fb45ff 100644
+--- a/tests/test_profile_analysis.py
++++ b/tests/test_profile_analysis.py
+@@ -142,6 +142,11 @@ def _profile_events(operation_id: str = "profile-test"):
+             "shared_usage_clusters": 0.5,
+             "publish_preparation": 0.5,
+         },
++        "persistence": {
++            "metadata_and_revision": 2.0,
++            "file_state_payload": 3.0,
++            "snapshot_save": 34.0,
++        },
+         "live_publish": {
+             "connect": 5.0,
+             "publish": 25.0,
+@@ -158,7 +163,15 @@ def _profile_events(operation_id: str = "profile-test"):
+                 "component": component,
+                 "elapsed_ms": elapsed_ms,
+                 "timing_semantics": "critical_path_stage_component",
+-                **({"status": "success"} if stage == "live_publish" else {}),
++                **(
++                    {"status": "success"}
++                    if stage == "live_publish"
++                    or (
++                        stage == "persistence"
++                        and component == "snapshot_save"
++                    )
++                    else {}
++                ),
+             }
+             for component, elapsed_ms in components.items()
+         )
+@@ -236,6 +249,16 @@ def test_profile_ranks_only_critical_path_and_attributes_known_causes():
+     assert live_attribution["publish_ms"] == 25.0
+     assert live_attribution["stage_status"] == "success"
+ 
++    persistence = profile["stage_attribution"]["persistence"]
++    assert persistence["reason_code"] == "snapshot_save_cost"
++    assert persistence["metadata_and_revision_ms"] == 2.0
++    assert persistence["file_state_payload_ms"] == 3.0
++    assert persistence["snapshot_save_ms"] == 34.0
++    assert persistence["component_sum_ms"] == 39.0
++    assert persistence["residual_ms"] == 1.0
++    assert persistence["dominant_component"] == "snapshot_save"
++    assert persistence["stage_status"] == "success"
++
+     aggregate = profile["aggregate_worker_diagnostics"]
+     assert aggregate["timing_semantics"] == (
+         "aggregate_file_task_not_critical_path"
+@@ -314,6 +337,25 @@ def test_profile_fails_closed_when_stage_component_evidence_is_missing():
+     ]
+ 
+ 
++def test_profile_fails_closed_when_persistence_component_evidence_is_missing():
++    events = [
++        event
++        for event in _profile_events()
++        if not (
++            event["ev"] == "FULL_ANALYSIS_STAGE_COMPONENT_END"
++            and event["stage"] == "persistence"
++            and event["component"] == "snapshot_save"
++        )
++    ]
++
++    profile = build_analysis_profile(events, operation_id="profile-test")
++
++    assert profile["status"] == "incomplete"
++    assert profile["missing"] == [
++        "FULL_ANALYSIS_STAGE_COMPONENT_END:persistence:snapshot_save"
++    ]
++
++
+ def test_profile_rejects_invalid_stage_component_timing_semantics():
+     events = _profile_events()
+     component = next(
+
+```
 
 FILES_CHANGED=NONE
 DIFFS=NONE

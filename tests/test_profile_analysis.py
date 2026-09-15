@@ -142,6 +142,11 @@ def _profile_events(operation_id: str = "profile-test"):
             "shared_usage_clusters": 0.5,
             "publish_preparation": 0.5,
         },
+        "persistence": {
+            "metadata_and_revision": 2.0,
+            "file_state_payload": 3.0,
+            "snapshot_save": 34.0,
+        },
         "live_publish": {
             "connect": 5.0,
             "publish": 25.0,
@@ -158,7 +163,15 @@ def _profile_events(operation_id: str = "profile-test"):
                 "component": component,
                 "elapsed_ms": elapsed_ms,
                 "timing_semantics": "critical_path_stage_component",
-                **({"status": "success"} if stage == "live_publish" else {}),
+                **(
+                    {"status": "success"}
+                    if stage == "live_publish"
+                    or (
+                        stage == "persistence"
+                        and component == "snapshot_save"
+                    )
+                    else {}
+                ),
             }
             for component, elapsed_ms in components.items()
         )
@@ -236,6 +249,16 @@ def test_profile_ranks_only_critical_path_and_attributes_known_causes():
     assert live_attribution["publish_ms"] == 25.0
     assert live_attribution["stage_status"] == "success"
 
+    persistence = profile["stage_attribution"]["persistence"]
+    assert persistence["reason_code"] == "snapshot_save_cost"
+    assert persistence["metadata_and_revision_ms"] == 2.0
+    assert persistence["file_state_payload_ms"] == 3.0
+    assert persistence["snapshot_save_ms"] == 34.0
+    assert persistence["component_sum_ms"] == 39.0
+    assert persistence["residual_ms"] == 1.0
+    assert persistence["dominant_component"] == "snapshot_save"
+    assert persistence["stage_status"] == "success"
+
     aggregate = profile["aggregate_worker_diagnostics"]
     assert aggregate["timing_semantics"] == (
         "aggregate_file_task_not_critical_path"
@@ -311,6 +334,25 @@ def test_profile_fails_closed_when_stage_component_evidence_is_missing():
     assert profile["status"] == "incomplete"
     assert profile["missing"] == [
         "FULL_ANALYSIS_STAGE_COMPONENT_END:reports:artifact_pipeline"
+    ]
+
+
+def test_profile_fails_closed_when_persistence_component_evidence_is_missing():
+    events = [
+        event
+        for event in _profile_events()
+        if not (
+            event["ev"] == "FULL_ANALYSIS_STAGE_COMPONENT_END"
+            and event["stage"] == "persistence"
+            and event["component"] == "snapshot_save"
+        )
+    ]
+
+    profile = build_analysis_profile(events, operation_id="profile-test")
+
+    assert profile["status"] == "incomplete"
+    assert profile["missing"] == [
+        "FULL_ANALYSIS_STAGE_COMPONENT_END:persistence:snapshot_save"
     ]
 
 
