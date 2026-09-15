@@ -169,6 +169,11 @@ warnings.filterwarnings("ignore")
 
 from typing import Any, Callable
 from fastmcp import FastMCP
+from fastmcp.exceptions import ToolError
+from fastmcp.server.middleware import Middleware, MiddlewareContext
+from fastmcp.tools.tool import ToolResult
+from pydantic_core import ValidationError as PydanticCoreValidationError
+from contextor.mcp import query_helpers
 from contextor.mcp_process_registry import (
     process_identity,
     read_records,
@@ -240,6 +245,7 @@ from contextor.mcp.tools.get_file_edit_context import (
     get_file_edit_context as _get_file_edit_context_impl,
 )
 from contextor.mcp.tools.get_symbol_implementation import (
+    _parameter_contract_response as _get_symbol_implementation_parameter_contract_response,
     get_symbol_implementation as _get_symbol_implementation_impl,
 )
 from contextor.mcp.tools.update_file import update_file as _update_file_impl
@@ -251,8 +257,199 @@ from contextor.mcp.tools.extract_indexed_report_context import (
     extract_indexed_report_context as _extract_indexed_report_context_impl,
 )
 
+_GET_SYMBOL_IMPLEMENTATION_ARGUMENTS = (
+    "repo_path",
+    "symbol",
+    "file_paths",
+    "mode",
+    "include",
+    "methods",
+    "member_limit",
+    "file_path",
+)
+
+_GET_SYMBOL_IMPLEMENTATION_ARGUMENT_SET = frozenset(
+    _GET_SYMBOL_IMPLEMENTATION_ARGUMENTS
+)
+
+_GET_SYMBOL_IMPLEMENTATION_REQUIRED_ARGUMENTS = (
+    "repo_path",
+    "symbol",
+)
+
+
+def _get_symbol_implementation_boundary_result(
+    *,
+    parameter: str,
+    invalid_value: Any,
+    reason: str,
+    similar_candidates: Any = None,
+) -> ToolResult:
+    return ToolResult(
+        content=(
+            _get_symbol_implementation_parameter_contract_response(
+                parameter=parameter,
+                invalid_value=invalid_value,
+                reason=reason,
+                similar_candidates=similar_candidates,
+            )
+        )
+    )
+
+
+def _get_symbol_implementation_validation_parameters(
+    exc: PydanticCoreValidationError,
+) -> list[str] | None:
+    errors = exc.errors()
+
+    if not errors:
+        return None
+
+    parameters: list[str] = []
+
+    for error in errors:
+        location = error.get("loc") or ()
+
+        if not location:
+            return None
+
+        parameter = str(location[0])
+
+        if (
+            parameter
+            not in _GET_SYMBOL_IMPLEMENTATION_ARGUMENT_SET
+        ):
+            return None
+
+        parameters.append(parameter)
+
+    return sorted(set(parameters))
+
+
+class _GetSymbolImplementationInputBoundaryMiddleware(
+    Middleware
+):
+    async def on_call_tool(
+        self,
+        context: MiddlewareContext[Any],
+        call_next: Callable[..., Any],
+    ) -> ToolResult:
+        message = context.message
+
+        if (
+            getattr(message, "name", None)
+            != "get_symbol_implementation"
+        ):
+            return await call_next(context)
+
+        arguments = dict(
+            getattr(message, "arguments", None)
+            or {}
+        )
+
+        unknown_arguments = sorted(
+            set(arguments)
+            - _GET_SYMBOL_IMPLEMENTATION_ARGUMENT_SET
+        )
+
+        if unknown_arguments:
+            return _get_symbol_implementation_boundary_result(
+                parameter="unknown_argument",
+                invalid_value=unknown_arguments,
+                reason=(
+                    "Unknown get_symbol_implementation argument "
+                    "name(s): "
+                    + ", ".join(unknown_arguments)
+                    + ". Valid argument names are: "
+                    + ", ".join(
+                        _GET_SYMBOL_IMPLEMENTATION_ARGUMENTS
+                    )
+                    + "."
+                ),
+                similar_candidates={
+                    argument: (
+                        query_helpers
+                        .fuzzy_choice_candidates(
+                            argument,
+                            _GET_SYMBOL_IMPLEMENTATION_ARGUMENTS,
+                        )
+                    )
+                    for argument in unknown_arguments
+                },
+            )
+
+        missing_arguments = [
+            parameter
+            for parameter
+            in _GET_SYMBOL_IMPLEMENTATION_REQUIRED_ARGUMENTS
+            if parameter not in arguments
+        ]
+
+        if missing_arguments:
+            return _get_symbol_implementation_boundary_result(
+                parameter="missing_required_argument",
+                invalid_value=missing_arguments,
+                reason=(
+                    "Missing required "
+                    "get_symbol_implementation argument(s): "
+                    + ", ".join(missing_arguments)
+                    + "."
+                ),
+            )
+
+        try:
+            return await call_next(context)
+
+        except ToolError as exc:
+            cause = exc.__cause__
+
+            if not isinstance(
+                cause,
+                PydanticCoreValidationError,
+            ):
+                raise
+
+            invalid_parameters = (
+                _get_symbol_implementation_validation_parameters(
+                    cause
+                )
+            )
+
+            if invalid_parameters is None:
+                raise
+
+            parameter = (
+                invalid_parameters[0]
+                if len(invalid_parameters) == 1
+                else "mcp_input_schema"
+            )
+
+            invalid_value = {
+                name: arguments.get(name)
+                for name in invalid_parameters
+                if name in arguments
+            }
+
+            return _get_symbol_implementation_boundary_result(
+                parameter=parameter,
+                invalid_value=invalid_value,
+                reason=(
+                    "FastMCP input-schema validation failed "
+                    "for documented "
+                    "get_symbol_implementation parameter(s): "
+                    + ", ".join(invalid_parameters)
+                    + ". Read the parameter types in this "
+                    "documentation response and retry once "
+                    "with the documented contract."
+                ),
+            )
+
+
 # Initialize FastMCP Server
 mcp = FastMCP("Contextor")
+mcp.add_middleware(
+    _GetSymbolImplementationInputBoundaryMiddleware()
+)
 
 
 def _cleanup_orphaned_processes(directory: Path) -> None:

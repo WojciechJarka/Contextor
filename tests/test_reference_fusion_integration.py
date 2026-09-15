@@ -41,7 +41,7 @@ def test_cold_index_emits_json_safe_reference_facts_into_combined_cache(
     assert _payload(root, source)["reference_facts"] == record
 
 
-def test_warm_reference_hit_parses_once_for_lineage_and_zero_reference_extraction(
+def test_warm_reference_hit_skips_ast_parse_and_reference_extraction(
     tmp_path, isolated_dirs, monkeypatch
 ):
     monkeypatch.setenv("CONTEXTOR_DISABLE_PROCESS_POOL", "1")
@@ -53,11 +53,17 @@ def test_warm_reference_hit_parses_once_for_lineage_and_zero_reference_extractio
     _reset_worker_cache(root)
 
     parse_calls = []
-    original_parse = indexer.parse_source_with_fingerprint
     monkeypatch.setattr(
         indexer,
-        "parse_source_with_fingerprint",
-        lambda path: (parse_calls.append(path) or original_parse(path)),
+        "parse_source_snapshot",
+        lambda snapshot, path: (
+            parse_calls.append(path)
+            or (_ for _ in ()).throw(
+                AssertionError(
+                    "unexpected warm AST parse"
+                )
+            )
+        ),
     )
     monkeypatch.setattr(
         indexer,
@@ -67,7 +73,7 @@ def test_warm_reference_hit_parses_once_for_lineage_and_zero_reference_extractio
 
     result = indexer.index_repository(str(root))
     assert result.reference_facts_by_module["module"]["status"] == "available"
-    assert len(parse_calls) == 1
+    assert parse_calls == []
 
 
 def test_reference_legacy_and_schema_migrations_parse_once_then_hit_warm(
@@ -80,12 +86,15 @@ def test_reference_legacy_and_schema_migrations_parse_once_then_hit_warm(
     source.write_text("def current(): return 1\n", encoding="utf-8")
     CacheManager(str(root)).set(source, {"imports": [], "error": None})
     _reset_worker_cache(root)
-    original_parse = indexer.parse_source_with_fingerprint
+    original_parse = indexer.parse_source_snapshot
     calls = []
     monkeypatch.setattr(
         indexer,
-        "parse_source_with_fingerprint",
-        lambda path: (calls.append(path) or original_parse(path)),
+        "parse_source_snapshot",
+        lambda snapshot, path: (
+            calls.append(path)
+            or original_parse(snapshot, path)
+        ),
     )
 
     migrated = indexer.index_repository(str(root))
@@ -104,7 +113,7 @@ def test_reference_legacy_and_schema_migrations_parse_once_then_hit_warm(
     _reset_worker_cache(root)
     calls.clear()
     indexer.index_repository(str(root))
-    assert len(calls) == 1
+    assert calls == []
 
 
 def test_source_change_invalidates_reference_facts_and_reassembles_reexports(

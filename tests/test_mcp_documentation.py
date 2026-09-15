@@ -97,6 +97,26 @@ def test_get_symbol_implementation_description_prevents_undocumented_modes():
     assert "only to missing fetch include selection" not in serialized
     assert "parameter_contract_error" in serialized
     assert "Symbol-name and selected method-name lookup misses" in serialized
+    assert (
+        "Unknown argument names are rejected by the MCP/FastMCP input boundary"
+        not in serialized
+    )
+    assert (
+        "dedicated MCP input-boundary middleware"
+        in serialized
+    )
+    assert (
+        "Missing required arguments receive the same"
+        in serialized
+    )
+    assert (
+        "ToolError cause chain"
+        in serialized
+    )
+    assert (
+        "Unrelated ToolError or validation failures are re-raised"
+        in serialized
+    )
 
 
 def test_single_tool_and_section_filters_load_only_selected_document(monkeypatch):
