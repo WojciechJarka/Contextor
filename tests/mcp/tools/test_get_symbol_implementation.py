@@ -618,7 +618,7 @@ def test_get_symbol_implementation__fetch_without_include_returns_full_canonical
         "get_symbol_implementation"
     )
 
-    assert result == expected
+    _assert_parameter_documentation_response(result, parameter="include")
     assert result["tool"] == "get_symbol_implementation"
     assert "parameters" in result
     assert "behavior" in result
@@ -650,9 +650,8 @@ def test_get_symbol_implementation__fetch_empty_include_returns_full_canonical_d
         include=[],
     )
 
-    assert json.loads(raw) == load_tool_document(
-        "get_symbol_implementation"
-    )
+    result = json.loads(raw)
+    _assert_parameter_documentation_response(result, parameter="include")
 
 
 def test_get_symbol_implementation__fetch_include_typo_returns_bounded_fuzzy_candidate(
@@ -674,13 +673,8 @@ def test_get_symbol_implementation__fetch_include_typo_returns_bounded_fuzzy_can
 
     result = json.loads(raw)
 
-    assert result["status"] == "error"
-    assert result["error"] == "Unsupported include sections."
-    assert result["unknown_sections"] == [
-        "implmentation"
-    ]
-
-    candidates = result["similar_candidates"][
+    _assert_parameter_documentation_response(result, parameter="include")
+    candidates = result["parameter_contract_error"]["similar_candidates"][
         "implmentation"
     ]
 
@@ -709,12 +703,9 @@ def test_get_symbol_implementation__fetch_include_unrelated_value_does_not_guess
 
     result = json.loads(raw)
 
-    assert result["status"] == "error"
-    assert result["unknown_sections"] == [
-        "totally_unrelated_xyz"
-    ]
+    _assert_parameter_documentation_response(result, parameter="include")
     assert (
-        result["similar_candidates"][
+        result["parameter_contract_error"]["similar_candidates"][
             "totally_unrelated_xyz"
         ]
         == []
@@ -739,10 +730,9 @@ def test_get_symbol_implementation__invalid_mode_typo_returns_bounded_fuzzy_cand
 
     result = json.loads(raw)
 
-    assert result["status"] == "error"
-    assert result["invalid_mode"] == "fetcc"
+    _assert_parameter_documentation_response(result, parameter="mode")
 
-    candidates = result["similar_candidates"]
+    candidates = result["parameter_contract_error"]["similar_candidates"]
 
     assert 1 <= len(candidates) <= 5
     assert candidates[0]["value"] == "fetch"
@@ -768,9 +758,7 @@ def test_get_symbol_implementation__missing_method_selection_still_uses_existing
 
     result = json.loads(raw)
 
-    assert result["status"] == "selection_required"
-    assert "method names" in result["message"]
-    assert "tool" not in result
+    _assert_parameter_documentation_response(result, parameter="methods")
 
 
 def test_get_symbol_implementation__unknown_method_typo_returns_bounded_fuzzy_candidate(
@@ -1072,7 +1060,58 @@ def test_get_symbol_implementation__runtime_description_parity():
     tool = mcp_server.mcp._tool_manager._tools["get_symbol_implementation"]
     assert tool.fn.__doc__ is None
     desc = tool.description.lower()
-    assert "plain leaves" in desc
-    assert "source is read from disk" in desc
-    assert "ambiguous" in desc
+    assert "auto|preview|fetch" in desc
+    assert "include=['implementation']" in desc
+    assert "documented argument names" in desc
 
+
+def _assert_parameter_documentation_response(result, *, parameter):
+    assert result["tool"] == "get_symbol_implementation"
+    assert result["version"] == "1.0.0"
+    for key in ("purpose", "parameters", "behavior", "freshness", "errors", "usage_notes", "examples"):
+        assert key in result
+    assert result["parameter_contract_error"]["parameter"] == parameter
+    assert "reason" in result["parameter_contract_error"]
+    assert "Do not repeat the same invalid call." in result["parameter_contract_error"]["retry_instruction"]
+
+
+def test_get_symbol_implementation__mode_full_returns_documentation(tmp_path, monkeypatch):
+    _setup_symbol_implementation_workspace(tmp_path, monkeypatch)
+    result = json.loads(get_symbol_implementation(repo_path=str(tmp_path), symbol="process_data", file_path="pkg/a.py", mode="full"))
+    _assert_parameter_documentation_response(result, parameter="mode")
+    assert result["parameter_contract_error"]["invalid_value"] == "full"
+
+
+def test_get_symbol_implementation__unrelated_invalid_mode_returns_documentation(tmp_path, monkeypatch):
+    _setup_symbol_implementation_workspace(tmp_path, monkeypatch)
+    result = json.loads(get_symbol_implementation(repo_path=str(tmp_path), symbol="process_data", file_path="pkg/a.py", mode="banana"))
+    _assert_parameter_documentation_response(result, parameter="mode")
+    assert result["parameter_contract_error"]["similar_candidates"] == []
+
+
+def test_get_symbol_implementation__invalid_combinations_return_documentation(tmp_path, monkeypatch):
+    _setup_symbol_implementation_workspace(tmp_path, monkeypatch)
+    cases = [
+        ({"mode":"auto", "include":["implementation"]}, "include"),
+        ({"mode":"preview", "methods":["login"]}, "methods"),
+        ({"mode":"fetch", "include":["implementation","methods"], "methods":["login"]}, "include"),
+        ({"mode":"fetch", "include":["methods"]}, "methods"),
+        ({"mode":"fetch", "include":["signature"], "methods":["login"]}, "methods"),
+    ]
+    for kwargs, parameter in cases:
+        symbol = "AuthService" if "methods" in kwargs.get("include", []) or kwargs.get("methods") else "process_data"
+        result = json.loads(get_symbol_implementation(repo_path=str(tmp_path), symbol=symbol, file_path="pkg/services/auth.py" if symbol == "AuthService" else "pkg/a.py", **kwargs))
+        _assert_parameter_documentation_response(result, parameter=parameter)
+
+
+def test_get_symbol_implementation__invalid_scalar_and_file_scope_return_documentation(tmp_path, monkeypatch):
+    _setup_symbol_implementation_workspace(tmp_path, monkeypatch)
+    cases = [
+        (dict(repo_path=str(tmp_path), symbol="AuthService", file_path="pkg/services/auth.py", member_limit=-1), "member_limit"),
+        (dict(repo_path=str(tmp_path), symbol="process_data", file_path="   "), "file_path"),
+        (dict(repo_path=str(tmp_path), symbol="process_data", file_path="pkg/missing.py"), "file_path/file_paths"),
+        (dict(repo_path=str(tmp_path / "missing"), symbol="anything"), "repo_path"),
+    ]
+    for kwargs, parameter in cases:
+        result = json.loads(get_symbol_implementation(**kwargs))
+        _assert_parameter_documentation_response(result, parameter=parameter)

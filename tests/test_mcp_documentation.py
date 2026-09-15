@@ -80,6 +80,20 @@ def test_documentation_default_returns_only_index(monkeypatch):
     assert loaded == [documentation.INDEX_PATH]
 
 
+def test_get_symbol_implementation_description_prevents_undocumented_modes():
+    index = documentation.load_documentation_index()
+    entry = next(
+        item
+        for item in index["tools"]
+        if item["tool"] == "get_symbol_implementation"
+    )
+    description = entry["short_description"]
+    assert "auto|preview|fetch" in description
+    assert "include=['implementation']" in description
+    assert "Use only documented argument names" in description
+    assert len(description.encode("utf-8")) <= 300
+
+
 def test_single_tool_and_section_filters_load_only_selected_document(monkeypatch):
     loaded = []
     original = documentation._read_json

@@ -11,6 +11,45 @@ from contextor.mcp import runtime as mcp_runtime
 DEFAULT_AUTO_FETCH_THRESHOLD_BYTES = 5120
 
 
+_FETCH_SECTIONS = (
+    "signature",
+    "docstring",
+    "implementation",
+    "static_context",
+    "methods",
+)
+
+_MODES = (
+    "auto",
+    "preview",
+    "fetch",
+)
+
+
+def _parameter_contract_response(
+    *,
+    parameter: str,
+    invalid_value: Any,
+    reason: str,
+    similar_candidates: Any = None,
+) -> str:
+    document = dict(load_tool_document("get_symbol_implementation"))
+    parameter_error: dict[str, Any] = {
+        "parameter": parameter,
+        "invalid_value": invalid_value,
+        "reason": reason,
+        "retry_instruction": (
+            "Read the documentation in this response and retry once "
+            "using only documented parameter names, values, and "
+            "combinations. Do not repeat the same invalid call."
+        ),
+    }
+    if similar_candidates is not None:
+        parameter_error["similar_candidates"] = similar_candidates
+    document["parameter_contract_error"] = parameter_error
+    return json.dumps(document, indent=2, ensure_ascii=False)
+
+
 def _resolve_symbol_source_paths(root: Path, file_paths: list[str]) -> list[Path]:
     """Resolve explicit Python source paths while retaining repository scope."""
     resolved: list[Path] = []
@@ -265,23 +304,86 @@ def get_symbol_implementation(
 
 
     if not root.is_dir():
-        return json.dumps({"status": "error", "error": f"Repository path '{root}' does not exist."}, indent=2)
-    normalized_mode = mode.strip().lower()
-    allowed_modes = ("auto", "preview", "fetch")
-
-    if normalized_mode not in set(allowed_modes):
-        return json.dumps(
-            {
-                "status": "error",
-                "error": "mode must be 'auto', 'preview', or 'fetch'.",
-                "invalid_mode": mode,
-                "similar_candidates": query_helpers.fuzzy_choice_candidates(
-                    normalized_mode,
-                    allowed_modes,
-                ),
-            },
-            indent=2,
+        return _parameter_contract_response(
+            parameter="repo_path",
+            invalid_value=repo_path,
+            reason=(
+                f"Repository path '{root}' does not exist "
+                "or is not a directory."
+            ),
         )
+    normalized_mode = mode.strip().lower()
+    if normalized_mode not in set(_MODES):
+        return _parameter_contract_response(
+            parameter="mode",
+            invalid_value=mode,
+            reason=(
+                "mode must be exactly one of: 'auto', 'preview', or "
+                "'fetch'. There is no mode='full'. For the complete "
+                "AST-bounded implementation use mode='fetch' with "
+                "include=['implementation']."
+            ),
+            similar_candidates=query_helpers.fuzzy_choice_candidates(
+                normalized_mode, _MODES
+            ),
+        )
+    if member_limit is not None and member_limit < 0:
+        return _parameter_contract_response(
+            parameter="member_limit", invalid_value=member_limit,
+            reason="member_limit must be null or an integer greater than or equal to 0.",
+        )
+    if file_path is not None and not file_path.strip():
+        return _parameter_contract_response(
+            parameter="file_path", invalid_value=file_path,
+            reason="file_path must be null or a non-empty Python source path.",
+        )
+    if file_paths is not None:
+        blank_file_paths = [item for item in file_paths if not item.strip()]
+        if blank_file_paths:
+            return _parameter_contract_response(
+                parameter="file_paths", invalid_value=file_paths,
+                reason="file_paths may be null or a list of non-empty Python source paths.",
+            )
+    if normalized_mode in {"auto", "preview"}:
+        if include is not None:
+            return _parameter_contract_response(
+                parameter="include", invalid_value=include,
+                reason="include is valid only with mode='fetch'. Do not pass include to mode='auto' or mode='preview'.",
+            )
+        if methods is not None:
+            return _parameter_contract_response(
+                parameter="methods", invalid_value=methods,
+                reason="methods is valid only with mode='fetch' and include=['methods'].",
+            )
+    if normalized_mode == "fetch":
+        selected_fetch_sections = list(include or [])
+        if not selected_fetch_sections:
+            return _parameter_contract_response(
+                parameter="include", invalid_value=include,
+                reason="mode='fetch' requires a non-empty include list. For the complete symbol implementation use include=['implementation'].",
+            )
+        unknown_fetch_sections = sorted(set(selected_fetch_sections) - set(_FETCH_SECTIONS))
+        if unknown_fetch_sections:
+            return _parameter_contract_response(
+                parameter="include", invalid_value=include,
+                reason="include contains unsupported fetch sections.",
+                similar_candidates={section: query_helpers.fuzzy_choice_candidates(section, _FETCH_SECTIONS) for section in unknown_fetch_sections},
+            )
+        if "implementation" in selected_fetch_sections and "methods" in selected_fetch_sections:
+            return _parameter_contract_response(
+                parameter="include", invalid_value=include,
+                reason="'implementation' and 'methods' are mutually exclusive fetch selections. Fetch the complete class with include=['implementation'], or selected class methods with include=['methods'] and methods=[...].",
+            )
+        if "methods" in selected_fetch_sections and not methods:
+            return _parameter_contract_response(
+                parameter="methods", invalid_value=methods,
+                reason="include=['methods'] requires explicit method names in methods=[...]. Use mode='preview' first if method discovery is needed.",
+            )
+        if methods is not None and "methods" not in selected_fetch_sections:
+            return _parameter_contract_response(
+                parameter="methods", invalid_value=methods,
+                reason="methods may be supplied only when include contains 'methods'.",
+            )
     effective_file_paths = list(file_paths or [])
     if file_path and file_path not in effective_file_paths:
         effective_file_paths.append(file_path)
@@ -314,7 +416,7 @@ def get_symbol_implementation(
                 try:
                     explicit_paths = _resolve_symbol_source_paths(root, effective_file_paths)
                 except ValueError as exc:
-                    return json.dumps({"status": "error", "error": str(exc)}, indent=2)
+                    return _parameter_contract_response(parameter="file_path/file_paths", invalid_value=effective_file_paths, reason=str(exc))
                 explicit_modules = {
                     normalize_module_path_to_dotted(str(p.relative_to(root)), repo_root=str(root))
                     for p in explicit_paths
@@ -351,7 +453,7 @@ def get_symbol_implementation(
                 try:
                     search_paths = _resolve_symbol_source_paths(root, [canonical_rel_path])
                 except ValueError as exc:
-                    return json.dumps({"status": "error", "error": str(exc)}, indent=2)
+                    return _parameter_contract_response(parameter="file_path/file_paths", invalid_value=effective_file_paths, reason=str(exc))
         elif identity["status"] == "not_found" and identity.get("query_kind") == "artifact_id":
             return json.dumps(
                 {
@@ -380,7 +482,7 @@ def get_symbol_implementation(
                 try:
                     explicit_paths = _resolve_symbol_source_paths(root, effective_file_paths)
                 except ValueError as exc:
-                    return json.dumps({"status": "error", "error": str(exc)}, indent=2)
+                    return _parameter_contract_response(parameter="file_path/file_paths", invalid_value=effective_file_paths, reason=str(exc))
                 explicit_modules = {
                     normalize_module_path_to_dotted(str(p.relative_to(root)), repo_root=str(root))
                     for p in explicit_paths
@@ -417,13 +519,13 @@ def get_symbol_implementation(
                 try:
                     search_paths = _resolve_symbol_source_paths(root, [canonical_rel_path])
                 except ValueError as exc:
-                    return json.dumps({"status": "error", "error": str(exc)}, indent=2)
+                    return _parameter_contract_response(parameter="file_path/file_paths", invalid_value=effective_file_paths, reason=str(exc))
         else:
             if effective_file_paths:
                 try:
                     explicit_paths = _resolve_symbol_source_paths(root, effective_file_paths)
                 except ValueError as exc:
-                    return json.dumps({"status": "error", "error": str(exc)}, indent=2)
+                    return _parameter_contract_response(parameter="file_path/file_paths", invalid_value=effective_file_paths, reason=str(exc))
                 explicit_modules = {
                     normalize_module_path_to_dotted(str(p.relative_to(root)), repo_root=str(root))
                     for p in explicit_paths
@@ -480,7 +582,7 @@ def get_symbol_implementation(
             try:
                 search_paths = _resolve_symbol_source_paths(root, effective_file_paths)
             except ValueError as exc:
-                return json.dumps({"status": "error", "error": str(exc)}, indent=2)
+                return _parameter_contract_response(parameter="file_path/file_paths", invalid_value=effective_file_paths, reason=str(exc))
         else:
             mod_path_to_id, mod_id_to_path, art_path_to_id, art_id_to_path = _get_registries()
             identity = query_helpers.resolve_artifact_identity(raw_symbol, art_path_to_id, art_id_to_path)
@@ -501,7 +603,7 @@ def get_symbol_implementation(
                 try:
                     search_paths = _resolve_symbol_source_paths(root, [canonical_rel_path])
                 except ValueError as exc:
-                    return json.dumps({"status": "error", "error": str(exc)}, indent=2)
+                    return _parameter_contract_response(parameter="file_path/file_paths", invalid_value=effective_file_paths, reason=str(exc))
             elif identity["status"] == "ambiguous":
                 return json.dumps(
                     {
@@ -632,50 +734,22 @@ def get_symbol_implementation(
     selected_sections = (
         ["implementation"] if normalized_mode == "auto" else list(include or [])
     )
-    if not selected_sections:
-        return json.dumps(
-            load_tool_document("get_symbol_implementation"),
-            indent=2,
-            ensure_ascii=False,
-        )
-    unknown_sections = sorted(
+    unavailable_sections = sorted(
         set(selected_sections) - allowed_sections
     )
-
-    if unknown_sections:
-        ordered_allowed_sections = sorted(allowed_sections)
-
-        return json.dumps(
-            {
-                "status": "error",
-                "error": "Unsupported include sections.",
-                "unknown_sections": unknown_sections,
-                "allowed_sections": ordered_allowed_sections,
-                "similar_candidates": {
-                    section: query_helpers.fuzzy_choice_candidates(
-                        section,
-                        ordered_allowed_sections,
-                    )
-                    for section in unknown_sections
-                },
+    if unavailable_sections:
+        return _parameter_contract_response(
+            parameter="include",
+            invalid_value=include,
+            reason=(
+                "The requested include section is not available for the resolved symbol kind."
+            ),
+            similar_candidates={
+                section: query_helpers.fuzzy_choice_candidates(
+                    section, sorted(allowed_sections)
+                )
+                for section in unavailable_sections
             },
-            indent=2,
-        )
-    if "implementation" in selected_sections and "methods" in selected_sections:
-        return json.dumps(
-            {
-                "status": "error",
-                "error": "implementation and methods are mutually exclusive.",
-            },
-            indent=2,
-        )
-    if "methods" in selected_sections and not methods:
-        return json.dumps(
-            {
-                "status": "selection_required",
-                "message": "Fetching methods requires explicit method names from preview.methods.items.",
-            },
-            indent=2,
         )
 
     resolution = preview["resolution"]

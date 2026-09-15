@@ -55,7 +55,7 @@
     {
       "tool": "get_symbol_implementation",
       "filename": "get_symbol_implementation.json",
-      "short_description": "Preview or fetch one exact AST-bounded symbol implementation. Unique plain leaves may resolve through canonical LIVE identity; explicit file scope remains supported. Source is read from disk and ambiguous matches are never guessed."
+      "short_description": "Fetch one exact AST-bounded symbol. Modes: auto|preview|fetch; full source = mode=fetch with include=['implementation']. Use only documented argument names. Invalid non-symbol parameter contracts return full tool documentation."
     },
     {
       "tool": "get_file_edit_context",
