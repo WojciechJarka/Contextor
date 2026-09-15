@@ -1227,8 +1227,8 @@ def test_full_index_transports_transient_lineage_on_cache_miss_and_hit(tmp_path,
     source.write_text("value = 1\n", encoding="utf-8")
     class FakeCache:
         def __init__(self): self.data = None
-        def get(self, _path): return self.data
-        def set(self, _path, data): self.data = data
+        def get(self, _path, *, source_bytes): return self.data
+        def set(self, _path, data, *, source_bytes): self.data = data
     cache = FakeCache()
     monkeypatch.setattr(indexer_module, "_cache_manager", lambda _root: cache)
     first = indexer_module._process_single_file(str(source), str(tmp_path))
@@ -1242,8 +1242,8 @@ def test_repository_index_collects_source_keyed_transient_lineage(tmp_path, monk
     (tmp_path / "pkg.py").write_text("value = 1\n", encoding="utf-8")
     monkeypatch.setenv("CONTEXTOR_DISABLE_PROCESS_POOL", "1")
     class FakeCache:
-        def get(self, _path): return None
-        def set(self, _path, _data): return None
+        def get(self, _path, *, source_bytes): return None
+        def set(self, _path, _data, *, source_bytes): return None
     monkeypatch.setattr(indexer_module, "_cache_manager", lambda _root: FakeCache())
     result = indexer_module.index_repository(str(tmp_path))
     assert set(result.lineage_facts_by_source) == {"pkg.py"}

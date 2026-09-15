@@ -54,7 +54,7 @@ def test_cold_index_facts_match_repository_extraction_and_materialize_all_fields
         assert isinstance(fact["code"], str)
 
 
-def test_warm_current_schema_parses_once_for_lineage_and_zero_collision_extraction(
+def test_warm_current_schema_skips_ast_parse_and_collision_extraction(
     tmp_path, isolated_dirs, monkeypatch
 ):
     _serial(monkeypatch)
@@ -63,21 +63,19 @@ def test_warm_current_schema_parses_once_for_lineage_and_zero_collision_extracti
     indexer._CACHE_MANAGERS.pop(str(root.resolve()), None)
 
     parse_calls = []
-    original_parse = indexer.parse_source_with_fingerprint
-
     def forbidden(*args, **kwargs):
         raise AssertionError("unexpected warm extraction")
 
     monkeypatch.setattr(
         indexer,
-        "parse_source_with_fingerprint",
-        lambda path: (parse_calls.append(path) or original_parse(path)),
+        "parse_source_snapshot",
+        lambda snapshot, path: (parse_calls.append(path) or (_ for _ in ()).throw(AssertionError("unexpected warm AST parse"))),
     )
     monkeypatch.setattr(indexer, "extract_module_collision_facts", forbidden)
     warm = indexer.index_repository(str(root))
 
     assert warm.collision_facts_by_module["module"][0]["name"] == "public"
-    assert len(parse_calls) == 1
+    assert parse_calls == []
 
 
 def test_missing_collision_field_migrates_once_and_preserves_other_fact_families(
@@ -93,12 +91,12 @@ def test_missing_collision_field_migrates_once_and_preserves_other_fact_families
 
     parse_calls = []
     collision_calls = []
-    real_parse = indexer.parse_source_with_fingerprint
+    real_parse = indexer.parse_source_snapshot
     real_extract = indexer.extract_module_collision_facts
     monkeypatch.setattr(
         indexer,
-        "parse_source_with_fingerprint",
-        lambda path: (parse_calls.append(path) or real_parse(path)),
+        "parse_source_snapshot",
+        lambda snapshot, path: (parse_calls.append(path) or real_parse(snapshot, path)),
     )
     monkeypatch.setattr(
         indexer,
@@ -162,11 +160,11 @@ def test_schema_mismatch_and_source_change_reextract_once(tmp_path, isolated_dir
     indexer._CACHE_MANAGERS.pop(str(root.resolve()), None)
 
     parse_calls = []
-    real_parse = indexer.parse_source_with_fingerprint
+    real_parse = indexer.parse_source_snapshot
     monkeypatch.setattr(
         indexer,
-        "parse_source_with_fingerprint",
-        lambda path: (parse_calls.append(path) or real_parse(path)),
+        "parse_source_snapshot",
+        lambda snapshot, path: (parse_calls.append(path) or real_parse(snapshot, path)),
     )
     mismatched = indexer.index_repository(str(root))
     assert len(parse_calls) == 1

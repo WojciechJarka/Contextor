@@ -86,7 +86,7 @@ def test_case():
     assert facts["has_assertions"] is expected[2]
 
 
-def test_cold_then_current_schema_warm_has_one_lineage_parse_per_source_and_zero_test_fact_visitor(
+def test_cold_then_current_schema_warm_skips_ast_parse_and_test_fact_visitor(
     tmp_path, isolated_dirs, monkeypatch
 ):
     root = tmp_path / "repo"
@@ -96,22 +96,16 @@ def test_cold_then_current_schema_warm_has_one_lineage_parse_per_source_and_zero
     indexer._CACHE_MANAGERS.pop(str(root.resolve()), None)
     parse_calls = []
     visitor_calls = []
-    original_parse = indexer.parse_source_with_fingerprint
     original_extract = indexer._extract_test_file_facts
     monkeypatch.setattr(
         indexer,
-        "parse_source_with_fingerprint",
-        lambda path: (parse_calls.append(path) or original_parse(path)),
+        "parse_source_snapshot",
+        lambda snapshot, path: (parse_calls.append(path) or (_ for _ in ()).throw(AssertionError("unexpected warm AST parse"))),
     )
     monkeypatch.setattr(indexer, "_extract_test_file_facts", lambda tree: (visitor_calls.append(tree) or original_extract(tree)))
 
     warm = indexer.index_repository(str(root))
-    assert set(parse_calls) == {
-        root / "pkg" / "mod.py",
-        root / "tests" / "conftest.py",
-        source,
-    }
-    assert all(parse_calls.count(path) == 1 for path in parse_calls)
+    assert parse_calls == []
     assert visitor_calls == []
     assert str(source.resolve()) in warm.test_facts_by_path
 
@@ -129,11 +123,11 @@ def test_non_candidate_cache_record_is_not_migrated(tmp_path, isolated_dirs, mon
     CacheManager(str(root)).set(source, {"imports": [], "error": None})
     indexer._CACHE_MANAGERS.pop(str(root.resolve()), None)
     calls = []
-    original = indexer.parse_source_with_fingerprint
+    original = indexer.parse_source_snapshot
     monkeypatch.setattr(
         indexer,
-        "parse_source_with_fingerprint",
-        lambda path: (calls.append(path) or original(path)),
+        "parse_source_snapshot",
+        lambda snapshot, path: (calls.append(path) or original(snapshot, path)),
     )
 
     result = indexer.index_repository(str(root))
@@ -151,13 +145,23 @@ def test_missing_schema_and_source_change_invalidate_test_facts(tmp_path, isolat
     data["test_facts"]["schema_version"] = 0
     CacheManager(str(root)).set(source, data)
     indexer._CACHE_MANAGERS.pop(str(root.resolve()), None)
+    parse_calls = []
+    original_parse = indexer.parse_source_snapshot
+    monkeypatch.setattr(
+        indexer,
+        "parse_source_snapshot",
+        lambda snapshot, path: (parse_calls.append(path) or original_parse(snapshot, path)),
+    )
     migrated = indexer.index_repository(str(root))
+    assert parse_calls == [source]
     assert migrated.test_facts_by_path[str(source.resolve())]["has_assertions"] is True
     assert _cache_data(root, source)["test_facts"]["schema_version"] == indexer.TEST_FACTS_SCHEMA_VERSION
 
     source.write_text("from pkg.mod import Target\nassert Target\nvalue = 2\n", encoding="utf-8")
     indexer._CACHE_MANAGERS.pop(str(root.resolve()), None)
+    parse_calls.clear()
     changed = indexer.index_repository(str(root))
+    assert parse_calls == [source]
     assert changed.test_facts_by_path[str(source.resolve())]["names"]
     assert first.test_facts_by_path[str(source.resolve())] != changed.test_facts_by_path[str(source.resolve())]
 
