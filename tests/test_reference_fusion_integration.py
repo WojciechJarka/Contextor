@@ -98,7 +98,7 @@ def test_reference_legacy_and_schema_migrations_parse_once_then_hit_warm(
     )
 
     migrated = indexer.index_repository(str(root))
-    assert len(calls) == 1
+    assert calls == [source]
     assert migrated.reference_facts_by_module["module"]["status"] == "available"
 
     data = _payload(root, source)
@@ -107,7 +107,7 @@ def test_reference_legacy_and_schema_migrations_parse_once_then_hit_warm(
     _reset_worker_cache(root)
     calls.clear()
     remigrated = indexer.index_repository(str(root))
-    assert len(calls) == 1
+    assert calls == [source]
     assert remigrated.reference_facts_by_module["module"]["schema_version"] == 1
 
     _reset_worker_cache(root)
