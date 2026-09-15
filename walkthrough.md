@@ -522,6 +522,70 @@ The prescribed Step 2 script reached the controlled update but its process outpu
 FILES_CHANGED=NONE
 DIFFS=NONE
 
+## CPA10F_PROFILE_ATTRIBUTION_GAP_DISCOVERY
+
+STATUS=DISCOVERY_COMPLETE
+FILES_CHANGED=NONE
+DIFFS=NONE
+
+Contextor-first evidence used `get_symbol_call_context`, `get_symbol_implementation`, `search_source`, and `get_source_range`; source was read only through Contextor tools. The four stage boundaries are all in `contextor/core/api/facade.py`, inside `ContextorFacade.analyze_project`.
+
+### identity_and_setup
+
+- START_BOUNDARY=`identity_and_setup_started = facade_started` (line 589).
+- END_BOUNDARY=`emit_stage_end("identity_and_setup", identity_and_setup_started)` (line 604).
+- DIRECT_CALLS_IN_EXECUTION_ORDER=`_StagedProgress(...)`; `progress.begin("Initializing repository identity")`; `_initialize_repository_identity(path)`; `path = str(registry.repo_path.resolve())`; `resolve_authoritative_repository_state(path)`; `reset_caches()`; `_analysis_filters(path, additional_excludes)`; `progress.begin("Indexing repository files")`.
+- EXISTING_TRACE_EVENTS=only `FULL_ANALYSIS_STAGE_END(stage="identity_and_setup")` with stage `elapsed_ms`.
+- UNINSTRUMENTED_CALLS=every listed subcall has no individual elapsed field in this stage.
+- RETURN/STATUS_VALUES_AVAILABLE_FOR_EVIDENCE=registry; canonical state object; canonical path; excludes/extra_dirs; index progress callback.
+
+### reports
+
+- START_BOUNDARY=`reports_started = time.monotonic()` (line 688).
+- END_BOUNDARY=`emit_stage_end("reports", reports_started)` (line 713).
+- FILE=`contextor/core/api/facade.py`; owning execution call=`contextor.core.reporting_engine.pipeline::execute_global_pipeline`.
+- DIRECT_CALLS_IN_EXECUTION_ORDER=`datetime.now().strftime`; `progress.begin("Generating architectural reports")`; `execute_global_pipeline(...)`; optional high-risk-layer log handling.
+- EXISTING_TRACE_EVENTS=only `FULL_ANALYSIS_STAGE_END(stage="reports")` at facade level.
+- UNINSTRUMENTED_CALLS=inside `execute_global_pipeline`, including collision/basic preparation, summary/structure/collision output, artifact pipeline, sanity check, layer slicing/execution, git state, high-risk writes, global writes, and FileStateManager population/save, have no facade stage sub-boundary exposed to profile analysis.
+- RETURN/STATUS_VALUES_AVAILABLE_FOR_EVIDENCE=`report_result`, including `_analysis_result`, `_file_state_manager`, `_raw_shared_usage_clusters`, and `_artifact_data` later consumed by canonical materialization.
+
+### canonical_materialization
+
+- START_BOUNDARY=`canonical_materialization_started = time.monotonic()` (line 719).
+- END_BOUNDARY=`emit_stage_end("canonical_materialization", canonical_materialization_started)` (line 905).
+- FILE=`contextor/core/api/facade.py`.
+- DIRECT_CALLS_IN_EXECUTION_ORDER=topology analytics; collision fact validation and canonical collision calculation; canonical artifact consumption; `build_module_usage_baseline_with_reuse`; consumption coverage validation; syntax diagnostics; `_materialize_full_analysis_lineage`; `build_lineage_query_indexes`; `RepositoryAnalysisState` construction; dependency matrix calculation; shared-usage-cluster handoff/compute; writer/origin/cache/file-state preparation.
+- EXISTING_TRACE_EVENTS=stage end plus nested `FULL_ANALYSIS_LINEAGE_MATERIALIZATION` emitted by `_materialize_full_analysis_lineage`.
+- NESTED_LINEAGE_FIELDS=`elapsed_ms`, `reuse_sources`, `reresolve_sources`, `materialize_sources`, `reresolve_fallback_sources`, `reuse_gate_ms`, `reresolve_calls_ms`, `materialize_calls_ms`, `lineage_sources`, anchors/flows/surfaces/descriptors.
+- NESTED_LINEAGE_EXCLUDES=topology, collision canonicalization, consumption, module usage, coverage, diagnostics, query indexes, state construction, dependency matrix, clusters, and stage preparation; it therefore does not cover most of the canonical stage.
+- RETURN/STATUS_VALUES_AVAILABLE_FOR_EVIDENCE=state family states, lineage state/version/indexes, matrix/cluster states, writer/origin/cache/file-state manager.
+
+### live_publish
+
+- START_BOUNDARY=`live_publish_started = time.monotonic()` (line 934).
+- END_BOUNDARY=`emit_stage_end("live_publish", live_publish_started)` (line 965).
+- DIRECT_CALLS_IN_EXECUTION_ORDER=`connect(path)`; if client exists, `client.publish(state, origin=origin)`; dictionary `status/revision/error` handling; timeout/general exception handling.
+- RETURN/STATUS_VALUES_AVAILABLE_FOR_EVIDENCE=`live_publish_status` (`success`, `failed`, `not_attempted`, `timed_out`), revision, and warning.
+- EXISTING_TRACE_EVENTS=facade stage end only. Existing structured elapsed data from `connect`/`publish` is not exposed to this facade stage as profile evidence.
+
+### profile_analysis current attribution contract
+
+- `_REQUIRED_SINGLE_EVENTS` requires the full-analysis facade end and one stage-end event per required stage; it validates stage completeness, not stage-specific attribution.
+- Existing dedicated reason functions discovered: `_indexing_reason` and `_canonical_materialization_reason`.
+- `_indexing_reason` returns `unattributed` unless parse failures, warm-cache exact conditions, or cache misses/lineage extraction conditions match.
+- `_canonical_materialization_reason` returns `unattributed` unless materialization, re-resolution/fallback, or the lineage-reuse-gate threshold (`lineage_elapsed_ms >= stage_ms * 0.5`) matches.
+- identity_and_setup, reports, and live_publish have no dedicated reason function and therefore their profile bottlenecks are `unattributed` by definition when selected.
+- `runtime_trace.trace_event` currently allows the existing lineage nested fields and standard elapsed/stage/result fields. The profile evidence above contains no individual fields for the uninstrumented subphases; any distinct new measurement field would require a trace-event allowlist extension before it could be serialized.
+
+### ATTRIBUTION_GAPS
+
+- identity_and_setup: CPA10E=8,796 ms; visible evidence=stage elapsed only; uninstrumented=_StagedProgress, repository identity, canonical path resolution, authoritative-state resolve, cache reset, filters; owner=`contextor/core/api/facade.py`.
+- reports: CPA10E=5,485 ms; visible evidence=stage elapsed only; uninstrumented=the actual `execute_global_pipeline` subphases listed above; owners=`contextor/core/api/facade.py`, `contextor/core/reporting_engine/pipeline.py`.
+- canonical_materialization: CPA10E=24,281 ms; visible evidence=lineage nested timing fields (`lineage_elapsed_ms=6,344`, `reuse_gate_ms=3,594`, 397 reuse sources); uninstrumented=all non-lineage operations listed above; owner=`contextor/core/api/facade.py`.
+- live_publish: CPA10E=9,266 ms; visible evidence=stage elapsed and final status/revision/warning only; uninstrumented=connect/publish response and exception subphases; owner=`contextor/core/api/facade.py` plus LIVE client implementation.
+
+No solution, reason-code taxonomy, instrumentation, tests, profiler run, runtime restart, or production/test change was proposed or performed.
+
 ## CPA10E_FULL_ANALYSIS_PROFILE
 
 STATUS=DISCOVERY_COMPLETE
