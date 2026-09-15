@@ -1,6 +1,6 @@
 # CPA10D_LIVE_MUTATION_ADMISSION_CORRELATION
 
-STATUS=IMPLEMENTATION_PASS_RUNTIME_RESTART_PENDING
+STATUS=DISCOVERY_COMPLETE
 
 HEAD_BEFORE=9d7ab352aa2bb92c9b7abd6f6a151147fd916f99
 HEAD_AFTER=9d7ab352aa2bb92c9b7abd6f6a151147fd916f99
@@ -483,3 +483,239 @@ index 10e0460..f2829e0 100644
 - TERMINAL PASS: `.venv\\Scripts\\python.exe -m pytest tests/test_live_mutation_coordinator.py tests/test_full_analysis_coordination.py -q` — `45 passed in 26.54s`.
 - The previous interface-limit qualification is superseded by the terminal combined PASS above.
 - RUNTIME_RESTART_REQUIRED=YES. No LIVE/MCP restart and no runtime freshness certification were performed.
+
+## CPA10D_RUNTIME_CERTIFICATION
+
+CPA10D_RUNTIME_CERTIFICATION=PASS
+CPA10D_IMPLEMENTATION=PASS
+CPA10_OVERALL=OPEN
+RUNTIME_FRESHNESS=PASS
+
+### Step 1 — authority freshness gate
+
+- SERVICE_PID=10812
+- SERVICE_START_TIME=2026-09-15 10:52:24 Europe/Warsaw (after required 2026-09-15 10:45:04 threshold)
+- SERVICE_INSTANCE_ID=3d6dd4d61b364f0887b46f4267b6294e
+- LEASE_GENERATION=70
+- PROCESS_START_IDENTITY=134339359446469807
+- PROTOCOL_VERSION=4 (equal to `LIVE_PROTOCOL_VERSION`)
+- ENDPOINT_SCHEMA_VERSION=2 (equal to `LIVE_ENDPOINT_SCHEMA_VERSION`)
+- ENDPOINT_FINGERPRINT=5adc7aa67b7e2c4f0cb9099aebbbcd889fad0681f16630103ec775830a83a662
+- BASELINE_REVISION=1132
+- BASELINE_ACTIVITY_EPOCH=35047e975b9f490aafb2c93e663a4091
+- BASELINE_SEQ=11
+
+Endpoint and `authority_status` agreed on PID, service instance, lease generation, process-start identity, and protocol/schema versions. The authority PID and instance remained unchanged during the controlled mutation.
+
+### Step 2 — controlled queued mutation
+
+- ACK: `status=accepted`, `job_id=mu-f185bdb1be6142cd89ca681ee43cf015`, `queue_order=1`, `accepted_revision=1132`
+- mutation_status: `state=completed`, same `job_id`, same `queue_order`, same `accepted_revision`, `started_revision=1132`, `final_revision=1133`
+- Correlation: `op=u-10812-1`; `path=C:\\Temp\\Contextor_Repo\\contextor\\core\\live_state\\ipc.py`; `idempotency_key=cpa10d-cert-ca67eab210f7481ab0c6015d0828ea7c`; `origin=cpa10d_runtime_certification`
+- ACQUIRED: exactly one event in `C:\\Users\\DafoO\\AppData\\Roaming\\Contextor\\logs\\contextor_runtime_20260915_085219_808_11296.jsonl`, at `2026-09-15T09:03:51.729+00:00`, `wait_ms=0.0`, with all correlation values above, `owner=live_mutation_worker`, `writer_kind=live_mutation`.
+- RELEASED: exactly one event in the same trace file at `2026-09-15T09:03:51.774+00:00`, with the identical `op`, path, job ID, idempotency key, queue order, accepted/started revisions, origin, owner, and writer kind.
+- LIVE event: exactly matching `trace_op=u-10812-1`, `operation=update_file`, `file_path=C:\\Temp\\Contextor_Repo\\contextor\\core\\live_state\\ipc.py`, `status=UNCHANGED`, `canonical_revision=1133`, `seq=12`.
+- Activity epoch remained `35047e975b9f490aafb2c93e663a4091`; no activity resync was required. Terminal `final_revision=1133` equals journal latest revision 1133 and is greater than baseline 1132.
+
+The prescribed Step 2 script reached the controlled update but its process output was cut at the interface's 30-second cap before it could print. The mutation completed after approximately 33 seconds. A subsequent read-only validation asserted every required terminal, admission, journal, correlation, and authority condition. Its later JSON presentation failed only because `IncrementalUpdateResult` was not JSON-serializable; that occurred after all assertions had passed and does not change certification evidence.
+
+FILES_CHANGED=NONE
+DIFFS=NONE
+
+## CPA10E_FULL_ANALYSIS_PROFILE
+
+STATUS=DISCOVERY_COMPLETE
+FILES_CHANGED=NONE
+DIFFS=NONE
+
+Source: Contextor MCP `contextor_profile_analysis(repo_path="C:\\Temp\\Contextor_Repo")`; operation `profile-11132-1`; status `ok`. This is a diagnostic profile, not an authoritative absolute benchmark (`absolute_wall_authoritative=false`).
+
+### Total wall time
+
+- `total_ms=124,360`
+- `total_before_release_ms=124,344`
+- `lease_wait_ms=125`
+- `analysis_body_ms=123,484`
+- `stage_sum_ms=123,031`
+- `unattributed_analysis_ms=453`
+
+### FULL_ANALYSIS_STAGE_END critical-path durations
+
+| stage | critical_path_ms |
+|---|---:|
+| identity_and_setup | 8,796 |
+| indexing | 69,719 |
+| reference_and_collision | 656 |
+| graph | 110 |
+| validation | 47 |
+| metrics | 15 |
+| reports | 5,485 |
+| canonical_materialization | 24,281 |
+| persistence | 4,656 |
+| live_publish | 9,266 |
+| finalize | 0 |
+
+### Bottleneck ranking and structured evidence
+
+1. `indexing`: 69,719 ms (56.46% of analysis); `reason_code=cold_or_partial_cache_work`.
+   - `file_tasks=397`, `source_parse_calls=397`, `source_parse_failures=0`
+   - `cache_get_calls=397`, `cache_hits=387`, `cache_misses=10`
+   - `lineage_cache_hits=387`, `lineage_extract_calls=10`
+2. `canonical_materialization`: 24,281 ms (19.66%); `reason_code=unattributed`.
+   - `lineage_elapsed_ms=6,344`, `lineage_sources=397`, `reuse_sources=397`
+   - `reresolve_sources=0`, `materialize_sources=0`, `reresolve_fallback_sources=0`
+   - `reuse_gate_ms=3,594`, `reresolve_calls_ms=0`, `materialize_calls_ms=0`
+3. `live_publish`: 9,266 ms (7.50%); `reason_code=unattributed`; no structured evidence returned.
+4. `identity_and_setup`: 8,796 ms (7.12%); `reason_code=unattributed`; no structured evidence returned.
+5. `reports`: 5,485 ms (4.44%); `reason_code=unattributed`; no structured evidence returned.
+
+### Aggregate worker/file-task diagnostics — not critical path
+
+`timing_semantics=aggregate_file_task_not_critical_path`.
+
+- `source_parse_sum_ms=19,258`
+- `cache_get_sum_ms=53,973`
+- `lineage_extract_sum_ms=8,376`
+- `lineage_extract_event_sum_ms=8,376`
+
+These aggregate sums are intentionally not added to critical-path stage durations.
+
+### Conclusion / stopping condition
+
+The current profile proves that the dominant current critical-path stage is indexing, with `cold_or_partial_cache_work`; it does not attribute the other substantial stages listed above. It does **not** prove the source of a historical increase from approximately 16 s to approximately 44 s: no paired historical profile/baseline was provided by this single operation, and three material stages are explicitly `unattributed`.
+
+Missing signals needed before any stronger causal claim: a comparable earlier profile and structured timing/reason evidence for canonical materialization, LIVE publication, identity/setup, and reports. No manual profiler, trace parsing, follow-up analysis, or optimization was performed.
+
+## CPA10E_LIVE_MUTATION_33S_TRACE_DECOMPOSITION
+
+TARGET_OP=u-10812-1
+TARGET_JOB=mu-f185bdb1be6142cd89ca681ee43cf015
+TARGET_PATH=C:\\Temp\\Contextor_Repo\\contextor\\core\\live_state\\ipc.py
+
+Contextor-first call-path evidence: `CanonicalLiveServer._execute_queued_update_file` directly calls `_execute_update_file`; `run_service` constructs both `_repository_mutation_guard` and `_repository_updater`; `_execute_update_file` has canonical clone, event, persistence, diagnostic, and commit call edges. Static context does not fully materialize the dynamic factory edge from the coordinator worker to the guard/updater, so that link is confirmed by the target-op runtime trace rather than inferred from source alone.
+
+The literal first trace script supplied with this task had an unclosed final `print(` and raised `SyntaxError`; a minimally corrected read-only copy was used for the exact same trace selection. The second supplied PID-window reader returned exactly the same 15 target-op records and no records without that op.
+
+### Trace timeline
+
+Source: `C:\\Users\\DafoO\\AppData\\Roaming\\Contextor\\logs\\contextor_runtime_20260915_085219_808_11296.jsonl`, lines 419–433; PID 10812, TID 4884. Trace span: **32,796 ms**, 15 records.
+
+| since first ms | event | measured event elapsed_ms |
+|---:|---|---:|
+| 0 | CANONICAL_WRITER_ADMISSION_ACQUIRED | — |
+| 46 | CANONICAL_WRITER_ADMISSION_RELEASED | — |
+| 46 | UPDATE_RECEIVED | — |
+| 27,640 | CLONE_END | — |
+| 27,640 | UPDATER_START | — |
+| 28,000 | ENGINE_READY | 360 |
+| 28,031 | INCREMENTAL_END (`UNCHANGED`) | 31 |
+| 28,031 | UPDATER_END (`UNCHANGED`) | 391 |
+| 28,046 | PERSIST_START | — |
+| 32,781 | SNAPSHOT_SAVE_END | 4,735 |
+| 32,796 | FILE_STATE_SAVE_END / PERSIST_END / CANONICAL_COMMIT / ACTIVITY_APPEND / UPDATE_PUBLISHED | 0 / — |
+
+### Cost decomposition
+
+1. QUEUE_TO_ADMISSION
+   - START_EVENT=UNAVAILABLE
+   - END_EVENT=CANONICAL_WRITER_ADMISSION_ACQUIRED
+   - MEASURED_MS=UNAVAILABLE
+   - EVIDENCE=no enqueue/worker-start trace boundary for this job
+   - CONFIDENCE=UNAVAILABLE
+
+2. ADMISSION_AND_LEASE_ACQUIRE
+   - START_EVENT=CANONICAL_WRITER_ADMISSION_ACQUIRED
+   - END_EVENT=CANONICAL_WRITER_ADMISSION_RELEASED
+   - MEASURED_MS=46
+   - EVIDENCE=target trace lines 419–420; acquisition `wait_ms=0.0`
+   - CONFIDENCE=PROVEN
+
+3. CANONICAL_STATE_CLONE
+   - START_EVENT=UPDATE_RECEIVED
+   - END_EVENT=CLONE_END
+   - MEASURED_MS=27,594
+   - EVIDENCE=target trace lines 421–422
+   - CONFIDENCE=PROVEN
+
+4. UPDATER_SETUP / ENGINE_READY
+   - START_EVENT=UPDATER_START
+   - END_EVENT=ENGINE_READY
+   - MEASURED_MS=360
+   - EVIDENCE=target lines 423–424; `ENGINE_READY.elapsed_ms=360`
+   - CONFIDENCE=PROVEN
+
+5. INCREMENTAL_PREPARATION
+   - START_EVENT=ENGINE_READY
+   - END_EVENT=INCREMENTAL_END
+   - MEASURED_MS=31
+   - EVIDENCE=target lines 424–425; `INCREMENTAL_END.elapsed_ms=31`, status `UNCHANGED`
+   - CONFIDENCE=PROVEN
+
+6. REFRESH_PLAN_EXECUTION
+   - START_EVENT=UNAVAILABLE
+   - END_EVENT=UNAVAILABLE
+   - MEASURED_MS=UNAVAILABLE
+   - EVIDENCE=no target-op trace boundary
+   - CONFIDENCE=UNAVAILABLE
+
+7. IDENTITY_REGISTRY_SYNC
+   - START_EVENT=UNAVAILABLE
+   - END_EVENT=UNAVAILABLE
+   - MEASURED_MS=UNAVAILABLE
+   - EVIDENCE=no target-op trace boundary
+   - CONFIDENCE=UNAVAILABLE
+
+8. LINEAGE
+   - START_EVENT=UNAVAILABLE
+   - END_EVENT=UNAVAILABLE
+   - MEASURED_MS=UNAVAILABLE
+   - EVIDENCE=no target-op trace boundary or lineage counters
+   - CONFIDENCE=UNAVAILABLE
+
+9. OTHER_INCREMENTAL_WORK
+   - START_EVENT=UNAVAILABLE
+   - END_EVENT=UNAVAILABLE
+   - MEASURED_MS=UNAVAILABLE
+   - EVIDENCE=the trace does not subdivide the 31 ms incremental segment
+   - CONFIDENCE=UNAVAILABLE
+
+10. PERSISTENCE
+   - START_EVENT=PERSIST_START
+   - END_EVENT=PERSIST_END
+   - MEASURED_MS=4,750
+   - EVIDENCE=lines 427–430; dominated by `SNAPSHOT_SAVE_END.elapsed_ms=4,735`, followed by 15 ms to FILE_STATE_SAVE_END
+   - CONFIDENCE=PROVEN
+
+11. COMMIT/PUBLISH
+   - START_EVENT=CANONICAL_COMMIT
+   - END_EVENT=UPDATE_PUBLISHED
+   - MEASURED_MS=0 at trace monotonic-millisecond resolution
+   - EVIDENCE=lines 431–433 share `mono_ms=6258671`
+   - CONFIDENCE=PROVEN
+
+12. UNATTRIBUTED_GAP
+   - START_EVENT=UNAVAILABLE
+   - END_EVENT=UNAVAILABLE
+   - MEASURED_MS=UNAVAILABLE
+   - EVIDENCE=all observed large gaps have explicit enclosing trace boundaries; the clone interior itself is not further decomposed
+   - CONFIDENCE=UNAVAILABLE
+
+### Required findings
+
+- A. The approximately 33 s occurs **after** `CANONICAL_WRITER_ADMISSION_RELEASED`; release is at +46 ms, while the trace ends at +32,796 ms.
+- B. ACQUIRED → RELEASED = **46 ms** (`wait_ms=0.0` on acquire).
+- C. UPDATE_RECEIVED → CLONE_END = **27,594 ms**.
+- D. UPDATER_START → ENGINE_READY = **360 ms**.
+- E. ENGINE_READY → INCREMENTAL_END = **31 ms**.
+- F. UPDATER_END → CANONICAL_COMMIT = **4,765 ms**; UPDATER_END → UPDATE_PUBLISHED = **4,765 ms**.
+- G. Largest adjacent-event gap = **27,594 ms**, UPDATE_RECEIVED → CLONE_END.
+- H. `DOMINANT_COST=CLONE`.
+- I. Yes. `status=UNCHANGED` is emitted at INCREMENTAL_END, **27,625 ms** after UPDATE_RECEIVED; it follows the 27,594 ms clone segment.
+- J. No. The wider PID=10812 selection for 09:03:45Z–09:04:30Z contains only these 15 records, all with `op=u-10812-1`; no op-less event explains either large gap.
+
+FULL_ANALYSIS_44S_CAUSAL_LINK=NOT_SUPPORTED
+
+There is no trace here from a specific full-analysis run waiting on this particular mutation/lease. Similar wall-clock magnitudes alone are not causal evidence.
+
+FILES_CHANGED=NONE
+DIFFS=NONE
