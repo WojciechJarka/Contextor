@@ -748,50 +748,56 @@ class AuthorityEventEmitter:
             raise AuthorityEventRecoveryError("authority trace shrank below durable tail offset")
         if end == start:
             return payload
-        if end - start > _AUTHORITY_RECOVERY_WINDOW:
-            raise AuthorityEventRecoveryError("observability_recovery_required: unindexed trace range exceeds bound")
-        with path.open("rb") as stream:
-            stream.seek(start)
-            chunk = stream.read(end - start)
-        if not chunk.endswith(b"\n"):
-            raise AuthorityEventRecoveryError("observability_recovery_required: truncated unindexed trace range")
         domains = dict(payload["domains"])
         tail = start
-        for line in chunk.splitlines(keepends=True):
-            start, end = tail, tail + len(line)
-            tail = end
-            try:
-                raw = json.loads(line.decode("utf-8"))
-            except (UnicodeDecodeError, ValueError, TypeError) as exc:
-                raise AuthorityEventRecoveryError("observability_recovery_required: malformed trace record") from exc
-            if not isinstance(raw, dict):
-                raise AuthorityEventRecoveryError("observability_recovery_required: trace record is not an object")
-            if raw.get("_type") != "authority_event":
-                continue
-            if raw.get("schema") != AUTHORITY_EVENT_SCHEMA:
-                raise AuthorityEventRecoveryError("observability_recovery_required: authority schema mismatch")
-            event = AuthorityEvent.from_dict({key: raw.get(key) for key in AuthorityEvent.__dataclass_fields__})
-            domain = dict(domains.get(event.runtime_domain_id) or _authority_default_domain(event.runtime_domain_id))
-            expected = int(domain["durable_high_water_sequence"]) + 1
-            if event.sequence != expected:
-                raise AuthorityEventRecoveryError("observability_recovery_required: authority sequence discontinuity")
-            index = RecordIndex(event.sequence, event.event_id, str(path.resolve()), start, end)
-            domain.update(durable_high_water_sequence=event.sequence, durable_high_water_event_id=event.event_id, durable_high_water_trace_path=str(path.resolve()), durable_high_water_offset=start, durable_high_water_end_offset=end)
-            pending = list(domain["pending_index"])
-            if len(pending) >= _AUTHORITY_PENDING_LIMIT:
-                raise AuthorityEventRecoveryError("observability_recovery_required: pending index retention exceeded")
-            pending.append(index.__dict__)
-            domain["pending_index"] = pending
-            if domain["pending_start_sequence"] is None:
-                domain["pending_start_sequence"] = int(domain["live_handoff_cursor"]) + 1
-            domain["pending_end_sequence"] = event.sequence
-            if event.event_type == "AUTHORITY_EVENT_DELIVERY_CONFLICT":
-                if event.request_type != "authority_delivery_conflict" or not isinstance(event.operation_id, str) or not event.operation_id or isinstance(event.queue_order, bool) or not isinstance(event.queue_order, int) or event.queue_order < 1:
-                    raise AuthorityEventRecoveryError("authority delivery conflict lacks exact machine identity")
-                marker = {"runtime_domain_id": event.runtime_domain_id, "sequence": event.queue_order, "event_id": event.operation_id}
-                if marker not in domain["delivery_conflicts"]:
-                    domain["delivery_conflicts"] = list(domain["delivery_conflicts"]) + [marker]
-            domains[event.runtime_domain_id] = domain
+        authority_recovery_bytes = 0
+        # The recovery window bounds cumulative unindexed authority-event bytes, not the shared runtime trace.
+        with path.open("rb") as stream:
+            stream.seek(start)
+            while tail < end:
+                record_start = tail
+                line = stream.readline(end - tail)
+                if not line:
+                    raise AuthorityEventRecoveryError("observability_recovery_required: truncated unindexed trace range")
+                record_end = record_start + len(line)
+                tail = record_end
+                if not line.endswith(b"\n"):
+                    raise AuthorityEventRecoveryError("observability_recovery_required: truncated unindexed trace range")
+                try:
+                    raw = json.loads(line.decode("utf-8"))
+                except (UnicodeDecodeError, ValueError, TypeError) as exc:
+                    raise AuthorityEventRecoveryError("observability_recovery_required: malformed trace record") from exc
+                if not isinstance(raw, dict):
+                    raise AuthorityEventRecoveryError("observability_recovery_required: trace record is not an object")
+                if raw.get("_type") != "authority_event":
+                    continue
+                authority_recovery_bytes += len(line)
+                if authority_recovery_bytes > _AUTHORITY_RECOVERY_WINDOW:
+                    raise AuthorityEventRecoveryError("observability_recovery_required: authority event recovery exceeds bound")
+                if raw.get("schema") != AUTHORITY_EVENT_SCHEMA:
+                    raise AuthorityEventRecoveryError("observability_recovery_required: authority schema mismatch")
+                event = AuthorityEvent.from_dict({key: raw.get(key) for key in AuthorityEvent.__dataclass_fields__})
+                domain = dict(domains.get(event.runtime_domain_id) or _authority_default_domain(event.runtime_domain_id))
+                expected = int(domain["durable_high_water_sequence"]) + 1
+                if event.sequence != expected:
+                    raise AuthorityEventRecoveryError("observability_recovery_required: authority sequence discontinuity")
+                index = RecordIndex(event.sequence, event.event_id, str(path.resolve()), record_start, record_end)
+                domain.update(durable_high_water_sequence=event.sequence, durable_high_water_event_id=event.event_id, durable_high_water_trace_path=str(path.resolve()), durable_high_water_offset=record_start, durable_high_water_end_offset=record_end)
+                pending = list(domain["pending_index"])
+                if len(pending) >= _AUTHORITY_PENDING_LIMIT:
+                    raise AuthorityEventRecoveryError("observability_recovery_required: pending index retention exceeded")
+                pending.append(index.__dict__)
+                domain["pending_index"] = pending
+                if domain["pending_start_sequence"] is None:
+                    domain["pending_start_sequence"] = int(domain["live_handoff_cursor"]) + 1
+                domain["pending_end_sequence"] = event.sequence
+                if event.event_type == "AUTHORITY_EVENT_DELIVERY_CONFLICT":
+                    if event.request_type != "authority_delivery_conflict" or not isinstance(event.operation_id, str) or not event.operation_id or isinstance(event.queue_order, bool) or not isinstance(event.queue_order, int) or event.queue_order < 1:
+                        raise AuthorityEventRecoveryError("authority delivery conflict lacks exact machine identity")
+                    marker = {"runtime_domain_id": event.runtime_domain_id, "sequence": event.queue_order, "event_id": event.operation_id}
+                    if marker not in domain["delivery_conflicts"]:
+                        domain["delivery_conflicts"] = list(domain["delivery_conflicts"]) + [marker]
+                domains[event.runtime_domain_id] = domain
         payload = dict(payload)
         payload["durable_tail_offset"] = end
         payload["domains"] = domains

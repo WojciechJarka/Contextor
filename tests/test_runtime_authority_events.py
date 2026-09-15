@@ -192,6 +192,43 @@ def test_pending_event_from_previous_trace_segment_replays_after_rollover(trace_
     assert delivered[0]["timestamp"] == event.timestamp and old_path.exists()
 
 
+def test_diagnostic_noise_does_not_block_authority_recovery_after_rollover(trace_logs, monkeypatch):
+    emitter = trace.AuthorityEventEmitter(runtime_domain_id="domain-a", logs_root=trace_logs)
+    first = emitter.emit("FIRST")
+    old_path = emitter.log_path
+    durable_tail = _state(trace_logs)["durable_tail_offset"]
+    monkeypatch.setattr(trace, "_AUTHORITY_RECOVERY_WINDOW", 64)
+
+    for index in range(20):
+        trace.trace_event("DIAGNOSTIC", f"NOISE_{index}", reason="x" * 128)
+
+    assert _state(trace_logs)["durable_tail_offset"] == durable_tail
+    trace.finish_desktop_trace_session()
+    recovered = trace.AuthorityEventEmitter(runtime_domain_id="domain-a", logs_root=trace_logs)
+
+    assert recovered.log_path != old_path
+    assert recovered.emit("AFTER_RECOVERY").sequence == first.sequence + 1
+    diagnostics = [json.loads(line) for line in old_path.read_text(encoding="utf-8").splitlines() if json.loads(line).get("d") == "DIAGNOSTIC"]
+    assert [record["ev"] for record in diagnostics] == [f"NOISE_{index}" for index in range(20)]
+
+
+def test_diagnostic_noise_does_not_block_same_segment_authority_recovery(trace_logs, monkeypatch):
+    emitter = trace.AuthorityEventEmitter(runtime_domain_id="domain-a", logs_root=trace_logs)
+    emitter.emit("FIRST")
+    active_path = emitter.log_path
+    durable_tail = _state(trace_logs)["durable_tail_offset"]
+    monkeypatch.setattr(trace, "_AUTHORITY_RECOVERY_WINDOW", 64)
+
+    for index in range(20):
+        trace.trace_event("DIAGNOSTIC", f"NOISE_{index}", reason="x" * 128)
+
+    assert _state(trace_logs)["durable_tail_offset"] == durable_tail
+    recovered = trace.AuthorityEventEmitter(runtime_domain_id="domain-a", logs_root=trace_logs)
+
+    assert recovered.log_path == active_path
+    assert recovered.emit("AFTER_RECOVERY").sequence == 2
+
+
 def test_missing_old_pending_segment_fails_closed(trace_logs):
     first = trace.AuthorityEventEmitter(runtime_domain_id="domain-a", logs_root=trace_logs)
     first.emit("PENDING")
