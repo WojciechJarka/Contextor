@@ -26,6 +26,7 @@ _EXPECTED_ORDER = [
     "get_symbol_call_context", "get_symbol_lineage", "get_name_collisions",
     "get_mcp_documentation", "get_module_blast_radius",
     "contextor_fact_lineage",
+    "contextor_profile_analysis",
 ]
 
 _IMPLEMENTATIONS = {

@@ -27,7 +27,7 @@ _EXPECTED_ORDER = [
     "lookup_index_entries", "get_artifacts_for_module",
     "lookup_artifact_by_symbol", "search_source", "get_source_range",
     "get_symbol_call_context", "get_symbol_lineage", "get_name_collisions", "get_mcp_documentation",
-    "get_module_blast_radius", "contextor_fact_lineage",
+    "get_module_blast_radius", "contextor_fact_lineage", "contextor_profile_analysis",
 ]
 
 _IMPLEMENTATIONS = {

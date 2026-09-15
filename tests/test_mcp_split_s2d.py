@@ -22,7 +22,7 @@ _EXPECTED_ORDER = [
     "lookup_index_entries", "get_artifacts_for_module",
     "lookup_artifact_by_symbol", "search_source", "get_source_range",
     "get_symbol_call_context", "get_symbol_lineage", "get_name_collisions", "get_mcp_documentation",
-    "get_module_blast_radius", "contextor_fact_lineage",
+    "get_module_blast_radius", "contextor_fact_lineage", "contextor_profile_analysis",
 ]
 
 _IMPLEMENTATIONS = {
@@ -183,7 +183,7 @@ def test_get_symbol_implementation_explicit_fetch_large_returns_implementation(t
     assert "auto_fetch" not in res
 
 
-def test_get_symbol_implementation_explicit_fetch_without_include_returns_selection_required(tmp_path):
+def test_get_symbol_implementation_explicit_fetch_without_include_returns_parameter_contract_documentation(tmp_path):
     import json
     src = tmp_path / "small_mod.py"
     src.write_text("def helper():\n    return 42\n", encoding="utf-8")
@@ -194,11 +194,18 @@ def test_get_symbol_implementation_explicit_fetch_without_include_returns_select
         mode="fetch",
     )
     res = json.loads(res_raw)
-    assert res["status"] == "selection_required"
-    assert "Fetch requires an explicit include selection" in res["message"]
+    assert res["tool"] == "get_symbol_implementation"
+    assert res["version"] == "1.0.0"
+    assert "parameters" in res
+    assert "behavior" in res
+    error = res["parameter_contract_error"]
+    assert error["parameter"] == "include"
+    assert error["invalid_value"] is None
+    assert "mode='fetch' requires a non-empty include list" in error["reason"]
+    assert "Do not repeat the same invalid call." in error["retry_instruction"]
 
 
-def test_get_symbol_implementation_invalid_mode(tmp_path):
+def test_get_symbol_implementation_invalid_mode_returns_parameter_contract_documentation(tmp_path):
     import json
     src = tmp_path / "small_mod.py"
     src.write_text("def helper():\n    return 42\n", encoding="utf-8")
@@ -209,8 +216,15 @@ def test_get_symbol_implementation_invalid_mode(tmp_path):
         mode="invalid_mode",
     )
     res = json.loads(res_raw)
-    assert res["status"] == "error"
-    assert "mode must be 'auto', 'preview', or 'fetch'." in res["error"]
+    assert res["tool"] == "get_symbol_implementation"
+    assert res["version"] == "1.0.0"
+    assert "parameters" in res
+    assert "behavior" in res
+    error = res["parameter_contract_error"]
+    assert error["parameter"] == "mode"
+    assert error["invalid_value"] == "invalid_mode"
+    assert "mode must be exactly one of: 'auto', 'preview', or 'fetch'" in error["reason"]
+    assert "Do not repeat the same invalid call." in error["retry_instruction"]
 
 
 def _generate_exact_candidate_source(target_bytes: int, tmp_path: Path, filename: str) -> Path:

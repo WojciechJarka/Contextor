@@ -736,7 +736,7 @@ def test_signature_docs_registration_and_public_contract_parity():
     assert str(inspect.signature(tool.fn)) == (
         "(repo_path: str, family: str, direction: str = 'both', depth: int = 3) -> str"
     )
-    assert list(mcp_server.REGISTERED_MCP_TOOL_NAMES)[-1] == "contextor_fact_lineage"
+    assert "contextor_fact_lineage" in mcp_server.REGISTERED_MCP_TOOL_NAMES
     document = load_tool_document("contextor_fact_lineage")
     assert document["tool"] == "contextor_fact_lineage"
     assert any(entry.startswith("family (string, required)") for entry in document["parameters"])
