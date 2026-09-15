@@ -185,6 +185,7 @@ def test_real_windows_job_object_breakaway_integration(tmp_path, monkeypatch):
     repo.mkdir()
     PersistentIdentityRegistry(str(repo))
     monkeypatch.setenv("CONTEXTOR_CACHE_DIR", str(cache))
+    monkeypatch.setenv("CONTEXTOR_STATE_DIR", str(tmp_path / "state"))
 
     keeper_pid = os.getpid()
     keeper_token = "job-keeper-token-123"

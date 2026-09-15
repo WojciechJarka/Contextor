@@ -190,6 +190,37 @@ IMPLEMENTATION_PERFORMED=NO
 TESTS_RUN=NO; NO_NEW_ANALYSIS_RUN=YES
 ACTUAL_DIFF=DIFFS=NONE for production/source/test files; walkthrough.md is report-only.
 
+## CPA10K0_WINDOWS_JOB_OBJECT_BASELINE_RECHECK
+
+STATUS=SUCCESS
+HEAD=3c46f2240b324f38a50498268ff7131d40c90a54
+RUN_1=FAIL; tests/test_live_job_object.py::test_real_windows_job_object_breakaway_integration; AssertionError at tests/test_live_job_object.py:225 because line was ''; 1 failed in 2.98s.
+RUN_2=FAIL; tests/test_live_job_object.py::test_real_windows_job_object_breakaway_integration; AssertionError at tests/test_live_job_object.py:225 because line was ''; 1 failed in 27.02s.
+RUN_3=FAIL; tests/test_live_job_object.py::test_real_windows_job_object_breakaway_integration; AssertionError at tests/test_live_job_object.py:225 because line was ''; 1 failed in 1.69s.
+FAILURE_DIAGNOSTICS_IF_ANY=The required -vv -s rerun also failed at the same assertion in 1.62s. PDB inspection of the unchanged test-local helper pipes showed helper stdout='' and helper.poll()=1. Full helper stderr:
+
+```text
+Traceback (most recent call last):
+  File "<string>", line 8, in <module>
+  File "C:\Temp\Contextor_Repo\contextor\core\live_state\runtime.py", line 983, in connect_or_start
+    AuthorityEventEmitter(
+  File "C:\Temp\Contextor_Repo\contextor\core\runtime_trace.py", line 698, in __init__
+    self._recover_locked()
+  File "C:\Temp\Contextor_Repo\contextor\core\runtime_trace.py", line 740, in _recover_locked
+    payload = self._recover_unindexed_range_locked(self.log_path, tail, self.log_path.stat().st_size, payload)
+  File "C:\Temp\Contextor_Repo\contextor\core\runtime_trace.py", line 752, in _recover_unindexed_range_locked
+    raise AuthorityEventRecoveryError("observability_recovery_required: unindexed trace range exceeds bound")
+contextor.core.runtime_trace.AuthorityEventRecoveryError: observability_recovery_required: unindexed trace range exceeds bound
+```
+
+CLASSIFICATION=REPRODUCED_NEEDS_DISCOVERY
+IMPLEMENTATION_PERFORMED=NO
+NO_CODE_CHANGE=YES
+NO_TEST_CHANGE=YES
+NO_DOC_CHANGE=YES except this required walkthrough report section
+NO_FULL_PYTEST=YES
+ACTUAL_DIFF=DIFFS=NONE
+
 ## CPA10K0_PRE_REFACTOR_BASELINE_TEST_CONTRACT_SYNC
 
 STATUS=SUCCESS
@@ -342,5 +373,96 @@ index 69b236c..77889e4 100644
 +    "get_module_blast_radius", "contextor_fact_lineage", "contextor_profile_analysis",
  ]
  
- _IMPLEMENTATIONS = {
+_IMPLEMENTATIONS = {
+```
+
+## CPA10K0A_WINDOWS_JOB_OBJECT_TRACE_RECOVERY_DISCOVERY
+
+STATUS=SUCCESS
+HEAD=3c46f2240b324f38a50498268ff7131d40c90a54
+WORKTREE=walkthrough.md was pre-existing modified; no production or test file changes were made by this discovery; this required report section was appended.
+CONTEXTOR_FIRST_VERIFICATION=PASS; active mcp__contextor__* tools were found and used first. Canonical LIVE revision 1225 was fresh with workspace_sync=verified. Contextor mapped AuthorityEventEmitter.__init__ -> _recover_locked -> _recover_unindexed_range_locked, connect_or_start -> _production_domain, and runtime_logs_dir -> state_dir. lookup_index_entries resolved the recovery callers/callees to the active authority-event symbols. Source ranges confirmed the relevant paths and startup call boundary.
+FAILING_RUNTIME_DOMAIN=CODE_PATH_PROVED; the target test sets only CONTEXTOR_CACHE_DIR in the parent and helper. CONTEXTOR_STATE_DIR is absent, so state_dir() resolves to the real per-user Windows state root. RuntimeDomain.create(mode='production') defaults cache_root to repo_cache_dir(repo) and logs_root to runtime_logs_dir(); connect_or_start constructs AuthorityEventEmitter with domain.logs_root before RUNTIME_AUTHORITY_START and subprocess spawn. The helper therefore reaches the production runtime logs root while using only a temporary cache root.
+PRODUCTION_LOG_ROOT_EVIDENCE=DIRECT_EVIDENCE plus CODE_PATH_PROVED; with no CONTEXTOR_STATE_DIR/CONTEXTOR_CACHE_DIR override, state_dir=C:\Users\DafoO\AppData\Roaming\Contextor and runtime_logs_dir=C:\Users\DafoO\AppData\Roaming\Contextor\logs. authority_event_state.json was present at that root. The sidecar selected active_trace_path=C:\Users\DafoO\AppData\Roaming\Contextor\logs\contextor_runtime_20260915_140732_711_9084.jsonl; the file was present and had active_file_size=3748734 bytes. No log contents were dumped.
+AUTHORITY_SIDECAR_STATE=DIRECT_EVIDENCE; authority_event_state.json schema_version=3; top-level durable_tail_offset=77731; top-level active_trace_path pointed to the active trace above; sidecar contained 4 domain entries. The top-level active segment is the segment used by _recover_locked when previous == self.log_path; domain entries did not select a different active segment.
+UNINDEXED_RANGE_BYTES=3671003; calculated as active_file_size 3748734 minus durable_tail_offset 77731. This is 2622427 bytes above the bound.
+RECOVERY_WINDOW_BYTES=1048576; CODE_PATH_PROVED from _AUTHORITY_RECOVERY_WINDOW = 1024 * 1024 and _recover_unindexed_range_locked raises when end-start exceeds it.
+ISOLATED_STATE_RUN_1=PASS; new empty CONTEXTOR_STATE_DIR; 1 passed in 5.33s; created state directory removed after LIVE lock release.
+ISOLATED_STATE_RUN_2=PASS; different new empty CONTEXTOR_STATE_DIR; 1 passed in 4.82s; created state directory removed after LIVE lock release.
+ISOLATED_STATE_RUN_3=PASS; different new empty CONTEXTOR_STATE_DIR; 1 passed in 5.85s; created state directory removed after LIVE lock release.
+AUTHORITY_RECOVERY_CONTRACT=CONTRACT_PROVED; AuthorityEventRecoveryError is documented as durable authority-event state that cannot be recovered safely. AuthorityEventEmitter is explicitly a durable-first authority event pipeline with bounded crash recovery. Existing tests/test_runtime_authority_events.py explicitly require AuthorityEventRecoveryError for malformed/truncated tails (line 134), missing old pending segments (201), sidecar cursor/range corruption (221, 232), pending index overflow (243), old-segment recovery beyond the configured bound (323), recovered conflict identity corruption (445), pending-index holes (456), and corrupt foreign domains (466). The three recovery-window tests override the bound at lines 209, 321, and 487. These are authority-event durable-pipeline contracts, distinct from ordinary trace_event fail-open tests.
+TEST_ISOLATION_CONTRACT=CONTRACT_PROVED; tests/conftest.py:isolate_dirs sets CONTEXTOR_CACHE_DIR and CONTEXTOR_STATE_DIR together, and autouse isolate_live_test_artifacts does the same for tests marked live. The target test has no live marker and sets only CONTEXTOR_CACHE_DIR at line 187. Existing tests/test_live_authority_bootstrap.py:_repo sets both variables at lines 37-38; tests/live_state/test_runtime_domain.py uses explicit test-domain cache/logs roots and test context. No direct connect_or_start test was found that injects AuthorityEventRecoveryError/corrupt observability state.
+BASELINE_HELPER_STDOUT=''
+BASELINE_HELPER_STDERR=
+
+```text
+Traceback (most recent call last):
+  File "<string>", line 8, in <module>
+  File "C:\Temp\Contextor_Repo\contextor\core\live_state\runtime.py", line 983, in connect_or_start
+    AuthorityEventEmitter(
+  File "C:\Temp\Contextor_Repo\contextor\core\runtime_trace.py", line 698, in __init__
+    self._recover_locked()
+  File "C:\Temp\Contextor_Repo\contextor\core\runtime_trace.py", line 740, in _recover_locked
+    payload = self._recover_unindexed_range_locked(self.log_path, tail, self.log_path.stat().st_size, payload)
+  File "C:\Temp\Contextor_Repo\contextor\core\runtime_trace.py", line 752, in _recover_unindexed_range_locked
+    raise AuthorityEventRecoveryError("observability_recovery_required: unindexed trace range exceeds bound")
+contextor.core.runtime_trace.AuthorityEventRecoveryError: observability_recovery_required: unindexed trace range exceeds bound
+```
+
+CLASSIFICATION=A_TEST_ISOLATION_DEFECT_ONLY
+ROOT_CAUSE=The integration test isolated repository/cache state but not the production state/logs root. The helper inherited no CONTEXTOR_STATE_DIR, so connect_or_start used the real production authority-event sidecar and active trace. Its unindexed tail was 3671003 bytes, exceeding the 1048576-byte fail-closed recovery window; AuthorityEventEmitter recovery raised before LIVE spawn, so HELPER_DONE was never printed. A fresh isolated state root removed the exception in 3/3 runs.
+ROOT_CAUSE_CONFIDENCE=HIGH for the test-isolation root cause and the observed failure mechanism; HIGH that fail-closed recovery is an intentional authority-event durability contract; UNKNOWN only for any unobserved per-process domain correlation beyond the direct code path and matching production-root evidence.
+PROVED_FACTS=
+- DIRECT_EVIDENCE: baseline failing test reproduced 3/3; each failed at tests/test_live_job_object.py:225 with line=''.
+- DIRECT_EVIDENCE: diagnostic helper stdout was empty, helper.poll()=1, and helper stderr raised AuthorityEventRecoveryError: observability_recovery_required: unindexed trace range exceeds bound.
+- CODE_PATH_PROVED: target helper sets only CONTEXTOR_CACHE_DIR and inherits the absent CONTEXTOR_STATE_DIR.
+- CODE_PATH_PROVED: production RuntimeDomain defaults logs_root to runtime_logs_dir(), which is state_dir()/logs; connect_or_start invokes AuthorityEventEmitter recovery before authority-start event and LIVE spawn.
+- DIRECT_EVIDENCE: production sidecar active trace size and durable offset yielded 3671003 unindexed bytes, greater than 1048576.
+- DIRECT_EVIDENCE: all three controlled isolated-state runs passed and their newly created state directories were removed.
+- CONTRACT_PROVED: authority-event tests explicitly require fail-closed AuthorityEventRecoveryError for malformed, missing, corrupt, over-bound, and cross-domain durable state.
+- CONTRACT_PROVED: test fixtures and live bootstrap helpers establish the canonical paired cache/state isolation pattern.
+- CONTRACT_PROVED: ordinary trace_event/trace_operation failure tests in tests/test_live_state_ipc.py are fail-open, but they do not cover AuthorityEventEmitter durable recovery and therefore do not override the specific authority-event contract.
+INFERENCES=
+- INFERENCE: the failing helper used the observed production sidecar/active segment because the source path and environment inheritance are exact, and the production segment delta independently matches the thrown recovery condition.
+- INFERENCE: adding only CONTEXTOR_STATE_DIR to the target test is sufficient; the helper subprocess inherits it automatically, as demonstrated by the 3/3 isolated-state PASS.
+UNKNOWNS=
+- UNKNOWN: no direct per-helper PID/domain event was available to bind the failing subprocess to one sidecar domain entry; the production-root path and exact code path are nevertheless proved.
+- UNKNOWN: no direct connect_or_start corruption test exists in the discovered test set, so the startup-boundary behavior is established by source plus the generic AuthorityEventEmitter fail-closed tests.
+- UNKNOWN: the exact future production behavior after a test-only fix was not rerun against modified files because implementation and test changes were forbidden.
+MINIMAL_FIX_CONTRACT_IF_PROVED=Test-only exact fix: in tests/test_live_job_object.py::test_real_windows_job_object_breakaway_integration, immediately after the existing line 187 monkeypatch.setenv("CONTEXTOR_CACHE_DIR", str(cache)), add monkeypatch.setenv("CONTEXTOR_STATE_DIR", str(tmp_path / "state")). This matches tests/conftest.py and tests/test_live_authority_bootstrap.py::_repo. Focused verification: run the same integration test three times with a fresh state root per run; the controlled experiment already established 3/3 PASS. No production change or exception swallowing is justified by this evidence.
+LIKELY_FILES=tests/test_live_job_object.py; canonical isolation references tests/conftest.py and tests/test_live_authority_bootstrap.py; production contract evidence contextor/core/paths.py, contextor/core/live_state/runtime_domain.py, contextor/core/live_state/runtime.py, contextor/core/runtime_trace.py.
+LIKELY_TESTS=tests/test_live_job_object.py::test_real_windows_job_object_breakaway_integration (three isolated-state runs); existing tests/test_runtime_authority_events.py fail-closed recovery cases remain the authority-event contract suite.
+IMPLEMENTATION_PERFORMED=NO
+ACTUAL_DIFF=DIFFS=NONE for production and test files; only the required walkthrough report section was added.
+
+## CPA10K0B_WINDOWS_JOB_OBJECT_TEST_ISOLATION_FIX
+
+STATUS=SUCCESS
+HEAD_BEFORE=3c46f2240b324f38a50498268ff7131d40c90a54
+HEAD_AFTER=3c46f2240b324f38a50498268ff7131d40c90a54
+FILES_CHANGED=tests/test_live_job_object.py
+CONTEXTOR_FIRST_VERIFICATION=PASS; active mcp__contextor__* tools were found and used first. Contextor get_source_range confirmed the exact target anchor in tests/test_live_job_object.py and the canonical paired cache/state isolation patterns in tests/conftest.py and tests/test_live_authority_bootstrap.py. Canonical LIVE diagnostics were fresh with workspace_sync=verified.
+SOURCE_DRIFT_CHECK=PASS; expected base HEAD matched; the literal anchor matched exactly; no production file, other test, or documentation source was changed.
+PY_COMPILE=PASS; & .\.venv\Scripts\python.exe -m py_compile tests/test_live_job_object.py
+RUN_1=PASS; & .\.venv\Scripts\python.exe -m pytest tests/test_live_job_object.py::test_real_windows_job_object_breakaway_integration -q; 1 passed in 6.37s.
+RUN_2=PASS; & .\.venv\Scripts\python.exe -m pytest tests/test_live_job_object.py::test_real_windows_job_object_breakaway_integration -q; 1 passed in 5.15s.
+RUN_3=PASS; & .\.venv\Scripts\python.exe -m pytest tests/test_live_job_object.py::test_real_windows_job_object_breakaway_integration -q; 1 passed in 4.80s.
+IMPLEMENTATION_CONTRACT=Implemented exactly one test-only environment line: CONTEXTOR_STATE_DIR is set to str(tmp_path / "state") immediately after the existing CONTEXTOR_CACHE_DIR line. The helper subprocess inherits this environment automatically, isolating runtime logs under tmp_path. AuthorityEventEmitter and all production runtime/domain/path files were untouched.
+MCP_SERVER_RESTART_REQUIRED=NO
+DESKTOP_LIVE_RESTART_REQUIRED=NO
+ACTUAL_DIFF=
+
+```diff
+diff --git a/tests/test_live_job_object.py b/tests/test_live_job_object.py
+index 4284d65..6c27601 100644
+--- a/tests/test_live_job_object.py
++++ b/tests/test_live_job_object.py
+@@ -185,6 +185,7 @@ def test_real_windows_job_object_breakaway_integration(tmp_path, monkeypatch):
+     repo.mkdir()
+     PersistentIdentityRegistry(str(repo))
+     monkeypatch.setenv("CONTEXTOR_CACHE_DIR", str(cache))
++    monkeypatch.setenv("CONTEXTOR_STATE_DIR", str(tmp_path / "state"))
+ 
+     keeper_pid = os.getpid()
+     keeper_token = "job-keeper-token-123"
 ```
