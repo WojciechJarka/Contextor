@@ -10,9 +10,12 @@ from pathlib import Path
 __all__ = [
     "ParsedSourceInput",
     "SourceError",
+    "SourceSnapshot",
     "parse_source",
+    "parse_source_snapshot",
     "parse_source_with_fingerprint",
     "read_source",
+    "read_source_snapshot",
 ]
 
 
@@ -30,6 +33,12 @@ class SourceError(ValueError):
 @dataclass(frozen=True)
 class ParsedSourceInput:
     tree: ast.AST
+    source_fingerprint: str
+
+
+@dataclass(frozen=True)
+class SourceSnapshot:
+    raw: bytes
     source_fingerprint: str
 
 
@@ -54,6 +63,14 @@ def _read_source_snapshot(path: str | Path) -> tuple[bytes, str]:
     return raw, hashlib.sha256(raw).hexdigest()
 
 
+def read_source_snapshot(path: str | Path) -> SourceSnapshot:
+    raw, fingerprint = _read_source_snapshot(path)
+    return SourceSnapshot(
+        raw=raw,
+        source_fingerprint=fingerprint,
+    )
+
+
 def _decode_source_snapshot(raw: bytes) -> str:
     try:
         encoding, _ = tokenize.detect_encoding(io.BytesIO(raw).readline)
@@ -65,10 +82,15 @@ def _decode_source_snapshot(raw: bytes) -> str:
         raise SourceError("not valid text in its declared encoding") from None
 
 
-def parse_source_with_fingerprint(path: str | Path) -> ParsedSourceInput:
-    """Parse and SHA-256 fingerprint one exact byte snapshot of a Python file."""
-    raw, fingerprint = _read_source_snapshot(path)
-    source = _decode_source_snapshot(raw)
+def parse_source_snapshot(
+    snapshot: SourceSnapshot,
+    path: str | Path,
+) -> ParsedSourceInput:
+    if not isinstance(snapshot, SourceSnapshot):
+        raise TypeError("snapshot must be SourceSnapshot.")
+
+    source = _decode_source_snapshot(snapshot.raw)
+
     try:
         tree = ast.parse(source, filename=str(path))
     except SyntaxError as exc:
@@ -80,7 +102,20 @@ def parse_source_with_fingerprint(path: str | Path) -> ParsedSourceInput:
         raise SourceError(f"is not valid Python ({exc})", error_status="SYNTAX_ERROR", detail_message=str(exc)) from None
     except RecursionError:
         raise SourceError("is too deeply nested to parse", error_status="SYNTAX_ERROR", detail_message="is too deeply nested to parse") from None
-    return ParsedSourceInput(tree=tree, source_fingerprint=fingerprint)
+    return ParsedSourceInput(
+        tree=tree,
+        source_fingerprint=snapshot.source_fingerprint,
+    )
+
+
+def parse_source_with_fingerprint(
+    path: str | Path,
+) -> ParsedSourceInput:
+    """Parse and SHA-256 fingerprint one exact byte snapshot of a Python file."""
+    return parse_source_snapshot(
+        read_source_snapshot(path),
+        path,
+    )
 
 
 def parse_source(path: str | Path) -> ast.AST:

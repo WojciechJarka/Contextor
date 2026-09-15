@@ -10,7 +10,7 @@ def _write_two_file_repo(tmp_path):
     return repo
 
 
-def test_warm_index_cache_evidence_proves_source_parse_still_runs(tmp_path, monkeypatch):
+def test_warm_index_cache_evidence_proves_ast_parse_is_skipped(tmp_path, monkeypatch):
     monkeypatch.setenv("CONTEXTOR_STATE_DIR", str(tmp_path / "state"))
     monkeypatch.setenv("CONTEXTOR_DISABLE_PROCESS_POOL", "1")
     repo = _write_two_file_repo(tmp_path)
@@ -28,14 +28,14 @@ def test_warm_index_cache_evidence_proves_source_parse_still_runs(tmp_path, monk
     assert event["execution_mode"] == "inline"
     assert event["timing_semantics"] == "aggregate_file_task_not_critical_path"
     assert event["file_tasks"] == 2
-    assert event["source_parse_calls"] == 2
+    assert event["source_parse_calls"] == 0
     assert event["source_parse_failures"] == 0
     assert event["cache_get_calls"] == 2
     assert event["cache_hits"] == 2
     assert event["cache_misses"] == 0
     assert event["lineage_cache_hits"] == 2
     assert event["lineage_extract_calls"] == 0
-    assert event["source_parse_sum_ms"] >= 0.0
+    assert event["source_parse_sum_ms"] == 0.0
     assert event["cache_get_sum_ms"] >= 0.0
     assert event["lineage_extract_sum_ms"] == 0.0
     assert "elapsed_ms" not in event

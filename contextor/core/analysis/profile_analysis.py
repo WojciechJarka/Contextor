@@ -198,6 +198,17 @@ def _indexing_reason(
 
     if (
         file_tasks > 0
+        and source_parse_calls == 0
+        and cache_get_calls == file_tasks
+        and cache_hits == file_tasks
+        and cache_misses == 0
+        and lineage_cache_hits == file_tasks
+        and lineage_extract_calls == 0
+    ):
+        return "warm_cache_fast_path", evidence
+
+    if (
+        file_tasks > 0
         and source_parse_calls == file_tasks
         and cache_get_calls == file_tasks
         and cache_hits == file_tasks

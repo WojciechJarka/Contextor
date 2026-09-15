@@ -24,7 +24,7 @@ def test_index_cache_miss_stores_symbol_facts(tmp_path, isolated_dirs):
     assert _cache_payload(root, source)["data"]["symbol_facts"] == record
 
 
-def test_new_format_cache_hit_reuses_cached_facts_but_parses_current_source_for_lineage(
+def test_new_format_cache_hit_reuses_cached_facts_without_ast_parse(
     tmp_path, isolated_dirs, monkeypatch
 ):
     monkeypatch.setenv("CONTEXTOR_DISABLE_PROCESS_POOL", "1")
@@ -36,11 +36,13 @@ def test_new_format_cache_hit_reuses_cached_facts_but_parses_current_source_for_
     indexer._CACHE_MANAGERS.pop(str(root.resolve()), None)
 
     parse_calls = []
-    original_parse = indexer.parse_source_with_fingerprint
+    original_parse = indexer.parse_source_snapshot
     monkeypatch.setattr(
         indexer,
-        "parse_source_with_fingerprint",
-        lambda path: (parse_calls.append(path) or original_parse(path)),
+        "parse_source_snapshot",
+        lambda snapshot, path: (
+            parse_calls.append(path) or original_parse(snapshot, path)
+        ),
     )
 
     extraction_calls = []
@@ -55,14 +57,14 @@ def test_new_format_cache_hit_reuses_cached_facts_but_parses_current_source_for_
 
     result = indexer.index_repository(str(root))
 
-    assert len(parse_calls) == 1
+    assert parse_calls == []
     assert extraction_calls == []
     assert result.modules["module"].imports == []
     assert result.symbol_facts_by_module["module"]["status"] == "available"
     assert result.lineage_facts_by_source["module.py"].source_key == "module.py"
 
 
-def test_source_change_invalidates_symbol_facts_then_warm_hit_reparses_only_for_lineage(
+def test_source_change_invalidates_symbol_facts_then_complete_warm_hit_skips_ast_parse(
     tmp_path, isolated_dirs, monkeypatch
 ):
     monkeypatch.setenv("CONTEXTOR_DISABLE_PROCESS_POOL", "1")
@@ -75,11 +77,13 @@ def test_source_change_invalidates_symbol_facts_then_warm_hit_reparses_only_for_
     source.write_text("def new():\n    return 2\n", encoding="utf-8")
     indexer._CACHE_MANAGERS.pop(str(root.resolve()), None)
     parse_calls = []
-    original_parse = indexer.parse_source_with_fingerprint
+    original_parse = indexer.parse_source_snapshot
     monkeypatch.setattr(
         indexer,
-        "parse_source_with_fingerprint",
-        lambda path: (parse_calls.append(path) or original_parse(path)),
+        "parse_source_snapshot",
+        lambda snapshot, path: (
+            parse_calls.append(path) or original_parse(snapshot, path)
+        ),
     )
 
     changed = indexer.index_repository(str(root))
@@ -90,12 +94,12 @@ def test_source_change_invalidates_symbol_facts_then_warm_hit_reparses_only_for_
     indexer._CACHE_MANAGERS.pop(str(root.resolve()), None)
     parse_calls.clear()
     warm = indexer.index_repository(str(root))
-    assert len(parse_calls) == 1
+    assert parse_calls == []
     assert warm.lineage_facts_by_source["module.py"].source_key == "module.py"
     assert warm.symbol_facts_by_module["module"]["facts"]["functions"] == ["new"]
 
 
-def test_legacy_cache_is_migrated_once_then_warm_hit_reparses_only_for_lineage(
+def test_legacy_cache_is_migrated_once_then_complete_warm_hit_skips_ast_parse(
     tmp_path, isolated_dirs, monkeypatch
 ):
     monkeypatch.setenv("CONTEXTOR_DISABLE_PROCESS_POOL", "1")
@@ -106,11 +110,13 @@ def test_legacy_cache_is_migrated_once_then_warm_hit_reparses_only_for_lineage(
     CacheManager(str(root)).set(source, {"imports": [], "error": None})
     indexer._CACHE_MANAGERS.pop(str(root.resolve()), None)
     parse_calls = []
-    original_parse = indexer.parse_source_with_fingerprint
+    original_parse = indexer.parse_source_snapshot
     monkeypatch.setattr(
         indexer,
-        "parse_source_with_fingerprint",
-        lambda path: (parse_calls.append(path) or original_parse(path)),
+        "parse_source_snapshot",
+        lambda snapshot, path: (
+            parse_calls.append(path) or original_parse(snapshot, path)
+        ),
     )
 
     migrated = indexer.index_repository(str(root))
@@ -121,7 +127,7 @@ def test_legacy_cache_is_migrated_once_then_warm_hit_reparses_only_for_lineage(
     parse_calls.clear()
     warm = indexer.index_repository(str(root))
     assert warm.symbol_facts_by_module["module"]["status"] == "available"
-    assert len(parse_calls) == 1
+    assert parse_calls == []
     assert warm.lineage_facts_by_source["module.py"].source_key == "module.py"
 
 
@@ -144,12 +150,14 @@ def test_symbol_facts_schema_mismatch_recomputes(tmp_path, isolated_dirs, monkey
         },
     )
     indexer._CACHE_MANAGERS.pop(str(root.resolve()), None)
-    original_parse = indexer.parse_source_with_fingerprint
+    original_parse = indexer.parse_source_snapshot
     parse_calls = []
     monkeypatch.setattr(
         indexer,
-        "parse_source_with_fingerprint",
-        lambda path: (parse_calls.append(path) or original_parse(path)),
+        "parse_source_snapshot",
+        lambda snapshot, path: (
+            parse_calls.append(path) or original_parse(snapshot, path)
+        ),
     )
 
     result = indexer.index_repository(str(root))

@@ -85,6 +85,11 @@ class CacheManager:
 
         return digest
 
+    def _compute_hash_bytes(self, raw: bytes) -> str:
+        hasher = _HASH(digest_size=_HASH_DIGEST_SIZE)
+        hasher.update(raw)
+        return hasher.hexdigest()
+
     def _get_cache_file_path(self, original_file_path: str | Path) -> Path:
         """
         Generuje unikalną nazwę pliku cache bazującą na względnej ścieżce.
@@ -112,15 +117,25 @@ class CacheManager:
     # PUBLIC API
     # ------------------------------------------------------
 
-    def get(self, file_path: str | Path) -> dict[str, Any] | None:
+    def get(
+        self,
+        file_path: str | Path,
+        *,
+        source_bytes: bytes | None = None,
+    ) -> dict[str, Any] | None:
         """
-        Pobiera zbuforowane dane, jeśli plik się nie zmienił.
+        Pobiera zbuforowane dane, jeśli snapshot pliku się nie zmienił.
 
-        Zwraca dane jako słownik (dict) lub None, jeśli brak cache
-        lub cache jest nieaktualny.
+        Gdy source_bytes jest podane, walidacja cache odnosi się dokładnie
+        do snapshotu analizowanego przez caller i nie czyta source ponownie
+        z dysku.
         """
 
-        current_hash = self._compute_hash(file_path)
+        current_hash = (
+            self._compute_hash_bytes(source_bytes)
+            if source_bytes is not None
+            else self._compute_hash(file_path)
+        )
 
         if not current_hash:
             return None
@@ -137,18 +152,30 @@ class CacheManager:
         if cached_data.get("_file_hash") != current_hash:
             return None
 
-        # Guards against a hash collision on the cache file name.
         if cached_data.get("_source") != str(Path(file_path).resolve()):
             return None
 
         return cached_data.get("data")
 
-    def set(self, file_path: str | Path, data: dict[str, Any]) -> None:
+    def set(
+        self,
+        file_path: str | Path,
+        data: dict[str, Any],
+        *,
+        source_bytes: bytes | None = None,
+    ) -> None:
         """
         Zapisuje dane do cache'u. 'data' musi być serializowalne przez orjson.
+
+        Gdy source_bytes jest podane, wrapper cache zostaje związany dokładnie
+        z tym samym snapshotem, który analizował caller.
         """
 
-        current_hash = self._compute_hash(file_path)
+        current_hash = (
+            self._compute_hash_bytes(source_bytes)
+            if source_bytes is not None
+            else self._compute_hash(file_path)
+        )
 
         if not current_hash:
             return
@@ -164,8 +191,6 @@ class CacheManager:
         try:
             self._ensure_dir()
 
-            # Atomic publish: a crash mid-write must not leave a
-            # truncated entry that later reads would choke on.
             temp_file = cache_file.with_suffix(".json.tmp")
 
             with open(temp_file, "wb") as handle:

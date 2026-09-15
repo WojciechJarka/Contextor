@@ -42,7 +42,8 @@ from contextor.core.runtime_trace import trace_event
 from contextor.core.source import (
     SourceError,
     parse_source,
-    parse_source_with_fingerprint,
+    parse_source_snapshot,
+    read_source_snapshot,
 )
 from contextor.core.symbol_engine.extractor import extract_file_symbols
 from contextor.core.validator.collisions import (
@@ -317,11 +318,10 @@ def _process_single_file(path_str: str, root_str: str) -> dict:
     source_key = rel.as_posix()
     module_id = ".".join(rel.with_suffix("").parts)
 
-    source_parse_started = time.monotonic()
+    test_candidate = is_test_context_candidate(root_str, path)
     try:
-        parsed_input = parse_source_with_fingerprint(path)
+        source_snapshot = read_source_snapshot(path)
     except SourceError as exc:
-        source_parse_ms = (time.monotonic() - source_parse_started) * 1000.0
         return {
             "module_id": module_id,
             "path": str(rel),
@@ -337,9 +337,9 @@ def _process_single_file(path_str: str, root_str: str) -> dict:
             "test_facts_status": None,
             "lineage_facts": None,
             "lineage_extract_ms": 0.0,
-            "source_parse_called": True,
-            "source_parse_ms": source_parse_ms,
-            "source_parse_failed": True,
+            "source_parse_called": False,
+            "source_parse_ms": 0.0,
+            "source_parse_failed": False,
             "cache_get_called": False,
             "cache_get_ms": 0.0,
             "cache_hit": False,
@@ -347,18 +347,14 @@ def _process_single_file(path_str: str, root_str: str) -> dict:
             "lineage_extract_called": False,
             "automatic_test_context_directory": (
                 str(path.parent)
-                if is_test_context_candidate(root_str, path)
+                if test_candidate
                 or path.parent == Path(root_str)
                 else None
             ),
         }
-    source_parse_ms = (time.monotonic() - source_parse_started) * 1000.0
-    tree = parsed_input.tree
-
-    # Próba odczytu z cache
     cache = _cache_manager(root_str)
     cache_get_started = time.monotonic()
-    cached_data = cache.get(path)
+    cached_data = cache.get(path, source_bytes=source_snapshot.raw)
     cache_get_ms = (time.monotonic() - cache_get_started) * 1000.0
 
     lineage_facts = None
@@ -368,22 +364,10 @@ def _process_single_file(path_str: str, root_str: str) -> dict:
         lineage_facts = deserialize_extracted_lineage_source_facts(
             cached_data.get("lineage_facts"),
             source_key=source_key,
-            source_fingerprint=parsed_input.source_fingerprint,
+            source_fingerprint=source_snapshot.source_fingerprint,
         )
         lineage_cache_hit = lineage_facts is not None
         cached_lineage_valid = lineage_facts is not None
-
-    lineage_extract_ms = 0.0
-    lineage_extract_called = False
-    if lineage_facts is None:
-        lineage_extract_called = True
-        lineage_extract_started = time.monotonic()
-        lineage_facts = extract_lineage_source_facts(
-            tree,
-            source_key=source_key,
-            source_fingerprint=parsed_input.source_fingerprint,
-        )
-        lineage_extract_ms = (time.monotonic() - lineage_extract_started) * 1000.0
 
     symbol_facts = None
     reference_facts = None
@@ -391,7 +375,6 @@ def _process_single_file(path_str: str, root_str: str) -> dict:
     collision_facts_status = None
     test_facts = None
     test_facts_status = None
-    test_candidate = is_test_context_candidate(root_str, path)
     if cached_data is not None:
         error = cached_data.get("error")
         imports = None if error else [ImportRef(**imp) for imp in cached_data.get("imports", [])]
@@ -411,6 +394,83 @@ def _process_single_file(path_str: str, root_str: str) -> dict:
             test_facts = cached_test_facts
             test_facts_status = _TEST_FACTS_AVAILABLE
 
+        if (
+            not error
+            and lineage_facts is not None
+            and symbol_facts is not None
+            and reference_facts is not None
+            and collision_facts is not None
+            and (not test_candidate or test_facts is not None)
+        ):
+            return {
+                "module_id": module_id,
+                "path": str(rel),
+                "absolute_path": str(path.resolve()),
+                "imports": imports,
+                "error": error,
+                "filename": path.name,
+                "symbol_facts": symbol_facts,
+                "reference_facts": reference_facts,
+                "collision_facts": collision_facts,
+                "collision_facts_status": collision_facts_status,
+                "test_facts": test_facts,
+                "test_facts_status": test_facts_status,
+                "lineage_facts": lineage_facts,
+                "lineage_extract_ms": 0.0,
+                "source_parse_called": False,
+                "source_parse_ms": 0.0,
+                "source_parse_failed": False,
+                "cache_get_called": True,
+                "cache_get_ms": cache_get_ms,
+                "cache_hit": True,
+                "lineage_cache_hit": True,
+                "lineage_extract_called": False,
+                "automatic_test_context_directory": (
+                    str(path.parent)
+                    if test_candidate or path.parent == Path(root_str)
+                    else None
+                ),
+            }
+
+    source_parse_started = time.monotonic()
+    try:
+        parsed_input = parse_source_snapshot(source_snapshot, path)
+    except SourceError as exc:
+        source_parse_ms = (time.monotonic() - source_parse_started) * 1000.0
+        return {
+            "module_id": module_id, "path": str(rel),
+            "absolute_path": str(path.resolve()), "imports": None,
+            "error": str(exc), "filename": path.name,
+            "symbol_facts": None, "reference_facts": None,
+            "collision_facts": None, "collision_facts_status": None,
+            "test_facts": None, "test_facts_status": None,
+            "lineage_facts": None, "lineage_extract_ms": 0.0,
+            "source_parse_called": True, "source_parse_ms": source_parse_ms,
+            "source_parse_failed": True, "cache_get_called": True,
+            "cache_get_ms": cache_get_ms, "cache_hit": cached_data is not None,
+            "lineage_cache_hit": False, "lineage_extract_called": False,
+            "automatic_test_context_directory": (
+                str(path.parent) if test_candidate or path.parent == Path(root_str)
+                else None
+            ),
+        }
+
+    source_parse_ms = (time.monotonic() - source_parse_started) * 1000.0
+    assert parsed_input.source_fingerprint == source_snapshot.source_fingerprint
+    tree = parsed_input.tree
+    lineage_extract_ms = 0.0
+    lineage_extract_called = False
+    if lineage_facts is None:
+        lineage_extract_called = True
+        lineage_extract_started = time.monotonic()
+        lineage_facts = extract_lineage_source_facts(
+            tree,
+            source_key=source_key,
+            source_fingerprint=source_snapshot.source_fingerprint,
+        )
+        lineage_extract_ms = (time.monotonic() - lineage_extract_started) * 1000.0
+
+    if cached_data is not None:
         if not error and (
             not cached_lineage_valid
             or symbol_facts is None
@@ -501,7 +561,11 @@ def _process_single_file(path_str: str, root_str: str) -> dict:
                         rewritten["test_facts"] = test_facts
                     else:
                         rewritten.pop("test_facts", None)
-                cache.set(path, rewritten)
+                cache.set(
+                    path,
+                    rewritten,
+                    source_bytes=source_snapshot.raw,
+                )
     else:
         try:
             tree = parsed_input.tree
@@ -564,7 +628,11 @@ def _process_single_file(path_str: str, root_str: str) -> dict:
             cache_data["collision_facts"] = collision_facts
         if _valid_test_facts(test_facts):
             cache_data["test_facts"] = test_facts
-        cache.set(path, cache_data)
+        cache.set(
+            path,
+            cache_data,
+            source_bytes=source_snapshot.raw,
+        )
 
     return {
         "module_id": module_id,
