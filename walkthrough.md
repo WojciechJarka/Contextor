@@ -1,6 +1,6 @@
 # CPA10D_LIVE_MUTATION_ADMISSION_CORRELATION
 
-STATUS=PARTIAL
+STATUS=IMPLEMENTATION_PASS_RUNTIME_RESTART_PENDING
 
 HEAD_BEFORE=9d7ab352aa2bb92c9b7abd6f6a151147fd916f99
 HEAD_AFTER=9d7ab352aa2bb92c9b7abd6f6a151147fd916f99
@@ -476,3 +476,10 @@ index 10e0460..f2829e0 100644
  def test_different_idempotency_keys_for_same_path_create_distinct_jobs():
      executions = []
 ```
+
+## CPA10D_TEST_CERTIFICATION_ONLY
+
+- TERMINAL PASS: `.venv\\Scripts\\python.exe -m pytest tests/test_full_analysis_coordination.py -q` — `21 passed in 26.10s`.
+- TERMINAL PASS: `.venv\\Scripts\\python.exe -m pytest tests/test_live_mutation_coordinator.py tests/test_full_analysis_coordination.py -q` — `45 passed in 26.54s`.
+- The previous interface-limit qualification is superseded by the terminal combined PASS above.
+- RUNTIME_RESTART_REQUIRED=YES. No LIVE/MCP restart and no runtime freshness certification were performed.
