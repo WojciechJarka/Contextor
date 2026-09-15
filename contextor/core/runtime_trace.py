@@ -1359,6 +1359,11 @@ def trace_event(domain: str, event: str, *, op: str | None = None, rev: int | No
         key_map.update(
             {
                 "origin": "origin",
+                "job_id": "job_id",
+                "idempotency_key": "idempotency_key",
+                "queue_order": "queue_order",
+                "accepted_revision": "accepted_revision",
+                "started_revision": "started_revision",
                 "diagnostic_kind": "diagnostic_kind",
                 "diagnostic_key": "diagnostic_key",
                 "collision_kind": "collision_kind",

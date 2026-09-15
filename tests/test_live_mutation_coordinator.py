@@ -220,10 +220,171 @@ def test_duplicate_idempotency_key_reuses_job_and_executes_once():
         release.set()
         terminal = _wait_for_coordinator_terminal(coordinator, first["job_id"])
         assert terminal["state"] == "completed"
-        assert executions == [{"file_path": "same.py", "idempotency_key": "intent-1"}]
+        assert executions == [
+            {
+                "file_path": "same.py",
+                "idempotency_key": "intent-1",
+                "job_id": first["job_id"],
+                "queue_order": first["queue_order"],
+                "accepted_revision": first["accepted_revision"],
+                "started_revision": 0,
+            }
+        ]
     finally:
         release.set()
         coordinator.close()
+
+
+def test_executor_receives_authoritative_job_identity_without_mutating_submitted_request():
+    executions = []
+    submitted_request = {
+        "file_path": "same.py",
+        "idempotency_key": "intent-authoritative",
+        "job_id": "forged-job",
+        "queue_order": 999,
+        "accepted_revision": 999,
+        "started_revision": 999,
+    }
+
+    def executor(request):
+        executions.append(request)
+        return {"status": "ok", "revision": 1}
+
+    coordinator = CanonicalMutationCoordinator(executor, lambda: 0)
+    try:
+        accepted = coordinator.submit(submitted_request)
+        terminal = _wait_for_coordinator_terminal(
+            coordinator,
+            accepted["job_id"],
+        )
+
+        assert terminal["state"] == "completed"
+        assert len(executions) == 1
+
+        execution_request = executions[0]
+        assert execution_request["file_path"] == "same.py"
+        assert execution_request["idempotency_key"] == "intent-authoritative"
+        assert execution_request["job_id"] == accepted["job_id"]
+        assert execution_request["queue_order"] == accepted["queue_order"]
+        assert (
+            execution_request["accepted_revision"]
+            == accepted["accepted_revision"]
+        )
+        assert execution_request["started_revision"] == 0
+
+        assert submitted_request == {
+            "file_path": "same.py",
+            "idempotency_key": "intent-authoritative",
+            "job_id": "forged-job",
+            "queue_order": 999,
+            "accepted_revision": 999,
+            "started_revision": 999,
+        }
+    finally:
+        coordinator.close()
+
+
+def test_queued_mutation_guard_receives_job_identity_and_trace_operation():
+    guarded_requests = []
+
+    @contextmanager
+    def mutation_guard(request, stop_event):
+        assert not stop_event.is_set()
+        guarded_requests.append(dict(request))
+        yield
+
+    def updater(state, path):
+        state.files.append(path)
+        return {"status": "UPDATED", "file_path": path}
+
+    server = CanonicalLiveServer(
+        SimpleNamespace(files=[], revision=0),
+        updater=updater,
+        mutation_guard=mutation_guard,
+    )
+
+    with _running_server(server) as client:
+        accepted = client.submit_update_file(
+            "guarded.py",
+            origin="desktop_watcher",
+            idempotency_key="guarded-intent",
+        )
+        terminal = _wait_for_terminal(
+            client,
+            accepted["job_id"],
+        )
+
+        assert terminal["state"] == "completed"
+        assert terminal["final_revision"] == 1
+
+    assert len(guarded_requests) == 1
+    guarded = guarded_requests[0]
+    assert guarded["file_path"] == "guarded.py"
+    assert guarded["origin"] == "desktop_watcher"
+    assert guarded["idempotency_key"] == "guarded-intent"
+    assert guarded["job_id"] == accepted["job_id"]
+    assert guarded["queue_order"] == accepted["queue_order"]
+    assert guarded["accepted_revision"] == accepted["accepted_revision"]
+    assert guarded["started_revision"] == 0
+    assert isinstance(guarded["trace_op"], str)
+    assert guarded["trace_op"]
+
+
+def test_repository_mutation_guard_forwards_exact_admission_trace_fields(
+    tmp_path,
+    monkeypatch,
+):
+    from contextor.core.analysis import full_analysis_coordinator as fac
+
+    acquired = []
+    released = []
+    lease = object()
+
+    def fake_acquire(repo_path, **kwargs):
+        acquired.append((repo_path, kwargs))
+        return lease
+
+    def fake_release(value):
+        released.append(value)
+
+    monkeypatch.setattr(fac, "acquire_full_analysis", fake_acquire)
+    monkeypatch.setattr(fac, "release_full_analysis", fake_release)
+
+    stop_event = threading.Event()
+    guard = _repository_mutation_guard(tmp_path)
+
+    request = {
+        "trace_op": "u-test-op",
+        "file_path": "contextor/example.py",
+        "job_id": "mu-test",
+        "idempotency_key": "intent-test",
+        "queue_order": 7,
+        "accepted_revision": 41,
+        "started_revision": 42,
+        "source": "desktop_watcher",
+    }
+
+    with guard(request, stop_event):
+        pass
+
+    assert len(acquired) == 1
+    repo_path, kwargs = acquired[0]
+    assert repo_path == tmp_path
+    assert kwargs["owner"] == "live_mutation_worker"
+    assert kwargs["writer_kind"] == "live_mutation"
+    assert callable(kwargs["is_cancelled"])
+    assert kwargs["is_cancelled"]() is False
+    assert kwargs["admission_trace_fields"] == {
+        "op": "u-test-op",
+        "path": "contextor/example.py",
+        "job_id": "mu-test",
+        "idempotency_key": "intent-test",
+        "queue_order": 7,
+        "accepted_revision": 41,
+        "started_revision": 42,
+        "origin": "desktop_watcher",
+    }
+    assert released == [lease]
 
 
 def test_different_idempotency_keys_for_same_path_create_distinct_jobs():

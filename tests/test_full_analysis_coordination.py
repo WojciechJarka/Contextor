@@ -67,6 +67,78 @@ def test_startup_publish_writer_kind_is_accepted(tmp_path: Path):
         acquire_full_analysis(repo, writer_kind="invalid")
 
 
+def test_live_mutation_admission_trace_fields_are_correlated_and_whitelisted(
+    tmp_path: Path,
+):
+    repo = tmp_path / "live_mutation_trace"
+    repo.mkdir()
+
+    supplied = {
+        "op": "u-test-op",
+        "path": "contextor/example.py",
+        "job_id": "mu-test",
+        "idempotency_key": "intent-test",
+        "queue_order": 7,
+        "accepted_revision": 41,
+        "started_revision": 42,
+        "origin": "desktop_watcher",
+        "repo_id": "forged-repo",
+        "owner": "forged-owner",
+        "writer_kind": "forged-kind",
+        "wait_ms": -1,
+        "unexpected": "must-not-leak",
+    }
+
+    with capture_trace_events() as events:
+        lease = acquire_full_analysis(
+            repo,
+            owner="live_mutation_worker",
+            writer_kind="live_mutation",
+            timeout=1.0,
+            admission_trace_fields=supplied,
+        )
+        release_full_analysis(lease)
+
+    admission_events = [
+        event
+        for event in events
+        if event.get("ev")
+        in {
+            "CANONICAL_WRITER_ADMISSION_ACQUIRED",
+            "CANONICAL_WRITER_ADMISSION_RELEASED",
+        }
+    ]
+
+    assert [event["ev"] for event in admission_events] == [
+        "CANONICAL_WRITER_ADMISSION_ACQUIRED",
+        "CANONICAL_WRITER_ADMISSION_RELEASED",
+    ]
+
+    expected_correlation = {
+        "op": "u-test-op",
+        "path": "contextor/example.py",
+        "job_id": "mu-test",
+        "idempotency_key": "intent-test",
+        "queue_order": 7,
+        "accepted_revision": 41,
+        "started_revision": 42,
+        "origin": "desktop_watcher",
+    }
+
+    for event in admission_events:
+        for key, value in expected_correlation.items():
+            assert event[key] == value
+
+        assert event["repo_id"] == lease.repo_id
+        assert event["owner"] == "live_mutation_worker"
+        assert event["writer_kind"] == "live_mutation"
+        assert "unexpected" not in event
+
+    acquired_event = admission_events[0]
+    assert acquired_event["wait_ms"] >= 0.0
+    assert acquired_event["wait_ms"] != -1
+
+
 def test_normal_shutdown_releases_lease_for_next_desktop_instance(
     tmp_path: Path,
 ):

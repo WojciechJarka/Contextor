@@ -263,9 +263,18 @@ class CanonicalMutationCoordinator:
                     continue
                 job.state = "running"
                 job.started_revision = int(self._revision_reader())
+                execution_request = dict(job.request)
+                execution_request.update(
+                    {
+                        "job_id": job.job_id,
+                        "queue_order": job.queue_order,
+                        "accepted_revision": job.accepted_revision,
+                        "started_revision": job.started_revision,
+                    }
+                )
 
             try:
-                response = self._executor(job.request)
+                response = self._executor(execution_request)
             except Exception as exc:
                 response = {
                     "status": "error",
@@ -1250,6 +1259,10 @@ class CanonicalLiveServer:
                 return {"status": "ok", "revision": self._revision, "seq": evt["seq"]}
 
     def _execute_queued_update_file(self, request: dict[str, Any]) -> dict[str, Any]:
+        trace_op = _safe_trace_op(request, "u")
+        if trace_op is not None:
+            request = {**request, "trace_op": trace_op}
+
         if self._mutation_guard is None:
             return self._execute_update_file(request)
         with self._mutation_guard(request, self._stop):

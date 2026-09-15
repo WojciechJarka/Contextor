@@ -16,7 +16,7 @@ import time
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Mapping
 
 from contextor.core.errors import AnalysisCancelled
 from contextor.core.paths import repo_cache_dir, repo_key
@@ -51,6 +51,30 @@ _PROCESS_LOCKS: dict[str, threading.Lock] = {}
 _PROCESS_LOCKS_GUARD = threading.Lock()
 _ADMISSION_LOCKS: dict[str, threading.Lock] = {}
 _ADMISSION_LOCKS_GUARD = threading.Lock()
+
+_ADMISSION_TRACE_FIELD_NAMES = (
+    "op",
+    "path",
+    "job_id",
+    "idempotency_key",
+    "queue_order",
+    "accepted_revision",
+    "started_revision",
+    "origin",
+)
+
+
+def _select_admission_trace_fields(
+    fields: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    if fields is None:
+        return {}
+
+    return {
+        name: fields[name]
+        for name in _ADMISSION_TRACE_FIELD_NAMES
+        if name in fields and fields[name] is not None
+    }
 
 
 def _get_process_lock(
@@ -105,7 +129,11 @@ def _canonical_writer_admission(
     deadline: float | None,
     poll_interval: float,
     is_cancelled: Callable[[], bool] | None,
+    admission_trace_fields: Mapping[str, Any] | None,
 ):
+    trace_fields = _select_admission_trace_fields(
+        admission_trace_fields
+    )
     process_lock = _get_admission_lock(key)
     started = time.monotonic()
     _acquire_process_lock_until(
@@ -148,6 +176,7 @@ def _canonical_writer_admission(
             owner=owner,
             writer_kind=writer_kind,
             wait_ms=(time.monotonic() - started) * 1000.0,
+            **trace_fields,
         )
         yield
     finally:
@@ -172,6 +201,7 @@ def _canonical_writer_admission(
                     repo_id=repo_id,
                     owner=owner,
                     writer_kind=writer_kind,
+                    **trace_fields,
                 )
 
 
@@ -386,6 +416,7 @@ def acquire_full_analysis(
     poll_interval: float = 0.25,
     is_cancelled: Callable[[], bool] | None = None,
     log: Callable[[str], None] | None = None,
+    admission_trace_fields: Mapping[str, Any] | None = None,
 ) -> FullAnalysisLease:
     """
     Acquire exclusive single-writer lease for full repository analysis.
@@ -416,6 +447,7 @@ def acquire_full_analysis(
         deadline=deadline,
         poll_interval=poll_interval,
         is_cancelled=is_cancelled,
+        admission_trace_fields=admission_trace_fields,
     ):
         _acquire_process_lock_until(
             proc_lock,

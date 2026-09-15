@@ -1134,17 +1134,33 @@ def _repository_persister(root: Path, holder: dict[str, object] | None = None):
 
 def _repository_mutation_guard(root: Path):
     @contextlib.contextmanager
-    def guard(_request: Mapping[str, Any], stop_event: threading.Event):
+    def guard(request: Mapping[str, Any], stop_event: threading.Event):
         from contextor.core.analysis.full_analysis_coordinator import (
             acquire_full_analysis,
             release_full_analysis,
         )
+
+        origin = request.get("origin")
+        if origin is None:
+            origin = request.get("source")
+
+        admission_trace_fields = {
+            "op": request.get("trace_op"),
+            "path": request.get("file_path"),
+            "job_id": request.get("job_id"),
+            "idempotency_key": request.get("idempotency_key"),
+            "queue_order": request.get("queue_order"),
+            "accepted_revision": request.get("accepted_revision"),
+            "started_revision": request.get("started_revision"),
+            "origin": origin,
+        }
 
         lease = acquire_full_analysis(
             root,
             owner="live_mutation_worker",
             writer_kind="live_mutation",
             is_cancelled=stop_event.is_set,
+            admission_trace_fields=admission_trace_fields,
         )
         try:
             yield
