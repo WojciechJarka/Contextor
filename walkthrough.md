@@ -522,6 +522,1135 @@ The prescribed Step 2 script reached the controlled update but its process outpu
 FILES_CHANGED=NONE
 DIFFS=NONE
 
+
+## CPA10F_PROFILE_STAGE_COMPONENT_ATTRIBUTION
+
+STATUS=IMPLEMENTATION_COMPLETE_TESTS_PASS
+HEAD_BEFORE=871c97117ec34d51bbaecb701d13763d093d8511
+HEAD_AFTER=871c97117ec34d51bbaecb701d13763d093d8511
+BASE_DRIFT=YES (HEAD differs from known CPA10D base 9d7ab352aa2bb92c9b7abd6f6a151147fd916f99; existing committed CPA10D state preserved)
+FILES_CHANGED=7 (the exact seven files requested; walkthrough.md excluded)
+PY_COMPILE=PASS
+TESTS=PASS — 56 passed in 27.21s
+PROFILE_RUN=NOT_RUN (explicitly forbidden in this task)
+PROFILE_WORKER_RESTART_REQUIRED=NO
+DESKTOP_RUNTIME_RESTART_REQUIRED=YES_BEFORE_DESKTOP_CERTIFICATION
+MCP_SERVER_RESTART_REQUIRED=NO_FOR_PROFILE_EXECUTION
+
+IMPLEMENTATION_SCOPE=Exact component attribution only; pipeline order/semantics, LIVE/persistence/revision semantics, public MCP parameters, FIFO/fairness, and watcher dedup unchanged.
+ATTRIBUTION=identity_and_setup (5), reports (9), canonical_materialization (12), and live_publish (3) now emit critical_path_stage_component events. Profiler validates all required labels, computes component_sum_ms/residual_ms/coverage_pct, selects deterministic dominant component, and retains nested lineage reason evidence.
+CONTEXTOR_FIRST_VERIFICATION=Completed after edits. trace_event resolved with workspace_sync=verified. build_analysis_profile, ContextorFacade.analyze_project, and execute_global_pipeline were resolved but returned status=stale_source/workspace_sync=out_of_sync because the edited files are ahead of canonical LIVE state; no analysis refresh was run because profile execution/restart were forbidden. analyze_project call-context returned canonical callees with the same expected stale-source advisory.
+
+ACTUAL_DIFF=
+```diff
+warning: in the working copy of 'contextor/core/analysis/profile_analysis.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'contextor/core/api/facade.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'contextor/core/reporting_engine/pipeline.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'contextor/core/runtime_trace.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'contextor/mcp/docs/contextor_profile_analysis.json', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'tests/test_profile_analysis.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'tests/test_runtime_trace.py', LF will be replaced by CRLF the next time Git touches it
+diff --git a/contextor/core/analysis/profile_analysis.py b/contextor/core/analysis/profile_analysis.py
+index 45f91a0..17f3e8f 100644
+--- a/contextor/core/analysis/profile_analysis.py
++++ b/contextor/core/analysis/profile_analysis.py
+@@ -28,6 +28,89 @@ _REQUIRED_SINGLE_EVENTS = (
+     "FULL_ANALYSIS_LINEAGE_MATERIALIZATION",
+ )
+ 
++_REQUIRED_STAGE_COMPONENTS = {
++    "identity_and_setup": (
++        "progress_setup",
++        "repository_identity",
++        "authoritative_state_resolution",
++        "cache_reset",
++        "analysis_filters_and_index_progress",
++    ),
++    "reports": (
++        "basic_report_preparation",
++        "artifact_pipeline",
++        "sanity_check",
++        "layer_reports",
++        "git_state",
++        "high_risk_writes",
++        "global_report_write",
++        "incremental_file_state",
++        "finalization",
++    ),
++    "canonical_materialization": (
++        "setup_and_imports",
++        "topology_analytics",
++        "collision_canonicalization",
++        "artifact_consumption",
++        "module_usage_reuse",
++        "canonical_validation",
++        "lineage_materialization",
++        "lineage_query_indexes",
++        "state_construction",
++        "dependency_matrix",
++        "shared_usage_clusters",
++        "publish_preparation",
++    ),
++    "live_publish": (
++        "connect",
++        "publish",
++        "status_handling",
++    ),
++}
++
++_COMPONENT_REASON_CODES = {
++    "identity_and_setup": {
++        "progress_setup": "identity_progress_setup_cost",
++        "repository_identity": "repository_identity_cost",
++        "authoritative_state_resolution": "authoritative_state_resolution_cost",
++        "cache_reset": "cache_reset_cost",
++        "analysis_filters_and_index_progress": "analysis_filter_setup_cost",
++        "__residual__": "identity_setup_residual_cost",
++    },
++    "reports": {
++        "basic_report_preparation": "report_basic_preparation_cost",
++        "artifact_pipeline": "artifact_pipeline_cost",
++        "sanity_check": "report_sanity_check_cost",
++        "layer_reports": "layer_report_generation_cost",
++        "git_state": "git_state_cost",
++        "high_risk_writes": "high_risk_report_write_cost",
++        "global_report_write": "global_report_write_cost",
++        "incremental_file_state": "incremental_file_state_cost",
++        "finalization": "report_finalization_cost",
++        "__residual__": "reports_residual_cost",
++    },
++    "canonical_materialization": {
++        "setup_and_imports": "canonical_setup_cost",
++        "topology_analytics": "topology_analytics_cost",
++        "collision_canonicalization": "collision_canonicalization_cost",
++        "artifact_consumption": "canonical_artifact_consumption_cost",
++        "module_usage_reuse": "module_usage_reuse_cost",
++        "canonical_validation": "canonical_validation_cost",
++        "lineage_query_indexes": "lineage_query_index_cost",
++        "state_construction": "canonical_state_construction_cost",
++        "dependency_matrix": "dependency_matrix_cost",
++        "shared_usage_clusters": "shared_usage_clusters_cost",
++        "publish_preparation": "canonical_publish_preparation_cost",
++        "__residual__": "canonical_materialization_residual_cost",
++    },
++    "live_publish": {
++        "connect": "live_connect_cost",
++        "publish": "live_publish_ipc_cost",
++        "status_handling": "live_publish_status_handling_cost",
++        "__residual__": "live_publish_residual_cost",
++    },
++}
++
+ 
+ def _number(event: dict[str, object], field: str) -> float:
+     value = event.get(field)
+@@ -119,8 +202,7 @@ def _indexing_reason(
+     return "unattributed", evidence
+ 
+ 
+-def _canonical_materialization_reason(
+-    stage_ms: float,
++def _lineage_materialization_reason(
+     event: dict[str, object],
+ ) -> tuple[str, dict[str, object]]:
+     reuse_sources = _count(event, "reuse_sources")
+@@ -159,12 +241,102 @@ def _canonical_materialization_reason(
+         and materialize_sources == 0
+         and fallback_sources == 0
+         and reuse_gate_ms > 0.0
+-        and stage_ms > 0.0
+-        and lineage_elapsed_ms >= stage_ms * 0.5
++        and lineage_elapsed_ms > 0.0
+     ):
+         return "lineage_reuse_gate_cost", evidence
+ 
+-    return "unattributed", evidence
++    return "lineage_other_cost", evidence
++
++
++def _stage_component_reason(
++    stage: str,
++    stage_ms: float,
++    component_events: dict[str, dict[str, object]],
++    *,
++    lineage_reason: str | None = None,
++    lineage_evidence: dict[str, object] | None = None,
++) -> tuple[str, dict[str, object]]:
++    ordered = _REQUIRED_STAGE_COMPONENTS[stage]
++    component_ms: dict[str, float] = {}
++
++    for component in ordered:
++        event = component_events[component]
++        if (
++            event.get("timing_semantics")
++            != "critical_path_stage_component"
++        ):
++            raise ValueError(
++                "FULL_ANALYSIS_STAGE_COMPONENT_END:"
++                f"{stage}:{component} has invalid timing_semantics"
++            )
++        component_ms[component] = _number(event, "elapsed_ms")
++
++    component_sum_ms = sum(component_ms.values())
++    residual_ms = max(0.0, stage_ms - component_sum_ms)
++
++    evidence: dict[str, object] = {
++        f"{component}_ms": _round_ms(component_ms[component])
++        for component in ordered
++    }
++    evidence["component_sum_ms"] = _round_ms(component_sum_ms)
++    evidence["residual_ms"] = _round_ms(residual_ms)
++    evidence["coverage_pct"] = (
++        round(
++            min(100.0, (component_sum_ms / stage_ms) * 100.0),
++            2,
++        )
++        if stage_ms > 0.0
++        else 100.0
++    )
++
++    final_status = component_events[ordered[-1]].get("status")
++    if isinstance(final_status, str) and final_status:
++        evidence["stage_status"] = final_status
++
++    if stage_ms == 0.0:
++        zero_reason = {
++            "identity_and_setup": "identity_setup_no_work",
++            "reports": "reports_no_work",
++            "canonical_materialization": "canonical_materialization_no_work",
++            "live_publish": "live_publish_not_attempted",
++        }
++        return zero_reason[stage], evidence
++
++    candidates = [
++        (component, component_ms[component])
++        for component in ordered
++    ]
++    candidates.append(("__residual__", residual_ms))
++    dominant_component, _ = max(
++        candidates,
++        key=lambda item: (
++            item[1],
++            -(
++                ordered.index(item[0])
++                if item[0] in ordered
++                else len(ordered)
++            ),
++        ),
++    )
++    evidence["dominant_component"] = dominant_component
++
++    if (
++        stage == "canonical_materialization"
++        and dominant_component == "lineage_materialization"
++    ):
++        if lineage_reason is None or lineage_evidence is None:
++            raise ValueError(
++                "canonical_materialization lineage attribution "
++                "requires lineage evidence"
++            )
++        evidence["lineage_reason_code"] = lineage_reason
++        evidence.update(lineage_evidence)
++        return lineage_reason, evidence
++
++    return (
++        _COMPONENT_REASON_CODES[stage][dominant_component],
++        evidence,
++    )
+ 
+ 
+ def build_analysis_profile(
+@@ -211,6 +383,34 @@ def build_analysis_profile(
+         else:
+             stage_events[stage] = matches[0]
+ 
++    stage_component_events: dict[
++        str,
++        dict[str, dict[str, object]],
++    ] = {}
++
++    for stage, components in _REQUIRED_STAGE_COMPONENTS.items():
++        collected: dict[str, dict[str, object]] = {}
++        for component in components:
++            matches = [
++                event
++                for event in scoped
++                if event.get("ev")
++                == "FULL_ANALYSIS_STAGE_COMPONENT_END"
++                and event.get("stage") == stage
++                and event.get("component") == component
++            ]
++            label = (
++                "FULL_ANALYSIS_STAGE_COMPONENT_END:"
++                f"{stage}:{component}"
++            )
++            if len(matches) > 1:
++                duplicates.append(label)
++            elif not matches:
++                missing.append(label)
++            else:
++                collected[component] = matches[0]
++        stage_component_events[stage] = collected
++
+     if missing or duplicates:
+         return _incomplete_profile(
+             operation_id,
+@@ -286,13 +486,35 @@ def build_analysis_profile(
+             )
+ 
+         index_reason, index_reason_evidence = _indexing_reason(index_event)
+-        canonical_reason, canonical_reason_evidence = (
+-            _canonical_materialization_reason(
+-                stage_values["canonical_materialization"],
++        lineage_reason, lineage_reason_evidence = (
++            _lineage_materialization_reason(
+                 lineage_materialization_event,
+             )
+         )
+ 
++        stage_attribution: dict[str, dict[str, object]] = {}
++
++        for stage in _REQUIRED_STAGE_COMPONENTS:
++            reason_code, evidence = _stage_component_reason(
++                stage,
++                stage_values[stage],
++                stage_component_events[stage],
++                lineage_reason=(
++                    lineage_reason
++                    if stage == "canonical_materialization"
++                    else None
++                ),
++                lineage_evidence=(
++                    lineage_reason_evidence
++                    if stage == "canonical_materialization"
++                    else None
++                ),
++            )
++            stage_attribution[stage] = {
++                "reason_code": reason_code,
++                **evidence,
++            }
++
+         stage_breakdown = [
+             {
+                 "stage": stage,
+@@ -317,9 +539,15 @@ def build_analysis_profile(
+             if stage == "indexing":
+                 reason_code = index_reason
+                 reason_evidence = index_reason_evidence
+-            elif stage == "canonical_materialization":
+-                reason_code = canonical_reason
+-                reason_evidence = canonical_reason_evidence
++            elif stage in stage_attribution:
++                reason_code = str(
++                    stage_attribution[stage]["reason_code"]
++                )
++                reason_evidence = {
++                    key: value
++                    for key, value in stage_attribution[stage].items()
++                    if key != "reason_code"
++                }
+ 
+             share = (
+                 (stage_values[stage] / analysis_ms) * 100.0
+@@ -376,14 +604,15 @@ def build_analysis_profile(
+                 ),
+             },
+             "stage_breakdown": stage_breakdown,
++            "stage_attribution": stage_attribution,
+             "bottlenecks": bottlenecks,
+             "indexing_evidence": {
+                 "reason_code": index_reason,
+                 **index_reason_evidence,
+             },
+             "lineage_materialization_evidence": {
+-                "reason_code": canonical_reason,
+-                **canonical_reason_evidence,
++                "reason_code": lineage_reason,
++                **lineage_reason_evidence,
+             },
+             "aggregate_worker_diagnostics": {
+                 "timing_semantics": (
+diff --git a/contextor/core/api/facade.py b/contextor/core/api/facade.py
+index 7720d22..980ad5c 100644
+--- a/contextor/core/api/facade.py
++++ b/contextor/core/api/facade.py
+@@ -589,18 +589,90 @@ class ContextorFacade:
+                 result=f"stage={stage};elapsed_ms={elapsed_ms:.3f}",
+             )
+ 
++        def emit_stage_component(
++            stage: str,
++            component: str,
++            elapsed_ms: float,
++            *,
++            status: str | None = None,
++        ) -> None:
++            trace_event(
++                "ANALYSIS",
++                "FULL_ANALYSIS_STAGE_COMPONENT_END",
++                stage=stage,
++                component=component,
++                operation=f"{stage}:{component}",
++                elapsed_ms=elapsed_ms,
++                timing_semantics="critical_path_stage_component",
++                status=status,
++                result=(
++                    f"stage={stage};component={component};"
++                    f"elapsed_ms={elapsed_ms:.3f}"
++                ),
++            )
++
++        def emit_stage_component_end(
++            stage: str,
++            component: str,
++            started: float,
++            *,
++            status: str | None = None,
++        ) -> float:
++            elapsed_ms = (time.monotonic() - started) * 1000.0
++            emit_stage_component(
++                stage,
++                component,
++                elapsed_ms,
++                status=status,
++            )
++            return elapsed_ms
++
+         identity_and_setup_started = facade_started
++
++        component_started = time.monotonic()
+         progress = _StagedProgress(progress_callback, total_stages=8, log=log)
+         progress.begin("Initializing repository identity")
++        emit_stage_component_end(
++            "identity_and_setup",
++            "progress_setup",
++            component_started,
++        )
++
++        component_started = time.monotonic()
+         registry = _initialize_repository_identity(path)
+         path = str(registry.repo_path.resolve())
++        emit_stage_component_end(
++            "identity_and_setup",
++            "repository_identity",
++            component_started,
++        )
++
++        component_started = time.monotonic()
+         previous_canonical_state = resolve_authoritative_repository_state(path)
++        emit_stage_component_end(
++            "identity_and_setup",
++            "authoritative_state_resolution",
++            component_started,
++        )
++
++        component_started = time.monotonic()
+         reset_caches()
++        emit_stage_component_end(
++            "identity_and_setup",
++            "cache_reset",
++            component_started,
++        )
+ 
++        component_started = time.monotonic()
+         if log:
+             log("Starting directory indexing...")
+         excludes, extra_dirs = _analysis_filters(path, additional_excludes)
+         index_progress = progress.begin("Indexing repository files")
++        emit_stage_component_end(
++            "identity_and_setup",
++            "analysis_filters_and_index_progress",
++            component_started,
++        )
+         emit_stage_end("identity_and_setup", identity_and_setup_started)
+ 
+         indexing_started = time.monotonic()
+@@ -717,6 +789,7 @@ class ContextorFacade:
+             log(f"Generated additional reports for high risk layers: {high_risk_layers}")
+ 
+         canonical_materialization_started = time.monotonic()
++        canonical_setup_started = canonical_materialization_started
+         analysis_result = report_result.get("_analysis_result")
+ 
+         progress.begin("Persisting canonical LIVE snapshot")
+@@ -740,12 +813,25 @@ class ContextorFacade:
+                 is_valid_shared_usage_clusters_handoff,
+             )
+ 
++            emit_stage_component_end(
++                "canonical_materialization",
++                "setup_and_imports",
++                canonical_setup_started,
++            )
++
++            component_started = time.monotonic()
+             graph = getattr(analysis_result, "graph", None)
+             hard_edges = getattr(graph, "hard_edges", {}) if graph else {}
+             soft_edges = getattr(graph, "soft_edges", {}) if graph else {}
+             metrics = getattr(analysis_result, "metrics", {})
+             topology_analytics = compute_topology_analytics(hard_edges, soft_edges, metrics) if hard_edges else {}
++            emit_stage_component_end(
++                "canonical_materialization",
++                "topology_analytics",
++                component_started,
++            )
+ 
++            component_started = time.monotonic()
+             from contextor.core.analysis.incremental.materialization import _validate_collision_facts_dict
+             cf = getattr(analysis_result, "collision_facts", None)
+             mods = getattr(analysis_result, "modules", {})
+@@ -757,10 +843,22 @@ class ContextorFacade:
+             else:
+                 canonical_collisions = []
+                 collisions_state = "deferred"
++            emit_stage_component_end(
++                "canonical_materialization",
++                "collision_canonicalization",
++                component_started,
++            )
+ 
++            component_started = time.monotonic()
+             raw_artifacts = getattr(analysis_result, "artifacts", {}) or {}
+             canonical_consumption = build_canonical_artifact_consumption(raw_artifacts)
++            emit_stage_component_end(
++                "canonical_materialization",
++                "artifact_consumption",
++                component_started,
++            )
+ 
++            component_started = time.monotonic()
+             from contextor.core.reference.module_usage_reuse import (
+                 build_module_usage_baseline_with_reuse,
+             )
+@@ -772,7 +870,13 @@ class ContextorFacade:
+                     file_state_manager,
+                 )
+             )
++            emit_stage_component_end(
++                "canonical_materialization",
++                "module_usage_reuse",
++                component_started,
++            )
+ 
++            component_started = time.monotonic()
+             # Exact canonical coverage trust gate (no truthiness)
+             consumption_valid = validate_canonical_artifact_consumption_coverage(
+                 canonical_consumption,
+@@ -781,6 +885,13 @@ class ContextorFacade:
+             syntax_diagnostics_by_path, syntax_diagnostics_state = (
+                 build_syntax_diagnostics_from_index(index)
+             )
++            emit_stage_component_end(
++                "canonical_materialization",
++                "canonical_validation",
++                component_started,
++            )
++
++            component_started = time.monotonic()
+             (
+                 lineage_facts_by_source,
+                 lineage_facts_state,
+@@ -796,6 +907,12 @@ class ContextorFacade:
+                     else None
+                 ),
+             )
++            emit_stage_component_end(
++                "canonical_materialization",
++                "lineage_materialization",
++                component_started,
++            )
++            component_started = time.monotonic()
+             from contextor.core.lineage_query.index import (
+                 build_lineage_query_indexes,
+             )
+@@ -810,7 +927,13 @@ class ContextorFacade:
+                 if lineage_facts_state == "not_materialized"
+                 else "fresh"
+             )
++            emit_stage_component_end(
++                "canonical_materialization",
++                "lineage_query_indexes",
++                component_started,
++            )
+ 
++            component_started = time.monotonic()
+             state = RepositoryAnalysisState(
+                 modules=mods,
+                 artifacts=raw_artifacts,
+@@ -856,8 +979,14 @@ class ContextorFacade:
+ 
+             if getattr(analysis_result, "resync_required", False):
+                 state.resync_required = True
++            emit_stage_component_end(
++                "canonical_materialization",
++                "state_construction",
++                component_started,
++            )
+ 
+             # Compute Dependency Matrix from canonical state (independent failure & graph trust)
++            component_started = time.monotonic()
+             if dependency_matrix_inputs_are_fresh(state):
+                 try:
+                     _dm_candidate = compute_dependency_matrix_from_state(state)
+@@ -868,8 +997,14 @@ class ContextorFacade:
+                     state.dependency_matrix_state = "fresh"
+             else:
+                 state.dependency_matrix_state = "stale"
++            emit_stage_component_end(
++                "canonical_materialization",
++                "dependency_matrix",
++                component_started,
++            )
+ 
+             # Compute Shared Usage Clusters from canonical state (independent failure & AC trust)
++            component_started = time.monotonic()
+             if artifact_consumption_is_fresh(state):
+                 raw_shared_usage_clusters = report_result.get(
+                     "_raw_shared_usage_clusters"
+@@ -893,7 +1028,13 @@ class ContextorFacade:
+                         state.shared_usage_clusters_state = "fresh"
+             else:
+                 state.shared_usage_clusters_state = "stale"
++            emit_stage_component_end(
++                "canonical_materialization",
++                "shared_usage_clusters",
++                component_started,
++            )
+ 
++            component_started = time.monotonic()
+             live_publish_status = "not_attempted"
+             live_publish_revision = None
+             live_publish_warning = None
+@@ -903,6 +1044,11 @@ class ContextorFacade:
+ 
+             cache_dir = str(repo_cache_dir(path))
+             file_state_manager = report_result.get("_file_state_manager")
++            emit_stage_component_end(
++                "canonical_materialization",
++                "publish_preparation",
++                component_started,
++            )
+ 
+             emit_stage_end(
+                 "canonical_materialization", canonical_materialization_started
+@@ -929,13 +1075,26 @@ class ContextorFacade:
+             emit_stage_end("persistence", persistence_started)
+ 
+             live_publish_started = time.monotonic()
++            connect_ms = 0.0
++            publish_ms = 0.0
++            status_handling_ms = 0.0
+             if meta is not None:
+                 from contextor.core.live_state import connect
+ 
++                client = None
+                 try:
+-                    client = connect(path)
++                    component_started = time.monotonic()
++                    try:
++                        client = connect(path)
++                    finally:
++                        connect_ms = (time.monotonic() - component_started) * 1000.0
+                     if client is not None:
+-                        published = client.publish(state, origin=origin)
++                        component_started = time.monotonic()
++                        try:
++                            published = client.publish(state, origin=origin)
++                        finally:
++                            publish_ms = (time.monotonic() - component_started) * 1000.0
++                        component_started = time.monotonic()
+                         if (
+                             isinstance(published, dict)
+                             and published.get("status") == "ok"
+@@ -950,25 +1109,90 @@ class ContextorFacade:
+                             err = published.get("error") if isinstance(published, dict) else None
+                             status_val = published.get("status") if isinstance(published, dict) else None
+                             live_publish_warning = err or (f"LIVE service returned status '{status_val}'." if status_val else "Canonical LIVE service rejected publication.")
+-                            if log:
+-                                log(f"Warning: Failed to publish canonical state to live daemon: {live_publish_warning}")
++                        status_handling_ms = (time.monotonic() - component_started) * 1000.0
++                        if live_publish_status == "failed" and log:
++                            log(f"Warning: Failed to publish canonical state to live daemon: {live_publish_warning}")
+                     else:
++                        component_started = time.monotonic()
+                         live_publish_status = "not_attempted"
++                        status_handling_ms = (time.monotonic() - component_started) * 1000.0
+                 except Exception as e:
++                    component_started = time.monotonic()
+                     live_publish_status = "timed_out" if isinstance(e, TimeoutError) else "failed"
+                     live_publish_revision = None
+                     live_publish_warning = f"{type(e).__name__}: {e}"
++                    status_handling_ms = (time.monotonic() - component_started) * 1000.0
+                     if log:
+                         log(f"Warning: Failed to publish canonical state to live daemon: {live_publish_warning}")
+ 
++            emit_stage_component(
++                "live_publish",
++                "connect",
++                connect_ms,
++                status=live_publish_status,
++            )
++            emit_stage_component(
++                "live_publish",
++                "publish",
++                publish_ms,
++                status=live_publish_status,
++            )
++            emit_stage_component(
++                "live_publish",
++                "status_handling",
++                status_handling_ms,
++                status=live_publish_status,
++            )
+             emit_stage_end("live_publish", live_publish_started)
+ 
+         else:
++            emit_stage_component_end(
++                "canonical_materialization",
++                "setup_and_imports",
++                canonical_setup_started,
++            )
++            for component in (
++                "topology_analytics",
++                "collision_canonicalization",
++                "artifact_consumption",
++                "module_usage_reuse",
++                "canonical_validation",
++                "lineage_materialization",
++                "lineage_query_indexes",
++                "state_construction",
++                "dependency_matrix",
++                "shared_usage_clusters",
++                "publish_preparation",
++            ):
++                emit_stage_component(
++                    "canonical_materialization",
++                    component,
++                    0.0,
++                    status="skipped",
++                )
+             emit_stage_end(
+                 "canonical_materialization", canonical_materialization_started
+             )
+             skipped_stage_started = time.monotonic()
+             emit_stage_end("persistence", skipped_stage_started)
++            emit_stage_component(
++                "live_publish",
++                "connect",
++                0.0,
++                status="not_attempted",
++            )
++            emit_stage_component(
++                "live_publish",
++                "publish",
++                0.0,
++                status="not_attempted",
++            )
++            emit_stage_component(
++                "live_publish",
++                "status_handling",
++                0.0,
++                status="not_attempted",
++            )
+             emit_stage_end("live_publish", time.monotonic())
+ 
+         finalize_started = time.monotonic()
+diff --git a/contextor/core/reporting_engine/pipeline.py b/contextor/core/reporting_engine/pipeline.py
+index a82e947..af166f0 100644
+--- a/contextor/core/reporting_engine/pipeline.py
++++ b/contextor/core/reporting_engine/pipeline.py
+@@ -20,10 +20,12 @@ It does not perform AST analysis or graph analysis itself.
+ 
+ from __future__ import annotations
+ 
++import time
+ from pathlib import Path
+ 
+ from contextor.core.errors import checkpoint
+ from contextor.core.program_log import log_program_event
++from contextor.core.runtime_trace import trace_event
+ 
+ # ==========================================================
+ # GLOBAL PIPELINE
+@@ -66,6 +68,27 @@ def execute_global_pipeline(
+     PersistentIdentityRegistry is the single authority for module
+     and artifact identity.
+     """
++    def emit_report_component_end(
++        component: str,
++        started: float,
++    ) -> float:
++        elapsed_ms = (time.monotonic() - started) * 1000.0
++        trace_event(
++            "ANALYSIS",
++            "FULL_ANALYSIS_STAGE_COMPONENT_END",
++            stage="reports",
++            component=component,
++            operation=f"reports:{component}",
++            elapsed_ms=elapsed_ms,
++            timing_semantics="critical_path_stage_component",
++            result=(
++                f"stage=reports;component={component};"
++                f"elapsed_ms={elapsed_ms:.3f}"
++            ),
++        )
++        return elapsed_ms
++
++    component_started = time.monotonic()
+     log_program_event(
+         "REPORT", "global pipeline start", repo=repo_name, modules=len(modules)
+     )
+@@ -206,6 +229,11 @@ def execute_global_pipeline(
+         modules,
+         precomputed=all_collisions,
+     )
++    emit_report_component_end(
++        "basic_report_preparation",
++        component_started,
++    )
++    component_started = time.monotonic()
+ 
+     artifact_bundle = build_artifact_pipeline(
+         modules=modules,
+@@ -229,6 +257,11 @@ def execute_global_pipeline(
+     compact_structure_data = artifact_bundle.compact_structure_data
+     graph_analytics_data = artifact_bundle.graph_analytics_data
+     raw_shared_usage_clusters = artifact_bundle.raw_shared_usage_clusters
++    emit_report_component_end(
++        "artifact_pipeline",
++        component_started,
++    )
++    component_started = time.monotonic()
+ 
+     # ------------------------------------------------------
+     # SANITY CHECK
+@@ -250,6 +283,11 @@ def execute_global_pipeline(
+                 log(
+                     f"[SANITY] {warning}"
+                 )
++    emit_report_component_end(
++        "sanity_check",
++        component_started,
++    )
++    component_started = time.monotonic()
+ 
+     # ------------------------------------------------------
+     # LAYER REPORTS
+@@ -366,6 +404,12 @@ def execute_global_pipeline(
+                 ),
+             )
+ 
++    emit_report_component_end(
++        "layer_reports",
++        component_started,
++    )
++    component_started = time.monotonic()
++
+     # ------------------------------------------------------
+     # GIT STATE
+     # ------------------------------------------------------
+@@ -389,6 +433,11 @@ def execute_global_pipeline(
+     summary_data["git_changes"] = (
+         git_section
+     )
++    emit_report_component_end(
++        "git_state",
++        component_started,
++    )
++    component_started = time.monotonic()
+ 
+     # ------------------------------------------------------
+     # WRITE HIGH-RISK LAYER REPORTS
+@@ -425,6 +474,11 @@ def execute_global_pipeline(
+                 log=log,
+                 layer_output_dir=layer_dir,
+             )
++    emit_report_component_end(
++        "high_risk_writes",
++        component_started,
++    )
++    component_started = time.monotonic()
+ 
+     # ------------------------------------------------------
+     # GLOBAL REPORT PAYLOAD
+@@ -471,6 +525,11 @@ def execute_global_pipeline(
+             "All reports have been successfully "
+             "generated and saved."
+         )
++    emit_report_component_end(
++        "global_report_write",
++        component_started,
++    )
++    component_started = time.monotonic()
+ 
+     # ------------------------------------------------------
+     # INCREMENTAL CACHE
+@@ -512,6 +571,11 @@ def execute_global_pipeline(
+     state_mgr.save(
+         datestamp or ""
+     )
++    emit_report_component_end(
++        "incremental_file_state",
++        component_started,
++    )
++    component_started = time.monotonic()
+ 
+     # ------------------------------------------------------
+     # RETURNED FILE PATHS
+@@ -599,6 +663,10 @@ def execute_global_pipeline(
+         reports=7,
+         layers=len(layer_index_data),
+     )
++    emit_report_component_end(
++        "finalization",
++        component_started,
++    )
+     return {
+         "saved": True,
+         "repo": repo_name,
+diff --git a/contextor/core/runtime_trace.py b/contextor/core/runtime_trace.py
+index c92a174..8fd5a2b 100644
+--- a/contextor/core/runtime_trace.py
++++ b/contextor/core/runtime_trace.py
+@@ -1174,6 +1174,7 @@ def _header_records(sid: str, started_at: str, desktop_pid: int, file_name: str)
+             "execution_mode": "indexer execution mode",
+             "timing_semantics": "timing interpretation contract",
+             "stage": "full-analysis stage name",
++            "component": "non-overlapping full-analysis stage component name",
+             "analysis_ms": "critical-path analysis body milliseconds; same interval as FULL_ANALYSIS_BODY_END.elapsed_ms",
+             "total_before_release_ms": "overlapping critical-path total from coordinator start through analysis body end; includes lease wait; not additive",
+             "total_ms": "critical-path full coordinator milliseconds including lease wait, analysis body, and lease release; not additive",
+@@ -1206,6 +1207,7 @@ def _header_records(sid: str, started_at: str, desktop_pid: int, file_name: str)
+         [
+             "FULL_ANALYSIS_INDEX_EVIDENCE",
+             "FULL_ANALYSIS_LINEAGE_MATERIALIZATION",
++            "FULL_ANALYSIS_STAGE_COMPONENT_END",
+             "FULL_ANALYSIS_STAGE_END",
+         ]
+     )
+@@ -1379,6 +1381,7 @@ def trace_event(domain: str, event: str, *, op: str | None = None, rev: int | No
+                 "execution_mode": "execution_mode",
+                 "timing_semantics": "timing_semantics",
+                 "stage": "stage",
++                "component": "component",
+                 "analysis_ms": "analysis_ms",
+                 "total_before_release_ms": "total_before_release_ms",
+                 "total_ms": "total_ms",
+diff --git a/contextor/mcp/docs/contextor_profile_analysis.json b/contextor/mcp/docs/contextor_profile_analysis.json
+index fa717d2..7f4b893 100644
+--- a/contextor/mcp/docs/contextor_profile_analysis.json
++++ b/contextor/mcp/docs/contextor_profile_analysis.json
+@@ -1,11 +1,11 @@
+ {
+-  "version": "1.0.0",
++  "version": "1.1.0",
+   "tool": "contextor_profile_analysis",
+   "purpose": ["Run one repository-wide diagnostic profile through the real production full-analysis path and return a compact, deterministic breakdown of where the analysis spends time and which structured evidence explains known bottlenecks."],
+   "parameters": ["repo_path (string, required): canonical repository root to profile.", "exclude_paths (array of strings or null, optional, default null): additional per-run repository-relative exclusions forwarded unchanged to the production full-analysis path."],
+-  "behavior": ["1. The MCP coroutine launches a dedicated Contextor profile worker process so the MCP event loop does not execute the synchronous analysis body and the worker's normal full-analysis ProcessPool is isolated from the MCP server process.\n2. The runner attempts the existing canonical full-analysis writer with timeout=0.0; if another writer already owns the repository, status=busy with reason_code=full_analysis_busy is returned instead of waiting and contaminating the sample.\n3. Evidence is captured in memory from the existing runtime trace path under one scoped profile operation; the tool creates no second trace session and reads no JSONL.\n4. Bottleneck ranking uses only FULL_ANALYSIS_STAGE_END critical-path wall timings. Aggregate worker/file-task sums are reported separately and never participate in that ranking.\n5. Known reason codes are derived only from structured runtime evidence. Unknown causes remain unattributed rather than inferred."],
++  "behavior": ["1. The MCP coroutine launches a dedicated Contextor profile worker process so the MCP event loop does not execute the synchronous analysis body and the worker's normal full-analysis ProcessPool is isolated from the MCP server process.\n2. The runner attempts the existing canonical full-analysis writer with timeout=0.0; if another writer already owns the repository, status=busy with reason_code=full_analysis_busy is returned instead of waiting and contaminating the sample.\n3. Evidence is captured in memory from the existing runtime trace path under one scoped profile operation; the tool creates no second trace session and reads no JSONL.\n4. Bottleneck ranking uses only FULL_ANALYSIS_STAGE_END critical-path wall timings. Aggregate worker/file-task sums are reported separately and never participate in that ranking.\n5. The wide stages identity_and_setup, reports, canonical_materialization, and live_publish emit non-overlapping structured stage-component evidence; the profiler selects the dominant measured component or measured residual, while canonical lineage retains nested lineage attribution."],
+   "freshness": ["The tool executes a real full repository analysis and therefore refreshes the same canonical analysis state and LIVE publication path as the normal production full-analysis owner when the run succeeds.", "The returned profile describes only the analysis executed by this call. It is not a historical profiler report and is not persisted as a separate profiling artifact."],
+   "errors": ["A missing or non-directory repo_path returns an Error string before starting the profile runner.", "status=busy with reason_code=full_analysis_busy means another canonical full-analysis writer already owns the repository; retry later rather than treating the result as a performance sample.", "status=incomplete means required structured profile evidence was missing or duplicated.", "status=invalid_evidence means captured timing/evidence contracts were internally inconsistent.", "Unexpected production analysis failures propagate through the normal central MCP wrapper and are not converted into profiler guesses."],
+-  "usage_notes": ["Use this tool to identify which analysis stages dominate and why, not to establish clean-machine absolute benchmark time. The response explicitly marks absolute_wall_authoritative=false because caller/runtime load can inflate wall duration.", "One run is normally sufficient for architectural diagnosis. Repeat only when confirming a specific optimization or investigating unstable evidence.", "Do not add aggregate source_parse_sum_ms, cache_get_sum_ms, or lineage_extract_sum_ms to critical-path stage durations; those values are aggregate file-task diagnostics and may exceed wall time under parallel execution."],
+-  "examples": ["Call contextor_profile_analysis(repo_path=\"C:\\\\Temp\\\\Contextor_Repo\") and inspect bottlenecks first. A reason_code such as warm_cache_still_parses_source or lineage_reuse_gate_cost is evidence-backed; unattributed means the current structured signals do not justify a stronger causal claim."]
++  "usage_notes": ["Use this tool to identify which analysis stages dominate and why, not to establish clean-machine absolute benchmark time. The response explicitly marks absolute_wall_authoritative=false because caller/runtime load can inflate wall duration.", "One run is normally sufficient for architectural diagnosis. Repeat only when confirming a specific optimization or investigating unstable evidence.", "Do not add aggregate source_parse_sum_ms, cache_get_sum_ms, or lineage_extract_sum_ms to critical-path stage durations; those values are aggregate file-task diagnostics and may exceed wall time under parallel execution.", "stage_attribution returns component timings, component_sum_ms, residual_ms, coverage_pct, and dominant_component for identity_and_setup, reports, canonical_materialization, and live_publish.", "residual_ms is the critical-path portion of a stage not covered by named components and must not be heuristically allocated."] ,
++  "examples": ["Call contextor_profile_analysis(repo_path=\"C:\\\\Temp\\\\Contextor_Repo\") and inspect bottlenecks first. Evidence-backed reason_code examples include artifact_pipeline_cost, lineage_reuse_gate_cost, live_publish_ipc_cost, and repository_identity_cost."]
+ }
+diff --git a/tests/test_profile_analysis.py b/tests/test_profile_analysis.py
+index 6d81b6a..265b86c 100644
+--- a/tests/test_profile_analysis.py
++++ b/tests/test_profile_analysis.py
+@@ -109,6 +109,59 @@ def _profile_events(operation_id: str = "profile-test"):
+         }
+         for stage, elapsed_ms in stage_ms.items()
+     )
++    component_ms = {
++        "identity_and_setup": {
++            "progress_setup": 1.0,
++            "repository_identity": 8.0,
++            "authoritative_state_resolution": 5.0,
++            "cache_reset": 1.0,
++            "analysis_filters_and_index_progress": 4.0,
++        },
++        "reports": {
++            "basic_report_preparation": 20.0,
++            "artifact_pipeline": 80.0,
++            "sanity_check": 5.0,
++            "layer_reports": 30.0,
++            "git_state": 10.0,
++            "high_risk_writes": 10.0,
++            "global_report_write": 20.0,
++            "incremental_file_state": 20.0,
++            "finalization": 4.0,
++        },
++        "canonical_materialization": {
++            "setup_and_imports": 0.5,
++            "topology_analytics": 0.5,
++            "collision_canonicalization": 0.5,
++            "artifact_consumption": 0.5,
++            "module_usage_reuse": 0.5,
++            "canonical_validation": 0.5,
++            "lineage_materialization": 70.0,
++            "lineage_query_indexes": 0.5,
++            "state_construction": 0.5,
++            "dependency_matrix": 0.5,
++            "shared_usage_clusters": 0.5,
++            "publish_preparation": 0.5,
++        },
++        "live_publish": {
++            "connect": 5.0,
++            "publish": 25.0,
++            "status_handling": 2.0,
++        },
++    }
++    for stage, components in component_ms.items():
++        events.extend(
++            {
++                "d": "ANALYSIS",
++                "ev": "FULL_ANALYSIS_STAGE_COMPONENT_END",
++                "op": operation_id,
++                "stage": stage,
++                "component": component,
++                "elapsed_ms": elapsed_ms,
++                "timing_semantics": "critical_path_stage_component",
++                **({"status": "success"} if stage == "live_publish" else {}),
++            }
++            for component, elapsed_ms in components.items()
++        )
+     return events
+ 
+ 
+@@ -164,9 +217,25 @@ def test_profile_ranks_only_critical_path_and_attributes_known_causes():
+         if item["stage"] == "canonical_materialization"
+     )
+     assert canonical["reason_code"] == "lineage_reuse_gate_cost"
++    assert canonical["evidence"]["dominant_component"] == "lineage_materialization"
++    assert canonical["evidence"]["lineage_reason_code"] == "lineage_reuse_gate_cost"
+     assert canonical["evidence"]["lineage_elapsed_ms"] == 70.0
+     assert canonical["evidence"]["reuse_gate_ms"] == 60.0
+ 
++    assert profile["stage_attribution"]["identity_and_setup"]["reason_code"] == (
++        "repository_identity_cost"
++    )
++    assert profile["stage_attribution"]["reports"]["reason_code"] == (
++        "artifact_pipeline_cost"
++    )
++    assert profile["stage_attribution"]["canonical_materialization"]["reason_code"] == (
++        "lineage_reuse_gate_cost"
++    )
++    live_attribution = profile["stage_attribution"]["live_publish"]
++    assert live_attribution["reason_code"] == "live_publish_ipc_cost"
++    assert live_attribution["publish_ms"] == 25.0
++    assert live_attribution["stage_status"] == "success"
++
+     aggregate = profile["aggregate_worker_diagnostics"]
+     assert aggregate["timing_semantics"] == (
+         "aggregate_file_task_not_critical_path"
+@@ -224,3 +293,42 @@ def test_profile_rejects_invalid_overlapping_coordinator_contract():
+         profile["error"]
+         == "total_before_release_ms cannot be shorter than analysis_ms"
+     )
++
++
++def test_profile_fails_closed_when_stage_component_evidence_is_missing():
++    events = [
++        event
++        for event in _profile_events()
++        if not (
++            event["ev"] == "FULL_ANALYSIS_STAGE_COMPONENT_END"
++            and event["stage"] == "reports"
++            and event["component"] == "artifact_pipeline"
++        )
++    ]
++
++    profile = build_analysis_profile(events, operation_id="profile-test")
++
++    assert profile["status"] == "incomplete"
++    assert profile["missing"] == [
++        "FULL_ANALYSIS_STAGE_COMPONENT_END:reports:artifact_pipeline"
++    ]
++
++
++def test_profile_rejects_invalid_stage_component_timing_semantics():
++    events = _profile_events()
++    component = next(
++        event
++        for event in events
++        if event["ev"] == "FULL_ANALYSIS_STAGE_COMPONENT_END"
++        and event["stage"] == "reports"
++        and event["component"] == "artifact_pipeline"
++    )
++    component["timing_semantics"] = "aggregate"
++
++    profile = build_analysis_profile(events, operation_id="profile-test")
++
++    assert profile["status"] == "invalid_evidence"
++    assert profile["error"] == (
++        "FULL_ANALYSIS_STAGE_COMPONENT_END:reports:artifact_pipeline "
++        "has invalid timing_semantics"
++    )
+diff --git a/tests/test_runtime_trace.py b/tests/test_runtime_trace.py
+index c9e981f..576d1ea 100644
+--- a/tests/test_runtime_trace.py
++++ b/tests/test_runtime_trace.py
+@@ -75,7 +75,7 @@ def test_canonical_writer_analysis_trace_is_self_describing_and_durable():
+     assert {"CANONICAL_WRITER_ADMISSION_ACQUIRED", "CANONICAL_WRITER_ADMISSION_RELEASED", "FULL_ANALYSIS_LEASE_ACQUIRED", "FULL_ANALYSIS_BODY_END", "FULL_ANALYSIS_END"} <= set(records[4]["events"]["ANALYSIS"])
+     assert {
+         "owner", "writer_kind", "execution_mode", "timing_semantics",
+-        "stage", "analysis_ms", "total_before_release_ms", "total_ms",
++        "stage", "component", "analysis_ms", "total_before_release_ms", "total_ms",
+         "file_tasks", "source_parse_calls", "source_parse_failures",
+         "cache_get_calls", "cache_hits", "cache_misses", "lineage_cache_hits",
+         "lineage_extract_calls", "source_parse_sum_ms", "cache_get_sum_ms",
+@@ -88,6 +88,7 @@ def test_canonical_writer_analysis_trace_is_self_describing_and_durable():
+     assert {
+         "FULL_ANALYSIS_INDEX_EVIDENCE",
+         "FULL_ANALYSIS_LINEAGE_MATERIALIZATION",
++        "FULL_ANALYSIS_STAGE_COMPONENT_END",
+         "FULL_ANALYSIS_STAGE_END",
+     } <= set(records[4]["events"]["ANALYSIS"])
+     acquired = next(item for item in records if item.get("ev") == "CANONICAL_WRITER_ADMISSION_ACQUIRED")
+@@ -108,8 +109,21 @@ def test_full_analysis_stage_evidence_is_structured_in_memory():
+             timing_semantics="critical_path_stage",
+             result="stage=indexing;elapsed_ms=12.500",
+         )
++        trace.trace_event(
++            "ANALYSIS",
++            "FULL_ANALYSIS_STAGE_COMPONENT_END",
++            stage="reports",
++            component="artifact_pipeline",
++            operation="reports:artifact_pipeline",
++            elapsed_ms=7.5,
++            timing_semantics="critical_path_stage_component",
++            result=(
++                "stage=reports;component=artifact_pipeline;"
++                "elapsed_ms=7.500"
++            ),
++        )
+ 
+-    assert len(events) == 1
++    assert len(events) == 2
+     event = events[0]
+     assert event["ev"] == "FULL_ANALYSIS_STAGE_END"
+     assert event["stage"] == "indexing"
+@@ -117,6 +131,12 @@ def test_full_analysis_stage_evidence_is_structured_in_memory():
+     assert event["elapsed_ms"] == 12.5
+     assert event["timing_semantics"] == "critical_path_stage"
+     assert event["result"] == "stage=indexing;elapsed_ms=12.500"
++    component_event = events[1]
++    assert component_event["component"] == "artifact_pipeline"
++    assert component_event["elapsed_ms"] == 7.5
++    assert component_event["timing_semantics"] == (
++        "critical_path_stage_component"
++    )
+ 
+ 
+ def test_diagnostic_trace_fields_and_structured_node_arrays_are_durable():
+
+```
+
+
 ## CPA10F_PROFILE_ATTRIBUTION_GAP_DISCOVERY
 
 STATUS=DISCOVERY_COMPLETE

@@ -589,18 +589,90 @@ class ContextorFacade:
                 result=f"stage={stage};elapsed_ms={elapsed_ms:.3f}",
             )
 
+        def emit_stage_component(
+            stage: str,
+            component: str,
+            elapsed_ms: float,
+            *,
+            status: str | None = None,
+        ) -> None:
+            trace_event(
+                "ANALYSIS",
+                "FULL_ANALYSIS_STAGE_COMPONENT_END",
+                stage=stage,
+                component=component,
+                operation=f"{stage}:{component}",
+                elapsed_ms=elapsed_ms,
+                timing_semantics="critical_path_stage_component",
+                status=status,
+                result=(
+                    f"stage={stage};component={component};"
+                    f"elapsed_ms={elapsed_ms:.3f}"
+                ),
+            )
+
+        def emit_stage_component_end(
+            stage: str,
+            component: str,
+            started: float,
+            *,
+            status: str | None = None,
+        ) -> float:
+            elapsed_ms = (time.monotonic() - started) * 1000.0
+            emit_stage_component(
+                stage,
+                component,
+                elapsed_ms,
+                status=status,
+            )
+            return elapsed_ms
+
         identity_and_setup_started = facade_started
+
+        component_started = time.monotonic()
         progress = _StagedProgress(progress_callback, total_stages=8, log=log)
         progress.begin("Initializing repository identity")
+        emit_stage_component_end(
+            "identity_and_setup",
+            "progress_setup",
+            component_started,
+        )
+
+        component_started = time.monotonic()
         registry = _initialize_repository_identity(path)
         path = str(registry.repo_path.resolve())
-        previous_canonical_state = resolve_authoritative_repository_state(path)
-        reset_caches()
+        emit_stage_component_end(
+            "identity_and_setup",
+            "repository_identity",
+            component_started,
+        )
 
+        component_started = time.monotonic()
+        previous_canonical_state = resolve_authoritative_repository_state(path)
+        emit_stage_component_end(
+            "identity_and_setup",
+            "authoritative_state_resolution",
+            component_started,
+        )
+
+        component_started = time.monotonic()
+        reset_caches()
+        emit_stage_component_end(
+            "identity_and_setup",
+            "cache_reset",
+            component_started,
+        )
+
+        component_started = time.monotonic()
         if log:
             log("Starting directory indexing...")
         excludes, extra_dirs = _analysis_filters(path, additional_excludes)
         index_progress = progress.begin("Indexing repository files")
+        emit_stage_component_end(
+            "identity_and_setup",
+            "analysis_filters_and_index_progress",
+            component_started,
+        )
         emit_stage_end("identity_and_setup", identity_and_setup_started)
 
         indexing_started = time.monotonic()
@@ -717,6 +789,7 @@ class ContextorFacade:
             log(f"Generated additional reports for high risk layers: {high_risk_layers}")
 
         canonical_materialization_started = time.monotonic()
+        canonical_setup_started = canonical_materialization_started
         analysis_result = report_result.get("_analysis_result")
 
         progress.begin("Persisting canonical LIVE snapshot")
@@ -740,12 +813,25 @@ class ContextorFacade:
                 is_valid_shared_usage_clusters_handoff,
             )
 
+            emit_stage_component_end(
+                "canonical_materialization",
+                "setup_and_imports",
+                canonical_setup_started,
+            )
+
+            component_started = time.monotonic()
             graph = getattr(analysis_result, "graph", None)
             hard_edges = getattr(graph, "hard_edges", {}) if graph else {}
             soft_edges = getattr(graph, "soft_edges", {}) if graph else {}
             metrics = getattr(analysis_result, "metrics", {})
             topology_analytics = compute_topology_analytics(hard_edges, soft_edges, metrics) if hard_edges else {}
+            emit_stage_component_end(
+                "canonical_materialization",
+                "topology_analytics",
+                component_started,
+            )
 
+            component_started = time.monotonic()
             from contextor.core.analysis.incremental.materialization import _validate_collision_facts_dict
             cf = getattr(analysis_result, "collision_facts", None)
             mods = getattr(analysis_result, "modules", {})
@@ -757,10 +843,22 @@ class ContextorFacade:
             else:
                 canonical_collisions = []
                 collisions_state = "deferred"
+            emit_stage_component_end(
+                "canonical_materialization",
+                "collision_canonicalization",
+                component_started,
+            )
 
+            component_started = time.monotonic()
             raw_artifacts = getattr(analysis_result, "artifacts", {}) or {}
             canonical_consumption = build_canonical_artifact_consumption(raw_artifacts)
+            emit_stage_component_end(
+                "canonical_materialization",
+                "artifact_consumption",
+                component_started,
+            )
 
+            component_started = time.monotonic()
             from contextor.core.reference.module_usage_reuse import (
                 build_module_usage_baseline_with_reuse,
             )
@@ -772,7 +870,13 @@ class ContextorFacade:
                     file_state_manager,
                 )
             )
+            emit_stage_component_end(
+                "canonical_materialization",
+                "module_usage_reuse",
+                component_started,
+            )
 
+            component_started = time.monotonic()
             # Exact canonical coverage trust gate (no truthiness)
             consumption_valid = validate_canonical_artifact_consumption_coverage(
                 canonical_consumption,
@@ -781,6 +885,13 @@ class ContextorFacade:
             syntax_diagnostics_by_path, syntax_diagnostics_state = (
                 build_syntax_diagnostics_from_index(index)
             )
+            emit_stage_component_end(
+                "canonical_materialization",
+                "canonical_validation",
+                component_started,
+            )
+
+            component_started = time.monotonic()
             (
                 lineage_facts_by_source,
                 lineage_facts_state,
@@ -796,6 +907,12 @@ class ContextorFacade:
                     else None
                 ),
             )
+            emit_stage_component_end(
+                "canonical_materialization",
+                "lineage_materialization",
+                component_started,
+            )
+            component_started = time.monotonic()
             from contextor.core.lineage_query.index import (
                 build_lineage_query_indexes,
             )
@@ -810,7 +927,13 @@ class ContextorFacade:
                 if lineage_facts_state == "not_materialized"
                 else "fresh"
             )
+            emit_stage_component_end(
+                "canonical_materialization",
+                "lineage_query_indexes",
+                component_started,
+            )
 
+            component_started = time.monotonic()
             state = RepositoryAnalysisState(
                 modules=mods,
                 artifacts=raw_artifacts,
@@ -856,8 +979,14 @@ class ContextorFacade:
 
             if getattr(analysis_result, "resync_required", False):
                 state.resync_required = True
+            emit_stage_component_end(
+                "canonical_materialization",
+                "state_construction",
+                component_started,
+            )
 
             # Compute Dependency Matrix from canonical state (independent failure & graph trust)
+            component_started = time.monotonic()
             if dependency_matrix_inputs_are_fresh(state):
                 try:
                     _dm_candidate = compute_dependency_matrix_from_state(state)
@@ -868,8 +997,14 @@ class ContextorFacade:
                     state.dependency_matrix_state = "fresh"
             else:
                 state.dependency_matrix_state = "stale"
+            emit_stage_component_end(
+                "canonical_materialization",
+                "dependency_matrix",
+                component_started,
+            )
 
             # Compute Shared Usage Clusters from canonical state (independent failure & AC trust)
+            component_started = time.monotonic()
             if artifact_consumption_is_fresh(state):
                 raw_shared_usage_clusters = report_result.get(
                     "_raw_shared_usage_clusters"
@@ -893,7 +1028,13 @@ class ContextorFacade:
                         state.shared_usage_clusters_state = "fresh"
             else:
                 state.shared_usage_clusters_state = "stale"
+            emit_stage_component_end(
+                "canonical_materialization",
+                "shared_usage_clusters",
+                component_started,
+            )
 
+            component_started = time.monotonic()
             live_publish_status = "not_attempted"
             live_publish_revision = None
             live_publish_warning = None
@@ -903,6 +1044,11 @@ class ContextorFacade:
 
             cache_dir = str(repo_cache_dir(path))
             file_state_manager = report_result.get("_file_state_manager")
+            emit_stage_component_end(
+                "canonical_materialization",
+                "publish_preparation",
+                component_started,
+            )
 
             emit_stage_end(
                 "canonical_materialization", canonical_materialization_started
@@ -929,13 +1075,26 @@ class ContextorFacade:
             emit_stage_end("persistence", persistence_started)
 
             live_publish_started = time.monotonic()
+            connect_ms = 0.0
+            publish_ms = 0.0
+            status_handling_ms = 0.0
             if meta is not None:
                 from contextor.core.live_state import connect
 
+                client = None
                 try:
-                    client = connect(path)
+                    component_started = time.monotonic()
+                    try:
+                        client = connect(path)
+                    finally:
+                        connect_ms = (time.monotonic() - component_started) * 1000.0
                     if client is not None:
-                        published = client.publish(state, origin=origin)
+                        component_started = time.monotonic()
+                        try:
+                            published = client.publish(state, origin=origin)
+                        finally:
+                            publish_ms = (time.monotonic() - component_started) * 1000.0
+                        component_started = time.monotonic()
                         if (
                             isinstance(published, dict)
                             and published.get("status") == "ok"
@@ -950,25 +1109,90 @@ class ContextorFacade:
                             err = published.get("error") if isinstance(published, dict) else None
                             status_val = published.get("status") if isinstance(published, dict) else None
                             live_publish_warning = err or (f"LIVE service returned status '{status_val}'." if status_val else "Canonical LIVE service rejected publication.")
-                            if log:
-                                log(f"Warning: Failed to publish canonical state to live daemon: {live_publish_warning}")
+                        status_handling_ms = (time.monotonic() - component_started) * 1000.0
+                        if live_publish_status == "failed" and log:
+                            log(f"Warning: Failed to publish canonical state to live daemon: {live_publish_warning}")
                     else:
+                        component_started = time.monotonic()
                         live_publish_status = "not_attempted"
+                        status_handling_ms = (time.monotonic() - component_started) * 1000.0
                 except Exception as e:
+                    component_started = time.monotonic()
                     live_publish_status = "timed_out" if isinstance(e, TimeoutError) else "failed"
                     live_publish_revision = None
                     live_publish_warning = f"{type(e).__name__}: {e}"
+                    status_handling_ms = (time.monotonic() - component_started) * 1000.0
                     if log:
                         log(f"Warning: Failed to publish canonical state to live daemon: {live_publish_warning}")
 
+            emit_stage_component(
+                "live_publish",
+                "connect",
+                connect_ms,
+                status=live_publish_status,
+            )
+            emit_stage_component(
+                "live_publish",
+                "publish",
+                publish_ms,
+                status=live_publish_status,
+            )
+            emit_stage_component(
+                "live_publish",
+                "status_handling",
+                status_handling_ms,
+                status=live_publish_status,
+            )
             emit_stage_end("live_publish", live_publish_started)
 
         else:
+            emit_stage_component_end(
+                "canonical_materialization",
+                "setup_and_imports",
+                canonical_setup_started,
+            )
+            for component in (
+                "topology_analytics",
+                "collision_canonicalization",
+                "artifact_consumption",
+                "module_usage_reuse",
+                "canonical_validation",
+                "lineage_materialization",
+                "lineage_query_indexes",
+                "state_construction",
+                "dependency_matrix",
+                "shared_usage_clusters",
+                "publish_preparation",
+            ):
+                emit_stage_component(
+                    "canonical_materialization",
+                    component,
+                    0.0,
+                    status="skipped",
+                )
             emit_stage_end(
                 "canonical_materialization", canonical_materialization_started
             )
             skipped_stage_started = time.monotonic()
             emit_stage_end("persistence", skipped_stage_started)
+            emit_stage_component(
+                "live_publish",
+                "connect",
+                0.0,
+                status="not_attempted",
+            )
+            emit_stage_component(
+                "live_publish",
+                "publish",
+                0.0,
+                status="not_attempted",
+            )
+            emit_stage_component(
+                "live_publish",
+                "status_handling",
+                0.0,
+                status="not_attempted",
+            )
             emit_stage_end("live_publish", time.monotonic())
 
         finalize_started = time.monotonic()

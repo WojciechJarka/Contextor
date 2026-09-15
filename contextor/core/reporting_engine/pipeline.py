@@ -20,10 +20,12 @@ It does not perform AST analysis or graph analysis itself.
 
 from __future__ import annotations
 
+import time
 from pathlib import Path
 
 from contextor.core.errors import checkpoint
 from contextor.core.program_log import log_program_event
+from contextor.core.runtime_trace import trace_event
 
 # ==========================================================
 # GLOBAL PIPELINE
@@ -66,6 +68,27 @@ def execute_global_pipeline(
     PersistentIdentityRegistry is the single authority for module
     and artifact identity.
     """
+    def emit_report_component_end(
+        component: str,
+        started: float,
+    ) -> float:
+        elapsed_ms = (time.monotonic() - started) * 1000.0
+        trace_event(
+            "ANALYSIS",
+            "FULL_ANALYSIS_STAGE_COMPONENT_END",
+            stage="reports",
+            component=component,
+            operation=f"reports:{component}",
+            elapsed_ms=elapsed_ms,
+            timing_semantics="critical_path_stage_component",
+            result=(
+                f"stage=reports;component={component};"
+                f"elapsed_ms={elapsed_ms:.3f}"
+            ),
+        )
+        return elapsed_ms
+
+    component_started = time.monotonic()
     log_program_event(
         "REPORT", "global pipeline start", repo=repo_name, modules=len(modules)
     )
@@ -206,6 +229,11 @@ def execute_global_pipeline(
         modules,
         precomputed=all_collisions,
     )
+    emit_report_component_end(
+        "basic_report_preparation",
+        component_started,
+    )
+    component_started = time.monotonic()
 
     artifact_bundle = build_artifact_pipeline(
         modules=modules,
@@ -229,6 +257,11 @@ def execute_global_pipeline(
     compact_structure_data = artifact_bundle.compact_structure_data
     graph_analytics_data = artifact_bundle.graph_analytics_data
     raw_shared_usage_clusters = artifact_bundle.raw_shared_usage_clusters
+    emit_report_component_end(
+        "artifact_pipeline",
+        component_started,
+    )
+    component_started = time.monotonic()
 
     # ------------------------------------------------------
     # SANITY CHECK
@@ -250,6 +283,11 @@ def execute_global_pipeline(
                 log(
                     f"[SANITY] {warning}"
                 )
+    emit_report_component_end(
+        "sanity_check",
+        component_started,
+    )
+    component_started = time.monotonic()
 
     # ------------------------------------------------------
     # LAYER REPORTS
@@ -366,6 +404,12 @@ def execute_global_pipeline(
                 ),
             )
 
+    emit_report_component_end(
+        "layer_reports",
+        component_started,
+    )
+    component_started = time.monotonic()
+
     # ------------------------------------------------------
     # GIT STATE
     # ------------------------------------------------------
@@ -389,6 +433,11 @@ def execute_global_pipeline(
     summary_data["git_changes"] = (
         git_section
     )
+    emit_report_component_end(
+        "git_state",
+        component_started,
+    )
+    component_started = time.monotonic()
 
     # ------------------------------------------------------
     # WRITE HIGH-RISK LAYER REPORTS
@@ -425,6 +474,11 @@ def execute_global_pipeline(
                 log=log,
                 layer_output_dir=layer_dir,
             )
+    emit_report_component_end(
+        "high_risk_writes",
+        component_started,
+    )
+    component_started = time.monotonic()
 
     # ------------------------------------------------------
     # GLOBAL REPORT PAYLOAD
@@ -471,6 +525,11 @@ def execute_global_pipeline(
             "All reports have been successfully "
             "generated and saved."
         )
+    emit_report_component_end(
+        "global_report_write",
+        component_started,
+    )
+    component_started = time.monotonic()
 
     # ------------------------------------------------------
     # INCREMENTAL CACHE
@@ -512,6 +571,11 @@ def execute_global_pipeline(
     state_mgr.save(
         datestamp or ""
     )
+    emit_report_component_end(
+        "incremental_file_state",
+        component_started,
+    )
+    component_started = time.monotonic()
 
     # ------------------------------------------------------
     # RETURNED FILE PATHS
@@ -598,6 +662,10 @@ def execute_global_pipeline(
         repo=repo_name,
         reports=7,
         layers=len(layer_index_data),
+    )
+    emit_report_component_end(
+        "finalization",
+        component_started,
     )
     return {
         "saved": True,

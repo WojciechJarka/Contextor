@@ -28,6 +28,89 @@ _REQUIRED_SINGLE_EVENTS = (
     "FULL_ANALYSIS_LINEAGE_MATERIALIZATION",
 )
 
+_REQUIRED_STAGE_COMPONENTS = {
+    "identity_and_setup": (
+        "progress_setup",
+        "repository_identity",
+        "authoritative_state_resolution",
+        "cache_reset",
+        "analysis_filters_and_index_progress",
+    ),
+    "reports": (
+        "basic_report_preparation",
+        "artifact_pipeline",
+        "sanity_check",
+        "layer_reports",
+        "git_state",
+        "high_risk_writes",
+        "global_report_write",
+        "incremental_file_state",
+        "finalization",
+    ),
+    "canonical_materialization": (
+        "setup_and_imports",
+        "topology_analytics",
+        "collision_canonicalization",
+        "artifact_consumption",
+        "module_usage_reuse",
+        "canonical_validation",
+        "lineage_materialization",
+        "lineage_query_indexes",
+        "state_construction",
+        "dependency_matrix",
+        "shared_usage_clusters",
+        "publish_preparation",
+    ),
+    "live_publish": (
+        "connect",
+        "publish",
+        "status_handling",
+    ),
+}
+
+_COMPONENT_REASON_CODES = {
+    "identity_and_setup": {
+        "progress_setup": "identity_progress_setup_cost",
+        "repository_identity": "repository_identity_cost",
+        "authoritative_state_resolution": "authoritative_state_resolution_cost",
+        "cache_reset": "cache_reset_cost",
+        "analysis_filters_and_index_progress": "analysis_filter_setup_cost",
+        "__residual__": "identity_setup_residual_cost",
+    },
+    "reports": {
+        "basic_report_preparation": "report_basic_preparation_cost",
+        "artifact_pipeline": "artifact_pipeline_cost",
+        "sanity_check": "report_sanity_check_cost",
+        "layer_reports": "layer_report_generation_cost",
+        "git_state": "git_state_cost",
+        "high_risk_writes": "high_risk_report_write_cost",
+        "global_report_write": "global_report_write_cost",
+        "incremental_file_state": "incremental_file_state_cost",
+        "finalization": "report_finalization_cost",
+        "__residual__": "reports_residual_cost",
+    },
+    "canonical_materialization": {
+        "setup_and_imports": "canonical_setup_cost",
+        "topology_analytics": "topology_analytics_cost",
+        "collision_canonicalization": "collision_canonicalization_cost",
+        "artifact_consumption": "canonical_artifact_consumption_cost",
+        "module_usage_reuse": "module_usage_reuse_cost",
+        "canonical_validation": "canonical_validation_cost",
+        "lineage_query_indexes": "lineage_query_index_cost",
+        "state_construction": "canonical_state_construction_cost",
+        "dependency_matrix": "dependency_matrix_cost",
+        "shared_usage_clusters": "shared_usage_clusters_cost",
+        "publish_preparation": "canonical_publish_preparation_cost",
+        "__residual__": "canonical_materialization_residual_cost",
+    },
+    "live_publish": {
+        "connect": "live_connect_cost",
+        "publish": "live_publish_ipc_cost",
+        "status_handling": "live_publish_status_handling_cost",
+        "__residual__": "live_publish_residual_cost",
+    },
+}
+
 
 def _number(event: dict[str, object], field: str) -> float:
     value = event.get(field)
@@ -119,8 +202,7 @@ def _indexing_reason(
     return "unattributed", evidence
 
 
-def _canonical_materialization_reason(
-    stage_ms: float,
+def _lineage_materialization_reason(
     event: dict[str, object],
 ) -> tuple[str, dict[str, object]]:
     reuse_sources = _count(event, "reuse_sources")
@@ -159,12 +241,102 @@ def _canonical_materialization_reason(
         and materialize_sources == 0
         and fallback_sources == 0
         and reuse_gate_ms > 0.0
-        and stage_ms > 0.0
-        and lineage_elapsed_ms >= stage_ms * 0.5
+        and lineage_elapsed_ms > 0.0
     ):
         return "lineage_reuse_gate_cost", evidence
 
-    return "unattributed", evidence
+    return "lineage_other_cost", evidence
+
+
+def _stage_component_reason(
+    stage: str,
+    stage_ms: float,
+    component_events: dict[str, dict[str, object]],
+    *,
+    lineage_reason: str | None = None,
+    lineage_evidence: dict[str, object] | None = None,
+) -> tuple[str, dict[str, object]]:
+    ordered = _REQUIRED_STAGE_COMPONENTS[stage]
+    component_ms: dict[str, float] = {}
+
+    for component in ordered:
+        event = component_events[component]
+        if (
+            event.get("timing_semantics")
+            != "critical_path_stage_component"
+        ):
+            raise ValueError(
+                "FULL_ANALYSIS_STAGE_COMPONENT_END:"
+                f"{stage}:{component} has invalid timing_semantics"
+            )
+        component_ms[component] = _number(event, "elapsed_ms")
+
+    component_sum_ms = sum(component_ms.values())
+    residual_ms = max(0.0, stage_ms - component_sum_ms)
+
+    evidence: dict[str, object] = {
+        f"{component}_ms": _round_ms(component_ms[component])
+        for component in ordered
+    }
+    evidence["component_sum_ms"] = _round_ms(component_sum_ms)
+    evidence["residual_ms"] = _round_ms(residual_ms)
+    evidence["coverage_pct"] = (
+        round(
+            min(100.0, (component_sum_ms / stage_ms) * 100.0),
+            2,
+        )
+        if stage_ms > 0.0
+        else 100.0
+    )
+
+    final_status = component_events[ordered[-1]].get("status")
+    if isinstance(final_status, str) and final_status:
+        evidence["stage_status"] = final_status
+
+    if stage_ms == 0.0:
+        zero_reason = {
+            "identity_and_setup": "identity_setup_no_work",
+            "reports": "reports_no_work",
+            "canonical_materialization": "canonical_materialization_no_work",
+            "live_publish": "live_publish_not_attempted",
+        }
+        return zero_reason[stage], evidence
+
+    candidates = [
+        (component, component_ms[component])
+        for component in ordered
+    ]
+    candidates.append(("__residual__", residual_ms))
+    dominant_component, _ = max(
+        candidates,
+        key=lambda item: (
+            item[1],
+            -(
+                ordered.index(item[0])
+                if item[0] in ordered
+                else len(ordered)
+            ),
+        ),
+    )
+    evidence["dominant_component"] = dominant_component
+
+    if (
+        stage == "canonical_materialization"
+        and dominant_component == "lineage_materialization"
+    ):
+        if lineage_reason is None or lineage_evidence is None:
+            raise ValueError(
+                "canonical_materialization lineage attribution "
+                "requires lineage evidence"
+            )
+        evidence["lineage_reason_code"] = lineage_reason
+        evidence.update(lineage_evidence)
+        return lineage_reason, evidence
+
+    return (
+        _COMPONENT_REASON_CODES[stage][dominant_component],
+        evidence,
+    )
 
 
 def build_analysis_profile(
@@ -210,6 +382,34 @@ def build_analysis_profile(
             missing.append(label)
         else:
             stage_events[stage] = matches[0]
+
+    stage_component_events: dict[
+        str,
+        dict[str, dict[str, object]],
+    ] = {}
+
+    for stage, components in _REQUIRED_STAGE_COMPONENTS.items():
+        collected: dict[str, dict[str, object]] = {}
+        for component in components:
+            matches = [
+                event
+                for event in scoped
+                if event.get("ev")
+                == "FULL_ANALYSIS_STAGE_COMPONENT_END"
+                and event.get("stage") == stage
+                and event.get("component") == component
+            ]
+            label = (
+                "FULL_ANALYSIS_STAGE_COMPONENT_END:"
+                f"{stage}:{component}"
+            )
+            if len(matches) > 1:
+                duplicates.append(label)
+            elif not matches:
+                missing.append(label)
+            else:
+                collected[component] = matches[0]
+        stage_component_events[stage] = collected
 
     if missing or duplicates:
         return _incomplete_profile(
@@ -286,12 +486,34 @@ def build_analysis_profile(
             )
 
         index_reason, index_reason_evidence = _indexing_reason(index_event)
-        canonical_reason, canonical_reason_evidence = (
-            _canonical_materialization_reason(
-                stage_values["canonical_materialization"],
+        lineage_reason, lineage_reason_evidence = (
+            _lineage_materialization_reason(
                 lineage_materialization_event,
             )
         )
+
+        stage_attribution: dict[str, dict[str, object]] = {}
+
+        for stage in _REQUIRED_STAGE_COMPONENTS:
+            reason_code, evidence = _stage_component_reason(
+                stage,
+                stage_values[stage],
+                stage_component_events[stage],
+                lineage_reason=(
+                    lineage_reason
+                    if stage == "canonical_materialization"
+                    else None
+                ),
+                lineage_evidence=(
+                    lineage_reason_evidence
+                    if stage == "canonical_materialization"
+                    else None
+                ),
+            )
+            stage_attribution[stage] = {
+                "reason_code": reason_code,
+                **evidence,
+            }
 
         stage_breakdown = [
             {
@@ -317,9 +539,15 @@ def build_analysis_profile(
             if stage == "indexing":
                 reason_code = index_reason
                 reason_evidence = index_reason_evidence
-            elif stage == "canonical_materialization":
-                reason_code = canonical_reason
-                reason_evidence = canonical_reason_evidence
+            elif stage in stage_attribution:
+                reason_code = str(
+                    stage_attribution[stage]["reason_code"]
+                )
+                reason_evidence = {
+                    key: value
+                    for key, value in stage_attribution[stage].items()
+                    if key != "reason_code"
+                }
 
             share = (
                 (stage_values[stage] / analysis_ms) * 100.0
@@ -376,14 +604,15 @@ def build_analysis_profile(
                 ),
             },
             "stage_breakdown": stage_breakdown,
+            "stage_attribution": stage_attribution,
             "bottlenecks": bottlenecks,
             "indexing_evidence": {
                 "reason_code": index_reason,
                 **index_reason_evidence,
             },
             "lineage_materialization_evidence": {
-                "reason_code": canonical_reason,
-                **canonical_reason_evidence,
+                "reason_code": lineage_reason,
+                **lineage_reason_evidence,
             },
             "aggregate_worker_diagnostics": {
                 "timing_semantics": (

@@ -1174,6 +1174,7 @@ def _header_records(sid: str, started_at: str, desktop_pid: int, file_name: str)
             "execution_mode": "indexer execution mode",
             "timing_semantics": "timing interpretation contract",
             "stage": "full-analysis stage name",
+            "component": "non-overlapping full-analysis stage component name",
             "analysis_ms": "critical-path analysis body milliseconds; same interval as FULL_ANALYSIS_BODY_END.elapsed_ms",
             "total_before_release_ms": "overlapping critical-path total from coordinator start through analysis body end; includes lease wait; not additive",
             "total_ms": "critical-path full coordinator milliseconds including lease wait, analysis body, and lease release; not additive",
@@ -1206,6 +1207,7 @@ def _header_records(sid: str, started_at: str, desktop_pid: int, file_name: str)
         [
             "FULL_ANALYSIS_INDEX_EVIDENCE",
             "FULL_ANALYSIS_LINEAGE_MATERIALIZATION",
+            "FULL_ANALYSIS_STAGE_COMPONENT_END",
             "FULL_ANALYSIS_STAGE_END",
         ]
     )
@@ -1379,6 +1381,7 @@ def trace_event(domain: str, event: str, *, op: str | None = None, rev: int | No
                 "execution_mode": "execution_mode",
                 "timing_semantics": "timing_semantics",
                 "stage": "stage",
+                "component": "component",
                 "analysis_ms": "analysis_ms",
                 "total_before_release_ms": "total_before_release_ms",
                 "total_ms": "total_ms",

@@ -109,6 +109,59 @@ def _profile_events(operation_id: str = "profile-test"):
         }
         for stage, elapsed_ms in stage_ms.items()
     )
+    component_ms = {
+        "identity_and_setup": {
+            "progress_setup": 1.0,
+            "repository_identity": 8.0,
+            "authoritative_state_resolution": 5.0,
+            "cache_reset": 1.0,
+            "analysis_filters_and_index_progress": 4.0,
+        },
+        "reports": {
+            "basic_report_preparation": 20.0,
+            "artifact_pipeline": 80.0,
+            "sanity_check": 5.0,
+            "layer_reports": 30.0,
+            "git_state": 10.0,
+            "high_risk_writes": 10.0,
+            "global_report_write": 20.0,
+            "incremental_file_state": 20.0,
+            "finalization": 4.0,
+        },
+        "canonical_materialization": {
+            "setup_and_imports": 0.5,
+            "topology_analytics": 0.5,
+            "collision_canonicalization": 0.5,
+            "artifact_consumption": 0.5,
+            "module_usage_reuse": 0.5,
+            "canonical_validation": 0.5,
+            "lineage_materialization": 70.0,
+            "lineage_query_indexes": 0.5,
+            "state_construction": 0.5,
+            "dependency_matrix": 0.5,
+            "shared_usage_clusters": 0.5,
+            "publish_preparation": 0.5,
+        },
+        "live_publish": {
+            "connect": 5.0,
+            "publish": 25.0,
+            "status_handling": 2.0,
+        },
+    }
+    for stage, components in component_ms.items():
+        events.extend(
+            {
+                "d": "ANALYSIS",
+                "ev": "FULL_ANALYSIS_STAGE_COMPONENT_END",
+                "op": operation_id,
+                "stage": stage,
+                "component": component,
+                "elapsed_ms": elapsed_ms,
+                "timing_semantics": "critical_path_stage_component",
+                **({"status": "success"} if stage == "live_publish" else {}),
+            }
+            for component, elapsed_ms in components.items()
+        )
     return events
 
 
@@ -164,8 +217,24 @@ def test_profile_ranks_only_critical_path_and_attributes_known_causes():
         if item["stage"] == "canonical_materialization"
     )
     assert canonical["reason_code"] == "lineage_reuse_gate_cost"
+    assert canonical["evidence"]["dominant_component"] == "lineage_materialization"
+    assert canonical["evidence"]["lineage_reason_code"] == "lineage_reuse_gate_cost"
     assert canonical["evidence"]["lineage_elapsed_ms"] == 70.0
     assert canonical["evidence"]["reuse_gate_ms"] == 60.0
+
+    assert profile["stage_attribution"]["identity_and_setup"]["reason_code"] == (
+        "repository_identity_cost"
+    )
+    assert profile["stage_attribution"]["reports"]["reason_code"] == (
+        "artifact_pipeline_cost"
+    )
+    assert profile["stage_attribution"]["canonical_materialization"]["reason_code"] == (
+        "lineage_reuse_gate_cost"
+    )
+    live_attribution = profile["stage_attribution"]["live_publish"]
+    assert live_attribution["reason_code"] == "live_publish_ipc_cost"
+    assert live_attribution["publish_ms"] == 25.0
+    assert live_attribution["stage_status"] == "success"
 
     aggregate = profile["aggregate_worker_diagnostics"]
     assert aggregate["timing_semantics"] == (
@@ -223,4 +292,43 @@ def test_profile_rejects_invalid_overlapping_coordinator_contract():
     assert (
         profile["error"]
         == "total_before_release_ms cannot be shorter than analysis_ms"
+    )
+
+
+def test_profile_fails_closed_when_stage_component_evidence_is_missing():
+    events = [
+        event
+        for event in _profile_events()
+        if not (
+            event["ev"] == "FULL_ANALYSIS_STAGE_COMPONENT_END"
+            and event["stage"] == "reports"
+            and event["component"] == "artifact_pipeline"
+        )
+    ]
+
+    profile = build_analysis_profile(events, operation_id="profile-test")
+
+    assert profile["status"] == "incomplete"
+    assert profile["missing"] == [
+        "FULL_ANALYSIS_STAGE_COMPONENT_END:reports:artifact_pipeline"
+    ]
+
+
+def test_profile_rejects_invalid_stage_component_timing_semantics():
+    events = _profile_events()
+    component = next(
+        event
+        for event in events
+        if event["ev"] == "FULL_ANALYSIS_STAGE_COMPONENT_END"
+        and event["stage"] == "reports"
+        and event["component"] == "artifact_pipeline"
+    )
+    component["timing_semantics"] = "aggregate"
+
+    profile = build_analysis_profile(events, operation_id="profile-test")
+
+    assert profile["status"] == "invalid_evidence"
+    assert profile["error"] == (
+        "FULL_ANALYSIS_STAGE_COMPONENT_END:reports:artifact_pipeline "
+        "has invalid timing_semantics"
     )
