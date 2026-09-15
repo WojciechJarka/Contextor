@@ -977,3 +977,46 @@ MCP_SERVER_RESTART_REQUIRED=YES
 
 ACTUAL_DIFF=
 No remaining whitespace-only `+                ` lines were present in the current diff; the requested three blank lines were already clean. No code or tests were changed.
+
+## GET_SYMBOL_IMPLEMENTATION_MCP_INPUT_BOUNDARY_ERGONOMICS
+
+STATUS=BLOCKED_BY_SOURCE_DRIFT
+HEAD_BEFORE=unchanged
+HEAD_AFTER=unchanged
+FILES_CHANGED=NONE
+PY_COMPILE=NOT_RUN_AFTER_REVERT
+BOUNDARY_TESTS=BLOCKED
+DOCUMENTATION_TESTS=NOT_RUN
+GIT_DIFF_CHECK=PASS (source/test changes reverted)
+
+UNKNOWN_ARGUMENT_DOCS=NOT_CERTIFIED
+UNKNOWN_ARGUMENT_FUZZY=NOT_CERTIFIED
+MISSING_REQUIRED_ARGUMENT_DOCS=NOT_CERTIFIED
+FAST_MCP_TYPE_VALIDATION_DOCS=BLOCKED_BY_SOURCE_DRIFT
+OTHER_TOOLS_UNCHANGED=PASS
+INTERNAL_VALIDATION_NOT_MISCLASSIFIED=NOT_CERTIFIED
+
+FAST_MCP_2_12_4_VERIFICATION=Contextor-first/source evidence showed the middleware boundary precedes ToolManager.call_tool, but the installed FastMCP ToolManager catches PydanticCoreValidationError inside FunctionTool.run and wraps it as fastmcp.exceptions.ToolError before on_call_tool can receive it. The literal middleware contract catches only PydanticCoreValidationError, so the required member_limit type-validation test cannot pass without violating the explicit prohibition on catching another exception type.
+
+MCP_SERVER_RESTART_REQUIRED=YES
+DESKTOP_LIVE_RESTART_REQUIRED=NO
+
+ACTUAL_DIFF=
+No changes retained after the source-drift blocker.
+
+## CPA10I_REFERENCE_FUSION_FINAL_TEST_MIGRATION
+
+STATUS=NOT_RUN_DUE_TO_BLOCKER
+FILES_CHANGED=NONE
+PY_COMPILE=NOT_RUN
+REGRESSION_SELECTION=NOT_RUN
+GIT_DIFF_CHECK=PASS
+
+WARM_REFERENCE_HIT_AST_PARSE_CALLS=NOT_RUN
+LEGACY_MIGRATION_PARSE_CALLS=NOT_RUN
+SCHEMA_MIGRATION_PARSE_CALLS=NOT_RUN
+POST_MIGRATION_WARM_PARSE_CALLS=NOT_RUN
+STALE_PARSE_SOURCE_WITH_FINGERPRINT_MONKEYPATCHES_REMAINING=UNCHANGED
+
+ACTUAL_DIFF=
+No changes retained after the source-drift blocker.
