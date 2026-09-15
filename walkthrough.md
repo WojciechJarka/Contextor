@@ -719,3 +719,250 @@ index e467432..701b728 100644
  def test_single_tool_and_section_filters_load_only_selected_document(monkeypatch):
      loaded = []
      original = documentation._read_json
+
+## GET_SYMBOL_IMPLEMENTATION_FULL_PARAMETER_CONTRACT_HARDENING_AUDIT_FIX
+
+STATUS=SUCCESS
+FILES_CHANGED=contextor/mcp/tools/get_symbol_implementation.py; contextor/mcp/docs/get_symbol_implementation.json; tests/mcp/tools/test_get_symbol_implementation.py; tests/test_mcp_documentation.py
+PY_COMPILE=PASS
+TOOL_TESTS=PASS (61 passed, 1 external deprecation warning)
+DOCUMENTATION_TESTS=PASS (12 passed, 1 external deprecation warning)
+
+REDUNDANT_EXPLICIT_SCOPE_RESOLVE_REMOVED=PASS
+CANONICAL_PATH_ERRORS_NOT_MISCLASSIFIED=PASS
+DOCS_CONTRADICTION_REMOVED=PASS
+SYMBOLIC_NAME_EXCEPTION_TESTS=PASS
+NON_PYTHON_SCOPE_TEST=PASS
+OUTSIDE_REPO_SCOPE_TEST=PASS
+METHODS_ON_FUNCTION_TEST=PASS
+
+MCP_SERVER_RESTART_REQUIRED=YES
+DESKTOP_LIVE_RESTART_REQUIRED=NO
+
+ACTUAL_DIFF=
+
+diff --git a/contextor/mcp/docs/get_symbol_implementation.json b/contextor/mcp/docs/get_symbol_implementation.json
+index 9261b51..e3ecdfc 100644
+--- a/contextor/mcp/docs/get_symbol_implementation.json
++++ b/contextor/mcp/docs/get_symbol_implementation.json
+@@ -19,8 +19,8 @@
+     "Parameter-contract hardening: every invalid non-symbol parameter value or invalid parameter combination that reaches get_symbol_implementation returns the complete canonical documentation in the same response together with parameter_contract_error. The response tells the caller which parameter was invalid, why it was invalid, and instructs the caller to retry once using documented names, values, and combinations instead of repeating the same call.",
+     "Valid mode combinations: mode='auto' accepts no include or methods override; mode='preview' accepts no include or methods override; mode='fetch' requires a non-empty include list. include=['implementation'] fetches the complete AST-bounded symbol. include=['methods'] requires methods=[...] and applies only to class symbols. 'implementation' and 'methods' cannot be selected together.",
+     "Caller parameter names are exactly repo_path, symbol, file_paths, mode, include, methods, member_limit, and file_path. Do not invent additional argument names. Unknown argument names are rejected by the MCP/FastMCP input boundary before the Python tool body can produce its documentation fallback.",
+-    "Fetch selection ergonomics: mode='fetch' requires a non-empty include list. When include is missing or empty, get_symbol_implementation returns the full validated canonical documentation for this tool so the caller immediately sees the valid selection contract. This documentation fallback applies only to missing fetch include selection; other errors preserve their existing fail-closed status.",
+-    "Finite-choice typo handling is suggestion-only. Similar invalid mode, include-section, or class-method values may return candidates using the shared Contextor fuzzy contract (minimum score 0.75, maximum 5 candidates). No candidate is ever auto-selected."
++    "Fetch selection ergonomics: mode='fetch' requires a non-empty include list. Missing, unsupported, or internally inconsistent fetch parameter selections return the complete canonical documentation together with parameter_contract_error. Symbol-name and selected method-name lookup misses keep their dedicated fail-closed identity/fuzzy responses and do not use parameter-documentation fallback.",
++    "Finite-choice typo handling is suggestion-only. Invalid mode and include-section values may return bounded candidates inside parameter_contract_error.similar_candidates using the shared Contextor fuzzy contract (minimum score 0.75, maximum 5 candidates). Unknown selected class method names retain the existing symbolic lookup response with top-level similar_candidates. No candidate is ever auto-selected."
+   ],
+   "freshness": [
+     "Every resolved response includes a ``state_freshness`` envelope scoped to the source file of the resolved symbol.",
+diff --git a/contextor/mcp/tools/get_symbol_implementation.py b/contextor/mcp/tools/get_symbol_implementation.py
+index 55f6f0b..d630e39 100644
+--- a/contextor/mcp/tools/get_symbol_implementation.py
++++ b/contextor/mcp/tools/get_symbol_implementation.py
+@@ -417,6 +417,7 @@ def get_symbol_implementation(
+                     explicit_paths = _resolve_symbol_source_paths(root, effective_file_paths)
+                 except ValueError as exc:
+                     return _parameter_contract_response(parameter="file_path/file_paths", invalid_value=effective_file_paths, reason=str(exc))
++                
+                 explicit_modules = {
+                     normalize_module_path_to_dotted(str(p.relative_to(root)), repo_root=str(root))
+                     for p in explicit_paths
+@@ -453,7 +454,7 @@ def get_symbol_implementation(
+                 try:
+                     search_paths = _resolve_symbol_source_paths(root, [canonical_rel_path])
+                 except ValueError as exc:
+-                    return _parameter_contract_response(parameter="file_path/file_paths", invalid_value=effective_file_paths, reason=str(exc))
++                    return json.dumps({"status": "error", "error": str(exc)}, indent=2)
+         elif identity["status"] == "not_found" and identity.get("query_kind") == "artifact_id":
+             return json.dumps(
+                 {
+@@ -483,6 +484,7 @@ def get_symbol_implementation(
+                     explicit_paths = _resolve_symbol_source_paths(root, effective_file_paths)
+                 except ValueError as exc:
+                     return _parameter_contract_response(parameter="file_path/file_paths", invalid_value=effective_file_paths, reason=str(exc))
++                
+                 explicit_modules = {
+                     normalize_module_path_to_dotted(str(p.relative_to(root)), repo_root=str(root))
+                     for p in explicit_paths
+@@ -519,13 +521,14 @@ def get_symbol_implementation(
+                 try:
+                     search_paths = _resolve_symbol_source_paths(root, [canonical_rel_path])
+                 except ValueError as exc:
+-                    return _parameter_contract_response(parameter="file_path/file_paths", invalid_value=effective_file_paths, reason=str(exc))
++                    return json.dumps({"status": "error", "error": str(exc)}, indent=2)
+         else:
+             if effective_file_paths:
+                 try:
+                     explicit_paths = _resolve_symbol_source_paths(root, effective_file_paths)
+                 except ValueError as exc:
+                     return _parameter_contract_response(parameter="file_path/file_paths", invalid_value=effective_file_paths, reason=str(exc))
++                
+                 explicit_modules = {
+                     normalize_module_path_to_dotted(str(p.relative_to(root)), repo_root=str(root))
+                     for p in explicit_paths
+@@ -603,7 +606,10 @@ def get_symbol_implementation(
+                 try:
+                     search_paths = _resolve_symbol_source_paths(root, [canonical_rel_path])
+                 except ValueError as exc:
+-                    return _parameter_contract_response(parameter="file_path/file_paths", invalid_value=effective_file_paths, reason=str(exc))
++                    return json.dumps(
++                        {"status": "error", "error": str(exc)},
++                        indent=2,
++                    )
+             elif identity["status"] == "ambiguous":
+                 return json.dumps(
+                     {
+@@ -645,10 +651,7 @@ def get_symbol_implementation(
+ 
+     if not candidates:
+         if effective_file_paths:
+-            try:
+-                explicit_paths = _resolve_symbol_source_paths(root, effective_file_paths)
+-            except ValueError:
+-                explicit_paths = search_paths
++            explicit_paths = search_paths
+             explicit_modules = {
+                 normalize_module_path_to_dotted(str(p.relative_to(root)), repo_root=str(root))
+                 for p in explicit_paths
+diff --git a/tests/mcp/tools/test_get_symbol_implementation.py b/tests/mcp/tools/test_get_symbol_implementation.py
+index 2a86c8a..1c258bf 100644
+--- a/tests/mcp/tools/test_get_symbol_implementation.py
++++ b/tests/mcp/tools/test_get_symbol_implementation.py
+@@ -1,4 +1,5 @@
+ import json
++import importlib
+ from types import SimpleNamespace
+ from pathlib import Path
+ import pytest
+@@ -7,6 +8,10 @@ from contextor.core.analysis.state_manager import RepositoryAnalysisState
+ from contextor.mcp import query_helpers, runtime as mcp_runtime
+ from contextor.mcp.tools.get_symbol_implementation import get_symbol_implementation
+ 
++get_symbol_implementation_module = importlib.import_module(
++    "contextor.mcp.tools.get_symbol_implementation"
++)
++
+ 
+ def _setup_symbol_implementation_workspace(tmp_path, monkeypatch):
+     """Creates real Python source files on disk and mocks the active registry and LIVE state."""
+@@ -599,8 +604,6 @@ def test_get_symbol_implementation__fetch_without_include_returns_full_canonical
+     tmp_path,
+     monkeypatch,
+ ):
+-    from contextor.mcp.documentation import load_tool_document
+-
+     _setup_symbol_implementation_workspace(
+         tmp_path,
+         monkeypatch,
+@@ -614,10 +617,6 @@ def test_get_symbol_implementation__fetch_without_include_returns_full_canonical
+     )
+ 
+     result = json.loads(raw)
+-    expected = load_tool_document(
+-        "get_symbol_implementation"
+-    )
+-
+     _assert_parameter_documentation_response(result, parameter="include")
+     assert result["tool"] == "get_symbol_implementation"
+     assert "parameters" in result
+@@ -635,8 +634,6 @@ def test_get_symbol_implementation__fetch_empty_include_returns_full_canonical_d
+     tmp_path,
+     monkeypatch,
+ ):
+-    from contextor.mcp.documentation import load_tool_document
+-
+     _setup_symbol_implementation_workspace(
+         tmp_path,
+         monkeypatch,
+@@ -790,6 +787,8 @@ def test_get_symbol_implementation__unknown_method_typo_returns_bounded_fuzzy_ca
+     assert 1 <= len(candidates) <= 5
+     assert candidates[0]["value"] == "login"
+     assert candidates[0]["score"] >= 0.75
++    assert "parameter_contract_error" not in result
++    assert "tool" not in result
+ 
+ 
+ def test_get_symbol_implementation__existing_symbol_fuzzy_contract_remains_bounded_and_suggestion_only(
+@@ -817,6 +816,7 @@ def test_get_symbol_implementation__existing_symbol_fuzzy_contract_remains_bound
+     )
+     assert "implementation" not in result
+     assert "resolution" not in result
++    assert "parameter_contract_error" not in result
+ 
+ 
+ def test_fuzzy_choice_candidates__uses_shared_threshold_order_and_bound():
+@@ -1075,6 +1075,57 @@ def _assert_parameter_documentation_response(result, *, parameter):
+     assert "Do not repeat the same invalid call." in result["parameter_contract_error"]["retry_instruction"]
+ 
+ 
++def test_get_symbol_implementation__explicit_scope_is_resolved_once_before_symbol_fuzzy_fallback(tmp_path, monkeypatch):
++    _setup_symbol_implementation_workspace(tmp_path, monkeypatch)
++    calls = []
++    original = get_symbol_implementation_module._resolve_symbol_source_paths
++    def tracked(root, paths):
++        calls.append(tuple(paths))
++        return original(root, paths)
++    monkeypatch.setattr(get_symbol_implementation_module, "_resolve_symbol_source_paths", tracked)
++    result = json.loads(get_symbol_implementation(repo_path=str(tmp_path), symbol="definitely_missing_symbol_xyz", file_path="pkg/a.py"))
++    assert result["status"] == "not_found"
++    assert calls == [("pkg/a.py",)]
++
++
++def test_get_symbol_implementation__canonical_live_path_failure_is_not_misclassified_as_caller_parameter_error(tmp_path, monkeypatch):
++    _setup_symbol_implementation_workspace(tmp_path, monkeypatch)
++    def fail_canonical_path(root, paths):
++        assert paths == ["pkg/a.py"]
++        raise ValueError("canonical source path unavailable")
++    monkeypatch.setattr(get_symbol_implementation_module, "_resolve_symbol_source_paths", fail_canonical_path)
++    result = json.loads(get_symbol_implementation(repo_path=str(tmp_path), symbol="process_data"))
++    assert result == {"status": "error", "error": "canonical source path unavailable"}
++    assert "parameter_contract_error" not in result
++    assert "tool" not in result
++
++
++def test_get_symbol_implementation__methods_section_on_function_returns_parameter_documentation(tmp_path, monkeypatch):
++    _setup_symbol_implementation_workspace(tmp_path, monkeypatch)
++    result = json.loads(get_symbol_implementation(repo_path=str(tmp_path), symbol="process_data", file_path="pkg/a.py", mode="fetch", include=["methods"], methods=["whatever"]))
++    _assert_parameter_documentation_response(result, parameter="include")
++
++
++def test_get_symbol_implementation__non_python_explicit_file_returns_parameter_documentation(tmp_path, monkeypatch):
++    _setup_symbol_implementation_workspace(tmp_path, monkeypatch)
++    (tmp_path / "pkg" / "note.txt").write_text("not python", encoding="utf-8")
++    result = json.loads(get_symbol_implementation(repo_path=str(tmp_path), symbol="process_data", file_path="pkg/note.txt"))
++    _assert_parameter_documentation_response(result, parameter="file_path/file_paths")
++    assert "not a Python file" in result["parameter_contract_error"]["reason"]
++
++
++def test_get_symbol_implementation__outside_repo_explicit_file_returns_parameter_documentation(tmp_path, monkeypatch):
++    _setup_symbol_implementation_workspace(tmp_path, monkeypatch)
++    outside = tmp_path.parent / (tmp_path.name + "_outside.py")
++    outside.write_text("def external():\n    return 1\n", encoding="utf-8")
++    try:
++        result = json.loads(get_symbol_implementation(repo_path=str(tmp_path), symbol="process_data", file_path=str(outside)))
++    finally:
++        outside.unlink(missing_ok=True)
++    _assert_parameter_documentation_response(result, parameter="file_path/file_paths")
++    assert "outside the repository" in result["parameter_contract_error"]["reason"]
++
++
+ def test_get_symbol_implementation__mode_full_returns_documentation(tmp_path, monkeypatch):
+     _setup_symbol_implementation_workspace(tmp_path, monkeypatch)
+     result = json.loads(get_symbol_implementation(repo_path=str(tmp_path), symbol="process_data", file_path="pkg/a.py", mode="full"))
+diff --git a/tests/test_mcp_documentation.py b/tests/test_mcp_documentation.py
+index 701b728..7f94dc5 100644
+--- a/tests/test_mcp_documentation.py
++++ b/tests/test_mcp_documentation.py
+@@ -92,6 +92,11 @@ def test_get_symbol_implementation_description_prevents_undocumented_modes():
+     assert "include=['implementation']" in description
+     assert "Use only documented argument names" in description
+     assert len(description.encode("utf-8")) <= 300
++    document = documentation.load_tool_document("get_symbol_implementation")
++    serialized = json.dumps(document)
++    assert "only to missing fetch include selection" not in serialized
++    assert "parameter_contract_error" in serialized
++    assert "Symbol-name and selected method-name lookup misses" in serialized
+ 
+ 
+ def test_single_tool_and_section_filters_load_only_selected_document(monkeypatch):

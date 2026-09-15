@@ -417,6 +417,7 @@ def get_symbol_implementation(
                     explicit_paths = _resolve_symbol_source_paths(root, effective_file_paths)
                 except ValueError as exc:
                     return _parameter_contract_response(parameter="file_path/file_paths", invalid_value=effective_file_paths, reason=str(exc))
+
                 explicit_modules = {
                     normalize_module_path_to_dotted(str(p.relative_to(root)), repo_root=str(root))
                     for p in explicit_paths
@@ -453,7 +454,7 @@ def get_symbol_implementation(
                 try:
                     search_paths = _resolve_symbol_source_paths(root, [canonical_rel_path])
                 except ValueError as exc:
-                    return _parameter_contract_response(parameter="file_path/file_paths", invalid_value=effective_file_paths, reason=str(exc))
+                    return json.dumps({"status": "error", "error": str(exc)}, indent=2)
         elif identity["status"] == "not_found" and identity.get("query_kind") == "artifact_id":
             return json.dumps(
                 {
@@ -483,6 +484,7 @@ def get_symbol_implementation(
                     explicit_paths = _resolve_symbol_source_paths(root, effective_file_paths)
                 except ValueError as exc:
                     return _parameter_contract_response(parameter="file_path/file_paths", invalid_value=effective_file_paths, reason=str(exc))
+
                 explicit_modules = {
                     normalize_module_path_to_dotted(str(p.relative_to(root)), repo_root=str(root))
                     for p in explicit_paths
@@ -519,13 +521,14 @@ def get_symbol_implementation(
                 try:
                     search_paths = _resolve_symbol_source_paths(root, [canonical_rel_path])
                 except ValueError as exc:
-                    return _parameter_contract_response(parameter="file_path/file_paths", invalid_value=effective_file_paths, reason=str(exc))
+                    return json.dumps({"status": "error", "error": str(exc)}, indent=2)
         else:
             if effective_file_paths:
                 try:
                     explicit_paths = _resolve_symbol_source_paths(root, effective_file_paths)
                 except ValueError as exc:
                     return _parameter_contract_response(parameter="file_path/file_paths", invalid_value=effective_file_paths, reason=str(exc))
+
                 explicit_modules = {
                     normalize_module_path_to_dotted(str(p.relative_to(root)), repo_root=str(root))
                     for p in explicit_paths
@@ -603,7 +606,10 @@ def get_symbol_implementation(
                 try:
                     search_paths = _resolve_symbol_source_paths(root, [canonical_rel_path])
                 except ValueError as exc:
-                    return _parameter_contract_response(parameter="file_path/file_paths", invalid_value=effective_file_paths, reason=str(exc))
+                    return json.dumps(
+                        {"status": "error", "error": str(exc)},
+                        indent=2,
+                    )
             elif identity["status"] == "ambiguous":
                 return json.dumps(
                     {
@@ -645,10 +651,7 @@ def get_symbol_implementation(
 
     if not candidates:
         if effective_file_paths:
-            try:
-                explicit_paths = _resolve_symbol_source_paths(root, effective_file_paths)
-            except ValueError:
-                explicit_paths = search_paths
+            explicit_paths = search_paths
             explicit_modules = {
                 normalize_module_path_to_dotted(str(p.relative_to(root)), repo_root=str(root))
                 for p in explicit_paths

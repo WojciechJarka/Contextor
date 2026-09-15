@@ -1,4 +1,5 @@
 import json
+import importlib
 from types import SimpleNamespace
 from pathlib import Path
 import pytest
@@ -6,6 +7,10 @@ import pytest
 from contextor.core.analysis.state_manager import RepositoryAnalysisState
 from contextor.mcp import query_helpers, runtime as mcp_runtime
 from contextor.mcp.tools.get_symbol_implementation import get_symbol_implementation
+
+get_symbol_implementation_module = importlib.import_module(
+    "contextor.mcp.tools.get_symbol_implementation"
+)
 
 
 def _setup_symbol_implementation_workspace(tmp_path, monkeypatch):
@@ -599,8 +604,6 @@ def test_get_symbol_implementation__fetch_without_include_returns_full_canonical
     tmp_path,
     monkeypatch,
 ):
-    from contextor.mcp.documentation import load_tool_document
-
     _setup_symbol_implementation_workspace(
         tmp_path,
         monkeypatch,
@@ -614,10 +617,6 @@ def test_get_symbol_implementation__fetch_without_include_returns_full_canonical
     )
 
     result = json.loads(raw)
-    expected = load_tool_document(
-        "get_symbol_implementation"
-    )
-
     _assert_parameter_documentation_response(result, parameter="include")
     assert result["tool"] == "get_symbol_implementation"
     assert "parameters" in result
@@ -635,8 +634,6 @@ def test_get_symbol_implementation__fetch_empty_include_returns_full_canonical_d
     tmp_path,
     monkeypatch,
 ):
-    from contextor.mcp.documentation import load_tool_document
-
     _setup_symbol_implementation_workspace(
         tmp_path,
         monkeypatch,
@@ -790,6 +787,8 @@ def test_get_symbol_implementation__unknown_method_typo_returns_bounded_fuzzy_ca
     assert 1 <= len(candidates) <= 5
     assert candidates[0]["value"] == "login"
     assert candidates[0]["score"] >= 0.75
+    assert "parameter_contract_error" not in result
+    assert "tool" not in result
 
 
 def test_get_symbol_implementation__existing_symbol_fuzzy_contract_remains_bounded_and_suggestion_only(
@@ -817,6 +816,7 @@ def test_get_symbol_implementation__existing_symbol_fuzzy_contract_remains_bound
     )
     assert "implementation" not in result
     assert "resolution" not in result
+    assert "parameter_contract_error" not in result
 
 
 def test_fuzzy_choice_candidates__uses_shared_threshold_order_and_bound():
@@ -1073,6 +1073,57 @@ def _assert_parameter_documentation_response(result, *, parameter):
     assert result["parameter_contract_error"]["parameter"] == parameter
     assert "reason" in result["parameter_contract_error"]
     assert "Do not repeat the same invalid call." in result["parameter_contract_error"]["retry_instruction"]
+
+
+def test_get_symbol_implementation__explicit_scope_is_resolved_once_before_symbol_fuzzy_fallback(tmp_path, monkeypatch):
+    _setup_symbol_implementation_workspace(tmp_path, monkeypatch)
+    calls = []
+    original = get_symbol_implementation_module._resolve_symbol_source_paths
+    def tracked(root, paths):
+        calls.append(tuple(paths))
+        return original(root, paths)
+    monkeypatch.setattr(get_symbol_implementation_module, "_resolve_symbol_source_paths", tracked)
+    result = json.loads(get_symbol_implementation(repo_path=str(tmp_path), symbol="definitely_missing_symbol_xyz", file_path="pkg/a.py"))
+    assert result["status"] == "not_found"
+    assert calls == [("pkg/a.py",)]
+
+
+def test_get_symbol_implementation__canonical_live_path_failure_is_not_misclassified_as_caller_parameter_error(tmp_path, monkeypatch):
+    _setup_symbol_implementation_workspace(tmp_path, monkeypatch)
+    def fail_canonical_path(root, paths):
+        assert paths == ["pkg/a.py"]
+        raise ValueError("canonical source path unavailable")
+    monkeypatch.setattr(get_symbol_implementation_module, "_resolve_symbol_source_paths", fail_canonical_path)
+    result = json.loads(get_symbol_implementation(repo_path=str(tmp_path), symbol="process_data"))
+    assert result == {"status": "error", "error": "canonical source path unavailable"}
+    assert "parameter_contract_error" not in result
+    assert "tool" not in result
+
+
+def test_get_symbol_implementation__methods_section_on_function_returns_parameter_documentation(tmp_path, monkeypatch):
+    _setup_symbol_implementation_workspace(tmp_path, monkeypatch)
+    result = json.loads(get_symbol_implementation(repo_path=str(tmp_path), symbol="process_data", file_path="pkg/a.py", mode="fetch", include=["methods"], methods=["whatever"]))
+    _assert_parameter_documentation_response(result, parameter="include")
+
+
+def test_get_symbol_implementation__non_python_explicit_file_returns_parameter_documentation(tmp_path, monkeypatch):
+    _setup_symbol_implementation_workspace(tmp_path, monkeypatch)
+    (tmp_path / "pkg" / "note.txt").write_text("not python", encoding="utf-8")
+    result = json.loads(get_symbol_implementation(repo_path=str(tmp_path), symbol="process_data", file_path="pkg/note.txt"))
+    _assert_parameter_documentation_response(result, parameter="file_path/file_paths")
+    assert "not a Python file" in result["parameter_contract_error"]["reason"]
+
+
+def test_get_symbol_implementation__outside_repo_explicit_file_returns_parameter_documentation(tmp_path, monkeypatch):
+    _setup_symbol_implementation_workspace(tmp_path, monkeypatch)
+    outside = tmp_path.parent / (tmp_path.name + "_outside.py")
+    outside.write_text("def external():\n    return 1\n", encoding="utf-8")
+    try:
+        result = json.loads(get_symbol_implementation(repo_path=str(tmp_path), symbol="process_data", file_path=str(outside)))
+    finally:
+        outside.unlink(missing_ok=True)
+    _assert_parameter_documentation_response(result, parameter="file_path/file_paths")
+    assert "outside the repository" in result["parameter_contract_error"]["reason"]
 
 
 def test_get_symbol_implementation__mode_full_returns_documentation(tmp_path, monkeypatch):

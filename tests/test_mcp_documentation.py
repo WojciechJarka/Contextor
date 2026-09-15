@@ -92,6 +92,11 @@ def test_get_symbol_implementation_description_prevents_undocumented_modes():
     assert "include=['implementation']" in description
     assert "Use only documented argument names" in description
     assert len(description.encode("utf-8")) <= 300
+    document = documentation.load_tool_document("get_symbol_implementation")
+    serialized = json.dumps(document)
+    assert "only to missing fetch include selection" not in serialized
+    assert "parameter_contract_error" in serialized
+    assert "Symbol-name and selected method-name lookup misses" in serialized
 
 
 def test_single_tool_and_section_filters_load_only_selected_document(monkeypatch):
