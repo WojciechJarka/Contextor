@@ -1,44 +1,37 @@
-## CPA10I_REFERENCE_FUSION_TEST_CONTRACT_MIGRATION
+## CPA10I_INDEXING_SINGLE_SNAPSHOT_WARM_CACHE_PROFILE_CERTIFICATION
 
 STATUS=PASS
-HEAD_BEFORE=38f9607aad5d283922a33572dcc94ec314cb1873
-HEAD_AFTER=38f9607aad5d283922a33572dcc94ec314cb1873
-FILES_CHANGED=tests/test_reference_fusion_integration.py
+HEAD_BEFORE=827d7983eef971afdbcb0a9c40549d3ea93390c0
+HEAD_AFTER=827d7983eef971afdbcb0a9c40549d3ea93390c0
+WORKTREE_BEFORE=clean; git status --short empty; git diff --name-only HEAD empty; git diff HEAD --stat empty
+WORKTREE_AFTER=report-only change to walkthrough.md; production/test/docs files unchanged
+FILES_CHANGED=walkthrough.md only (report); production/test/docs=NONE
 
-CONTEXTOR_FIRST_VERIFICATION=PASS. Deferred Contextor tools were found and used. LIVE revision 1209, canonical_state=fresh, workspace_sync=verified: parse_source_snapshot resolved to contextor/core/source.py:85-108; _process_single_file resolved by preview to contextor/core/symbol_engine/indexer.py:313-665 with complete implementation available (implementation payload 15.8 KB, confirmation required for full fetch); index_repository resolved to contextor/core/symbol_engine/indexer.py:723-972. Contextor confirms parse seam signature parse_source_snapshot(snapshot, path), complete current-schema warm return before AST parse, and miss/incomplete parse ownership in _process_single_file.
+CONTEXTOR_FIRST_VERIFICATION=PASS. Deferred Contextor tools were present and used before profiling. get_project_architecture returned data_source=live_canonical_state, module_count=398, and LIVE canonical revision 1210. get_symbol_implementation/get_source_range verified workspace_sync=verified and canonical_state=fresh for parse_source_snapshot (contextor/core/source.py:85-108), CacheManager.get (contextor/core/analysis/cache_manager.py:120-158), CacheManager.set (contextor/core/analysis/cache_manager.py:160-202), _process_single_file (contextor/core/symbol_engine/indexer.py:313-665), and index_repository (contextor/core/symbol_engine/indexer.py:723-972). The exact implementation shows read_source_snapshot once per file task, cache.get(..., source_bytes=source_snapshot.raw), an early complete-cache return before parse_source_snapshot, parse_source_snapshot(source_snapshot, path) on miss/incomplete, and cache.set(..., source_bytes=source_snapshot.raw). The profile owner/tool was verified through contextor/core/analysis/profile_runner.py, contextor/core/analysis/profile_worker.py, and contextor/mcp/tools/contextor_profile_analysis.py; the public tool uses the canonical isolated profile worker and no ad-hoc harness.
 
-PRE_EDIT_LITERAL_VERIFICATION=PASS. The target reference-fusion test already contained the migrated parse_source_snapshot seam and zero-parse warm assertion; the two stale len(calls) == 1 assertions remained and matched exactly.
+PROFILE_MECHANISM=contextor_profile_analysis(repo_path="C:\\Temp\\Contextor_Repo") invoked three times sequentially. Each call ran the existing canonical full-analysis path through the isolated profile worker and returned schema=contextor-profile-analysis/v1, status=ok, purpose=diagnostic_profile_not_benchmark, absolute_wall_authoritative=false. No source, test, production, or docs file was edited; no restart was performed.
 
-TEST_1_REQUESTED=& ..venv\Scripts\python.exe -m pytest tests/test_reference_fusion_integration.py -q
-TEST_1_REQUESTED_RESULT=NOT_EXECUTED_BY_PYTEST: PowerShell rejected the literal path because ..venv\Scripts\python.exe does not exist.
-TEST_1_EFFECTIVE=& .\.venv\Scripts\python.exe -m pytest tests/test_reference_fusion_integration.py -q
-TEST_1=PASS (9 passed in 5.31s)
-TEST_2_EFFECTIVE=& .\.venv\Scripts\python.exe -m pytest tests/analysis/test_lineage_extraction.py tests/test_collision_facts_fusion.py tests/test_reference_fusion_integration.py tests/test_test_context_fusion.py -q
-TEST_2=PASS (226 passed in 14.43s; 0 failed)
-PRODUCTION_DIFF_EXTENDED=NO
-PROFILE_RUN=NOT_RUN
+PROFILE_RUN_1=COLD_OR_FORCED_MISS requested label; observed literal profile classification=cold_or_partial_cache_work (operation_id=profile-11772-1). measurement: total_ms=89750.0 (direct), analysis_body_ms=89109.0 (direct), stage_sum_ms=88265.0 (direct), lease_wait_ms=125.0 (direct), unattributed_analysis_ms=844.0 (direct). stage_breakdown critical_path_ms (direct): indexing=29765.0, identity_and_setup=8531.0, reference_and_collision=954.0, graph=78.0, validation=31.0, reports=4266.0, canonical_materialization=25281.0, persistence=4844.0, live_publish=14515.0, metrics=0.0, finalize=0.0. indexing_evidence (direct): file_tasks=398, cache_get_calls=398, cache_hits=381, cache_misses=17, source_parse_calls=17, source_parse_failures=0, lineage_cache_hits=381, lineage_extract_calls=17. aggregate_worker_diagnostics (direct, timing_semantics=aggregate_file_task_not_critical_path): cache_get_sum_ms=18048.0, source_parse_sum_ms=408.0, lineage_extract_sum_ms=2453.0, lineage_extract_event_sum_ms=2453.0. lineage_materialization_evidence (direct): lineage_elapsed_ms=8188.0, lineage_sources=398, reuse_sources=398, reresolve_sources=0, materialize_sources=0, reuse_gate_ms=3985.0. Dominant measured bottleneck: indexing=29765.0 ms, share_of_analysis_pct=33.4, reason_code=cold_or_partial_cache_work.
+
+PROFILE_RUN_2=WARM_CURRENT_SCHEMA (operation_id=profile-1748-1). measurement: total_ms=66438.0 (direct), analysis_body_ms=65641.0 (direct), stage_sum_ms=65078.0 (direct), lease_wait_ms=219.0 (direct), unattributed_analysis_ms=563.0 (direct). stage_breakdown critical_path_ms (direct): indexing=27719.0, identity_and_setup=8516.0, reference_and_collision=562.0, graph=63.0, validation=15.0, reports=4078.0, canonical_materialization=9688.0, persistence=4469.0, live_publish=9968.0, metrics=0.0, finalize=0.0. indexing_evidence (direct): file_tasks=398, cache_get_calls=398, cache_hits=398, cache_misses=0, source_parse_calls=0, source_parse_failures=0, lineage_cache_hits=398, lineage_extract_calls=0, reason_code=warm_cache_fast_path. aggregate_worker_diagnostics (direct, not critical path): cache_get_sum_ms=15494.0, source_parse_sum_ms=0.0, lineage_extract_sum_ms=0.0, lineage_extract_event_sum_ms=0.0. lineage_materialization_evidence (direct): lineage_elapsed_ms=7313.0, lineage_sources=398, reuse_sources=398, reresolve_sources=0, materialize_sources=0, reuse_gate_ms=3704.0. Dominant measured bottleneck: indexing=27719.0 ms, share_of_analysis_pct=42.23, reason_code=warm_cache_fast_path. Warm stage attribution (direct) additionally identifies live_publish=9968.0 ms (publish=9937.0), canonical_materialization=9688.0 ms (lineage_materialization=7328.0), identity_and_setup=8516.0 ms (authoritative_state_resolution=8422.0), and persistence=4469.0 ms (snapshot_save=4454.0).
+
+PROFILE_RUN_3=WARM_CURRENT_SCHEMA_REPEAT (operation_id=profile-1252-1). measurement: total_ms=45297.0 (direct), analysis_body_ms=44656.0 (direct), stage_sum_ms=44172.0 (direct), lease_wait_ms=141.0 (direct), unattributed_analysis_ms=484.0 (direct). stage_breakdown critical_path_ms (direct): indexing=11875.0, identity_and_setup=8000.0, reference_and_collision=578.0, graph=63.0, validation=16.0, reports=3671.0, canonical_materialization=7829.0, persistence=3828.0, live_publish=8312.0, metrics=0.0, finalize=0.0. indexing_evidence (direct): file_tasks=398, cache_get_calls=398, cache_hits=398, cache_misses=0, source_parse_calls=0, source_parse_failures=0, lineage_cache_hits=398, lineage_extract_calls=0, reason_code=warm_cache_fast_path. aggregate_worker_diagnostics (direct, not critical path): cache_get_sum_ms=2077.0, source_parse_sum_ms=0.0, lineage_extract_sum_ms=0.0, lineage_extract_event_sum_ms=0.0. lineage_materialization_evidence (direct): lineage_elapsed_ms=6156.0, lineage_sources=398, reuse_sources=398, reresolve_sources=0, materialize_sources=0, reuse_gate_ms=3484.0. Dominant measured bottleneck: indexing=11875.0 ms, share_of_analysis_pct=26.59, reason_code=warm_cache_fast_path. Warm stage attribution (direct) additionally identifies live_publish=8312.0 ms (publish=8281.0), identity_and_setup=8000.0 ms (authoritative_state_resolution=7922.0), canonical_materialization=7829.0 ms (lineage_materialization=6156.0), and persistence=3828.0 ms (snapshot_save=3812.0).
+
+PROFILE_COMPARISON=All listed profile and stage values are direct profiler fields unless marked calculated. total_ms: run1=89750.0, run2=66438.0, run3=45297.0 (direct). indexing critical_path_ms: run1=29765.0, run2=27719.0, run3=11875.0 (direct). Calculated run2-run3 total reduction=21141.0 ms; calculated run2-run3 indexing reduction=15844.0 ms. The two warm runs are contract-equivalent but not time-stable: the repeat is faster, consistent with one-time process/OS/cache warm-up; these are diagnostic profiles, not controlled benchmarks. source_snapshot/read_ms: NOT EXPOSED by the profiler. cache_get_ms: no critical-path cache_get_ms field is exposed; aggregate cache_get_sum_ms is directly reported as 18048.0 (run1), 15494.0 (run2), and 2077.0 (run3), explicitly non-critical-path. source_parse_ms: no critical-path field is exposed; aggregate source_parse_sum_ms is directly reported as 408.0 (run1), 0.0 (run2), and 0.0 (run3). lineage_extract_ms: no critical-path stage field is exposed; aggregate lineage_extract_sum_ms and lineage_extract_event_sum_ms are directly reported as 2453.0 (run1), 0.0 (run2), and 0.0 (run3); canonical lineage materialization critical-path fields are direct above. No value was inferred from a missing counter.
+
+WARM_ZERO_AST_PARSE=PASS. Both warm profiles directly report source_parse_calls=0, source_parse_failures=0, and aggregate source_parse_sum_ms=0.0 for all 398 file tasks. The profiler labels both indexing runs warm_cache_fast_path.
+
+WARM_ZERO_REEXTRACTION=PASS for the available canonical evidence. Both warm profiles directly report lineage_extract_calls=0, lineage_extract_sum_ms=0.0, lineage_extract_event_sum_ms=0.0, materialize_sources=0, and reresolve_sources=0 for all 398 lineage sources. The exact _process_single_file implementation confirms the complete-cache return occurs before parse and all symbol/reference/collision/test/lineage extraction calls. The profiler does not expose separate per-family symbol/reference/collision/test counters; that absence is recorded, not converted into a guessed count.
+
+SINGLE_SNAPSHOT_VERIFICATION=PASS by current Contextor symbol implementation. _process_single_file obtains source_snapshot=read_source_snapshot(path) once, passes source_snapshot.raw to CacheManager.get for validation, passes the same SourceSnapshot to parse_source_snapshot on miss/incomplete, and passes the same source_snapshot.raw to CacheManager.set. CacheManager.get/set use _compute_hash_bytes(source_bytes) when supplied and therefore do not perform a second source file read/hash pass. The profiler has no dedicated source-read-count counter; this part is proven by the current implementation, not by an inferred timing.
+
+DOMINANT_COST=Run1 cold/partial: indexing critical path 29765.0 ms (33.4%), followed by canonical_materialization 25281.0 ms (28.37%) and live_publish 14515.0 ms (16.29%). Warm2: indexing 27719.0 ms (42.23%) remains the largest critical-path stage, while live_publish=9968.0 ms, canonical_materialization=9688.0 ms, and identity_and_setup=8516.0 ms are the next measured stages. Warm3: indexing=11875.0 ms (26.59%), live_publish=8312.0 ms (18.61%), identity_and_setup=8000.0 ms (17.91%), and canonical_materialization=7829.0 ms (17.53%). Within warm canonical_materialization, lineage_materialization is the dominant measured component (7328.0 ms run2; 6156.0 ms run3); within live_publish, publish is dominant (9937.0 ms run2; 8281.0 ms run3). These are direct profiler attributions.
+
+LATENCY_DIAGNOSIS=CPA10I warm fast path is contractually effective: complete current-schema warm hits avoid AST parsing and lineage re-extraction. The remaining total profile cost is not attributable to AST parsing in warm runs. The dominant warm critical-path cost is indexing stage overhead itself, followed by live publish IPC, authoritative state resolution, and lineage materialization/reuse-gate work. Warm2-to-warm3 variation demonstrates diagnostic warm-up/load sensitivity; it is not evidence that the CPA10I contract regressed. Historical desktop 16 s/44 s observations were not used as equivalent benchmarks.
+
+PROFILE_EVIDENCE_LIMITATIONS=The canonical profiler exposes aggregate file-task cache/parse/lineage counters, not a separate source_snapshot read-count or critical-path cache_get/source_parse/lineage_extract timer. It also does not provide separate symbol/reference/collision/test extraction counters. Therefore the zero-parse and zero-lineage conclusions use literal profiler fields, while single-snapshot and complete warm early-return semantics use current Contextor symbol implementations. Absolute wall time is explicitly non-authoritative. Run1 was cold_or_partial_cache_work (17 misses), not a forced all-file cold-cache run; the existing public profile tool has no force-miss argument, so no ad-hoc cache manipulation or harness was introduced.
+
 MCP_SERVER_RESTART_REQUIRED=NO
-DESKTOP_RUNTIME_RESTART_REQUIRED=YES_BEFORE_LATER_DESKTOP_CERTIFICATION
+DESKTOP_RUNTIME_RESTART_REQUIRED=YES_BEFORE_DESKTOP_CERTIFICATION (desktop certification was not executed)
 PROFILE_WORKER_RESTART_REQUIRED=NO
-GIT_DIFF_CHECK=PASS (only CRLF conversion warnings)
-
-ACTUAL_DIFF=
-diff --git a/tests/test_reference_fusion_integration.py b/tests/test_reference_fusion_integration.py
-index 6aad63c..a3553cc 100644
---- a/tests/test_reference_fusion_integration.py
-+++ b/tests/test_reference_fusion_integration.py
-@@ -98,7 +98,7 @@ def test_reference_legacy_and_schema_migrations_parse_once_then_hit_warm(
-     )
-     migrated = indexer.index_repository(str(root))
--    assert len(calls) == 1
-+    assert calls == [source]
-     assert migrated.reference_facts_by_module["module"]["status"] == "available"
-     data = _payload(root, source)
-@@ -107,7 +107,7 @@ def test_reference_legacy_and_schema_migrations_parse_once_then_hit_warm(
-     _reset_worker_cache(root)
-     calls.clear()
-     remigrated = indexer.index_repository(str(root))
--    assert len(calls) == 1
-+    assert calls == [source]
-     assert remigrated.reference_facts_by_module["module"]["schema_version"] == 1
-     _reset_worker_cache(root)
+ACTUAL_DIFF=DIFFS=NONE for CPA10I production/test/docs/source files. Only walkthrough.md was written as the required report. No historical CPA10I diff was pasted.
