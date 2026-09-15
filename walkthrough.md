@@ -516,3 +516,24 @@ index c71b42d..f7fe899 100644
  
 -
 -
+
+## MCP_DOCUMENTATION_CATALOG_VERSION_CONSISTENCY_FIX
+
+STATUS=SUCCESS
+FILES_CHANGED=contextor/mcp/docs/contextor_profile_analysis.json
+DOCUMENTATION_TESTS=PASS (11 passed, 1 external deprecation warning)
+TOOL_TESTS=PASS (52 passed, 1 external deprecation warning)
+MCP_SERVER_RESTART_REQUIRED=YES
+
+ACTUAL_DIFF=
+diff --git a/contextor/mcp/docs/contextor_profile_analysis.json b/contextor/mcp/docs/contextor_profile_analysis.json
+index f369a5f..9683b78 100644
+--- a/contextor/mcp/docs/contextor_profile_analysis.json
++++ b/contextor/mcp/docs/contextor_profile_analysis.json
+@@ -1,5 +1,5 @@
+ {
+-  "version": "1.3.0",
++  "version": "1.0.0",
+   "tool": "contextor_profile_analysis",
+   "purpose": ["Run one repository-wide diagnostic profile through the real production full-analysis path and return a compact, deterministic breakdown of where the analysis spends time and which structured evidence explains known bottlenecks."],
+   "parameters": ["repo_path (string, required): canonical repository root to profile.", "exclude_paths (array of strings or null, optional, default null): additional per-run repository-relative exclusions forwarded unchanged to the production full-analysis path."],
