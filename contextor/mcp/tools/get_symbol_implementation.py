@@ -5,6 +5,7 @@ from typing import Any
 
 from contextor.core.source import SourceError, read_source
 from contextor.mcp import query_helpers
+from contextor.mcp.documentation import load_tool_document
 from contextor.mcp import runtime as mcp_runtime
 
 DEFAULT_AUTO_FETCH_THRESHOLD_BYTES = 5120
@@ -266,9 +267,19 @@ def get_symbol_implementation(
     if not root.is_dir():
         return json.dumps({"status": "error", "error": f"Repository path '{root}' does not exist."}, indent=2)
     normalized_mode = mode.strip().lower()
-    if normalized_mode not in {"auto", "preview", "fetch"}:
+    allowed_modes = ("auto", "preview", "fetch")
+
+    if normalized_mode not in set(allowed_modes):
         return json.dumps(
-            {"status": "error", "error": "mode must be 'auto', 'preview', or 'fetch'."},
+            {
+                "status": "error",
+                "error": "mode must be 'auto', 'preview', or 'fetch'.",
+                "invalid_mode": mode,
+                "similar_candidates": query_helpers.fuzzy_choice_candidates(
+                    normalized_mode,
+                    allowed_modes,
+                ),
+            },
             indent=2,
         )
     effective_file_paths = list(file_paths or [])
@@ -623,21 +634,30 @@ def get_symbol_implementation(
     )
     if not selected_sections:
         return json.dumps(
-            {
-                "status": "selection_required",
-                "message": "Fetch requires an explicit include selection. Run preview to compare costs.",
-                "allowed_sections": sorted(allowed_sections),
-            },
+            load_tool_document("get_symbol_implementation"),
             indent=2,
+            ensure_ascii=False,
         )
-    unknown_sections = sorted(set(selected_sections) - allowed_sections)
+    unknown_sections = sorted(
+        set(selected_sections) - allowed_sections
+    )
+
     if unknown_sections:
+        ordered_allowed_sections = sorted(allowed_sections)
+
         return json.dumps(
             {
                 "status": "error",
                 "error": "Unsupported include sections.",
                 "unknown_sections": unknown_sections,
-                "allowed_sections": sorted(allowed_sections),
+                "allowed_sections": ordered_allowed_sections,
+                "similar_candidates": {
+                    section: query_helpers.fuzzy_choice_candidates(
+                        section,
+                        ordered_allowed_sections,
+                    )
+                    for section in unknown_sections
+                },
             },
             indent=2,
         )
@@ -684,14 +704,28 @@ def get_symbol_implementation(
             for child in node.body
             if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef))
         }
-        unknown_methods = sorted(set(methods or []) - set(available_methods))
+        unknown_methods = sorted(
+            set(methods or []) - set(available_methods)
+        )
+
         if unknown_methods:
+            ordered_available_methods = sorted(
+                available_methods
+            )
+
             return json.dumps(
                 {
                     "status": "error",
                     "error": "Unknown class methods.",
                     "unknown_methods": unknown_methods,
-                    "available_methods": sorted(available_methods),
+                    "available_methods": ordered_available_methods,
+                    "similar_candidates": {
+                        method: query_helpers.fuzzy_choice_candidates(
+                            method,
+                            ordered_available_methods,
+                        )
+                        for method in unknown_methods
+                    },
                 },
                 indent=2,
             )

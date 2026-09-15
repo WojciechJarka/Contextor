@@ -12,6 +12,44 @@ FUZZY_MIN_SCORE: float = 0.75
 FUZZY_MAX_CANDIDATES: int = 5
 
 
+def fuzzy_choice_candidates(
+    query: str,
+    choices: list[str] | tuple[str, ...] | set[str],
+) -> list[dict[str, object]]:
+    """Return bounded suggestion-only fuzzy matches for one finite string choice."""
+    normalized_query = str(query).strip().casefold()
+    if not normalized_query:
+        return []
+
+    scored: list[tuple[float, str, float]] = []
+
+    for choice in sorted({str(item) for item in choices}):
+        raw_score = difflib.SequenceMatcher(
+            None,
+            normalized_query,
+            choice.casefold(),
+        ).ratio()
+
+        if raw_score >= FUZZY_MIN_SCORE:
+            scored.append(
+                (
+                    -raw_score,
+                    choice,
+                    raw_score,
+                )
+            )
+
+    scored.sort()
+
+    return [
+        {
+            "value": choice,
+            "score": round(score, 4),
+        }
+        for _, choice, score in scored[:FUZZY_MAX_CANDIDATES]
+    ]
+
+
 def bounded_items(items: list, limit: int | None) -> tuple[list, int, bool]:
     total = len(items)
     if limit is None:

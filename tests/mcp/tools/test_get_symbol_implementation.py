@@ -591,6 +591,295 @@ def test_get_symbol_implementation__exact_id_auto_large_response_uses_existing_p
 
 
 # ============================================================
+# FETCH SELECTION ERGONOMICS
+# ============================================================
+
+
+def test_get_symbol_implementation__fetch_without_include_returns_full_canonical_documentation(
+    tmp_path,
+    monkeypatch,
+):
+    from contextor.mcp.documentation import load_tool_document
+
+    _setup_symbol_implementation_workspace(
+        tmp_path,
+        monkeypatch,
+    )
+
+    raw = get_symbol_implementation(
+        repo_path=str(tmp_path),
+        symbol="process_data",
+        file_path="pkg/a.py",
+        mode="fetch",
+    )
+
+    result = json.loads(raw)
+    expected = load_tool_document(
+        "get_symbol_implementation"
+    )
+
+    assert result == expected
+    assert result["tool"] == "get_symbol_implementation"
+    assert "parameters" in result
+    assert "behavior" in result
+    assert "usage_notes" in result
+
+    serialized = json.dumps(result)
+
+    assert "include" in serialized
+    assert "mode='fetch'" in serialized
+    assert "selection_required" not in result
+
+
+def test_get_symbol_implementation__fetch_empty_include_returns_full_canonical_documentation(
+    tmp_path,
+    monkeypatch,
+):
+    from contextor.mcp.documentation import load_tool_document
+
+    _setup_symbol_implementation_workspace(
+        tmp_path,
+        monkeypatch,
+    )
+
+    raw = get_symbol_implementation(
+        repo_path=str(tmp_path),
+        symbol="process_data",
+        file_path="pkg/a.py",
+        mode="fetch",
+        include=[],
+    )
+
+    assert json.loads(raw) == load_tool_document(
+        "get_symbol_implementation"
+    )
+
+
+def test_get_symbol_implementation__fetch_include_typo_returns_bounded_fuzzy_candidate(
+    tmp_path,
+    monkeypatch,
+):
+    _setup_symbol_implementation_workspace(
+        tmp_path,
+        monkeypatch,
+    )
+
+    raw = get_symbol_implementation(
+        repo_path=str(tmp_path),
+        symbol="process_data",
+        file_path="pkg/a.py",
+        mode="fetch",
+        include=["implmentation"],
+    )
+
+    result = json.loads(raw)
+
+    assert result["status"] == "error"
+    assert result["error"] == "Unsupported include sections."
+    assert result["unknown_sections"] == [
+        "implmentation"
+    ]
+
+    candidates = result["similar_candidates"][
+        "implmentation"
+    ]
+
+    assert 1 <= len(candidates) <= 5
+    assert candidates[0]["value"] == "implementation"
+    assert candidates[0]["score"] >= 0.75
+    assert "implementation" not in result
+
+
+def test_get_symbol_implementation__fetch_include_unrelated_value_does_not_guess(
+    tmp_path,
+    monkeypatch,
+):
+    _setup_symbol_implementation_workspace(
+        tmp_path,
+        monkeypatch,
+    )
+
+    raw = get_symbol_implementation(
+        repo_path=str(tmp_path),
+        symbol="process_data",
+        file_path="pkg/a.py",
+        mode="fetch",
+        include=["totally_unrelated_xyz"],
+    )
+
+    result = json.loads(raw)
+
+    assert result["status"] == "error"
+    assert result["unknown_sections"] == [
+        "totally_unrelated_xyz"
+    ]
+    assert (
+        result["similar_candidates"][
+            "totally_unrelated_xyz"
+        ]
+        == []
+    )
+
+
+def test_get_symbol_implementation__invalid_mode_typo_returns_bounded_fuzzy_candidate(
+    tmp_path,
+    monkeypatch,
+):
+    _setup_symbol_implementation_workspace(
+        tmp_path,
+        monkeypatch,
+    )
+
+    raw = get_symbol_implementation(
+        repo_path=str(tmp_path),
+        symbol="process_data",
+        file_path="pkg/a.py",
+        mode="fetcc",
+    )
+
+    result = json.loads(raw)
+
+    assert result["status"] == "error"
+    assert result["invalid_mode"] == "fetcc"
+
+    candidates = result["similar_candidates"]
+
+    assert 1 <= len(candidates) <= 5
+    assert candidates[0]["value"] == "fetch"
+    assert candidates[0]["score"] >= 0.75
+
+
+def test_get_symbol_implementation__missing_method_selection_still_uses_existing_selection_required_contract(
+    tmp_path,
+    monkeypatch,
+):
+    _setup_symbol_implementation_workspace(
+        tmp_path,
+        monkeypatch,
+    )
+
+    raw = get_symbol_implementation(
+        repo_path=str(tmp_path),
+        symbol="AuthService",
+        file_path="pkg/services/auth.py",
+        mode="fetch",
+        include=["methods"],
+    )
+
+    result = json.loads(raw)
+
+    assert result["status"] == "selection_required"
+    assert "method names" in result["message"]
+    assert "tool" not in result
+
+
+def test_get_symbol_implementation__unknown_method_typo_returns_bounded_fuzzy_candidate(
+    tmp_path,
+    monkeypatch,
+):
+    _setup_symbol_implementation_workspace(
+        tmp_path,
+        monkeypatch,
+    )
+
+    raw = get_symbol_implementation(
+        repo_path=str(tmp_path),
+        symbol="AuthService",
+        file_path="pkg/services/auth.py",
+        mode="fetch",
+        include=["methods"],
+        methods=["logn"],
+    )
+
+    result = json.loads(raw)
+
+    assert result["status"] == "error"
+    assert result["error"] == "Unknown class methods."
+    assert result["unknown_methods"] == ["logn"]
+
+    candidates = result["similar_candidates"]["logn"]
+
+    assert 1 <= len(candidates) <= 5
+    assert candidates[0]["value"] == "login"
+    assert candidates[0]["score"] >= 0.75
+
+
+def test_get_symbol_implementation__existing_symbol_fuzzy_contract_remains_bounded_and_suggestion_only(
+    tmp_path,
+    monkeypatch,
+):
+    _setup_symbol_implementation_workspace(
+        tmp_path,
+        monkeypatch,
+    )
+
+    raw = get_symbol_implementation(
+        repo_path=str(tmp_path),
+        symbol="process_dat",
+        file_path="pkg/a.py",
+    )
+
+    result = json.loads(raw)
+
+    assert result["status"] == "not_found"
+    assert 1 <= len(result["similar_candidates"]) <= 5
+    assert (
+        result["similar_candidates"][0]["artifact"]
+        == "pkg.a::process_data"
+    )
+    assert "implementation" not in result
+    assert "resolution" not in result
+
+
+def test_fuzzy_choice_candidates__uses_shared_threshold_order_and_bound():
+    choices = {
+        "implementation",
+        "signature",
+        "docstring",
+        "static_context",
+        "methods",
+        "implementation_extra_1",
+        "implementation_extra_2",
+        "implementation_extra_3",
+        "implementation_extra_4",
+        "implementation_extra_5",
+        "implementation_extra_6",
+    }
+
+    candidates = query_helpers.fuzzy_choice_candidates(
+        "implementatio",
+        choices,
+    )
+
+    assert candidates
+    assert len(candidates) <= query_helpers.FUZZY_MAX_CANDIDATES
+    assert candidates[0]["value"] == "implementation"
+    assert all(
+        candidate["score"] >= query_helpers.FUZZY_MIN_SCORE
+        for candidate in candidates
+    )
+
+    scores = [
+        candidate["score"]
+        for candidate in candidates
+    ]
+
+    assert scores == sorted(
+        scores,
+        reverse=True,
+    )
+
+
+def test_fuzzy_choice_candidates__unrelated_query_returns_empty():
+    assert (
+        query_helpers.fuzzy_choice_candidates(
+            "xyz_totally_unrelated",
+            ["auto", "preview", "fetch"],
+        )
+        == []
+    )
+
+
 # 5. CURRENTNESS & LIVE DEPENDENCY
 # ============================================================
 
@@ -786,6 +1075,4 @@ def test_get_symbol_implementation__runtime_description_parity():
     assert "plain leaves" in desc
     assert "source is read from disk" in desc
     assert "ambiguous" in desc
-
-
 
