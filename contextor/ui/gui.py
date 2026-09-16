@@ -21,6 +21,9 @@ from contextor.core.analysis.full_analysis_coordinator import (
     release_full_analysis,
     run_full_analysis_exclusive,
 )
+from contextor.core.analysis.process_pool_lifecycle import (
+    terminate_active_process_pools,
+)
 from contextor.core.api.facade import ContextorFacade
 from contextor.core.live_state import (
     DesktopLiveEventFeed,
@@ -1260,6 +1263,18 @@ class ContextorGUI:
             # finish UI callbacks after this bound; process exit remains the
             # safe fallback for a task that ignores cooperative cancellation.
             full_analysis_done.wait(timeout=FULL_ANALYSIS_SHUTDOWN_WAIT_SECONDS)
+
+        terminate_active_process_pools(
+            timeout=FULL_ANALYSIS_SHUTDOWN_WAIT_SECONDS,
+        )
+
+        if (
+            full_analysis_done is not None
+            and not full_analysis_done.is_set()
+        ):
+            full_analysis_done.wait(
+                timeout=FULL_ANALYSIS_SHUTDOWN_WAIT_SECONDS
+            )
 
         if getattr(self, "_live_start_retry_after_id", None) is not None:
             if hasattr(self, "root") and hasattr(self.root, "after_cancel"):

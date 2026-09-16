@@ -1,645 +1,623 @@
-# CPA10K4B_RUNTIME_TRACE_SAFE_DIAGNOSTIC_TAIL_RECOVERY
+# CPA10K5A_DESKTOP_PROCESS_POOL_OWNERSHIP_AND_FORCED_SHUTDOWN
 
 MODE=IMPLEMENT_EXACT_AUDITOR_DESIGN
 REPO=C:\\Temp\\Contextor_Repo
-SCOPE=current-task-only
+SCOPE=DESKTOP_OWNED_PROCESS_POOL_WORKERS_ONLY
 IMPLEMENTATION_RESULT=PASS
-PREVIOUS_STAGE=CPA10K4A2_WRITER_PASS_CLOSED
 FULL_ANALYSIS=NOT_RUN
 LIVE_MCP_RESTART=NOT_PERFORMED
 UPDATE_FILE=NOT_USED
-PROCESS_LIFECYCLE=NOT_CHANGED
-PROCESS_LEAK_WORK=NOT_STARTED
+RUNTIME_TRACE_TOUCHED=NO
+MCP_PROCESS_CLEANUP_TOUCHED=NO
 
 ## EXACT_ANCHORS_VERIFIED
 
-Before edit, Contextor verified the current recovery and both physical writers at canonical revision 1278 with `workspace_sync=verified` and fresh syntax/collision/cycle diagnostics.
+Before edit, Contextor verified with `workspace_sync=verified`, canonical revision 1281:
 
-After edit, Contextor verified:
+- `index_repository`: exact existing `ProcessPoolExecutor()` call and existing `executor.shutdown(wait=False, cancel_futures=True)` cancellation path.
+- `collect_module_artifacts`: exact local `ProcessPoolExecutor, as_completed` import, existing pool, and existing cancellation path.
+- `ContextorGUI.on_closing`: existing cooperative `FULL_ANALYSIS_SHUTDOWN_WAIT_SECONDS=1.5` wait before LIVE shutdown and `root.destroy`.
 
-- `AuthorityEventEmitter._recover_unindexed_range_locked`: `get_symbol_implementation` status `resolved`, `workspace_sync=verified`, canonical revision 1280, lines 861-1127.
-- `_append`: status `resolved`, `workspace_sync=verified`, canonical revision 1280, lines 1450-1515.
-- `_append_authority_record_locked`: status `resolved`, `workspace_sync=verified`, canonical revision 1280, lines 550-631.
-- Source ranges for the canonical constants/thread lock and `_TraceAppendFileLock` returned status `ok` with fresh diagnostics.
-- Contextor reported no syntax errors, name collisions, cycles, or diagnostic attention.
+Literal source verification found exactly two production ProcessPoolExecutor creation call sites. `contextor/__main__.py` contains only a Windows comment, not a creation site.
+
+After edit, Contextor verified the new lifecycle functions with `status=resolved`, `workspace_sync=verified`, canonical revision 1282:
+
+- `managed_process_pool`: lines 44-56.
+- `terminate_process_pool`: lines 88-146.
+- `terminate_active_process_pools`: lines 149-163.
+
+The modified existing files were verified with fresh Contextor source ranges because their symbol fetches reported `workspace_sync=out_of_sync` after local edits:
+
+- indexer managed pool/cancellation range: status `ok`, lines 900-968.
+- artifact managed pool/cancellation range: status `ok`, lines 245-306.
+- GUI import range: status `ok`, lines 15-34.
+- GUI close order range: status `ok`, lines 1247-1305.
+- GUI close tail/root destroy range: status `ok`, lines 1348-1365.
+
+All Contextor results reported fresh syntax diagnostics with no collisions, cycles, or diagnostic attention. No `update_file` or full analysis was used.
 
 ## FILES_CHANGED
 
-- `contextor/core/runtime_trace.py`
-- `tests/test_runtime_authority_events.py`
+- `contextor/core/analysis/process_pool_lifecycle.py`
+- `contextor/core/symbol_engine/indexer.py`
+- `contextor/core/reporting_layer/artifact_usage_report.py`
+- `contextor/ui/gui.py`
+- `tests/test_process_pool_lifecycle.py`
 - `walkthrough.md` report artifact only and excluded from production/test diff accounting
 
-No writer, capture, session/pointer, process-lifecycle, or `tests/test_runtime_trace.py` changes were made in this step.
+No file outside FILES_CHANGED_EXPECTED changed in this step. No MCP file was changed.
 
-## RECOVERY_LOCK_ORDER
+## PROCESS_LOCAL_OWNERSHIP_MODEL
 
-The exact recovery lock order is:
+The registry is process-local in memory:
 
-`existing process-local authority lock -> _AuthorityFileLock -> _trace_append_thread_lock -> _TraceAppendFileLock`
+- `_active_executors` stores executor objects by `id(executor)`.
+- `_registry_pid` detects a changed process identity and clears inherited registry state after fork.
+- `managed_process_pool` registers before entering the executor context and unregisters in `finally`.
+- No file registry, owner token, MCP registry, or cross-process ownership mechanism was added.
+- External Antigravity/Codex MCP root processes cannot appear in this registry because they are not executor objects registered in this Python process.
 
-The replacement recovery method obtains `_trace_append_thread_lock` and then `_TraceAppendFileLock(_trace_append_lock_path(path))`. It obtains the locked physical file size, scans, and performs the optional final-tail truncate/fsync while the same extent lock is held.
+## PROCESS_POOL_CALL_SITES
 
-No lock class was changed. No file-lock reentrancy was added. No append lock was moved to another layer.
+Exactly two production ProcessPoolExecutor creation sites remain:
 
-## SAFE_REPAIR_BOUNDARY
+1. `contextor/core/symbol_engine/indexer.py`
+   - retains `from concurrent.futures import ProcessPoolExecutor, as_completed`;
+   - wraps `ProcessPoolExecutor` with `managed_process_pool`;
+   - replaces cancellation shutdown with `terminate_process_pool(executor)`.
 
-The only repair path is:
+2. `contextor/core/reporting_layer/artifact_usage_report.py`
+   - retains the local `from concurrent.futures import ProcessPoolExecutor, as_completed` import required by existing monkeypatch contracts;
+   - wraps the initializer/configured pool with `managed_process_pool`;
+   - replaces cancellation shutdown with `terminate_process_pool(executor)`.
 
-- the scanned line is the final unterminated tail;
-- its raw bytes begin exactly with `_DIAGNOSTIC_RECORD_PREFIX`;
-- the stream is truncated at that record start;
-- the stream is flushed and fsynced;
-- recovery continues with the corrected `locked_end`.
+No other production ProcessPoolExecutor creation call site exists.
 
-The canonical prefix is exactly:
+## DESKTOP_CLOSE_ORDER
 
-`_DIAGNOSTIC_RECORD_PREFIX = b'{"_record_kind":"diagnostic_event",'`
+`ContextorGUI.on_closing` now executes:
 
-No prefix is reconstructed heuristically in recovery.
+1. existing cooperative cancellation signal;
+2. existing first bounded wait of 1.5 seconds;
+3. `terminate_active_process_pools(timeout=1.5)` for the current Desktop process registry only;
+4. second bounded wait of 1.5 seconds;
+5. existing watcher/feed/client/LIVE shutdown;
+6. existing state save and `root.destroy()`.
 
-A complete LF-terminated line is always decoded and JSON-parsed before any authority/non-authority filtering. A malformed LF-terminated line therefore remains fatal even if it starts with the diagnostic prefix.
+The value `FULL_ANALYSIS_SHUTDOWN_WAIT_SECONDS = 1.5` and all existing LIVE shutdown logic remain unchanged.
 
-An unterminated tail without the exact diagnostic prefix remains fatal. No malformed-diagnostic `continue` path exists.
+## REAL_WORKER_TERMINATION_EVIDENCE
 
-## FAIL_CLOSED_EVIDENCE
+`test_real_process_pool_workers_are_force_terminated` creates a real `ProcessPoolExecutor(max_workers=2)`, starts two long-running workers, confirms both workers are alive and registered, invokes `terminate_active_process_pools(timeout=2.0)`, and confirms both worker processes are no longer alive. This test passed.
 
-The preserved recovery behavior and new tests cover:
+The fake-process test also confirms the exact sequence: executor shutdown with `wait=False, cancel_futures=True`, terminate, bounded join, kill survivor, bounded join.
 
-- unknown/truncated tail without the typed prefix: fails closed via `test_malformed_or_truncated_unindexed_tail_fails_closed`;
-- complete LF-terminated typed diagnostic malformed JSON: fails closed with `malformed trace record`;
-- complete malformed authority record: fails closed with `malformed trace record`;
-- complete legacy unframed malformed record: fails closed with `malformed trace record`;
-- valid authority event processing, schema/sequence/pending/conflict semantics, and existing diagnostic-noise recovery tests remain passing.
+## EXTERNAL_MCP_EXCLUSION_EVIDENCE
 
-## LARGE_DIAGNOSTIC_EVIDENCE
-
-`test_large_valid_diagnostic_range_does_not_hit_authority_recovery_bound` writes a valid diagnostic JSONL record larger than `_AUTHORITY_RECOVERY_WINDOW` and verifies that the next authority event recovers with the next sequence. The recovery byte bound remains applied only to authority records because the diagnostic record is valid JSON and has `_type != "authority_event"`.
-
-## WRITER_UNCHANGED_EVIDENCE
-
-The post-edit Contextor implementations of `_append` and `_append_authority_record_locked` match the closed CPA10K4A2 writer contract exactly:
-
-- process-local writer serialization remains in both writers;
-- `_append` still does not use `_AuthorityFileLock`;
-- authority physical append still uses `_TraceAppendFileLock`;
-- diagnostic timeout, prefix construction, `_active_fd` removal, `_rollback_append`, and both lock classes are unchanged.
-
-The only production changes in this step are the canonical prefix constant and the exact recovery-method replacement.
+- Registry storage is only module memory guarded by `_registry_lock`.
+- Registry state is keyed to the current OS process through `_registry_pid`.
+- No import or call to `mcp_process_registry`, `terminate_pid_tree`, or MCP shutdown was added.
+- No file under `contextor/mcp*` changed.
+- Certification is limited to Desktop-owned ProcessPoolExecutor workers; external MCP roots are explicitly outside this mechanism.
 
 ## PY_COMPILE
 
 Command:
 
-`& .\\.venv\\Scripts\\python.exe -m py_compile contextor/core/runtime_trace.py`
+`& .\\.venv\\Scripts\\python.exe -m py_compile contextor/core/analysis/process_pool_lifecycle.py contextor/core/symbol_engine/indexer.py contextor/core/reporting_layer/artifact_usage_report.py contextor/ui/gui.py`
 
 Result: PASS
 
 ## TESTS
 
-Authority test file:
+Authorized command:
 
-`& .\\.venv\\Scripts\\python.exe -m pytest tests/test_runtime_authority_events.py -q`
+`& .\\.venv\\Scripts\\python.exe -m pytest tests/test_process_pool_lifecycle.py tests/test_artifact_adaptive_execution.py tests/test_cancellation.py -q`
 
-Result: `45 passed in 15.26s`
-
-Writer regression anchors:
-
-`& .\\.venv\\Scripts\\python.exe -m pytest tests/test_runtime_trace.py::test_scoped_trace_capture_matches_durable_record tests/test_runtime_trace.py::test_multiprocess_append_is_valid_json -q`
-
-Result: `2 passed in 3.93s`
+Result: `22 passed in 10.92s`
 
 No broad/full pytest suite was run.
 
 ## CERTIFICATION
 
-FINAL_TYPED_DIAGNOSTIC_TAIL_REPAIRED=YES
-COMPLETE_MALFORMED_TYPED_DIAGNOSTIC_FAILS_CLOSED=YES
-MALFORMED_AUTHORITY_FAILS_CLOSED=YES
-LEGACY_MALFORMED_RECORD_FAILS_CLOSED=YES
-UNKNOWN_TRUNCATED_TAIL_FAILS_CLOSED=YES
-RECOVERY_FILE_EXTENT_SERIALIZED=YES
-SHARED_TRACE_OVER_1M_DIAGNOSTIC_RECOVERS=YES
-WRITER_CONTRACT_UNCHANGED=YES
+PROCESS_POOL_REGISTRY_PROCESS_LOCAL=YES
+INDEXER_POOL_MANAGED=YES
+ARTIFACT_POOL_MANAGED=YES
+CANCELLATION_FORCE_TERMINATES_RUNNING_WORKERS=YES
+DESKTOP_CLOSE_FORCE_TERMINATES_ACTIVE_POOLS=YES
+REAL_PROCESSPOOL_WORKERS_GONE_AFTER_FORCE_SHUTDOWN=YES
+EXTERNAL_MCP_ROOT_CAN_BE_TERMINATED_BY_DESKTOP=NO
+MCP_PROCESS_CLEANUP_TOUCHED=NO
 PY_COMPILE=PASS
 FOCUSED_TESTS=PASS
 
 ## COMPLETE_DIFFS
 
-The following is the complete current worktree diff for every production/test file in this task. `walkthrough.md` is excluded.
+The following is the complete diff for every production/test file changed in this step. New files are represented as full new-file diffs. `walkthrough.md` is excluded.
 
-diff --git a/contextor/core/runtime_trace.py b/contextor/core/runtime_trace.py
-index 34dd692..4f8dafd 100644
---- a/contextor/core/runtime_trace.py
-+++ b/contextor/core/runtime_trace.py
-@@ -34,6 +34,9 @@ _counter = 0
- _AUTHORITY_STATE_NAME = "authority_event_state.json"
- _TRACE_APPEND_LOCK_NAME = ".contextor_runtime_trace.append.lock"
- _DIAGNOSTIC_RECORD_KIND = "diagnostic_event"
-+_DIAGNOSTIC_RECORD_PREFIX = (
-+    b'{"_record_kind":"diagnostic_event",'
+diff --git a/contextor/core/reporting_layer/artifact_usage_report.py b/contextor/core/reporting_layer/artifact_usage_report.py
+index 44f7466..8648edf 100644
+--- a/contextor/core/reporting_layer/artifact_usage_report.py
++++ b/contextor/core/reporting_layer/artifact_usage_report.py
+@@ -49,6 +49,10 @@ from contextor.core.analysis.test_context import (
+     build_test_context_index,
+     discover_test_dirs,
+ )
++from contextor.core.analysis.process_pool_lifecycle import (
++    managed_process_pool,
++    terminate_process_pool,
 +)
- _DIAGNOSTIC_APPEND_LOCK_TIMEOUT = 0.25
- _AUTHORITY_RECOVERY_WINDOW = 1024 * 1024
- _AUTHORITY_APPEND_LOCATE_WINDOW = 1024 * 1024
-@@ -855,65 +858,273 @@ class AuthorityEventEmitter:
-             _write_authority_sidecar(self.sidecar_path, self.runtime_domain_id, state, payload)
-         return state, payload
+ from contextor.core.api.api_consumers import extract_api_consumers
+ from contextor.core.errors import AnalysisCancelled, checkpoint
+ from contextor.core.reference import (
+@@ -251,7 +255,8 @@ def collect_module_artifacts(
+             checkpoint(progress_callback, f"JSON: {module_id}", completed, total)
+         return result, failures
  
--    def _recover_unindexed_range_locked(self, path: Path, start: int, end: int, payload: dict[str, object]) -> dict[str, object]:
-+    def _recover_unindexed_range_locked(
-+        self,
-+        path: Path,
-+        start: int,
-+        end: int,
-+        payload: dict[str, object],
-+    ) -> dict[str, object]:
-         if end < start:
--            raise AuthorityEventRecoveryError("authority trace shrank below durable tail offset")
--        if end == start:
--            return payload
--        domains = dict(payload["domains"])
--        tail = start
--        authority_recovery_bytes = 0
--        # The recovery window bounds cumulative unindexed authority-event bytes, not the shared runtime trace.
--        with path.open("rb") as stream:
--            stream.seek(start)
--            while tail < end:
--                record_start = tail
--                line = stream.readline(end - tail)
--                if not line:
--                    raise AuthorityEventRecoveryError("observability_recovery_required: truncated unindexed trace range")
--                record_end = record_start + len(line)
--                tail = record_end
--                if not line.endswith(b"\n"):
--                    raise AuthorityEventRecoveryError("observability_recovery_required: truncated unindexed trace range")
-+            raise AuthorityEventRecoveryError(
-+                "authority trace shrank below durable tail offset"
+-    with ProcessPoolExecutor(
++    with managed_process_pool(
++        ProcessPoolExecutor,
+         initializer=_init_artifact_worker,
+         initargs=(
+             modules,
+@@ -292,10 +297,7 @@ def collect_module_artifacts(
+                     total,
+                 )
+             except AnalysisCancelled:
+-                executor.shutdown(
+-                    wait=False,
+-                    cancel_futures=True,
+-                )
++                terminate_process_pool(executor)
+                 raise
+ 
+     return result, failures
+diff --git a/contextor/core/symbol_engine/indexer.py b/contextor/core/symbol_engine/indexer.py
+index 718d4b6..5ff9f4e 100644
+--- a/contextor/core/symbol_engine/indexer.py
++++ b/contextor/core/symbol_engine/indexer.py
+@@ -19,6 +19,10 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
+ from pathlib import Path
+ 
+ from contextor.core.analysis.cache_manager import CacheManager
++from contextor.core.analysis.process_pool_lifecycle import (
++    managed_process_pool,
++    terminate_process_pool,
++)
+ from contextor.core.analysis.lineage_extraction import (
+     deserialize_extracted_lineage_source_facts,
+     extract_lineage_source_facts,
+@@ -909,7 +913,9 @@ def index_repository(
+             automatic_test_dirs=automatic_test_dirs(),
+         )
+ 
+-    with ProcessPoolExecutor() as executor:
++    with managed_process_pool(
++        ProcessPoolExecutor,
++    ) as executor:
+         futures = {
+             executor.submit(_process_single_file, str(p), str(root_path)): p
+             for p in files_to_process
+@@ -954,7 +960,7 @@ def index_repository(
+             try:
+                 checkpoint(progress_callback, res["filename"], completed, total_files)
+             except AnalysisCancelled:
+-                executor.shutdown(wait=False, cancel_futures=True)
++                terminate_process_pool(executor)
+                 raise
+ 
+     emit_index_profile_evidence("process_pool")
+diff --git a/contextor/ui/gui.py b/contextor/ui/gui.py
+index 0887237..eb5b708 100644
+--- a/contextor/ui/gui.py
++++ b/contextor/ui/gui.py
+@@ -21,6 +21,9 @@ from contextor.core.analysis.full_analysis_coordinator import (
+     release_full_analysis,
+     run_full_analysis_exclusive,
+ )
++from contextor.core.analysis.process_pool_lifecycle import (
++    terminate_active_process_pools,
++)
+ from contextor.core.api.facade import ContextorFacade
+ from contextor.core.live_state import (
+     DesktopLiveEventFeed,
+@@ -1261,6 +1264,18 @@ class ContextorGUI:
+             # safe fallback for a task that ignores cooperative cancellation.
+             full_analysis_done.wait(timeout=FULL_ANALYSIS_SHUTDOWN_WAIT_SECONDS)
+ 
++        terminate_active_process_pools(
++            timeout=FULL_ANALYSIS_SHUTDOWN_WAIT_SECONDS,
++        )
++
++        if (
++            full_analysis_done is not None
++            and not full_analysis_done.is_set()
++        ):
++            full_analysis_done.wait(
++                timeout=FULL_ANALYSIS_SHUTDOWN_WAIT_SECONDS
 +            )
 +
-+        with _trace_append_thread_lock:
-+            with _TraceAppendFileLock(
-+                _trace_append_lock_path(path)
-+            ):
+         if getattr(self, "_live_start_retry_after_id", None) is not None:
+             if hasattr(self, "root") and hasattr(self.root, "after_cancel"):
                  try:
--                    raw = json.loads(line.decode("utf-8"))
--                except (UnicodeDecodeError, ValueError, TypeError) as exc:
--                    raise AuthorityEventRecoveryError("observability_recovery_required: malformed trace record") from exc
--                if not isinstance(raw, dict):
--                    raise AuthorityEventRecoveryError("observability_recovery_required: trace record is not an object")
--                if raw.get("_type") != "authority_event":
--                    continue
--                authority_recovery_bytes += len(line)
--                if authority_recovery_bytes > _AUTHORITY_RECOVERY_WINDOW:
--                    raise AuthorityEventRecoveryError("observability_recovery_required: authority event recovery exceeds bound")
--                if raw.get("schema") != AUTHORITY_EVENT_SCHEMA:
--                    raise AuthorityEventRecoveryError("observability_recovery_required: authority schema mismatch")
--                event = AuthorityEvent.from_dict({key: raw.get(key) for key in AuthorityEvent.__dataclass_fields__})
--                domain = dict(domains.get(event.runtime_domain_id) or _authority_default_domain(event.runtime_domain_id))
--                expected = int(domain["durable_high_water_sequence"]) + 1
--                if event.sequence != expected:
--                    raise AuthorityEventRecoveryError("observability_recovery_required: authority sequence discontinuity")
--                index = RecordIndex(event.sequence, event.event_id, str(path.resolve()), record_start, record_end)
--                domain.update(durable_high_water_sequence=event.sequence, durable_high_water_event_id=event.event_id, durable_high_water_trace_path=str(path.resolve()), durable_high_water_offset=record_start, durable_high_water_end_offset=record_end)
--                pending = list(domain["pending_index"])
--                if len(pending) >= _AUTHORITY_PENDING_LIMIT:
--                    raise AuthorityEventRecoveryError("observability_recovery_required: pending index retention exceeded")
--                pending.append(index.__dict__)
--                domain["pending_index"] = pending
--                if domain["pending_start_sequence"] is None:
--                    domain["pending_start_sequence"] = int(domain["live_handoff_cursor"]) + 1
--                domain["pending_end_sequence"] = event.sequence
--                if event.event_type == "AUTHORITY_EVENT_DELIVERY_CONFLICT":
--                    if event.request_type != "authority_delivery_conflict" or not isinstance(event.operation_id, str) or not event.operation_id or isinstance(event.queue_order, bool) or not isinstance(event.queue_order, int) or event.queue_order < 1:
--                        raise AuthorityEventRecoveryError("authority delivery conflict lacks exact machine identity")
--                    marker = {"runtime_domain_id": event.runtime_domain_id, "sequence": event.queue_order, "event_id": event.operation_id}
--                    if marker not in domain["delivery_conflicts"]:
--                        domain["delivery_conflicts"] = list(domain["delivery_conflicts"]) + [marker]
--                domains[event.runtime_domain_id] = domain
--        payload = dict(payload)
--        payload["durable_tail_offset"] = end
--        payload["domains"] = domains
--        return payload
-+                    locked_end = path.stat().st_size
-+                except FileNotFoundError as exc:
-+                    raise AuthorityEventRecoveryError(
-+                        "observability_recovery_required: "
-+                        "authority trace segment is missing"
-+                    ) from exc
+diff --git a/contextor/core/analysis/process_pool_lifecycle.py b/contextor/core/analysis/process_pool_lifecycle.py
+new file mode 100644
+--- /dev/null
++++ b/contextor/core/analysis/process_pool_lifecycle.py
+@@ -0,0 +1,172 @@
++from __future__ import annotations
 +
-+                if locked_end < start:
-+                    raise AuthorityEventRecoveryError(
-+                        "authority trace shrank below durable tail offset"
-+                    )
-+                if locked_end == start:
-+                    return payload
++import os
++import threading
++import time
++from contextlib import contextmanager
++from typing import Any, Callable, Iterator
 +
-+                domains = dict(payload["domains"])
-+                tail = start
-+                authority_recovery_bytes = 0
 +
-+                with path.open("r+b") as stream:
-+                    stream.seek(start)
++_registry_lock = threading.RLock()
++_registry_pid = os.getpid()
++_active_executors: dict[int, Any] = {}
 +
-+                    while tail < locked_end:
-+                        record_start = tail
-+                        line = stream.readline(
-+                            locked_end - tail
-+                        )
 +
-+                        if not line:
-+                            raise AuthorityEventRecoveryError(
-+                                "observability_recovery_required: "
-+                                "truncated unindexed trace range"
-+                            )
++def _ensure_process_local_registry_locked() -> None:
++    global _registry_pid
 +
-+                        record_end = record_start + len(line)
-+                        tail = record_end
++    current_pid = os.getpid()
++    if current_pid == _registry_pid:
++        return
 +
-+                        if not line.endswith(b"\n"):
-+                            if line.startswith(
-+                                _DIAGNOSTIC_RECORD_PREFIX
-+                            ):
-+                                stream.seek(record_start)
-+                                stream.truncate()
-+                                stream.flush()
-+                                os.fsync(stream.fileno())
-+                                locked_end = record_start
-+                                tail = record_start
-+                                break
++    _active_executors.clear()
++    _registry_pid = current_pid
 +
-+                            raise AuthorityEventRecoveryError(
-+                                "observability_recovery_required: "
-+                                "truncated unindexed trace range"
-+                            )
 +
-+                        try:
-+                            raw = json.loads(
-+                                line.decode("utf-8")
-+                            )
-+                        except (
-+                            UnicodeDecodeError,
-+                            ValueError,
-+                            TypeError,
-+                        ) as exc:
-+                            raise AuthorityEventRecoveryError(
-+                                "observability_recovery_required: "
-+                                "malformed trace record"
-+                            ) from exc
++def _register_executor(executor: Any) -> None:
++    with _registry_lock:
++        _ensure_process_local_registry_locked()
++        _active_executors[id(executor)] = executor
 +
-+                        if not isinstance(raw, dict):
-+                            raise AuthorityEventRecoveryError(
-+                                "observability_recovery_required: "
-+                                "trace record is not an object"
-+                            )
 +
-+                        if raw.get("_type") != "authority_event":
-+                            continue
++def _unregister_executor(executor: Any) -> None:
++    with _registry_lock:
++        _ensure_process_local_registry_locked()
++        _active_executors.pop(id(executor), None)
 +
-+                        authority_recovery_bytes += len(line)
-+                        if (
-+                            authority_recovery_bytes
-+                            > _AUTHORITY_RECOVERY_WINDOW
-+                        ):
-+                            raise AuthorityEventRecoveryError(
-+                                "observability_recovery_required: "
-+                                "authority event recovery exceeds bound"
-+                            )
 +
-+                        if (
-+                            raw.get("schema")
-+                            != AUTHORITY_EVENT_SCHEMA
-+                        ):
-+                            raise AuthorityEventRecoveryError(
-+                                "observability_recovery_required: "
-+                                "authority schema mismatch"
-+                            )
++def active_process_pool_count() -> int:
++    with _registry_lock:
++        _ensure_process_local_registry_locked()
++        return len(_active_executors)
 +
-+                        event = AuthorityEvent.from_dict(
-+                            {
-+                                key: raw.get(key)
-+                                for key
-+                                in AuthorityEvent.__dataclass_fields__
-+                            }
-+                        )
 +
-+                        domain = dict(
-+                            domains.get(
-+                                event.runtime_domain_id
-+                            )
-+                            or _authority_default_domain(
-+                                event.runtime_domain_id
-+                            )
-+                        )
++@contextmanager
++def managed_process_pool(
++    executor_factory: Callable[..., Any],
++    *args: Any,
++    **kwargs: Any,
++) -> Iterator[Any]:
++    executor = executor_factory(*args, **kwargs)
++    _register_executor(executor)
++    try:
++        with executor as entered:
++            yield entered
++    finally:
++        _unregister_executor(executor)
 +
-+                        expected = (
-+                            int(
-+                                domain[
-+                                    "durable_high_water_sequence"
-+                                ]
-+                            )
-+                            + 1
-+                        )
-+                        if event.sequence != expected:
-+                            raise AuthorityEventRecoveryError(
-+                                "observability_recovery_required: "
-+                                "authority sequence discontinuity"
-+                            )
 +
-+                        index = RecordIndex(
-+                            event.sequence,
-+                            event.event_id,
-+                            str(path.resolve()),
-+                            record_start,
-+                            record_end,
-+                        )
-+
-+                        domain.update(
-+                            durable_high_water_sequence=(
-+                                event.sequence
-+                            ),
-+                            durable_high_water_event_id=(
-+                                event.event_id
-+                            ),
-+                            durable_high_water_trace_path=(
-+                                str(path.resolve())
-+                            ),
-+                            durable_high_water_offset=(
-+                                record_start
-+                            ),
-+                            durable_high_water_end_offset=(
-+                                record_end
-+                            ),
-+                        )
-+
-+                        pending = list(
-+                            domain["pending_index"]
-+                        )
-+                        if (
-+                            len(pending)
-+                            >= _AUTHORITY_PENDING_LIMIT
-+                        ):
-+                            raise AuthorityEventRecoveryError(
-+                                "observability_recovery_required: "
-+                                "pending index retention exceeded"
-+                            )
-+
-+                        pending.append(index.__dict__)
-+                        domain["pending_index"] = pending
-+
-+                        if (
-+                            domain["pending_start_sequence"]
-+                            is None
-+                        ):
-+                            domain[
-+                                "pending_start_sequence"
-+                            ] = (
-+                                int(
-+                                    domain[
-+                                        "live_handoff_cursor"
-+                                    ]
-+                                )
-+                                + 1
-+                            )
-+
-+                        domain[
-+                            "pending_end_sequence"
-+                        ] = event.sequence
-+
-+                        if (
-+                            event.event_type
-+                            == "AUTHORITY_EVENT_DELIVERY_CONFLICT"
-+                        ):
-+                            if (
-+                                event.request_type
-+                                != "authority_delivery_conflict"
-+                                or not isinstance(
-+                                    event.operation_id,
-+                                    str,
-+                                )
-+                                or not event.operation_id
-+                                or isinstance(
-+                                    event.queue_order,
-+                                    bool,
-+                                )
-+                                or not isinstance(
-+                                    event.queue_order,
-+                                    int,
-+                                )
-+                                or event.queue_order < 1
-+                            ):
-+                                raise AuthorityEventRecoveryError(
-+                                    "authority delivery conflict "
-+                                    "lacks exact machine identity"
-+                                )
-+
-+                            marker = {
-+                                "runtime_domain_id": (
-+                                    event.runtime_domain_id
-+                                ),
-+                                "sequence": (
-+                                    event.queue_order
-+                                ),
-+                                "event_id": (
-+                                    event.operation_id
-+                                ),
-+                            }
-+
-+                            if (
-+                                marker
-+                                not in domain[
-+                                    "delivery_conflicts"
-+                                ]
-+                            ):
-+                                domain[
-+                                    "delivery_conflicts"
-+                                ] = (
-+                                    list(
-+                                        domain[
-+                                            "delivery_conflicts"
-+                                        ]
-+                                    )
-+                                    + [marker]
-+                                )
-+
-+                        domains[
-+                            event.runtime_domain_id
-+                        ] = domain
-+
-+                payload = dict(payload)
-+                payload["durable_tail_offset"] = locked_end
-+                payload["domains"] = domains
-+                return payload
- 
-     def _event_from_record(self, record: Mapping[str, object]) -> AuthorityEvent:
-         event_id = uuid.uuid4().hex
-diff --git a/tests/test_runtime_authority_events.py b/tests/test_runtime_authority_events.py
-index 328b3fc..b8820b6 100644
---- a/tests/test_runtime_authority_events.py
-+++ b/tests/test_runtime_authority_events.py
-@@ -135,6 +135,153 @@ def test_malformed_or_truncated_unindexed_tail_fails_closed(trace_logs):
-         trace.AuthorityEventEmitter(runtime_domain_id="domain-a", logs_root=trace_logs)
- 
- 
-+def test_truncated_typed_diagnostic_tail_is_repaired(trace_logs):
-+    emitter = trace.AuthorityEventEmitter(
-+        runtime_domain_id="domain-a",
-+        logs_root=trace_logs,
++def _executor_processes(executor: Any) -> tuple[Any, ...]:
++    processes = getattr(executor, "_processes", None)
++    if not isinstance(processes, dict):
++        return ()
++    return tuple(
++        process
++        for process in processes.values()
++        if process is not None
 +    )
-+    first = emitter.emit("VALID")
-+    path = emitter.log_path
-+    before_tail = path.stat().st_size
 +
-+    with path.open("ab") as stream:
-+        stream.write(
-+            trace._DIAGNOSTIC_RECORD_PREFIX
-+            + b'"ts":"incomplete"'
++
++def _process_is_alive(process: Any) -> bool:
++    try:
++        return bool(process.is_alive())
++    except Exception:
++        return False
++
++
++def _join_process_until(
++    process: Any,
++    deadline: float,
++) -> None:
++    remaining = max(0.0, deadline - time.monotonic())
++    try:
++        process.join(timeout=remaining)
++    except Exception:
++        pass
++
++
++def terminate_process_pool(
++    executor: Any,
++    *,
++    timeout: float = 1.5,
++) -> int:
++    processes = _executor_processes(executor)
++
++    shutdown = getattr(executor, "shutdown", None)
++    if callable(shutdown):
++        try:
++            shutdown(
++                wait=False,
++                cancel_futures=True,
++            )
++        except TypeError:
++            try:
++                shutdown(wait=False)
++            except Exception:
++                pass
++        except Exception:
++            pass
++
++    targets = [
++        process
++        for process in processes
++        if _process_is_alive(process)
++    ]
++
++    for process in targets:
++        try:
++            process.terminate()
++        except Exception:
++            pass
++
++    deadline = time.monotonic() + max(0.0, timeout)
++    for process in targets:
++        _join_process_until(process, deadline)
++
++    survivors = [
++        process
++        for process in targets
++        if _process_is_alive(process)
++    ]
++
++    for process in survivors:
++        try:
++            kill = getattr(process, "kill", None)
++            if callable(kill):
++                kill()
++            else:
++                process.terminate()
++        except Exception:
++            pass
++
++    kill_deadline = time.monotonic() + max(0.0, timeout)
++    for process in survivors:
++        _join_process_until(process, kill_deadline)
++
++    return len(targets)
++
++
++def terminate_active_process_pools(
++    *,
++    timeout: float = 1.5,
++) -> int:
++    with _registry_lock:
++        _ensure_process_local_registry_locked()
++        executors = tuple(_active_executors.values())
++
++    terminated = 0
++    for executor in executors:
++        terminated += terminate_process_pool(
++            executor,
++            timeout=timeout,
++        )
++    return terminated
++
++
++__all__ = [
++    "active_process_pool_count",
++    "managed_process_pool",
++    "terminate_active_process_pools",
++    "terminate_process_pool",
++]
++
+diff --git a/tests/test_process_pool_lifecycle.py b/tests/test_process_pool_lifecycle.py
+new file mode 100644
+--- /dev/null
++++ b/tests/test_process_pool_lifecycle.py
+@@ -0,0 +1,188 @@
++from concurrent.futures import ProcessPoolExecutor
++from types import SimpleNamespace
++import threading
++import time
++
++import contextor.core.analysis.process_pool_lifecycle as lifecycle
++import contextor.ui.gui as gui_module
++
++
++def _sleep_worker(seconds):
++    time.sleep(seconds)
++    return seconds
++
++
++class _FakeProcess:
++    def __init__(self, *, survive_terminate=False):
++        self.alive = True
++        self.survive_terminate = survive_terminate
++        self.terminate_calls = 0
++        self.kill_calls = 0
++        self.join_calls = 0
++
++    def is_alive(self):
++        return self.alive
++
++    def terminate(self):
++        self.terminate_calls += 1
++        if not self.survive_terminate:
++            self.alive = False
++
++    def kill(self):
++        self.kill_calls += 1
++        self.alive = False
++
++    def join(self, timeout=None):
++        self.join_calls += 1
++
++
++class _FakeExecutor:
++    def __init__(self, processes=None):
++        self._processes = {
++            index: process
++            for index, process in enumerate(processes or ())
++        }
++        self.shutdown_calls = []
++
++    def __enter__(self):
++        return self
++
++    def __exit__(self, *_args):
++        return False
++
++    def shutdown(self, *, wait=True, cancel_futures=False):
++        self.shutdown_calls.append(
++            (wait, cancel_futures)
 +        )
 +
-+    assert path.stat().st_size > before_tail
 +
-+    recovered = trace.AuthorityEventEmitter(
-+        runtime_domain_id="domain-a",
-+        logs_root=trace_logs,
-+    )
++def test_managed_process_pool_registry_is_process_local():
++    assert lifecycle.active_process_pool_count() == 0
 +
-+    assert path.stat().st_size == before_tail
-+    assert (
-+        _state(trace_logs)["durable_tail_offset"]
-+        == before_tail
-+    )
-+    assert (
-+        recovered.emit("AFTER_RECOVERY").sequence
-+        == first.sequence + 1
-+    )
-+
-+
-+def test_complete_malformed_typed_diagnostic_still_fails_closed(
-+    trace_logs,
-+):
-+    emitter = trace.AuthorityEventEmitter(
-+        runtime_domain_id="domain-a",
-+        logs_root=trace_logs,
-+    )
-+    emitter.emit("VALID")
-+
-+    with emitter.log_path.open("ab") as stream:
-+        stream.write(
-+            trace._DIAGNOSTIC_RECORD_PREFIX
-+            + b'"ts":}\n'
-+        )
-+
-+    with pytest.raises(
-+        trace.AuthorityEventRecoveryError,
-+        match="malformed trace record",
++    with lifecycle.managed_process_pool(
++        _FakeExecutor,
 +    ):
-+        trace.AuthorityEventEmitter(
-+            runtime_domain_id="domain-a",
-+            logs_root=trace_logs,
++        assert lifecycle.active_process_pool_count() == 1
++
++    assert lifecycle.active_process_pool_count() == 0
++
++
++def test_force_shutdown_terminates_then_kills_survivors():
++    normal = _FakeProcess()
++    stubborn = _FakeProcess(survive_terminate=True)
++    executor = _FakeExecutor([normal, stubborn])
++
++    terminated = lifecycle.terminate_process_pool(
++        executor,
++        timeout=0.01,
++    )
++
++    assert terminated == 2
++    assert executor.shutdown_calls == [
++        (False, True)
++    ]
++    assert normal.terminate_calls == 1
++    assert normal.kill_calls == 0
++    assert stubborn.terminate_calls == 1
++    assert stubborn.kill_calls == 1
++    assert not normal.is_alive()
++    assert not stubborn.is_alive()
++
++
++def test_real_process_pool_workers_are_force_terminated():
++    with lifecycle.managed_process_pool(
++        ProcessPoolExecutor,
++        max_workers=2,
++    ) as executor:
++        executor.submit(_sleep_worker, 60)
++        executor.submit(_sleep_worker, 60)
++
++        deadline = time.monotonic() + 5.0
++        processes = ()
++        while time.monotonic() < deadline:
++            raw = getattr(executor, "_processes", None)
++            if isinstance(raw, dict) and len(raw) == 2:
++                processes = tuple(raw.values())
++                if all(process.is_alive() for process in processes):
++                    break
++            time.sleep(0.02)
++
++        assert len(processes) == 2
++        assert all(
++            process.is_alive()
++            for process in processes
++        )
++        assert lifecycle.active_process_pool_count() == 1
++
++        terminated = lifecycle.terminate_active_process_pools(
++            timeout=2.0,
 +        )
 +
++        assert terminated == 2
++        assert all(
++            not process.is_alive()
++            for process in processes
++        )
 +
-+def test_complete_malformed_authority_record_still_fails_closed(
-+    trace_logs,
++    assert lifecycle.active_process_pool_count() == 0
++
++
++def test_desktop_close_force_terminates_process_local_pools(
++    monkeypatch,
 +):
-+    emitter = trace.AuthorityEventEmitter(
-+        runtime_domain_id="domain-a",
-+        logs_root=trace_logs,
++    calls = []
++    destroyed = []
++
++    monkeypatch.setattr(
++        gui_module,
++        "close_cmd_log",
++        lambda: None,
 +    )
-+    emitter.emit("VALID")
-+
-+    with emitter.log_path.open("ab") as stream:
-+        stream.write(
-+            b'{"_type":"authority_event","event_id":}\n'
-+        )
-+
-+    with pytest.raises(
-+        trace.AuthorityEventRecoveryError,
-+        match="malformed trace record",
-+    ):
-+        trace.AuthorityEventEmitter(
-+            runtime_domain_id="domain-a",
-+            logs_root=trace_logs,
-+        )
-+
-+
-+def test_complete_legacy_unframed_malformed_record_still_fails_closed(
-+    trace_logs,
-+):
-+    emitter = trace.AuthorityEventEmitter(
-+        runtime_domain_id="domain-a",
-+        logs_root=trace_logs,
++    monkeypatch.setattr(
++        gui_module,
++        "save_state",
++        lambda **_kwargs: None,
 +    )
-+    emitter.emit("VALID")
-+
-+    with emitter.log_path.open("ab") as stream:
-+        stream.write(
-+            b'0022992,"status":"ok","bytes":1239}\n'
-+        )
-+
-+    with pytest.raises(
-+        trace.AuthorityEventRecoveryError,
-+        match="malformed trace record",
-+    ):
-+        trace.AuthorityEventEmitter(
-+            runtime_domain_id="domain-a",
-+            logs_root=trace_logs,
-+        )
-+
-+
-+def test_large_valid_diagnostic_range_does_not_hit_authority_recovery_bound(
-+    trace_logs,
-+):
-+    emitter = trace.AuthorityEventEmitter(
-+        runtime_domain_id="domain-a",
-+        logs_root=trace_logs,
++    monkeypatch.setattr(
++        gui_module,
++        "terminate_active_process_pools",
++        lambda *, timeout: calls.append(timeout) or 0,
 +    )
-+    first = emitter.emit("VALID")
-+
-+    diagnostic = {
-+        "_record_kind": "diagnostic_event",
-+        "d": "TEST",
-+        "ev": "LARGE_DIAGNOSTIC",
-+        "payload": "x" * (
-+            trace._AUTHORITY_RECOVERY_WINDOW + 256
-+        ),
-+    }
-+    encoded = (
-+        json.dumps(
-+            diagnostic,
-+            separators=(",", ":"),
-+        )
-+        + "\n"
-+    ).encode("utf-8")
-+
-+    assert len(encoded) > trace._AUTHORITY_RECOVERY_WINDOW
-+
-+    with emitter.log_path.open("ab") as stream:
-+        stream.write(encoded)
-+
-+    recovered = trace.AuthorityEventEmitter(
-+        runtime_domain_id="domain-a",
-+        logs_root=trace_logs,
++    monkeypatch.setattr(
++        gui_module,
++        "FULL_ANALYSIS_SHUTDOWN_WAIT_SECONDS",
++        0.01,
 +    )
 +
-+    assert (
-+        recovered.emit("AFTER_LARGE_DIAGNOSTIC").sequence
-+        == first.sequence + 1
++    class _Root:
++        def geometry(self):
++            return "800x600+10+10"
++
++        def destroy(self):
++            destroyed.append(True)
++
++    class _Var:
++        def get(self):
++            return ""
++
++    controller = object.__new__(
++        gui_module.ContextorGUI
 +    )
++    controller.root = _Root()
++    controller.theme_mode = "light"
++    controller.repo_path_var = _Var()
++    controller.layer_path_var = _Var()
++    controller.file_path_var = _Var()
++    controller.live_watchers = {}
++    controller.live_event_feeds = {}
++    controller.live_clients = {}
++    controller.live_client = None
++    controller._live_start_retry_after_id = None
++    controller._full_analysis_done = threading.Event()
 +
++    gui_module.ContextorGUI.on_closing(controller)
 +
- def test_two_runtime_domains_have_independent_sequences(trace_logs):
-     left = trace.AuthorityEventEmitter(runtime_domain_id="domain-left", logs_root=trace_logs)
-     right = trace.AuthorityEventEmitter(runtime_domain_id="domain-right", logs_root=trace_logs)
++    assert calls == [0.01]
++    assert destroyed == [True]
++    assert controller._closing is True
++
 
 ## END_COMPLETE_DIFFS
 
 ## MUST_NOT_CHANGE_CONFIRMED
 
-- `_append`, `_append_authority_record_locked`, `_AuthorityFileLock`, `_TraceAppendFileLock`, and `_trace_append_thread_lock` writer semantics.
-- Diagnostic append timeout, marker value/order, active-fd removal, session/pointer lifecycle, and capture semantics.
-- Process lifecycle, Desktop/LIVE/MCP shutdown, process-leak work, MCP docs, runtime storage, or existing corrupted production logs.
-- Recovery redesign beyond the exact prefix-gated final-tail repair.
-- Any complete malformed LF-terminated line.
+- `contextor/mcp_server.py`, `contextor/mcp_process_registry.py`, MCP analysis jobs/profile paths.
+- LIVE authority/service shutdown, `_terminate_pid_tree`, external MCP roots, and runtime trace/recovery code.
+- Any new MCP cleanup or LIVE service race design.
 
 DIFFS=COMPLETE_CURRENT_WORKTREE_DIFF_INCLUDED
 STATUS=STOP_AND_WAIT_FOR_PROCEDUJ

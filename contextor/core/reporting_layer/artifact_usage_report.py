@@ -49,6 +49,10 @@ from contextor.core.analysis.test_context import (
     build_test_context_index,
     discover_test_dirs,
 )
+from contextor.core.analysis.process_pool_lifecycle import (
+    managed_process_pool,
+    terminate_process_pool,
+)
 from contextor.core.api.api_consumers import extract_api_consumers
 from contextor.core.errors import AnalysisCancelled, checkpoint
 from contextor.core.reference import (
@@ -251,7 +255,8 @@ def collect_module_artifacts(
             checkpoint(progress_callback, f"JSON: {module_id}", completed, total)
         return result, failures
 
-    with ProcessPoolExecutor(
+    with managed_process_pool(
+        ProcessPoolExecutor,
         initializer=_init_artifact_worker,
         initargs=(
             modules,
@@ -292,10 +297,7 @@ def collect_module_artifacts(
                     total,
                 )
             except AnalysisCancelled:
-                executor.shutdown(
-                    wait=False,
-                    cancel_futures=True,
-                )
+                terminate_process_pool(executor)
                 raise
 
     return result, failures

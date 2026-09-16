@@ -19,6 +19,10 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 
 from contextor.core.analysis.cache_manager import CacheManager
+from contextor.core.analysis.process_pool_lifecycle import (
+    managed_process_pool,
+    terminate_process_pool,
+)
 from contextor.core.analysis.lineage_extraction import (
     deserialize_extracted_lineage_source_facts,
     extract_lineage_source_facts,
@@ -909,7 +913,9 @@ def index_repository(
             automatic_test_dirs=automatic_test_dirs(),
         )
 
-    with ProcessPoolExecutor() as executor:
+    with managed_process_pool(
+        ProcessPoolExecutor,
+    ) as executor:
         futures = {
             executor.submit(_process_single_file, str(p), str(root_path)): p
             for p in files_to_process
@@ -954,7 +960,7 @@ def index_repository(
             try:
                 checkpoint(progress_callback, res["filename"], completed, total_files)
             except AnalysisCancelled:
-                executor.shutdown(wait=False, cancel_futures=True)
+                terminate_process_pool(executor)
                 raise
 
     emit_index_profile_evidence("process_pool")
