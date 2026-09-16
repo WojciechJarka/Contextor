@@ -43,6 +43,7 @@ _FALLBACK_SCHEMA = 1
 _sidecar_rollovers: set[Path] = set()
 _authority_emitters: dict[tuple[str, str], "AuthorityEventEmitter"] = {}
 _authority_lock = threading.RLock()
+_trace_append_thread_lock = threading.RLock()
 _operation_var: contextvars.ContextVar[str | None] = contextvars.ContextVar(
     "contextor_trace_operation", default=None
 )
@@ -557,65 +558,66 @@ def _append_authority_record_locked(
         + "\n"
     ).encode("utf-8")
 
-    with _TraceAppendFileLock(_trace_append_lock_path(path)):
-        fd = os.open(
-            str(path),
-            os.O_WRONLY
-            | os.O_APPEND
-            | os.O_CREAT
-            | getattr(os, "O_BINARY", 0),
-            0o600,
-        )
-        before = os.fstat(fd).st_size
-        try:
+    with _trace_append_thread_lock:
+        with _TraceAppendFileLock(_trace_append_lock_path(path)):
+            fd = os.open(
+                str(path),
+                os.O_WRONLY
+                | os.O_APPEND
+                | os.O_CREAT
+                | getattr(os, "O_BINARY", 0),
+                0o600,
+            )
+            before = os.fstat(fd).st_size
             try:
-                written = os.write(fd, data)
-                if written != len(data):
-                    raise AuthorityEventRecoveryError(
-                        "short authority JSONL append"
-                    )
-                os.fsync(fd)
-                end = os.fstat(fd).st_size
-                if end != before + len(data):
-                    raise AuthorityEventRecoveryError(
-                        "authority JSONL append size is inconsistent"
-                    )
-            except Exception:
                 try:
-                    _rollback_append(fd, before)
-                except OSError as rollback_exc:
-                    raise AuthorityEventRecoveryError(
-                        "authority JSONL append rollback failed"
-                    ) from rollback_exc
-                raise
-        finally:
-            os.close(fd)
+                    written = os.write(fd, data)
+                    if written != len(data):
+                        raise AuthorityEventRecoveryError(
+                            "short authority JSONL append"
+                        )
+                    os.fsync(fd)
+                    end = os.fstat(fd).st_size
+                    if end != before + len(data):
+                        raise AuthorityEventRecoveryError(
+                            "authority JSONL append size is inconsistent"
+                        )
+                except Exception:
+                    try:
+                        _rollback_append(fd, before)
+                    except OSError as rollback_exc:
+                        raise AuthorityEventRecoveryError(
+                            "authority JSONL append rollback failed"
+                        ) from rollback_exc
+                    raise
+            finally:
+                os.close(fd)
 
-        with path.open("rb") as stream:
-            stream.seek(before)
-            persisted = stream.read(len(data))
+            with path.open("rb") as stream:
+                stream.seek(before)
+                persisted = stream.read(len(data))
 
-        if persisted != data:
-            raise AuthorityEventRecoveryError(
-                "authority JSONL append identity verification failed"
+            if persisted != data:
+                raise AuthorityEventRecoveryError(
+                    "authority JSONL append identity verification failed"
+                )
+
+            start = before
+            record_end = before + len(data)
+            recovered = _read_authority_record_at(
+                path,
+                start,
+                record_end,
             )
-
-        start = before
-        record_end = before + len(data)
-        recovered = _read_authority_record_at(
-            path,
-            start,
-            record_end,
-        )
-        if (
-            recovered.event_id != event.event_id
-            or recovered.sequence != event.sequence
-            or recovered.runtime_domain_id
-            != event.runtime_domain_id
-        ):
-            raise AuthorityEventRecoveryError(
-                "authority JSONL append identity verification failed"
-            )
+            if (
+                recovered.event_id != event.event_id
+                or recovered.sequence != event.sequence
+                or recovered.runtime_domain_id
+                != event.runtime_domain_id
+            ):
+                raise AuthorityEventRecoveryError(
+                    "authority JSONL append identity verification failed"
+                )
 
     return RecordIndex(
         event.sequence,
@@ -1252,51 +1254,52 @@ def _append(
             + "\n"
         ).encode("utf-8")
 
-        with _TraceAppendFileLock(
-            _trace_append_lock_path(path),
-            timeout=_DIAGNOSTIC_APPEND_LOCK_TIMEOUT,
-        ):
-            flags = os.O_WRONLY | os.O_APPEND | os.O_CREAT
-            if hasattr(os, "O_BINARY"):
-                flags |= os.O_BINARY
+        with _trace_append_thread_lock:
+            with _TraceAppendFileLock(
+                _trace_append_lock_path(path),
+                timeout=_DIAGNOSTIC_APPEND_LOCK_TIMEOUT,
+            ):
+                flags = os.O_WRONLY | os.O_APPEND | os.O_CREAT
+                if hasattr(os, "O_BINARY"):
+                    flags |= os.O_BINARY
 
-            fd = os.open(str(path), flags)
-            before = os.fstat(fd).st_size
-            try:
+                fd = os.open(str(path), flags)
+                before = os.fstat(fd).st_size
                 try:
-                    offset = 0
-                    while offset < len(encoded):
-                        written = os.write(
-                            fd,
-                            encoded[offset:],
-                        )
-                        if written <= 0:
-                            raise OSError(
-                                "runtime trace diagnostic append made no progress"
-                            )
-                        offset += written
-
-                    end = os.fstat(fd).st_size
-                    if end != before + len(encoded):
-                        raise OSError(
-                            "runtime trace diagnostic append size is inconsistent"
-                        )
-
-                    with path.open("rb") as stream:
-                        stream.seek(before)
-                        persisted = stream.read(len(encoded))
-                    if persisted != encoded:
-                        raise OSError(
-                            "runtime trace diagnostic append verification failed"
-                        )
-                except Exception:
                     try:
-                        _rollback_append(fd, before)
-                    except OSError:
-                        pass
-                    raise
-            finally:
-                os.close(fd)
+                        offset = 0
+                        while offset < len(encoded):
+                            written = os.write(
+                                fd,
+                                encoded[offset:],
+                            )
+                            if written <= 0:
+                                raise OSError(
+                                    "runtime trace diagnostic append made no progress"
+                                )
+                            offset += written
+
+                        end = os.fstat(fd).st_size
+                        if end != before + len(encoded):
+                            raise OSError(
+                                "runtime trace diagnostic append size is inconsistent"
+                            )
+
+                        with path.open("rb") as stream:
+                            stream.seek(before)
+                            persisted = stream.read(len(encoded))
+                        if persisted != encoded:
+                            raise OSError(
+                                "runtime trace diagnostic append verification failed"
+                            )
+                    except Exception:
+                        try:
+                            _rollback_append(fd, before)
+                        except OSError:
+                            pass
+                        raise
+                finally:
+                    os.close(fd)
     except Exception:
         pass
 

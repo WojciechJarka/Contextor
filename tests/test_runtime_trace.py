@@ -332,7 +332,13 @@ def test_scoped_trace_capture_matches_durable_record():
 
     records = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
     durable_record = next(item for item in records if item.get("ev") == "CAPTURE_DURABLE_MATCH")
-    assert events[0] == durable_record
+    assert "_record_kind" not in events[0]
+    assert durable_record["_record_kind"] == "diagnostic_event"
+    assert {
+        key: value
+        for key, value in durable_record.items()
+        if key != "_record_kind"
+    } == events[0]
 
 
 def test_nested_trace_captures_are_scoped():
