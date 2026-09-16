@@ -1,728 +1,1105 @@
-## CPA10K1_ANALYSIS_JOB_PERSISTENCE_AND_RECONCILIATION
+# CPA10K1A_GET_PROJECT_ARCHITECTURE_FULL_CANONICAL_REPRESENTATION_IMPLEMENTATION
 
-STATUS=IMPLEMENTATION_COMPLETE_FOCUSED_PASS
-TASK=CPA10K1_LITERAL_IMPLEMENTATION
-MODE=APPLY_EXACT_CODE
-REPO=C:\\Temp\\Contextor_Repo
-HEAD=0b95ff860609ddb365878db0eb8873e7ab7c3dcf
-NO_FULL_PYTEST=YES
-PRODUCTION_ANALYZE_PROJECT_RUNTIME=NOT_RUN
-STOP=WAIT_FOR_USER_COMMAND_PROCEDUJ
+## IMPLEMENTATION_SCOPE
 
-### STATUS
+- TASK: CPA10K1A_GET_PROJECT_ARCHITECTURE_FULL_CANONICAL_REPRESENTATION_IMPLEMENTATION
+- REPO: C:\Temp\Contextor_Repo
+- MODE: LITERAL_PATCH_ONLY
+- HEAD_EXPECTED: 6768630ff48918fb0dea46379849d3e26326514f
+- The exact supplied patch was applied until the mandated post-patch static verification.
+- No redesign, report recomputation, repository scan, MCP restart, Desktop restart, `update_file`, or synthetic LIVE mutation was performed.
 
-The exact requested implementation was applied after the explicit `proceduj` gate. The first composite patch attempt was rejected by `apply_patch` because one locally composed context anchor was incorrect; no partial edit was applied. The edits were then applied in exact scoped chunks. No redesign, ownership change, or edit to `contextor/mcp/tools/analyze_project.py` was made.
+## HEAD_BEFORE
 
-### SOURCE_DRIFT
+- `git rev-parse HEAD` before patch: `6768630ff48918fb0dea46379849d3e26326514f`
+- `HEAD_MATCH=YES`
+- Exact precondition passed.
 
-SOURCE_DRIFT=NONE.
+## HEAD_AFTER
 
-Literal pre-edit verification at the current HEAD confirmed:
+- `git rev-parse HEAD` after patch: `6768630ff48918fb0dea46379849d3e26326514f`
+- No commit was created.
 
-- `contextor/mcp/analysis_jobs.py` still contained the requested import, constants anchor, complete `_write_analysis_job`, `_active_analysis_jobs`, and `_execute_analysis_job` locations.
-- `contextor/mcp/tools/get_analysis_status.py` still contained the exact prior owner-process reconciliation block.
-- The requested test and documentation anchors were present.
-- `contextor/mcp/tools/analyze_project.py` was not changed.
+## IMPLEMENTATION_RESULT
 
-### CONTEXTOR_OWNER_AND_LINEAGE_EVIDENCE
+- `PATCH_APPLICATION=PARTIAL_LITERAL_PATCH_APPLIED`
+- `SOURCE_DRIFT=POST_PATCH_STATIC_CONSUMER_MIGRATION_REQUIRED`
+- The required patch anchors all matched exactly once before editing.
+- `guard_large_output` was updated with the exact custom threshold parameter.
+- `get_project_architecture.py`, its docs, index description, listed contract tests, regression block, new full-report tests, and custom-threshold test were applied exactly as supplied.
+- The mandated static verification then found existing consumers still using the removed `max_items`/`compact` signature and old response contract. Per `SOURCE_DRIFT_RULE`, work stopped; those consumers were not adapted.
 
-Discovery evidence was obtained before implementation through Contextor MCP at canonical revision `1234`, with `canonical_state=fresh`, `provenance=live`, and requested source targets reporting `workspace_sync=verified`.
+## SOURCE_DRIFT
 
-- `contextor/mcp/analysis_jobs.py` is the canonical owner for durable job writes, in-memory task ownership, worker execution, and active-job filtering. Contextor resolved module ID `34/1`, 12 static consumers, and 49 reachable covering tests.
-- `contextor/mcp/tools/get_analysis_status.py` is the canonical public reconciliation/status owner. Contextor resolved module ID `60/1`, public symbol `get_analysis_status` as `A1731/1`, five static consumers, and 29 reachable covering tests.
-- Exact Contextor symbol implementations were resolved for `_write_analysis_job` (lines 43-54), `_active_analysis_jobs` (84-120), `_execute_analysis_job` (237-340), `_start_analysis_job` (343-379), and `get_analysis_status` (14-123).
-- Call context confirmed the strict pre-start write in `_start_analysis_job`, persistence call sites in `_execute_analysis_job`, and the existing task `is_alive()` ownership map. `contextor_fact_lineage(family="symbol_calls")` confirmed the core analysis path remains owned by `ContextorFacade.analyze_project`; it did not move the job-persistence owner.
+The following existing consumers require a mechanical migration that was not included in the literal patch:
 
-Post-implementation LIVE/runtime certification was intentionally not performed. MCP server source changed, so the running MCP process must be reloaded before any runtime certification.
+- `tests/test_mcp_split_s2d.py:36` still asserts:
+  `"get_project_architecture": "(repo_path: str, max_items: int | None = 10, compact: bool = True, fields: list[str] | None = None) -> str"`
+- `tests/test_mcp_regressions.py:192` calls `mcp_server.get_project_architecture.fn(str(tmp_path), compact=False)`.
+- `tests/test_mcp_regressions.py:345-347`, `:366-368`, `:390-392` call the target with `compact=True`.
+- `tests/test_mcp_regressions.py:411-413` calls the target with `compact=False`.
+- `tests/test_mcp_regressions.py:200-201,291-292,317-318,535-537` assert the removed old response families `top_global_hotspots`, `action_items`, `debt_summary` and legacy layer-index shape, so they also require an approved contract migration after the signature migration.
+- `tests/test_live_e2e_corrections.py:395` invokes the target positionally and needs response-shape review even though it does not pass the removed keywords.
 
-### IMPLEMENTATION_CONTRACT_VERIFICATION
+Exact mismatching blocks were observed by the post-patch `rg`/source check:
+```text
+tests/test_mcp_regressions.py:192:
+mcp_server.get_project_architecture.fn(str(tmp_path), compact=False)
 
-PASS for the requested implementation:
+tests/test_mcp_regressions.py:345-347:
+mcp_server.get_project_architecture.fn(
+    repo_path=str(tmp_path),
+    compact=True,
 
-1. Added `time`, `_ANALYSIS_JOB_REPLACE_ATTEMPTS = 4`, and `_ANALYSIS_JOB_REPLACE_RETRY_SECONDS = 0.05`.
-2. `_write_analysis_job` retries only `PermissionError` from the final `os.replace`, with four bounded attempts and three sleeps, reusing the same temporary file.
-3. Temporary write is not retried; generic `OSError` is not retried; atomic temp-plus-replace semantics remain.
-4. Added `_is_current_process_analysis_task_active(job_id)` using the existing lock/map and `is_alive()`.
-5. Same-process durable queued/running jobs without an active in-memory task are excluded from `_active_analysis_jobs`.
-6. Added best-effort `persist_job(phase)` with explicit stderr diagnostics.
-7. Exact phases are `initial_running`, `progress`, `completed`, and `failed`.
-8. Progress persistence failures are swallowed and diagnosed.
-9. Completed persistence is best-effort after successful analysis.
-10. Failed-state persistence cannot replace the primary core error; diagnostic is emitted.
-11. The strict initial queued write in `_start_analysis_job` is unchanged.
-12. Existing `finally` cleanup is unchanged.
-13. Foreign-owner queued/running jobs preserve `owner_process_changed`.
-14. Current-process jobs without a live task reconcile to `worker_not_active`.
-15. Reconciliation persistence `OSError` still returns the in-memory interrupted response, with the warning stored in existing `message`.
-16. No new public field was added.
-17. The two requested public docs were updated only for changed lifecycle/reconciliation semantics.
+tests/test_mcp_regressions.py:366-368:
+mcp_server.get_project_architecture.fn(
+    repo_path=str(tmp_path),
+    compact=True,
 
-### FOCUSED_TESTS
+tests/test_mcp_regressions.py:390-392:
+mcp_server.get_project_architecture.fn(
+    repo_path=str(tmp_path),
+    compact=True,
 
-PASS.
+tests/test_mcp_regressions.py:411-413:
+mcp_server.get_project_architecture.fn(
+    repo_path=str(tmp_path),
+    compact=False,
 
-- `& .\\.venv\\Scripts\\python.exe -m py_compile contextor/mcp/analysis_jobs.py contextor/mcp/tools/get_analysis_status.py tests/mcp/tools/test_analysis_status_concurrency.py tests/mcp/tools/test_analysis_trigger_docs.py`
-  - exit code `0`.
-- `& .\\.venv\\Scripts\\python.exe -m pytest tests/mcp/tools/test_analysis_status_concurrency.py tests/mcp/tools/test_analysis_trigger_docs.py -q`
-  - `24 passed, 1 warning in 12.80s`.
-  - Warning: existing `AuthlibDeprecationWarning` from the bundled FastMCP dependency.
-- `git diff --check`
-  - PASS. Git emitted only expected LF-to-CRLF working-copy warnings for changed files.
-- Full pytest was not run.
-
-### RESTART_REQUIREMENTS
-
-MCP_SERVER_RESTART_REQUIRED=YES.
-
-The changed files are imported by the MCP server process. Do not certify runtime behavior until that process is restarted/reloaded and freshness/schema/version is checked afterward.
-
-DESKTOP_RESTART_REQUIRED=NO based on current discovery: no Desktop-owned runtime source was changed and no evidence established that a Desktop restart is required. Reassess only if the MCP server is hosted inside a Desktop process that is not independently reloadable.
-
-No MCP or Desktop restart was performed.
-
-### FILES_CHANGED
-
-1. `contextor/mcp/analysis_jobs.py`
-2. `contextor/mcp/tools/get_analysis_status.py`
-3. `contextor/mcp/docs/get_analysis_status.json`
-4. `contextor/mcp/docs/analyze_project.json`
-5. `tests/mcp/tools/test_analysis_status_concurrency.py`
-6. `tests/mcp/tools/test_analysis_trigger_docs.py`
-
-`walkthrough.md` is the mandatory report channel and is excluded from this source/test/docs change set.
-
-### EVIDENCE_CLASSIFICATION
-
-- DIRECT_EVIDENCE: current HEAD, exact scoped diff, successful py_compile, focused pytest result, and git diff check.
-- CODE_PATH_PROVED: persistence retry, best-effort phases, worker liveness filtering, and interrupted reconciliation paths shown in the complete diff below.
-- CONTRACT_PROVED: requested exact edits, phase names, retry bounds, no-new-field rule, strict initial write, and focused test commands.
-- INFERENCE: Desktop restart is not required based on ownership discovery; runtime certification remains unknown until MCP reload.
-- UNKNOWN: post-restart LIVE/runtime behavior, intentionally not claimed.
-
-### ACTUAL_DIFF
-
-Complete actual diff for every changed production, test, and documentation file:
-
-```diff
-warning: in the working copy of 'contextor/mcp/analysis_jobs.py', LF will be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'contextor/mcp/docs/analyze_project.json', LF will be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'contextor/mcp/docs/get_analysis_status.json', LF will be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'contextor/mcp/tools/get_analysis_status.py', LF will be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'tests/mcp/tools/test_analysis_status_concurrency.py', LF will be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'tests/mcp/tools/test_analysis_trigger_docs.py', LF will be replaced by CRLF the next time Git touches it
-diff --git a/contextor/mcp/analysis_jobs.py b/contextor/mcp/analysis_jobs.py
-index d8db080..b503805 100644
---- a/contextor/mcp/analysis_jobs.py
-+++ b/contextor/mcp/analysis_jobs.py
-@@ -3,6 +3,7 @@ import json
- import os
- import sys
- import threading
-+import time
- from datetime import datetime, timezone
- from pathlib import Path
- from uuid import uuid4
-@@ -18,6 +19,8 @@ _analysis_lock = threading.Lock()
- _analysis_job_lock = threading.RLock()
- _analysis_tasks: dict[str, threading.Thread] = {}
- _analysis_jobs_by_repo: dict[str, str] = {}
-+_ANALYSIS_JOB_REPLACE_ATTEMPTS = 4
-+_ANALYSIS_JOB_REPLACE_RETRY_SECONDS = 0.05
- 
- 
- def _mcp_cache_root(root: Path) -> Path:
-@@ -51,7 +54,14 @@ def _write_analysis_job(root: Path, job: dict) -> None:
-             json.dumps(payload, indent=2, ensure_ascii=False),
-             encoding="utf-8",
-         )
--        os.replace(temporary, target)
-+        for attempt in range(_ANALYSIS_JOB_REPLACE_ATTEMPTS):
-+            try:
-+                os.replace(temporary, target)
-+                break
-+            except PermissionError:
-+                if attempt + 1 >= _ANALYSIS_JOB_REPLACE_ATTEMPTS:
-+                    raise
-+                time.sleep(_ANALYSIS_JOB_REPLACE_RETRY_SECONDS)
- 
- 
- def _read_analysis_job(root: Path, job_id: str) -> dict | None:
-@@ -81,6 +91,12 @@ def _latest_analysis_job(root: Path) -> dict | None:
-     return None
- 
- 
-+def _is_current_process_analysis_task_active(job_id: str) -> bool:
-+    with _analysis_job_lock:
-+        task = _analysis_tasks.get(job_id)
-+        return task is not None and task.is_alive()
-+
-+
- def _active_analysis_jobs(root: Path) -> list[dict]:
-     """Return readable queued/running durable jobs in deterministic newest-first order."""
-     directory = _analysis_job_dir(root)
-@@ -93,6 +109,13 @@ def _active_analysis_jobs(root: Path) -> list[dict]:
-         job = _read_analysis_job(root, path.stem)
-         if job is None or job.get("status") not in {"queued", "running"}:
-             continue
-+        if (
-+            job.get("owner_pid") == os.getpid()
-+            and not _is_current_process_analysis_task_active(
-+                str(job.get("job_id") or "")
-+            )
-+        ):
-+            continue
- 
-         try:
-             mtime_ns = path.stat().st_mtime_ns
-@@ -244,13 +267,26 @@ async def _execute_analysis_job(
-         **job, "status": "running", "started_at": _utc_now(),
-         "message": "Analysis started.",
-     }
--    _write_analysis_job(root, job)
-+
-+    def persist_job(phase: str) -> bool:
-+        try:
-+            _write_analysis_job(root, job)
-+        except OSError as exc:
-+            _stderr_log(
-+                f"[analysis-job-persistence] phase={phase} "
-+                f"job_id={job.get('job_id')} "
-+                f"{type(exc).__name__}: {exc}"
-+            )
-+            return False
-+        return True
-+
-+    persist_job("initial_running")
- 
-     def job_log(message: str) -> None:
-         nonlocal job
-         _stderr_log(message)
-         job = {**job, "message": str(message)}
--        _write_analysis_job(root, job)
-+        persist_job("progress")
- 
-     try:
-         analysis_outcome = await _run_analysis_worker(
-@@ -321,7 +357,7 @@ async def _execute_analysis_job(
-             **job, **(analysis_outcome or {}), "status": "completed",
-             "completed_at": _utc_now(), "message": completed_message, "error": None,
-         }
--        _write_analysis_job(root, job)
-+        persist_job("completed")
-     except Exception as exc:
-         live_publish_status = job.get("live_publish_status")
-         if job.get("operation") == "project" and live_publish_status == "pending":
-@@ -332,7 +368,7 @@ async def _execute_analysis_job(
-             "error": f"{type(exc).__name__}: {exc}",
-             "live_publish_status": live_publish_status,
-         }
--        _write_analysis_job(root, job)
-+        persist_job("failed")
-     finally:
-         with _analysis_job_lock:
-             _analysis_tasks.pop(str(job["job_id"]), None)
-diff --git a/contextor/mcp/docs/analyze_project.json b/contextor/mcp/docs/analyze_project.json
-index f7df415..b86147b 100644
---- a/contextor/mcp/docs/analyze_project.json
-+++ b/contextor/mcp/docs/analyze_project.json
-@@ -9,7 +9,7 @@
-     "exclude_paths (array of strings or null, optional, default null): repository-relative or accepted existing exclusion paths forwarded to project analysis; null means no additional exclusions supplied by this request."
-   ],
-   "behavior": [
--    "1. Starts global architectural analysis asynchronously/non-blocking and immediately returns job identity and initial status.\n2. An active queued or running equivalent request may be reused according to existing job-owner semantics.\n3. Progress, completion, and coverage metrics are read through get_analysis_status.\n4. Tool does not require the LLM to poll source files directly."
-+    "1. Starts global architectural analysis asynchronously/non-blocking and immediately returns job identity and initial status.\n2. An active queued or running equivalent request may be reused according to existing job-owner semantics.\n3. Progress, completion, and coverage metrics are read through get_analysis_status.\n4. Tool does not require the LLM to poll source files directly.\n5. Initial queued acceptance is durably persisted before the worker starts. After acceptance, running, progress, and terminal job-metadata persistence are best-effort observability updates; failure to persist those updates does not abort an otherwise valid repository analysis."
-   ],
-   "freshness": [],
-   "errors": [],
-diff --git a/contextor/mcp/docs/get_analysis_status.json b/contextor/mcp/docs/get_analysis_status.json
-index 5acc92a..94e1d52 100644
---- a/contextor/mcp/docs/get_analysis_status.json
-+++ b/contextor/mcp/docs/get_analysis_status.json
-@@ -17,7 +17,7 @@
-     "Every job also exposes durable LIVE publication state. Project jobs move\nfrom ``live_publish_status='pending'`` to ``success``, ``timed_out`` or\n``failed``; an analysis failure before publication reports\n``not_attempted``. Successful publication includes\n``live_publish_revision`` (representing the LIVE publish/event journal revision returned by daemon, not canonical state publication revision). Publication failures preserve\n``live_publish_warning`` even though the report job itself may complete.\nLayer and single-file jobs report ``not_applicable`` because their shared\nfacade updates canonical state incrementally rather than publishing a new\nglobal baseline here."
-   ],
-   "errors": [
--    "Explicit ``job_id`` bypasses active job ambiguity detection. When ``job_id`` is omitted and multiple active jobs exist, ``status: 'ambiguous_job'`` is returned.\nTerminal states are ``completed``, ``failed`` and ``interrupted``. A job\nleft running by a previous MCP server process is marked ``interrupted``\nrather than remaining permanently ambiguous.",
-+    "Explicit ``job_id`` bypasses active job ambiguity detection. When ``job_id`` is omitted and multiple active jobs exist, ``status: 'ambiguous_job'`` is returned.\nTerminal states are ``completed``, ``failed`` and ``interrupted``. A job\nleft running by a previous MCP server process is marked ``interrupted``\nrather than remaining permanently ambiguous. A queued/running job owned by the current MCP process is also reconciled to `interrupted` with `error='worker_not_active'` when its in-memory worker is no longer alive. If persistence of the reconciled interrupted state fails, the current call still returns the interrupted state and reports the persistence failure in `message` instead of returning stale queued/running status.",
-     "A completed global project job includes ``analysis_coverage`` when its\nindexer finished: ``skipped_python_files`` reports files that could not be\nstatically analyzed, their parser/read reason, structured ``line_number``\nand ``column_number`` when parser coordinates exist, and\n``syntax_error_count``.\n``max_skipped_files`` bounds returned entries (default 10); pass ``None``\nfor every skipped file. ``total`` and ``truncated`` make the coverage gap\nexplicit. Layer and single-file jobs do not claim global coverage."
-   ],
- 
-diff --git a/contextor/mcp/tools/get_analysis_status.py b/contextor/mcp/tools/get_analysis_status.py
-index 7b999a2..7b64bde 100644
---- a/contextor/mcp/tools/get_analysis_status.py
-+++ b/contextor/mcp/tools/get_analysis_status.py
-@@ -65,18 +65,42 @@ def get_analysis_status(
-             {"status": "not_found", "job_id": job_id, "repo_path": str(root)},
-             indent=2,
-         )
--    if (
--        job.get("status") in {"queued", "running"}
--        and job.get("owner_pid") != os.getpid()
--    ):
--        job = {
--            **job,
--            "status": "interrupted",
--            "completed_at": analysis_jobs._utc_now(),
--            "message": "The MCP server process that owned this job is no longer active.",
--            "error": "owner_process_changed",
--        }
--        analysis_jobs._write_analysis_job(root, job)
-+    if job.get("status") in {"queued", "running"}:
-+        interruption_error = None
-+        interruption_message = None
-+
-+        if job.get("owner_pid") != os.getpid():
-+            interruption_error = "owner_process_changed"
-+            interruption_message = (
-+                "The MCP server process that owned this job is no longer active."
-+            )
-+        elif not analysis_jobs._is_current_process_analysis_task_active(
-+            str(job.get("job_id") or "")
-+        ):
-+            interruption_error = "worker_not_active"
-+            interruption_message = (
-+                "The analysis worker for this job is no longer active."
-+            )
-+
-+        if interruption_error is not None:
-+            job = {
-+                **job,
-+                "status": "interrupted",
-+                "completed_at": analysis_jobs._utc_now(),
-+                "message": interruption_message,
-+                "error": interruption_error,
-+            }
-+            try:
-+                analysis_jobs._write_analysis_job(root, job)
-+            except OSError as exc:
-+                job = {
-+                    **job,
-+                    "message": (
-+                        f"{interruption_message} "
-+                        "Durable reconciliation persistence failed: "
-+                        f"{type(exc).__name__}: {exc}"
-+                    ),
-+                }
-     public_job = analysis_jobs._public_job(job, max_skipped_files=max_skipped_files)
-     if public_job.get("status") == "completed":
-         diag = diagnostics_summary_for_completed_job(diagnostics_summary(root), job)
-diff --git a/tests/mcp/tools/test_analysis_status_concurrency.py b/tests/mcp/tools/test_analysis_status_concurrency.py
-index 561b5a5..efaa5c8 100644
---- a/tests/mcp/tools/test_analysis_status_concurrency.py
-+++ b/tests/mcp/tools/test_analysis_status_concurrency.py
-@@ -1,3 +1,4 @@
-+import asyncio
- import json
- import os
- from pathlib import Path
-@@ -57,8 +58,9 @@ def _create_job(
- 
- def test_analysis_status_concurrency__multiple_active_without_job_id_returns_ambiguity(tmp_path):
-     root = tmp_path
--    _create_job(root, 1, status="queued", mtime_ns=1_000_000_000)
--    _create_job(root, 2, status="running", mtime_ns=2_000_000_000)
-+    foreign_owner = os.getpid() + 100000
-+    _create_job(root, 1, status="queued", owner_pid=foreign_owner, mtime_ns=1_000_000_000)
-+    _create_job(root, 2, status="running", owner_pid=foreign_owner, mtime_ns=2_000_000_000)
- 
-     raw = get_analysis_status(str(root), job_id=None)
-     res = json.loads(raw)
-@@ -82,6 +84,11 @@ def test_analysis_status_concurrency__explicit_job_id_bypasses_ambiguity(tmp_pat
-         raise AssertionError("_active_analysis_jobs MUST NOT be called when explicit job_id is passed!")
- 
-     monkeypatch.setattr(analysis_jobs, "_active_analysis_jobs", fail_if_active_called)
-+    monkeypatch.setattr(
-+        analysis_jobs,
-+        "_is_current_process_analysis_task_active",
-+        lambda _job_id: True,
-+    )
- 
-     raw = get_analysis_status(str(root), job_id=j1["job_id"])
-     res = json.loads(raw)
-@@ -92,7 +99,13 @@ def test_analysis_status_concurrency__explicit_job_id_bypasses_ambiguity(tmp_pat
- 
- def test_analysis_status_concurrency__single_active_does_not_override_newer_completed_latest(tmp_path):
-     root = tmp_path
--    _create_job(root, 1, status="running", mtime_ns=1_000_000_000)
-+    _create_job(
-+        root,
-+        1,
-+        status="running",
-+        owner_pid=os.getpid() + 100000,
-+        mtime_ns=1_000_000_000,
-+    )
-     j2 = _create_job(root, 2, status="completed", mtime_ns=2_000_000_000)
- 
-     raw = get_analysis_status(str(root), job_id=None)
-@@ -116,7 +129,13 @@ def test_analysis_status_concurrency__zero_active_preserves_latest_terminal(tmp_
- 
- def test_analysis_status_concurrency__completed_jobs_do_not_count_as_active(tmp_path):
-     root = tmp_path
--    _create_job(root, 1, status="queued", mtime_ns=1_000_000_000)
-+    _create_job(
-+        root,
-+        1,
-+        status="queued",
-+        owner_pid=os.getpid() + 100000,
-+        mtime_ns=1_000_000_000,
-+    )
-     _create_job(root, 2, status="failed", mtime_ns=2_000_000_000)
-     j3 = _create_job(root, 3, status="completed", mtime_ns=3_000_000_000)
- 
-@@ -130,9 +149,28 @@ def test_analysis_status_concurrency__completed_jobs_do_not_count_as_active(tmp_
- 
- def test_analysis_status_concurrency__active_candidates_are_deterministic_newest_first(tmp_path):
-     root = tmp_path
--    j1 = _create_job(root, 1, status="queued", mtime_ns=1_000_000_000)
--    j2 = _create_job(root, 2, status="running", mtime_ns=3_000_000_000)
--    j3 = _create_job(root, 3, status="running", mtime_ns=2_000_000_000)
-+    foreign_owner = os.getpid() + 100000
-+    j1 = _create_job(
-+        root,
-+        1,
-+        status="queued",
-+        owner_pid=foreign_owner,
-+        mtime_ns=1_000_000_000,
-+    )
-+    j2 = _create_job(
-+        root,
-+        2,
-+        status="running",
-+        owner_pid=foreign_owner,
-+        mtime_ns=3_000_000_000,
-+    )
-+    j3 = _create_job(
-+        root,
-+        3,
-+        status="running",
-+        owner_pid=foreign_owner,
-+        mtime_ns=2_000_000_000,
-+    )
- 
-     raw = get_analysis_status(str(root), job_id=None)
-     res = json.loads(raw)
-@@ -144,8 +182,21 @@ def test_analysis_status_concurrency__active_candidates_are_deterministic_newest
- 
- def test_analysis_status_concurrency__equal_mtime_uses_job_id_tiebreak(tmp_path):
-     root = tmp_path
--    j1 = _create_job(root, 1, status="queued", mtime_ns=1_000_000_000)
--    j2 = _create_job(root, 2, status="running", mtime_ns=1_000_000_000)
-+    foreign_owner = os.getpid() + 100000
-+    j1 = _create_job(
-+        root,
-+        1,
-+        status="queued",
-+        owner_pid=foreign_owner,
-+        mtime_ns=1_000_000_000,
-+    )
-+    j2 = _create_job(
-+        root,
-+        2,
-+        status="running",
-+        owner_pid=foreign_owner,
-+        mtime_ns=1_000_000_000,
-+    )
- 
-     raw = get_analysis_status(str(root), job_id=None)
-     res = json.loads(raw)
-@@ -157,8 +208,15 @@ def test_analysis_status_concurrency__equal_mtime_uses_job_id_tiebreak(tmp_path)
- 
- def test_analysis_status_concurrency__candidate_list_is_bounded_to_five(tmp_path):
-     root = tmp_path
-+    foreign_owner = os.getpid() + 100000
-     for i in range(1, 8):
--        _create_job(root, i, status="running", mtime_ns=i * 1_000_000_000)
-+        _create_job(
-+            root,
-+            i,
-+            status="running",
-+            owner_pid=foreign_owner,
-+            mtime_ns=i * 1_000_000_000,
-+        )
- 
-     raw = get_analysis_status(str(root), job_id=None)
-     res = json.loads(raw)
-@@ -233,3 +291,255 @@ def test_analysis_status_concurrency__runtime_description_is_index_backed():
-     assert "multiple" in description
-     assert "queued/running" in description
-     assert "ambiguous_job" in description
-+
-+
-+def test_analysis_job_write__retries_permission_error_only_on_replace(
-+    tmp_path, monkeypatch
-+):
-+    real_replace = analysis_jobs.os.replace
-+    replace_calls = []
-+    sleep_calls = []
-+
-+    def flaky_replace(source, target):
-+        replace_calls.append((source, target))
-+        if len(replace_calls) < 3:
-+            raise PermissionError("replace temporarily blocked")
-+        real_replace(source, target)
-+
-+    monkeypatch.setattr(analysis_jobs.os, "replace", flaky_replace)
-+    monkeypatch.setattr(analysis_jobs.time, "sleep", sleep_calls.append)
-+
-+    job_id = f"{101:032x}"
-+    analysis_jobs._write_analysis_job(
-+        tmp_path,
-+        {"job_id": job_id, "status": "queued"},
-+    )
-+
-+    assert len(replace_calls) == 3
-+    assert sleep_calls == [
-+        analysis_jobs._ANALYSIS_JOB_REPLACE_RETRY_SECONDS,
-+        analysis_jobs._ANALYSIS_JOB_REPLACE_RETRY_SECONDS,
-+    ]
-+    persisted = analysis_jobs._read_analysis_job(tmp_path, job_id)
-+    assert persisted is not None
-+    assert persisted["status"] == "queued"
-+
-+
-+def test_analysis_job_write__does_not_retry_generic_oserror(
-+    tmp_path, monkeypatch
-+):
-+    replace_calls = []
-+    sleep_calls = []
-+
-+    def failing_replace(source, target):
-+        replace_calls.append((source, target))
-+        raise OSError("replace failed")
-+
-+    monkeypatch.setattr(analysis_jobs.os, "replace", failing_replace)
-+    monkeypatch.setattr(analysis_jobs.time, "sleep", sleep_calls.append)
-+
-+    with pytest.raises(OSError, match="replace failed"):
-+        analysis_jobs._write_analysis_job(
-+            tmp_path,
-+            {"job_id": f"{102:032x}", "status": "queued"},
-+        )
-+
-+    assert len(replace_calls) == 1
-+    assert sleep_calls == []
-+
-+
-+def test_analysis_job_execution__progress_persistence_failure_does_not_abort(
-+    tmp_path, monkeypatch, capsys
-+):
-+    job = _create_job(
-+        tmp_path,
-+        103,
-+        status="queued",
-+        operation="layer",
-+        started_at=None,
-+        completed_at=None,
-+        live_publish_status="not_applicable",
-+        live_publish_revision=None,
-+    )
-+    writes = []
-+
-+    async def fake_worker(
-+        operation,
-+        root,
-+        target=None,
-+        exclude_paths=None,
-+        log=None,
-+    ):
-+        assert operation == "layer"
-+        assert log is not None
-+        log("progress")
-+        return {}
-+
-+    def flaky_write(root, payload):
-+        writes.append(dict(payload))
-+        if payload.get("message") == "progress":
-+            raise OSError("progress persistence failed")
-+
-+    monkeypatch.setattr(analysis_jobs, "_run_analysis_worker", fake_worker)
-+    monkeypatch.setattr(analysis_jobs, "_write_analysis_job", flaky_write)
-+
-+    asyncio.run(
-+        analysis_jobs._execute_analysis_job(
-+            tmp_path,
-+            job,
-+            None,
-+            None,
-+        )
-+    )
-+
-+    assert any(item.get("status") == "completed" for item in writes)
-+    stderr = capsys.readouterr().err
-+    assert "[analysis-job-persistence] phase=progress" in stderr
-+    assert "progress persistence failed" in stderr
-+
-+
-+def test_analysis_job_execution__primary_failure_survives_failed_persistence(
-+    tmp_path, monkeypatch, capsys
-+):
-+    job = _create_job(
-+        tmp_path,
-+        104,
-+        status="queued",
-+        operation="layer",
-+        started_at=None,
-+        completed_at=None,
-+        live_publish_status="not_applicable",
-+        live_publish_revision=None,
-+    )
-+    job_id = job["job_id"]
-+    writes = []
-+
-+    async def failing_worker(*args, **kwargs):
-+        raise ValueError("primary boom")
-+
-+    def flaky_write(root, payload):
-+        writes.append(dict(payload))
-+        if payload.get("status") == "failed":
-+            raise OSError("secondary persistence boom")
-+
-+    monkeypatch.setattr(analysis_jobs, "_run_analysis_worker", failing_worker)
-+    monkeypatch.setattr(analysis_jobs, "_write_analysis_job", flaky_write)
-+    monkeypatch.setitem(analysis_jobs._analysis_tasks, job_id, object())
-+    monkeypatch.setitem(
-+        analysis_jobs._analysis_jobs_by_repo,
-+        str(tmp_path),
-+        job_id,
-+    )
-+
-+    asyncio.run(
-+        analysis_jobs._execute_analysis_job(
-+            tmp_path,
-+            job,
-+            None,
-+            None,
-+        )
-+    )
-+
-+    failed_payloads = [
-+        item for item in writes if item.get("status") == "failed"
-+    ]
-+    assert len(failed_payloads) == 1
-+    assert failed_payloads[0]["error"] == "ValueError: primary boom"
-+    assert job_id not in analysis_jobs._analysis_tasks
-+    assert str(tmp_path) not in analysis_jobs._analysis_jobs_by_repo
-+
-+    stderr = capsys.readouterr().err
-+    assert "[analysis-job-persistence] phase=failed" in stderr
-+    assert "secondary persistence boom" in stderr
-+
-+
-+def test_analysis_status_concurrency__same_process_dead_worker_is_interrupted(
-+    tmp_path, monkeypatch
-+):
-+    job = _create_job(
-+        tmp_path,
-+        105,
-+        status="running",
-+        owner_pid=os.getpid(),
-+    )
-+    monkeypatch.delitem(
-+        analysis_jobs._analysis_tasks,
-+        job["job_id"],
-+        raising=False,
-+    )
-+
-+    res = json.loads(
-+        get_analysis_status(str(tmp_path), job_id=job["job_id"])
-+    )
-+
-+    assert res["status"] == "interrupted"
-+    assert res["error"] == "worker_not_active"
-+
-+    persisted = analysis_jobs._read_analysis_job(
-+        tmp_path,
-+        job["job_id"],
-+    )
-+    assert persisted["status"] == "interrupted"
-+    assert persisted["error"] == "worker_not_active"
-+
-+
-+def test_analysis_status_concurrency__reconciliation_write_failure_returns_interrupted(
-+    tmp_path, monkeypatch
-+):
-+    job = _create_job(
-+        tmp_path,
-+        106,
-+        status="running",
-+        owner_pid=os.getpid(),
-+    )
-+    monkeypatch.delitem(
-+        analysis_jobs._analysis_tasks,
-+        job["job_id"],
-+        raising=False,
-+    )
-+
-+    def fail_write(*args, **kwargs):
-+        raise OSError("cannot persist reconciliation")
-+
-+    monkeypatch.setattr(
-+        analysis_jobs,
-+        "_write_analysis_job",
-+        fail_write,
-+    )
-+
-+    res = json.loads(
-+        get_analysis_status(str(tmp_path), job_id=job["job_id"])
-+    )
-+
-+    assert res["status"] == "interrupted"
-+    assert res["error"] == "worker_not_active"
-+    assert "Durable reconciliation persistence failed" in res["message"]
-+    assert "cannot persist reconciliation" in res["message"]
-+
-+
-+def test_active_analysis_jobs__excludes_dead_same_process_worker(
-+    tmp_path, monkeypatch
-+):
-+    current = _create_job(
-+        tmp_path,
-+        107,
-+        status="running",
-+        owner_pid=os.getpid(),
-+        mtime_ns=2_000_000_000,
-+    )
-+    foreign = _create_job(
-+        tmp_path,
-+        108,
-+        status="running",
-+        owner_pid=os.getpid() + 100000,
-+        mtime_ns=1_000_000_000,
-+    )
-+    monkeypatch.delitem(
-+        analysis_jobs._analysis_tasks,
-+        current["job_id"],
-+        raising=False,
-+    )
-+
-+    active = analysis_jobs._active_analysis_jobs(tmp_path)
-+
-+    assert [job["job_id"] for job in active] == [foreign["job_id"]]
-diff --git a/tests/mcp/tools/test_analysis_trigger_docs.py b/tests/mcp/tools/test_analysis_trigger_docs.py
-index 354b461..4779cfe 100644
---- a/tests/mcp/tools/test_analysis_trigger_docs.py
-+++ b/tests/mcp/tools/test_analysis_trigger_docs.py
-@@ -46,3 +46,17 @@ def test_analysis_trigger_docs__runtime_signatures_unchanged():
-     assert str(inspect.signature(tools["analyze_single_file"].fn)) == (
-         "(repo_path: str, file_path: str, exclude_paths: list[str] | None = None) -> str"
-     )
-+
-+
-+def test_analysis_trigger_docs__job_lifecycle_persistence_semantics_documented():
-+    analyze_project_doc = _load_doc("analyze_project")
-+    analyze_behavior = "\n".join(analyze_project_doc.get("behavior", []))
-+    assert "durably persisted before the worker starts" in analyze_behavior
-+    assert "best-effort observability updates" in analyze_behavior
-+    assert "does not abort an otherwise valid repository analysis" in analyze_behavior
-+
-+    status_doc = _load_doc("get_analysis_status")
-+    status_errors = "\n".join(status_doc.get("errors", []))
-+    assert "worker_not_active" in status_errors
-+    assert "persistence failure" in status_errors
-+    assert "stale queued/running status" in status_errors
+tests/test_mcp_split_s2d.py:36:
+"get_project_architecture": "(repo_path: str, max_items: int | None = 10, compact: bool = True, fields: list[str] | None = None) -> str",
 ```
 
-### NEXT_STEP
+## PY_COMPILE
 
-STOP. Await the explicit user command: `proceduj`.
+- `NOT_RUN`.
+- Static consumer SOURCE_DRIFT required stopping before verification commands.
+- Requested commands, including `python -m py_compile`, were not executed.
 
+## FOCUSED_TESTS
+
+- `NOT_RUN`.
+- No pytest command was executed because the post-patch static consumer gate failed.
+- Full pytest was not run.
+
+## STATIC_CONSUMER_VERIFICATION
+
+- Search performed after patch for `get_project_architecture` references and old `max_items`/`compact` signature usage.
+- Result: SOURCE_DRIFT as listed above.
+- The target's new signature is present in `contextor/mcp/tools/get_project_architecture.py`, `tests/mcp/tools/test_architecture_context_contracts.py`, and `tests/test_mcp_documentation.py`.
+- The remaining old exact signature is present in `tests/test_mcp_split_s2d.py:36`.
+- Old architecture contract assertions remain in `tests/test_mcp_regressions.py` and must not be guessed at under literal-patch-only rules.
+- `MCP_SERVER_RESTART_REQUIRED=YES` after acceptance because public MCP source/signature/docs changed.
+- `DESKTOP_RUNTIME_RESTART_REQUIRED=NO` for this implementation itself.
+
+## FILES_CHANGED
+
+- `C:\Temp\Contextor_Repo\contextor\mcp\output_guard.py`
+- `C:\Temp\Contextor_Repo\contextor\mcp\tools\get_project_architecture.py`
+- `C:\Temp\Contextor_Repo\contextor\mcp\docs\get_project_architecture.json`
+- `C:\Temp\Contextor_Repo\contextor\mcp\docs\index.json`
+- `C:\Temp\Contextor_Repo\tests\mcp\tools\test_architecture_context_contracts.py`
+- `C:\Temp\Contextor_Repo\tests\mcp\tools\test_auto_bounded_output.py`
+- `C:\Temp\Contextor_Repo\tests\test_mcp_documentation.py`
+- `C:\Temp\Contextor_Repo\tests\test_mcp_regressions.py`
+- `C:\Temp\Contextor_Repo\tests\mcp\tools\test_get_project_architecture_full_reports.py`
+- `C:\Temp\Contextor_Repo\walkthrough.md` is the report artifact and is excluded from the required source/test/docs diff below.
+
+## ACTUAL_DIFF
+
+Complete diffs for every changed production/test/docs file follow. `walkthrough.md` itself is excluded as required.
+### contextor/mcp/output_guard.py
+
+```diff
+warning: in the working copy of 'contextor/mcp/output_guard.py', LF will be replaced by CRLF the next time Git touches it
+diff --git a/contextor/mcp/output_guard.py b/contextor/mcp/output_guard.py
+index 3996db0..b0565e5 100644
+--- a/contextor/mcp/output_guard.py
++++ b/contextor/mcp/output_guard.py
+@@ -11,9 +11,10 @@ def guard_large_output(
+     retry_instruction: str,
+     requested_count: int | None = None,
+     reason: str = "Estimated output exceeds the recommended context size.",
++    warning_threshold_bytes: int = LARGE_OUTPUT_WARNING_BYTES,
+ ) -> str:
+     estimated_output_bytes = len(serialized_output.encode("utf-8"))
+-    if estimated_output_bytes <= LARGE_OUTPUT_WARNING_BYTES or allow_large_output:
++    if estimated_output_bytes <= warning_threshold_bytes or allow_large_output:
+         return serialized_output
+ 
+     warning_response: dict[str, Any] = {
+@@ -27,8 +28,8 @@ def guard_large_output(
+         {
+             "estimated_output_bytes": estimated_output_bytes,
+             "estimated_output_kib": estimated_output_bytes / 1024,
+-            "warning_threshold_bytes": LARGE_OUTPUT_WARNING_BYTES,
+-            "warning_threshold_kib": 15.0,
++            "warning_threshold_bytes": warning_threshold_bytes,
++            "warning_threshold_kib": warning_threshold_bytes / 1024,
+             "retry": {
+                 "allow_large_output": True,
+             },
+```
+
+### contextor/mcp/tools/get_project_architecture.py
+
+```diff
+warning: in the working copy of 'contextor/mcp/tools/get_project_architecture.py', LF will be replaced by CRLF the next time Git touches it
+diff --git a/contextor/mcp/tools/get_project_architecture.py b/contextor/mcp/tools/get_project_architecture.py
+index 2fc4800..517d799 100644
+--- a/contextor/mcp/tools/get_project_architecture.py
++++ b/contextor/mcp/tools/get_project_architecture.py
+@@ -1,140 +1,341 @@
+ import json
+ from pathlib import Path
++from typing import Any
+ 
+-from contextor.core.analysis.state_manager import module_current_truth
+ from contextor.mcp import query_helpers
++from contextor.mcp import report_helpers
+ from contextor.mcp import runtime as mcp_runtime
+ from contextor.mcp.diagnostics import diagnostics_summary
++from contextor.mcp.output_guard import guard_large_output
++from contextor.mcp.representation import serialized_json_bytes
+ 
+ 
+-def _stale_module_truths(state) -> dict[str, dict]:
+-    """Return parse-stale canonical modules using the shared core contract."""
+-    module_names = set(getattr(state, "modules", {}) or {}) | set(
+-        getattr(state, "artifacts", {}) or {}
++PROJECT_ARCHITECTURE_DIRECT_BYTES = 50 * 1024
++
++_REPORT_FILES: tuple[tuple[str, str], ...] = (
++    ("summary", "summary.json"),
++    ("structure", "structure.json"),
++    ("name_collisions", "name_collisions.json"),
++    ("artifacts_compact", "artifacts_compact.json"),
++    ("graph_analytics", "graph_analytics.json"),
++    ("report_diff", "report_diff.json"),
++)
++
++
++def _error(code: str, **details: Any) -> str:
++    return json.dumps(
++        {
++            "status": "error",
++            "error": code,
++            **details,
++        },
++        indent=2,
++        ensure_ascii=False,
+     )
+-    return {
+-        module_name: truth
+-        for module_name in sorted(module_names)
+-        if not (truth := module_current_truth(state, module_name))["available"]
++
++
++def _report_generated_at(payload: Any) -> str | None:
++    if not isinstance(payload, dict):
++        return None
++
++    generated_at = payload.get("generated_at")
++    if isinstance(generated_at, str) and generated_at:
++        return generated_at
++
++    report_header = payload.get("report_header")
++    if isinstance(report_header, dict):
++        generated_at = report_header.get("generated_at")
++        if isinstance(generated_at, str) and generated_at:
++            return generated_at
++
++    current = payload.get("current")
++    if isinstance(current, dict):
++        generated_at = current.get("generated_at")
++        if isinstance(generated_at, str) and generated_at:
++            return generated_at
++
++    runtime = payload.get("runtime")
++    if isinstance(runtime, dict):
++        generated_at = runtime.get("generated_at")
++        if isinstance(generated_at, str) and generated_at:
++            return generated_at
++
++    return None
++
++
++def _load_report(
++    root: Path,
++    field: str,
++    suffix: str,
++) -> tuple[Any, dict[str, Any]]:
++    filename = f"{root.name}_{suffix}"
++    try:
++        path = report_helpers.get_canonical_report(root, filename)
++    except Exception as exc:
++        unavailable = {
++            "available": False,
++            "state": "unavailable",
++            "reason": f"Report lookup failed: {exc}",
++        }
++        return unavailable, {
++            "available": False,
++            "field": field,
++            "filename": filename,
++            "state": "unavailable",
++            "reason": unavailable["reason"],
++            "serialized_bytes": None,
++            "serialized_kib": None,
++        }
++
++    if path is None:
++        unavailable = {
++            "available": False,
++            "state": "unavailable",
++            "reason": f"Completed project report not found: {filename}",
++        }
++        return unavailable, {
++            "available": False,
++            "field": field,
++            "filename": filename,
++            "state": "unavailable",
++            "reason": unavailable["reason"],
++            "serialized_bytes": None,
++            "serialized_kib": None,
++        }
++
++    try:
++        payload = json.loads(path.read_text(encoding="utf-8"))
++    except (OSError, json.JSONDecodeError) as exc:
++        unavailable = {
++            "available": False,
++            "state": "invalid",
++            "reason": f"Completed project report could not be read: {exc}",
++        }
++        return unavailable, {
++            "available": False,
++            "field": field,
++            "filename": filename,
++            "report_path": str(path),
++            "state": "invalid",
++            "reason": unavailable["reason"],
++            "serialized_bytes": None,
++            "serialized_kib": None,
++        }
++
++    payload_bytes = serialized_json_bytes(payload)
++    return payload, {
++        "available": True,
++        "field": field,
++        "filename": filename,
++        "report_path": str(path),
++        "source": "completed_analysis_report",
++        "generated_at": _report_generated_at(payload),
++        "serialized_bytes": payload_bytes,
++        "serialized_kib": payload_bytes / 1024,
+     }
+ 
+ 
+-def _layer_index_view(
+-    layer_items: list[dict],
+-    max_items: int | None,
+-    compact: bool,
+-) -> dict:
+-    selected, total, truncated = query_helpers.bounded_items(layer_items, max_items)
+-    if compact:
+-        result = {
+-            "available": True,
+-            "distribution": {
+-                str(item["layer"]): int(item["module_count"])
+-                for item in selected
+-            },
+-            "total": total,
+-            "truncated": truncated,
++def _load_report_bundle(
++    root: Path,
++) -> tuple[dict[str, Any], dict[str, dict[str, Any]]]:
++    reports: dict[str, Any] = {}
++    catalog: dict[str, dict[str, Any]] = {}
++    for field, suffix in _REPORT_FILES:
++        payload, metadata = _load_report(root, field, suffix)
++        reports[field] = payload
++        catalog[field] = metadata
++    return reports, catalog
++
++
++def _live_state_overlay(root: Path) -> dict[str, Any]:
++    try:
++        engine = mcp_runtime.get_or_init_engine(root)
++    except Exception as exc:
++        return {
++            "available": False,
++            "state": "unavailable",
++            "reason": f"Canonical LIVE state lookup failed: {exc}",
++        }
++
++    state = getattr(engine, "state", None) if engine is not None else None
++    if state is None:
++        return {
++            "available": False,
++            "state": "unavailable",
++            "reason": "No usable canonical LIVE state is available.",
+         }
+-    else:
+-        result = {
+-            "available": True,
+-            "items": selected,
+-            "total": total,
+-            "truncated": truncated,
++
++    try:
++        diag = diagnostics_summary(root, state)
++    except Exception as exc:
++        diag = {
++            "available": False,
++            "state": "unavailable",
++            "reason": f"Diagnostics summary failed: {exc}",
+         }
+-    if truncated:
+-        result["expand"] = {
+-            "compact": False,
+-            "max_items": None,
++
++    try:
++        freshness = query_helpers.build_state_freshness(
++            root,
++            state,
++            engine=engine,
++        )
++    except Exception as exc:
++        freshness = {
++            "canonical_state": (
++                "stale"
++                if getattr(state, "resync_required", False)
++                else "unknown"
++            ),
++            "workspace_sync": "unverified",
++            "canonical_revision": getattr(engine, "revision", None),
++            "provenance": getattr(engine, "provenance", None),
++            "families": {},
++            "advisory_warning": f"Freshness envelope failed: {exc}",
+         }
+-    return result
++
++    return {
++        "available": True,
++        "data_source": "live_canonical_state",
++        "module_count": len(getattr(state, "modules", {}) or {}),
++        "resync_required": bool(getattr(state, "resync_required", False)),
++        "state_freshness": freshness,
++        "diagnostics_summary": diag,
++        "diagnostics_attention_required": (
++            bool(diag.get("attention_required", False))
++            if isinstance(diag, dict)
++            else False
++        ),
++    }
++
++
++def _bundle_state(catalog: dict[str, dict[str, Any]]) -> str:
++    available = sum(
++        1
++        for metadata in catalog.values()
++        if metadata.get("available") is True
++    )
++    if available == len(catalog):
++        return "complete"
++    if available:
++        return "partial"
++    return "unavailable"
++
++
++def _build_payload(
++    *,
++    selected_fields: list[str],
++    reports: dict[str, Any],
++    catalog: dict[str, dict[str, Any]],
++    live_state: dict[str, Any],
++) -> dict[str, Any]:
++    bundle_state = _bundle_state(catalog)
++    return {
++        "status": "ok" if bundle_state == "complete" else "partial",
++        "scope": "project",
++        "data_source": "completed_analysis_report_bundle",
++        "report_bundle_state": bundle_state,
++        "available_fields": [field for field, _ in _REPORT_FILES],
++        "selected_fields": selected_fields,
++        "reports": {
++            field: reports[field]
++            for field in selected_fields
++        },
++        "report_catalog": catalog,
++        "live_state": live_state,
++    }
+ 
+ 
+ def get_project_architecture(
+     repo_path: str,
+-    max_items: int | None = 10,
+-    compact: bool = True,
+     fields: list[str] | None = None,
++    allow_large_output: bool = False,
+ ) -> str:
++    if fields is not None and (
++        not isinstance(fields, list)
++        or any(not isinstance(field, str) for field in fields)
++    ):
++        return _error(
++            "invalid_fields",
++            expected="array of project report field names or null",
++        )
++    if not isinstance(allow_large_output, bool):
++        return _error(
++            "invalid_allow_large_output",
++            expected="boolean",
++        )
++
+     root = Path(repo_path).expanduser().resolve()
++    allowed_fields = [field for field, _ in _REPORT_FILES]
++
++    if fields is None:
++        selected_fields = list(allowed_fields)
++    else:
++        selected_fields = list(dict.fromkeys(fields))
++        unknown_fields = sorted(set(selected_fields) - set(allowed_fields))
++        if unknown_fields:
++            return _error(
++                "unsupported_fields",
++                unknown_fields=unknown_fields,
++                allowed_fields=allowed_fields,
++            )
++
+     try:
+-        engine = mcp_runtime.get_or_init_engine(root)
+-        if not engine or getattr(engine.state, "resync_required", False):
+-            return "Error: No usable canonical LIVE state. Run analyze_project first."
+-
+-        state = engine.state
+-        stale_modules = _stale_module_truths(state)
+-        if stale_modules:
+-            return json.dumps(
+-                {
+-                    "status": "stale",
+-                    "available": False,
+-                    "scope": "project",
+-                    "provenance": "last_known_good",
+-                    "affected_modules": stale_modules,
++        reports, catalog = _load_report_bundle(root)
++        live_state = _live_state_overlay(root)
++        result = _build_payload(
++            selected_fields=selected_fields,
++            reports=reports,
++            catalog=catalog,
++            live_state=live_state,
++        )
++        serialized = json.dumps(
++            result,
++            indent=2,
++            ensure_ascii=False,
++        )
++
++        guarded = guard_large_output(
++            serialized,
++            allow_large_output=allow_large_output,
++            requested_count=len(selected_fields),
++            reason=(
++                "Selected project architecture reports exceed the "
++                "50 KiB direct-response threshold."
++            ),
++            retry_instruction=(
++                "Inspect report_catalog serialized_bytes/serialized_kib, "
++                "retry with fields limited to the report sections you need, "
++                "or repeat the identical selection with "
++                "allow_large_output=true."
++            ),
++            warning_threshold_bytes=PROJECT_ARCHITECTURE_DIRECT_BYTES,
++        )
++        if guarded == serialized:
++            return serialized
++
++        warning = json.loads(guarded)
++        warning.update(
++            {
++                "scope": "project",
++                "report_bundle_state": result["report_bundle_state"],
++                "available_fields": allowed_fields,
++                "selected_fields": selected_fields,
++                "report_catalog": catalog,
++                "live_state": live_state,
++                "retry": {
++                    "fields": selected_fields,
++                    "allow_large_output": True,
+                 },
+-                indent=2,
+-            )
+-        unavailable = {
+-            "available": False,
+-            "state": "deferred",
+-            "reason": "No fresh canonical LIVE producer is available for this analytics family.",
+-        }
+-        collections = {
+-            "action_items": dict(unavailable),
+-            "top_global_hotspots": dict(unavailable),
+-        }
+-        debt_summary = dict(unavailable)
+-
+-        cached_analytics = getattr(state, "cached_analytics", {}) or {}
+-        cached_state = getattr(state, "cached_analytics_state", "deferred")
+-        canonical_modules = set(getattr(state, "modules", {}) or {})
+-        module_layers = None
+-        if (
+-            cached_state == "fresh"
+-            and isinstance(cached_analytics, dict)
+-            and "module_layers" in cached_analytics
+-            and isinstance(cached_analytics["module_layers"], dict)
+-        ):
+-            candidate_layers = cached_analytics["module_layers"]
+-            if set(candidate_layers) == canonical_modules:
+-                module_layers = candidate_layers
+-        if isinstance(module_layers, dict):
+-            layer_counts: dict[str, int] = {}
+-            for layer in module_layers.values():
+-                layer_name = str(layer)
+-                layer_counts[layer_name] = layer_counts.get(layer_name, 0) + 1
+-            layer_items = [
+-                {"layer": layer, "module_count": count}
+-                for layer, count in sorted(layer_counts.items())
+-            ]
+-            layer_index = _layer_index_view(
+-                layer_items,
+-                max_items,
+-                compact,
+-            )
+-        else:
+-            layer_index = dict(unavailable)
+-        collections["layer_index"] = layer_index
+-        diag = diagnostics_summary(root, state)
+-        result = {
+-            **collections,
+-            "debt_summary": debt_summary,
+-            "module_count": len(getattr(state, "modules", {}) or {}),
+-            "data_source": "live_canonical_state",
+-            "diagnostics_summary": diag,
+-            "diagnostics_attention_required": diag["attention_required"],
+-        }
+-        if fields is not None:
+-            allowed_fields = set(result)
+-            unknown_fields = sorted(set(fields) - allowed_fields)
+-            if unknown_fields:
+-                return json.dumps({
+-                    "error": "Unsupported fields for get_project_architecture",
+-                    "unknown_fields": unknown_fields,
+-                    "allowed_fields": sorted(allowed_fields),
+-                }, indent=2)
+-            result = {field: result[field] for field in fields}
+-        return json.dumps(result, indent=2)
+-    except Exception as e:
+-        return f"Error reading project architecture: {e}"
++            }
++        )
++        return json.dumps(
++            warning,
++            indent=2,
++            ensure_ascii=False,
++        )
++    except Exception as exc:
++        return _error(
++            "project_architecture_failed",
++            detail=str(exc),
++        )
+```
+
+### contextor/mcp/docs/get_project_architecture.json
+
+```diff
+warning: in the working copy of 'contextor/mcp/docs/get_project_architecture.json', LF will be replaced by CRLF the next time Git touches it
+diff --git a/contextor/mcp/docs/get_project_architecture.json b/contextor/mcp/docs/get_project_architecture.json
+index ee5d0dc..8d77125 100644
+--- a/contextor/mcp/docs/get_project_architecture.json
++++ b/contextor/mcp/docs/get_project_architecture.json
+@@ -1,22 +1,37 @@
+ {
+-  "version": "1.0.0",
++  "version": "2.0.0",
+   "tool": "get_project_architecture",
+   "purpose": [
+-    "[OPTIMIZED] The highest-level architectural summary of the project.\nReturns global action items, debt summary, layer index, and hotspots.\nEach analytics family is an explicit union: available collections expose\n``available=true``, ``total`` and ``truncated``; unavailable families expose\n``available=false``, ``state`` and ``reason`` without fabricated counts.\nThe default ``compact=True`` response returns ``layer_index.distribution`` as\na concise mapping of layer names to module counts. ``max_items`` bounds the\nreturned layers in compact and full modes; pass ``max_items=None`` to return\nevery layer. Set ``compact=False`` for full ``items`` and\n``compact=False, max_items=None`` for lossless complete data. ``truncated``\nmeans fewer elements are present than ``total``, and truncated collections\ninclude ``expand={\"compact\": false, \"max_items\": null}``. ``fields`` projects\ntop-level keys after compact shaping. Allowed values are ``action_items``,\n``debt_summary``, ``layer_index``, ``top_global_hotspots``, ``module_count``,\nand ``data_source``."
++    "[OPTIMIZED] Return the complete persisted global project-analysis report bundle with an explicit current canonical LIVE freshness overlay. The report bundle contains summary, structure, name_collisions, artifacts_compact, graph_analytics, and report_diff. Report bodies are returned losslessly; the tool does not replace them with top-N summaries."
+   ],
+   "parameters": [
+     "repo_path (string, required): canonical repository root.",
+-    "max_items (integer or null, default 10): maximum number of entries to return in bounded collections; pass null for unlimited entries. Does not bound module_count.",
+-    "compact (boolean, default true): controls concise summary shaping (such as layer distribution mapping) versus verbose item lists.",
+-    "fields (array of strings or null, default null): optional projection list of top-level keys to return; null returns the full response."
++    "fields (array of strings or null, default null): optional selection of global report sections. Allowed values are summary, structure, name_collisions, artifacts_compact, graph_analytics, and report_diff. Null selects all sections.",
++    "allow_large_output (boolean, default false): approve returning the complete selected report payload when it exceeds the 51200-byte (50 KiB) direct-response threshold."
+   ],
+   "behavior": [
+-    "1. Reads current structure from canonical LIVE state without requiring a full source scan during query execution.\n2. Saved or report-derived analytics expose explicit available=true/false status and reason without fabricated metrics.\n3. Collections expose total and truncated metadata with expand instructions when truncated."
++    "1. Reads the persisted global report family produced by the latest completed project analysis; it does not rerun report producers or scan repository source files.",
++    "2. The completed-analysis report snapshot and current canonical LIVE state are separate provenance domains. reports contains the persisted analysis snapshot; live_state contains current canonical revision/provenance/family freshness and diagnostics.",
++    "3. When the complete selected response is at most 51200 UTF-8 JSON bytes it is returned directly.",
++    "4. Above 51200 bytes, unless allow_large_output=true, the tool returns confirmation_required with the exact complete selected response size plus report_catalog containing each report section's serialized byte/KiB size. The agent can then narrow fields or explicitly approve the same selection.",
++    "5. Missing or unreadable report sections remain explicit available=false/state/reason entries. They are never fabricated as empty successful reports.",
++    "6. fields controls retrieval width only; it never changes the semantic contents of a selected report."
++  ],
++  "freshness": [
++    "Persisted reports describe the latest completed full-analysis report write and may be older than the current incremental LIVE revision.",
++    "live_state.state_freshness reports the current canonical revision, provenance, family states, workspace-sync status, and advisory warning independently from the report snapshot.",
++    "A newer LIVE revision does not relabel persisted report-only analytics as fresh LIVE facts."
++  ],
++  "errors": [
++    "unsupported_fields: one or more requested fields are not global project report sections.",
++    "invalid_fields: fields is not an array of strings or null.",
++    "invalid_allow_large_output: allow_large_output is not boolean.",
++    "project_architecture_failed: unexpected report-bundle construction failure."
+   ],
+-  "freshness": [],
+-  "errors": [],
+   "usage_notes": [
+-    "LLM use: start compact with the default limit. Increase it only when a\nrelevant collection is truncated, or pass ``None`` after explicitly\ndeciding that the complete collection is worth the token cost."
++    "Call with the default fields=null first. If the complete bundle is over 50 KiB, inspect report_catalog before choosing the report sections worth loading.",
++    "Use fields to fetch one or more exact report sections without semantic truncation. Use allow_large_output=true only after deciding that the complete selected payload is worth the context cost.",
++    "For targeted extraction from a very large indexed report, prefer the existing specialized indexed/report-context tools rather than loading hundreds of KiB unnecessarily."
+   ],
+   "examples": []
+ }
+```
+
+### contextor/mcp/docs/index.json
+
+```diff
+warning: in the working copy of 'contextor/mcp/docs/index.json', LF will be replaced by CRLF the next time Git touches it
+diff --git a/contextor/mcp/docs/index.json b/contextor/mcp/docs/index.json
+index 89d5c4c..79b3579 100644
+--- a/contextor/mcp/docs/index.json
++++ b/contextor/mcp/docs/index.json
+@@ -35,7 +35,7 @@
+     {
+       "tool": "get_project_architecture",
+       "filename": "get_project_architecture.json",
+-      "short_description": "Return the highest-level canonical architecture summary with explicit availability per analytics family. Unavailable families never fabricate zero counts."
++      "short_description": "Return the complete persisted global project-report bundle with current LIVE freshness metadata and exact 50 KiB size preflight before large retrieval."
+     },
+     {
+       "tool": "get_module_context",
+```
+
+### tests/mcp/tools/test_architecture_context_contracts.py
+
+```diff
+warning: in the working copy of 'tests/mcp/tools/test_architecture_context_contracts.py', LF will be replaced by CRLF the next time Git touches it
+diff --git a/tests/mcp/tools/test_architecture_context_contracts.py b/tests/mcp/tools/test_architecture_context_contracts.py
+index 3a6d342..b5647f0 100644
+--- a/tests/mcp/tools/test_architecture_context_contracts.py
++++ b/tests/mcp/tools/test_architecture_context_contracts.py
+@@ -14,7 +14,7 @@ def _load_doc(tool_name: str) -> dict:
+ def test_architecture_context_contracts__get_project_architecture_signature():
+     tools = mcp_server.mcp._tool_manager._tools
+     sig = str(inspect.signature(tools["get_project_architecture"].fn))
+-    assert sig == "(repo_path: str, max_items: int | None = 10, compact: bool = True, fields: list[str] | None = None) -> str"
++    assert sig == "(repo_path: str, fields: list[str] | None = None, allow_large_output: bool = False) -> str"
+ 
+ 
+ def test_architecture_context_contracts__get_file_edit_context_signature():
+@@ -45,9 +45,16 @@ def test_architecture_context_contracts__get_project_architecture_docs_complete(
+     doc = _load_doc("get_project_architecture")
+     params_text = "\n".join(doc.get("parameters", []))
+     assert "repo_path (string, required)" in params_text
+-    assert "max_items (integer or null, default 10)" in params_text
+-    assert "compact (boolean, default true)" in params_text
+     assert "fields (array of strings or null, default null)" in params_text
++    assert "allow_large_output (boolean, default false)" in params_text
++    combined = "\n".join(
++        doc.get("behavior", [])
++        + doc.get("freshness", [])
++        + doc.get("usage_notes", [])
++    )
++    assert "51200" in combined
++    assert "report_catalog" in combined
++    assert "live_state" in combined
+ 
+ 
+ def test_architecture_context_contracts__get_file_edit_context_docs_complete():
+```
+
+### tests/mcp/tools/test_auto_bounded_output.py
+
+```diff
+warning: in the working copy of 'tests/mcp/tools/test_auto_bounded_output.py', LF will be replaced by CRLF the next time Git touches it
+diff --git a/tests/mcp/tools/test_auto_bounded_output.py b/tests/mcp/tools/test_auto_bounded_output.py
+index 3a984a0..9e458d1 100644
+--- a/tests/mcp/tools/test_auto_bounded_output.py
++++ b/tests/mcp/tools/test_auto_bounded_output.py
+@@ -509,3 +509,20 @@ def test_auto_bounded_output__lookup_reserved_output_key_is_never_overwritten(
+ 
+ def test_auto_bounded_output__shared_warning_threshold_is_15360():
+     assert LARGE_OUTPUT_WARNING_BYTES == 15360
++def test_auto_bounded_output__guard_large_output_accepts_custom_threshold():
++    from contextor.mcp.output_guard import guard_large_output
++
++    payload = "x" * 20
++    result = guard_large_output(
++        payload,
++        allow_large_output=False,
++        retry_instruction="retry",
++        warning_threshold_bytes=10,
++    )
++    parsed = json.loads(result)
++
++    assert parsed["status"] == "confirmation_required"
++    assert parsed["estimated_output_bytes"] == 20
++    assert parsed["warning_threshold_bytes"] == 10
++    assert parsed["warning_threshold_kib"] == 10 / 1024
++    assert parsed["retry"] == {"allow_large_output": True}
+```
+
+### tests/test_mcp_documentation.py
+
+```diff
+warning: in the working copy of 'tests/test_mcp_documentation.py', LF will be replaced by CRLF the next time Git touches it
+diff --git a/tests/test_mcp_documentation.py b/tests/test_mcp_documentation.py
+index 63a256d..92b9ea1 100644
+--- a/tests/test_mcp_documentation.py
++++ b/tests/test_mcp_documentation.py
+@@ -13,7 +13,7 @@ LEGACY_SIGNATURES = {
+     "get_analysis_status": "(repo_path: str, job_id: str | None = None, max_skipped_files: int | None = 10, allow_large_output: bool = False) -> str",
+     "get_live_events": "(repo_path: str, after_revision: int | None = None, limit: int | None = 20) -> str",
+     "update_file": "(repo_path: str, file_path: str, max_items: int | None = 30, compact: bool = True, fields: list[str] | None = None) -> str",
+-    "get_project_architecture": "(repo_path: str, max_items: int | None = 10, compact: bool = True, fields: list[str] | None = None) -> str",
++    "get_project_architecture": "(repo_path: str, fields: list[str] | None = None, allow_large_output: bool = False) -> str",
+     "get_module_context": "(repo_path: str, module_name: str = '', max_items: int | None = 30, compact: bool = True, fields: list[str] | None = None, module: str | None = None) -> str",
+     "get_artifact_blast_radius": "(repo_path: str, artifact_name: str = '', max_items: int | None = 30, compact: bool = True, fields: list[str] | None = None, representation: str = 'named', artifact: str | None = None) -> str",
+     "search_artifacts": "(repo_path: str, search_term: str | None = None, limit: int | None = 20, evidence_limit: int | None = 20, compact: bool = True, fields: list[str] | None = None, query: str | None = None) -> str",
+```
+
+### tests/test_mcp_regressions.py
+
+```diff
+warning: in the working copy of 'tests/test_mcp_regressions.py', LF will be replaced by CRLF the next time Git touches it
+diff --git a/tests/test_mcp_regressions.py b/tests/test_mcp_regressions.py
+index 4fa59a5..98fb91f 100644
+--- a/tests/test_mcp_regressions.py
++++ b/tests/test_mcp_regressions.py
+@@ -3734,11 +3734,16 @@ def test_project_architecture_and_report_diff_offer_optional_bounds(
+     )
+ 
+     architecture = json.loads(mcp_server.get_project_architecture.fn(
+-        repo_path=str(tmp_path), max_items=1, compact=False,
+-        fields=["action_items", "top_global_hotspots"],
++        repo_path=str(tmp_path),
++        fields=["summary"],
+     ))
+-    assert architecture["action_items"]["available"] is False
+-    assert architecture["top_global_hotspots"]["available"] is False
++    assert architecture["status"] == "partial"
++    assert architecture["selected_fields"] == ["summary"]
++    assert architecture["reports"]["summary"] == json.loads(
++        summary_path.read_text(encoding="utf-8")
++    )
++    assert architecture["report_catalog"]["summary"]["available"] is True
++    assert architecture["report_catalog"]["structure"]["available"] is False
+ 
+     diff = json.loads(mcp_server.get_report_diff.fn(
+         repo_path=str(tmp_path), max_items=1, compact=False,
+```
+
+### tests/mcp/tools/test_get_project_architecture_full_reports.py
+
+```diff
+diff --git a/tests/mcp/tools/test_get_project_architecture_full_reports.py b/tests/mcp/tools/test_get_project_architecture_full_reports.py
+new file mode 100644
+--- /dev/null
++++ b/tests/mcp/tools/test_get_project_architecture_full_reports.py
++import importlib
++import json
++from types import SimpleNamespace
++
++from contextor import mcp_server
++from contextor.core.analysis.state_manager import RepositoryAnalysisState
++
++
++architecture_tool = importlib.import_module(
++    "contextor.mcp.tools.get_project_architecture"
++)
++
++_REPORT_SUFFIXES = {
++    "summary": "summary.json",
++    "structure": "structure.json",
++    "name_collisions": "name_collisions.json",
++    "artifacts_compact": "artifacts_compact.json",
++    "graph_analytics": "graph_analytics.json",
++    "report_diff": "report_diff.json",
++}
++
++
++def _install_runtime(tmp_path, monkeypatch, reports):
++    paths = {}
++    for field, payload in reports.items():
++        path = tmp_path / f"{field}.json"
++        path.write_text(
++            json.dumps(payload, indent=2, ensure_ascii=False),
++            encoding="utf-8",
++        )
++        paths[f"{tmp_path.name}_{_REPORT_SUFFIXES[field]}"] = path
++
++    monkeypatch.setattr(
++        architecture_tool.report_helpers,
++        "get_canonical_report",
++        lambda _root, filename: paths.get(filename),
++    )
++
++    state = RepositoryAnalysisState(
++        modules={"pkg.mod": object()},
++        cycles_state="fresh",
++        collisions_state="fresh",
++        topology_metrics_state="fresh",
++        artifact_consumption_state="fresh",
++        lineage_facts_state="fresh",
++    )
++    engine = SimpleNamespace(
++        state=state,
++        revision=77,
++        provenance="live",
++    )
++    monkeypatch.setattr(
++        architecture_tool.mcp_runtime,
++        "get_or_init_engine",
++        lambda _root: engine,
++    )
++    monkeypatch.setattr(
++        architecture_tool,
++        "diagnostics_summary",
++        lambda _root, _state: {
++            "attention_required": False,
++            "availability": {
++                "cycles": "fresh",
++                "name_collisions": "fresh",
++            },
++        },
++    )
++    monkeypatch.setattr(
++        architecture_tool.query_helpers,
++        "build_state_freshness",
++        lambda _root, _state, engine=None: {
++            "canonical_state": "fresh",
++            "workspace_sync": "unverified",
++            "canonical_revision": 77,
++            "provenance": "live",
++            "families": {
++                "graph": "fresh",
++                "topology": "fresh",
++                "artifact_consumption": "fresh",
++                "cycles": "fresh",
++                "collisions": "fresh",
++                "lineage": "fresh",
++            },
++            "advisory_warning": None,
++        },
++    )
++
++
++def _small_bundle():
++    return {
++        "summary": {
++            "status": "WARNING",
++            "metrics": {"nodes": 3, "edges_total": 4},
++            "action_items": ["inspect pkg.mod"],
++            "report_header": {
++                "commit_sha": "abc",
++                "generated_at": "2026-09-16T07:41:26",
++            },
++        },
++        "structure": {
++            "hard_edges": {"pkg.mod": ["pkg.dep"]},
++            "soft_edges": {},
++        },
++        "name_collisions": {
++            "total_collisions": 0,
++            "collision_summary": {"total": 0},
++            "collisions": [],
++        },
++        "artifacts_compact": {
++            "_format_version": "3",
++            "artifact_count": 1,
++            "artifacts": {"A1": {"kind": "function"}},
++        },
++        "graph_analytics": {
++            "report_type": "graph_analytics",
++            "module_count": 1,
++            "modules": {
++                "pkg.mod": {
++                    "fan_in": 1,
++                    "fan_out": 1,
++                }
++            },
++        },
++        "report_diff": {
++            "classification": "NO_CHANGE",
++            "report_diff": {
++                "metrics": {},
++                "debt": {},
++                "layers": {},
++                "is_empty": True,
++            },
++            "current": {
++                "commit_sha": "abc",
++                "generated_at": "2026-09-16T07:41:26",
++            },
++        },
++    }
++
++
++def test_get_project_architecture_returns_lossless_global_report_bundle_under_50k(
++    tmp_path,
++    monkeypatch,
++):
++    reports = _small_bundle()
++    _install_runtime(tmp_path, monkeypatch, reports)
++
++    result = json.loads(
++        mcp_server.get_project_architecture.fn(
++            repo_path=str(tmp_path),
++        )
++    )
++
++    assert result["status"] == "ok"
++    assert result["report_bundle_state"] == "complete"
++    assert result["selected_fields"] == list(_REPORT_SUFFIXES)
++    assert result["reports"] == reports
++    assert result["live_state"]["state_freshness"]["canonical_revision"] == 77
++    assert result["live_state"]["state_freshness"]["provenance"] == "live"
++
++    for field, payload in reports.items():
++        metadata = result["report_catalog"][field]
++        assert metadata["available"] is True
++        assert metadata["serialized_bytes"] == len(
++            json.dumps(
++                payload,
++                indent=2,
++                ensure_ascii=False,
++            ).encode("utf-8")
++        )
++
++
++def test_get_project_architecture_preflights_over_50k_and_reports_section_sizes(
++    tmp_path,
++    monkeypatch,
++):
++    reports = _small_bundle()
++    reports["graph_analytics"] = {
++        "report_type": "graph_analytics",
++        "payload": "x" * 60000,
++    }
++    _install_runtime(tmp_path, monkeypatch, reports)
++
++    result = json.loads(
++        mcp_server.get_project_architecture.fn(
++            repo_path=str(tmp_path),
++        )
++    )
++
++    assert result["status"] == "confirmation_required"
++    assert result["estimated_output_bytes"] > 50 * 1024
++    assert result["warning_threshold_bytes"] == 50 * 1024
++    assert result["warning_threshold_kib"] == 50.0
++    assert (
++        result["report_catalog"]["graph_analytics"]["serialized_bytes"]
++        > 50 * 1024
++    )
++    assert result["retry"] == {
++        "fields": list(_REPORT_SUFFIXES),
++        "allow_large_output": True,
++    }
++
++
++def test_get_project_architecture_fields_narrow_before_large_retrieval(
++    tmp_path,
++    monkeypatch,
++):
++    reports = _small_bundle()
++    reports["graph_analytics"] = {
++        "report_type": "graph_analytics",
++        "payload": "x" * 60000,
++    }
++    _install_runtime(tmp_path, monkeypatch, reports)
++
++    result = json.loads(
++        mcp_server.get_project_architecture.fn(
++            repo_path=str(tmp_path),
++            fields=["summary", "report_diff"],
++        )
++    )
++
++    assert result["status"] == "ok"
++    assert result["selected_fields"] == ["summary", "report_diff"]
++    assert set(result["reports"]) == {"summary", "report_diff"}
++    assert result["reports"]["summary"] == reports["summary"]
++    assert result["reports"]["report_diff"] == reports["report_diff"]
++    assert (
++        result["report_catalog"]["graph_analytics"]["serialized_bytes"]
++        > 50 * 1024
++    )
++
++
++def test_get_project_architecture_allow_large_output_returns_exact_selected_report(
++    tmp_path,
++    monkeypatch,
++):
++    reports = _small_bundle()
++    reports["graph_analytics"] = {
++        "report_type": "graph_analytics",
++        "payload": "x" * 60000,
++    }
++    _install_runtime(tmp_path, monkeypatch, reports)
++
++    result = json.loads(
++        mcp_server.get_project_architecture.fn(
++            repo_path=str(tmp_path),
++            fields=["graph_analytics"],
++            allow_large_output=True,
++        )
++    )
++
++    assert result["status"] == "ok"
++    assert result["selected_fields"] == ["graph_analytics"]
++    assert result["reports"]["graph_analytics"] == reports["graph_analytics"]
++
++
++def test_get_project_architecture_missing_reports_are_explicit_and_unknown_fields_fail(
++    tmp_path,
++    monkeypatch,
++):
++    reports = {
++        "summary": _small_bundle()["summary"],
++    }
++    _install_runtime(tmp_path, monkeypatch, reports)
++
++    result = json.loads(
++        mcp_server.get_project_architecture.fn(
++            repo_path=str(tmp_path),
++            fields=["summary", "structure"],
++        )
++    )
++
++    assert result["status"] == "partial"
++    assert result["reports"]["summary"] == reports["summary"]
++    assert result["reports"]["structure"]["available"] is False
++    assert result["reports"]["structure"]["state"] == "unavailable"
++
++    invalid = json.loads(
++        mcp_server.get_project_architecture.fn(
++            repo_path=str(tmp_path),
++            fields=["does_not_exist"],
++        )
++    )
++    assert invalid["status"] == "error"
++    assert invalid["error"] == "unsupported_fields"
++    assert invalid["unknown_fields"] == ["does_not_exist"]
++
+```
+
+## ACTION_GATE
+
+- Do not run more commands or tests under this contract until the user supplies an updated literal migration contract covering the remaining consumers, or explicitly authorizes a non-literal migration.
+- The implementation is blocked at the mandated SOURCE_DRIFT gate, not classified as a passing implementation.

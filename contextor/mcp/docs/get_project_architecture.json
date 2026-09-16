@@ -1,22 +1,37 @@
 {
-  "version": "1.0.0",
+  "version": "2.0.0",
   "tool": "get_project_architecture",
   "purpose": [
-    "[OPTIMIZED] The highest-level architectural summary of the project.\nReturns global action items, debt summary, layer index, and hotspots.\nEach analytics family is an explicit union: available collections expose\n``available=true``, ``total`` and ``truncated``; unavailable families expose\n``available=false``, ``state`` and ``reason`` without fabricated counts.\nThe default ``compact=True`` response returns ``layer_index.distribution`` as\na concise mapping of layer names to module counts. ``max_items`` bounds the\nreturned layers in compact and full modes; pass ``max_items=None`` to return\nevery layer. Set ``compact=False`` for full ``items`` and\n``compact=False, max_items=None`` for lossless complete data. ``truncated``\nmeans fewer elements are present than ``total``, and truncated collections\ninclude ``expand={\"compact\": false, \"max_items\": null}``. ``fields`` projects\ntop-level keys after compact shaping. Allowed values are ``action_items``,\n``debt_summary``, ``layer_index``, ``top_global_hotspots``, ``module_count``,\nand ``data_source``."
+    "[OPTIMIZED] Return the complete persisted global project-analysis report bundle with an explicit current canonical LIVE freshness overlay. The report bundle contains summary, structure, name_collisions, artifacts_compact, graph_analytics, and report_diff. Report bodies are returned losslessly; the tool does not replace them with top-N summaries."
   ],
   "parameters": [
     "repo_path (string, required): canonical repository root.",
-    "max_items (integer or null, default 10): maximum number of entries to return in bounded collections; pass null for unlimited entries. Does not bound module_count.",
-    "compact (boolean, default true): controls concise summary shaping (such as layer distribution mapping) versus verbose item lists.",
-    "fields (array of strings or null, default null): optional projection list of top-level keys to return; null returns the full response."
+    "fields (array of strings or null, default null): optional selection of global report sections. Allowed values are summary, structure, name_collisions, artifacts_compact, graph_analytics, and report_diff. Null selects all sections.",
+    "allow_large_output (boolean, default false): approve returning the complete selected report payload when it exceeds the 51200-byte (50 KiB) direct-response threshold."
   ],
   "behavior": [
-    "1. Reads current structure from canonical LIVE state without requiring a full source scan during query execution.\n2. Saved or report-derived analytics expose explicit available=true/false status and reason without fabricated metrics.\n3. Collections expose total and truncated metadata with expand instructions when truncated."
+    "1. Reads the persisted global report family produced by the latest completed project analysis; it does not rerun report producers or scan repository source files.",
+    "2. The completed-analysis report snapshot and current canonical LIVE state are separate provenance domains. reports contains the persisted analysis snapshot; live_state contains current canonical revision/provenance/family freshness and diagnostics.",
+    "3. When the complete selected response is at most 51200 UTF-8 JSON bytes it is returned directly.",
+    "4. Above 51200 bytes, unless allow_large_output=true, the tool returns confirmation_required with the exact complete selected response size plus report_catalog containing each report section's serialized byte/KiB size. The agent can then narrow fields or explicitly approve the same selection.",
+    "5. Missing or unreadable report sections remain explicit available=false/state/reason entries. They are never fabricated as empty successful reports.",
+    "6. fields controls retrieval width only; it never changes the semantic contents of a selected report."
   ],
-  "freshness": [],
-  "errors": [],
+  "freshness": [
+    "Persisted reports describe the latest completed full-analysis report write and may be older than the current incremental LIVE revision.",
+    "live_state.state_freshness reports the current canonical revision, provenance, family states, workspace-sync status, and advisory warning independently from the report snapshot.",
+    "A newer LIVE revision does not relabel persisted report-only analytics as fresh LIVE facts."
+  ],
+  "errors": [
+    "unsupported_fields: one or more requested fields are not global project report sections.",
+    "invalid_fields: fields is not an array of strings or null.",
+    "invalid_allow_large_output: allow_large_output is not boolean.",
+    "project_architecture_failed: unexpected report-bundle construction failure."
+  ],
   "usage_notes": [
-    "LLM use: start compact with the default limit. Increase it only when a\nrelevant collection is truncated, or pass ``None`` after explicitly\ndeciding that the complete collection is worth the token cost."
+    "Call with the default fields=null first. If the complete bundle is over 50 KiB, inspect report_catalog before choosing the report sections worth loading.",
+    "Use fields to fetch one or more exact report sections without semantic truncation. Use allow_large_output=true only after deciding that the complete selected payload is worth the context cost.",
+    "For targeted extraction from a very large indexed report, prefer the existing specialized indexed/report-context tools rather than loading hundreds of KiB unnecessarily."
   ],
   "examples": []
 }

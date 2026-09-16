@@ -14,7 +14,7 @@ def _load_doc(tool_name: str) -> dict:
 def test_architecture_context_contracts__get_project_architecture_signature():
     tools = mcp_server.mcp._tool_manager._tools
     sig = str(inspect.signature(tools["get_project_architecture"].fn))
-    assert sig == "(repo_path: str, max_items: int | None = 10, compact: bool = True, fields: list[str] | None = None) -> str"
+    assert sig == "(repo_path: str, fields: list[str] | None = None, allow_large_output: bool = False) -> str"
 
 
 def test_architecture_context_contracts__get_file_edit_context_signature():
@@ -45,9 +45,16 @@ def test_architecture_context_contracts__get_project_architecture_docs_complete(
     doc = _load_doc("get_project_architecture")
     params_text = "\n".join(doc.get("parameters", []))
     assert "repo_path (string, required)" in params_text
-    assert "max_items (integer or null, default 10)" in params_text
-    assert "compact (boolean, default true)" in params_text
     assert "fields (array of strings or null, default null)" in params_text
+    assert "allow_large_output (boolean, default false)" in params_text
+    combined = "\n".join(
+        doc.get("behavior", [])
+        + doc.get("freshness", [])
+        + doc.get("usage_notes", [])
+    )
+    assert "51200" in combined
+    assert "report_catalog" in combined
+    assert "live_state" in combined
 
 
 def test_architecture_context_contracts__get_file_edit_context_docs_complete():

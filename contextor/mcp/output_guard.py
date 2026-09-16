@@ -11,9 +11,10 @@ def guard_large_output(
     retry_instruction: str,
     requested_count: int | None = None,
     reason: str = "Estimated output exceeds the recommended context size.",
+    warning_threshold_bytes: int = LARGE_OUTPUT_WARNING_BYTES,
 ) -> str:
     estimated_output_bytes = len(serialized_output.encode("utf-8"))
-    if estimated_output_bytes <= LARGE_OUTPUT_WARNING_BYTES or allow_large_output:
+    if estimated_output_bytes <= warning_threshold_bytes or allow_large_output:
         return serialized_output
 
     warning_response: dict[str, Any] = {
@@ -27,8 +28,8 @@ def guard_large_output(
         {
             "estimated_output_bytes": estimated_output_bytes,
             "estimated_output_kib": estimated_output_bytes / 1024,
-            "warning_threshold_bytes": LARGE_OUTPUT_WARNING_BYTES,
-            "warning_threshold_kib": 15.0,
+            "warning_threshold_bytes": warning_threshold_bytes,
+            "warning_threshold_kib": warning_threshold_bytes / 1024,
             "retry": {
                 "allow_large_output": True,
             },

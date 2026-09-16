@@ -509,3 +509,20 @@ def test_auto_bounded_output__lookup_reserved_output_key_is_never_overwritten(
 
 def test_auto_bounded_output__shared_warning_threshold_is_15360():
     assert LARGE_OUTPUT_WARNING_BYTES == 15360
+def test_auto_bounded_output__guard_large_output_accepts_custom_threshold():
+    from contextor.mcp.output_guard import guard_large_output
+
+    payload = "x" * 20
+    result = guard_large_output(
+        payload,
+        allow_large_output=False,
+        retry_instruction="retry",
+        warning_threshold_bytes=10,
+    )
+    parsed = json.loads(result)
+
+    assert parsed["status"] == "confirmation_required"
+    assert parsed["estimated_output_bytes"] == 20
+    assert parsed["warning_threshold_bytes"] == 10
+    assert parsed["warning_threshold_kib"] == 10 / 1024
+    assert parsed["retry"] == {"allow_large_output": True}

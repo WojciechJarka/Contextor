@@ -13,7 +13,7 @@ LEGACY_SIGNATURES = {
     "get_analysis_status": "(repo_path: str, job_id: str | None = None, max_skipped_files: int | None = 10, allow_large_output: bool = False) -> str",
     "get_live_events": "(repo_path: str, after_revision: int | None = None, limit: int | None = 20) -> str",
     "update_file": "(repo_path: str, file_path: str, max_items: int | None = 30, compact: bool = True, fields: list[str] | None = None) -> str",
-    "get_project_architecture": "(repo_path: str, max_items: int | None = 10, compact: bool = True, fields: list[str] | None = None) -> str",
+    "get_project_architecture": "(repo_path: str, fields: list[str] | None = None, allow_large_output: bool = False) -> str",
     "get_module_context": "(repo_path: str, module_name: str = '', max_items: int | None = 30, compact: bool = True, fields: list[str] | None = None, module: str | None = None) -> str",
     "get_artifact_blast_radius": "(repo_path: str, artifact_name: str = '', max_items: int | None = 30, compact: bool = True, fields: list[str] | None = None, representation: str = 'named', artifact: str | None = None) -> str",
     "search_artifacts": "(repo_path: str, search_term: str | None = None, limit: int | None = 20, evidence_limit: int | None = 20, compact: bool = True, fields: list[str] | None = None, query: str | None = None) -> str",

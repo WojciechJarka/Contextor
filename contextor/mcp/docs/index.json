@@ -35,7 +35,7 @@
     {
       "tool": "get_project_architecture",
       "filename": "get_project_architecture.json",
-      "short_description": "Return the highest-level canonical architecture summary with explicit availability per analytics family. Unavailable families never fabricate zero counts."
+      "short_description": "Return the complete persisted global project-report bundle with current LIVE freshness metadata and exact 50 KiB size preflight before large retrieval."
     },
     {
       "tool": "get_module_context",

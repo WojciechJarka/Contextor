@@ -3734,11 +3734,16 @@ def test_project_architecture_and_report_diff_offer_optional_bounds(
     )
 
     architecture = json.loads(mcp_server.get_project_architecture.fn(
-        repo_path=str(tmp_path), max_items=1, compact=False,
-        fields=["action_items", "top_global_hotspots"],
+        repo_path=str(tmp_path),
+        fields=["summary"],
     ))
-    assert architecture["action_items"]["available"] is False
-    assert architecture["top_global_hotspots"]["available"] is False
+    assert architecture["status"] == "partial"
+    assert architecture["selected_fields"] == ["summary"]
+    assert architecture["reports"]["summary"] == json.loads(
+        summary_path.read_text(encoding="utf-8")
+    )
+    assert architecture["report_catalog"]["summary"]["available"] is True
+    assert architecture["report_catalog"]["structure"]["available"] is False
 
     diff = json.loads(mcp_server.get_report_diff.fn(
         repo_path=str(tmp_path), max_items=1, compact=False,
