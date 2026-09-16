@@ -135,6 +135,153 @@ def test_malformed_or_truncated_unindexed_tail_fails_closed(trace_logs):
         trace.AuthorityEventEmitter(runtime_domain_id="domain-a", logs_root=trace_logs)
 
 
+def test_truncated_typed_diagnostic_tail_is_repaired(trace_logs):
+    emitter = trace.AuthorityEventEmitter(
+        runtime_domain_id="domain-a",
+        logs_root=trace_logs,
+    )
+    first = emitter.emit("VALID")
+    path = emitter.log_path
+    before_tail = path.stat().st_size
+
+    with path.open("ab") as stream:
+        stream.write(
+            trace._DIAGNOSTIC_RECORD_PREFIX
+            + b'"ts":"incomplete"'
+        )
+
+    assert path.stat().st_size > before_tail
+
+    recovered = trace.AuthorityEventEmitter(
+        runtime_domain_id="domain-a",
+        logs_root=trace_logs,
+    )
+
+    assert path.stat().st_size == before_tail
+    assert (
+        _state(trace_logs)["durable_tail_offset"]
+        == before_tail
+    )
+    assert (
+        recovered.emit("AFTER_RECOVERY").sequence
+        == first.sequence + 1
+    )
+
+
+def test_complete_malformed_typed_diagnostic_still_fails_closed(
+    trace_logs,
+):
+    emitter = trace.AuthorityEventEmitter(
+        runtime_domain_id="domain-a",
+        logs_root=trace_logs,
+    )
+    emitter.emit("VALID")
+
+    with emitter.log_path.open("ab") as stream:
+        stream.write(
+            trace._DIAGNOSTIC_RECORD_PREFIX
+            + b'"ts":}\n'
+        )
+
+    with pytest.raises(
+        trace.AuthorityEventRecoveryError,
+        match="malformed trace record",
+    ):
+        trace.AuthorityEventEmitter(
+            runtime_domain_id="domain-a",
+            logs_root=trace_logs,
+        )
+
+
+def test_complete_malformed_authority_record_still_fails_closed(
+    trace_logs,
+):
+    emitter = trace.AuthorityEventEmitter(
+        runtime_domain_id="domain-a",
+        logs_root=trace_logs,
+    )
+    emitter.emit("VALID")
+
+    with emitter.log_path.open("ab") as stream:
+        stream.write(
+            b'{"_type":"authority_event","event_id":}\n'
+        )
+
+    with pytest.raises(
+        trace.AuthorityEventRecoveryError,
+        match="malformed trace record",
+    ):
+        trace.AuthorityEventEmitter(
+            runtime_domain_id="domain-a",
+            logs_root=trace_logs,
+        )
+
+
+def test_complete_legacy_unframed_malformed_record_still_fails_closed(
+    trace_logs,
+):
+    emitter = trace.AuthorityEventEmitter(
+        runtime_domain_id="domain-a",
+        logs_root=trace_logs,
+    )
+    emitter.emit("VALID")
+
+    with emitter.log_path.open("ab") as stream:
+        stream.write(
+            b'0022992,"status":"ok","bytes":1239}\n'
+        )
+
+    with pytest.raises(
+        trace.AuthorityEventRecoveryError,
+        match="malformed trace record",
+    ):
+        trace.AuthorityEventEmitter(
+            runtime_domain_id="domain-a",
+            logs_root=trace_logs,
+        )
+
+
+def test_large_valid_diagnostic_range_does_not_hit_authority_recovery_bound(
+    trace_logs,
+):
+    emitter = trace.AuthorityEventEmitter(
+        runtime_domain_id="domain-a",
+        logs_root=trace_logs,
+    )
+    first = emitter.emit("VALID")
+
+    diagnostic = {
+        "_record_kind": "diagnostic_event",
+        "d": "TEST",
+        "ev": "LARGE_DIAGNOSTIC",
+        "payload": "x" * (
+            trace._AUTHORITY_RECOVERY_WINDOW + 256
+        ),
+    }
+    encoded = (
+        json.dumps(
+            diagnostic,
+            separators=(",", ":"),
+        )
+        + "\n"
+    ).encode("utf-8")
+
+    assert len(encoded) > trace._AUTHORITY_RECOVERY_WINDOW
+
+    with emitter.log_path.open("ab") as stream:
+        stream.write(encoded)
+
+    recovered = trace.AuthorityEventEmitter(
+        runtime_domain_id="domain-a",
+        logs_root=trace_logs,
+    )
+
+    assert (
+        recovered.emit("AFTER_LARGE_DIAGNOSTIC").sequence
+        == first.sequence + 1
+    )
+
+
 def test_two_runtime_domains_have_independent_sequences(trace_logs):
     left = trace.AuthorityEventEmitter(runtime_domain_id="domain-left", logs_root=trace_logs)
     right = trace.AuthorityEventEmitter(runtime_domain_id="domain-right", logs_root=trace_logs)
