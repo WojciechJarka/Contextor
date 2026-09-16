@@ -7,6 +7,7 @@ from ctypes import wintypes
 import json
 import os
 import signal
+import subprocess
 import time
 from pathlib import Path
 from typing import Any
@@ -165,27 +166,75 @@ def record_matches_process(record: dict[str, Any]) -> bool:
     return True
 
 
-def terminate_registered_process(record: dict[str, Any]) -> bool:
+def terminate_registered_process(
+    record: dict[str, Any],
+) -> bool:
     if not record_matches_process(record):
         return False
     pid = int(record["pid"])
     if sys_platform_is_windows():
-        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-        kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        try:
+            subprocess.run(
+                [
+                    "taskkill",
+                    "/F",
+                    "/T",
+                    "/PID",
+                    str(pid),
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+                timeout=5.0,
+            )
+        except Exception:
+            pass
+        _, _, alive = process_identity(pid)
+        if not alive:
+            return True
+        kernel32 = ctypes.WinDLL(
+            "kernel32",
+            use_last_error=True,
+        )
+        kernel32.OpenProcess.argtypes = [
+            wintypes.DWORD,
+            wintypes.BOOL,
+            wintypes.DWORD,
+        ]
         kernel32.OpenProcess.restype = wintypes.HANDLE
-        kernel32.TerminateProcess.argtypes = [wintypes.HANDLE, wintypes.UINT]
+        kernel32.TerminateProcess.argtypes = [
+            wintypes.HANDLE,
+            wintypes.UINT,
+        ]
         kernel32.TerminateProcess.restype = wintypes.BOOL
-        kernel32.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+        kernel32.WaitForSingleObject.argtypes = [
+            wintypes.HANDLE,
+            wintypes.DWORD,
+        ]
         kernel32.WaitForSingleObject.restype = wintypes.DWORD
-        kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+        kernel32.CloseHandle.argtypes = [
+            wintypes.HANDLE,
+        ]
         kernel32.CloseHandle.restype = wintypes.BOOL
-        handle = kernel32.OpenProcess(0x0001, False, pid)
+        handle = kernel32.OpenProcess(
+            0x0001,
+            False,
+            pid,
+        )
         if not handle:
             return False
         try:
-            terminated = bool(kernel32.TerminateProcess(handle, 1))
+            terminated = bool(
+                kernel32.TerminateProcess(
+                    handle,
+                    1,
+                )
+            )
             if terminated:
-                kernel32.WaitForSingleObject(handle, 2000)
+                kernel32.WaitForSingleObject(
+                    handle,
+                    2000,
+                )
             return terminated
         finally:
             kernel32.CloseHandle(handle)
@@ -194,3 +243,24 @@ def terminate_registered_process(record: dict[str, Any]) -> bool:
         return True
     except OSError:
         return False
+
+
+def terminate_registered_record(
+    path: Path | None,
+) -> bool:
+    if path is None:
+        return False
+    try:
+        value = json.loads(
+            path.read_text(encoding="utf-8")
+        )
+    except (OSError, ValueError, TypeError):
+        remove_record(path)
+        return False
+    if not isinstance(value, dict):
+        remove_record(path)
+        return False
+    try:
+        return terminate_registered_process(value)
+    finally:
+        remove_record(path)

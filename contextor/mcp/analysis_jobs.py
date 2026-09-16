@@ -19,8 +19,46 @@ _analysis_lock = threading.Lock()
 _analysis_job_lock = threading.RLock()
 _analysis_tasks: dict[str, threading.Thread] = {}
 _analysis_jobs_by_repo: dict[str, str] = {}
+_analysis_shutdown_event = threading.Event()
 _ANALYSIS_JOB_REPLACE_ATTEMPTS = 4
 _ANALYSIS_JOB_REPLACE_RETRY_SECONDS = 0.05
+
+
+def _analysis_shutdown_requested() -> bool:
+    return _analysis_shutdown_event.is_set()
+
+
+def _analysis_progress_callback(
+    *_args,
+) -> bool:
+    return not _analysis_shutdown_event.is_set()
+
+
+def request_analysis_shutdown(
+    *,
+    timeout: float = 1.5,
+) -> int:
+    _analysis_shutdown_event.set()
+    with _analysis_job_lock:
+        tasks = tuple(_analysis_tasks.values())
+    deadline = time.monotonic() + max(
+        0.0,
+        timeout,
+    )
+    current = threading.current_thread()
+    for task in tasks:
+        if task is current:
+            continue
+        remaining = max(
+            0.0,
+            deadline - time.monotonic(),
+        )
+        task.join(timeout=remaining)
+    return sum(
+        1
+        for task in tasks
+        if task is not current and task.is_alive()
+    )
 
 
 def _mcp_cache_root(root: Path) -> Path:
@@ -197,14 +235,19 @@ async def _run_analysis_worker(
             previous_cache = os.environ.get("CONTEXTOR_CACHE_DIR")
             previous_registry = os.environ.get("CONTEXTOR_MCP_PROCESS_REGISTRY")
             os.environ["CONTEXTOR_CACHE_DIR"] = str(_mcp_cache_root(root))
-            os.environ["CONTEXTOR_MCP_PROCESS_REGISTRY"] = str(registry_dir(root))
+            if previous_registry is None:
+                os.environ[
+                    "CONTEXTOR_MCP_PROCESS_REGISTRY"
+                ] = str(registry_dir(root))
             try:
                 if operation == "project":
                     _, result = run_full_analysis_exclusive(
                         str(root),
                         owner="mcp_analysis",
                         log=effective_log,
+                        progress_callback=_analysis_progress_callback,
                         additional_excludes=exclude_paths,
+                        is_cancelled=_analysis_shutdown_requested,
                     )
                     if result is None:
                         raise RuntimeError("Analysis returned no canonical state.")

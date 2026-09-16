@@ -3,7 +3,11 @@ from __future__ import annotations
 import os
 import threading
 import time
+from concurrent.futures import ProcessPoolExecutor
 from contextlib import contextmanager
+from multiprocessing.util import Finalize
+from pathlib import Path
+import sys
 from typing import Any, Callable, Iterator
 
 
@@ -38,7 +42,37 @@ def _unregister_executor(executor: Any) -> None:
 def active_process_pool_count() -> int:
     with _registry_lock:
         _ensure_process_local_registry_locked()
-        return len(_active_executors)
+    return len(_active_executors)
+
+
+def _initialize_mcp_managed_worker(
+    owner_pid: int,
+    original_initializer: Callable[..., Any] | None,
+    original_initargs: tuple[Any, ...],
+) -> None:
+    registry_value = os.environ.get(
+        "CONTEXTOR_MCP_PROCESS_REGISTRY"
+    )
+    if registry_value:
+        from contextor.mcp_process_registry import (
+            register_process,
+            remove_record,
+        )
+        record_path = register_process(
+            Path(registry_value),
+            pid=os.getpid(),
+            parent_pid=owner_pid,
+            kind="process-pool-worker",
+            executable=sys.executable,
+        )
+        Finalize(
+            None,
+            remove_record,
+            args=(record_path,),
+            exitpriority=0,
+        )
+    if original_initializer is not None:
+        original_initializer(*original_initargs)
 
 
 @contextmanager
@@ -47,7 +81,33 @@ def managed_process_pool(
     *args: Any,
     **kwargs: Any,
 ) -> Iterator[Any]:
-    executor = executor_factory(*args, **kwargs)
+    factory_kwargs = dict(kwargs)
+    registry_value = os.environ.get(
+        "CONTEXTOR_MCP_PROCESS_REGISTRY"
+    )
+    if (
+        executor_factory is ProcessPoolExecutor
+        and registry_value
+    ):
+        original_initializer = factory_kwargs.pop(
+            "initializer",
+            None,
+        )
+        original_initargs = tuple(
+            factory_kwargs.pop("initargs", ()) or ()
+        )
+        factory_kwargs["initializer"] = (
+            _initialize_mcp_managed_worker
+        )
+        factory_kwargs["initargs"] = (
+            os.getpid(),
+            original_initializer,
+            original_initargs,
+        )
+    executor = executor_factory(
+        *args,
+        **factory_kwargs,
+    )
     _register_executor(executor)
     try:
         with executor as entered:

@@ -173,6 +173,9 @@ from fastmcp.exceptions import ToolError
 from fastmcp.server.middleware import Middleware, MiddlewareContext
 from fastmcp.tools.tool import ToolResult
 from pydantic_core import ValidationError as PydanticCoreValidationError
+from contextor.core.analysis.process_pool_lifecycle import (
+    terminate_active_process_pools,
+)
 from contextor.mcp import query_helpers
 from contextor.mcp_process_registry import (
     process_identity,
@@ -490,6 +493,31 @@ def _cleanup_owned_processes(directory: Path, owner_pid: int) -> None:
             remove_record(record_path)
 
 
+def _shutdown_mcp_owned_processes(
+    directory: Path,
+    owner_pid: int,
+    *,
+    timeout: float = 1.5,
+) -> None:
+    from contextor.mcp import analysis_jobs
+    analysis_jobs.request_analysis_shutdown(
+        timeout=timeout,
+    )
+    terminate_active_process_pools(
+        timeout=timeout,
+    )
+    analysis_jobs.request_analysis_shutdown(
+        timeout=timeout,
+    )
+    _cleanup_owned_processes(
+        directory,
+        owner_pid,
+    )
+    _cleanup_orphaned_processes(
+        directory,
+    )
+
+
 import inspect
 from typing import Any, Callable
 
@@ -783,15 +811,21 @@ contextor_profile_analysis = register_mcp_tool(
 
 def main():
     """Entry point for the MCP server."""
-    # Ensure Windows IO encoding is UTF-8 to prevent charmap errors in JSON-RPC
     if sys.platform == "win32":
-        sys.stdout.reconfigure(encoding='utf-8')
-        sys.stderr.reconfigure(encoding='utf-8')
-
+        sys.stdout.reconfigure(encoding="utf-8")
+        sys.stderr.reconfigure(encoding="utf-8")
     import asyncio
 
-    process_directory = registry_dir(Path.cwd().resolve())
+    process_directory = registry_dir(
+        Path.cwd().resolve()
+    )
     _cleanup_orphaned_processes(process_directory)
+    previous_registry = os.environ.get(
+        "CONTEXTOR_MCP_PROCESS_REGISTRY"
+    )
+    os.environ[
+        "CONTEXTOR_MCP_PROCESS_REGISTRY"
+    ] = str(process_directory)
     server_record = register_process(
         process_directory,
         pid=os.getpid(),
@@ -799,19 +833,49 @@ def main():
         kind="mcp-server",
         executable=sys.executable,
     )
-
+    cleanup_done = False
     def _shutdown_cleanup() -> None:
-        _cleanup_owned_processes(process_directory, os.getpid())
-        remove_record(server_record)
+        nonlocal cleanup_done
+        if cleanup_done:
+            return
+        cleanup_done = True
+        try:
+            _shutdown_mcp_owned_processes(
+                process_directory,
+                os.getpid(),
+            )
+        finally:
+            remove_record(server_record)
+            if previous_registry is None:
+                os.environ.pop(
+                    "CONTEXTOR_MCP_PROCESS_REGISTRY",
+                    None,
+                )
+            else:
+                os.environ[
+                    "CONTEXTOR_MCP_PROCESS_REGISTRY"
+                ] = previous_registry
 
     atexit.register(_shutdown_cleanup)
-
-    transport = os.environ.get("CONTEXTOR_MCP_TRANSPORT", "stdio").lower()
-
+    transport = os.environ.get(
+        "CONTEXTOR_MCP_TRANSPORT",
+        "stdio",
+    ).lower()
     async def _run():
-        if transport in {"http", "streamable-http"}:
-            host = os.environ.get("CONTEXTOR_MCP_HOST", "127.0.0.1")
-            port = int(os.environ.get("CONTEXTOR_MCP_PORT", "8765"))
+        if transport in {
+            "http",
+            "streamable-http",
+        }:
+            host = os.environ.get(
+                "CONTEXTOR_MCP_HOST",
+                "127.0.0.1",
+            )
+            port = int(
+                os.environ.get(
+                    "CONTEXTOR_MCP_PORT",
+                    "8765",
+                )
+            )
             await mcp.run_http_async(
                 transport="streamable-http",
                 host=host,
@@ -820,8 +884,10 @@ def main():
             )
         else:
             await mcp.run_stdio_async()
-        
-    asyncio.run(_run())
+    try:
+        asyncio.run(_run())
+    finally:
+        _shutdown_cleanup()
 
 
 if __name__ == "__main__":

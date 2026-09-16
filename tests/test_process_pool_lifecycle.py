@@ -1,8 +1,10 @@
 from concurrent.futures import ProcessPoolExecutor
+import os
 from types import SimpleNamespace
 import threading
 import time
 
+from contextor import mcp_process_registry
 import contextor.core.analysis.process_pool_lifecycle as lifecycle
 import contextor.ui.gui as gui_module
 
@@ -64,6 +66,46 @@ def test_managed_process_pool_registry_is_process_local():
     ):
         assert lifecycle.active_process_pool_count() == 1
 
+    assert lifecycle.active_process_pool_count() == 0
+
+
+def test_mcp_managed_pool_worker_is_durably_registered(
+    tmp_path,
+    monkeypatch,
+):
+    registry = tmp_path / "mcp-processes"
+    monkeypatch.setenv(
+        "CONTEXTOR_MCP_PROCESS_REGISTRY",
+        str(registry),
+    )
+    with lifecycle.managed_process_pool(
+        ProcessPoolExecutor,
+        max_workers=1,
+    ) as executor:
+        worker_pid = executor.submit(
+            os.getpid
+        ).result(timeout=10)
+        deadline = time.monotonic() + 5.0
+        worker_record = None
+        while time.monotonic() < deadline:
+            records = mcp_process_registry.read_records(
+                registry
+            )
+            matches = [
+                record
+                for _path, record in records
+                if record.get("kind")
+                == "process-pool-worker"
+                and int(record.get("pid", 0))
+                == worker_pid
+            ]
+            if matches:
+                worker_record = matches[0]
+                break
+            time.sleep(0.02)
+        assert worker_record is not None
+        assert worker_record["parent_pid"] == os.getpid()
+        assert lifecycle.active_process_pool_count() == 1
     assert lifecycle.active_process_pool_count() == 0
 
 
