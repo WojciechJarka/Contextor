@@ -42,7 +42,7 @@ def _unregister_executor(executor: Any) -> None:
 def active_process_pool_count() -> int:
     with _registry_lock:
         _ensure_process_local_registry_locked()
-    return len(_active_executors)
+        return len(_active_executors)
 
 
 def _initialize_mcp_managed_worker(
