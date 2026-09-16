@@ -46,3 +46,17 @@ def test_analysis_trigger_docs__runtime_signatures_unchanged():
     assert str(inspect.signature(tools["analyze_single_file"].fn)) == (
         "(repo_path: str, file_path: str, exclude_paths: list[str] | None = None) -> str"
     )
+
+
+def test_analysis_trigger_docs__job_lifecycle_persistence_semantics_documented():
+    analyze_project_doc = _load_doc("analyze_project")
+    analyze_behavior = "\n".join(analyze_project_doc.get("behavior", []))
+    assert "durably persisted before the worker starts" in analyze_behavior
+    assert "best-effort observability updates" in analyze_behavior
+    assert "does not abort an otherwise valid repository analysis" in analyze_behavior
+
+    status_doc = _load_doc("get_analysis_status")
+    status_errors = "\n".join(status_doc.get("errors", []))
+    assert "worker_not_active" in status_errors
+    assert "persistence failure" in status_errors
+    assert "stale queued/running status" in status_errors

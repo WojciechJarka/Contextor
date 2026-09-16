@@ -3,6 +3,7 @@ import json
 import os
 import sys
 import threading
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
@@ -18,6 +19,8 @@ _analysis_lock = threading.Lock()
 _analysis_job_lock = threading.RLock()
 _analysis_tasks: dict[str, threading.Thread] = {}
 _analysis_jobs_by_repo: dict[str, str] = {}
+_ANALYSIS_JOB_REPLACE_ATTEMPTS = 4
+_ANALYSIS_JOB_REPLACE_RETRY_SECONDS = 0.05
 
 
 def _mcp_cache_root(root: Path) -> Path:
@@ -51,7 +54,14 @@ def _write_analysis_job(root: Path, job: dict) -> None:
             json.dumps(payload, indent=2, ensure_ascii=False),
             encoding="utf-8",
         )
-        os.replace(temporary, target)
+        for attempt in range(_ANALYSIS_JOB_REPLACE_ATTEMPTS):
+            try:
+                os.replace(temporary, target)
+                break
+            except PermissionError:
+                if attempt + 1 >= _ANALYSIS_JOB_REPLACE_ATTEMPTS:
+                    raise
+                time.sleep(_ANALYSIS_JOB_REPLACE_RETRY_SECONDS)
 
 
 def _read_analysis_job(root: Path, job_id: str) -> dict | None:
@@ -81,6 +91,12 @@ def _latest_analysis_job(root: Path) -> dict | None:
     return None
 
 
+def _is_current_process_analysis_task_active(job_id: str) -> bool:
+    with _analysis_job_lock:
+        task = _analysis_tasks.get(job_id)
+        return task is not None and task.is_alive()
+
+
 def _active_analysis_jobs(root: Path) -> list[dict]:
     """Return readable queued/running durable jobs in deterministic newest-first order."""
     directory = _analysis_job_dir(root)
@@ -92,6 +108,13 @@ def _active_analysis_jobs(root: Path) -> list[dict]:
     for path in directory.glob("*.json"):
         job = _read_analysis_job(root, path.stem)
         if job is None or job.get("status") not in {"queued", "running"}:
+            continue
+        if (
+            job.get("owner_pid") == os.getpid()
+            and not _is_current_process_analysis_task_active(
+                str(job.get("job_id") or "")
+            )
+        ):
             continue
 
         try:
@@ -244,13 +267,26 @@ async def _execute_analysis_job(
         **job, "status": "running", "started_at": _utc_now(),
         "message": "Analysis started.",
     }
-    _write_analysis_job(root, job)
+
+    def persist_job(phase: str) -> bool:
+        try:
+            _write_analysis_job(root, job)
+        except OSError as exc:
+            _stderr_log(
+                f"[analysis-job-persistence] phase={phase} "
+                f"job_id={job.get('job_id')} "
+                f"{type(exc).__name__}: {exc}"
+            )
+            return False
+        return True
+
+    persist_job("initial_running")
 
     def job_log(message: str) -> None:
         nonlocal job
         _stderr_log(message)
         job = {**job, "message": str(message)}
-        _write_analysis_job(root, job)
+        persist_job("progress")
 
     try:
         analysis_outcome = await _run_analysis_worker(
@@ -321,7 +357,7 @@ async def _execute_analysis_job(
             **job, **(analysis_outcome or {}), "status": "completed",
             "completed_at": _utc_now(), "message": completed_message, "error": None,
         }
-        _write_analysis_job(root, job)
+        persist_job("completed")
     except Exception as exc:
         live_publish_status = job.get("live_publish_status")
         if job.get("operation") == "project" and live_publish_status == "pending":
@@ -332,7 +368,7 @@ async def _execute_analysis_job(
             "error": f"{type(exc).__name__}: {exc}",
             "live_publish_status": live_publish_status,
         }
-        _write_analysis_job(root, job)
+        persist_job("failed")
     finally:
         with _analysis_job_lock:
             _analysis_tasks.pop(str(job["job_id"]), None)

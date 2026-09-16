@@ -65,18 +65,42 @@ def get_analysis_status(
             {"status": "not_found", "job_id": job_id, "repo_path": str(root)},
             indent=2,
         )
-    if (
-        job.get("status") in {"queued", "running"}
-        and job.get("owner_pid") != os.getpid()
-    ):
-        job = {
-            **job,
-            "status": "interrupted",
-            "completed_at": analysis_jobs._utc_now(),
-            "message": "The MCP server process that owned this job is no longer active.",
-            "error": "owner_process_changed",
-        }
-        analysis_jobs._write_analysis_job(root, job)
+    if job.get("status") in {"queued", "running"}:
+        interruption_error = None
+        interruption_message = None
+
+        if job.get("owner_pid") != os.getpid():
+            interruption_error = "owner_process_changed"
+            interruption_message = (
+                "The MCP server process that owned this job is no longer active."
+            )
+        elif not analysis_jobs._is_current_process_analysis_task_active(
+            str(job.get("job_id") or "")
+        ):
+            interruption_error = "worker_not_active"
+            interruption_message = (
+                "The analysis worker for this job is no longer active."
+            )
+
+        if interruption_error is not None:
+            job = {
+                **job,
+                "status": "interrupted",
+                "completed_at": analysis_jobs._utc_now(),
+                "message": interruption_message,
+                "error": interruption_error,
+            }
+            try:
+                analysis_jobs._write_analysis_job(root, job)
+            except OSError as exc:
+                job = {
+                    **job,
+                    "message": (
+                        f"{interruption_message} "
+                        "Durable reconciliation persistence failed: "
+                        f"{type(exc).__name__}: {exc}"
+                    ),
+                }
     public_job = analysis_jobs._public_job(job, max_skipped_files=max_skipped_files)
     if public_job.get("status") == "completed":
         diag = diagnostics_summary_for_completed_job(diagnostics_summary(root), job)
