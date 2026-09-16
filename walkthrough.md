@@ -1,22 +1,22 @@
-# CPA10K1A_GET_PROJECT_ARCHITECTURE_FINAL_FOCUSED_FIXES
+# CPA10K1A_GET_PROJECT_ARCHITECTURE_FINAL_FOCUSED_FIXES_RETRY
 
 ## FILES_CHANGED
 
 - This task: `walkthrough.md` only.
-- Production/test/docs files changed by earlier work remain untouched by this task.
+- Existing production/test/docs modifications in the working tree were not changed by this task.
 - `walkthrough.md` is excluded from diff accounting.
 
 ## IMPLEMENTATION_RESULT
 
 `SOURCE_DRIFT` — no patch was applied.
 
-The required exact-search precondition results were:
+Exact-search precondition counts in the current working tree:
 
-- PATCH_1: exact search occurs 1 time.
-- PATCH_2: exact search occurs 1 time.
-- PATCH_3: exact search occurs 0 times.
+- PATCH_1: 1 occurrence of `"version": "2.0.0",`.
+- PATCH_2: 1 occurrence of `assert "json.load" not in source`.
+- PATCH_3: 0 occurrences of the supplied multiline block.
 
-PATCH_3 required this exact block:
+PATCH_3 supplied this exact block:
 
 ```text
 assert edit_context["risk_score"] is None
@@ -26,7 +26,7 @@ edit_context["tests_covering"]["tests"][0]["module"]
 )
 ```
 
-The current source contains the same assertion with indentation on the inner lines:
+The current source block is indented:
 
 ```text
     assert edit_context["risk_score"] is None
@@ -36,15 +36,15 @@ The current source contains the same assertion with indentation on the inner lin
     )
 ```
 
-This is an exact-search mismatch. Per `SOURCE_DRIFT_RULE`, PATCH_1 and PATCH_2 were also not applied, and no adaptation was made.
+Because PATCH_3 does not match exactly once, the SOURCE_DRIFT_RULE required stopping. PATCH_1 and PATCH_2 were not applied, and the source was not adapted.
 
 ## PY_COMPILE
 
-`NOT_RUN` — stopped at the precondition gate.
+`NOT_RUN` — precondition failed.
 
 ## FOCUSED_TESTS
 
-`NOT_RUN` — stopped at the precondition gate.
+`NOT_RUN` — precondition failed.
 
 ## STATIC_VERIFICATION
 
@@ -54,7 +54,7 @@ No commit or HEAD checks were performed.
 
 ## RUNTIME
 
-- `MCP_SERVER_RESTART_REQUIRED=NO` — implementation patch was not applied.
+- `MCP_SERVER_RESTART_REQUIRED=NO` — no implementation patch was applied.
 - `DESKTOP_RUNTIME_RESTART_REQUIRED=NO`.
 - No MCP restart, Desktop restart, `update_file`, or synthesized LIVE mutation was performed.
 
@@ -64,4 +64,4 @@ No commit or HEAD checks were performed.
 
 ## STOP
 
-Stopped after recording the exact SOURCE_DRIFT result and waiting for `proceduj` or a corrected literal contract.
+Stopped after recording the exact SOURCE_DRIFT result. Waiting for `proceduj` or a corrected literal anchor.
