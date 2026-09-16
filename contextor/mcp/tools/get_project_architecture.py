@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from contextor.core.analysis.state_manager import module_current_truth
 from contextor.mcp import query_helpers
 from contextor.mcp import report_helpers
 from contextor.mcp import runtime as mcp_runtime
@@ -32,6 +33,17 @@ def _error(code: str, **details: Any) -> str:
         indent=2,
         ensure_ascii=False,
     )
+
+
+def _stale_module_truths(state: Any) -> dict[str, dict[str, Any]]:
+    module_names = set(getattr(state, "modules", {}) or {}) | set(
+        getattr(state, "artifacts", {}) or {}
+    )
+    return {
+        module_name: truth
+        for module_name in sorted(module_names)
+        if not (truth := module_current_truth(state, module_name))["available"]
+    }
 
 
 def _report_generated_at(payload: Any) -> str | None:
@@ -194,11 +206,27 @@ def _live_state_overlay(root: Path) -> dict[str, Any]:
             "advisory_warning": f"Freshness envelope failed: {exc}",
         }
 
+    stale_modules = _stale_module_truths(state)
+    if stale_modules:
+        freshness = dict(freshness)
+        freshness["canonical_state"] = "stale"
+        existing_warning = freshness.get("advisory_warning")
+        stale_warning = (
+            "One or more modules are parse-stale; canonical facts for those "
+            "modules are last-known-good."
+        )
+        freshness["advisory_warning"] = (
+            f"{existing_warning} {stale_warning}"
+            if existing_warning
+            else stale_warning
+        )
+
     return {
         "available": True,
         "data_source": "live_canonical_state",
         "module_count": len(getattr(state, "modules", {}) or {}),
         "resync_required": bool(getattr(state, "resync_required", False)),
+        "parse_stale_modules": stale_modules,
         "state_freshness": freshness,
         "diagnostics_summary": diag,
         "diagnostics_attention_required": (

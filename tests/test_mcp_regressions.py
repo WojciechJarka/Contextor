@@ -154,7 +154,7 @@ def test_own_symbols_excludes_legacy_category_symbols_from_artifact_queries(
     assert "not found" in blast
 
 
-def test_stale_layer_snapshot_is_not_presented_after_incremental_update(
+def test_stale_topology_is_not_presented_in_file_edit_context_after_incremental_update(
     tmp_path, monkeypatch
 ):
     from contextor.core.domain.graph import ProjectGraph
@@ -162,56 +162,43 @@ def test_stale_layer_snapshot_is_not_presented_after_incremental_update(
     state = RepositoryAnalysisState(
         modules={
             "provider": SimpleNamespace(module_id="1/1", path="provider.py"),
-            "quality.scenario": SimpleNamespace(module_id="2/1", path="quality/scenario.py"),
+            "quality.scenario": SimpleNamespace(
+                module_id="2/1",
+                path="quality/scenario.py",
+            ),
         },
         artifacts={"provider": {"own_symbols": []}},
         metrics={"provider": {"betweenness": 0.9, "hub_score": 0.8}},
         topology_analytics={"module_risk": {"provider": 0.95}},
         topology_metrics_state="stale",
-        cached_analytics={
-            "module_layers": {"provider": "core", "quality.scenario": "tests"}
-        },
-        cached_analytics_state="fresh",
         dependency_graph=ProjectGraph(
-            hard_edges={"quality.scenario": {"provider"}, "provider": set()},
+            hard_edges={
+                "quality.scenario": {"provider"},
+                "provider": set(),
+            },
             soft_edges={},
         ),
-        layer_information={
-            "summary_data": {"action_items": ["old action"]},
-            "layer_index": [{"layer": "legacy", "module_count": 99}],
-            "hotspots": [{"module": "provider", "score": 0.99}],
-            "debt": {"score": 99},
-        },
     )
     monkeypatch.setattr(
-        mcp_runtime, "get_or_init_engine", lambda _root: SimpleNamespace(state=state)
+        mcp_runtime,
+        "get_or_init_engine",
+        lambda _root: SimpleNamespace(state=state),
     )
     _patch_empty_registries(monkeypatch)
 
-    architecture = json.loads(
-        mcp_server.get_project_architecture.fn(str(tmp_path), compact=False)
-    )
     edit_context = json.loads(
         mcp_server.get_file_edit_context.fn(
-            repo_path=str(tmp_path), file_path="provider.py", compact=False
+            repo_path=str(tmp_path),
+            file_path="provider.py",
+            compact=False,
         )
     )
 
-    assert architecture["action_items"]["available"] is False
-    assert architecture["top_global_hotspots"]["available"] is False
-    assert architecture["debt_summary"]["available"] is False
-    assert architecture["layer_index"] == {
-        "available": True,
-        "items": [
-            {"layer": "core", "module_count": 1},
-            {"layer": "tests", "module_count": 1},
-        ],
-        "total": 2,
-        "truncated": False,
-    }
-    assert "legacy" not in json.dumps(architecture)
     assert edit_context["risk_score"] is None
-    assert edit_context["tests_covering"]["tests"][0]["module"] == "quality.scenario"
+    assert (
+        edit_context["tests_covering"]["tests"][0]["module"]
+        == "quality.scenario"
+    )
 
 
 def test_minimal_file_context_fails_closed_without_usable_live_graph(
@@ -270,163 +257,43 @@ def test_module_context_fails_closed_when_canonical_graph_is_missing(
     assert "live_canonical_graph" not in result
 
 
-def test_project_architecture_requires_present_complete_module_layers(
+def test_project_architecture_does_not_reconstruct_reports_from_cached_live_analytics(
     tmp_path, monkeypatch
 ):
     state = RepositoryAnalysisState(
         modules={"provider": object()},
         cached_analytics_state="fresh",
-        cached_analytics={},
-    )
-    monkeypatch.setattr(
-        mcp_runtime, "get_or_init_engine", lambda _root: SimpleNamespace(state=state)
-    )
-
-    missing = json.loads(mcp_server.get_project_architecture.fn(str(tmp_path)))
-    state.cached_analytics = {"module_layers": {}}
-    incomplete = json.loads(mcp_server.get_project_architecture.fn(str(tmp_path)))
-    state.modules = {}
-    fresh_empty = json.loads(mcp_server.get_project_architecture.fn(str(tmp_path)))
-
-    assert missing["layer_index"]["available"] is False
-    assert incomplete["layer_index"]["available"] is False
-    assert fresh_empty["layer_index"] == {
-        "available": True,
-        "distribution": {},
-        "total": 0,
-        "truncated": False,
-    }
-
-
-def test_project_architecture_rejects_extra_deleted_module_layer(
-    tmp_path, monkeypatch
-):
-    state = RepositoryAnalysisState(
-        modules={"a": object(), "b": object()},
-        cached_analytics_state="fresh",
         cached_analytics={
-            "module_layers": {"a": "core", "b": "api", "deleted": "legacy"}
+            "module_layers": {"provider": "core"},
+        },
+        layer_information={
+            "summary_data": {"action_items": ["legacy action"]},
+            "layer_index": [{"layer": "legacy", "module_count": 99}],
+            "hotspots": [{"module": "provider", "score": 0.99}],
+            "debt": {"score": 99},
         },
     )
     monkeypatch.setattr(
-        mcp_runtime, "get_or_init_engine", lambda _root: SimpleNamespace(state=state)
-    )
-
-    result = json.loads(mcp_server.get_project_architecture.fn(str(tmp_path)))
-
-    assert result["layer_index"]["available"] is False
-
-
-def test_project_architecture_compact_layer_distribution_respects_max_items(
-    tmp_path, monkeypatch
-):
-    state = RepositoryAnalysisState(
-        modules={
-            "pkg.adapter_a": object(),
-            "pkg.adapter_b": object(),
-            "pkg.engine": object(),
-            "pkg.runtime": object(),
-        },
-        cached_analytics_state="fresh",
-        cached_analytics={
-            "module_layers": {
-                "pkg.adapter_a": "adapter",
-                "pkg.adapter_b": "adapter",
-                "pkg.engine": "engine",
-                "pkg.runtime": "runtime",
-            }
-        },
+        mcp_runtime,
+        "get_or_init_engine",
+        lambda _root: SimpleNamespace(state=state),
     )
     monkeypatch.setattr(
-        mcp_runtime, "get_or_init_engine", lambda _root: SimpleNamespace(state=state)
+        report_helpers,
+        "get_canonical_report",
+        lambda _root, _filename: None,
     )
 
-    call1 = json.loads(
-        mcp_server.get_project_architecture.fn(
-            repo_path=str(tmp_path),
-            compact=True,
-            max_items=10,
-            fields=["layer_index"],
-        )
+    result = json.loads(
+        mcp_server.get_project_architecture.fn(str(tmp_path))
     )
-    assert call1 == {
-        "layer_index": {
-            "available": True,
-            "distribution": {
-                "adapter": 2,
-                "engine": 1,
-                "runtime": 1,
-            },
-            "total": 3,
-            "truncated": False,
-        }
-    }
 
-    call2 = json.loads(
-        mcp_server.get_project_architecture.fn(
-            repo_path=str(tmp_path),
-            compact=True,
-            max_items=2,
-            fields=["layer_index"],
-        )
-    )
-    assert call2 == {
-        "layer_index": {
-            "available": True,
-            "distribution": {
-                "adapter": 2,
-                "engine": 1,
-            },
-            "total": 3,
-            "truncated": True,
-            "expand": {
-                "compact": False,
-                "max_items": None,
-            },
-        }
-    }
-
-    call3 = json.loads(
-        mcp_server.get_project_architecture.fn(
-            repo_path=str(tmp_path),
-            compact=True,
-            max_items=0,
-            fields=["layer_index"],
-        )
-    )
-    assert call3 == {
-        "layer_index": {
-            "available": True,
-            "distribution": {},
-            "total": 3,
-            "truncated": True,
-            "expand": {
-                "compact": False,
-                "max_items": None,
-            },
-        }
-    }
-
-    call4 = json.loads(
-        mcp_server.get_project_architecture.fn(
-            repo_path=str(tmp_path),
-            compact=False,
-            max_items=None,
-            fields=["layer_index"],
-        )
-    )
-    assert call4 == {
-        "layer_index": {
-            "available": True,
-            "items": [
-                {"layer": "adapter", "module_count": 2},
-                {"layer": "engine", "module_count": 1},
-                {"layer": "runtime", "module_count": 1},
-            ],
-            "total": 3,
-            "truncated": False,
-        }
-    }
+    assert result["status"] == "partial"
+    assert result["report_bundle_state"] == "unavailable"
+    assert result["reports"]["summary"]["available"] is False
+    assert result["live_state"]["available"] is True
+    assert result["live_state"]["module_count"] == 1
+    assert "legacy action" not in json.dumps(result)
 
 
 def test_lookup_returns_symbol_facts_when_consumers_are_stale(tmp_path, monkeypatch):
@@ -512,7 +379,10 @@ def test_full_file_context_public_api_uses_canonical_symbol_domain(
     assert "legacy_old" not in json.dumps(result["public_api"])
 
 
-def test_live_first_tools_work_without_any_saved_reports(tmp_path, monkeypatch):
+def test_live_first_tools_other_than_project_architecture_work_without_any_saved_reports(
+    tmp_path,
+    monkeypatch,
+):
     repo = tmp_path / "repo"
     target = repo / "pkg" / "module.py"
     target.parent.mkdir(parents=True)
@@ -532,9 +402,6 @@ def test_live_first_tools_work_without_any_saved_reports(tmp_path, monkeypatch):
         ),
     )
 
-    architecture = json.loads(mcp_server.get_project_architecture.fn(str(repo)))
-    assert architecture["top_global_hotspots"]["available"] is False
-    assert architecture["debt_summary"]["available"] is False
     blast = json.loads(
         mcp_server.get_artifact_blast_radius.fn(str(repo), "pkg.module::api", compact=False)
     )
@@ -551,8 +418,6 @@ def test_live_first_tools_work_without_any_saved_reports(tmp_path, monkeypatch):
         mcp_server.lookup_artifact_by_symbol.fn(str(repo), "api", compact=False)
     )
 
-    assert architecture["data_source"] == "live_canonical_state"
-    assert architecture["module_count"] == 3
     assert blast["data_source"] == "live_canonical_state"
     assert blast["consumers"]["items"] == ["tests.test_module"]
     assert edit["dependency_data_source"] == "live_canonical_graph"

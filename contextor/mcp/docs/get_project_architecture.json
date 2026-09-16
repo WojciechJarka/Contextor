@@ -20,7 +20,8 @@
   "freshness": [
     "Persisted reports describe the latest completed full-analysis report write and may be older than the current incremental LIVE revision.",
     "live_state.state_freshness reports the current canonical revision, provenance, family states, workspace-sync status, and advisory warning independently from the report snapshot.",
-    "A newer LIVE revision does not relabel persisted report-only analytics as fresh LIVE facts."
+    "A newer LIVE revision does not relabel persisted report-only analytics as fresh LIVE facts.",
+    "If one or more modules are parse-stale, live_state.state_freshness.canonical_state is stale and live_state.parse_stale_modules identifies the affected last-known-good module truths; persisted completed-analysis reports remain independently retrievable."
   ],
   "errors": [
     "unsupported_fields: one or more requested fields are not global project report sections.",

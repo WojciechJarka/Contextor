@@ -7,6 +7,7 @@ import pytest
 from contextor import mcp_server
 from contextor.mcp import runtime as mcp_runtime
 from contextor.mcp import query_helpers
+from contextor.mcp import report_helpers
 from contextor.mcp.tools import (
     query_canonical_projection as query_canonical_projection_tool,
 )
@@ -390,6 +391,11 @@ def test_global_search_and_static_context_do_not_leak_parse_stale_truth(
         ),
     )
     monkeypatch.setattr(mcp_runtime, "get_or_init_engine", lambda _root: engine)
+    monkeypatch.setattr(
+        report_helpers,
+        "get_canonical_report",
+        lambda _root, _filename: None,
+    )
 
     architecture = json.loads(
         mcp_server.get_project_architecture.fn(str(tmp_path))
@@ -407,7 +413,14 @@ def test_global_search_and_static_context_do_not_leak_parse_stale_truth(
         )
     )
 
-    assert architecture["status"] == "stale"
+    assert architecture["status"] == "partial"
+    assert (
+        architecture["live_state"]["state_freshness"]["canonical_state"]
+        == "stale"
+    )
+    assert architecture["live_state"]["parse_stale_modules"]["provider"][
+        "provenance"
+    ] == "last_known_good"
     assert search["status"] == "stale"
     assert implementation["static_context"]["status"] == "stale"
     assert implementation["static_context"]["provenance"] == "last_known_good"
