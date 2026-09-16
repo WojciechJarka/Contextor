@@ -1,4 +1,4 @@
-# TASK=CPA10K5B2_PROFILE_WORKER_OWNERSHIP_AND_CANCELLATION_CLEANUP
+# TASK=CPA10K5B2_PROFILE_WORKER_FINAL_LIFECYCLE_CORRECTIONS
 
 ## IMPLEMENTATION_RESULT
 
@@ -10,108 +10,50 @@ PASS
 - tests/test_mcp_profile_worker_lifecycle.py
 - walkthrough.md (report only; excluded from source/test diff accounting)
 
-OTHER_SOURCE_TEST_FILES_CHANGED=NONE
-K5B1_FILES_UNCHANGED=YES
+OTHER_PRODUCTION_FILES_CHANGED=NONE
+EXISTING_K5B2_CONTRACT_UNCHANGED=YES
 
-## LITERAL_CONTENT_MATCH
+## REGISTRATION_FAILURE_CLEANUP
 
-YES
+REGISTRATION_FAILURE_CANNOT_LEAK_PROFILE_WORKER=YES
 
-The production file and test file match CONTENT_1 and CONTENT_2 literally. No implementation or test adaptation was made after validation.
+_register_process is now inside the existing try/except BaseException boundary. If durable register_process raises after subprocess creation, record_path remains None, _terminate_profile_subprocess uses the direct process.terminate fallback, bounded cleanup runs, the original OSError is re-raised, and finally calls remove_record(None).
+
+## POST_KILL_WAIT_BOUND
+
+FIRST_WAIT_BOUNDED=YES
+POST_KILL_WAIT_BOUNDED=YES
+
+_wait_profile_process normalizes timeout once as bounded_timeout. Both process.wait calls use asyncio.wait_for with that same bounded timeout. After kill, the second wait is bounded and catches asyncio.TimeoutError and ProcessLookupError without an unbounded await.
 
 ## CERTIFICATION
 
-PROFILE_WORKER_REGISTERED=YES
-PROFILE_WORKER_PARENT_IS_MCP=YES
-PROFILE_WORKER_NORMAL_RECORD_REMOVAL=YES
-PROFILE_WORKER_CANCELLATION_TREE_CLEANUP=YES
-PROFILE_WORKER_EXCEPTION_TREE_CLEANUP=YES
-PROFILE_WORKER_HARD_ROOT_ORPHAN_RECOVERABLE=YES
-PROFILE_DESCENDANT_POOLS_INHERIT_CENTRAL_REGISTRY=YES
-PUBLIC_PROFILE_TOOL_CONTRACT_UNCHANGED=YES
+EXISTING_CANCELLATION_TREE_CLEANUP_UNCHANGED=YES
+OTHER_PRODUCTION_FILES_UNCHANGED=YES
 PY_COMPILE=PASS
 FOCUSED_TESTS=PASS
 
 ## EXACT_ANCHORS_VERIFIED
 
-Contextor read-only source-range verification returned status=ok for the literal result:
+Contextor read-only source-range verification returned status=ok for all requested current functions:
 
-- _wait_profile_process: lines 17-40
-- _terminate_profile_subprocess: lines 41-67
-- _run_profile_subprocess: lines 68-154
-- contextor_profile_analysis: lines 155-173
-- source_total_lines=178
+- _wait_profile_process: lines 17-59
+- _terminate_profile_subprocess: lines 60-86
+- _run_profile_subprocess: lines 87-174
+- contextor_profile_analysis: lines 175-193
+- source_total_lines=198
 
-Verified literal lifecycle anchors:
+The verified source confirms:
 
-- The central CONTEXTOR_MCP_PROCESS_REGISTRY environment value controls registration.
-- register_process receives pid=process.pid, parent_pid=os.getpid(), kind="profile-worker", and executable=sys.executable.
-- Normal completion removes record_path in finally.
-- BaseException from process.communicate enters _terminate_profile_subprocess and re-raises the original exception.
-- Registered cancellation/exception cleanup calls terminate_registered_record through asyncio.shield and asyncio.to_thread.
-- Fallback process.terminate and bounded _wait_profile_process/process.kill behavior are present with timeout 2.0 seconds.
-- contextor_profile_analysis signature, invalid-path response, profile invocation, and JSON response shape remain unchanged.
-- profile_worker.py and profile_runner.py were not modified.
-- mcp_server.py, mcp_process_registry.py, analysis_jobs.py, and process_pool_lifecycle.py were not modified.
+- registration failure is inside the BaseException cleanup boundary;
+- both process.wait calls are bounded by asyncio.wait_for;
+- _terminate_profile_subprocess is unchanged;
+- contextor_profile_analysis is unchanged;
+- no other production file was modified.
 
-## PROFILE_WORKER_OWNER
+## EXISTING_K5B2_CONTRACT
 
-The MCP profile subprocess is registered as a direct child of the MCP process through the existing central registry. The durable record parent_pid is os.getpid() from the MCP tool process.
-
-## NORMAL_EXIT_LIFECYCLE
-
-The worker is registered only when CONTEXTOR_MCP_PROCESS_REGISTRY is present. After communicate completes, the existing JSON/error/result semantics run unchanged and finally calls remove_record(record_path), including when no registry record exists.
-
-## CANCELLATION_LIFECYCLE
-
-Any BaseException escaping communicate, including asyncio.CancelledError, invokes _terminate_profile_subprocess. A registered record is first sent through terminate_registered_record in a shielded thread call, then the direct process termination fallback and bounded wait/kill path are applied as required. The original cancellation or exception is re-raised.
-
-## HARD_MCP_DEATH_MODEL
-
-If the MCP root dies before Python cleanup executes, the durable profile-worker record remains with parent_pid pointing to the dead MCP root. Existing _cleanup_orphaned_processes can recover the stale profile-worker record on the next MCP startup. No second registry or orphan scanner was added.
-
-## DESCENDANT_PROCESSPOOL_INHERITANCE
-
-The existing profile worker environment inherits CONTEXTOR_MCP_PROCESS_REGISTRY. Existing _initialize_mcp_managed_worker registers process-pool descendants with parent_pid equal to the profile-worker PID, allowing the existing two-pass orphan cleanup to terminate the tree.
-
-## PROFILE_TOOL_PUBLIC_CONTRACT
-
-UNCHANGED. The public contextor_profile_analysis(repo_path, exclude_paths=None) signature and current invalid-path, profile-payload, and JSON serialization behavior remain unchanged.
-
-## EVIDENCE
-
-### DIRECT_EVIDENCE
-
-- The requested exact production replacement was applied.
-- The requested exact test file was created.
-- py_compile exited with code 0.
-- pytest output was:
-  .....                                                                    [100%]
-  5 passed in 0.30s
-- Contextor source-range reads returned status=ok for all four requested functions.
-- git status after implementation listed only the requested production file, requested test file, and walkthrough.md.
-- The required git diff command showed only the requested production diff; the untracked test file was separately captured as a complete /dev/null diff below.
-
-### CODE_PATH_PROVED
-
-- contextor_profile_analysis directly calls _run_profile_subprocess.
-- _run_profile_subprocess creates the profile_worker subprocess, conditionally registers it, communicates, cleans the record in finally, and routes BaseException through tree cleanup.
-- Existing registry termination, MCP orphan cleanup, and process-pool child registration are unchanged and are the lifecycle owners used by this patch.
-
-### CONTRACT_PROVED
-
-- Only the two allowed source/test files were changed.
-- No forbidden helper, timeout, function-name, public-contract, profile-worker, profile-runner, server, registry, analysis-job, process-pool, Desktop, LIVE, runtime-trace, schema, or documentation changes were made.
-- No additional tests were run.
-
-### INFERENCE
-
-- Hard-root orphan recovery and descendant tree recovery are inferred from the unchanged existing registry/orphan/process-pool code path plus the new durable profile-worker record. Runtime certification was not performed.
-
-### UNKNOWN
-
-- Runtime/Desktop certification was not requested and was not performed.
-- The report does not claim live process-tree execution evidence.
+The existing tree-termination contract remains unchanged. Registered cancellation and exception paths still call _terminate_profile_subprocess, which uses terminate_registered_record through asyncio.shield and asyncio.to_thread, then falls back to process.terminate and bounded wait/kill handling. Only the requested registration-boundary and post-kill wait corrections were applied.
 
 ## TESTS
 
@@ -126,336 +68,162 @@ VALIDATION_2:
 
 RESULT_2:
 PASS
-.....                                                                    [100%]
-5 passed in 0.30s
+.......                                                                  [100%]
+7 passed in 0.33s
+
+No other tests were run.
+
+## EVIDENCE
+
+### DIRECT_EVIDENCE
+
+- The two requested production functions were replaced literally.
+- The two requested tests were appended literally.
+- py_compile exited with code 0.
+- The focused lifecycle test command passed all 7 tests.
+- Contextor returned status=ok for all four requested source ranges.
+- git status after implementation listed only contextor/mcp/tools/contextor_profile_analysis.py, tests/test_mcp_profile_worker_lifecycle.py, and walkthrough.md.
+
+### CODE_PATH_PROVED
+
+- _run_profile_subprocess creates the subprocess before entering try, then performs registry lookup, registration, request construction, and communicate inside the BaseException cleanup boundary.
+- Registration failure reaches the existing fallback cleanup owner with record_path=None.
+- _wait_profile_process has bounded waits both before and after process.kill.
+- _terminate_profile_subprocess and contextor_profile_analysis were not changed by this task.
+
+### CONTRACT_PROVED
+
+- Allowed source/test scope contains exactly the two requested files.
+- No profile_worker.py, profile_runner.py, mcp_server.py, mcp_process_registry.py, analysis_jobs.py, process_pool_lifecycle.py, Desktop, LIVE, or runtime_trace file was changed.
+- No implementation redesign or post-failure fix was performed.
+
+### INFERENCE
+
+- The registration-failure test proves the direct fallback invocation in the isolated fake-process path. Full OS process-tree behavior remains governed by the unchanged registry implementation and was not runtime-certified in this task.
+
+### UNKNOWN
+
+- Runtime/Desktop certification was not requested and was not performed.
+- No claim is made about live process-tree execution beyond the focused unit-contract evidence.
 
 ## COMPLETE_DIFFS
 
-The following are the complete current source/test diffs. walkthrough.md is excluded.
+The following is the complete current git diff for every source/test file changed by this task. walkthrough.md is excluded.
 
---- contextor/mcp/tools/contextor_profile_analysis.py
 diff --git a/contextor/mcp/tools/contextor_profile_analysis.py b/contextor/mcp/tools/contextor_profile_analysis.py
-index f57b8d3..da4f8d4 100644
+index da4f8d4..73f7653 100644
 --- a/contextor/mcp/tools/contextor_profile_analysis.py
 +++ b/contextor/mcp/tools/contextor_profile_analysis.py
-@@ -1,26 +1,178 @@
- import asyncio
- import json
-+import os
- import sys
- from pathlib import Path
+@@ -21,22 +21,41 @@ async def _wait_profile_process(
+ ) -> None:
+     if process.returncode is not None:
+         return
++
++    bounded_timeout = max(
++        0.0,
++        timeout,
++    )
++
+     try:
+         await asyncio.wait_for(
+             process.wait(),
+-            timeout=max(0.0, timeout),
++            timeout=bounded_timeout,
+         )
++        return
+     except asyncio.TimeoutError:
+-        if process.returncode is None:
+-            try:
+-                process.kill()
+-            except ProcessLookupError:
+-                pass
++        pass
++
++    if process.returncode is None:
+         try:
+-            await process.wait()
++            process.kill()
+         except ProcessLookupError:
+             pass
  
-+from contextor.mcp_process_registry import (
-+    register_process,
-+    remove_record,
-+    terminate_registered_record,
-+)
-+
-+
-+_PROFILE_PROCESS_WAIT_SECONDS = 2.0
-+
-+
-+async def _wait_profile_process(
-+    process: asyncio.subprocess.Process,
-+    *,
-+    timeout: float = _PROFILE_PROCESS_WAIT_SECONDS,
-+) -> None:
 +    if process.returncode is not None:
 +        return
++
 +    try:
 +        await asyncio.wait_for(
 +            process.wait(),
-+            timeout=max(0.0, timeout),
-+        )
-+    except asyncio.TimeoutError:
-+        if process.returncode is None:
-+            try:
-+                process.kill()
-+            except ProcessLookupError:
-+                pass
-+        try:
-+            await process.wait()
-+        except ProcessLookupError:
-+            pass
-+
-+
-+async def _terminate_profile_subprocess(
-+    process: asyncio.subprocess.Process,
-+    record_path: Path | None,
-+) -> None:
-+    if process.returncode is not None:
-+        return
-+
-+    if record_path is not None:
-+        try:
-+            await asyncio.shield(
-+                asyncio.to_thread(
-+                    terminate_registered_record,
-+                    record_path,
-+                )
-+            )
-+        except Exception:
-+            pass
-+
-+    if process.returncode is None:
-+        try:
-+            process.terminate()
-+        except ProcessLookupError:
-+            pass
-+
-+    await _wait_profile_process(process)
-+
-+
-+async def _run_profile_subprocess(
-+    root: Path,
-+    *,
-+    exclude_paths: list[str] | None,
-+) -> dict[str, object]:
-+    process = await asyncio.create_subprocess_exec(
-+        sys.executable,
-+        "-u",
-+        "-m",
-+        "contextor.core.analysis.profile_worker",
-+        stdin=asyncio.subprocess.PIPE,
-+        stdout=asyncio.subprocess.PIPE,
-+        stderr=asyncio.subprocess.PIPE,
-+    )
-+
-+    record_path: Path | None = None
-+    registry_value = os.environ.get(
-+        "CONTEXTOR_MCP_PROCESS_REGISTRY"
-+    )
-+
-+    if registry_value:
-+        record_path = register_process(
-+            Path(registry_value),
-+            pid=process.pid,
-+            parent_pid=os.getpid(),
-+            kind="profile-worker",
-+            executable=sys.executable,
-+        )
-+
-+    request = json.dumps(
-+        {
-+            "repo_path": str(root),
-+            "exclude_paths": exclude_paths,
-+        },
-+        ensure_ascii=False,
-+        separators=(",", ":"),
-+    ).encode("utf-8")
-+
-+    try:
-+        stdout, stderr = await process.communicate(
-+            request
-+        )
-+    except BaseException:
-+        await _terminate_profile_subprocess(
-+            process,
-+            record_path,
-+        )
-+        raise
-+    finally:
-+        remove_record(record_path)
- 
--async def _run_profile_subprocess(root: Path, *, exclude_paths: list[str] | None) -> dict[str, object]:
--    process = await asyncio.create_subprocess_exec(sys.executable, "-u", "-m", "contextor.core.analysis.profile_worker", stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
--    request = json.dumps({"repo_path": str(root), "exclude_paths": exclude_paths}, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
--    stdout, stderr = await process.communicate(request)
-     if process.returncode != 0:
--        error = stderr.decode("utf-8", errors="replace").strip()
--        if len(error) > 4000: error = error[-4000:]
--        raise RuntimeError("Contextor profile worker failed" + (f": {error}" if error else "."))
--    try: payload = json.loads(stdout.decode("utf-8"))
--    except (UnicodeDecodeError, json.JSONDecodeError) as exc: raise RuntimeError("Contextor profile worker returned invalid JSON.") from exc
--    if not isinstance(payload, dict): raise RuntimeError("Contextor profile worker returned a non-object payload.")
-+        error = stderr.decode(
-+            "utf-8",
-+            errors="replace",
-+        ).strip()
-+        if len(error) > 4000:
-+            error = error[-4000:]
-+        raise RuntimeError(
-+            "Contextor profile worker failed"
-+            + (
-+                f": {error}"
-+                if error
-+                else "."
-+            )
-+        )
-+
-+    try:
-+        payload = json.loads(
-+            stdout.decode("utf-8")
++            timeout=bounded_timeout,
 +        )
 +    except (
-+        UnicodeDecodeError,
-+        json.JSONDecodeError,
-+    ) as exc:
-+        raise RuntimeError(
-+            "Contextor profile worker returned invalid JSON."
-+        ) from exc
-+
-+    if not isinstance(payload, dict):
-+        raise RuntimeError(
-+            "Contextor profile worker returned a non-object payload."
-+        )
-+
-     return payload
--async def contextor_profile_analysis(repo_path: str, exclude_paths: list[str] | None = None) -> str:
-+
-+
-+async def contextor_profile_analysis(
-+    repo_path: str,
-+    exclude_paths: list[str] | None = None,
-+) -> str:
-     root = Path(repo_path).expanduser().resolve()
-     if not root.is_dir():
--        return f"Error: Repository path '{root}' does not exist."
--    profile = await _run_profile_subprocess(root, exclude_paths=exclude_paths)
--    return json.dumps(profile, indent=2)
-+        return (
-+            f"Error: Repository path '{root}' "
-+            "does not exist."
-+        )
-+
-+    profile = await _run_profile_subprocess(
-+        root,
-+        exclude_paths=exclude_paths,
-+    )
-+    return json.dumps(
-+        profile,
-+        indent=2,
-+    )
++        asyncio.TimeoutError,
++        ProcessLookupError,
++    ):
++        pass
 +
  
--__all__ = ["contextor_profile_analysis"]
-+__all__ = [
-+    "contextor_profile_analysis",
-+]
-
---- tests/test_mcp_profile_worker_lifecycle.py
-diff --git a/tests/test_mcp_profile_worker_lifecycle.py b/tests/test_mcp_profile_worker_lifecycle.py
-new file mode 100644
-index 0000000..ac282ff
---- /dev/null
-+++ b/tests/test_mcp_profile_worker_lifecycle.py
-@@ -0,0 +1,318 @@
-+import asyncio
-+import os
-+from pathlib import Path
-+
-+import pytest
-+
-+from contextor.mcp.tools import (
-+    contextor_profile_analysis as profile_module,
-+)
-+
-+
-+class _FakeProcess:
-+    def __init__(
-+        self,
-+        *,
-+        pid=1234,
-+        returncode=None,
-+        stdout=b'{"status":"ok"}',
-+        stderr=b"",
-+        communicate_error=None,
-+    ):
-+        self.pid = pid
-+        self.returncode = returncode
-+        self.stdout_payload = stdout
-+        self.stderr_payload = stderr
-+        self.communicate_error = communicate_error
-+        self.terminate_calls = 0
-+        self.kill_calls = 0
-+        self.wait_calls = 0
-+
-+    async def communicate(self, _request):
-+        if self.communicate_error is not None:
-+            raise self.communicate_error
-+        self.returncode = 0
-+        return (
-+            self.stdout_payload,
-+            self.stderr_payload,
-+        )
-+
-+    async def wait(self):
-+        self.wait_calls += 1
-+        if self.returncode is None:
-+            self.returncode = -15
-+        return self.returncode
-+
-+    def terminate(self):
-+        self.terminate_calls += 1
-+        self.returncode = -15
-+
-+    def kill(self):
-+        self.kill_calls += 1
-+        self.returncode = -9
-+
-+
-+def test_profile_worker_registers_and_removes_record(
-+    tmp_path,
-+    monkeypatch,
-+):
-+    process = _FakeProcess()
-+    central = tmp_path / "mcp-processes"
-+    registered = []
-+    removed = []
-+
-+    async def fake_create(*_args, **_kwargs):
-+        return process
-+
-+    monkeypatch.setattr(
-+        profile_module.asyncio,
-+        "create_subprocess_exec",
-+        fake_create,
-+    )
-+    monkeypatch.setattr(
-+        profile_module,
-+        "register_process",
-+        lambda directory, **kwargs: (
-+            registered.append(
-+                (Path(directory), kwargs)
+ async def _terminate_profile_subprocess(
+     process: asyncio.subprocess.Process,
+@@ -81,29 +100,30 @@ async def _run_profile_subprocess(
+     )
+ 
+     record_path: Path | None = None
+-    registry_value = os.environ.get(
+-        "CONTEXTOR_MCP_PROCESS_REGISTRY"
+-    )
+ 
+-    if registry_value:
+-        record_path = register_process(
+-            Path(registry_value),
+-            pid=process.pid,
+-            parent_pid=os.getpid(),
+-            kind="profile-worker",
+-            executable=sys.executable,
++    try:
++        registry_value = os.environ.get(
++            "CONTEXTOR_MCP_PROCESS_REGISTRY"
+         )
+ 
+-    request = json.dumps(
+-        {
+-            "repo_path": str(root),
+-            "exclude_paths": exclude_paths,
+-        },
+-        ensure_ascii=False,
+-        separators=(",", ":"),
+-    ).encode("utf-8")
++        if registry_value:
++            record_path = register_process(
++                Path(registry_value),
++                pid=process.pid,
++                parent_pid=os.getpid(),
++                kind="profile-worker",
++                executable=sys.executable,
 +            )
-+            or central / "profile-worker-1234.json"
-+        ),
-+    )
-+    monkeypatch.setattr(
-+        profile_module,
-+        "remove_record",
-+        lambda path: removed.append(path),
-+    )
-+    monkeypatch.setenv(
-+        "CONTEXTOR_MCP_PROCESS_REGISTRY",
-+        str(central),
-+    )
 +
-+    result = asyncio.run(
-+        profile_module._run_profile_subprocess(
-+            tmp_path,
-+            exclude_paths=None,
-+        )
-+    )
-+
-+    assert result == {"status": "ok"}
-+    assert registered == [
-+        (
-+            central,
++        request = json.dumps(
 +            {
-+                "pid": 1234,
-+                "parent_pid": os.getpid(),
-+                "kind": "profile-worker",
-+                "executable": profile_module.sys.executable,
++                "repo_path": str(root),
++                "exclude_paths": exclude_paths,
 +            },
-+        )
-+    ]
-+    assert removed == [
-+        central / "profile-worker-1234.json"
-+    ]
++            ensure_ascii=False,
++            separators=(",", ":"),
++        ).encode("utf-8")
+ 
+-    try:
+         stdout, stderr = await process.communicate(
+             request
+         )
+diff --git a/tests/test_mcp_profile_worker_lifecycle.py b/tests/test_mcp_profile_worker_lifecycle.py
+index ac282ff..3a2e0cf 100644
+--- a/tests/test_mcp_profile_worker_lifecycle.py
++++ b/tests/test_mcp_profile_worker_lifecycle.py
+@@ -316,3 +316,77 @@ def test_profile_worker_nonzero_exit_keeps_existing_error_contract(
+                 exclude_paths=None,
+             )
+         )
 +
 +
-+def test_profile_worker_without_registry_keeps_normal_contract(
++def test_profile_worker_registration_failure_terminates_spawned_process(
 +    tmp_path,
 +    monkeypatch,
 +):
@@ -468,80 +236,22 @@ index 0000000..ac282ff
 +        profile_module.asyncio,
 +        "create_subprocess_exec",
 +        fake_create,
-+    )
-+    monkeypatch.delenv(
-+        "CONTEXTOR_MCP_PROCESS_REGISTRY",
-+        raising=False,
 +    )
 +    monkeypatch.setattr(
 +        profile_module,
 +        "register_process",
 +        lambda *_args, **_kwargs: (
-+            pytest.fail(
-+                "profile worker must not register "
-+                "without registry environment"
-+            )
++            _raise_registration_failure()
 +        ),
-+    )
-+
-+    result = asyncio.run(
-+        profile_module._run_profile_subprocess(
-+            tmp_path,
-+            exclude_paths=[],
-+        )
-+    )
-+
-+    assert result == {"status": "ok"}
-+
-+
-+def test_profile_worker_exception_terminates_registered_tree(
-+    tmp_path,
-+    monkeypatch,
-+):
-+    process = _FakeProcess(
-+        communicate_error=RuntimeError(
-+            "communication failed"
-+        )
-+    )
-+    central = tmp_path / "mcp-processes"
-+    record = central / "profile-worker-1234.json"
-+    terminated = []
-+    removed = []
-+
-+    async def fake_create(*_args, **_kwargs):
-+        return process
-+
-+    monkeypatch.setattr(
-+        profile_module.asyncio,
-+        "create_subprocess_exec",
-+        fake_create,
-+    )
-+    monkeypatch.setattr(
-+        profile_module,
-+        "register_process",
-+        lambda *_args, **_kwargs: record,
-+    )
-+    monkeypatch.setattr(
-+        profile_module,
-+        "terminate_registered_record",
-+        lambda path: (
-+            terminated.append(path)
-+            or True
-+        ),
-+    )
-+    monkeypatch.setattr(
-+        profile_module,
-+        "remove_record",
-+        lambda path: removed.append(path),
 +    )
 +    monkeypatch.setenv(
 +        "CONTEXTOR_MCP_PROCESS_REGISTRY",
-+        str(central),
++        str(tmp_path / "mcp-processes"),
 +    )
 +
 +    with pytest.raises(
-+        RuntimeError,
-+        match="communication failed",
++        OSError,
++        match="registry unavailable",
 +    ):
 +        asyncio.run(
 +            profile_module._run_profile_subprocess(
@@ -550,113 +260,39 @@ index 0000000..ac282ff
 +            )
 +        )
 +
-+    assert terminated == [record]
-+    assert removed == [record]
++    assert process.terminate_calls == 1
 +
 +
-+def test_profile_worker_cancellation_uses_same_cleanup_path(
-+    tmp_path,
-+    monkeypatch,
-+):
-+    started = asyncio.Event()
-+    release = asyncio.Event()
-+    central = tmp_path / "mcp-processes"
-+    record = central / "profile-worker-1234.json"
-+    terminated = []
++def _raise_registration_failure():
++    raise OSError("registry unavailable")
 +
-+    class _BlockingProcess(_FakeProcess):
-+        async def communicate(self, _request):
-+            started.set()
-+            await release.wait()
-+            self.returncode = 0
-+            return (
-+                self.stdout_payload,
-+                self.stderr_payload,
-+            )
 +
-+    process = _BlockingProcess()
++def test_profile_worker_post_kill_wait_is_bounded():
++    class _NeverExitsProcess:
++        pid = 1234
++        returncode = None
 +
-+    async def fake_create(*_args, **_kwargs):
-+        return process
++        def __init__(self):
++            self.kill_calls = 0
 +
-+    monkeypatch.setattr(
-+        profile_module.asyncio,
-+        "create_subprocess_exec",
-+        fake_create,
-+    )
-+    monkeypatch.setattr(
-+        profile_module,
-+        "register_process",
-+        lambda *_args, **_kwargs: record,
-+    )
-+    monkeypatch.setattr(
-+        profile_module,
-+        "terminate_registered_record",
-+        lambda path: (
-+            terminated.append(path)
-+            or True
-+        ),
-+    )
-+    monkeypatch.setenv(
-+        "CONTEXTOR_MCP_PROCESS_REGISTRY",
-+        str(central),
-+    )
++        async def wait(self):
++            await asyncio.sleep(60)
++
++        def kill(self):
++            self.kill_calls += 1
++
++    process = _NeverExitsProcess()
 +
 +    async def scenario():
-+        task = asyncio.create_task(
-+            profile_module._run_profile_subprocess(
-+                tmp_path,
-+                exclude_paths=None,
-+            )
++        await asyncio.wait_for(
++            profile_module._wait_profile_process(
++                process,
++                timeout=0.01,
++            ),
++            timeout=0.2,
 +        )
-+        await started.wait()
-+        task.cancel()
-+        with pytest.raises(asyncio.CancelledError):
-+            await task
 +
 +    asyncio.run(scenario())
 +
-+    assert terminated == [record]
-+
-+
-+def test_profile_worker_nonzero_exit_keeps_existing_error_contract(
-+    tmp_path,
-+    monkeypatch,
-+):
-+    process = _FakeProcess(
-+        returncode=1,
-+        stderr=b"profile failed",
-+    )
-+
-+    async def fake_create(*_args, **_kwargs):
-+        return process
-+
-+    async def fake_communicate(_request):
-+        return (
-+            b"",
-+            b"profile failed",
-+        )
-+
-+    process.communicate = fake_communicate
-+    monkeypatch.setattr(
-+        profile_module.asyncio,
-+        "create_subprocess_exec",
-+        fake_create,
-+    )
-+    monkeypatch.delenv(
-+        "CONTEXTOR_MCP_PROCESS_REGISTRY",
-+        raising=False,
-+    )
-+
-+    with pytest.raises(
-+        RuntimeError,
-+        match="Contextor profile worker failed: profile failed",
-+    ):
-+        asyncio.run(
-+            profile_module._run_profile_subprocess(
-+                tmp_path,
-+                exclude_paths=None,
-+            )
-+        )
-
++    assert process.kill_calls == 1
 

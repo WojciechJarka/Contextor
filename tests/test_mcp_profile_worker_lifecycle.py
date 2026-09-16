@@ -316,3 +316,77 @@ def test_profile_worker_nonzero_exit_keeps_existing_error_contract(
                 exclude_paths=None,
             )
         )
+
+
+def test_profile_worker_registration_failure_terminates_spawned_process(
+    tmp_path,
+    monkeypatch,
+):
+    process = _FakeProcess()
+
+    async def fake_create(*_args, **_kwargs):
+        return process
+
+    monkeypatch.setattr(
+        profile_module.asyncio,
+        "create_subprocess_exec",
+        fake_create,
+    )
+    monkeypatch.setattr(
+        profile_module,
+        "register_process",
+        lambda *_args, **_kwargs: (
+            _raise_registration_failure()
+        ),
+    )
+    monkeypatch.setenv(
+        "CONTEXTOR_MCP_PROCESS_REGISTRY",
+        str(tmp_path / "mcp-processes"),
+    )
+
+    with pytest.raises(
+        OSError,
+        match="registry unavailable",
+    ):
+        asyncio.run(
+            profile_module._run_profile_subprocess(
+                tmp_path,
+                exclude_paths=None,
+            )
+        )
+
+    assert process.terminate_calls == 1
+
+
+def _raise_registration_failure():
+    raise OSError("registry unavailable")
+
+
+def test_profile_worker_post_kill_wait_is_bounded():
+    class _NeverExitsProcess:
+        pid = 1234
+        returncode = None
+
+        def __init__(self):
+            self.kill_calls = 0
+
+        async def wait(self):
+            await asyncio.sleep(60)
+
+        def kill(self):
+            self.kill_calls += 1
+
+    process = _NeverExitsProcess()
+
+    async def scenario():
+        await asyncio.wait_for(
+            profile_module._wait_profile_process(
+                process,
+                timeout=0.01,
+            ),
+            timeout=0.2,
+        )
+
+    asyncio.run(scenario())
+
+    assert process.kill_calls == 1

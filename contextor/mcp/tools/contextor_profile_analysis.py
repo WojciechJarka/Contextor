@@ -21,21 +21,40 @@ async def _wait_profile_process(
 ) -> None:
     if process.returncode is not None:
         return
+
+    bounded_timeout = max(
+        0.0,
+        timeout,
+    )
+
     try:
         await asyncio.wait_for(
             process.wait(),
-            timeout=max(0.0, timeout),
+            timeout=bounded_timeout,
         )
+        return
     except asyncio.TimeoutError:
-        if process.returncode is None:
-            try:
-                process.kill()
-            except ProcessLookupError:
-                pass
+        pass
+
+    if process.returncode is None:
         try:
-            await process.wait()
+            process.kill()
         except ProcessLookupError:
             pass
+
+    if process.returncode is not None:
+        return
+
+    try:
+        await asyncio.wait_for(
+            process.wait(),
+            timeout=bounded_timeout,
+        )
+    except (
+        asyncio.TimeoutError,
+        ProcessLookupError,
+    ):
+        pass
 
 
 async def _terminate_profile_subprocess(
@@ -81,29 +100,30 @@ async def _run_profile_subprocess(
     )
 
     record_path: Path | None = None
-    registry_value = os.environ.get(
-        "CONTEXTOR_MCP_PROCESS_REGISTRY"
-    )
-
-    if registry_value:
-        record_path = register_process(
-            Path(registry_value),
-            pid=process.pid,
-            parent_pid=os.getpid(),
-            kind="profile-worker",
-            executable=sys.executable,
-        )
-
-    request = json.dumps(
-        {
-            "repo_path": str(root),
-            "exclude_paths": exclude_paths,
-        },
-        ensure_ascii=False,
-        separators=(",", ":"),
-    ).encode("utf-8")
 
     try:
+        registry_value = os.environ.get(
+            "CONTEXTOR_MCP_PROCESS_REGISTRY"
+        )
+
+        if registry_value:
+            record_path = register_process(
+                Path(registry_value),
+                pid=process.pid,
+                parent_pid=os.getpid(),
+                kind="profile-worker",
+                executable=sys.executable,
+            )
+
+        request = json.dumps(
+            {
+                "repo_path": str(root),
+                "exclude_paths": exclude_paths,
+            },
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ).encode("utf-8")
+
         stdout, stderr = await process.communicate(
             request
         )
