@@ -135,6 +135,22 @@ def test_malformed_or_truncated_unindexed_tail_fails_closed(trace_logs):
         trace.AuthorityEventEmitter(runtime_domain_id="domain-a", logs_root=trace_logs)
 
 
+def test_short_authority_append_is_rolled_back(trace_logs, monkeypatch):
+    emitter = trace.AuthorityEventEmitter(runtime_domain_id="domain-a", logs_root=trace_logs)
+    before = emitter.log_path.stat().st_size
+    real_write = trace.os.write
+
+    def short_write(fd, data):
+        if b'"_type":"authority_event"' in data:
+            return real_write(fd, data[: len(data) // 2])
+        return real_write(fd, data)
+
+    monkeypatch.setattr(trace.os, "write", short_write)
+    with pytest.raises(trace.AuthorityEventRecoveryError, match="short authority JSONL append"):
+        emitter.emit("SHORT_WRITE")
+    assert emitter.log_path.stat().st_size == before
+
+
 def test_two_runtime_domains_have_independent_sequences(trace_logs):
     left = trace.AuthorityEventEmitter(runtime_domain_id="domain-left", logs_root=trace_logs)
     right = trace.AuthorityEventEmitter(runtime_domain_id="domain-right", logs_root=trace_logs)

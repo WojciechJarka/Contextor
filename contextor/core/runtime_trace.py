@@ -41,6 +41,7 @@ _FALLBACK_SCHEMA = 1
 _sidecar_rollovers: set[Path] = set()
 _authority_emitters: dict[tuple[str, str], "AuthorityEventEmitter"] = {}
 _authority_lock = threading.RLock()
+_trace_file_lock_local = threading.local()
 _operation_var: contextvars.ContextVar[str | None] = contextvars.ContextVar(
     "contextor_trace_operation", default=None
 )
@@ -53,6 +54,10 @@ _trace_capture_var: contextvars.ContextVar[
 
 
 AUTHORITY_EVENT_SCHEMA = "contextor-authority-event/v1"
+
+
+def _runtime_trace_lock_path(path: Path) -> Path:
+    return path.parent / f".{_AUTHORITY_STATE_NAME}.lock"
 
 
 def _snapshot_stamp() -> str:
@@ -532,6 +537,16 @@ def _authority_envelope(event: AuthorityEvent) -> dict[str, object]:
     return {"_type": "authority_event", "schema": AUTHORITY_EVENT_SCHEMA, **event.to_dict()}
 
 
+def _rollback_jsonl_append(fd: int, before: int, record_kind: str) -> None:
+    try:
+        os.ftruncate(fd, before)
+        os.fsync(fd)
+    except OSError as exc:
+        raise AuthorityEventRecoveryError(
+            f"{record_kind} JSONL append rollback failed"
+        ) from exc
+
+
 def _append_authority_record_locked(path: Path, event: AuthorityEvent) -> RecordIndex:
     data = (
         json.dumps(
@@ -551,6 +566,7 @@ def _append_authority_record_locked(path: Path, event: AuthorityEvent) -> Record
         before = os.fstat(fd).st_size
         written = os.write(fd, data)
         if written != len(data):
+            _rollback_jsonl_append(fd, before, "authority")
             raise AuthorityEventRecoveryError("short authority JSONL append")
         os.fsync(fd)
         end = os.fstat(fd).st_size
@@ -604,14 +620,24 @@ def _read_authority_record_at(path: Path, offset: int, end_offset: int) -> Autho
 
 
 class _AuthorityFileLock(contextlib.AbstractContextManager):
-    """Cross-process lock for the bounded sidecar and its JSONL append order."""
+    """Cross-process lock for shared JSONL append and authority sidecar order."""
 
     def __init__(self, path: Path, timeout: float = 10.0) -> None:
         self.path = path
         self.timeout = timeout
         self._file = None
+        self._reentrant = False
+        self._key = str(path.resolve())
 
     def __enter__(self):
+        held = getattr(_trace_file_lock_local, "held", None)
+        if held is None:
+            held = {}
+            _trace_file_lock_local.held = held
+        if held.get(self._key, 0):
+            held[self._key] += 1
+            self._reentrant = True
+            return self
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._file = self.path.open("a+b")
         if self.path.stat().st_size == 0:
@@ -629,6 +655,7 @@ class _AuthorityFileLock(contextlib.AbstractContextManager):
                     import fcntl
 
                     fcntl.flock(self._file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                held[self._key] = 1
                 return self
             except (OSError, BlockingIOError):
                 if time.monotonic() >= deadline:
@@ -638,6 +665,15 @@ class _AuthorityFileLock(contextlib.AbstractContextManager):
                 time.sleep(0.01)
 
     def __exit__(self, exc_type, exc, tb):
+        held = getattr(_trace_file_lock_local, "held", {})
+        if self._reentrant:
+            depth = held.get(self._key, 0)
+            if depth <= 1:
+                held.pop(self._key, None)
+            else:
+                held[self._key] = depth - 1
+            self._reentrant = False
+            return False
         if self._file is not None:
             try:
                 self._file.seek(0)
@@ -653,6 +689,7 @@ class _AuthorityFileLock(contextlib.AbstractContextManager):
                 pass
             self._file.close()
             self._file = None
+            held.pop(self._key, None)
 
 
 
@@ -1139,15 +1176,31 @@ def active_trace_path(*, force_refresh: bool = False) -> Path | None:
 def _append(record: dict[str, object], path: Path) -> None:
     global _active_fd
     try:
-        payload = json.dumps(record, ensure_ascii=False, separators=(",", ":")) + "\n"
+        persisted_record = dict(record)
+        persisted_record["_record_kind"] = "diagnostic"
+        payload = (
+            json.dumps(
+                persisted_record,
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
+            + "\n"
+        )
         encoded = payload.encode("utf-8")
-        with _lock:
-            if _active_fd is None:
-                flags = os.O_WRONLY | os.O_APPEND | os.O_CREAT
-                if hasattr(os, "O_BINARY"):
-                    flags |= os.O_BINARY
-                _active_fd = os.open(str(path), flags)
-            os.write(_active_fd, encoded)
+        with _AuthorityFileLock(_runtime_trace_lock_path(path)):
+            with _lock:
+                if _active_fd is None:
+                    flags = os.O_WRONLY | os.O_APPEND | os.O_CREAT
+                    if hasattr(os, "O_BINARY"):
+                        flags |= os.O_BINARY
+                    _active_fd = os.open(str(path), flags)
+                before = os.fstat(_active_fd).st_size
+                written = os.write(_active_fd, encoded)
+                if written != len(encoded):
+                    _rollback_jsonl_append(_active_fd, before, "diagnostic")
+                    raise AuthorityEventRecoveryError(
+                        "short diagnostic JSONL append"
+                    )
     except Exception:
         pass
 
