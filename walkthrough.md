@@ -1,491 +1,709 @@
-# CPA10K3 — writer-owner implementation stage
+# CPA10K4A_RUNTIME_TRACE_SHARED_WRITER_HARDENING_CORRECTION
 
-MODE: IMPLEMENTATION_STAGE_1
-REPO: C:\Temp\Contextor_Repo
-SCOPE: first owner of runtime trace corruption only
-CONTEXTOR_STATE: live canonical revision 1260; exact implementation fetches fresh; workspace_sync verified
+MODE=IMPLEMENT_EXACT_AUDITOR_PATCH
+REPO=C:\\Temp\\Contextor_Repo
+SCOPE=current-task-only
+DISCOVERY_ONLY=NO
+PYTEST=NOT_RUN
+DESKTOP_MCP_RESTART=NOT_PERFORMED
+LIVE_STATE_MUTATION=NOT_PERFORMED
 
-This stage implements only the shared runtime JSONL writer owner. Recovery semantics and the Desktop process-leak owner are intentionally unchanged.
+## IMPLEMENTATION_RESULT
 
-## IMPLEMENTED_CONTRACT
+PASS_WITH_CONTEXTOR_SOURCE_RANGE_VERIFICATION
 
-- Ordinary diagnostic persistence now adds _record_kind=diagnostic only to a copied record inside _append.
-- capture_trace_events still receives the original in-memory record before _append and therefore does not receive _record_kind.
-- Ordinary and authority JSONL appends now use the same cross-process lock path: the existing authority sidecar lock path derived from the runtime logs directory.
-- The lock is reentrant for nested calls on the same thread. This preserves the existing authority/diagnostic interleaving contract without attempting a second OS lock acquisition from the same thread.
-- Both ordinary and authority append paths check os.write return length.
-- On a short write, the append is rolled back with os.ftruncate to the pre-append size followed by os.fsync before the existing error behavior continues.
-- Ordinary diagnostics remain fail-open at trace_event/_append boundary. A failed diagnostic append is swallowed as before.
-- Authority short writes remain fail-closed by raising AuthorityEventRecoveryError, but no incomplete authority bytes are left by the tested short-write path.
-- No recovery parser, _type filtering, authority schema, pointer lifecycle, process lifecycle, or LIVE state was changed.
+The rejected CPA10K4A variant was corrected exactly in `contextor/core/runtime_trace.py`. The recovery implementation and process-lifecycle code were not redesigned or otherwise changed.
 
-## OBSERVED_TRACE_EVIDENCE
+## CORRECTIONS_FROM_REJECTED_VARIANT
 
-The original discovery identified one malformed ordinary diagnostic tail in:
+- Restored `_AuthorityFileLock` to the non-reentrant authority-sidecar/durability lock semantics.
+- Removed `_trace_file_lock_local`, reentrancy bookkeeping, and the rejected shared authority-lock use from ordinary diagnostic append.
+- Added the dedicated `_TraceAppendFileLock` using `.contextor_runtime_trace.append.lock`.
+- Restored authority append ownership under the authority lock and added the required physical append self-lock.
+- Replaced the rejected active descriptor lifecycle with per-append descriptors; `_active_fd` has no remaining production reference.
+- Added the exact `_record_kind=diagnostic_event` physical discriminator while leaving in-memory capture marker-free.
+- Added exact diagnostic timeout `0.25`, short-write progress checking, size checking, identity verification, and rollback helper behavior.
+- Removed only the prior CPA10K4A test assertion/short-write test hunks and restored the original exact capture-vs-durable equality assertion.
 
-C:\Users\DafoO\AppData\Roaming\Contextor\logs\contextor_runtime_20260915_211945_272_8748.jsonl
+## EXACT_ANCHORS_VERIFIED
 
-The malformed record was line 1780 at byte offset 557355, payload length 35 bytes, with suffix:
+Contextor `get_symbol_implementation` resolved all requested symbols but returned `stale_source` after the local edit because `workspace_sync=out_of_sync`; no `update_file`, full analysis, restart, or LIVE mutation was used.
 
-0022992,"status":"ok","bytes":1239}
+Contextor `get_source_range` returned status `ok` with fresh syntax diagnostics for the exact current source ranges:
 
-The surrounding operation was an ordinary MCP CALL_END sequence, not an authority_event. The affected file was 1,935,514 bytes. The size remains correlation only; this implementation does not treat file size as the root cause.
+- `_append_authority_record_locked`: lines 546-651.
+- `_AuthorityFileLock`: lines 653-703.
+- `_TraceAppendFileLock`: lines 704-767.
+- `_refresh_pointer`: lines 1208-1235.
+- `_append`: lines 1237-1301.
+- `_header_records`: lines 1304-1383.
+- `_open_runtime_trace_session`: lines 1386-1408.
+- `finish_desktop_trace_session`: lines 1442-1463.
 
-## TRACE_WRITER_OWNERS
-
-Contextor exact implementations established:
-
-- trace_event -> _append is the ordinary diagnostic writer.
-- AuthorityEventEmitter.emit -> _append_authority_record_locked is the authority writer.
-- _open_runtime_trace_session/start/finish owns active trace creation, pointer publication, SESSION_START/SESSION_END, and process-local fd lifecycle.
-- contextor/mcp_server.py ordinary CALL_END events route through trace_event.
-
-Changed writer ownership:
-
-- _append serializes a copied diagnostic record and writes it under _AuthorityFileLock.
-- _append_authority_record_locked retains authority envelope, fsync, offset, and identity verification, and now rolls back a short append before raising.
-- AuthorityEventEmitter already holds the same sidecar lock path; the lock implementation is now explicitly shared between authority and diagnostic appenders.
-
-## TRACE_SYNCHRONIZATION_MODEL
-
-Before this stage, ordinary writes used only a process-local threading lock and process-local fd. Authority writes used the cross-process sidecar lock.
-
-After this stage:
-
-- Ordinary diagnostic appends acquire _AuthorityFileLock at .authority_event_state.json.lock under the runtime logs root.
-- Authority recovery/emission already acquires the same path.
-- The lock implementation uses Windows msvcrt locking or POSIX flock and has thread-local reentrancy bookkeeping.
-- The ordinary path still does not add a successful-write fsync or retry loop. The implemented contract is shared serialization plus short-write rollback, as scoped for this stage.
-
-Certification after this stage:
-
-MALFORMED_RECORD_IS_NON_AUTHORITY_DIAGNOSTIC=YES
-DIAGNOSTIC_WRITES_CROSS_PROCESS_SERIALIZED=YES
-AUTHORITY_AND_DIAGNOSTIC_WRITES_SHARE_FILE=YES
-MALFORMED_NON_AUTHORITY_CAN_BLOCK_RECOVERY=YES
-SIZE_OVER_1M_IS_ROOT_CAUSE=CORRELATED_ONLY
-PREVIOUS_RECOVERY_REFACTOR_MISSED_SHARED_WRITER_RACE=PARTIAL
-
-The recovery result remains YES for malformed non-authority blocking because recovery was deliberately not changed in this stage. The next recovery stage must consume the new discriminator without weakening authority fail-closed behavior.
-
-## MALFORMED_RECORD_FAILURE_PATH
-
-UNCHANGED BY DESIGN:
-
-contextor/core/runtime_trace.py:_recover_unindexed_range_locked still parses each line and only then checks raw.get("_type"). A malformed non-authority line can therefore still raise observability_recovery_required before filtering.
-
-This stage does not implement “ignore malformed lines” and does not alter authority recovery ordering.
-
-## PREVIOUS_REFACTOR_COVERAGE_AND_GAP
-
-Retained authority hardening:
-
-- Cross-process locking.
-- Authority fsync.
-- Authority short-write detection.
-- Authority offset and identity verification.
-- Fail-closed authority recovery.
-
-Closed in this stage:
-
-- Ordinary diagnostics now participate in the same cross-process append serialization.
-- Short ordinary and authority appends are rolled back before the writer returns/raises.
-- New durable diagnostics have an explicit _record_kind discriminator.
-
-Remaining gap for the next stage:
-
-- Recovery still parses malformed bytes before discriminator filtering.
-- _record_kind is intentionally not consumed yet.
-- No recovery behavior was redesigned or changed here.
-
-## PROCESS_FAMILIES
-
-UNCHANGED BY DESIGN. The prior discovery remains the ownership baseline:
-
-- LIVE authority/service is spawned by Desktop through connect_or_start and subprocess.Popen.
-- Desktop watcher/feed/startup/progress workers are threads.
-- Desktop analysis can create indexer and artifact ProcessPoolExecutor workers.
-- External MCP server/profile-worker/mcp_worker/Git families remain externally owned unless runtime spawn evidence proves otherwise.
-
-No process creation or shutdown code was changed.
-
-## DESKTOP_SHUTDOWN_PATH
-
-UNCHANGED BY DESIGN. ContextorGUI.on_closing still:
-
-- cancels the progress task and waits only the configured bounded interval,
-- stops watcher/feed objects,
-- releases the Desktop claim,
-- requests LIVE shutdown and falls back to _terminate_pid_tree for the LIVE service PID,
-- destroys the Tk root.
-
-No executor ownership, process registry, LIVE shutdown, or process-tree behavior was changed.
-
-## PROCESS_OWNERSHIP_MATRIX
-
-| Family | This stage changed ownership? | Status |
-|---|---:|---|
-| LIVE authority/service | No | Existing owner-aware shutdown retained |
-| Desktop indexer ProcessPool workers | No | Existing lifecycle gap deferred |
-| Desktop artifact ProcessPool workers | No | Existing lifecycle gap deferred |
-| External MCP server/profile-worker/Git/mcp_worker | No | Must remain outside Desktop cleanup |
-
-## CONFIRMED_DESKTOP_OWNED_LEAKS
-
-DESKTOP_OWNED_PROCESS_LEAK_CONFIRMED=PARTIAL
-
-This stage does not change or newly prove the process-leak classification. No post-exit PID snapshot was available, and no process was restarted or killed.
-
-LEAKED_PROCESS_FAMILIES=NONE_CONFIRMED; prior source-confirmed candidates remain Desktop LIVE authority service and Desktop indexer/artifact ProcessPoolExecutor workers
-EXTERNAL_PROCESS_FAMILIES=external MCP server processes; MCP-spawned profile_worker; MCP-owned Git subprocesses; externally launched mcp_worker CLI
-SHUTDOWN_PROCESS_TREE_COMPLETE=NO
-
-## EXISTING_TEST_COVERAGE
-
-Focused test execution:
-
-Command:
-
-& .\.venv\Scripts\python.exe -m pytest tests/test_runtime_trace.py tests/test_runtime_authority_events.py
-
-Result: 57 passed in 15.74s on win32, Python 3.10.9, pytest 9.1.1.
-
-The six directly changed/contractual tests also passed:
-
-- test_desktop_trace_session_headers_and_finish
-- test_multiprocess_append_is_valid_json
-- test_short_diagnostic_append_is_rolled_back
-- test_scoped_trace_capture_matches_durable_record
-- test_authority_record_offset_survives_interleaved_runtime_trace_append
-- test_short_authority_append_is_rolled_back
-
-New/updated coverage:
-
-- durable diagnostic records contain _record_kind=diagnostic;
-- capture_trace_events remains marker-free;
-- short diagnostic append restores the pre-append file size;
-- short authority append restores the pre-append file size and remains fail-closed;
-- existing multiprocess diagnostic JSON validity and authority/diagnostic interleave behavior remain passing.
-
-Not executed:
-
-- broad pytest suite;
-- recovery redesign tests;
-- Desktop close/process-tree tests;
-- LIVE restart or runtime certification.
-
-## ROOT_CAUSE_A
-
-The original root cause was the ordinary shared writer being outside cross-process serialization and lacking short-write rollback. This stage addresses that writer owner:
-
-- shared lock participation is now present;
-- ordinary short-write rollback is now present;
-- authority short-write rollback is now present;
-- the diagnostic discriminator is now persisted for the next recovery stage.
-
-The original malformed trace is not rewritten and storage was not cleared.
-
-## ROOT_CAUSE_B
-
-Not addressed in this stage. The Desktop process-leak ownership gap remains deferred exactly as discovered. No process lifecycle source was modified.
-
-## MUST_TOUCH
-
-Changed:
-
-- contextor/core/runtime_trace.py
-- tests/test_runtime_trace.py
-- tests/test_runtime_authority_events.py
-
-Next stage only:
-
-- recovery parser/discriminator handling, with authority fail-closed proof.
-
-## MUST_NOT_TOUCH
-
-- Do not change recovery behavior in this stage.
-- Do not consume _record_kind until the recovery contract is explicitly reviewed.
-- Do not clear or rewrite observability storage.
-- Do not change Desktop process ownership or external MCP cleanup.
-- Do not restart Desktop/MCP or kill processes.
-- Do not redesign authority/lease semantics.
-
-## IMPLEMENTATION_CONTRACT_REQUIRED
-
-For this stage, the contract is satisfied by the focused tests above:
-
-- one shared cross-process lock for all active JSONL append paths;
-- pre-append size captured under that lock;
-- short write detected;
-- incomplete append truncated back and fsynced before the writer exits/raises;
-- diagnostic record kind added only to the durable copy;
-- capture_trace_events behavior preserved;
-- authority recovery behavior unchanged.
-
-The next stage must separately define how recovery uses _record_kind and how malformed non-authority bytes are handled without skipping a damaged authority record.
+The exact source-range content matches the auditor patch. The `get_symbol_implementation` stale-source result is recorded as a tooling freshness limitation, not treated as a source mismatch.
 
 ## FILES_CHANGED
 
-- contextor/core/runtime_trace.py
-- tests/test_runtime_trace.py
-- tests/test_runtime_authority_events.py
-- walkthrough.md (report artifact)
+Task-level net changes:
 
-## DIFFS
+- `contextor/core/runtime_trace.py`: exact production correction.
+- `tests/test_runtime_trace.py`: prior CPA10K4A hunks reverted; content restored to the pre-CPA10K4A contract.
+- `tests/test_runtime_authority_events.py`: prior CPA10K4A hunk reverted; content restored to the pre-CPA10K4A contract.
+- `walkthrough.md`: this report only; excluded from production/test diff accounting.
 
-DIFFS=SOURCE_AND_TESTS_CHANGED
-ACTUAL_DIFF=FULL_DIFFS_INCLUDED_BELOW
+The test-file changes shown in ACTUAL_DIFF are the requested reversion of the rejected variant. There are no remaining CPA10K4A test assertions or short-write tests in the corrected test content.
 
-## ACTUAL_DIFF_START
+## PY_COMPILE
+
+Command: `& .\\.venv\\Scripts\\python.exe -m py_compile contextor/core/runtime_trace.py`
+
+Result: PASS
+
+No pytest or broad test execution was performed.
+
+## ZERO_REFERENCE_CHECKS
+
+- `_active_fd` in `contextor/core/runtime_trace.py`: ZERO.
+- `_trace_file_lock_local` in `contextor/core/runtime_trace.py`: ZERO.
+- `_runtime_trace_lock_path` in `contextor/core/runtime_trace.py`: ZERO.
+- `_rollback_jsonl_append` in `contextor/core/runtime_trace.py`: ZERO.
+- `held`/old `_key` reentrancy state in the authority lock: ZERO.
+- Ordinary `_append` references to `_AuthorityFileLock`: ZERO.
+
+## LOCK_ORDER_EVIDENCE
+
+- Authority recovery/sidecar paths retain the process-local authority lock and `_AuthorityFileLock`.
+- `_append_authority_record_locked` self-acquires `_TraceAppendFileLock(_trace_append_lock_path(path))`.
+- Therefore authority physical append ordering is: process-local authority lock -> `_AuthorityFileLock` -> `_TraceAppendFileLock`.
+- Ordinary diagnostic `_append` acquires only `_TraceAppendFileLock` with `timeout=_DIAGNOSTIC_APPEND_LOCK_TIMEOUT`.
+- Ordinary diagnostic append does not acquire `_AuthorityFileLock`.
+- The two paths use the same dedicated physical append lock, so authority and diagnostic records cannot physically append concurrently through these writers.
+
+## DIAGNOSTIC_PREFIX_EVIDENCE
+
+The corrected diagnostic path constructs:
+
+`persisted_record = {"_record_kind": _DIAGNOSTIC_RECORD_KIND, **record}`
+
+with:
+
+`_DIAGNOSTIC_RECORD_KIND = "diagnostic_event"`
+
+and serializes with compact JSON separators. The first physical bytes of every newly written diagnostic record are therefore exactly:
+
+`{"_record_kind":"diagnostic_event",`
+
+The marker is inserted only inside `_append`; `trace_event` creates and captures its in-memory record before `_append`, so capture remains marker-free. Header metadata contains the exact `_record_kind` description requested by the patch.
+
+## RECOVERY_AND_LIFECYCLE_BOUNDARY
+
+- `_recover_unindexed_range_locked` was not changed.
+- Authority recovery ordering and fail-closed behavior were not changed.
+- Runtime trace session open/rotation/pointer behavior was not redesigned.
+- The only lifecycle adjustment is the required removal of the obsolete shared `_active_fd`; open/finish retain active metadata/path/session state and pointer checks.
+- No process lifecycle, Desktop shutdown, LIVE shutdown, or MCP ownership code was touched.
+
+## TEST_REVERSION_EVIDENCE
+
+Reverted exactly:
+
+- The diagnostic `_record_kind == "diagnostic"` assertion.
+- `test_short_diagnostic_append_is_rolled_back`.
+- The marker-stripping comparison in `test_scoped_trace_capture_matches_durable_record`; restored `assert events[0] == durable_record`.
+- `test_short_authority_append_is_rolled_back`.
+
+Focused tests were enumerated only; none were executed.
+
+## CERTIFICATION
+
+AUTHORITY_LOCK_RESTORED=YES
+DEDICATED_TRACE_APPEND_LOCK=YES
+DIAGNOSTIC_LOCK_TIMEOUT_025=YES
+ACTIVE_FD_REMOVED=YES
+DIAGNOSTIC_PREFIX_EXACT=YES
+AUTHORITY_PHYSICAL_APPEND_SELF_LOCKED=YES
+RECOVERY_UNCHANGED=YES
+TEST_FILES_NET_UNCHANGED=YES
+PY_COMPILE=PASS
+IMPLEMENTATION_READY=YES
+
+## ACTUAL_DIFF
+
+The following is the complete current diff for every production/test file changed by this correction. `walkthrough.md` is intentionally excluded.
 
 diff --git a/contextor/core/runtime_trace.py b/contextor/core/runtime_trace.py
-index bde50c7..fb11bc0 100644
+index fb11bc0..5605d7a 100644
 --- a/contextor/core/runtime_trace.py
 +++ b/contextor/core/runtime_trace.py
-@@ -41,6 +41,7 @@ _FALLBACK_SCHEMA = 1
+@@ -29,10 +29,12 @@ _lock = threading.RLock()
+ _active_meta: dict[str, object] | None = None
+ _active_path: Path | None = None
+ _active_sid: str | None = None
+-_active_fd: int | None = None
+ _last_pointer_check = 0.0
+ _counter = 0
+ _AUTHORITY_STATE_NAME = "authority_event_state.json"
++_TRACE_APPEND_LOCK_NAME = ".contextor_runtime_trace.append.lock"
++_DIAGNOSTIC_RECORD_KIND = "diagnostic_event"
++_DIAGNOSTIC_APPEND_LOCK_TIMEOUT = 0.25
+ _AUTHORITY_RECOVERY_WINDOW = 1024 * 1024
+ _AUTHORITY_APPEND_LOCATE_WINDOW = 1024 * 1024
+ _AUTHORITY_PENDING_LIMIT = 10_000
+@@ -41,7 +43,6 @@ _FALLBACK_SCHEMA = 1
  _sidecar_rollovers: set[Path] = set()
  _authority_emitters: dict[tuple[str, str], "AuthorityEventEmitter"] = {}
  _authority_lock = threading.RLock()
-+_trace_file_lock_local = threading.local()
+-_trace_file_lock_local = threading.local()
  _operation_var: contextvars.ContextVar[str | None] = contextvars.ContextVar(
      "contextor_trace_operation", default=None
  )
-@@ -55,6 +56,10 @@ _trace_capture_var: contextvars.ContextVar[
+@@ -56,8 +57,13 @@ _trace_capture_var: contextvars.ContextVar[
  AUTHORITY_EVENT_SCHEMA = "contextor-authority-event/v1"
  
  
-+def _runtime_trace_lock_path(path: Path) -> Path:
-+    return path.parent / f".{_AUTHORITY_STATE_NAME}.lock"
+-def _runtime_trace_lock_path(path: Path) -> Path:
+-    return path.parent / f".{_AUTHORITY_STATE_NAME}.lock"
++def _trace_append_lock_path(trace_path: Path) -> Path:
++    return trace_path.resolve().parent / _TRACE_APPEND_LOCK_NAME
 +
 +
- def _snapshot_stamp() -> str:
-     return datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S_%f")[:-3]
++def _rollback_append(fd: int, offset: int) -> None:
++    os.ftruncate(fd, offset)
++    os.fsync(fd)
  
-@@ -532,6 +537,16 @@ def _authority_envelope(event: AuthorityEvent) -> dict[str, object]:
+ 
+ def _snapshot_stamp() -> str:
+@@ -537,17 +543,10 @@ def _authority_envelope(event: AuthorityEvent) -> dict[str, object]:
      return {"_type": "authority_event", "schema": AUTHORITY_EVENT_SCHEMA, **event.to_dict()}
  
  
-+def _rollback_jsonl_append(fd: int, before: int, record_kind: str) -> None:
-+    try:
-+        os.ftruncate(fd, before)
-+        os.fsync(fd)
-+    except OSError as exc:
-+        raise AuthorityEventRecoveryError(
-+            f"{record_kind} JSONL append rollback failed"
-+        ) from exc
-+
-+
- def _append_authority_record_locked(path: Path, event: AuthorityEvent) -> RecordIndex:
+-def _rollback_jsonl_append(fd: int, before: int, record_kind: str) -> None:
+-    try:
+-        os.ftruncate(fd, before)
+-        os.fsync(fd)
+-    except OSError as exc:
+-        raise AuthorityEventRecoveryError(
+-            f"{record_kind} JSONL append rollback failed"
+-        ) from exc
+-
+-
+-def _append_authority_record_locked(path: Path, event: AuthorityEvent) -> RecordIndex:
++def _append_authority_record_locked(
++    path: Path,
++    event: AuthorityEvent,
++) -> RecordIndex:
      data = (
          json.dumps(
-@@ -551,6 +566,7 @@ def _append_authority_record_locked(path: Path, event: AuthorityEvent) -> Record
+             _authority_envelope(event),
+@@ -557,42 +556,74 @@ def _append_authority_record_locked(path: Path, event: AuthorityEvent) -> Record
+         )
+         + "\n"
+     ).encode("utf-8")
+-    fd = os.open(
+-        str(path),
+-        os.O_WRONLY | os.O_APPEND | os.O_CREAT | getattr(os, "O_BINARY", 0),
+-        0o600,
+-    )
+-    try:
++
++    with _TraceAppendFileLock(_trace_append_lock_path(path)):
++        fd = os.open(
++            str(path),
++            os.O_WRONLY
++            | os.O_APPEND
++            | os.O_CREAT
++            | getattr(os, "O_BINARY", 0),
++            0o600,
++        )
          before = os.fstat(fd).st_size
-         written = os.write(fd, data)
-         if written != len(data):
-+            _rollback_jsonl_append(fd, before, "authority")
-             raise AuthorityEventRecoveryError("short authority JSONL append")
-         os.fsync(fd)
-         end = os.fstat(fd).st_size
-@@ -604,14 +620,24 @@ def _read_authority_record_at(path: Path, offset: int, end_offset: int) -> Autho
+-        written = os.write(fd, data)
+-        if written != len(data):
+-            _rollback_jsonl_append(fd, before, "authority")
+-            raise AuthorityEventRecoveryError("short authority JSONL append")
+-        os.fsync(fd)
+-        end = os.fstat(fd).st_size
+-    finally:
+-        os.close(fd)
+-    if end < before + written:
+-        raise AuthorityEventRecoveryError("authority JSONL append size is inconsistent")
+-    span = end - before
+-    if span > max(_AUTHORITY_APPEND_LOCATE_WINDOW, written):
+-        raise AuthorityEventRecoveryError(
+-            "authority append location exceeds bounded interleaving window"
++        try:
++            try:
++                written = os.write(fd, data)
++                if written != len(data):
++                    raise AuthorityEventRecoveryError(
++                        "short authority JSONL append"
++                    )
++                os.fsync(fd)
++                end = os.fstat(fd).st_size
++                if end != before + len(data):
++                    raise AuthorityEventRecoveryError(
++                        "authority JSONL append size is inconsistent"
++                    )
++            except Exception:
++                try:
++                    _rollback_append(fd, before)
++                except OSError as rollback_exc:
++                    raise AuthorityEventRecoveryError(
++                        "authority JSONL append rollback failed"
++                    ) from rollback_exc
++                raise
++        finally:
++            os.close(fd)
++
++        with path.open("rb") as stream:
++            stream.seek(before)
++            persisted = stream.read(len(data))
++
++        if persisted != data:
++            raise AuthorityEventRecoveryError(
++                "authority JSONL append identity verification failed"
++            )
++
++        start = before
++        record_end = before + len(data)
++        recovered = _read_authority_record_at(
++            path,
++            start,
++            record_end,
+         )
+-    with path.open("rb") as stream:
+-        stream.seek(before)
+-        window = stream.read(span)
+-    relative = window.find(data)
+-    if relative < 0:
+-        raise AuthorityEventRecoveryError("authority JSONL append cannot be located exactly")
+-    if window.find(data, relative + 1) >= 0:
+-        raise AuthorityEventRecoveryError("authority JSONL append identity is ambiguous")
+-    start = before + relative
+-    end = start + written
+-    recovered = _read_authority_record_at(path, start, end)
+-    if recovered.event_id != event.event_id or recovered.sequence != event.sequence or recovered.runtime_domain_id != event.runtime_domain_id:
+-        raise AuthorityEventRecoveryError("authority JSONL append identity verification failed")
+-    return RecordIndex(event.sequence, event.event_id, str(path.resolve()), start, end)
++        if (
++            recovered.event_id != event.event_id
++            or recovered.sequence != event.sequence
++            or recovered.runtime_domain_id
++            != event.runtime_domain_id
++        ):
++            raise AuthorityEventRecoveryError(
++                "authority JSONL append identity verification failed"
++            )
++
++    return RecordIndex(
++        event.sequence,
++        event.event_id,
++        str(path.resolve()),
++        start,
++        record_end,
++    )
+ 
+ 
+ def _read_authority_record_at(path: Path, offset: int, end_offset: int) -> AuthorityEvent:
+@@ -620,24 +651,14 @@ def _read_authority_record_at(path: Path, offset: int, end_offset: int) -> Autho
  
  
  class _AuthorityFileLock(contextlib.AbstractContextManager):
--    """Cross-process lock for the bounded sidecar and its JSONL append order."""
-+    """Cross-process lock for shared JSONL append and authority sidecar order."""
+-    """Cross-process lock for shared JSONL append and authority sidecar order."""
++    """Cross-process lock for the bounded sidecar and its JSONL append order."""
  
      def __init__(self, path: Path, timeout: float = 10.0) -> None:
          self.path = path
          self.timeout = timeout
          self._file = None
-+        self._reentrant = False
-+        self._key = str(path.resolve())
+-        self._reentrant = False
+-        self._key = str(path.resolve())
  
      def __enter__(self):
-+        held = getattr(_trace_file_lock_local, "held", None)
-+        if held is None:
-+            held = {}
-+            _trace_file_lock_local.held = held
-+        if held.get(self._key, 0):
-+            held[self._key] += 1
-+            self._reentrant = True
-+            return self
+-        held = getattr(_trace_file_lock_local, "held", None)
+-        if held is None:
+-            held = {}
+-            _trace_file_lock_local.held = held
+-        if held.get(self._key, 0):
+-            held[self._key] += 1
+-            self._reentrant = True
+-            return self
          self.path.parent.mkdir(parents=True, exist_ok=True)
          self._file = self.path.open("a+b")
          if self.path.stat().st_size == 0:
-@@ -629,6 +655,7 @@ class _AuthorityFileLock(contextlib.AbstractContextManager):
+@@ -655,7 +676,6 @@ class _AuthorityFileLock(contextlib.AbstractContextManager):
                      import fcntl
  
                      fcntl.flock(self._file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-+                held[self._key] = 1
+-                held[self._key] = 1
                  return self
              except (OSError, BlockingIOError):
                  if time.monotonic() >= deadline:
-@@ -638,6 +665,15 @@ class _AuthorityFileLock(contextlib.AbstractContextManager):
+@@ -665,15 +685,6 @@ class _AuthorityFileLock(contextlib.AbstractContextManager):
                  time.sleep(0.01)
  
      def __exit__(self, exc_type, exc, tb):
-+        held = getattr(_trace_file_lock_local, "held", {})
-+        if self._reentrant:
-+            depth = held.get(self._key, 0)
-+            if depth <= 1:
-+                held.pop(self._key, None)
-+            else:
-+                held[self._key] = depth - 1
-+            self._reentrant = False
-+            return False
+-        held = getattr(_trace_file_lock_local, "held", {})
+-        if self._reentrant:
+-            depth = held.get(self._key, 0)
+-            if depth <= 1:
+-                held.pop(self._key, None)
+-            else:
+-                held[self._key] = depth - 1
+-            self._reentrant = False
+-            return False
          if self._file is not None:
              try:
                  self._file.seek(0)
-@@ -653,6 +689,7 @@ class _AuthorityFileLock(contextlib.AbstractContextManager):
+@@ -689,9 +700,71 @@ class _AuthorityFileLock(contextlib.AbstractContextManager):
                  pass
              self._file.close()
              self._file = None
-+            held.pop(self._key, None)
+-            held.pop(self._key, None)
  
++class _TraceAppendFileLock(contextlib.AbstractContextManager):
++    def __init__(self, path: Path, timeout: float = 10.0) -> None:
++        self.path = path
++        self.timeout = timeout
++        self._file = None
  
- 
-@@ -1139,15 +1176,31 @@ def active_trace_path(*, force_refresh: bool = False) -> Path | None:
- def _append(record: dict[str, object], path: Path) -> None:
-     global _active_fd
-     try:
--        payload = json.dumps(record, ensure_ascii=False, separators=(",", ":")) + "\n"
-+        persisted_record = dict(record)
-+        persisted_record["_record_kind"] = "diagnostic"
-+        payload = (
-+            json.dumps(
-+                persisted_record,
-+                ensure_ascii=False,
-+                separators=(",", ":"),
-+            )
-+            + "\n"
-+        )
-         encoded = payload.encode("utf-8")
--        with _lock:
--            if _active_fd is None:
--                flags = os.O_WRONLY | os.O_APPEND | os.O_CREAT
--                if hasattr(os, "O_BINARY"):
--                    flags |= os.O_BINARY
--                _active_fd = os.open(str(path), flags)
--            os.write(_active_fd, encoded)
-+        with _AuthorityFileLock(_runtime_trace_lock_path(path)):
-+            with _lock:
-+                if _active_fd is None:
-+                    flags = os.O_WRONLY | os.O_APPEND | os.O_CREAT
-+                    if hasattr(os, "O_BINARY"):
-+                        flags |= os.O_BINARY
-+                    _active_fd = os.open(str(path), flags)
-+                before = os.fstat(_active_fd).st_size
-+                written = os.write(_active_fd, encoded)
-+                if written != len(encoded):
-+                    _rollback_jsonl_append(_active_fd, before, "diagnostic")
-+                    raise AuthorityEventRecoveryError(
-+                        "short diagnostic JSONL append"
++    def __enter__(self):
++        self.path.parent.mkdir(parents=True, exist_ok=True)
++        self._file = self.path.open("a+b")
++        if self.path.stat().st_size == 0:
++            self._file.write(b"0")
++            self._file.flush()
++        deadline = time.monotonic() + self.timeout
++        while True:
++            try:
++                self._file.seek(0)
++                if os.name == "nt":
++                    import msvcrt
++
++                    msvcrt.locking(
++                        self._file.fileno(),
++                        msvcrt.LK_NBLCK,
++                        1,
 +                    )
++                else:
++                    import fcntl
++
++                    fcntl.flock(
++                        self._file.fileno(),
++                        fcntl.LOCK_EX | fcntl.LOCK_NB,
++                    )
++                return self
++            except (OSError, BlockingIOError):
++                if time.monotonic() >= deadline:
++                    self._file.close()
++                    self._file = None
++                    raise AuthorityEventRecoveryError(
++                        "timed out waiting for runtime trace append lock"
++                    )
++                time.sleep(0.01)
++
++    def __exit__(self, exc_type, exc, tb):
++        if self._file is not None:
++            try:
++                self._file.seek(0)
++                if os.name == "nt":
++                    import msvcrt
++
++                    msvcrt.locking(
++                        self._file.fileno(),
++                        msvcrt.LK_UNLCK,
++                        1,
++                    )
++                else:
++                    import fcntl
++
++                    fcntl.flock(
++                        self._file.fileno(),
++                        fcntl.LOCK_UN,
++                    )
++            except OSError:
++                pass
++            self._file.close()
++            self._file = None
+ 
+ 
+ class AuthorityEventEmitter:
+@@ -1133,7 +1206,7 @@ def _read_pointer() -> tuple[dict[str, object], Path] | None:
+ 
+ 
+ def _refresh_pointer(*, force: bool = False) -> Path | None:
+-    global _active_meta, _active_path, _active_sid, _active_fd, _last_pointer_check
++    global _active_meta, _active_path, _active_sid, _last_pointer_check
+     now = time.monotonic()
+     with _lock:
+         if not force and now - _last_pointer_check < _CHECK_INTERVAL:
+@@ -1141,24 +1214,12 @@ def _refresh_pointer(*, force: bool = False) -> Path | None:
+         _last_pointer_check = now
+         resolved = _read_pointer()
+         if resolved is None:
+-            if _active_fd is not None:
+-                try:
+-                    os.close(_active_fd)
+-                except OSError:
+-                    pass
+-                _active_fd = None
+             _active_meta = None
+             _active_path = None
+             _active_sid = None
+             return None
+         meta, path = resolved
+         if meta != _active_meta or path != _active_path:
+-            if _active_fd is not None:
+-                try:
+-                    os.close(_active_fd)
+-                except OSError:
+-                    pass
+-                _active_fd = None
+             _active_meta = meta
+             _active_path = path
+             _active_sid = str(meta["sid"])
+@@ -1173,34 +1234,69 @@ def active_trace_path(*, force_refresh: bool = False) -> Path | None:
+         return None
+ 
+ 
+-def _append(record: dict[str, object], path: Path) -> None:
+-    global _active_fd
++def _append(
++    record: dict[str, object],
++    path: Path,
++) -> None:
+     try:
+-        persisted_record = dict(record)
+-        persisted_record["_record_kind"] = "diagnostic"
+-        payload = (
++        persisted_record = {
++            "_record_kind": _DIAGNOSTIC_RECORD_KIND,
++            **record,
++        }
++        encoded = (
+             json.dumps(
+                 persisted_record,
+                 ensure_ascii=False,
+                 separators=(",", ":"),
+             )
+             + "\n"
+-        )
+-        encoded = payload.encode("utf-8")
+-        with _AuthorityFileLock(_runtime_trace_lock_path(path)):
+-            with _lock:
+-                if _active_fd is None:
+-                    flags = os.O_WRONLY | os.O_APPEND | os.O_CREAT
+-                    if hasattr(os, "O_BINARY"):
+-                        flags |= os.O_BINARY
+-                    _active_fd = os.open(str(path), flags)
+-                before = os.fstat(_active_fd).st_size
+-                written = os.write(_active_fd, encoded)
+-                if written != len(encoded):
+-                    _rollback_jsonl_append(_active_fd, before, "diagnostic")
+-                    raise AuthorityEventRecoveryError(
+-                        "short diagnostic JSONL append"
+-                    )
++        ).encode("utf-8")
++
++        with _TraceAppendFileLock(
++            _trace_append_lock_path(path),
++            timeout=_DIAGNOSTIC_APPEND_LOCK_TIMEOUT,
++        ):
++            flags = os.O_WRONLY | os.O_APPEND | os.O_CREAT
++            if hasattr(os, "O_BINARY"):
++                flags |= os.O_BINARY
++
++            fd = os.open(str(path), flags)
++            before = os.fstat(fd).st_size
++            try:
++                try:
++                    offset = 0
++                    while offset < len(encoded):
++                        written = os.write(
++                            fd,
++                            encoded[offset:],
++                        )
++                        if written <= 0:
++                            raise OSError(
++                                "runtime trace diagnostic append made no progress"
++                            )
++                        offset += written
++
++                    end = os.fstat(fd).st_size
++                    if end != before + len(encoded):
++                        raise OSError(
++                            "runtime trace diagnostic append size is inconsistent"
++                        )
++
++                    with path.open("rb") as stream:
++                        stream.seek(before)
++                        persisted = stream.read(len(encoded))
++                    if persisted != encoded:
++                        raise OSError(
++                            "runtime trace diagnostic append verification failed"
++                        )
++                except Exception:
++                    try:
++                        _rollback_append(fd, before)
++                    except OSError:
++                        pass
++                    raise
++            finally:
++                os.close(fd)
      except Exception:
          pass
  
+@@ -1215,6 +1311,10 @@ def _header_records(sid: str, started_at: str, desktop_pid: int, file_name: str)
+     ]
+     records[1]["fields"].update(
+         {
++            "_record_kind": (
++                "physical JSONL record kind; "
++                "diagnostic_event for ordinary best-effort diagnostics"
++            ),
+             "owner": "canonical writer owner",
+             "writer_kind": "canonical writer kind",
+             "origin": "LIVE update origin",
+@@ -1285,7 +1385,7 @@ def _header_records(sid: str, started_at: str, desktop_pid: int, file_name: str)
+ 
+ def _open_runtime_trace_session(*, logs_root: str | Path | None = None) -> Path:
+     """Open and publish the sole runtime-trace JSONL session."""
+-    global _active_meta, _active_path, _active_sid, _active_fd, _last_pointer_check
++    global _active_meta, _active_path, _active_sid, _last_pointer_check
+     logs = _resolved_logs_root(logs_root)
+     production_logs = runtime_logs_dir().resolve()
+     logs.mkdir(parents=True, exist_ok=True)
+@@ -1314,7 +1414,6 @@ def _open_runtime_trace_session(*, logs_root: str | Path | None = None) -> Path:
+     if logs == production_logs:
+         with _lock:
+             _active_meta, _active_path, _active_sid = pointer, path.resolve(), sid
+-            _active_fd = None
+             _last_pointer_check = time.monotonic()
+     return path.resolve()
+ 
+@@ -1341,7 +1440,7 @@ def start_desktop_trace_session() -> Path | None:
+ 
+ 
+ def finish_desktop_trace_session() -> None:
+-    global _active_meta, _active_path, _active_sid, _active_fd, _last_pointer_check
++    global _active_meta, _active_path, _active_sid, _last_pointer_check
+     try:
+         sid = _active_sid
+         path = _active_path
+@@ -1358,12 +1457,6 @@ def finish_desktop_trace_session() -> None:
+             except FileNotFoundError:
+                 pass
+         with _lock:
+-            if _active_fd is not None:
+-                try:
+-                    os.close(_active_fd)
+-                except OSError:
+-                    pass
+-                _active_fd = None
+             _active_meta = _active_path = _active_sid = None
+             _last_pointer_check = 0.0
+     except Exception:
 diff --git a/tests/test_runtime_authority_events.py b/tests/test_runtime_authority_events.py
-index 328b3fc..534ef2d 100644
+index 534ef2d..328b3fc 100644
 --- a/tests/test_runtime_authority_events.py
 +++ b/tests/test_runtime_authority_events.py
-@@ -135,6 +135,22 @@ def test_malformed_or_truncated_unindexed_tail_fails_closed(trace_logs):
+@@ -135,22 +135,6 @@ def test_malformed_or_truncated_unindexed_tail_fails_closed(trace_logs):
          trace.AuthorityEventEmitter(runtime_domain_id="domain-a", logs_root=trace_logs)
  
  
-+def test_short_authority_append_is_rolled_back(trace_logs, monkeypatch):
-+    emitter = trace.AuthorityEventEmitter(runtime_domain_id="domain-a", logs_root=trace_logs)
-+    before = emitter.log_path.stat().st_size
-+    real_write = trace.os.write
-+
-+    def short_write(fd, data):
-+        if b'"_type":"authority_event"' in data:
-+            return real_write(fd, data[: len(data) // 2])
-+        return real_write(fd, data)
-+
-+    monkeypatch.setattr(trace.os, "write", short_write)
-+    with pytest.raises(trace.AuthorityEventRecoveryError, match="short authority JSONL append"):
-+        emitter.emit("SHORT_WRITE")
-+    assert emitter.log_path.stat().st_size == before
-+
-+
+-def test_short_authority_append_is_rolled_back(trace_logs, monkeypatch):
+-    emitter = trace.AuthorityEventEmitter(runtime_domain_id="domain-a", logs_root=trace_logs)
+-    before = emitter.log_path.stat().st_size
+-    real_write = trace.os.write
+-
+-    def short_write(fd, data):
+-        if b'"_type":"authority_event"' in data:
+-            return real_write(fd, data[: len(data) // 2])
+-        return real_write(fd, data)
+-
+-    monkeypatch.setattr(trace.os, "write", short_write)
+-    with pytest.raises(trace.AuthorityEventRecoveryError, match="short authority JSONL append"):
+-        emitter.emit("SHORT_WRITE")
+-    assert emitter.log_path.stat().st_size == before
+-
+-
  def test_two_runtime_domains_have_independent_sequences(trace_logs):
      left = trace.AuthorityEventEmitter(runtime_domain_id="domain-left", logs_root=trace_logs)
      right = trace.AuthorityEventEmitter(runtime_domain_id="domain-right", logs_root=trace_logs)
 diff --git a/tests/test_runtime_trace.py b/tests/test_runtime_trace.py
-index 576d1ea..3ee262e 100644
+index 3ee262e..576d1ea 100644
 --- a/tests/test_runtime_trace.py
 +++ b/tests/test_runtime_trace.py
-@@ -46,6 +46,10 @@ def test_desktop_trace_session_headers_and_finish(tmp_path, monkeypatch):
+@@ -46,10 +46,6 @@ def test_desktop_trace_session_headers_and_finish(tmp_path, monkeypatch):
      assert trace.active_trace_path(force_refresh=True) is None
      assert not (tmp_path / "logs" / "contextor_runtime_active.json").exists()
      assert len(records[6]["err"]) == 500
-+    assert all(
-+        item.get("_record_kind") == "diagnostic"
-+        for item in records[5:]
-+    )
+-    assert all(
+-        item.get("_record_kind") == "diagnostic"
+-        for item in records[5:]
+-    )
      fields, events = records[1]["fields"], records[4]["events"]["LIVE"]
      assert {"attempt", "attempts", "attempts_used", "retry_delay", "runtime_domain_id", "repo_id", "endpoint_fingerprint", "service_pid", "lease_generation", "service_instance_id", "reason_code", "exception_class", "errno", "winerror", "error", "pid_alive", "endpoint_changed", "process_alive", "process_identity_matches", "endpoint_available", "endpoint_matches", "reason", "result", "side", "operation_or_request_type", "prior_endpoint_fingerprint", "prior_service_pid", "new_endpoint_fingerprint", "new_service_pid", "recovery_operation_id", "owner", "writer_kind"} <= set(fields)
      assert "ANALYSIS" in records[2]["domains"]
-@@ -265,6 +269,30 @@ def test_multiprocess_append_is_valid_json(tmp_path, monkeypatch):
+@@ -269,30 +265,6 @@ def test_multiprocess_append_is_valid_json(tmp_path, monkeypatch):
          json.loads(line)
  
  
-+def test_short_diagnostic_append_is_rolled_back(tmp_path, monkeypatch):
-+    monkeypatch.setattr(trace, "runtime_logs_dir", lambda: tmp_path / "logs")
-+    _reset_trace_state()
-+    path = trace.start_desktop_trace_session()
-+    before = path.stat().st_size
-+    real_write = trace.os.write
-+
-+    def short_write(fd, data):
-+        if len(data) > 1:
-+            return real_write(fd, data[: len(data) // 2])
-+        return real_write(fd, data)
-+
-+    monkeypatch.setattr(trace.os, "write", short_write)
-+    trace.trace_event("MCP", "SHORT_WRITE", status="ok")
-+    assert path.stat().st_size == before
-+
-+    monkeypatch.setattr(trace.os, "write", real_write)
-+    trace.trace_event("MCP", "AFTER_SHORT_WRITE", status="ok")
-+    trace.finish_desktop_trace_session()
-+    records = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
-+    assert not any(item.get("ev") == "SHORT_WRITE" for item in records)
-+    assert any(item.get("ev") == "AFTER_SHORT_WRITE" for item in records)
-+
-+
+-def test_short_diagnostic_append_is_rolled_back(tmp_path, monkeypatch):
+-    monkeypatch.setattr(trace, "runtime_logs_dir", lambda: tmp_path / "logs")
+-    _reset_trace_state()
+-    path = trace.start_desktop_trace_session()
+-    before = path.stat().st_size
+-    real_write = trace.os.write
+-
+-    def short_write(fd, data):
+-        if len(data) > 1:
+-            return real_write(fd, data[: len(data) // 2])
+-        return real_write(fd, data)
+-
+-    monkeypatch.setattr(trace.os, "write", short_write)
+-    trace.trace_event("MCP", "SHORT_WRITE", status="ok")
+-    assert path.stat().st_size == before
+-
+-    monkeypatch.setattr(trace.os, "write", real_write)
+-    trace.trace_event("MCP", "AFTER_SHORT_WRITE", status="ok")
+-    trace.finish_desktop_trace_session()
+-    records = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+-    assert not any(item.get("ev") == "SHORT_WRITE" for item in records)
+-    assert any(item.get("ev") == "AFTER_SHORT_WRITE" for item in records)
+-
+-
  def test_clean_shutdown_archives_runtime_active_pointer_before_delete(tmp_path, monkeypatch):
      logs = tmp_path / "logs"
      monkeypatch.setattr(trace, "runtime_logs_dir", lambda: logs)
-@@ -332,7 +360,12 @@ def test_scoped_trace_capture_matches_durable_record():
+@@ -360,12 +332,7 @@ def test_scoped_trace_capture_matches_durable_record():
  
      records = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
      durable_record = next(item for item in records if item.get("ev") == "CAPTURE_DURABLE_MATCH")
--    assert events[0] == durable_record
-+    assert "_record_kind" not in events[0]
-+    assert {
-+        key: value
-+        for key, value in durable_record.items()
-+        if key != "_record_kind"
-+    } == events[0]
+-    assert "_record_kind" not in events[0]
+-    assert {
+-        key: value
+-        for key, value in durable_record.items()
+-        if key != "_record_kind"
+-    } == events[0]
++    assert events[0] == durable_record
  
  
  def test_nested_trace_captures_are_scoped():
 
-## ACTUAL_DIFF_END
+## END_ACTUAL_DIFF
 
-## CERTIFICATION
+## MUST_TOUCH
 
-DESKTOP_OWNED_PROCESS_LEAK_CONFIRMED=PARTIAL
-SHUTDOWN_PROCESS_TREE_COMPLETE=NO
-IMPLEMENTATION_READY=NO
+- `contextor/core/runtime_trace.py` exact writer-lock, rollback, discriminator, and active-descriptor correction.
+- Reversion of only the prior CPA10K4A test hunks.
 
-IMPLEMENTATION_READY=NO means the full CPA10K3 task is not complete: recovery consumption of _record_kind and process-leak ownership remain separate stages. The writer-owner stage itself is implemented and its focused tests pass.
+## MUST_NOT_TOUCH
 
-STOP_CONDITION
+- Recovery semantics/design.
+- Desktop/LIVE/MCP process lifecycle.
+- External MCP ownership.
+- LIVE state, runtime output storage, process state, restart state.
+- Git-history archaeology, commit/HEAD operations, pytest, broad tests, or full analysis.
 
-Writer-owner implementation stage complete. Wait for: proceduj
-
-
-
-
+DIFFS=SOURCE_CORRECTION_PLUS_EXACT_TEST_REVERSION
+STATUS=STOP_AND_WAIT_FOR_PROCEDUJ

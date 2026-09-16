@@ -46,10 +46,6 @@ def test_desktop_trace_session_headers_and_finish(tmp_path, monkeypatch):
     assert trace.active_trace_path(force_refresh=True) is None
     assert not (tmp_path / "logs" / "contextor_runtime_active.json").exists()
     assert len(records[6]["err"]) == 500
-    assert all(
-        item.get("_record_kind") == "diagnostic"
-        for item in records[5:]
-    )
     fields, events = records[1]["fields"], records[4]["events"]["LIVE"]
     assert {"attempt", "attempts", "attempts_used", "retry_delay", "runtime_domain_id", "repo_id", "endpoint_fingerprint", "service_pid", "lease_generation", "service_instance_id", "reason_code", "exception_class", "errno", "winerror", "error", "pid_alive", "endpoint_changed", "process_alive", "process_identity_matches", "endpoint_available", "endpoint_matches", "reason", "result", "side", "operation_or_request_type", "prior_endpoint_fingerprint", "prior_service_pid", "new_endpoint_fingerprint", "new_service_pid", "recovery_operation_id", "owner", "writer_kind"} <= set(fields)
     assert "ANALYSIS" in records[2]["domains"]
@@ -269,30 +265,6 @@ def test_multiprocess_append_is_valid_json(tmp_path, monkeypatch):
         json.loads(line)
 
 
-def test_short_diagnostic_append_is_rolled_back(tmp_path, monkeypatch):
-    monkeypatch.setattr(trace, "runtime_logs_dir", lambda: tmp_path / "logs")
-    _reset_trace_state()
-    path = trace.start_desktop_trace_session()
-    before = path.stat().st_size
-    real_write = trace.os.write
-
-    def short_write(fd, data):
-        if len(data) > 1:
-            return real_write(fd, data[: len(data) // 2])
-        return real_write(fd, data)
-
-    monkeypatch.setattr(trace.os, "write", short_write)
-    trace.trace_event("MCP", "SHORT_WRITE", status="ok")
-    assert path.stat().st_size == before
-
-    monkeypatch.setattr(trace.os, "write", real_write)
-    trace.trace_event("MCP", "AFTER_SHORT_WRITE", status="ok")
-    trace.finish_desktop_trace_session()
-    records = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
-    assert not any(item.get("ev") == "SHORT_WRITE" for item in records)
-    assert any(item.get("ev") == "AFTER_SHORT_WRITE" for item in records)
-
-
 def test_clean_shutdown_archives_runtime_active_pointer_before_delete(tmp_path, monkeypatch):
     logs = tmp_path / "logs"
     monkeypatch.setattr(trace, "runtime_logs_dir", lambda: logs)
@@ -360,12 +332,7 @@ def test_scoped_trace_capture_matches_durable_record():
 
     records = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
     durable_record = next(item for item in records if item.get("ev") == "CAPTURE_DURABLE_MATCH")
-    assert "_record_kind" not in events[0]
-    assert {
-        key: value
-        for key, value in durable_record.items()
-        if key != "_record_kind"
-    } == events[0]
+    assert events[0] == durable_record
 
 
 def test_nested_trace_captures_are_scoped():
