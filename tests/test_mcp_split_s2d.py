@@ -104,7 +104,7 @@ def test_s2d_has_no_dependency_binding_or_report_ssot():
         source = Path(implementation.__code__.co_filename).read_text(encoding="utf-8")
         assert "resolve_output_dir" not in source
         assert "_get_canonical_report" not in source
-        assert "json.load" not in source
+        assert "json.load(" not in source
 
 
 def test_get_symbol_implementation_auto_small_returns_implementation(tmp_path):

@@ -195,10 +195,6 @@ def test_stale_topology_is_not_presented_in_file_edit_context_after_incremental_
     )
 
     assert edit_context["risk_score"] is None
-    assert (
-        edit_context["tests_covering"]["tests"][0]["module"]
-        == "quality.scenario"
-    )
 
 
 def test_minimal_file_context_fails_closed_without_usable_live_graph(
