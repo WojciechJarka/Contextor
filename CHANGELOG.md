@@ -1,3 +1,31 @@
+17.09.2025 patch
+
+- Corrected canonical LIVE provenance so query tools now report `provenance=live` when data is served from the active CanonicalLiveServer rather than incorrectly labelling fresh LIVE state as snapshot-backed; runtime certification confirmed fresh canonical/family state and complete anchors.
+
+- Isolated repository profiling into a dedicated profile worker process with stdin/stdout JSON transport, preserving the normal ProcessPool execution path while preventing profiling work from contaminating the MCP server process.
+
+- Extended full-analysis performance tracing and stage attribution across admission, indexing, canonical-state work, lineage materialization, persistence and LIVE publication, eliminating previously unattributed top-level latency and exposing snapshot persistence as a distinct measured stage.
+
+- Reworked warm indexing around a single raw-byte source snapshot with cache validation before AST parsing. Fully valid warm-cache hits now avoid both AST parsing and lineage extraction; runtime certification completed with 398/398 cache hits and zero parse, lineage-extraction or materialization work on consecutive warm Desktop analyses.
+
+- Fixed shared runtime-trace authority recovery so large volumes of ordinary diagnostic records are no longer counted against the authority recovery window. Recovery now measures only actual unindexed `authority_event` bytes while preserving fail-closed validation and bounded streaming recovery.
+
+- Hardened `analyze_project` MCP job persistence and reconciliation: queued acceptance remains strict, post-acceptance persistence is best-effort where appropriate, transient Windows `os.replace` failures are retried, dead workers and foreign owners are reconciled explicitly, and interrupted jobs are persisted deterministically. Runtime certification confirmed queued → running → completed lifecycle and successful LIVE publication.
+
+- Expanded `get_project_architecture` into a lossless field-selectable architecture bundle with explicit preflight sizing, large-output opt-in, six independently selectable report sections and separate completed-report versus LIVE freshness provenance, avoiding hidden top-N truncation.
+
+- Serialized shared runtime-trace appends across Desktop, LIVE and MCP processes, removed the persistent diagnostic trace file descriptor, added fresh per-append descriptors, complete-write handling and rollback on failed diagnostic writes, and introduced explicit framed diagnostic records.
+
+- Hardened runtime-trace recovery so only an unterminated final framed diagnostic tail may be repaired automatically; malformed authority records, complete malformed records and legacy unframed corruption remain fail-closed.
+
+- Added managed Desktop ProcessPool ownership and bounded shutdown: active repository-analysis pools are cooperatively cancelled first and then terminated/killed if necessary, preventing analysis workers from surviving Desktop exit.
+
+- Added MCP-owned child-process registration, bounded analysis shutdown and orphan cleanup, and hardened the separate profile-worker lifecycle including registration-failure cleanup and bounded post-kill waits.
+
+- Runtime-certified Desktop process lifecycle with real ProcessPool workers: Desktop shutdown removed the GUI process, LIVE runtime and Desktop-owned analysis workers while preserving pre-existing external MCP server processes.
+
+- Isolated the large Python-process accumulation from the Desktop lifecycle. Repeated `contextor.mcp_server` trees were observed under the Codex app-server and disappeared completely when Codex was closed; the exact trigger for repeated Codex-hosted MCP tree creation remains a separate follow-up.
+
 2026-09-14 Patch
 Added canonical universal lineage as a first-class repository-analysis family, covering symbol ownership, semantic anchors, call/data-flow relationships, exposed surfaces and callable interface descriptors without relying on query-time source rescans.
 Added deterministic full-analysis lineage materialization from extracted source facts and finalized persistent module/artifact identities, with explicit fresh, deferred and resource-limited family states.

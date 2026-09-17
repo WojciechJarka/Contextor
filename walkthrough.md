@@ -1,298 +1,264 @@
-# TASK=CPA10K5B2_PROFILE_WORKER_FINAL_LIFECYCLE_CORRECTIONS
+# CPA10K5R2_FINAL_TERMINAL_EVIDENCE_ONLY
 
-## IMPLEMENTATION_RESULT
+## Scope and restrictions
 
-PASS
+This report contains only the terminal evidence for the already completed forced-close run and the requested natural shutdown of the measurement monitor/notifier. No analysis was started, no Desktop or MCP restart was performed, and no Contextor process was terminated with `taskkill` or `Stop-Process`.
 
-## FILES_CHANGED
+SOURCE_TEST_FILES_CHANGED=NO
+ANALYSIS_START=FORBIDDEN_AND_NOT_PERFORMED
+DESKTOP_RESTART=NO
+MCP_RESTART=NO
+REPORT_SCOPE=current-task-only
 
-- contextor/mcp/tools/contextor_profile_analysis.py
-- tests/test_mcp_profile_worker_lifecycle.py
-- walkthrough.md (report only; excluded from source/test diff accounting)
+Evidence paths:
 
-OTHER_PRODUCTION_FILES_CHANGED=NONE
-EXISTING_K5B2_CONTRACT_UNCHANGED=YES
+```text
+RAW_LOG=C:\Users\DafoO\AppData\Local\Temp\contextor_k5r2_final\monitor\process_events.jsonl
+WORKER_SIGNAL=C:\Users\DafoO\AppData\Local\Temp\contextor_k5r2_final\worker\worker_signal.json
+EXTERNAL_BASELINE=C:\Users\DafoO\AppData\Local\Temp\contextor_k5r2_final\external_mcp_before_close.json
+DESKTOP_PID=11172
+WORKER_PID=6168
+MONITOR_PID=9452
+NOTIFIER_PID=16164
+```
 
-## REGISTRATION_FAILURE_CLEANUP
+## Phase 1 — raw process-event ordering
 
-REGISTRATION_FAILURE_CANNOT_LEAK_PROFILE_WORKER=YES
+The raw log was read without modification. The complete literal events for PID 11172 were:
 
-_register_process is now inside the existing try/except BaseException boundary. If durable register_process raises after subprocess creation, record_path remains None, _terminate_profile_subprocess uses the direct process.terminate fallback, bounded cleanup runs, the original OSError is re-raised, and finally calls remove_record(None).
+```text
+{"Event":"STOP","ObservedAtUtc":"2026-09-16T19:18:06.399547Z","ProcessId":11172,"ParentProcessId":6188,"ProcessName":"python.exe","CreationDateUtc":null,"ExecutablePath":null,"CommandLine":null}
+```
 
-## POST_KILL_WAIT_BOUND
+The complete literal events for PID 6168 were:
 
-FIRST_WAIT_BOUNDED=YES
-POST_KILL_WAIT_BOUNDED=YES
+```text
+{"Event":"START","ObservedAtUtc":"2026-09-16T19:16:01.048317Z","ProcessId":6168,"ParentProcessId":4752,"ProcessName":"conhost.exe","CreationDateUtc":"2026-09-16T19:16:01.017816Z","ExecutablePath":"C:\\Windows\\System32\\conhost.exe","CommandLine":"\\??\\C:\\WINDOWS\\system32\\conhost.exe 0x4"}
+{"Event":"STOP","ObservedAtUtc":"2026-09-16T19:16:01.889960Z","ProcessId":6168,"ParentProcessId":4752,"ProcessName":"conhost.exe","CreationDateUtc":"2026-09-16T19:16:01.017816Z","ExecutablePath":"C:\\Windows\\System32\\conhost.exe","CommandLine":"\\??\\C:\\WINDOWS\\system32\\conhost.exe 0x4"}
+{"Event":"START","ObservedAtUtc":"2026-09-16T19:17:39.250942Z","ProcessId":6168,"ParentProcessId":11172,"ProcessName":"python.exe","CreationDateUtc":"2026-09-16T19:17:39.196474Z","ExecutablePath":"C:\\SpiralProphet\\python\\WPy64-31090\\python-3.10.9.amd64\\python.exe","CommandLine":"\"C:\\Temp\\Contextor_Repo\\.venv\\Scripts\\python.exe\" \"-c\" \"from multiprocessing.spawn import spawn_main; spawn_main(parent_pid=11172, pipe_handle=1644)\" \"--multiprocessing-fork\""}
+{"Event":"STOP","ObservedAtUtc":"2026-09-16T19:17:42.490941Z","ProcessId":6168,"ParentProcessId":11172,"ProcessName":"python.exe","CreationDateUtc":"2026-09-16T19:17:39.196474Z","ExecutablePath":"C:\\SpiralProphet\\python\\WPy64-31090\\python-3.10.9.amd64\\python.exe","CommandLine":"\"C:\\Temp\\Contextor_Repo\\.venv\\Scripts\\python.exe\" \"-c\" \"from multiprocessing.spawn import spawn_main; spawn_main(parent_pid=11172, pipe_handle=1644)\" \"--multiprocessing-fork\""}
+```
 
-_wait_profile_process normalizes timeout once as bounded_timeout. Both process.wait calls use asyncio.wait_for with that same bounded timeout. After kill, the second wait is bounded and catches asyncio.TimeoutError and ProcessLookupError without an unbounded await.
+The relevant worker START is an exact raw match for `worker_signal.json`:
 
-## CERTIFICATION
+```json
+{
+  "Event": "START",
+  "ObservedAtUtc": "2026-09-16T19:17:39.250942Z",
+  "ProcessId": 6168,
+  "ParentProcessId": 11172,
+  "ProcessName": "python.exe",
+  "CreationDateUtc": "2026-09-16T19:17:39.196474Z",
+  "ExecutablePath": "C:\\SpiralProphet\\python\\WPy64-31090\\python-3.10.9.amd64\\python.exe",
+  "CommandLine": "\"C:\\Temp\\Contextor_Repo\\.venv\\Scripts\\python.exe\" \"-c\" \"from multiprocessing.spawn import spawn_main; spawn_main(parent_pid=11172, pipe_handle=1644)\" \"--multiprocessing-fork\""
+}
+```
 
-EXISTING_CANCELLATION_TREE_CLEANUP_UNCHANGED=YES
-OTHER_PRODUCTION_FILES_UNCHANGED=YES
-PY_COMPILE=PASS
-FOCUSED_TESTS=PASS
+Literal worker signal artifact:
 
-## EXACT_ANCHORS_VERIFIED
+```json
+{
+  "Event": "START",
+  "ObservedAtUtc": "2026-09-16T19:17:39.250942Z",
+  "ProcessId": 6168,
+  "ParentProcessId": 11172,
+  "ProcessName": "python.exe",
+  "CreationDateUtc": "2026-09-16T19:17:39.196474Z",
+  "ExecutablePath": "C:\\SpiralProphet\\python\\WPy64-31090\\python-3.10.9.amd64\\python.exe",
+  "CommandLine": "\"C:\\Temp\\Contextor_Repo\\.venv\\Scripts\\python.exe\" \"-c\" \"from multiprocessing.spawn import spawn_main; spawn_main(parent_pid=11172, pipe_handle=1644)\" \"--multiprocessing-fork\"",
+  "SignalAtUtc": "2026-09-16T19:17:39.266942Z"
+}
+```
 
-Contextor read-only source-range verification returned status=ok for all requested current functions:
+The raw worker STOP is present:
 
-- _wait_profile_process: lines 17-59
-- _terminate_profile_subprocess: lines 60-86
-- _run_profile_subprocess: lines 87-174
-- contextor_profile_analysis: lines 175-193
-- source_total_lines=198
+```text
+{"Event":"STOP","ObservedAtUtc":"2026-09-16T19:17:42.490941Z","ProcessId":6168,"ParentProcessId":11172,"ProcessName":"python.exe","CreationDateUtc":"2026-09-16T19:17:39.196474Z","ExecutablePath":"C:\\SpiralProphet\\python\\WPy64-31090\\python-3.10.9.amd64\\python.exe","CommandLine":"\"C:\\Temp\\Contextor_Repo\\.venv\\Scripts\\python.exe\" \"-c\" \"from multiprocessing.spawn import spawn_main; spawn_main(parent_pid=11172, pipe_handle=1644)\" \"--multiprocessing-fork\""}
+```
 
-The verified source confirms:
+Ordering:
 
-- registration failure is inside the BaseException cleanup boundary;
-- both process.wait calls are bounded by asyncio.wait_for;
-- _terminate_profile_subprocess is unchanged;
-- contextor_profile_analysis is unchanged;
-- no other production file was modified.
+```text
+WORKER_START_UTC=2026-09-16T19:17:39.250942Z
+WORKER_STOP_UTC=2026-09-16T19:17:42.490941Z
+DESKTOP_STOP_UTC=2026-09-16T19:18:06.399547Z
+WORKER_STARTED_BEFORE_DESKTOP_STOP=YES
+WORKER_STILL_ACTIVE_AT_DESKTOP_STOP=NO
+```
 
-## EXISTING_K5B2_CONTRACT
+The worker STOP precedes the Desktop STOP by approximately 23.9 seconds. Therefore the required active-worker-at-close predicate is not satisfied.
 
-The existing tree-termination contract remains unchanged. Registered cancellation and exception paths still call _terminate_profile_subprocess, which uses terminate_registered_record through asyncio.shield and asyncio.to_thread, then falls back to process.terminate and bounded wait/kill handling. Only the requested registration-boundary and post-kill wait corrections were applied.
+FORCED_ACTIVE_WORKER_AT_CLOSE_GATE=BLOCKED
 
-## TESTS
+## Phase 2 — fresh post-close process evidence
 
-VALIDATION_1:
-& .\.venv\Scripts\python.exe -m py_compile contextor/mcp/tools/contextor_profile_analysis.py
+Fresh `Get-CimInstance Win32_Process` evidence after the close and before measurement shutdown:
 
-RESULT_1:
-PASS, exit_code=0
+```text
+PID 11172 = MISSING
+PID 6168  = MISSING
+Processes with ParentProcessId 11172 = NONE
+Python/pythonw processes with contextor.core.live_state.runtime = NONE
+```
 
-VALIDATION_2:
-& .\.venv\Scripts\python.exe -m pytest tests/test_mcp_profile_worker_lifecycle.py -q
+The measurement processes were still alive before Phase 5:
 
-RESULT_2:
-PASS
-.......                                                                  [100%]
-7 passed in 0.33s
+```text
+PID 9452:
+  ParentProcessId=7652
+  CreationDate=2026-09-16T20:48:44.30434+02:00
+  Name=python.exe
+  ExecutablePath=C:\SpiralProphet\python\WPy64-31090\python-3.10.9.amd64\python.exe
+  CommandLine="C:\SpiralProphet\python\WPy64-31090\python-3.10.9.amd64\python.exe" C:\Users\DafoO\AppData\Local\Temp\contextor_k5r2_final\monitor\monitor.py C:\Users\DafoO\AppData\Local\Temp\contextor_k5r2_final\monitor 11172 2026-09-16T18:44:44.5522730Z
 
-No other tests were run.
+PID 16164:
+  ParentProcessId=13832
+  CreationDate=2026-09-16T21:04:34.883068+02:00
+  Name=python.exe
+  ExecutablePath=C:\SpiralProphet\python\WPy64-31090\python-3.10.9.amd64\python.exe
+  CommandLine="C:\SpiralProphet\python\WPy64-31090\python-3.10.9.amd64\python.exe" C:\Users\DafoO\AppData\Local\Temp\contextor_k5r2_final\notifier.py
+```
 
-## EVIDENCE
+DESKTOP_GUI_AFTER_CLOSE=DEAD
+CAPTURED_FORCED_WORKER_AFTER_CLOSE=DEAD
+DESKTOP_LIVE_SERVICE_AFTER_CLOSE=DEAD
+LATE_DESKTOP_CHILD_AFTER_CLOSE=NONE
 
-### DIRECT_EVIDENCE
+## Phase 3 — strict external MCP identity comparison
 
-- The two requested production functions were replaced literally.
-- The two requested tests were appended literally.
-- py_compile exited with code 0.
-- The focused lifecycle test command passed all 7 tests.
-- Contextor returned status=ok for all four requested source ranges.
-- git status after implementation listed only contextor/mcp/tools/contextor_profile_analysis.py, tests/test_mcp_profile_worker_lifecycle.py, and walkthrough.md.
+The baseline was read from:
 
-### CODE_PATH_PROVED
+```text
+C:\Users\DafoO\AppData\Local\Temp\contextor_k5r2_final\external_mcp_before_close.json
+```
 
-- _run_profile_subprocess creates the subprocess before entering try, then performs registry lookup, registration, request construction, and communicate inside the BaseException cleanup boundary.
-- Registration failure reaches the existing fallback cleanup owner with record_path=None.
-- _wait_profile_process has bounded waits both before and after process.kill.
-- _terminate_profile_subprocess and contextor_profile_analysis were not changed by this task.
+Literal baseline metadata:
 
-### CONTRACT_PROVED
+```text
+CapturedAtUtc=2026-09-16T18:47:53.6554776Z
+RepoPath=C:\Temp\Contextor_Repo
+SelectionRule=literal CommandLine containing -m contextor.mcp_server
+ProcessCount=32
+Identity=(PID + CreationDateUtc + ExecutablePath + CommandLine)
+```
 
-- Allowed source/test scope contains exactly the two requested files.
-- No profile_worker.py, profile_runner.py, mcp_server.py, mcp_process_registry.py, analysis_jobs.py, process_pool_lifecycle.py, Desktop, LIVE, or runtime_trace file was changed.
-- No implementation redesign or post-failure fix was performed.
+The following are the 32 baseline identities. Every row matched the current process table on the full identity tuple, not only on PID:
 
-### INFERENCE
+```text
+PID=4700   CreationDateUtc=2026-09-16T16:16:21.4332300Z  ExecutablePath=C:\Temp\Contextor_Repo\.venv\Scripts\python.exe                         CommandLine="C:\Temp\Contextor_Repo\.venv\Scripts\python.exe" -u -X utf8 -m contextor.mcp_server                         SAME_IDENTITY_ALIVE=YES
+PID=10116  CreationDateUtc=2026-09-16T16:16:21.4617890Z  ExecutablePath=C:\SpiralProphet\python\WPy64-31090\python-3.10.9.amd64\python.exe  CommandLine="C:\SpiralProphet\python\WPy64-31090\python-3.10.9.amd64\python.exe" -u -X utf8 -m contextor.mcp_server  SAME_IDENTITY_ALIVE=YES
+PID=12208  CreationDateUtc=2026-09-16T16:16:23.4011190Z  ExecutablePath=C:\Temp\Contextor_Repo\.venv\Scripts\python.exe                         CommandLine="C:\Temp\Contextor_Repo\.venv\Scripts\python.exe" -u -X utf8 -m contextor.mcp_server                         SAME_IDENTITY_ALIVE=YES
+PID=11316  CreationDateUtc=2026-09-16T16:16:23.4218230Z  ExecutablePath=C:\SpiralProphet\python\WPy64-31090\python-3.10.9.amd64\python.exe  CommandLine="C:\SpiralProphet\python\WPy64-31090\python-3.10.9.amd64\python.exe" -u -X utf8 -m contextor.mcp_server  SAME_IDENTITY_ALIVE=YES
+PID=13724  CreationDateUtc=2026-09-16T16:36:52.0120730Z  ExecutablePath=C:\Temp\Contextor_Repo\.venv\Scripts\python.exe                         CommandLine="C:\Temp\Contextor_Repo\.venv\Scripts\python.exe" -u -X utf8 -m contextor.mcp_server                         SAME_IDENTITY_ALIVE=YES
+PID=10452  CreationDateUtc=2026-09-16T16:36:52.0258140Z  ExecutablePath=C:\SpiralProphet\python\WPy64-31090\python-3.10.9.amd64\python.exe  CommandLine="C:\SpiralProphet\python\WPy64-31090\python-3.10.9.amd64\python.exe" -u -X utf8 -m contextor.mcp_server  SAME_IDENTITY_ALIVE=YES
+PID=3496   CreationDateUtc=2026-09-16T16:52:44.0803100Z  ExecutablePath=C:\Temp\Contextor_Repo\.venv\Scripts\python.exe                         CommandLine="C:\Temp\Contextor_Repo\.venv\Scripts\python.exe" -u -X utf8 -m contextor.mcp_server                         SAME_IDENTITY_ALIVE=YES
+PID=436    CreationDateUtc=2026-09-16T16:52:44.1306960Z  ExecutablePath=C:\SpiralProphet\python\WPy64-31090\python-3.10.9.amd64\python.exe  CommandLine="C:\SpiralProphet\python\WPy64-31090\python-3.10.9.amd64\python.exe" -u -X utf8 -m contextor.mcp_server  SAME_IDENTITY_ALIVE=YES
+PID=15460  CreationDateUtc=2026-09-16T17:02:57.0447170Z  ExecutablePath=C:\Temp\Contextor_Repo\.venv\Scripts\python.exe                         CommandLine="C:\Temp\Contextor_Repo\.venv\Scripts\python.exe" -u -X utf8 -m contextor.mcp_server                         SAME_IDENTITY_ALIVE=YES
+PID=2324   CreationDateUtc=2026-09-16T17:02:57.1866890Z  ExecutablePath=C:\SpiralProphet\python\WPy64-31090\python-3.10.9.amd64\python.exe  CommandLine="C:\SpiralProphet\python\WPy64-31090\python-3.10.9.amd64\python.exe" -u -X utf8 -m contextor.mcp_server  SAME_IDENTITY_ALIVE=YES
+PID=12912  CreationDateUtc=2026-09-16T17:08:14.3435260Z  ExecutablePath=C:\Temp\Contextor_Repo\.venv\Scripts\python.exe                         CommandLine="C:\Temp\Contextor_Repo\.venv\Scripts\python.exe" -u -X utf8 -m contextor.mcp_server                         SAME_IDENTITY_ALIVE=YES
+PID=14756  CreationDateUtc=2026-09-16T17:08:14.5012450Z  ExecutablePath=C:\SpiralProphet\python\WPy64-31090\python-3.10.9.amd64\python.exe  CommandLine="C:\SpiralProphet\python\WPy64-31090\python-3.10.9.amd64\python.exe" -u -X utf8 -m contextor.mcp_server  SAME_IDENTITY_ALIVE=YES
+PID=8412   CreationDateUtc=2026-09-16T17:17:34.0658720Z  ExecutablePath=C:\Temp\Contextor_Repo\.venv\Scripts\python.exe                         CommandLine="C:\Temp\Contextor_Repo\.venv\Scripts\python.exe" -u -X utf8 -m contextor.mcp_server                         SAME_IDENTITY_ALIVE=YES
+PID=8068   CreationDateUtc=2026-09-16T17:17:34.0950930Z  ExecutablePath=C:\SpiralProphet\python\WPy64-31090\python-3.10.9.amd64\python.exe  CommandLine="C:\SpiralProphet\python\WPy64-31090\python-3.10.9.amd64\python.exe" -u -X utf8 -m contextor.mcp_server  SAME_IDENTITY_ALIVE=YES
+PID=13224  CreationDateUtc=2026-09-16T17:25:52.3364090Z  ExecutablePath=C:\Temp\Contextor_Repo\.venv\Scripts\python.exe                         CommandLine="C:\Temp\Contextor_Repo\.venv\Scripts\python.exe" -u -X utf8 -m contextor.mcp_server                         SAME_IDENTITY_ALIVE=YES
+PID=5864   CreationDateUtc=2026-09-16T17:25:52.3530190Z  ExecutablePath=C:\SpiralProphet\python\WPy64-31090\python-3.10.9.amd64\python.exe  CommandLine="C:\SpiralProphet\python\WPy64-31090\python-3.10.9.amd64\python.exe" -u -X utf8 -m contextor.mcp_server  SAME_IDENTITY_ALIVE=YES
+PID=7444   CreationDateUtc=2026-09-16T17:32:32.9885890Z  ExecutablePath=C:\Temp\Contextor_Repo\.venv\Scripts\python.exe                         CommandLine="C:\Temp\Contextor_Repo\.venv\Scripts\python.exe" -u -X utf8 -m contextor.mcp_server                         SAME_IDENTITY_ALIVE=YES
+PID=6724   CreationDateUtc=2026-09-16T17:32:33.0049640Z  ExecutablePath=C:\SpiralProphet\python\WPy64-31090\python-3.10.9.amd64\python.exe  CommandLine="C:\SpiralProphet\python\WPy64-31090\python-3.10.9.amd64\python.exe" -u -X utf8 -m contextor.mcp_server  SAME_IDENTITY_ALIVE=YES
+PID=4848   CreationDateUtc=2026-09-16T17:38:40.9889050Z  ExecutablePath=C:\Temp\Contextor_Repo\.venv\Scripts\python.exe                         CommandLine="C:\Temp\Contextor_Repo\.venv\Scripts\python.exe" -u -X utf8 -m contextor.mcp_server                         SAME_IDENTITY_ALIVE=YES
+PID=12776  CreationDateUtc=2026-09-16T17:38:41.0300920Z  ExecutablePath=C:\SpiralProphet\python\WPy64-31090\python-3.10.9.amd64\python.exe  CommandLine="C:\SpiralProphet\python\WPy64-31090\python-3.10.9.amd64\python.exe" -u -X utf8 -m contextor.mcp_server  SAME_IDENTITY_ALIVE=YES
+PID=1540   CreationDateUtc=2026-09-16T17:51:22.2656010Z  ExecutablePath=C:\Temp\Contextor_Repo\.venv\Scripts\python.exe                         CommandLine="C:\Temp\Contextor_Repo\.venv\Scripts\python.exe" -u -X utf8 -m contextor.mcp_server                         SAME_IDENTITY_ALIVE=YES
+PID=9640   CreationDateUtc=2026-09-16T17:51:22.2874210Z  ExecutablePath=C:\SpiralProphet\python\WPy64-31090\python-3.10.9.amd64\python.exe  CommandLine="C:\SpiralProphet\python\WPy64-31090\python-3.10.9.amd64\python.exe" -u -X utf8 -m contextor.mcp_server  SAME_IDENTITY_ALIVE=YES
+PID=7580   CreationDateUtc=2026-09-16T18:04:43.4954730Z  ExecutablePath=C:\Temp\Contextor_Repo\.venv\Scripts\python.exe                         CommandLine="C:\Temp\Contextor_Repo\.venv\Scripts\python.exe" -u -X utf8 -m contextor.mcp_server                         SAME_IDENTITY_ALIVE=YES
+PID=11216  CreationDateUtc=2026-09-16T18:04:43.5576670Z  ExecutablePath=C:\SpiralProphet\python\WPy64-31090\python-3.10.9.amd64\python.exe  CommandLine="C:\SpiralProphet\python\WPy64-31090\python-3.10.9.amd64\python.exe" -u -X utf8 -m contextor.mcp_server  SAME_IDENTITY_ALIVE=YES
+PID=3800   CreationDateUtc=2026-09-16T18:12:56.7122130Z  ExecutablePath=C:\Temp\Contextor_Repo\.venv\Scripts\python.exe                         CommandLine="C:\Temp\Contextor_Repo\.venv\Scripts\python.exe" -u -X utf8 -m contextor.mcp_server                         SAME_IDENTITY_ALIVE=YES
+PID=11292  CreationDateUtc=2026-09-16T18:12:56.7590390Z  ExecutablePath=C:\SpiralProphet\python\WPy64-31090\python-3.10.9.amd64\python.exe  CommandLine="C:\SpiralProphet\python\WPy64-31090\python-3.10.9.amd64\python.exe" -u -X utf8 -m contextor.mcp_server  SAME_IDENTITY_ALIVE=YES
+PID=15312  CreationDateUtc=2026-09-16T18:25:46.0373900Z  ExecutablePath=C:\Temp\Contextor_Repo\.venv\Scripts\python.exe                         CommandLine="C:\Temp\Contextor_Repo\.venv\Scripts\python.exe" -u -X utf8 -m contextor.mcp_server                         SAME_IDENTITY_ALIVE=YES
+PID=13244  CreationDateUtc=2026-09-16T18:25:46.3193610Z  ExecutablePath=C:\SpiralProphet\python\WPy64-31090\python-3.10.9.amd64\python.exe  CommandLine="C:\SpiralProphet\python\WPy64-31090\python-3.10.9.amd64\python.exe" -u -X utf8 -m contextor.mcp_server  SAME_IDENTITY_ALIVE=YES
+PID=14340  CreationDateUtc=2026-09-16T18:35:54.9695310Z  ExecutablePath=C:\Temp\Contextor_Repo\.venv\Scripts\python.exe                         CommandLine="C:\Temp\Contextor_Repo\.venv\Scripts\python.exe" -u -X utf8 -m contextor.mcp_server                         SAME_IDENTITY_ALIVE=YES
+PID=4804   CreationDateUtc=2026-09-16T18:35:55.2297420Z  ExecutablePath=C:\SpiralProphet\python\WPy64-31090\python-3.10.9.amd64\python.exe  CommandLine="C:\SpiralProphet\python\WPy64-31090\python-3.10.9.amd64\python.exe" -u -X utf8 -m contextor.mcp_server  SAME_IDENTITY_ALIVE=YES
+PID=9548   CreationDateUtc=2026-09-16T18:42:58.0168550Z  ExecutablePath=C:\Temp\Contextor_Repo\.venv\Scripts\python.exe                         CommandLine="C:\Temp\Contextor_Repo\.venv\Scripts\python.exe" -u -X utf8 -m contextor.mcp_server                         SAME_IDENTITY_ALIVE=YES
+PID=6660   CreationDateUtc=2026-09-16T18:42:58.1235000Z  ExecutablePath=C:\SpiralProphet\python\WPy64-31090\python-3.10.9.amd64\python.exe  CommandLine="C:\SpiralProphet\python\WPy64-31090\python-3.10.9.amd64\python.exe" -u -X utf8 -m contextor.mcp_server  SAME_IDENTITY_ALIVE=YES
+```
 
-- The registration-failure test proves the direct fallback invocation in the isolated fake-process path. Full OS process-tree behavior remains governed by the unchanged registry implementation and was not runtime-certified in this task.
+MATCH_COUNT=32
+BASELINE_COUNT=32
+PREEXISTING_EXTERNAL_MCP_UNTOUCHED=YES
 
-### UNKNOWN
+## Phase 4 — unaccounted Contextor-related Python processes
 
-- Runtime/Desktop certification was not requested and was not performed.
-- No claim is made about live process-tree execution beyond the focused unit-contract evidence.
+Selection for this count was Python/pythonw processes whose command line contained `contextor`, `main.py --gui`, or multiprocessing worker markers. Exclusions were limited to the 32 exact baseline MCP identities, exact measurement monitor PID 9452, and exact notifier PID 16164.
 
-## COMPLETE_DIFFS
+The nonzero survivors were:
 
-The following is the complete current git diff for every source/test file changed by this task. walkthrough.md is excluded.
+```text
+ProcessId=14532 ParentProcessId=9108 CreationDate=2026-09-16T19:54:36+02:00 Name=python.exe ExecutablePath=C:\SpiralProphet\python\WPy64-31090\python-3.10.9.amd64\python.exe CommandLine="C:\SpiralProphet\python\WPy64-31090\python-3.10.9.amd64\python.exe" C:\Users\DafoO\AppData\Local\Temp\contextor_k5r1_forced_procmon\monitor.py C:\Users\DafoO\AppData\Local\Temp\contextor_k5r1_forced_procmon 8368 2026-09-16T16:14:33.4723590Z
+ProcessId=5596 ParentProcessId=9664 CreationDate=2026-09-16T20:57:41+02:00 Name=python.exe ExecutablePath=C:\Temp\Contextor_Repo\.venv\Scripts\python.exe CommandLine="C:\Temp\Contextor_Repo\.venv\Scripts\python.exe" -u -X utf8 -m contextor.mcp_server
+ProcessId=11428 ParentProcessId=5596 CreationDate=2026-09-16T20:57:41+02:00 Name=python.exe ExecutablePath=C:\SpiralProphet\python\WPy64-31090\python-3.10.9.amd64\python.exe CommandLine="C:\SpiralProphet\python\WPy64-31090\python-3.10.9.amd64\python.exe" -u -X utf8 -m contextor.mcp_server
+ProcessId=6072 ParentProcessId=9664 CreationDate=2026-09-16T21:07:29+02:00 Name=python.exe ExecutablePath=C:\Temp\Contextor_Repo\.venv\Scripts\python.exe CommandLine="C:\Temp\Contextor_Repo\.venv\Scripts\python.exe" -u -X utf8 -m contextor.mcp_server
+ProcessId=7816 ParentProcessId=6072 CreationDate=2026-09-16T21:07:29+02:00 Name=python.exe ExecutablePath=C:\SpiralProphet\python\WPy64-31090\python-3.10.9.amd64\python.exe CommandLine="C:\SpiralProphet\python\WPy64-31090\python-3.10.9.amd64\python.exe" -u -X utf8 -m contextor.mcp_server
+ProcessId=12632 ParentProcessId=9664 CreationDate=2026-09-16T21:08:07+02:00 Name=python.exe ExecutablePath=C:\Temp\Contextor_Repo\.venv\Scripts\python.exe CommandLine="C:\Temp\Contextor_Repo\.venv\Scripts\python.exe" -u -X utf8 -m contextor.mcp_server
+ProcessId=11180 ParentProcessId=12632 CreationDate=2026-09-16T21:08:08+02:00 Name=python.exe ExecutablePath=C:\SpiralProphet\python\WPy64-31090\python-3.10.9.amd64\python.exe CommandLine="C:\SpiralProphet\python\WPy64-31090\python-3.10.9.amd64\python.exe" -u -X utf8 -m contextor.mcp_server
+ProcessId=12204 ParentProcessId=9664 CreationDate=2026-09-16T21:08:32+02:00 Name=python.exe ExecutablePath=C:\Temp\Contextor_Repo\.venv\Scripts\python.exe CommandLine="C:\Temp\Contextor_Repo\.venv\Scripts\python.exe" -u -X utf8 -m contextor.mcp_server
+ProcessId=7672 ParentProcessId=12204 CreationDate=2026-09-16T21:08:32+02:00 Name=python.exe ExecutablePath=C:\SpiralProphet\python\WPy64-31090\python-3.10.9.amd64\python.exe CommandLine="C:\SpiralProphet\python\WPy64-31090\python-3.10.9.amd64\python.exe" -u -X utf8 -m contextor.mcp_server
+ProcessId=8832 ParentProcessId=9664 CreationDate=2026-09-16T21:13:43+02:00 Name=python.exe ExecutablePath=C:\Temp\Contextor_Repo\.venv\Scripts\python.exe CommandLine="C:\Temp\Contextor_Repo\.venv\Scripts\python.exe" -u -X utf8 -m contextor.mcp_server
+ProcessId=8328 ParentProcessId=8832 CreationDate=2026-09-16T21:13:43+02:00 Name=python.exe ExecutablePath=C:\SpiralProphet\python\WPy64-31090\python-3.10.9.amd64\python.exe CommandLine="C:\SpiralProphet\python\WPy64-31090\python-3.10.9.amd64\python.exe" -u -X utf8 -m contextor.mcp_server
+ProcessId=9896 ParentProcessId=9664 CreationDate=2026-09-16T21:20:35+02:00 Name=python.exe ExecutablePath=C:\Temp\Contextor_Repo\.venv\Scripts\python.exe CommandLine="C:\Temp\Contextor_Repo\.venv\Scripts\python.exe" -u -X utf8 -m contextor.mcp_server
+ProcessId=8732 ParentProcessId=9896 CreationDate=2026-09-16T21:20:35+02:00 Name=python.exe ExecutablePath=C:\SpiralProphet\python\WPy64-31090\python-3.10.9.amd64\python.exe CommandLine="C:\SpiralProphet\python\WPy64-31090\python-3.10.9.amd64\python.exe" -u -X utf8 -m contextor.mcp_server
+```
 
-diff --git a/contextor/mcp/tools/contextor_profile_analysis.py b/contextor/mcp/tools/contextor_profile_analysis.py
-index da4f8d4..73f7653 100644
---- a/contextor/mcp/tools/contextor_profile_analysis.py
-+++ b/contextor/mcp/tools/contextor_profile_analysis.py
-@@ -21,22 +21,41 @@ async def _wait_profile_process(
- ) -> None:
-     if process.returncode is not None:
-         return
-+
-+    bounded_timeout = max(
-+        0.0,
-+        timeout,
-+    )
-+
-     try:
-         await asyncio.wait_for(
-             process.wait(),
--            timeout=max(0.0, timeout),
-+            timeout=bounded_timeout,
-         )
-+        return
-     except asyncio.TimeoutError:
--        if process.returncode is None:
--            try:
--                process.kill()
--            except ProcessLookupError:
--                pass
-+        pass
-+
-+    if process.returncode is None:
-         try:
--            await process.wait()
-+            process.kill()
-         except ProcessLookupError:
-             pass
- 
-+    if process.returncode is not None:
-+        return
-+
-+    try:
-+        await asyncio.wait_for(
-+            process.wait(),
-+            timeout=bounded_timeout,
-+        )
-+    except (
-+        asyncio.TimeoutError,
-+        ProcessLookupError,
-+    ):
-+        pass
-+
- 
- async def _terminate_profile_subprocess(
-     process: asyncio.subprocess.Process,
-@@ -81,29 +100,30 @@ async def _run_profile_subprocess(
-     )
- 
-     record_path: Path | None = None
--    registry_value = os.environ.get(
--        "CONTEXTOR_MCP_PROCESS_REGISTRY"
--    )
- 
--    if registry_value:
--        record_path = register_process(
--            Path(registry_value),
--            pid=process.pid,
--            parent_pid=os.getpid(),
--            kind="profile-worker",
--            executable=sys.executable,
-+    try:
-+        registry_value = os.environ.get(
-+            "CONTEXTOR_MCP_PROCESS_REGISTRY"
-         )
- 
--    request = json.dumps(
--        {
--            "repo_path": str(root),
--            "exclude_paths": exclude_paths,
--        },
--        ensure_ascii=False,
--        separators=(",", ":"),
--    ).encode("utf-8")
-+        if registry_value:
-+            record_path = register_process(
-+                Path(registry_value),
-+                pid=process.pid,
-+                parent_pid=os.getpid(),
-+                kind="profile-worker",
-+                executable=sys.executable,
-+            )
-+
-+        request = json.dumps(
-+            {
-+                "repo_path": str(root),
-+                "exclude_paths": exclude_paths,
-+            },
-+            ensure_ascii=False,
-+            separators=(",", ":"),
-+        ).encode("utf-8")
- 
--    try:
-         stdout, stderr = await process.communicate(
-             request
-         )
-diff --git a/tests/test_mcp_profile_worker_lifecycle.py b/tests/test_mcp_profile_worker_lifecycle.py
-index ac282ff..3a2e0cf 100644
---- a/tests/test_mcp_profile_worker_lifecycle.py
-+++ b/tests/test_mcp_profile_worker_lifecycle.py
-@@ -316,3 +316,77 @@ def test_profile_worker_nonzero_exit_keeps_existing_error_contract(
-                 exclude_paths=None,
-             )
-         )
-+
-+
-+def test_profile_worker_registration_failure_terminates_spawned_process(
-+    tmp_path,
-+    monkeypatch,
-+):
-+    process = _FakeProcess()
-+
-+    async def fake_create(*_args, **_kwargs):
-+        return process
-+
-+    monkeypatch.setattr(
-+        profile_module.asyncio,
-+        "create_subprocess_exec",
-+        fake_create,
-+    )
-+    monkeypatch.setattr(
-+        profile_module,
-+        "register_process",
-+        lambda *_args, **_kwargs: (
-+            _raise_registration_failure()
-+        ),
-+    )
-+    monkeypatch.setenv(
-+        "CONTEXTOR_MCP_PROCESS_REGISTRY",
-+        str(tmp_path / "mcp-processes"),
-+    )
-+
-+    with pytest.raises(
-+        OSError,
-+        match="registry unavailable",
-+    ):
-+        asyncio.run(
-+            profile_module._run_profile_subprocess(
-+                tmp_path,
-+                exclude_paths=None,
-+            )
-+        )
-+
-+    assert process.terminate_calls == 1
-+
-+
-+def _raise_registration_failure():
-+    raise OSError("registry unavailable")
-+
-+
-+def test_profile_worker_post_kill_wait_is_bounded():
-+    class _NeverExitsProcess:
-+        pid = 1234
-+        returncode = None
-+
-+        def __init__(self):
-+            self.kill_calls = 0
-+
-+        async def wait(self):
-+            await asyncio.sleep(60)
-+
-+        def kill(self):
-+            self.kill_calls += 1
-+
-+    process = _NeverExitsProcess()
-+
-+    async def scenario():
-+        await asyncio.wait_for(
-+            profile_module._wait_profile_process(
-+                process,
-+                timeout=0.01,
-+            ),
-+            timeout=0.2,
-+        )
-+
-+    asyncio.run(scenario())
-+
-+    assert process.kill_calls == 1
+UNACCOUNTED_CONTEXTOR_PYTHON_PROCESSES=13
 
+No unaccounted survivor was terminated because the contract forbids termination and provides no ownership authority for these identities.
+
+## Phase 5 — natural measurement shutdown
+
+The monitor source contract uses this sentinel path:
+
+```text
+C:\Users\DafoO\AppData\Local\Temp\contextor_k5r2_final\monitor\stop.flag
+```
+
+Read-only directory evidence before shutdown showed no pre-existing flag file. The canonical flag path was then created solely to request the monitor's natural exit. The notifier sentinel was created at its canonical path:
+
+```text
+C:\Users\DafoO\AppData\Local\Temp\contextor_k5r2_final\notifier.stop
+```
+
+No `taskkill` or `Stop-Process` was used. After polling for natural exit:
+
+```text
+MONITOR_9452_AFTER_STOP=MISSING
+NOTIFIER_16164_AFTER_STOP=MISSING
+```
+
+Final exact PID check also showed:
+
+```text
+PID 11172 = MISSING
+PID 6168  = MISSING
+PID 9452  = MISSING
+PID 16164 = MISSING
+```
+
+Final raw-log SHA256:
+
+```text
+986046C6BF29B12DF0B456C0F69FFFB96D1957A10E65777FAC7C0D54729DEDCD
+```
+
+## Final certifications
+
+```text
+FORCED_ACTIVE_WORKER_AT_CLOSE_GATE=BLOCKED
+DESKTOP_FORCED_ANALYSIS_POOL_CLEANUP=BLOCKED
+DESKTOP_GUI_AFTER_CLOSE=DEAD
+DESKTOP_LIVE_SERVICE_AFTER_CLOSE=DEAD
+LATE_DESKTOP_CHILD_AFTER_CLOSE=NONE
+PREEXISTING_EXTERNAL_MCP_UNTOUCHED=YES
+UNACCOUNTED_CONTEXTOR_PYTHON_PROCESSES=13
+DESKTOP_RUNTIME_PROCESS_CERTIFICATION=BLOCKED
+```
+
+The forced-close cleanup certificate is BLOCKED, not FAIL: the captured worker was dead after close, but raw ordering proves that it had already stopped before the Desktop STOP, so the required active-worker-at-close gate was not proven. The runtime certification is also BLOCKED because the required unaccounted-process count is 13 rather than 0.
+
+ACTUAL_DIFF=DIFFS=NONE for source/test files
+STOP=Terminalny odczyt zakończony. Nie rozpoczynaj kolejnych prób K5R.
