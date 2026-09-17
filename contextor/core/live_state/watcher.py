@@ -24,6 +24,7 @@ class _PendingMutationIntent:
     trace_op: str
     observed_state: tuple[int, int] | None
     started_at: float
+    observed_sha256: str | None = None
 
 
 @dataclass(frozen=True)
@@ -34,6 +35,7 @@ class _WatcherMutationJob:
     idempotency_key: str
     observed_state: tuple[int, int] | None
     started_at: float
+    observed_sha256: str | None = None
 
 
 class _PollingLiveWorker:
@@ -618,6 +620,7 @@ class DesktopLiveWatcher:
                         trace_op=job.trace_op,
                         observed_state=job.observed_state,
                         started_at=job.started_at,
+                        observed_sha256=job.observed_sha256,
                     ),
                 )
             from contextor.core.runtime_trace import trace_event
@@ -759,6 +762,39 @@ class DesktopLiveWatcher:
                     reconciled.append(path)
                     continue
                 current_state = current.get(path)
+                current_sha256: str | None = None
+                if current_state is not None:
+                    try:
+                        file_state = batch_manager.get_current_file_state(
+                            path, compute_hash=True
+                        )
+                        post_hash_state = batch_manager.get_current_file_state(
+                            path, compute_hash=False
+                        )
+                    except OSError:
+                        file_state = None
+                        post_hash_state = None
+                    if (
+                        file_state is None
+                        or (
+                            file_state.mtime_ns,
+                            file_state.size,
+                        )
+                        != current_state
+                        or not file_state.sha256
+                        or post_hash_state is None
+                        or (
+                            post_hash_state.mtime_ns,
+                            post_hash_state.size,
+                        )
+                        != current_state
+                    ):
+                        deferred.append(path)
+                        self._emit(
+                            "LIVE: mutation identity capture unavailable; deferring watcher update"
+                        )
+                        continue
+                    current_sha256 = file_state.sha256
                 pending_intent = self._pending_intents.get(path)
                 current_inflight = next(
                     (
@@ -766,6 +802,7 @@ class DesktopLiveWatcher:
                         for job in self._inflight_updates.values()
                         if job.path == path
                         and job.observed_state == current_state
+                        and job.observed_sha256 == current_sha256
                     ),
                     None,
                 )
@@ -781,6 +818,7 @@ class DesktopLiveWatcher:
                         trace_op=op,
                         observed_state=current_state,
                         started_at=update_started,
+                        observed_sha256=current_sha256,
                     )
                     self._pending_intents[path] = pending_intent
                 if was_ambiguous:
@@ -816,8 +854,12 @@ class DesktopLiveWatcher:
                 pending_intent.idempotency_key,
                 pending_intent.observed_state,
                 pending_intent.started_at,
+                pending_intent.observed_sha256,
             )
-            if current.get(path) != pending_intent.observed_state:
+            if (
+                current.get(path) != pending_intent.observed_state
+                or current_sha256 != pending_intent.observed_sha256
+            ):
                 deferred.append(path)
         if deferred:
             self._requeue_paths(deferred)

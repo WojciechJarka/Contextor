@@ -2,6 +2,7 @@ import json
 import os
 import threading
 import time
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -590,7 +591,8 @@ def test_change_during_startup_resync_is_not_lost(tmp_path):
         return ([], object())
     watcher = DesktopLiveWatcher(repo, _QueuedClientAdapter(Client()), on_resync=resync)
     watcher._startup_requires_resync = True
-    watcher._trusted_file_state = lambda _snapshot: object()
+    manager = FileStateManager(str(repo_cache_dir(repo)))
+    watcher._trusted_file_state = lambda _snapshot: manager
     watcher._candidate_requires_update = lambda *_args: True
     assert watcher.poll_once() == []
     assert calls == []
@@ -736,7 +738,8 @@ def test_update_transport_recovery_revalidates_generation_before_retry(tmp_path)
         watcher = DesktopLiveWatcher(repo, client)
         watcher._snapshot = {str(source): (0, 1)}
         source.write_text("VALUE = 2\n", encoding="utf-8")
-        watcher._trusted_file_state = lambda _snapshot: object()
+        manager = FileStateManager(str(repo_cache_dir(repo)))
+        watcher._trusted_file_state = lambda _snapshot: manager
         values = iter(candidate_values)
         watcher._candidate_requires_update = lambda *_args: next(values)
         watcher._enqueue_path(str(source))
@@ -764,7 +767,8 @@ def test_update_error_result_is_not_acknowledged_into_watcher_snapshot(tmp_path)
     watcher._snapshot = {str(source): (0, 1)}
     watcher._candidate_requires_update = lambda *_args: True
     source.write_text("VALUE = 2\n", encoding="utf-8")
-    watcher._trusted_file_state = lambda _snapshot: object()
+    manager = FileStateManager(str(repo_cache_dir(repo)))
+    watcher._trusted_file_state = lambda _snapshot: manager
     watcher._candidate_requires_update = lambda *_args: True
     watcher._enqueue_path(str(source))
 
@@ -787,7 +791,8 @@ def test_deferred_candidate_does_not_replay_already_reconciled_sibling(tmp_path)
     watcher = DesktopLiveWatcher(repo, _QueuedClientAdapter(Client()))
     watcher._snapshot = {str(first): (0, 1), str(second): (0, 1)}
     first.write_text("A = 2\n", encoding="utf-8"); second.write_text("B = 2\n", encoding="utf-8")
-    watcher._trusted_file_state = lambda _snapshot: object()
+    manager = FileStateManager(str(repo_cache_dir(repo)))
+    watcher._trusted_file_state = lambda _snapshot: manager
     watcher._enqueue_path(str(first)); watcher._enqueue_path(str(second))
     deferred = {str(second)}
     watcher._candidate_requires_update = lambda path, *_args: None if path in deferred else True
@@ -806,7 +811,8 @@ def test_missing_update_result_is_not_acknowledged(tmp_path):
         def update_file(self, *_args, **_kwargs): return {"status": "ok"}
     watcher = DesktopLiveWatcher(repo, _QueuedClientAdapter(Client())); watcher._snapshot = {str(source): (0, 1)}
     source.write_text("VALUE = 2\n", encoding="utf-8")
-    watcher._trusted_file_state = lambda _snapshot: object(); watcher._candidate_requires_update = lambda *_args: True
+    manager = FileStateManager(str(repo_cache_dir(repo)))
+    watcher._trusted_file_state = lambda _snapshot: manager; watcher._candidate_requires_update = lambda *_args: True
     watcher._enqueue_path(str(source))
     assert watcher.poll_once() == []
     assert watcher._has_pending_paths() is True
@@ -820,7 +826,8 @@ def test_error_top_level_response_is_not_acknowledged(tmp_path):
         def update_file(self, *_args, **_kwargs): return {"status": "error", "error": "rejected"}
     watcher = DesktopLiveWatcher(repo, _QueuedClientAdapter(Client())); watcher._snapshot = {str(source): (0, 1)}
     source.write_text("VALUE = 2\n", encoding="utf-8")
-    watcher._trusted_file_state = lambda _snapshot: object(); watcher._candidate_requires_update = lambda *_args: True
+    manager = FileStateManager(str(repo_cache_dir(repo)))
+    watcher._trusted_file_state = lambda _snapshot: manager; watcher._candidate_requires_update = lambda *_args: True
     watcher._enqueue_path(str(source))
     assert watcher.poll_once() == []
     assert watcher._snapshot[str(source)] == (0, 1)
@@ -1045,10 +1052,11 @@ def test_lost_queued_update_ack_does_not_relabel_overlapping_edit(
             trace_op=frozen_retry_op,
             observed_state=intent.observed_state,
             started_at=intent.started_at,
+            observed_sha256=intent.observed_sha256,
         )
         frozen_intent = watcher._pending_intents[path]
 
-        source.write_text("VALUE = 3\n", encoding="utf-8")
+        source.write_text("VALUE = 33\n", encoding="utf-8")
         s2 = watcher._scan()[path]
         watcher._enqueue_path(path)
         assert watcher._pending_intents[path] is frozen_intent
@@ -1105,6 +1113,168 @@ def test_lost_queued_update_ack_does_not_relabel_overlapping_edit(
         thread.join(timeout=2)
 
 
+def test_same_stat_different_content_is_distinct_mutation_identity(
+    tmp_path,
+):
+    update_started = threading.Event()
+    release_first_update = threading.Event()
+    second_update_done = threading.Event()
+    update_contents = []
+    submitted_contents = {}
+    attempts = []
+
+    def updater(_state, path):
+        update_contents.append(Path(path).read_text(encoding="utf-8"))
+        if len(update_contents) == 1:
+            update_started.set()
+            assert release_first_update.wait(timeout=5)
+        else:
+            second_update_done.set()
+        return SimpleNamespace(status="UPDATED", file_path=path)
+
+    repo, server, thread, _endpoint, client, watcher = _real_watcher_runtime(
+        tmp_path, updater
+    )
+    source = repo / "module.py"
+    path = str(source)
+    source.write_text("VALUE = 1\n", encoding="utf-8")
+    watcher._snapshot = {path: (0, 1)}
+    watcher._candidate_requires_update = lambda *_args: True
+    original_submit = client.submit_update_file
+
+    def capture_submit(file_path, **kwargs):
+        key = kwargs["idempotency_key"]
+        content = Path(file_path).read_text(encoding="utf-8")
+        attempts.append((key, content))
+        submitted_contents.setdefault(key, content)
+        response = original_submit(file_path, **kwargs)
+        if len(attempts) <= 2:
+            raise ConnectionError("accepted response lost")
+        return response
+
+    client.submit_update_file = capture_submit
+
+    try:
+        source.write_text("VALUE = 2\n", encoding="utf-8")
+        s1 = watcher._scan()[path]
+        state_manager = FileStateManager(str(repo_cache_dir(repo)))
+        sha1 = state_manager.get_current_file_state(
+            path, compute_hash=True
+        ).sha256
+
+        watcher._enqueue_path(path)
+        assert watcher.poll_once() == []
+        assert update_started.wait(timeout=2)
+        intent = watcher._pending_intents[path]
+        assert intent.observed_state == s1
+        assert intent.observed_sha256 == sha1
+
+        source.write_text("VALUE = 3\n", encoding="utf-8")
+        stat = source.stat()
+        os.utime(str(source), ns=(stat.st_atime_ns, s1[0]))
+        s2 = watcher._scan()[path]
+        sha2 = state_manager.get_current_file_state(
+            path, compute_hash=True
+        ).sha256
+
+        assert s2 == s1
+        assert sha2 != sha1
+        watcher._enqueue_path(path)
+        assert watcher.poll_once() == []
+        assert watcher._pending_intents[path] is intent
+        assert watcher._pending_intents[path].observed_state == s1
+        assert watcher._pending_intents[path].observed_sha256 == sha1
+
+        assert watcher.poll_once() == []
+        job_id = server._mutation_coordinator._idempotency_jobs[attempts[0][0]]
+        recovered_job = watcher._inflight_updates[job_id]
+        assert recovered_job.observed_state == s1 == s2
+        assert recovered_job.observed_sha256 == sha1
+        assert recovered_job.observed_sha256 != sha2
+        assert watcher._pending_intents.get(path) is None
+        assert watcher._has_pending_paths()
+
+        release_first_update.set()
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            watcher.poll_once()
+            if (
+                len(submitted_contents) == 2
+                and second_update_done.is_set()
+                and not watcher._inflight_updates
+                and not watcher._has_pending_paths()
+            ):
+                break
+            threading.Event().wait(0.01)
+
+        assert len(submitted_contents) == 2
+        assert set(submitted_contents.values()) == {"VALUE = 2\n", "VALUE = 3\n"}
+        assert len(update_contents) == 2
+        assert not watcher._inflight_updates
+        assert not watcher._has_pending_paths()
+        assert watcher._snapshot[path] == s2
+    finally:
+        release_first_update.set()
+        server.close()
+        thread.join(timeout=2)
+
+
+def test_unstable_mutation_identity_capture_is_deferred(tmp_path, monkeypatch):
+    submissions = []
+
+    repo, server, thread, _endpoint, client, watcher = _real_watcher_runtime(
+        tmp_path,
+        lambda _state, path: SimpleNamespace(status="UPDATED", file_path=path),
+    )
+    source = repo / "module.py"
+    path = str(source)
+    source.write_text("VALUE = 2\n", encoding="utf-8")
+    current_state = watcher._scan()[path]
+    generation_b = (current_state[0] + 1, current_state[1])
+    watcher._snapshot = {path: (0, 1)}
+    watcher._candidate_requires_update = lambda *_args: True
+    state_manager = FileStateManager(str(repo_cache_dir(repo)))
+    watcher._trusted_file_state = lambda _snapshot: state_manager
+    state_reads = []
+
+    def unstable_state_read(file_path, compute_hash=False):
+        state_reads.append(compute_hash)
+        if compute_hash:
+            return SimpleNamespace(
+                mtime_ns=current_state[0],
+                size=current_state[1],
+                sha256="a" * 64,
+            )
+        return SimpleNamespace(
+            mtime_ns=generation_b[0],
+            size=generation_b[1],
+            sha256="",
+        )
+
+    def capture_submit(*args, **kwargs):
+        submissions.append((args, kwargs))
+        return {"status": "accepted", "accepted": True, "job_id": "unexpected"}
+
+    monkeypatch.setattr(
+        state_manager,
+        "get_current_file_state",
+        unstable_state_read,
+    )
+    monkeypatch.setattr(client, "submit_update_file", capture_submit)
+
+    try:
+        watcher._enqueue_path(path)
+        assert watcher.poll_once() == []
+        assert state_reads == [True, False]
+        assert submissions == []
+        assert watcher._pending_intents == {}
+        assert watcher._inflight_updates == {}
+        assert watcher._has_pending_paths()
+    finally:
+        server.close()
+        thread.join(timeout=2)
+
+
 def test_stale_unknown_intent_is_superseded_by_newer_current_inflight_job(tmp_path):
     submissions = []
     update_started = threading.Event()
@@ -1123,10 +1293,13 @@ def test_stale_unknown_intent_is_superseded_by_newer_current_inflight_job(tmp_pa
 
     source.write_text("VALUE = 10\n", encoding="utf-8")
     s1 = watcher._scan()[path]
+    state_manager = FileStateManager(str(repo_cache_dir(repo)))
+    sha1 = state_manager.get_current_file_state(path, compute_hash=True).sha256
 
     source.write_text("VALUE = 200\n", encoding="utf-8")
     s2 = watcher._scan()[path]
     assert s2 != s1
+    sha2 = state_manager.get_current_file_state(path, compute_hash=True).sha256
 
     watcher._snapshot = {path: s1}
     watcher._startup_pending = []
@@ -1140,6 +1313,7 @@ def test_stale_unknown_intent_is_superseded_by_newer_current_inflight_job(tmp_pa
         idempotency_key="old-k1",
         observed_state=s1,
         started_at=started_at,
+        observed_sha256=sha1,
     )
     watcher._inflight_updates["current-job"] = _WatcherMutationJob(
         job_id="current-job",
@@ -1148,6 +1322,7 @@ def test_stale_unknown_intent_is_superseded_by_newer_current_inflight_job(tmp_pa
         idempotency_key="current-k2",
         observed_state=s2,
         started_at=started_at,
+        observed_sha256=sha2,
     )
 
     original_status = client.mutation_status

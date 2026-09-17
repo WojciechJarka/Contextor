@@ -1549,7 +1549,7 @@ def test_desktop_watcher_reports_syntax_location(tmp_path):
         target = tmp_path / "broken.py"
         target.write_text("def broken(:\n", encoding="utf-8")
         watcher._enqueue_path(str(target))
-        assert watcher.poll_once() == [str(target)]
+        assert _poll_until_reconciled(watcher, [str(target)]) == [str(target)]
         assert statuses == [
             "Updating LIVE: broken.py",
             "LIVE syntax error: broken.py line 2, column 7: invalid syntax",
