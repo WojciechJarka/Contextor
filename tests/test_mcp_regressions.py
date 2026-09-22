@@ -77,6 +77,48 @@ def _patch_empty_registries(monkeypatch):
     monkeypatch.setattr(query_helpers, "read_registries", lambda _root: ({}, {}, {}, {}))
 
 
+class _ObservedRLock:
+    def __init__(self, watched_thread_name: str):
+        self._lock = threading.RLock()
+        self._watched_thread_name = watched_thread_name
+        self.attempted = threading.Event()
+        self.acquired = threading.Event()
+
+    def __enter__(self):
+        watched = (
+            threading.current_thread().name
+            == self._watched_thread_name
+        )
+        if watched:
+            self.attempted.set()
+
+        self._lock.acquire()
+
+        if watched:
+            self.acquired.set()
+
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        self._lock.release()
+        return False
+
+
+def _install_observed_cache_lock(
+    monkeypatch,
+    root: Path,
+    watched_thread_name: str,
+):
+    root_key = mcp_runtime._engine_cache_key(root)
+    lock = _ObservedRLock(watched_thread_name)
+    monkeypatch.setitem(
+        mcp_runtime._engine_cache_locks,
+        root_key,
+        lock,
+    )
+    return root_key, lock
+
+
 def test_same_root_double_hydration_is_serialized(tmp_path, monkeypatch):
     root = tmp_path / "repo"
     root.mkdir()
@@ -205,11 +247,14 @@ def test_analysis_refresh_transaction_excludes_same_root_reader(tmp_path, monkey
 
     root = tmp_path / "repo"
     root.mkdir()
-    root_key = str(root.resolve())
+    root_key, observed_lock = _install_observed_cache_lock(
+        monkeypatch,
+        root,
+        "same-root-reader",
+    )
     old_engine = SimpleNamespace(state=SimpleNamespace(revision=10))
     new_engine = SimpleNamespace(state=SimpleNamespace(revision=11))
     refresh_entered = threading.Event()
-    reader_started = threading.Event()
     reader_done = threading.Event()
     release_refresh = threading.Event()
     reader_results = []
@@ -228,7 +273,6 @@ def test_analysis_refresh_transaction_excludes_same_root_reader(tmp_path, monkey
         return new_engine
 
     def read_summary(candidate_root):
-        reader_started.set()
         reader_results.append(diagnostics.diagnostics_summary(candidate_root))
         reader_done.set()
 
@@ -254,20 +298,27 @@ def test_analysis_refresh_transaction_excludes_same_root_reader(tmp_path, monkey
             analysis_errors.append(exc)
 
     analysis_thread = threading.Thread(target=run_analysis)
-    reader_thread = threading.Thread(target=read_summary, args=(root,))
+    reader_thread = threading.Thread(
+        target=read_summary,
+        args=(root,),
+        name="same-root-reader",
+    )
     analysis_thread.start()
     assert refresh_entered.wait(timeout=2)
     reader_thread.start()
-    assert reader_started.wait(timeout=2)
-    assert not reader_done.wait(timeout=0.1)
+    assert observed_lock.attempted.wait(timeout=2)
+    assert observed_lock.acquired.is_set() is False
+    assert reader_done.is_set() is False
     release_refresh.set()
     analysis_thread.join(timeout=2)
     reader_thread.join(timeout=2)
 
     assert not analysis_thread.is_alive()
     assert not reader_thread.is_alive()
-    assert analysis_errors == []
+    assert observed_lock.acquired.is_set() is True
+    assert reader_done.is_set() is True
     assert reader_results == [{"revision": 11}]
+    assert analysis_errors == []
 
 
 def test_analysis_refresh_transaction_is_reentrant(tmp_path, monkeypatch):
@@ -326,7 +377,11 @@ def test_update_file_refresh_uses_same_root_transaction(tmp_path, monkeypatch):
     target = root / "pkg" / "module.py"
     target.parent.mkdir()
     target.write_text("def run():\n    return 1\n", encoding="utf-8")
-    root_key = str(root.resolve())
+    root_key, observed_lock = _install_observed_cache_lock(
+        monkeypatch,
+        root,
+        "same-root-probe",
+    )
     old_engine = SimpleNamespace(state=SimpleNamespace(artifacts={"pkg.module": {}}))
     new_engine = SimpleNamespace(
         state=SimpleNamespace(artifacts={"pkg.module": {"symbols": {}}})
@@ -345,9 +400,6 @@ def test_update_file_refresh_uses_same_root_transaction(tmp_path, monkeypatch):
     )
     refresh_entered = threading.Event()
     release_refresh = threading.Event()
-    probe_started = threading.Event()
-    probe_entered = threading.Event()
-    update_done = threading.Event()
     update_results = []
     calls = []
 
@@ -360,6 +412,8 @@ def test_update_file_refresh_uses_same_root_transaction(tmp_path, monkeypatch):
         if len(calls) == 1:
             return old_engine
         refresh_entered.set()
+        mcp_runtime._live_engines[root_key] = new_engine
+        mcp_runtime._live_engine_revisions[root_key] = 22
         release_refresh.wait()
         return new_engine
 
@@ -377,31 +431,32 @@ def test_update_file_refresh_uses_same_root_transaction(tmp_path, monkeypatch):
         update_results.append(
             json.loads(update_file_module.update_file(str(root), str(target)))
         )
-        update_done.set()
 
     def probe_transaction():
-        probe_started.set()
         with mcp_runtime._engine_cache_transaction(root):
-            probe_entered.set()
+            pass
 
     update_thread = threading.Thread(target=run_update)
-    probe_thread = threading.Thread(target=probe_transaction)
+    probe_thread = threading.Thread(
+        target=probe_transaction,
+        name="same-root-probe",
+    )
     update_thread.start()
     assert refresh_entered.wait(timeout=2)
     probe_thread.start()
-    assert probe_started.wait(timeout=2)
-    assert not probe_entered.wait(timeout=0.1)
+    assert observed_lock.attempted.wait(timeout=2)
+    assert observed_lock.acquired.is_set() is False
     release_refresh.set()
-    assert update_done.wait(timeout=2)
-    assert probe_entered.wait(timeout=2)
     update_thread.join(timeout=2)
     probe_thread.join(timeout=2)
 
     assert not update_thread.is_alive()
     assert not probe_thread.is_alive()
+    assert observed_lock.acquired.is_set() is True
     assert update_results[0]["status"] == "UPDATED"
     assert update_results[0]["live_state_persisted"] is True
-    assert mcp_runtime._live_engine_revisions[root_key] == 21
+    assert mcp_runtime._live_engines[root_key] is new_engine
+    assert mcp_runtime._live_engine_revisions[root_key] == 22
 
 
 def test_file_edit_context_binds_engine_and_revision_atomically(tmp_path, monkeypatch):
@@ -411,7 +466,11 @@ def test_file_edit_context_binds_engine_and_revision_atomically(tmp_path, monkey
 
     root = tmp_path / "repo"
     root.mkdir()
-    root_key = str(root.resolve())
+    root_key, observed_lock = _install_observed_cache_lock(
+        monkeypatch,
+        root,
+        "post-snapshot-mutator",
+    )
     engine_one = SimpleNamespace(
         state=SimpleNamespace(
             modules={"pkg.mod": SimpleNamespace(module_id="1/1", path="pkg/mod.py")},
@@ -430,7 +489,7 @@ def test_file_edit_context_binds_engine_and_revision_atomically(tmp_path, monkey
     release_snapshot = threading.Event()
     response_phase = threading.Event()
     allow_response = threading.Event()
-    mutation_entered = threading.Event()
+    mutation_done = threading.Event()
     result_box = []
     errors = []
 
@@ -445,7 +504,7 @@ def test_file_edit_context_binds_engine_and_revision_atomically(tmp_path, monkey
         with mcp_runtime._engine_cache_transaction(root):
             mcp_runtime._live_engines[root_key] = engine_two
             mcp_runtime._live_engine_revisions[root_key] = 42
-            mutation_entered.set()
+        mutation_done.set()
 
     def module_truth_unavailable(_state, _module_name):
         response_phase.set()
@@ -466,9 +525,6 @@ def test_file_edit_context_binds_engine_and_revision_atomically(tmp_path, monkey
         lambda *_args, **_kwargs: [],
     )
 
-    probe_thread = threading.Thread(target=mutate_after_snapshot)
-    probe_thread.start()
-
     def read_context():
         try:
             result_box.append(
@@ -481,18 +537,31 @@ def test_file_edit_context_binds_engine_and_revision_atomically(tmp_path, monkey
         except BaseException as exc:
             errors.append(exc)
 
-    context_thread = threading.Thread(target=read_context)
+    context_thread = threading.Thread(
+        target=read_context,
+        name="snapshot-reader",
+    )
+    mutation_thread = threading.Thread(
+        target=mutate_after_snapshot,
+        name="post-snapshot-mutator",
+    )
     context_thread.start()
     assert snapshot_entered.wait(timeout=2)
+    mutation_thread.start()
+    assert observed_lock.attempted.wait(timeout=2)
+    assert observed_lock.acquired.is_set() is False
     release_snapshot.set()
     assert response_phase.wait(timeout=2)
-    assert mutation_entered.wait(timeout=2)
+    assert mutation_done.wait(timeout=2)
+    assert observed_lock.acquired.is_set() is True
+    assert mcp_runtime._live_engines[root_key] is engine_two
+    assert mcp_runtime._live_engine_revisions[root_key] == 42
     allow_response.set()
     context_thread.join(timeout=2)
-    probe_thread.join(timeout=2)
+    mutation_thread.join(timeout=2)
 
     assert not context_thread.is_alive()
-    assert not probe_thread.is_alive()
+    assert not mutation_thread.is_alive()
     assert errors == []
     assert result_box[0]["live_revision"] == 41
 
