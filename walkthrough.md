@@ -1,1126 +1,221 @@
-# CPA10K7G2A — shared backend server mode hardening
+# CPA10K7G2B — PERSISTENT BACKEND OWNER DISCOVERY
 
-STATUS=IMPLEMENTED_FOCUSED_VALIDATION_PASS_WITH_LIVE_SYNC_CAVEAT
-REPORT_DATE=2026-09-22
+STATUS=DISCOVERY_COMPLETE
+HEAD=a382c6aa342f8a8df54f0e3a863cfd29ae70fcb7
+FILES_CHANGED=C:\Temp\Contextor_Repo\walkthrough.md
 REPOSITORY=C:\Temp\Contextor_Repo
-CONTRACT=CPA10K7G2A_SHARED_BACKEND_SERVER_MODE_HARDENING
-SOURCE_DRIFT=NONE
-SCOPE=literal contract only
+CANONICAL_LIVE_REVISION=1335
+CANONICAL_STATE=FRESH
+WORKSPACE_SYNC=VERIFIED_FOR_FETCHED_SOURCE_SYMBOLS
 
-## STATUS
+## Scope and integrity
 
-Implementation completed according to the supplied literal contract. No design alternative, architecture change, backend launcher, backend CLI, durable backend record, token persistence, or configuration migration was added.
+Discovery only. No production, test, config, or documentation source was edited. No pytest command, persistent backend launch, process start/stop, or full repository analysis was performed.
 
-Evidence classes used:
+At discovery start, `git status --short` returned ` M walkthrough.md`; that was the prior CPA10K7G2A report. This task overwrites that report as requested. `git rev-parse HEAD` returned the HEAD above.
 
-- DIRECT_EVIDENCE: current source, exact post-edit Contextor source ranges, watcher events, focused command results, and final Git diff.
-- CODE_PATH_PROVED: current `mcp_server.py` path and focused tests.
-- CONTRACT_PROVED: required auth, process-registry, role, and lifecycle behavior.
-- INFERENCE: none used for implementation claims.
-- UNKNOWN: post-edit Contextor blast-radius response does not expose `workspace_sync=verified`; this remains explicitly unclaimed.
+Contextor LIVE poll after revision 1335 returned latest_revision=1335, continuous continuity, resync_required=false, and fresh diagnostics (0 syntax errors, 0 collisions, 0 cycles). Contextor file contexts for the relevant modules also resolved at revision 1335. Exact symbol fetches were fresh, workspace_sync=verified, provenance=live. Local `rg` was used afterward only to confirm source anchors, test names, config text, and security API literals.
 
-## HEAD_BEFORE
+`contextor_fact_lineage` was considered and its current documentation read. Its only v1 families are `artifact_consumption`, `syntax_diagnostics`, and `symbol_calls`; none is a process/backend lifecycle fact family, so no unsupported family was queried. Symbol lineage and call-context were queried for the process registry, cleanup, CLI, and LIVE startup owners.
 
-4ffd9a7faebeb17aee05ba77c55a983d5b7094f9
+## CURRENT_OWNERS
 
-## HEAD_AFTER
+| Owner / absolute path | Responsibility and direct consumers | Contextor blast radius / tests | Reuse assessment |
+|---|---|---|---|
+| `C:\Temp\Contextor_Repo\contextor\mcp_process_registry.py` | Process record directory, process identity, JSON registration/removal, record matching, termination. `register_process` and `remove_record` direct consumers: `contextor.core.analysis.git_context`, `contextor.core.analysis.process_pool_lifecycle`, `contextor.mcp.tools.contextor_profile_analysis`, `contextor.mcp_server`. Termination direct consumers: `contextor.mcp_server`, `tests.test_mcp_child_process_cleanup`. | Module context: 11 direct consumers, 194 transitive consumers, 128 covering test modules. | Process facts and record primitives are reusable in their current scope; parent-owned cleanup and Windows termination do not provide persistent-backend ownership or a race-free stop guarantee. |
+| `C:\Temp\Contextor_Repo\contextor\mcp_server.py` | MCP transport/auth construction, server role, registry selection, root registration, startup orphan cleanup, atexit/shutdown cleanup, HTTP run. `main` is called through `contextor.mcp_main`. | 32 direct/transitive consumers in module context; 31 covering test modules. | Correct owner for current MCP server lifecycle and G2A behavior; it contains no backend management command API. |
+| `C:\Temp\Contextor_Repo\contextor\mcp_main.py` | Dedicated `contextor-mcp` entrypoint imports and calls `contextor.mcp_server.main`. | Project script entrypoint; module context reports no static consumers/tests. | Separate MCP-server entrypoint, not the top-level `contextor` CLI router. |
+| `C:\Temp\Contextor_Repo\contextor\__main__.py` | Top-level application entrypoint; `--gui` selects GUI, all other args route to `contextor.cli.main`. | 2 direct module consumers; 1 covering test module (`tests.test_gui_single_instance`). | Existing top-level routing seam. |
+| `C:\Temp\Contextor_Repo\contextor\cli.py` | `argparse` CLI parser and analysis dispatch. Current parser has positional repository path and `--layer`, `--file`, `--output`, `--quiet`, `--version`; no backend subcommands. | 1 direct consumer (`contextor.__main__`), 3 transitive; module context lists 1 covering test module. | Current CLI owner, but no existing backend command contract/parser. |
+| `C:\Temp\Contextor_Repo\contextor\core\live_state\runtime.py` | Canonical LIVE service startup coordinator, LIVE-specific startup lock, Windows spawn helper, service owner watchdog. `connect_or_start` direct consumers include LIVE package/watcher/UI and its focused tests. | 14 direct / 65 transitive consumers; 55 covering test modules. | Useful evidence/reference for singleton startup and Windows spawn; its service is explicitly owner-scoped and is not a persistent MCP backend primitive as-is. |
+| `C:\Temp\Contextor_Repo\contextor\core\live_state\runtime_lease.py` | Canonical LIVE authority lease, cross-process domain file lock, atomic JSON writer. | 5 direct / 70 transitive consumers; 58 covering test modules. | General OS-lock mechanics exist, but the owner/contract is LIVE authority lease, not backend start coordination. |
+| `C:\Temp\Contextor_Repo\contextor\core\paths.py` | General path utilities including atomic sibling-temp replacement. | 45 direct / 241 transitive consumers; 146 covering test modules. | Atomicity only; no secret ACL/storage contract. |
+| `C:\Temp\Contextor_Repo\contextor\core\repository_identity.py` | Durable repository identity creation/lookup; record has schema_version, repo_id, repo_name, root_path, created_at. | Queried canonical implementation; this identity is repository-scoped, not process/backend-scoped. | Not a backend process record or secret store. |
 
-4ffd9a7faebeb17aee05ba77c55a983d5b7094f9
+## REUSABLE_PRIMITIVES
 
-HEAD_AFTER is the same repository commit because the implementation is uncommitted working-tree state.
+- `contextor.mcp_process_registry.registry_dir(root)` resolves to `root/.contextor/mcp_processes`. `CONTEXTOR_MCP_PROCESS_REGISTRY` can override that directory through the current MCP server environment.
+- `register_process` writes one JSON record per kind/PID via a sibling temporary file and replace. Present fields: `pid`, `parent_pid`, `kind`, `executable`, `creation_time`, `parent_creation_time`, `registered_at`. This is durable process metadata, but has no host, HTTP port, transport, backend status, or token fields.
+- On Windows, `process_identity(pid)` gets image path, alive state, and process creation FILETIME through `GetProcessTimes`. `record_matches_process` compares executable basename when available and compares creation time only when both recorded and current values are non-null.
+- `connect_or_start` uses an exclusive-create LIVE startup lock; `RuntimeLeaseManager` also has a cross-process OS file-lock implementation. These prove analogous primitives for LIVE startup/lease only.
+- `contextor.core.paths.atomic_write` and `runtime_lease._atomic_write_json` provide atomic-replacement patterns. Neither establishes secret-file permissions.
+- The existing G2A HTTP verifier is constructed from `CONTEXTOR_MCP_TOKEN` and attached to FastMCP. `_create_mcp` removes that variable from the process environment after construction; the verifier retains the token in memory.
+- `PersistentIdentityRegistry` / `ensure_repository_identity` atomically create repository identity metadata under a central identity directory; it does not record process identity or MCP endpoint/lifecycle state.
 
-## LIVE_REVISION_BEFORE
+## MISSING_PRIMITIVES
 
-1330
+Backend-specific gaps (not claims that no analogous generic mechanism exists):
 
-## LIVE_REVISION_AFTER
+- No durable persistent-backend root/endpoint lifecycle record is registered by the current server role.
+- No backend-specific singleton/start lock or command owner; existing locks are scoped to LIVE service startup, LIVE authority leases, or repository identity creation.
+- No backend start/status/stop commands or top-level CLI route for them.
+- No MCP bearer-token generator plus durable protected secret store. No explicit Windows ACL/DACL, DPAPI, Credential Manager, or keyring primitive was found in `contextor`. Two unrelated modules pass POSIX-style `0o600` modes to file open; these are not a demonstrated Windows ACL abstraction.
+- No backend-specific detached launcher with independent lifetime/cleanup contract. The existing LIVE spawn helper is owner-scoped and has a fallback without breakaway.
+- Existing registry termination does not prove atomic identity-bound termination against PID reuse.
+- Repository config examples contain stdio MCP stanzas only; no HTTP backend client stanza is present. The repo does not specify the exact FastMCP HTTP route path.
 
-1335
+## BACKEND_IDENTITY_EVIDENCE
 
-## FILES_CHANGED
+DIRECT_EVIDENCE — `contextor/mcp_process_registry.py:16-17, 79-122, 150-166`:
 
-- C:\Temp\Contextor_Repo\contextor\mcp_server.py
-- C:\Temp\Contextor_Repo\tests\test_mcp_shared_backend_server_mode.py
-- C:\Temp\Contextor_Repo\walkthrough.md
+- Default path is `.contextor/mcp_processes` beneath the supplied root.
+- The JSON schema fields are PID, parent PID, process kind, executable, process creation time, parent creation time, and registration timestamp.
+- Windows process creation identity is obtained with `GetProcessTimes`; the persisted numeric value is the FILETIME creation value.
+- Matching is conditional: if either stored creation time or current creation time is null, creation-time inequality is not rejected by that check. Executable comparison is basename-only when both image values are available.
 
-No file outside the allowed scope was changed.
+CODE_PATH_PROVED — `contextor/mcp_server.py:963-976`:
 
-## IMPLEMENTATION_RESULT
+- `_register_server_root(..., role="persistent-backend")` returns `None`; it does not create an `mcp-server` root record. For host-owned role it calls `register_process`.
+- `test_persistent_backend_role_has_no_host_owned_root_record` covers this G2A contract.
 
-PASS
+INFERENCE — the registry can physically encode PID/start identity for a process, but its present parent fields and parent-based cleanup semantics do not by themselves establish persistent backend ownership independent of the launching Codex session.
 
-- Added the exact transport/auth bootstrap contract before FastMCP construction.
-- Added fixed bearer-token verification using the supplied digest and constant-time comparison.
-- Removed `CONTEXTOR_MCP_TOKEN` from process environment after verifier construction.
-- Preserved stdio without auth.
-- Honored preconfigured `CONTEXTOR_MCP_PROCESS_REGISTRY`.
-- Added the supplied `host-owned` / `persistent-backend` role gate.
-- Prevented a persistent backend from registering a host-owned root record.
-- Preserved process-wide MCP shutdown cleanup.
-- Added the exact focused test file from the request.
-- No HTTP backend, detached backend, new MCP session, restart, config migration, or manual process termination was performed.
+UNKNOWN — there is no current backend record schema for host/port/transport/status/lifecycle metadata.
 
-## AUTH_CONTRACT
+## STARTUP_RACE_EVIDENCE
 
-CONTRACT_PROVED:
+DIRECT_EVIDENCE — `contextor/core/live_state/runtime.py:856-1033`:
 
-- `stdio` returns no auth verifier.
-- HTTP and streamable HTTP require `CONTEXTOR_MCP_TOKEN`.
-- The token must contain at least 32 characters and have no surrounding whitespace.
-- `_ContextorBearerTokenVerifier` stores only the SHA-256 expected digest.
-- Verification uses `hmac.compare_digest`.
-- Accepted access token has client ID `contextor-local`, empty scopes, no expiry, and empty claims.
-- `FastMCP` receives auth during `_create_mcp` construction.
-- The environment token is removed only after verifier construction.
-- `StaticTokenVerifier` was not imported or used.
-- No token is written to a file, registry record, or log.
+- LIVE `connect_or_start` checks for an existing service, creates sibling `live_service_start.lock` with `os.open(O_CREAT | O_EXCL | O_WRONLY)`, retries while another lock exists, and removes a lock whose mtime is older than the effective startup budget. It rechecks for a live service before spawning and removes its lock in `finally`.
+- This is a concrete single-owner mechanism for Canonical LIVE service startup, not a backend manager contract. Its stale-lock deletion is age-based.
 
-## PROCESS_REGISTRY_CONTRACT
+DIRECT_EVIDENCE — `contextor/core/live_state/runtime_lease.py:760-809`:
 
-CONTRACT_PROVED:
+- `_DomainFileLock` combines a process-local thread lock with `msvcrt.locking(...LK_NBLCK...)` on Windows or `fcntl.flock(...LOCK_EX | LOCK_NB)` elsewhere, with a timeout.
+- `_atomic_write_json` uses a temporary sibling, flush/fsync, and `os.replace`; `contextor.core.paths.atomic_write` also uses a temporary sibling and replace.
+- Repository identity creation has its own O_EXCL lock in `contextor/core/repository_identity.py:118-167`.
 
-- `CONTEXTOR_MCP_PROCESS_REGISTRY` is resolved and honored when present.
-- The existing cwd-based registry remains the fallback.
-- The existing registry helpers and process identity behavior were not changed.
-- The existing orphan cleanup and process-wide shutdown path remain in use.
-- Host-owned mode registers the `mcp-server` root through the supplied helper.
+CONCLUSION — no existing primitive is wired to guarantee one persistent MCP backend for concurrent `backend start` operations. Existing locks are scoped to separate owners/contracts; no alternative lock design is proposed here.
 
-## PERSISTENT_ROLE_CONTRACT
+## DETACHED_SPAWN_EVIDENCE
 
-CONTRACT_PROVED:
+DIRECT_EVIDENCE — `contextor/core/live_state/runtime.py:741-801, 856-1033, 1413-1447, 1546-1562`:
 
-- `persistent-backend` is accepted only with HTTP/streamable HTTP transport.
-- The role/transport rejection occurs before lifecycle side effects.
-- Persistent backend mode returns no host-owned root record.
-- Shutdown still calls `_shutdown_mcp_owned_processes` for the whole MCP process.
-- The supplied final `if __name__ == "__main__"` block is unchanged.
+- The only identified reusable Windows spawn helper is `_spawn_runtime_subprocess`, called by LIVE `connect_or_start`.
+- Primary Windows flags are `CREATE_NO_WINDOW | CREATE_BREAKAWAY_FROM_JOB`; on WinError 5 it retries once with `CREATE_NO_WINDOW` only. It passes explicit `cwd` and `env`, and sets stdin/stdout/stderr to `DEVNULL` on both branches. Non-Windows uses creationflags=0 and the same DEVNULL streams.
+- It does not set `DETACHED_PROCESS` or `start_new_session`; process-group/session detachment is not established by this code.
+- `connect_or_start` can pass `--owner-pid` to the child. LIVE `run_service` opens a handle to that owner on Windows and its watchdog closes the server when the owner process signals; non-Windows polls owner PID liveness.
+- Therefore the primary breakaway branch is intended to avoid host Job Object termination when the launcher exits, but the LIVE service remains owner-scoped when an owner PID is supplied. The fallback does not break away. No actual detached launch was performed.
 
-## TEST_RESULTS
+TEST/CODE LIMIT — `tests/test_live_job_object.py` asserts flags/fallback and contains a Windows-only Job Object integration test; these are LIVE-service tests, not MCP-backend lifecycle certification.
 
-PASS
+## DURABLE_RECORD_EVIDENCE
 
-- `python -m py_compile contextor/mcp_server.py tests/test_mcp_shared_backend_server_mode.py`: exit 0.
-- `pytest -q tests/test_mcp_shared_backend_server_mode.py`: 13 passed.
-- `pytest -q tests/test_mcp_child_process_cleanup.py`: 4 passed.
-- `pytest -q tests/test_mcp_regressions.py`: 89 passed.
-- Each pytest invocation reported one existing FastMCP/Authlib deprecation warning; no test failure occurred.
-- Full repository pytest was not run.
+DIRECT_EVIDENCE:
 
-## CONTEXTOR_VERIFICATION
+- Current process registry path: `C:\Temp\Contextor_Repo\.contextor\mcp_processes` when the repo root is supplied and no environment override is set.
+- Process registry JSON contains PID/process identity and parent ownership fields listed above, but not HTTP host, port, transport, endpoint, registry path reference, status, or backend lifecycle state.
+- In persistent-backend role, server root registration returns no record; server atexit still runs `_shutdown_mcp_owned_processes`, which shuts down analysis work and cleans records owned by that server PID, then orphaned records.
+- The repository identity registry stores repository identity metadata, not backend runtime metadata.
 
-PRE_EDIT:
+INFERENCE — current shutdown/orphan cleanup is session/server-process lifecycle logic, not a management plane for a persistent backend. Reusing the child registry for backend ownership without accounting for parent-based cleanup would preserve an ownership tie the persistent role is meant to avoid.
 
-- Contextor architectural edit context, call context, consumers, tests, and module blast radius were retrieved at live revision 1330.
-- The target module was `contextor.mcp_server`, module ID `213/1`, adapter layer.
-- Pre-edit context reported 31 direct/transitive consumers in the bounded projection and 30 covering tests.
-- The exact source anchors and final-block boundary were confirmed before patching.
+## TOKEN_STORAGE_EVIDENCE
 
-POST_EDIT:
+DIRECT_EVIDENCE — `contextor/mcp_server.py:525-571`:
 
-- `get_live_events(after_revision=1330)` returned the final watcher observations:
-  - revision 1331, status UPDATED, file `contextor.mcp_server.py`, blast radius fresh;
-  - revision 1332, status UPDATED, file `contextor.mcp_server.py`, blast radius deferred;
-  - revision 1333, status UPDATED, file `tests.test_mcp_shared_backend_server_mode.py`, blast radius fresh;
-  - revision 1334, status UNCHANGED, file `contextor.mcp_server.py`, blast radius deferred;
-  - revision 1335, status UPDATED, file `contextor.mcp_server.py`, blast radius deferred.
-- Final live revision is 1335; continuity is continuous and resync is false.
-- Post-edit source ranges show the exact auth/bootstrap and role/main implementations in the canonical source.
-- Final `get_file_edit_context(mode=minimal)` returned live revision 1335, syntax diagnostics checked-and-none, zero name collisions, zero cycles, no warnings, and no layer violations.
-- Final post-edit bounded context reports 32 direct/transitive consumers and 31 covering tests, including the new focused test module.
-- Final post-edit live diagnostics summary: syntax_errors=0, name_collisions=0, cycles=0, attention_required=false.
-- The post-edit module blast-radius response reports canonical state fresh and provenance live, but its `workspace_sync` field is `unverified`; therefore `workspace_sync=verified` is not claimed.
-- No `update_file` call was made.
+- HTTP bootstrap reads `CONTEXTOR_MCP_TOKEN`, rejects missing/shorter-than-32/surrounding-whitespace values, creates the bearer verifier, passes it as `FastMCP(..., auth=auth)`, then removes the environment variable.
+- No token value is persisted by this path. The verifier retains its configured credential in process memory.
 
-## MCP_SERVER_RESTART_REQUIRED
+LITERAL_SOURCE_CHECK:
 
-MCP_SERVER_RESTART_REQUIRED=YES
+- `rg` found no explicit Windows ACL/DACL, DPAPI, Credential Manager, keyring, or `chmod` helper in `contextor`.
+- The only `0o600` literals are in `contextor/core/runtime_trace.py` and `contextor/core/analysis/full_analysis_coordinator.py`; no Windows ACL semantics or reusable secret-storage contract is proved by those hits.
+- `contextor/core/live_state/ipc.py` uses `secrets.token_bytes(32)` for an IPC auth key; that is not the MCP bearer-token lifecycle and no durable bearer secret store is shown.
+- Current tests cover token validation/verifier behavior and environment removal; they do not cover persistent secret storage or Windows permissions.
 
-The changed file is active MCP server code. No MCP or Desktop restart was performed.
+## CLI_ROUTING_EVIDENCE
 
-## FULL_DIFFS
+DIRECT_EVIDENCE:
 
-### contextor/mcp_server.py
+- `pyproject.toml:21-23`: `contextor = contextor.__main__:main`; `contextor-mcp = contextor.mcp_main:main`.
+- `contextor/__main__.py:78-92`: `--gui` selects GUI; otherwise arguments go to `contextor.cli.main`.
+- `contextor/cli.py:23-69, 72-125`: current parser has no subparsers/backend actions and routes to repository analysis.
+- `contextor/mcp_main.py:4-7`: dedicated MCP server entrypoint calls `contextor.mcp_server.main`.
+- `config_jsons/mcp_config.json` and `config_jsons/config.toml` show stdio invocation of `contextor.mcp_server`; they contain no persistent HTTP backend client stanza.
 
-```diff
-diff --git a/contextor/mcp_server.py b/contextor/mcp_server.py
-index b6636c7..1f6cc4d 100644
---- a/contextor/mcp_server.py
-+++ b/contextor/mcp_server.py
-@@ -111,6 +111,8 @@ The MCP server must start silently and wait for JSON-RPC messages.
- """
- import asyncio
- import atexit
-+import hashlib
-+import hmac
- import os
- import sys
- import warnings
-@@ -169,6 +171,7 @@ warnings.filterwarnings("ignore")
- 
- from typing import Any, Callable
- from fastmcp import FastMCP
-+from fastmcp.server.auth.auth import AccessToken, TokenVerifier
- from fastmcp.exceptions import ToolError
- from fastmcp.server.middleware import Middleware, MiddlewareContext
- from fastmcp.tools.tool import ToolResult
-@@ -448,10 +451,128 @@ class _GetSymbolImplementationInputBoundaryMiddleware(
-             )
- 
- 
-+_HTTP_TRANSPORTS = frozenset(
-+    {
-+        "http",
-+        "streamable-http",
-+    }
-+)
-+
-+_SERVER_ROLES = frozenset(
-+    {
-+        "host-owned",
-+        "persistent-backend",
-+    }
-+)
-+
-+_MIN_MCP_TOKEN_LENGTH = 32
-+
-+
-+def _mcp_transport_from_environment() -> str:
-+    transport = os.environ.get(
-+        "CONTEXTOR_MCP_TRANSPORT",
-+        "stdio",
-+    ).strip().lower()
-+
-+    if transport not in {
-+        "stdio",
-+        "http",
-+        "streamable-http",
-+    }:
-+        raise RuntimeError(
-+            "Unsupported CONTEXTOR_MCP_TRANSPORT: "
-+            f"{transport!r}"
-+        )
-+
-+    return transport
-+
-+
-+_MCP_BOOTSTRAP_TRANSPORT = (
-+    _mcp_transport_from_environment()
-+)
-+
-+
-+class _ContextorBearerTokenVerifier(TokenVerifier):
-+    def __init__(self, token: str) -> None:
-+        super().__init__()
-+        self._expected_digest = hashlib.sha256(
-+            token.encode("utf-8")
-+        ).digest()
-+
-+    async def verify_token(
-+        self,
-+        token: str,
-+    ) -> AccessToken | None:
-+        candidate_digest = hashlib.sha256(
-+            token.encode("utf-8")
-+        ).digest()
-+
-+        if not hmac.compare_digest(
-+            candidate_digest,
-+            self._expected_digest,
-+        ):
-+            return None
-+
-+        return AccessToken(
-+            token=token,
-+            client_id="contextor-local",
-+            scopes=[],
-+            expires_at=None,
-+            claims={},
-+        )
-+
-+
-+def _build_mcp_auth_from_environment(
-+    transport: str,
-+) -> TokenVerifier | None:
-+    if transport not in _HTTP_TRANSPORTS:
-+        return None
-+
-+    token = os.environ.get(
-+        "CONTEXTOR_MCP_TOKEN"
-+    )
-+
-+    if (
-+        token is None
-+        or len(token) < _MIN_MCP_TOKEN_LENGTH
-+        or token != token.strip()
-+    ):
-+        raise RuntimeError(
-+            "Streamable HTTP Contextor MCP requires "
-+            "CONTEXTOR_MCP_TOKEN containing at least "
-+            "32 non-whitespace-surrounded characters."
-+        )
-+
-+    return _ContextorBearerTokenVerifier(token)
-+
-+
- # Initialize FastMCP Server
--mcp = FastMCP("Contextor")
--mcp.add_middleware(
--    _GetSymbolImplementationInputBoundaryMiddleware()
-+def _create_mcp(
-+    transport: str,
-+) -> FastMCP:
-+    auth = _build_mcp_auth_from_environment(
-+        transport
-+    )
-+
-+    server = FastMCP(
-+        "Contextor",
-+        auth=auth,
-+    )
-+    server.add_middleware(
-+        _GetSymbolImplementationInputBoundaryMiddleware()
-+    )
-+
-+    if auth is not None:
-+        os.environ.pop(
-+            "CONTEXTOR_MCP_TOKEN",
-+            None,
-+        )
-+
-+    return server
-+
-+
-+mcp = _create_mcp(
-+    _MCP_BOOTSTRAP_TRANSPORT
- )
- 
- 
-@@ -809,43 +930,129 @@ contextor_profile_analysis = register_mcp_tool(
- )
- 
- 
-+def _server_role_from_environment() -> str:
-+    role = os.environ.get(
-+        "CONTEXTOR_MCP_SERVER_ROLE",
-+        "host-owned",
-+    ).strip().lower()
-+
-+    if role not in _SERVER_ROLES:
-+        raise RuntimeError(
-+            "Unsupported CONTEXTOR_MCP_SERVER_ROLE: "
-+            f"{role!r}"
-+        )
-+
-+    return role
-+
-+
-+def _process_directory_from_environment() -> Path:
-+    configured = os.environ.get(
-+        "CONTEXTOR_MCP_PROCESS_REGISTRY"
-+    )
-+
-+    if configured:
-+        return Path(
-+            configured
-+        ).expanduser().resolve()
-+
-+    return registry_dir(
-+        Path.cwd().resolve()
-+    )
-+
-+
-+def _register_server_root(
-+    process_directory: Path,
-+    role: str,
-+) -> Path | None:
-+    if role == "persistent-backend":
-+        return None
-+
-+    return register_process(
-+        process_directory,
-+        pid=os.getpid(),
-+        parent_pid=os.getppid(),
-+        kind="mcp-server",
-+        executable=sys.executable,
-+    )
-+
-+
- def main():
-     """Entry point for the MCP server."""
-     if sys.platform == "win32":
--        sys.stdout.reconfigure(encoding="utf-8")
--        sys.stderr.reconfigure(encoding="utf-8")
-+        sys.stdout.reconfigure(
-+            encoding="utf-8"
-+        )
-+        sys.stderr.reconfigure(
-+            encoding="utf-8"
-+        )
-+
-     import asyncio
- 
--    process_directory = registry_dir(
--        Path.cwd().resolve()
-+    transport = (
-+        _mcp_transport_from_environment()
-+    )
-+
-+    if transport != _MCP_BOOTSTRAP_TRANSPORT:
-+        raise RuntimeError(
-+            "CONTEXTOR_MCP_TRANSPORT changed after "
-+            "FastMCP construction; transport and auth "
-+            "must be selected before importing "
-+            "contextor.mcp_server."
-+        )
-+
-+    role = _server_role_from_environment()
-+
-+    if (
-+        role == "persistent-backend"
-+        and transport not in _HTTP_TRANSPORTS
-+    ):
-+        raise RuntimeError(
-+            "persistent-backend role requires "
-+            "Streamable HTTP transport."
-+        )
-+
-+    process_directory = (
-+        _process_directory_from_environment()
-+    )
-+
-+    _cleanup_orphaned_processes(
-+        process_directory
-     )
--    _cleanup_orphaned_processes(process_directory)
-+
-     previous_registry = os.environ.get(
-         "CONTEXTOR_MCP_PROCESS_REGISTRY"
-     )
-+
-     os.environ[
-         "CONTEXTOR_MCP_PROCESS_REGISTRY"
-     ] = str(process_directory)
--    server_record = register_process(
-+
-+    server_record = _register_server_root(
-         process_directory,
--        pid=os.getpid(),
--        parent_pid=os.getppid(),
--        kind="mcp-server",
--        executable=sys.executable,
-+        role,
-     )
-+
-     cleanup_done = False
-+
-     def _shutdown_cleanup() -> None:
-         nonlocal cleanup_done
-+
-         if cleanup_done:
-             return
-+
-         cleanup_done = True
-+
-         try:
-             _shutdown_mcp_owned_processes(
-                 process_directory,
-                 os.getpid(),
-             )
-         finally:
--            remove_record(server_record)
-+            if server_record is not None:
-+                remove_record(
-+                    server_record
-+                )
-+
-             if previous_registry is None:
-                 os.environ.pop(
-                     "CONTEXTOR_MCP_PROCESS_REGISTRY",
-@@ -856,26 +1063,24 @@ def main():
-                     "CONTEXTOR_MCP_PROCESS_REGISTRY"
-                 ] = previous_registry
- 
--    atexit.register(_shutdown_cleanup)
--    transport = os.environ.get(
--        "CONTEXTOR_MCP_TRANSPORT",
--        "stdio",
--    ).lower()
-+    atexit.register(
-+        _shutdown_cleanup
-+    )
-+
-     async def _run():
--        if transport in {
--            "http",
--            "streamable-http",
--        }:
-+        if transport in _HTTP_TRANSPORTS:
-             host = os.environ.get(
-                 "CONTEXTOR_MCP_HOST",
-                 "127.0.0.1",
-             )
-+
-             port = int(
-                 os.environ.get(
-                     "CONTEXTOR_MCP_PORT",
-                     "8765",
-                 )
-             )
-+
-             await mcp.run_http_async(
-                 transport="streamable-http",
-                 host=host,
-@@ -884,8 +1089,11 @@ def main():
-             )
-         else:
-             await mcp.run_stdio_async()
-+
-     try:
--        asyncio.run(_run())
-+        asyncio.run(
-+            _run()
-+        )
-     finally:
-         _shutdown_cleanup()
- 
-```
+CONCLUSION — existing top-level command seam is `contextor.cli.main` (reached through `contextor.__main__.main`). There are currently no `backend start/status/stop` routes or command-level tests identified.
 
-### tests/test_mcp_shared_backend_server_mode.py
+## STOP_SAFETY_EVIDENCE
 
-```diff
-diff --git a/tests/test_mcp_shared_backend_server_mode.py b/tests/test_mcp_shared_backend_server_mode.py
-new file mode 100644
---- /dev/null
-+++ b/tests/test_mcp_shared_backend_server_mode.py
-@@ -0,0 +1,611 @@
-+import asyncio
-+from pathlib import Path
-+
-+import pytest
-+
-+from contextor import mcp_server
-+
-+
-+def test_stdio_transport_does_not_require_auth(
-+    monkeypatch,
-+):
-+    monkeypatch.delenv(
-+        "CONTEXTOR_MCP_TOKEN",
-+        raising=False,
-+    )
-+
-+    assert (
-+        mcp_server
-+        ._build_mcp_auth_from_environment(
-+            "stdio"
-+        )
-+        is None
-+    )
-+
-+
-+def test_http_transport_requires_bearer_token(
-+    monkeypatch,
-+):
-+    monkeypatch.delenv(
-+        "CONTEXTOR_MCP_TOKEN",
-+        raising=False,
-+    )
-+
-+    with pytest.raises(
-+        RuntimeError,
-+        match="CONTEXTOR_MCP_TOKEN",
-+    ):
-+        (
-+            mcp_server
-+            ._build_mcp_auth_from_environment(
-+                "streamable-http"
-+            )
-+        )
-+
-+
-+def test_http_token_rejects_surrounding_whitespace(
-+    monkeypatch,
-+):
-+    monkeypatch.setenv(
-+        "CONTEXTOR_MCP_TOKEN",
-+        " " + ("a" * 40),
-+    )
-+
-+    with pytest.raises(
-+        RuntimeError,
-+        match="CONTEXTOR_MCP_TOKEN",
-+    ):
-+        (
-+            mcp_server
-+            ._build_mcp_auth_from_environment(
-+                "streamable-http"
-+            )
-+        )
-+
-+
-+def test_http_verifier_accepts_only_exact_token(
-+    monkeypatch,
-+):
-+    token = "a" * 40
-+
-+    monkeypatch.setenv(
-+        "CONTEXTOR_MCP_TOKEN",
-+        token,
-+    )
-+
-+    verifier = (
-+        mcp_server
-+        ._build_mcp_auth_from_environment(
-+            "streamable-http"
-+        )
-+    )
-+
-+    accepted = asyncio.run(
-+        verifier.verify_token(token)
-+    )
-+    rejected = asyncio.run(
-+        verifier.verify_token(
-+            "b" * 40
-+        )
-+    )
-+
-+    assert accepted is not None
-+    assert (
-+        accepted.client_id
-+        == "contextor-local"
-+    )
-+    assert accepted.scopes == []
-+    assert rejected is None
-+
-+
-+def test_create_mcp_removes_http_secret_from_environment(
-+    monkeypatch,
-+):
-+    token = "c" * 40
-+
-+    monkeypatch.setenv(
-+        "CONTEXTOR_MCP_TOKEN",
-+        token,
-+    )
-+
-+    server = mcp_server._create_mcp(
-+        "streamable-http"
-+    )
-+
-+    assert server is not None
-+    assert (
-+        "CONTEXTOR_MCP_TOKEN"
-+        not in mcp_server.os.environ
-+    )
-+
-+
-+def test_process_registry_environment_is_honored(
-+    tmp_path,
-+    monkeypatch,
-+):
-+    registry = (
-+        tmp_path
-+        / "central-registry"
-+    )
-+
-+    monkeypatch.setenv(
-+        "CONTEXTOR_MCP_PROCESS_REGISTRY",
-+        str(registry),
-+    )
-+
-+    assert (
-+        mcp_server
-+        ._process_directory_from_environment()
-+        == registry.resolve()
-+    )
-+
-+
-+def test_process_registry_falls_back_to_cwd_registry(
-+    tmp_path,
-+    monkeypatch,
-+):
-+    monkeypatch.delenv(
-+        "CONTEXTOR_MCP_PROCESS_REGISTRY",
-+        raising=False,
-+    )
-+    monkeypatch.chdir(tmp_path)
-+
-+    assert (
-+        mcp_server
-+        ._process_directory_from_environment()
-+        == (
-+            tmp_path
-+            / ".contextor"
-+            / "mcp_processes"
-+        ).resolve()
-+    )
-+
-+
-+def test_persistent_backend_role_has_no_host_owned_root_record(
-+    tmp_path,
-+    monkeypatch,
-+):
-+    called = []
-+
-+    monkeypatch.setattr(
-+        mcp_server,
-+        "register_process",
-+        lambda *args, **kwargs: (
-+            called.append(
-+                (args, kwargs)
-+            )
-+            or tmp_path
-+            / "unexpected.json"
-+        ),
-+    )
-+
-+    result = (
-+        mcp_server
-+        ._register_server_root(
-+            tmp_path,
-+            "persistent-backend",
-+        )
-+    )
-+
-+    assert result is None
-+    assert called == []
-+
-+
-+def test_host_owned_role_registers_mcp_server_root(
-+    tmp_path,
-+    monkeypatch,
-+):
-+    captured = {}
-+
-+    def fake_register(
-+        directory,
-+        *,
-+        pid,
-+        parent_pid,
-+        kind,
-+        executable,
-+    ):
-+        captured.update(
-+            {
-+                "directory": directory,
-+                "pid": pid,
-+                "parent_pid": parent_pid,
-+                "kind": kind,
-+                "executable": executable,
-+            }
-+        )
-+        return (
-+            tmp_path
-+            / "mcp-server.json"
-+        )
-+
-+    monkeypatch.setattr(
-+        mcp_server,
-+        "register_process",
-+        fake_register,
-+    )
-+
-+    record = (
-+        mcp_server
-+        ._register_server_root(
-+            tmp_path,
-+            "host-owned",
-+        )
-+    )
-+
-+    assert (
-+        record
-+        == tmp_path
-+        / "mcp-server.json"
-+    )
-+    assert (
-+        captured["directory"]
-+        == tmp_path
-+    )
-+    assert (
-+        captured["kind"]
-+        == "mcp-server"
-+    )
-+
-+
-+def test_persistent_backend_role_rejects_stdio_before_lifecycle_side_effects(
-+    monkeypatch,
-+):
-+    monkeypatch.setattr(
-+        mcp_server.sys,
-+        "platform",
-+        "linux",
-+    )
-+    monkeypatch.setattr(
-+        mcp_server,
-+        "_MCP_BOOTSTRAP_TRANSPORT",
-+        "stdio",
-+    )
-+    monkeypatch.setenv(
-+        "CONTEXTOR_MCP_TRANSPORT",
-+        "stdio",
-+    )
-+    monkeypatch.setenv(
-+        "CONTEXTOR_MCP_SERVER_ROLE",
-+        "persistent-backend",
-+    )
-+
-+    monkeypatch.setattr(
-+        mcp_server,
-+        "_cleanup_orphaned_processes",
-+        lambda _directory: pytest.fail(
-+            "lifecycle side effect occurred"
-+        ),
-+    )
-+
-+    with pytest.raises(
-+        RuntimeError,
-+        match="persistent-backend role",
-+    ):
-+        mcp_server.main()
-+
-+
-+def test_transport_cannot_change_after_fastmcp_construction(
-+    monkeypatch,
-+):
-+    monkeypatch.setattr(
-+        mcp_server.sys,
-+        "platform",
-+        "linux",
-+    )
-+    monkeypatch.setattr(
-+        mcp_server,
-+        "_MCP_BOOTSTRAP_TRANSPORT",
-+        "stdio",
-+    )
-+    monkeypatch.setenv(
-+        "CONTEXTOR_MCP_TRANSPORT",
-+        "streamable-http",
-+    )
-+
-+    monkeypatch.setattr(
-+        mcp_server,
-+        "_cleanup_orphaned_processes",
-+        lambda _directory: pytest.fail(
-+            "lifecycle side effect occurred"
-+        ),
-+    )
-+
-+    with pytest.raises(
-+        RuntimeError,
-+        match="changed after FastMCP construction",
-+    ):
-+        mcp_server.main()
-+
-+
-+def test_host_owned_stdio_main_uses_preconfigured_registry(
-+    tmp_path,
-+    monkeypatch,
-+):
-+    events = []
-+    registry = (
-+        tmp_path
-+        / "registry"
-+    )
-+
-+    monkeypatch.setattr(
-+        mcp_server.sys,
-+        "platform",
-+        "linux",
-+    )
-+    monkeypatch.setattr(
-+        mcp_server,
-+        "_MCP_BOOTSTRAP_TRANSPORT",
-+        "stdio",
-+    )
-+
-+    monkeypatch.setenv(
-+        "CONTEXTOR_MCP_TRANSPORT",
-+        "stdio",
-+    )
-+    monkeypatch.setenv(
-+        "CONTEXTOR_MCP_SERVER_ROLE",
-+        "host-owned",
-+    )
-+    monkeypatch.setenv(
-+        "CONTEXTOR_MCP_PROCESS_REGISTRY",
-+        str(registry),
-+    )
-+
-+    monkeypatch.setattr(
-+        mcp_server,
-+        "_cleanup_orphaned_processes",
-+        lambda directory: events.append(
-+            (
-+                "orphan",
-+                Path(directory),
-+            )
-+        ),
-+    )
-+
-+    def fake_register(
-+        directory,
-+        *,
-+        pid,
-+        parent_pid,
-+        kind,
-+        executable,
-+    ):
-+        events.append(
-+            (
-+                "register",
-+                Path(directory),
-+                kind,
-+            )
-+        )
-+        return (
-+            tmp_path
-+            / "server-record.json"
-+        )
-+
-+    monkeypatch.setattr(
-+        mcp_server,
-+        "register_process",
-+        fake_register,
-+    )
-+
-+    monkeypatch.setattr(
-+        mcp_server,
-+        "_shutdown_mcp_owned_processes",
-+        lambda directory, owner_pid: (
-+            events.append(
-+                (
-+                    "shutdown",
-+                    Path(directory),
-+                )
-+            )
-+        ),
-+    )
-+
-+    monkeypatch.setattr(
-+        mcp_server,
-+        "remove_record",
-+        lambda path: events.append(
-+            (
-+                "remove",
-+                path,
-+            )
-+        ),
-+    )
-+
-+    monkeypatch.setattr(
-+        mcp_server.atexit,
-+        "register",
-+        lambda _callback: None,
-+    )
-+
-+    async def fake_stdio():
-+        events.append(
-+            (
-+                "stdio",
-+            )
-+        )
-+
-+    async def fail_http(**_kwargs):
-+        pytest.fail(
-+            "HTTP transport selected"
-+        )
-+
-+    monkeypatch.setattr(
-+        mcp_server.mcp,
-+        "run_stdio_async",
-+        fake_stdio,
-+    )
-+    monkeypatch.setattr(
-+        mcp_server.mcp,
-+        "run_http_async",
-+        fail_http,
-+    )
-+
-+    mcp_server.main()
-+
-+    assert events[0] == (
-+        "orphan",
-+        registry.resolve(),
-+    )
-+    assert (
-+        "register",
-+        registry.resolve(),
-+        "mcp-server",
-+    ) in events
-+    assert ("stdio",) in events
-+    assert (
-+        "shutdown",
-+        registry.resolve(),
-+    ) in events
-+
-+    assert (
-+        mcp_server.os.environ[
-+            "CONTEXTOR_MCP_PROCESS_REGISTRY"
-+        ]
-+        == str(registry)
-+    )
-+
-+
-+def test_persistent_http_main_uses_shared_registry_without_root_registration(
-+    tmp_path,
-+    monkeypatch,
-+):
-+    events = []
-+    registry = (
-+        tmp_path
-+        / "backend-registry"
-+    )
-+
-+    monkeypatch.setattr(
-+        mcp_server.sys,
-+        "platform",
-+        "linux",
-+    )
-+    monkeypatch.setattr(
-+        mcp_server,
-+        "_MCP_BOOTSTRAP_TRANSPORT",
-+        "streamable-http",
-+    )
-+
-+    monkeypatch.setenv(
-+        "CONTEXTOR_MCP_TRANSPORT",
-+        "streamable-http",
-+    )
-+    monkeypatch.setenv(
-+        "CONTEXTOR_MCP_SERVER_ROLE",
-+        "persistent-backend",
-+    )
-+    monkeypatch.setenv(
-+        "CONTEXTOR_MCP_PROCESS_REGISTRY",
-+        str(registry),
-+    )
-+    monkeypatch.setenv(
-+        "CONTEXTOR_MCP_HOST",
-+        "127.0.0.1",
-+    )
-+    monkeypatch.setenv(
-+        "CONTEXTOR_MCP_PORT",
-+        "8765",
-+    )
-+
-+    monkeypatch.setattr(
-+        mcp_server,
-+        "_cleanup_orphaned_processes",
-+        lambda directory: events.append(
-+            (
-+                "orphan",
-+                Path(directory),
-+            )
-+        ),
-+    )
-+
-+    monkeypatch.setattr(
-+        mcp_server,
-+        "register_process",
-+        lambda *args, **kwargs: pytest.fail(
-+            "persistent backend root was registered "
-+            "as host-owned"
-+        ),
-+    )
-+
-+    monkeypatch.setattr(
-+        mcp_server,
-+        "_shutdown_mcp_owned_processes",
-+        lambda directory, owner_pid: (
-+            events.append(
-+                (
-+                    "shutdown",
-+                    Path(directory),
-+                )
-+            )
-+        ),
-+    )
-+
-+    monkeypatch.setattr(
-+        mcp_server,
-+        "remove_record",
-+        lambda path: events.append(
-+            (
-+                "remove",
-+                path,
-+            )
-+        ),
-+    )
-+
-+    monkeypatch.setattr(
-+        mcp_server.atexit,
-+        "register",
-+        lambda _callback: None,
-+    )
-+
-+    async def fail_stdio():
-+        pytest.fail(
-+            "stdio transport selected"
-+        )
-+
-+    async def fake_http(**kwargs):
-+        events.append(
-+            (
-+                "http",
-+                kwargs,
-+            )
-+        )
-+
-+    monkeypatch.setattr(
-+        mcp_server.mcp,
-+        "run_stdio_async",
-+        fail_stdio,
-+    )
-+    monkeypatch.setattr(
-+        mcp_server.mcp,
-+        "run_http_async",
-+        fake_http,
-+    )
-+
-+    mcp_server.main()
-+
-+    assert events[0] == (
-+        "orphan",
-+        registry.resolve(),
-+    )
-+
-+    http_events = [
-+        event
-+        for event in events
-+        if event[0] == "http"
-+    ]
-+
-+    assert len(http_events) == 1
-+
-+    assert http_events[0][1] == {
-+        "transport": "streamable-http",
-+        "host": "127.0.0.1",
-+        "port": 8765,
-+        "show_banner": False,
-+    }
-+
-+    assert (
-+        "shutdown",
-+        registry.resolve(),
-+    ) in events
-```
+CODE_PATH_PROVED — `contextor/mcp_process_registry.py:150-245, 248-266`:
 
-## FINAL LITERALS
+1. `terminate_registered_process` calls `record_matches_process` once before termination.
+2. On Windows it then runs `taskkill /F /T /PID <pid>`.
+3. If that command returns and the PID is still alive, fallback opens the PID and calls `TerminateProcess`; it does not re-check the opened process handle's creation time or image against the record.
+4. `record_matches_process` itself only compares creation times when both are non-null.
 
-FIXED_BEARER_TOKEN_SUPPORTED_DIRECTLY=YES
-CUSTOM_TOKEN_VERIFIER_REQUIRED=NO
-AUTH_CAN_BE_SELECTED_BEFORE_FASTMCP_CREATION=YES
-PREEXISTING_MCP_REGISTRY_ENV_HONORED=YES
-DETACHED_SPAWN_PRIMITIVE_CONFIRMED=YES
-PID_CREATION_IDENTITY_AVAILABLE=YES
-SAFE_IDENTITY_CHECKED_TREE_TERMINATION_AVAILABLE=YES
-TOP_LEVEL_BACKEND_SUBCOMMAND_EXISTS=NO
-LOCAL_CODEX_DIRECT_HTTP_STANZA_CONFIRMED=YES
+INFERENCE — this is useful stale-record screening, but it is not a proven guarantee against a PID being recycled between the initial check and PID-based termination. It is not sufficient evidence for a strict “never kill a reused PID” backend stop guarantee.
 
-DESIGN_DECISIONS=NONE
-IMPLEMENTATION_PERFORMED=YES
-TESTS_RUN=YES
-CONFIG_CHANGED=NO
-PROCESSES_STARTED=NO
-PROCESSES_TERMINATED=NO
+TEST_COVERAGE — `tests/test_mcp_regressions.py::test_registry_rejects_reused_pid` covers a recorded/current creation-time mismatch before termination. `tests/test_mcp_child_process_cleanup.py::test_windows_registered_process_termination_uses_tree_kill` mocks a matching initial identity followed by a dead PID and asserts taskkill arguments; it does not exercise PID reuse during the kill window. No test of that race was found.
+
+## CLIENT_CONNECTION_EVIDENCE
+
+DIRECT_EVIDENCE — `contextor/mcp_server.py:525-571, 1073-1088` and `pyproject.toml`:
+
+- Server transport is selected as Streamable HTTP; HTTP run receives host from `CONTEXTOR_MCP_HOST` (default `127.0.0.1`) and port from `CONTEXTOR_MCP_PORT` (default `8765`).
+- Server construction receives the bearer verifier; the client must present the configured bearer credential through the HTTP auth contract.
+- The repo’s checked-in MCP client examples configure stdio, not HTTP.
+
+UNKNOWN — the repo does not set the Streamable HTTP URL path or provide a Codex HTTP stanza. The route path is delegated to pinned FastMCP (2.12.4) defaults, so this discovery does not assert an exact URL path or invent client configuration fields. Code-level connection requirements established here are host, port, Streamable HTTP transport, and bearer credential.
+
+## TEST_COVERAGE
+
+Static inspection only; no test was run.
+
+Relevant existing tests:
+
+- `tests/test_mcp_shared_backend_server_mode.py::test_http_transport_requires_bearer_token`
+- `tests/test_mcp_shared_backend_server_mode.py::test_http_verifier_accepts_only_exact_token`
+- `tests/test_mcp_shared_backend_server_mode.py::test_persistent_backend_role_has_no_host_owned_root_record`
+- `tests/test_mcp_regressions.py::test_registry_rejects_reused_pid`
+- `tests/test_mcp_regressions.py::test_startup_cleanup_stops_only_orphaned_registered_processes`
+- `tests/test_mcp_regressions.py::test_shutdown_cleanup_stops_only_children_owned_by_server`
+- `tests/test_mcp_child_process_cleanup.py::test_windows_registered_process_termination_uses_tree_kill`
+- `tests/test_mcp_child_process_cleanup.py::test_mcp_shutdown_order_is_analysis_pool_owned_orphan`
+- `tests/test_live_job_object.py::test_windows_primary_spawn_flags_contain_breakaway_and_no_window`
+- `tests/test_live_job_object.py::test_breakaway_denied_creation_performs_exactly_one_legacy_fallback`
+- `tests/test_live_state_ipc.py::test_real_process_busy_update_does_not_spawn_second_live_owner`
+
+No backend start/status/stop CLI tests, bearer secret persistence/ACL tests, backend concurrent-start tests, or identity-bound PID-reuse-during-termination tests were identified.
+
+## BLAST_RADIUS
+
+- Process registry is high fan-out: 11 direct / 194 transitive consumers and 128 test modules in Contextor file context. Changing its record/termination contract has broad process-management impact beyond MCP.
+- MCP server file context reports 32 direct/transitive consumers and 31 covering test modules. Server startup/shutdown ownership changes cross MCP tools and lifecycle tests.
+- CLI and top-level entrypoint are narrower: `contextor.cli` has 1 direct / 3 transitive consumers and 1 covering test module; `contextor.__main__` has 2 direct consumers and 1 covering test module.
+- LIVE runtime/spawn is shared infrastructure: runtime has 14 direct / 65 transitive consumers and 55 covering test modules; runtime_lease has 5 direct / 70 transitive consumers and 58 covering test modules. Treat them as reference owners unless a later approved scope explicitly changes LIVE behavior.
+- Repository path utilities have 45 direct / 241 transitive consumers and 146 covering test modules; a generic write helper change would have a broad blast radius.
+
+## FILES_REQUIRED_FOR_IMPLEMENTATION
+
+Candidate files directly implicated by the requested future backend lifecycle, with full absolute paths:
+
+- `C:\Temp\Contextor_Repo\contextor\cli.py` — current parser and analysis dispatch; no backend subcommands exist.
+- `C:\Temp\Contextor_Repo\contextor\__main__.py` — top-level executable routing path to the CLI.
+- `C:\Temp\Contextor_Repo\contextor\mcp_server.py` — HTTP/auth construction, persistent role, server root registration, and shutdown hooks.
+- `C:\Temp\Contextor_Repo\contextor\mcp_process_registry.py` — current durable process record, identity matching, and termination contract.
+- `C:\Temp\Contextor_Repo\tests\test_mcp_shared_backend_server_mode.py` — existing G2A transport/auth/role regression coverage.
+- `C:\Temp\Contextor_Repo\tests\test_mcp_regressions.py` — process identity and startup/shutdown cleanup coverage.
+- `C:\Temp\Contextor_Repo\tests\test_mcp_child_process_cleanup.py` — termination and MCP shutdown ordering coverage.
+
+Reference-only files, not established as edit targets by this discovery:
+
+- `C:\Temp\Contextor_Repo\contextor\core\live_state\runtime.py` — LIVE startup-lock, spawn, and owner-watchdog precedent.
+- `C:\Temp\Contextor_Repo\contextor\core\live_state\runtime_lease.py` — LIVE OS file lock and atomic JSON write precedent.
+- `C:\Temp\Contextor_Repo\contextor\core\paths.py` — general atomic replacement helper.
+- `C:\Temp\Contextor_Repo\contextor\core\repository_identity.py` — repository identity metadata/creation lock, not backend identity.
+- `C:\Temp\Contextor_Repo\tests\test_live_job_object.py` and `C:\Temp\Contextor_Repo\tests\test_live_state_ipc.py` — existing LIVE spawn/single-owner behavior, not backend lifecycle tests.
+- `C:\Temp\Contextor_Repo\config_jsons\mcp_config.json`, `C:\Temp\Contextor_Repo\config_jsons\config.toml`, and `C:\Temp\Contextor_Repo\README.md` — inspect/update only if a later task explicitly includes client setup or CLI documentation. The current config files are stdio examples.
+- `C:\Temp\Contextor_Repo\pyproject.toml` — current `contextor` and `contextor-mcp` scripts are already declared; no new executable is established as required here.
+
+No full module was required to answer this discovery. Before a later implementation, read the complete contents of the source candidates and their focused tests above; this discovery fetched exact symbol bodies and targeted test bodies, not whole-file snapshots.
+
+## Diff and next gate
+
+PRODUCTION_TEST_CONFIG_DOC_FILES_CHANGED=NO
+ACTUAL_DIFF=DIFFS=NONE
+TESTS=NOT_RUN_BY_CONTRACT
+PROCESSES_STARTED_OR_STOPPED=NO
+FILES_CHANGED=C:\Temp\Contextor_Repo\walkthrough.md
+NEXT_STEP=WAIT_FOR_USER_COMMAND_PROCEDUJ
