@@ -12,8 +12,10 @@ from contextor.core.analysis.full_analysis_coordinator import (
     acquire_full_analysis,
     release_full_analysis,
 )
+from contextor.core.analysis.state_manager import FileStateManager
 from contextor.core.errors import AnalysisCancelled
 from contextor.core.live_state.watcher import DesktopLiveWatcher
+from contextor.core.paths import repo_cache_dir
 from contextor.core.reporting_engine.persistent_registry import PersistentIdentityRegistry
 from contextor.core.repository_identity import read_repository_identity
 from contextor.ui import gui
@@ -872,7 +874,8 @@ def test_desktop_watcher_recovers_after_live_service_death(tmp_path):
         return recovered_client
 
     watcher._recover_client = mock_recover
-    watcher._trusted_file_state = lambda _snapshot: object()
+    manager = FileStateManager(str(repo_cache_dir(repo)))
+    watcher._trusted_file_state = lambda _snapshot: manager
     watcher._candidate_requires_update = lambda *_args: True
 
     # Simulate watchdog delivery for the changed path.
@@ -962,7 +965,8 @@ def test_desktop_watcher_syntax_error_does_not_trigger_recovery(tmp_path):
     )
     watcher._recover_client = lambda: recovery_called.append(True)
     watcher._candidate_requires_update = lambda *_args: True
-    watcher._trusted_file_state = lambda _snapshot: object()
+    manager = FileStateManager(str(repo_cache_dir(repo)))
+    watcher._trusted_file_state = lambda _snapshot: manager
 
     status_messages = []
     watcher.on_status = lambda msg: status_messages.append(msg)

@@ -6,7 +6,9 @@ from types import SimpleNamespace
 
 import pytest
 
+from contextor.core.analysis.state_manager import FileStateManager
 from contextor.core.live_state import CanonicalLiveServer, DesktopLiveWatcher, LiveStateClient
+from contextor.core.paths import repo_cache_dir
 import contextor.core.live_state.watcher as watcher_module
 
 
@@ -60,9 +62,11 @@ def _make_watcher(tmp_path, *, result_status: str = "UPDATED"):
     watcher = DesktopLiveWatcher(repo, client, interval=0)
     watcher._startup_requires_resync = False
     watcher._startup_pending = []
+    manager = FileStateManager(str(repo_cache_dir(repo)))
     watcher._trusted_file_state = lambda _snapshot: SimpleNamespace(
         has_changed=lambda _path: True,
         tracked_paths=lambda: {item[0] for item in updates},
+        get_current_file_state=manager.get_current_file_state,
         revision=1,
         state_id="sid",
     )
@@ -218,9 +222,11 @@ def test_syntax_error_and_recovery_contract_survives_watchdog_adapter(tmp_path):
     )
     watcher._startup_requires_resync = False
     watcher._startup_pending = []
+    manager = FileStateManager(str(repo_cache_dir(repo)))
     watcher._trusted_file_state = lambda _snapshot: SimpleNamespace(
         has_changed=lambda _path: True,
         tracked_paths=lambda: {str(target.resolve())},
+        get_current_file_state=manager.get_current_file_state,
         revision=0,
         state_id="sid",
     )

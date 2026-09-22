@@ -39,6 +39,8 @@ from contextor.core.live_state import (
     LiveStateClient,
 )
 from contextor.core.live_state.ipc import ACTIVITY_EVENT_RETENTION
+from contextor.core.analysis.state_manager import FileStateManager
+from contextor.core.paths import repo_cache_dir
 from contextor.core.reporting_engine.persistent_registry import PersistentIdentityRegistry
 from contextor.mcp import runtime as mcp_runtime
 from contextor.mcp_server import (
@@ -694,9 +696,11 @@ def test_desktop_watcher_and_mcp_update_file_single_event_semantics(tmp_path):
         client,
         on_status=lambda msg: gui_status_callback(msg, event=None),
     )
+    manager = FileStateManager(str(repo_cache_dir(repo)))
     watcher._trusted_file_state = lambda _snapshot: SimpleNamespace(
         has_changed=lambda _path: True,
         tracked_paths=lambda: set(),
+        get_current_file_state=manager.get_current_file_state,
         revision=1,
         state_id="sid",
     )
