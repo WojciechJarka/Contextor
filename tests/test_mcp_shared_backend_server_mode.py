@@ -1,9 +1,15 @@
 import asyncio
+import os
 from pathlib import Path
 
 import pytest
 
 from contextor import mcp_server
+from contextor.mcp_backend_state import (
+    BackendAlreadyRunning,
+    PersistentBackendLease,
+    read_backend_record,
+)
 
 
 def test_stdio_transport_does_not_require_auth(
@@ -501,6 +507,10 @@ def test_persistent_http_main_uses_shared_registry_without_root_registration(
         str(registry),
     )
     monkeypatch.setenv(
+        "CONTEXTOR_STATE_DIR",
+        str(tmp_path / "state"),
+    )
+    monkeypatch.setenv(
         "CONTEXTOR_MCP_HOST",
         "127.0.0.1",
     )
@@ -565,6 +575,14 @@ def test_persistent_http_main_uses_shared_registry_without_root_registration(
         )
 
     async def fake_http(**kwargs):
+        record = read_backend_record()
+        assert record is not None
+        assert record.pid == os.getpid()
+        assert record.server_role == "persistent-backend"
+        assert record.transport == "streamable-http"
+        assert record.host == "127.0.0.1"
+        assert record.port == 8765
+        assert Path(record.process_registry) == registry.resolve()
         events.append(
             (
                 "http",
@@ -609,3 +627,66 @@ def test_persistent_http_main_uses_shared_registry_without_root_registration(
         "shutdown",
         registry.resolve(),
     ) in events
+    assert read_backend_record() is None
+
+
+def test_second_persistent_backend_is_rejected_before_lifecycle_side_effects(
+    tmp_path,
+    monkeypatch,
+):
+    registry = tmp_path / "registry"
+    monkeypatch.setenv(
+        "CONTEXTOR_STATE_DIR",
+        str(tmp_path / "state"),
+    )
+    monkeypatch.setenv(
+        "CONTEXTOR_MCP_TRANSPORT",
+        "streamable-http",
+    )
+    monkeypatch.setenv(
+        "CONTEXTOR_MCP_SERVER_ROLE",
+        "persistent-backend",
+    )
+    monkeypatch.setenv(
+        "CONTEXTOR_MCP_PROCESS_REGISTRY",
+        str(registry),
+    )
+    monkeypatch.setenv(
+        "CONTEXTOR_MCP_HOST",
+        "127.0.0.1",
+    )
+    monkeypatch.setenv(
+        "CONTEXTOR_MCP_PORT",
+        "8765",
+    )
+    monkeypatch.setattr(
+        mcp_server.sys,
+        "platform",
+        "linux",
+    )
+    monkeypatch.setattr(
+        mcp_server,
+        "_MCP_BOOTSTRAP_TRANSPORT",
+        "streamable-http",
+    )
+
+    lease = PersistentBackendLease.acquire(
+        host="127.0.0.1",
+        port=8765,
+        transport="streamable-http",
+        process_registry=registry,
+    )
+
+    try:
+        monkeypatch.setattr(
+            mcp_server,
+            "_cleanup_orphaned_processes",
+            lambda *_args, **_kwargs: pytest.fail(
+                "lifecycle side effect occurred"
+            ),
+        )
+
+        with pytest.raises(BackendAlreadyRunning):
+            mcp_server.main()
+    finally:
+        lease.release()

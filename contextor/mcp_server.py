@@ -189,6 +189,9 @@ from contextor.mcp_process_registry import (
     remove_record,
     terminate_registered_process,
 )
+from contextor.mcp_backend_state import (
+    PersistentBackendLease,
+)
 from contextor.mcp.documentation import short_description
 from contextor.mcp.tools.get_artifact_blast_radius import (
     get_artifact_blast_radius as _get_artifact_blast_radius_impl,
@@ -1015,87 +1018,112 @@ def main():
         _process_directory_from_environment()
     )
 
-    _cleanup_orphaned_processes(
-        process_directory
-    )
+    http_host = None
+    http_port = None
 
-    previous_registry = os.environ.get(
-        "CONTEXTOR_MCP_PROCESS_REGISTRY"
-    )
+    if transport in _HTTP_TRANSPORTS:
+        http_host = os.environ.get(
+            "CONTEXTOR_MCP_HOST",
+            "127.0.0.1",
+        )
 
-    os.environ[
-        "CONTEXTOR_MCP_PROCESS_REGISTRY"
-    ] = str(process_directory)
-
-    server_record = _register_server_root(
-        process_directory,
-        role,
-    )
-
-    cleanup_done = False
-
-    def _shutdown_cleanup() -> None:
-        nonlocal cleanup_done
-
-        if cleanup_done:
-            return
-
-        cleanup_done = True
-
-        try:
-            _shutdown_mcp_owned_processes(
-                process_directory,
-                os.getpid(),
+        http_port = int(
+            os.environ.get(
+                "CONTEXTOR_MCP_PORT",
+                "8765",
             )
-        finally:
-            if server_record is not None:
-                remove_record(
-                    server_record
-                )
+        )
 
-            if previous_registry is None:
-                os.environ.pop(
-                    "CONTEXTOR_MCP_PROCESS_REGISTRY",
-                    None,
-                )
-            else:
-                os.environ[
-                    "CONTEXTOR_MCP_PROCESS_REGISTRY"
-                ] = previous_registry
+    backend_lease = None
 
-    atexit.register(
-        _shutdown_cleanup
-    )
-
-    async def _run():
-        if transport in _HTTP_TRANSPORTS:
-            host = os.environ.get(
-                "CONTEXTOR_MCP_HOST",
-                "127.0.0.1",
-            )
-
-            port = int(
-                os.environ.get(
-                    "CONTEXTOR_MCP_PORT",
-                    "8765",
-                )
-            )
-
-            await mcp.run_http_async(
+    if role == "persistent-backend":
+        backend_lease = (
+            PersistentBackendLease.acquire(
+                host=http_host,
+                port=http_port,
                 transport="streamable-http",
-                host=host,
-                port=port,
-                show_banner=False,
+                process_registry=process_directory,
             )
-        else:
-            await mcp.run_stdio_async()
+        )
+
+        atexit.register(
+            backend_lease.release
+        )
 
     try:
-        asyncio.run(
-            _run()
+        _cleanup_orphaned_processes(
+            process_directory
         )
+
+        previous_registry = os.environ.get(
+            "CONTEXTOR_MCP_PROCESS_REGISTRY"
+        )
+
+        os.environ[
+            "CONTEXTOR_MCP_PROCESS_REGISTRY"
+        ] = str(process_directory)
+
+        server_record = _register_server_root(
+            process_directory,
+            role,
+        )
+
+        cleanup_done = False
+
+        def _shutdown_cleanup() -> None:
+            nonlocal cleanup_done
+
+            if cleanup_done:
+                return
+
+            cleanup_done = True
+
+            try:
+                _shutdown_mcp_owned_processes(
+                    process_directory,
+                    os.getpid(),
+                )
+            finally:
+                if server_record is not None:
+                    remove_record(
+                        server_record
+                    )
+
+                if previous_registry is None:
+                    os.environ.pop(
+                        "CONTEXTOR_MCP_PROCESS_REGISTRY",
+                        None,
+                    )
+                else:
+                    os.environ[
+                        "CONTEXTOR_MCP_PROCESS_REGISTRY"
+                    ] = previous_registry
+
+        atexit.register(
+            _shutdown_cleanup
+        )
+
+        async def _run():
+            if transport in _HTTP_TRANSPORTS:
+                await mcp.run_http_async(
+                    transport="streamable-http",
+                    host=http_host,
+                    port=http_port,
+                    show_banner=False,
+                )
+            else:
+                await mcp.run_stdio_async()
+
+        try:
+            asyncio.run(
+                _run()
+            )
+        finally:
+            _shutdown_cleanup()
+
     finally:
-        _shutdown_cleanup()
+        if backend_lease is not None:
+            backend_lease.release()
 
 
 if __name__ == "__main__":
