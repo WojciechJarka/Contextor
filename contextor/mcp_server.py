@@ -111,6 +111,8 @@ The MCP server must start silently and wait for JSON-RPC messages.
 """
 import asyncio
 import atexit
+import hashlib
+import hmac
 import os
 import sys
 import warnings
@@ -169,6 +171,7 @@ warnings.filterwarnings("ignore")
 
 from typing import Any, Callable
 from fastmcp import FastMCP
+from fastmcp.server.auth.auth import AccessToken, TokenVerifier
 from fastmcp.exceptions import ToolError
 from fastmcp.server.middleware import Middleware, MiddlewareContext
 from fastmcp.tools.tool import ToolResult
@@ -448,10 +451,128 @@ class _GetSymbolImplementationInputBoundaryMiddleware(
             )
 
 
+_HTTP_TRANSPORTS = frozenset(
+    {
+        "http",
+        "streamable-http",
+    }
+)
+
+_SERVER_ROLES = frozenset(
+    {
+        "host-owned",
+        "persistent-backend",
+    }
+)
+
+_MIN_MCP_TOKEN_LENGTH = 32
+
+
+def _mcp_transport_from_environment() -> str:
+    transport = os.environ.get(
+        "CONTEXTOR_MCP_TRANSPORT",
+        "stdio",
+    ).strip().lower()
+
+    if transport not in {
+        "stdio",
+        "http",
+        "streamable-http",
+    }:
+        raise RuntimeError(
+            "Unsupported CONTEXTOR_MCP_TRANSPORT: "
+            f"{transport!r}"
+        )
+
+    return transport
+
+
+_MCP_BOOTSTRAP_TRANSPORT = (
+    _mcp_transport_from_environment()
+)
+
+
+class _ContextorBearerTokenVerifier(TokenVerifier):
+    def __init__(self, token: str) -> None:
+        super().__init__()
+        self._expected_digest = hashlib.sha256(
+            token.encode("utf-8")
+        ).digest()
+
+    async def verify_token(
+        self,
+        token: str,
+    ) -> AccessToken | None:
+        candidate_digest = hashlib.sha256(
+            token.encode("utf-8")
+        ).digest()
+
+        if not hmac.compare_digest(
+            candidate_digest,
+            self._expected_digest,
+        ):
+            return None
+
+        return AccessToken(
+            token=token,
+            client_id="contextor-local",
+            scopes=[],
+            expires_at=None,
+            claims={},
+        )
+
+
+def _build_mcp_auth_from_environment(
+    transport: str,
+) -> TokenVerifier | None:
+    if transport not in _HTTP_TRANSPORTS:
+        return None
+
+    token = os.environ.get(
+        "CONTEXTOR_MCP_TOKEN"
+    )
+
+    if (
+        token is None
+        or len(token) < _MIN_MCP_TOKEN_LENGTH
+        or token != token.strip()
+    ):
+        raise RuntimeError(
+            "Streamable HTTP Contextor MCP requires "
+            "CONTEXTOR_MCP_TOKEN containing at least "
+            "32 non-whitespace-surrounded characters."
+        )
+
+    return _ContextorBearerTokenVerifier(token)
+
+
 # Initialize FastMCP Server
-mcp = FastMCP("Contextor")
-mcp.add_middleware(
-    _GetSymbolImplementationInputBoundaryMiddleware()
+def _create_mcp(
+    transport: str,
+) -> FastMCP:
+    auth = _build_mcp_auth_from_environment(
+        transport
+    )
+
+    server = FastMCP(
+        "Contextor",
+        auth=auth,
+    )
+    server.add_middleware(
+        _GetSymbolImplementationInputBoundaryMiddleware()
+    )
+
+    if auth is not None:
+        os.environ.pop(
+            "CONTEXTOR_MCP_TOKEN",
+            None,
+        )
+
+    return server
+
+
+mcp = _create_mcp(
+    _MCP_BOOTSTRAP_TRANSPORT
 )
 
 
@@ -809,43 +930,129 @@ contextor_profile_analysis = register_mcp_tool(
 )
 
 
-def main():
-    """Entry point for the MCP server."""
-    if sys.platform == "win32":
-        sys.stdout.reconfigure(encoding="utf-8")
-        sys.stderr.reconfigure(encoding="utf-8")
-    import asyncio
+def _server_role_from_environment() -> str:
+    role = os.environ.get(
+        "CONTEXTOR_MCP_SERVER_ROLE",
+        "host-owned",
+    ).strip().lower()
 
-    process_directory = registry_dir(
+    if role not in _SERVER_ROLES:
+        raise RuntimeError(
+            "Unsupported CONTEXTOR_MCP_SERVER_ROLE: "
+            f"{role!r}"
+        )
+
+    return role
+
+
+def _process_directory_from_environment() -> Path:
+    configured = os.environ.get(
+        "CONTEXTOR_MCP_PROCESS_REGISTRY"
+    )
+
+    if configured:
+        return Path(
+            configured
+        ).expanduser().resolve()
+
+    return registry_dir(
         Path.cwd().resolve()
     )
-    _cleanup_orphaned_processes(process_directory)
-    previous_registry = os.environ.get(
-        "CONTEXTOR_MCP_PROCESS_REGISTRY"
-    )
-    os.environ[
-        "CONTEXTOR_MCP_PROCESS_REGISTRY"
-    ] = str(process_directory)
-    server_record = register_process(
+
+
+def _register_server_root(
+    process_directory: Path,
+    role: str,
+) -> Path | None:
+    if role == "persistent-backend":
+        return None
+
+    return register_process(
         process_directory,
         pid=os.getpid(),
         parent_pid=os.getppid(),
         kind="mcp-server",
         executable=sys.executable,
     )
+
+
+def main():
+    """Entry point for the MCP server."""
+    if sys.platform == "win32":
+        sys.stdout.reconfigure(
+            encoding="utf-8"
+        )
+        sys.stderr.reconfigure(
+            encoding="utf-8"
+        )
+
+    import asyncio
+
+    transport = (
+        _mcp_transport_from_environment()
+    )
+
+    if transport != _MCP_BOOTSTRAP_TRANSPORT:
+        raise RuntimeError(
+            "CONTEXTOR_MCP_TRANSPORT changed after "
+            "FastMCP construction; transport and auth "
+            "must be selected before importing "
+            "contextor.mcp_server."
+        )
+
+    role = _server_role_from_environment()
+
+    if (
+        role == "persistent-backend"
+        and transport not in _HTTP_TRANSPORTS
+    ):
+        raise RuntimeError(
+            "persistent-backend role requires "
+            "Streamable HTTP transport."
+        )
+
+    process_directory = (
+        _process_directory_from_environment()
+    )
+
+    _cleanup_orphaned_processes(
+        process_directory
+    )
+
+    previous_registry = os.environ.get(
+        "CONTEXTOR_MCP_PROCESS_REGISTRY"
+    )
+
+    os.environ[
+        "CONTEXTOR_MCP_PROCESS_REGISTRY"
+    ] = str(process_directory)
+
+    server_record = _register_server_root(
+        process_directory,
+        role,
+    )
+
     cleanup_done = False
+
     def _shutdown_cleanup() -> None:
         nonlocal cleanup_done
+
         if cleanup_done:
             return
+
         cleanup_done = True
+
         try:
             _shutdown_mcp_owned_processes(
                 process_directory,
                 os.getpid(),
             )
         finally:
-            remove_record(server_record)
+            if server_record is not None:
+                remove_record(
+                    server_record
+                )
+
             if previous_registry is None:
                 os.environ.pop(
                     "CONTEXTOR_MCP_PROCESS_REGISTRY",
@@ -856,26 +1063,24 @@ def main():
                     "CONTEXTOR_MCP_PROCESS_REGISTRY"
                 ] = previous_registry
 
-    atexit.register(_shutdown_cleanup)
-    transport = os.environ.get(
-        "CONTEXTOR_MCP_TRANSPORT",
-        "stdio",
-    ).lower()
+    atexit.register(
+        _shutdown_cleanup
+    )
+
     async def _run():
-        if transport in {
-            "http",
-            "streamable-http",
-        }:
+        if transport in _HTTP_TRANSPORTS:
             host = os.environ.get(
                 "CONTEXTOR_MCP_HOST",
                 "127.0.0.1",
             )
+
             port = int(
                 os.environ.get(
                     "CONTEXTOR_MCP_PORT",
                     "8765",
                 )
             )
+
             await mcp.run_http_async(
                 transport="streamable-http",
                 host=host,
@@ -884,8 +1089,11 @@ def main():
             )
         else:
             await mcp.run_stdio_async()
+
     try:
-        asyncio.run(_run())
+        asyncio.run(
+            _run()
+        )
     finally:
         _shutdown_cleanup()
 
