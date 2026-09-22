@@ -122,15 +122,17 @@ def _install_observed_cache_lock(
 def test_same_root_double_hydration_is_serialized(tmp_path, monkeypatch):
     root = tmp_path / "repo"
     root.mkdir()
-    root_key = str(root.resolve())
+    root_key, observed_lock = _install_observed_cache_lock(
+        monkeypatch,
+        root,
+        "second-hydrator",
+    )
     state = SimpleNamespace(revision=7, state_id="state-7")
     builds = []
     first_build_entered = threading.Event()
     release_first_build = threading.Event()
-    second_get_entered = threading.Event()
     results = []
     errors = []
-    second_thread_id = [None]
 
     class FakeClient:
         endpoint = SimpleNamespace(host="127.0.0.1", port=9000, authkey_hex="auth")
@@ -170,15 +172,6 @@ def test_same_root_double_hydration_is_serialized(tmp_path, monkeypatch):
     monkeypatch.setattr(core_registry, "PersistentIdentityRegistry", FakeRegistry)
     monkeypatch.setattr(core_paths, "repo_cache_dir", lambda _root: root / ".cache")
 
-    real_get_or_init_engine = mcp_runtime.get_or_init_engine
-
-    def wrapped_get_or_init_engine(candidate_root):
-        if threading.get_ident() == second_thread_id[0]:
-            second_get_entered.set()
-        return real_get_or_init_engine(candidate_root)
-
-    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", wrapped_get_or_init_engine)
-
     def hydrate():
         try:
             results.append(mcp_runtime.get_or_init_engine(root))
@@ -190,21 +183,29 @@ def test_same_root_double_hydration_is_serialized(tmp_path, monkeypatch):
     assert first_build_entered.wait(timeout=2), errors
 
     def hydrate_second():
-        second_thread_id[0] = threading.get_ident()
         try:
-            results.append(mcp_runtime.get_or_init_engine(root))
+            results.append(
+                mcp_runtime.get_or_init_engine(root)
+            )
         except BaseException as exc:
             errors.append(exc)
 
-    second = threading.Thread(target=hydrate_second)
+    second = threading.Thread(
+        target=hydrate_second,
+        name="second-hydrator",
+    )
     second.start()
-    assert second_get_entered.wait(timeout=2)
+    assert observed_lock.attempted.wait(timeout=2)
+    assert observed_lock.acquired.is_set() is False
+    assert len(builds) == 1
+
     release_first_build.set()
     first.join(timeout=2)
     second.join(timeout=2)
 
     assert not first.is_alive()
     assert not second.is_alive()
+    assert observed_lock.acquired.is_set() is True
     assert errors == []
     assert len(builds) == 1
     assert len(results) == 2
