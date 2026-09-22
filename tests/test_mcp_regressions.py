@@ -77,6 +77,426 @@ def _patch_empty_registries(monkeypatch):
     monkeypatch.setattr(query_helpers, "read_registries", lambda _root: ({}, {}, {}, {}))
 
 
+def test_same_root_double_hydration_is_serialized(tmp_path, monkeypatch):
+    root = tmp_path / "repo"
+    root.mkdir()
+    root_key = str(root.resolve())
+    state = SimpleNamespace(revision=7, state_id="state-7")
+    builds = []
+    first_build_entered = threading.Event()
+    release_first_build = threading.Event()
+    second_get_entered = threading.Event()
+    results = []
+    errors = []
+    second_thread_id = [None]
+
+    class FakeClient:
+        endpoint = SimpleNamespace(host="127.0.0.1", port=9000, authkey_hex="auth")
+
+        def ping(self):
+            return {"revision": 3}
+
+        def snapshot(self):
+            return {"state": state}
+
+    class FakeEngine:
+        def __init__(self, loaded_state, *_args):
+            builds.append(self)
+            if len(builds) == 1:
+                first_build_entered.set()
+                release_first_build.wait()
+            self.state = loaded_state
+            self.revision = loaded_state.revision
+
+    class FakeStateManager:
+        def __init__(self, *_args):
+            pass
+
+    class FakeRegistry:
+        def __init__(self, *_args):
+            pass
+
+    import contextor.core.analysis.incremental_engine as core_incremental_engine
+    import contextor.core.analysis.state_manager as core_state_manager
+    import contextor.core.live_state as core_live_state
+    import contextor.core.paths as core_paths
+    import contextor.core.reporting_engine.persistent_registry as core_registry
+
+    monkeypatch.setattr(core_live_state, "connect", lambda _root: FakeClient())
+    monkeypatch.setattr(core_state_manager, "FileStateManager", FakeStateManager)
+    monkeypatch.setattr(core_incremental_engine, "IncrementalAnalysisEngine", FakeEngine)
+    monkeypatch.setattr(core_registry, "PersistentIdentityRegistry", FakeRegistry)
+    monkeypatch.setattr(core_paths, "repo_cache_dir", lambda _root: root / ".cache")
+
+    real_get_or_init_engine = mcp_runtime.get_or_init_engine
+
+    def wrapped_get_or_init_engine(candidate_root):
+        if threading.get_ident() == second_thread_id[0]:
+            second_get_entered.set()
+        return real_get_or_init_engine(candidate_root)
+
+    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", wrapped_get_or_init_engine)
+
+    def hydrate():
+        try:
+            results.append(mcp_runtime.get_or_init_engine(root))
+        except BaseException as exc:
+            errors.append(exc)
+
+    first = threading.Thread(target=hydrate)
+    first.start()
+    assert first_build_entered.wait(timeout=2), errors
+
+    def hydrate_second():
+        second_thread_id[0] = threading.get_ident()
+        try:
+            results.append(mcp_runtime.get_or_init_engine(root))
+        except BaseException as exc:
+            errors.append(exc)
+
+    second = threading.Thread(target=hydrate_second)
+    second.start()
+    assert second_get_entered.wait(timeout=2)
+    release_first_build.set()
+    first.join(timeout=2)
+    second.join(timeout=2)
+
+    assert not first.is_alive()
+    assert not second.is_alive()
+    assert errors == []
+    assert len(builds) == 1
+    assert len(results) == 2
+    assert results[0] is results[1]
+
+
+def test_different_root_cache_transactions_are_independent(tmp_path):
+    root_a = tmp_path / "repo-a"
+    root_b = tmp_path / "repo-b"
+    root_a.mkdir()
+    root_b.mkdir()
+    first_entered = threading.Event()
+    second_entered = threading.Event()
+    release_first = threading.Event()
+
+    def hold_first_root():
+        with mcp_runtime._engine_cache_transaction(root_a):
+            first_entered.set()
+            release_first.wait()
+
+    def enter_second_root():
+        with mcp_runtime._engine_cache_transaction(root_b):
+            second_entered.set()
+
+    first = threading.Thread(target=hold_first_root)
+    second = threading.Thread(target=enter_second_root)
+    first.start()
+    assert first_entered.wait(timeout=2)
+    second.start()
+    assert second_entered.wait(timeout=2)
+    release_first.set()
+    first.join(timeout=2)
+    second.join(timeout=2)
+    assert not first.is_alive()
+    assert not second.is_alive()
+
+
+def test_analysis_refresh_transaction_excludes_same_root_reader(tmp_path, monkeypatch):
+    from contextor.mcp import diagnostics
+
+    root = tmp_path / "repo"
+    root.mkdir()
+    root_key = str(root.resolve())
+    old_engine = SimpleNamespace(state=SimpleNamespace(revision=10))
+    new_engine = SimpleNamespace(state=SimpleNamespace(revision=11))
+    refresh_entered = threading.Event()
+    reader_started = threading.Event()
+    reader_done = threading.Event()
+    release_refresh = threading.Event()
+    reader_results = []
+    analysis_errors = []
+
+    async def fake_worker(*_args, **_kwargs):
+        return {
+            "live_publish_status": "success",
+            "live_publish_revision": 11,
+        }
+
+    def refresh_engine(_candidate_root):
+        refresh_entered.set()
+        release_refresh.wait()
+        mcp_runtime._live_engines[root_key] = new_engine
+        return new_engine
+
+    def read_summary(candidate_root):
+        reader_started.set()
+        reader_results.append(diagnostics.diagnostics_summary(candidate_root))
+        reader_done.set()
+
+    monkeypatch.setattr(analysis_jobs, "_run_analysis_worker", fake_worker)
+    monkeypatch.setattr(analysis_jobs, "_write_analysis_job", lambda *_args: None)
+    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", refresh_engine)
+    monkeypatch.setattr(
+        diagnostics,
+        "diagnostics_summary_for_state",
+        lambda state: {"revision": getattr(state, "revision", None)},
+    )
+    mcp_runtime._live_engines[root_key] = old_engine
+    mcp_runtime._live_engine_revisions[root_key] = 10
+
+    def run_analysis():
+        try:
+            asyncio.run(
+                analysis_jobs._execute_analysis_job(
+                    root, _project_analysis_job(root, "reader-exclusion"), None, []
+                )
+            )
+        except BaseException as exc:
+            analysis_errors.append(exc)
+
+    analysis_thread = threading.Thread(target=run_analysis)
+    reader_thread = threading.Thread(target=read_summary, args=(root,))
+    analysis_thread.start()
+    assert refresh_entered.wait(timeout=2)
+    reader_thread.start()
+    assert reader_started.wait(timeout=2)
+    assert not reader_done.wait(timeout=0.1)
+    release_refresh.set()
+    analysis_thread.join(timeout=2)
+    reader_thread.join(timeout=2)
+
+    assert not analysis_thread.is_alive()
+    assert not reader_thread.is_alive()
+    assert analysis_errors == []
+    assert reader_results == [{"revision": 11}]
+
+
+def test_analysis_refresh_transaction_is_reentrant(tmp_path, monkeypatch):
+    root = tmp_path / "repo"
+    root.mkdir()
+    root_key = str(root.resolve())
+    completed = threading.Event()
+    errors = []
+    writes = []
+    engine = SimpleNamespace(state=SimpleNamespace(revision=13))
+
+    async def fake_worker(*_args, **_kwargs):
+        return {
+            "live_publish_status": "success",
+            "live_publish_revision": 13,
+        }
+
+    def reentrant_get(candidate_root):
+        with mcp_runtime._engine_cache_transaction(candidate_root):
+            mcp_runtime._live_engines[root_key] = engine
+            return engine
+
+    monkeypatch.setattr(analysis_jobs, "_run_analysis_worker", fake_worker)
+    monkeypatch.setattr(
+        analysis_jobs,
+        "_write_analysis_job",
+        lambda _root, payload: writes.append(payload),
+    )
+    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", reentrant_get)
+
+    def run_analysis():
+        try:
+            asyncio.run(
+                analysis_jobs._execute_analysis_job(
+                    root, _project_analysis_job(root, "reentrant-refresh"), None, []
+                )
+            )
+        except BaseException as exc:
+            errors.append(exc)
+        finally:
+            completed.set()
+
+    thread = threading.Thread(target=run_analysis, daemon=True)
+    thread.start()
+    assert completed.wait(timeout=2)
+    thread.join(timeout=2)
+
+    assert errors == []
+    assert writes[-1]["status"] == "completed"
+    assert mcp_runtime._live_engine_revisions[root_key] == 13
+
+
+def test_update_file_refresh_uses_same_root_transaction(tmp_path, monkeypatch):
+    root = tmp_path / "repo"
+    root.mkdir()
+    target = root / "pkg" / "module.py"
+    target.parent.mkdir()
+    target.write_text("def run():\n    return 1\n", encoding="utf-8")
+    root_key = str(root.resolve())
+    old_engine = SimpleNamespace(state=SimpleNamespace(artifacts={"pkg.module": {}}))
+    new_engine = SimpleNamespace(
+        state=SimpleNamespace(artifacts={"pkg.module": {"symbols": {}}})
+    )
+    result = SimpleNamespace(
+        status="UPDATED",
+        file_path=str(target),
+        graph_state="fresh",
+        dependencies_state="fresh",
+        blast_radius_state="fresh",
+        local_metrics_state="deferred",
+        global_metrics_state="deferred",
+        artifact_consumption_state="deferred",
+        affected_modules=[],
+        delta=None,
+    )
+    refresh_entered = threading.Event()
+    release_refresh = threading.Event()
+    probe_started = threading.Event()
+    probe_entered = threading.Event()
+    update_done = threading.Event()
+    update_results = []
+    calls = []
+
+    class FakeLiveClient:
+        def update_file(self, *_args, **_kwargs):
+            return {"status": "ok", "revision": 22, "result": result}
+
+    def fake_get_or_init_engine(_root):
+        calls.append(True)
+        if len(calls) == 1:
+            return old_engine
+        refresh_entered.set()
+        release_refresh.wait()
+        return new_engine
+
+    import contextor.core.live_state as core_live_state
+
+    monkeypatch.setattr(core_live_state, "connect", lambda _root: FakeLiveClient())
+    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", fake_get_or_init_engine)
+    monkeypatch.setattr(
+        update_file_module,
+        "_mcp_runtime_restart_required",
+        lambda _path: False,
+    )
+
+    def run_update():
+        update_results.append(
+            json.loads(update_file_module.update_file(str(root), str(target)))
+        )
+        update_done.set()
+
+    def probe_transaction():
+        probe_started.set()
+        with mcp_runtime._engine_cache_transaction(root):
+            probe_entered.set()
+
+    update_thread = threading.Thread(target=run_update)
+    probe_thread = threading.Thread(target=probe_transaction)
+    update_thread.start()
+    assert refresh_entered.wait(timeout=2)
+    probe_thread.start()
+    assert probe_started.wait(timeout=2)
+    assert not probe_entered.wait(timeout=0.1)
+    release_refresh.set()
+    assert update_done.wait(timeout=2)
+    assert probe_entered.wait(timeout=2)
+    update_thread.join(timeout=2)
+    probe_thread.join(timeout=2)
+
+    assert not update_thread.is_alive()
+    assert not probe_thread.is_alive()
+    assert update_results[0]["status"] == "UPDATED"
+    assert update_results[0]["live_state_persisted"] is True
+    assert mcp_runtime._live_engine_revisions[root_key] == 21
+
+
+def test_file_edit_context_binds_engine_and_revision_atomically(tmp_path, monkeypatch):
+    import contextor.core.live_state as core_live_state
+    from contextor.core.domain.graph import ProjectGraph
+    import contextor.mcp.tools.get_file_edit_context as get_file_edit_context_module
+
+    root = tmp_path / "repo"
+    root.mkdir()
+    root_key = str(root.resolve())
+    engine_one = SimpleNamespace(
+        state=SimpleNamespace(
+            modules={"pkg.mod": SimpleNamespace(module_id="1/1", path="pkg/mod.py")},
+            artifacts={"pkg.mod": {"own_symbols": []}},
+            dependency_graph=ProjectGraph(hard_edges={}, soft_edges={}),
+        )
+    )
+    engine_two = SimpleNamespace(
+        state=SimpleNamespace(
+            modules={"pkg.mod": SimpleNamespace(module_id="1/1", path="pkg/mod.py")},
+            artifacts={"pkg.mod": {"own_symbols": []}},
+            dependency_graph=ProjectGraph(hard_edges={}, soft_edges={}),
+        )
+    )
+    snapshot_entered = threading.Event()
+    release_snapshot = threading.Event()
+    response_phase = threading.Event()
+    allow_response = threading.Event()
+    mutation_entered = threading.Event()
+    result_box = []
+    errors = []
+
+    def fake_get_or_init_engine(_root):
+        mcp_runtime._live_engines[root_key] = engine_one
+        mcp_runtime._live_engine_revisions[root_key] = 41
+        snapshot_entered.set()
+        release_snapshot.wait()
+        return engine_one
+
+    def mutate_after_snapshot():
+        with mcp_runtime._engine_cache_transaction(root):
+            mcp_runtime._live_engines[root_key] = engine_two
+            mcp_runtime._live_engine_revisions[root_key] = 42
+            mutation_entered.set()
+
+    def module_truth_unavailable(_state, _module_name):
+        response_phase.set()
+        allow_response.wait()
+        return None
+
+    monkeypatch.setattr(core_live_state, "connect", lambda _root: None)
+    monkeypatch.setattr(mcp_runtime, "get_or_init_engine", fake_get_or_init_engine)
+    monkeypatch.setattr(
+        query_helpers,
+        "read_registries",
+        lambda _root: ({"pkg.mod": "1/1"}, {"1/1": "pkg.mod"}, {}, {}),
+    )
+    monkeypatch.setattr(query_helpers, "module_truth_unavailable", module_truth_unavailable)
+    monkeypatch.setattr(
+        get_file_edit_context_module,
+        "syntax_diagnostics_for_path",
+        lambda *_args, **_kwargs: [],
+    )
+
+    probe_thread = threading.Thread(target=mutate_after_snapshot)
+    probe_thread.start()
+
+    def read_context():
+        try:
+            result_box.append(
+                json.loads(
+                    get_file_edit_context_module.get_file_edit_context(
+                        repo_path=str(root), target="pkg.mod", mode="minimal"
+                    )
+                )
+            )
+        except BaseException as exc:
+            errors.append(exc)
+
+    context_thread = threading.Thread(target=read_context)
+    context_thread.start()
+    assert snapshot_entered.wait(timeout=2)
+    release_snapshot.set()
+    assert response_phase.wait(timeout=2)
+    assert mutation_entered.wait(timeout=2)
+    allow_response.set()
+    context_thread.join(timeout=2)
+    probe_thread.join(timeout=2)
+
+    assert not context_thread.is_alive()
+    assert not probe_thread.is_alive()
+    assert errors == []
+    assert result_box[0]["live_revision"] == 41
+
+
 def test_canonical_empty_consumers_do_not_fall_back_to_legacy_artifact_state():
     state = RepositoryAnalysisState(
         artifacts={

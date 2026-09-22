@@ -89,16 +89,17 @@ def _persist_live_engine(root: Path, engine) -> bool:
     )
     if meta is not None:
         new_rev = int(meta.revision)
-        engine.revision = new_rev
-        if hasattr(engine.state, "revision"):
-            engine.state.revision = new_rev
-        mcp_runtime._live_engine_revisions[str(root)] = new_rev
-        if hasattr(engine, "state_manager") and engine.state_manager:
-            engine.state_manager.revision = new_rev
-            if hasattr(engine.state_manager, "save"):
-                engine.state_manager.save(
-                    getattr(engine.state_manager, "state_id", ""), revision=new_rev
-                )
+        with mcp_runtime._engine_cache_transaction(root) as root_key:
+            engine.revision = new_rev
+            if hasattr(engine.state, "revision"):
+                engine.state.revision = new_rev
+            mcp_runtime._live_engine_revisions[root_key] = new_rev
+            if hasattr(engine, "state_manager") and engine.state_manager:
+                engine.state_manager.revision = new_rev
+                if hasattr(engine.state_manager, "save"):
+                    engine.state_manager.save(
+                        getattr(engine.state_manager, "state_id", ""), revision=new_rev
+                    )
         return True
     return False
 
@@ -214,8 +215,9 @@ def update_file(
             if remote.get("status") != "ok":
                 raise RuntimeError(remote.get("error", "Shared LIVE update failed."))
             res = remote["result"]
-            mcp_runtime._live_engine_revisions[str(root)] = int(remote["revision"]) - 1
-            engine = mcp_runtime.get_or_init_engine(root)
+            with mcp_runtime._engine_cache_transaction(root) as root_key:
+                mcp_runtime._live_engine_revisions[root_key] = int(remote["revision"]) - 1
+                engine = mcp_runtime.get_or_init_engine(root)
             live_state_persisted = True
         else:
             res = engine.update_file(str(target_file))

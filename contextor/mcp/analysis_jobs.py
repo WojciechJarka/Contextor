@@ -336,7 +336,6 @@ async def _execute_analysis_job(
             str(job["operation"]), root, target, exclude_paths, log=job_log
         )
         if job["operation"] == "project":
-            cache_key = str(root)
             pub_status = (
                 (analysis_outcome or {}).get("live_publish_status")
             )
@@ -353,42 +352,43 @@ async def _execute_analysis_job(
                 "live_publish_warning": pub_warn,
             }
 
-            if pub_status == "success" and pub_rev is not None:
-                mcp_runtime._live_engines.pop(cache_key, None)
-                mcp_runtime._live_engine_revisions.pop(cache_key, None)
-                engine = mcp_runtime.get_or_init_engine(root)
-
-                if engine is None:
+            with mcp_runtime._engine_cache_transaction(root) as cache_key:
+                if pub_status == "success" and pub_rev is not None:
                     mcp_runtime._live_engines.pop(cache_key, None)
                     mcp_runtime._live_engine_revisions.pop(cache_key, None)
-                    raise RuntimeError(
-                        "Analysis completed and LIVE publication returned, "
-                        "but canonical state could not be loaded."
-                    )
+                    engine = mcp_runtime.get_or_init_engine(root)
 
-                engine_state = getattr(engine, "state", None)
-                canonical_rev = getattr(engine_state, "revision", None)
-                if canonical_rev is None:
+                    if engine is None:
+                        mcp_runtime._live_engines.pop(cache_key, None)
+                        mcp_runtime._live_engine_revisions.pop(cache_key, None)
+                        raise RuntimeError(
+                            "Analysis completed and LIVE publication returned, "
+                            "but canonical state could not be loaded."
+                        )
+
+                    engine_state = getattr(engine, "state", None)
+                    canonical_rev = getattr(engine_state, "revision", None)
+                    if canonical_rev is None:
+                        mcp_runtime._live_engines.pop(cache_key, None)
+                        mcp_runtime._live_engine_revisions.pop(cache_key, None)
+                        raise RuntimeError(
+                            "Canonical state loaded after analysis without a revision."
+                        )
+
+                    canonical_rev = int(canonical_rev)
+                    published_rev = int(pub_rev)
+                    if canonical_rev != published_rev:
+                        mcp_runtime._live_engines.pop(cache_key, None)
+                        mcp_runtime._live_engine_revisions.pop(cache_key, None)
+                        raise RuntimeError(
+                            "Canonical revision mismatch after full analysis: "
+                            f"loaded={canonical_rev}, published={published_rev}."
+                        )
+
+                    mcp_runtime._live_engine_revisions[cache_key] = canonical_rev
+                else:
                     mcp_runtime._live_engines.pop(cache_key, None)
                     mcp_runtime._live_engine_revisions.pop(cache_key, None)
-                    raise RuntimeError(
-                        "Canonical state loaded after analysis without a revision."
-                    )
-
-                canonical_rev = int(canonical_rev)
-                published_rev = int(pub_rev)
-                if canonical_rev != published_rev:
-                    mcp_runtime._live_engines.pop(cache_key, None)
-                    mcp_runtime._live_engine_revisions.pop(cache_key, None)
-                    raise RuntimeError(
-                        "Canonical revision mismatch after full analysis: "
-                        f"loaded={canonical_rev}, published={published_rev}."
-                    )
-
-                mcp_runtime._live_engine_revisions[cache_key] = canonical_rev
-            else:
-                mcp_runtime._live_engines.pop(cache_key, None)
-                mcp_runtime._live_engine_revisions.pop(cache_key, None)
         publish_status = job.get("live_publish_status")
         completed_message = "Analysis completed successfully."
         if job["operation"] == "project" and publish_status != "success":

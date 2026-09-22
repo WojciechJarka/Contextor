@@ -160,7 +160,7 @@ def syntax_diagnostics_for_path(
 
 def diagnostics_summary(root: Path, state: Any = None) -> dict[str, Any]:
     if state is None:
-        engine = mcp_runtime._live_engines.get(str(root))
+        engine = mcp_runtime._cached_engine(root)
         state = getattr(engine, "state", None) if engine is not None else None
     summary = diagnostics_summary_for_state(state)
     return summary

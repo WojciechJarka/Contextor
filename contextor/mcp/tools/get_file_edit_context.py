@@ -91,7 +91,11 @@ def get_file_edit_context(
     # Read registries & catalog for canonical resolution
     from contextor.core.report_query import IndexCatalog, catalog_from_registry, catalog_from_registry_state, registry_maps_from_state, resolve_index_query
 
-    minimal_engine = mcp_runtime.get_or_init_engine(root) if mode == "minimal" else None
+    if mode == "minimal":
+        minimal_engine, minimal_live_revision = mcp_runtime._get_or_init_engine_snapshot(root)
+    else:
+        minimal_engine = None
+        minimal_live_revision = None
     if mode == "minimal":
         from contextor.core.reporting_engine.persistent_registry import PersistentIdentityRegistry
 
@@ -387,7 +391,7 @@ def get_file_edit_context(
                         "reason": f"Cached analytics state is '{cached_state}'.",
                     }
 
-            live_revision = mcp_runtime._live_engine_revisions.get(str(root)) if engine else None
+            live_revision = minimal_live_revision if engine is not None else None
 
             return json.dumps(
                 {
