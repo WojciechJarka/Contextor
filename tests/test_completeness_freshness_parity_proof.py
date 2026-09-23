@@ -1021,10 +1021,22 @@ def test_ambiguity_regression_real_backfill_path(tmp_path):
     from contextor.core.analysis.incremental import plan_executor
     original_resolve = plan_executor._resolve_canonical_target_key
 
-    def ambiguous_resolve(target, candidate_consumption, candidate_artifacts):
+    def ambiguous_resolve(
+        target,
+        candidate_consumption,
+        candidate_artifacts,
+        expected_targets=None,
+        dotted_target_index=None,
+    ):
         if target and "foo" in target:
             return None, "ambiguous"
-        return original_resolve(target, candidate_consumption, candidate_artifacts)
+        return original_resolve(
+            target,
+            candidate_consumption,
+            candidate_artifacts,
+            expected_targets=expected_targets,
+            dotted_target_index=dotted_target_index,
+        )
 
     with patch("contextor.core.analysis.incremental.plan_executor._resolve_canonical_target_key", side_effect=ambiguous_resolve):
         res = engine.update_file(str(f_provider))
