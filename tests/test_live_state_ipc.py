@@ -20,7 +20,10 @@ from contextor.core.live_state.ipc import LIVE_PROTOCOL_VERSION
 from contextor.core.live_state import ipc as ipc_module
 from contextor.core.live_state.runtime import EndpointSchemaError, connect_or_start, endpoint_file
 from contextor.core.reporting_engine.persistent_registry import PersistentIdentityRegistry
-from contextor.core.analysis.state_manager import FileStateManager
+from contextor.core.analysis.state_manager import (
+    FileStateManager,
+    RepositoryAnalysisState,
+)
 from contextor.core.paths import repo_cache_dir
 from contextor.core.domain.validation import ValidationError
 
@@ -705,6 +708,235 @@ def test_update_clone_failure_uses_update_fail_not_publish_fail(monkeypatch):
     assert response["error"] == "canonical_state_clone_failed"
     assert any(args[1] == "UPDATE_FAIL" for args, _kwargs in events)
     assert not any(args[1] == "PUBLISH_FAIL" for args, _kwargs in events)
+
+
+def test_repository_analysis_state_clone_for_update_detaches_all_top_level_mutable_fields():
+    nested_artifact = object()
+    nested_cycle = object()
+
+    state = RepositoryAnalysisState()
+    state.artifacts["pkg.mod"] = nested_artifact
+    state.cycles.append(nested_cycle)
+
+    state.revision = 17
+    state.provenance = "live"
+    state.state_id = "state-17"
+    state.resync_required = True
+
+    candidate = state.clone_for_update()
+
+    assert candidate is not state
+
+    for field_name in state.__dataclass_fields__:
+        original_value = getattr(
+            state,
+            field_name,
+        )
+        candidate_value = getattr(
+            candidate,
+            field_name,
+        )
+
+        if isinstance(
+            original_value,
+            (
+                dict,
+                list,
+                set,
+            ),
+        ):
+            assert candidate_value is not original_value
+            assert candidate_value == original_value
+
+    assert candidate.artifacts[
+        "pkg.mod"
+    ] is nested_artifact
+
+    assert candidate.cycles[
+        0
+    ] is nested_cycle
+
+    assert candidate.revision == 17
+    assert candidate.provenance == "live"
+    assert candidate.state_id == "state-17"
+    assert candidate.resync_required is True
+
+    candidate.revision = 18
+    candidate.provenance = "candidate"
+    candidate.state_id = "state-18"
+    candidate.resync_required = False
+
+    assert state.revision == 17
+    assert state.provenance == "live"
+    assert state.state_id == "state-17"
+    assert state.resync_required is True
+
+
+def test_live_clone_uses_repository_structural_clone_without_deepcopying_nested_values():
+    class NoDeepcopy:
+        def __deepcopy__(
+            self,
+            _memo,
+        ):
+            raise AssertionError(
+                "nested canonical value must not be deep-copied"
+            )
+
+    nested = NoDeepcopy()
+
+    state = RepositoryAnalysisState(
+        artifacts={
+            "pkg.mod": nested,
+        },
+    )
+
+    candidate = ipc_module._clone_state_for_update(
+        state
+    )
+
+    assert candidate is not state
+    assert candidate.artifacts is not state.artifacts
+    assert candidate.artifacts[
+        "pkg.mod"
+    ] is nested
+
+
+def test_repository_structural_clone_isolates_top_level_updater_failure():
+    existing_usage = object()
+
+    state = RepositoryAnalysisState(
+        module_usages={
+            "existing": existing_usage,
+        },
+        module_parse_freshness={
+            "existing": {
+                "state": "fresh",
+            },
+        },
+    )
+
+    original_module_usages = state.module_usages
+    original_parse_freshness = (
+        state.module_parse_freshness
+    )
+
+    def updater(
+        candidate,
+        _path,
+    ):
+        candidate.module_usages[
+            "new"
+        ] = {}
+
+        candidate.module_parse_freshness[
+            "new"
+        ] = {
+            "state": "stale",
+        }
+
+        candidate.artifact_consumption_state = (
+            "stale"
+        )
+
+        raise RuntimeError(
+            "synthetic updater failure"
+        )
+
+    server = CanonicalLiveServer(
+        state,
+        updater=updater,
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="^synthetic updater failure$",
+    ):
+        server._dispatch(
+            {
+                "operation": "update_file",
+                "file_path": "pkg/change.py",
+            }
+        )
+
+    assert server._state is state
+    assert server._revision == 0
+
+    assert state.module_usages is (
+        original_module_usages
+    )
+    assert state.module_parse_freshness is (
+        original_parse_freshness
+    )
+
+    assert state.module_usages == {
+        "existing": existing_usage,
+    }
+
+    assert state.module_parse_freshness == {
+        "existing": {
+            "state": "fresh",
+        },
+    }
+
+    assert (
+        state.artifact_consumption_state
+        == "deferred"
+    )
+
+
+def test_repository_structural_clone_success_keeps_previous_top_level_state_untouched():
+    existing_usage = object()
+
+    state = RepositoryAnalysisState(
+        module_usages={
+            "existing": existing_usage,
+        },
+    )
+
+    original_module_usages = state.module_usages
+
+    def updater(
+        candidate,
+        _path,
+    ):
+        candidate.module_usages[
+            "new"
+        ] = {}
+
+        return {
+            "status": "UPDATED",
+        }
+
+    server = CanonicalLiveServer(
+        state,
+        updater=updater,
+    )
+
+    response = server._dispatch(
+        {
+            "operation": "update_file",
+            "file_path": "pkg/change.py",
+        }
+    )
+
+    assert response[
+        "revision"
+    ] == 1
+
+    assert server._state is not state
+
+    assert state.module_usages is (
+        original_module_usages
+    )
+
+    assert state.module_usages == {
+        "existing": existing_usage,
+    }
+
+    assert server._state.module_usages == {
+        "existing": existing_usage,
+        "new": {},
+    }
 
 
 def test_persister_runs_after_validation_before_canonical_exposure():
