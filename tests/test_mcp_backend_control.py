@@ -317,7 +317,7 @@ def test_windows_backend_spawn_uses_breakaway_and_no_window(
 
     assert len(calls) == 1
     flags = calls[0]["creationflags"]
-    assert flags & control.CREATE_BREAKAWAY_FROM_JOB
+    assert flags & control._CREATE_BREAKAWAY_FROM_JOB
     create_no_window = getattr(subprocess, "CREATE_NO_WINDOW", 0)
     if create_no_window:
         assert flags & create_no_window
@@ -346,8 +346,8 @@ def test_windows_breakaway_denied_has_exactly_one_fallback(
     control._spawn_backend_process("test-token")
 
     assert len(calls) == 2
-    assert calls[0]["creationflags"] & control.CREATE_BREAKAWAY_FROM_JOB
-    assert not calls[1]["creationflags"] & control.CREATE_BREAKAWAY_FROM_JOB
+    assert calls[0]["creationflags"] & control._CREATE_BREAKAWAY_FROM_JOB
+    assert not calls[1]["creationflags"] & control._CREATE_BREAKAWAY_FROM_JOB
 
     other_error = OSError("unrelated process creation failure")
     other_error.winerror = 87
@@ -512,10 +512,24 @@ def test_windows_stop_refuses_missing_creation_identity(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     record = replace(backend_record, creation_time=None)
+    removed = []
     monkeypatch.setattr(control.sys, "platform", "win32")
     monkeypatch.setattr(control, "_BackendControlLock", lambda *args, **kwargs: nullcontext())
     monkeypatch.setattr(control, "read_backend_record", lambda: record)
-    monkeypatch.setattr(control, "_backend_owner_identity_matches", lambda owner: True)
+    monkeypatch.setattr(
+        control,
+        "process_identity",
+        lambda pid: (
+            record.executable,
+            123456789,
+            True,
+        ),
+    )
+    monkeypatch.setattr(
+        control,
+        "remove_backend_record_if_exact",
+        lambda owner: removed.append(owner) or True,
+    )
     monkeypatch.setattr(
         control,
         "terminate_registered_process",
@@ -524,6 +538,8 @@ def test_windows_stop_refuses_missing_creation_identity(
 
     with pytest.raises(control.BackendControlError, match="creation identity"):
         control.stop_backend()
+
+    assert removed == []
 
 
 def test_windows_stop_uses_exact_backend_record_for_termination(

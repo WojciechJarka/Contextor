@@ -21,6 +21,7 @@ from contextor.mcp_backend_secret import (
     read_backend_token,
 )
 from contextor.mcp_backend_state import (
+    BACKEND_TRANSPORT as _BACKEND_TRANSPORT,
     PersistentBackendRecord,
     backend_state_dir,
     read_backend_record,
@@ -39,9 +40,7 @@ BACKEND_HOST = "127.0.0.1"
 BACKEND_PORT = 8765
 BACKEND_MCP_PATH = "/mcp"
 BACKEND_SERVER_NAME = "Contextor"
-BACKEND_TRANSPORT = "streamable-http"
-
-CREATE_BREAKAWAY_FROM_JOB = 0x01000000
+_CREATE_BREAKAWAY_FROM_JOB = 0x01000000
 
 BackendState = Literal[
     "stopped",
@@ -457,7 +456,7 @@ def _backend_environment(
 
     env[
         "CONTEXTOR_MCP_TRANSPORT"
-    ] = BACKEND_TRANSPORT
+    ] = _BACKEND_TRANSPORT
 
     env[
         "CONTEXTOR_MCP_SERVER_ROLE"
@@ -531,7 +530,7 @@ def _spawn_backend_process(
 
     primary_flags = (
         base_flags
-        | CREATE_BREAKAWAY_FROM_JOB
+        | _CREATE_BREAKAWAY_FROM_JOB
     )
 
     try:
@@ -787,12 +786,6 @@ def _backend_owner_identity_matches(
         return False
 
     if (
-        sys.platform == "win32"
-        and record.creation_time is None
-    ):
-        return False
-
-    if (
         record.creation_time is not None
         and creation_time is not None
         and int(
@@ -1010,7 +1003,6 @@ __all__ = [
     "BACKEND_MCP_PATH",
     "BACKEND_PORT",
     "BACKEND_SERVER_NAME",
-    "BACKEND_TRANSPORT",
     "BackendControlError",
     "BackendStatus",
     "backend_control_lock_path",
