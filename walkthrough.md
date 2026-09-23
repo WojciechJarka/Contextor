@@ -1,173 +1,549 @@
-STATUS=BLOCKED_CONTEXTOR_FRESHNESS
-HEAD_BEFORE=cf165262279960e10545d697673526ffddbeaf1e
-HEAD_AFTER=cf165262279960e10545d697673526ffddbeaf1e
-LIVE_REVISION_BEFORE=1346
-LIVE_REVISION_AFTER=1347
+STATUS=FINAL_PASS
+HEAD_BEFORE=e8857b342bf48f815e570146572e3bb8672d8f2c
+HEAD_AFTER=e8857b342bf48f815e570146572e3bb8672d8f2c
+LIVE_REVISION_BEFORE=1349
+LIVE_REVISION_AFTER=1353
 
 FILES_CHANGED
-- C:\Temp\Contextor_Repo\contextor\mcp_backend_control.py
-- C:\Temp\Contextor_Repo\tests\test_mcp_backend_control.py
-- C:\Temp\Contextor_Repo\walkthrough.md
+- C:\Temp\Contextor_Repo\contextor\mcp_backend_cli.py
+- C:\Temp\Contextor_Repo\contextor\__main__.py
+- C:\Temp\Contextor_Repo\tests\test_mcp_backend_cli.py
+walkthrough.md is report-only and excluded from diff accounting. No protected file changed.
 
-PATCH_RESULT=APPLIED
-BACKEND_TRANSPORT_DUPLICATE_REMOVED=YES
-CREATE_BREAKAWAY_DUPLICATE_REMOVED=YES
-The backend control module now imports the canonical backend transport privately, uses a private Windows breakaway constant, and omits BACKEND_TRANSPORT from __all__. The Windows-only early false return was removed from _backend_owner_identity_matches. The only test changes are the private constant references and the specified missing-creation identity proof.
+SOURCE_VALIDATION
+DIRECT_EVIDENCE:
+- Current HEAD before and after implementation is e8857b342bf48f815e570146572e3bb8672d8f2c, matching the certified G2B1 handoff HEAD.
+- Fresh Contextor source for contextor.__main__::main was workspace_sync=verified at LIVE revision 1349 before editing. The exact requested SEARCH block occurred exactly once: SEARCH_ANCHOR_COUNT=1.
+- The literal patch was applied once. Existing contextor.cli.main and mcp_backend_control lifecycle APIs were unchanged.
+- Read-only git status/diff shows only the three allowed source/test files and walkthrough.md. Protected files contextor/cli.py, contextor/mcp_backend_control.py, contextor/mcp_backend_state.py, contextor/mcp_backend_secret.py, and contextor/mcp_server.py have no diff.
+CODE_PATH_PROVED:
+- contextor.__main__.main keeps GUI routing first, strips --cli, routes only backend start/status/stop to the backend CLI, and delegates all other input to contextor.cli.main.
+- contextor.mcp_backend_cli delegates lifecycle operations to get_backend_status, start_backend, and stop_backend from the existing contextor.mcp_backend_control owner.
+CONTRACT_PROVED:
+- The new CLI serializes BackendStatus.to_dict(), catches BackendControlError, and does not read or expose the backend token.
+- The exact ten supplied tests cover JSON/status/error behavior, all three command routes, --cli handling, bare backend path compatibility, unrecognized suffix compatibility, and token-field absence.
+INFERENCE:
+- None required for the implementation verdict.
+UNKNOWN:
+- None material to the contracted behavior; no real backend was started.
 
-WINDOWS_IDENTITY_GUARD_PROOF
-WINDOWS_MISSING_CREATION_IDENTITY_FAILS_CLOSED=YES
-WINDOWS_MISSING_CREATION_RECORD_PRESERVED=YES
-The test uses the real _backend_owner_identity_matches with process_identity returning a live process, the recorded executable, and a concrete creation time. The backend record has creation_time=None. stop_backend reaches its Windows guard and raises BackendControlError. terminate_registered_process would fail the test if called; remove_backend_record_if_exact is captured and remains uncalled. This is a unit proof; no real process was contacted.
+IMPLEMENTATION_RESULT
+BACKEND_CLI_IMPLEMENTED=YES
+BACKEND_START_ROUTE_IMPLEMENTED=YES
+BACKEND_STATUS_ROUTE_IMPLEMENTED=YES
+BACKEND_STOP_ROUTE_IMPLEMENTED=YES
+BARE_BACKEND_PATH_COMPATIBILITY_PRESERVED=YES
+TOKEN_EXPOSED_BY_CLI=NO
+REAL_BACKEND_STARTED=NO
+CODEX_CONFIG_CHANGED=NO
+
+ROUTING_CONTRACT
+GUI routing remains first. The application intercepts exactly the backend start, backend status, and backend stop prefixes after removing --cli. Bare backend and unrecognized backend suffixes continue to contextor.cli.main.
+
+CLI_OUTPUT_CONTRACT
+The CLI emits JSON from BackendStatus.to_dict(), whose public keys are state, ready, detail, endpoint, pid, and instance_id. BackendControlError is emitted to stderr with the [ERROR] prefix and return code 1. Status returns 0 when ready and 1 when not ready.
 
 TEST_RESULTS
-- `.venv\Scripts\python.exe -m py_compile contextor\mcp_backend_control.py tests\test_mcp_backend_control.py` — PASS.
-- `.venv\Scripts\python.exe -m pytest -q tests/test_mcp_backend_control.py` — 20 passed, 1 Authlib deprecation warning.
-- `.venv\Scripts\python.exe -m pytest -q tests/test_mcp_backend_state.py` — 5 passed.
-- `.venv\Scripts\python.exe -m pytest -q tests/test_mcp_child_process_cleanup.py` — 4 passed, 1 Authlib deprecation warning.
+- py_compile contextor\mcp_backend_cli.py contextor\__main__.py tests\test_mcp_backend_cli.py: PASS.
+- pytest -q tests/test_mcp_backend_cli.py: PASS, 10 passed, 1 Authlib deprecation warning.
+- pytest -q tests/test_mcp_backend_control.py: PASS, 20 passed, 1 Authlib deprecation warning.
 TARGETED_TESTS=PASS
-REAL_BACKEND_STARTED=NO
 FULL_SUITE_RUN=NO
 
 CONTEXTOR_VERIFICATION
-- Before patch: LIVE revision 1346, continuity=continuous, resync_required=false, workspace_sync=verified for both files, and two IDENTICAL_DEFINITION_DUPLICATE records for BACKEND_TRANSPORT and CREATE_BREAKAWAY_FROM_JOB.
-- After patch: desktop_watcher published the test file at revision 1347. No desktop_watcher event for contextor/mcp_backend_control.py appeared after repeated bounded polling. get_file_edit_context at revision 1347 reports workspace_sync=verified for the test, but workspace_sync=out_of_sync for the production file.
-- The current get_name_collisions result still lists the two pre-patch duplicates. It reflects canonical state that is out of sync with the production file; it cannot certify either removal or the absence of a new collision in the changed source.
-- Current canonical diagnostics show syntax_errors.count=0 and cycles.count=0 at revision 1347, but the production file is out of sync. py_compile independently verifies source syntax. No new unexpected diagnostic was identified in the published test update.
-WORKSPACE_SYNC=OUT_OF_SYNC_FOR_PRODUCTION
-NAME_COLLISIONS=NOT_CERTIFIED (stale canonical count=2)
-SYNTAX_ERRORS=NOT_CERTIFIED_BY_FRESH_CONTEXTOR (py_compile=PASS; stale canonical count=0)
-CYCLES=NOT_CERTIFIED_BY_FRESH_CONTEXTOR (stale canonical count=0)
-CONTEXTOR_GATE=BLOCKED
-No update_file, analysis job, Desktop/MCP restart, or real backend start was performed. The required production desktop_watcher event and fresh zero-collision projection remain outstanding.
+- After four bounded get_live_events attempts spaced 5, 10, and 10 seconds, no desktop_watcher event appeared and __main__.py remained out_of_sync. No further event polling or update_file call was made.
+- The contract-authorized full repository analysis recovery completed successfully and published LIVE revision 1352; analysis_coverage reported zero skipped Python files.
+- Fresh post-recovery and post-test get_file_edit_context projections report workspace_sync=verified at revision 1353 for all three changed source/test files:
+  - contextor/mcp_backend_cli.py
+  - contextor/__main__.py
+  - tests/test_mcp_backend_cli.py
+- Each changed file reports syntax_errors=0, name_collisions=0, and cycles=0 with fresh availability.
+- Direct fresh get_name_collisions reports availability=fresh, total=0, conflicting=0, identical=0.
+- No real backend start occurred.
+
+WORKSPACE_SYNC=verified/3 files at LIVE revision 1353
+NAME_COLLISIONS=0/fresh direct projection
+SYNTAX_ERRORS=0/fresh
+CYCLES=0/fresh
 
 MCP_SERVER_RESTART_REQUIRED=NO
 GIT_COMMIT_PERFORMED=NO
 GIT_PUSH_PERFORMED=NO
 
 FULL_DIFFS
-Full diff against HEAD for both changed code files. walkthrough.md is the report and excluded from diff accounting.
 
-```diff
-diff --git a/contextor/mcp_backend_control.py b/contextor/mcp_backend_control.py
-index e16ea3a..4777789 100644
---- a/contextor/mcp_backend_control.py
-+++ b/contextor/mcp_backend_control.py
-@@ -21,6 +21,7 @@ from contextor.mcp_backend_secret import (
-     read_backend_token,
- )
- from contextor.mcp_backend_state import (
-+    BACKEND_TRANSPORT as _BACKEND_TRANSPORT,
-     PersistentBackendRecord,
-     backend_state_dir,
-     read_backend_record,
-@@ -39,9 +40,7 @@ BACKEND_HOST = "127.0.0.1"
- BACKEND_PORT = 8765
- BACKEND_MCP_PATH = "/mcp"
- BACKEND_SERVER_NAME = "Contextor"
--BACKEND_TRANSPORT = "streamable-http"
--
--CREATE_BREAKAWAY_FROM_JOB = 0x01000000
-+_CREATE_BREAKAWAY_FROM_JOB = 0x01000000
- 
- BackendState = Literal[
-     "stopped",
-@@ -457,7 +456,7 @@ def _backend_environment(
- 
-     env[
-         "CONTEXTOR_MCP_TRANSPORT"
--    ] = BACKEND_TRANSPORT
-+    ] = _BACKEND_TRANSPORT
- 
-     env[
-         "CONTEXTOR_MCP_SERVER_ROLE"
-@@ -531,7 +530,7 @@ def _spawn_backend_process(
- 
-     primary_flags = (
-         base_flags
--        | CREATE_BREAKAWAY_FROM_JOB
-+        | _CREATE_BREAKAWAY_FROM_JOB
-     )
- 
-     try:
-@@ -786,12 +785,6 @@ def _backend_owner_identity_matches(
-     if not alive:
-         return False
- 
--    if (
--        sys.platform == "win32"
--        and record.creation_time is None
--    ):
--        return False
--
-     if (
-         record.creation_time is not None
-         and creation_time is not None
-@@ -1010,7 +1003,6 @@ __all__ = [
-     "BACKEND_MCP_PATH",
-     "BACKEND_PORT",
-     "BACKEND_SERVER_NAME",
--    "BACKEND_TRANSPORT",
-     "BackendControlError",
-     "BackendStatus",
-     "backend_control_lock_path",
-diff --git a/tests/test_mcp_backend_control.py b/tests/test_mcp_backend_control.py
-index d8971f3..78a7568 100644
---- a/tests/test_mcp_backend_control.py
-+++ b/tests/test_mcp_backend_control.py
-@@ -317,7 +317,7 @@ def test_windows_backend_spawn_uses_breakaway_and_no_window(
- 
-     assert len(calls) == 1
-     flags = calls[0]["creationflags"]
--    assert flags & control.CREATE_BREAKAWAY_FROM_JOB
-+    assert flags & control._CREATE_BREAKAWAY_FROM_JOB
-     create_no_window = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-     if create_no_window:
-         assert flags & create_no_window
-@@ -346,8 +346,8 @@ def test_windows_breakaway_denied_has_exactly_one_fallback(
-     control._spawn_backend_process("test-token")
- 
-     assert len(calls) == 2
--    assert calls[0]["creationflags"] & control.CREATE_BREAKAWAY_FROM_JOB
--    assert not calls[1]["creationflags"] & control.CREATE_BREAKAWAY_FROM_JOB
-+    assert calls[0]["creationflags"] & control._CREATE_BREAKAWAY_FROM_JOB
-+    assert not calls[1]["creationflags"] & control._CREATE_BREAKAWAY_FROM_JOB
- 
-     other_error = OSError("unrelated process creation failure")
-     other_error.winerror = 87
-@@ -512,10 +512,24 @@ def test_windows_stop_refuses_missing_creation_identity(
-     monkeypatch: pytest.MonkeyPatch,
- ) -> None:
-     record = replace(backend_record, creation_time=None)
-+    removed = []
-     monkeypatch.setattr(control.sys, "platform", "win32")
-     monkeypatch.setattr(control, "_BackendControlLock", lambda *args, **kwargs: nullcontext())
-     monkeypatch.setattr(control, "read_backend_record", lambda: record)
--    monkeypatch.setattr(control, "_backend_owner_identity_matches", lambda owner: True)
-+    monkeypatch.setattr(
-+        control,
-+        "process_identity",
-+        lambda pid: (
-+            record.executable,
-+            123456789,
-+            True,
+FILE=C:\Temp\Contextor_Repo\contextor\mcp_backend_cli.py
+diff --git a/contextor/mcp_backend_cli.py b/contextor/mcp_backend_cli.py
+new file mode 100644
+index 0000000..416461a
+--- /dev/null
++++ b/contextor/mcp_backend_cli.py
+@@ -0,0 +1,94 @@
++"""Command-line control for the persistent Contextor MCP backend."""
++
++from __future__ import annotations
++
++import argparse
++import json
++import sys
++
++from contextor.mcp_backend_control import (
++    BackendControlError,
++    BackendStatus,
++    get_backend_status,
++    start_backend,
++    stop_backend,
++)
++
++
++def _build_parser() -> argparse.ArgumentParser:
++    parser = argparse.ArgumentParser(
++        prog="contextor backend",
++        description=(
++            "Control the persistent local Contextor MCP backend."
 +        ),
 +    )
-+    monkeypatch.setattr(
-+        control,
-+        "remove_backend_record_if_exact",
-+        lambda owner: removed.append(owner) or True,
-+    )
-     monkeypatch.setattr(
-         control,
-         "terminate_registered_process",
-@@ -525,6 +539,8 @@ def test_windows_stop_refuses_missing_creation_identity(
-     with pytest.raises(control.BackendControlError, match="creation identity"):
-         control.stop_backend()
- 
-+    assert removed == []
 +
- 
- def test_windows_stop_uses_exact_backend_record_for_termination(
-     backend_record: PersistentBackendRecord,
-```
++    subparsers = parser.add_subparsers(
++        dest="command",
++        required=True,
++    )
++
++    subparsers.add_parser(
++        "start",
++        help=(
++            "Start the persistent backend or reuse an "
++            "already-ready instance."
++        ),
++    )
++
++    subparsers.add_parser(
++        "status",
++        help="Report authenticated backend readiness.",
++    )
++
++    subparsers.add_parser(
++        "stop",
++        help="Stop the identity-verified persistent backend.",
++    )
++
++    return parser
++
++
++def _emit_status(
++    status: BackendStatus,
++) -> None:
++    print(
++        json.dumps(
++            status.to_dict(),
++            sort_keys=True,
++        )
++    )
++
++
++def main(
++    argv: list[str] | None = None,
++) -> int:
++    args = _build_parser().parse_args(argv)
++
++    try:
++        if args.command == "start":
++            status = start_backend()
++
++        elif args.command == "status":
++            status = get_backend_status()
++
++        else:
++            status = stop_backend()
++
++    except BackendControlError as exc:
++        print(
++            f"[ERROR] {exc}",
++            file=sys.stderr,
++        )
++        return 1
++
++    _emit_status(status)
++
++    if args.command == "status":
++        return 0 if status.ready else 1
++
++    return 0
++
++
++if __name__ == "__main__":
++    sys.exit(main())
 
+FILE=C:\Temp\Contextor_Repo\contextor\__main__.py
+diff --git a/contextor/__main__.py b/contextor/__main__.py
+index 633b963..aa441f3 100644
+--- a/contextor/__main__.py
++++ b/contextor/__main__.py
+@@ -85,11 +85,37 @@ def main(argv: list[str] | None = None) -> int:
+     if "--gui" in argv:
+         return _run_gui()
+ 
+-    from contextor.cli import main as cli_main
+-
+     # '--cli' is accepted for symmetry with '--gui' and documentation,
+     # but CLI is the default mode.
+-    return cli_main([arg for arg in argv if arg != "--cli"])
++    cli_argv = [
++        arg
++        for arg in argv
++        if arg != "--cli"
++    ]
++
++    if (
++        len(cli_argv) >= 2
++        and cli_argv[0] == "backend"
++        and cli_argv[1]
++        in {
++            "start",
++            "status",
++            "stop",
++        }
++    ):
++        from contextor.mcp_backend_cli import (
++            main as backend_cli_main,
++        )
++
++        return backend_cli_main(
++            cli_argv[1:]
++        )
++
++    from contextor.cli import main as cli_main
++
++    return cli_main(
++        cli_argv
++    )
+ 
+ 
+ # ============================================================
+
+FILE=C:\Temp\Contextor_Repo\tests\test_mcp_backend_cli.py
+diff --git a/tests/test_mcp_backend_cli.py b/tests/test_mcp_backend_cli.py
+new file mode 100644
+index 0000000..4996244
+--- /dev/null
++++ b/tests/test_mcp_backend_cli.py
+@@ -0,0 +1,318 @@
++import json
++
++import pytest
++
++import contextor.__main__ as application
++import contextor.cli as analysis_cli
++import contextor.mcp_backend_cli as backend_cli
++from contextor.mcp_backend_control import (
++    BackendControlError,
++    BackendStatus,
++)
++
++
++def test_backend_cli_start_emits_json_and_returns_zero(
++    monkeypatch: pytest.MonkeyPatch,
++    capsys: pytest.CaptureFixture[str],
++) -> None:
++    monkeypatch.setattr(
++        backend_cli,
++        "start_backend",
++        lambda: BackendStatus(
++            state="running",
++            ready=True,
++            detail="ready",
++            record=None,
++        ),
++    )
++
++    result = backend_cli.main(["start"])
++
++    captured = capsys.readouterr()
++    payload = json.loads(captured.out)
++
++    assert result == 0
++    assert captured.err == ""
++    assert payload == {
++        "detail": "ready",
++        "endpoint": None,
++        "instance_id": None,
++        "pid": None,
++        "ready": True,
++        "state": "running",
++    }
++
++
++def test_backend_cli_status_ready_returns_zero(
++    monkeypatch: pytest.MonkeyPatch,
++    capsys: pytest.CaptureFixture[str],
++) -> None:
++    monkeypatch.setattr(
++        backend_cli,
++        "get_backend_status",
++        lambda: BackendStatus(
++            state="running",
++            ready=True,
++            detail="ready",
++            record=None,
++        ),
++    )
++
++    result = backend_cli.main(["status"])
++
++    captured = capsys.readouterr()
++    payload = json.loads(captured.out)
++
++    assert result == 0
++    assert captured.err == ""
++    assert payload["ready"] is True
++
++
++def test_backend_cli_status_not_ready_returns_one(
++    monkeypatch: pytest.MonkeyPatch,
++    capsys: pytest.CaptureFixture[str],
++) -> None:
++    monkeypatch.setattr(
++        backend_cli,
++        "get_backend_status",
++        lambda: BackendStatus(
++            state="stopped",
++            ready=False,
++            detail="not running",
++            record=None,
++        ),
++    )
++
++    result = backend_cli.main(["status"])
++
++    captured = capsys.readouterr()
++    payload = json.loads(captured.out)
++
++    assert result == 1
++    assert captured.err == ""
++    assert payload["ready"] is False
++    assert payload["state"] == "stopped"
++
++
++def test_backend_cli_stop_returns_zero(
++    monkeypatch: pytest.MonkeyPatch,
++    capsys: pytest.CaptureFixture[str],
++) -> None:
++    monkeypatch.setattr(
++        backend_cli,
++        "stop_backend",
++        lambda: BackendStatus(
++            state="stopped",
++            ready=False,
++            detail="persistent backend stopped",
++            record=None,
++        ),
++    )
++
++    result = backend_cli.main(["stop"])
++
++    captured = capsys.readouterr()
++    payload = json.loads(captured.out)
++
++    assert result == 0
++    assert captured.err == ""
++    assert payload["state"] == "stopped"
++
++
++def test_backend_cli_control_error_is_stderr_and_exit_one(
++    monkeypatch: pytest.MonkeyPatch,
++    capsys: pytest.CaptureFixture[str],
++) -> None:
++    def fail_start() -> BackendStatus:
++        raise BackendControlError("boom")
++
++    monkeypatch.setattr(
++        backend_cli,
++        "start_backend",
++        fail_start,
++    )
++
++    result = backend_cli.main(["start"])
++
++    captured = capsys.readouterr()
++
++    assert result == 1
++    assert captured.out == ""
++    assert "[ERROR] boom" in captured.err
++
++
++def test_application_main_routes_backend_start_to_backend_cli(
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    captured: list[list[str]] = []
++
++    def fake_backend_main(
++        argv: list[str] | None = None,
++    ) -> int:
++        captured.append(list(argv or []))
++        return 17
++
++    monkeypatch.setattr(
++        backend_cli,
++        "main",
++        fake_backend_main,
++    )
++    monkeypatch.setattr(
++        analysis_cli,
++        "main",
++        lambda argv=None: pytest.fail(
++            "normal CLI must not handle backend start"
++        ),
++    )
++
++    result = application.main(
++        [
++            "backend",
++            "start",
++        ]
++    )
++
++    assert result == 17
++    assert captured == [["start"]]
++
++
++def test_application_main_routes_backend_status_with_cli_flag(
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    captured: list[list[str]] = []
++
++    def fake_backend_main(
++        argv: list[str] | None = None,
++    ) -> int:
++        captured.append(list(argv or []))
++        return 19
++
++    monkeypatch.setattr(
++        backend_cli,
++        "main",
++        fake_backend_main,
++    )
++    monkeypatch.setattr(
++        analysis_cli,
++        "main",
++        lambda argv=None: pytest.fail(
++            "normal CLI must not handle backend status"
++        ),
++    )
++
++    result = application.main(
++        [
++            "--cli",
++            "backend",
++            "status",
++        ]
++    )
++
++    assert result == 19
++    assert captured == [["status"]]
++
++
++def test_application_main_preserves_bare_backend_as_repository_path(
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    captured: list[list[str]] = []
++
++    def fake_analysis_main(
++        argv: list[str] | None = None,
++    ) -> int:
++        captured.append(list(argv or []))
++        return 23
++
++    monkeypatch.setattr(
++        analysis_cli,
++        "main",
++        fake_analysis_main,
++    )
++    monkeypatch.setattr(
++        backend_cli,
++        "main",
++        lambda argv=None: pytest.fail(
++            "bare backend must remain an analysis path"
++        ),
++    )
++
++    result = application.main(
++        ["backend"]
++    )
++
++    assert result == 23
++    assert captured == [["backend"]]
++
++
++def test_application_main_preserves_unrecognized_backend_suffix_for_normal_cli(
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    captured: list[list[str]] = []
++
++    def fake_analysis_main(
++        argv: list[str] | None = None,
++    ) -> int:
++        captured.append(list(argv or []))
++        return 29
++
++    monkeypatch.setattr(
++        analysis_cli,
++        "main",
++        fake_analysis_main,
++    )
++    monkeypatch.setattr(
++        backend_cli,
++        "main",
++        lambda argv=None: pytest.fail(
++            "unknown backend suffix must remain normal CLI input"
++        ),
++    )
++
++    result = application.main(
++        [
++            "backend",
++            "something-else",
++        ]
++    )
++
++    assert result == 29
++    assert captured == [
++        [
++            "backend",
++            "something-else",
++        ]
++    ]
++
++
++def test_backend_cli_does_not_expose_token_fields(
++    monkeypatch: pytest.MonkeyPatch,
++    capsys: pytest.CaptureFixture[str],
++) -> None:
++    monkeypatch.setattr(
++        backend_cli,
++        "get_backend_status",
++        lambda: BackendStatus(
++            state="running",
++            ready=True,
++            detail="ready",
++            record=None,
++        ),
++    )
++
++    result = backend_cli.main(["status"])
++
++    captured = capsys.readouterr()
++    payload = json.loads(captured.out)
++
++    assert result == 0
++    assert set(payload) == {
++        "state",
++        "ready",
++        "detail",
++        "endpoint",
++        "pid",
++        "instance_id",
++    }
++    assert "token" not in payload
++    assert "auth" not in payload
++    assert "bearer" not in payload
+warning: in the working copy of 'tests/test_mcp_backend_cli.py', LF will be replaced by CRLF the next time Git touches it

@@ -85,11 +85,37 @@ def main(argv: list[str] | None = None) -> int:
     if "--gui" in argv:
         return _run_gui()
 
-    from contextor.cli import main as cli_main
-
     # '--cli' is accepted for symmetry with '--gui' and documentation,
     # but CLI is the default mode.
-    return cli_main([arg for arg in argv if arg != "--cli"])
+    cli_argv = [
+        arg
+        for arg in argv
+        if arg != "--cli"
+    ]
+
+    if (
+        len(cli_argv) >= 2
+        and cli_argv[0] == "backend"
+        and cli_argv[1]
+        in {
+            "start",
+            "status",
+            "stop",
+        }
+    ):
+        from contextor.mcp_backend_cli import (
+            main as backend_cli_main,
+        )
+
+        return backend_cli_main(
+            cli_argv[1:]
+        )
+
+    from contextor.cli import main as cli_main
+
+    return cli_main(
+        cli_argv
+    )
 
 
 # ============================================================
