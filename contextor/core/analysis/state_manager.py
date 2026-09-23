@@ -74,45 +74,6 @@ class AnalysisResult:
     report_header: Dict[str, Any]
     trie: Optional[Any] = None
     package_root: str = ""
-
-    def clone_for_update(self) -> "RepositoryAnalysisState":
-        """
-        Create an execution-local LIVE update candidate using structural
-        top-level Copy-On-Write.
-
-        The outer state object is shallow-copied so dynamic runtime
-        attributes such as revision, provenance, state_id, and
-        resync_required are preserved on the candidate without sharing
-        the state holder itself.
-
-        Every declared top-level dict/list/set field receives its own
-        shallow container. Nested values remain structurally shared and
-        continue to rely on the existing family-level Copy-On-Write
-        contracts in the incremental pipeline.
-        """
-        candidate = copy.copy(self)
-
-        for state_field in fields(self):
-            value = getattr(
-                self,
-                state_field.name,
-            )
-
-            if isinstance(
-                value,
-                (
-                    dict,
-                    list,
-                    set,
-                ),
-            ):
-                setattr(
-                    candidate,
-                    state_field.name,
-                    copy.copy(value),
-                )
-
-        return candidate
     collision_facts: Optional[Dict[str, Any]] = None
     live_publish_status: str = "not_attempted"
     live_publish_revision: Optional[int] = None
@@ -165,6 +126,45 @@ class RepositoryAnalysisState:
 
     trie: Optional[Any] = None
     package_root: str = ""
+
+    def clone_for_update(self) -> "RepositoryAnalysisState":
+        """
+        Create an execution-local LIVE update candidate using structural
+        top-level Copy-On-Write.
+
+        The outer state object is shallow-copied so dynamic runtime
+        attributes such as revision, provenance, state_id, and
+        resync_required are preserved on the candidate without sharing
+        the state holder itself.
+
+        Every declared top-level dict/list/set field receives its own
+        shallow container. Nested values remain structurally shared and
+        continue to rely on the existing family-level Copy-On-Write
+        contracts in the incremental pipeline.
+        """
+        candidate = copy.copy(self)
+
+        for state_field in fields(self):
+            value = getattr(
+                self,
+                state_field.name,
+            )
+
+            if isinstance(
+                value,
+                (
+                    dict,
+                    list,
+                    set,
+                ),
+            ):
+                setattr(
+                    candidate,
+                    state_field.name,
+                    copy.copy(value),
+                )
+
+        return candidate
 
 
 def canonical_python_source_path(path: Any) -> str | None:
