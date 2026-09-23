@@ -150,11 +150,49 @@ def _build_consumer_target_index(
     return index
 
 
+def _build_dotted_target_index(
+    expected_targets: Set[str],
+) -> Dict[str, Tuple[str, ...]]:
+    """
+    Builds one transient lookup from dotted target spelling to all
+    canonical targets that share that spelling.
+
+    Multiple canonical candidates are preserved so ambiguity semantics
+    remain identical to the legacy linear scan.
+    """
+    grouped: Dict[str, List[str]] = {}
+
+    for canonical in expected_targets:
+        definer, sep, symbol = canonical.partition("::")
+        if not sep:
+            continue
+
+        dotted = f"{definer}.{symbol}"
+        grouped.setdefault(
+            dotted,
+            [],
+        ).append(
+            canonical
+        )
+
+    return {
+        dotted: tuple(
+            sorted(
+                targets
+            )
+        )
+        for dotted, targets in grouped.items()
+    }
+
+
 def _resolve_canonical_target_key(
     target: Optional[str],
     candidate_consumption: Mapping[str, Any],
     candidate_artifacts: Mapping[str, Any],
     expected_targets: Optional[Set[str]] = None,
+    dotted_target_index: Optional[
+        Mapping[str, Tuple[str, ...]]
+    ] = None,
 ) -> Tuple[Optional[str], str]:
     """
     Resolves a target string against the canonical target domain.
@@ -177,15 +215,29 @@ def _resolve_canonical_target_key(
             return target, "resolved"
         return None, "unresolved"
 
-    # Exact dotted representation match against real canonical targets
-    matches: List[str] = []
-    for canonical in expected_targets:
-        definer, sep, symbol = canonical.partition("::")
-        if not sep:
-            continue
+    if dotted_target_index is not None:
+        matches = tuple(
+            dotted_target_index.get(
+                target,
+                (),
+            )
+        )
+    else:
+        fallback_matches: List[str] = []
 
-        if f"{definer}.{symbol}" == target:
-            matches.append(canonical)
+        for canonical in expected_targets:
+            definer, sep, symbol = canonical.partition("::")
+            if not sep:
+                continue
+
+            if f"{definer}.{symbol}" == target:
+                fallback_matches.append(
+                    canonical
+                )
+
+        matches = tuple(
+            fallback_matches
+        )
 
     if len(matches) == 1:
         return matches[0], "resolved"
@@ -212,6 +264,9 @@ def _rebuild_consumer_slice(
     candidate_artifacts: Mapping[str, Any],
     reexports: Mapping[str, str],
     expected_targets: Optional[Set[str]] = None,
+    dotted_target_index: Optional[
+        Mapping[str, Tuple[str, ...]]
+    ] = None,
     consumer_target_index: Optional[Dict[str, Set[str]]] = None,
 ) -> Tuple[Dict[str, Any], bool]:
     """
@@ -277,6 +332,7 @@ def _rebuild_consumer_slice(
             candidate_consumption,
             candidate_artifacts,
             expected_targets=expected_targets,
+            dotted_target_index=dotted_target_index,
         )
 
         if status == "ambiguous":
@@ -603,6 +659,9 @@ def execute_refresh_plan(
     expected_targets = canonical_artifact_consumption_targets(
         candidate.artifacts
     )
+    dotted_target_index = _build_dotted_target_index(
+        expected_targets
+    )
     consumer_target_index = _build_consumer_target_index(
         candidate.artifact_consumption
     )
@@ -627,6 +686,7 @@ def execute_refresh_plan(
                     candidate_artifacts=candidate.artifacts,
                     reexports=new_reexports,
                     expected_targets=expected_targets,
+                    dotted_target_index=dotted_target_index,
                     consumer_target_index=consumer_target_index,
                 )
                 if is_ambig:
@@ -694,6 +754,7 @@ def execute_refresh_plan(
                     candidate_artifacts=candidate.artifacts,
                     reexports=new_reexports,
                     expected_targets=expected_targets,
+                    dotted_target_index=dotted_target_index,
                     consumer_target_index=consumer_target_index,
                 )
                 if is_ambig:
