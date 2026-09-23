@@ -98,10 +98,63 @@ def _get_copy_of_entry(raw_entry: dict) -> dict:
     return {"consumers": consumers, "channels": channels}
 
 
+def _build_consumer_target_index(
+    consumption: Mapping[str, Any],
+) -> Dict[str, Set[str]]:
+    """
+    Builds one transient reverse lookup for the current plan execution.
+
+    This is execution-local acceleration only. It is not canonical state
+    and is never persisted.
+    """
+    index: Dict[str, Set[str]] = {}
+
+    for target, raw_entry in consumption.items():
+        if not isinstance(raw_entry, dict):
+            continue
+
+        consumers = raw_entry.get("consumers", ())
+        if isinstance(
+            consumers,
+            (
+                list,
+                tuple,
+                set,
+            ),
+        ):
+            for consumer in consumers:
+                if (
+                    isinstance(consumer, str)
+                    and consumer
+                ):
+                    index.setdefault(
+                        consumer,
+                        set(),
+                    ).add(target)
+
+        channels = raw_entry.get(
+            "channels",
+            {},
+        )
+        if isinstance(channels, dict):
+            for consumer in channels:
+                if (
+                    isinstance(consumer, str)
+                    and consumer
+                ):
+                    index.setdefault(
+                        consumer,
+                        set(),
+                    ).add(target)
+
+    return index
+
+
 def _resolve_canonical_target_key(
     target: Optional[str],
     candidate_consumption: Mapping[str, Any],
     candidate_artifacts: Mapping[str, Any],
+    expected_targets: Optional[Set[str]] = None,
 ) -> Tuple[Optional[str], str]:
     """
     Resolves a target string against the canonical target domain.
@@ -113,7 +166,10 @@ def _resolve_canonical_target_key(
     if not target:
         return None, "unresolved"
 
-    expected_targets = canonical_artifact_consumption_targets(candidate_artifacts)
+    if expected_targets is None:
+        expected_targets = canonical_artifact_consumption_targets(
+            candidate_artifacts
+        )
 
     # Already canonical format
     if "::" in target:
@@ -155,60 +211,205 @@ def _rebuild_consumer_slice(
     candidate_consumption: Dict[str, Any],
     candidate_artifacts: Mapping[str, Any],
     reexports: Mapping[str, str],
+    expected_targets: Optional[Set[str]] = None,
+    consumer_target_index: Optional[Dict[str, Set[str]]] = None,
 ) -> Tuple[Dict[str, Any], bool]:
     """
-    Rebuilds the entire artifact_consumption slice for a single consumer in Copy-On-Write fashion.
-    Inspects all canonical usage families: direct_calls, runtime_calls, qualified_refs,
-    callback_calls, event_bindings, api_imports, inheritance.
-    Returns (updated_consumption_dict, is_ambiguous). If is_ambiguous is True, returns original container.
+    Rebuilds the entire artifact_consumption slice for a single consumer.
+
+    When an execution-local reverse index is supplied, the candidate
+    top-level mapping is already Copy-On-Write and only entries known to
+    contain the consumer are inspected. Nested entries are still copied
+    before mutation.
+
+    Without the execution-local index, the legacy full-map fallback is
+    preserved.
+
+    Returns (updated_consumption_dict, is_ambiguous). If is_ambiguous is
+    True, returns the original container without mutation.
     """
     c_aliases = dict(consumer_facts.aliases)
     c_tagged = (
-        [(sym, "direct_calls") for sym in consumer_facts.direct_calls]
-        + [(sym, "runtime_calls") for sym in consumer_facts.runtime_calls]
-        + [(sym, "qualified_refs") for sym in consumer_facts.qualified_refs]
-        + [(sym, "callback_calls") for sym in consumer_facts.callback_calls]
-        + [(sym, "event_bindings") for sym in consumer_facts.event_bindings]
-        + [(sym, "api_imports") for sym in consumer_facts.imports]
-        + [(item[1], "inheritance") for item in consumer_facts.inheritance_refs if len(item) >= 2 and item[1]]
+        [
+            (sym, "direct_calls")
+            for sym in consumer_facts.direct_calls
+        ]
+        + [
+            (sym, "runtime_calls")
+            for sym in consumer_facts.runtime_calls
+        ]
+        + [
+            (sym, "qualified_refs")
+            for sym in consumer_facts.qualified_refs
+        ]
+        + [
+            (sym, "callback_calls")
+            for sym in consumer_facts.callback_calls
+        ]
+        + [
+            (sym, "event_bindings")
+            for sym in consumer_facts.event_bindings
+        ]
+        + [
+            (sym, "api_imports")
+            for sym in consumer_facts.imports
+        ]
+        + [
+            (item[1], "inheritance")
+            for item in consumer_facts.inheritance_refs
+            if len(item) >= 2 and item[1]
+        ]
     )
 
     rebuilt_targets: Dict[str, Set[str]] = {}
     is_ambiguous = False
 
     for sym, ch_name in c_tagged:
-        raw_t = _resolve_reexport(_resolve_alias(sym, c_aliases), reexports)
-        target, status = _resolve_canonical_target_key(raw_t, candidate_consumption, candidate_artifacts)
+        raw_t = _resolve_reexport(
+            _resolve_alias(
+                sym,
+                c_aliases,
+            ),
+            reexports,
+        )
+        target, status = _resolve_canonical_target_key(
+            raw_t,
+            candidate_consumption,
+            candidate_artifacts,
+            expected_targets=expected_targets,
+        )
+
         if status == "ambiguous":
             is_ambiguous = True
-        elif status == "resolved" and target:
+
+        elif (
+            status == "resolved"
+            and target
+        ):
             if target not in rebuilt_targets:
                 rebuilt_targets[target] = set()
-            rebuilt_targets[target].add(ch_name)
+
+            rebuilt_targets[target].add(
+                ch_name
+            )
 
     if is_ambiguous:
         return candidate_consumption, True
 
-    # Copy-on-Write update of candidate_consumption container and entries
-    new_consumption = dict(candidate_consumption)
+    if consumer_target_index is None:
+        new_consumption = dict(
+            candidate_consumption
+        )
+        previous_targets = tuple(
+            new_consumption.keys()
+        )
+    else:
+        new_consumption = candidate_consumption
+        previous_targets = tuple(
+            consumer_target_index.get(
+                consumer,
+                (),
+            )
+        )
 
-    # 1. Remove consumer from all previous target entries
-    for t_key, entry in list(new_consumption.items()):
-        if consumer in entry.get("consumers", []) or consumer in entry.get("channels", {}):
-            copied_entry = _get_copy_of_entry(entry)
-            if consumer in copied_entry["consumers"]:
-                copied_entry["consumers"].remove(consumer)
-            copied_entry["channels"].pop(consumer, None)
-            new_consumption[t_key] = copied_entry
+    # Remove the consumer only from entries known to contain its old slice.
+    for t_key in previous_targets:
+        entry = new_consumption.get(
+            t_key
+        )
+        if not isinstance(entry, dict):
+            continue
 
-    # 2. Install rebuilt exact slice
+        if (
+            consumer in entry.get(
+                "consumers",
+                [],
+            )
+            or consumer
+            in entry.get(
+                "channels",
+                {},
+            )
+        ):
+            copied_entry = _get_copy_of_entry(
+                entry
+            )
+
+            if consumer in copied_entry[
+                "consumers"
+            ]:
+                copied_entry[
+                    "consumers"
+                ].remove(
+                    consumer
+                )
+
+            copied_entry[
+                "channels"
+            ].pop(
+                consumer,
+                None,
+            )
+
+            new_consumption[
+                t_key
+            ] = copied_entry
+
+    # Install rebuilt exact slice.
     for target, channels in rebuilt_targets.items():
-        entry = _get_copy_of_entry(new_consumption.get(target, {"consumers": [], "channels": {}}))
-        if consumer not in entry["consumers"]:
-            entry["consumers"].append(consumer)
-        entry["consumers"] = sorted(set(entry["consumers"]))
-        entry["channels"][consumer] = sorted(channels)
-        new_consumption[target] = entry
+        entry = _get_copy_of_entry(
+            new_consumption.get(
+                target,
+                {
+                    "consumers": [],
+                    "channels": {},
+                },
+            )
+        )
+
+        if consumer not in entry[
+            "consumers"
+        ]:
+            entry[
+                "consumers"
+            ].append(
+                consumer
+            )
+
+        entry[
+            "consumers"
+        ] = sorted(
+            set(
+                entry[
+                    "consumers"
+                ]
+            )
+        )
+
+        entry[
+            "channels"
+        ][
+            consumer
+        ] = sorted(
+            channels
+        )
+
+        new_consumption[
+            target
+        ] = entry
+
+    if consumer_target_index is not None:
+        if rebuilt_targets:
+            consumer_target_index[
+                consumer
+            ] = set(
+                rebuilt_targets
+            )
+        else:
+            consumer_target_index.pop(
+                consumer,
+                None,
+            )
 
     return new_consumption, False
 
@@ -399,6 +600,13 @@ def execute_refresh_plan(
                 ) and art_key not in current_targets:
                     candidate.artifact_consumption.pop(art_key, None)
 
+    expected_targets = canonical_artifact_consumption_targets(
+        candidate.artifacts
+    )
+    consumer_target_index = _build_consumer_target_index(
+        candidate.artifact_consumption
+    )
+
     # 2. REPARSE - record planned reparse modules (trace-only, no secondary source I/O)
     executed_reparse: List[str] = []
     for reparse_mod in plan.reparse_modules:
@@ -418,11 +626,17 @@ def execute_refresh_plan(
                     candidate_consumption=candidate.artifact_consumption,
                     candidate_artifacts=candidate.artifacts,
                     reexports=new_reexports,
+                    expected_targets=expected_targets,
+                    consumer_target_index=consumer_target_index,
                 )
                 if is_ambig:
                     candidate.artifact_consumption = _remove_consumer_slice(
                         candidate.artifact_consumption,
                         consumer_path,
+                    )
+                    consumer_target_index.pop(
+                        consumer_path,
+                        None,
                     )
                     artifact_consumption_failed = True
                     candidate.artifact_consumption_state = "stale"
@@ -479,11 +693,17 @@ def execute_refresh_plan(
                     candidate_consumption=candidate.artifact_consumption,
                     candidate_artifacts=candidate.artifacts,
                     reexports=new_reexports,
+                    expected_targets=expected_targets,
+                    consumer_target_index=consumer_target_index,
                 )
                 if is_ambig:
                     candidate.artifact_consumption = _remove_consumer_slice(
                         candidate.artifact_consumption,
                         delta.module_path,
+                    )
+                    consumer_target_index.pop(
+                        delta.module_path,
+                        None,
                     )
                     artifact_consumption_failed = True
                     candidate.artifact_consumption_state = "stale"

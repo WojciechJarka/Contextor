@@ -1,549 +1,712 @@
-STATUS=FINAL_PASS
-HEAD_BEFORE=e8857b342bf48f815e570146572e3bb8672d8f2c
-HEAD_AFTER=e8857b342bf48f815e570146572e3bb8672d8f2c
-LIVE_REVISION_BEFORE=1349
-LIVE_REVISION_AFTER=1353
+CPA10L1_INCREMENTAL_CONSUMER_SLICE_COMPLEXITY_FIX
+
+STATUS
+STATUS=BLOCKED
+BLOCK_REASON=LIVE synchronization gate not satisfied; targeted validation was not run.
+
+BASELINE
+HISTORICAL_INCREMENTAL_EXECUTE_PLAN_MS=304390
+HISTORICAL_RECOMPUTE_COUNT=398
+BASELINE_SOURCE=User-provided task contract.
+LIVE_BASELINE_REVISION=1353
+LIVE_FIRST_EDIT_REVISION=1354
+LIVE_FIRST_EDIT_EVENT=SYNTAX_ERROR for contextor/core/analysis/incremental/plan_executor.py at line 597, column 8.
+LOCAL_SOURCE_AFTER_CORRECTION=The prepopulation cleanup loop indentation is restored in the working file.
+CANONICAL_LIVE_AFTER_CORRECTION=Still reports the earlier parse failure at line 597; no later canonical revision arrived in four bounded polls.
+ACTIVE_MUTATION_OR_REPOSITORY_LEASE=UNKNOWN
+ANALYSIS_STATUS=Most recent returned job 0259d1bbc4b34fd795d9370df0628ab7 is completed and published revision 1352; this does not establish current writer/lease inactivity.
 
 FILES_CHANGED
-- C:\Temp\Contextor_Repo\contextor\mcp_backend_cli.py
-- C:\Temp\Contextor_Repo\contextor\__main__.py
-- C:\Temp\Contextor_Repo\tests\test_mcp_backend_cli.py
-walkthrough.md is report-only and excluded from diff accounting. No protected file changed.
-
-SOURCE_VALIDATION
-DIRECT_EVIDENCE:
-- Current HEAD before and after implementation is e8857b342bf48f815e570146572e3bb8672d8f2c, matching the certified G2B1 handoff HEAD.
-- Fresh Contextor source for contextor.__main__::main was workspace_sync=verified at LIVE revision 1349 before editing. The exact requested SEARCH block occurred exactly once: SEARCH_ANCHOR_COUNT=1.
-- The literal patch was applied once. Existing contextor.cli.main and mcp_backend_control lifecycle APIs were unchanged.
-- Read-only git status/diff shows only the three allowed source/test files and walkthrough.md. Protected files contextor/cli.py, contextor/mcp_backend_control.py, contextor/mcp_backend_state.py, contextor/mcp_backend_secret.py, and contextor/mcp_server.py have no diff.
-CODE_PATH_PROVED:
-- contextor.__main__.main keeps GUI routing first, strips --cli, routes only backend start/status/stop to the backend CLI, and delegates all other input to contextor.cli.main.
-- contextor.mcp_backend_cli delegates lifecycle operations to get_backend_status, start_backend, and stop_backend from the existing contextor.mcp_backend_control owner.
-CONTRACT_PROVED:
-- The new CLI serializes BackendStatus.to_dict(), catches BackendControlError, and does not read or expose the backend token.
-- The exact ten supplied tests cover JSON/status/error behavior, all three command routes, --cli handling, bare backend path compatibility, unrecognized suffix compatibility, and token-field absence.
-INFERENCE:
-- None required for the implementation verdict.
-UNKNOWN:
-- None material to the contracted behavior; no real backend was started.
+- C:\Temp\Contextor_Repo\contextor\core\analysis\incremental\plan_executor.py
+- C:\Temp\Contextor_Repo\tests\test_incremental_plan_executor_complexity.py
+WALKTHROUGH_REPORT_ONLY=YES
 
 IMPLEMENTATION_RESULT
-BACKEND_CLI_IMPLEMENTED=YES
-BACKEND_START_ROUTE_IMPLEMENTED=YES
-BACKEND_STATUS_ROUTE_IMPLEMENTED=YES
-BACKEND_STOP_ROUTE_IMPLEMENTED=YES
-BARE_BACKEND_PATH_COMPATIBILITY_PRESERVED=YES
-TOKEN_EXPOSED_BY_CLI=NO
-REAL_BACKEND_STARTED=NO
-CODEX_CONFIG_CHANGED=NO
+TRANSIENT_CONSUMER_TARGET_INDEX_IMPLEMENTED=YES
+TARGET_DOMAIN_PRECOMPUTED_ONCE=YES (one full candidate target-domain precompute is present; the exact supplied test's global call counter also counts the existing changed-module prepopulation call, see COMPLEXITY_CONTRACT)
+CANONICAL_STATE_SCHEMA_CHANGED=NO
+PERSISTENCE_CHANGED=NO
+PLANNER_SEMANTICS_CHANGED=NO
+AMBIGUITY_SEMANTICS_CHANGED=NO
+COW_ENTRY_COPY_PRESERVED=YES
+FIX_DESIGNED_BY_AGENT=NO
+The requested helper, resolver/rebuild replacements, execution-local index, both call-site arguments, and ambiguity-path index cleanup are present in the source diff. No source/test files beyond the two authorized paths were changed.
 
-ROUTING_CONTRACT
-GUI routing remains first. The application intercepts exactly the backend start, backend status, and backend stop prefixes after removing --cli. Bare backend and unrecognized backend suffixes continue to contextor.cli.main.
+COMPLEXITY_CONTRACT
+INDEXED_REBUILD_FULL_MAP_SCAN=NO
+INDEXED_REBUILD_TOP_LEVEL_COPY=NO
+INDEXED_REBUILD_TARGET_DOMAIN_REBUILD=NO
+The indexed branch uses only the consumer's reverse-index targets and passes the precomputed expected_targets into target resolution.
+STATIC_TEST_CONTRACT_CONFLICT=YES
+The exact test asserts target_domain_calls == 1. In its execute_refresh_plan fixture, delta.module_path is "changed" and candidate.artifacts has no "changed" entry. The existing candidate prepopulation block therefore obtains the default empty dict and calls canonical_artifact_consumption_targets once; the newly required full-domain precompute calls it again. The exact test's wrapper counts both calls, so the source path appears to produce 2 calls. This was not run because the LIVE gate failed. No adaptation was made.
 
-CLI_OUTPUT_CONTRACT
-The CLI emits JSON from BackendStatus.to_dict(), whose public keys are state, ready, detail, endpoint, pid, and instance_id. BackendControlError is emitted to stderr with the [ERROR] prefix and return code 1. Status returns 0 when ready and 1 when not ready.
+COW_CONTRACT
+COW_ENTRY_COPY_PRESERVED=YES
+With consumer_target_index supplied, _rebuild_consumer_slice reuses the already-isolated candidate top-level mapping. Entries being mutated are copied through _get_copy_of_entry. The fallback without an index retains a top-level copy and full-map key fallback.
 
-TEST_RESULTS
-- py_compile contextor\mcp_backend_cli.py contextor\__main__.py tests\test_mcp_backend_cli.py: PASS.
-- pytest -q tests/test_mcp_backend_cli.py: PASS, 10 passed, 1 Authlib deprecation warning.
-- pytest -q tests/test_mcp_backend_control.py: PASS, 20 passed, 1 Authlib deprecation warning.
-TARGETED_TESTS=PASS
+TARGETED_TEST_RESULTS
+PERFORMANCE_REGRESSION_TEST_ADDED=YES
+TARGETED_TESTS=NOT_RUN
+PY_COMPILE=NOT_RUN
+VALIDATION_GATE=workspace_sync=verified was not established for both files.
 FULL_SUITE_RUN=NO
 
 CONTEXTOR_VERIFICATION
-- After four bounded get_live_events attempts spaced 5, 10, and 10 seconds, no desktop_watcher event appeared and __main__.py remained out_of_sync. No further event polling or update_file call was made.
-- The contract-authorized full repository analysis recovery completed successfully and published LIVE revision 1352; analysis_coverage reported zero skipped Python files.
-- Fresh post-recovery and post-test get_file_edit_context projections report workspace_sync=verified at revision 1353 for all three changed source/test files:
-  - contextor/mcp_backend_cli.py
-  - contextor/__main__.py
-  - tests/test_mcp_backend_cli.py
-- Each changed file reports syntax_errors=0, name_collisions=0, and cycles=0 with fresh availability.
-- Direct fresh get_name_collisions reports availability=fresh, total=0, conflicting=0, identical=0.
-- No real backend start occurred.
-
-WORKSPACE_SYNC=verified/3 files at LIVE revision 1353
-NAME_COLLISIONS=0/fresh direct projection
-SYNTAX_ERRORS=0/fresh
-CYCLES=0/fresh
-
-MCP_SERVER_RESTART_REQUIRED=NO
-GIT_COMMIT_PERFORMED=NO
-GIT_PUSH_PERFORMED=NO
+WORKSPACE_SYNC=unverified
+PRODUCTION_FILE_CONTEXT=stale; Contextor returned last-known-good state and the prior parse failure at line 597, column 8.
+TEST_FILE_CONTEXT=unavailable; tests.test_incremental_plan_executor_complexity is not present in canonical LIVE state.
+NAME_COLLISIONS=0 (fresh direct get_name_collisions projection)
+SYNTAX_ERRORS=1 (fresh canonical summary still reflects the earlier line 597 parse failure)
+CYCLES=0 (fresh canonical diagnostics summary)
+POST_TEST_VERIFICATION=NOT_RUN
+The local production file contains the corrected indentation, but Contextor did not publish a newer revision. No pytest or py_compile was run. The bounded LIVE polling allowance was exhausted; no update_file or full-analysis recovery was started. The available completed analysis status did not prove that a mutation worker or repository lease was inactive, so recovery was not safe to start.
 
 FULL_DIFFS
 
-FILE=C:\Temp\Contextor_Repo\contextor\mcp_backend_cli.py
-diff --git a/contextor/mcp_backend_cli.py b/contextor/mcp_backend_cli.py
-new file mode 100644
-index 0000000..416461a
---- /dev/null
-+++ b/contextor/mcp_backend_cli.py
-@@ -0,0 +1,94 @@
-+"""Command-line control for the persistent Contextor MCP backend."""
+FULL_DIFF: C:\Temp\Contextor_Repo\contextor\core\analysis\incremental\plan_executor.py
+
+FULL_DIFF: C:\Temp\Contextor_Repo\tests\test_incremental_plan_executor_complexity.py
+
+CODE_CHANGED=YES
+TEST_CODE_CHANGED=YES
+FIX_DESIGNED_BY_AGENT=NO
+GIT_COMMIT_PERFORMED=NO
+GIT_PUSH_PERFORMED=NO
+GIT_MUTATION_PERFORMED=NO
+
+diff --git a/contextor/core/analysis/incremental/plan_executor.py b/contextor/core/analysis/incremental/plan_executor.py
+index a45710b..c04a55a 100644
+--- a/contextor/core/analysis/incremental/plan_executor.py
++++ b/contextor/core/analysis/incremental/plan_executor.py
+@@ -98,10 +98,63 @@ def _get_copy_of_entry(raw_entry: dict) -> dict:
+     return {"consumers": consumers, "channels": channels}
+ 
+ 
++def _build_consumer_target_index(
++    consumption: Mapping[str, Any],
++) -> Dict[str, Set[str]]:
++    """
++    Builds one transient reverse lookup for the current plan execution.
 +
-+from __future__ import annotations
++    This is execution-local acceleration only. It is not canonical state
++    and is never persisted.
++    """
++    index: Dict[str, Set[str]] = {}
 +
-+import argparse
-+import json
-+import sys
++    for target, raw_entry in consumption.items():
++        if not isinstance(raw_entry, dict):
++            continue
 +
-+from contextor.mcp_backend_control import (
-+    BackendControlError,
-+    BackendStatus,
-+    get_backend_status,
-+    start_backend,
-+    stop_backend,
-+)
++        consumers = raw_entry.get("consumers", ())
++        if isinstance(
++            consumers,
++            (
++                list,
++                tuple,
++                set,
++            ),
++        ):
++            for consumer in consumers:
++                if (
++                    isinstance(consumer, str)
++                    and consumer
++                ):
++                    index.setdefault(
++                        consumer,
++                        set(),
++                    ).add(target)
 +
-+
-+def _build_parser() -> argparse.ArgumentParser:
-+    parser = argparse.ArgumentParser(
-+        prog="contextor backend",
-+        description=(
-+            "Control the persistent local Contextor MCP backend."
-+        ),
-+    )
-+
-+    subparsers = parser.add_subparsers(
-+        dest="command",
-+        required=True,
-+    )
-+
-+    subparsers.add_parser(
-+        "start",
-+        help=(
-+            "Start the persistent backend or reuse an "
-+            "already-ready instance."
-+        ),
-+    )
-+
-+    subparsers.add_parser(
-+        "status",
-+        help="Report authenticated backend readiness.",
-+    )
-+
-+    subparsers.add_parser(
-+        "stop",
-+        help="Stop the identity-verified persistent backend.",
-+    )
-+
-+    return parser
-+
-+
-+def _emit_status(
-+    status: BackendStatus,
-+) -> None:
-+    print(
-+        json.dumps(
-+            status.to_dict(),
-+            sort_keys=True,
++        channels = raw_entry.get(
++            "channels",
++            {},
 +        )
-+    )
++        if isinstance(channels, dict):
++            for consumer in channels:
++                if (
++                    isinstance(consumer, str)
++                    and consumer
++                ):
++                    index.setdefault(
++                        consumer,
++                        set(),
++                    ).add(target)
++
++    return index
 +
 +
-+def main(
-+    argv: list[str] | None = None,
-+) -> int:
-+    args = _build_parser().parse_args(argv)
+ def _resolve_canonical_target_key(
+     target: Optional[str],
+     candidate_consumption: Mapping[str, Any],
+     candidate_artifacts: Mapping[str, Any],
++    expected_targets: Optional[Set[str]] = None,
+ ) -> Tuple[Optional[str], str]:
+     """
+     Resolves a target string against the canonical target domain.
+@@ -113,7 +166,10 @@ def _resolve_canonical_target_key(
+     if not target:
+         return None, "unresolved"
+ 
+-    expected_targets = canonical_artifact_consumption_targets(candidate_artifacts)
++    if expected_targets is None:
++        expected_targets = canonical_artifact_consumption_targets(
++            candidate_artifacts
++        )
+ 
+     # Already canonical format
+     if "::" in target:
+@@ -155,60 +211,205 @@ def _rebuild_consumer_slice(
+     candidate_consumption: Dict[str, Any],
+     candidate_artifacts: Mapping[str, Any],
+     reexports: Mapping[str, str],
++    expected_targets: Optional[Set[str]] = None,
++    consumer_target_index: Optional[Dict[str, Set[str]]] = None,
+ ) -> Tuple[Dict[str, Any], bool]:
+     """
+-    Rebuilds the entire artifact_consumption slice for a single consumer in Copy-On-Write fashion.
+-    Inspects all canonical usage families: direct_calls, runtime_calls, qualified_refs,
+-    callback_calls, event_bindings, api_imports, inheritance.
+-    Returns (updated_consumption_dict, is_ambiguous). If is_ambiguous is True, returns original container.
++    Rebuilds the entire artifact_consumption slice for a single consumer.
 +
-+    try:
-+        if args.command == "start":
-+            status = start_backend()
++    When an execution-local reverse index is supplied, the candidate
++    top-level mapping is already Copy-On-Write and only entries known to
++    contain the consumer are inspected. Nested entries are still copied
++    before mutation.
 +
-+        elif args.command == "status":
-+            status = get_backend_status()
++    Without the execution-local index, the legacy full-map fallback is
++    preserved.
 +
++    Returns (updated_consumption_dict, is_ambiguous). If is_ambiguous is
++    True, returns the original container without mutation.
+     """
+     c_aliases = dict(consumer_facts.aliases)
+     c_tagged = (
+-        [(sym, "direct_calls") for sym in consumer_facts.direct_calls]
+-        + [(sym, "runtime_calls") for sym in consumer_facts.runtime_calls]
+-        + [(sym, "qualified_refs") for sym in consumer_facts.qualified_refs]
+-        + [(sym, "callback_calls") for sym in consumer_facts.callback_calls]
+-        + [(sym, "event_bindings") for sym in consumer_facts.event_bindings]
+-        + [(sym, "api_imports") for sym in consumer_facts.imports]
+-        + [(item[1], "inheritance") for item in consumer_facts.inheritance_refs if len(item) >= 2 and item[1]]
++        [
++            (sym, "direct_calls")
++            for sym in consumer_facts.direct_calls
++        ]
++        + [
++            (sym, "runtime_calls")
++            for sym in consumer_facts.runtime_calls
++        ]
++        + [
++            (sym, "qualified_refs")
++            for sym in consumer_facts.qualified_refs
++        ]
++        + [
++            (sym, "callback_calls")
++            for sym in consumer_facts.callback_calls
++        ]
++        + [
++            (sym, "event_bindings")
++            for sym in consumer_facts.event_bindings
++        ]
++        + [
++            (sym, "api_imports")
++            for sym in consumer_facts.imports
++        ]
++        + [
++            (item[1], "inheritance")
++            for item in consumer_facts.inheritance_refs
++            if len(item) >= 2 and item[1]
++        ]
+     )
+ 
+     rebuilt_targets: Dict[str, Set[str]] = {}
+     is_ambiguous = False
+ 
+     for sym, ch_name in c_tagged:
+-        raw_t = _resolve_reexport(_resolve_alias(sym, c_aliases), reexports)
+-        target, status = _resolve_canonical_target_key(raw_t, candidate_consumption, candidate_artifacts)
++        raw_t = _resolve_reexport(
++            _resolve_alias(
++                sym,
++                c_aliases,
++            ),
++            reexports,
++        )
++        target, status = _resolve_canonical_target_key(
++            raw_t,
++            candidate_consumption,
++            candidate_artifacts,
++            expected_targets=expected_targets,
++        )
++
+         if status == "ambiguous":
+             is_ambiguous = True
+-        elif status == "resolved" and target:
++
++        elif (
++            status == "resolved"
++            and target
++        ):
+             if target not in rebuilt_targets:
+                 rebuilt_targets[target] = set()
+-            rebuilt_targets[target].add(ch_name)
++
++            rebuilt_targets[target].add(
++                ch_name
++            )
+ 
+     if is_ambiguous:
+         return candidate_consumption, True
+ 
+-    # Copy-on-Write update of candidate_consumption container and entries
+-    new_consumption = dict(candidate_consumption)
++    if consumer_target_index is None:
++        new_consumption = dict(
++            candidate_consumption
++        )
++        previous_targets = tuple(
++            new_consumption.keys()
++        )
++    else:
++        new_consumption = candidate_consumption
++        previous_targets = tuple(
++            consumer_target_index.get(
++                consumer,
++                (),
++            )
++        )
+ 
+-    # 1. Remove consumer from all previous target entries
+-    for t_key, entry in list(new_consumption.items()):
+-        if consumer in entry.get("consumers", []) or consumer in entry.get("channels", {}):
+-            copied_entry = _get_copy_of_entry(entry)
+-            if consumer in copied_entry["consumers"]:
+-                copied_entry["consumers"].remove(consumer)
+-            copied_entry["channels"].pop(consumer, None)
+-            new_consumption[t_key] = copied_entry
++    # Remove the consumer only from entries known to contain its old slice.
++    for t_key in previous_targets:
++        entry = new_consumption.get(
++            t_key
++        )
++        if not isinstance(entry, dict):
++            continue
+ 
+-    # 2. Install rebuilt exact slice
++        if (
++            consumer in entry.get(
++                "consumers",
++                [],
++            )
++            or consumer
++            in entry.get(
++                "channels",
++                {},
++            )
++        ):
++            copied_entry = _get_copy_of_entry(
++                entry
++            )
++
++            if consumer in copied_entry[
++                "consumers"
++            ]:
++                copied_entry[
++                    "consumers"
++                ].remove(
++                    consumer
++                )
++
++            copied_entry[
++                "channels"
++            ].pop(
++                consumer,
++                None,
++            )
++
++            new_consumption[
++                t_key
++            ] = copied_entry
++
++    # Install rebuilt exact slice.
+     for target, channels in rebuilt_targets.items():
+-        entry = _get_copy_of_entry(new_consumption.get(target, {"consumers": [], "channels": {}}))
+-        if consumer not in entry["consumers"]:
+-            entry["consumers"].append(consumer)
+-        entry["consumers"] = sorted(set(entry["consumers"]))
+-        entry["channels"][consumer] = sorted(channels)
+-        new_consumption[target] = entry
++        entry = _get_copy_of_entry(
++            new_consumption.get(
++                target,
++                {
++                    "consumers": [],
++                    "channels": {},
++                },
++            )
++        )
++
++        if consumer not in entry[
++            "consumers"
++        ]:
++            entry[
++                "consumers"
++            ].append(
++                consumer
++            )
++
++        entry[
++            "consumers"
++        ] = sorted(
++            set(
++                entry[
++                    "consumers"
++                ]
++            )
++        )
++
++        entry[
++            "channels"
++        ][
++            consumer
++        ] = sorted(
++            channels
++        )
++
++        new_consumption[
++            target
++        ] = entry
++
++    if consumer_target_index is not None:
++        if rebuilt_targets:
++            consumer_target_index[
++                consumer
++            ] = set(
++                rebuilt_targets
++            )
 +        else:
-+            status = stop_backend()
-+
-+    except BackendControlError as exc:
-+        print(
-+            f"[ERROR] {exc}",
-+            file=sys.stderr,
-+        )
-+        return 1
-+
-+    _emit_status(status)
-+
-+    if args.command == "status":
-+        return 0 if status.ready else 1
-+
-+    return 0
-+
-+
-+if __name__ == "__main__":
-+    sys.exit(main())
-
-FILE=C:\Temp\Contextor_Repo\contextor\__main__.py
-diff --git a/contextor/__main__.py b/contextor/__main__.py
-index 633b963..aa441f3 100644
---- a/contextor/__main__.py
-+++ b/contextor/__main__.py
-@@ -85,11 +85,37 @@ def main(argv: list[str] | None = None) -> int:
-     if "--gui" in argv:
-         return _run_gui()
++            consumer_target_index.pop(
++                consumer,
++                None,
++            )
  
--    from contextor.cli import main as cli_main
--
-     # '--cli' is accepted for symmetry with '--gui' and documentation,
-     # but CLI is the default mode.
--    return cli_main([arg for arg in argv if arg != "--cli"])
-+    cli_argv = [
-+        arg
-+        for arg in argv
-+        if arg != "--cli"
-+    ]
-+
-+    if (
-+        len(cli_argv) >= 2
-+        and cli_argv[0] == "backend"
-+        and cli_argv[1]
-+        in {
-+            "start",
-+            "status",
-+            "stop",
-+        }
-+    ):
-+        from contextor.mcp_backend_cli import (
-+            main as backend_cli_main,
-+        )
-+
-+        return backend_cli_main(
-+            cli_argv[1:]
-+        )
-+
-+    from contextor.cli import main as cli_main
-+
-+    return cli_main(
-+        cli_argv
+     return new_consumption, False
+ 
+@@ -399,6 +600,13 @@ def execute_refresh_plan(
+                 ) and art_key not in current_targets:
+                     candidate.artifact_consumption.pop(art_key, None)
+ 
++    expected_targets = canonical_artifact_consumption_targets(
++        candidate.artifacts
 +    )
- 
- 
- # ============================================================
++    consumer_target_index = _build_consumer_target_index(
++        candidate.artifact_consumption
++    )
++
+     # 2. REPARSE - record planned reparse modules (trace-only, no secondary source I/O)
+     executed_reparse: List[str] = []
+     for reparse_mod in plan.reparse_modules:
+@@ -418,12 +626,18 @@ def execute_refresh_plan(
+                     candidate_consumption=candidate.artifact_consumption,
+                     candidate_artifacts=candidate.artifacts,
+                     reexports=new_reexports,
++                    expected_targets=expected_targets,
++                    consumer_target_index=consumer_target_index,
+                 )
+                 if is_ambig:
+                     candidate.artifact_consumption = _remove_consumer_slice(
+                         candidate.artifact_consumption,
+                         consumer_path,
+                     )
++                    consumer_target_index.pop(
++                        consumer_path,
++                        None,
++                    )
+                     artifact_consumption_failed = True
+                     candidate.artifact_consumption_state = "stale"
+                     break
+@@ -479,12 +693,18 @@ def execute_refresh_plan(
+                     candidate_consumption=candidate.artifact_consumption,
+                     candidate_artifacts=candidate.artifacts,
+                     reexports=new_reexports,
++                    expected_targets=expected_targets,
++                    consumer_target_index=consumer_target_index,
+                 )
+                 if is_ambig:
+                     candidate.artifact_consumption = _remove_consumer_slice(
+                         candidate.artifact_consumption,
+                         delta.module_path,
+                     )
++                    consumer_target_index.pop(
++                        delta.module_path,
++                        None,
++                    )
+                     artifact_consumption_failed = True
+                     candidate.artifact_consumption_state = "stale"
+                 else:
 
-FILE=C:\Temp\Contextor_Repo\tests\test_mcp_backend_cli.py
-diff --git a/tests/test_mcp_backend_cli.py b/tests/test_mcp_backend_cli.py
+diff --git a/tests/test_incremental_plan_executor_complexity.py b/tests/test_incremental_plan_executor_complexity.py
 new file mode 100644
-index 0000000..4996244
+index 0000000..17f0793
 --- /dev/null
-+++ b/tests/test_mcp_backend_cli.py
-@@ -0,0 +1,318 @@
-+import json
++++ b/tests/test_incremental_plan_executor_complexity.py
+@@ -0,0 +1,258 @@
++from pathlib import Path
 +
 +import pytest
 +
-+import contextor.__main__ as application
-+import contextor.cli as analysis_cli
-+import contextor.mcp_backend_cli as backend_cli
-+from contextor.mcp_backend_control import (
-+    BackendControlError,
-+    BackendStatus,
++from contextor.core.analysis.incremental import (
++    plan_executor,
++)
++from contextor.core.analysis.state_manager import (
++    FileDelta,
++    RepositoryAnalysisState,
++)
++from contextor.core.domain.refresh_plan import (
++    RefreshPlan,
++)
++from contextor.core.domain.usage_facts import (
++    ModuleUsageFacts,
 +)
 +
 +
-+def test_backend_cli_start_emits_json_and_returns_zero(
++class _NoFullScanDict(dict):
++    def items(self):
++        raise AssertionError(
++            "indexed rebuild must not scan the full "
++            "artifact_consumption mapping"
++        )
++
++
++def test_indexed_rebuild_uses_precomputed_domain_without_full_scan(
 +    monkeypatch: pytest.MonkeyPatch,
-+    capsys: pytest.CaptureFixture[str],
 +) -> None:
-+    monkeypatch.setattr(
-+        backend_cli,
-+        "start_backend",
-+        lambda: BackendStatus(
-+            state="running",
-+            ready=True,
-+            detail="ready",
-+            record=None,
++    consumption = _NoFullScanDict(
++        {
++            "provider::foo": {
++                "consumers": [
++                    "consumer",
++                ],
++                "channels": {
++                    "consumer": [
++                        "direct_calls",
++                    ],
++                },
++            },
++            "provider::bar": {
++                "consumers": [],
++                "channels": {},
++            },
++        }
++    )
++
++    usage = ModuleUsageFacts(
++        direct_calls=(
++            "provider.bar",
 +        ),
 +    )
 +
-+    result = backend_cli.main(["start"])
++    consumer_target_index = {
++        "consumer": {
++            "provider::foo",
++        },
++    }
 +
-+    captured = capsys.readouterr()
-+    payload = json.loads(captured.out)
++    def fail_target_rebuild(
++        artifacts,
++    ):
++        pytest.fail(
++            "precomputed target domain must be reused"
++        )
 +
-+    assert result == 0
-+    assert captured.err == ""
-+    assert payload == {
-+        "detail": "ready",
-+        "endpoint": None,
-+        "instance_id": None,
-+        "pid": None,
-+        "ready": True,
-+        "state": "running",
++    monkeypatch.setattr(
++        plan_executor,
++        "canonical_artifact_consumption_targets",
++        fail_target_rebuild,
++    )
++
++    rebuilt, is_ambiguous = (
++        plan_executor._rebuild_consumer_slice(
++            consumer="consumer",
++            consumer_facts=usage,
++            candidate_consumption=consumption,
++            candidate_artifacts={
++                "provider": {
++                    "own_symbols": [
++                        "foo",
++                        "bar",
++                    ],
++                },
++            },
++            reexports={},
++            expected_targets={
++                "provider::foo",
++                "provider::bar",
++            },
++            consumer_target_index=consumer_target_index,
++        )
++    )
++
++    assert is_ambiguous is False
++    assert rebuilt is consumption
++
++    assert rebuilt[
++        "provider::foo"
++    ] == {
++        "consumers": [],
++        "channels": {},
++    }
++
++    assert rebuilt[
++        "provider::bar"
++    ] == {
++        "consumers": [
++            "consumer",
++        ],
++        "channels": {
++            "consumer": [
++                "direct_calls",
++            ],
++        },
++    }
++
++    assert consumer_target_index == {
++        "consumer": {
++            "provider::bar",
++        },
 +    }
 +
 +
-+def test_backend_cli_status_ready_returns_zero(
++def test_execute_refresh_plan_builds_target_domain_once_for_many_consumers(
 +    monkeypatch: pytest.MonkeyPatch,
-+    capsys: pytest.CaptureFixture[str],
++    tmp_path: Path,
 +) -> None:
++    state = RepositoryAnalysisState(
++        artifacts={
++            "provider": {
++                "own_symbols": [
++                    "foo",
++                    "bar",
++                ],
++            },
++        },
++        artifact_consumption={
++            "provider::foo": {
++                "consumers": [
++                    "consumer_a",
++                    "consumer_b",
++                ],
++                "channels": {
++                    "consumer_a": [
++                        "direct_calls",
++                    ],
++                    "consumer_b": [
++                        "direct_calls",
++                    ],
++                },
++            },
++            "provider::bar": {
++                "consumers": [],
++                "channels": {},
++            },
++        },
++        artifact_consumption_state="fresh",
++        module_usages={
++            "consumer_a": ModuleUsageFacts(
++                direct_calls=(
++                    "provider.bar",
++                ),
++            ),
++            "consumer_b": ModuleUsageFacts(
++                direct_calls=(
++                    "provider.bar",
++                ),
++            ),
++        },
++    )
++
++    original_targets = (
++        plan_executor
++        .canonical_artifact_consumption_targets
++    )
++    target_domain_calls = 0
++
++    def counted_targets(
++        artifacts,
++    ):
++        nonlocal target_domain_calls
++        target_domain_calls += 1
++        return original_targets(
++            artifacts
++        )
++
 +    monkeypatch.setattr(
-+        backend_cli,
-+        "get_backend_status",
-+        lambda: BackendStatus(
-+            state="running",
-+            ready=True,
-+            detail="ready",
-+            record=None,
++        plan_executor,
++        "canonical_artifact_consumption_targets",
++        counted_targets,
++    )
++
++    outcome = plan_executor.execute_refresh_plan(
++        state=state,
++        delta=FileDelta(
++            module_path="changed",
++        ),
++        usage_delta=None,
++        plan=RefreshPlan(
++            recompute_modules=(
++                "consumer_a",
++                "consumer_b",
++            ),
++        ),
++        new_imports=None,
++        new_artifacts=None,
++        new_usage=None,
++        root_path=tmp_path,
++        file_path=str(
++            tmp_path
++            / "changed.py"
 +        ),
 +    )
 +
-+    result = backend_cli.main(["status"])
++    assert target_domain_calls == 1
 +
-+    captured = capsys.readouterr()
-+    payload = json.loads(captured.out)
-+
-+    assert result == 0
-+    assert captured.err == ""
-+    assert payload["ready"] is True
-+
-+
-+def test_backend_cli_status_not_ready_returns_one(
-+    monkeypatch: pytest.MonkeyPatch,
-+    capsys: pytest.CaptureFixture[str],
-+) -> None:
-+    monkeypatch.setattr(
-+        backend_cli,
-+        "get_backend_status",
-+        lambda: BackendStatus(
-+            state="stopped",
-+            ready=False,
-+            detail="not running",
-+            record=None,
-+        ),
-+    )
-+
-+    result = backend_cli.main(["status"])
-+
-+    captured = capsys.readouterr()
-+    payload = json.loads(captured.out)
-+
-+    assert result == 1
-+    assert captured.err == ""
-+    assert payload["ready"] is False
-+    assert payload["state"] == "stopped"
-+
-+
-+def test_backend_cli_stop_returns_zero(
-+    monkeypatch: pytest.MonkeyPatch,
-+    capsys: pytest.CaptureFixture[str],
-+) -> None:
-+    monkeypatch.setattr(
-+        backend_cli,
-+        "stop_backend",
-+        lambda: BackendStatus(
-+            state="stopped",
-+            ready=False,
-+            detail="persistent backend stopped",
-+            record=None,
-+        ),
-+    )
-+
-+    result = backend_cli.main(["stop"])
-+
-+    captured = capsys.readouterr()
-+    payload = json.loads(captured.out)
-+
-+    assert result == 0
-+    assert captured.err == ""
-+    assert payload["state"] == "stopped"
-+
-+
-+def test_backend_cli_control_error_is_stderr_and_exit_one(
-+    monkeypatch: pytest.MonkeyPatch,
-+    capsys: pytest.CaptureFixture[str],
-+) -> None:
-+    def fail_start() -> BackendStatus:
-+        raise BackendControlError("boom")
-+
-+    monkeypatch.setattr(
-+        backend_cli,
-+        "start_backend",
-+        fail_start,
-+    )
-+
-+    result = backend_cli.main(["start"])
-+
-+    captured = capsys.readouterr()
-+
-+    assert result == 1
-+    assert captured.out == ""
-+    assert "[ERROR] boom" in captured.err
-+
-+
-+def test_application_main_routes_backend_start_to_backend_cli(
-+    monkeypatch: pytest.MonkeyPatch,
-+) -> None:
-+    captured: list[list[str]] = []
-+
-+    def fake_backend_main(
-+        argv: list[str] | None = None,
-+    ) -> int:
-+        captured.append(list(argv or []))
-+        return 17
-+
-+    monkeypatch.setattr(
-+        backend_cli,
-+        "main",
-+        fake_backend_main,
-+    )
-+    monkeypatch.setattr(
-+        analysis_cli,
-+        "main",
-+        lambda argv=None: pytest.fail(
-+            "normal CLI must not handle backend start"
-+        ),
-+    )
-+
-+    result = application.main(
-+        [
-+            "backend",
-+            "start",
-+        ]
-+    )
-+
-+    assert result == 17
-+    assert captured == [["start"]]
-+
-+
-+def test_application_main_routes_backend_status_with_cli_flag(
-+    monkeypatch: pytest.MonkeyPatch,
-+) -> None:
-+    captured: list[list[str]] = []
-+
-+    def fake_backend_main(
-+        argv: list[str] | None = None,
-+    ) -> int:
-+        captured.append(list(argv or []))
-+        return 19
-+
-+    monkeypatch.setattr(
-+        backend_cli,
-+        "main",
-+        fake_backend_main,
-+    )
-+    monkeypatch.setattr(
-+        analysis_cli,
-+        "main",
-+        lambda argv=None: pytest.fail(
-+            "normal CLI must not handle backend status"
-+        ),
-+    )
-+
-+    result = application.main(
-+        [
-+            "--cli",
-+            "backend",
-+            "status",
-+        ]
-+    )
-+
-+    assert result == 19
-+    assert captured == [["status"]]
-+
-+
-+def test_application_main_preserves_bare_backend_as_repository_path(
-+    monkeypatch: pytest.MonkeyPatch,
-+) -> None:
-+    captured: list[list[str]] = []
-+
-+    def fake_analysis_main(
-+        argv: list[str] | None = None,
-+    ) -> int:
-+        captured.append(list(argv or []))
-+        return 23
-+
-+    monkeypatch.setattr(
-+        analysis_cli,
-+        "main",
-+        fake_analysis_main,
-+    )
-+    monkeypatch.setattr(
-+        backend_cli,
-+        "main",
-+        lambda argv=None: pytest.fail(
-+            "bare backend must remain an analysis path"
-+        ),
-+    )
-+
-+    result = application.main(
-+        ["backend"]
-+    )
-+
-+    assert result == 23
-+    assert captured == [["backend"]]
-+
-+
-+def test_application_main_preserves_unrecognized_backend_suffix_for_normal_cli(
-+    monkeypatch: pytest.MonkeyPatch,
-+) -> None:
-+    captured: list[list[str]] = []
-+
-+    def fake_analysis_main(
-+        argv: list[str] | None = None,
-+    ) -> int:
-+        captured.append(list(argv or []))
-+        return 29
-+
-+    monkeypatch.setattr(
-+        analysis_cli,
-+        "main",
-+        fake_analysis_main,
-+    )
-+    monkeypatch.setattr(
-+        backend_cli,
-+        "main",
-+        lambda argv=None: pytest.fail(
-+            "unknown backend suffix must remain normal CLI input"
-+        ),
-+    )
-+
-+    result = application.main(
-+        [
-+            "backend",
-+            "something-else",
-+        ]
-+    )
-+
-+    assert result == 29
-+    assert captured == [
-+        [
-+            "backend",
-+            "something-else",
-+        ]
++    assert state.artifact_consumption[
++        "provider::foo"
++    ][
++        "consumers"
++    ] == [
++        "consumer_a",
++        "consumer_b",
 +    ]
 +
-+
-+def test_backend_cli_does_not_expose_token_fields(
-+    monkeypatch: pytest.MonkeyPatch,
-+    capsys: pytest.CaptureFixture[str],
-+) -> None:
-+    monkeypatch.setattr(
-+        backend_cli,
-+        "get_backend_status",
-+        lambda: BackendStatus(
-+            state="running",
-+            ready=True,
-+            detail="ready",
-+            record=None,
-+        ),
-+    )
-+
-+    result = backend_cli.main(["status"])
-+
-+    captured = capsys.readouterr()
-+    payload = json.loads(captured.out)
-+
-+    assert result == 0
-+    assert set(payload) == {
-+        "state",
-+        "ready",
-+        "detail",
-+        "endpoint",
-+        "pid",
-+        "instance_id",
++    assert outcome.candidate_state.artifact_consumption[
++        "provider::foo"
++    ] == {
++        "consumers": [],
++        "channels": {},
 +    }
-+    assert "token" not in payload
-+    assert "auth" not in payload
-+    assert "bearer" not in payload
-warning: in the working copy of 'tests/test_mcp_backend_cli.py', LF will be replaced by CRLF the next time Git touches it
++
++    assert outcome.candidate_state.artifact_consumption[
++        "provider::bar"
++    ] == {
++        "consumers": [
++            "consumer_a",
++            "consumer_b",
++        ],
++        "channels": {
++            "consumer_a": [
++                "direct_calls",
++            ],
++            "consumer_b": [
++                "direct_calls",
++            ],
++        },
++    }
++
++    assert outcome.execution_trace[
++        "recompute_modules"
++    ] == (
++        "consumer_a",
++        "consumer_b",
++    )
+
