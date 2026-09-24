@@ -1567,6 +1567,26 @@ def _header_records(sid: str, started_at: str, desktop_pid: int, file_name: str)
             "worker_task_max_ms": "maximum single worker task wall milliseconds",
             "worker_task_top10": "bounded slowest worker task path/time summary",
 
+            "worker_process_count": "distinct process-pool worker PIDs observed in returned file tasks",
+            "worker_first_start_count": "worker processes for which the actual first executed task start was observed",
+            "worker_tasks_per_process": "bounded worker PID to completed-task-count summary",
+
+            "worker_start_delay_sum_ms": "aggregate submit-to-worker-entry milliseconds; overlaps across tasks and is not critical-path additive",
+            "worker_start_delay_max_ms": "maximum submit-to-worker-entry milliseconds",
+            "worker_start_delay_top10": "bounded slowest submit-to-worker-entry path/time summary",
+
+            "worker_first_start_delay_min_ms": "minimum per-worker first-task submit-to-entry delay",
+            "worker_first_start_delay_max_ms": "maximum per-worker first-task submit-to-entry delay",
+            "worker_first_start_delay_mean_ms": "mean per-worker first-task submit-to-entry delay",
+
+            "worker_result_transport_sum_ms": "aggregate worker-result-ready to parent-received milliseconds; overlaps and is not critical-path additive",
+            "worker_result_transport_max_ms": "maximum worker-result-ready to parent-received milliseconds",
+            "worker_result_transport_top10": "bounded slowest worker-result transport path/time summary",
+
+            "executor_max_workers": "ProcessPoolExecutor configured max worker count",
+            "executor_process_count_after_submit": "executor process count observed immediately after all submissions",
+            "executor_process_count_before_shutdown": "executor process count observed after all results and before context shutdown",
+
             "source_read_calls": "worker source-read call count",
             "source_read_sum_ms": "aggregate worker source-read milliseconds; not critical-path additive",
 
@@ -1821,6 +1841,26 @@ def trace_event(domain: str, event: str, *, op: str | None = None, rev: int | No
                 "worker_task_sum_ms": "worker_task_sum_ms",
                 "worker_task_max_ms": "worker_task_max_ms",
                 "worker_task_top10": "worker_task_top10",
+
+                "worker_process_count": "worker_process_count",
+                "worker_first_start_count": "worker_first_start_count",
+                "worker_tasks_per_process": "worker_tasks_per_process",
+
+                "worker_start_delay_sum_ms": "worker_start_delay_sum_ms",
+                "worker_start_delay_max_ms": "worker_start_delay_max_ms",
+                "worker_start_delay_top10": "worker_start_delay_top10",
+
+                "worker_first_start_delay_min_ms": "worker_first_start_delay_min_ms",
+                "worker_first_start_delay_max_ms": "worker_first_start_delay_max_ms",
+                "worker_first_start_delay_mean_ms": "worker_first_start_delay_mean_ms",
+
+                "worker_result_transport_sum_ms": "worker_result_transport_sum_ms",
+                "worker_result_transport_max_ms": "worker_result_transport_max_ms",
+                "worker_result_transport_top10": "worker_result_transport_top10",
+
+                "executor_max_workers": "executor_max_workers",
+                "executor_process_count_after_submit": "executor_process_count_after_submit",
+                "executor_process_count_before_shutdown": "executor_process_count_before_shutdown",
 
                 "source_read_calls": "source_read_calls",
                 "source_read_sum_ms": "source_read_sum_ms",

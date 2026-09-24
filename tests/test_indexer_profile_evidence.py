@@ -238,6 +238,85 @@ def test_process_pool_parent_timing_evidence_is_explicit(
     assert event["parent_progress_ms"] >= 0.0
     assert event["pool_shutdown_ms"] >= 0.0
 
+    assert event["executor_max_workers"] >= 1
+
+    assert (
+        event["executor_process_count_after_submit"]
+        >= 1
+    )
+
+    assert (
+        event[
+            "executor_process_count_before_shutdown"
+        ]
+        >= 1
+    )
+
+    worker_events = [
+        item
+        for item in events
+        if item["ev"]
+        == "FULL_ANALYSIS_INDEX_WORKER_TIMING"
+    ]
+
+    assert len(worker_events) == 1
+
+    worker_event = worker_events[0]
+
+    assert worker_event["execution_mode"] == "process_pool"
+
+    assert worker_event["worker_process_count"] >= 1
+    assert (
+        worker_event["worker_first_start_count"]
+        == worker_event["worker_process_count"]
+    )
+
+    assert (
+        worker_event["worker_process_count"]
+        <= event["executor_max_workers"]
+    )
+
+    assert worker_event["worker_tasks_per_process"]
+
+    assert worker_event["worker_start_delay_sum_ms"] >= 0.0
+    assert worker_event["worker_start_delay_max_ms"] >= 0.0
+
+    assert (
+        worker_event["worker_first_start_delay_min_ms"]
+        >= 0.0
+    )
+
+    assert (
+        worker_event["worker_first_start_delay_max_ms"]
+        >= worker_event[
+            "worker_first_start_delay_min_ms"
+        ]
+    )
+
+    assert (
+        worker_event["worker_first_start_delay_mean_ms"]
+        >= worker_event[
+            "worker_first_start_delay_min_ms"
+        ]
+    )
+
+    assert (
+        worker_event["worker_first_start_delay_mean_ms"]
+        <= worker_event[
+            "worker_first_start_delay_max_ms"
+        ]
+    )
+
+    assert (
+        worker_event["worker_result_transport_sum_ms"]
+        >= 0.0
+    )
+
+    assert (
+        worker_event["worker_result_transport_max_ms"]
+        >= 0.0
+    )
+
     assert (
         event["pool_scope_ms"]
         >= event["pool_enter_ms"]

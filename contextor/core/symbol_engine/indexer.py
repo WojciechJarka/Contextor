@@ -303,6 +303,8 @@ def extract_imports(file_path: Path) -> list[ImportRef]:
 # directory check for every source file in the repository.
 _CACHE_MANAGERS: dict[str, CacheManager] = {}
 
+_WORKER_TASK_ORDINAL_BY_PID: dict[int, int] = {}
+
 
 def _cache_manager(root_str: str) -> CacheManager:
     manager = _CACHE_MANAGERS.get(root_str)
@@ -314,7 +316,11 @@ def _cache_manager(root_str: str) -> CacheManager:
     return manager
 
 
-def _process_single_file(path_str: str, root_str: str) -> dict:
+def _process_single_file(
+    path_str: str,
+    root_str: str,
+    submitted_monotonic_ns: int | None = None,
+) -> dict:
     """Funkcja pomocnicza dla wieloprocesowości."""
     path = Path(path_str)
 
@@ -322,7 +328,41 @@ def _process_single_file(path_str: str, root_str: str) -> dict:
     source_key = rel.as_posix()
     module_id = ".".join(rel.with_suffix("").parts)
 
-    task_started = time.monotonic()
+    worker_pid = os.getpid()
+
+    worker_task_ordinal = (
+        _WORKER_TASK_ORDINAL_BY_PID.get(
+            worker_pid,
+            0,
+        )
+        + 1
+    )
+
+    _WORKER_TASK_ORDINAL_BY_PID[
+        worker_pid
+    ] = worker_task_ordinal
+
+    worker_is_first_task = (
+        worker_task_ordinal == 1
+    )
+
+    worker_started_monotonic_ns = time.monotonic_ns()
+
+    task_started = (
+        worker_started_monotonic_ns
+        / 1_000_000_000.0
+    )
+
+    worker_start_delay_ms = (
+        max(
+            0,
+            worker_started_monotonic_ns
+            - submitted_monotonic_ns,
+        )
+        / 1_000_000.0
+        if submitted_monotonic_ns is not None
+        else 0.0
+    )
 
     source_read_called = False
     source_read_ms = 0.0
@@ -346,12 +386,26 @@ def _process_single_file(path_str: str, root_str: str) -> dict:
     cache_set_ms = 0.0
 
     def timing_evidence() -> dict[str, object]:
+        worker_result_ready_monotonic_ns = (
+            time.monotonic_ns()
+        )
+
         return {
             "task_total_ms": (
-                time.monotonic()
-                - task_started
+                worker_result_ready_monotonic_ns
+                - worker_started_monotonic_ns
             )
-            * 1000.0,
+            / 1_000_000.0,
+            "worker_pid": worker_pid,
+            "worker_is_first_task": (
+                worker_is_first_task
+            ),
+            "worker_start_delay_ms": (
+                worker_start_delay_ms
+            ),
+            "worker_result_ready_monotonic_ns": (
+                worker_result_ready_monotonic_ns
+            ),
             "source_read_called": source_read_called,
             "source_read_ms": source_read_ms,
             "import_extract_called": import_extract_called,
@@ -922,6 +976,26 @@ def index_repository(
     worker_task_slowest: list[tuple[float, str]] = []
     cache_miss_slowest: list[tuple[float, str]] = []
 
+    worker_process_ids: set[int] = set()
+    worker_tasks_by_pid: dict[int, int] = {}
+
+    worker_start_delay_sum_ms = 0.0
+    worker_start_delay_max_ms = 0.0
+    worker_start_delay_slowest: list[
+        tuple[float, str]
+    ] = []
+
+    worker_first_start_delay_by_pid: dict[
+        int,
+        float,
+    ] = {}
+
+    worker_result_transport_sum_ms = 0.0
+    worker_result_transport_max_ms = 0.0
+    worker_result_transport_slowest: list[
+        tuple[float, str]
+    ] = []
+
     source_read_calls = 0
     source_read_sum_ms = 0.0
 
@@ -954,6 +1028,10 @@ def index_repository(
     parent_progress_ms = 0.0
     pool_shutdown_ms = 0.0
 
+    executor_max_workers = 0
+    executor_process_count_after_submit = 0
+    executor_process_count_before_shutdown = 0
+
     collision_facts_by_module: dict[str, list[dict]] = {}
     test_facts_by_path: dict[str, dict] = {}
     automatic_test_dir_entries: dict[Path, set[str]] = {root_path: set()}
@@ -971,7 +1049,11 @@ def index_repository(
             for directory in sorted(automatic_test_dir_entries)
         }
 
-    def record_file_task_evidence(result: dict) -> None:
+    def record_file_task_evidence(
+        result: dict,
+        *,
+        parent_result_received_monotonic_ns: int | None = None,
+    ) -> None:
         nonlocal file_tasks
         nonlocal source_parse_calls
         nonlocal source_parse_failures
@@ -984,6 +1066,11 @@ def index_repository(
         nonlocal lineage_extract_sum_ms
 
         nonlocal worker_task_sum_ms
+        nonlocal worker_start_delay_sum_ms
+        nonlocal worker_start_delay_max_ms
+        nonlocal worker_result_transport_sum_ms
+        nonlocal worker_result_transport_max_ms
+
         nonlocal source_read_calls
         nonlocal source_read_sum_ms
         nonlocal import_extract_calls
@@ -1014,6 +1101,103 @@ def index_repository(
                 result["path"],
             )
         )
+
+        worker_start_delay_ms = float(
+            result.get(
+                "worker_start_delay_ms",
+                0.0,
+            )
+        )
+
+        worker_start_delay_sum_ms += (
+            worker_start_delay_ms
+        )
+
+        worker_start_delay_max_ms = max(
+            worker_start_delay_max_ms,
+            worker_start_delay_ms,
+        )
+
+        worker_start_delay_slowest.append(
+            (
+                worker_start_delay_ms,
+                result["path"],
+            )
+        )
+
+        if (
+            parent_result_received_monotonic_ns
+            is not None
+        ):
+            worker_pid = int(
+                result.get(
+                    "worker_pid",
+                    0,
+                )
+            )
+
+            if worker_pid > 0:
+                worker_process_ids.add(
+                    worker_pid
+                )
+
+                worker_tasks_by_pid[
+                    worker_pid
+                ] = (
+                    worker_tasks_by_pid.get(
+                        worker_pid,
+                        0,
+                    )
+                    + 1
+                )
+
+                if (
+                    result.get(
+                        "worker_is_first_task"
+                    )
+                    is True
+                ):
+                    worker_first_start_delay_by_pid[
+                        worker_pid
+                    ] = worker_start_delay_ms
+
+            result_ready_ns = result.get(
+                "worker_result_ready_monotonic_ns"
+            )
+
+            if (
+                isinstance(
+                    result_ready_ns,
+                    int,
+                )
+                and result_ready_ns > 0
+            ):
+                worker_result_transport_ms = (
+                    max(
+                        0,
+                        (
+                            parent_result_received_monotonic_ns
+                            - result_ready_ns
+                        ),
+                    )
+                    / 1_000_000.0
+                )
+
+                worker_result_transport_sum_ms += (
+                    worker_result_transport_ms
+                )
+
+                worker_result_transport_max_ms = max(
+                    worker_result_transport_max_ms,
+                    worker_result_transport_ms,
+                )
+
+                worker_result_transport_slowest.append(
+                    (
+                        worker_result_transport_ms,
+                        result["path"],
+                    )
+                )
 
         elapsed_ms = float(
             result.get(
@@ -1294,6 +1478,54 @@ def index_repository(
             for _elapsed_ms, detail in slowest_misses
         )
 
+        first_start_delays = list(
+            worker_first_start_delay_by_pid.values()
+        )
+
+        worker_first_start_delay_min_ms = (
+            min(first_start_delays)
+            if first_start_delays
+            else 0.0
+        )
+
+        worker_first_start_delay_max_ms = (
+            max(first_start_delays)
+            if first_start_delays
+            else 0.0
+        )
+
+        worker_first_start_delay_mean_ms = (
+            sum(first_start_delays)
+            / len(first_start_delays)
+            if first_start_delays
+            else 0.0
+        )
+
+        worker_start_delay_top10 = ",".join(
+            f"{path}:{elapsed_ms:.3f}"
+            for elapsed_ms, path
+            in sorted(
+                worker_start_delay_slowest,
+                reverse=True,
+            )[:10]
+        )
+
+        worker_result_transport_top10 = ",".join(
+            f"{path}:{elapsed_ms:.3f}"
+            for elapsed_ms, path
+            in sorted(
+                worker_result_transport_slowest,
+                reverse=True,
+            )[:10]
+        )
+
+        worker_tasks_per_process = ",".join(
+            f"{pid}:{worker_tasks_by_pid[pid]}"
+            for pid in sorted(
+                worker_tasks_by_pid
+            )
+        )
+
         trace_event(
             "ANALYSIS",
             "FULL_ANALYSIS_INDEX_WORKER_TIMING",
@@ -1306,6 +1538,42 @@ def index_repository(
             worker_task_sum_ms=worker_task_sum_ms,
             worker_task_max_ms=worker_task_max_ms,
             worker_task_top10=worker_task_top10,
+            worker_process_count=len(
+                worker_process_ids
+            ),
+            worker_first_start_count=len(
+                worker_first_start_delay_by_pid
+            ),
+            worker_tasks_per_process=(
+                worker_tasks_per_process
+            ),
+            worker_start_delay_sum_ms=(
+                worker_start_delay_sum_ms
+            ),
+            worker_start_delay_max_ms=(
+                worker_start_delay_max_ms
+            ),
+            worker_start_delay_top10=(
+                worker_start_delay_top10
+            ),
+            worker_first_start_delay_min_ms=(
+                worker_first_start_delay_min_ms
+            ),
+            worker_first_start_delay_max_ms=(
+                worker_first_start_delay_max_ms
+            ),
+            worker_first_start_delay_mean_ms=(
+                worker_first_start_delay_mean_ms
+            ),
+            worker_result_transport_sum_ms=(
+                worker_result_transport_sum_ms
+            ),
+            worker_result_transport_max_ms=(
+                worker_result_transport_max_ms
+            ),
+            worker_result_transport_top10=(
+                worker_result_transport_top10
+            ),
             source_read_calls=source_read_calls,
             source_read_sum_ms=source_read_sum_ms,
             import_extract_calls=import_extract_calls,
@@ -1355,6 +1623,15 @@ def index_repository(
             parent_merge_ms=parent_merge_ms,
             parent_progress_ms=parent_progress_ms,
             pool_shutdown_ms=pool_shutdown_ms,
+            executor_max_workers=(
+                executor_max_workers
+            ),
+            executor_process_count_after_submit=(
+                executor_process_count_after_submit
+            ),
+            executor_process_count_before_shutdown=(
+                executor_process_count_before_shutdown
+            ),
         )
 
     ignored_dirs = set(DEFAULT_IGNORED_DIRS)
@@ -1452,6 +1729,15 @@ def index_repository(
     with managed_process_pool(
         ProcessPoolExecutor,
     ) as executor:
+        executor_max_workers = int(
+            getattr(
+                executor,
+                "_max_workers",
+                0,
+            )
+            or 0
+        )
+
         pool_enter_ms = (
             time.monotonic()
             - pool_enter_started
@@ -1464,6 +1750,7 @@ def index_repository(
                 _process_single_file,
                 str(p),
                 str(root_path),
+                time.monotonic_ns(),
             ): p
             for p in files_to_process
         }
@@ -1472,6 +1759,21 @@ def index_repository(
             time.monotonic()
             - pool_submit_started
         ) * 1000.0
+
+        raw_processes_after_submit = getattr(
+            executor,
+            "_processes",
+            None,
+        )
+
+        executor_process_count_after_submit = (
+            len(raw_processes_after_submit)
+            if isinstance(
+                raw_processes_after_submit,
+                dict,
+            )
+            else 0
+        )
 
         wait_started = time.monotonic()
 
@@ -1483,6 +1785,9 @@ def index_repository(
 
             future_result_started = time.monotonic()
             res = future.result()
+            parent_result_received_monotonic_ns = (
+                time.monotonic_ns()
+            )
             parent_future_result_ms += (
                 time.monotonic()
                 - future_result_started
@@ -1490,7 +1795,12 @@ def index_repository(
 
             parent_merge_started = time.monotonic()
 
-            record_file_task_evidence(res)
+            record_file_task_evidence(
+                res,
+                parent_result_received_monotonic_ns=(
+                    parent_result_received_monotonic_ns
+                ),
+            )
 
             if res["error"]:
                 line_number, column_number = (
@@ -1595,6 +1905,21 @@ def index_repository(
                 ) * 1000.0
 
             wait_started = time.monotonic()
+
+        raw_processes_before_shutdown = getattr(
+            executor,
+            "_processes",
+            None,
+        )
+
+        executor_process_count_before_shutdown = (
+            len(raw_processes_before_shutdown)
+            if isinstance(
+                raw_processes_before_shutdown,
+                dict,
+            )
+            else 0
+        )
 
         pool_body_end = time.monotonic()
 
