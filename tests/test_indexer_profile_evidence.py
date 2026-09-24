@@ -143,6 +143,43 @@ def test_index_lineage_extraction_event_is_explicitly_noncritical(tmp_path, monk
         "cache_miss_top10"
     ]
 
+    miss_events = [
+        event
+        for event in events
+        if event["ev"]
+        == "FULL_ANALYSIS_INDEX_CACHE_MISS_TIMING"
+    ]
+
+    assert len(miss_events) == 2
+
+    assert {
+        event["path"]
+        for event in miss_events
+    } == {
+        "a.py",
+        "b.py",
+    }
+
+    for miss_event in miss_events:
+        assert (
+            miss_event["timing_semantics"]
+            == (
+                "single_file_task_wall_and_nested_subphases"
+            )
+        )
+
+        assert miss_event["task_total_ms"] >= 0.0
+        assert miss_event["source_read_ms"] >= 0.0
+        assert miss_event["cache_get_ms"] >= 0.0
+        assert miss_event["source_parse_ms"] >= 0.0
+        assert miss_event["lineage_extract_ms"] >= 0.0
+        assert miss_event["import_extract_ms"] >= 0.0
+        assert miss_event["symbol_extract_ms"] >= 0.0
+        assert miss_event["reference_extract_ms"] >= 0.0
+        assert miss_event["collision_extract_ms"] >= 0.0
+        assert miss_event["test_extract_ms"] >= 0.0
+        assert miss_event["cache_set_ms"] >= 0.0
+
 
 def test_process_pool_parent_timing_evidence_is_explicit(
     tmp_path,

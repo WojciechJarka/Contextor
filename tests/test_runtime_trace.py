@@ -79,7 +79,29 @@ def test_canonical_writer_analysis_trace_is_self_describing_and_durable():
         "file_tasks", "source_parse_calls", "source_parse_failures",
         "cache_get_calls", "cache_hits", "cache_misses", "lineage_cache_hits",
         "lineage_extract_calls", "source_parse_sum_ms", "cache_get_sum_ms",
-        "lineage_extract_sum_ms", "reuse_sources", "reresolve_sources",
+        "lineage_extract_sum_ms",
+
+        "worker_task_sum_ms", "worker_task_max_ms", "worker_task_top10",
+        "source_read_calls", "source_read_sum_ms",
+        "import_extract_calls", "import_extract_sum_ms",
+        "symbol_extract_calls", "symbol_extract_sum_ms",
+        "reference_extract_calls", "reference_extract_sum_ms",
+        "collision_extract_calls", "collision_extract_sum_ms",
+        "test_extract_calls", "test_extract_sum_ms",
+        "cache_set_calls", "cache_set_sum_ms",
+        "cache_miss_task_count", "cache_miss_top10",
+
+        "task_total_ms", "source_read_ms", "cache_get_ms",
+        "source_parse_ms", "lineage_extract_ms", "import_extract_ms",
+        "symbol_extract_ms", "reference_extract_ms",
+        "collision_extract_ms", "test_extract_ms", "cache_set_ms",
+
+        "index_internal_ms", "file_discovery_ms", "pool_scope_ms",
+        "pool_enter_ms", "pool_submit_ms", "parent_future_wait_ms",
+        "parent_future_result_ms", "parent_merge_ms",
+        "parent_progress_ms", "pool_shutdown_ms",
+
+        "reuse_sources", "reresolve_sources",
         "materialize_sources", "reresolve_fallback_sources",
         "reuse_gate_ms", "reresolve_calls_ms", "materialize_calls_ms",
         "lineage_sources", "lineage_anchors", "lineage_flows",
@@ -87,6 +109,9 @@ def test_canonical_writer_analysis_trace_is_self_describing_and_durable():
     } <= set(records[1]["fields"])
     assert {
         "FULL_ANALYSIS_INDEX_EVIDENCE",
+        "FULL_ANALYSIS_INDEX_WORKER_TIMING",
+        "FULL_ANALYSIS_INDEX_PARENT_TIMING",
+        "FULL_ANALYSIS_INDEX_CACHE_MISS_TIMING",
         "FULL_ANALYSIS_LINEAGE_MATERIALIZATION",
         "FULL_ANALYSIS_STAGE_COMPONENT_END",
         "FULL_ANALYSIS_STAGE_END",

@@ -1156,6 +1156,77 @@ def index_repository(
                 )
             )
 
+            trace_event(
+                "ANALYSIS",
+                "FULL_ANALYSIS_INDEX_CACHE_MISS_TIMING",
+                operation="indexing_cache_miss_timing",
+                timing_semantics=(
+                    "single_file_task_wall_and_nested_subphases"
+                ),
+                path=result["path"],
+                task_total_ms=task_total_ms,
+                source_read_ms=float(
+                    result.get(
+                        "source_read_ms",
+                        0.0,
+                    )
+                ),
+                cache_get_ms=float(
+                    result.get(
+                        "cache_get_ms",
+                        0.0,
+                    )
+                ),
+                source_parse_ms=float(
+                    result.get(
+                        "source_parse_ms",
+                        0.0,
+                    )
+                ),
+                lineage_extract_ms=float(
+                    result.get(
+                        "lineage_extract_ms",
+                        0.0,
+                    )
+                ),
+                import_extract_ms=float(
+                    result.get(
+                        "import_extract_ms",
+                        0.0,
+                    )
+                ),
+                symbol_extract_ms=float(
+                    result.get(
+                        "symbol_extract_ms",
+                        0.0,
+                    )
+                ),
+                reference_extract_ms=float(
+                    result.get(
+                        "reference_extract_ms",
+                        0.0,
+                    )
+                ),
+                collision_extract_ms=float(
+                    result.get(
+                        "collision_extract_ms",
+                        0.0,
+                    )
+                ),
+                test_extract_ms=float(
+                    result.get(
+                        "test_extract_ms",
+                        0.0,
+                    )
+                ),
+                cache_set_ms=float(
+                    result.get(
+                        "cache_set_ms",
+                        0.0,
+                    )
+                ),
+            )
+
     def emit_index_profile_evidence(execution_mode: str) -> None:
         trace_event(
             "ANALYSIS",

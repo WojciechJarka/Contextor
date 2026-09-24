@@ -1562,6 +1562,58 @@ def _header_records(sid: str, started_at: str, desktop_pid: int, file_name: str)
             "source_parse_sum_ms": "aggregate per-file task milliseconds; not critical-path wall",
             "cache_get_sum_ms": "aggregate per-file task milliseconds; not critical-path wall",
             "lineage_extract_sum_ms": "aggregate per-file task milliseconds; not critical-path wall",
+
+            "worker_task_sum_ms": "aggregate worker task wall milliseconds; overlapping across processes and not critical-path additive",
+            "worker_task_max_ms": "maximum single worker task wall milliseconds",
+            "worker_task_top10": "bounded slowest worker task path/time summary",
+
+            "source_read_calls": "worker source-read call count",
+            "source_read_sum_ms": "aggregate worker source-read milliseconds; not critical-path additive",
+
+            "import_extract_calls": "worker import extraction call count",
+            "import_extract_sum_ms": "aggregate worker import extraction milliseconds; not critical-path additive",
+
+            "symbol_extract_calls": "worker symbol extraction call count",
+            "symbol_extract_sum_ms": "aggregate worker symbol extraction milliseconds; not critical-path additive",
+
+            "reference_extract_calls": "worker reference extraction call count",
+            "reference_extract_sum_ms": "aggregate worker reference extraction milliseconds; not critical-path additive",
+
+            "collision_extract_calls": "worker collision extraction call count",
+            "collision_extract_sum_ms": "aggregate worker collision extraction milliseconds; not critical-path additive",
+
+            "test_extract_calls": "worker test-fact extraction call count",
+            "test_extract_sum_ms": "aggregate worker test-fact extraction milliseconds; not critical-path additive",
+
+            "cache_set_calls": "worker cache-set call count",
+            "cache_set_sum_ms": "aggregate worker cache-set milliseconds; not critical-path additive",
+
+            "cache_miss_task_count": "worker cold cache-miss task count",
+            "cache_miss_top10": "bounded cold cache-miss timing summary",
+
+            "task_total_ms": "single worker task wall milliseconds",
+            "source_read_ms": "single worker task source-read milliseconds",
+            "cache_get_ms": "single worker task cache-get milliseconds",
+            "source_parse_ms": "single worker task source-parse milliseconds",
+            "lineage_extract_ms": "single worker task lineage-extraction milliseconds",
+            "import_extract_ms": "single worker task import-extraction milliseconds",
+            "symbol_extract_ms": "single worker task symbol-extraction milliseconds",
+            "reference_extract_ms": "single worker task reference-extraction milliseconds",
+            "collision_extract_ms": "single worker task collision-extraction milliseconds",
+            "test_extract_ms": "single worker task test-fact extraction milliseconds",
+            "cache_set_ms": "single worker task cache-set milliseconds",
+
+            "index_internal_ms": "index_repository internal wall milliseconds",
+            "file_discovery_ms": "repository Python-file discovery wall milliseconds",
+            "pool_scope_ms": "managed process-pool scope wall milliseconds",
+            "pool_enter_ms": "managed process-pool context entry milliseconds",
+            "pool_submit_ms": "process-pool task submission milliseconds",
+            "parent_future_wait_ms": "parent critical-path time waiting for as_completed yields",
+            "parent_future_result_ms": "parent future.result retrieval milliseconds",
+            "parent_merge_ms": "parent result merge milliseconds",
+            "parent_progress_ms": "parent progress checkpoint milliseconds",
+            "pool_shutdown_ms": "managed process-pool context shutdown milliseconds",
+
             "reuse_sources": "lineage sources reused without rematerialization",
             "reresolve_sources": "lineage sources reresolved against changed global resolution",
             "materialize_sources": "lineage sources fully materialized",
@@ -1579,6 +1631,9 @@ def _header_records(sid: str, started_at: str, desktop_pid: int, file_name: str)
     records[4]["events"]["ANALYSIS"].extend(
         [
             "FULL_ANALYSIS_INDEX_EVIDENCE",
+            "FULL_ANALYSIS_INDEX_WORKER_TIMING",
+            "FULL_ANALYSIS_INDEX_PARENT_TIMING",
+            "FULL_ANALYSIS_INDEX_CACHE_MISS_TIMING",
             "FULL_ANALYSIS_LINEAGE_MATERIALIZATION",
             "FULL_ANALYSIS_STAGE_COMPONENT_END",
             "FULL_ANALYSIS_STAGE_END",
@@ -1762,6 +1817,59 @@ def trace_event(domain: str, event: str, *, op: str | None = None, rev: int | No
                 "source_parse_sum_ms": "source_parse_sum_ms",
                 "cache_get_sum_ms": "cache_get_sum_ms",
                 "lineage_extract_sum_ms": "lineage_extract_sum_ms",
+
+                "worker_task_sum_ms": "worker_task_sum_ms",
+                "worker_task_max_ms": "worker_task_max_ms",
+                "worker_task_top10": "worker_task_top10",
+
+                "source_read_calls": "source_read_calls",
+                "source_read_sum_ms": "source_read_sum_ms",
+
+                "import_extract_calls": "import_extract_calls",
+                "import_extract_sum_ms": "import_extract_sum_ms",
+
+                "symbol_extract_calls": "symbol_extract_calls",
+                "symbol_extract_sum_ms": "symbol_extract_sum_ms",
+
+                "reference_extract_calls": "reference_extract_calls",
+                "reference_extract_sum_ms": "reference_extract_sum_ms",
+
+                "collision_extract_calls": "collision_extract_calls",
+                "collision_extract_calls": "collision_extract_calls",
+                "collision_extract_sum_ms": "collision_extract_sum_ms",
+
+                "test_extract_calls": "test_extract_calls",
+                "test_extract_sum_ms": "test_extract_sum_ms",
+
+                "cache_set_calls": "cache_set_calls",
+                "cache_set_sum_ms": "cache_set_sum_ms",
+
+                "cache_miss_task_count": "cache_miss_task_count",
+                "cache_miss_top10": "cache_miss_top10",
+
+                "task_total_ms": "task_total_ms",
+                "source_read_ms": "source_read_ms",
+                "cache_get_ms": "cache_get_ms",
+                "source_parse_ms": "source_parse_ms",
+                "lineage_extract_ms": "lineage_extract_ms",
+                "import_extract_ms": "import_extract_ms",
+                "symbol_extract_ms": "symbol_extract_ms",
+                "reference_extract_ms": "reference_extract_ms",
+                "collision_extract_ms": "collision_extract_ms",
+                "test_extract_ms": "test_extract_ms",
+                "cache_set_ms": "cache_set_ms",
+
+                "index_internal_ms": "index_internal_ms",
+                "file_discovery_ms": "file_discovery_ms",
+                "pool_scope_ms": "pool_scope_ms",
+                "pool_enter_ms": "pool_enter_ms",
+                "pool_submit_ms": "pool_submit_ms",
+                "parent_future_wait_ms": "parent_future_wait_ms",
+                "parent_future_result_ms": "parent_future_result_ms",
+                "parent_merge_ms": "parent_merge_ms",
+                "parent_progress_ms": "parent_progress_ms",
+                "pool_shutdown_ms": "pool_shutdown_ms",
+
                 "reuse_sources": "reuse_sources",
                 "reresolve_sources": "reresolve_sources",
                 "materialize_sources": "materialize_sources",
