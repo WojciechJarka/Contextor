@@ -1079,9 +1079,150 @@ def test_real_repository_adapter_two_successive_updates_are_exact_successors(tmp
         assert read_metadata(cache).revision == expected
         loaded_state, loaded_metadata = load_snapshot(cache, "sid")
         assert loaded_metadata.revision == expected
-        assert loaded_state.revision == expected
-        assert FileStateManager(str(cache)).revision == expected
-        assert server._events[-1]["revision"] == expected
+    assert loaded_state.revision == expected
+    assert FileStateManager(str(cache)).revision == expected
+    assert server._events[-1]["revision"] == expected
+
+
+def test_repository_persister_advances_previous_state_only_after_success(
+    tmp_path,
+    monkeypatch,
+):
+    import contextor.core.live_state.runtime as runtime
+
+    from contextor.core.repository_identity import (
+        ensure_repository_identity,
+    )
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    ensure_repository_identity(
+        repo
+    )
+
+    class StubManager:
+        state_id = "sid"
+
+        def build_payload(
+            self,
+            state_id,
+            revision,
+        ):
+            return {
+                "_meta": {
+                    "state_id": state_id,
+                    "revision": revision,
+                },
+                "files": {},
+            }
+
+    holder = {
+        "manager": StubManager(),
+        "state_id": "sid",
+    }
+
+    initial = SimpleNamespace(
+        marker="initial"
+    )
+
+    first = SimpleNamespace(
+        marker="first"
+    )
+
+    failed = SimpleNamespace(
+        marker="failed"
+    )
+
+    second = SimpleNamespace(
+        marker="second"
+    )
+
+    calls = []
+
+    def fake_save_snapshot(
+        state,
+        _cache,
+        _state_id,
+        **kwargs,
+    ):
+        calls.append(
+            (
+                state,
+                kwargs.get(
+                    "previous_state"
+                ),
+                kwargs.get(
+                    "exact_revision"
+                ),
+            )
+        )
+
+        if state is failed:
+            raise RuntimeError(
+                "synthetic persistence failure"
+            )
+
+        return SimpleNamespace(
+            revision=kwargs[
+                "exact_revision"
+            ]
+        )
+
+    monkeypatch.setattr(
+        runtime,
+        "save_snapshot",
+        fake_save_snapshot,
+    )
+
+    persist = runtime._repository_persister(
+        repo,
+        holder,
+        previous_state=initial,
+    )
+
+    first_meta = persist(
+        first,
+        1,
+    )
+
+    assert first_meta.revision == 1
+
+    with pytest.raises(
+        RuntimeError,
+        match=(
+            "^synthetic persistence failure$"
+        ),
+    ):
+        persist(
+            failed,
+            2,
+        )
+
+    second_meta = persist(
+        second,
+        2,
+    )
+
+    assert second_meta.revision == 2
+
+    assert calls == [
+        (
+            first,
+            initial,
+            1,
+        ),
+        (
+            failed,
+            first,
+            2,
+        ),
+        (
+            second,
+            first,
+            2,
+        ),
+    ]
 
 
 def test_persistence_trace_operation_is_propagated_across_successful_real_update(tmp_path, monkeypatch):

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import json
 import os
 import pickle
@@ -35,7 +36,8 @@ from contextor.core.domain.lineage_facts import (
     SurfaceKind,
 )
 
-LIVE_STATE_SCHEMA_VERSION = "1.2"
+LIVE_STATE_SCHEMA_VERSION = "1.3"
+LINEAGE_MANIFEST_SCHEMA_VERSION = "1.0"
 
 
 class _LegacySymbolCallFact:
@@ -409,6 +411,550 @@ class LiveStateMetadata:
     root_path: str = ""
     state_file: str = ""
     file_state_file: str = ""
+    lineage_manifest_file: str = ""
+
+
+def _supports_split_lineage_generation(state: Any) -> bool:
+    return (
+        state is not None
+        and not isinstance(state, dict)
+        and hasattr(state, "__dict__")
+        and isinstance(
+            getattr(
+                state,
+                "lineage_facts_by_source",
+                None,
+            ),
+            dict,
+        )
+    )
+
+
+def _snapshot_child_path(
+    cache_dir: str | Path,
+    file_name: str,
+    *,
+    label: str,
+) -> Path:
+    if not isinstance(file_name, str) or not file_name:
+        raise pickle.UnpicklingError(
+            f"{label} file name must be non-empty."
+        )
+
+    candidate = Path(file_name)
+
+    if (
+        candidate.is_absolute()
+        or candidate.name != file_name
+    ):
+        raise pickle.UnpicklingError(
+            f"{label} file name must be a cache-local basename."
+        )
+
+    return Path(cache_dir) / candidate
+
+
+def _write_split_lineage_generation(
+    state: Any,
+    manifest_path: Path,
+    *,
+    state_id: str,
+    revision: int,
+    token: str,
+    previous_state: Any = None,
+    reusable_sources: dict[str, Any] | None = None,
+) -> tuple[Any, list[Path]]:
+    sources = getattr(
+        state,
+        "lineage_facts_by_source",
+    )
+
+    if not isinstance(sources, dict):
+        raise ValueError(
+            "lineage_facts_by_source must be a dict."
+        )
+
+    if any(
+        not isinstance(source_key, str)
+        or not source_key
+        for source_key in sources
+    ):
+        raise ValueError(
+            "Lineage source keys must be non-empty strings."
+        )
+
+    previous_sources = (
+        getattr(
+            previous_state,
+            "lineage_facts_by_source",
+            {},
+        )
+        if _supports_split_lineage_generation(
+            previous_state
+        )
+        else {}
+    )
+
+    if not isinstance(
+        previous_sources,
+        dict,
+    ):
+        previous_sources = {}
+
+    if not isinstance(
+        reusable_sources,
+        dict,
+    ):
+        reusable_sources = {}
+
+    created_chunks: list[Path] = []
+    manifest_sources: dict[
+        str,
+        dict[str, str],
+    ] = {}
+
+    try:
+        for index, source_key in enumerate(
+            sorted(sources)
+        ):
+            source_slice = sources[source_key]
+
+            if not isinstance(
+                source_slice,
+                MaterializedLineageSourceFacts,
+            ):
+                raise ValueError(
+                    "Lineage source value has invalid type."
+                )
+
+            if (
+                source_slice.manifest.source_key
+                != source_key
+            ):
+                raise ValueError(
+                    "Lineage mapping key does not match source manifest."
+                )
+
+            previous_slice = previous_sources.get(
+                source_key
+            )
+
+            reusable_entry = reusable_sources.get(
+                source_key
+            )
+
+            if (
+                previous_slice is source_slice
+                and isinstance(
+                    reusable_entry,
+                    dict,
+                )
+            ):
+                reusable_file = reusable_entry.get(
+                    "file"
+                )
+                reusable_fingerprint = reusable_entry.get(
+                    "source_fingerprint"
+                )
+                reusable_semantic_version = reusable_entry.get(
+                    "semantic_version"
+                )
+
+                if (
+                    isinstance(
+                        reusable_file,
+                        str,
+                    )
+                    and reusable_file
+                    and reusable_fingerprint
+                    == source_slice.manifest.source_fingerprint
+                    and reusable_semantic_version
+                    == source_slice.manifest.semantic_version
+                ):
+                    try:
+                        reusable_path = _snapshot_child_path(
+                            manifest_path.parent,
+                            reusable_file,
+                            label="Lineage chunk",
+                        )
+                    except pickle.UnpicklingError:
+                        reusable_path = None
+
+                    if (
+                        reusable_path is not None
+                        and reusable_path.is_file()
+                    ):
+                        manifest_sources[
+                            source_key
+                        ] = {
+                            "file": reusable_file,
+                            "source_fingerprint": (
+                                source_slice.manifest.source_fingerprint
+                            ),
+                            "semantic_version": (
+                                source_slice.manifest.semantic_version
+                            ),
+                        }
+
+                        continue
+
+            chunk_path = (
+                manifest_path.parent
+                / (
+                    f"lineage_source.r{revision}."
+                    f"{token}.{index:05d}.pkl"
+                )
+            )
+
+            created_chunks.append(
+                chunk_path
+            )
+
+            with chunk_path.open(
+                "wb"
+            ) as stream:
+                pickle.dump(
+                    source_slice,
+                    stream,
+                )
+                stream.flush()
+                os.fsync(
+                    stream.fileno()
+                )
+
+            manifest_sources[
+                source_key
+            ] = {
+                "file": chunk_path.name,
+                "source_fingerprint": (
+                    source_slice.manifest.source_fingerprint
+                ),
+                "semantic_version": (
+                    source_slice.manifest.semantic_version
+                ),
+            }
+
+        manifest_payload = {
+            "schema_version": (
+                LINEAGE_MANIFEST_SCHEMA_VERSION
+            ),
+            "state_id": state_id,
+            "revision": revision,
+            "sources": manifest_sources,
+        }
+
+        with manifest_path.open(
+            "w",
+            encoding="utf-8",
+        ) as stream:
+            json.dump(
+                manifest_payload,
+                stream,
+                indent=2,
+                sort_keys=True,
+            )
+            stream.flush()
+            os.fsync(
+                stream.fileno()
+            )
+
+        core_state = copy.copy(
+            state
+        )
+        core_state.lineage_facts_by_source = {}
+
+        return (
+            core_state,
+            created_chunks,
+        )
+
+    except Exception:
+        for generated_path in [
+            *created_chunks,
+            manifest_path,
+        ]:
+            try:
+                generated_path.unlink()
+            except OSError:
+                pass
+
+        raise
+
+
+def _read_split_lineage_manifest(
+    cache_dir: str | Path,
+    metadata: LiveStateMetadata,
+) -> dict[str, Any]:
+    manifest_path = _snapshot_child_path(
+        cache_dir,
+        metadata.lineage_manifest_file,
+        label="Lineage manifest",
+    )
+
+    try:
+        payload = json.loads(
+            manifest_path.read_text(
+                encoding="utf-8"
+            )
+        )
+    except (
+        OSError,
+        json.JSONDecodeError,
+        TypeError,
+        ValueError,
+    ) as exc:
+        raise pickle.UnpicklingError(
+            "Invalid lineage manifest."
+        ) from exc
+
+    if not isinstance(
+        payload,
+        dict,
+    ):
+        raise pickle.UnpicklingError(
+            "Lineage manifest must be a mapping."
+        )
+
+    if (
+        payload.get(
+            "schema_version"
+        )
+        != LINEAGE_MANIFEST_SCHEMA_VERSION
+    ):
+        raise pickle.UnpicklingError(
+            "Unsupported lineage manifest schema."
+        )
+
+    if (
+        payload.get(
+            "state_id"
+        )
+        != metadata.state_id
+    ):
+        raise pickle.UnpicklingError(
+            "Lineage manifest state_id mismatch."
+        )
+
+    if (
+        payload.get(
+            "revision"
+        )
+        != metadata.revision
+    ):
+        raise pickle.UnpicklingError(
+            "Lineage manifest revision mismatch."
+        )
+
+    sources = payload.get(
+        "sources"
+    )
+
+    if not isinstance(
+        sources,
+        dict,
+    ):
+        raise pickle.UnpicklingError(
+            "Lineage manifest sources must be a mapping."
+        )
+
+    return payload
+
+
+def _reusable_lineage_manifest_sources(
+    cache_dir: str | Path,
+    current: LiveStateMetadata | None,
+    previous_state: Any,
+) -> dict[str, Any]:
+    if (
+        current is None
+        or current.schema_version != LIVE_STATE_SCHEMA_VERSION
+        or not current.lineage_manifest_file
+        or not _supports_split_lineage_generation(
+            previous_state
+        )
+    ):
+        return {}
+
+    if (
+        getattr(
+            previous_state,
+            "revision",
+            None,
+        )
+        != current.revision
+    ):
+        return {}
+
+    if (
+        getattr(
+            previous_state,
+            "state_id",
+            None,
+        )
+        != current.state_id
+    ):
+        return {}
+
+    try:
+        payload = _read_split_lineage_manifest(
+            cache_dir,
+            current,
+        )
+    except pickle.UnpicklingError:
+        return {}
+
+    sources = payload.get(
+        "sources"
+    )
+
+    if not isinstance(
+        sources,
+        dict,
+    ):
+        return {}
+
+    return sources
+
+
+def _load_split_lineage_generation(
+    cache_dir: str | Path,
+    metadata: LiveStateMetadata,
+) -> dict[
+    str,
+    MaterializedLineageSourceFacts,
+]:
+    payload = _read_split_lineage_manifest(
+        cache_dir,
+        metadata,
+    )
+
+    raw_sources = payload[
+        "sources"
+    ]
+
+    loaded_sources: dict[
+        str,
+        MaterializedLineageSourceFacts,
+    ] = {}
+
+    for source_key in sorted(
+        raw_sources
+    ):
+        if (
+            not isinstance(
+                source_key,
+                str,
+            )
+            or not source_key
+        ):
+            raise pickle.UnpicklingError(
+                "Lineage manifest source key is invalid."
+            )
+
+        entry = raw_sources[
+            source_key
+        ]
+
+        if not isinstance(
+            entry,
+            dict,
+        ):
+            raise pickle.UnpicklingError(
+                "Lineage manifest source entry must be a mapping."
+            )
+
+        file_name = entry.get(
+            "file"
+        )
+        expected_fingerprint = entry.get(
+            "source_fingerprint"
+        )
+        expected_semantic_version = entry.get(
+            "semantic_version"
+        )
+
+        if (
+            not isinstance(
+                file_name,
+                str,
+            )
+            or not file_name
+            or not isinstance(
+                expected_fingerprint,
+                str,
+            )
+            or not expected_fingerprint
+            or not isinstance(
+                expected_semantic_version,
+                str,
+            )
+            or not expected_semantic_version
+        ):
+            raise pickle.UnpicklingError(
+                "Lineage manifest source entry is incomplete."
+            )
+
+        chunk_path = _snapshot_child_path(
+            cache_dir,
+            file_name,
+            label="Lineage chunk",
+        )
+
+        try:
+            with chunk_path.open(
+                "rb"
+            ) as stream:
+                source_slice = (
+                    _SnapshotUnpickler(
+                        stream
+                    ).load()
+                )
+        except (
+            OSError,
+            pickle.PickleError,
+            EOFError,
+        ) as exc:
+            raise pickle.UnpicklingError(
+                "Invalid lineage source chunk."
+            ) from exc
+
+        if not isinstance(
+            source_slice,
+            MaterializedLineageSourceFacts,
+        ):
+            raise pickle.UnpicklingError(
+                "Lineage source chunk has invalid type."
+            )
+
+        if (
+            source_slice.manifest.source_key
+            != source_key
+        ):
+            raise pickle.UnpicklingError(
+                "Lineage chunk source key mismatch."
+            )
+
+        if (
+            source_slice.manifest.source_fingerprint
+            != expected_fingerprint
+        ):
+            raise pickle.UnpicklingError(
+                "Lineage chunk source fingerprint mismatch."
+            )
+
+        if (
+            source_slice.manifest.semantic_version
+            != expected_semantic_version
+        ):
+            raise pickle.UnpicklingError(
+                "Lineage chunk semantic version mismatch."
+            )
+
+        loaded_sources[
+            source_key
+        ] = source_slice
+
+    return loaded_sources
 
 
 class SnapshotRevisionConflict(ValueError):
@@ -433,7 +979,10 @@ def read_metadata(cache_dir: str | Path) -> LiveStateMetadata | None:
     try:
         payload = json.loads(meta_file.read_text(encoding="utf-8"))
         if payload.get("schema_version") not in {
-            "1.0", "1.1", LIVE_STATE_SCHEMA_VERSION
+            "1.0",
+            "1.1",
+            "1.2",
+            LIVE_STATE_SCHEMA_VERSION,
         }:
             return None
         return LiveStateMetadata(
@@ -445,8 +994,14 @@ def read_metadata(cache_dir: str | Path) -> LiveStateMetadata | None:
             root_path=str(payload.get("root_path", "")),
             state_file=str(payload.get("state_file", "")),
             file_state_file=str(payload.get("file_state_file", "")),
+            lineage_manifest_file=str(
+                payload.get(
+                    "lineage_manifest_file",
+                    "",
+                )
+            ),
         )
-    except (OSError, ValueError, TypeError):
+    except (OSError, ValueError, KeyError, TypeError):
         return None
 
 
@@ -479,6 +1034,7 @@ def save_snapshot(
     revision_floor: int = 0,
     exact_revision: int | None = None,
     file_state_payload: dict[str, Any] | None = None,
+    previous_state: Any = None,
 ) -> LiveStateMetadata:
     """Atomically publish a complete snapshot and monotonically increasing revision."""
 
@@ -490,90 +1046,330 @@ def save_snapshot(
     meta_tmp = meta_file.with_name(f".{meta_file.name}.{token}.tmp")
     generation_state = state_tmp
     generation_file_state: Path | None = None
+    generation_lineage_manifest: Path | None = None
+    generation_lineage_chunks: list[Path] = []
+    reusable_lineage_sources: dict[str, Any] = {}
     committed = False
+
     try:
         current = read_metadata(cache_dir)
         normalized_root = (
-            str(Path(root_path).expanduser().resolve()) if root_path else ""
+            str(Path(root_path).expanduser().resolve())
+            if root_path
+            else ""
         )
-        if current and repo_id and current.repo_id and current.repo_id != repo_id:
-            raise ValueError("Snapshot repository ID does not match existing metadata.")
+
+        if (
+            current
+            and repo_id
+            and current.repo_id
+            and current.repo_id != repo_id
+        ):
+            raise ValueError(
+                "Snapshot repository ID does not match existing metadata."
+            )
+
         if (
             current
             and normalized_root
             and current.root_path
-            and Path(current.root_path).expanduser().resolve() != Path(normalized_root)
+            and Path(current.root_path).expanduser().resolve()
+            != Path(normalized_root)
         ):
-            raise ValueError("Snapshot repository root does not match existing metadata.")
+            raise ValueError(
+                "Snapshot repository root does not match existing metadata."
+            )
+
         if exact_revision is not None:
-            if isinstance(exact_revision, bool) or not isinstance(exact_revision, int) or exact_revision < 0:
-                raise ValueError("exact_revision must be a non-negative integer.")
-            current_revision = current.revision if current is not None else None
-            if current_revision is None and exact_revision != 1:
-                raise SnapshotRevisionConflict(None, exact_revision)
-            if current_revision is not None and exact_revision != current_revision + 1:
-                raise SnapshotRevisionConflict(current_revision, exact_revision)
+            if (
+                isinstance(exact_revision, bool)
+                or not isinstance(exact_revision, int)
+                or exact_revision < 0
+            ):
+                raise ValueError(
+                    "exact_revision must be a non-negative integer."
+                )
+
+            current_revision = (
+                current.revision
+                if current is not None
+                else None
+            )
+
+            if (
+                current_revision is None
+                and exact_revision != 1
+            ):
+                raise SnapshotRevisionConflict(
+                    None,
+                    exact_revision,
+                )
+
+            if (
+                current_revision is not None
+                and exact_revision
+                != current_revision + 1
+            ):
+                raise SnapshotRevisionConflict(
+                    current_revision,
+                    exact_revision,
+                )
+
             next_revision = exact_revision
-            generation_state = state_file.parent / f"engine_state.r{exact_revision}.{token}.pkl"
-            generation_file_state = state_file.parent / f"file_state.r{exact_revision}.{token}.json"
+
+            generation_state = (
+                state_file.parent
+                / (
+                    f"engine_state.r{exact_revision}."
+                    f"{token}.pkl"
+                )
+            )
+
+            generation_file_state = (
+                state_file.parent
+                / (
+                    f"file_state.r{exact_revision}."
+                    f"{token}.json"
+                )
+            )
+
+            if _supports_split_lineage_generation(
+                state
+            ):
+                generation_lineage_manifest = (
+                    state_file.parent
+                    / (
+                        f"lineage_manifest.r{exact_revision}."
+                        f"{token}.json"
+                    )
+                )
+
+                reusable_lineage_sources = (
+                    _reusable_lineage_manifest_sources(
+                        cache_dir,
+                        current,
+                        previous_state,
+                    )
+                )
+
         else:
-            next_revision = max(current.revision if current else 0, revision_floor) + 1
+            next_revision = (
+                max(
+                    current.revision
+                    if current
+                    else 0,
+                    revision_floor,
+                )
+                + 1
+            )
+
         metadata = LiveStateMetadata(
             state_id=state_id,
             revision=next_revision,
             writer=writer,
             repo_id=repo_id,
             root_path=normalized_root,
-            state_file=generation_state.name if exact_revision is not None else "",
-            file_state_file=generation_file_state.name if generation_file_state is not None else "",
+            state_file=(
+                generation_state.name
+                if exact_revision is not None
+                else ""
+            ),
+            file_state_file=(
+                generation_file_state.name
+                if generation_file_state is not None
+                else ""
+            ),
+            lineage_manifest_file=(
+                generation_lineage_manifest.name
+                if generation_lineage_manifest is not None
+                else ""
+            ),
         )
-        if exact_revision is not None and isinstance(state, dict):
+
+        if (
+            exact_revision is not None
+            and isinstance(
+                state,
+                dict,
+            )
+        ):
             state["revision"] = metadata.revision
             state["state_id"] = metadata.state_id
-        elif state is not None and hasattr(state, "__dict__"):
+
+        elif (
+            state is not None
+            and hasattr(
+                state,
+                "__dict__",
+            )
+        ):
             try:
-                setattr(state, "state_id", metadata.state_id)
-                setattr(state, "revision", metadata.revision)
+                setattr(
+                    state,
+                    "state_id",
+                    metadata.state_id,
+                )
+                setattr(
+                    state,
+                    "revision",
+                    metadata.revision,
+                )
             except AttributeError:
                 pass
-        with generation_state.open("wb") as stream:
-            pickle.dump({"metadata": asdict(metadata), "state": state}, stream)
+
+        state_to_persist = state
+
+        if (
+            generation_lineage_manifest
+            is not None
+        ):
+            (
+                state_to_persist,
+                generation_lineage_chunks,
+            ) = _write_split_lineage_generation(
+                state,
+                generation_lineage_manifest,
+                state_id=metadata.state_id,
+                revision=metadata.revision,
+                token=token,
+                previous_state=previous_state,
+                reusable_sources=reusable_lineage_sources,
+            )
+
+        with generation_state.open(
+            "wb"
+        ) as stream:
+            pickle.dump(
+                {
+                    "metadata": asdict(
+                        metadata
+                    ),
+                    "state": state_to_persist,
+                },
+                stream,
+            )
             stream.flush()
-            os.fsync(stream.fileno())
+            os.fsync(
+                stream.fileno()
+            )
+
         if generation_file_state is not None:
-            if not isinstance(file_state_payload, dict) or not isinstance(file_state_payload.get("_meta"), dict):
-                raise ValueError("file_state_payload must contain a _meta mapping.")
-            payload_meta = file_state_payload["_meta"]
-            if payload_meta.get("state_id", "") != state_id:
-                raise ValueError("FileState payload state_id does not match snapshot state_id.")
-            if payload_meta.get("revision") != exact_revision:
-                raise ValueError("FileState payload revision does not match exact_revision.")
-            with generation_file_state.open("w", encoding="utf-8") as stream:
-                json.dump(file_state_payload, stream, indent=2)
+            if (
+                not isinstance(
+                    file_state_payload,
+                    dict,
+                )
+                or not isinstance(
+                    file_state_payload.get(
+                        "_meta"
+                    ),
+                    dict,
+                )
+            ):
+                raise ValueError(
+                    "file_state_payload must contain a _meta mapping."
+                )
+
+            payload_meta = file_state_payload[
+                "_meta"
+            ]
+
+            if (
+                payload_meta.get(
+                    "state_id",
+                    "",
+                )
+                != state_id
+            ):
+                raise ValueError(
+                    "FileState payload state_id does not match snapshot state_id."
+                )
+
+            if (
+                payload_meta.get(
+                    "revision"
+                )
+                != exact_revision
+            ):
+                raise ValueError(
+                    "FileState payload revision does not match exact_revision."
+                )
+
+            with generation_file_state.open(
+                "w",
+                encoding="utf-8",
+            ) as stream:
+                json.dump(
+                    file_state_payload,
+                    stream,
+                    indent=2,
+                )
                 stream.flush()
-                os.fsync(stream.fileno())
-        with meta_tmp.open("w", encoding="utf-8") as stream:
-            json.dump(asdict(metadata), stream, indent=2)
+                os.fsync(
+                    stream.fileno()
+                )
+
+        with meta_tmp.open(
+            "w",
+            encoding="utf-8",
+        ) as stream:
+            json.dump(
+                asdict(
+                    metadata
+                ),
+                stream,
+                indent=2,
+            )
             stream.flush()
-            os.fsync(stream.fileno())
+            os.fsync(
+                stream.fileno()
+            )
+
         if exact_revision is None:
-            os.replace(generation_state, state_file)
-        os.replace(meta_tmp, meta_file)
+            os.replace(
+                generation_state,
+                state_file,
+            )
+
+        os.replace(
+            meta_tmp,
+            meta_file,
+        )
+
         committed = True
+
         return metadata
+
     finally:
-        for temporary in (state_tmp, meta_tmp):
+        for temporary in (
+            state_tmp,
+            meta_tmp,
+        ):
             try:
                 temporary.unlink()
             except OSError:
                 pass
-        if not committed and exact_revision is not None:
-            for temporary in (generation_state, generation_file_state):
-                if temporary is not None:
-                    try:
-                        temporary.unlink()
-                    except OSError:
-                        pass
+
+        if (
+            not committed
+            and exact_revision is not None
+        ):
+            failed_generations = [
+                generation_state,
+                generation_file_state,
+                generation_lineage_manifest,
+                *generation_lineage_chunks,
+            ]
+
+            for temporary in failed_generations:
+                if temporary is None:
+                    continue
+
+                try:
+                    temporary.unlink()
+                except OSError:
+                    pass
+
         try:
             os.close(lock_fd)
         finally:
@@ -624,12 +1420,66 @@ def load_snapshot(
                 root_path=str(embedded.get("root_path", "")),
                 state_file=str(embedded.get("state_file", "")),
                 file_state_file=str(embedded.get("file_state_file", "")),
+                lineage_manifest_file=str(
+                    embedded.get(
+                        "lineage_manifest_file",
+                        "",
+                    )
+                ),
             )
             if embedded_metadata.revision != metadata.revision:
                 return None
+            if (
+                embedded_metadata.lineage_manifest_file
+                != metadata.lineage_manifest_file
+            ):
+                return None
+
+            raw_state = payload[
+                "state"
+            ]
+
+            if metadata.lineage_manifest_file:
+                if (
+                    metadata.schema_version
+                    != LIVE_STATE_SCHEMA_VERSION
+                ):
+                    return None
+
+                if (
+                    raw_state is None
+                    or isinstance(
+                        raw_state,
+                        dict,
+                    )
+                    or not hasattr(
+                        raw_state,
+                        "__dict__",
+                    )
+                ):
+                    return None
+
+                split_lineage = (
+                    _load_split_lineage_generation(
+                        cache_dir,
+                        metadata,
+                    )
+                )
+
+                try:
+                    setattr(
+                        raw_state,
+                        "lineage_facts_by_source",
+                        split_lineage,
+                    )
+                except AttributeError:
+                    return None
+
             state_obj = _normalize_lineage_query_index_state(
                 _normalize_lineage_facts_state(
-                    _normalize_symbol_call_facts(payload["state"])
+                    _normalize_symbol_call_facts(
+                        raw_state
+                    )
                 )
             )
             state_revision = (
@@ -737,6 +1587,9 @@ def load_snapshot(
                     except AttributeError:
                         pass
             return state_obj, metadata
+        if metadata.lineage_manifest_file:
+            return None
+
         payload = _normalize_lineage_query_index_state(
             _normalize_lineage_facts_state(
                 _normalize_symbol_call_facts(payload)

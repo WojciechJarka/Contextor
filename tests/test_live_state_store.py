@@ -1,6 +1,7 @@
 """Unit and integration boundaries for the shared canonical LIVE snapshot store."""
 
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -36,6 +37,53 @@ def test_legacy_state_without_manifest_loads_with_empty_manifest(tmp_path):
     save_snapshot(legacy,tmp_path,"legacy-manifest")
     loaded,_=load_snapshot(tmp_path,"legacy-manifest")
     assert loaded.module_usages_manifest == {}
+
+
+def _split_lineage_test_state(*source_keys):
+    from contextor.core.analysis.state_manager import (
+        RepositoryAnalysisState,
+    )
+    from contextor.core.domain.lineage_facts import (
+        LINEAGE_FACTS_SEMANTIC_VERSION,
+        LineageFamilyStatus,
+        MaterializedLineageSourceFacts,
+        SourceLineageManifest,
+    )
+
+    sources = {}
+
+    for index, source_key in enumerate(
+        source_keys
+    ):
+        sources[source_key] = (
+            MaterializedLineageSourceFacts(
+                manifest=SourceLineageManifest(
+                    source_key=source_key,
+                    source_fingerprint=(
+                        f"source-{index}"
+                    ),
+                    semantic_version=(
+                        LINEAGE_FACTS_SEMANTIC_VERSION
+                    ),
+                    status=(
+                        LineageFamilyStatus.FRESH
+                    ),
+                    anchor_count=0,
+                    flow_count=0,
+                    surface_count=0,
+                )
+            )
+        )
+
+    return RepositoryAnalysisState(
+        lineage_facts_by_source=sources,
+        lineage_facts_state=(
+            LineageFamilyStatus.FRESH.value
+        ),
+        lineage_facts_semantic_version=(
+            LINEAGE_FACTS_SEMANTIC_VERSION
+        ),
+    )
 
 
 def test_snapshot_roundtrip_increments_revision_and_records_writer(tmp_path):
@@ -129,6 +177,769 @@ def test_exact_snapshot_revision_binds_embedded_state_and_metadata(tmp_path):
     metadata = save_snapshot(candidate, tmp_path, "state-a", exact_revision=1, file_state_payload={"_meta": {"state_id": "state-a", "revision": 1}, "files": {}})
     loaded, loaded_metadata = load_snapshot(tmp_path, "state-a")
     assert metadata.revision == loaded_metadata.revision == loaded.revision == 1
+
+
+def test_exact_schema_13_splits_lineage_and_roundtrips(tmp_path):
+    import json
+    import pickle
+
+    state = _split_lineage_test_state(
+        "pkg/a.py",
+        "pkg/b.py",
+    )
+
+    metadata = save_snapshot(
+        state,
+        tmp_path,
+        "sid",
+        exact_revision=1,
+        file_state_payload={
+            "_meta": {
+                "state_id": "sid",
+                "revision": 1,
+            },
+            "files": {},
+        },
+    )
+
+    assert metadata.schema_version == "1.3"
+    assert metadata.lineage_manifest_file
+
+    with (
+        tmp_path
+        / metadata.state_file
+    ).open("rb") as stream:
+        core_payload = pickle.load(
+            stream
+        )
+
+    assert (
+        core_payload[
+            "state"
+        ].lineage_facts_by_source
+        == {}
+    )
+
+    manifest = json.loads(
+        (
+            tmp_path
+            / metadata.lineage_manifest_file
+        ).read_text(
+            encoding="utf-8"
+        )
+    )
+
+    assert (
+        manifest[
+            "schema_version"
+        ]
+        == "1.0"
+    )
+    assert (
+        manifest[
+            "state_id"
+        ]
+        == "sid"
+    )
+    assert (
+        manifest[
+            "revision"
+        ]
+        == 1
+    )
+    assert set(
+        manifest[
+            "sources"
+        ]
+    ) == {
+        "pkg/a.py",
+        "pkg/b.py",
+    }
+
+    for entry in manifest[
+        "sources"
+    ].values():
+        assert (
+            tmp_path
+            / entry[
+                "file"
+            ]
+        ).is_file()
+
+    loaded_state, loaded_metadata = (
+        load_snapshot(
+            tmp_path,
+            "sid",
+        )
+    )
+
+    assert loaded_metadata == metadata
+    assert (
+        loaded_state.lineage_facts_by_source
+        == state.lineage_facts_by_source
+    )
+
+
+def test_exact_split_lineage_reuses_unchanged_source_chunks_by_identity(
+    tmp_path,
+):
+    import json
+    from dataclasses import replace
+
+    state = _split_lineage_test_state(
+        "pkg/a.py",
+        "pkg/b.py",
+    )
+
+    first = save_snapshot(
+        state,
+        tmp_path,
+        "sid",
+        exact_revision=1,
+        file_state_payload={
+            "_meta": {
+                "state_id": "sid",
+                "revision": 1,
+            },
+            "files": {},
+        },
+    )
+
+    first_manifest = json.loads(
+        (
+            tmp_path
+            / first.lineage_manifest_file
+        ).read_text(
+            encoding="utf-8"
+        )
+    )
+
+    candidate = state.clone_for_update()
+
+    previous_b = (
+        candidate.lineage_facts_by_source[
+            "pkg/b.py"
+        ]
+    )
+
+    candidate.lineage_facts_by_source[
+        "pkg/b.py"
+    ] = replace(
+        previous_b,
+        manifest=replace(
+            previous_b.manifest,
+            source_fingerprint=(
+                "source-1-next"
+            ),
+        ),
+    )
+
+    second = save_snapshot(
+        candidate,
+        tmp_path,
+        "sid",
+        exact_revision=2,
+        file_state_payload={
+            "_meta": {
+                "state_id": "sid",
+                "revision": 2,
+            },
+            "files": {},
+        },
+        previous_state=state,
+    )
+
+    second_manifest = json.loads(
+        (
+            tmp_path
+            / second.lineage_manifest_file
+        ).read_text(
+            encoding="utf-8"
+        )
+    )
+
+    assert (
+        second_manifest[
+            "sources"
+        ][
+            "pkg/a.py"
+        ][
+            "file"
+        ]
+        == first_manifest[
+            "sources"
+        ][
+            "pkg/a.py"
+        ][
+            "file"
+        ]
+    )
+
+    assert (
+        second_manifest[
+            "sources"
+        ][
+            "pkg/b.py"
+        ][
+            "file"
+        ]
+        != first_manifest[
+            "sources"
+        ][
+            "pkg/b.py"
+        ][
+            "file"
+        ]
+    )
+
+    assert len(
+        list(
+            tmp_path.glob(
+                "lineage_source.r2.*.pkl"
+            )
+        )
+    ) == 1
+
+    loaded_state, loaded_metadata = (
+        load_snapshot(
+            tmp_path,
+            "sid",
+        )
+    )
+
+    assert loaded_metadata == second
+
+    assert (
+        loaded_state.lineage_facts_by_source
+        == candidate.lineage_facts_by_source
+    )
+
+
+def test_exact_split_lineage_does_not_reuse_equal_distinct_slice(
+    tmp_path,
+):
+    import json
+    from dataclasses import replace
+
+    state = _split_lineage_test_state(
+        "pkg/a.py"
+    )
+
+    first = save_snapshot(
+        state,
+        tmp_path,
+        "sid",
+        exact_revision=1,
+        file_state_payload={
+            "_meta": {
+                "state_id": "sid",
+                "revision": 1,
+            },
+            "files": {},
+        },
+    )
+
+    first_manifest = json.loads(
+        (
+            tmp_path
+            / first.lineage_manifest_file
+        ).read_text(
+            encoding="utf-8"
+        )
+    )
+
+    candidate = state.clone_for_update()
+
+    previous_slice = (
+        state.lineage_facts_by_source[
+            "pkg/a.py"
+        ]
+    )
+
+    equal_distinct = replace(
+        previous_slice
+    )
+
+    assert (
+        equal_distinct
+        == previous_slice
+    )
+
+    assert (
+        equal_distinct
+        is not previous_slice
+    )
+
+    candidate.lineage_facts_by_source[
+        "pkg/a.py"
+    ] = equal_distinct
+
+    second = save_snapshot(
+        candidate,
+        tmp_path,
+        "sid",
+        exact_revision=2,
+        file_state_payload={
+            "_meta": {
+                "state_id": "sid",
+                "revision": 2,
+            },
+            "files": {},
+        },
+        previous_state=state,
+    )
+
+    second_manifest = json.loads(
+        (
+            tmp_path
+            / second.lineage_manifest_file
+        ).read_text(
+            encoding="utf-8"
+        )
+    )
+
+    assert (
+        second_manifest[
+            "sources"
+        ][
+            "pkg/a.py"
+        ][
+            "file"
+        ]
+        != first_manifest[
+            "sources"
+        ][
+            "pkg/a.py"
+        ][
+            "file"
+        ]
+    )
+
+    assert len(
+        list(
+            tmp_path.glob(
+                "lineage_source.r2.*.pkl"
+            )
+        )
+    ) == 1
+
+
+def test_split_lineage_reuse_failure_preserves_previous_chunk(
+    tmp_path,
+    monkeypatch,
+):
+    import json
+    from dataclasses import replace
+
+    import contextor.core.live_state.store as store
+
+    state = _split_lineage_test_state(
+        "pkg/a.py",
+        "pkg/b.py",
+    )
+
+    first = save_snapshot(
+        state,
+        tmp_path,
+        "sid",
+        exact_revision=1,
+        file_state_payload={
+            "_meta": {
+                "state_id": "sid",
+                "revision": 1,
+            },
+            "files": {},
+        },
+    )
+
+    first_manifest = json.loads(
+        (
+            tmp_path
+            / first.lineage_manifest_file
+        ).read_text(
+            encoding="utf-8"
+        )
+    )
+
+    reused_chunk = (
+        tmp_path
+        / first_manifest[
+            "sources"
+        ][
+            "pkg/a.py"
+        ][
+            "file"
+        ]
+    )
+
+    candidate = state.clone_for_update()
+
+    previous_b = (
+        candidate.lineage_facts_by_source[
+            "pkg/b.py"
+        ]
+    )
+
+    candidate.lineage_facts_by_source[
+        "pkg/b.py"
+    ] = replace(
+        previous_b,
+        manifest=replace(
+            previous_b.manifest,
+            source_fingerprint=(
+                "source-1-next"
+            ),
+        ),
+    )
+
+    original_replace = store.os.replace
+
+    def fail_metadata_replace(
+        source,
+        target,
+    ):
+        if (
+            Path(
+                target
+            ).name
+            == "engine_state.meta.json"
+        ):
+            raise RuntimeError(
+                "synthetic metadata commit failure"
+            )
+
+        return original_replace(
+            source,
+            target,
+        )
+
+    monkeypatch.setattr(
+        store.os,
+        "replace",
+        fail_metadata_replace,
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match=(
+            "^synthetic metadata commit failure$"
+        ),
+    ):
+        save_snapshot(
+            candidate,
+            tmp_path,
+            "sid",
+            exact_revision=2,
+            file_state_payload={
+                "_meta": {
+                    "state_id": "sid",
+                    "revision": 2,
+                },
+                "files": {},
+            },
+            previous_state=state,
+        )
+
+    assert reused_chunk.is_file()
+
+    assert (
+        read_metadata(
+            tmp_path
+        ).revision
+        == 1
+    )
+
+    assert not list(
+        tmp_path.glob(
+            "engine_state.r2.*.pkl"
+        )
+    )
+
+    assert not list(
+        tmp_path.glob(
+            "file_state.r2.*.json"
+        )
+    )
+
+    assert not list(
+        tmp_path.glob(
+            "lineage_manifest.r2.*.json"
+        )
+    )
+
+    assert not list(
+        tmp_path.glob(
+            "lineage_source.r2.*.pkl"
+        )
+    )
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        "missing_chunk",
+        "manifest_revision",
+        "corrupt_chunk",
+    ],
+)
+def test_split_lineage_corruption_fails_closed(
+    tmp_path,
+    failure,
+):
+    import json
+
+    state = _split_lineage_test_state(
+        "pkg/a.py"
+    )
+
+    metadata = save_snapshot(
+        state,
+        tmp_path,
+        "sid",
+        exact_revision=1,
+        file_state_payload={
+            "_meta": {
+                "state_id": "sid",
+                "revision": 1,
+            },
+            "files": {},
+        },
+    )
+
+    manifest_path = (
+        tmp_path
+        / metadata.lineage_manifest_file
+    )
+
+    manifest = json.loads(
+        manifest_path.read_text(
+            encoding="utf-8"
+        )
+    )
+
+    entry = manifest[
+        "sources"
+    ][
+        "pkg/a.py"
+    ]
+
+    chunk_path = (
+        tmp_path
+        / entry[
+            "file"
+        ]
+    )
+
+    if failure == "missing_chunk":
+        chunk_path.unlink()
+
+    elif failure == "manifest_revision":
+        manifest[
+            "revision"
+        ] = 2
+        manifest_path.write_text(
+            json.dumps(
+                manifest,
+                indent=2,
+                sort_keys=True,
+            ),
+            encoding="utf-8",
+        )
+
+    elif failure == "corrupt_chunk":
+        chunk_path.write_bytes(
+            b"not-a-pickle"
+        )
+
+    assert (
+        load_snapshot(
+            tmp_path,
+            "sid",
+        )
+        is None
+    )
+
+
+def test_split_lineage_failed_metadata_commit_cleans_new_generation(
+    tmp_path,
+    monkeypatch,
+):
+    import contextor.core.live_state.store as store
+
+    state = _split_lineage_test_state(
+        "pkg/a.py",
+        "pkg/b.py",
+    )
+
+    baseline = save_snapshot(
+        state,
+        tmp_path,
+        "sid",
+        exact_revision=1,
+        file_state_payload={
+            "_meta": {
+                "state_id": "sid",
+                "revision": 1,
+            },
+            "files": {},
+        },
+    )
+
+    candidate = state.clone_for_update()
+
+    original_replace = (
+        store.os.replace
+    )
+
+    def fail_metadata_replace(
+        source,
+        target,
+    ):
+        if (
+            Path(
+                target
+            ).name
+            == "engine_state.meta.json"
+        ):
+            raise RuntimeError(
+                "synthetic metadata commit failure"
+            )
+
+        return original_replace(
+            source,
+            target,
+        )
+
+    monkeypatch.setattr(
+        store.os,
+        "replace",
+        fail_metadata_replace,
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match=(
+            "^synthetic metadata commit failure$"
+        ),
+    ):
+        save_snapshot(
+            candidate,
+            tmp_path,
+            "sid",
+            exact_revision=2,
+            file_state_payload={
+                "_meta": {
+                    "state_id": "sid",
+                    "revision": 2,
+                },
+                "files": {},
+            },
+        )
+
+    assert (
+        read_metadata(
+            tmp_path
+        ).revision
+        == baseline.revision
+    )
+
+    assert not list(
+        tmp_path.glob(
+            "engine_state.r2.*.pkl"
+        )
+    )
+    assert not list(
+        tmp_path.glob(
+            "file_state.r2.*.json"
+        )
+    )
+    assert not list(
+        tmp_path.glob(
+            "lineage_manifest.r2.*.json"
+        )
+    )
+    assert not list(
+        tmp_path.glob(
+            "lineage_source.r2.*.pkl"
+        )
+    )
+
+
+def test_schema_12_monolithic_snapshot_remains_loadable(
+    tmp_path,
+):
+    import json
+    import pickle
+
+    from contextor.core.analysis.state_manager import (
+        RepositoryAnalysisState,
+    )
+
+    state = RepositoryAnalysisState()
+    state.state_id = "legacy-sid"
+    state.revision = 1
+
+    state_file = (
+        "engine_state.r1.legacy.pkl"
+    )
+
+    metadata = {
+        "schema_version": "1.2",
+        "state_id": "legacy-sid",
+        "revision": 1,
+        "writer": "legacy",
+        "repo_id": "",
+        "root_path": "",
+        "state_file": state_file,
+        "file_state_file": "",
+    }
+
+    with (
+        tmp_path
+        / state_file
+    ).open("wb") as stream:
+        pickle.dump(
+            {
+                "metadata": metadata,
+                "state": state,
+            },
+            stream,
+        )
+
+    (
+        tmp_path
+        / "engine_state.meta.json"
+    ).write_text(
+        json.dumps(
+            metadata,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    loaded_state, loaded_metadata = (
+        load_snapshot(
+            tmp_path,
+            "legacy-sid",
+        )
+    )
+
+    assert (
+        loaded_metadata.schema_version
+        == "1.2"
+    )
+    assert (
+        loaded_metadata.lineage_manifest_file
+        == ""
+    )
+    assert (
+        loaded_state.state_id
+        == "legacy-sid"
+    )
+    assert (
+        loaded_state.revision
+        == 1
+    )
 
 
 def test_build_payload_is_side_effect_free(tmp_path):

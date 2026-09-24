@@ -1093,20 +1093,44 @@ def _repository_updater(root: Path, holder: dict[str, object] | None = None):
     return update
 
 
-def _repository_persister(root: Path, holder: dict[str, object] | None = None):
+def _repository_persister(
+    root: Path,
+    holder: dict[str, object] | None = None,
+    *,
+    previous_state: object | None = None,
+):
     identity = require_repository_identity(root)
     cache = repo_cache_dir(root)
+    persisted_state = previous_state
 
     def persist(state, exact_revision: int):
+        nonlocal persisted_state
+
         import time
+
         op = _safe_current_trace_operation()
         manager = (holder or {}).get("manager")
+
         if manager is None:
             from contextor.core.analysis.state_manager import FileStateManager
 
-            manager = FileStateManager(str(cache))
-        state_id = (holder or {}).get("state_id", getattr(manager, "state_id", ""))
+            manager = FileStateManager(
+                str(cache)
+            )
+
+        state_id = (
+            holder or {}
+        ).get(
+            "state_id",
+            getattr(
+                manager,
+                "state_id",
+                "",
+            ),
+        )
+
         snapshot_started = time.monotonic()
+
         try:
             meta = save_snapshot(
                 state,
@@ -1116,17 +1140,51 @@ def _repository_persister(root: Path, holder: dict[str, object] | None = None):
                 repo_id=identity.repo_id,
                 root_path=identity.root_path,
                 exact_revision=exact_revision,
-                file_state_payload=manager.build_payload(str(state_id), exact_revision),
+                file_state_payload=manager.build_payload(
+                    str(state_id),
+                    exact_revision,
+                ),
+                previous_state=persisted_state,
             )
+
             if meta.revision != exact_revision:
-                raise ValueError("Exact LIVE persistence revision mismatch.")
-            _safe_trace_event("LIVE", "SNAPSHOT_SAVE_END", op=op, repo=str(root), elapsed_ms=(time.monotonic() - snapshot_started) * 1000.0)
-            _safe_trace_event("LIVE", "FILE_STATE_SAVE_END", op=op, repo=str(root), elapsed_ms=0.0)
+                raise ValueError(
+                    "Exact LIVE persistence revision mismatch."
+                )
+
+            persisted_state = state
+
+            _safe_trace_event(
+                "LIVE",
+                "SNAPSHOT_SAVE_END",
+                op=op,
+                repo=str(root),
+                elapsed_ms=(
+                    time.monotonic()
+                    - snapshot_started
+                )
+                * 1000.0,
+            )
+
+            _safe_trace_event(
+                "LIVE",
+                "FILE_STATE_SAVE_END",
+                op=op,
+                repo=str(root),
+                elapsed_ms=0.0,
+            )
+
         except Exception as exc:
             from contextor.core.live_state.store import SnapshotRevisionConflict
+
             if isinstance(exc, SnapshotRevisionConflict):
-                raise CanonicalPersistenceConflict(exc.current_revision, exc.requested_revision) from exc
+                raise CanonicalPersistenceConflict(
+                    exc.current_revision,
+                    exc.requested_revision,
+                ) from exc
+
             raise
+
         return meta
 
     return persist
@@ -1319,7 +1377,11 @@ def run_service(
             state,
             revision=revision,
             updater=_repository_updater(root, adapter_holder),
-            persister=_repository_persister(root, adapter_holder),
+            persister=_repository_persister(
+                root,
+                adapter_holder,
+                previous_state=state,
+            ),
             canonical_query_handler=(
                 _repository_canonical_query_handler
             ),
