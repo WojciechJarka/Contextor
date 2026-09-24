@@ -1079,9 +1079,9 @@ def test_real_repository_adapter_two_successive_updates_are_exact_successors(tmp
         assert read_metadata(cache).revision == expected
         loaded_state, loaded_metadata = load_snapshot(cache, "sid")
         assert loaded_metadata.revision == expected
-    assert loaded_state.revision == expected
-    assert FileStateManager(str(cache)).revision == expected
-    assert server._events[-1]["revision"] == expected
+        assert loaded_state.revision == expected
+        assert FileStateManager(str(cache)).revision == expected
+        assert server._events[-1]["revision"] == expected
 
 
 def test_repository_persister_advances_previous_state_only_after_success(
