@@ -15,13 +15,12 @@ import dataclasses
 import os
 import re
 import time
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import as_completed
 from pathlib import Path
 
 from contextor.core.analysis.cache_manager import CacheManager
 from contextor.core.analysis.process_pool_lifecycle import (
-    managed_process_pool,
-    terminate_process_pool,
+    managed_reusable_process_pool,
 )
 from contextor.core.analysis.lineage_extraction import (
     deserialize_extracted_lineage_source_facts,
@@ -303,7 +302,7 @@ def extract_imports(file_path: Path) -> list[ImportRef]:
 # directory check for every source file in the repository.
 _CACHE_MANAGERS: dict[str, CacheManager] = {}
 
-_WORKER_TASK_ORDINAL_BY_PID: dict[int, int] = {}
+_WORKER_LAST_BATCH_TOKEN_BY_PID: dict[int, str] = {}
 
 
 def _cache_manager(root_str: str) -> CacheManager:
@@ -320,6 +319,7 @@ def _process_single_file(
     path_str: str,
     root_str: str,
     submitted_monotonic_ns: int | None = None,
+    batch_token: str | None = None,
 ) -> dict:
     """Funkcja pomocnicza dla wieloprocesowości."""
     path = Path(path_str)
@@ -330,21 +330,21 @@ def _process_single_file(
 
     worker_pid = os.getpid()
 
-    worker_task_ordinal = (
-        _WORKER_TASK_ORDINAL_BY_PID.get(
-            worker_pid,
-            0,
+    previous_batch_token = (
+        _WORKER_LAST_BATCH_TOKEN_BY_PID.get(
+            worker_pid
         )
-        + 1
     )
-
-    _WORKER_TASK_ORDINAL_BY_PID[
-        worker_pid
-    ] = worker_task_ordinal
 
     worker_is_first_task = (
-        worker_task_ordinal == 1
+        batch_token is not None
+        and previous_batch_token != batch_token
     )
+
+    if batch_token is not None:
+        _WORKER_LAST_BATCH_TOKEN_BY_PID[
+            worker_pid
+        ] = batch_token
 
     worker_started_monotonic_ns = time.monotonic_ns()
 
@@ -1028,6 +1028,9 @@ def index_repository(
     parent_progress_ms = 0.0
     pool_shutdown_ms = 0.0
 
+    process_pool_reused = False
+    process_pool_generation = 0
+
     executor_max_workers = 0
     executor_process_count_after_submit = 0
     executor_process_count_before_shutdown = 0
@@ -1623,6 +1626,12 @@ def index_repository(
             parent_merge_ms=parent_merge_ms,
             parent_progress_ms=parent_progress_ms,
             pool_shutdown_ms=pool_shutdown_ms,
+            process_pool_reused=(
+                process_pool_reused
+            ),
+            process_pool_generation=(
+                process_pool_generation
+            ),
             executor_max_workers=(
                 executor_max_workers
             ),
@@ -1726,9 +1735,13 @@ def index_repository(
     pool_scope_started = time.monotonic()
     pool_enter_started = pool_scope_started
 
-    with managed_process_pool(
-        ProcessPoolExecutor,
-    ) as executor:
+    with managed_reusable_process_pool(
+        "indexer",
+    ) as (
+        executor,
+        process_pool_reused,
+        process_pool_generation,
+    ):
         executor_max_workers = int(
             getattr(
                 executor,
@@ -1745,12 +1758,17 @@ def index_repository(
 
         pool_submit_started = time.monotonic()
 
+        worker_batch_token = (
+            f"{os.getpid()}:{time.monotonic_ns()}"
+        )
+
         futures = {
             executor.submit(
                 _process_single_file,
                 str(p),
                 str(root_path),
                 time.monotonic_ns(),
+                worker_batch_token,
             ): p
             for p in files_to_process
         }
@@ -1896,7 +1914,6 @@ def index_repository(
                     total_files,
                 )
             except AnalysisCancelled:
-                terminate_process_pool(executor)
                 raise
             finally:
                 parent_progress_ms += (

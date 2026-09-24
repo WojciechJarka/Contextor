@@ -1,3 +1,6 @@
+from contextor.core.analysis.process_pool_lifecycle import (
+    terminate_active_process_pools,
+)
 from contextor.core.runtime_trace import capture_trace_events
 from contextor.core.symbol_engine.indexer import index_repository
 
@@ -237,6 +240,15 @@ def test_process_pool_parent_timing_evidence_is_explicit(
     assert event["parent_merge_ms"] >= 0.0
     assert event["parent_progress_ms"] >= 0.0
     assert event["pool_shutdown_ms"] >= 0.0
+    assert isinstance(
+        event["process_pool_reused"],
+        bool,
+    )
+
+    assert (
+        event["process_pool_generation"]
+        >= 1
+    )
 
     assert event["executor_max_workers"] >= 1
 
@@ -326,3 +338,147 @@ def test_process_pool_parent_timing_evidence_is_explicit(
         event["pool_scope_ms"]
         >= event["pool_shutdown_ms"]
     )
+
+
+def test_index_repository_reuses_pool_and_resets_first_task_per_batch(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv(
+        "CONTEXTOR_STATE_DIR",
+        str(
+            tmp_path
+            / "state"
+        ),
+    )
+
+    monkeypatch.delenv(
+        "CONTEXTOR_DISABLE_PROCESS_POOL",
+        raising=False,
+    )
+
+    repo = _write_two_file_repo(
+        tmp_path
+    )
+
+    terminate_active_process_pools(
+        timeout=2.0,
+    )
+
+    try:
+        with capture_trace_events() as first_events:
+            index_repository(
+                str(repo)
+            )
+
+        with capture_trace_events() as second_events:
+            index_repository(
+                str(repo)
+            )
+
+        first_parent = [
+            event
+            for event in first_events
+            if event["ev"]
+            == "FULL_ANALYSIS_INDEX_PARENT_TIMING"
+        ]
+
+        second_parent = [
+            event
+            for event in second_events
+            if event["ev"]
+            == "FULL_ANALYSIS_INDEX_PARENT_TIMING"
+        ]
+
+        assert len(first_parent) == 1
+        assert len(second_parent) == 1
+
+        first_parent_event = first_parent[0]
+        second_parent_event = second_parent[0]
+
+        assert (
+            first_parent_event[
+                "process_pool_reused"
+            ]
+            is False
+        )
+
+        assert (
+            second_parent_event[
+                "process_pool_reused"
+            ]
+            is True
+        )
+
+        assert (
+            first_parent_event[
+                "process_pool_generation"
+            ]
+            >= 1
+        )
+
+        assert (
+            second_parent_event[
+                "process_pool_generation"
+            ]
+            == first_parent_event[
+                "process_pool_generation"
+            ]
+        )
+
+        first_worker = [
+            event
+            for event in first_events
+            if event["ev"]
+            == "FULL_ANALYSIS_INDEX_WORKER_TIMING"
+        ]
+
+        second_worker = [
+            event
+            for event in second_events
+            if event["ev"]
+            == "FULL_ANALYSIS_INDEX_WORKER_TIMING"
+        ]
+
+        assert len(first_worker) == 1
+        assert len(second_worker) == 1
+
+        first_worker_event = first_worker[0]
+        second_worker_event = second_worker[0]
+
+        assert (
+            first_worker_event[
+                "worker_process_count"
+            ]
+            >= 1
+        )
+
+        assert (
+            second_worker_event[
+                "worker_process_count"
+            ]
+            >= 1
+        )
+
+        assert (
+            first_worker_event[
+                "worker_first_start_count"
+            ]
+            == first_worker_event[
+                "worker_process_count"
+            ]
+        )
+
+        assert (
+            second_worker_event[
+                "worker_first_start_count"
+            ]
+            == second_worker_event[
+                "worker_process_count"
+            ]
+        )
+
+    finally:
+        terminate_active_process_pools(
+            timeout=2.0,
+        )

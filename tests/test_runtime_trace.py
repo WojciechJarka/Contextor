@@ -94,6 +94,8 @@ def test_canonical_writer_analysis_trace_is_self_describing_and_durable():
         "worker_result_transport_sum_ms",
         "worker_result_transport_max_ms",
         "worker_result_transport_top10",
+        "process_pool_reused",
+        "process_pool_generation",
         "executor_max_workers",
         "executor_process_count_after_submit",
         "executor_process_count_before_shutdown",
