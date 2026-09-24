@@ -1835,7 +1835,6 @@ def trace_event(domain: str, event: str, *, op: str | None = None, rev: int | No
                 "reference_extract_sum_ms": "reference_extract_sum_ms",
 
                 "collision_extract_calls": "collision_extract_calls",
-                "collision_extract_calls": "collision_extract_calls",
                 "collision_extract_sum_ms": "collision_extract_sum_ms",
 
                 "test_extract_calls": "test_extract_calls",
