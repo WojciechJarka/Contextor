@@ -4,6 +4,8 @@ from types import SimpleNamespace
 import threading
 import time
 
+import pytest
+
 from contextor import mcp_process_registry
 import contextor.core.analysis.process_pool_lifecycle as lifecycle
 import contextor.ui.gui as gui_module
@@ -227,3 +229,214 @@ def test_desktop_close_force_terminates_process_local_pools(
     assert calls == [0.01]
     assert destroyed == [True]
     assert controller._closing is True
+
+
+def test_reusable_process_pool_preserves_generation_between_leases(
+    monkeypatch,
+):
+    lifecycle.terminate_active_process_pools(
+        timeout=0.01,
+    )
+
+    monkeypatch.delenv(
+        "CONTEXTOR_MCP_PROCESS_REGISTRY",
+        raising=False,
+    )
+
+    created = []
+
+    def factory(**_kwargs):
+        executor = _FakeExecutor()
+        created.append(executor)
+        return executor
+
+    monkeypatch.setattr(
+        lifecycle,
+        "ProcessPoolExecutor",
+        factory,
+    )
+
+    with lifecycle.managed_reusable_process_pool(
+        "indexer",
+    ) as (
+        first_executor,
+        first_reused,
+        first_generation,
+    ):
+        assert first_reused is False
+        assert lifecycle.active_process_pool_count() == 1
+
+    assert first_executor.shutdown_calls == []
+    assert lifecycle.active_process_pool_count() == 1
+
+    with lifecycle.managed_reusable_process_pool(
+        "indexer",
+    ) as (
+        second_executor,
+        second_reused,
+        second_generation,
+    ):
+        assert second_reused is True
+        assert second_executor is first_executor
+        assert second_generation == first_generation
+
+    assert len(created) == 1
+    assert lifecycle.active_process_pool_count() == 1
+
+    lifecycle.terminate_active_process_pools(
+        timeout=0.01,
+    )
+
+    assert lifecycle.active_process_pool_count() == 0
+
+    with lifecycle.managed_reusable_process_pool(
+        "indexer",
+    ) as (
+        third_executor,
+        third_reused,
+        third_generation,
+    ):
+        assert third_reused is False
+        assert third_executor is not first_executor
+        assert third_generation > first_generation
+
+    lifecycle.terminate_active_process_pools(
+        timeout=0.01,
+    )
+
+
+def test_reusable_process_pool_exception_invalidates_generation(
+    monkeypatch,
+):
+    lifecycle.terminate_active_process_pools(
+        timeout=0.01,
+    )
+
+    monkeypatch.delenv(
+        "CONTEXTOR_MCP_PROCESS_REGISTRY",
+        raising=False,
+    )
+
+    created = []
+
+    def factory(**_kwargs):
+        executor = _FakeExecutor()
+        created.append(executor)
+        return executor
+
+    monkeypatch.setattr(
+        lifecycle,
+        "ProcessPoolExecutor",
+        factory,
+    )
+
+    with pytest.raises(RuntimeError):
+        with lifecycle.managed_reusable_process_pool(
+            "indexer",
+        ) as (
+            first_executor,
+            first_reused,
+            first_generation,
+        ):
+            assert first_reused is False
+            raise RuntimeError("boom")
+
+    assert first_executor.shutdown_calls == [
+        (False, True)
+    ]
+    assert lifecycle.active_process_pool_count() == 0
+
+    with lifecycle.managed_reusable_process_pool(
+        "indexer",
+    ) as (
+        second_executor,
+        second_reused,
+        second_generation,
+    ):
+        assert second_reused is False
+        assert second_executor is not first_executor
+        assert second_generation > first_generation
+
+    lifecycle.terminate_active_process_pools(
+        timeout=0.01,
+    )
+
+
+def test_reusable_process_pool_rotates_when_registry_scope_changes(
+    monkeypatch,
+    tmp_path,
+):
+    lifecycle.terminate_active_process_pools(
+        timeout=0.01,
+    )
+
+    created = []
+
+    def factory(**kwargs):
+        executor = _FakeExecutor()
+        executor.factory_kwargs = kwargs
+        created.append(executor)
+        return executor
+
+    monkeypatch.setattr(
+        lifecycle,
+        "ProcessPoolExecutor",
+        factory,
+    )
+
+    first_registry = str(
+        tmp_path / "registry-a"
+    )
+    second_registry = str(
+        tmp_path / "registry-b"
+    )
+
+    monkeypatch.setenv(
+        "CONTEXTOR_MCP_PROCESS_REGISTRY",
+        first_registry,
+    )
+
+    with lifecycle.managed_reusable_process_pool(
+        "indexer",
+    ) as (
+        first_executor,
+        first_reused,
+        first_generation,
+    ):
+        assert first_reused is False
+
+    assert (
+        first_executor.factory_kwargs[
+            "initializer"
+        ]
+        is lifecycle._initialize_mcp_managed_worker
+    )
+
+    monkeypatch.setenv(
+        "CONTEXTOR_MCP_PROCESS_REGISTRY",
+        second_registry,
+    )
+
+    with lifecycle.managed_reusable_process_pool(
+        "indexer",
+    ) as (
+        second_executor,
+        second_reused,
+        second_generation,
+    ):
+        assert second_reused is False
+        assert second_executor is not first_executor
+        assert second_generation > first_generation
+
+    assert first_executor.shutdown_calls == [
+        (False, True)
+    ]
+
+    assert len(created) == 2
+    assert lifecycle.active_process_pool_count() == 1
+
+    lifecycle.terminate_active_process_pools(
+        timeout=0.01,
+    )
+
+    assert lifecycle.active_process_pool_count() == 0

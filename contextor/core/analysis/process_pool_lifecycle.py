@@ -15,15 +15,27 @@ _registry_lock = threading.RLock()
 _registry_pid = os.getpid()
 _active_executors: dict[int, Any] = {}
 
+_reusable_executors: dict[str, Any] = {}
+_reusable_registry_values: dict[str, str | None] = {}
+_reusable_generations: dict[str, int] = {}
+_reusable_use_locks: dict[str, threading.RLock] = {}
+_reusable_generation_counter = 0
+
 
 def _ensure_process_local_registry_locked() -> None:
     global _registry_pid
+    global _reusable_generation_counter
 
     current_pid = os.getpid()
     if current_pid == _registry_pid:
         return
 
     _active_executors.clear()
+    _reusable_executors.clear()
+    _reusable_registry_values.clear()
+    _reusable_generations.clear()
+    _reusable_use_locks.clear()
+    _reusable_generation_counter = 0
     _registry_pid = current_pid
 
 
@@ -43,6 +55,210 @@ def active_process_pool_count() -> int:
     with _registry_lock:
         _ensure_process_local_registry_locked()
         return len(_active_executors)
+
+
+def _reusable_pool_use_lock(
+    pool_key: str,
+) -> threading.RLock:
+    if not pool_key:
+        raise ValueError(
+            "Reusable process-pool key must be non-empty."
+        )
+
+    with _registry_lock:
+        _ensure_process_local_registry_locked()
+
+        lock = _reusable_use_locks.get(
+            pool_key
+        )
+
+        if lock is None:
+            lock = threading.RLock()
+            _reusable_use_locks[
+                pool_key
+            ] = lock
+
+        return lock
+
+
+def _drop_reusable_executor(
+    pool_key: str,
+    executor: Any,
+) -> None:
+    with _registry_lock:
+        _ensure_process_local_registry_locked()
+
+        if (
+            _reusable_executors.get(
+                pool_key
+            )
+            is not executor
+        ):
+            return
+
+        _reusable_executors.pop(
+            pool_key,
+            None,
+        )
+        _reusable_registry_values.pop(
+            pool_key,
+            None,
+        )
+        _reusable_generations.pop(
+            pool_key,
+            None,
+        )
+        _active_executors.pop(
+            id(executor),
+            None,
+        )
+
+
+def _create_reusable_process_pool(
+    pool_key: str,
+    registry_value: str | None,
+) -> tuple[Any, int]:
+    global _reusable_generation_counter
+
+    factory_kwargs: dict[str, Any] = {}
+
+    if registry_value:
+        factory_kwargs[
+            "initializer"
+        ] = _initialize_mcp_managed_worker
+
+        factory_kwargs[
+            "initargs"
+        ] = (
+            os.getpid(),
+            None,
+            (),
+        )
+
+    executor = ProcessPoolExecutor(
+        **factory_kwargs
+    )
+
+    with _registry_lock:
+        _ensure_process_local_registry_locked()
+
+        _reusable_generation_counter += 1
+        generation = (
+            _reusable_generation_counter
+        )
+
+        _active_executors[
+            id(executor)
+        ] = executor
+
+        _reusable_executors[
+            pool_key
+        ] = executor
+
+        _reusable_registry_values[
+            pool_key
+        ] = registry_value
+
+        _reusable_generations[
+            pool_key
+        ] = generation
+
+    return executor, generation
+
+
+@contextmanager
+def managed_reusable_process_pool(
+    pool_key: str,
+) -> Iterator[tuple[Any, bool, int]]:
+    """
+    Lease one process-local reusable ProcessPoolExecutor.
+
+    Normal context exit preserves the executor and its workers.
+
+    Any exception escaping the lease invalidates and terminates that
+    generation so the next lease must create a fresh executor.
+
+    A change of CONTEXTOR_MCP_PROCESS_REGISTRY also rotates the
+    generation before reuse, preventing workers registered under one
+    registry scope from silently surviving into another scope.
+    """
+
+    use_lock = _reusable_pool_use_lock(
+        pool_key
+    )
+
+    with use_lock:
+        registry_value = os.environ.get(
+            "CONTEXTOR_MCP_PROCESS_REGISTRY"
+        )
+
+        with _registry_lock:
+            _ensure_process_local_registry_locked()
+
+            executor = (
+                _reusable_executors.get(
+                    pool_key
+                )
+            )
+
+            previous_registry_value = (
+                _reusable_registry_values.get(
+                    pool_key
+                )
+            )
+
+            generation = (
+                _reusable_generations.get(
+                    pool_key
+                )
+            )
+
+        if (
+            executor is not None
+            and previous_registry_value
+            != registry_value
+        ):
+            terminate_process_pool(
+                executor
+            )
+
+            _drop_reusable_executor(
+                pool_key,
+                executor,
+            )
+
+            executor = None
+            generation = None
+
+        reused = executor is not None
+
+        if executor is None:
+            executor, generation = (
+                _create_reusable_process_pool(
+                    pool_key,
+                    registry_value,
+                )
+            )
+
+        assert generation is not None
+
+        try:
+            yield (
+                executor,
+                reused,
+                generation,
+            )
+        except BaseException:
+            terminate_process_pool(
+                executor
+            )
+
+            _drop_reusable_executor(
+                pool_key,
+                executor,
+            )
+
+            raise
 
 
 def _initialize_mcp_managed_worker(
@@ -212,20 +428,61 @@ def terminate_active_process_pools(
 ) -> int:
     with _registry_lock:
         _ensure_process_local_registry_locked()
-        executors = tuple(_active_executors.values())
+        executors = tuple(
+            _active_executors.values()
+        )
+
+    target_ids = {
+        id(executor)
+        for executor in executors
+    }
 
     terminated = 0
+
     for executor in executors:
         terminated += terminate_process_pool(
             executor,
             timeout=timeout,
         )
+
+    with _registry_lock:
+        _ensure_process_local_registry_locked()
+
+        for executor_id in target_ids:
+            _active_executors.pop(
+                executor_id,
+                None,
+            )
+
+        for (
+            pool_key,
+            executor,
+        ) in tuple(
+            _reusable_executors.items()
+        ):
+            if id(executor) not in target_ids:
+                continue
+
+            _reusable_executors.pop(
+                pool_key,
+                None,
+            )
+            _reusable_registry_values.pop(
+                pool_key,
+                None,
+            )
+            _reusable_generations.pop(
+                pool_key,
+                None,
+            )
+
     return terminated
 
 
 __all__ = [
     "active_process_pool_count",
     "managed_process_pool",
+    "managed_reusable_process_pool",
     "terminate_active_process_pools",
     "terminate_process_pool",
 ]
