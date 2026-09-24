@@ -40,6 +40,42 @@ def test_warm_index_cache_evidence_proves_ast_parse_is_skipped(tmp_path, monkeyp
     assert event["lineage_extract_sum_ms"] == 0.0
     assert "elapsed_ms" not in event
 
+    worker_events = [
+        event
+        for event in events
+        if event["ev"]
+        == "FULL_ANALYSIS_INDEX_WORKER_TIMING"
+    ]
+
+    assert len(worker_events) == 1
+
+    worker_event = worker_events[0]
+
+    assert (
+        worker_event["timing_semantics"]
+        == "aggregate_file_task_not_critical_path"
+    )
+
+    assert worker_event["execution_mode"] == "inline"
+    assert worker_event["file_tasks"] == 2
+    assert worker_event["worker_task_sum_ms"] >= 0.0
+    assert worker_event["worker_task_max_ms"] >= 0.0
+
+    assert worker_event["source_read_calls"] == 2
+    assert worker_event["source_read_sum_ms"] >= 0.0
+
+    assert worker_event["import_extract_calls"] == 0
+    assert worker_event["symbol_extract_calls"] == 0
+    assert worker_event["reference_extract_calls"] == 0
+    assert worker_event["collision_extract_calls"] == 0
+    assert worker_event["test_extract_calls"] == 0
+
+    assert worker_event["cache_set_calls"] == 0
+    assert worker_event["cache_set_sum_ms"] == 0.0
+
+    assert worker_event["cache_miss_task_count"] == 0
+    assert worker_event["cache_miss_top10"] == ""
+
 
 def test_index_lineage_extraction_event_is_explicitly_noncritical(tmp_path, monkeypatch):
     monkeypatch.setenv("CONTEXTOR_STATE_DIR", str(tmp_path / "state"))
@@ -58,3 +94,119 @@ def test_index_lineage_extraction_event_is_explicitly_noncritical(tmp_path, monk
     assert event["timing_semantics"] == "aggregate_file_task_not_critical_path"
     assert event["lineage_extract_calls"] == 2
     assert event["lineage_cache_hits"] == 0
+
+    worker_events = [
+        event
+        for event in events
+        if event["ev"]
+        == "FULL_ANALYSIS_INDEX_WORKER_TIMING"
+    ]
+
+    assert len(worker_events) == 1
+
+    worker_event = worker_events[0]
+
+    assert worker_event["execution_mode"] == "inline"
+
+    assert (
+        worker_event["timing_semantics"]
+        == "aggregate_file_task_not_critical_path"
+    )
+
+    assert worker_event["file_tasks"] == 2
+
+    assert worker_event["source_read_calls"] == 2
+    assert worker_event["source_read_sum_ms"] >= 0.0
+
+    assert worker_event["import_extract_calls"] == 2
+    assert worker_event["import_extract_sum_ms"] >= 0.0
+
+    assert worker_event["symbol_extract_calls"] == 2
+    assert worker_event["symbol_extract_sum_ms"] >= 0.0
+
+    assert worker_event["reference_extract_calls"] == 2
+    assert worker_event["reference_extract_sum_ms"] >= 0.0
+
+    assert worker_event["collision_extract_calls"] == 2
+    assert worker_event["collision_extract_sum_ms"] >= 0.0
+
+    assert worker_event["cache_set_calls"] == 2
+    assert worker_event["cache_set_sum_ms"] >= 0.0
+
+    assert worker_event["cache_miss_task_count"] == 2
+
+    assert "a.py|task=" in worker_event[
+        "cache_miss_top10"
+    ]
+
+    assert "b.py|task=" in worker_event[
+        "cache_miss_top10"
+    ]
+
+
+def test_process_pool_parent_timing_evidence_is_explicit(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv(
+        "CONTEXTOR_STATE_DIR",
+        str(
+            tmp_path
+            / "state"
+        ),
+    )
+
+    monkeypatch.delenv(
+        "CONTEXTOR_DISABLE_PROCESS_POOL",
+        raising=False,
+    )
+
+    repo = _write_two_file_repo(
+        tmp_path
+    )
+
+    with capture_trace_events() as events:
+        index_repository(
+            str(
+                repo
+            )
+        )
+
+    parent_events = [
+        event
+        for event in events
+        if event["ev"]
+        == "FULL_ANALYSIS_INDEX_PARENT_TIMING"
+    ]
+
+    assert len(parent_events) == 1
+
+    event = parent_events[0]
+
+    assert event["execution_mode"] == "process_pool"
+
+    assert (
+        event["timing_semantics"]
+        == "critical_path_parent_subphases_partial"
+    )
+
+    assert event["index_internal_ms"] >= 0.0
+    assert event["file_discovery_ms"] >= 0.0
+    assert event["pool_scope_ms"] >= 0.0
+    assert event["pool_enter_ms"] >= 0.0
+    assert event["pool_submit_ms"] >= 0.0
+    assert event["parent_future_wait_ms"] >= 0.0
+    assert event["parent_future_result_ms"] >= 0.0
+    assert event["parent_merge_ms"] >= 0.0
+    assert event["parent_progress_ms"] >= 0.0
+    assert event["pool_shutdown_ms"] >= 0.0
+
+    assert (
+        event["pool_scope_ms"]
+        >= event["pool_enter_ms"]
+    )
+
+    assert (
+        event["pool_scope_ms"]
+        >= event["pool_shutdown_ms"]
+    )
