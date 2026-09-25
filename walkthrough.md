@@ -1,386 +1,241 @@
-# CPA10M7B2_WIRE_INDEXER_TO_REUSABLE_POOL_AND_BATCH_TELEMETRY
+# CPA10M7C1_PROCESS_IDENTITY_CORRECTION_AND_FULL_RUNTIME_CENSUS
 
-## STATUS
-STATUS=BLOCKED_CONTEXTOR_SYNC
-BLOCK_REASON=INDEXER_WORKSPACE_SYNC_OUT_OF_SYNC
-FINAL_PASS=NO
-RUNTIME_GATE=PASS
-SOURCE_GATE=PASS
-SOURCE_DRIFT=NO
+STATUS=DISCOVERY_COMPLETE
+CHECKPOINT=DISCOVERY_RUNTIME_EVIDENCE_ONLY
+WIN32_PROCESS_SNAPSHOT_AT_UTC=2026-09-25T08:33:58.4073639Z
+ROOT_DESCENDANT_CHECK_AT_UTC=2026-09-25T08:43:26.1711257Z
+REMOTE_PROCESS_ENVIRONMENT_CAPTURE_AT_UTC=2026-09-25T08:40:48.1542856Z
+CURRENT_TARGETED_PROCESS_IDENTITY_CHECK=repository process_identity() via Win32 GetProcessTimes
+CONTEXTOR_CANONICAL_REVISION=1412
+CONTEXTOR_WORKSPACE_SYNC=verified for the five requested module contexts
 
-## RUNTIME_GATE
-PRE_M7B1_MCP_PID=4768
-PRE_M7B1_DESKTOP_PID=15508
-CURRENT_MCP_PID=5756
-CURRENT_DESKTOP_PID=5748
-CURRENT_MCP_PID_EVIDENCE=Contextor runtime lease process_id plus live Win32 process identity for contextor.core.live_state.runtime
-CURRENT_DESKTOP_PID_EVIDENCE=Contextor desktop claim process_id plus live Win32 process identity for main.py --gui
-CURRENT_MCP_PID_DIFFERENT_FROM_PREVIOUS=YES
-CURRENT_DESKTOP_PID_DIFFERENT_FROM_PREVIOUS=YES
+## IDENTITY_MODEL_CORRECTION
 
-## SOURCE_GATE
-PRE_EDIT_CANONICAL_REVISION=1406
-PRE_EDIT_WORKSPACE_SYNC=verified for all four allowed files
-PRE_EDIT_ALLOWED_FILES_GIT_CLEAN=YES
-REQUIRED_LITERAL_ANCHORS=PASS
-MANAGED_REUSABLE_PROCESS_POOL_EXISTS=YES
-PRE_EDIT_MANAGED_REUSABLE_DIRECT_CONSUMERS=tests.test_process_pool_lifecycle only
-PRE_EDIT_LEGACY_MANAGED_DIRECT_CONSUMERS=contextor.core.symbol_engine.indexer; contextor.core.reporting_layer.artifact_usage_report; tests.test_process_pool_lifecycle
+PREVIOUS_EXPECTED_MCP_PID_15596_VALID=NO
 
-## IMPLEMENTATION
-ARTIFACT_USAGE_POOL_CHANGED=NO
-LEGACY_MANAGED_POOL_IMPLEMENTATION_CHANGED=NO
-ARTIFACT_USAGE_REPORT_FILE_CHANGED=NO
+PID 15596 was previously conflated with the MCP server because runtime lease/authority evidence identified it as RUNTIME_SERVICE_PID. The current exact Win32 process identity check says PID 15596 is no longer alive. It has no current mcp-server registry record. Runtime service ownership and MCP server ownership are separate process roles.
 
-## REUSABLE_POOL_WIRING
-INDEXER_USES_REUSABLE_POOL=YES
-REUSABLE_POOL_KEY=indexer
-INDEXER_IS_ONLY_PRODUCTION_CALLER_MIGRATED=YES
-NORMAL_SUCCESSFUL_INDEX_RUN_TERMINATES_WORKERS=NO
-ABNORMAL_EXCEPTION_INVALIDATES_WORKER_GENERATION=YES
-REGISTRY_SCOPE_CHANGE_ROTATES_GENERATION=YES
+Current Contextor evidence:
+- get_file_edit_context for mcp_server.py, mcp_backend_state.py, mcp_process_registry.py, mcp/analysis_jobs.py, and core/live_state/runtime.py returned canonical revision 1412, workspace_sync=verified.
+- get_live_events returned status=no_live_service for C:\Temp\Contextor_Repo.
+- get_analysis_status for job e267940458114e4d81a62c0eb04c24d3 returned completed/successful.
+- get_symbol_lineage for the selected process/job symbols returned canonical_live_unavailable; those responses were not used as process-identity evidence.
+- contextor_fact_lineage(symbol_calls) is not a process lifecycle or runtime ownership source and was not used to assign PIDs.
 
-## BATCH_TELEMETRY
-PROCESS_POOL_REUSED_FIELD_ADDED=YES
-PROCESS_POOL_GENERATION_FIELD_ADDED=YES
-FIRST_TASK_SEMANTICS=FIRST_TASK_PER_WORKER_PER_INDEX_REPOSITORY_BATCH
-FIRST_TASK_PROCESS_LIFETIME_SEMANTICS_REMOVED=YES
-REAL_TWO_RUN_REUSE_TEST=PASS
+## BACKEND_RECORD
 
-## CANCELLATION
-CANCELLATION_DOUBLE_TERMINATION_REMOVED=YES
-CANCELLATION_INVALIDATES_WORKER_GENERATION=YES
+BACKEND_RECORD_PRESENT=NO
+BACKEND_INSTANCE_ID=NONE
+BACKEND_SERVER_ROLE=NONE
+BACKEND_TRANSPORT=NONE
+BACKEND_HOST=NONE
+BACKEND_PORT=NONE
+BACKEND_PID=UNKNOWN
+BACKEND_EXECUTABLE=NONE
+BACKEND_CREATION_TIME=NONE
+BACKEND_PROCESS_REGISTRY=NONE
+BACKEND_STARTED_AT=NONE
+BACKEND_PID_ALIVE=NOT_APPLICABLE
+BACKEND_PID_IDENTITY_MATCH=NOT_APPLICABLE
 
-## VALIDATION
-PY_COMPILE=PASS
-PY_COMPILE_COMMAND=.venv\Scripts\python.exe -m py_compile contextor\core\symbol_engine\indexer.py contextor\core\runtime_trace.py tests\test_indexer_profile_evidence.py tests\test_runtime_trace.py
-FIRST_TEST_GATE=PASS
-FIRST_TEST_GATE_RESULT=13 passed in 3.90s
-TARGETED_TESTS=PASS
-TARGETED_TEST_COMMAND=.venv\Scripts\python.exe -m pytest -q tests/test_process_pool_lifecycle.py tests/test_indexer_profile_evidence.py tests/test_index_fusion.py tests/test_collision_facts_fusion.py tests/test_reference_fusion_integration.py tests/test_test_context_discovery_map_0j7.py tests/test_mcp_child_process_cleanup.py tests/test_full_analysis_coordination.py tests/test_runtime_trace.py tests/analysis/test_cache_manager_content_hash.py
-TARGETED_TEST_RESULT=85 passed, 1 dependency deprecation warning in 45.86s
-TARGETED_TEST_EXECUTIONS=2
-TARGETED_TEST_EXECUTION_NOTE=First invocation did not surface its exit summary through the tool session; one exact rerun captured the passing result above.
-FULL_SUITE_RUN=NO
-ANALYZE_PROJECT_RUN_COUNT=0
-PROFILE_RUN_COUNT=0
-PROCESS_COUNT_EXPERIMENT_RUN=NO
-GIT_DIFF_CHECK=PASS
+BACKEND_STATE_DIR=C:\Users\DafoO\AppData\Roaming\Contextor
+BACKEND_LOCK_PATH=C:\Users\DafoO\AppData\Roaming\Contextor\mcp_backend\backend.lock
+BACKEND_RECORD_PATH=C:\Users\DafoO\AppData\Roaming\Contextor\mcp_backend\backend.json
+BACKEND_LOCK_EXISTS=NO
+BACKEND_RECORD_CONSISTENT_WITH_LIVE_OWNER=NOT_APPLICABLE_NO_RECORD
 
-## CONTEXTOR_LIVE
-PRE_EDIT_LIVE_REVISION=1406
-LATEST_OBSERVED_CANONICAL_REVISION=1409
-LIVE_EVENT_CONTINUITY=continuous
-LIVE_RESYNC_REQUIRED=NO
-DESKTOP_WATCHER_PUBLICATION=PARTIAL
-INDEXER_DESKTOP_WATCHER_EVENT=NOT_OBSERVED_WITHIN_BOUNDED_POLLS
-RUNTIME_TRACE_WORKSPACE_SYNC=verified
-TEST_INDEXER_PROFILE_EVIDENCE_WORKSPACE_SYNC=verified
-TEST_RUNTIME_TRACE_WORKSPACE_SYNC=verified
-INDEXER_WORKSPACE_SYNC=out_of_sync
-WORKSPACE_SYNC=partial; indexer=out_of_sync; other_three=verified
-NAME_COLLISIONS=0
-SYNTAX_ERRORS=0
-CYCLES=0
-DIAGNOSTIC_FAMILIES=FRESH_AT_CANONICAL_REVISION_1409
-NO_UPDATE_FILE=YES
-LIVE_POLLING_LIMIT=FOUR_POLLS_PER_EDIT_BATCH_REACHED
+Both current live mcp-server processes directly exposed APPDATA=C:\Users\DafoO\AppData\Roaming, CONTEXTOR_STATE_DIR=UNSET, and the same process registry path. The source-derived default record path above was checked and is absent. No backend owner can be assigned from a missing record.
 
-## CONSUMER_VERIFICATION
-POST_EDIT_CONTEXTOR_CONSUMER_VERIFICATION=BLOCKED_BY_INDEXER_WORKSPACE_SYNC
-POST_EDIT_MANAGED_REUSABLE_DIRECT_CONSUMERS=tests.test_process_pool_lifecycle only
-INDEXER_DIRECT_CONSUMER_IN_CONTEXTOR=NOT_OBSERVED
-POST_EDIT_MANAGED_PROCESS_POOL_DIRECT_CONSUMERS=contextor.core.reporting_layer.artifact_usage_report; contextor.core.symbol_engine.indexer; tests.test_process_pool_lifecycle
-LEGACY_CONSUMER_PROJECTION_LIMITATION=Indexer source remains out_of_sync at canonical revision 1409; these are not current post-edit consumers.
-ARTIFACT_USAGE_REPORT_WORKSPACE_SYNC=verified
-ARTIFACT_USAGE_REPORT_CHANGED=NO
+## LIVE_MCP_SERVERS
 
-## RESTART
-MCP_SERVER_RESTART_REQUIRED_BEFORE_M7C=YES
-DESKTOP_LIVE_RESTART_REQUIRED_BEFORE_M7C=YES
-MCP_SERVER_RESTART_PERFORMED=NO
-DESKTOP_LIVE_RESTART_PERFORMED=NO
+LIVE_MCP_SERVER_COUNT=2
+LIVE_MCP_SERVER_PID_SET={6432,12540}
 
-## PROCESS_COUNT
-PROCESS_COUNT_EXPERIMENT_RUN=NO
-M7C_PROCESS_COUNT_CERTIFICATION=NOT_RUN
+Server-role and transport evidence was read from each live process environment block. For both processes CONTEXTOR_MCP_SERVER_ROLE and CONTEXTOR_MCP_TRANSPORT were unset. Current source defaults are host-owned and stdio respectively. The source role set is exactly host-owned or persistent-backend. _register_server_root registers kind=mcp-server for non-persistent-backend roles and returns no server record for persistent-backend. The valid matching records therefore identify these two processes as host-owned. A targeted TCP-listener query returned no listeners for either process; LISTEN_ENDPOINT=NONE.
+
+| PID | parent_pid (registry) | creation_time (registry FILETIME) | parent_creation_time (registry FILETIME) | executable | registered_at (Unix seconds) | record_matches_process | live/dead | command line | Win32 creation time UTC | actual Win32 parent PID | server role | transport | listen endpoint |
+|---:|---:|---:|---:|---|---:|---|---|---|---|---:|---|---|---|
+| 6432 | 5012 | 134347978968634590 | 134347978967914643 | C:\SpiralProphet\python\WPy64-31090\python-3.10.9.amd64\python.exe | 1790324307.1867683 | true | live | "C:\SpiralProphet\python\WPy64-31090\python-3.10.9.amd64\python.exe" -u -X utf8 -m contextor.mcp_server | 2026-09-25T08:18:16.8634590Z | 5012 | host-owned | stdio | NONE |
+| 12540 | 12900 | 134347979058241086 | 134347979058043409 | C:\SpiralProphet\python\WPy64-31090\python-3.10.9.amd64\python.exe | 1790324313.1299987 | true | live | "C:\SpiralProphet\python\WPy64-31090\python-3.10.9.amd64\python.exe" -u -X utf8 -m contextor.mcp_server | 2026-09-25T08:18:25.8241086Z | 12900 | host-owned | stdio | NONE |
+
+One additional durable mcp-server registry entry remains for PID 11436. It is dead, record_matches_process=false, and was not removed. It is excluded from LIVE_MCP_SERVER_COUNT.
+
+CURRENT_CONTEXTOR_MCP_TOOL_RECEIVER_PID=UNKNOWN
+CURRENT_CONTEXTOR_MCP_TOOL_RECEIVER_CANDIDATES={6432,12540}
+The public tool response does not expose which of these two stdio server PIDs received the present MCP request. Their host-owned/stdio classification does not make either process a persistent backend.
+
+## PID_13228
+
+PID_13228_ALIVE=NO
+PID_13228_CREATION_TIME=2026-09-24T21:50:03.1203920Z (historical matching durable record)
+PID_13228_PARENT_PID=12980 (historical matching durable record; current Win32 parent unavailable)
+PID_13228_COMMAND_LINE=UNKNOWN (process exited; command line was not persisted in its registry record)
+PID_13228_DURABLE_KIND=mcp-server (historical matching record; no current record)
+PID_13228_RECORD_MATCHES_PROCESS=NO_CURRENT_PROCESS
+PID_13228_IS_PERSISTENT_BACKEND=NO
+PID_13228_IS_HOST_OWNED_SERVER=YES
+PID_13228_TRANSPORT=UNKNOWN
+PID_13228_ENDPOINT=UNKNOWN
+
+The historical mcp-server record for PID 13228 matched its process identity in the previous checkpoint. Source proves that persistent-backend role skips mcp-server registration, while the only other supported role is host-owned. The historical valid record therefore establishes host-owned role. Its transport-specific process environment and listener state were not retained, so transport and endpoint remain UNKNOWN.
+
+RUN1_EXECUTION_OWNER_PID=13228
+RUN1_JOB_ID=e267940458114e4d81a62c0eb04c24d3
+RUN1_JOB_RECORD_PATH=C:\Temp\Contextor_Repo\.contextor\analysis_jobs\e267940458114e4d81a62c0eb04c24d3.json
+RUN1_JOB_RECORD_OWNER_PID=13228
+RUN1_JOB_STATUS=completed
+RUN1_STARTED_AT=2026-09-24T22:16:43.519325Z
+RUN1_COMPLETED_AT=2026-09-24T22:18:16.569407Z
+RUN1_TRACE_EVENT_PID=13228
+RUN1_TRACE_EVENT_AT=2026-09-24T22:17:26.233Z
+RUN1_TRACE_PATH=C:\Users\DafoO\AppData\Roaming\Contextor\logs\contextor_runtime_20260924_214424_495_11740.jsonl
+RUN1_PROCESS_POOL_REUSED=false
+RUN1_PROCESS_POOL_GENERATION=1
+RUN1_TASK_BEARING_WORKER_PID_SET={8292,13360,14144}
+
+The persisted job's owner_pid and the FULL_ANALYSIS_INDEX_* trace events emitted by PID 13228 coincide with the job interval. This identifies PID 13228 as RUN1 execution owner. The trace session ID is Desktop-scoped, but the individual diagnostic event pid is 13228; the job record independently supplies owner_pid=13228.
+
+## PID_15596
+
+PID_15596_ALIVE=NO
+PID_15596_CREATION_TIME=2026-09-24T21:44:25.3052390Z (historical Win32 observation)
+PID_15596_PARENT_PID=14160 (historical Win32 observation; current parent unavailable)
+PID_15596_COMMAND_LINE=UNKNOWN (process exited; prior runtime lease evidence did not persist command line)
+PID_15596_ROLE=HISTORICAL_RUNTIME_SERVICE_PID; CURRENTLY_EXITED
+PID_15596_WAS_RUNTIME_SERVICE_PID=YES
+PID_15596_RUNTIME_IMPLEMENTATION_MODULE=contextor.core.live_state.runtime
+PID_15596_IS_LIVE_STATE_RUNTIME=NO
+PID_15596_IS_MCP_SERVER=NO
+
+The module value names the LIVE runtime implementation associated with the historical runtime-service lease PID; it is not a recovered command line. Current evidence has no live PID 15596 and no mcp-server record for it.
+
+## DESKTOP
+
+PID_11740_ALIVE=NO
+PID_11740_CREATION_TIME=2026-09-24T21:44:23.7954700Z (historical Win32 observation)
+PID_11740_PARENT_PID=UNKNOWN_CURRENT
+PID_11740_COMMAND_LINE=UNKNOWN_CURRENT
+PID_11740_ROLE=HISTORICAL_DESKTOP_TRACE_ROOT; CURRENTLY_EXITED
+
+DESKTOP_REUSABLE_WORKER_PID_SET={}
+DESKTOP_REUSABLE_WORKER_COUNT=0
+PREVIOUS_DESKTOP_WORKER_PID_SET={2372,13164,14068,16184}
+PREVIOUS_DESKTOP_WORKERS_CURRENTLY_ALIVE={}
+
+The repository process_identity() check reported all four previously known Desktop worker PIDs as not alive. There are no current durable registry records for those Desktop workers. Because they are exited, no current OS parent PID can be read for them.
+
+## RUN1_GENERATION
+
+CURRENT_RUN1_MCP_WORKER_PID_SET={}
+CURRENT_RUN1_MCP_WORKER_COUNT=0
+ADDITIONAL_13228_WORKERS_SINCE_RUN1_SNAPSHOT=NO
+RUN1_WORKER_SET_STABLE_SINCE_CHECKPOINT=NO
+RUN1_INDEXER_GENERATION_STILL_ALIVE=NO
+
+The current process registry contains no process-pool-worker records. Exact process_identity() checks report prior RUN1 worker PIDs 6804, 8292, 13360, and 14144 as not alive. No current record has parent_pid=13228. The previously observed live set {6804,8292,13360,14144} has therefore ended; the task-bearing set from RUN1 was {8292,13360,14144}. No generation is inferred from PID values.
+
+## FULL_PROCESS_TREE_CENSUS
+
+Requested roots: PID 13228, PID 15596, PID 11740, PID 12980, and the backend PID if different. No backend PID exists in the source-derived backend record path.
+
+| Root PID | present/live in Win32 snapshot | creation identity | direct/transitive live descendants |
+|---:|---|---|---:|
+| 13228 | no | historical creation time recorded above | 0 |
+| 15596 | no | historical creation time recorded above | 0 |
+| 11740 | no | historical creation time recorded above | 0 |
+| 12980 | no | historical parent creation identity from PID 13228 record | 0 |
+| backend PID | no record / no PID | not applicable | 0 |
+
+A targeted Win32 child query at 2026-09-25T08:43:26.1711257Z checked each requested root and recursively checked any descendants. It returned zero rows. No process was terminated or reaped.
+
+TOTAL_LIVE_PROCESSES_IN_CAPTURED_TREES=0
+LIVE_MCP_SERVER_PROCESSES=0 in requested root-tree union; registry-global live count is 2
+LIVE_LIVE_STATE_RUNTIME_PROCESSES=0 in requested root-tree union; get_live_events reported no_live_service
+LIVE_DESKTOP_PROCESSES=0 in requested root-tree union
+LIVE_PROCESS_POOL_WORKERS=0 in requested root-tree union and zero current durable worker records
+ACCOUNTED_CONTEXTOR_RELATED_PROCESS_COUNT=0 in requested root-tree union
+CURRENT_LIVE_MCP_SERVERS_OUTSIDE_REQUESTED_TREE_ROOTS={6432,12540}
+
+LIVE_WORKERS_BY_PARENT:
+13228 -> {}
+15596 -> {}
+11740 -> {}
+12980 -> {}
+5012 -> {}
+12900 -> {}
+
+OTHER_DESCENDANTS_BY_PARENT=NONE in the requested root-tree union.
+The two current registered MCP servers have Win32 parents 5012 and 12900, which are not descendants of any live requested root; they are listed separately and are not silently folded into the requested-tree count.
+
+## PROCESS_COUNT_RECONCILIATION
+
+PROCESS_COUNT_AT_RUN1_START_APPROX=30 (user observation)
+PROCESS_COUNT_AFTER_RUN1_CHECKPOINT=63 (user observation)
+PROCESS_COUNT_AT_REPORT_RECEIPT=69 (user observation)
+CURRENT_WIN32_SNAPSHOT_TIME=2026-09-25T08:33:58.4073639Z
+EXTERNAL_69_FULLY_RECONCILED=NO
+UNEXPLAINED_EXTERNAL_COUNT=NOT_COMPUTABLE
+
+The external count of 69 was not a same-time count of the specified root trees. The captured root set is now absent, and the two currently live registered MCP servers have different parent PIDs outside that set. These scopes and capture times are not comparable, so no subtraction from 69 is valid.
+
+## ACCUMULATION_FACTS
+
+INDEXER_RUN1_GENERATION_MULTIPLIED_AFTER_RUN1=NO
+MCP_SERVER_COUNT_GREATER_THAN_ARCHITECTURAL_EXPECTATION=UNKNOWN
+LIVE_STATE_RUNTIME_COUNT_GREATER_THAN_EXPECTED=NO
+DESKTOP_INDEXER_WORKER_COUNT=0
+MCP_13228_INDEXER_WORKER_COUNT=0
+CURRENT_REUSABLE_INDEXER_WORKERS_TOTAL=0
+GLOBAL_CURRENT_DURABLE_PROCESS_POOL_WORKER_RECORDS=0
+
+There is no live RUN1 generation and no current durable worker record. Two host-owned stdio MCP server processes are directly evidenced, but the inspected source imposes a shared lifetime lock only on the persistent-backend role; it does not establish a global singleton limit for host-owned stdio servers. Therefore a server-count excess is UNKNOWN, not a proven architecture violation or indexer leak. Contextor currently reports no LIVE service for this repository.
+
+## RUN2_READINESS
+
+ACTUAL_MCP_EXECUTION_PID=13228 (RUN1 owner; current MCP request receiver UNKNOWN)
+ACTUAL_MCP_EXECUTION_PID_STILL_ALIVE=NO
+RUN1_INDEXER_GENERATION_STILL_ALIVE=NO
+RUN1_WORKER_SET_STABLE_SINCE_CHECKPOINT=NO
+MULTIPLE_LIVE_MCP_SERVERS_REQUIRE_INVESTIGATION=YES
+RUN2_SAFE_FOR_EXTERNAL_ARCHITECT_TO_AUTHORIZE=NO
+RUN2_SUBMITTED=NO
+
+The readiness flag is NO because RUN1's actual MCP execution owner and generation have exited, the worker set is no longer stable, the repository has no LIVE service, and current Contextor MCP requests cannot be bound to either of the two live stdio server PIDs from available evidence. YES/NO here is a gate result, not permission to submit RUN2.
+
+## SOURCE_LIFETIME_LOCK
+
+Contextor source discovery used fresh canonical contexts (revision 1412, workspace_sync=verified) and exact symbol implementations:
+
+- C:\Temp\Contextor_Repo\contextor\mcp_backend_state.py::backend_state_dir (271-275), ::backend_record_path (278-282), and ::backend_lock_path (285-289) construct the user-state paths.
+- C:\Temp\Contextor_Repo\contextor\mcp_backend_state.py::PersistentBackendLease.acquire (584-668) enters _BackendLifetimeLock before writing backend.json and retaining the lease.
+- C:\Temp\Contextor_Repo\contextor\mcp_backend_state.py::_BackendLifetimeLock.__enter__ (445-524) takes a process-local thread lock and, on Windows, a non-blocking msvcrt byte-range lock on backend.lock. The file handle and lock remain held until exit; failure to acquire within the configured timeout raises BackendAlreadyRunning.
+- C:\Temp\Contextor_Repo\contextor\mcp_backend_state.py::PersistentBackendLease.release (670-687) removes only its exact record, then releases the lifetime lock.
+- C:\Temp\Contextor_Repo\contextor\mcp_server.py::main (982-1126) acquires PersistentBackendLease only for role=persistent-backend and releases it during shutdown/finalization.
+- C:\Temp\Contextor_Repo\contextor\mcp_server.py::_register_server_root (966-979) deliberately does not create an mcp-server record for persistent-backend; other supported role is host-owned.
+- C:\Temp\Contextor_Repo\contextor\mcp_server.py::_server_role_from_environment (936-948), role constants (450-475), and ::_mcp_transport_from_environment (474-490) establish environment-selected roles/transports and defaults.
+- C:\Temp\Contextor_Repo\contextor\mcp\analysis_jobs.py::_start_analysis_job (422-458) persists owner_pid=os.getpid(); ::_execute_analysis_job (303-419) and ::_run_analysis_worker (224-300) carry out the asynchronous full-analysis work.
+- C:\Temp\Contextor_Repo\contextor\mcp_process_registry.py::registry_dir (16-17), ::process_identity (79-91), ::register_process (98-122), and ::record_matches_process (150-166) define the durable registry and Win32 identity comparison.
+
+SOURCE_PROVED=one simultaneous persistent-backend lease per shared state directory/lock path while its lifetime lock is held.
+SOURCE_DID_NOT_PROVE=all host-owned or stdio MCP server processes are forbidden or globally limited to one.
+The backend lease scope must not be used to classify or prohibit the separately supported host-owned stdio server processes.
 
 ## CHANGE_CONTROL
-FILES_CHANGED=contextor/core/symbol_engine/indexer.py; contextor/core/runtime_trace.py; tests/test_indexer_profile_evidence.py; tests/test_runtime_trace.py
-REPORT_FILE=walkthrough.md
-ACTUAL_DIFF=COMPLETE_FULL_DIFFS_INCLUDED
-FIX_DESIGNED_BY_AGENT=NO
-GIT_COMMIT_PERFORMED=NO
-GIT_PUSH_PERFORMED=NO
-GIT_MUTATION_PERFORMED=NO
-FORBIDDEN_FILES_CHANGED=NO
 
-## COMPLETE_FULL_DIFFS
-diff --git a/contextor/core/runtime_trace.py b/contextor/core/runtime_trace.py
-index 7a038c6..759555d 100644
---- a/contextor/core/runtime_trace.py
-+++ b/contextor/core/runtime_trace.py
-@@ -1571 +1571 @@ def _header_records(sid: str, started_at: str, desktop_pid: int, file_name: str)
--            "worker_first_start_count": "worker processes for which the actual first executed task start was observed",
-+            "worker_first_start_count": "worker processes for which the first task of the current index_repository batch was observed",
-@@ -1578,3 +1578,3 @@ def _header_records(sid: str, started_at: str, desktop_pid: int, file_name: str)
--            "worker_first_start_delay_min_ms": "minimum per-worker first-task submit-to-entry delay",
--            "worker_first_start_delay_max_ms": "maximum per-worker first-task submit-to-entry delay",
--            "worker_first_start_delay_mean_ms": "mean per-worker first-task submit-to-entry delay",
-+            "worker_first_start_delay_min_ms": "minimum per-worker current-batch first-task submit-to-entry delay",
-+            "worker_first_start_delay_max_ms": "maximum per-worker current-batch first-task submit-to-entry delay",
-+            "worker_first_start_delay_mean_ms": "mean per-worker current-batch first-task submit-to-entry delay",
-@@ -1585,0 +1586,2 @@ def _header_records(sid: str, started_at: str, desktop_pid: int, file_name: str)
-+            "process_pool_reused": "whether this index_repository process-pool lease reused an existing process-local reusable generation",
-+            "process_pool_generation": "process-local reusable indexer pool generation identifier; zero for non-reusable or inline execution",
-@@ -1588 +1590 @@ def _header_records(sid: str, started_at: str, desktop_pid: int, file_name: str)
--            "executor_process_count_before_shutdown": "executor process count observed after all results and before context shutdown",
-+            "executor_process_count_before_shutdown": "executor process count observed after all results and before pool context exit; field name retained for compatibility and reusable normal exit does not shut workers down",
-@@ -1635 +1637 @@ def _header_records(sid: str, started_at: str, desktop_pid: int, file_name: str)
--            "pool_shutdown_ms": "managed process-pool context shutdown milliseconds",
-+            "pool_shutdown_ms": "managed process-pool context-exit milliseconds; legacy pool exit includes shutdown while successful reusable-pool exit preserves workers",
-@@ -1860,0 +1863,2 @@ def trace_event(domain: str, event: str, *, op: str | None = None, rev: int | No
-+                "process_pool_reused": "process_pool_reused",
-+                "process_pool_generation": "process_pool_generation",
-diff --git a/contextor/core/symbol_engine/indexer.py b/contextor/core/symbol_engine/indexer.py
-index cd0a4ad..2bd8a2e 100644
---- a/contextor/core/symbol_engine/indexer.py
-+++ b/contextor/core/symbol_engine/indexer.py
-@@ -18 +18 @@ import time
--from concurrent.futures import ProcessPoolExecutor, as_completed
-+from concurrent.futures import as_completed
-@@ -23,2 +23 @@ from contextor.core.analysis.process_pool_lifecycle import (
--    managed_process_pool,
--    terminate_process_pool,
-+    managed_reusable_process_pool,
-@@ -306 +305 @@ _CACHE_MANAGERS: dict[str, CacheManager] = {}
--_WORKER_TASK_ORDINAL_BY_PID: dict[int, int] = {}
-+_WORKER_LAST_BATCH_TOKEN_BY_PID: dict[int, str] = {}
-@@ -322,0 +322 @@ def _process_single_file(
-+    batch_token: str | None = None,
-@@ -333,4 +333,3 @@ def _process_single_file(
--    worker_task_ordinal = (
--        _WORKER_TASK_ORDINAL_BY_PID.get(
--            worker_pid,
--            0,
-+    previous_batch_token = (
-+        _WORKER_LAST_BATCH_TOKEN_BY_PID.get(
-+            worker_pid
-@@ -338 +336,0 @@ def _process_single_file(
--        + 1
-@@ -341,4 +338,0 @@ def _process_single_file(
--    _WORKER_TASK_ORDINAL_BY_PID[
--        worker_pid
--    ] = worker_task_ordinal
--
-@@ -346 +340,2 @@ def _process_single_file(
--        worker_task_ordinal == 1
-+        batch_token is not None
-+        and previous_batch_token != batch_token
-@@ -348,0 +344,5 @@ def _process_single_file(
-+    if batch_token is not None:
-+        _WORKER_LAST_BATCH_TOKEN_BY_PID[
-+            worker_pid
-+        ] = batch_token
-+
-@@ -1030,0 +1031,3 @@ def index_repository(
-+    process_pool_reused = False
-+    process_pool_generation = 0
-+
-@@ -1625,0 +1629,6 @@ def index_repository(
-+            process_pool_reused=(
-+                process_pool_reused
-+            ),
-+            process_pool_generation=(
-+                process_pool_generation
-+            ),
-@@ -1729,3 +1738,7 @@ def index_repository(
--    with managed_process_pool(
--        ProcessPoolExecutor,
--    ) as executor:
-+    with managed_reusable_process_pool(
-+        "indexer",
-+    ) as (
-+        executor,
-+        process_pool_reused,
-+        process_pool_generation,
-+    ):
-@@ -1747,0 +1761,4 @@ def index_repository(
-+        worker_batch_token = (
-+            f"{os.getpid()}:{time.monotonic_ns()}"
-+        )
-+
-@@ -1753,0 +1771 @@ def index_repository(
-+                worker_batch_token,
-@@ -1899 +1916,0 @@ def index_repository(
--                terminate_process_pool(executor)
-diff --git a/tests/test_indexer_profile_evidence.py b/tests/test_indexer_profile_evidence.py
-index 5e2dd48..9122f6d 100644
---- a/tests/test_indexer_profile_evidence.py
-+++ b/tests/test_indexer_profile_evidence.py
-@@ -0,0 +1,3 @@
-+from contextor.core.analysis.process_pool_lifecycle import (
-+    terminate_active_process_pools,
-+)
-@@ -239,0 +243,9 @@ def test_process_pool_parent_timing_evidence_is_explicit(
-+    assert isinstance(
-+        event["process_pool_reused"],
-+        bool,
-+    )
-+
-+    assert (
-+        event["process_pool_generation"]
-+        >= 1
-+    )
-@@ -328,0 +341,144 @@ def test_process_pool_parent_timing_evidence_is_explicit(
-+
-+
-+def test_index_repository_reuses_pool_and_resets_first_task_per_batch(
-+    tmp_path,
-+    monkeypatch,
-+):
-+    monkeypatch.setenv(
-+        "CONTEXTOR_STATE_DIR",
-+        str(
-+            tmp_path
-+            / "state"
-+        ),
-+    )
-+
-+    monkeypatch.delenv(
-+        "CONTEXTOR_DISABLE_PROCESS_POOL",
-+        raising=False,
-+    )
-+
-+    repo = _write_two_file_repo(
-+        tmp_path
-+    )
-+
-+    terminate_active_process_pools(
-+        timeout=2.0,
-+    )
-+
-+    try:
-+        with capture_trace_events() as first_events:
-+            index_repository(
-+                str(repo)
-+            )
-+
-+        with capture_trace_events() as second_events:
-+            index_repository(
-+                str(repo)
-+            )
-+
-+        first_parent = [
-+            event
-+            for event in first_events
-+            if event["ev"]
-+            == "FULL_ANALYSIS_INDEX_PARENT_TIMING"
-+        ]
-+
-+        second_parent = [
-+            event
-+            for event in second_events
-+            if event["ev"]
-+            == "FULL_ANALYSIS_INDEX_PARENT_TIMING"
-+        ]
-+
-+        assert len(first_parent) == 1
-+        assert len(second_parent) == 1
-+
-+        first_parent_event = first_parent[0]
-+        second_parent_event = second_parent[0]
-+
-+        assert (
-+            first_parent_event[
-+                "process_pool_reused"
-+            ]
-+            is False
-+        )
-+
-+        assert (
-+            second_parent_event[
-+                "process_pool_reused"
-+            ]
-+            is True
-+        )
-+
-+        assert (
-+            first_parent_event[
-+                "process_pool_generation"
-+            ]
-+            >= 1
-+        )
-+
-+        assert (
-+            second_parent_event[
-+                "process_pool_generation"
-+            ]
-+            == first_parent_event[
-+                "process_pool_generation"
-+            ]
-+        )
-+
-+        first_worker = [
-+            event
-+            for event in first_events
-+            if event["ev"]
-+            == "FULL_ANALYSIS_INDEX_WORKER_TIMING"
-+        ]
-+
-+        second_worker = [
-+            event
-+            for event in second_events
-+            if event["ev"]
-+            == "FULL_ANALYSIS_INDEX_WORKER_TIMING"
-+        ]
-+
-+        assert len(first_worker) == 1
-+        assert len(second_worker) == 1
-+
-+        first_worker_event = first_worker[0]
-+        second_worker_event = second_worker[0]
-+
-+        assert (
-+            first_worker_event[
-+                "worker_process_count"
-+            ]
-+            >= 1
-+        )
-+
-+        assert (
-+            second_worker_event[
-+                "worker_process_count"
-+            ]
-+            >= 1
-+        )
-+
-+        assert (
-+            first_worker_event[
-+                "worker_first_start_count"
-+            ]
-+            == first_worker_event[
-+                "worker_process_count"
-+            ]
-+        )
-+
-+        assert (
-+            second_worker_event[
-+                "worker_first_start_count"
-+            ]
-+            == second_worker_event[
-+                "worker_process_count"
-+            ]
-+        )
-+
-+    finally:
-+        terminate_active_process_pools(
-+            timeout=2.0,
-+        )
-diff --git a/tests/test_runtime_trace.py b/tests/test_runtime_trace.py
-index 782ab1e..a5b4940 100644
---- a/tests/test_runtime_trace.py
-+++ b/tests/test_runtime_trace.py
-@@ -96,0 +97,2 @@ def test_canonical_writer_analysis_trace_is_self_describing_and_durable():
-+        "process_pool_reused",
-+        "process_pool_generation",
+FILES_CHANGED=NONE
+REPORT_FILE=C:\Temp\Contextor_Repo\walkthrough.md
+SOURCE_CHANGED=NO
+TEST_CODE_CHANGED=NO
+TESTS_RUN=NO
+ANALYZE_PROJECT_RUN_COUNT=0
+PROFILE_RUN_COUNT=0
+RUN2_SUBMITTED=NO
+PROCESS_TERMINATION_PERFORMED=NO
+RESTART_PERFORMED=NO
+UPDATE_FILE_CALLED=NO
+GIT_MUTATION_PERFORMED=NO
+FIX_DESIGNED_BY_AGENT=NO
+
+STOP=WAIT_FOR_USER_COMMAND_PROCEDUJ
+
+
