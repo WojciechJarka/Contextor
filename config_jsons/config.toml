@@ -2,11 +2,11 @@ service_tier = "default"
 sandbox_mode = "workspace-write"
 
 
-model = "gpt-5.6-sol"
-model_reasoning_effort = "low"
+model = "gpt-6-luna"
+model_reasoning_effort = "xhigh"
 personality = "pragmatic"
 model_verbosity = "low"
-notify = [ "C:\\Users\\DafoO\\AppData\\Local\\OpenAI\\Codex\\runtimes\\cua_node\\950613ca46815e82\\bin\\node_modules\\@oai\\sky\\bin\\windows\\codex-computer-use.exe", "turn-ended" ]
+notify = [ "C:\\Users\\DafoO\\AppData\\Local\\OpenAI\\Codex\\runtimes\\cua_node\\13827bafdc0b5422\\bin\\node_modules\\@oai\\sky\\bin\\windows\\codex-computer-use.exe", "turn-ended" ]
 [sandbox_workspace_write]
 writable_roots = [
     'C:\Temp\Agent-orchestrator_Repo',
@@ -42,13 +42,16 @@ enabled = true
 [plugins."visualize@openai-bundled"]
 enabled = true
 
-[plugins."browser@openai-bundled"]
-enabled = true
-
 [plugins."codex-app-tools@openai-bundled"]
 enabled = true
 
-[plugins."sites@openai-bundled"]
+[plugins."browser@openai-bundled"]
+enabled = true
+
+[plugins."unified-computer-use@openai-bundled"]
+enabled = true
+
+[plugins."computer-use@openai-bundled"]
 enabled = true
 
 [features]
@@ -56,15 +59,11 @@ js_repl = false
 memories = true
 
 [mcp_servers.contextor]
-command = 'C:\Temp\Contextor_Repo\.venv\Scripts\python.exe'
-args = ["-u", "-X", "utf8", "-m", "contextor.mcp_server"]
-cwd = 'C:\Temp\Contextor_Repo'
-env = {
-    PYTHONUNBUFFERED = "1",
-    PYTHONIOENCODING = "utf-8",
-}
+url = "http://127.0.0.1:8765/mcp"
+http_headers_helper = 'cd /d C:\Temp\Contextor_Repo && C:\Temp\Contextor_Repo\.venv\Scripts\python.exe -u -X utf8 -m contextor.mcp_backend_http_headers'
 required = true
 startup_timeout_sec = 120
+enabled = true
 
 [mcp_servers.contextor.tools.get_live_events]
 approval_mode = "approve"
@@ -135,27 +134,44 @@ approval_mode = "approve"
 [mcp_servers.contextor.tools.get_symbol_call_context]
 approval_mode = "approve"
 
+[mcp_servers.contextor.tools.get_module_blast_radius]
+approval_mode = "approve"
+
+[mcp_servers.contextor.tools.get_dataflow_lineage]
+approval_mode = "approve"
+
+[mcp_servers.contextor.tools.contextor_fact_lineage]
+approval_mode = "approve"
+
+[mcp_servers.contextor.tools.get_name_collisions]
+approval_mode = "approve"
+
+[mcp_servers.contextor.tools.update_file]
+approval_mode = "approve"
+
 [mcp_servers.node_repl]
 args = []
-command = 'C:\Users\DafoO\AppData\Local\OpenAI\Codex\runtimes\cua_node\950613ca46815e82\bin\node_repl.exe'
+command = 'C:\Users\DafoO\AppData\Local\OpenAI\Codex\runtimes\cua_node\13827bafdc0b5422\bin\node_repl.exe'
+env_vars = ["CODEX_WINDOWS_REGISTERED_CORE"]
 startup_timeout_sec = 120
 
 [mcp_servers.node_repl.env]
 NODE_REPL_NATIVE_PIPE_CONNECT_TIMEOUT_MS = "1000"
-NODE_REPL_NODE_MODULE_DIRS = 'C:\Users\DafoO\AppData\Local\OpenAI\Codex\runtimes\cua_node\950613ca46815e82\bin\node_modules'
-NODE_REPL_NODE_PATH = 'C:\Users\DafoO\AppData\Local\OpenAI\Codex\runtimes\cua_node\950613ca46815e82\bin\node.exe'
-NODE_REPL_TRUSTED_CODE_PATHS = 'C:\Users\DafoO\.codex;C:\Users\DafoO\AppData\Local\OpenAI\Codex\runtimes\cua_node\950613ca46815e82\bin\node_modules'
+NODE_REPL_NODE_MODULE_DIRS = 'C:\Users\DafoO\AppData\Local\OpenAI\Codex\runtimes\cua_node\13827bafdc0b5422\bin\node_modules'
+NODE_REPL_NODE_PATH = 'C:\Users\DafoO\AppData\Local\OpenAI\Codex\runtimes\cua_node\13827bafdc0b5422\bin\node.exe'
+NODE_REPL_TRUSTED_CODE_PATHS = 'C:\Users\DafoO\.codex;C:\Users\DafoO\AppData\Local\OpenAI\Codex\runtimes\cua_node\13827bafdc0b5422\bin\node_modules'
 CODEX_HOME = 'C:\Users\DafoO\.codex'
 BROWSER_USE_AVAILABLE_BACKENDS = "chrome,iab"
-BROWSER_USE_TINYSKY_ENABLED = "0"
-NODE_REPL_INSTRUCTIONS_USE_CASE_BROWSER = "Control the in-app browser in conjunction with the Browser Plugin."
-NODE_REPL_INSTRUCTIONS_USE_CASE_CHROME = "Control the Chrome browser in conjunction with the Chrome Plugin. Prefer this method of controlling Chrome over alternatives (such as Computer Use) unless the user explicitly mentions an alternative."
+BROWSER_USE_TINYSKY_ENABLED = "1"
+NODE_REPL_INSTRUCTIONS_USE_CASE_BROWSER = ""
+NODE_REPL_INSTRUCTIONS_USE_CASE_CHROME = ""
 BROWSER_USE_CODEX_APP_BUILD_FLAVOR = "prod"
-BROWSER_USE_CODEX_APP_VERSION = "26.820.60940"
-NODE_REPL_TRUSTED_SERVICES = '{"browser":"C:/Users/DafoO/.codex/plugins/cache/openai-bundled/browser/26.820.60940/scripts/browser-service.mjs","sky":"@oai/sky/service"}'
+BROWSER_USE_CODEX_APP_VERSION = "26.917.71314"
+NODE_REPL_TRUSTED_SERVICES = '{"browser":"C:/Users/DafoO/.codex/plugins/cache/openai-bundled/browser/26.917.71314/scripts/browser-service.mjs","sky":"@oai/sky/service"}'
 SKY_CUA_NATIVE_PIPE = "1"
-SKY_CUA_NATIVE_PIPE_DIRECTORY = '\\.\pipe\codex-computer-use-343d40e8-7af0-45a1-a607-7024f64c6ee1'
-CODEX_CLI_PATH = 'C:\Users\DafoO\AppData\Local\OpenAI\Codex\bin\d0097be4feba73d0\codex.exe'
+SKY_CUA_NATIVE_PIPE_DIRECTORY = '\\.\pipe\codex-computer-use-bc7d4e91-27cc-4722-93ac-b80252b45205'
+CODEX_CLI_PATH = 'C:\Users\DafoO\AppData\Local\OpenAI\Codex\bin\13995fba801849b0\codex.exe'
+NODE_REPL_UNTRUSTED_ENV_ALLOWLIST = "CODEX_WINDOWS_REGISTERED_CORE"
 
 [desktop]
 conversationDetailMode = "STEPS_COMMANDS"
@@ -174,6 +190,12 @@ trust_level = "trusted"
 trust_level = "trusted"
 
 [projects.'C:\Temp\Spiral-Prophet_Repo']
+trust_level = "trusted"
+
+[projects.'c:\users\dafoo\documents\codex\2026-09-12\realtime-voice-chat']
+trust_level = "trusted"
+
+[projects.'c:\users\dafoo\documents\codex\2026-09-12\text-kontynuujemy-contextor-zatrzymaj-dalsze-prace']
 trust_level = "trusted"
 
 [shell_environment_policy.set]

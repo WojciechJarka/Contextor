@@ -28,10 +28,181 @@ class LiveSymbolLineageTransportResult:
     detail: str | None = None
 
 
+@dataclass(frozen=True)
+class LiveDiagnosticsSummaryTransportResult:
+    status: str
+    revision: int | None = None
+    summary: dict[str, Any] | None = None
+    error: str | None = None
+    detail: str | None = None
+
+
 def _bounded_live_query_detail(value: object) -> str | None:
     if not isinstance(value, str):
         return None
     return value[:500]
+
+
+def _valid_live_diagnostics_summary(
+    value: object,
+) -> bool:
+    if not isinstance(value, Mapping):
+        return False
+
+    availability = value.get(
+        "availability"
+    )
+
+    if not isinstance(
+        availability,
+        Mapping,
+    ):
+        return False
+
+    for family in (
+        "syntax_errors",
+        "name_collisions",
+        "cycles",
+    ):
+        if not isinstance(
+            value.get(family),
+            Mapping,
+        ):
+            return False
+
+        if family not in availability:
+            return False
+
+    return (
+        type(
+            value.get(
+                "attention_required"
+            )
+        )
+        is bool
+    )
+
+
+def query_live_diagnostics_summary_narrow(
+    root: Path,
+) -> LiveDiagnosticsSummaryTransportResult:
+    if not isinstance(root, Path):
+        raise TypeError(
+            "root must be a Path."
+        )
+
+    from contextor.core.live_state import connect
+
+    try:
+        client = connect(root)
+    except (
+        OSError,
+        EOFError,
+        ConnectionError,
+        TimeoutError,
+        RuntimeError,
+    ) as exc:
+        return LiveDiagnosticsSummaryTransportResult(
+            status="error",
+            error="canonical_live_transport_error",
+            detail=_bounded_live_query_detail(
+                str(exc)
+            ),
+        )
+
+    if client is None:
+        return LiveDiagnosticsSummaryTransportResult(
+            status="unavailable",
+            error="canonical_live_unavailable",
+        )
+
+    try:
+        response = client.canonical_query(
+            "diagnostics_summary",
+            payload={},
+        )
+    except (
+        OSError,
+        EOFError,
+        ConnectionError,
+        TimeoutError,
+        RuntimeError,
+    ) as exc:
+        return LiveDiagnosticsSummaryTransportResult(
+            status="error",
+            error="canonical_query_transport_error",
+            detail=_bounded_live_query_detail(
+                str(exc)
+            ),
+        )
+
+    if not isinstance(
+        response,
+        Mapping,
+    ):
+        return LiveDiagnosticsSummaryTransportResult(
+            status="error",
+            error="canonical_query_response_invalid",
+        )
+
+    if response.get("status") != "ok":
+        remote_error = response.get(
+            "error"
+        )
+
+        return LiveDiagnosticsSummaryTransportResult(
+            status="error",
+            error=(
+                remote_error
+                if (
+                    isinstance(
+                        remote_error,
+                        str,
+                    )
+                    and remote_error
+                )
+                else "canonical_query_failed"
+            ),
+            detail=_bounded_live_query_detail(
+                response.get("detail")
+            ),
+        )
+
+    revision = response.get(
+        "revision"
+    )
+
+    if (
+        isinstance(revision, bool)
+        or not isinstance(
+            revision,
+            int,
+        )
+        or revision < 0
+    ):
+        return LiveDiagnosticsSummaryTransportResult(
+            status="error",
+            error="canonical_query_response_invalid",
+        )
+
+    result = response.get(
+        "result"
+    )
+
+    if not _valid_live_diagnostics_summary(
+        result
+    ):
+        return LiveDiagnosticsSummaryTransportResult(
+            status="error",
+            revision=revision,
+            error="canonical_query_response_invalid",
+        )
+
+    return LiveDiagnosticsSummaryTransportResult(
+        status="ok",
+        revision=revision,
+        summary=dict(result),
+    )
 
 
 def query_live_symbol_lineage_narrow(

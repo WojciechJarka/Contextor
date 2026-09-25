@@ -13,6 +13,9 @@ import time
 from pathlib import Path
 from typing import Any, Mapping
 
+from contextor.core.diagnostics_projection import (
+    diagnostics_summary_for_state,
+)
 from contextor.core.lineage_query.live_query import (
     query_live_symbol_lineage,
 )
@@ -1038,6 +1041,16 @@ def _repository_canonical_query_handler(
     query_kind: str,
     payload: Mapping[str, Any],
 ):
+    if query_kind == "diagnostics_summary":
+        if payload:
+            raise ValueError(
+                "diagnostics_summary query payload must be empty."
+            )
+
+        return diagnostics_summary_for_state(
+            state
+        )
+
     if query_kind != "symbol_lineage":
         raise ValueError(
             f"Unsupported canonical query kind: {query_kind}"

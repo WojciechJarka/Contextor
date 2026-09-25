@@ -6,87 +6,12 @@ import json
 from pathlib import Path
 from typing import Any
 
+from contextor.core.diagnostics_projection import (
+    diagnostics_summary_for_state,
+)
 from contextor.mcp import runtime as mcp_runtime
 from contextor.mcp.output_guard import LARGE_OUTPUT_WARNING_BYTES, guard_large_output
 from contextor.core.analysis.state_manager import canonical_python_source_path
-
-
-def _availability(state: Any, family: str, values: Any) -> str:
-    status = getattr(state, f"{family}_state", None)
-    if values is None and status == "fresh":
-        return "unavailable"
-    if status in {"fresh", "stale", "deferred", "unavailable"}:
-        return status
-    if values is None:
-        return "unavailable"
-    return "fresh"
-
-
-def diagnostics_summary_for_state(state: Any) -> dict[str, Any]:
-    """Return counts plus freshness, never converting unavailable to zero."""
-    if state is None:
-        unavailable = {"count": None, "availability": "unavailable"}
-        return {
-            "syntax_errors": dict(unavailable),
-            "name_collisions": {
-                "count": None, "critical": None, "warning": None, "info": None,
-                "availability": "unavailable",
-            },
-            "cycles": dict(unavailable),
-            "attention_required": False,
-            "availability": {
-                "syntax_errors": "unavailable",
-                "name_collisions": "unavailable",
-                "cycles": "unavailable",
-            },
-        }
-
-    syntax_state = getattr(state, "syntax_diagnostics_state", None)
-    syntax_facts = getattr(state, "syntax_diagnostics_by_path", None)
-    if syntax_state == "fresh" and isinstance(syntax_facts, dict):
-        syntax_values = sum(
-            isinstance(fact, dict) and fact.get("status") == "checked_with_errors"
-            for fact in syntax_facts.values()
-        )
-        syntax_availability = "fresh"
-    elif syntax_state in {"not_materialized", "deferred", "stale", "unavailable"}:
-        syntax_values = None
-        syntax_availability = syntax_state
-    else:
-        syntax_values = None
-        syntax_availability = "unavailable"
-    collisions = getattr(state, "collisions", None)
-    cycles = getattr(state, "cycles", None)
-    collision_availability = _availability(state, "collisions", collisions)
-    cycle_availability = _availability(state, "cycles", cycles)
-    if collision_availability != "fresh":
-        collision_count = critical = warning = info = None
-    else:
-        collision_count = len(collisions or [])
-        critical = warning = info = None
-    cycle_count = len(cycles) if cycle_availability == "fresh" else None
-    syntax_issue = syntax_values if syntax_availability == "fresh" else None
-    attention = any(
-        value is not None and value > 0
-        for value in (syntax_issue, collision_count, cycle_count)
-    )
-    return {
-        "syntax_errors": {"count": syntax_values, "availability": syntax_availability},
-        "name_collisions": {
-            "count": collision_count,
-            "critical": critical,
-            "warning": warning,
-            "info": info,
-            "availability": collision_availability,
-        },
-        "cycles": {"count": cycle_count, "availability": cycle_availability},
-        "attention_required": bool(attention),
-        "availability": {
-            "syntax_errors": syntax_availability,
-            "name_collisions": collision_availability,
-            "cycles": cycle_availability,
-        },
-    }
 
 
 def syntax_diagnostics_for_path(
@@ -158,12 +83,50 @@ def syntax_diagnostics_for_path(
     }
 
 
-def diagnostics_summary(root: Path, state: Any = None) -> dict[str, Any]:
-    if state is None:
-        engine = mcp_runtime._cached_engine(root)
-        state = getattr(engine, "state", None) if engine is not None else None
-    summary = diagnostics_summary_for_state(state)
-    return summary
+def diagnostics_summary(
+    root: Path,
+    state: Any = None,
+) -> dict[str, Any]:
+    if state is not None:
+        return diagnostics_summary_for_state(
+            state
+        )
+
+    live = (
+        mcp_runtime
+        .query_live_diagnostics_summary_narrow(
+            root
+        )
+    )
+
+    if (
+        live.status == "ok"
+        and live.summary is not None
+    ):
+        return live.summary
+
+    if live.status == "unavailable":
+        engine = (
+            mcp_runtime
+            ._cached_engine(root)
+        )
+        cached_state = (
+            getattr(
+                engine,
+                "state",
+                None,
+            )
+            if engine is not None
+            else None
+        )
+
+        return diagnostics_summary_for_state(
+            cached_state
+        )
+
+    return diagnostics_summary_for_state(
+        None
+    )
 
 
 def diagnostics_summary_for_completed_job(summary: dict[str, Any], job: dict[str, Any]) -> dict[str, Any]:
