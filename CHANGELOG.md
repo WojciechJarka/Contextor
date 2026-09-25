@@ -1,4 +1,42 @@
-17.09.2025 patch
+##  2026-09-25 Patch — Persistent State, Analysis Performance and Shared MCP Runtime
+
+- Reworked canonical LIVE persistence into schema 1.3 with a compact core snapshot, immutable per-source lineage chunks and a revision manifest. Unchanged lineage chunks are now reused across revisions while metadata remains the sole atomic authority pointer, preserving crash safety and backward loading of older snapshot formats.
+
+- Reduced one-file LIVE persistence latency from roughly 4.9 seconds to about 0.5 seconds on the certified workload by eliminating repeated serialization of unchanged lineage data. Runtime certification showed one changed lineage chunk with 412 reused chunks per update and an approximately 89% persistence-time reduction.
+
+- Replaced the full `RepositoryAnalysisState` deep copy used by incremental LIVE updates with an explicit copy-on-write `clone_for_update` contract. Clone time on the production repository fell from roughly 28 seconds to about 15 ms while preserving top-level mutable-container isolation and existing incremental semantics.
+
+- Reworked incremental artifact-consumption maintenance around canonical reverse indexes and copy-on-write indexed rebuilds. A representative aliased-import LIVE mutation dropped from roughly 304 seconds to about 19 seconds, with the restore path completing in about 1.7 seconds.
+
+- Removed the historical multi-minute full-analysis admission delay. Canonical full-analysis lease acquisition, previously observed at roughly 304 seconds, was reduced to sub-second scale, exposing indexing rather than lease contention as the dominant remaining full-analysis cost.
+
+- Added detailed full-analysis indexing telemetry covering parent pool lifetime, submission, worker-entry delay, per-worker task timing, cache/parse/lineage stages, result readiness, merge and shutdown. This isolated a large previously unattributed delay before the first worker entered `_process_single_file`.
+
+- Added a dedicated reusable ProcessPool generation for repository indexing while preserving the existing one-shot managed-pool contract for unrelated consumers. Repeated warm analyses in the same MCP owner now reuse the same worker generation rather than recreating a pool for every `index_repository` call.
+
+- Runtime-certified reusable warm indexing on the same MCP owner: first-worker startup delay fell from roughly 14 seconds to milliseconds on the second run, indexing time dropped from about 31.7 seconds to 15.6 seconds, and the same four worker processes were reused without worker accumulation.
+
+- Hardened reusable ProcessPool lifecycle management with keyed process-local generations, registry-scope rotation, exception-triggered invalidation and explicit global termination support. Indexer batch telemetry now distinguishes first task per worker per indexing batch rather than first task for the lifetime of the worker process.
+
+- Isolated the remaining Codex-hosted Contextor process multiplication from indexer worker reuse. Runtime topology showed multiple host-owned stdio MCP invocations under one Codex app-server while the reusable indexer pool itself remained stable and non-accumulating.
+
+- Added a persistent authenticated Contextor MCP backend with explicit `start`, `status` and `stop` lifecycle control, loopback-only Streamable HTTP transport, singleton ownership, durable backend identity, authenticated readiness probes and persisted Windows-protected bearer credentials.
+
+- Added an HTTP credential bridge for MCP clients using Codex `http_headers_helper`, keeping the bearer token out of `config.toml`, environment variables and plaintext files. Codex configuration was migrated from host-owned stdio to `http://127.0.0.1:8765/mcp`.
+
+- Runtime-certified the persistent HTTP topology with one logical backend, no host-owned stdio Contextor server and no lingering header-helper process while Contextor MCP calls continued to succeed through the shared backend.
+
+- Identified an outstanding cold-start limitation in the Codex HTTP activation path: a cold persistent-backend startup can exceed Codex's fixed 10-second `http_headers_helper` lifetime. Manual pre-start of the backend confirms HTTP transport and authentication are otherwise functional; independent backend autostart remains a follow-up rather than being hidden behind increased helper timeouts.
+
+- Removed MCP diagnostic-summary dependence on an incidental process-local cached engine whenever canonical LIVE is available. Diagnostic counts and freshness are now exposed through a narrow canonical LIVE query instead of requiring a full LIVE snapshot or engine hydration.
+
+- Extracted diagnostic-state projection into a shared pure core module and added a dedicated `diagnostics_summary` canonical query. Successful LIVE queries bypass the MCP cache, unavailable LIVE state preserves the legacy cache fallback, and transport or malformed-response failures remain fail-closed.
+
+- Runtime-certified the new canonical diagnostic path after LIVE and MCP restart: syntax diagnostics, name collisions and cycles all report `availability=fresh`, zero current findings and `resync_required=false` at canonical revision 1426.
+
+- Expanded targeted regression coverage for persistence, copy-on-write state cloning, reusable indexing workers, backend lifecycle/authentication and narrow canonical diagnostic queries while continuing to avoid unnecessary full-suite execution during individual refactor stages.
+
+17.09.2026 patch
 
 - Corrected canonical LIVE provenance so query tools now report `provenance=live` when data is served from the active CanonicalLiveServer rather than incorrectly labelling fresh LIVE state as snapshot-backed; runtime certification confirmed fresh canonical/family state and complete anchors.
 
