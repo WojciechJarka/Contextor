@@ -73,11 +73,11 @@ echo.
 :check_deps
 echo Checking dependencies...
 
-"%VENV_PY%" -c "import orjson, watchdog" >nul 2>&1
+"%VENV_PY%" -c "import orjson, watchdog, mcp, fastmcp" >nul 2>&1
 if errorlevel 1 goto install_deps
 
 echo [OK] Dependencies are already installed.
-goto start_gui
+goto check_backend_autostart
 
 
 :install_deps
@@ -92,6 +92,48 @@ if not exist "%PROJECT_DIR%\requirements.txt" goto no_requirements
 if errorlevel 1 goto install_failed
 
 echo [SUCCESS] Dependencies installed.
+echo.
+goto check_backend_autostart
+
+
+:check_backend_autostart
+echo Checking MCP backend autostart...
+
+"%VENV_PY%" -m contextor.mcp_backend_autostart status >nul 2>&1
+if errorlevel 1 goto install_backend_autostart
+
+echo [OK] MCP backend autostart is already configured.
+goto check_backend
+
+
+:install_backend_autostart
+echo [INFO] Registering MCP backend autostart...
+
+"%VENV_PY%" -m contextor.mcp_backend_autostart install >nul 2>&1
+if errorlevel 1 goto backend_autostart_failed
+
+echo [SUCCESS] MCP backend autostart registered.
+goto check_backend
+
+
+:check_backend
+echo Checking MCP backend...
+
+"%VENV_PY%" -m contextor backend status >nul 2>&1
+if errorlevel 1 goto start_backend
+
+echo [OK] MCP backend is already running.
+goto start_gui
+
+
+:start_backend
+echo [INFO] Starting MCP backend...
+
+"%VENV_PY%" -m contextor backend start >nul 2>&1
+if errorlevel 1 goto backend_start_failed
+
+echo [SUCCESS] MCP backend started.
+goto start_gui
 
 
 :start_gui
@@ -114,11 +156,13 @@ echo         %~dp0
 pause
 exit /b 1
 
+
 :no_python
 echo [ERROR] Python was not found.
 echo Install Python 3.10+ and add it to your system PATH.
 pause
 exit /b 1
+
 
 :venv_failed
 echo [ERROR] Failed to create the virtual environment at:
@@ -126,17 +170,34 @@ echo         %VENV_DIR%
 pause
 exit /b 1
 
+
 :no_requirements
 echo [ERROR] requirements.txt not found in:
 echo         %PROJECT_DIR%
 pause
 exit /b 1
 
+
 :install_failed
 echo.
 echo [ERROR] Dependency installation failed.
 pause
 exit /b 1
+
+
+:backend_autostart_failed
+echo.
+echo [ERROR] Failed to register the Contextor MCP backend autostart.
+pause
+exit /b 1
+
+
+:backend_start_failed
+echo.
+echo [ERROR] Failed to start the Contextor MCP backend.
+pause
+exit /b 1
+
 
 :gui_failed
 echo.

@@ -1,67 +1,39 @@
 from __future__ import annotations
 
 import json
-from types import SimpleNamespace
 
 import pytest
 
 import contextor.mcp_backend_http_headers as backend_headers
 
 
-def test_build_backend_http_headers_starts_or_reuses_ready_backend(
+def test_build_backend_http_headers_uses_credential_only(
     monkeypatch,
 ) -> None:
     calls = []
 
-    def fake_start_backend(
-        *,
-        timeout,
-        probe_timeout,
-    ):
-        calls.append(
-            (
-                timeout,
-                probe_timeout,
-            )
-        )
-        return SimpleNamespace(ready=True)
+    def fake_get_or_create_backend_token():
+        calls.append("token")
+        return "test-backend-token"
 
     monkeypatch.setattr(
         backend_headers,
-        "start_backend",
-        fake_start_backend,
-    )
-    monkeypatch.setattr(
-        backend_headers,
-        "read_backend_token",
-        lambda: "test-backend-token",
+        "get_or_create_backend_token",
+        fake_get_or_create_backend_token,
     )
 
-    assert backend_headers.build_backend_http_headers() == {
-        "Authorization": "Bearer test-backend-token",
+    assert (
+        backend_headers
+        .build_backend_http_headers()
+    ) == {
+        "Authorization": (
+            "Bearer test-backend-token"
+        ),
     }
+
     assert calls == [
-        (
-            8.0,
-            1.0,
-        )
+        "token"
     ]
-
-
-def test_build_backend_http_headers_rejects_unready_backend(
-    monkeypatch,
-) -> None:
-    monkeypatch.setattr(
-        backend_headers,
-        "start_backend",
-        lambda **_kwargs: SimpleNamespace(ready=False),
-    )
-
-    with pytest.raises(
-        backend_headers.BackendHttpHeadersError,
-        match="backend is not ready",
-    ):
-        backend_headers.build_backend_http_headers()
 
 
 def test_build_backend_http_headers_rejects_missing_token(
@@ -69,12 +41,7 @@ def test_build_backend_http_headers_rejects_missing_token(
 ) -> None:
     monkeypatch.setattr(
         backend_headers,
-        "start_backend",
-        lambda **_kwargs: SimpleNamespace(ready=True),
-    )
-    monkeypatch.setattr(
-        backend_headers,
-        "read_backend_token",
+        "get_or_create_backend_token",
         lambda: None,
     )
 
@@ -93,7 +60,9 @@ def test_main_emits_exact_json_header_map(
         backend_headers,
         "build_backend_http_headers",
         lambda: {
-            "Authorization": "Bearer test-backend-token",
+            "Authorization": (
+                "Bearer test-backend-token"
+            ),
         },
     )
 
@@ -106,8 +75,12 @@ def test_main_emits_exact_json_header_map(
         '{"Authorization":"Bearer test-backend-token"}\n'
     )
 
-    assert json.loads(captured.out) == {
-        "Authorization": "Bearer test-backend-token",
+    assert json.loads(
+        captured.out
+    ) == {
+        "Authorization": (
+            "Bearer test-backend-token"
+        ),
     }
 
 
@@ -116,8 +89,11 @@ def test_main_failure_uses_stderr_and_keeps_stdout_empty(
     capsys,
 ) -> None:
     def fail():
-        raise backend_headers.BackendHttpHeadersError(
-            "expected test failure"
+        raise (
+            backend_headers
+            .BackendHttpHeadersError(
+                "expected test failure"
+            )
         )
 
     monkeypatch.setattr(
@@ -133,4 +109,11 @@ def test_main_failure_uses_stderr_and_keeps_stdout_empty(
     assert captured.out == ""
     assert captured.err == (
         "[ERROR] expected test failure\n"
+    )
+
+
+def test_helper_has_no_backend_lifecycle_import():
+    assert not hasattr(
+        backend_headers,
+        "start_backend",
     )
