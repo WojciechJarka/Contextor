@@ -39,7 +39,7 @@ from contextor.core.domain.module import (
     Module,
 )
 from contextor.core.errors import AnalysisCancelled, checkpoint
-from contextor.core.paths import DEFAULT_IGNORED_DIRS
+from contextor.core.paths import DEFAULT_IGNORED_DIRS, repo_cache_dir
 from contextor.core.reference.index import extract_compact_reference_facts
 from contextor.core.runtime_trace import trace_event
 from contextor.core.source import (
@@ -305,11 +305,26 @@ _CACHE_MANAGERS: dict[str, CacheManager] = {}
 _WORKER_LAST_BATCH_TOKEN_BY_PID: dict[int, str] = {}
 
 
-def _cache_manager(root_str: str) -> CacheManager:
+def _cache_manager(
+    root_str: str,
+    cache_dir_str: str | None = None,
+) -> CacheManager:
+    requested_cache_dir = (
+        Path(cache_dir_str)
+        if cache_dir_str is not None
+        else repo_cache_dir(root_str)
+    )
+
     manager = _CACHE_MANAGERS.get(root_str)
 
-    if manager is None:
-        manager = CacheManager(root_str)
+    if (
+        manager is None
+        or manager.cache_dir != requested_cache_dir
+    ):
+        manager = CacheManager(
+            root_str,
+            cache_dir=requested_cache_dir,
+        )
         _CACHE_MANAGERS[root_str] = manager
 
     return manager
@@ -320,6 +335,7 @@ def _process_single_file(
     root_str: str,
     submitted_monotonic_ns: int | None = None,
     batch_token: str | None = None,
+    cache_dir_str: str | None = None,
 ) -> dict:
     """Funkcja pomocnicza dla wieloprocesowości."""
     path = Path(path_str)
@@ -471,7 +487,10 @@ def _process_single_file(
         - source_read_started
     ) * 1000.0
 
-    cache = _cache_manager(root_str)
+    cache = _cache_manager(
+        root_str,
+        cache_dir_str,
+    )
     cache_get_started = time.monotonic()
     cached_data = cache.get(path, source_bytes=source_snapshot.raw)
     cache_get_ms = (time.monotonic() - cache_get_started) * 1000.0
@@ -954,6 +973,10 @@ def index_repository(
 
     if not root_path.is_dir():
         raise ValueError(f"Repository root is not directory: {root_path}")
+
+    resolved_cache_dir = str(
+        repo_cache_dir(root_path)
+    )
 
     modules: dict[str, Module] = {}
     skipped: list[SkippedFile] = []
@@ -1683,7 +1706,11 @@ def index_repository(
     completed = 0
     if os.environ.get("CONTEXTOR_DISABLE_PROCESS_POOL") == "1":
         for path in files_to_process:
-            res = _process_single_file(str(path), str(root_path))
+            res = _process_single_file(
+                str(path),
+                str(root_path),
+                cache_dir_str=resolved_cache_dir,
+            )
             record_file_task_evidence(res)
             if res["error"]:
                 line_number, column_number = _syntax_error_location(res["error"])
@@ -1769,6 +1796,7 @@ def index_repository(
                 str(root_path),
                 time.monotonic_ns(),
                 worker_batch_token,
+                resolved_cache_dir,
             ): p
             for p in files_to_process
         }

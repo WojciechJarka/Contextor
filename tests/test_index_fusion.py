@@ -1,6 +1,9 @@
 import json
 
 from contextor.core.analysis.cache_manager import CacheManager
+from contextor.core.analysis.process_pool_lifecycle import (
+    terminate_active_process_pools,
+)
 from contextor.core.reporting_layer.artifact_usage_report import collect_module_artifacts
 from contextor.core.symbol_engine import indexer
 
@@ -22,6 +25,103 @@ def test_index_cache_miss_stores_symbol_facts(tmp_path, isolated_dirs):
     assert record["status"] == "available"
     assert record["facts"]["functions"] == ["hello"]
     assert _cache_payload(root, source)["data"]["symbol_facts"] == record
+
+
+def test_reused_indexer_pool_uses_current_parent_cache_root(
+    tmp_path,
+    monkeypatch,
+):
+    root = tmp_path / "repo"
+    root.mkdir()
+    source = root / "module.py"
+
+    first_cache = tmp_path / "cache-a"
+    second_cache = tmp_path / "cache-b"
+
+    monkeypatch.delenv(
+        "CONTEXTOR_DISABLE_PROCESS_POOL",
+        raising=False,
+    )
+
+    terminate_active_process_pools(
+        timeout=1.0,
+    )
+
+    try:
+        monkeypatch.setenv(
+            "CONTEXTOR_CACHE_DIR",
+            str(first_cache),
+        )
+
+        source.write_text(
+            "def first():\n    return 1\n",
+            encoding="utf-8",
+        )
+
+        first = indexer.index_repository(
+            str(root)
+        )
+
+        assert (
+            first
+            .symbol_facts_by_module["module"]
+            ["facts"]["functions"]
+            == ["first"]
+        )
+
+        first_payload = (
+            CacheManager(str(root))
+            ._get_cache_file_path(source)
+        )
+
+        assert first_payload.is_file()
+
+        monkeypatch.setenv(
+            "CONTEXTOR_CACHE_DIR",
+            str(second_cache),
+        )
+
+        source.write_text(
+            "def second():\n    return 2\n",
+            encoding="utf-8",
+        )
+
+        second = indexer.index_repository(
+            str(root)
+        )
+
+        assert (
+            second
+            .symbol_facts_by_module["module"]
+            ["facts"]["functions"]
+            == ["second"]
+        )
+
+        second_manager = CacheManager(
+            str(root)
+        )
+        second_payload = (
+            second_manager
+            ._get_cache_file_path(source)
+        )
+
+        assert second_payload.is_file()
+
+        cached = json.loads(
+            second_payload.read_text()
+        )
+
+        assert (
+            cached["data"]["symbol_facts"]
+            == second.symbol_facts_by_module[
+                "module"
+            ]
+        )
+
+    finally:
+        terminate_active_process_pools(
+            timeout=1.0,
+        )
 
 
 def test_new_format_cache_hit_reuses_cached_facts_without_ast_parse(
