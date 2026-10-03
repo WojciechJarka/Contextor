@@ -52,6 +52,80 @@ def test_desktop_trace_session_headers_and_finish(tmp_path, monkeypatch):
     assert {"LIVE_CONNECT_ATTEMPT", "LIVE_CONNECT_REJECT", "LIVE_CONNECT_RESULT", "LIVE_LIVENESS_RESULT", "LIVE_WATCHER_RECOVERY_START", "LIVE_WATCHER_RECOVERY_RESULT", "LIVE_IPC_FAILURE", "LIVE_SERVICE_THREAD_FAILURE"} <= set(events)
 
 
+def test_live_service_pre_endpoint_timing_is_self_describing_and_durable():
+    path = trace.start_desktop_trace_session()
+
+    payload = {
+        "snapshot_loaded": True,
+        "materialization_required": False,
+        "migrate_legacy_snapshot_ms": 10.0,
+        "load_snapshot_ms": 20.0,
+        "materialization_import_ms": 30.0,
+        "module_usages_require_materialization_ms": 40.0,
+        "file_state_manager_import_ms": 50.0,
+        "file_state_manager_load_ms": 60.0,
+        "ensure_module_usages_ms": 70.0,
+        "file_state_build_payload_ms": 80.0,
+        "backfill_save_snapshot_ms": 90.0,
+        "read_metadata_ms": 100.0,
+        "canonical_live_server_construct_ms": 110.0,
+        "service_thread_construct_ms": 120.0,
+        "service_thread_start_ms": 130.0,
+        "service_bootstrap_wait_ms": 140.0,
+        "authority_endpoint_build_ms": 150.0,
+        "endpoint_atomic_write_ms": 160.0,
+        "bind_endpoint_ms": 170.0,
+        "pre_endpoint_total_ms": 180.0,
+    }
+
+    trace.trace_event(
+        "LIVE",
+        "LIVE_SERVICE_PRE_ENDPOINT_TIMING",
+        **payload,
+    )
+
+    trace.finish_desktop_trace_session()
+
+    records = [
+        json.loads(line)
+        for line in path.read_text(
+            encoding="utf-8"
+        ).splitlines()
+    ]
+
+    fields = records[1]["fields"]
+    events = records[4]["events"]["LIVE"]
+
+    assert (
+        "LIVE_SERVICE_PRE_ENDPOINT_TIMING"
+        in events
+    )
+
+    assert set(payload) <= set(fields)
+
+    record = next(
+        item
+        for item in records
+        if item.get("ev")
+        == "LIVE_SERVICE_PRE_ENDPOINT_TIMING"
+    )
+
+    assert {
+        key: record[key]
+        for key in payload
+    } == payload
+
+    assert record["snapshot_loaded"] is True
+    assert (
+        record["materialization_required"]
+        is False
+    )
+    assert (
+        record["pre_endpoint_total_ms"]
+        == 180.0
+    )
+
+
 def test_canonical_writer_analysis_trace_is_self_describing_and_durable():
     path = trace.start_desktop_trace_session()
     trace.trace_event(
