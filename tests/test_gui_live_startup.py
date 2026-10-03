@@ -518,6 +518,38 @@ def test_duplicate_watcher_prevented(tmp_path, monkeypatch):
     assert controller._live_start_retry_attempt == 0
 
 
+def test_reselecting_existing_watcher_restores_client_feed_and_status(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    registry = PersistentIdentityRegistry(str(repo))
+    controller = _make_controller(repo)
+    existing_watcher = SimpleNamespace()
+    existing_client = SimpleNamespace(name="existing-client")
+    existing_feed = SimpleNamespace(client=existing_client)
+    controller.live_watchers[registry.repo_id] = existing_watcher
+    controller.live_event_feeds[registry.repo_id] = existing_feed
+    controller.live_clients[registry.repo_id] = existing_client
+    controller.live_watcher = SimpleNamespace(name="stale-watcher")
+    controller.live_event_feed = SimpleNamespace(name="stale-feed")
+    controller.live_client = SimpleNamespace(name="stale-client")
+    connect_calls = []
+    monkeypatch.setattr(
+        gui,
+        "connect_or_start",
+        lambda *args, **kwargs: connect_calls.append((args, kwargs)),
+    )
+
+    ContextorGUI._start_live_watcher_blocking(controller, str(repo))
+
+    assert connect_calls == []
+    assert controller.live_client is existing_client
+    assert controller.live_watcher is existing_watcher
+    assert controller.live_event_feed is existing_feed
+    assert controller._statuses == [
+        f"[{repo.name}] LIVE: shared state attached; watcher active"
+    ]
+
+
 def test_shutdown_cancels_pending_retry(tmp_path, monkeypatch):
     repo = tmp_path / "repo"
     repo.mkdir()

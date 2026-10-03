@@ -416,22 +416,39 @@ def test_browse_repository_switches_live_to_selected_registered_repo(
     second.mkdir()
     PersistentIdentityRegistry(str(first))
     second_registry = PersistentIdentityRegistry(str(second))
-    calls = []
+    status_queue = gui.Queue()
+    status_queue.put({"message": "stale LIVE status"})
+    events = []
 
     controller = SimpleNamespace(
         repo_path_var=_LiveIntegrationFakeVar(),
         layer_path_var=_LiveIntegrationFakeVar(),
-        _start_live_watcher=lambda path: calls.append(path),
+        _live_status_queue=status_queue,
+        _set_live_status=lambda message: events.append(
+            ("status", message, status_queue.qsize())
+        ),
+        _start_live_watcher=lambda path: events.append(
+            ("start", path, status_queue.qsize())
+        ),
     )
     monkeypatch.setattr(gui.filedialog, "askdirectory", lambda: str(second))
-    monkeypatch.setattr(gui, "save_state", lambda **payload: calls.append(payload))
+    monkeypatch.setattr(
+        gui,
+        "save_state",
+        lambda **payload: events.append(("save", payload)),
+    )
 
     gui.ContextorGUI.browse_repository(controller)
 
     selected = str(second).replace("\\", "/")
     assert controller.repo_path_var.value == selected
     assert controller.layer_path_var.value == ""
-    assert calls == [{"repository": selected}, selected]
+    assert status_queue.empty()
+    assert events == [
+        ("save", {"repository": selected}),
+        ("status", f"LIVE: switching to {second.name}", 0),
+        ("start", selected, 0),
+    ]
     assert second_registry.repo_id != read_repository_identity(first).repo_id
 
 
@@ -495,6 +512,106 @@ def test_switching_repositories_keeps_previous_watcher_active(tmp_path, monkeypa
     }
     assert not [event for event in events if event[0] == "stop"]
     assert len([event for event in events if event[0] == "start"]) == 2
+
+
+def test_inactive_repository_callbacks_do_not_overwrite_selected_live_state(
+    tmp_path, monkeypatch
+):
+    first = tmp_path / "first"
+    second = tmp_path / "second"
+    first.mkdir()
+    second.mkdir()
+    first_registry = PersistentIdentityRegistry(str(first))
+    second_registry = PersistentIdentityRegistry(str(second))
+    statuses = []
+    clients_by_path = {}
+    watchers_by_path = {}
+    feeds_by_path = {}
+
+    class Client:
+        def __init__(self, root):
+            self.root = str(root)
+
+    class Watcher:
+        def __init__(
+            self, root, client, *, on_status=None, on_reconnect=None, **_kwargs
+        ):
+            self.root = str(root)
+            self.client = client
+            self.on_status = on_status
+            self.on_reconnect = on_reconnect
+            watchers_by_path[self.root] = self
+
+        def start(self):
+            pass
+
+        def stop(self):
+            pass
+
+    class EventFeed:
+        def __init__(self, client, on_status, **_kwargs):
+            self.client = client
+            self.on_status = on_status
+            feeds_by_path[client.root] = self
+
+        def start(self):
+            pass
+
+        def stop(self):
+            pass
+
+    monkeypatch.setattr(
+        gui,
+        "connect_or_start",
+        lambda root, **_kwargs: clients_by_path.setdefault(str(root), Client(root)),
+    )
+    monkeypatch.setattr(gui, "DesktopLiveWatcher", Watcher)
+    monkeypatch.setattr(gui, "DesktopLiveEventFeed", EventFeed)
+    monkeypatch.setattr(gui, "migrate_legacy_snapshot", lambda root: str(root))
+    monkeypatch.setattr(
+        "contextor.core.analysis.state_manager.load_engine_state",
+        lambda *_args, **_kwargs: None,
+    )
+
+    controller = SimpleNamespace(
+        repo_path_var=SimpleNamespace(get=lambda: str(first)),
+        live_watcher=None,
+        live_event_feed=None,
+        live_watchers={},
+        live_event_feeds={},
+        live_clients={},
+        live_client=None,
+        _set_live_status=lambda message, **_kwargs: statuses.append(message),
+    )
+
+    gui.ContextorGUI._start_live_watcher_blocking(controller, str(first))
+    first_client = controller.live_clients[first_registry.repo_id]
+    first_watcher = controller.live_watchers[first_registry.repo_id]
+    first_feed = controller.live_event_feeds[first_registry.repo_id]
+    statuses.clear()
+    gui.ContextorGUI._start_live_watcher_blocking(controller, str(second))
+    second_watcher = controller.live_watchers[second_registry.repo_id]
+    second_feed = controller.live_event_feeds[second_registry.repo_id]
+
+    assert statuses == []
+    assert controller.live_client is first_client
+    assert controller.live_watcher is first_watcher
+    assert controller.live_event_feed is first_feed
+    assert controller.live_clients[second_registry.repo_id] is clients_by_path[str(second)]
+
+    statuses.clear()
+    second_watcher.on_status("inactive callback", event={"category": "LIVE_STATE"})
+    assert statuses == []
+    first_watcher.on_status("selected callback", event={"category": "LIVE_STATE"})
+    assert statuses == [f"[{first.name}] selected callback"]
+
+    replacement_client = Client(second)
+    second_watcher.on_reconnect(replacement_client)
+    assert controller.live_clients[second_registry.repo_id] is replacement_client
+    assert second_feed.client is replacement_client
+    assert controller.live_client is first_client
+    assert controller.live_watcher is first_watcher
+    assert controller.live_event_feed is first_feed
 
 
 def test_closing_gui_stops_every_repository_watcher_and_feed(monkeypatch):

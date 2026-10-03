@@ -546,6 +546,28 @@ class ContextorGUI:
         if hasattr(self, "progress_bar"):
             self.progress_bar.is_cancelled = True
 
+    def _is_selected_live_repository(self, path):
+        repo_path_var = getattr(self, "repo_path_var", None)
+        if repo_path_var is None or not hasattr(repo_path_var, "get"):
+            return True
+        selected = repo_path_var.get()
+        if not selected:
+            return False
+        try:
+            return Path(selected).expanduser().resolve() == Path(path).expanduser().resolve()
+        except Exception:
+            return str(selected).replace("\\", "/") == str(path).replace("\\", "/")
+
+    def _discard_pending_live_statuses(self):
+        queue = getattr(self, "_live_status_queue", None)
+        if queue is None:
+            return
+        while True:
+            try:
+                queue.get_nowait()
+            except Empty:
+                return
+
     def browse_repository(self):
         directory = filedialog.askdirectory()
         if directory:
@@ -553,6 +575,8 @@ class ContextorGUI:
             self.repo_path_var.set(directory)
             self.layer_path_var.set("")
             save_state(repository=directory)
+            ContextorGUI._discard_pending_live_statuses(self)
+            self._set_live_status(f"LIVE: switching to {Path(directory).name}")
             self._start_live_watcher(directory)
 
     def browse_layer(self):
@@ -879,10 +903,12 @@ class ContextorGUI:
         try:
             identity = ContextorGUI._refresh_repo_identity(self, path)
         except RepositoryIdentityError as exc:
-            self._set_live_status(f"LIVE identity error: {exc}")
+            if ContextorGUI._is_selected_live_repository(self, path):
+                self._set_live_status(f"LIVE identity error: {exc}")
             return
         if identity is None:
-            self._set_live_status("LIVE: repository not registered; run an analysis")
+            if ContextorGUI._is_selected_live_repository(self, path):
+                self._set_live_status("LIVE: repository not registered; run an analysis")
             return
         watchers = getattr(self, "live_watchers", None)
         if watchers is None:
@@ -896,8 +922,15 @@ class ContextorGUI:
 
         existing_watcher = watchers.get(identity.repo_id)
         if existing_watcher is not None:
-            self.live_watcher = existing_watcher
-            self.live_event_feed = feeds.get(identity.repo_id)
+            existing_client = clients.get(identity.repo_id)
+            if ContextorGUI._is_selected_live_repository(self, path):
+                self.live_watcher = existing_watcher
+                self.live_event_feed = feeds.get(identity.repo_id)
+                if existing_client is not None:
+                    self.live_client = existing_client
+                self._set_live_status(
+                    f"[{identity.repo_name}] LIVE: shared state attached; watcher active"
+                )
             if getattr(self, "_live_start_retry_after_id", None) is not None:
                 if hasattr(self, "root") and hasattr(self.root, "after_cancel"):
                     try:
@@ -921,10 +954,11 @@ class ContextorGUI:
             if "client_kind" in parameters:
                 connect_kwargs["client_kind"] = "desktop"
             client = connect_or_start(path, **connect_kwargs)
+            clients[identity.repo_id] = client
             if getattr(self, "_closing", False):
                 return
-            self.live_client = client
-            clients[identity.repo_id] = client
+            if ContextorGUI._is_selected_live_repository(self, path):
+                self.live_client = client
             cache = migrate_legacy_snapshot(path)
             if getattr(self, "_live_start_retry_after_id", None) is not None:
                 if hasattr(self, "root") and hasattr(self.root, "after_cancel"):
@@ -937,7 +971,8 @@ class ContextorGUI:
         except SecondDesktopActive as exc:
             self._live_start_retry_attempt = 0
             self._live_start_retry_after_id = None
-            self._set_live_status(f"LIVE: {exc}")
+            if ContextorGUI._is_selected_live_repository(self, path):
+                self._set_live_status(f"LIVE: {exc}")
             return
         except (OSError, EOFError, RuntimeError, TimeoutError, RepositoryIdentityError) as exc:
             if getattr(self, "_closing", False):
@@ -947,9 +982,10 @@ class ContextorGUI:
             if current_attempt < LIVE_START_MAX_ATTEMPTS:
                 delay_idx = min(current_attempt - 1, len(LIVE_START_RETRY_DELAYS_MS) - 1)
                 delay_ms = LIVE_START_RETRY_DELAYS_MS[delay_idx]
-                self._set_live_status(
-                    f"LIVE connection delayed; retrying ({current_attempt + 1}/{LIVE_START_MAX_ATTEMPTS})..."
-                )
+                if ContextorGUI._is_selected_live_repository(self, path):
+                    self._set_live_status(
+                        f"LIVE connection delayed; retrying ({current_attempt + 1}/{LIVE_START_MAX_ATTEMPTS})..."
+                    )
                 if hasattr(self, "root") and hasattr(self.root, "after"):
                     self._live_start_retry_after_id = self.root.after(
                         delay_ms, lambda: ContextorGUI._start_live_watcher(self, path, initial_seq=initial_seq)
@@ -957,7 +993,8 @@ class ContextorGUI:
                 return
             self._live_start_retry_attempt = 0
             self._live_start_retry_after_id = None
-            self._set_live_status(f"LIVE connection error: {exc}")
+            if ContextorGUI._is_selected_live_repository(self, path):
+                self._set_live_status(f"LIVE connection error: {exc}")
             return
 
         from contextor.core.analysis.state_manager import load_engine_state
@@ -976,9 +1013,11 @@ class ContextorGUI:
             state_id = getattr(state, "state_id", None)
             if state_revision is not None and live_revision == int(state_revision):
                 if state_id and getattr(live_state, "state_id", None) == state_id:
-                    self._set_live_status("LIVE: shared state attached; watcher active")
+                    if ContextorGUI._is_selected_live_repository(self, path):
+                        self._set_live_status("LIVE: shared state attached; watcher active")
                 else:
-                    self._set_live_status("LIVE: generation conflict; analysis required")
+                    if ContextorGUI._is_selected_live_repository(self, path):
+                        self._set_live_status("LIVE: generation conflict; analysis required")
                     return
             else:
                 startup_lease = None
@@ -991,9 +1030,10 @@ class ContextorGUI:
                         poll_interval=0.01,
                     )
                 except FullAnalysisBusyError:
-                    self._set_live_status(
-                        "LIVE: canonical writer busy; cache publish skipped"
-                    )
+                    if ContextorGUI._is_selected_live_repository(self, path):
+                        self._set_live_status(
+                            "LIVE: canonical writer busy; cache publish skipped"
+                        )
                 else:
                     try:
                         published = client.publish(
@@ -1006,22 +1046,34 @@ class ContextorGUI:
                         isinstance(published, dict)
                         and published.get("status") == "ok"
                     ):
-                        self._set_live_status(
-                            "LIVE: shared state published; watcher active"
-                        )
+                        if ContextorGUI._is_selected_live_repository(self, path):
+                            self._set_live_status(
+                                "LIVE: shared state published; watcher active"
+                            )
                     else:
-                        self._set_live_status(
-                            "LIVE: shared state attach failed; analysis required"
-                        )
+                        if ContextorGUI._is_selected_live_repository(self, path):
+                            self._set_live_status(
+                                "LIVE: shared state attach failed; analysis required"
+                            )
         else:
-            self._set_live_status("LIVE: no snapshot; waiting for analysis")
+            if ContextorGUI._is_selected_live_repository(self, path):
+                self._set_live_status("LIVE: no snapshot; waiting for analysis")
         existing_watcher = watchers.get(identity.repo_id)
         if existing_watcher is not None:
-            self.live_watcher = existing_watcher
-            self.live_event_feed = feeds.get(identity.repo_id)
+            existing_client = clients.get(identity.repo_id)
+            if ContextorGUI._is_selected_live_repository(self, path):
+                self.live_watcher = existing_watcher
+                self.live_event_feed = feeds.get(identity.repo_id)
+                if existing_client is not None:
+                    self.live_client = existing_client
+                self._set_live_status(
+                    f"[{identity.repo_name}] LIVE: shared state attached; watcher active"
+                )
             return
 
         def status_callback(message, event=None, name=identity.repo_name):
+            if not ContextorGUI._is_selected_live_repository(self, path):
+                return
             if event is None and (message.startswith("LIVE update successful:") or message.startswith("Updating LIVE:")):
                 return
             cat = event.get("category", "LIVE_STATE") if isinstance(event, dict) else "LIVE_STATE"
@@ -1036,8 +1088,9 @@ class ContextorGUI:
             self._set_live_status(msg, category=cat, event=event)
 
         def on_reconnect(new_client):
-            self.live_client = new_client
             self.live_clients[identity.repo_id] = new_client
+            if ContextorGUI._is_selected_live_repository(self, path):
+                self.live_client = new_client
             feed = feeds.get(identity.repo_id)
             if feed is not None:
                 feed.client = new_client
@@ -1052,7 +1105,7 @@ class ContextorGUI:
 
         if getattr(self, "_closing", False):
             return
-        self.live_watcher = DesktopLiveWatcher(
+        watcher = DesktopLiveWatcher(
             path,
             client,
             owner_pid=os.getpid(),
@@ -1076,14 +1129,16 @@ class ContextorGUI:
                 status_callback,
             )
 
-        self.live_event_feed = feed
-        watchers[identity.repo_id] = self.live_watcher
+        watchers[identity.repo_id] = watcher
         feeds[identity.repo_id] = feed
+        if ContextorGUI._is_selected_live_repository(self, path):
+            self.live_watcher = watcher
+            self.live_event_feed = feed
         if hasattr(feed, "replay_authority_events"):
             feed.replay_authority_events()
         if getattr(self, "_closing", False):
             return
-        self.live_watcher.start()
+        watcher.start()
         feed.start()
 
     def _refresh_repo_identity(self, path):
