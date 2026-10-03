@@ -487,10 +487,13 @@ def _process_single_file(
         - source_read_started
     ) * 1000.0
 
-    cache = _cache_manager(
-        root_str,
-        cache_dir_str,
-    )
+    if cache_dir_str is None:
+        cache = _cache_manager(root_str)
+    else:
+        cache = _cache_manager(
+            root_str,
+            cache_dir_str,
+        )
     cache_get_started = time.monotonic()
     cached_data = cache.get(path, source_bytes=source_snapshot.raw)
     cache_get_ms = (time.monotonic() - cache_get_started) * 1000.0
@@ -1709,7 +1712,6 @@ def index_repository(
             res = _process_single_file(
                 str(path),
                 str(root_path),
-                cache_dir_str=resolved_cache_dir,
             )
             record_file_task_evidence(res)
             if res["error"]:
