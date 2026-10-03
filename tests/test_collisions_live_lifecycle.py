@@ -577,7 +577,7 @@ def test_historical_patch_families_ordering_preserved():
     )
 
 
-def test_missing_ast_snapshot_report_parity():
+def test_missing_ast_snapshot_report_parity(isolated_dirs):
     """Snapshot report retains valid collisions from parseable modules when 1 module has missing AST."""
     from contextor.core.domain.graph import ProjectGraph
     from contextor.core.reporting_engine.pipeline import execute_global_pipeline
