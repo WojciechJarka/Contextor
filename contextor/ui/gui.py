@@ -100,6 +100,11 @@ class ContextorGUI:
         self.file_path_var = tk.StringVar(
             value=self.state.get("python_file", "").replace("\\", "/")
         )
+        self._selected_live_repo_path = self.repo_path_var.get()
+        self._repo_path_trace_id = self.repo_path_var.trace_add(
+            "write",
+            self._sync_selected_live_repository_path,
+        )
 
         self.exclude_win = None
         self.repo_builder_win = None
@@ -546,11 +551,17 @@ class ContextorGUI:
         if hasattr(self, "progress_bar"):
             self.progress_bar.is_cancelled = True
 
-    def _is_selected_live_repository(self, path):
+    def _sync_selected_live_repository_path(self, *_args):
         repo_path_var = getattr(self, "repo_path_var", None)
         if repo_path_var is None or not hasattr(repo_path_var, "get"):
+            self._selected_live_repo_path = ""
+            return
+        self._selected_live_repo_path = repo_path_var.get()
+
+    def _is_selected_live_repository(self, path):
+        if not hasattr(self, "_selected_live_repo_path"):
             return True
-        selected = repo_path_var.get()
+        selected = self._selected_live_repo_path
         if not selected:
             return False
         try:
@@ -573,6 +584,7 @@ class ContextorGUI:
         if directory:
             directory = directory.replace("\\", "/")
             self.repo_path_var.set(directory)
+            self._selected_live_repo_path = directory
             self.layer_path_var.set("")
             save_state(repository=directory)
             ContextorGUI._discard_pending_live_statuses(self)

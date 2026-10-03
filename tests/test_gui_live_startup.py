@@ -89,6 +89,7 @@ def _make_controller(repo_path, root=None):
         _live_start_threads={},
         repo_id_var=_GuiFakeVar("Repo ID: unregistered"),
         repo_path_var=_GuiFakeVar(str(repo_path)),
+        _selected_live_repo_path=str(repo_path),
         layer_path_var=_GuiFakeVar(""),
         file_path_var=_GuiFakeVar(""),
         theme_mode="light",
@@ -97,6 +98,24 @@ def _make_controller(repo_path, root=None):
         _statuses=statuses,
     )
     return controller
+
+
+def test_selected_live_repository_predicate_does_not_read_tk_variable(tmp_path):
+    selected = tmp_path / "selected"
+    other = tmp_path / "other"
+    selected.mkdir()
+    other.mkdir()
+
+    def forbidden_get():
+        raise AssertionError("worker predicate must not read Tk/StringVar")
+
+    controller = SimpleNamespace(
+        _selected_live_repo_path=str(selected),
+        repo_path_var=SimpleNamespace(get=forbidden_get),
+    )
+
+    assert ContextorGUI._is_selected_live_repository(controller, str(selected)) is True
+    assert ContextorGUI._is_selected_live_repository(controller, str(other)) is False
 
 
 def _wait_for_live_start(controller, timeout=5.0):

@@ -422,6 +422,7 @@ def test_browse_repository_switches_live_to_selected_registered_repo(
 
     controller = SimpleNamespace(
         repo_path_var=_LiveIntegrationFakeVar(),
+        _selected_live_repo_path=str(first),
         layer_path_var=_LiveIntegrationFakeVar(),
         _live_status_queue=status_queue,
         _set_live_status=lambda message: events.append(
@@ -442,6 +443,7 @@ def test_browse_repository_switches_live_to_selected_registered_repo(
 
     selected = str(second).replace("\\", "/")
     assert controller.repo_path_var.value == selected
+    assert controller._selected_live_repo_path == selected
     assert controller.layer_path_var.value == ""
     assert status_queue.empty()
     assert events == [
@@ -575,6 +577,7 @@ def test_inactive_repository_callbacks_do_not_overwrite_selected_live_state(
 
     controller = SimpleNamespace(
         repo_path_var=SimpleNamespace(get=lambda: str(first)),
+        _selected_live_repo_path=str(first),
         live_watcher=None,
         live_event_feed=None,
         live_watchers={},
