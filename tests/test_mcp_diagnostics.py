@@ -322,3 +322,47 @@ def test_cheap_filters_run_before_severity_and_severity_filter_survives(tmp_path
 def test_registered_name_collision_tool_and_shared_summary_wrapper():
     assert "get_name_collisions" in mcp_server.REGISTERED_MCP_TOOL_NAMES
     assert len(mcp_server.REGISTERED_MCP_TOOL_NAMES) == 29
+
+
+def test_wrapper_diagnostics_exception_cannot_replace_successful_tool_result(
+    tmp_path,
+    monkeypatch,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    def fail_diagnostics(_root):
+        raise StopIteration(
+            "synthetic exhausted diagnostics transport"
+        )
+
+    monkeypatch.setattr(
+        "contextor.mcp.diagnostics.diagnostics_summary",
+        fail_diagnostics,
+    )
+
+    wrapped = mcp_server._instrument_mcp_tool(
+        lambda repo_path: json.dumps(
+            {
+                "status": "ok",
+                "repo_path": repo_path,
+                "value": 42,
+            }
+        ),
+        "synthetic_query",
+    )
+
+    result = json.loads(
+        wrapped(
+            str(repo)
+        )
+    )
+
+    assert result["status"] == "ok"
+    assert result["value"] == 42
+    assert result["diagnostics_summary"]["availability"] == {
+        "syntax_errors": "unavailable",
+        "name_collisions": "unavailable",
+        "cycles": "unavailable",
+    }
+    assert result["diagnostics_attention_required"] is False

@@ -5,6 +5,7 @@ from pathlib import Path
 import threading
 from typing import Any, Iterator
 
+from contextor.core.live_state.runtime_domain import RuntimeDomainError
 from contextor.core.lineage_query.live_query import (
     LiveSymbolLineageQueryResult,
 )
@@ -101,6 +102,7 @@ def query_live_diagnostics_summary_narrow(
         ConnectionError,
         TimeoutError,
         RuntimeError,
+        RuntimeDomainError,
     ) as exc:
         return LiveDiagnosticsSummaryTransportResult(
             status="error",

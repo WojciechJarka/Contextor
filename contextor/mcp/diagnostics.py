@@ -187,7 +187,10 @@ def inject_diagnostics_summary(
     root = Path(root_path).expanduser().resolve() if root_path else None
     if root is None:
         return result
-    summary = diagnostics_summary(root)
+    try:
+        summary = diagnostics_summary(root)
+    except Exception:
+        summary = diagnostics_summary_for_state(None)
     payload.setdefault("diagnostics_summary", summary)
     payload.setdefault("diagnostics_attention_required", summary["attention_required"])
     serialized = json.dumps(payload, indent=2, ensure_ascii=False)

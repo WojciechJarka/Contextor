@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 import contextor.core.live_state as live_state
+from contextor.core.live_state.runtime_domain import RuntimeDomainError
 from contextor.core.diagnostics_projection import (
     diagnostics_summary_for_state,
 )
@@ -388,6 +389,40 @@ def test_diagnostics_summary_transport_error_fails_closed_without_cache(
     assert (
         result["cycles"]["count"]
         is None
+    )
+
+
+def test_narrow_live_diagnostics_query_treats_runtime_domain_error_as_transport_error(
+    monkeypatch,
+):
+    def fail_connect(_root):
+        raise RuntimeDomainError(
+            "invalid runtime domain"
+        )
+
+    monkeypatch.setattr(
+        live_state,
+        "connect",
+        fail_connect,
+    )
+
+    result = (
+        mcp_runtime
+        .query_live_diagnostics_summary_narrow(
+            Path(
+                r"C:\Temp\Contextor_Repo"
+            )
+        )
+    )
+
+    assert result.status == "error"
+    assert (
+        result.error
+        == "canonical_live_transport_error"
+    )
+    assert (
+        "invalid runtime domain"
+        in (result.detail or "")
     )
 
 
