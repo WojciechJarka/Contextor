@@ -1,22 +1,6 @@
 STATUS=PASS
-FILES_CHANGED=tests/test_collisions_live_lifecycle.py
-
-FULL_DIFFS=
-```diff
-diff --git a/tests/test_collisions_live_lifecycle.py b/tests/test_collisions_live_lifecycle.py
-index 428a695..23e72b2 100644
---- a/tests/test_collisions_live_lifecycle.py
-+++ b/tests/test_collisions_live_lifecycle.py
-@@ -577,7 +577,7 @@ def test_historical_patch_families_ordering_preserved():
-     )
- 
- 
--def test_missing_ast_snapshot_report_parity():
-+def test_missing_ast_snapshot_report_parity(isolated_dirs):
-     """Snapshot report retains valid collisions from parseable modules when 1 module has missing AST."""
-     from contextor.core.domain.graph import ProjectGraph
-     from contextor.core.reporting_engine.pipeline import execute_global_pipeline
-```
+FILES_CHANGED=NONE
+FULL_DIFFS=DIFFS=NONE
 
 PY_COMPILE=PASS
 TARGETED_TESTS=PASS
