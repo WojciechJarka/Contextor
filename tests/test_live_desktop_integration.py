@@ -578,6 +578,7 @@ def test_inactive_repository_callbacks_do_not_overwrite_selected_live_state(
     controller = SimpleNamespace(
         repo_path_var=SimpleNamespace(get=lambda: str(first)),
         _selected_live_repo_path=str(first),
+        repo_id_var=_LiveIntegrationFakeVar(),
         live_watcher=None,
         live_event_feed=None,
         live_watchers={},
