@@ -60,6 +60,19 @@ class _FakeExecutor:
         )
 
 
+@pytest.fixture(autouse=True)
+def _isolate_process_pool_registry():
+    lifecycle.terminate_active_process_pools(
+        timeout=0.05,
+    )
+    try:
+        yield
+    finally:
+        lifecycle.terminate_active_process_pools(
+            timeout=0.05,
+        )
+
+
 def test_managed_process_pool_registry_is_process_local():
     assert lifecycle.active_process_pool_count() == 0
 
