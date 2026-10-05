@@ -1683,6 +1683,7 @@ def _header_records(sid: str, started_at: str, desktop_pid: int, file_name: str)
     )
     records[4]["events"]["LIVE"].extend(
         [
+            "LIVE_SNAPSHOT_LOAD_PHASE",
             "LIVE_SERVICE_PRE_ENDPOINT_TIMING",
             "LIVE_DIAGNOSTIC_SYNTAX_ERROR",
             "LIVE_DIAGNOSTIC_SYNTAX_RECOVERED",

@@ -1379,6 +1379,34 @@ def save_snapshot(
                 pass
 
 
+def _trace_snapshot_load_phase(
+    component: str,
+    started: float,
+    *,
+    repo_id: str = "",
+    count: int | None = None,
+) -> None:
+    try:
+        from contextor.core.runtime_trace import trace_event
+
+        trace_event(
+            "LIVE",
+            "LIVE_SNAPSHOT_LOAD_PHASE",
+            repo_id=repo_id or None,
+            component=component,
+            elapsed_ms=round(
+                (time.monotonic() - started) * 1000.0,
+                3,
+            ),
+            count=count,
+            timing_semantics=(
+                "non_overlapping_load_snapshot_phase"
+            ),
+        )
+    except Exception:
+        pass
+
+
 def load_snapshot(
     cache_dir: str | Path,
     expected_state_id: str = "",
@@ -1389,7 +1417,14 @@ def load_snapshot(
     """Load one complete published snapshot, rejecting incompatible identities."""
 
     state_file, _, _ = _paths(cache_dir)
+
+    phase_started = time.monotonic()
     metadata = read_metadata(cache_dir)
+    _trace_snapshot_load_phase(
+        "metadata_read",
+        phase_started,
+        repo_id=expected_repo_id,
+    )
     normalized_root = (
         str(Path(expected_root_path).expanduser().resolve())
         if expected_root_path
@@ -1407,8 +1442,15 @@ def load_snapshot(
     if metadata.state_file:
         state_file = state_file.parent / metadata.state_file
     try:
+        phase_started = time.monotonic()
         with state_file.open("rb") as stream:
             payload = _SnapshotUnpickler(stream).load()
+        _trace_snapshot_load_phase(
+            "core_pickle_unpickle",
+            phase_started,
+            repo_id=expected_repo_id,
+        )
+
         if isinstance(payload, dict) and set(payload) == {"metadata", "state"}:
             embedded = payload["metadata"]
             embedded_metadata = LiveStateMetadata(
@@ -1459,11 +1501,18 @@ def load_snapshot(
                 ):
                     return None
 
+                phase_started = time.monotonic()
                 split_lineage = (
                     _load_split_lineage_generation(
                         cache_dir,
                         metadata,
                     )
+                )
+                _trace_snapshot_load_phase(
+                    "split_lineage_load",
+                    phase_started,
+                    repo_id=expected_repo_id,
+                    count=len(split_lineage),
                 )
 
                 try:
@@ -1475,13 +1524,47 @@ def load_snapshot(
                 except AttributeError:
                     return None
 
-            state_obj = _normalize_lineage_query_index_state(
-                _normalize_lineage_facts_state(
-                    _normalize_symbol_call_facts(
-                        raw_state
+            phase_started = time.monotonic()
+            state_obj = _normalize_symbol_call_facts(
+                raw_state
+            )
+            _trace_snapshot_load_phase(
+                "normalize_symbol_call_facts",
+                phase_started,
+                repo_id=expected_repo_id,
+            )
+
+            phase_started = time.monotonic()
+            state_obj = _normalize_lineage_facts_state(
+                state_obj
+            )
+            _trace_snapshot_load_phase(
+                "normalize_lineage_facts_state",
+                phase_started,
+                repo_id=expected_repo_id,
+                count=len(
+                    getattr(
+                        state_obj,
+                        "lineage_facts_by_source",
+                        {},
                     )
+                    or {}
+                ),
+            )
+
+            phase_started = time.monotonic()
+            state_obj = (
+                _normalize_lineage_query_index_state(
+                    state_obj
                 )
             )
+            _trace_snapshot_load_phase(
+                "normalize_lineage_query_index_state",
+                phase_started,
+                repo_id=expected_repo_id,
+            )
+
+            phase_started = time.monotonic()
             state_revision = (
                 state_obj.get("revision") if isinstance(state_obj, dict)
                 else getattr(state_obj, "revision", None)
@@ -1586,6 +1669,12 @@ def load_snapshot(
                         setattr(state_obj, "shared_usage_clusters_state", "deferred")
                     except AttributeError:
                         pass
+
+            _trace_snapshot_load_phase(
+                "post_normalization_finalize",
+                phase_started,
+                repo_id=expected_repo_id,
+            )
             return state_obj, metadata
         if metadata.lineage_manifest_file:
             return None

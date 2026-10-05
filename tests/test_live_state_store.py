@@ -280,6 +280,95 @@ def test_exact_schema_13_splits_lineage_and_roundtrips(tmp_path):
     )
 
 
+def test_split_snapshot_load_emits_non_overlapping_phase_timings(tmp_path):
+    import contextor.core.runtime_trace as runtime_trace
+
+    state = _split_lineage_test_state(
+        "pkg/a.py",
+        "pkg/b.py",
+    )
+
+    save_snapshot(
+        state,
+        tmp_path,
+        "sid",
+        exact_revision=1,
+        repo_id="repo-test",
+        root_path=str(tmp_path),
+        file_state_payload={
+            "_meta": {
+                "state_id": "sid",
+                "revision": 1,
+            },
+            "files": {},
+        },
+    )
+
+    with runtime_trace.capture_trace_events() as events:
+        loaded = load_snapshot(
+            tmp_path,
+            "sid",
+            expected_repo_id="repo-test",
+            expected_root_path=str(tmp_path),
+        )
+
+    assert loaded is not None
+
+    phase_events = [
+        item
+        for item in events
+        if item.get("ev")
+        == "LIVE_SNAPSHOT_LOAD_PHASE"
+    ]
+
+    assert [
+        item["component"]
+        for item in phase_events
+    ] == [
+        "metadata_read",
+        "core_pickle_unpickle",
+        "split_lineage_load",
+        "normalize_symbol_call_facts",
+        "normalize_lineage_facts_state",
+        "normalize_lineage_query_index_state",
+        "post_normalization_finalize",
+    ]
+
+    assert all(
+        item["repo_id"] == "repo-test"
+        for item in phase_events
+    )
+
+    assert all(
+        isinstance(item["elapsed_ms"], (int, float))
+        and item["elapsed_ms"] >= 0
+        for item in phase_events
+    )
+
+    split_event = next(
+        item
+        for item in phase_events
+        if item["component"]
+        == "split_lineage_load"
+    )
+
+    lineage_normalize_event = next(
+        item
+        for item in phase_events
+        if item["component"]
+        == "normalize_lineage_facts_state"
+    )
+
+    assert split_event["count"] == 2
+    assert lineage_normalize_event["count"] == 2
+
+    assert all(
+        item["timing_semantics"]
+        == "non_overlapping_load_snapshot_phase"
+        for item in phase_events
+    )
+
+
 def test_exact_split_lineage_reuses_unchanged_source_chunks_by_identity(
     tmp_path,
 ):
