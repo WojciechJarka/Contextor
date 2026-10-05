@@ -1,4 +1,4 @@
-##  2026-10-05 Patch
+##  2026-10-05 Patch - multi-repository LIVE runtime support
 
 Added runtime phase telemetry for split-lineage snapshot loading and used it to isolate cold-start cost to lineage chunk loading and deep persisted-lineage revalidation.
 
