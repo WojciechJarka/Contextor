@@ -1,3 +1,13 @@
+##  2026-10-05 Patch
+
+Added runtime phase telemetry for split-lineage snapshot loading and used it to isolate cold-start cost to lineage chunk loading and deep persisted-lineage revalidation.
+
+Introduced a non-authoritative schema-2 per-chunk lineage validation cache keyed by chunk identity, semantic version and SHA-256 content. Unchanged chunks now retain trusted validation across snapshot revision churn, while changed or corrupted chunks fall back to full fail-closed revalidation without altering canonical snapshot or lineage-manifest schemas.
+
+Runtime-certified the warm lineage fast path on Spiral Prophet: normalize_lineage_facts_state dropped from 6.594 s to effectively 0 ms, stable warm load_snapshot fell from 11.313 s cold to ~4.1 s, and all 1,065 lineage chunks retained trust across canonical revision churn, reducing pre-endpoint startup time by about 63%.
+
+
+
 ##  2026-09-25 Patch — Persistent State, Analysis Performance and Shared MCP Runtime
 
 - Reworked canonical LIVE persistence into schema 1.3 with a compact core snapshot, immutable per-source lineage chunks and a revision manifest. Unchanged lineage chunks are now reused across revisions while metadata remains the sole atomic authority pointer, preserving crash safety and backward loading of older snapshot formats.
