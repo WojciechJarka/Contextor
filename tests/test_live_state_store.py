@@ -369,6 +369,240 @@ def test_split_snapshot_load_emits_non_overlapping_phase_timings(tmp_path):
     )
 
 
+def test_split_lineage_validation_cache_skips_repeat_deep_revalidation(
+    tmp_path,
+    monkeypatch,
+):
+    import json
+
+    import contextor.core.live_state.store as store
+
+    state = _split_lineage_test_state(
+        "pkg/a.py",
+        "pkg/b.py",
+    )
+
+    metadata = save_snapshot(
+        state,
+        tmp_path,
+        "sid",
+        exact_revision=1,
+        repo_id="repo-test",
+        root_path=str(tmp_path),
+        file_state_payload={
+            "_meta": {
+                "state_id": "sid",
+                "revision": 1,
+            },
+            "files": {},
+        },
+    )
+
+    first_loaded = load_snapshot(
+        tmp_path,
+        "sid",
+        expected_repo_id="repo-test",
+        expected_root_path=str(tmp_path),
+    )
+
+    assert first_loaded is not None
+
+    cache_path = (
+        tmp_path
+        / store._LINEAGE_VALIDATION_CACHE_NAME
+    )
+
+    assert cache_path.is_file()
+
+    cache_payload = json.loads(
+        cache_path.read_text(
+            encoding="utf-8"
+        )
+    )
+
+    assert (
+        cache_payload[
+            "schema_version"
+        ]
+        == store.LINEAGE_VALIDATION_CACHE_SCHEMA_VERSION
+    )
+    assert (
+        cache_payload[
+            "validation_contract_version"
+        ]
+        == store.LINEAGE_VALIDATION_CONTRACT_VERSION
+    )
+    assert (
+        cache_payload[
+            "lineage_manifest_file"
+        ]
+        == metadata.lineage_manifest_file
+    )
+    assert (
+        set(
+            cache_payload[
+                "chunks"
+            ]
+        )
+        == {
+            "pkg/a.py",
+            "pkg/b.py",
+        }
+    )
+
+    def unexpected_revalidation(
+        source_slice,
+    ):
+        raise AssertionError(
+            "trusted lineage chunk was deeply revalidated"
+        )
+
+    monkeypatch.setattr(
+        store,
+        "_revalidate_lineage_slice",
+        unexpected_revalidation,
+    )
+
+    second_loaded = load_snapshot(
+        tmp_path,
+        "sid",
+        expected_repo_id="repo-test",
+        expected_root_path=str(tmp_path),
+    )
+
+    assert second_loaded is not None
+
+    second_state, second_metadata = (
+        second_loaded
+    )
+
+    assert second_metadata == metadata
+    assert (
+        second_state.lineage_facts_by_source
+        == first_loaded[
+            0
+        ].lineage_facts_by_source
+    )
+
+
+def test_split_lineage_validation_cache_contract_mismatch_revalidates(
+    tmp_path,
+    monkeypatch,
+):
+    import json
+
+    import contextor.core.live_state.store as store
+
+    state = _split_lineage_test_state(
+        "pkg/a.py",
+        "pkg/b.py",
+    )
+
+    metadata = save_snapshot(
+        state,
+        tmp_path,
+        "sid",
+        exact_revision=1,
+        repo_id="repo-test",
+        root_path=str(tmp_path),
+        file_state_payload={
+            "_meta": {
+                "state_id": "sid",
+                "revision": 1,
+            },
+            "files": {},
+        },
+    )
+
+    first_loaded = load_snapshot(
+        tmp_path,
+        "sid",
+        expected_repo_id="repo-test",
+        expected_root_path=str(tmp_path),
+    )
+
+    assert first_loaded is not None
+
+    cache_path = (
+        tmp_path
+        / store._LINEAGE_VALIDATION_CACHE_NAME
+    )
+
+    cache_payload = json.loads(
+        cache_path.read_text(
+            encoding="utf-8"
+        )
+    )
+
+    cache_payload[
+        "validation_contract_version"
+    ] = "stale"
+
+    cache_path.write_text(
+        json.dumps(
+            cache_payload,
+            indent=2,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+    original = (
+        store._revalidate_lineage_slice
+    )
+    calls = []
+
+    def counting_revalidation(
+        source_slice,
+    ):
+        calls.append(
+            source_slice.manifest.source_key
+        )
+        return original(
+            source_slice
+        )
+
+    monkeypatch.setattr(
+        store,
+        "_revalidate_lineage_slice",
+        counting_revalidation,
+    )
+
+    second_loaded = load_snapshot(
+        tmp_path,
+        "sid",
+        expected_repo_id="repo-test",
+        expected_root_path=str(tmp_path),
+    )
+
+    assert second_loaded is not None
+
+    assert sorted(calls) == [
+        "pkg/a.py",
+        "pkg/b.py",
+    ]
+
+    rewritten = json.loads(
+        cache_path.read_text(
+            encoding="utf-8"
+        )
+    )
+
+    assert (
+        rewritten[
+            "validation_contract_version"
+        ]
+        == store.LINEAGE_VALIDATION_CONTRACT_VERSION
+    )
+
+    assert (
+        second_loaded[
+            1
+        ]
+        == metadata
+    )
+
+
 def test_exact_split_lineage_reuses_unchanged_source_chunks_by_identity(
     tmp_path,
 ):

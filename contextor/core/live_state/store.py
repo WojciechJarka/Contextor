@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import copy
+import hashlib
+import io
 import json
 import os
 import pickle
@@ -38,6 +40,10 @@ from contextor.core.domain.lineage_facts import (
 
 LIVE_STATE_SCHEMA_VERSION = "1.3"
 LINEAGE_MANIFEST_SCHEMA_VERSION = "1.0"
+
+LINEAGE_VALIDATION_CACHE_SCHEMA_VERSION = "1"
+LINEAGE_VALIDATION_CONTRACT_VERSION = "1"
+_LINEAGE_VALIDATION_CACHE_NAME = "lineage_validation_cache.json"
 
 
 class _LegacySymbolCallFact:
@@ -292,7 +298,11 @@ def _revalidate_lineage_slice(
     )
 
 
-def _normalize_lineage_facts_state(state: Any) -> Any:
+def _normalize_lineage_facts_state(
+    state: Any,
+    *,
+    revalidate_slices: bool = True,
+) -> Any:
     """Normalize/validate persisted materialized lineage without source work."""
 
     if state is None or isinstance(state, dict) or not hasattr(state, "__dict__"):
@@ -353,7 +363,20 @@ def _normalize_lineage_facts_state(state: Any) -> Any:
                 raise pickle.UnpicklingError(
                     "Lineage source key must be a non-empty string."
                 )
-            rebuilt = _revalidate_lineage_slice(source_slice)
+            if revalidate_slices:
+                rebuilt = _revalidate_lineage_slice(
+                    source_slice
+                )
+            else:
+                if not isinstance(
+                    source_slice,
+                    MaterializedLineageSourceFacts,
+                ):
+                    raise pickle.UnpicklingError(
+                        "Lineage source value has invalid type."
+                    )
+                rebuilt = source_slice
+
             if rebuilt.manifest.source_key != source_key:
                 raise pickle.UnpicklingError(
                     "Lineage mapping key does not match manifest source_key."
@@ -452,6 +475,276 @@ def _snapshot_child_path(
         )
 
     return Path(cache_dir) / candidate
+
+
+def _sha256_bytes(payload: bytes) -> str:
+    return hashlib.sha256(payload).hexdigest()
+
+
+def _is_sha256_hex(value: object) -> bool:
+    return (
+        isinstance(value, str)
+        and len(value) == 64
+        and all(
+            character in "0123456789abcdef"
+            for character in value
+        )
+    )
+
+
+def _lineage_validation_cache_path(
+    cache_dir: str | Path,
+) -> Path:
+    return (
+        Path(cache_dir)
+        / _LINEAGE_VALIDATION_CACHE_NAME
+    )
+
+
+def _read_lineage_validation_cache(
+    cache_dir: str | Path,
+    *,
+    metadata: LiveStateMetadata,
+    manifest_sha256: str,
+) -> dict[str, dict[str, str]] | None:
+    path = _lineage_validation_cache_path(
+        cache_dir
+    )
+
+    try:
+        payload = json.loads(
+            path.read_text(
+                encoding="utf-8"
+            )
+        )
+    except (
+        FileNotFoundError,
+        OSError,
+        json.JSONDecodeError,
+        TypeError,
+        ValueError,
+    ):
+        return None
+
+    if not isinstance(payload, dict):
+        return None
+
+    if (
+        payload.get("schema_version")
+        != LINEAGE_VALIDATION_CACHE_SCHEMA_VERSION
+        or payload.get(
+            "validation_contract_version"
+        )
+        != LINEAGE_VALIDATION_CONTRACT_VERSION
+        or payload.get("repo_id")
+        != metadata.repo_id
+        or payload.get("state_id")
+        != metadata.state_id
+        or payload.get("revision")
+        != metadata.revision
+        or payload.get(
+            "lineage_manifest_file"
+        )
+        != metadata.lineage_manifest_file
+        or payload.get("manifest_sha256")
+        != manifest_sha256
+        or payload.get(
+            "lineage_semantic_version"
+        )
+        != LINEAGE_FACTS_SEMANTIC_VERSION
+    ):
+        return None
+
+    raw_chunks = payload.get("chunks")
+
+    if not isinstance(raw_chunks, dict):
+        return None
+
+    chunks: dict[
+        str,
+        dict[str, str],
+    ] = {}
+
+    for source_key, entry in raw_chunks.items():
+        if (
+            not isinstance(source_key, str)
+            or not source_key
+            or not isinstance(entry, dict)
+        ):
+            return None
+
+        file_name = entry.get("file")
+        sha256 = entry.get("sha256")
+
+        if (
+            not isinstance(file_name, str)
+            or not file_name
+            or not _is_sha256_hex(sha256)
+        ):
+            return None
+
+        try:
+            _snapshot_child_path(
+                cache_dir,
+                file_name,
+                label=(
+                    "Lineage validation "
+                    "cache chunk"
+                ),
+            )
+        except pickle.UnpicklingError:
+            return None
+
+        chunks[source_key] = {
+            "file": file_name,
+            "sha256": sha256,
+        }
+
+    return chunks
+
+
+def _write_lineage_validation_cache(
+    cache_dir: str | Path,
+    *,
+    metadata: LiveStateMetadata,
+    manifest_sha256: str,
+    chunks: dict[
+        str,
+        dict[str, str],
+    ],
+) -> None:
+    path = _lineage_validation_cache_path(
+        cache_dir
+    )
+    temporary = path.with_name(
+        f".{path.name}.{os.getpid()}."
+        f"{uuid.uuid4().hex}.tmp"
+    )
+
+    payload = {
+        "schema_version": (
+            LINEAGE_VALIDATION_CACHE_SCHEMA_VERSION
+        ),
+        "validation_contract_version": (
+            LINEAGE_VALIDATION_CONTRACT_VERSION
+        ),
+        "repo_id": metadata.repo_id,
+        "state_id": metadata.state_id,
+        "revision": metadata.revision,
+        "lineage_manifest_file": (
+            metadata.lineage_manifest_file
+        ),
+        "manifest_sha256": manifest_sha256,
+        "lineage_semantic_version": (
+            LINEAGE_FACTS_SEMANTIC_VERSION
+        ),
+        "chunks": {
+            source_key: dict(
+                chunks[source_key]
+            )
+            for source_key in sorted(chunks)
+        },
+    }
+
+    try:
+        with temporary.open(
+            "w",
+            encoding="utf-8",
+            newline="\n",
+        ) as stream:
+            json.dump(
+                payload,
+                stream,
+                indent=2,
+                sort_keys=True,
+            )
+            stream.write("\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+
+        os.replace(
+            temporary,
+            path,
+        )
+
+    except OSError:
+        pass
+
+    finally:
+        try:
+            temporary.unlink()
+        except FileNotFoundError:
+            pass
+        except OSError:
+            pass
+
+
+def _lineage_slice_validation_cache_eligible(
+    source_slice: object,
+) -> bool:
+    if not isinstance(
+        source_slice,
+        MaterializedLineageSourceFacts,
+    ):
+        return False
+
+    manifest = source_slice.manifest
+
+    if not isinstance(
+        manifest,
+        SourceLineageManifest,
+    ):
+        return False
+
+    manifest_boolean_fields = (
+        "semantic_anchor_bindings_materialized",
+        "anchor_ownership_materialized",
+        "flow_ownership_materialized",
+        "interface_descriptors_materialized",
+    )
+
+    if any(
+        not hasattr(manifest, field)
+        or not isinstance(
+            getattr(manifest, field),
+            bool,
+        )
+        for field in manifest_boolean_fields
+    ):
+        return False
+
+    if any(
+        not hasattr(source_slice, field)
+        for field in (
+            "anchors",
+            "flows",
+            "surfaces",
+            "interface_descriptors",
+            "semantic_endpoint_origins",
+            "semantic_anchors",
+        )
+    ):
+        return False
+
+    if any(
+        not hasattr(
+            anchor,
+            "owner_local_id",
+        )
+        for anchor in source_slice.anchors
+    ):
+        return False
+
+    if any(
+        not hasattr(
+            flow,
+            "owner_local_id",
+        )
+        for flow in source_slice.flows
+    ):
+        return False
+
+    return True
 
 
 def _write_split_lineage_generation(
@@ -819,13 +1112,48 @@ def _reusable_lineage_manifest_sources(
 def _load_split_lineage_generation(
     cache_dir: str | Path,
     metadata: LiveStateMetadata,
-) -> dict[
+) -> tuple[
+    dict[
+        str,
+        MaterializedLineageSourceFacts,
+    ],
+    bool,
+    dict[
+        str,
+        dict[str, str],
+    ],
     str,
-    MaterializedLineageSourceFacts,
 ]:
     payload = _read_split_lineage_manifest(
         cache_dir,
         metadata,
+    )
+
+    manifest_path = _snapshot_child_path(
+        cache_dir,
+        metadata.lineage_manifest_file,
+        label="Lineage manifest",
+    )
+
+    try:
+        manifest_sha256 = _sha256_bytes(
+            manifest_path.read_bytes()
+        )
+    except OSError as exc:
+        raise pickle.UnpicklingError(
+            "Invalid lineage manifest."
+        ) from exc
+
+    validation_cache = (
+        _read_lineage_validation_cache(
+            cache_dir,
+            metadata=metadata,
+            manifest_sha256=manifest_sha256,
+        )
+    )
+
+    validation_cache_complete = (
+        validation_cache is not None
     )
 
     raw_sources = payload[
@@ -835,6 +1163,11 @@ def _load_split_lineage_generation(
     loaded_sources: dict[
         str,
         MaterializedLineageSourceFacts,
+    ] = {}
+
+    chunk_hashes: dict[
+        str,
+        dict[str, str],
     ] = {}
 
     for source_key in sorted(
@@ -901,14 +1234,21 @@ def _load_split_lineage_generation(
         )
 
         try:
-            with chunk_path.open(
-                "rb"
-            ) as stream:
-                source_slice = (
-                    _SnapshotUnpickler(
-                        stream
-                    ).load()
+            chunk_bytes = (
+                chunk_path.read_bytes()
+            )
+            actual_sha256 = (
+                _sha256_bytes(
+                    chunk_bytes
                 )
+            )
+            source_slice = (
+                _SnapshotUnpickler(
+                    io.BytesIO(
+                        chunk_bytes
+                    )
+                ).load()
+            )
         except (
             OSError,
             pickle.PickleError,
@@ -917,6 +1257,38 @@ def _load_split_lineage_generation(
             raise pickle.UnpicklingError(
                 "Invalid lineage source chunk."
             ) from exc
+
+        chunk_hashes[
+            source_key
+        ] = {
+            "file": file_name,
+            "sha256": actual_sha256,
+        }
+
+        if validation_cache is not None:
+            cached_entry = (
+                validation_cache.get(
+                    source_key
+                )
+            )
+
+            if (
+                not isinstance(
+                    cached_entry,
+                    dict,
+                )
+                or cached_entry.get(
+                    "file"
+                )
+                != file_name
+                or cached_entry.get(
+                    "sha256"
+                )
+                != actual_sha256
+            ):
+                validation_cache_complete = (
+                    False
+                )
 
         if not isinstance(
             source_slice,
@@ -954,7 +1326,19 @@ def _load_split_lineage_generation(
             source_key
         ] = source_slice
 
-    return loaded_sources
+    if (
+        validation_cache is not None
+        and set(validation_cache)
+        != set(raw_sources)
+    ):
+        validation_cache_complete = False
+
+    return (
+        loaded_sources,
+        validation_cache_complete,
+        chunk_hashes,
+        manifest_sha256,
+    )
 
 
 class SnapshotRevisionConflict(ValueError):
@@ -1481,6 +1865,11 @@ def load_snapshot(
                 "state"
             ]
 
+            lineage_validation_trusted = False
+            lineage_validation_cache_eligible = False
+            lineage_validation_chunks = None
+            lineage_validation_manifest_sha256 = None
+
             if metadata.lineage_manifest_file:
                 if (
                     metadata.schema_version
@@ -1502,12 +1891,24 @@ def load_snapshot(
                     return None
 
                 phase_started = time.monotonic()
-                split_lineage = (
-                    _load_split_lineage_generation(
-                        cache_dir,
-                        metadata,
-                    )
+                (
+                    split_lineage,
+                    lineage_validation_trusted,
+                    lineage_validation_chunks,
+                    lineage_validation_manifest_sha256,
+                ) = _load_split_lineage_generation(
+                    cache_dir,
+                    metadata,
                 )
+
+                lineage_validation_cache_eligible = all(
+                    _lineage_slice_validation_cache_eligible(
+                        source_slice
+                    )
+                    for source_slice
+                    in split_lineage.values()
+                )
+
                 _trace_snapshot_load_phase(
                     "split_lineage_load",
                     phase_started,
@@ -1536,7 +1937,10 @@ def load_snapshot(
 
             phase_started = time.monotonic()
             state_obj = _normalize_lineage_facts_state(
-                state_obj
+                state_obj,
+                revalidate_slices=(
+                    not lineage_validation_trusted
+                ),
             )
             _trace_snapshot_load_phase(
                 "normalize_lineage_facts_state",
@@ -1669,6 +2073,26 @@ def load_snapshot(
                         setattr(state_obj, "shared_usage_clusters_state", "deferred")
                     except AttributeError:
                         pass
+
+            if (
+                metadata.lineage_manifest_file
+                and not lineage_validation_trusted
+                and lineage_validation_cache_eligible
+                and lineage_validation_chunks
+                is not None
+                and lineage_validation_manifest_sha256
+                is not None
+            ):
+                _write_lineage_validation_cache(
+                    cache_dir,
+                    metadata=metadata,
+                    manifest_sha256=(
+                        lineage_validation_manifest_sha256
+                    ),
+                    chunks=(
+                        lineage_validation_chunks
+                    ),
+                )
 
             _trace_snapshot_load_phase(
                 "post_normalization_finalize",
