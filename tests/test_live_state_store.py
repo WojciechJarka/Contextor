@@ -603,6 +603,171 @@ def test_split_lineage_validation_cache_contract_mismatch_revalidates(
     )
 
 
+def test_split_lineage_validation_cache_chunk_mutation_falls_back_and_fails_closed(
+    tmp_path,
+    monkeypatch,
+):
+    import json
+    import pickle
+
+    import contextor.core.live_state.store as store
+
+    state = _split_lineage_test_state(
+        "pkg/a.py",
+        "pkg/b.py",
+    )
+
+    metadata = save_snapshot(
+        state,
+        tmp_path,
+        "sid",
+        exact_revision=1,
+        repo_id="repo-test",
+        root_path=str(tmp_path),
+        file_state_payload={
+            "_meta": {
+                "state_id": "sid",
+                "revision": 1,
+            },
+            "files": {},
+        },
+    )
+
+    first_loaded = load_snapshot(
+        tmp_path,
+        "sid",
+        expected_repo_id="repo-test",
+        expected_root_path=str(tmp_path),
+    )
+
+    assert first_loaded is not None
+
+    cache_path = (
+        tmp_path
+        / store._LINEAGE_VALIDATION_CACHE_NAME
+    )
+
+    assert cache_path.is_file()
+
+    cache_payload = json.loads(
+        cache_path.read_text(
+            encoding="utf-8"
+        )
+    )
+
+    lineage_manifest = json.loads(
+        (
+            tmp_path
+            / metadata.lineage_manifest_file
+        ).read_text(
+            encoding="utf-8"
+        )
+    )
+
+    chunk_file = (
+        lineage_manifest[
+            "sources"
+        ][
+            "pkg/a.py"
+        ][
+            "file"
+        ]
+    )
+
+    chunk_path = (
+        tmp_path
+        / chunk_file
+    )
+
+    cached_sha256 = (
+        cache_payload[
+            "chunks"
+        ][
+            "pkg/a.py"
+        ][
+            "sha256"
+        ]
+    )
+
+    source_slice = (
+        first_loaded[
+            0
+        ].lineage_facts_by_source[
+            "pkg/a.py"
+        ]
+    )
+
+    object.__setattr__(
+        source_slice.manifest,
+        "flow_count",
+        source_slice.manifest.flow_count + 1,
+    )
+
+    chunk_path.write_bytes(
+        pickle.dumps(
+            source_slice
+        )
+    )
+
+    assert (
+        store._sha256_bytes(
+            chunk_path.read_bytes()
+        )
+        != cached_sha256
+    )
+
+    original_revalidate = (
+        store._revalidate_lineage_slice
+    )
+    calls = []
+
+    def counting_revalidation(
+        candidate,
+    ):
+        calls.append(
+            candidate.manifest.source_key
+        )
+        return original_revalidate(
+            candidate
+        )
+
+    monkeypatch.setattr(
+        store,
+        "_revalidate_lineage_slice",
+        counting_revalidation,
+    )
+
+    second_loaded = load_snapshot(
+        tmp_path,
+        "sid",
+        expected_repo_id="repo-test",
+        expected_root_path=str(tmp_path),
+    )
+
+    assert second_loaded is None
+
+    assert calls == [
+        "pkg/a.py",
+    ]
+
+    unchanged_cache = json.loads(
+        cache_path.read_text(
+            encoding="utf-8"
+        )
+    )
+
+    assert (
+        unchanged_cache[
+            "chunks"
+        ][
+            "pkg/a.py"
+        ][
+            "sha256"
+        ]
+        == cached_sha256
+    )
+
+
 def test_exact_split_lineage_reuses_unchanged_source_chunks_by_identity(
     tmp_path,
 ):
