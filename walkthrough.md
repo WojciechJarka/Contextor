@@ -1,87 +1,329 @@
-# CPA_FILE_UPDATE_TRANSITIVE_PROPAGATION_REPRO
+# CPA_FILE_UPDATE_AFFECTED_CANONICAL_FIXPOINT
 
-STATUS=REPRODUCER_FAILED_AS_EXPECTED
-HEAD=a7a4a3645ab0a642380833e78542d5aa8a894432
+STATUS=BLOCKED/FAIL
 
-ACCEPTED_PREEXISTING_WORKTREE
-- At step start, git status was clean at HEAD above.
-- The previously approved canonical definition payload fix is already present in HEAD and was treated as accepted preexisting work.
-- The test file had no diff against HEAD before this task.
-- The current task changed only the test file listed under FILES_CHANGED; no production file changed.
+HEAD_BEFORE=61f85a45a7d87def445e72ca94da48ec62103447
 
-SOURCE_DRIFT=NONE
-- Exact target file and insertion anchor matched current HEAD.
-- The canonical key a::foo is consistent with the existing module::symbol target contract and existing literal test fixtures such as a::foo and target::foo.
-- Production files compare cleanly against HEAD.
+ACCEPTED_PREEXISTING_WORKTREE=The previously accepted late-provider reproducer was already present at HEAD and was retained. The worktree was clean before this task; this task adds its required execution-trace assertion and the two requested tests.
 
-REPRO_CONTRACT
-- Baseline files: a.py defines VALUE only; b.py imports foo from a; c.py imports b and calls b.foo().
-- Baseline analysis calls update_file for A, B, and C.
-- The only post-baseline disk write and update_file call is for A, adding foo().
-- The test compares incremental canonical artifact_consumption[a::foo] with a fresh _build_full_static_state(tmp_path) oracle. B and C are not rewritten or manually updated.
+SOURCE_DRIFT=NONE. The exact old recompute loop was present at HEAD in `contextor/core/analysis/incremental/plan_executor.py`; the named helper anchor was present. Only the allowed production file and test file are changed. `git diff --check` completed without whitespace errors (Git printed only its LF-to-CRLF working-copy notices).
 
-CONTEXTOR_AND_SOURCE_EVIDENCE
-- Contextor get_symbol_implementation resolved _find_dependent_consumers to contextor/core/analysis/refresh_planner.py:14-56; its implementation iterates module usage references and returns a set of dependent module paths.
-- Contextor get_symbol_implementation resolved _build_reexport_map to contextor/core/reference/shared.py:50-129; its implementation computes a cycle-safe transitive re-export identity map. The executor imports the shared re-export helper through contextor.core.reference.engine.
-- Contextor get_symbol_implementation resolved _rebuild_consumer_slice to contextor/core/analysis/incremental/plan_executor.py:260-470; it rebuilds one consumer's artifact_consumption slice using the supplied re-export map.
-- Contextor get_symbol_implementation resolved execute_refresh_plan to contextor/core/analysis/incremental/plan_executor.py:574-1006.
-- Contextor get_source_range returned the literal executor block at lines 674-705: it loops once over plan.recompute_modules, rebuilding each listed consumer slice.
-- Contextor get_source_range returned lines 735-765: the artifact_consumption patch rebuilds delta.module_path using new_usage; this is the changed file A in this scenario.
-- Contextor search_source returned the existing _build_full_static_state helper in tests/test_completeness_freshness_parity_proof.py:33-42. It runs ContextorFacade.analyze_project(repo_dir), hydrates the repository engine, and returns that fresh state.
-- Contextor artifact_consumption fact lineage resolved with status=ok, owner=RepositoryAnalysisState.artifact_consumption, provenance=live, canonical_state=fresh, resync_required=false at revision 1474. _rebuild_consumer_slice is listed as the incremental consumer-slice producer. The narrower get_symbol_lineage request for _rebuild_consumer_slice returned confirmation_required due output size; complete implementation source was separately obtained with get_symbol_implementation.
+CANONICAL_OWNER=Canonical `artifact_consumption` is owned by `RepositoryAnalysisState.artifact_consumption`; `_rebuild_consumer_slice` produces a candidate consumer slice, `_apply_delta_and_commit` writes committed state, and the facade materializes full-analysis state. Contextor lineage at revision 1474 previously resolved this ownership; no new owner or index was introduced.
 
-DIRECT_RECOMPUTE_SET
-- Observed from the actual failing test result: result.shadow_plan.recompute_modules=('b',).
-- B was selected; C was not selected.
+CONTRACT_IMPLEMENTED=Added the requested deterministic RAM signature helper and replaced the one-pass recompute loop with a queue seeded by `plan.recompute_modules`. Each consumer is processed at most once. Downstream consumers are enqueued only when that consumer's canonical slice changes. Existing ambiguity behavior remains fail-closed. No RefreshPlanner, persistence, watcher, graph, or full-analysis production code was changed.
 
-INCREMENTAL_ARTIFACT_CONSUMPTION
-{'consumers': ['b'], 'channels': {'b': ['api_imports']}}
+PROPAGATION_ALGORITHM=The queue processes the initial direct seeds, snapshots each consumer's canonical slice, rebuilds it from existing candidate facts, then compares the result. An unchanged slice stops propagation at that node. A changed slice discovers only direct dependent consumers from existing `candidate.module_usages`; sorted insertion plus scheduled/processed sets gives deterministic, duplicate-free execution. The changed source module is excluded from requeueing.
 
-FULL_ORACLE_ARTIFACT_CONSUMPTION
-{'consumers': ['b', 'c'], 'channels': {'c': ['direct_calls'], 'b': ['api_imports']}}
+EVIDENCE_CLASSIFICATION
+DIRECT_EVIDENCE=The targeted pytest output printed all three seed/execution tuples and reported two passes plus the exact `ArchitectureCycle` error in the third node. The LIVE event response directly reported revisions 1475-1478, latest revision 1478, continuous event history, and no resync requirement.
+CODE_PATH_PROVED=The final diff shows the propagation queue consumes existing candidate RAM facts and calls `_find_dependent_consumers` with `candidate.module_usages`; no downstream disk or parse call is in the loop.
+CONTRACT_PROVED=Late-provider trace/parity and stable-slice bounded work/parity passed their exact assertions. The cycle no-duplicate assertion passed; cycle full parity remains unproved because oracle setup failed.
+INFERENCE=NONE.
+UNKNOWN=Whether this cycle fixture is intended to be supported by `_build_full_static_state` despite its observed `ArchitectureCycle` validation error; no evidence establishes that contract.
+SOURCE_IO_EVIDENCE=CODE_PATH_PROVED by the final production diff: the fixpoint loop reads `candidate.module_usages`, `candidate.artifacts`, `candidate.modules`, the existing in-memory expected-target structures, and calls `_find_dependent_consumers(consumer_path, candidate.module_usages)`. The loop contains no downstream file read, AST parse, repository scan, or full-analysis call. The tests' explicitly requested `_build_full_static_state` oracle runs after incremental update and is separate from propagation.
 
-TEST_NODE_ID
-tests/test_completeness_freshness_parity_proof.py::test_transitive_reexport_late_provider_matches_full_oracle
+PLANNED_VS_EXECUTED_RECOMPUTE=
+- Late-provider: `shadow_plan.recompute_modules=('b',)`; execution trace `('b', 'c')`.
+- Stable slice: `shadow_plan.recompute_modules=('b',)`; execution trace `('b',)`.
+- Cycle fixture: `shadow_plan.recompute_modules=('b',)`; execution trace `('b',)`.
 
-TEST_RESULT
-- Ran only the requested node ID, using one physical Windows command:
-  & .\.venv\Scripts\python.exe -m pytest tests/test_completeness_freshness_parity_proof.py::test_transitive_reexport_late_provider_matches_full_oracle -q
-- Result: 1 failed in 5.70s.
-- Both oracle preconditions passed: b and c were present in full_entry.consumers.
-- Failure occurred at the incremental/full consumer-set comparison. The assertion showed incremental ['b'] versus full ['b', 'c']; recompute_modules=('b',).
+The tuples were captured during the single targeted pytest invocation using temporary print-only diagnostics; those prints were removed before final diff inspection. The final test code contains no diagnostics.
 
-CLASSIFICATION=CONFIRMED_TRANSITIVE_CANONICAL_PROPAGATION_DEFECT
+LATE_PROVIDER_PARITY=PASS. The requested existing reproducer passed; its new execution assertion observed `('b', 'c')`, and its incremental canonical state matched the fresh/full oracle.
 
-LIVE_AND_RUNTIME
-- No MCP update_file, analyze_project on the repository, process restart, or runtime reload was performed.
-- The desktop watcher later emitted UPDATED for the test file at revision 1474; continuity=continuous and resync_required=false. This is source indexing evidence only; the reproducer itself ran in a fresh pytest process as requested.
+STABLE_SLICE_BOUNDING=PASS. The test observed the required direct seed `('b',)`, execution remained `('b',)`, and full parity passed. No downstream consumer was recomputed.
 
-FILES_CHANGED
-- tests/test_completeness_freshness_parity_proof.py
-- walkthrough.md is this required report and is not counted as a source/test diff.
+CYCLE_TERMINATION=The cycle test observed seed and execution tuples `('b',)` and `('b',)`. Its no-duplicate assertion passed. The test then failed while constructing its requested full oracle: `ContextorFacade.analyze_project` returned `ValidationError(kind='ArchitectureCycle', message='Cyclic dependency detected in architecture: a -> b -> a', nodes=['a', 'b', 'a'], ...)`; `_build_full_static_state` asserts that there are no errors, so full parity was not reached. This is the exact blocker; no cause beyond that observed validation error is inferred.
 
-ACTUAL_DIFF / FULL_DIFF
+TARGETED_TESTS=Ran exactly one pytest command with only the three requested node IDs; no full suite and no additional node IDs were run. Command: `& .\.venv\Scripts\python.exe -m pytest tests/test_completeness_freshness_parity_proof.py::test_transitive_reexport_late_provider_matches_full_oracle tests/test_completeness_freshness_parity_proof.py::test_transitive_propagation_stops_when_direct_consumer_slice_is_unchanged tests/test_completeness_freshness_parity_proof.py::test_transitive_propagation_cycle_terminates_without_duplicate_recompute -q -s`
 
+TEST_RESULTS=Exit code 1; `2 passed, 1 failed in 10.74s`. The only failure was the cycle test's fresh/full oracle raising the `ArchitectureCycle` validation error described above. The incremental no-duplicate assertion itself passed. Because this exact requested node does not complete full parity, this step is BLOCKED/FAIL; no redesign or test weakening was applied.
+
+LIVE_EVIDENCE=Contextor `get_live_events(repo_path='C:\Temp\Contextor_Repo', after_revision=1474)` returned `latest_revision=1478`, `continuity='continuous'`, and `resync_required=false`. Revision 1475 is the `desktop_watcher` update for `plan_executor.py` (`status=UPDATED`, `blast_radius_state=fresh`, affected total 140 with a truncated item list). Revisions 1476–1478 are watcher updates for the test file, including the temporary diagnostic addition and its removal. No MCP `update_file` call or restart was performed. This evidence does not certify a reloaded MCP runtime.
+
+FILES_CHANGED=
+- `contextor/core/analysis/incremental/plan_executor.py`
+- `tests/test_completeness_freshness_parity_proof.py`
+
+MCP_RESTART_REQUIRED=YES_FOR_LATER_RUNTIME_CERTIFICATION
+
+NEXT_STEP=Wait for `proceduj`. The cycle fixture needs an accepted way to obtain a full oracle without the observed architecture-cycle validation error before the parity part of that test can be certified; no fixture redesign was performed in this step.
+
+## ACTUAL_DIFF — contextor/core/analysis/incremental/plan_executor.py
+
+```diff
+diff --git a/contextor/core/analysis/incremental/plan_executor.py b/contextor/core/analysis/incremental/plan_executor.py
+index 9ba2c1b..eb899d3 100644
+--- a/contextor/core/analysis/incremental/plan_executor.py
++++ b/contextor/core/analysis/incremental/plan_executor.py
+@@ -9,6 +9,7 @@ RefreshPlan execution pipeline for incremental updates:
+ - Complete isolation from disk I/O and threading locks
+ """
+ 
++from collections import deque
+ from dataclasses import dataclass
+ from pathlib import Path
+ from typing import Optional, List, Set, Dict, Tuple, Any, Mapping
+@@ -150,6 +151,87 @@ def _build_consumer_target_index(
+     return index
+ 
+ 
++def _consumer_slice_signature(
++    consumer: str,
++    consumption: Mapping[str, Any],
++    consumer_target_index: Mapping[str, Set[str]],
++) -> Tuple[Tuple[str, bool, Tuple[str, ...]], ...]:
++    """
++    Return a deterministic execution-local signature of one consumer's
++    canonical artifact_consumption slice.
++
++    This observes only canonical RAM state. It performs no source I/O.
++    """
++    rows: List[Tuple[str, bool, Tuple[str, ...]]] = []
++
++    for target in sorted(
++        consumer_target_index.get(
++            consumer,
++            set(),
++        )
++    ):
++        entry = consumption.get(
++            target,
++            {},
++        )
++        if not isinstance(entry, dict):
++            continue
++
++        consumers = entry.get(
++            "consumers",
++            (),
++        )
++        channels = entry.get(
++            "channels",
++            {},
++        )
++
++        is_consumer = (
++            consumer in consumers
++            if isinstance(
++                consumers,
++                (
++                    list,
++                    tuple,
++                    set,
++                ),
++            )
++            else False
++        )
++
++        consumer_channels: Tuple[str, ...] = ()
++        if isinstance(channels, dict):
++            raw_channels = channels.get(
++                consumer,
++                (),
++            )
++            if isinstance(
++                raw_channels,
++                (
++                    list,
++                    tuple,
++                    set,
++                ),
++            ):
++                consumer_channels = tuple(
++                    sorted(
++                        str(channel)
++                        for channel in raw_channels
++                    )
++                )
++
++        if is_consumer or consumer_channels:
++            rows.append(
++                (
++                    target,
++                    is_consumer,
++                    consumer_channels,
++                )
++            )
++
++    return tuple(rows)
++
++
+ def _build_dotted_target_index(
+     expected_targets: Set[str],
+ ) -> Dict[str, Tuple[str, ...]]:
+@@ -675,34 +757,97 @@ def execute_refresh_plan(
+     artifact_consumption_failed = False
+     executed_recompute: List[str] = []
+     if plan.recompute_modules:
++        from contextor.core.analysis.refresh_planner import (
++            _find_dependent_consumers,
++        )
++
+         new_reexports = _build_reexport_map(candidate.modules)
+-        for consumer_path in plan.recompute_modules:
+-            consumer_facts = candidate.module_usages.get(consumer_path)
+-            if consumer_facts:
+-                rebuilt_consumption, is_ambig = _rebuild_consumer_slice(
+-                    consumer=consumer_path,
+-                    consumer_facts=consumer_facts,
+-                    candidate_consumption=candidate.artifact_consumption,
+-                    candidate_artifacts=candidate.artifacts,
+-                    reexports=new_reexports,
+-                    expected_targets=expected_targets,
+-                    dotted_target_index=dotted_target_index,
+-                    consumer_target_index=consumer_target_index,
++
++        recompute_queue = deque(plan.recompute_modules)
++        scheduled_recompute = set(plan.recompute_modules)
++        processed_recompute: Set[str] = set()
++
++        while recompute_queue:
++            consumer_path = recompute_queue.popleft()
++
++            if consumer_path in processed_recompute:
++                continue
++
++            processed_recompute.add(consumer_path)
++
++            consumer_facts = candidate.module_usages.get(
++                consumer_path
++            )
++            if not consumer_facts:
++                continue
++
++            previous_slice = _consumer_slice_signature(
++                consumer_path,
++                candidate.artifact_consumption,
++                consumer_target_index,
++            )
++
++            rebuilt_consumption, is_ambig = _rebuild_consumer_slice(
++                consumer=consumer_path,
++                consumer_facts=consumer_facts,
++                candidate_consumption=candidate.artifact_consumption,
++                candidate_artifacts=candidate.artifacts,
++                reexports=new_reexports,
++                expected_targets=expected_targets,
++                dotted_target_index=dotted_target_index,
++                consumer_target_index=consumer_target_index,
++            )
++
++            if is_ambig:
++                candidate.artifact_consumption = _remove_consumer_slice(
++                    candidate.artifact_consumption,
++                    consumer_path,
++                )
++                consumer_target_index.pop(
++                    consumer_path,
++                    None,
++                )
++                artifact_consumption_failed = True
++                candidate.artifact_consumption_state = "stale"
++                break
++
++            candidate.artifact_consumption = rebuilt_consumption
++            executed_recompute.append(
++                consumer_path
++            )
++
++            current_slice = _consumer_slice_signature(
++                consumer_path,
++                candidate.artifact_consumption,
++                consumer_target_index,
++            )
++
++            if current_slice == previous_slice:
++                continue
++
++            downstream_consumers = _find_dependent_consumers(
++                consumer_path,
++                candidate.module_usages,
++            )
++
++            for downstream_consumer in sorted(
++                downstream_consumers
++            ):
++                if downstream_consumer == delta.module_path:
++                    continue
++
++                if downstream_consumer in processed_recompute:
++                    continue
++
++                if downstream_consumer in scheduled_recompute:
++                    continue
++
++                scheduled_recompute.add(
++                    downstream_consumer
++                )
++                recompute_queue.append(
++                    downstream_consumer
+                 )
+-                if is_ambig:
+-                    candidate.artifact_consumption = _remove_consumer_slice(
+-                        candidate.artifact_consumption,
+-                        consumer_path,
+-                    )
+-                    consumer_target_index.pop(
+-                        consumer_path,
+-                        None,
+-                    )
+-                    artifact_consumption_failed = True
+-                    candidate.artifact_consumption_state = "stale"
+-                    break
+-                candidate.artifact_consumption = rebuilt_consumption
+-                executed_recompute.append(consumer_path)
+ 
+     # 4. PATCH - apply fact families listed in plan.patch_families
+     executed_patch_families: List[str] = []
+```
+
+## ACTUAL_DIFF — tests/test_completeness_freshness_parity_proof.py
+
+```diff
 diff --git a/tests/test_completeness_freshness_parity_proof.py b/tests/test_completeness_freshness_parity_proof.py
-index 473672f..e1698f4 100644
+index e1698f4..1454d4f 100644
 --- a/tests/test_completeness_freshness_parity_proof.py
 +++ b/tests/test_completeness_freshness_parity_proof.py
-@@ -916,6 +916,71 @@ def test_incremental_global_add_matches_full_oracle(tmp_path):
+@@ -954,6 +954,10 @@ def test_transitive_reexport_late_provider_matches_full_oracle(tmp_path):
      )
-
-
-+def test_transitive_reexport_late_provider_matches_full_oracle(tmp_path):
+ 
+     result = engine.update_file(str(f_provider))
++    assert result.execution_trace["recompute_modules"] == (
++        "b",
++        "c",
++    )
+     oracle = _build_full_static_state(tmp_path)
+ 
+     incremental_entry = engine.state.artifact_consumption.get(
+@@ -981,6 +985,144 @@ def test_transitive_reexport_late_provider_matches_full_oracle(tmp_path):
+     _assert_full_parity(engine.state, oracle)
+ 
+ 
++def test_transitive_propagation_stops_when_direct_consumer_slice_is_unchanged(
++    tmp_path,
++):
 +    f_provider = tmp_path / "a.py"
-+    f_reexport = tmp_path / "b.py"
-+    f_consumer = tmp_path / "c.py"
++    f_middle = tmp_path / "b.py"
++    f_downstream = tmp_path / "c.py"
 +
-+    f_provider.write_text("VALUE = 1\n", encoding="utf-8")
-+    f_reexport.write_text("from a import foo\n", encoding="utf-8")
-+    f_consumer.write_text(
++    f_provider.write_text(
++        "def existing():\n"
++        "    return 1\n",
++        encoding="utf-8",
++    )
++    f_middle.write_text(
++        "import a\n"
++        "\n"
++        "def bridge():\n"
++        "    return a.existing()\n",
++        encoding="utf-8",
++    )
++    f_downstream.write_text(
 +        "import b\n"
 +        "\n"
 +        "def run():\n"
-+        "    return b.foo()\n",
++        "    return b.bridge()\n",
 +        encoding="utf-8",
 +    )
 +
@@ -96,43 +338,108 @@ index 473672f..e1698f4 100644
 +    )
 +
 +    engine.update_file(str(f_provider))
-+    engine.update_file(str(f_reexport))
-+    engine.update_file(str(f_consumer))
++    engine.update_file(str(f_middle))
++    engine.update_file(str(f_downstream))
 +
 +    f_provider.write_text(
-+        "VALUE = 1\n"
++        "def existing():\n"
++        "    return 1\n"
 +        "\n"
-+        "def foo():\n"
++        "def unrelated():\n"
++        "    return 2\n",
++        encoding="utf-8",
++    )
++
++    result = engine.update_file(
++        str(f_provider)
++    )
++
++    oracle = _build_full_static_state(
++        tmp_path
++    )
++
++    assert result.shadow_plan.recompute_modules == (
++        "b",
++    )
++    assert result.execution_trace["recompute_modules"] == (
++        "b",
++    )
++
++    _assert_full_parity(
++        engine.state,
++        oracle,
++    )
++
++
++def test_transitive_propagation_cycle_terminates_without_duplicate_recompute(
++    tmp_path,
++):
++    f_a = tmp_path / "a.py"
++    f_b = tmp_path / "b.py"
++
++    f_a.write_text(
++        "import b\n"
++        "\n"
++        "def a_func():\n"
++        "    return b.b_func()\n",
++        encoding="utf-8",
++    )
++    f_b.write_text(
++        "import a\n"
++        "\n"
++        "def b_func():\n"
++        "    return a.a_func()\n",
++        encoding="utf-8",
++    )
++
++    cache_dir = tmp_path / "cache"
++    cache_dir.mkdir()
++
++    engine = IncrementalAnalysisEngine(
++        RepositoryAnalysisState(modules={}),
++        PersistentIdentityRegistry(str(tmp_path)),
++        FileStateManager(str(cache_dir)),
++        str(tmp_path),
++    )
++
++    engine.update_file(str(f_a))
++    engine.update_file(str(f_b))
++
++    f_a.write_text(
++        "import b\n"
++        "\n"
++        "def a_func():\n"
++        "    return b.b_func()\n"
++        "\n"
++        "def added():\n"
 +        "    return 1\n",
 +        encoding="utf-8",
 +    )
 +
-+    result = engine.update_file(str(f_provider))
-+    oracle = _build_full_static_state(tmp_path)
-+
-+    incremental_entry = engine.state.artifact_consumption.get(
-+        "a::foo",
-+        {},
-+    )
-+    full_entry = oracle.artifact_consumption.get(
-+        "a::foo",
-+        {},
++    result = engine.update_file(
++        str(f_a)
 +    )
 +
-+    assert "b" in full_entry.get("consumers", [])
-+    assert "c" in full_entry.get("consumers", [])
-+
-+    assert sorted(
-+        incremental_entry.get("consumers", [])
-+    ) == sorted(
-+        full_entry.get("consumers", [])
-+    ), (
-+        "transitive canonical propagation differs from fresh full oracle: "
-+        f"incremental={incremental_entry!r}, full={full_entry!r}, "
-+        f"recompute_modules={result.shadow_plan.recompute_modules!r}"
++    oracle = _build_full_static_state(
++        tmp_path
 +    )
 +
-+    _assert_full_parity(engine.state, oracle)
-
-
++    recomputed = result.execution_trace[
++        "recompute_modules"
++    ]
++
++    assert len(recomputed) == len(
++        set(recomputed)
++    )
++
++    _assert_full_parity(
++        engine.state,
++        oracle,
++    )
++
++
+ def test_full_canonical_parity_module_add_and_delete(tmp_path):
+     f_target = tmp_path / "target.py"
+     f_target.write_text("def foo(): pass\n", encoding="utf-8")
+```
 

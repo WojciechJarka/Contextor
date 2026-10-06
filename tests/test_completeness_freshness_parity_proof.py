@@ -954,6 +954,10 @@ def test_transitive_reexport_late_provider_matches_full_oracle(tmp_path):
     )
 
     result = engine.update_file(str(f_provider))
+    assert result.execution_trace["recompute_modules"] == (
+        "b",
+        "c",
+    )
     oracle = _build_full_static_state(tmp_path)
 
     incremental_entry = engine.state.artifact_consumption.get(
@@ -979,6 +983,144 @@ def test_transitive_reexport_late_provider_matches_full_oracle(tmp_path):
     )
 
     _assert_full_parity(engine.state, oracle)
+
+
+def test_transitive_propagation_stops_when_direct_consumer_slice_is_unchanged(
+    tmp_path,
+):
+    f_provider = tmp_path / "a.py"
+    f_middle = tmp_path / "b.py"
+    f_downstream = tmp_path / "c.py"
+
+    f_provider.write_text(
+        "def existing():\n"
+        "    return 1\n",
+        encoding="utf-8",
+    )
+    f_middle.write_text(
+        "import a\n"
+        "\n"
+        "def bridge():\n"
+        "    return a.existing()\n",
+        encoding="utf-8",
+    )
+    f_downstream.write_text(
+        "import b\n"
+        "\n"
+        "def run():\n"
+        "    return b.bridge()\n",
+        encoding="utf-8",
+    )
+
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir()
+
+    engine = IncrementalAnalysisEngine(
+        RepositoryAnalysisState(modules={}),
+        PersistentIdentityRegistry(str(tmp_path)),
+        FileStateManager(str(cache_dir)),
+        str(tmp_path),
+    )
+
+    engine.update_file(str(f_provider))
+    engine.update_file(str(f_middle))
+    engine.update_file(str(f_downstream))
+
+    f_provider.write_text(
+        "def existing():\n"
+        "    return 1\n"
+        "\n"
+        "def unrelated():\n"
+        "    return 2\n",
+        encoding="utf-8",
+    )
+
+    result = engine.update_file(
+        str(f_provider)
+    )
+
+    oracle = _build_full_static_state(
+        tmp_path
+    )
+
+    assert result.shadow_plan.recompute_modules == (
+        "b",
+    )
+    assert result.execution_trace["recompute_modules"] == (
+        "b",
+    )
+
+    _assert_full_parity(
+        engine.state,
+        oracle,
+    )
+
+
+def test_transitive_propagation_cycle_terminates_without_duplicate_recompute(
+    tmp_path,
+):
+    f_a = tmp_path / "a.py"
+    f_b = tmp_path / "b.py"
+
+    f_a.write_text(
+        "import b\n"
+        "\n"
+        "def a_func():\n"
+        "    return b.b_func()\n",
+        encoding="utf-8",
+    )
+    f_b.write_text(
+        "import a\n"
+        "\n"
+        "def b_func():\n"
+        "    return a.a_func()\n",
+        encoding="utf-8",
+    )
+
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir()
+
+    engine = IncrementalAnalysisEngine(
+        RepositoryAnalysisState(modules={}),
+        PersistentIdentityRegistry(str(tmp_path)),
+        FileStateManager(str(cache_dir)),
+        str(tmp_path),
+    )
+
+    engine.update_file(str(f_a))
+    engine.update_file(str(f_b))
+
+    f_a.write_text(
+        "import b\n"
+        "\n"
+        "def a_func():\n"
+        "    return b.b_func()\n"
+        "\n"
+        "def added():\n"
+        "    return 1\n",
+        encoding="utf-8",
+    )
+
+    result = engine.update_file(
+        str(f_a)
+    )
+
+    oracle = _build_full_static_state(
+        tmp_path
+    )
+
+    recomputed = result.execution_trace[
+        "recompute_modules"
+    ]
+
+    assert len(recomputed) == len(
+        set(recomputed)
+    )
+
+    _assert_full_parity(
+        engine.state,
+        oracle,
+    )
 
 
 def test_full_canonical_parity_module_add_and_delete(tmp_path):

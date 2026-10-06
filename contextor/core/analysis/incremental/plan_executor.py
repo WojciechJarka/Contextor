@@ -9,6 +9,7 @@ RefreshPlan execution pipeline for incremental updates:
 - Complete isolation from disk I/O and threading locks
 """
 
+from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, List, Set, Dict, Tuple, Any, Mapping
@@ -148,6 +149,87 @@ def _build_consumer_target_index(
                     ).add(target)
 
     return index
+
+
+def _consumer_slice_signature(
+    consumer: str,
+    consumption: Mapping[str, Any],
+    consumer_target_index: Mapping[str, Set[str]],
+) -> Tuple[Tuple[str, bool, Tuple[str, ...]], ...]:
+    """
+    Return a deterministic execution-local signature of one consumer's
+    canonical artifact_consumption slice.
+
+    This observes only canonical RAM state. It performs no source I/O.
+    """
+    rows: List[Tuple[str, bool, Tuple[str, ...]]] = []
+
+    for target in sorted(
+        consumer_target_index.get(
+            consumer,
+            set(),
+        )
+    ):
+        entry = consumption.get(
+            target,
+            {},
+        )
+        if not isinstance(entry, dict):
+            continue
+
+        consumers = entry.get(
+            "consumers",
+            (),
+        )
+        channels = entry.get(
+            "channels",
+            {},
+        )
+
+        is_consumer = (
+            consumer in consumers
+            if isinstance(
+                consumers,
+                (
+                    list,
+                    tuple,
+                    set,
+                ),
+            )
+            else False
+        )
+
+        consumer_channels: Tuple[str, ...] = ()
+        if isinstance(channels, dict):
+            raw_channels = channels.get(
+                consumer,
+                (),
+            )
+            if isinstance(
+                raw_channels,
+                (
+                    list,
+                    tuple,
+                    set,
+                ),
+            ):
+                consumer_channels = tuple(
+                    sorted(
+                        str(channel)
+                        for channel in raw_channels
+                    )
+                )
+
+        if is_consumer or consumer_channels:
+            rows.append(
+                (
+                    target,
+                    is_consumer,
+                    consumer_channels,
+                )
+            )
+
+    return tuple(rows)
 
 
 def _build_dotted_target_index(
@@ -675,34 +757,97 @@ def execute_refresh_plan(
     artifact_consumption_failed = False
     executed_recompute: List[str] = []
     if plan.recompute_modules:
+        from contextor.core.analysis.refresh_planner import (
+            _find_dependent_consumers,
+        )
+
         new_reexports = _build_reexport_map(candidate.modules)
-        for consumer_path in plan.recompute_modules:
-            consumer_facts = candidate.module_usages.get(consumer_path)
-            if consumer_facts:
-                rebuilt_consumption, is_ambig = _rebuild_consumer_slice(
-                    consumer=consumer_path,
-                    consumer_facts=consumer_facts,
-                    candidate_consumption=candidate.artifact_consumption,
-                    candidate_artifacts=candidate.artifacts,
-                    reexports=new_reexports,
-                    expected_targets=expected_targets,
-                    dotted_target_index=dotted_target_index,
-                    consumer_target_index=consumer_target_index,
+
+        recompute_queue = deque(plan.recompute_modules)
+        scheduled_recompute = set(plan.recompute_modules)
+        processed_recompute: Set[str] = set()
+
+        while recompute_queue:
+            consumer_path = recompute_queue.popleft()
+
+            if consumer_path in processed_recompute:
+                continue
+
+            processed_recompute.add(consumer_path)
+
+            consumer_facts = candidate.module_usages.get(
+                consumer_path
+            )
+            if not consumer_facts:
+                continue
+
+            previous_slice = _consumer_slice_signature(
+                consumer_path,
+                candidate.artifact_consumption,
+                consumer_target_index,
+            )
+
+            rebuilt_consumption, is_ambig = _rebuild_consumer_slice(
+                consumer=consumer_path,
+                consumer_facts=consumer_facts,
+                candidate_consumption=candidate.artifact_consumption,
+                candidate_artifacts=candidate.artifacts,
+                reexports=new_reexports,
+                expected_targets=expected_targets,
+                dotted_target_index=dotted_target_index,
+                consumer_target_index=consumer_target_index,
+            )
+
+            if is_ambig:
+                candidate.artifact_consumption = _remove_consumer_slice(
+                    candidate.artifact_consumption,
+                    consumer_path,
                 )
-                if is_ambig:
-                    candidate.artifact_consumption = _remove_consumer_slice(
-                        candidate.artifact_consumption,
-                        consumer_path,
-                    )
-                    consumer_target_index.pop(
-                        consumer_path,
-                        None,
-                    )
-                    artifact_consumption_failed = True
-                    candidate.artifact_consumption_state = "stale"
-                    break
-                candidate.artifact_consumption = rebuilt_consumption
-                executed_recompute.append(consumer_path)
+                consumer_target_index.pop(
+                    consumer_path,
+                    None,
+                )
+                artifact_consumption_failed = True
+                candidate.artifact_consumption_state = "stale"
+                break
+
+            candidate.artifact_consumption = rebuilt_consumption
+            executed_recompute.append(
+                consumer_path
+            )
+
+            current_slice = _consumer_slice_signature(
+                consumer_path,
+                candidate.artifact_consumption,
+                consumer_target_index,
+            )
+
+            if current_slice == previous_slice:
+                continue
+
+            downstream_consumers = _find_dependent_consumers(
+                consumer_path,
+                candidate.module_usages,
+            )
+
+            for downstream_consumer in sorted(
+                downstream_consumers
+            ):
+                if downstream_consumer == delta.module_path:
+                    continue
+
+                if downstream_consumer in processed_recompute:
+                    continue
+
+                if downstream_consumer in scheduled_recompute:
+                    continue
+
+                scheduled_recompute.add(
+                    downstream_consumer
+                )
+                recompute_queue.append(
+                    downstream_consumer
+                )
 
     # 4. PATCH - apply fact families listed in plan.patch_families
     executed_patch_families: List[str] = []
