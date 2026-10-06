@@ -1,740 +1,195 @@
-STATUS=STEP_PASS
-HEAD_BEFORE=d206febc7c5f002a3423d6296c1410412d05f99b
-HEAD_AFTER=d206febc7c5f002a3423d6296c1410412d05f99b
+# CPA_FILE_UPDATE_CANONICAL_REEXPORT_FACTS_PERSISTENCE_DISCOVERY
+
+## 1. STATUS
+STATUS=DISCOVERY_COMPLETE_READY_FOR_DESIGN
+TESTS=NOT_RUN (source/Contextor discovery; user preferred ZERO pytest)
+IMPLEMENTATION=NONE
+PRODUCTION_OR_TEST_EDITS=NONE
+
+Evidence labels: DIRECT_EVIDENCE = literal source/Git/Contextor result; CODE_PATH_PROVED = traced source path; CONTRACT_PROVED = source behavior or existing tests; INFERENCE = derived conclusion; UNKNOWN = not established.
+
+## 2. HEAD
+HEAD=93ae0ea98ec3466c9bdfa2e372b8b59c70325fbd
+
+## 3. WORKTREE_STATE
+WORKTREE_STATE=CLEAN
 SOURCE_DRIFT=NONE
-SHARED_REEXPORT_EXTRACTION_CONTRACT=PASS
-REPEATED_ALL_CONTRACT=LAST_SUPPORTED_TOP_LEVEL_ASSIGNMENT_WINS
-COMPACT_LEGACY_PARITY=PASS
-DUPLICATE_HELPERS_REMOVED=YES
-TEST_RESULTS=8/8 PASS
-MCP_RESTART_REQUIRED=YES_BEFORE_AN_ALREADY_RUNNING_LONG_LIVED_MCP_PYTHON_PROCESS_EXECUTES_THE_CHANGED_IMPLEMENTATION; NOT_PERFORMED
+DIRECT_EVIDENCE: git status --short and git diff --stat were empty before this report. Accepted prior work is included in current HEAD.
+CONTEXTOR: get_file_edit_context returned preparation.py workspace_sync=verified, fresh state, revision 1491; plan_executor.py workspace_sync=verified, fresh state, revision 1492. Both had no syntax errors.
+CONTEXTOR SCOPE: contextor_fact_lineage v1 accepts only artifact_consumption, syntax_diagnostics, symbol_calls. No re-export family anchor is supported. Its artifact_consumption trace is only neighboring lifecycle evidence, not re-export lineage.
 
-# CPA_FILE_UPDATE_UNIFIED_REEXPORT_SEMANTICS
+## 4. FULL_ANALYSIS_MATERIALIZATION_OWNER
+DIRECT_EVIDENCE:
+- index_repository returns RepositoryIndex.reference_facts_by_module (indexer.py:947-961, 964+, 1753-1762, 1990-1999).
+- ContextorFacade.analyze_project has index immediately after index_repository and passes index.reference_facts_by_module into assemble_reference_index_or_fallback (facade.py:678-692).
+- RepositoryAnalysisState is constructed at facade.py:937-978. Current constructor installs modules, artifacts, usages, lineage, collision and analytics, but no reference/re-export facts.
+- Full canonical save calls save_engine_state at facade.py:1087-1096.
+CANONICAL_OWNER=RepositoryAnalysisState in state_manager.py; exact full materialization insertion point is ContextorFacade.analyze_project state construction, while current-run index is available.
+1. AVAILABLE_AT_STATE_CONSTRUCTION=YES.
+2. COMPLETE_CURRENT_MODULE_DOMAIN=NOT GUARANTEED BY AN EXPLICIT INDEXER ASSERTION. Normal successful worker results attach reference facts to indexed modules. Parse-invalid files become skipped and are not in index.modules. The indexer inserts only non-None reference_facts and has no final key-set assertion; facade compact assembly is the existing coverage gate.
+3. ENVELOPE_STATUSES=available | unavailable | failure.
+4. SOURCE-FREE PROJECTION=YES if every current module has an available envelope and dict facts; then module_id -> facts["reexports"] is directly available. Not unconditional: unavailable has no facts and failure has facts=None.
+5. FULL ANALYSIS HANDLING:
+   - assemble_reference_index_or_fallback uses compact facts only if keys exactly match modules and all statuses are available/unavailable; otherwise it calls the AST-backed RepositoryReferenceIndex.build fallback (reference/index.py:669-686).
+   - failure routes to that full fallback.
+   - unavailable is accepted in the compact route but from_compact_facts skips that module and excludes its re-export slice (index.py:440-455, 472-477).
+   - missing keys fail the exact-domain gate and route to AST fallback.
+DIRECT_EVIDENCE: extract_compact_reference_facts returns unavailable if tree is None and failure with error metadata if extraction raises (reference/index.py:307-359). test_reference_fusion_integration.py:149-170 proves failure is represented in the run result but not persisted to the per-file cache.
+INFERENCE: A new required re-export family should extract its slice independently from generic reference visitor success; an unrelated visitor failure can hide reexports despite an already parsed source tree.
 
-## Pre-edit evidence and scope
+## 5. MINIMAL_SUFFICIENT_CANONICAL_PAYLOAD
+VARIANTS:
 
-- HEAD before editing: d206febc7c5f002a3423d6296c1410412d05f99b.
-- Git worktree was clean before editing; all four named files matched HEAD. No source drift in requested anchors.
-- Contextor get_file_edit_context before editing reported canonical revision 1484, LIVE, workspace_sync=verified, syntax diagnostics fresh for shared.py, index.py and both target tests. It identified shared.py callers index.py and engine.py; index.py has eight static consumers including the compact semantic core test.
-- No source outside the two requested production files and two requested test files was edited. No MCP update_file, restart, or full repository pytest suite was run.
+| Concern | A. Full reference_facts_by_module | B. Source-local reexport_facts_by_module |
+|---|---|---|
+| Re-export correctness | Sufficient only for complete available envelopes; broad-family failure/unavailable complicates coverage | Sufficient: assembler consumes exporter, explicit_all, bindings, star_sources |
+| Persisted size | Larger: aliases, calls, callbacks, events, inheritance, qualified_refs, imports, reexports | Small: one four-field slice per module |
+| Coupling | REFERENCE_FACTS_SCHEMA_VERSION, SinglePassConsumerVisitor and reference-index schema | Shared re-export extractor/assembler only |
+| Validation | Envelope status/schema and broad generic facts plus nested reexports | Exact module coverage and four-field shape/identity |
+| Single-file update | Broad visitor overlaps usage extraction | Replace one slice from the already parsed tree |
+| Future reuse | Higher for rebuilding broader reference index | Narrow, directly matches this incremental resolver need |
 
-## SHARED_REEXPORT_EXTRACTION_CONTRACT
+DIRECT_EVIDENCE: _assemble_reexport_map(reexport_facts_by_module) reads only the four named fields and documents RAM-only/no-source-I/O behavior (reference/shared.py:139-147, 154-200). extract_compact_reference_facts packages generic visitor facts plus reexports (reference/index.py:320-351).
+MINIMAL_SUFFICIENT_CANONICAL_PAYLOAD={module_id: {exporter: str, explicit_all: list[str] | None, bindings: dict[str, str], star_sources: list[str]}} for every current state.modules key, plus explicit family completeness/freshness or equivalent coverage validation. The marker prevents missing facts from being confused with a legitimate empty-export module.
+This identifies the minimum for RAM-only re-export assembly; it does not discard the greater future reuse value of variant A.
 
-- shared.py now owns the sole source-local _extract_reexport_facts and pure-RAM _assemble_reexport_map.
-- On a cache miss, _build_reexport_map preserves the existing _REEXPORT_CACHE key and performs the current module iteration and ast_tree access, extracts one fact record per available AST, then invokes the shared assembler.
-- The index compact path imports both shared helpers. extract_compact_reference_facts uses the shared source-local extractor without changing compact output shape.
-- from_compact_facts retains missing/failure-envelope validation, selects facts only for current modules with status=available and dict facts, then passes facts.reexports to the shared assembler. status=unavailable remains excluded from assembly, as before.
-- The shared extractor processes top-level assignments in source order. An unsupported assignment produces an empty explicit export set; a later supported assignment replaces it. No dynamic expression is evaluated.
+## 6. DOMAIN_COMPLETENESS_INVARIANT
+REQUIRED_FOR_FRESH_COMPLETE_FAMILY:
+set(reexport_facts_by_module) == set(state.modules) = YES.
+Every module needs a slice, including empty-but-valid modules.
+- Valid empty .py: parsed tree; exporter, explicit_all=None, bindings={}, star_sources=[].
+- Source with no public exports: retain a per-module slice; assembler may produce no mapping entries.
+- Syntax-invalid / last-known-good: full indexing skips the invalid file; incremental parse failure retains previous modules/artifacts/usages and marks module_parse_freshness stale. Preserve its previous re-export slice as LKG.
+- New file: insert one slice.
+- Delete: remove one slice.
+- Package __init__.py: key remains aligned to module domain (e.g. pkg.__init__); exporter normalizes to pkg.
+- status=unavailable: not successful empty facts. Current compact assembly may accept the envelope but omits that module's reexports; new family must be incomplete/stale unless independent source-local extraction produced a valid slice.
+- status=failure: also not successful empty facts.
+DIRECT_EVIDENCE:
+- _export_module_name is exactly module_id.removesuffix(".__init__") (shared.py:28-45).
+- Module.ast_tree is lazy and may return None if stat/read/parse cannot produce a tree (domain/module.py:16-38, 58-60).
+- incremental parse failure retains facts as last-known-good (engine.py:568-592; state_manager.py:245-263).
+- deletion removes module/artifact/usage candidate slices (plan_executor.py:707-724).
+UNKNOWN: No current canonical re-export family/status exists to label retained slices stale/LKG. Next design must relate that meaning to module_parse_freshness or an equivalent explicit family contract.
 
-## REPEATED_ALL_CONTRACT
+## 7. SINGLE_FILE_EXTRACTION_CONTRACT
+CHANGED_FILE_EXTRA_PARSE_REQUIRED=NO
+CHANGED_FILE_EXTRA_SOURCE_READ_REQUIRED=NO
+DIRECT_EVIDENCE:
+- prepare_source_update parses once with parse_source_with_fingerprint and retains parsed_tree (preparation.py:162-165).
+- read_imports and extract_file_symbols receive that tree (preparation.py:206-255); extract_module_usage_facts also receives it (281-286).
+- _extract_reexport_facts(module_id, tree) needs only module ID and AST and does no source/stat/parse work (shared.py:33-48).
+OPTIONS:
+- Direct shared extractor: minimal payload; scans top-level AST; no extra broad visitor.
+- extract_compact_reference_facts(module_id, tree=parsed_tree, imports=new_imports): no extra parse/read/stat when called with these inputs, but runs SinglePassConsumerVisitor over the AST, packages broader facts, then calls re-export extraction (reference/index.py:320-351).
+- new_usage invokes SymbolReferenceVisitor.visit(tree), local-symbol scanning, and later ast.walk(tree) (reference/engine.py:543-603, 643+). Compact extraction therefore adds a further broad visitor pass overlapping usage work; direct helper avoids this extra pass.
+FAILURE: compact extraction catches and returns status=failure; shared direct helper itself has no try/except. Re-export extraction can fail independently of other preparation facts and needs its own failure semantics. No prepared re-export field/status currently exists.
 
-- test_repeated_all_uses_last_assignment_consistently covers two literal top-level assignments and verifies only the final exported binding.
-- test_repeated_all_dynamic_then_literal_uses_last_assignment covers an unsupported dynamic assignment followed by a literal assignment and verifies the latter controls the map.
-- Both targeted tests passed.
+## 8. ADD_CHANGE_DELETE_CONTRACT
+Existing file change=replace one module slice before downstream assembly.
+New file=insert one module slice before assembly.
+Delete=remove one module slice before assembly.
+DIRECT_EVIDENCE: plan_executor.py:707-736 pre-populates candidate modules/artifacts/usages for delete or changed/new modules; _apply_delta_and_commit manually publishes selected families at engine.py:944-990.
+NO-OP EDGE: update_file returns from plan.is_empty at engine.py:623-657 without execute_refresh_plan or installing prep.new_artifacts. A top-level __all__-only change can change re-export facts while symbol/import/usage/collision facts remain equal. The new family must still replace its slice on this path.
+DELETE: plan_executor.py:708-713 currently purges module/artifact/usage entries; no re-export family exists.
+PARSE_FAILURE_REEXPORT_EXPECTATION=KEEP_LAST_KNOWN_GOOD
 
-## COMPACT_LEGACY_PARITY
+## 9. PARSE_FAILURE_CONTRACT
+PARSE_FAILURE_REEXPORT_EXPECTATION=KEEP_LAST_KNOWN_GOOD
+CODE_PATH_PROVED: prepare_source_update returns on SourceError before replacement facts (preparation.py:162-181). update_file routes that error to _commit_syntax_candidate (engine.py:568-599). That commit updates syntax/parse freshness/lineage but does not assign modules, artifacts or usages (engine.py:126-205). mark_module_parse_failure explicitly marks retained facts last-known-good (state_manager.py:245-263).
+REQUIREMENT: preserve old re-export slice and LKG meaning; absence caused by parse failure is not deletion.
 
-- test_compact_and_ast_reexport_maps_are_identical_for_repeated_all builds compact current-run facts and compares RepositoryReferenceIndex.reexports with _build_reexport_map for the repeated-literal fixture.
-- The new equality test passed. Existing requested alias/transitive, star, cycle, shadowing, and compact-vs-build regression nodes also passed.
+## 10. COW_CONTRACT
+- RepositoryAnalysisState.clone_for_update loops declared dataclass fields and shallow-copies each top-level dict/list/set (state_manager.py:130-167). A declared dict gets its own outer map.
+- Nested per-module values are shared; replace/delete a module slice, do not mutate nested data in place.
+- CandidateState is a separate explicit dataclass and _prepare_candidate_state manually lists copied fields (plan_executor.py:37-70, 598-664).
+- _apply_delta_and_commit also manually installs fields (engine.py:944-990).
+MANUAL_FAMILY_SITES:
+1. CandidateState field declaration.
+2. _prepare_candidate_state copy/default.
+3. execute_refresh_plan add/change/delete before RECOMPUTE.
+4. _apply_delta_and_commit canonical installation.
+5. Empty-plan and parse-failure paths, which bypass normal family patch execution.
+COW nested sharing is safe only with replace-slice semantics.
 
-## DUPLICATE_HELPERS_REMOVED
+## 11. SNAPSHOT_SCHEMA_CONTRACT
+LIVE_STATE_SCHEMA_VERSION=1.3 (store.py:41).
+OLDER_METADATA_VERSIONS_ACCEPTED=1.0, 1.1, 1.2 plus current 1.3 (store.py:1375-1403).
+SERIALIZATION: save_snapshot pickles the full state object (store.py:1620-1650); new snapshots automatically include the new attribute.
+OLD OBJECT BEHAVIOR: pickle restores serialized instance state; it does not backfill a newly added dataclass field. load_snapshot currently has explicit hasattr defaults for known old fields rather than a generic dataclass migration (store.py:1991-2082 and 2112-2198).
+NORMALIZERS: specialized symbol-call, lineage and lineage-query-index normalizers exist; no generic RepositoryAnalysisState field normalizer found.
+A new default_factory field is absent from an old unpickled instance unless load code explicitly initializes it. The class default_factory does not replace current explicit load compatibility code.
+{} is unsafe as completeness default: with nonempty modules it lacks slices; a whole empty map is not equivalent to a module domain where every module has valid empty facts.
 
-- Literal search found no _explicit_all in contextor/core.
-- _extract_reexport_facts and _assemble_reexport_map each have one definition, in shared.py. index.py imports and calls them; it no longer defines local duplicates.
-- _build_reexport_map remains in shared.py and uses both shared helpers on cache miss.
+## 12. OLD_SNAPSHOT_COMPATIBILITY
+OLD_SNAPSHOT_WITHOUT_REEXPORT_FACTS_CAN_BE_SAFELY_USED_INCREMENTALLY=NO
+DIRECT_EVIDENCE:
+- load_snapshot accepts current legacy metadata versions and has no re-export completeness check (store.py:1381-1386, 1991-2082).
+- hydrate_repository_engine accepts loaded modules/graph and creates IncrementalAnalysisEngine (hydration.py:69-112).
+- mcp.runtime.get_or_init_engine installs a loaded snapshot into an engine without a re-export-family guard (runtime.py:378-419).
+INFERENCE: Old snapshots cannot supply the complete RAM map. Defaulting absence to {} would silently give incomplete resolver input; failing closed may block incremental use but is not usable compatibility.
 
-## TARGETED_TESTS
+## 13. HYDRATION_CONTRACT
+1. resolve_authoritative_repository_state tries LIVE snapshot, then load_engine_state (hydration.py:39-68).
+2. If load returns None or modules/graph are absent, it returns None; hydrate_repository_engine returns None (hydration.py:69-99).
+3. MCP get_or_init_engine explicitly does not silently call analyze_project; if neither LIVE nor snapshot loads, engine cache is cleared and None returned (runtime.py:311-419).
+4. LIVE runtime startup calls load_snapshot; the inspected startup path continues with state=None and does not trigger full analysis (live_state/runtime.py:1341-1361, 1428-1463).
+5. No re-export completeness guard or load-time resync_required marking was found.
+HYDRATION_RISK=YES until old/incomplete snapshots are rejected or explicitly marked before incremental execution.
 
-One physical Windows pytest command ran exactly these eight node IDs:
+## 14. FULL_ANALYSIS_TO_RESTART_CHAIN
+CURRENT_CHAIN=NOT_YET_PRESENT_FOR_REEXPORT_FACTS
+- Full run has current-run reference facts at the facade canonical materialization point; state construction does not install them.
+- save_snapshot pickles the full state; a populated new field would persist.
+- Restart hydration loads state without source scan, but current load has no family completeness check.
+- Incremental executor still reconstructs reexports by scanning candidate modules through _build_reexport_map.
+TARGET_CHAIN=full analysis -> complete facts installed at state construction -> snapshot -> load-time completeness/schema gate -> hydrate -> incremental replace one slice -> RAM-only assembly -> propagation -> persist/publish.
+GAP: Generic reference extraction failure/unavailable must not mark the new re-export family complete. Full worker already has a parsed tree; separate extraction can use it. Old snapshot rejection also needs explicit full-analysis recovery; current get_or_init_engine does not provide it.
 
-& .\.venv\Scripts\python.exe -m pytest -q tests/test_reexport_reference_semantics.py::test_repeated_all_uses_last_assignment_consistently tests/test_reexport_reference_semantics.py::test_repeated_all_dynamic_then_literal_uses_last_assignment tests/test_reference_fusion_semantic_core.py::test_compact_and_ast_reexport_maps_are_identical_for_repeated_all tests/test_reexport_reference_semantics.py::test_transitive_aliased_reexport_resolves_to_original_artifact tests/test_reexport_reference_semantics.py::test_star_reexport_uses_explicit_all_and_remains_transitive tests/test_reexport_reference_semantics.py::test_cyclic_reexports_are_not_resolved_arbitrarily tests/test_reexport_reference_semantics.py::test_local_definition_shadows_earlier_imported_binding tests/test_reference_fusion_semantic_core.py::test_ast_build_exactly_equals_compact_facts_build
+## 15. VALIDATION_REQUIREMENTS
+Evidence-derived per-module shape:
+- exporter: str and exactly module_id.removesuffix(".__init__").
+- explicit_all: list[str] | None. None without a supported static assignment; list for supported list/tuple/set; [] for non-literal assignment. Last supported top-level assignment wins (shared.py:40-70).
+- bindings: dict[str, str]; later source-order assignment overwrites earlier binding (shared.py:71-129).
+- star_sources: list[str]; relative imports normalized against module/package identity (shared.py:71-84).
+- Domain key exactly canonical module ID, retaining __init__ suffix.
+- Validate exact key coverage, types, and exporter identity; reject missing/unexpected modules and malformed facts.
+- Empty module slice is valid; unavailable/failure is not empty success.
+- Preserve source-order semantics for __all__ assignment, binding overwrites, and star import collection.
+DETERMINISTIC ORDER: Semantic equality does not require arbitrary sorting: explicit_all is consumed as membership; extraction and assembly are source-derived. Existing pickle contract does not promise byte-canonical serialization. Stable map-key ordering may be specified for reproducible representation, but current evidence does not make global sorting a semantic requirement; do not sort order-sensitive source facts.
 
-## TEST_RESULTS
+## 16. SOURCE_SCAN_ELIMINATION_TEST_TARGET
+BEST_EXISTING_FILE=tests/test_completeness_freshness_parity_proof.py
+BEST_NEARBY_CASE=test_transitive_reexport_late_provider_matches_full_oracle (lines 933-1000): temp repo, normal update_file, re-export chain and fresh ContextorFacade/hydration oracle. Helpers _build_full_static_state and _assert_full_parity are at lines 33-80.
+RELATED_BASELINE=tests/test_reference_fusion_integration.py::test_compact_reexport_oracle_and_artifact_output_parity (188-235) proves compact assembly equals legacy AST map for package/cycle fixture.
+FUTURE_GATE:
+1. Many modules; fresh full canonical baseline; assert facts key domain equals modules.
+2. Change only one provider/re-export module.
+3. During normal update_file allow changed source parse, trap all unchanged Module.ast_tree accesses, require zero.
+4. Guard _assemble_reexport_map to prove it receives complete candidate RAM facts and performs no disk/source operation.
+5. Compare new family and affected canonical outputs with fresh full oracle; current _assert_full_parity does not include this family.
+6. Disable AST trap before creating the full oracle so only incremental path is measured.
+NO TEST WAS ADDED OR RUN.
 
-- Result: 8 passed in 3.76s.
-- Full repository pytest suite: not run.
-- git diff --check: exit code 0; Git emitted only its Windows LF-to-CRLF working-copy advisory for modified text files.
+## 17. REMAINING_LEGACY_REEXPORT_CALLERS
+DIRECT_EVIDENCE:
+- plan_executor.py:774 (RECOMPUTE) and :880 (artifact_consumption) call _build_reexport_map(candidate.modules).
+- shared.py:271-287 loops all modules and accesses ast_tree; Module.ast_tree invokes _get_cached_ast, which stats and parses on a cache miss (domain/module.py:16-38, 58-60).
+- reference/engine.py:218 calls it from _legacy_build_symbol_references, explicitly documented as a legacy reference/test helper.
+- Tests directly use the adapter: test_reexport_reference_semantics.py, test_reference_fusion_semantic_core.py, test_reference_fusion_integration.py:216-218.
+CONCLUSION: Retain _build_reexport_map/cache as legacy/reference adapter if those paths remain. Incremental executor can stop using it after a validated complete canonical facts map is available and it calls _assemble_reexport_map directly. Two incremental call sites exist today.
 
-## LIVE AND RESTART
+## 18. IMPLEMENTATION_BLOCKERS
+DISCOVERY_EVIDENCE_BLOCKERS=NONE
+REQUIRED_NEXT_DESIGN_GATES:
+- Invalidate every previously accepted snapshot generation that lacks the required family; adding default {} alone is unsafe.
+- Define explicit full-analysis recovery before incremental work when an old snapshot is rejected. Current loaders do not automatically analyze.
+- Keep re-export completeness independent of broad reference visitor availability/failure.
+- Ensure __all__-only changes update the facts despite the current empty-plan early return.
+These are source-backed constraints, not unresolved discovery evidence.
 
-- A single get_live_events query after pre-edit revision 1484 showed desktop_watcher update events for the changed Python/test paths, with latest revision 1491 and continuity=continuous, resync_required=false.
-- Post-edit get_file_edit_context for shared.py reported canonical_revision=1491, provenance=live, workspace_sync=verified, no warnings.
-- The watcher events establish canonical LIVE source updates. They do not establish that a pre-existing long-lived Python MCP process reloaded imported code. No restart was performed; restart is required before certifying changed implementation execution in such an already-running process. Pytest used a fresh process.
+## 19. FILES_CHANGED
+FILES_CHANGED=NONE (production/test/docs)
+walkthrough.md is the required report output and excluded from source/test diff accounting.
+ACTUAL_DIFF=DIFFS=NONE
 
-## FILES_CHANGED
-
-- C:/Temp/Contextor_Repo/contextor/core/reference/shared.py
-- C:/Temp/Contextor_Repo/contextor/core/reference/index.py
-- C:/Temp/Contextor_Repo/tests/test_reexport_reference_semantics.py
-- C:/Temp/Contextor_Repo/tests/test_reference_fusion_semantic_core.py
-
-FINAL_PASS_FOR_FILE_UPDATE_COMPLETENESS=NOT_CLAIMED
-
-## ACTUAL_DIFF/FULL_DIFF
-
-The following is the complete Git diff from HEAD for every changed production/test file. walkthrough.md is the report and is excluded.
-
-
-### contextor/core/reference/shared.py
-
-```diff
-diff --git a/contextor/core/reference/shared.py b/contextor/core/reference/shared.py
-index a6c8b2b..1e81f39 100644
---- a/contextor/core/reference/shared.py
-+++ b/contextor/core/reference/shared.py
-@@ -25,107 +25,276 @@ def reset_reexport_cache() -> None:
-     _REEXPORT_CACHE.clear()
- 
- 
--def _explicit_all(tree: Any) -> set[str] | None:
--    """Extract explicit __all__ string sequence if defined in AST root."""
--    for node in getattr(tree, "body", []):
--        if not isinstance(node, ast.Assign):
--            continue
--        if not any(isinstance(target, ast.Name) and target.id == "__all__" for target in node.targets):
--            continue
--        if isinstance(node.value, (ast.List, ast.Tuple, ast.Set)):
--            return {
--                item.value
--                for item in node.value.elts
--                if isinstance(item, ast.Constant) and isinstance(item.value, str)
--            }
--        return set()
--    return None
--
--
- def _export_module_name(module_id: str) -> str:
-     """Normalize package __init__ module ID to parent package identity."""
-     return module_id.removesuffix(".__init__")
- 
- 
--def _build_reexport_map(modules: dict) -> dict[str, str]:
--    """Build cycle-safe transitive identities for top-level ImportFrom re-exports."""
--    cache_key = (id(modules), len(modules))
--    cached = _REEXPORT_CACHE.get(cache_key)
--    if cached is not None:
--        return cached
-+def _extract_reexport_facts(
-+    module_id: str,
-+    tree: Any,
-+) -> dict[str, Any]:
-+    """
-+    Extract source-local inputs required for global re-export assembly.
-+
-+    Top-level __all__ follows Python execution order: when assigned
-+    repeatedly, the last supported assignment is authoritative.
-+    """
-+    exporter = _export_module_name(module_id)
-+    explicit_all: list[str] | None = None
-+    bindings: dict[str, str] = {}
-+    star_sources: list[str] = []
-+
-+    for node in getattr(tree, "body", []):
-+        if isinstance(node, ast.Assign) and any(
-+            isinstance(target, ast.Name)
-+            and target.id == "__all__"
-+            for target in node.targets
-+        ):
-+            if isinstance(
-+                node.value,
-+                (
-+                    ast.List,
-+                    ast.Tuple,
-+                    ast.Set,
-+                ),
-+            ):
-+                explicit_all = [
-+                    item.value
-+                    for item in node.value.elts
-+                    if isinstance(item, ast.Constant)
-+                    and isinstance(item.value, str)
-+                ]
-+            else:
-+                explicit_all = []
-+
-+        if isinstance(node, ast.ImportFrom):
-+            source = _absolute_import_module(
-+                module_id,
-+                node.module,
-+                node.level or 0,
-+            )
-+
-+            for item in node.names:
-+                if item.name == "*":
-+                    star_sources.append(source)
-+                else:
-+                    bindings[
-+                        item.asname or item.name
-+                    ] = f"{source}.{item.name}"
-+
-+        elif isinstance(
-+            node,
-+            (
-+                ast.FunctionDef,
-+                ast.AsyncFunctionDef,
-+                ast.ClassDef,
-+            ),
-+        ):
-+            bindings[node.name] = (
-+                f"{exporter}.{node.name}"
-+            )
-+
-+        elif isinstance(
-+            node,
-+            (
-+                ast.Assign,
-+                ast.AnnAssign,
-+            ),
-+        ):
-+            targets = (
-+                node.targets
-+                if isinstance(node, ast.Assign)
-+                else [node.target]
-+            )
-+            value = node.value
- 
-+            for target in targets:
-+                if (
-+                    not isinstance(target, ast.Name)
-+                    or target.id == "__all__"
-+                ):
-+                    continue
-+
-+                if (
-+                    isinstance(value, ast.Name)
-+                    and value.id in bindings
-+                ):
-+                    bindings[target.id] = bindings[
-+                        value.id
-+                    ]
-+                else:
-+                    bindings[target.id] = (
-+                        f"{exporter}.{target.id}"
-+                    )
-+
-+    return {
-+        "exporter": exporter,
-+        "explicit_all": explicit_all,
-+        "bindings": bindings,
-+        "star_sources": star_sources,
-+    }
-+
-+
-+def _assemble_reexport_map(
-+    reexport_facts_by_module: dict[str, dict[str, Any]],
-+) -> dict[str, str]:
-+    """
-+    Assemble cycle-safe transitive re-export identities from complete
-+    source-local re-export facts.
-+
-+    Performs no source or filesystem I/O.
-+    """
-     raw: dict[str, str] = {}
-     module_exports: dict[str, dict[str, str]] = {}
--    star_imports: list[tuple[str, str, set[str] | None]] = []
-+    star_imports: list[
-+        tuple[str, str, set[str] | None]
-+    ] = []
- 
--    for module_id, module in modules.items():
--        tree = getattr(module, "ast_tree", None)
--        if tree is None:
--            continue
--        exporter = _export_module_name(module_id)
--        allowed = _explicit_all(tree)
--        bindings: dict[str, str] = {}
--        for node in tree.body:
--            if isinstance(node, ast.ImportFrom):
--                source = _absolute_import_module(
--                    module_id, node.module, node.level or 0
--                )
--                for item in node.names:
--                    if item.name == "*":
--                        star_imports.append((exporter, source, allowed))
--                        continue
--                    bindings[item.asname or item.name] = f"{source}.{item.name}"
--            elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
--                bindings[node.name] = f"{exporter}.{node.name}"
--            elif isinstance(node, (ast.Assign, ast.AnnAssign)):
--                targets = node.targets if isinstance(node, ast.Assign) else [node.target]
--                value = node.value
--                for target in targets:
--                    if not isinstance(target, ast.Name) or target.id == "__all__":
--                        continue
--                    if isinstance(value, ast.Name) and value.id in bindings:
--                        bindings[target.id] = bindings[value.id]
--                    else:
--                        bindings[target.id] = f"{exporter}.{target.id}"
--
--        visible_bindings = {}
--        for local, target in bindings.items():
--            if allowed is not None and local not in allowed:
-+    for reexport in reexport_facts_by_module.values():
-+        exporter = reexport["exporter"]
-+        explicit_all = reexport["explicit_all"]
-+        allowed = (
-+            None
-+            if explicit_all is None
-+            else set(explicit_all)
-+        )
-+
-+        visible_bindings: dict[str, str] = {}
-+
-+        for local, target in reexport[
-+            "bindings"
-+        ].items():
-+            if (
-+                allowed is not None
-+                and local not in allowed
-+            ):
-                 continue
--            if allowed is None and local.startswith("_"):
-+
-+            if (
-+                allowed is None
-+                and local.startswith("_")
-+            ):
-                 continue
-+
-             visible_bindings[local] = target
-+
-             key = f"{exporter}.{local}"
-+
-             if key != target:
-                 raw[key] = target
--        module_exports[exporter] = visible_bindings
-+
-+        module_exports[exporter] = (
-+            visible_bindings
-+        )
-+
-+        for source in reexport[
-+            "star_sources"
-+        ]:
-+            star_imports.append(
-+                (
-+                    exporter,
-+                    source,
-+                    allowed,
-+                )
-+            )
- 
-     changed = True
-+
-     while changed:
-         changed = False
-+
-         for exporter, source, allowed in star_imports:
--            for local, target in list(module_exports.get(source, {}).items()):
--                if allowed is not None and local not in allowed:
-+            for local, target in list(
-+                module_exports.get(
-+                    source,
-+                    {},
-+                ).items()
-+            ):
-+                if (
-+                    allowed is not None
-+                    and local not in allowed
-+                ):
-                     continue
--                if allowed is None and local.startswith("_"):
-+
-+                if (
-+                    allowed is None
-+                    and local.startswith("_")
-+                ):
-                     continue
-+
-                 key = f"{exporter}.{local}"
-+
-                 if key not in raw:
-                     raw[key] = target
--                    module_exports.setdefault(exporter, {})[local] = target
-+                    module_exports.setdefault(
-+                        exporter,
-+                        {},
-+                    )[local] = target
-                     changed = True
- 
--    resolved = {}
-+    resolved: dict[str, str] = {}
-+
-     for key, initial in raw.items():
-         target = initial
-         visited = {key}
--        while target in raw and target not in visited:
-+
-+        while (
-+            target in raw
-+            and target not in visited
-+        ):
-             visited.add(target)
-             target = raw[target]
-+
-         if target not in visited:
-             resolved[key] = target
- 
--    _REEXPORT_CACHE[cache_key] = resolved
-+    return resolved
-+
-+
-+def _build_reexport_map(
-+    modules: dict,
-+) -> dict[str, str]:
-+    """Build cycle-safe transitive identities for top-level re-exports."""
-+    cache_key = (
-+        id(modules),
-+        len(modules),
-+    )
-+
-+    cached = _REEXPORT_CACHE.get(
-+        cache_key
-+    )
-+
-+    if cached is not None:
-+        return cached
-+
-+    reexport_facts_by_module = {}
-+
-+    for module_id, module in modules.items():
-+        tree = getattr(
-+            module,
-+            "ast_tree",
-+            None,
-+        )
-+
-+        if tree is None:
-+            continue
-+
-+        reexport_facts_by_module[
-+            module_id
-+        ] = _extract_reexport_facts(
-+            module_id,
-+            tree,
-+        )
-+
-+    resolved = _assemble_reexport_map(
-+        reexport_facts_by_module
-+    )
-+
-+    _REEXPORT_CACHE[
-+        cache_key
-+    ] = resolved
-+
-     return resolved
- 
- 
-```
-
-### contextor/core/reference/index.py
-
-```diff
-diff --git a/contextor/core/reference/index.py b/contextor/core/reference/index.py
-index 71c23d3..8e7888a 100644
---- a/contextor/core/reference/index.py
-+++ b/contextor/core/reference/index.py
-@@ -31,7 +31,9 @@ from .resolution import (
-     _resolve_reexport,
- )
- from .shared import (
-+    _assemble_reexport_map,
-     _empty_reference,
-+    _extract_reexport_facts,
-     _normalize_references,
- )
- from .visitor import _is_event_binding_call
-@@ -302,61 +304,6 @@ class SinglePassConsumerVisitor(ast.NodeVisitor):
-         self.class_stack.pop()
- 
- 
--def _extract_reexport_facts(
--    module_id: str,
--    tree: ast.AST,
--) -> dict[str, Any]:
--    """Extract JSON-safe, source-local inputs for global re-export assembly."""
--    exporter = module_id.removesuffix(".__init__")
--    explicit_all: list[str] | None = None
--    bindings: dict[str, str] = {}
--    star_sources: list[str] = []
--
--    for node in getattr(tree, "body", []):
--        if isinstance(node, ast.Assign) and any(
--            isinstance(target, ast.Name) and target.id == "__all__"
--            for target in node.targets
--        ):
--            if isinstance(node.value, (ast.List, ast.Tuple, ast.Set)):
--                explicit_all = [
--                    item.value
--                    for item in node.value.elts
--                    if isinstance(item, ast.Constant)
--                    and isinstance(item.value, str)
--                ]
--            else:
--                explicit_all = []
--
--        if isinstance(node, ast.ImportFrom):
--            source = _absolute_import_module(
--                module_id, node.module, node.level or 0
--            )
--            for item in node.names:
--                if item.name == "*":
--                    star_sources.append(source)
--                else:
--                    bindings[item.asname or item.name] = f"{source}.{item.name}"
--        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
--            bindings[node.name] = f"{exporter}.{node.name}"
--        elif isinstance(node, (ast.Assign, ast.AnnAssign)):
--            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
--            value = node.value
--            for target in targets:
--                if not isinstance(target, ast.Name) or target.id == "__all__":
--                    continue
--                if isinstance(value, ast.Name) and value.id in bindings:
--                    bindings[target.id] = bindings[value.id]
--                else:
--                    bindings[target.id] = f"{exporter}.{target.id}"
--
--    return {
--        "exporter": exporter,
--        "explicit_all": explicit_all,
--        "bindings": bindings,
--        "star_sources": star_sources,
--    }
--
--
- def extract_compact_reference_facts(
-     module_id: str,
-     module: Any = None,
-@@ -412,60 +359,6 @@ def extract_compact_reference_facts(
-         }
- 
- 
--def _assemble_reexport_map(compact_facts: dict[str, dict[str, Any]]) -> dict[str, str]:
--    """Assemble cycle-safe transitive re-exports from source-local facts."""
--    raw: dict[str, str] = {}
--    module_exports: dict[str, dict[str, str]] = {}
--    star_imports: list[tuple[str, str, set[str] | None]] = []
--
--    for envelope in compact_facts.values():
--        if envelope["status"] != "available":
--            continue
--        reexport = envelope["facts"]["reexports"]
--        exporter = reexport["exporter"]
--        explicit_all = reexport["explicit_all"]
--        allowed = None if explicit_all is None else set(explicit_all)
--        visible_bindings: dict[str, str] = {}
--        for local, target in reexport["bindings"].items():
--            if allowed is not None and local not in allowed:
--                continue
--            if allowed is None and local.startswith("_"):
--                continue
--            visible_bindings[local] = target
--            key = f"{exporter}.{local}"
--            if key != target:
--                raw[key] = target
--        module_exports[exporter] = visible_bindings
--        for source in reexport["star_sources"]:
--            star_imports.append((exporter, source, allowed))
--
--    changed = True
--    while changed:
--        changed = False
--        for exporter, source, allowed in star_imports:
--            for local, target in list(module_exports.get(source, {}).items()):
--                if allowed is not None and local not in allowed:
--                    continue
--                if allowed is None and local.startswith("_"):
--                    continue
--                key = f"{exporter}.{local}"
--                if key not in raw:
--                    raw[key] = target
--                    module_exports.setdefault(exporter, {})[local] = target
--                    changed = True
--
--    resolved: dict[str, str] = {}
--    for key, initial in raw.items():
--        target = initial
--        visited = {key}
--        while target in raw and target not in visited:
--            visited.add(target)
--            target = raw[target]
--        if target not in visited:
--            resolved[key] = target
--    return resolved
--
--
- class RepositoryReferenceIndex:
-     """
-     Run-scoped repository-wide reference index built in a single AST pass.
-@@ -544,7 +437,22 @@ class RepositoryReferenceIndex:
-             )
-             raise RuntimeError(f"Compact reference extraction failed: {details}")
- 
--        reexports = _assemble_reexport_map(compact_facts)
-+        reexport_facts_by_module = {
-+            module_id: envelope["facts"]["reexports"]
-+            for module_id, envelope in compact_facts.items()
-+            if (
-+                module_id in modules
-+                and envelope.get("status") == "available"
-+                and isinstance(
-+                    envelope.get("facts"),
-+                    dict,
-+                )
-+            )
-+        }
-+
-+        reexports = _assemble_reexport_map(
-+            reexport_facts_by_module
-+        )
- 
-         direct_calls_by_target: dict[str, list[tuple[str, Optional[int], Optional[str]]]] = defaultdict(list)
-         instance_calls_by_target: dict[str, list[tuple[str, Optional[int], Optional[str]]]] = defaultdict(list)
-```
-
-### tests/test_reexport_reference_semantics.py
-
-```diff
-diff --git a/tests/test_reexport_reference_semantics.py b/tests/test_reexport_reference_semantics.py
-index 166918e..843a2a7 100644
---- a/tests/test_reexport_reference_semantics.py
-+++ b/tests/test_reexport_reference_semantics.py
-@@ -163,3 +163,70 @@ def test_compact_artifact_pipeline_attributes_reexport_consumers_to_origin(
-     assert not failures
-     assert artifacts["provider::run"]["consumers"] == ["consumer", "facade"]
-     assert artifacts["provider::run"]["consumer_count"] == 2
-+
-+
-+
-+def test_repeated_all_uses_last_assignment_consistently(
-+    tmp_path,
-+):
-+    (tmp_path / "provider.py").write_text(
-+        "def first():\n"
-+        "    return 1\n"
-+        "\n"
-+        "def second():\n"
-+        "    return 2\n",
-+        encoding="utf-8",
-+    )
-+
-+    (tmp_path / "facade.py").write_text(
-+        "from provider import first, second\n"
-+        "__all__ = ['first']\n"
-+        "__all__ = ['second']\n",
-+        encoding="utf-8",
-+    )
-+
-+    modules = index_repository(
-+        str(tmp_path)
-+    ).modules
-+
-+    legacy_mapping = _build_reexport_map(
-+        modules
-+    )
-+
-+    assert (
-+        "facade.first"
-+        not in legacy_mapping
-+    )
-+    assert (
-+        legacy_mapping["facade.second"]
-+        == "provider.second"
-+    )
-+
-+
-+def test_repeated_all_dynamic_then_literal_uses_last_assignment(
-+    tmp_path,
-+):
-+    (tmp_path / "provider.py").write_text(
-+        "def run():\n"
-+        "    return 1\n",
-+        encoding="utf-8",
-+    )
-+
-+    (tmp_path / "facade.py").write_text(
-+        "from provider import run\n"
-+        "__all__ = make_exports()\n"
-+        "__all__ = ['run']\n",
-+        encoding="utf-8",
-+    )
-+
-+    modules = index_repository(
-+        str(tmp_path)
-+    ).modules
-+
-+    mapping = _build_reexport_map(
-+        modules
-+    )
-+
-+    assert mapping["facade.run"] == (
-+        "provider.run"
-+    )
-```
-
-### tests/test_reference_fusion_semantic_core.py
-
-```diff
-diff --git a/tests/test_reference_fusion_semantic_core.py b/tests/test_reference_fusion_semantic_core.py
-index cc8dd14..d7e5950 100644
---- a/tests/test_reference_fusion_semantic_core.py
-+++ b/tests/test_reference_fusion_semantic_core.py
-@@ -7,6 +7,9 @@ from contextor.core.reference.index import (
-     SinglePassConsumerVisitor,
-     extract_compact_reference_facts,
- )
-+from contextor.core.reference.shared import (
-+    _build_reexport_map,
-+)
- from contextor.core.symbol_engine.indexer import index_repository
- 
- 
-@@ -141,3 +144,46 @@ def test_compact_build_rejects_missing_module_facts(tmp_path):
-         RepositoryReferenceIndex.from_compact_facts(
-             modules, str(tmp_path), compact
-         )
-+
-+
-+
-+def test_compact_and_ast_reexport_maps_are_identical_for_repeated_all(
-+    tmp_path,
-+):
-+    (tmp_path / "provider.py").write_text(
-+        "def first():\n"
-+        "    return 1\n"
-+        "\n"
-+        "def second():\n"
-+        "    return 2\n",
-+        encoding="utf-8",
-+    )
-+
-+    (tmp_path / "facade.py").write_text(
-+        "from provider import first, second\n"
-+        "__all__ = ['first']\n"
-+        "__all__ = ['second']\n",
-+        encoding="utf-8",
-+    )
-+
-+    modules = index_repository(
-+        str(tmp_path)
-+    ).modules
-+
-+    compact = {
-+        module_id: extract_compact_reference_facts(
-+            module_id,
-+            module,
-+        )
-+        for module_id, module in modules.items()
-+    }
-+
-+    compact_index = RepositoryReferenceIndex.from_compact_facts(
-+        modules,
-+        str(tmp_path),
-+        compact,
-+    )
-+
-+    assert _build_reexport_map(
-+        modules
-+    ) == compact_index.reexports
-```
