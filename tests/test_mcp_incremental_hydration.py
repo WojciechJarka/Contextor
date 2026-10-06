@@ -18,6 +18,10 @@ from contextor.core.reporting_layer.artifact_usage_report import (
     collect_qualified_artifact_identities,
 )
 from contextor.core.symbol_engine.indexer import index_repository
+from contextor.core.reference.shared import (
+    materialize_reexport_facts_by_module,
+    validate_reexport_facts_by_module,
+)
 from contextor.core.live_state import CanonicalLiveServer, LiveStateClient
 
 pytestmark = pytest.mark.live
@@ -64,13 +68,19 @@ def test_update_persist_restart_hydrate_keeps_live_reverse_context(tmp_path, mon
     repo.mkdir()
     provider = repo / "provider.py"
     provider.write_text("def run():\n    return 1\n", encoding="utf-8")
-    modules = index_repository(str(repo)).modules
+    index = index_repository(str(repo))
+    modules = index.modules
+    reexport_facts_by_module = materialize_reexport_facts_by_module(
+        modules,
+        index.reference_facts_by_module,
+    )
     artifacts, failures = collect_module_artifacts(modules, str(repo))
     assert not failures
     trie = build_trie(modules)
     package_root = detect_package_root(modules, trie)
     state = RepositoryAnalysisState(
         modules=dict(modules),
+        reexport_facts_by_module=reexport_facts_by_module,
         artifacts=artifacts,
         dependency_graph=build_graph(modules, trie=trie, package_root=package_root),
         trie=trie,
@@ -123,6 +133,10 @@ def test_update_persist_restart_hydrate_keeps_live_reverse_context(tmp_path, mon
     mcp_runtime._live_engines.clear()
     hydrated = mcp_runtime.get_or_init_engine(repo.resolve())
     assert hydrated is not None
+    assert validate_reexport_facts_by_module(
+        hydrated.engine.state.reexport_facts_by_module,
+        hydrated.engine.state.modules,
+    )
     context = json.loads(
         mcp_server.get_file_edit_context.fn(
             repo_path=str(repo), file_path="provider.py", compact=False

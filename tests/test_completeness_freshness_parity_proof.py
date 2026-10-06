@@ -63,7 +63,13 @@ def _assert_full_parity(incremental_state: RepositoryAnalysisState, oracle_state
         assert inc_facts.imports == ora_facts.imports
         assert inc_facts.aliases == ora_facts.aliases
 
-    # 4. Artifact Consumption (exact target set, exact consumers, and exact channel sets)
+    # 4. Canonical re-export facts
+    assert (
+        incremental_state.reexport_facts_by_module
+        == oracle_state.reexport_facts_by_module
+    )
+
+    # 5. Artifact Consumption (exact target set, exact consumers, and exact channel sets)
     assert set(incremental_state.artifact_consumption.keys()) == set(oracle_state.artifact_consumption.keys())
     for target, ora_entry in oracle_state.artifact_consumption.items():
         inc_entry = incremental_state.artifact_consumption.get(target, {})
@@ -79,13 +85,13 @@ def _assert_full_parity(incremental_state: RepositoryAnalysisState, oracle_state
                 f"incremental={inc_channels.get(consumer)} vs full={ora_channels.get(consumer)}"
             )
 
-    # 5. Dependency Graph
+    # 6. Dependency Graph
     if oracle_state.dependency_graph is not None:
         assert incremental_state.dependency_graph is not None
         assert incremental_state.dependency_graph.hard_edges == oracle_state.dependency_graph.hard_edges
         assert incremental_state.dependency_graph.soft_edges == oracle_state.dependency_graph.soft_edges
 
-    # 6. Macro Graph Metrics
+    # 7. Macro Graph Metrics
     if oracle_state.metrics is not None:
         assert incremental_state.metrics is not None
         assert incremental_state.metrics == oracle_state.metrics
@@ -1324,6 +1330,194 @@ def test_reexport_retarget_matches_full_oracle(tmp_path):
         engine.state,
         oracle,
     )
+
+
+def test_reexport_all_only_change_is_ram_only_and_matches_full_oracle(
+    tmp_path,
+    monkeypatch,
+):
+    provider = tmp_path / "a.py"
+    reexporter = tmp_path / "b.py"
+    consumer = tmp_path / "c.py"
+    provider.write_text(
+        "def foo():\n"
+        "    return 1\n",
+        encoding="utf-8",
+    )
+    reexporter.write_text(
+        "from a import foo\n"
+        "__all__ = ['foo']\n",
+        encoding="utf-8",
+    )
+    consumer.write_text(
+        "from b import *\n"
+        "\n"
+        "def run():\n"
+        "    return foo()\n",
+        encoding="utf-8",
+    )
+    for index in range(1, 4):
+        (tmp_path / f"noise_{index}.py").write_text(
+            f"VALUE_{index} = {index}\n",
+            encoding="utf-8",
+        )
+
+    errors, _ = ContextorFacade().analyze_project(
+        str(tmp_path)
+    )
+    assert not errors, errors
+    hydrated = hydrate_repository_engine(tmp_path)
+    assert hydrated is not None
+    engine = hydrated.engine
+    state = engine.state
+    assert set(state.reexport_facts_by_module) == set(
+        state.modules
+    )
+    assert state.reexport_facts_by_module["b"]["explicit_all"] == [
+        "foo"
+    ]
+
+    reexporter.write_text(
+        "from a import foo\n"
+        "__all__ = []\n",
+        encoding="utf-8",
+    )
+
+    from contextor.core.analysis.incremental import plan_executor
+    import contextor.core.domain.module as module_domain
+
+    assembled_domains = []
+    ast_accesses = []
+    original_assembler = plan_executor._assemble_reexport_map
+
+    def assemble_spy(facts_by_module):
+        assert isinstance(facts_by_module, dict)
+        assert set(facts_by_module) == set(engine.state.modules)
+        assembled_domains.append(deepcopy(facts_by_module))
+        return original_assembler(facts_by_module)
+
+    def fail_ast_access(*args, **kwargs):
+        ast_accesses.append((args, kwargs))
+        raise AssertionError(
+            "incremental re-export execution accessed Module.ast_tree"
+        )
+
+    with (
+        patch.object(
+            plan_executor,
+            "_assemble_reexport_map",
+            side_effect=assemble_spy,
+        ),
+        patch.object(
+            Module,
+            "ast_tree",
+            new=property(fail_ast_access),
+        ),
+        patch.object(
+            module_domain,
+            "_get_cached_ast",
+            side_effect=fail_ast_access,
+        ),
+    ):
+        result = engine.update_file(str(reexporter))
+
+    assert ast_accesses == []
+    assert len(assembled_domains) == 1
+    assert set(assembled_domains[0]) == set(engine.state.modules)
+    assert all(
+        isinstance(fact, dict)
+        for fact in assembled_domains[0].values()
+    )
+    assert "reexport_facts" in result.shadow_plan.patch_families
+    assert "c" in result.execution_trace["recompute_modules"]
+
+    oracle = _build_full_static_state(tmp_path)
+    _assert_full_parity(engine.state, oracle)
+
+
+def test_reexport_canonical_domain_tracks_add_change_delete(tmp_path):
+    provider = tmp_path / "a.py"
+    reexporter = tmp_path / "b.py"
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir()
+    engine = IncrementalAnalysisEngine(
+        RepositoryAnalysisState(modules={}),
+        PersistentIdentityRegistry(str(tmp_path)),
+        FileStateManager(str(cache_dir)),
+        str(tmp_path),
+    )
+
+    def assert_domain():
+        assert set(engine.state.reexport_facts_by_module) == set(
+            engine.state.modules
+        )
+
+    provider.write_text(
+        "def foo():\n"
+        "    return 1\n",
+        encoding="utf-8",
+    )
+    engine.update_file(str(provider))
+    assert_domain()
+
+    reexporter.write_text(
+        "from a import foo\n",
+        encoding="utf-8",
+    )
+    engine.update_file(str(reexporter))
+    assert_domain()
+    old_slice = deepcopy(
+        engine.state.reexport_facts_by_module["b"]
+    )
+
+    reexporter.write_text(
+        "from a import foo as bar\n",
+        encoding="utf-8",
+    )
+    changed = engine.update_file(str(reexporter))
+    assert changed.status == "UPDATED"
+    assert_domain()
+    assert engine.state.reexport_facts_by_module["b"] != old_slice
+
+    reexporter.unlink()
+    deleted = engine.update_file(str(reexporter))
+    assert deleted.status == "DELETED"
+    assert_domain()
+    assert "b" not in engine.state.reexport_facts_by_module
+
+
+def test_reexport_facts_preserve_last_known_good_on_parse_failure(
+    tmp_path,
+):
+    reexporter = tmp_path / "b.py"
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir()
+    engine = IncrementalAnalysisEngine(
+        RepositoryAnalysisState(modules={}),
+        PersistentIdentityRegistry(str(tmp_path)),
+        FileStateManager(str(cache_dir)),
+        str(tmp_path),
+    )
+    reexporter.write_text(
+        "from a import foo\n",
+        encoding="utf-8",
+    )
+    initial = engine.update_file(str(reexporter))
+    assert initial.status == "UPDATED"
+    old_slice = deepcopy(
+        engine.state.reexport_facts_by_module["b"]
+    )
+
+    reexporter.write_text(
+        "def foo(:\n"
+        "    return 1\n",
+        encoding="utf-8",
+    )
+    failed = engine.update_file(str(reexporter))
+
+    assert failed.status == "SYNTAX_ERROR"
+    assert engine.state.reexport_facts_by_module["b"] == old_slice
+    assert engine.state.module_parse_freshness["b"]["state"] == "stale"
 
 
 def test_natural_ambiguity_transition_matches_full_oracle_state(

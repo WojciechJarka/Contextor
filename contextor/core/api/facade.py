@@ -683,6 +683,15 @@ class ContextorFacade:
             progress_callback=index_progress,
         )
         modules = index.modules
+        from contextor.core.reference.shared import (
+            materialize_reexport_facts_by_module,
+        )
+        canonical_reexport_facts = (
+            materialize_reexport_facts_by_module(
+                modules,
+                index.reference_facts_by_module,
+            )
+        )
 
         emit_stage_end("indexing", indexing_started)
 
@@ -934,9 +943,20 @@ class ContextorFacade:
             )
 
             component_started = time.monotonic()
+            from contextor.core.reference.shared import (
+                validate_reexport_facts_by_module,
+            )
+            if not validate_reexport_facts_by_module(
+                canonical_reexport_facts,
+                mods,
+            ):
+                raise RuntimeError(
+                    "Canonical re-export facts do not cover the current module domain."
+                )
             state = RepositoryAnalysisState(
                 modules=mods,
                 artifacts=raw_artifacts,
+                reexport_facts_by_module=canonical_reexport_facts,
                 dependency_graph=graph,
                 trie=getattr(analysis_result, "trie", None),
                 package_root=getattr(analysis_result, "package_root", ""),

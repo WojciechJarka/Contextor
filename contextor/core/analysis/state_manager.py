@@ -85,6 +85,7 @@ class RepositoryAnalysisState:
     """Canonical runtime state of the repository analysis."""
     modules: Dict[str, Any] = field(default_factory=dict)
     artifacts: Dict[str, Any] = field(default_factory=dict)
+    reexport_facts_by_module: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     dependency_graph: Optional[Any] = None
     artifact_consumption: Dict[str, Any] = field(default_factory=dict)
     artifact_consumption_state: str = "deferred"

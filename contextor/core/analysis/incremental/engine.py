@@ -520,6 +520,7 @@ class IncrementalAnalysisEngine:
                 affected_set, blast_radius_complete, execution_trace = self._apply_delta_and_commit(
                     file_path, delta, usage_delta, plan, [], {}, ModuleUsageFacts(),
                     new_collision_facts=None,
+                    new_reexport_facts=None,
                     syntax_source_path=source_path,
                     remove_syntax_fact=True,
                     clear_parse_module=module_path,
@@ -552,6 +553,11 @@ class IncrementalAnalysisEngine:
             old_artifacts = self.state.artifacts.get(module_path, {})
             old_usage = self.state.module_usages.get(module_path, ModuleUsageFacts()) if hasattr(self.state, "module_usages") and self.state.module_usages else ModuleUsageFacts()
             old_collision_facts = self.state.collision_facts.get(module_path) if hasattr(self.state, "collision_facts") and self.state.collision_facts else None
+            old_reexport_facts = (
+                self.state.reexport_facts_by_module.get(
+                    module_path
+                )
+            )
 
             prep = prepare_source_update(
                 file_path=file_path,
@@ -563,6 +569,7 @@ class IncrementalAnalysisEngine:
                 persistent_id=module_id,
                 old_collision_facts=old_collision_facts,
                 source_key=source_path,
+                old_reexport_facts=old_reexport_facts,
             )
 
             if prep.has_error:
@@ -611,6 +618,7 @@ class IncrementalAnalysisEngine:
             new_artifacts = prep.new_artifacts
             new_usage = prep.new_usage
             new_collision_facts = prep.new_collision_facts
+            new_reexport_facts = prep.new_reexport_facts
 
             from contextor.core.analysis.refresh_planner import RefreshPlanner
             plan = RefreshPlanner.plan_refresh(
@@ -669,6 +677,7 @@ class IncrementalAnalysisEngine:
             affected_set, blast_radius_complete, execution_trace = self._apply_delta_and_commit(
                 file_path, delta, usage_delta, plan, new_imports, new_artifacts, new_usage,
                 new_collision_facts=new_collision_facts,
+                new_reexport_facts=new_reexport_facts,
                 extracted_lineage_facts=prep.extracted_lineage_facts,
                 syntax_source_path=source_path,
                 syntax_fact=checked_and_none,
@@ -758,6 +767,7 @@ class IncrementalAnalysisEngine:
         mod_artifacts: dict,
         new_usage: Any,
         new_collision_facts: Optional[List[Dict[str, Any]]] = None,
+        new_reexport_facts: Optional[Dict[str, Any]] = None,
         extracted_lineage_facts: Any | None = None,
         syntax_source_path: str | None = None,
         syntax_fact: Dict[str, Any] | None = None,
@@ -784,6 +794,7 @@ class IncrementalAnalysisEngine:
                 root_path=self.root_path,
                 file_path=file_path,
                 new_collision_facts=new_collision_facts,
+                new_reexport_facts=new_reexport_facts,
             )
         except Exception as exc:
             _trace_incremental_phase(
@@ -942,6 +953,9 @@ class IncrementalAnalysisEngine:
         if clear_parse_module is not None:
             clear_module_parse_failure(candidate, clear_parse_module)
         self.state.modules = candidate.modules
+        self.state.reexport_facts_by_module = (
+            candidate.reexport_facts_by_module
+        )
         self.state.artifacts = candidate.artifacts
         self.state.module_parse_freshness = candidate.module_parse_freshness
         self.state.syntax_diagnostics_by_path = candidate.syntax_diagnostics_by_path

@@ -94,6 +94,12 @@ class RefreshPlanner:
 
         module_path = delta.module_path if delta else (usage_delta.module_path if usage_delta else "")
         usages = module_usages if module_usages is not None else {}
+        has_reexport_facts_change = bool(
+            delta
+            and delta.metadata_changes.get(
+                "reexport_facts_changed"
+            )
+        )
         identity_registry_required = bool(
             delta
             and (
@@ -120,6 +126,7 @@ class RefreshPlanner:
                 "definitions",
                 "identity_registry",
                 "module_usages",
+                "reexport_facts",
                 "dependency_graph",
                 "artifact_consumption",
                 "cached_analytics",
@@ -146,6 +153,7 @@ class RefreshPlanner:
                 "definitions",
                 "identity_registry",
                 "module_usages",
+                "reexport_facts",
                 "dependency_graph",
                 "artifact_consumption",
                 "cached_analytics",
@@ -196,6 +204,11 @@ class RefreshPlanner:
                         recompute_set.add(c_path)
 
             patch_families = ["definitions", "module_usages", "artifact_consumption"]
+            if has_reexport_facts_change:
+                patch_families.insert(
+                    patch_families.index("artifact_consumption"),
+                    "reexport_facts",
+                )
             graph_recomputations = []
             if has_import_changes:
                 patch_families.extend(["modules", "dependency_graph"])
@@ -224,6 +237,11 @@ class RefreshPlanner:
                 "artifact_consumption",
                 "cached_analytics",
             ]
+            if has_reexport_facts_change:
+                patch_families.insert(
+                    patch_families.index("artifact_consumption"),
+                    "reexport_facts",
+                )
             if collision_facts_changed:
                 patch_families.extend(["collision_facts", "collisions"])
 
@@ -242,6 +260,11 @@ class RefreshPlanner:
             recompute_set = _find_dependent_consumers(module_path, usages)
 
             patch_families = ["definitions", "identity_registry", "module_usages", "artifact_consumption"]
+            if has_reexport_facts_change:
+                patch_families.insert(
+                    patch_families.index("artifact_consumption"),
+                    "reexport_facts",
+                )
             if bool(delta.artifacts_added or delta.artifacts_removed) or (usage_delta and not usage_delta.is_empty):
                 patch_families.append("cached_analytics")
             if collision_facts_changed:
@@ -265,12 +288,33 @@ class RefreshPlanner:
         )
 
         patch_families = []
+        recompute_set = (
+            _find_dependent_consumers(
+                module_path,
+                usages,
+            )
+            if has_reexport_facts_change
+            else set()
+        )
         if has_symbol_payload_change:
             patch_families.append("definitions")
         if has_usage:
             patch_families.extend(
                 ["module_usages", "artifact_consumption", "cached_analytics"]
             )
+        if has_reexport_facts_change:
+            if "reexport_facts" not in patch_families:
+                if "artifact_consumption" in patch_families:
+                    patch_families.insert(
+                        patch_families.index("artifact_consumption"),
+                        "reexport_facts",
+                    )
+                else:
+                    patch_families.append("reexport_facts")
+            if "artifact_consumption" not in patch_families:
+                patch_families.append("artifact_consumption")
+            if "cached_analytics" not in patch_families:
+                patch_families.append("cached_analytics")
         if collision_facts_changed:
             patch_families.extend(["collision_facts", "collisions"])
 
@@ -278,12 +322,14 @@ class RefreshPlanner:
             reason = f"Body/usage change in '{module_path}'."
         elif has_symbol_payload_change:
             reason = f"Definition payload change in '{module_path}'."
+        elif has_reexport_facts_change:
+            reason = f"Re-export facts change in '{module_path}'."
         else:
             reason = f"Collision facts update for '{module_path}'."
 
         return RefreshPlan(
             reparse_modules=(),
-            recompute_modules=(),
+            recompute_modules=tuple(sorted(recompute_set)),
             patch_families=compose_patch_families(patch_families),
             graph_recomputations=(),
             refresh_completeness="complete",

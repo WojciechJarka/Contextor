@@ -16,6 +16,7 @@ from contextor.core.analysis.state_manager import FileDelta
 from contextor.core.analysis.lineage_extraction import extract_lineage_source_facts
 from contextor.core.domain.lineage_facts import ExtractedLineageSourceFacts
 from contextor.core.domain.usage_facts import ModuleUsageFacts, diff_usage_facts
+from contextor.core.reference.shared import _extract_reexport_facts
 from contextor.core.source import SourceError, parse_source_with_fingerprint
 
 
@@ -33,6 +34,7 @@ class PreparedSourceUpdate:
     new_collision_facts: Optional[List[Dict[str, Any]]] = None
     collision_facts_changed: bool = False
     extracted_lineage_facts: Optional[ExtractedLineageSourceFacts] = None
+    new_reexport_facts: Optional[Dict[str, Any]] = None
     error_status: Optional[str] = None
     error_message: Optional[str] = None
     line_number: Optional[int] = None
@@ -152,6 +154,7 @@ def prepare_source_update(
     persistent_id: Optional[str] = None,
     old_collision_facts: Optional[List[Dict[str, Any]]] = None,
     source_key: str | None = None,
+    old_reexport_facts: Optional[Dict[str, Any]] = None,
 ) -> PreparedSourceUpdate:
     """
     Parses and extracts all necessary facts from a changed/added source file,
@@ -178,6 +181,24 @@ def prepare_source_update(
             error_message=exc.detail_message,
             line_number=exc.line_number,
             column_number=exc.column_number,
+        )
+
+    try:
+        new_reexport_facts = _extract_reexport_facts(
+            module_path,
+            parsed_tree,
+        )
+    except Exception as exc:
+        return PreparedSourceUpdate(
+            module_path=module_path,
+            is_new=is_new,
+            new_imports=[],
+            new_artifacts={},
+            new_usage=None,
+            delta=FileDelta(module_path=module_path, is_new=is_new),
+            usage_delta=None,
+            error_status="ERROR",
+            error_message=f"re-export extraction failed: {exc}",
         )
 
     extracted_lineage_facts = None
@@ -276,6 +297,13 @@ def prepare_source_update(
         new_imports=new_imports,
         new_artifacts_dict=new_artifacts,
     )
+    if (
+        not is_new
+        and old_reexport_facts != new_reexport_facts
+    ):
+        delta.metadata_changes[
+            "reexport_facts_changed"
+        ] = True
 
     # 6. Extract Usage facts & UsageDelta
     from contextor.core.reference.engine import extract_module_usage_facts
@@ -298,6 +326,7 @@ def prepare_source_update(
         new_collision_facts=new_collision_facts,
         collision_facts_changed=collision_facts_changed,
         extracted_lineage_facts=extracted_lineage_facts,
+        new_reexport_facts=new_reexport_facts,
     )
 
 

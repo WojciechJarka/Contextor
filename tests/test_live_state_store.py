@@ -179,7 +179,7 @@ def test_exact_snapshot_revision_binds_embedded_state_and_metadata(tmp_path):
     assert metadata.revision == loaded_metadata.revision == loaded.revision == 1
 
 
-def test_exact_schema_13_splits_lineage_and_roundtrips(tmp_path):
+def test_current_schema_14_splits_lineage_and_roundtrips(tmp_path):
     import json
     import pickle
 
@@ -202,7 +202,7 @@ def test_exact_schema_13_splits_lineage_and_roundtrips(tmp_path):
         },
     )
 
-    assert metadata.schema_version == "1.3"
+    assert metadata.schema_version == "1.4"
     assert metadata.lineage_manifest_file
 
     with (
@@ -278,6 +278,95 @@ def test_exact_schema_13_splits_lineage_and_roundtrips(tmp_path):
         loaded_state.lineage_facts_by_source
         == state.lineage_facts_by_source
     )
+
+
+def test_current_schema_reexport_facts_roundtrip(tmp_path):
+    facts = {
+        "pkg.mod": {
+            "exporter": "pkg.mod",
+            "explicit_all": None,
+            "bindings": {},
+            "star_sources": [],
+        }
+    }
+    state = RepositoryAnalysisState(
+        modules={"pkg.mod": SimpleNamespace()},
+        reexport_facts_by_module=facts,
+    )
+
+    metadata = save_snapshot(
+        state,
+        tmp_path,
+        "reexport-roundtrip",
+    )
+    loaded, loaded_metadata = load_snapshot(
+        tmp_path,
+        "reexport-roundtrip",
+    )
+
+    assert metadata.schema_version == "1.4"
+    assert loaded_metadata.schema_version == "1.4"
+    assert loaded.reexport_facts_by_module == facts
+
+
+def test_save_snapshot_rejects_incomplete_canonical_reexport_facts(
+    tmp_path,
+):
+    state = RepositoryAnalysisState(
+        modules={"pkg.mod": SimpleNamespace()},
+        reexport_facts_by_module={},
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=(
+            "Cannot persist RepositoryAnalysisState with incomplete "
+            "canonical re-export facts"
+        ),
+    ):
+        save_snapshot(
+            state,
+            tmp_path,
+            "incomplete-reexport",
+        )
+
+
+def test_legacy_canonical_snapshot_without_reexport_facts_is_rejected(
+    tmp_path,
+):
+    import json
+    import pickle
+
+    state = RepositoryAnalysisState(
+        modules={"pkg.mod": SimpleNamespace()},
+        reexport_facts_by_module={
+            "pkg.mod": {
+                "exporter": "pkg.mod",
+                "explicit_all": None,
+                "bindings": {},
+                "star_sources": [],
+            }
+        },
+    )
+    del vars(state)["reexport_facts_by_module"]
+    (tmp_path / "engine_state.pkl").write_bytes(
+        pickle.dumps(state)
+    )
+    (tmp_path / "engine_state.meta.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "1.3",
+                "state_id": "legacy-canonical",
+                "revision": 1,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert load_snapshot(
+        tmp_path,
+        "legacy-canonical",
+    ) is None
 
 
 def test_split_snapshot_load_emits_non_overlapping_phase_timings(tmp_path):

@@ -27,7 +27,10 @@ from contextor.core.domain.module import Module
 from contextor.core.domain.refresh_plan import RefreshPlan
 from contextor.core.domain.usage_facts import ModuleUsageFacts
 from contextor.core.graph.graph import build_trie, detect_package_root, build_graph, resolve_module_edges
-from contextor.core.reference.engine import _build_reexport_map
+from contextor.core.reference.shared import (
+    _assemble_reexport_map,
+    validate_reexport_facts_by_module,
+)
 from contextor.core.reference.resolution import _resolve_alias, _resolve_reexport
 from contextor.core.reporting_layer.artifact_usage_report import (
     collect_qualified_artifact_identities,
@@ -41,6 +44,7 @@ class CandidateState:
     architectural model during RefreshPlan execution before commit.
     """
     modules: Dict[str, Any]
+    reexport_facts_by_module: Dict[str, Dict[str, Any]]
     artifacts: Dict[str, Any]
     module_parse_freshness: Dict[str, Dict[str, Any]]
     syntax_diagnostics_by_path: Dict[str, Dict[str, Any]]
@@ -599,6 +603,14 @@ def _prepare_candidate_state(state: RepositoryAnalysisState) -> CandidateState:
     """Initializes Copy-on-Write candidate state from current canonical state."""
     return CandidateState(
         modules=dict(state.modules),
+        reexport_facts_by_module=dict(
+            getattr(
+                state,
+                "reexport_facts_by_module",
+                {},
+            )
+            or {}
+        ),
         artifacts=dict(state.artifacts),
         module_parse_freshness=dict(getattr(state, "module_parse_freshness", {}) or {}),
         syntax_diagnostics_by_path=dict(getattr(state, "syntax_diagnostics_by_path", {}) or {}),
@@ -675,6 +687,7 @@ def execute_refresh_plan(
     root_path: Path,
     file_path: str,
     new_collision_facts: Optional[List[Dict[str, Any]]] = None,
+    new_reexport_facts: Optional[Dict[str, Any]] = None,
 ) -> PlanExecutionOutcome:
     """
     Executes the phases of a RefreshPlan (REPARSE, RECOMPUTE, PATCH, GRAPH)
@@ -683,6 +696,15 @@ def execute_refresh_plan(
     path = Path(file_path)
     mod_id = Path(delta.module_path).stem if delta.module_path.endswith(".py") else delta.module_path
     old_graph = state.dependency_graph
+
+    if not validate_reexport_facts_by_module(
+        state.reexport_facts_by_module,
+        state.modules,
+    ):
+        raise RuntimeError(
+            "Canonical re-export facts baseline is incomplete; "
+            "fresh full analysis is required."
+        )
 
     # 1. PREPARE candidate state
     candidate = _prepare_candidate_state(state)
@@ -708,6 +730,14 @@ def execute_refresh_plan(
     if delta.is_deleted:
         candidate.modules.pop(mod_id, None)
         candidate.modules.pop(delta.module_path, None)
+        candidate.reexport_facts_by_module.pop(
+            mod_id,
+            None,
+        )
+        candidate.reexport_facts_by_module.pop(
+            delta.module_path,
+            None,
+        )
         candidate.artifacts.pop(mod_id, None)
         candidate.artifacts.pop(delta.module_path, None)
         candidate.module_usages.pop(delta.module_path, None)
@@ -734,6 +764,24 @@ def execute_refresh_plan(
             candidate.artifacts[delta.module_path] = new_artifacts
         if "module_usages" in plan.patch_families and new_usage is not None:
             candidate.module_usages[delta.module_path] = new_usage
+
+    if not delta.is_deleted and "reexport_facts" in plan.patch_families:
+        if new_reexport_facts is None:
+            raise ValueError(
+                f"Planned reexport_facts patch for '{delta.module_path}' "
+                "requires non-None new_reexport_facts."
+            )
+        candidate.reexport_facts_by_module[
+            delta.module_path
+        ] = new_reexport_facts
+
+    if not validate_reexport_facts_by_module(
+        candidate.reexport_facts_by_module,
+        candidate.modules,
+    ):
+        raise RuntimeError(
+            "Candidate re-export facts do not cover the candidate module domain."
+        )
 
         # Ensure canonical targets for delta.module_path exist in candidate.artifact_consumption
         mod_art = candidate.artifacts.get(delta.module_path, {})
@@ -764,14 +812,21 @@ def execute_refresh_plan(
     for reparse_mod in plan.reparse_modules:
         executed_reparse.append(reparse_mod)
 
+    reexports = None
+    if (
+        plan.recompute_modules
+        or "artifact_consumption" in plan.patch_families
+    ):
+        reexports = _assemble_reexport_map(
+            candidate.reexport_facts_by_module
+        )
+
     # 3. RECOMPUTE - re-evaluate planned cached modules in RAM without source I/O
     executed_recompute: List[str] = []
     if plan.recompute_modules:
         from contextor.core.analysis.refresh_planner import (
             _find_dependent_consumers,
         )
-
-        new_reexports = _build_reexport_map(candidate.modules)
 
         recompute_queue = deque(plan.recompute_modules)
         scheduled_recompute = set(plan.recompute_modules)
@@ -802,7 +857,7 @@ def execute_refresh_plan(
                 consumer_facts=consumer_facts,
                 candidate_consumption=candidate.artifact_consumption,
                 candidate_artifacts=candidate.artifacts,
-                reexports=new_reexports,
+                reexports=reexports,
                 expected_targets=expected_targets,
                 dotted_target_index=dotted_target_index,
                 consumer_target_index=consumer_target_index,
@@ -859,6 +914,9 @@ def execute_refresh_plan(
         elif family == "module_usages":
             executed_patch_families.append("module_usages")
 
+        elif family == "reexport_facts":
+            executed_patch_families.append("reexport_facts")
+
         elif family == "dependency_graph":
             if delta.is_deleted or delta.is_new:
                 new_trie = build_trie(candidate.modules.keys())
@@ -877,7 +935,6 @@ def execute_refresh_plan(
             executed_patch_families.append("dependency_graph")
 
         elif family == "artifact_consumption":
-            new_reexports = _build_reexport_map(candidate.modules)
             if delta.is_deleted:
                 # Remove delta.module_path from all remaining targets
                 for t_key, entry in list(candidate.artifact_consumption.items()):
@@ -893,7 +950,7 @@ def execute_refresh_plan(
                     consumer_facts=new_usage,
                     candidate_consumption=candidate.artifact_consumption,
                     candidate_artifacts=candidate.artifacts,
-                    reexports=new_reexports,
+                    reexports=reexports,
                     expected_targets=expected_targets,
                     dotted_target_index=dotted_target_index,
                     consumer_target_index=consumer_target_index,

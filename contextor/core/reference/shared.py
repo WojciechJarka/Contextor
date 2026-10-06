@@ -11,13 +11,21 @@ This module must NOT depend on reference.engine or reference.index.
 from __future__ import annotations
 
 import ast
-from typing import Any
+from typing import Any, Mapping
 
 from .resolution import _absolute_import_module
 
 MAX_USAGE_DETAILS = 15
 
 _REEXPORT_CACHE: dict = {}
+_REEXPORT_FACT_KEYS = frozenset(
+    {
+        "exporter",
+        "explicit_all",
+        "bindings",
+        "star_sources",
+    }
+)
 
 
 def reset_reexport_cache() -> None:
@@ -28,6 +36,129 @@ def reset_reexport_cache() -> None:
 def _export_module_name(module_id: str) -> str:
     """Normalize package __init__ module ID to parent package identity."""
     return module_id.removesuffix(".__init__")
+
+
+def _is_valid_reexport_fact(
+    module_id: str,
+    fact: Any,
+) -> bool:
+    if not isinstance(module_id, str) or not module_id:
+        return False
+
+    if not isinstance(fact, dict):
+        return False
+
+    if set(fact) != _REEXPORT_FACT_KEYS:
+        return False
+
+    if fact.get("exporter") != _export_module_name(module_id):
+        return False
+
+    explicit_all = fact.get("explicit_all")
+    if explicit_all is not None:
+        if not isinstance(explicit_all, list):
+            return False
+        if not all(
+            isinstance(item, str)
+            for item in explicit_all
+        ):
+            return False
+
+    bindings = fact.get("bindings")
+    if not isinstance(bindings, dict):
+        return False
+    if not all(
+        isinstance(local, str)
+        and isinstance(target, str)
+        for local, target in bindings.items()
+    ):
+        return False
+
+    star_sources = fact.get("star_sources")
+    if not isinstance(star_sources, list):
+        return False
+    if not all(
+        isinstance(source, str)
+        for source in star_sources
+    ):
+        return False
+
+    return True
+
+
+def validate_reexport_facts_by_module(
+    facts_by_module: Any,
+    modules: Any,
+) -> bool:
+    if not isinstance(facts_by_module, dict):
+        return False
+
+    if not isinstance(modules, dict):
+        return False
+
+    if set(facts_by_module) != set(modules):
+        return False
+
+    return all(
+        _is_valid_reexport_fact(
+            module_id,
+            facts_by_module[module_id],
+        )
+        for module_id in modules
+    )
+
+
+def materialize_reexport_facts_by_module(
+    modules: dict,
+    compact_reference_facts: Mapping[str, Any] | None = None,
+) -> dict[str, dict[str, Any]]:
+    result: dict[str, dict[str, Any]] = {}
+    compact_facts = compact_reference_facts or {}
+
+    for module_id, module in modules.items():
+        envelope = compact_facts.get(module_id)
+        fact = None
+        if isinstance(envelope, Mapping) and envelope.get("status") == "available":
+            facts = envelope.get("facts")
+            if isinstance(facts, Mapping):
+                compact_fact = facts.get("reexports")
+                if _is_valid_reexport_fact(module_id, compact_fact):
+                    fact = compact_fact
+
+        if fact is None:
+            tree = getattr(module, "ast_tree", None)
+            if tree is None:
+                raise RuntimeError(
+                    "Canonical re-export facts unavailable for module "
+                    f"'{module_id}'."
+                )
+            fact = _extract_reexport_facts(module_id, tree)
+            if not _is_valid_reexport_fact(module_id, fact):
+                raise RuntimeError(
+                    "Canonical re-export facts unavailable for module "
+                    f"'{module_id}'."
+                )
+
+        result[module_id] = {
+            "exporter": fact["exporter"],
+            "explicit_all": (
+                None
+                if fact["explicit_all"] is None
+                else list(fact["explicit_all"])
+            ),
+            "bindings": dict(fact["bindings"]),
+            "star_sources": list(fact["star_sources"]),
+        }
+
+    if not validate_reexport_facts_by_module(
+        result,
+        modules,
+    ):
+        raise RuntimeError(
+            "Canonical re-export facts do not cover the current module domain."
+        )
+
+    return result
 
 
 def _extract_reexport_facts(

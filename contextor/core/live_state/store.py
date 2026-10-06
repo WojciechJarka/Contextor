@@ -38,7 +38,7 @@ from contextor.core.domain.lineage_facts import (
     SurfaceKind,
 )
 
-LIVE_STATE_SCHEMA_VERSION = "1.3"
+LIVE_STATE_SCHEMA_VERSION = "1.4"
 LINEAGE_MANIFEST_SCHEMA_VERSION = "1.0"
 
 LINEAGE_VALIDATION_CACHE_SCHEMA_VERSION = "2"
@@ -115,6 +115,41 @@ def _normalize_symbol_call_facts(state: Any) -> Any:
             ),
         )
     state.module_usages = normalized_usages
+    return state
+
+
+def _normalize_reexport_facts_state(
+    state: Any,
+) -> Any:
+    if state is None:
+        return state
+
+    from contextor.core.analysis.state_manager import (
+        RepositoryAnalysisState,
+    )
+    from contextor.core.reference.shared import (
+        validate_reexport_facts_by_module,
+    )
+
+    if not isinstance(state, RepositoryAnalysisState):
+        return state
+
+    if (
+        "reexport_facts_by_module" not in vars(state)
+        or not validate_reexport_facts_by_module(
+            getattr(
+                state,
+                "reexport_facts_by_module",
+                None,
+            ),
+            getattr(state, "modules", None),
+        )
+    ):
+        raise pickle.UnpicklingError(
+            "Canonical re-export facts are missing or incomplete; "
+            "fresh full analysis is required."
+        )
+
     return state
 
 
@@ -1382,6 +1417,7 @@ def read_metadata(cache_dir: str | Path) -> LiveStateMetadata | None:
             "1.0",
             "1.1",
             "1.2",
+            "1.3",
             LIVE_STATE_SCHEMA_VERSION,
         }:
             return None
@@ -1437,6 +1473,26 @@ def save_snapshot(
     previous_state: Any = None,
 ) -> LiveStateMetadata:
     """Atomically publish a complete snapshot and monotonically increasing revision."""
+
+    from contextor.core.analysis.state_manager import (
+        RepositoryAnalysisState,
+    )
+    from contextor.core.reference.shared import (
+        validate_reexport_facts_by_module,
+    )
+
+    if isinstance(state, RepositoryAnalysisState) and not validate_reexport_facts_by_module(
+        getattr(
+            state,
+            "reexport_facts_by_module",
+            None,
+        ),
+        state.modules,
+    ):
+        raise ValueError(
+            "Cannot persist RepositoryAnalysisState with incomplete "
+            "canonical re-export facts."
+        )
 
     state_file, meta_file, lock_file = _paths(cache_dir)
     state_file.parent.mkdir(parents=True, exist_ok=True)
@@ -1976,6 +2032,16 @@ def load_snapshot(
             )
 
             phase_started = time.monotonic()
+            state_obj = _normalize_reexport_facts_state(
+                state_obj
+            )
+            _trace_snapshot_load_phase(
+                "normalize_reexport_facts_state",
+                phase_started,
+                repo_id=expected_repo_id,
+            )
+
+            phase_started = time.monotonic()
             state_revision = (
                 state_obj.get("revision") if isinstance(state_obj, dict)
                 else getattr(state_obj, "revision", None)
@@ -2108,6 +2174,9 @@ def load_snapshot(
             _normalize_lineage_facts_state(
                 _normalize_symbol_call_facts(payload)
             )
+        )
+        payload = _normalize_reexport_facts_state(
+            payload
         )
         if payload is not None and hasattr(payload, "__dict__"):
             if not hasattr(payload, "module_usages"):

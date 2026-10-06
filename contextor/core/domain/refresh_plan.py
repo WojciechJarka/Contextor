@@ -17,6 +17,7 @@ VALID_PATCH_FAMILIES = {
     "modules",
     "definitions",
     "module_usages",
+    "reexport_facts",
     "artifact_consumption",
     "dependency_graph",
     "identity_registry",
