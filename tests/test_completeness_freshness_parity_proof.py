@@ -314,9 +314,9 @@ def test_runtime_calls_producer_and_canonical_parity(tmp_path):
 
 def test_natural_dotted_identity_ambiguity_helper():
     """
-    Proves _resolve_canonical_target_key returns (None, 'ambiguous')
-    when two canonical targets share the same dotted representation (e.g. pkg.a::B.foo and pkg.a.B::foo).
-    Does NOT use monkeypatch.
+    The singular helper preserves 'ambiguous' for non-unique canonical
+    identities, while production consumer rebuilding uses its plural
+    resolver to preserve full-analysis parity. Does NOT use monkeypatch.
     """
     candidate_artifacts = {
         "pkg.a": {"symbols": {"classes": ["B"], "functions": [], "methods": ["B.foo"], "globals": []}, "own_symbols": ["B", "B.foo"]},
@@ -333,15 +333,14 @@ def test_natural_dotted_identity_ambiguity_helper():
 
 def test_natural_dotted_identity_ambiguity_transition_lifecycle(tmp_path):
     """
-    Proves real natural dotted identity ambiguity during late provider update:
+    Proves exact dotted multi-identity parity during late provider update:
     STEP 1: pkg/a.py with class B: def foo(self): return 1 -> canonical pkg.a::B.foo
     STEP 2: consumer.py with import pkg.a; pkg.a.B.foo() -> uniquely bound to pkg.a::B.foo, fresh
     STEP 3 (LATE PROVIDER): pkg/a/B.py with def foo(): return 2 -> canonical pkg.a.B::foo
     Call ONLY update_file(pkg/a/B.py). NO consumer update.
     Verifies:
-    - artifact_consumption_state == 'stale'
-    - ambiguity detected in RAM backfill/recompute path
-    - fail-closed sanitization: consumer slice removed from candidate, no arbitrary binding
+    - artifact_consumption_state == 'fresh'
+    - consumer is projected to both exact canonical identities
     - consumer.py NOT reread from disk
     - COW: previous state was not mutated in place
     - unrelated entries preserved bit-for-bit
@@ -430,15 +429,13 @@ def test_natural_dotted_identity_ambiguity_transition_lifecycle(tmp_path):
     # (b) prepare_source_update guard: consumer.py was not reopened by production boundary.
     # If consumer.py had been read, guarded_prepare_source_update would have raised AssertionError.
 
-    # Assert fail-closed state
-    assert res2.artifact_consumption_state == "stale"
-    assert engine.state.artifact_consumption_state == "stale"
+    assert res2.artifact_consumption_state == "fresh"
+    assert engine.state.artifact_consumption_state == "fresh"
 
-    # Assert fail-closed sanitization: ambiguous consumer is NOT bound to either target
     for target_key in ("pkg.a::B.foo", "pkg.a.B::foo"):
         entry = engine.state.artifact_consumption.get(target_key, {})
-        assert "consumer" not in entry.get("consumers", [])
-        assert "consumer" not in entry.get("channels", {})
+        assert "consumer" in entry.get("consumers", [])
+        assert entry.get("channels", {}).get("consumer") == ["direct_calls"]
 
     # Assert unrelated consumer entry is preserved bit-for-bit
     assert engine.state.artifact_consumption["unrelated::ping"]["consumers"] == ["unrelated_consumer"]
@@ -448,11 +445,20 @@ def test_natural_dotted_identity_ambiguity_transition_lifecycle(tmp_path):
     assert old_consumption_ref == old_snapshot
     assert "consumer" in old_consumption_ref["pkg.a::B.foo"]["consumers"]
 
+    oracle = _build_full_static_state(
+        tmp_path
+    )
+
+    _assert_full_parity(
+        engine.state,
+        oracle,
+    )
+
 
 def test_natural_dotted_identity_ambiguity_consumer_last(tmp_path):
     """
-    Proves natural dotted identity ambiguity during consumer ADD (when both providers already exist).
-    Incremental engine fails closed to 'stale' without arbitrary binding.
+    Proves exact dotted multi-identity full parity during consumer ADD
+    after both providers already exist.
     """
     pkg_dir = tmp_path / "pkg"
     pkg_dir.mkdir()
@@ -480,14 +486,22 @@ def test_natural_dotted_identity_ambiguity_consumer_last(tmp_path):
     engine.update_file(str(f_b))
     res = engine.update_file(str(f_consumer))
 
-    # Assert fail-closed state
-    assert res.artifact_consumption_state == "stale"
-    assert engine.state.artifact_consumption_state == "stale"
+    assert res.artifact_consumption_state == "fresh"
+    assert engine.state.artifact_consumption_state == "fresh"
 
-    # Assert no arbitrary consumer binding occurred
     for target_key in ("pkg.a::B.foo", "pkg.a.B::foo"):
         entry = engine.state.artifact_consumption.get(target_key, {})
-        assert "consumer" not in entry.get("consumers", [])
+        assert "consumer" in entry.get("consumers", [])
+        assert entry.get("channels", {}).get("consumer") == ["direct_calls"]
+
+    oracle = _build_full_static_state(
+        tmp_path
+    )
+
+    _assert_full_parity(
+        engine.state,
+        oracle,
+    )
 
 
 def test_nested_callee_contract_b_regression(tmp_path):

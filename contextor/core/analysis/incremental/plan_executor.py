@@ -239,8 +239,9 @@ def _build_dotted_target_index(
     Builds one transient lookup from dotted target spelling to all
     canonical targets that share that spelling.
 
-    Multiple canonical candidates are preserved so ambiguity semantics
-    remain identical to the legacy linear scan.
+    All canonical identities with the same exact dotted spelling are
+    preserved so incremental consumer rebuilding matches the full-analysis
+    reference projection.
     """
     grouped: Dict[str, List[str]] = {}
 
@@ -267,6 +268,81 @@ def _build_dotted_target_index(
     }
 
 
+def _resolve_canonical_target_keys(
+    target: Optional[str],
+    candidate_consumption: Mapping[str, Any],
+    candidate_artifacts: Mapping[str, Any],
+    expected_targets: Optional[Set[str]] = None,
+    dotted_target_index: Optional[
+        Mapping[str, Tuple[str, ...]]
+    ] = None,
+) -> Tuple[Tuple[str, ...], str]:
+    """
+    Resolve one reference spelling to every exact canonical target
+    represented by that spelling.
+
+    A complete dotted spelling may map to more than one canonical
+    identity, for example:
+
+        pkg.a::B.foo
+        pkg.a.B::foo
+
+    both serialize to:
+
+        pkg.a.B.foo
+
+    Full analysis projects confirmed evidence to every such exact
+    canonical identity. Incremental rebuilding must preserve the same
+    semantics.
+
+    This helper performs no short-name fallback.
+    """
+    if not target:
+        return (), "unresolved"
+
+    if expected_targets is None:
+        expected_targets = canonical_artifact_consumption_targets(
+            candidate_artifacts
+        )
+
+    if "::" in target:
+        if target in expected_targets:
+            return (target,), "resolved"
+        return (), "unresolved"
+
+    if dotted_target_index is not None:
+        matches = tuple(
+            dotted_target_index.get(
+                target,
+                (),
+            )
+        )
+    else:
+        matches = tuple(
+            sorted(
+                canonical
+                for canonical in expected_targets
+                if (
+                    "::" in canonical
+                    and ".".join(
+                        canonical.split("::", 1)
+                    ) == target
+                )
+            )
+        )
+
+    matches = tuple(
+        sorted(
+            set(matches)
+        )
+    )
+
+    if matches:
+        return matches, "resolved"
+
+    return (), "unresolved"
+
+
 def _resolve_canonical_target_key(
     target: Optional[str],
     candidate_consumption: Mapping[str, Any],
@@ -277,57 +353,27 @@ def _resolve_canonical_target_key(
     ] = None,
 ) -> Tuple[Optional[str], str]:
     """
-    Resolves a target string against the canonical target domain.
-    Returns (canonical_key, status) where status is:
-    - 'resolved': exactly 1 match in canonical domain
-    - 'ambiguous': >1 matches in canonical domain (fail-closed)
-    - 'unresolved': 0 matches in canonical domain (unknown / external)
+    Singular compatibility resolver.
+
+    Returns one canonical key only when the exact spelling identifies
+    exactly one canonical identity. Multiple exact canonical identities
+    retain the existing singular 'ambiguous' result.
     """
-    if not target:
-        return None, "unresolved"
+    matches, status = _resolve_canonical_target_keys(
+        target,
+        candidate_consumption,
+        candidate_artifacts,
+        expected_targets=expected_targets,
+        dotted_target_index=dotted_target_index,
+    )
 
-    if expected_targets is None:
-        expected_targets = canonical_artifact_consumption_targets(
-            candidate_artifacts
-        )
-
-    # Already canonical format
-    if "::" in target:
-        if target in expected_targets:
-            return target, "resolved"
-        return None, "unresolved"
-
-    if dotted_target_index is not None:
-        matches = tuple(
-            dotted_target_index.get(
-                target,
-                (),
-            )
-        )
-    else:
-        fallback_matches: List[str] = []
-
-        for canonical in expected_targets:
-            definer, sep, symbol = canonical.partition("::")
-            if not sep:
-                continue
-
-            if f"{definer}.{symbol}" == target:
-                fallback_matches.append(
-                    canonical
-                )
-
-        matches = tuple(
-            fallback_matches
-        )
+    if status != "resolved":
+        return None, status
 
     if len(matches) == 1:
         return matches[0], "resolved"
 
-    if len(matches) > 1:
-        return None, "ambiguous"
-
-    return None, "unresolved"
+    return None, "ambiguous"
 
 
 def _to_canonical_target_key(
@@ -350,7 +396,7 @@ def _rebuild_consumer_slice(
         Mapping[str, Tuple[str, ...]]
     ] = None,
     consumer_target_index: Optional[Dict[str, Set[str]]] = None,
-) -> Tuple[Dict[str, Any], bool]:
+) -> Dict[str, Any]:
     """
     Rebuilds the entire artifact_consumption slice for a single consumer.
 
@@ -362,8 +408,9 @@ def _rebuild_consumer_slice(
     Without the execution-local index, the legacy full-map fallback is
     preserved.
 
-    Returns (updated_consumption_dict, is_ambiguous). If is_ambiguous is
-    True, returns the original container without mutation.
+    Returns the updated consumption dictionary. A complete dotted
+    spelling that maps to multiple exact canonical identities is projected
+    to each identity, matching the full-analysis reference projection.
     """
     c_aliases = dict(consumer_facts.aliases)
     c_tagged = (
@@ -399,8 +446,6 @@ def _rebuild_consumer_slice(
     )
 
     rebuilt_targets: Dict[str, Set[str]] = {}
-    is_ambiguous = False
-
     for sym, ch_name in c_tagged:
         raw_t = _resolve_reexport(
             _resolve_alias(
@@ -409,7 +454,13 @@ def _rebuild_consumer_slice(
             ),
             reexports,
         )
-        target, status = _resolve_canonical_target_key(
+        if (
+            ch_name == "api_imports"
+            and raw_t in candidate_artifacts
+        ):
+            continue
+
+        targets, status = _resolve_canonical_target_keys(
             raw_t,
             candidate_consumption,
             candidate_artifacts,
@@ -417,22 +468,14 @@ def _rebuild_consumer_slice(
             dotted_target_index=dotted_target_index,
         )
 
-        if status == "ambiguous":
-            is_ambiguous = True
+        if status == "resolved":
+            for target in targets:
+                if target not in rebuilt_targets:
+                    rebuilt_targets[target] = set()
 
-        elif (
-            status == "resolved"
-            and target
-        ):
-            if target not in rebuilt_targets:
-                rebuilt_targets[target] = set()
-
-            rebuilt_targets[target].add(
-                ch_name
-            )
-
-    if is_ambiguous:
-        return candidate_consumption, True
+                rebuilt_targets[target].add(
+                    ch_name
+                )
 
     if consumer_target_index is None:
         new_consumption = dict(
@@ -549,39 +592,7 @@ def _rebuild_consumer_slice(
                 None,
             )
 
-    return new_consumption, False
-
-
-def _remove_consumer_slice(
-    consumption: Mapping[str, Any],
-    consumer: str,
-) -> Dict[str, Any]:
-    """
-    Fail-closed sanitization helper: completely removes a consumer's slice
-    from the candidate artifact_consumption container when resolution becomes ambiguous.
-    """
-    sanitized = dict(consumption)
-
-    for target, raw_entry in consumption.items():
-        if (
-            consumer not in raw_entry.get("consumers", ())
-            and consumer not in raw_entry.get("channels", {})
-        ):
-            continue
-
-        entry = _get_copy_of_entry(raw_entry)
-
-        entry["consumers"] = sorted(
-            c
-            for c in entry.get("consumers", ())
-            if c != consumer
-        )
-
-        entry["channels"].pop(consumer, None)
-
-        sanitized[target] = entry
-
-    return sanitized
+    return new_consumption
 
 
 def _prepare_candidate_state(state: RepositoryAnalysisState) -> CandidateState:
@@ -754,7 +765,6 @@ def execute_refresh_plan(
         executed_reparse.append(reparse_mod)
 
     # 3. RECOMPUTE - re-evaluate planned cached modules in RAM without source I/O
-    artifact_consumption_failed = False
     executed_recompute: List[str] = []
     if plan.recompute_modules:
         from contextor.core.analysis.refresh_planner import (
@@ -787,7 +797,7 @@ def execute_refresh_plan(
                 consumer_target_index,
             )
 
-            rebuilt_consumption, is_ambig = _rebuild_consumer_slice(
+            candidate.artifact_consumption = _rebuild_consumer_slice(
                 consumer=consumer_path,
                 consumer_facts=consumer_facts,
                 candidate_consumption=candidate.artifact_consumption,
@@ -798,20 +808,6 @@ def execute_refresh_plan(
                 consumer_target_index=consumer_target_index,
             )
 
-            if is_ambig:
-                candidate.artifact_consumption = _remove_consumer_slice(
-                    candidate.artifact_consumption,
-                    consumer_path,
-                )
-                consumer_target_index.pop(
-                    consumer_path,
-                    None,
-                )
-                artifact_consumption_failed = True
-                candidate.artifact_consumption_state = "stale"
-                break
-
-            candidate.artifact_consumption = rebuilt_consumption
             executed_recompute.append(
                 consumer_path
             )
@@ -892,7 +888,7 @@ def execute_refresh_plan(
                         copied_entry["channels"].pop(delta.module_path, None)
                         candidate.artifact_consumption[t_key] = copied_entry
             elif new_usage:
-                rebuilt_consumption, is_ambig = _rebuild_consumer_slice(
+                candidate.artifact_consumption = _rebuild_consumer_slice(
                     consumer=delta.module_path,
                     consumer_facts=new_usage,
                     candidate_consumption=candidate.artifact_consumption,
@@ -902,23 +898,7 @@ def execute_refresh_plan(
                     dotted_target_index=dotted_target_index,
                     consumer_target_index=consumer_target_index,
                 )
-                if is_ambig:
-                    candidate.artifact_consumption = _remove_consumer_slice(
-                        candidate.artifact_consumption,
-                        delta.module_path,
-                    )
-                    consumer_target_index.pop(
-                        delta.module_path,
-                        None,
-                    )
-                    artifact_consumption_failed = True
-                    candidate.artifact_consumption_state = "stale"
-                else:
-                    candidate.artifact_consumption = rebuilt_consumption
-
-            if artifact_consumption_failed:
-                candidate.artifact_consumption_state = "stale"
-            elif (
+            if (
                 getattr(state, "resync_required", False)
                 or plan.refresh_completeness == "requires_resync"
             ):
@@ -1046,8 +1026,6 @@ def execute_refresh_plan(
         candidate.collisions_state = "stale"
         candidate.artifact_consumption_state = "stale"
     else:
-        if artifact_consumption_failed:
-            candidate.artifact_consumption_state = "stale"
         if "advanced_graph_metrics" in plan.graph_recomputations:
             candidate.topology_metrics_state = "fresh"
         if "cached_analytics" in plan.patch_families:
