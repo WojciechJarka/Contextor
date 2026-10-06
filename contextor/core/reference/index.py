@@ -33,6 +33,7 @@ from .resolution import (
 from .shared import (
     _assemble_module_export_surfaces,
     _assemble_reexport_map,
+    _canonicalize_package_reference_target,
     _empty_reference,
     _extract_reexport_facts,
     _normalize_references,
@@ -493,8 +494,14 @@ class RepositoryReferenceIndex:
 
             # 1. Calls
             for event in facts["calls"]:
-                resolved = _resolve_reexport(event["resolved"], reexports)
-                candidate = _resolve_reexport(event["candidate"], reexports)
+                resolved = _canonicalize_package_reference_target(
+                    _resolve_reexport(event["resolved"], reexports),
+                    modules,
+                )
+                candidate = _canonicalize_package_reference_target(
+                    _resolve_reexport(event["candidate"], reexports),
+                    modules,
+                )
                 if resolved:
                     direct_calls_by_target[resolved].append((module_id, event["line"], event["context"]))
                 if candidate:
@@ -510,7 +517,10 @@ class RepositoryReferenceIndex:
 
             # 2. Callbacks
             for name, local_resolved, lineno, ctx in facts["callbacks"]:
-                resolved = _resolve_reexport(local_resolved, reexports)
+                resolved = _canonicalize_package_reference_target(
+                    _resolve_reexport(local_resolved, reexports),
+                    modules,
+                )
                 if resolved:
                     callbacks_by_target[resolved].append((module_id, lineno, ctx))
                 name_to_check = name or resolved
@@ -522,7 +532,10 @@ class RepositoryReferenceIndex:
 
             # 3. Events
             for name, local_resolved, lineno, ctx in facts["events"]:
-                resolved = _resolve_reexport(local_resolved, reexports)
+                resolved = _canonicalize_package_reference_target(
+                    _resolve_reexport(local_resolved, reexports),
+                    modules,
+                )
                 if resolved:
                     events_by_target[resolved].append((module_id, lineno, ctx))
                 name_to_check = name or resolved
@@ -534,7 +547,10 @@ class RepositoryReferenceIndex:
 
             # 4. Inheritance
             for child_name, base_name, local_resolved, lineno in facts["inheritance"]:
-                resolved = _resolve_reexport(local_resolved, reexports)
+                resolved = _canonicalize_package_reference_target(
+                    _resolve_reexport(local_resolved, reexports),
+                    modules,
+                )
                 if resolved:
                     inheritance_by_target[resolved].append((module_id, child_name, lineno))
                 name_to_check = base_name or resolved
@@ -546,7 +562,10 @@ class RepositoryReferenceIndex:
 
             # 5. Qualified Refs
             for name, local_resolved, lineno, ctx in facts["qualified_refs"]:
-                resolved = _resolve_reexport(local_resolved, reexports)
+                resolved = _canonicalize_package_reference_target(
+                    _resolve_reexport(local_resolved, reexports),
+                    modules,
+                )
                 if resolved:
                     qualified_refs_by_target[resolved].append((module_id, lineno, ctx))
                 name_to_check = name or resolved
@@ -566,7 +585,13 @@ class RepositoryReferenceIndex:
                     if imported_name == "*":
                         star_imports_by_source[source_module].append(module_id)
                     else:
-                        target_id = _resolve_reexport(f"{source_module}.{imported_name}", reexports)
+                        target_id = _canonicalize_package_reference_target(
+                            _resolve_reexport(
+                                f"{source_module}.{imported_name}",
+                                reexports,
+                            ),
+                            modules,
+                        )
                         imports_by_target[target_id].append(module_id)
 
         return cls(
@@ -647,17 +672,37 @@ class RepositoryReferenceIndex:
 
             # 8. Star Imports
             for source_prefix, consumers in self.star_imports_by_source.items():
+                canonical_source_module = (
+                    _canonicalize_package_reference_target(
+                        source_prefix,
+                        self.modules,
+                    )
+                )
+                canonical_all_symbol = (
+                    _canonicalize_package_reference_target(
+                        f"{source_prefix}.__all__",
+                        self.modules,
+                    )
+                )
                 visible_targets = self.module_export_surfaces.get(
                     source_prefix,
                     {},
                 )
                 is_visible_export = any(
-                    _resolve_reexport(target, self.reexports) == symbol
+                    _canonicalize_package_reference_target(
+                        _resolve_reexport(
+                            target,
+                            self.reexports,
+                        ),
+                        self.modules,
+                    )
+                    == symbol
                     for target in visible_targets.values()
                 )
                 is_all_metadata = (
-                    source_prefix in self.explicit_all_modules
-                    and symbol == f"{source_prefix}.__all__"
+                    canonical_source_module
+                    in self.explicit_all_modules
+                    and symbol == canonical_all_symbol
                 )
                 if is_visible_export or is_all_metadata:
                     rec["imported_from"].extend(consumers)

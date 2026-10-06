@@ -30,6 +30,7 @@ from contextor.core.graph.graph import build_trie, detect_package_root, build_gr
 from contextor.core.reference.shared import (
     _assemble_module_export_surfaces,
     _assemble_reexport_map,
+    _canonicalize_package_reference_target,
     validate_reexport_facts_by_module,
 )
 from contextor.core.reference.resolution import _resolve_alias, _resolve_reexport
@@ -315,10 +316,17 @@ def _resolve_canonical_target_keys(
             return (target,), "resolved"
         return (), "unresolved"
 
+    lookup_target = (
+        _canonicalize_package_reference_target(
+            target,
+            candidate_artifacts,
+        )
+    )
+
     if dotted_target_index is not None:
         matches = tuple(
             dotted_target_index.get(
-                target,
+                lookup_target,
                 (),
             )
         )
@@ -331,7 +339,7 @@ def _resolve_canonical_target_keys(
                     "::" in canonical
                     and ".".join(
                         canonical.split("::", 1)
-                    ) == target
+                    ) == lookup_target
                 )
             )
         )
@@ -487,8 +495,14 @@ def _rebuild_consumer_slice(
                         set(),
                     ).add("api_imports")
 
+        canonical_star_source = (
+            _canonicalize_package_reference_target(
+                star_source,
+                candidate_artifacts,
+            )
+        )
         reexport_facts = reexport_facts_by_module.get(
-            star_source
+            canonical_star_source
         )
         if (
             reexport_facts is not None

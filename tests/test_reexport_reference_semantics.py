@@ -8,6 +8,9 @@ from contextor.core.reporting_layer.artifact_usage_report import (
 from contextor.core.symbol_engine.indexer import index_repository
 from contextor.core.api.facade import ContextorFacade
 from contextor.core.live_state.hydration import hydrate_repository_engine
+from contextor.core.reference.shared import (
+    _canonicalize_package_reference_target,
+)
 
 
 def _full_canonical_state(tmp_path, monkeypatch):
@@ -341,3 +344,208 @@ def test_full_multiple_star_imports_project_each_source_module(
     assert _star_channels(state, "b::beta") == ["api_imports"]
     assert _star_channels(state, "a::_A_PRIVATE") == []
     assert _star_channels(state, "b::_B_PRIVATE") == []
+
+
+def test_package_reference_canonicalizer_prefers_longest_module_prefix():
+    modules = {
+        "pkg.__init__",
+        "pkg.provider",
+        "pkg.sub.__init__",
+    }
+
+    assert (
+        _canonicalize_package_reference_target(
+            "pkg.PUBLIC",
+            modules,
+        )
+        == "pkg.__init__.PUBLIC"
+    )
+    assert (
+        _canonicalize_package_reference_target(
+            "pkg.__all__",
+            modules,
+        )
+        == "pkg.__init__.__all__"
+    )
+    assert (
+        _canonicalize_package_reference_target(
+            "pkg.provider.run",
+            modules,
+        )
+        == "pkg.provider.run"
+    )
+    assert (
+        _canonicalize_package_reference_target(
+            "pkg.sub.VALUE",
+            modules,
+        )
+        == "pkg.sub.__init__.VALUE"
+    )
+    assert (
+        _canonicalize_package_reference_target(
+            "pkg.sub.__all__",
+            modules,
+        )
+        == "pkg.sub.__init__.__all__"
+    )
+
+
+def test_named_package_local_import_uses_init_canonical_identity(
+    tmp_path,
+    monkeypatch,
+):
+    package = tmp_path / "pkg"
+    package.mkdir()
+    (package / "__init__.py").write_text(
+        "def public():\n"
+        "    pass\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "consumer.py").write_text(
+        "from pkg import public\n"
+        "\n"
+        "def use():\n"
+        "    public()\n",
+        encoding="utf-8",
+    )
+
+    state = _full_canonical_state(tmp_path, monkeypatch)
+
+    entry = state.artifact_consumption["pkg.__init__::public"]
+    assert entry["consumers"] == ["consumer"]
+    assert set(entry["channels"]["consumer"]) == {
+        "api_imports",
+        "direct_calls",
+    }
+
+
+def test_package_star_explicit_all_uses_init_canonical_identity(
+    tmp_path,
+    monkeypatch,
+):
+    package = tmp_path / "pkg"
+    package.mkdir()
+    (package / "__init__.py").write_text(
+        "PUBLIC = 1\n"
+        "_PRIVATE = 2\n"
+        "__all__ = ['PUBLIC']\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "consumer.py").write_text(
+        "from pkg import *\n",
+        encoding="utf-8",
+    )
+
+    state = _full_canonical_state(tmp_path, monkeypatch)
+
+    assert _star_channels(
+        state,
+        "pkg.__init__::PUBLIC",
+        consumer="consumer",
+    ) == ["api_imports"]
+    assert _star_channels(
+        state,
+        "pkg.__init__::_PRIVATE",
+        consumer="consumer",
+    ) == []
+    assert _star_channels(
+        state,
+        "pkg.__init__::__all__",
+        consumer="consumer",
+    ) == ["api_imports"]
+
+
+def test_package_star_empty_all_keeps_only_metadata_dependency(
+    tmp_path,
+    monkeypatch,
+):
+    package = tmp_path / "pkg"
+    package.mkdir()
+    (package / "__init__.py").write_text(
+        "PUBLIC = 1\n"
+        "_PRIVATE = 2\n"
+        "__all__ = []\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "consumer.py").write_text(
+        "from pkg import *\n",
+        encoding="utf-8",
+    )
+
+    state = _full_canonical_state(tmp_path, monkeypatch)
+
+    assert _star_channels(
+        state,
+        "pkg.__init__::PUBLIC",
+        consumer="consumer",
+    ) == []
+    assert _star_channels(
+        state,
+        "pkg.__init__::_PRIVATE",
+        consumer="consumer",
+    ) == []
+    assert _star_channels(
+        state,
+        "pkg.__init__::__all__",
+        consumer="consumer",
+    ) == ["api_imports"]
+
+
+def test_package_star_without_all_exports_public_only(
+    tmp_path,
+    monkeypatch,
+):
+    package = tmp_path / "pkg"
+    package.mkdir()
+    (package / "__init__.py").write_text(
+        "PUBLIC = 1\n"
+        "_PRIVATE = 2\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "consumer.py").write_text(
+        "from pkg import *\n",
+        encoding="utf-8",
+    )
+
+    state = _full_canonical_state(tmp_path, monkeypatch)
+
+    assert _star_channels(
+        state,
+        "pkg.__init__::PUBLIC",
+        consumer="consumer",
+    ) == ["api_imports"]
+    assert _star_channels(
+        state,
+        "pkg.__init__::_PRIVATE",
+        consumer="consumer",
+    ) == []
+    assert "pkg.__init__::__all__" not in state.artifact_consumption
+
+
+def test_package_star_reexport_keeps_provider_api_origin(
+    tmp_path,
+    monkeypatch,
+):
+    package = tmp_path / "pkg"
+    package.mkdir()
+    (package / "provider.py").write_text(
+        "def run():\n"
+        "    pass\n",
+        encoding="utf-8",
+    )
+    (package / "__init__.py").write_text(
+        "from .provider import run\n"
+        "__all__ = ['run']\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "consumer.py").write_text(
+        "from pkg import *\n",
+        encoding="utf-8",
+    )
+
+    state = _full_canonical_state(tmp_path, monkeypatch)
+
+    entry = state.artifact_consumption["pkg.provider::run"]
+    assert "consumer" in entry["consumers"]
+    assert "api_imports" in entry["channels"]["consumer"]
+    assert "pkg.__init__::run" not in state.artifact_consumption

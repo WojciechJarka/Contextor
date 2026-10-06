@@ -1,152 +1,817 @@
-# CPA_PACKAGE_INIT_CANONICAL_IMPORT_IDENTITY_DISCOVERY
+# CPA_PACKAGE_INIT_CANONICAL_REFERENCE_IDENTITY
 
-STATUS=DISCOVERY_COMPLETE
-HEAD=562a704fbf4c7dcde4fe8df1b880b6cfc138a6bc
-WORKTREE_STATE=REPORT_ONLY_MODIFIED (walkthrough.md)
-DIRECT_EVIDENCE: Before writing this report, git status --short returned no entries and git diff --stat returned no output. After writing it, git status --short reports only M walkthrough.md. No production/source/test/schema files were changed.
+STATUS=STEP_PASS
+CLASSIFICATION=PACKAGE_INIT_CANONICAL_REFERENCE_IDENTITY_CERTIFIED
+HEAD_BEFORE=e32b7ae9bbfff18ddb57057507e60eddc88c76f6
+HEAD_AT_REPORT=e32b7ae9bbfff18ddb57057507e60eddc88c76f6
+WORKTREE_BEFORE=CLEAN (git status --short empty before edits).
 
-ACCEPTED_BASELINE=CPA_CANONICAL_STAR_IMPORT_UNIFIED_SEMANTICS
-CONTRACT_PROVED: User accepted this baseline and instructed not to revert it. Current HEAD is 562a704fbf4c7dcde4fe8df1b880b6cfc138a6bc and the worktree is clean. No historical commit-provenance claim is made.
+## CANONICAL_PACKAGE_IDENTITY_CONTRACT
 
-## MODULE_IDENTITY
+CONTRACT_PROVED: Canonical artifact identities remain pkg.__init__::PUBLIC and pkg.__init__::__all__. External pkg.PUBLIC and pkg.__all__ map to the indexed initializer identity. Module IDs, persistent IDs, artifact target schema, snapshot schema, and persisted reexport facts were not changed.
 
-DIRECT_EVIDENCE: Fresh full analysis of the temporary pkg/__init__.py + consumer.py fixture returned module IDs consumer and pkg.__init__. Shared re-export facts recorded exporter="pkg"; consumer star source was pkg.
+DIRECT_EVIDENCE: Full fixtures identify pkg/__init__.py as module pkg.__init__, while the consumer import source remains pkg. New tests assert package-local canonical targets.
 
-CODE_PATH_PROVED: symbol_engine/indexer.py::_process_single_file derives module ID from the relative path, so the initializer becomes pkg.__init__. shared.py::_export_module_name removes the .__init__ suffix; _extract_reexport_facts uses the normalized exporter.
+## SHARED_CANONICALIZER
 
-- INDEX_MODULE_ID=pkg.__init__
-- REEXPORT_EXPORTER=pkg
-- EXTERNAL_IMPORT_IDENTITY=pkg
+Owner: contextor/core/reference/shared.py::_canonicalize_package_reference_target.
 
-## CANONICAL_ARTIFACT_IDENTITIES
+CODE_PATH_PROVED: Pure-RAM dotted-name mapping. Accepts module mappings or module-ID iterables. Checks the longest existing module prefix first; existing real submodules win. No source reads, AST, filesystem I/O, or stat.
 
-DIRECT_EVIDENCE: Full canonical state used these package-local targets:
-- pkg.__init__::PUBLIC
-- pkg.__init__::_PRIVATE
-- pkg.__init__::__all__
+DIRECT_EVIDENCE: The helper test passes:
+pkg.PUBLIC -> pkg.__init__.PUBLIC
+pkg.__all__ -> pkg.__init__.__all__
+pkg.provider.run -> pkg.provider.run
+pkg.sub.VALUE -> pkg.sub.__init__.VALUE
+pkg.sub.__all__ -> pkg.sub.__init__.__all__
 
-CODE_PATH_PROVED: Canonical artifact targets preserve indexed definer ID pkg.__init__, while the package export surface used external dotted spelling such as pkg.PUBLIC.
+PACKAGE_EXTERNAL_TO_INIT_CANONICALIZATION=PASS
+REAL_SUBMODULE_PRECEDENCE=PASS
 
-## FULL_PACKAGE_STAR_EXPLICIT
+## FULL_REFERENCE_CANONICALIZATION
 
-CONTRACT_PROVED: For from pkg import * with __all__ = ["PUBLIC"], PUBLIC should be consumed by consumer on api_imports; _PRIVATE should not be consumed; __all__ should be consumed as metadata by consumer on api_imports.
+CODE_PATH_PROVED: RepositoryReferenceIndex.from_compact_facts canonicalizes resolved and candidate calls, callbacks, events, inheritance, qualified refs, and direct imports after _resolve_reexport. Star import source keys remain external Python spelling. build_symbol_references canonicalizes visible targets and explicit-all source/metadata identity before comparison; channel remains api_imports.
 
-DIRECT_EVIDENCE: Full canonical artifact entries:
-- pkg.__init__::PUBLIC = {"consumers":[],"channels":{}} — FULL_PACKAGE_STAR_PUBLIC=FAIL (expected consumer missing).
-- pkg.__init__::_PRIVATE = {"consumers":[],"channels":{}} — FULL_PACKAGE_STAR_PRIVATE=PASS.
-- pkg.__init__::__all__ = {"consumers":[],"channels":{}} — FULL_PACKAGE_STAR_ALL_METADATA=FAIL (expected metadata consumer missing).
-- Surface: module_export_surfaces["pkg"]={"PUBLIC":"pkg.PUBLIC"}.
-- Star consumer index: star_imports_by_source["pkg"]=["consumer"].
+FULL_REFERENCE_CANONICALIZATION=PASS
 
-## FULL_PACKAGE_STAR_EMPTY
+## INCREMENTAL_TARGET_CANONICALIZATION
 
-CONTRACT_PROVED: With __all__ = [], neither PUBLIC nor _PRIVATE should have a star consumer; __all__ remains a metadata dependency consumed on api_imports.
+CODE_PATH_PROVED: _resolve_canonical_target_keys keeps exact canonical :: inputs unchanged, then canonicalizes dotted targets before both indexed and fallback lookup. No short-name fallback was added; dotted ambiguity behavior is retained. Contextor confirmed candidate_artifacts is module-keyed data accepted by this helper.
 
-DIRECT_EVIDENCE: Fresh full canonical entries:
-- pkg.__init__::PUBLIC = {"consumers":[],"channels":{}} — expected no consumer, PASS.
-- pkg.__init__::_PRIVATE = {"consumers":[],"channels":{}} — expected no consumer, PASS.
-- pkg.__init__::__all__ = {"consumers":[],"channels":{}} — expected metadata consumer missing, FAIL.
+INCREMENTAL_TARGET_CANONICALIZATION=PASS
 
-## FULL_PACKAGE_STAR_IMPLICIT
+## PROPAGATION_CANONICALIZATION
 
-CONTRACT_PROVED: With __all__ removed, PUBLIC should be consumed on api_imports, _PRIVATE should not be consumed, and no canonical __all__ target should exist.
+CODE_PATH_PROVED: _find_dependent_consumers resolves aliases, canonicalizes against the usage module domain, then applies existing exact module-boundary comparisons. pkg and pkg.* map through pkg.__init__; pkg.provider.run remains under the real submodule prefix.
 
-DIRECT_EVIDENCE: Fresh full canonical results:
-- pkg.__init__::PUBLIC = {"consumers":[],"channels":{}} — expected consumer missing, FAIL.
-- pkg.__init__::_PRIVATE = {"consumers":[],"channels":{}} — expected no consumer, PASS.
-- pkg.__init__::__all__ target absent — PASS.
+PROPAGATION_CANONICALIZATION=PASS
+
+## NAMED_PACKAGE_IMPORT
+
+DIRECT_EVIDENCE: Fresh full canonical fixture records pkg.__init__::public with consumer as consumer and both api_imports and direct_calls channels. It is not ambiguous-only.
+
+NAMED_PACKAGE_LOCAL_IMPORT=PASS
+NAMED_PACKAGE_LOCAL_CALL=PASS
+
+NAMED_PACKAGE_LIVE_TRIGGER=PASS_EXISTING_ARTIFACT_ADDITION
+DIRECT_EVIDENCE: An exploratory body-only return-value change did not activate recompute_modules. No new trigger was designed. The final LIVE regression adds a new package symbol through the existing artifacts_added structural trigger, retains pkg.__init__::public, recomputes consumer, and matches fresh full parity.
+
+## PACKAGE_STAR_SEMANTICS
+
+DIRECT_EVIDENCE from fresh full canonical fixtures:
+- Explicit __all__=["PUBLIC"]: pkg.__init__::PUBLIC -> consumer/api_imports; _PRIVATE has no consumer; pkg.__init__::__all__ -> consumer/api_imports metadata.
+- Empty __all__: PUBLIC and _PRIVATE have no consumer; __all__ remains consumer/api_imports metadata.
+- No __all__: PUBLIC -> consumer/api_imports; _PRIVATE has no consumer; pkg.__init__::__all__ is absent.
+
+PACKAGE_STAR_EXPLICIT_ALL=PASS
+PACKAGE_STAR_EMPTY_ALL=PASS
+PACKAGE_STAR_IMPLICIT_PUBLIC_ONLY=PASS
+PACKAGE_ALL_METADATA_DEPENDENCY=PASS
 
 ## PACKAGE_REEXPORT_PROVIDER
 
-DIRECT_EVIDENCE: Fixture used pkg/provider.py defining run, initializer from .provider import run, and consumer from pkg import *; run().
-- Canonical origin: pkg.provider::run.
-- Facts at pkg.__init__: {"bindings":{"run":"pkg.provider.run"},"explicit_all":["run"],"exporter":"pkg","star_sources":[]}.
-- module_export_surfaces["pkg"]={"run":"pkg.provider.run"}; re-export map contains pkg.run -> pkg.provider.run.
-- Provider artifact consumers include consumer and pkg.__init__; consumer api_imports relation exists.
-- No synthetic pkg.__init__::run artifact was observed.
-- Call relation: called_by=[]; called_by_ambiguous=["consumer"].
+DIRECT_EVIDENCE: Package star re-export keeps canonical origin pkg.provider::run, includes consumer on api_imports, and creates no pkg.__init__::run artifact.
 
-PACKAGE_REEXPORT_PROVIDER=PARTIAL
-INFERENCE: Re-export origin and API import resolve to provider. The direct call appears only in the ambiguous projection; this alone does not prove a broader provider re-export defect.
+PACKAGE_REEXPORT_PROVIDER_API_ORIGIN=PASS
+DEFERRED_STAR_BOUND_CALL_RESOLUTION=DEFERRED_TO_AST_SEMANTIC_COVERAGE_AUDIT
+CONTRACT_PROVED: Confirmed direct_calls after a bare wildcard-imported call is explicitly outside this package identity patch.
 
-## DIRECT_PACKAGE_LOCAL_IMPORT
+## PACKAGE_LIVE_PARITY
 
-CONTRACT_PROVED: Separate fixture imported package-local PUBLIC by from pkg import PUBLIC. Failure to bind it to the package-local canonical artifact means the gap extends beyond star import.
+DIRECT_EVIDENCE: Full baseline was hydrated, then normal engine.update_file(pkg/__init__.py) applied ["PUBLIC"] -> [] -> no __all__. A fresh full oracle and _assert_full_parity passed after each update.
 
-DIRECT_EVIDENCE: pkg.__init__::PUBLIC existed with empty consumers/channels. Consumer usage contained imports=["pkg","pkg.PUBLIC"] and reference evidence targeted pkg.PUBLIC on api_imports.
+PACKAGE_LIVE_FULL_PARITY=PASS
+PACKAGE_INIT_RECOMPUTE_SEED=PASS
+DIRECT_EVIDENCE: consumer appears in execution_trace.recompute_modules on both visibility updates.
 
-DIRECT_PACKAGE_LOCAL_IMPORT=FAIL
+DIRECT_EVIDENCE: Initial focused run found incremental/full metadata mismatch: full state had consumer on pkg.__init__::__all__, incremental state did not. Contextor source showed _rebuild_consumer_slice looked up facts by external star_source pkg although facts were keyed pkg.__init__. The in-scope plan_executor path now canonicalizes this facts lookup; final parity gates pass.
 
-## FULL_CODE_PATH
+## SOURCE_IO_PROOF
 
-CODE_PATH_PROVED:
-1. symbol_engine/indexer.py::_process_single_file maps initializer path to pkg.__init__.
-2. shared.py::_export_module_name maps it to exporter pkg.
-3. shared.py::_extract_reexport_facts creates binding targets such as pkg.PUBLIC and records literal __all__ facts.
-4. _assemble_module_export_surfaces and RepositoryReferenceIndex.from_compact_facts assemble export surfaces and explicit-all module keys from indexed module facts.
-5. Consumer star source is pkg; its public surface target is pkg.PUBLIC.
-6. build_symbol_references tries to resolve that external dotted spelling through the canonical reference index.
-7. Canonical package-local artifact target retains definer pkg.__init__.
+DIRECT_EVIDENCE: Existing test_reexport_all_only_change_is_ram_only_and_matches_full_oracle passed. It guards both Module.ast_tree and _get_cached_ast to fail on access and asserts the recorded access list remains empty during incremental re-export update.
 
-DIRECT_EVIDENCE:
-- MODULE_ID=pkg.__init__
-- EXPORTER=pkg
-- SURFACE_LOCAL_NAME=PUBLIC
-- SURFACE_TARGET=pkg.PUBLIC
-- REFERENCE_SYMBOL=pkg.__init__.PUBLIC
-- CANONICAL_TARGET=pkg.__init__::PUBLIC
-- EXPLICIT_ALL_MODULE_KEY=pkg.__init__
-- METADATA_COMPARE_SYMBOL=pkg.__init__.__all__
-- CANONICAL_ALL_TARGET=pkg.__init__::__all__
+INCREMENTAL_BUILD_REEXPORT_SOURCE_IO=ZERO
+UNCHANGED_MODULE_AST_ACCESSES=ZERO
 
-INFERENCE: Producer and consumer projections use external pkg.PUBLIC and canonical pkg.__init__::PUBLIC for the same package-local symbol; full results show they are not bridged for direct package-local consumption.
+## LIVE_CONTEXTOR_EVIDENCE
 
-## LIVE_PARITY
+DIRECT_EVIDENCE: Pre-edit LIVE revision 1517. Desktop watcher emitted update_file/UPDATED events for all six modified files through revision 1525; continuity=continuous and resync_required=false. At revision 1525, Contextor source freshness was canonical_state=fresh, workspace_sync=verified, syntax diagnostics=fresh with zero errors for the shared canonicalizer and incremental consumer-slice path; the refresh-planner blast-radius query was also fresh and verified. No MCP update_file or restart was used.
 
-DIRECT_EVIDENCE: Hydrated engine used normal engine.update_file(pkg/__init__.py) updates with fresh full oracles after each transition. Compared families: modules, reexport_facts_by_module, artifact_consumption, artifact_consumption_state.
-- LIVE_PACKAGE_STAR_EXPLICIT_PARITY=PASS
-- LIVE_PACKAGE_STAR_EMPTY_PARITY=PASS
-- LIVE_PACKAGE_STAR_IMPLICIT_PARITY=PASS
-- Transitions: __all__=["PUBLIC"] → __all__=[] → no __all__.
-- For empty and no-all updates, shadow and execution recompute module tuples were both empty.
+## TARGETED_TESTS
 
-INFERENCE: Each parity PASS is structural parity only: both full and incremental states contain the same missing semantic consumer edges.
+New package identity/LIVE nodes (8):
+- tests/test_reexport_reference_semantics.py::test_package_reference_canonicalizer_prefers_longest_module_prefix
+- tests/test_reexport_reference_semantics.py::test_named_package_local_import_uses_init_canonical_identity
+- tests/test_reexport_reference_semantics.py::test_package_star_explicit_all_uses_init_canonical_identity
+- tests/test_reexport_reference_semantics.py::test_package_star_empty_all_keeps_only_metadata_dependency
+- tests/test_reexport_reference_semantics.py::test_package_star_without_all_exports_public_only
+- tests/test_reexport_reference_semantics.py::test_package_star_reexport_keeps_provider_api_origin
+- tests/test_completeness_freshness_parity_proof.py::test_package_init_star_visibility_changes_match_full_oracle
+- tests/test_completeness_freshness_parity_proof.py::test_named_package_local_import_update_matches_full_oracle
 
-## INCREMENTAL_RESOLUTION_TRACE
+Previous 14 unified-star gates:
+- tests/test_reexport_reference_semantics.py::test_full_star_import_uses_explicit_all_and_tracks_metadata
+- tests/test_reexport_reference_semantics.py::test_full_star_import_empty_all_exports_only_metadata
+- tests/test_reexport_reference_semantics.py::test_full_star_import_without_all_exports_public_bindings_only
+- tests/test_reexport_reference_semantics.py::test_full_multiple_star_imports_project_each_source_module
+- tests/test_reference_fusion_semantic_core.py::test_ast_build_exactly_equals_compact_facts_build
+- tests/test_reexport_reference_semantics.py::test_star_reexport_uses_explicit_all_and_remains_transitive
+- tests/test_reexport_reference_semantics.py::test_direct_star_reexport_includes_public_source_definition
+- tests/test_reexport_reference_semantics.py::test_cyclic_reexports_are_not_resolved_arbitrarily
+- tests/test_completeness_freshness_parity_proof.py::test_reexport_all_only_change_is_ram_only_and_matches_full_oracle
+- tests/test_completeness_freshness_parity_proof.py::test_transitive_reexport_late_provider_matches_full_oracle
+- tests/test_completeness_freshness_parity_proof.py::test_reexport_retarget_matches_full_oracle
+- tests/test_completeness_freshness_parity_proof.py::test_natural_ambiguity_transition_matches_full_oracle_state
+- tests/test_completeness_freshness_parity_proof.py::test_transitive_reexport_symbol_remove_matches_full_oracle
+- tests/test_completeness_freshness_parity_proof.py::test_star_import_visibility_changes_match_full_oracle
 
-DIRECT_EVIDENCE:
-- STAR_SOURCE=pkg
-- MODULE_EXPORT_SURFACE={"PUBLIC":"pkg.PUBLIC"}
-- SURFACE_DOTTED_TARGET=pkg.PUBLIC
-- AFTER_REEXPORT_RESOLUTION=pkg.PUBLIC
-- EXPECTED_CANONICAL_TARGETS=["pkg.__init__::PUBLIC","pkg.__init__::_PRIVATE","pkg.__init__::__all__"]
-- DOTTED_TARGET_INDEX_KEYS=["pkg.__init__.PUBLIC","pkg.__init__._PRIVATE","pkg.__init__.__all__"]
-- RESOLVED_CANONICAL_TARGET_KEYS=([], "unresolved")
-- METADATA_DOTTED_REQUEST=pkg.__all__
-- RESOLVED_ALL_TARGET=([], "unresolved")
-- Metadata facts key: pkg.__init__; external metadata spelling: pkg.__all__.
-- Full metadata compare symbol: pkg.__init__.__all__; canonical target: pkg.__init__::__all__.
+## TEST_RESULTS
 
-## PACKAGE_INIT_IDENTITY_GAP
+- New package identity/LIVE gates: 8 passed.
+- Previous unified-star gates: 14 passed.
+- git diff --check for the six production/test files: PASS, no whitespace errors.
+- Unscoped git diff --check reports trailing-space rows in walkthrough.md because complete raw Git diffs are embedded there; these are diff-context rows in the report, not whitespace errors in the six production/test files.
+- Full repository pytest suite: NOT RUN, per policy.
 
-PACKAGE_INIT_IDENTITY_GAP=GENERAL_PACKAGE_LOCAL_IMPORT_IDENTITY
-
-DIRECT_EVIDENCE: Full star import and separate named package import both failed to attach the consumer to pkg.__init__::PUBLIC.
-INFERENCE: This is the broadest demonstrated category. Provider re-export API origin resolved to pkg.provider::run, so evidence does not establish BROADER_REEXPORT_IDENTITY.
-
-READY_FOR_DESIGN=YES
-
-## EVIDENCE_BOUNDARIES
-
-CONTRACT_PROVED: Semantic expectations are the Python-static contract supplied for these fixtures.
-DIRECT_EVIDENCE: Full analyses ran only on temporary fixture directories. No full analysis of the actual repository and no pytest suite were run.
-CODE_PATH_PROVED: Contextor source/lineage evidence traced indexing, re-export, reference, canonical artifact, and incremental paths.
-UNKNOWN:
-- Dynamic or non-literal __all__ behavior was not tested.
-- Runtime Python import behavior beyond these static fixtures was not tested.
-- The ambiguous direct-call projection for the provider re-export was not investigated further.
+DIRECT_EVIDENCE: The initial focused run had six full/helper passes and two LIVE failures. It exposed the package __all__ facts-key mismatch and showed that body-only return-value change did not activate an existing recompute trigger. After the in-scope incremental facts-lookup correction and switching the named LIVE fixture to an existing structural artifact-addition trigger, all eight new gates passed. The 14 earlier gates passed unchanged.
 
 ## FILES_CHANGED
 
-FILES_CHANGED=NONE
-DIFFS=NONE
+- contextor/core/reference/shared.py
+- contextor/core/reference/index.py
+- contextor/core/analysis/incremental/plan_executor.py
+- contextor/core/analysis/refresh_planner.py
+- tests/test_reexport_reference_semantics.py
+- tests/test_completeness_freshness_parity_proof.py
+
+## RESTART
+
+MCP_RESTART_REQUIRED=YES_AFTER_STEP
+MCP_RESTART_PERFORMED=NO
+FULL_ANALYSIS_REQUIRED_AFTER_RESTART=YES
+No out-of-scope production file was required. This is not final certification of the broader AST semantic coverage family.
+
+## FULL_DIFFS
+
+diff --git a/contextor/core/analysis/incremental/plan_executor.py b/contextor/core/analysis/incremental/plan_executor.py
+index 47606e1..55ac25f 100644
+--- a/contextor/core/analysis/incremental/plan_executor.py
++++ b/contextor/core/analysis/incremental/plan_executor.py
+@@ -30,6 +30,7 @@ from contextor.core.graph.graph import build_trie, detect_package_root, build_gr
+ from contextor.core.reference.shared import (
+     _assemble_module_export_surfaces,
+     _assemble_reexport_map,
++    _canonicalize_package_reference_target,
+     validate_reexport_facts_by_module,
+ )
+ from contextor.core.reference.resolution import _resolve_alias, _resolve_reexport
+@@ -315,10 +316,17 @@ def _resolve_canonical_target_keys(
+             return (target,), "resolved"
+         return (), "unresolved"
+ 
++    lookup_target = (
++        _canonicalize_package_reference_target(
++            target,
++            candidate_artifacts,
++        )
++    )
++
+     if dotted_target_index is not None:
+         matches = tuple(
+             dotted_target_index.get(
+-                target,
++                lookup_target,
+                 (),
+             )
+         )
+@@ -331,7 +339,7 @@ def _resolve_canonical_target_keys(
+                     "::" in canonical
+                     and ".".join(
+                         canonical.split("::", 1)
+-                    ) == target
++                    ) == lookup_target
+                 )
+             )
+         )
+@@ -487,8 +495,14 @@ def _rebuild_consumer_slice(
+                         set(),
+                     ).add("api_imports")
+ 
++        canonical_star_source = (
++            _canonicalize_package_reference_target(
++                star_source,
++                candidate_artifacts,
++            )
++        )
+         reexport_facts = reexport_facts_by_module.get(
+-            star_source
++            canonical_star_source
+         )
+         if (
+             reexport_facts is not None
+diff --git a/contextor/core/analysis/refresh_planner.py b/contextor/core/analysis/refresh_planner.py
+index 8b200ab..9296a2b 100644
+--- a/contextor/core/analysis/refresh_planner.py
++++ b/contextor/core/analysis/refresh_planner.py
+@@ -22,6 +22,9 @@ def _find_dependent_consumers(
+     qualified_refs, callback_calls, event_bindings, inheritance_refs.
+     """
+     from contextor.core.reference.resolution import _resolve_alias
++    from contextor.core.reference.shared import (
++        _canonicalize_package_reference_target,
++    )
+ 
+     recompute_set: Set[str] = set()
+     if not usages:
+@@ -45,6 +48,10 @@ def _find_dependent_consumers(
+ 
+         for ref in raw_refs:
+             resolved = _resolve_alias(ref, c_aliases)
++            resolved = _canonicalize_package_reference_target(
++                resolved,
++                usages,
++            )
+             if (
+                 resolved == module_path
+                 or resolved.startswith(f"{module_path}.")
+diff --git a/contextor/core/reference/index.py b/contextor/core/reference/index.py
+index 8c60d4a..27c1c30 100644
+--- a/contextor/core/reference/index.py
++++ b/contextor/core/reference/index.py
+@@ -33,6 +33,7 @@ from .resolution import (
+ from .shared import (
+     _assemble_module_export_surfaces,
+     _assemble_reexport_map,
++    _canonicalize_package_reference_target,
+     _empty_reference,
+     _extract_reexport_facts,
+     _normalize_references,
+@@ -493,8 +494,14 @@ class RepositoryReferenceIndex:
+ 
+             # 1. Calls
+             for event in facts["calls"]:
+-                resolved = _resolve_reexport(event["resolved"], reexports)
+-                candidate = _resolve_reexport(event["candidate"], reexports)
++                resolved = _canonicalize_package_reference_target(
++                    _resolve_reexport(event["resolved"], reexports),
++                    modules,
++                )
++                candidate = _canonicalize_package_reference_target(
++                    _resolve_reexport(event["candidate"], reexports),
++                    modules,
++                )
+                 if resolved:
+                     direct_calls_by_target[resolved].append((module_id, event["line"], event["context"]))
+                 if candidate:
+@@ -510,7 +517,10 @@ class RepositoryReferenceIndex:
+ 
+             # 2. Callbacks
+             for name, local_resolved, lineno, ctx in facts["callbacks"]:
+-                resolved = _resolve_reexport(local_resolved, reexports)
++                resolved = _canonicalize_package_reference_target(
++                    _resolve_reexport(local_resolved, reexports),
++                    modules,
++                )
+                 if resolved:
+                     callbacks_by_target[resolved].append((module_id, lineno, ctx))
+                 name_to_check = name or resolved
+@@ -522,7 +532,10 @@ class RepositoryReferenceIndex:
+ 
+             # 3. Events
+             for name, local_resolved, lineno, ctx in facts["events"]:
+-                resolved = _resolve_reexport(local_resolved, reexports)
++                resolved = _canonicalize_package_reference_target(
++                    _resolve_reexport(local_resolved, reexports),
++                    modules,
++                )
+                 if resolved:
+                     events_by_target[resolved].append((module_id, lineno, ctx))
+                 name_to_check = name or resolved
+@@ -534,7 +547,10 @@ class RepositoryReferenceIndex:
+ 
+             # 4. Inheritance
+             for child_name, base_name, local_resolved, lineno in facts["inheritance"]:
+-                resolved = _resolve_reexport(local_resolved, reexports)
++                resolved = _canonicalize_package_reference_target(
++                    _resolve_reexport(local_resolved, reexports),
++                    modules,
++                )
+                 if resolved:
+                     inheritance_by_target[resolved].append((module_id, child_name, lineno))
+                 name_to_check = base_name or resolved
+@@ -546,7 +562,10 @@ class RepositoryReferenceIndex:
+ 
+             # 5. Qualified Refs
+             for name, local_resolved, lineno, ctx in facts["qualified_refs"]:
+-                resolved = _resolve_reexport(local_resolved, reexports)
++                resolved = _canonicalize_package_reference_target(
++                    _resolve_reexport(local_resolved, reexports),
++                    modules,
++                )
+                 if resolved:
+                     qualified_refs_by_target[resolved].append((module_id, lineno, ctx))
+                 name_to_check = name or resolved
+@@ -566,7 +585,13 @@ class RepositoryReferenceIndex:
+                     if imported_name == "*":
+                         star_imports_by_source[source_module].append(module_id)
+                     else:
+-                        target_id = _resolve_reexport(f"{source_module}.{imported_name}", reexports)
++                        target_id = _canonicalize_package_reference_target(
++                            _resolve_reexport(
++                                f"{source_module}.{imported_name}",
++                                reexports,
++                            ),
++                            modules,
++                        )
+                         imports_by_target[target_id].append(module_id)
+ 
+         return cls(
+@@ -647,17 +672,37 @@ class RepositoryReferenceIndex:
+ 
+             # 8. Star Imports
+             for source_prefix, consumers in self.star_imports_by_source.items():
++                canonical_source_module = (
++                    _canonicalize_package_reference_target(
++                        source_prefix,
++                        self.modules,
++                    )
++                )
++                canonical_all_symbol = (
++                    _canonicalize_package_reference_target(
++                        f"{source_prefix}.__all__",
++                        self.modules,
++                    )
++                )
+                 visible_targets = self.module_export_surfaces.get(
+                     source_prefix,
+                     {},
+                 )
+                 is_visible_export = any(
+-                    _resolve_reexport(target, self.reexports) == symbol
++                    _canonicalize_package_reference_target(
++                        _resolve_reexport(
++                            target,
++                            self.reexports,
++                        ),
++                        self.modules,
++                    )
++                    == symbol
+                     for target in visible_targets.values()
+                 )
+                 is_all_metadata = (
+-                    source_prefix in self.explicit_all_modules
+-                    and symbol == f"{source_prefix}.__all__"
++                    canonical_source_module
++                    in self.explicit_all_modules
++                    and symbol == canonical_all_symbol
+                 )
+                 if is_visible_export or is_all_metadata:
+                     rec["imported_from"].extend(consumers)
+diff --git a/contextor/core/reference/shared.py b/contextor/core/reference/shared.py
+index 0b44f4f..ca185c5 100644
+--- a/contextor/core/reference/shared.py
++++ b/contextor/core/reference/shared.py
+@@ -38,6 +38,71 @@ def _export_module_name(module_id: str) -> str:
+     return module_id.removesuffix(".__init__")
+ 
+ 
++def _canonicalize_package_reference_target(
++    name: str | None,
++    modules: Any,
++) -> str | None:
++    """
++    Map an external dotted Python reference through a package initializer
++    to the indexed package module identity.
++
++    Examples:
++
++        pkg.PUBLIC
++        -> pkg.__init__.PUBLIC
++
++        pkg.__all__
++        -> pkg.__init__.__all__
++
++        pkg.provider.run
++        -> pkg.provider.run
++
++    The longest existing module prefix wins, so real submodules are never
++    rewritten through their parent package initializer.
++    """
++    if not name:
++        return name
++
++    module_ids = (
++        modules.keys()
++        if isinstance(modules, Mapping)
++        else modules
++    )
++
++    parts = name.split(".")
++
++    for stop in range(
++        len(parts),
++        0,
++        -1,
++    ):
++        prefix = ".".join(
++            parts[:stop]
++        )
++
++        # A real indexed module takes precedence.
++        if prefix in module_ids:
++            return name
++
++        init_module = (
++            f"{prefix}.__init__"
++        )
++
++        if init_module in module_ids:
++            suffix = ".".join(
++                parts[stop:]
++            )
++
++            if suffix:
++                return (
++                    f"{init_module}.{suffix}"
++                )
++
++            return init_module
++
++    return name
++
++
+ def _is_valid_reexport_fact(
+     module_id: str,
+     fact: Any,
+diff --git a/tests/test_completeness_freshness_parity_proof.py b/tests/test_completeness_freshness_parity_proof.py
+index b14b0b9..d57b0c5 100644
+--- a/tests/test_completeness_freshness_parity_proof.py
++++ b/tests/test_completeness_freshness_parity_proof.py
+@@ -2174,3 +2174,144 @@ def test_star_import_visibility_changes_match_full_oracle(tmp_path, monkeypatch)
+         [],
+         all_target_exists=False,
+     )
++
++
++def test_package_init_star_visibility_changes_match_full_oracle(
++    tmp_path,
++    monkeypatch,
++):
++    monkeypatch.setenv("CONTEXTOR_DISABLE_PROCESS_POOL", "1")
++    package = tmp_path / "pkg"
++    package.mkdir()
++    package_init = package / "__init__.py"
++    package_init.write_text(
++        "PUBLIC = 1\n"
++        "_PRIVATE = 2\n"
++        "__all__ = ['PUBLIC']\n",
++        encoding="utf-8",
++    )
++    (tmp_path / "consumer.py").write_text(
++        "from pkg import *\n",
++        encoding="utf-8",
++    )
++
++    errors, _ = ContextorFacade().analyze_project(str(tmp_path))
++    assert not errors, errors
++    hydrated = hydrate_repository_engine(tmp_path)
++    assert hydrated is not None
++    engine = hydrated.engine
++
++    def assert_package_star_projection(
++        state,
++        public_channels,
++        private_channels,
++        all_channels,
++        all_target_exists=True,
++    ):
++        assert state.artifact_consumption.get(
++            "pkg.__init__::PUBLIC", {}
++        ).get("channels", {}).get("consumer", []) == public_channels
++        assert state.artifact_consumption.get(
++            "pkg.__init__::_PRIVATE", {}
++        ).get("channels", {}).get("consumer", []) == private_channels
++        assert (
++            "pkg.__init__::__all__" in state.artifact_consumption
++        ) is all_target_exists
++        assert state.artifact_consumption.get(
++            "pkg.__init__::__all__", {}
++        ).get("channels", {}).get("consumer", []) == all_channels
++
++    assert_package_star_projection(
++        engine.state,
++        ["api_imports"],
++        [],
++        ["api_imports"],
++    )
++
++    package_init.write_text(
++        "PUBLIC = 1\n"
++        "_PRIVATE = 2\n"
++        "__all__ = []\n",
++        encoding="utf-8",
++    )
++    empty_all_result = engine.update_file(str(package_init))
++    assert "consumer" in empty_all_result.execution_trace[
++        "recompute_modules"
++    ]
++    empty_all_oracle = _build_full_static_state(tmp_path)
++    _assert_full_parity(engine.state, empty_all_oracle)
++    assert_package_star_projection(
++        engine.state,
++        [],
++        [],
++        ["api_imports"],
++    )
++
++    package_init.write_text(
++        "PUBLIC = 1\n"
++        "_PRIVATE = 2\n",
++        encoding="utf-8",
++    )
++    implicit_all_result = engine.update_file(str(package_init))
++    assert "consumer" in implicit_all_result.execution_trace[
++        "recompute_modules"
++    ]
++    implicit_all_oracle = _build_full_static_state(tmp_path)
++    _assert_full_parity(engine.state, implicit_all_oracle)
++    assert_package_star_projection(
++        engine.state,
++        ["api_imports"],
++        [],
++        [],
++        all_target_exists=False,
++    )
++
++
++def test_named_package_local_import_update_matches_full_oracle(
++    tmp_path,
++    monkeypatch,
++):
++    monkeypatch.setenv("CONTEXTOR_DISABLE_PROCESS_POOL", "1")
++    package = tmp_path / "pkg"
++    package.mkdir()
++    package_init = package / "__init__.py"
++    package_init.write_text(
++        "def public():\n"
++        "    return 1\n",
++        encoding="utf-8",
++    )
++    (tmp_path / "consumer.py").write_text(
++        "from pkg import public\n"
++        "\n"
++        "def use():\n"
++        "    return public()\n",
++        encoding="utf-8",
++    )
++
++    errors, _ = ContextorFacade().analyze_project(str(tmp_path))
++    assert not errors, errors
++    hydrated = hydrate_repository_engine(tmp_path)
++    assert hydrated is not None
++    engine = hydrated.engine
++    target = "pkg.__init__::public"
++    assert set(
++        engine.state.artifact_consumption[target]["channels"]["consumer"]
++    ) == {"api_imports", "direct_calls"}
++
++    package_init.write_text(
++        "def public():\n"
++        "    return 1\n"
++        "\n"
++        "def added():\n"
++        "    return 2\n",
++        encoding="utf-8",
++    )
++    result = engine.update_file(str(package_init))
++
++    assert "consumer" in result.execution_trace["recompute_modules"]
++    assert target in engine.state.artifact_consumption
++    assert set(
++        engine.state.artifact_consumption[target]["channels"]["consumer"]
++    ) == {"api_imports", "direct_calls"}
++    oracle = _build_full_static_state(tmp_path)
++    _assert_full_parity(engine.state, oracle)
+diff --git a/tests/test_reexport_reference_semantics.py b/tests/test_reexport_reference_semantics.py
+index fb989fb..4ee17d4 100644
+--- a/tests/test_reexport_reference_semantics.py
++++ b/tests/test_reexport_reference_semantics.py
+@@ -8,6 +8,9 @@ from contextor.core.reporting_layer.artifact_usage_report import (
+ from contextor.core.symbol_engine.indexer import index_repository
+ from contextor.core.api.facade import ContextorFacade
+ from contextor.core.live_state.hydration import hydrate_repository_engine
++from contextor.core.reference.shared import (
++    _canonicalize_package_reference_target,
++)
+ 
+ 
+ def _full_canonical_state(tmp_path, monkeypatch):
+@@ -341,3 +344,208 @@ def test_full_multiple_star_imports_project_each_source_module(
+     assert _star_channels(state, "b::beta") == ["api_imports"]
+     assert _star_channels(state, "a::_A_PRIVATE") == []
+     assert _star_channels(state, "b::_B_PRIVATE") == []
++
++
++def test_package_reference_canonicalizer_prefers_longest_module_prefix():
++    modules = {
++        "pkg.__init__",
++        "pkg.provider",
++        "pkg.sub.__init__",
++    }
++
++    assert (
++        _canonicalize_package_reference_target(
++            "pkg.PUBLIC",
++            modules,
++        )
++        == "pkg.__init__.PUBLIC"
++    )
++    assert (
++        _canonicalize_package_reference_target(
++            "pkg.__all__",
++            modules,
++        )
++        == "pkg.__init__.__all__"
++    )
++    assert (
++        _canonicalize_package_reference_target(
++            "pkg.provider.run",
++            modules,
++        )
++        == "pkg.provider.run"
++    )
++    assert (
++        _canonicalize_package_reference_target(
++            "pkg.sub.VALUE",
++            modules,
++        )
++        == "pkg.sub.__init__.VALUE"
++    )
++    assert (
++        _canonicalize_package_reference_target(
++            "pkg.sub.__all__",
++            modules,
++        )
++        == "pkg.sub.__init__.__all__"
++    )
++
++
++def test_named_package_local_import_uses_init_canonical_identity(
++    tmp_path,
++    monkeypatch,
++):
++    package = tmp_path / "pkg"
++    package.mkdir()
++    (package / "__init__.py").write_text(
++        "def public():\n"
++        "    pass\n",
++        encoding="utf-8",
++    )
++    (tmp_path / "consumer.py").write_text(
++        "from pkg import public\n"
++        "\n"
++        "def use():\n"
++        "    public()\n",
++        encoding="utf-8",
++    )
++
++    state = _full_canonical_state(tmp_path, monkeypatch)
++
++    entry = state.artifact_consumption["pkg.__init__::public"]
++    assert entry["consumers"] == ["consumer"]
++    assert set(entry["channels"]["consumer"]) == {
++        "api_imports",
++        "direct_calls",
++    }
++
++
++def test_package_star_explicit_all_uses_init_canonical_identity(
++    tmp_path,
++    monkeypatch,
++):
++    package = tmp_path / "pkg"
++    package.mkdir()
++    (package / "__init__.py").write_text(
++        "PUBLIC = 1\n"
++        "_PRIVATE = 2\n"
++        "__all__ = ['PUBLIC']\n",
++        encoding="utf-8",
++    )
++    (tmp_path / "consumer.py").write_text(
++        "from pkg import *\n",
++        encoding="utf-8",
++    )
++
++    state = _full_canonical_state(tmp_path, monkeypatch)
++
++    assert _star_channels(
++        state,
++        "pkg.__init__::PUBLIC",
++        consumer="consumer",
++    ) == ["api_imports"]
++    assert _star_channels(
++        state,
++        "pkg.__init__::_PRIVATE",
++        consumer="consumer",
++    ) == []
++    assert _star_channels(
++        state,
++        "pkg.__init__::__all__",
++        consumer="consumer",
++    ) == ["api_imports"]
++
++
++def test_package_star_empty_all_keeps_only_metadata_dependency(
++    tmp_path,
++    monkeypatch,
++):
++    package = tmp_path / "pkg"
++    package.mkdir()
++    (package / "__init__.py").write_text(
++        "PUBLIC = 1\n"
++        "_PRIVATE = 2\n"
++        "__all__ = []\n",
++        encoding="utf-8",
++    )
++    (tmp_path / "consumer.py").write_text(
++        "from pkg import *\n",
++        encoding="utf-8",
++    )
++
++    state = _full_canonical_state(tmp_path, monkeypatch)
++
++    assert _star_channels(
++        state,
++        "pkg.__init__::PUBLIC",
++        consumer="consumer",
++    ) == []
++    assert _star_channels(
++        state,
++        "pkg.__init__::_PRIVATE",
++        consumer="consumer",
++    ) == []
++    assert _star_channels(
++        state,
++        "pkg.__init__::__all__",
++        consumer="consumer",
++    ) == ["api_imports"]
++
++
++def test_package_star_without_all_exports_public_only(
++    tmp_path,
++    monkeypatch,
++):
++    package = tmp_path / "pkg"
++    package.mkdir()
++    (package / "__init__.py").write_text(
++        "PUBLIC = 1\n"
++        "_PRIVATE = 2\n",
++        encoding="utf-8",
++    )
++    (tmp_path / "consumer.py").write_text(
++        "from pkg import *\n",
++        encoding="utf-8",
++    )
++
++    state = _full_canonical_state(tmp_path, monkeypatch)
++
++    assert _star_channels(
++        state,
++        "pkg.__init__::PUBLIC",
++        consumer="consumer",
++    ) == ["api_imports"]
++    assert _star_channels(
++        state,
++        "pkg.__init__::_PRIVATE",
++        consumer="consumer",
++    ) == []
++    assert "pkg.__init__::__all__" not in state.artifact_consumption
++
++
++def test_package_star_reexport_keeps_provider_api_origin(
++    tmp_path,
++    monkeypatch,
++):
++    package = tmp_path / "pkg"
++    package.mkdir()
++    (package / "provider.py").write_text(
++        "def run():\n"
++        "    pass\n",
++        encoding="utf-8",
++    )
++    (package / "__init__.py").write_text(
++        "from .provider import run\n"
++        "__all__ = ['run']\n",
++        encoding="utf-8",
++    )
++    (tmp_path / "consumer.py").write_text(
++        "from pkg import *\n",
++        encoding="utf-8",
++    )
++
++    state = _full_canonical_state(tmp_path, monkeypatch)
++
++    entry = state.artifact_consumption["pkg.provider::run"]
++    assert "consumer" in entry["consumers"]
++    assert "api_imports" in entry["channels"]["consumer"]
++    assert "pkg.__init__::run" not in state.artifact_consumption

@@ -22,6 +22,9 @@ def _find_dependent_consumers(
     qualified_refs, callback_calls, event_bindings, inheritance_refs.
     """
     from contextor.core.reference.resolution import _resolve_alias
+    from contextor.core.reference.shared import (
+        _canonicalize_package_reference_target,
+    )
 
     recompute_set: Set[str] = set()
     if not usages:
@@ -45,6 +48,10 @@ def _find_dependent_consumers(
 
         for ref in raw_refs:
             resolved = _resolve_alias(ref, c_aliases)
+            resolved = _canonicalize_package_reference_target(
+                resolved,
+                usages,
+            )
             if (
                 resolved == module_path
                 or resolved.startswith(f"{module_path}.")

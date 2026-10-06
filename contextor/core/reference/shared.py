@@ -38,6 +38,71 @@ def _export_module_name(module_id: str) -> str:
     return module_id.removesuffix(".__init__")
 
 
+def _canonicalize_package_reference_target(
+    name: str | None,
+    modules: Any,
+) -> str | None:
+    """
+    Map an external dotted Python reference through a package initializer
+    to the indexed package module identity.
+
+    Examples:
+
+        pkg.PUBLIC
+        -> pkg.__init__.PUBLIC
+
+        pkg.__all__
+        -> pkg.__init__.__all__
+
+        pkg.provider.run
+        -> pkg.provider.run
+
+    The longest existing module prefix wins, so real submodules are never
+    rewritten through their parent package initializer.
+    """
+    if not name:
+        return name
+
+    module_ids = (
+        modules.keys()
+        if isinstance(modules, Mapping)
+        else modules
+    )
+
+    parts = name.split(".")
+
+    for stop in range(
+        len(parts),
+        0,
+        -1,
+    ):
+        prefix = ".".join(
+            parts[:stop]
+        )
+
+        # A real indexed module takes precedence.
+        if prefix in module_ids:
+            return name
+
+        init_module = (
+            f"{prefix}.__init__"
+        )
+
+        if init_module in module_ids:
+            suffix = ".".join(
+                parts[stop:]
+            )
+
+            if suffix:
+                return (
+                    f"{init_module}.{suffix}"
+                )
+
+            return init_module
+
+    return name
+
+
 def _is_valid_reexport_fact(
     module_id: str,
     fact: Any,

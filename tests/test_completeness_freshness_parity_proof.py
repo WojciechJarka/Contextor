@@ -2174,3 +2174,144 @@ def test_star_import_visibility_changes_match_full_oracle(tmp_path, monkeypatch)
         [],
         all_target_exists=False,
     )
+
+
+def test_package_init_star_visibility_changes_match_full_oracle(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv("CONTEXTOR_DISABLE_PROCESS_POOL", "1")
+    package = tmp_path / "pkg"
+    package.mkdir()
+    package_init = package / "__init__.py"
+    package_init.write_text(
+        "PUBLIC = 1\n"
+        "_PRIVATE = 2\n"
+        "__all__ = ['PUBLIC']\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "consumer.py").write_text(
+        "from pkg import *\n",
+        encoding="utf-8",
+    )
+
+    errors, _ = ContextorFacade().analyze_project(str(tmp_path))
+    assert not errors, errors
+    hydrated = hydrate_repository_engine(tmp_path)
+    assert hydrated is not None
+    engine = hydrated.engine
+
+    def assert_package_star_projection(
+        state,
+        public_channels,
+        private_channels,
+        all_channels,
+        all_target_exists=True,
+    ):
+        assert state.artifact_consumption.get(
+            "pkg.__init__::PUBLIC", {}
+        ).get("channels", {}).get("consumer", []) == public_channels
+        assert state.artifact_consumption.get(
+            "pkg.__init__::_PRIVATE", {}
+        ).get("channels", {}).get("consumer", []) == private_channels
+        assert (
+            "pkg.__init__::__all__" in state.artifact_consumption
+        ) is all_target_exists
+        assert state.artifact_consumption.get(
+            "pkg.__init__::__all__", {}
+        ).get("channels", {}).get("consumer", []) == all_channels
+
+    assert_package_star_projection(
+        engine.state,
+        ["api_imports"],
+        [],
+        ["api_imports"],
+    )
+
+    package_init.write_text(
+        "PUBLIC = 1\n"
+        "_PRIVATE = 2\n"
+        "__all__ = []\n",
+        encoding="utf-8",
+    )
+    empty_all_result = engine.update_file(str(package_init))
+    assert "consumer" in empty_all_result.execution_trace[
+        "recompute_modules"
+    ]
+    empty_all_oracle = _build_full_static_state(tmp_path)
+    _assert_full_parity(engine.state, empty_all_oracle)
+    assert_package_star_projection(
+        engine.state,
+        [],
+        [],
+        ["api_imports"],
+    )
+
+    package_init.write_text(
+        "PUBLIC = 1\n"
+        "_PRIVATE = 2\n",
+        encoding="utf-8",
+    )
+    implicit_all_result = engine.update_file(str(package_init))
+    assert "consumer" in implicit_all_result.execution_trace[
+        "recompute_modules"
+    ]
+    implicit_all_oracle = _build_full_static_state(tmp_path)
+    _assert_full_parity(engine.state, implicit_all_oracle)
+    assert_package_star_projection(
+        engine.state,
+        ["api_imports"],
+        [],
+        [],
+        all_target_exists=False,
+    )
+
+
+def test_named_package_local_import_update_matches_full_oracle(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv("CONTEXTOR_DISABLE_PROCESS_POOL", "1")
+    package = tmp_path / "pkg"
+    package.mkdir()
+    package_init = package / "__init__.py"
+    package_init.write_text(
+        "def public():\n"
+        "    return 1\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "consumer.py").write_text(
+        "from pkg import public\n"
+        "\n"
+        "def use():\n"
+        "    return public()\n",
+        encoding="utf-8",
+    )
+
+    errors, _ = ContextorFacade().analyze_project(str(tmp_path))
+    assert not errors, errors
+    hydrated = hydrate_repository_engine(tmp_path)
+    assert hydrated is not None
+    engine = hydrated.engine
+    target = "pkg.__init__::public"
+    assert set(
+        engine.state.artifact_consumption[target]["channels"]["consumer"]
+    ) == {"api_imports", "direct_calls"}
+
+    package_init.write_text(
+        "def public():\n"
+        "    return 1\n"
+        "\n"
+        "def added():\n"
+        "    return 2\n",
+        encoding="utf-8",
+    )
+    result = engine.update_file(str(package_init))
+
+    assert "consumer" in result.execution_trace["recompute_modules"]
+    assert target in engine.state.artifact_consumption
+    assert set(
+        engine.state.artifact_consumption[target]["channels"]["consumer"]
+    ) == {"api_imports", "direct_calls"}
+    oracle = _build_full_static_state(tmp_path)
+    _assert_full_parity(engine.state, oracle)
