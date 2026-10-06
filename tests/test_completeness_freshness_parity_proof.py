@@ -73,7 +73,15 @@ def _assert_full_parity(incremental_state: RepositoryAnalysisState, oracle_state
     assert set(incremental_state.artifact_consumption.keys()) == set(oracle_state.artifact_consumption.keys())
     for target, ora_entry in oracle_state.artifact_consumption.items():
         inc_entry = incremental_state.artifact_consumption.get(target, {})
-        assert sorted(inc_entry.get("consumers", [])) == sorted(ora_entry.get("consumers", []))
+        assert sorted(
+            inc_entry.get("consumers", [])
+        ) == sorted(
+            ora_entry.get("consumers", [])
+        ), (
+            f"Target '{target}' consumers mismatch: "
+            f"incremental={inc_entry.get('consumers', [])!r}, "
+            f"full={ora_entry.get('consumers', [])!r}"
+        )
         inc_channels = inc_entry.get("channels", {})
         ora_channels = ora_entry.get("channels", {})
         assert set(inc_channels.keys()) == set(ora_channels.keys()), (

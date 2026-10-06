@@ -765,6 +765,20 @@ def execute_refresh_plan(
         if "module_usages" in plan.patch_families and new_usage is not None:
             candidate.module_usages[delta.module_path] = new_usage
 
+        # Ensure canonical targets for delta.module_path exist in candidate.artifact_consumption
+        mod_art = candidate.artifacts.get(delta.module_path, {})
+        if isinstance(mod_art, dict):
+            current_targets = canonical_artifact_consumption_targets({delta.module_path: mod_art})
+            for t_key in current_targets:
+                if t_key not in candidate.artifact_consumption:
+                    candidate.artifact_consumption[t_key] = {"consumers": [], "channels": {}}
+            for art_key in list(candidate.artifact_consumption.keys()):
+                if (
+                    art_key.startswith(f"{delta.module_path}::")
+                    or art_key.startswith(f"{mod_id}::")
+                ) and art_key not in current_targets:
+                    candidate.artifact_consumption.pop(art_key, None)
+
     if not delta.is_deleted and "reexport_facts" in plan.patch_families:
         if new_reexport_facts is None:
             raise ValueError(
@@ -782,20 +796,6 @@ def execute_refresh_plan(
         raise RuntimeError(
             "Candidate re-export facts do not cover the candidate module domain."
         )
-
-        # Ensure canonical targets for delta.module_path exist in candidate.artifact_consumption
-        mod_art = candidate.artifacts.get(delta.module_path, {})
-        if isinstance(mod_art, dict):
-            current_targets = canonical_artifact_consumption_targets({delta.module_path: mod_art})
-            for t_key in current_targets:
-                if t_key not in candidate.artifact_consumption:
-                    candidate.artifact_consumption[t_key] = {"consumers": [], "channels": {}}
-            for art_key in list(candidate.artifact_consumption.keys()):
-                if (
-                    art_key.startswith(f"{delta.module_path}::")
-                    or art_key.startswith(f"{mod_id}::")
-                ) and art_key not in current_targets:
-                    candidate.artifact_consumption.pop(art_key, None)
 
     expected_targets = canonical_artifact_consumption_targets(
         candidate.artifacts

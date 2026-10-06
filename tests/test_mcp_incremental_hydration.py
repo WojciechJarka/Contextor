@@ -134,8 +134,8 @@ def test_update_persist_restart_hydrate_keeps_live_reverse_context(tmp_path, mon
     hydrated = mcp_runtime.get_or_init_engine(repo.resolve())
     assert hydrated is not None
     assert validate_reexport_facts_by_module(
-        hydrated.engine.state.reexport_facts_by_module,
-        hydrated.engine.state.modules,
+        hydrated.state.reexport_facts_by_module,
+        hydrated.state.modules,
     )
     context = json.loads(
         mcp_server.get_file_edit_context.fn(
