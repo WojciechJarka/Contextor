@@ -848,6 +848,41 @@ def test_full_canonical_parity_import_and_graph(tmp_path):
     _assert_full_parity(engine.state, oracle)
 
 
+def test_incremental_signature_change_matches_full_oracle(tmp_path):
+    f_target = tmp_path / "target.py"
+    f_target.write_text("def foo(a):\n    return a\n", encoding="utf-8")
+
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir()
+    engine = IncrementalAnalysisEngine(
+        RepositoryAnalysisState(modules={}),
+        PersistentIdentityRegistry(str(tmp_path)),
+        FileStateManager(str(cache_dir)),
+        str(tmp_path),
+    )
+    engine.update_file(str(f_target))
+
+    initial_signature = engine.state.artifacts["target"]["symbols"]["signatures"]["foo"]
+    assert initial_signature == "def foo(a)"
+
+    f_target.write_text("def foo(a, b=0):\n    return a\n", encoding="utf-8")
+    result = engine.update_file(str(f_target))
+
+    assert result.delta.artifacts_added == []
+    assert result.delta.artifacts_removed == []
+    assert result.delta.imports_added == []
+    assert result.delta.imports_removed == []
+    incremental_signature = engine.state.artifacts["target"]["symbols"]["signatures"]["foo"]
+    oracle = _build_full_static_state(tmp_path)
+    full_signature = oracle.artifacts["target"]["symbols"]["signatures"]["foo"]
+
+    assert full_signature == "def foo(a, b=0)"
+    assert incremental_signature == full_signature, (
+        "canonical incremental signature differs from fresh full oracle: "
+        f"incremental={incremental_signature!r}, full={full_signature!r}"
+    )
+
+
 def test_full_canonical_parity_module_add_and_delete(tmp_path):
     f_target = tmp_path / "target.py"
     f_target.write_text("def foo(): pass\n", encoding="utf-8")
