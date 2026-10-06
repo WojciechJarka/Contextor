@@ -48,7 +48,7 @@ def extract_artifact_names(artifacts: Optional[Dict[str, Any]]) -> Set[str]:
     symbols = artifacts.get("symbols", {}) if artifacts else {}
     return {
         str(name)
-        for category in ("functions", "classes", "methods")
+        for category in ("functions", "classes", "methods", "globals")
         for name in symbols.get(category, [])
     }
 
@@ -88,6 +88,16 @@ def calculate_file_delta(
 
     delta.artifacts_added = sorted(new_artifact_names - old_artifact_names)
     delta.artifacts_removed = sorted(old_artifact_names - new_artifact_names)
+
+    old_symbols = (old_artifacts or {}).get("symbols", {})
+    new_symbols = new_artifacts_dict.get("symbols", {})
+
+    if (
+        old_symbols != new_symbols
+        and not delta.artifacts_added
+        and not delta.artifacts_removed
+    ):
+        delta.metadata_changes["symbol_payload_changed"] = True
 
     return delta
 

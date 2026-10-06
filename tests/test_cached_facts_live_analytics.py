@@ -499,7 +499,7 @@ def test_requires_resync_invalidates_cached_analytics_freshness(tmp_path):
 
 
 def test_stage3d3b_pure_body_minimal_execution_and_full_static_parity(tmp_path):
-    """10. Stage 3D.3b: Pure body edit produces minimal plan (), 0-call execution, and 100% full static parity."""
+    """10. Stage 3D.3b: Pure body edit refreshes definition payload without unnecessary analytics/graph recomputation and preserves full static parity."""
     f = tmp_path / "calculator.py"
     f.write_text("def add(a, b):\n    return a + b\n", encoding="utf-8")
     cache_dir = tmp_path / "cache"
@@ -524,11 +524,11 @@ def test_stage3d3b_pure_body_minimal_execution_and_full_static_parity(tmp_path):
 
         res = engine.update_file(str(f))
 
-    assert res.shadow_plan.patch_families == ()
+    assert res.shadow_plan.patch_families == ("definitions",)
     assert res.shadow_plan.reparse_modules == ()
     assert res.shadow_plan.recompute_modules == ()
     assert res.shadow_plan.graph_recomputations == ()
-    assert res.execution_trace["patch_families"] == ()
+    assert res.execution_trace["patch_families"] == ("definitions",)
     assert res.execution_trace["graph_recomputations"] == ()
 
     # Zero-call execution minimality
@@ -547,12 +547,20 @@ def test_stage3d3b_pure_body_minimal_execution_and_full_static_parity(tmp_path):
 
     assert set(engine.state.modules.keys()) == set(oracle_engine.state.modules.keys())
     assert set(engine.state.artifacts.keys()) == set(oracle_engine.state.artifacts.keys())
+    assert (
+        engine.state.artifacts["calculator"]["symbols"]
+        == oracle_engine.state.artifacts["calculator"]["symbols"]
+    )
+    assert (
+        engine.state.artifacts["calculator"]["own_symbols"]
+        == oracle_engine.state.artifacts["calculator"]["own_symbols"]
+    )
     assert engine.state.cached_analytics == oracle_engine.state.cached_analytics
     assert engine.state.cached_analytics_state == oracle_engine.state.cached_analytics_state == "fresh"
 
 
 def test_stage3d3c_call_retarget_minimal_execution_counts_and_parity(tmp_path):
-    """11. Stage 3D.3c: Pure call-retarget edit produces ('module_usages', 'artifact_consumption', 'cached_analytics') with 0 definitions patch."""
+    """11. Stage 3D.3c: Call-retarget refreshes definition payload and usage/consumption without identity or graph recomputation."""
     target_py = tmp_path / "target.py"
     target_py.write_text(
         "def foo():\n"
@@ -603,12 +611,11 @@ def test_stage3d3c_call_retarget_minimal_execution_counts_and_parity(tmp_path):
     assert res.shadow_plan.reparse_modules == ()
     assert res.shadow_plan.recompute_modules == ()
     assert res.shadow_plan.graph_recomputations == ()
-    assert res.shadow_plan.patch_families == ("module_usages", "artifact_consumption", "cached_analytics")
-    assert "definitions" not in res.shadow_plan.patch_families
+    assert res.shadow_plan.patch_families == ("definitions", "module_usages", "artifact_consumption", "cached_analytics")
     assert "identity_registry" not in res.shadow_plan.patch_families
 
     # Execution trace assertions
-    assert res.execution_trace["patch_families"] == ("module_usages", "artifact_consumption", "cached_analytics")
+    assert res.execution_trace["patch_families"] == ("definitions", "module_usages", "artifact_consumption", "cached_analytics")
     assert res.execution_trace["graph_recomputations"] == ()
 
     # Zero unnecessary calls
@@ -630,5 +637,13 @@ def test_stage3d3c_call_retarget_minimal_execution_counts_and_parity(tmp_path):
 
     assert set(engine.state.modules.keys()) == set(oracle_engine.state.modules.keys())
     assert set(engine.state.artifacts.keys()) == set(oracle_engine.state.artifacts.keys())
+    assert (
+        engine.state.artifacts["consumer"]["symbols"]
+        == oracle_engine.state.artifacts["consumer"]["symbols"]
+    )
+    assert (
+        engine.state.artifacts["consumer"]["own_symbols"]
+        == oracle_engine.state.artifacts["consumer"]["own_symbols"]
+    )
     assert engine.state.cached_analytics == oracle_engine.state.cached_analytics
     assert engine.state.cached_analytics_state == oracle_engine.state.cached_analytics_state == "fresh"

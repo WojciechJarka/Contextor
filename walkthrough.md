@@ -1,126 +1,156 @@
-# CPA_FILE_UPDATE_COMPLETENESS_SIGNATURE_REPRO
+# CPA_FILE_UPDATE_CANONICAL_DEFINITION_PAYLOAD_FIX
 
-## STATUS
+STATUS=STEP_PASS
+CLASSIFICATION=STEP_PASS
 
-STATUS=CONFIRMED_INCREMENTAL_CANONICAL_COMPLETENESS_DEFECT
+HEAD_BEFORE=ffcb45fc5b73e6f7de6b6f08dc6ef5def009b063
+SOURCE_DRIFT=NONE; production files were clean against HEAD before editing, and all requested literal anchors matched.
 
-Discovery przed edycją wykonana przez Contextor. Dodano jeden targeted test, bez zmian production. Uruchomiono wyłącznie nowy node ID, dwa przebiegi po korekcie jednej błędnej precondition; oba przebiegi zakończyły się FAIL. Drugi przebieg dotarł do porównania signature incremental/full i wykazał jednoznaczny canonical mismatch. Nie uruchomiono innych testów.
+CANONICAL_OWNER
+- Canonical payload: RepositoryAnalysisState.artifacts[module], including symbols and own_symbols.
+- Incremental installation path: IncrementalAnalysisEngine.update_file -> RefreshPlanner.plan_refresh -> _apply_delta_and_commit / plan executor definitions patch.
+- Full oracle: tests._build_full_static_state.
+- Contextor file context reported both production modules available, workspace_sync=verified, provenance=live, canonical revision 1469. The artifact_consumption fact lineage identifies RepositoryAnalysisState.artifact_consumption as a separate canonical family and _apply_delta_and_commit as its incremental writer; no broader lineage claim is made for artifacts.
 
-## HEAD_BEFORE
+CONTRACT_IMPLEMENTED
+- extract_artifact_names now includes globals.
+- calculate_file_delta marks symbol_payload_changed in metadata_changes when symbol payload differs without identity additions/removals.
+- The refresh planner adds the existing definitions patch family for that metadata marker, without identity_registry, consumer recomputation, or graph recomputation for payload-only changes.
+- Usage and collision handling remain active; the requested reason strings are used.
+- Added global-definition canonical parity and strengthened body/call-retarget canonical symbols and own_symbols parity assertions.
 
-HEAD_BEFORE=9edaa5237163539f91cfc0240cc85ae9c09d98ec
-Branch=main
-
-HEAD po zmianie testu jest taki sam. Przed patchem git status wykazywał wyłącznie wcześniejszą zmianę walkthrough.md z zaakceptowanego poprzedniego kroku. Wskazane production files i target test file nie miały diffu względem HEAD. Raport walkthrough został nadpisany zgodnie z bieżącym zadaniem.
-
-## SOURCE_DRIFT
-
-SOURCE_DRIFT=NONE
-
-Przed edycją potwierdzono HEAD i brak driftu w:
-- contextor/core/analysis/incremental/engine.py
+FILES_CHANGED
 - contextor/core/analysis/incremental/preparation.py
-- contextor/core/symbol_engine/extractor.py
-- contextor/core/symbol_engine/domain.py
+- contextor/core/analysis/refresh_planner.py
 - tests/test_completeness_freshness_parity_proof.py
+- tests/test_cached_facts_live_analytics.py
+- walkthrough.md (required report only; excluded from source/test diffs)
 
-Contextor zwrócił engine.py jako LIVE/fresh, workspace_sync=verified, revision=1467. Aktualne source anchors zgodziły się z zaakceptowanym discovery. Jedyny patch wprowadza nową funkcję testową.
+TARGETED_TESTS
+Executed exactly one pytest command with exactly these node IDs:
+- tests/test_completeness_freshness_parity_proof.py::test_incremental_signature_change_matches_full_oracle
+- tests/test_completeness_freshness_parity_proof.py::test_incremental_global_add_matches_full_oracle
+- tests/test_cached_facts_live_analytics.py::test_pure_body_change_no_cached_analytics_invalidation
+- tests/test_cached_facts_live_analytics.py::test_stage3d3b_pure_body_minimal_execution_and_full_static_parity
+- tests/test_cached_facts_live_analytics.py::test_stage3d3c_call_retarget_minimal_execution_counts_and_parity
 
-## CANONICAL_OWNER
+Command:
+& .\.venv\Scripts\python.exe -m pytest tests/test_completeness_freshness_parity_proof.py::test_incremental_signature_change_matches_full_oracle tests/test_completeness_freshness_parity_proof.py::test_incremental_global_add_matches_full_oracle tests/test_cached_facts_live_analytics.py::test_pure_body_change_no_cached_analytics_invalidation tests/test_cached_facts_live_analytics.py::test_stage3d3b_pure_body_minimal_execution_and_full_static_parity tests/test_cached_facts_live_analytics.py::test_stage3d3c_call_retarget_minimal_execution_counts_and_parity -q
 
-Canonical updater: C:\Temp\Contextor_Repo\contextor\core\analysis\incremental\engine.py — IncrementalAnalysisEngine.update_file oraz _commit_syntax_candidate.
+TEST_RESULTS
+5 passed, 1 third-party AuthlibDeprecationWarning, 22.85s. No other pytest nodes or full suite were run.
 
-Przygotowanie i structural delta: C:\Temp\Contextor_Repo\contextor\core\analysis\incremental\preparation.py — prepare_source_update i calculate_file_delta.
+SIGNATURE_PARITY
+PASS. Canonical incremental signature matched the full oracle: def foo(a, b=0). The initial canonical assertion remains def foo(a); the fresh full oracle asserts def foo(a, b=0).
 
-Nowy payload signature powstaje w extract_file_symbols → SymbolFacts.to_dict:
-- C:\Temp\Contextor_Repo\contextor\core\symbol_engine\extractor.py
-- C:\Temp\Contextor_Repo\contextor\core\symbol_engine\domain.py
+BODY_FINGERPRINT_PARITY
+PASS. The body-edit test compares the complete canonical symbols payload to the fresh full oracle after changing the function body. The symbols payload contract includes body_fingerprints (SymbolFacts serialization and extractor evidence: contextor/core/symbol_engine/domain.py and contextor/core/symbol_engine/extractor.py).
 
-Planowane canonical definitions instalowane są przez ścieżkę execute_refresh_plan / _apply_delta_and_commit. Gałąź pustego planu w update_file wywołuje _commit_syntax_candidate oraz state_manager.update_state; nie przekazuje prep.new_artifacts do instalacji definitions.
+GLOBAL_DEFINITION_PARITY
+PASS. The targeted global-add test observed SECOND in result.delta.artifacts_added and exact equality of incremental/full symbols and own_symbols.
 
-## TEST_FILE
+IDENTITY_REGISTRY_SYNC_EVIDENCE
+PASS for the tested body-only and call-retarget paths: mock_reg_sync.call_count == 0. Call-retarget also asserts identity_registry is absent from patch_families. The tested plans have no graph recomputations; mocked graph metrics call_count == 0 where the test instruments it.
 
-C:\Temp\Contextor_Repo\tests\test_completeness_freshness_parity_proof.py
+DIRECT_EVIDENCE
+- The signature reproducer asserts initial signature def foo(a), full signature def foo(a, b=0), then exact incremental/full equality.
+- The body and call-retarget tests assert exact canonical symbols and own_symbols equality against their full static oracles.
+- The global test asserts SECOND is classified as added and exact symbols/own_symbols equality.
+- The five authorized node IDs all passed.
+- git diff --check returned no whitespace errors; Git emitted only its LF-to-CRLF working-copy notices.
 
-Contextor wskazał istniejący test_full_canonical_parity_import_and_graph w tym pliku: tworzy IncrementalAnalysisEngine, używa engine.update_file, buduje fresh oracle przez _build_full_static_state i porównuje canonical families przez _assert_full_parity. Ten fixture/oracle był najwęższym istniejącym miejscem dla tego reproduktora. _assert_full_parity porównuje cały symbols payload, ale nowy test dodatkowo odczytuje signature jawnie, aby mismatch był bezpośredni.
+CODE_PATH_PROVED
+- Before the change, extract_artifact_names omitted globals and calculate_file_delta did not compare the symbols payload.
+- The planner's default branch emitted no definitions patch for symbol-payload-only changes.
+- After the change, the targeted execution/parity tests passed with the definitions patch while the asserted identity and graph invariants remained satisfied.
 
-Contextor test coverage dla engine.py ma evidence_scope=static_dependency_reachability, total=95 test modules. To pomocnicza mapa zależności testów, nie wykonany dowód zachowania. Source range i implementacja helpera potwierdziły lokalny oracle i fixture.
+LIVE_EVIDENCE
+- Baseline canonical revision: 1469.
+- Desktop watcher emitted UPDATED events for preparation.py at revision 1470, refresh_planner.py at 1471, test_completeness_freshness_parity_proof.py at 1472, and test_cached_facts_live_analytics.py at 1473.
+- Latest observed revision: 1473; continuity=continuous; resync_required=false. No MCP update_file or manual restart was used.
 
-## TEST_NODE_ID
+MCP_RESTART_REQUIRED
+YES for later runtime-code freshness/certification because production Python modules changed. No restart was performed. The watcher events establish canonical source updates, not that an already-running Python process reloaded imported code.
 
-tests/test_completeness_freshness_parity_proof.py::test_incremental_signature_change_matches_full_oracle
+ACTUAL_DIFF / FULL_DIFFS
 
-## REPRO_CONTRACT
+diff --git a/contextor/core/analysis/incremental/preparation.py b/contextor/core/analysis/incremental/preparation.py
+index ebb692b..be9dfd1 100644
+--- a/contextor/core/analysis/incremental/preparation.py
++++ b/contextor/core/analysis/incremental/preparation.py
+@@ -48,7 +48,7 @@ def extract_artifact_names(artifacts: Optional[Dict[str, Any]]) -> Set[str]:
+     symbols = artifacts.get("symbols", {}) if artifacts else {}
+     return {
+         str(name)
+-        for category in ("functions", "classes", "methods")
++        for category in ("functions", "classes", "methods", "globals")
+         for name in symbols.get(category, [])
+     }
 
-Test wykonuje kolejno:
-1. Tworzy target.py z def foo(a): return a.
-2. Uruchamia normalne engine.update_file dla baseline i potwierdza canonical artifacts signature def foo(a).
-3. Zmienia wyłącznie nagłówek funkcji na def foo(a, b=0): return a.
-4. Ponownie wywołuje engine.update_file.
-5. Potwierdza, że delta nie ma added/removed symbols ani imports.
-6. Czyta signature z incremental canonical state.
-7. Buduje fresh/full oracle tego samego tmp_path przez istniejący _build_full_static_state i czyta canonical signature.
-8. Porównuje signature i raportuje obie wartości w komunikacie asercji.
+@@ -89,6 +89,16 @@ def calculate_file_delta(
+     delta.artifacts_added = sorted(new_artifact_names - old_artifact_names)
+     delta.artifacts_removed = sorted(old_artifact_names - new_artifact_names)
 
-Nie testuje calculate_file_delta w izolacji; mismatch pochodzi z pełnej single-file update path oraz canonical state.
++    old_symbols = (old_artifacts or {}).get("symbols", {})
++    new_symbols = new_artifacts_dict.get("symbols", {})
++
++    if (
++        old_symbols != new_symbols
++        and not delta.artifacts_added
++        and not delta.artifacts_removed
++    ):
++        delta.metadata_changes["symbol_payload_changed"] = True
++
+     return delta
 
-## DIRECT_EVIDENCE
 
-- Contextor search_source/get_source_range pokazał istniejący fixture i helper _build_full_static_state. Helper uruchamia ContextorFacade.analyze_project na małym tmp_path, następnie hydrate_repository_engine i zwraca świeży engine.state.
-- Contextor implementation calculate_file_delta dla istniejącego modułu porównuje zbiory nazw importowanych modułów oraz nazwy artefaktów; nie porównuje signatures.
-- Contextor search_source potwierdził SymbolFacts.signatures i body_fingerprints oraz extract_file_symbols zwracające facts.to_dict().
-- Literal source przed patchem: engine.py gałąź plan.is_empty woła _commit_syntax_candidate, state_manager.update_state i zwraca; nie instaluje prep.new_artifacts.
-- Pierwszy przebieg testu zatrzymał się na tymczasowym warunku shadow_plan.is_empty. Wynik pokazał, że dla tej zmiany plan zawierał wyłącznie patch_families collision_facts/collisions, bez recompute_modules. Collision facts nie były więc w tym fixture niezmienione i plan nie był pusty. Usunięto tylko tę dodatkową precondition; nie usunięto ani nie osłabiono porównania canonical signatures.
-- Drugi przebieg przeszedł baseline, incremental update i fresh/full oracle. Structural delta added/removed/import lists były puste. Ostatnia asercja porównująca canonical signatures zawiodła:
-  incremental signature = def foo(a)
-  full signature = def foo(a, b=0)
+diff --git a/contextor/core/analysis/refresh_planner.py b/contextor/core/analysis/refresh_planner.py
+index f36eab3..be5deeb 100644
+--- a/contextor/core/analysis/refresh_planner.py
++++ b/contextor/core/analysis/refresh_planner.py
+@@ -259,13 +259,27 @@ class RefreshPlanner:
 
-## TEST_RESULT
+         # 7. Default: Body-only Usage Change or Collision-only change
+         has_usage = bool(usage_delta and not usage_delta.is_empty)
++        has_symbol_payload_change = bool(
++            delta
++            and delta.metadata_changes.get("symbol_payload_changed")
++        )
++
+         patch_families = []
++        if has_symbol_payload_change:
++            patch_families.append("definitions")
+         if has_usage:
+-            patch_families = ["module_usages", "artifact_consumption", "cached_analytics"]
++            patch_families.extend(
++                ["module_usages", "artifact_consumption", "cached_analytics"]
++            )
+         if collision_facts_changed:
+             patch_families.extend(["collision_facts", "collisions"])
 
-Pierwszy przebieg tego samego node ID: FAIL na precondition shadow_plan.is_empty; wynik pokazał plan ograniczony do collision_facts/collisions.
+-        reason = f"Body-only usage change in '{module_path}'." if has_usage else f"Collision facts update for '{module_path}'."
++        if has_usage:
++            reason = f"Body/usage change in '{module_path}'."
++        elif has_symbol_payload_change:
++            reason = f"Definition payload change in '{module_path}'."
++        else:
++            reason = f"Collision facts update for '{module_path}'."
 
-Po usunięciu wyłącznie tej precondition, drugi przebieg tego samego node ID: FAIL na końcowej asercji incremental_signature == full_signature. Test wykonał fresh/full oracle; failure nie pochodzi z błędnego klucza, fixture setup ani delta helpera. Pozostawiono test w stanie oczekiwanego FAIL na mismatch; nie poprawiano production ani asercji końcowej.
+         return RefreshPlan(
+             reparse_modules=(),
 
-Uruchomione node IDs:
-- tests/test_completeness_freshness_parity_proof.py::test_incremental_signature_change_matches_full_oracle — dwa przebiegi.
-
-Nie uruchomiono adjacent node ani full suite.
-
-## OBSERVED_INCREMENTAL_SIGNATURE
-
-def foo(a)
-
-## OBSERVED_FULL_SIGNATURE
-
-def foo(a, b=0)
-
-## CLASSIFICATION
-
-CLASSIFICATION=CONFIRMED_INCREMENTAL_CANONICAL_COMPLETENESS_DEFECT
-
-Bezpośrednio potwierdzono, że zmiana signature tej samej funkcji zostawia starą signature w incremental canonical artifacts, podczas gdy fresh/full canonical state zawiera nową. W tym reproduktorze plan nie był pusty, bo zmieniły się collision facts; plan ograniczał się do collision_facts/collisions i nadal nie instalował nowych definitions. To potwierdza correctness gap dla single-file canonical signature completeness, ale nie potwierdza osobno wariantu, w którym collision facts pozostają niezmienione i plan jest pusty.
-
-## FILES_CHANGED
-
-- C:\Temp\Contextor_Repo\tests\test_completeness_freshness_parity_proof.py — dodano jeden targeted regression test.
-- C:\Temp\Contextor_Repo\walkthrough.md — nadpisano raport poprzedniego kroku zgodnie z instrukcją.
-
-Production files: bez zmian.
-HEAD: bez zmian.
-
-### ACTUAL_DIFF — tests/test_completeness_freshness_parity_proof.py
 
 diff --git a/tests/test_completeness_freshness_parity_proof.py b/tests/test_completeness_freshness_parity_proof.py
-index dfc80b2..6385b80 100644
+index 6385b80..473672f 100644
 --- a/tests/test_completeness_freshness_parity_proof.py
 +++ b/tests/test_completeness_freshness_parity_proof.py
-@@ -848,6 +848,41 @@ def test_full_canonical_parity_import_and_graph(tmp_path):
-     _assert_full_parity(engine.state, oracle)
+@@ -883,6 +883,39 @@ def test_incremental_signature_change_matches_full_oracle(tmp_path):
+     )
 
- 
-+def test_incremental_signature_change_matches_full_oracle(tmp_path):
+
++def test_incremental_global_add_matches_full_oracle(tmp_path):
 +    f_target = tmp_path / "target.py"
-+    f_target.write_text("def foo(a):\n    return a\n", encoding="utf-8")
++    f_target.write_text("VALUE = 1\n", encoding="utf-8")
 +
 +    cache_dir = tmp_path / "cache"
 +    cache_dir.mkdir()
@@ -132,25 +162,108 @@ index dfc80b2..6385b80 100644
 +    )
 +    engine.update_file(str(f_target))
 +
-+    initial_signature = engine.state.artifacts["target"]["symbols"]["signatures"]["foo"]
-+    assert initial_signature == "def foo(a)"
-+
-+    f_target.write_text("def foo(a, b=0):\n    return a\n", encoding="utf-8")
++    f_target.write_text(
++        "VALUE = 1\nSECOND = 2\n",
++        encoding="utf-8",
++    )
 +    result = engine.update_file(str(f_target))
 +
-+    assert result.delta.artifacts_added == []
-+    assert result.delta.artifacts_removed == []
-+    assert result.delta.imports_added == []
-+    assert result.delta.imports_removed == []
-+    incremental_signature = engine.state.artifacts["target"]["symbols"]["signatures"]["foo"]
 +    oracle = _build_full_static_state(tmp_path)
-+    full_signature = oracle.artifacts["target"]["symbols"]["signatures"]["foo"]
 +
-+    assert full_signature == "def foo(a, b=0)"
-+    assert incremental_signature == full_signature, (
-+        "canonical incremental signature differs from fresh full oracle: "
-+        f"incremental={incremental_signature!r}, full={full_signature!r}"
++    assert "SECOND" in result.delta.artifacts_added
++    assert (
++        engine.state.artifacts["target"]["symbols"]
++        == oracle.artifacts["target"]["symbols"]
++    )
++    assert (
++        engine.state.artifacts["target"]["own_symbols"]
++        == oracle.artifacts["target"]["own_symbols"]
 +    )
 +
 +
  def test_full_canonical_parity_module_add_and_delete(tmp_path):
+     f_target = tmp_path / "target.py"
+     f_target.write_text("def foo(): pass\n", encoding="utf-8")
+
+
+diff --git a/tests/test_cached_facts_live_analytics.py b/tests/test_cached_facts_live_analytics.py
+index 2ed599a..b4d1226 100644
+--- a/tests/test_cached_facts_live_analytics.py
++++ b/tests/test_cached_facts_live_analytics.py
+@@ -499,7 +499,7 @@ def test_requires_resync_invalidates_cached_analytics_freshness(tmp_path):
+
+
+ def test_stage3d3b_pure_body_minimal_execution_and_full_static_parity(tmp_path):
+-    """10. Stage 3D.3b: Pure body edit produces minimal plan (), 0-call execution, and 100% full static parity."""
++    """10. Stage 3D.3b: Pure body edit refreshes definition payload without unnecessary analytics/graph recomputation and preserves full static parity."""
+     f = tmp_path / "calculator.py"
+     f.write_text("def add(a, b):\n    return a + b\n", encoding="utf-8")
+     cache_dir = tmp_path / "cache"
+@@ -524,11 +524,11 @@ def test_stage3d3b_pure_body_minimal_execution_and_full_static_parity(tmp_path):
+
+         res = engine.update_file(str(f))
+
+-    assert res.shadow_plan.patch_families == ()
++    assert res.shadow_plan.patch_families == ("definitions",)
+     assert res.shadow_plan.reparse_modules == ()
+     assert res.shadow_plan.recompute_modules == ()
+     assert res.shadow_plan.graph_recomputations == ()
+-    assert res.execution_trace["patch_families"] == ()
++    assert res.execution_trace["patch_families"] == ("definitions",)
+     assert res.execution_trace["graph_recomputations"] == ()
+
+     # Zero-call execution minimality
+@@ -547,12 +547,20 @@ def test_stage3d3b_pure_body_minimal_execution_and_full_static_parity(tmp_path):
+
+     assert set(engine.state.modules.keys()) == set(oracle_engine.state.modules.keys())
+     assert set(engine.state.artifacts.keys()) == set(oracle_engine.state.artifacts.keys())
++    assert (
++        engine.state.artifacts["calculator"]["symbols"]
++        == oracle_engine.state.artifacts["calculator"]["symbols"]
++    )
++    assert (
++        engine.state.artifacts["calculator"]["own_symbols"]
++        == oracle_engine.state.artifacts["calculator"]["own_symbols"]
++    )
+     assert engine.state.cached_analytics == oracle_engine.state.cached_analytics
+     assert engine.state.cached_analytics_state == oracle_engine.state.cached_analytics_state == "fresh"
+
+
+ def test_stage3d3c_call_retarget_minimal_execution_counts_and_parity(tmp_path):
+-    """11. Stage 3D.3c: Pure call-retarget edit produces ('module_usages', 'artifact_consumption', 'cached_analytics') with 0 definitions patch."""
++    """11. Stage 3D.3c: Call-retarget refreshes definition payload and usage/consumption without identity or graph recomputation."""
+     target_py = tmp_path / "target.py"
+     target_py.write_text(
+         "def foo():\n"
+@@ -603,12 +611,11 @@ def test_stage3d3c_call_retarget_minimal_execution_counts_and_parity(tmp_path):
+
+     # Shadow plan assertions
+     assert res.shadow_plan.reparse_modules == ()
+     assert res.shadow_plan.recompute_modules == ()
+     assert res.shadow_plan.graph_recomputations == ()
+-    assert res.shadow_plan.patch_families == ("module_usages", "artifact_consumption", "cached_analytics")
+-    assert "definitions" not in res.shadow_plan.patch_families
++    assert res.shadow_plan.patch_families == ("definitions", "module_usages", "artifact_consumption", "cached_analytics")
+     assert "identity_registry" not in res.shadow_plan.patch_families
+
+     # Execution trace assertions
+-    assert res.execution_trace["patch_families"] == ("module_usages", "artifact_consumption", "cached_analytics")
++    assert res.execution_trace["patch_families"] == ("definitions", "module_usages", "artifact_consumption", "cached_analytics")
+     assert res.execution_trace["graph_recomputations"] == ()
+
+     # Zero unnecessary calls
+@@ -630,5 +637,13 @@ def test_stage3d3c_call_retarget_minimal_execution_counts_and_parity(tmp_path):
+
+     assert set(engine.state.modules.keys()) == set(oracle_engine.state.modules.keys())
+     assert set(engine.state.artifacts.keys()) == set(oracle_engine.state.artifacts.keys())
++    assert (
++        engine.state.artifacts["consumer"]["symbols"]
++        == oracle_engine.state.artifacts["consumer"]["symbols"]
++    )
++    assert (
++        engine.state.artifacts["consumer"]["own_symbols"]
++        == oracle_engine.state.artifacts["consumer"]["own_symbols"]
++    )
+     assert engine.state.cached_analytics == oracle_engine.state.cached_analytics
+     assert engine.state.cached_analytics_state == oracle_engine.state.cached_analytics_state == "fresh"
+

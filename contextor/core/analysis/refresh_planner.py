@@ -259,13 +259,27 @@ class RefreshPlanner:
 
         # 7. Default: Body-only Usage Change or Collision-only change
         has_usage = bool(usage_delta and not usage_delta.is_empty)
+        has_symbol_payload_change = bool(
+            delta
+            and delta.metadata_changes.get("symbol_payload_changed")
+        )
+
         patch_families = []
+        if has_symbol_payload_change:
+            patch_families.append("definitions")
         if has_usage:
-            patch_families = ["module_usages", "artifact_consumption", "cached_analytics"]
+            patch_families.extend(
+                ["module_usages", "artifact_consumption", "cached_analytics"]
+            )
         if collision_facts_changed:
             patch_families.extend(["collision_facts", "collisions"])
 
-        reason = f"Body-only usage change in '{module_path}'." if has_usage else f"Collision facts update for '{module_path}'."
+        if has_usage:
+            reason = f"Body/usage change in '{module_path}'."
+        elif has_symbol_payload_change:
+            reason = f"Definition payload change in '{module_path}'."
+        else:
+            reason = f"Collision facts update for '{module_path}'."
 
         return RefreshPlan(
             reparse_modules=(),

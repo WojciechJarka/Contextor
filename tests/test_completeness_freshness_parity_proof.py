@@ -883,6 +883,39 @@ def test_incremental_signature_change_matches_full_oracle(tmp_path):
     )
 
 
+def test_incremental_global_add_matches_full_oracle(tmp_path):
+    f_target = tmp_path / "target.py"
+    f_target.write_text("VALUE = 1\n", encoding="utf-8")
+
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir()
+    engine = IncrementalAnalysisEngine(
+        RepositoryAnalysisState(modules={}),
+        PersistentIdentityRegistry(str(tmp_path)),
+        FileStateManager(str(cache_dir)),
+        str(tmp_path),
+    )
+    engine.update_file(str(f_target))
+
+    f_target.write_text(
+        "VALUE = 1\nSECOND = 2\n",
+        encoding="utf-8",
+    )
+    result = engine.update_file(str(f_target))
+
+    oracle = _build_full_static_state(tmp_path)
+
+    assert "SECOND" in result.delta.artifacts_added
+    assert (
+        engine.state.artifacts["target"]["symbols"]
+        == oracle.artifacts["target"]["symbols"]
+    )
+    assert (
+        engine.state.artifacts["target"]["own_symbols"]
+        == oracle.artifacts["target"]["own_symbols"]
+    )
+
+
 def test_full_canonical_parity_module_add_and_delete(tmp_path):
     f_target = tmp_path / "target.py"
     f_target.write_text("def foo(): pass\n", encoding="utf-8")
