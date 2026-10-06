@@ -420,6 +420,7 @@ def test_split_snapshot_load_emits_non_overlapping_phase_timings(tmp_path):
         "normalize_symbol_call_facts",
         "normalize_lineage_facts_state",
         "normalize_lineage_query_index_state",
+        "normalize_reexport_facts_state",
         "post_normalization_finalize",
     ]
 

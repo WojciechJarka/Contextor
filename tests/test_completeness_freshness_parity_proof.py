@@ -1898,24 +1898,33 @@ def test_definition_add_backfill_without_reread(tmp_path):
     _assert_full_parity(engine.state, oracle)
 
 
-def test_ambiguity_regression_real_backfill_path(tmp_path):
+def test_incremental_backfill_does_not_use_singular_compatibility_resolver(
+    tmp_path,
+):
     """
-    Proves that when a definition or provider update encounters ambiguity during backfill:
-    1. The ambiguous candidate slice is rejected in transactional fashion.
-    2. artifact_consumption_state fails closed to 'stale'.
-    3. Failure is sticky and no arbitrary target is bound.
+    Proves that incremental backfill is owned by the plural exact-target
+    resolver. The singular compatibility resolver must not participate
+    in consumer rebuilding, and incremental state must match fresh full
+    analysis.
     """
     pkg_dir = tmp_path / "pkg"
     pkg_dir.mkdir()
 
     f_consumer = tmp_path / "consumer.py"
-    f_consumer.write_text("from pkg.impl_a import foo\nfoo()\n", encoding="utf-8")
+    f_consumer.write_text(
+        "from pkg.impl_a import foo\nfoo()\n",
+        encoding="utf-8",
+    )
 
     f_provider = pkg_dir / "impl_a.py"
-    f_provider.write_text("def bar(): pass\n", encoding="utf-8")
+    f_provider.write_text(
+        "def bar(): pass\n",
+        encoding="utf-8",
+    )
 
     cache_dir = tmp_path / "cache"
     cache_dir.mkdir()
+
     engine = IncrementalAnalysisEngine(
         RepositoryAnalysisState(modules={}),
         PersistentIdentityRegistry(str(tmp_path)),
@@ -1925,39 +1934,46 @@ def test_ambiguity_regression_real_backfill_path(tmp_path):
     engine.update_file(str(f_consumer))
     engine.update_file(str(f_provider))
 
-    # Now modify provider to add def foo(), but simulate ambiguity during resolution
-    f_provider.write_text("def bar(): pass\ndef foo(): pass\n", encoding="utf-8")
+    f_provider.write_text(
+        "def bar(): pass\ndef foo(): pass\n",
+        encoding="utf-8",
+    )
 
-    from contextor.core.analysis.incremental import plan_executor
-    original_resolve = plan_executor._resolve_canonical_target_key
-
-    def ambiguous_resolve(
-        target,
-        candidate_consumption,
-        candidate_artifacts,
-        expected_targets=None,
-        dotted_target_index=None,
+    with patch(
+        "contextor.core.analysis.incremental.plan_executor."
+        "_resolve_canonical_target_key",
+        side_effect=AssertionError(
+            "singular compatibility resolver must not drive "
+            "incremental consumer backfill"
+        ),
     ):
-        if target and "foo" in target:
-            return None, "ambiguous"
-        return original_resolve(
-            target,
-            candidate_consumption,
-            candidate_artifacts,
-            expected_targets=expected_targets,
-            dotted_target_index=dotted_target_index,
-        )
-
-    with patch("contextor.core.analysis.incremental.plan_executor._resolve_canonical_target_key", side_effect=ambiguous_resolve):
         res = engine.update_file(str(f_provider))
 
-    # Assert fail-closed state
-    assert res.artifact_consumption_state == "stale"
-    assert engine.state.artifact_consumption_state == "stale"
+    assert res.artifact_consumption_state == "fresh"
+    assert engine.state.artifact_consumption_state == "fresh"
 
-    # Assert no arbitrary binding occurred for consumer
-    for target_key, entry in engine.state.artifact_consumption.items():
-        assert "consumer" not in entry.get("consumers", [])
+    entry = engine.state.artifact_consumption[
+        "pkg.impl_a::foo"
+    ]
+
+    assert entry["consumers"] == [
+        "consumer",
+    ]
+    assert set(
+        entry["channels"]["consumer"]
+    ) == {
+        "api_imports",
+        "direct_calls",
+    }
+
+    oracle = _build_full_static_state(
+        tmp_path
+    )
+
+    _assert_full_parity(
+        engine.state,
+        oracle,
+    )
 
 
 def test_unresolved_target_never_appears(tmp_path):

@@ -7,7 +7,10 @@ from contextor.core.reference.index import (
     _assemble_reexport_map,
     assemble_reference_index_or_fallback,
 )
-from contextor.core.reference.shared import _build_reexport_map
+from contextor.core.reference.shared import (
+    _build_reexport_map,
+    materialize_reexport_facts_by_module,
+)
 from contextor.core.reporting_layer.artifact_usage_report import (
     generate_artifact_usage_report,
 )
@@ -213,8 +216,17 @@ def test_compact_reexport_oracle_and_artifact_output_parity(
     )
     indexed = indexer.index_repository(str(root))
 
-    assert _assemble_reexport_map(indexed.reference_facts_by_module) == (
-        _build_reexport_map(indexed.modules)
+    reexport_facts_by_module = (
+        materialize_reexport_facts_by_module(
+            indexed.modules,
+            indexed.reference_facts_by_module,
+        )
+    )
+
+    assert _assemble_reexport_map(
+        reexport_facts_by_module
+    ) == _build_reexport_map(
+        indexed.modules
     )
     passed = assemble_reference_index_or_fallback(
         indexed.modules, str(root), indexed.reference_facts_by_module

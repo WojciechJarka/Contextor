@@ -80,39 +80,38 @@ def test_indexed_rebuild_uses_precomputed_indexes_without_full_scan(
         fail_target_rebuild,
     )
 
-    rebuilt, is_ambiguous = (
-        plan_executor._rebuild_consumer_slice(
-            consumer="consumer",
-            consumer_facts=usage,
-            candidate_consumption=consumption,
-            candidate_artifacts={
-                "provider": {
-                    "own_symbols": [
-                        "foo",
-                        "bar",
-                    ],
-                },
+    rebuilt = plan_executor._rebuild_consumer_slice(
+        consumer="consumer",
+        consumer_facts=usage,
+        candidate_consumption=consumption,
+        candidate_artifacts={
+            "provider": {
+                "own_symbols": [
+                    "foo",
+                    "bar",
+                ],
             },
-            reexports={},
-            expected_targets=_NoIterSet(
-                {
-                    "provider::foo",
-                    "provider::bar",
-                }
+        },
+        reexports={},
+        reexport_facts_by_module={},
+        module_export_surfaces={},
+        expected_targets=_NoIterSet(
+            {
+                "provider::foo",
+                "provider::bar",
+            }
+        ),
+        dotted_target_index={
+            "provider.foo": (
+                "provider::foo",
             ),
-            dotted_target_index={
-                "provider.foo": (
-                    "provider::foo",
-                ),
-                "provider.bar": (
-                    "provider::bar",
-                ),
-            },
-            consumer_target_index=consumer_target_index,
-        )
+            "provider.bar": (
+                "provider::bar",
+            ),
+        },
+        consumer_target_index=consumer_target_index,
     )
 
-    assert is_ambiguous is False
     assert rebuilt is consumption
 
     assert rebuilt[

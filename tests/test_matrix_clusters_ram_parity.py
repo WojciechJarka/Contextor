@@ -441,96 +441,223 @@ def test_resolver_distinguishes_unknown_from_ambiguous():
     assert key is None
 
 
-def test_ambiguity_execution_semantic_regression_fails_closed(tmp_path: Path):
+def test_multi_identity_execution_projects_all_exact_targets_and_stays_fresh(
+    tmp_path: Path,
+):
     """
-    PROVES that when ambiguous usage occurs during incremental refresh:
-    - Candidate state marks artifact_consumption_state = 'stale'
-    - State publication preserves 'stale'
-    - Even if key coverage is 100% complete.
+    PROVES that a complete dotted spelling resolving to multiple exact
+    canonical identities is projected to every exact identity and remains
+    fresh when canonical coverage is complete.
     """
     repo_dir = tmp_path / "ambiguous_repo"
     repo_dir.mkdir()
 
-    # Module 'a' with symbol 'b.c' and module 'a.b' with symbol 'c'
     a_dir = repo_dir / "a"
     a_dir.mkdir()
-    (a_dir / "__init__.py").write_text("", encoding="utf-8")
-    (a_dir / "b.py").write_text("def c(): pass\n", encoding="utf-8")
+    (a_dir / "__init__.py").write_text(
+        "",
+        encoding="utf-8",
+    )
+    (a_dir / "b.py").write_text(
+        "def c(): pass\n",
+        encoding="utf-8",
+    )
 
     app_file = repo_dir / "app.py"
-    app_file.write_text("import a.b\ndef run(): a.b.c()\n", encoding="utf-8")
+    app_file.write_text(
+        "import a.b\ndef run(): a.b.c()\n",
+        encoding="utf-8",
+    )
 
     facade = ContextorFacade()
-    errors, _ = facade.analyze_project(str(repo_dir))
+    errors, _ = facade.analyze_project(
+        str(repo_dir)
+    )
     assert not errors
 
     hydrated = hydrate_repository_engine(repo_dir)
     assert hydrated is not None
     engine = hydrated.engine
 
-    # Artificially create ambiguity domain in artifacts: a::b.c and a.b::c
-    engine.state.artifacts["a"] = {"consumers": {"b.c": {"consumers": [], "usage": {}}}}
-    engine.state.artifacts["a.b"] = {"consumers": {"c": {"consumers": [], "usage": {}}}}
-    engine.state.artifacts["app"] = {"consumers": {"run": {"consumers": [], "usage": {}}}}
-
-    # Initial consumption matching domain
-    engine.state.artifact_consumption = {
-        "a::b.c": {"consumers": [], "channels": {}},
-        "a.b::c": {"consumers": [], "channels": {}},
-        "app::run": {"consumers": [], "channels": {}},
+    engine.state.artifacts["a"] = {
+        "consumers": {
+            "b.c": {
+                "consumers": [],
+                "usage": {},
+            }
+        }
     }
-    assert validate_canonical_artifact_consumption_coverage(engine.state.artifact_consumption, engine.state.artifacts) is True
+    engine.state.artifacts["a.b"] = {
+        "consumers": {
+            "c": {
+                "consumers": [],
+                "usage": {},
+            }
+        }
+    }
+    engine.state.artifacts["app"] = {
+        "consumers": {
+            "run": {
+                "consumers": [],
+                "usage": {},
+            }
+        }
+    }
 
-    # Modify app.py to call ambiguous dotted target 'a.b.c'
-    app_file.write_text("import a.b\ndef run():\n    a.b.c()\n", encoding="utf-8")
+    engine.state.artifact_consumption = {
+        "a::b.c": {
+            "consumers": [],
+            "channels": {},
+        },
+        "a.b::c": {
+            "consumers": [],
+            "channels": {},
+        },
+        "app::run": {
+            "consumers": [],
+            "channels": {},
+        },
+    }
 
-    res = engine.update_file(str(app_file))
-    assert res.status in ("UPDATED", "SUCCESS")
+    assert (
+        validate_canonical_artifact_consumption_coverage(
+            engine.state.artifact_consumption,
+            engine.state.artifacts,
+        )
+        is True
+    )
 
-    # Invariant: coverage is 100% valid, but state MUST be stale due to semantic ambiguity!
-    assert validate_canonical_artifact_consumption_coverage(engine.state.artifact_consumption, engine.state.artifacts) is True
-    assert engine.state.artifact_consumption_state == "stale"
-    assert res.artifact_consumption_state == "stale"
+    app_file.write_text(
+        "import a.b\ndef run():\n    a.b.c()\n",
+        encoding="utf-8",
+    )
+
+    res = engine.update_file(
+        str(app_file)
+    )
+
+    assert res.status in (
+        "UPDATED",
+        "SUCCESS",
+    )
+
+    assert (
+        validate_canonical_artifact_consumption_coverage(
+            engine.state.artifact_consumption,
+            engine.state.artifacts,
+        )
+        is True
+    )
+
+    assert engine.state.artifact_consumption_state == "fresh"
+    assert res.artifact_consumption_state == "fresh"
+
+    for target_key in (
+        "a::b.c",
+        "a.b::c",
+    ):
+        entry = engine.state.artifact_consumption[
+            target_key
+        ]
+
+        assert "app" in entry[
+            "consumers"
+        ]
+        assert entry[
+            "channels"
+        ][
+            "app"
+        ] == [
+            "direct_calls",
+        ]
 
 
-def test_early_ambiguity_in_recompute_phase_is_sticky_across_clean_later_patch(tmp_path: Path):
+def test_multi_identity_recompute_stays_fresh_across_clean_later_patch(
+    tmp_path: Path,
+):
     """
-    PROVES that if an ambiguity is detected in an earlier phase (e.g. RECOMPUTE),
-    a subsequent clean PATCH phase with 100% valid coverage CANNOT overwrite the failure.
-    The candidate and committed state must remain 'stale'.
+    PROVES that plural exact-target projection during RECOMPUTE remains
+    valid across a later clean PATCH phase. No ambiguity-stale latch is
+    produced because every exact canonical identity is retained.
     """
     repo_dir = tmp_path / "sticky_repo"
     repo_dir.mkdir()
 
     core_file = repo_dir / "core.py"
-    core_file.write_text("def helper(): return 1\ndef helper2(): return 2\n", encoding="utf-8")
+    core_file.write_text(
+        "def helper(): return 1\n"
+        "def helper2(): return 2\n",
+        encoding="utf-8",
+    )
 
     app_file = repo_dir / "app.py"
-    app_file.write_text("import core\ndef main(): return core.helper()\n", encoding="utf-8")
+    app_file.write_text(
+        "import core\n"
+        "def main(): return core.helper()\n",
+        encoding="utf-8",
+    )
 
     facade = ContextorFacade()
-    errors, _ = facade.analyze_project(str(repo_dir))
+    errors, _ = facade.analyze_project(
+        str(repo_dir)
+    )
     assert not errors
 
     hydrated = hydrate_repository_engine(repo_dir)
     assert hydrated is not None
     engine = hydrated.engine
 
-    # Domain has ambiguity: a::b.c and a.b::c
-    engine.state.artifacts["a"] = {"consumers": {"b.c": {"consumers": [], "usage": {}}}}
-    engine.state.artifacts["a.b"] = {"consumers": {"c": {"consumers": [], "usage": {}}}}
-    engine.state.artifact_consumption["a::b.c"] = {"consumers": [], "channels": {}}
-    engine.state.artifact_consumption["a.b::c"] = {"consumers": [], "channels": {}}
+    engine.state.artifacts["a"] = {
+        "consumers": {
+            "b.c": {
+                "consumers": [],
+                "usage": {},
+            }
+        }
+    }
+    engine.state.artifacts["a.b"] = {
+        "consumers": {
+            "c": {
+                "consumers": [],
+                "usage": {},
+            }
+        }
+    }
 
-    # Consumer module has ambiguous call in RECOMPUTE phase
-    from contextor.core.domain.usage_facts import ModuleUsageFacts
-    engine.state.module_usages["other_consumer"] = ModuleUsageFacts(
-        direct_calls=["a.b.c"]
+    engine.state.artifact_consumption[
+        "a::b.c"
+    ] = {
+        "consumers": [],
+        "channels": {},
+    }
+    engine.state.artifact_consumption[
+        "a.b::c"
+    ] = {
+        "consumers": [],
+        "channels": {},
+    }
+
+    from contextor.core.domain.usage_facts import (
+        ModuleUsageFacts,
     )
-    engine.state.modules["other_consumer"] = Module(
-        module_id="other_consumer", path="other.py", absolute_path="/other.py", imports=[]
+    engine.state.module_usages[
+        "other_consumer"
+    ] = ModuleUsageFacts(
+        direct_calls=[
+            "a.b.c",
+        ]
     )
-    engine.state.reexport_facts_by_module["other_consumer"] = {
+    engine.state.modules[
+        "other_consumer"
+    ] = Module(
+        module_id="other_consumer",
+        path="other.py",
+        absolute_path="/other.py",
+        imports=[],
+    )
+    engine.state.reexport_facts_by_module[
+        "other_consumer"
+    ] = {
         "exporter": "other_consumer",
         "explicit_all": None,
         "bindings": {},
@@ -538,37 +665,100 @@ def test_early_ambiguity_in_recompute_phase_is_sticky_across_clean_later_patch(t
     }
     with engine.registry.transaction():
         engine.registry.sync_with_workspace(
-            set(engine.state.modules),
-            aur.collect_qualified_artifact_identities(engine.state.artifacts),
+            set(
+                engine.state.modules
+            ),
+            aur.collect_qualified_artifact_identities(
+                engine.state.artifacts
+            ),
         )
 
-    # Perform clean update on app_file (switches to helper2 cleanly)
-    # Mock refresh planner to include 'other_consumer' in recompute_modules
-    from contextor.core.analysis.refresh_planner import RefreshPlanner
-    original_plan_refresh = RefreshPlanner.plan_refresh
+    from contextor.core.analysis.refresh_planner import (
+        RefreshPlanner,
+    )
+
+    original_plan_refresh = (
+        RefreshPlanner.plan_refresh
+    )
 
     def mock_plan(*args, **kwargs):
-        p = original_plan_refresh(*args, **kwargs)
-        # Add other_consumer to recompute_modules
-        return RefreshPlan(
-            reparse_modules=p.reparse_modules,
-            recompute_modules=tuple(list(p.recompute_modules) + ["other_consumer"]),
-            patch_families=p.patch_families,
-            graph_recomputations=p.graph_recomputations,
-            refresh_completeness=p.refresh_completeness,
+        plan = original_plan_refresh(
+            *args,
+            **kwargs,
         )
 
-    with patch.object(RefreshPlanner, "plan_refresh", side_effect=mock_plan):
-        app_file.write_text("import core\ndef main(): return core.helper2()\n", encoding="utf-8")
-        res = engine.update_file(str(app_file))
-        assert res.status in ("UPDATED", "SUCCESS")
+        return RefreshPlan(
+            reparse_modules=(
+                plan.reparse_modules
+            ),
+            recompute_modules=tuple(
+                list(
+                    plan.recompute_modules
+                )
+                + [
+                    "other_consumer",
+                ]
+            ),
+            patch_families=(
+                plan.patch_families
+            ),
+            graph_recomputations=(
+                plan.graph_recomputations
+            ),
+            refresh_completeness=(
+                plan.refresh_completeness
+            ),
+        )
 
-    # Invariant: Phase 1 (RECOMPUTE) failed on ambiguity.
-    # Phase 2 (PATCH artifact_consumption) was clean and coverage is True.
-    # Candidate & committed state MUST be 'stale'!
-    assert validate_canonical_artifact_consumption_coverage(engine.state.artifact_consumption, engine.state.artifacts) is True
-    assert engine.state.artifact_consumption_state == "stale"
-    assert res.artifact_consumption_state == "stale"
+    with patch.object(
+        RefreshPlanner,
+        "plan_refresh",
+        side_effect=mock_plan,
+    ):
+        app_file.write_text(
+            "import core\n"
+            "def main(): return core.helper2()\n",
+            encoding="utf-8",
+        )
+
+        res = engine.update_file(
+            str(app_file)
+        )
+
+    assert res.status in (
+        "UPDATED",
+        "SUCCESS",
+    )
+
+    assert (
+        validate_canonical_artifact_consumption_coverage(
+            engine.state.artifact_consumption,
+            engine.state.artifacts,
+        )
+        is True
+    )
+
+    assert engine.state.artifact_consumption_state == "fresh"
+    assert res.artifact_consumption_state == "fresh"
+
+    for target_key in (
+        "a::b.c",
+        "a.b::c",
+    ):
+        entry = engine.state.artifact_consumption[
+            target_key
+        ]
+
+        assert "other_consumer" in entry[
+            "consumers"
+        ]
+        assert entry[
+            "channels"
+        ][
+            "other_consumer"
+        ] == [
+            "direct_calls",
+        ]
 
 
 def test_forensic_post_add_artifact_shape_and_canonical_definition_domain(tmp_path: Path):
