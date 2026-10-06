@@ -1395,14 +1395,24 @@ def test_reexport_all_only_change_is_ram_only_and_matches_full_oracle(
     import contextor.core.domain.module as module_domain
 
     assembled_domains = []
+    surface_domains = []
     ast_accesses = []
     original_assembler = plan_executor._assemble_reexport_map
+    original_surface_assembler = (
+        plan_executor._assemble_module_export_surfaces
+    )
 
     def assemble_spy(facts_by_module):
         assert isinstance(facts_by_module, dict)
         assert set(facts_by_module) == set(engine.state.modules)
         assembled_domains.append(deepcopy(facts_by_module))
         return original_assembler(facts_by_module)
+
+    def assemble_surface_spy(facts_by_module):
+        assert isinstance(facts_by_module, dict)
+        assert set(facts_by_module) == set(engine.state.modules)
+        surface_domains.append(deepcopy(facts_by_module))
+        return original_surface_assembler(facts_by_module)
 
     def fail_ast_access(*args, **kwargs):
         ast_accesses.append((args, kwargs))
@@ -1415,6 +1425,11 @@ def test_reexport_all_only_change_is_ram_only_and_matches_full_oracle(
             plan_executor,
             "_assemble_reexport_map",
             side_effect=assemble_spy,
+        ),
+        patch.object(
+            plan_executor,
+            "_assemble_module_export_surfaces",
+            side_effect=assemble_surface_spy,
         ),
         patch.object(
             Module,
@@ -1432,6 +1447,8 @@ def test_reexport_all_only_change_is_ram_only_and_matches_full_oracle(
     assert ast_accesses == []
     assert len(assembled_domains) == 1
     assert set(assembled_domains[0]) == set(engine.state.modules)
+    assert len(surface_domains) == 1
+    assert set(surface_domains[0]) == set(engine.state.modules)
     assert all(
         isinstance(fact, dict)
         for fact in assembled_domains[0].values()
@@ -2060,3 +2077,100 @@ def test_fail_closed_on_unsupported_plan_item(tmp_path):
                 {},
                 ModuleUsageFacts(),
             )
+
+
+def test_star_import_visibility_changes_match_full_oracle(tmp_path, monkeypatch):
+    monkeypatch.setenv("CONTEXTOR_DISABLE_PROCESS_POOL", "1")
+    provider = tmp_path / "a.py"
+    reexporter = tmp_path / "b.py"
+    consumer = tmp_path / "c.py"
+    provider.write_text(
+        "def imported():\n"
+        "    pass\n",
+        encoding="utf-8",
+    )
+    reexporter.write_text(
+        "from a import imported\n"
+        "PUBLIC = 1\n"
+        "_PRIVATE = 2\n"
+        "__all__ = ['imported', 'PUBLIC']\n",
+        encoding="utf-8",
+    )
+    consumer.write_text(
+        "from b import *\n",
+        encoding="utf-8",
+    )
+
+    errors, _ = ContextorFacade().analyze_project(str(tmp_path))
+    assert not errors, errors
+    hydrated = hydrate_repository_engine(tmp_path)
+    assert hydrated is not None
+    engine = hydrated.engine
+
+    def assert_star_projection(
+        state,
+        imported_channels,
+        public_channels,
+        private_channels,
+        all_channels,
+        all_target_exists=True,
+    ):
+        assert state.artifact_consumption.get(
+            "a::imported", {}
+        ).get("channels", {}).get("c", []) == imported_channels
+        assert state.artifact_consumption.get(
+            "b::PUBLIC", {}
+        ).get("channels", {}).get("c", []) == public_channels
+        assert state.artifact_consumption.get(
+            "b::_PRIVATE", {}
+        ).get("channels", {}).get("c", []) == private_channels
+        assert ("b::__all__" in state.artifact_consumption) is all_target_exists
+        assert state.artifact_consumption.get(
+            "b::__all__", {}
+        ).get("channels", {}).get("c", []) == all_channels
+
+    assert_star_projection(
+        engine.state,
+        ["api_imports"],
+        ["api_imports"],
+        [],
+        ["api_imports"],
+    )
+
+    reexporter.write_text(
+        "from a import imported\n"
+        "PUBLIC = 1\n"
+        "_PRIVATE = 2\n"
+        "__all__ = []\n",
+        encoding="utf-8",
+    )
+    empty_all_result = engine.update_file(str(reexporter))
+    assert "c" in empty_all_result.execution_trace["recompute_modules"]
+    empty_all_oracle = _build_full_static_state(tmp_path)
+    _assert_full_parity(engine.state, empty_all_oracle)
+    assert_star_projection(
+        engine.state,
+        [],
+        [],
+        [],
+        ["api_imports"],
+    )
+
+    reexporter.write_text(
+        "from a import imported\n"
+        "PUBLIC = 1\n"
+        "_PRIVATE = 2\n",
+        encoding="utf-8",
+    )
+    implicit_all_result = engine.update_file(str(reexporter))
+    assert "c" in implicit_all_result.execution_trace["recompute_modules"]
+    implicit_all_oracle = _build_full_static_state(tmp_path)
+    _assert_full_parity(engine.state, implicit_all_oracle)
+    assert_star_projection(
+        engine.state,
+        ["api_imports"],
+        ["api_imports"],
+        [],
+        [],
+        all_target_exists=False,
+    )

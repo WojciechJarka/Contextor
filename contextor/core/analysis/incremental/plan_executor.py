@@ -28,6 +28,7 @@ from contextor.core.domain.refresh_plan import RefreshPlan
 from contextor.core.domain.usage_facts import ModuleUsageFacts
 from contextor.core.graph.graph import build_trie, detect_package_root, build_graph, resolve_module_edges
 from contextor.core.reference.shared import (
+    _assemble_module_export_surfaces,
     _assemble_reexport_map,
     validate_reexport_facts_by_module,
 )
@@ -395,6 +396,8 @@ def _rebuild_consumer_slice(
     candidate_consumption: Dict[str, Any],
     candidate_artifacts: Mapping[str, Any],
     reexports: Mapping[str, str],
+    reexport_facts_by_module: Mapping[str, Any],
+    module_export_surfaces: Mapping[str, Mapping[str, str]],
     expected_targets: Optional[Set[str]] = None,
     dotted_target_index: Optional[
         Mapping[str, Tuple[str, ...]]
@@ -450,6 +453,61 @@ def _rebuild_consumer_slice(
     )
 
     rebuilt_targets: Dict[str, Set[str]] = {}
+
+    star_sources = sorted(
+        {
+            target[:-2]
+            for target, channel, *_rest
+            in consumer_facts.reference_evidence
+            if channel == "api_imports"
+            and target.endswith(".*")
+        }
+    )
+
+    for star_source in star_sources:
+        for dotted_target in module_export_surfaces.get(
+            star_source,
+            {},
+        ).values():
+            resolved_target = _resolve_reexport(
+                dotted_target,
+                reexports,
+            )
+            targets, status = _resolve_canonical_target_keys(
+                resolved_target,
+                candidate_consumption,
+                candidate_artifacts,
+                expected_targets=expected_targets,
+                dotted_target_index=dotted_target_index,
+            )
+            if status == "resolved":
+                for target in targets:
+                    rebuilt_targets.setdefault(
+                        target,
+                        set(),
+                    ).add("api_imports")
+
+        reexport_facts = reexport_facts_by_module.get(
+            star_source
+        )
+        if (
+            reexport_facts is not None
+            and reexport_facts.get("explicit_all") is not None
+        ):
+            targets, status = _resolve_canonical_target_keys(
+                f"{star_source}.__all__",
+                candidate_consumption,
+                candidate_artifacts,
+                expected_targets=expected_targets,
+                dotted_target_index=dotted_target_index,
+            )
+            if status == "resolved":
+                for target in targets:
+                    rebuilt_targets.setdefault(
+                        target,
+                        set(),
+                    ).add("api_imports")
+
     for sym, ch_name in c_tagged:
         raw_t = _resolve_reexport(
             _resolve_alias(
@@ -458,6 +516,13 @@ def _rebuild_consumer_slice(
             ),
             reexports,
         )
+        if (
+            ch_name == "api_imports"
+            and raw_t
+            and raw_t.endswith(".*")
+        ):
+            continue
+
         if (
             ch_name == "api_imports"
             and raw_t in candidate_artifacts
@@ -813,11 +878,15 @@ def execute_refresh_plan(
         executed_reparse.append(reparse_mod)
 
     reexports = None
+    module_export_surfaces = None
     if (
         plan.recompute_modules
         or "artifact_consumption" in plan.patch_families
     ):
         reexports = _assemble_reexport_map(
+            candidate.reexport_facts_by_module
+        )
+        module_export_surfaces = _assemble_module_export_surfaces(
             candidate.reexport_facts_by_module
         )
 
@@ -858,6 +927,8 @@ def execute_refresh_plan(
                 candidate_consumption=candidate.artifact_consumption,
                 candidate_artifacts=candidate.artifacts,
                 reexports=reexports,
+                reexport_facts_by_module=candidate.reexport_facts_by_module,
+                module_export_surfaces=module_export_surfaces,
                 expected_targets=expected_targets,
                 dotted_target_index=dotted_target_index,
                 consumer_target_index=consumer_target_index,
@@ -951,6 +1022,8 @@ def execute_refresh_plan(
                     candidate_consumption=candidate.artifact_consumption,
                     candidate_artifacts=candidate.artifacts,
                     reexports=reexports,
+                    reexport_facts_by_module=candidate.reexport_facts_by_module,
+                    module_export_surfaces=module_export_surfaces,
                     expected_targets=expected_targets,
                     dotted_target_index=dotted_target_index,
                     consumer_target_index=consumer_target_index,

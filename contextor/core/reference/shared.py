@@ -267,12 +267,11 @@ def _extract_reexport_facts(
     }
 
 
-def _assemble_reexport_map(
+def _assemble_export_surface_state(
     reexport_facts_by_module: dict[str, dict[str, Any]],
-) -> dict[str, str]:
+) -> tuple[dict[str, dict[str, str]], dict[str, str]]:
     """
-    Assemble cycle-safe transitive re-export identities from complete
-    source-local re-export facts.
+    Assemble visible module exports and their raw re-export identities.
 
     Performs no source or filesystem I/O.
     """
@@ -363,6 +362,27 @@ def _assemble_reexport_map(
                         {},
                     )[local] = target
                     changed = True
+
+    return module_exports, raw
+
+
+def _assemble_module_export_surfaces(
+    reexport_facts_by_module: dict[str, dict[str, Any]],
+) -> dict[str, dict[str, str]]:
+    """Assemble visible local exports and their source target identities."""
+    module_exports, _raw = _assemble_export_surface_state(
+        reexport_facts_by_module
+    )
+    return module_exports
+
+
+def _assemble_reexport_map(
+    reexport_facts_by_module: dict[str, dict[str, Any]],
+) -> dict[str, str]:
+    """Assemble cycle-safe transitive re-export identities from source facts."""
+    _module_exports, raw = _assemble_export_surface_state(
+        reexport_facts_by_module
+    )
 
     resolved: dict[str, str] = {}
 

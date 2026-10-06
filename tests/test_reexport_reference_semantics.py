@@ -6,6 +6,45 @@ from contextor.core.reporting_layer.artifact_usage_report import (
     collect_module_artifacts,
 )
 from contextor.core.symbol_engine.indexer import index_repository
+from contextor.core.api.facade import ContextorFacade
+from contextor.core.live_state.hydration import hydrate_repository_engine
+
+
+def _full_canonical_state(tmp_path, monkeypatch):
+    monkeypatch.setenv("CONTEXTOR_DISABLE_PROCESS_POOL", "1")
+    errors, _ = ContextorFacade().analyze_project(str(tmp_path))
+    assert not errors, errors
+
+    hydrated = hydrate_repository_engine(tmp_path)
+    assert hydrated is not None
+    return hydrated.engine.state
+
+
+def _write_star_visibility_fixture(tmp_path, explicit_all):
+    (tmp_path / "a.py").write_text(
+        "def imported():\n"
+        "    pass\n",
+        encoding="utf-8",
+    )
+    source = (
+        "from a import imported\n"
+        "PUBLIC = 1\n"
+        "_PRIVATE = 2\n"
+    )
+    if explicit_all is not None:
+        source += f"__all__ = {explicit_all!r}\n"
+    (tmp_path / "b.py").write_text(source, encoding="utf-8")
+    (tmp_path / "c.py").write_text(
+        "from b import *\n",
+        encoding="utf-8",
+    )
+
+
+def _star_channels(state, target, consumer="c"):
+    return state.artifact_consumption.get(target, {}).get(
+        "channels",
+        {},
+    ).get(consumer, [])
 
 
 def test_transitive_aliased_reexport_resolves_to_original_artifact(tmp_path):
@@ -230,3 +269,75 @@ def test_repeated_all_dynamic_then_literal_uses_last_assignment(
     assert mapping["facade.run"] == (
         "provider.run"
     )
+
+
+def test_full_star_import_uses_explicit_all_and_tracks_metadata(tmp_path, monkeypatch):
+    _write_star_visibility_fixture(
+        tmp_path,
+        ["imported", "PUBLIC"],
+    )
+
+    state = _full_canonical_state(tmp_path, monkeypatch)
+
+    assert _star_channels(state, "a::imported") == ["api_imports"]
+    assert _star_channels(state, "b::PUBLIC") == ["api_imports"]
+    assert _star_channels(state, "b::_PRIVATE") == []
+    assert _star_channels(state, "b::__all__") == ["api_imports"]
+
+
+def test_full_star_import_empty_all_exports_only_metadata(tmp_path, monkeypatch):
+    _write_star_visibility_fixture(tmp_path, [])
+
+    state = _full_canonical_state(tmp_path, monkeypatch)
+
+    assert _star_channels(state, "a::imported") == []
+    assert _star_channels(state, "b::PUBLIC") == []
+    assert _star_channels(state, "b::_PRIVATE") == []
+    assert _star_channels(state, "a::imported", consumer="b") == [
+        "api_imports"
+    ]
+    assert _star_channels(state, "b::__all__") == ["api_imports"]
+
+
+def test_full_star_import_without_all_exports_public_bindings_only(
+    tmp_path,
+    monkeypatch,
+):
+    _write_star_visibility_fixture(tmp_path, None)
+
+    state = _full_canonical_state(tmp_path, monkeypatch)
+
+    assert _star_channels(state, "a::imported") == ["api_imports"]
+    assert _star_channels(state, "b::PUBLIC") == ["api_imports"]
+    assert _star_channels(state, "b::_PRIVATE") == []
+    assert "b::__all__" not in state.artifact_consumption
+
+
+def test_full_multiple_star_imports_project_each_source_module(
+    tmp_path,
+    monkeypatch,
+):
+    (tmp_path / "a.py").write_text(
+        "def alpha():\n"
+        "    pass\n"
+        "_A_PRIVATE = 1\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "b.py").write_text(
+        "def beta():\n"
+        "    pass\n"
+        "_B_PRIVATE = 2\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "c.py").write_text(
+        "from a import *\n"
+        "from b import *\n",
+        encoding="utf-8",
+    )
+
+    state = _full_canonical_state(tmp_path, monkeypatch)
+
+    assert _star_channels(state, "a::alpha") == ["api_imports"]
+    assert _star_channels(state, "b::beta") == ["api_imports"]
+    assert _star_channels(state, "a::_A_PRIVATE") == []
+    assert _star_channels(state, "b::_B_PRIVATE") == []

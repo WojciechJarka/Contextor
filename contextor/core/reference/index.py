@@ -31,6 +31,7 @@ from .resolution import (
     _resolve_reexport,
 )
 from .shared import (
+    _assemble_module_export_surfaces,
     _assemble_reexport_map,
     _empty_reference,
     _extract_reexport_facts,
@@ -371,6 +372,8 @@ class RepositoryReferenceIndex:
         modules: dict,
         root_path: str,
         reexports: dict[str, str],
+        module_export_surfaces: dict[str, dict[str, str]],
+        explicit_all_modules: frozenset[str],
         direct_calls_by_target: dict[str, list[tuple[str, Optional[int], Optional[str]]]],
         instance_calls_by_target: dict[str, list[tuple[str, Optional[int], Optional[str]]]],
         callbacks_by_target: dict[str, list[tuple[str, Optional[int], Optional[str]]]],
@@ -388,6 +391,8 @@ class RepositoryReferenceIndex:
         self.modules = modules
         self.root_path = root_path
         self.reexports = reexports
+        self.module_export_surfaces = module_export_surfaces
+        self.explicit_all_modules = explicit_all_modules
         self.direct_calls_by_target = direct_calls_by_target
         self.instance_calls_by_target = instance_calls_by_target
         self.callbacks_by_target = callbacks_by_target
@@ -452,6 +457,14 @@ class RepositoryReferenceIndex:
 
         reexports = _assemble_reexport_map(
             reexport_facts_by_module
+        )
+        module_export_surfaces = _assemble_module_export_surfaces(
+            reexport_facts_by_module
+        )
+        explicit_all_modules = frozenset(
+            module_id
+            for module_id, facts in reexport_facts_by_module.items()
+            if facts.get("explicit_all") is not None
         )
 
         direct_calls_by_target: dict[str, list[tuple[str, Optional[int], Optional[str]]]] = defaultdict(list)
@@ -560,6 +573,8 @@ class RepositoryReferenceIndex:
             modules=modules,
             root_path=root_path,
             reexports=reexports,
+            module_export_surfaces=module_export_surfaces,
+            explicit_all_modules=explicit_all_modules,
             direct_calls_by_target=dict(direct_calls_by_target),
             instance_calls_by_target=dict(instance_calls_by_target),
             callbacks_by_target=dict(callbacks_by_target),
@@ -632,10 +647,19 @@ class RepositoryReferenceIndex:
 
             # 8. Star Imports
             for source_prefix, consumers in self.star_imports_by_source.items():
-                if symbol.startswith(source_prefix + ".") or any(
-                    exported.startswith(source_prefix + ".") and orig == symbol
-                    for exported, orig in self.reexports.items()
-                ):
+                visible_targets = self.module_export_surfaces.get(
+                    source_prefix,
+                    {},
+                )
+                is_visible_export = any(
+                    _resolve_reexport(target, self.reexports) == symbol
+                    for target in visible_targets.values()
+                )
+                is_all_metadata = (
+                    source_prefix in self.explicit_all_modules
+                    and symbol == f"{source_prefix}.__all__"
+                )
+                if is_visible_export or is_all_metadata:
                     rec["imported_from"].extend(consumers)
 
             # 9. Ambiguous Calls for leaf
