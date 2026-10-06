@@ -829,12 +829,31 @@ def test_e2e_missing_source_fails_closed_no_blank_code_collision():
 
         mod_a = Module(module_id="mod_a", path="mod_a_deleted.py", absolute_path=str(path_a_nonexistent), imports=[])
         mod_b = Module(module_id="mod_b", path="mod_b.py", absolute_path=str(path_b), imports=[])
+        modules = {
+            "mod_a": mod_a,
+            "mod_b": mod_b,
+        }
 
         # A has unmaterialized fact with non-existent file path
         facts_a = [{"name": "missing_partner", "type": "function", "file": "mod_a", "file_path": str(path_a_nonexistent), "code": "", "line_start": 1, "line_end": 2, "col_start": 0, "col_end": 15}]
 
         state = RepositoryAnalysisState(
-            modules={"mod_a": mod_a, "mod_b": mod_b},
+            modules=modules,
+            reexport_facts_by_module={
+                "mod_a": {
+                    "exporter": "mod_a",
+                    "explicit_all": None,
+                    "bindings": {
+                        "missing_partner": "mod_a.missing_partner",
+                    },
+                    "star_sources": [],
+                },
+                **materialize_reexport_facts_by_module(
+                    {
+                        "mod_b": mod_b,
+                    }
+                ),
+            },
             collision_facts={"mod_a": facts_a, "mod_b": []},
             collisions_state="fresh",
             collisions=[],
@@ -868,6 +887,7 @@ def test_e2e_missing_source_fails_closed_no_blank_code_collision():
             root_path=str(root),
             file_path=str(path_b),
             new_collision_facts=prep.new_collision_facts,
+            new_reexport_facts=prep.new_reexport_facts,
         )
 
         candidate = outcome.candidate_state

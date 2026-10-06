@@ -335,6 +335,24 @@ def test_plan_executor_missing_payload_fail_closed():
             "a": Module(module_id="a", path="a.py", absolute_path="/tmp/a.py", imports=[]),
             "b": Module(module_id="b", path="b.py", absolute_path="/tmp/b.py", imports=[]),
         },
+        reexport_facts_by_module={
+            "a": {
+                "exporter": "a",
+                "explicit_all": None,
+                "bindings": {
+                    "X": "a.X",
+                },
+                "star_sources": [],
+            },
+            "b": {
+                "exporter": "b",
+                "explicit_all": None,
+                "bindings": {
+                    "X": "b.X",
+                },
+                "star_sources": [],
+            },
+        },
         collision_facts={
             "a": [{"name": "X", "type": "variable", "file": "a", "file_path": "/tmp/a.py", "code": "X = 1", "line_start": 1, "line_end": 1, "col_start": 0, "col_end": 5}],
             "b": [{"name": "X", "type": "variable", "file": "b", "file_path": "/tmp/b.py", "code": "X = 1", "line_start": 1, "line_end": 1, "col_start": 0, "col_end": 5}],
@@ -508,6 +526,16 @@ def test_missing_payload_transaction_failure():
     state = RepositoryAnalysisState(
         modules={
             "a": Module(module_id="a", path="a.py", absolute_path="/tmp/a.py", imports=[]),
+        },
+        reexport_facts_by_module={
+            "a": {
+                "exporter": "a",
+                "explicit_all": None,
+                "bindings": {
+                    "X": "a.X",
+                },
+                "star_sources": [],
+            },
         },
         collision_facts={
             "a": [{"name": "X", "type": "variable", "file": "a", "file_path": "/tmp/a.py", "code": "X = 1", "line_start": 1, "line_end": 1, "col_start": 0, "col_end": 5}],

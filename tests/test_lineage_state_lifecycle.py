@@ -631,6 +631,28 @@ def _cross_source_facts():
     }
 
 
+def _cross_source_reexport_facts():
+    return {
+        "provider": {
+            "exporter": "provider",
+            "explicit_all": ["target"],
+            "bindings": {
+                "target": "provider.target",
+            },
+            "star_sources": [],
+        },
+        "consumer": {
+            "exporter": "consumer",
+            "explicit_all": ["exported"],
+            "bindings": {
+                "exported": "provider.target",
+                "value": "consumer.value",
+            },
+            "star_sources": [],
+        },
+    }
+
+
 def _lineage_state_for_facts(facts, registry, modules, artifacts):
     index = SimpleNamespace(
         modules=modules,
@@ -724,6 +746,9 @@ def test_snapshot_round_trip_compact_origin_reresolves_without_source_work(tmp_p
         {"provider::target": "A:provider/1"},
     )
     state = _lineage_state_for_facts(facts, registry, modules, artifacts)
+    state.reexport_facts_by_module = (
+        _cross_source_reexport_facts()
+    )
     save_snapshot(state, tmp_path, "compact-origin")
     loaded, _ = load_snapshot(tmp_path, expected_state_id="compact-origin")
     consumer = loaded.lineage_facts_by_source["consumer.py"]
@@ -780,6 +805,9 @@ def test_snapshot_rejects_corrupt_compact_origin(tmp_path, origins):
         {"provider::target": "A:provider/1"},
     )
     state = _lineage_state_for_facts(facts, registry, modules, artifacts)
+    state.reexport_facts_by_module = (
+        _cross_source_reexport_facts()
+    )
     source_slice = state.lineage_facts_by_source["consumer.py"]
     origin = source_slice.semantic_endpoint_origins[0]
     object.__setattr__(source_slice, "semantic_endpoint_origins", origins(origin))
@@ -1388,6 +1416,16 @@ def test_fresh_process_hydrates_materialized_symbolic_lineage_without_analysis(
     )
     state = RepositoryAnalysisState(
         modules={"pkg": Module(module_id="pkg", path="pkg.py", absolute_path=str(repo / "missing.py"), imports=[])},
+        reexport_facts_by_module={
+            "pkg": {
+                "exporter": "pkg",
+                "explicit_all": None,
+                "bindings": {
+                    "thing": "pkg.thing",
+                },
+                "star_sources": [],
+            },
+        },
         dependency_graph=ProjectGraph(hard_edges={"pkg": set()}, soft_edges={"pkg": set()}),
         lineage_facts_by_source={"pkg.py": source},
         lineage_facts_state="fresh",
@@ -1461,6 +1499,16 @@ def test_snapshot_legacy_interface_descriptor_capability_fails_closed_without_dr
         {"pkg": "M:pkg/1"}, {"pkg::ping": "A:pkg.ping/1"}
     )
     state = _lineage_state_for_facts(facts, registry, modules, artifacts)
+    state.reexport_facts_by_module = {
+        "pkg": {
+            "exporter": "pkg",
+            "explicit_all": None,
+            "bindings": {
+                "ping": "pkg.ping",
+            },
+            "star_sources": [],
+        },
+    }
     source_slice = state.lineage_facts_by_source["pkg.py"]
     assert source_slice.manifest.interface_descriptors_materialized is True
     assert source_slice.interface_descriptors
