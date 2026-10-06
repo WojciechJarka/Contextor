@@ -916,6 +916,71 @@ def test_incremental_global_add_matches_full_oracle(tmp_path):
     )
 
 
+def test_transitive_reexport_late_provider_matches_full_oracle(tmp_path):
+    f_provider = tmp_path / "a.py"
+    f_reexport = tmp_path / "b.py"
+    f_consumer = tmp_path / "c.py"
+
+    f_provider.write_text("VALUE = 1\n", encoding="utf-8")
+    f_reexport.write_text("from a import foo\n", encoding="utf-8")
+    f_consumer.write_text(
+        "import b\n"
+        "\n"
+        "def run():\n"
+        "    return b.foo()\n",
+        encoding="utf-8",
+    )
+
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir()
+
+    engine = IncrementalAnalysisEngine(
+        RepositoryAnalysisState(modules={}),
+        PersistentIdentityRegistry(str(tmp_path)),
+        FileStateManager(str(cache_dir)),
+        str(tmp_path),
+    )
+
+    engine.update_file(str(f_provider))
+    engine.update_file(str(f_reexport))
+    engine.update_file(str(f_consumer))
+
+    f_provider.write_text(
+        "VALUE = 1\n"
+        "\n"
+        "def foo():\n"
+        "    return 1\n",
+        encoding="utf-8",
+    )
+
+    result = engine.update_file(str(f_provider))
+    oracle = _build_full_static_state(tmp_path)
+
+    incremental_entry = engine.state.artifact_consumption.get(
+        "a::foo",
+        {},
+    )
+    full_entry = oracle.artifact_consumption.get(
+        "a::foo",
+        {},
+    )
+
+    assert "b" in full_entry.get("consumers", [])
+    assert "c" in full_entry.get("consumers", [])
+
+    assert sorted(
+        incremental_entry.get("consumers", [])
+    ) == sorted(
+        full_entry.get("consumers", [])
+    ), (
+        "transitive canonical propagation differs from fresh full oracle: "
+        f"incremental={incremental_entry!r}, full={full_entry!r}, "
+        f"recompute_modules={result.shadow_plan.recompute_modules!r}"
+    )
+
+    _assert_full_parity(engine.state, oracle)
+
+
 def test_full_canonical_parity_module_add_and_delete(tmp_path):
     f_target = tmp_path / "target.py"
     f_target.write_text("def foo(): pass\n", encoding="utf-8")
