@@ -30,6 +30,7 @@ from contextor.core.reporting_layer.artifact_usage_report import (
     collect_module_artifacts,
 )
 from contextor.core.symbol_engine.indexer import index_repository
+from contextor.core.reference.shared import materialize_reexport_facts_by_module
 
 
 pytestmark = pytest.mark.live
@@ -76,11 +77,15 @@ def _engine_for_file(tmp_path):
     source = tmp_path / "provider.py"
     source.write_text("def helper(value: int) -> int:\n    return value + 1\n")
     registry = PersistentIdentityRegistry(str(tmp_path))
-    modules = index_repository(str(tmp_path)).modules
+    repo_index = index_repository(str(tmp_path))
+    modules = repo_index.modules
     artifacts, _ = collect_module_artifacts(modules, str(tmp_path))
     trie = build_trie(modules)
     state = RepositoryAnalysisState(
         modules=dict(modules),
+        reexport_facts_by_module=materialize_reexport_facts_by_module(
+            modules, repo_index.reference_facts_by_module
+        ),
         artifacts=artifacts,
         dependency_graph=build_graph(modules),
         trie=trie,

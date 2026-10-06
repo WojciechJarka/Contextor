@@ -99,8 +99,10 @@ def test_case_2_modify_call_target(tmp_path):
 
     m_target = Module(module_id="target", path="target.py", absolute_path=str(f_target), imports=[])
 
+    modules = {"target": m_target}
     state = RepositoryAnalysisState(
-        modules={"target": m_target},
+        modules=modules,
+        reexport_facts_by_module=materialize_reexport_facts_by_module(modules),
         artifacts={"target": {"symbols": {"functions": ["foo", "bar"]}, "own_symbols": ["foo", "bar"]}},
     )
     cache_dir = tmp_path / "cache"
@@ -139,8 +141,10 @@ def test_case_3_delete_consumer(tmp_path):
 
     m_target = Module(module_id="target", path="target.py", absolute_path=str(f_target), imports=[])
 
+    modules = {"target": m_target}
     state = RepositoryAnalysisState(
-        modules={"target": m_target},
+        modules=modules,
+        reexport_facts_by_module=materialize_reexport_facts_by_module(modules),
     )
     cache_dir = tmp_path / "cache"
     cache_dir.mkdir()
@@ -171,7 +175,11 @@ def test_case_4_alias_resolution(tmp_path):
     f_consumer.write_text("from target import foo as local\nlocal()\n", encoding="utf-8")
 
     m_target = Module(module_id="target", path="target.py", absolute_path=str(f_target), imports=[])
-    state = RepositoryAnalysisState(modules={"target": m_target})
+    modules = {"target": m_target}
+    state = RepositoryAnalysisState(
+        modules=modules,
+        reexport_facts_by_module=materialize_reexport_facts_by_module(modules),
+    )
     cache_dir = tmp_path / "cache"
     cache_dir.mkdir()
 
@@ -194,7 +202,11 @@ def test_case_5_qualified_call(tmp_path):
     f_consumer.write_text("import target\ntarget.foo()\n", encoding="utf-8")
 
     m_target = Module(module_id="target", path="target.py", absolute_path=str(f_target), imports=[])
-    state = RepositoryAnalysisState(modules={"target": m_target})
+    modules = {"target": m_target}
+    state = RepositoryAnalysisState(
+        modules=modules,
+        reexport_facts_by_module=materialize_reexport_facts_by_module(modules),
+    )
     cache_dir = tmp_path / "cache"
     cache_dir.mkdir()
 
@@ -221,7 +233,11 @@ def test_case_6_name_collision(tmp_path):
 
     m_a = Module(module_id="mod_a", path="mod_a.py", absolute_path=str(f_a), imports=[])
     m_b = Module(module_id="mod_b", path="mod_b.py", absolute_path=str(f_b), imports=[])
-    state = RepositoryAnalysisState(modules={"mod_a": m_a, "mod_b": m_b})
+    modules = {"mod_a": m_a, "mod_b": m_b}
+    state = RepositoryAnalysisState(
+        modules=modules,
+        reexport_facts_by_module=materialize_reexport_facts_by_module(modules),
+    )
     cache_dir = tmp_path / "cache"
     cache_dir.mkdir()
 
@@ -262,11 +278,15 @@ def test_case_7_reexport_retarget_no_reread(tmp_path):
     m_impl_a = Module(module_id="pkg.impl_a", path="pkg/impl_a.py", absolute_path=str(f_impl_a), imports=[])
     m_impl_b = Module(module_id="pkg.impl_b", path="pkg/impl_b.py", absolute_path=str(f_impl_b), imports=[])
 
-    state = RepositoryAnalysisState(modules={
+    modules = {
         "pkg.__init__": m_init,
         "pkg.impl_a": m_impl_a,
         "pkg.impl_b": m_impl_b,
-    })
+    }
+    state = RepositoryAnalysisState(
+        modules=modules,
+        reexport_facts_by_module=materialize_reexport_facts_by_module(modules),
+    )
     cache_dir = tmp_path / "cache"
     cache_dir.mkdir()
 

@@ -68,13 +68,17 @@ def test_deleted_file_reports_all_removed_definition_artifacts(tmp_path):
         "class Worker:\n    def execute(self):\n        return run()\n",
         encoding="utf-8",
     )
-    modules = index_repository(str(tmp_path)).modules
+    repo_index = index_repository(str(tmp_path))
+    modules = repo_index.modules
     artifacts, failures = collect_module_artifacts(modules, str(tmp_path))
     assert not failures
     trie = build_trie(modules)
     package_root = detect_package_root(modules, trie)
     state = RepositoryAnalysisState(
         modules=dict(modules),
+        reexport_facts_by_module=materialize_reexport_facts_by_module(
+            modules, repo_index.reference_facts_by_module
+        ),
         artifacts=artifacts,
         dependency_graph=build_graph(modules, trie=trie, package_root=package_root),
         trie=trie,
@@ -206,13 +210,17 @@ def test_update_file_returns_fresh_blast_radius_for_modified_provider(tmp_path):
     consumer = tmp_path / "consumer.py"
     consumer.write_text("from provider import run\nrun()\n", encoding="utf-8")
     
-    modules = index_repository(str(tmp_path)).modules
+    repo_index = index_repository(str(tmp_path))
+    modules = repo_index.modules
     artifacts, failures = collect_module_artifacts(modules, str(tmp_path))
     assert not failures
     trie = build_trie(modules)
     package_root = detect_package_root(modules, trie)
     state = RepositoryAnalysisState(
         modules=dict(modules),
+        reexport_facts_by_module=materialize_reexport_facts_by_module(
+            modules, repo_index.reference_facts_by_module
+        ),
         artifacts=artifacts,
         dependency_graph=build_graph(modules, trie=trie, package_root=package_root),
         trie=trie,
@@ -244,13 +252,17 @@ def test_update_file_returns_fresh_blast_radius_for_deleted_file(tmp_path):
     consumer = tmp_path / "consumer.py"
     consumer.write_text("from provider import run\nrun()\n", encoding="utf-8")
     
-    modules = index_repository(str(tmp_path)).modules
+    repo_index = index_repository(str(tmp_path))
+    modules = repo_index.modules
     artifacts, failures = collect_module_artifacts(modules, str(tmp_path))
     assert not failures
     trie = build_trie(modules)
     package_root = detect_package_root(modules, trie)
     state = RepositoryAnalysisState(
         modules=dict(modules),
+        reexport_facts_by_module=materialize_reexport_facts_by_module(
+            modules, repo_index.reference_facts_by_module
+        ),
         artifacts=artifacts,
         dependency_graph=build_graph(modules, trie=trie, package_root=package_root),
         trie=trie,
@@ -280,13 +292,17 @@ def test_update_file_add_module_resolving_dependency(tmp_path):
     consumer = tmp_path / "consumer.py"
     consumer.write_text("from provider import run\nrun()\n", encoding="utf-8")
     
-    modules = index_repository(str(tmp_path)).modules
+    repo_index = index_repository(str(tmp_path))
+    modules = repo_index.modules
     artifacts, failures = collect_module_artifacts(modules, str(tmp_path))
     assert not failures
     trie = build_trie(modules)
     package_root = detect_package_root(modules, trie)
     state = RepositoryAnalysisState(
         modules=dict(modules),
+        reexport_facts_by_module=materialize_reexport_facts_by_module(
+            modules, repo_index.reference_facts_by_module
+        ),
         artifacts=artifacts,
         dependency_graph=build_graph(modules, trie=trie, package_root=package_root),
         trie=trie,
@@ -322,6 +338,9 @@ def test_update_file_missing_graph_evidence_is_deferred_and_empty_affected_modul
         registry.sync_with_workspace({"sample"}, {"sample::run": "A1/1"})
     state = RepositoryAnalysisState(
         modules={"sample": module},
+        reexport_facts_by_module=materialize_reexport_facts_by_module(
+            {"sample": module}
+        ),
         artifacts={},
         dependency_graph=None,
         trie={},
@@ -368,6 +387,9 @@ def test_update_file_delete_with_missing_old_graph_is_deferred_despite_rebuilt_n
 
     state = RepositoryAnalysisState(
         modules={"mod_a": module_a, "mod_b": module_b},
+        reexport_facts_by_module=materialize_reexport_facts_by_module(
+            {"mod_a": module_a, "mod_b": module_b}
+        ),
         artifacts={},
         dependency_graph=None,  # Missing OLD graph
         trie={},

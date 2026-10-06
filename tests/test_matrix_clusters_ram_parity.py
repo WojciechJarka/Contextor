@@ -530,6 +530,12 @@ def test_early_ambiguity_in_recompute_phase_is_sticky_across_clean_later_patch(t
     engine.state.modules["other_consumer"] = Module(
         module_id="other_consumer", path="other.py", absolute_path="/other.py", imports=[]
     )
+    engine.state.reexport_facts_by_module["other_consumer"] = {
+        "exporter": "other_consumer",
+        "explicit_all": None,
+        "bindings": {},
+        "star_sources": [],
+    }
     with engine.registry.transaction():
         engine.registry.sync_with_workspace(
             set(engine.state.modules),

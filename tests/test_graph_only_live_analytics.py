@@ -281,6 +281,14 @@ def test_snapshot_backward_and_forward_compatibility(tmp_path):
     # 1. State WITH topology_analytics
     state = RepositoryAnalysisState(
         modules={"a": Module("a", "a.py", "/a.py", [])},
+        reexport_facts_by_module={
+            "a": {
+                "exporter": "a",
+                "explicit_all": None,
+                "bindings": {},
+                "star_sources": [],
+            }
+        },
         topology_analytics={"pagerank": {"a": 1.0}},
     )
     meta = save_snapshot(state, cache_dir, "test_state", repo_id="repo1", root_path=str(tmp_path))

@@ -126,6 +126,7 @@ def test_fresh_snapshot_restart_preservation(tmp_path):
 
     state = RepositoryAnalysisState(
         modules=modules,
+        reexport_facts_by_module=materialize_reexport_facts_by_module(modules),
         dependency_graph=graph,
         metrics=metrics,
         topology_analytics=topo,

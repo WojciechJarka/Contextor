@@ -68,7 +68,11 @@ def test_scenario_b_modify_body_only(tmp_path):
 
     m_target = Module(module_id="target", path="target.py", absolute_path=str(f_target), imports=[])
     m_consumer = Module(module_id="consumer", path="consumer.py", absolute_path=str(f_consumer), imports=[])
-    state = RepositoryAnalysisState(modules={"target": m_target, "consumer": m_consumer})
+    modules = {"target": m_target, "consumer": m_consumer}
+    state = RepositoryAnalysisState(
+        modules=modules,
+        reexport_facts_by_module=materialize_reexport_facts_by_module(modules),
+    )
     cache_dir = tmp_path / "cache"
     cache_dir.mkdir()
 
@@ -104,7 +108,11 @@ def test_scenario_c_delete_consumer(tmp_path):
 
     m_target = Module(module_id="target", path="target.py", absolute_path=str(f_target), imports=[])
     m_consumer = Module(module_id="consumer", path="consumer.py", absolute_path=str(f_consumer), imports=[])
-    state = RepositoryAnalysisState(modules={"target": m_target, "consumer": m_consumer})
+    modules = {"target": m_target, "consumer": m_consumer}
+    state = RepositoryAnalysisState(
+        modules=modules,
+        reexport_facts_by_module=materialize_reexport_facts_by_module(modules),
+    )
     cache_dir = tmp_path / "cache"
     cache_dir.mkdir()
 
@@ -130,7 +138,11 @@ def test_scenario_h_inheritance_usage(tmp_path):
     f_child.write_text("from base import BaseWidget\nclass ChildWidget(BaseWidget): pass\n", encoding="utf-8")
 
     m_base = Module(module_id="base", path="base.py", absolute_path=str(f_base), imports=[])
-    state = RepositoryAnalysisState(modules={"base": m_base})
+    modules = {"base": m_base}
+    state = RepositoryAnalysisState(
+        modules=modules,
+        reexport_facts_by_module=materialize_reexport_facts_by_module(modules),
+    )
     cache_dir = tmp_path / "cache"
     cache_dir.mkdir()
 
@@ -153,7 +165,11 @@ def test_definer_deletion_parity(tmp_path):
 
     m_target = Module(module_id="target", path="target.py", absolute_path=str(f_target), imports=[])
     m_consumer = Module(module_id="consumer", path="consumer.py", absolute_path=str(f_consumer), imports=[])
-    state = RepositoryAnalysisState(modules={"target": m_target, "consumer": m_consumer})
+    modules = {"target": m_target, "consumer": m_consumer}
+    state = RepositoryAnalysisState(
+        modules=modules,
+        reexport_facts_by_module=materialize_reexport_facts_by_module(modules),
+    )
     cache_dir = tmp_path / "cache"
     cache_dir.mkdir()
 
@@ -180,7 +196,11 @@ def test_copy_on_write_atomicity(tmp_path):
     f_consumer.write_text("from target import foo\nfoo()\n", encoding="utf-8")
 
     m_target = Module(module_id="target", path="target.py", absolute_path=str(f_target), imports=[])
-    state = RepositoryAnalysisState(modules={"target": m_target})
+    modules = {"target": m_target}
+    state = RepositoryAnalysisState(
+        modules=modules,
+        reexport_facts_by_module=materialize_reexport_facts_by_module(modules),
+    )
     cache_dir = tmp_path / "cache"
     cache_dir.mkdir()
 

@@ -24,6 +24,7 @@ from contextor.core.domain.usage_facts import ModuleUsageFacts
 from contextor.core.graph.metrics import compute_graph_metrics
 from contextor.core.live_state.store import save_snapshot, load_snapshot
 from contextor.core.reporting_engine.graph_analytics import compute_topology_analytics
+from contextor.core.reference.shared import materialize_reexport_facts_by_module
 from contextor.core.reporting_engine.persistent_registry import PersistentIdentityRegistry
 from contextor.mcp_server import get_module_context
 from contextor.mcp.runtime import _live_engines
@@ -196,6 +197,7 @@ def test_new_snapshot_save_and_restart(tmp_path):
         dependency_graph=graph,
         metrics=metrics,
         topology_analytics=topo,
+        reexport_facts_by_module=materialize_reexport_facts_by_module(modules),
     )
 
     save_snapshot(state, cache_dir, "new_snap", repo_id="repo1", root_path=str(tmp_path))

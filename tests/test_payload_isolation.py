@@ -15,6 +15,7 @@ from contextor.core.analysis.state_manager import FileStateManager, RepositoryAn
 from contextor.core.domain.module import Module
 from contextor.core.domain.refresh_plan import RefreshPlan
 from contextor.core.reporting_engine.persistent_registry import PersistentIdentityRegistry
+from contextor.core.reference.shared import materialize_reexport_facts_by_module
 
 
 def test_shadow_plan_repr_false():
@@ -30,7 +31,11 @@ def test_mcp_update_file_payload_isolation(tmp_path):
     f_target.write_text("def foo(): pass\n", encoding="utf-8")
 
     m_target = Module(module_id="target", path="target.py", absolute_path=str(f_target), imports=[])
-    state = RepositoryAnalysisState(modules={"target": m_target})
+    modules = {"target": m_target}
+    state = RepositoryAnalysisState(
+        modules=modules,
+        reexport_facts_by_module=materialize_reexport_facts_by_module(modules),
+    )
     cache_dir = tmp_path / "cache"
     cache_dir.mkdir()
 

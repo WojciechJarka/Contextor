@@ -444,6 +444,14 @@ def test_real_hydration_normalizes_legacy_lineage_absence_without_source_rebuild
     )
     state = RepositoryAnalysisState(
         modules={"pkg": module},
+        reexport_facts_by_module={
+            "pkg": {
+                "exporter": "pkg",
+                "explicit_all": None,
+                "bindings": {},
+                "star_sources": [],
+            }
+        },
         dependency_graph=ProjectGraph(
             hard_edges={"pkg": set()},
             soft_edges={"pkg": set()},

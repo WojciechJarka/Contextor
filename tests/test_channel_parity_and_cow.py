@@ -94,7 +94,11 @@ def test_channel_transition_direct_to_callback(tmp_path):
     f_consumer.write_text("from target import foo\nfoo()\n", encoding="utf-8")
 
     m_target = Module(module_id="target", path="target.py", absolute_path=str(f_target), imports=[])
-    state = RepositoryAnalysisState(modules={"target": m_target})
+    modules = {"target": m_target}
+    state = RepositoryAnalysisState(
+        modules=modules,
+        reexport_facts_by_module=materialize_reexport_facts_by_module(modules),
+    )
     cache_dir = tmp_path / "cache"
     cache_dir.mkdir()
 
@@ -128,7 +132,11 @@ def test_cow_immutability_non_empty_old_state(tmp_path):
     f_consumer.write_text("from target import foo\nfoo()\n", encoding="utf-8")
 
     m_target = Module(module_id="target", path="target.py", absolute_path=str(f_target), imports=[])
-    state = RepositoryAnalysisState(modules={"target": m_target})
+    modules = {"target": m_target}
+    state = RepositoryAnalysisState(
+        modules=modules,
+        reexport_facts_by_module=materialize_reexport_facts_by_module(modules),
+    )
     cache_dir = tmp_path / "cache"
     cache_dir.mkdir()
 
@@ -179,7 +187,11 @@ def test_unrelated_relation_preservation(tmp_path):
     m_target = Module(module_id="target", path="target.py", absolute_path=str(f_target), imports=[])
     m_other = Module(module_id="other", path="other.py", absolute_path=str(f_other), imports=[])
 
-    state = RepositoryAnalysisState(modules={"target": m_target, "other": m_other})
+    modules = {"target": m_target, "other": m_other}
+    state = RepositoryAnalysisState(
+        modules=modules,
+        reexport_facts_by_module=materialize_reexport_facts_by_module(modules),
+    )
     cache_dir = tmp_path / "cache"
     cache_dir.mkdir()
 

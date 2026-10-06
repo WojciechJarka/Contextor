@@ -1,181 +1,210 @@
-# CPA_SUITE_REPAIR_A_CANONICAL_REEXPORT_FIXTURE_MIGRATION
+# CPA_SUITE_REPAIR_A2_COMPLETE_CANONICAL_FIXTURE_MIGRATION
 
-STATUS=PARTIAL_BLOCKED_SYNTHETIC_FIXTURES
-CLASSIFICATION=PARTIAL_CANONICAL_REEXPORT_TEST_FIXTURE_MIGRATION
-HEAD_BEFORE=1525bc9ab51b3a80cc51c8358139cfb23f5b1be6
-HEAD_AT_REPORT=1525bc9ab51b3a80cc51c8358139cfb23f5b1be6
-WORKTREE_BEFORE=Only walkthrough.md was modified by the prior report; all test/source paths in this task were clean against HEAD.
-SOURCE_DRIFT=NONE_OBSERVED. Current Contextor LIVE revision 1551 reported canonical_state=fresh and workspace_sync=verified for relevant owners and test files. Exact current test anchors were inspected before editing and were at HEAD.
+STATUS=PARTIAL_BLOCKED_NONEMPTY_SYNTHETIC_FIXTURES
+CLASSIFICATION=PARTIAL_FIXTURE_MIGRATION_WITH_NONEMPTY_SYNTHETIC_BLOCKERS_AND_ONE_REMAINING_STEP_A_SEMANTIC_FAILURE
+HEAD_BEFORE=56bb40ea02598ef4c7f738dffd5a458477e41590
+HEAD_AT_REPORT=56bb40ea02598ef4c7f738dffd5a458477e41590
+WORKTREE_BASELINE=CLEAN_AT_A2_START; prior Step A changes were accepted and already present at HEAD
+SOURCE_DRIFT=NONE; HEAD remained unchanged and each edited anchor was checked against the current file
 
-## MIGRATION_CONTRACT
+CANONICAL_OWNER
+- Canonical field: RepositoryAnalysisState.reexport_facts_by_module.
+- Materializer owner: contextor.core.reference.shared::materialize_reexport_facts_by_module.
+- Enforcement evidence: execute_refresh_plan rejected incomplete baselines in targeted tests; save_snapshot rejected incomplete baselines in targeted tests. No production file was changed.
+CODE_PATH_PROVED=execute_refresh_plan validates the canonical map before candidate execution; save_snapshot validates it before persistence, as shown by direct targeted-test stack traces.
+CONTRACT_PROVED=Canonical map must validate for all modules in RepositoryAnalysisState; source-backed extraction and compact index facts follow the user-locked A2 rules.
+INFERENCE=NONE used to justify any synthetic nonempty fixture.
 
-Canonical owner: contextor.core.reference.shared::materialize_reexport_facts_by_module and ::validate_reexport_facts_by_module. The validator requires facts and modules to be dicts with exact matching module-key domains and valid fact shapes. save_snapshot and the incremental baseline guard consume this precondition. Production files were not changed.
+CONTEXTOR_DISCOVERY
+- Contextor file-edit context was queried before each A2 file edit; reusable helpers were additionally checked for callers where applicable.
+- During those pre-edit queries, Contextor returned canonical_state=fresh and workspace_sync=verified (observed revisions 1566 through 1582). This is pre-edit discovery evidence, not a post-edit freshness claim.
+- Contextor tool documentation was read after a parameter-contract error and the file/helper calls were then made using the documented argument contract.
 
-Contextor evidence:
-- get_mcp_documentation was read before using get_file_edit_context, get_artifact_blast_radius, get_symbol_call_context, and get_source_range contracts.
-- get_artifact_blast_radius(materialize_reexport_facts_by_module) reported LIVE revision 1551, fresh/verified; direct consumers include contextor.core.api.facade and tests.test_mcp_incremental_hydration.
-- Validator blast radius identified direct production consumers contextor.core.analysis.incremental.plan_executor, contextor.core.api.facade, contextor.core.lineage_query.backend, and contextor.core.live_state.store; canonical state freshness was fresh/verified at revision 1551.
-- index_repository is owned by contextor.core.symbol_engine.indexer; Contextor reported its source fresh/verified and facade as the production consumer.
-- Fresh Contextor call context was checked before modifying reusable helpers: _candidate has 4 test callers; bootstrap_state 18; _setup_engine 11; bootstrap_fresh_state 14; _bootstrap_state 9. These calls are intra-module static call facts at revision 1551, workspace_sync=verified. Affected reusable builders were migrated at their common canonical construction sites.
-- contextor_fact_lineage v1 documents only artifact_consumption, syntax_diagnostics, and symbol_calls; it has no reexport-facts family. Re-export ownership was therefore checked with artifact blast radius plus exact source rather than claiming a lineage response for an unsupported family.
-- The actual Module.ast_tree property delegates to _get_cached_ast; existing source paths yield the production cached AST. materialize_reexport_facts_by_module uses existing compact facts.reexports where supplied and otherwise that AST. No custom parser/extractor or hand-authored re-export fact was added.
-
-No full analysis, MCP update_file, runtime restart, or full repository pytest suite was run.
-
-## PARTIAL_CANDIDATE_PATCH
-
-Applied exactly the requested _candidate() change in tests/test_incremental_phase_trace.py: added reexport_facts_by_module={} beside modules={} and changed no other content in that helper. The empty map matches the empty module domain.
-
-The three required candidate nodes passed: 3 passed.
-
-## INCREMENTAL_FIXTURE_MIGRATIONS
-
-Migrated only the representative constructors/helper paths named in the prior failure evidence:
-
-- test_channel_parity_all_channels: extracted the one-entry modules map and used the production materializer over its existing source-backed Module.
-- test_case_1_add_consumer: extracted its one-entry modules map and used the production materializer over the existing target source.
-- bootstrap_state in test_incremental_equivalence.py: reused the already-created repo_index.reference_facts_by_module.
-- _setup_engine in test_incremental_local_metrics.py: retained its existing index object and reused its compact reference facts.
-- test_new_importing_file_immediately_updates_forward_and_reverse_graph: retained its existing index object and reused its compact reference facts.
-- bootstrap_fresh_state in test_live_state_consistency.py: reused the existing index's compact reference facts.
-- test_scenario_a_add_consumer: extracted the one-entry modules map and used the production materializer over its existing target source.
-
-Representative incremental gate result: all 7 required nodes pass. The initial invocation had 4 pass and 3 baseline-guard failures; after migrating those three source-backed fixtures, the three failed nodes were rerun and passed. The other four had already passed in that same gate invocation.
-
-## SNAPSHOT_FIXTURE_MIGRATIONS
-
-Migrated these source-backed snapshot constructors with the production materializer:
-
-- test_persisted_fresh_cycles_preserved_across_restart: existing app.a and app.b files.
-- test_stale_non_empty_snapshot_restart_and_consumer_guard: existing app.core, app.utils, and app.main files.
-- test_materialized_empty_symbol_calls_survive_snapshot_without_rebuild: existing empty.py file.
-
-Migrated tests/test_live_watcher_startup_reconciliation.py::_bootstrap_state by retaining its existing repo_index and passing repo_index.reference_facts_by_module to the materializer. The required startup node test_startup_reconciles_offline_add_modify_delete_and_is_idempotent passed its save_snapshot precondition and test assertions.
-
-One required snapshot representative remains blocked: test_real_hydration_normalizes_legacy_lineage_absence_without_source_rebuild. It uses a synthetic Module whose path does not exist and supplies no compact re-export envelope. The exact evidence is in BLOCKED_SYNTHETIC_FIXTURES.
-
-## SOURCE_BACKED_MATERIALIZATION
-
-Six directly constructed source-backed maps were passed to materialize_reexport_facts_by_module(modules). Five index-backed fixture paths reused the already available compact reference_facts_by_module. No manual empty facts were assigned to a non-empty source-backed state; the only literal empty re-export map is the requested test double with modules={}.
-
-## COMPACT_FACT_REUSE
-
-- tests/test_incremental_equivalence.py::bootstrap_state
-- tests/test_incremental_local_metrics.py::_setup_engine
-- tests/test_incremental_reverse_context.py::test_new_importing_file_immediately_updates_forward_and_reverse_graph
-- tests/test_live_state_consistency.py::bootstrap_fresh_state
-- tests/test_live_watcher_startup_reconciliation.py::_bootstrap_state
-
-Each path passes the index object's existing reference_facts_by_module into the canonical materializer; no second index build or source/AST extraction was added for those fixtures.
-
-## BLOCKED_SYNTHETIC_FIXTURES
-
-BLOCKED_SYNTHETIC_REEXPORT_FIXTURE=1 observed in the required representative gates
-FULL_PATH=tests/test_lineage_state_lifecycle.py
+SYNTHETIC_LINEAGE_BLOCKER=PASS
 TEST_NODE=tests/test_lineage_state_lifecycle.py::test_real_hydration_normalizes_legacy_lineage_absence_without_source_rebuild
-MODULE_ID=pkg
-MODULE_VALUE=Module(module_id="pkg", path="pkg.py", absolute_path="C:\Users\DafoO\AppData\Local\Temp\pytest-of-DafoO\pytest-84\test_real_hydration_normalizes0\repo\does-not-exist.py", imports=[])
-ABSOLUTE_PATH=C:\Users\DafoO\AppData\Local\Temp\pytest-of-DafoO\pytest-84\test_real_hydration_normalizes0\repo\does-not-exist.py
-ARTIFACT_SHAPE=RepositoryAnalysisState.modules has only key "pkg"; artifacts defaults empty; reexport_facts_by_module defaults {}; no compact reference envelope is supplied. module_usages contains symbol-call facts, which are a separate family.
-WHY_MATERIALIZER_CANNOT_BE_USED=Module.ast_tree calls _get_cached_ast; Path.stat fails for this absent file and returns None. With no compact facts, the production materializer cannot produce a canonical fact and raises. No semantics were invented and the fixture was not changed.
+RESULT=1 passed
+DIRECT_EVIDENCE=The exact authorized pkg empty fact was added to that state. The source path remains missing and no source file was created.
 
-The exact total number of synthetic blockers across all 103 baseline nodes is UNKNOWN because the supplied full-suite discovery contains aggregate failure counts but no per-node list. The one blocker above is directly observed in this step.
+EXACT_103_NODE_ACCOUNTING
+EXACT_STEP_A_NODE_COUNT=103
+EXACT_NODE_IDENTITIES_RUN=103
+PYTEST_CASES_PASSED=91
+PYTEST_CASES_REMAINING_FAILED_OR_BLOCKED=12
+ORIGINAL_STEP_A_NODE_IDENTITIES_REMAINING=12
+PARAMETERIZED_NODE_ACCOUNTING=The five explicit <lambda>0 through <lambda>4 IDs were each selected and counted separately.
 
-## REPRESENTATIVE_INCREMENTAL_GATES
+REPRO_CONTRACT
+- Canonical RepositoryAnalysisState fixtures were migrated only in test files.
+- Source-backed Modules use materialize_reexport_facts_by_module(modules).
+- Index-backed fixtures pass repo_index.reference_facts_by_module to the materializer.
+- Hand-built empty facts were added only to the five fixtures listed below whose module inputs/imports and artifact domains are empty and whose target does not exercise exports.
+- No semantic assertions, expected freshness values, planner expectations, production logic, or production guards were edited.
 
-Required command used one physical PowerShell line:
-& .\.venv\Scripts\python.exe -m pytest tests/test_channel_parity_and_cow.py::test_channel_parity_all_channels tests/test_incremental_artifact_consumption.py::test_case_1_add_consumer tests/test_incremental_equivalence.py::test_incremental_add_imported_module tests/test_incremental_local_metrics.py::test_stage2c_add_isolated_module_macro_metrics tests/test_incremental_reverse_context.py::test_new_importing_file_immediately_updates_forward_and_reverse_graph tests/test_live_state_consistency.py::test_import_mutation tests/test_parity_and_freshness_proof.py::test_scenario_a_add_consumer
+SOURCE_BACKED_MIGRATIONS
+- tests/test_channel_parity_and_cow.py: three affected direct source-backed states.
+- tests/test_collisions_live_lifecycle.py: two source-backed incremental lifecycle states.
+- tests/test_h2c_collision_equivalence.py: two source-backed states; both pass prep.new_reexport_facts to execute_refresh_plan. The missing-source case remains blocked because its mod_a fixture contains a function collision fact.
+- tests/test_incremental_artifact_consumption.py: source-backed target/package states for the affected cases.
+- tests/test_incremental_reverse_context.py: source-backed states use the materializer; index_repository-derived states reuse repo_index.reference_facts_by_module.
+- tests/test_live_e2e_corrections.py: the shared _engine_for_file helper uses index compact facts. Contextor call-context evidence showed its three direct test callers.
+- tests/test_no_double_parse.py, tests/test_parity_and_freshness_proof.py, tests/test_payload_isolation.py, tests/test_persistent_topology_provenance.py, tests/test_shadow_planning_integration.py, and tests/test_topology_bootstrap_and_consumer_truth.py: source-backed states use the materializer.
+- tests/test_syntax_diagnostics_full_analysis.py: shared _live_syntax_fixture reuses index.reference_facts_by_module. Contextor call-context evidence showed three direct callers.
 
-Final per-node status after allowed fixture migrations:
-- test_channel_parity_all_channels PASS
-- test_case_1_add_consumer PASS
-- test_incremental_add_imported_module PASS
-- test_stage2c_add_isolated_module_macro_metrics PASS
-- test_new_importing_file_immediately_updates_forward_and_reverse_graph PASS
-- test_import_mutation PASS
-- test_scenario_a_add_consumer PASS
+INDEX_BACKED_MIGRATIONS
+- tests/test_incremental_reverse_context.py: repo_index-derived state fixtures pass repo_index.reference_facts_by_module.
+- tests/test_live_e2e_corrections.py::_engine_for_file: passes the index's compact facts.
+- tests/test_syntax_diagnostics_full_analysis.py::_live_syntax_fixture: passes the index's compact facts.
+INDEX_BACKED_FIXTURES_REUSE_COMPACT_FACTS=YES
 
-Initial execution of the exact seven-node gate yielded 4 passed and 3 failures at the unchanged canonical baseline guard. The three source-backed direct fixtures were migrated with the existing materializer and rerun; all three passed. Final representative gate: 7/7 passed.
+SYNTHETIC_EMPTY_MIGRATIONS
+MANUAL_SYNTHETIC_EMPTY_FACTS=5
+1. tests/test_lineage_state_lifecycle.py::test_real_hydration_normalizes_legacy_lineage_absence_without_source_rebuild — pkg, imports=[], no artifact/export payload; exact requested fact.
+2. tests/test_graph_only_live_analytics.py::test_snapshot_backward_and_forward_compatibility — a, imports=[], artifacts absent; topology snapshot compatibility only.
+3. tests/test_live_state_ipc.py::test_startup_backfill_preserves_filestate_content_and_revision_parity — a.py, SimpleNamespace() with no import entries, artifacts absent; startup backfill parity only.
+4. tests/test_live_state_ipc.py::test_startup_backfill_failure_leaves_previous_generation_authoritative — same empty synthetic module domain as item 3.
+5. tests/test_matrix_clusters_ram_parity.py::test_early_ambiguity_in_recompute_phase_is_sticky_across_clean_later_patch — other_consumer, imports=[], no artifacts entry/definition; only a direct-call usage record is represented, while the target is ambiguity handling rather than export semantics.
 
-## REPRESENTATIVE_SNAPSHOT_GATES
+BLOCKED_NONEMPTY_SYNTHETIC_FIXTURES
+COUNT=11 exact node identities in five fixture groups. No empty bindings were invented.
 
-Required snapshot nodes plus one _bootstrap_state startup node were invoked together on one physical PowerShell line.
+GROUP 1
+FULL_PATH=tests/test_collisions_live_lifecycle.py
+TEST_NODE=tests/test_collisions_live_lifecycle.py::test_plan_executor_missing_payload_fail_closed
+MODULE_ID=a; MODULE_VALUE=Module(module_id='a', path='a.py', absolute_path='/tmp/a.py', imports=[])
+IMPORTS=[]
+ARTIFACTS=collision_facts contains X, type=variable, file=a, file_path=/tmp/a.py, code='X = 1', line 1.
+MODULE_ID=b; MODULE_VALUE=Module(module_id='b', path='b.py', absolute_path='/tmp/b.py', imports=[])
+IMPORTS=[]
+ARTIFACTS=collision_facts contains X, type=variable, file=b, file_path=/tmp/b.py, code='X = 1', line 1.
+WHY_EMPTY_FACT_IS_NOT_PROVABLY_CANONICAL=Both synthetic modules represent nonempty variable definitions and the test checks collision patch failure behavior.
+DIRECT_EVIDENCE=execute_refresh_plan stops at the canonical re-export baseline guard before the expected ValueError assertion.
 
-Final per-node status:
-- test_persisted_fresh_cycles_preserved_across_restart PASS after source-backed materialization.
-- test_real_hydration_normalizes_legacy_lineage_absence_without_source_rebuild BLOCKED at the expected save_snapshot guard for the missing-source synthetic fixture above.
-- test_stale_non_empty_snapshot_restart_and_consumer_guard PASS after source-backed materialization.
-- test_materialized_empty_symbol_calls_survive_snapshot_without_rebuild PASS after source-backed materialization.
-- test_startup_reconciles_offline_add_modify_delete_and_is_idempotent PASS; canonical save precondition passed.
+GROUP 2
+FULL_PATH=tests/test_collisions_live_lifecycle.py
+TEST_NODE=tests/test_collisions_live_lifecycle.py::test_missing_payload_transaction_failure
+MODULE_ID=a; MODULE_VALUE=Module(module_id='a', path='a.py', absolute_path='/tmp/a.py', imports=[])
+IMPORTS=[]
+ARTIFACTS=collision_facts contains X, type=variable, file=a, file_path=/tmp/a.py, code='X = 1', line 1.
+WHY_EMPTY_FACT_IS_NOT_PROVABLY_CANONICAL=The fixture represents a nonempty variable definition and tests collision-fact transaction behavior.
+DIRECT_EVIDENCE=execute_refresh_plan stops at the canonical re-export baseline guard before the expected transaction ValueError.
 
-The first five-node run yielded one pass and four precondition failures. Three source-backed constructors were migrated and their nodes rerun in the focused six-node retry; all three passed. The missing-source lineage node remains blocked. No production code or test assertion was changed.
+GROUP 3
+FULL_PATH=tests/test_h2c_collision_equivalence.py
+TEST_NODE=tests/test_h2c_collision_equivalence.py::test_e2e_missing_source_fails_closed_no_blank_code_collision
+MODULE_ID=mod_a; MODULE_VALUE=Module(module_id='mod_a', path='mod_a_deleted.py', absolute_path=<temporary-root>/mod_a_deleted.py, imports=[]); source does not exist.
+IMPORTS=[]
+ARTIFACTS=collision_facts contains missing_partner, type=function, file=mod_a, file_path=<temporary-root>/mod_a_deleted.py, code='', line 1-2. mod_b has real source and can be materialized.
+WHY_EMPTY_FACT_IS_NOT_PROVABLY_CANONICAL=mod_a has an explicit nonempty function-definition collision fact; replacing it with empty bindings would discard represented semantics.
+DIRECT_EVIDENCE=execute_refresh_plan rejects the incomplete map before the test's deferred-collision assertions.
 
-## CLUSTER_WIDE_TARGETED_REGRESSION
+GROUP 4 — seven exact nodes share _lineage_state_for_facts
+FULL_PATH=tests/test_lineage_state_lifecycle.py
+TEST_NODE=tests/test_lineage_state_lifecycle.py::test_snapshot_round_trip_compact_origin_reresolves_without_source_work; tests/test_lineage_state_lifecycle.py::test_snapshot_rejects_corrupt_compact_origin[<lambda>0]; [<lambda>1]; [<lambda>2]; [<lambda>3]; [<lambda>4]; tests/test_lineage_state_lifecycle.py::test_snapshot_legacy_interface_descriptor_capability_fails_closed_without_dropping_payload
+MODULE_ID=provider; MODULE_VALUE=Module(module_id='provider', path='provider.py', absolute_path='/provider.py', imports=[])
+IMPORTS=[]
+ARTIFACTS=own_symbols={'target'}; consumer has own_symbols=set().
+MODULE_ID=consumer; MODULE_VALUE=Module(module_id='consumer', path='consumer.py', absolute_path='/consumer.py', imports=[])
+IMPORTS=[]
+ARTIFACTS=own_symbols=set(); provider's target is a represented definition.
+WHY_EMPTY_FACT_IS_NOT_PROVABLY_CANONICAL=The synthetic fixture has nonempty definition/artifact semantics and compact lineage facts; the canonical empty rule forbids dropping the represented target.
+DIRECT_EVIDENCE=save_snapshot rejects each state at the canonical re-export baseline guard before lineage round-trip/corruption assertions.
 
-NOT RUN. The required snapshot representative gate is not fully passable because the lineage fixture is explicitly blocked by the no-source/no-compact-facts contract. The task requires stopping at that fixture rather than designing a new fact source. Therefore the conditional cluster-wide regression for every changed test file was not entered. No tests/ directory positional argument and no full suite were used.
+GROUP 5
+FULL_PATH=tests/test_lineage_state_lifecycle.py
+TEST_NODE=tests/test_lineage_state_lifecycle.py::test_fresh_process_hydrates_materialized_symbolic_lineage_without_analysis
+MODULE_ID=pkg; MODULE_VALUE=Module(module_id='pkg', path='pkg.py', absolute_path=<temporary-repo>/missing.py, imports=[]); source does not exist.
+IMPORTS=[]
+ARTIFACTS=state.artifacts is absent/empty; lineage_facts_by_source contains a materialized anchor/flow with SemanticEndpoint('A1') and a MaterializedSymbolicRef target.
+WHY_EMPTY_FACT_IS_NOT_PROVABLY_CANONICAL=There is no source or compact re-export index proving the module has no definition/export semantics; the fixture materializes a symbol endpoint and external symbolic target. Treating this as empty would be an unsupported semantic assumption.
+DIRECT_EVIDENCE=save_snapshot rejects the state before the fresh-process hydration assertions.
 
-## EXPECTED_OUT_OF_SCOPE_FAILURES
+PER_FILE_NODE_RESULTS
+| Exact target test file | PASS | Remaining blocked/failing | Result |
+|---|---:|---:|---|
+| tests/test_channel_parity_and_cow.py | 4 | 0 | PASS |
+| tests/test_collisions_live_lifecycle.py | 2 | 2 | 2 synthetic nonempty blockers |
+| tests/test_cycles_live_lifecycle.py | 1 | 0 | PASS |
+| tests/test_graph_only_live_analytics.py | 1 | 0 | PASS |
+| tests/test_h2c_collision_equivalence.py | 2 | 1 | 1 synthetic nonempty blocker |
+| tests/test_incremental_artifact_consumption.py | 7 | 0 | PASS |
+| tests/test_incremental_equivalence.py | 11 | 0 | PASS |
+| tests/test_incremental_local_metrics.py | 11 | 0 | PASS |
+| tests/test_incremental_phase_trace.py | 3 | 0 | PASS |
+| tests/test_incremental_reverse_context.py | 7 | 0 | PASS |
+| tests/test_lineage_state_lifecycle.py | 1 | 8 | 8 synthetic nonempty blockers |
+| tests/test_live_e2e_corrections.py | 3 | 0 | PASS |
+| tests/test_live_state_consistency.py | 9 | 0 | PASS |
+| tests/test_live_state_ipc.py | 2 | 0 | PASS |
+| tests/test_live_watcher_startup_reconciliation.py | 10 | 0 | PASS |
+| tests/test_matrix_clusters_ram_parity.py | 0 | 1 | Existing Step A assertion failure |
+| tests/test_no_double_parse.py | 2 | 0 | PASS |
+| tests/test_parity_and_freshness_proof.py | 6 | 0 | PASS |
+| tests/test_payload_isolation.py | 1 | 0 | PASS |
+| tests/test_persistent_topology_provenance.py | 2 | 0 | PASS |
+| tests/test_shadow_planning_integration.py | 2 | 0 | PASS |
+| tests/test_symbol_call_facts.py | 1 | 0 | PASS |
+| tests/test_syntax_diagnostics_full_analysis.py | 2 | 0 | PASS |
+| tests/test_topology_bootstrap_and_consumer_truth.py | 1 | 0 | PASS |
+| TOTAL | 91 | 12 | 103 exact identities |
 
-The six STEP B nodes remain untouched and were not rerun:
-- tests/test_incremental_plan_executor_complexity.py::test_indexed_rebuild_uses_precomputed_indexes_without_full_scan
-- tests/test_completeness_freshness_parity_proof.py::test_ambiguity_regression_real_backfill_path
-- tests/test_matrix_clusters_ram_parity.py::test_ambiguity_execution_semantic_regression_fails_closed
-- tests/test_live_state_store.py::test_split_snapshot_load_emits_non_overlapping_phase_timings
-- tests/test_reference_fusion_integration.py::test_compact_reexport_oracle_and_artifact_output_parity
-- tests/test_refresh_plan_execution.py::test_case_a_body_only_retarget
+STEP_A_SEMANTIC_FAILURE_REMAINS
+TEST_NODE=tests/test_matrix_clusters_ram_parity.py::test_early_ambiguity_in_recompute_phase_is_sticky_across_clean_later_patch
+DIRECT_EVIDENCE=After adding the permitted empty canonical fact for other_consumer, execution passes the canonical baseline guard and reaches the unchanged assertion at line 570. Expected artifact_consumption_state='stale'; actual value='fresh'.
+CLASSIFICATION=EXISTING_STEP_A_NODE_ASSERTION_FAILURE_AFTER_FIXTURE_GUARD_CLEARANCE
+UNKNOWN=The current evidence does not establish why the expected stale state was not produced. No assertion or production behavior was changed.
 
-## UNEXPECTED_FAILURES
+EXACT_STEP_A_ACCEPTANCE=NOT_MET
+EXACT_STEP_A_ORIGINAL_FAILURES_REMAINING=12 (11 are blocked at canonical baseline due to nonempty synthetic semantics; one reaches a semantic assertion and fails)
+CHANGED_FILE_REGRESSION=NOT_RUN; the contract gates it on all 103 exact nodes passing, which did not occur.
 
-UNEXPECTED_NEW_FAILURES=0. Every observed failure in representative gates was the exact canonical re-export baseline/save precondition, and each was either repaired using the authorized materializer or classified as the single observed synthetic blocker. The other six known suite signatures remain outside this task.
+EXPECTED_STEP_B_FAILURES=6; all six named STEP B node IDs were left untouched and were not run.
+UNEXPECTED_FAILURES=1 existing STEP A semantic assertion failure described above.
+UNEXPECTED_NEW_FAILURES=0; the failing identity was already part of the original 103 target set.
 
-## CERTIFICATION
-
-PARTIAL_CANDIDATE_MIGRATION=PASS
-INCREMENTAL_REEXPORT_BASELINE_FIXTURES_MIGRATED=PARTIAL (all 7 representative gates pass; exact 71-node membership was not supplied)
-SNAPSHOT_REEXPORT_BASELINE_FIXTURES_MIGRATED=PARTIAL_BLOCKED_SYNTHETIC_FIXTURES (4 source-backed representative gates pass; 1 is blocked)
-PRODUCTION_GUARD_CHANGED=NO
+CERTIFICATION
+SYNTHETIC_LINEAGE_BLOCKER=PASS
+EXACT_STEP_A_NODE_COUNT=103
+EXACT_STEP_A_ORIGINAL_FAILURES_REMAINING=12
+SOURCE_BACKED_FIXTURES_USE_MATERIALIZER=YES
+INDEX_BACKED_FIXTURES_REUSE_COMPACT_FACTS=YES
+MANUAL_SOURCE_BACKED_REEXPORT_FACTS=ZERO
+MANUAL_SYNTHETIC_EMPTY_FACTS=5
+BLOCKED_NONEMPTY_SYNTHETIC_FIXTURES=11
 PRODUCTION_FILES_CHANGED=NONE
-MANUAL_EMPTY_FACTS_FOR_SOURCE_BACKED_MODULES=ZERO
-SOURCE_BACKED_FIXTURES_USE_CANONICAL_MATERIALIZER=YES
-SCOPE=all source-backed fixtures changed in this task; full-cluster membership remains unavailable
-KNOWN_103_FAILURE_CLUSTER_REPAIRED=PARTIAL
-BLOCKED_SYNTHETIC_REEXPORT_FIXTURES=1 observed; total cluster count UNKNOWN
+PRODUCTION_GUARDS_CHANGED=NO
+EXPECTED_STEP_B_FAILURES=6
 UNEXPECTED_NEW_FAILURES=0
+CLASSIFICATION=NOT_CERTIFIED; bounded A2 fixture migration is partial and one Step A semantic assertion remains failing.
 
-Full cluster certification remains partial: the supplied discovery did not contain exact membership for the 71/29 aggregate failures, and the required snapshot sample exposed the one explicitly unrepairable synthetic fixture.
-
-## FILES_CHANGED
-
+FILES_CHANGED_CURRENT_A2
 - tests/test_channel_parity_and_cow.py
-- tests/test_cycles_live_lifecycle.py
+- tests/test_collisions_live_lifecycle.py
+- tests/test_graph_only_live_analytics.py
+- tests/test_h2c_collision_equivalence.py
 - tests/test_incremental_artifact_consumption.py
-- tests/test_incremental_equivalence.py
-- tests/test_incremental_local_metrics.py
-- tests/test_incremental_phase_trace.py
 - tests/test_incremental_reverse_context.py
-- tests/test_live_state_consistency.py
-- tests/test_live_watcher_startup_reconciliation.py
+- tests/test_lineage_state_lifecycle.py
+- tests/test_live_e2e_corrections.py
+- tests/test_live_state_ipc.py
+- tests/test_matrix_clusters_ram_parity.py
+- tests/test_no_double_parse.py
 - tests/test_parity_and_freshness_proof.py
+- tests/test_payload_isolation.py
 - tests/test_persistent_topology_provenance.py
-- tests/test_symbol_call_facts.py
+- tests/test_shadow_planning_integration.py
+- tests/test_syntax_diagnostics_full_analysis.py
+- tests/test_topology_bootstrap_and_consumer_truth.py
+PRODUCTION_FILES_CHANGED=NONE
+STEP_B_NODE_EDITS=NONE (test_matrix_clusters_ram_parity.py changes only the distinct Step A node; the forbidden Step B node remains unchanged)
 
-walkthrough.md is the report file and is excluded from FILES_CHANGED.
-## FULL_DIFFS
-
+FULL_DIFFS_CURRENT_A2
+```diff
 diff --git a/tests/test_channel_parity_and_cow.py b/tests/test_channel_parity_and_cow.py
-index 2ca32ed..cb4cafe 100644
+index cb4cafe..5c69483 100644
 --- a/tests/test_channel_parity_and_cow.py
 +++ b/tests/test_channel_parity_and_cow.py
-@@ -11,6 +11,7 @@ import pytest
- from contextor.core.analysis.incremental_engine import IncrementalAnalysisEngine
- from contextor.core.analysis.state_manager import FileStateManager, RepositoryAnalysisState
- from contextor.core.domain.module import Module
-+from contextor.core.reference.shared import materialize_reexport_facts_by_module
- from contextor.core.reporting_engine.persistent_registry import PersistentIdentityRegistry
- 
- 
-@@ -52,7 +53,11 @@ class ChildClass(BaseClass):
- """, encoding="utf-8")
+@@ -94,7 +94,11 @@ def test_channel_transition_direct_to_callback(tmp_path):
+     f_consumer.write_text("from target import foo\nfoo()\n", encoding="utf-8")
  
      m_target = Module(module_id="target", path="target.py", absolute_path=str(f_target), imports=[])
 -    state = RepositoryAnalysisState(modules={"target": m_target})
@@ -187,134 +216,254 @@ index 2ca32ed..cb4cafe 100644
      cache_dir = tmp_path / "cache"
      cache_dir.mkdir()
  
-diff --git a/tests/test_cycles_live_lifecycle.py b/tests/test_cycles_live_lifecycle.py
-index 6765a01..1b927b3 100644
---- a/tests/test_cycles_live_lifecycle.py
-+++ b/tests/test_cycles_live_lifecycle.py
-@@ -25,6 +25,7 @@ from contextor.core.domain.imports import ImportRef
- from contextor.core.domain.usage_facts import ModuleUsageFacts
- from contextor.core.graph.cycles import detect_cycles
- from contextor.core.live_state.store import save_snapshot, load_snapshot
-+from contextor.core.reference.shared import materialize_reexport_facts_by_module
- from contextor.core.reporting_engine.persistent_registry import PersistentIdentityRegistry
+@@ -128,7 +132,11 @@ def test_cow_immutability_non_empty_old_state(tmp_path):
+     f_consumer.write_text("from target import foo\nfoo()\n", encoding="utf-8")
  
- 
-@@ -222,6 +223,7 @@ def test_persisted_fresh_cycles_preserved_across_restart(tmp_path):
- 
-     state = RepositoryAnalysisState(
-         modules=modules,
+     m_target = Module(module_id="target", path="target.py", absolute_path=str(f_target), imports=[])
+-    state = RepositoryAnalysisState(modules={"target": m_target})
++    modules = {"target": m_target}
++    state = RepositoryAnalysisState(
++        modules=modules,
 +        reexport_facts_by_module=materialize_reexport_facts_by_module(modules),
-         dependency_graph=graph,
-         cycles=cycles_expected,
-         cycles_state="fresh",
++    )
+     cache_dir = tmp_path / "cache"
+     cache_dir.mkdir()
+ 
+@@ -179,7 +187,11 @@ def test_unrelated_relation_preservation(tmp_path):
+     m_target = Module(module_id="target", path="target.py", absolute_path=str(f_target), imports=[])
+     m_other = Module(module_id="other", path="other.py", absolute_path=str(f_other), imports=[])
+ 
+-    state = RepositoryAnalysisState(modules={"target": m_target, "other": m_other})
++    modules = {"target": m_target, "other": m_other}
++    state = RepositoryAnalysisState(
++        modules=modules,
++        reexport_facts_by_module=materialize_reexport_facts_by_module(modules),
++    )
+     cache_dir = tmp_path / "cache"
+     cache_dir.mkdir()
+ 
+diff --git a/tests/test_collisions_live_lifecycle.py b/tests/test_collisions_live_lifecycle.py
+index 23e72b2..cc19e56 100644
+--- a/tests/test_collisions_live_lifecycle.py
++++ b/tests/test_collisions_live_lifecycle.py
+@@ -41,6 +41,7 @@ from contextor.core.analysis.state_manager import (
+     RepositoryAnalysisState,
+ )
+ from contextor.core.domain.module import Module
++from contextor.core.reference.shared import materialize_reexport_facts_by_module
+ from contextor.core.domain.usage_facts import ModuleUsageFacts
+ from contextor.core.reporting_engine.persistent_registry import PersistentIdentityRegistry
+ from contextor.core.validator.collisions import (
+@@ -274,11 +275,13 @@ def test_incremental_engine_end_to_end_collision_lifecycle():
+         tree_a = ast.parse(file_a.read_text(encoding="utf-8"))
+         tree_b = ast.parse(file_b.read_text(encoding="utf-8"))
+ 
++        modules = {
++            "mod_a": Module(module_id="mod_a", path="mod_a.py", absolute_path=str(file_a), imports=[]),
++            "mod_b": Module(module_id="mod_b", path="mod_b.py", absolute_path=str(file_b), imports=[]),
++        }
+         state = RepositoryAnalysisState(
+-            modules={
+-                "mod_a": Module(module_id="mod_a", path="mod_a.py", absolute_path=str(file_a), imports=[]),
+-                "mod_b": Module(module_id="mod_b", path="mod_b.py", absolute_path=str(file_b), imports=[]),
+-            },
++            modules=modules,
++            reexport_facts_by_module=materialize_reexport_facts_by_module(modules),
+             collision_facts={
+                 "mod_a": extract_module_collision_facts(tree_a, "mod_a", str(file_a)),
+                 "mod_b": extract_module_collision_facts(tree_b, "mod_b", str(file_b)),
+@@ -466,11 +469,13 @@ def test_deferred_recovery_when_final_missing_fact_delivered():
+         tree_a = ast.parse(file_a.read_text(encoding="utf-8"))
+ 
+         # Incomplete initial state: missing mod_b fact, state is deferred
++        modules = {
++            "mod_a": Module(module_id="mod_a", path="mod_a.py", absolute_path=str(file_a), imports=[]),
++            "mod_b": Module(module_id="mod_b", path="mod_b.py", absolute_path=str(file_b), imports=[]),
++        }
+         state = RepositoryAnalysisState(
+-            modules={
+-                "mod_a": Module(module_id="mod_a", path="mod_a.py", absolute_path=str(file_a), imports=[]),
+-                "mod_b": Module(module_id="mod_b", path="mod_b.py", absolute_path=str(file_b), imports=[]),
+-            },
++            modules=modules,
++            reexport_facts_by_module=materialize_reexport_facts_by_module(modules),
+             collision_facts={
+                 "mod_a": extract_module_collision_facts(tree_a, "mod_a", str(file_a)),
+             },
+diff --git a/tests/test_graph_only_live_analytics.py b/tests/test_graph_only_live_analytics.py
+index 082a23c..d201593 100644
+--- a/tests/test_graph_only_live_analytics.py
++++ b/tests/test_graph_only_live_analytics.py
+@@ -281,6 +281,14 @@ def test_snapshot_backward_and_forward_compatibility(tmp_path):
+     # 1. State WITH topology_analytics
+     state = RepositoryAnalysisState(
+         modules={"a": Module("a", "a.py", "/a.py", [])},
++        reexport_facts_by_module={
++            "a": {
++                "exporter": "a",
++                "explicit_all": None,
++                "bindings": {},
++                "star_sources": [],
++            }
++        },
+         topology_analytics={"pagerank": {"a": 1.0}},
+     )
+     meta = save_snapshot(state, cache_dir, "test_state", repo_id="repo1", root_path=str(tmp_path))
+diff --git a/tests/test_h2c_collision_equivalence.py b/tests/test_h2c_collision_equivalence.py
+index 4010b01..c258e08 100644
+--- a/tests/test_h2c_collision_equivalence.py
++++ b/tests/test_h2c_collision_equivalence.py
+@@ -20,6 +20,7 @@ from unittest.mock import MagicMock, patch
+ import pytest
+ 
+ from contextor.core.domain.module import Module
++from contextor.core.reference.shared import materialize_reexport_facts_by_module
+ from contextor.core.domain.validation import ValidationError
+ from contextor.core.validator.collisions import (
+     CollisionFact,
+@@ -680,13 +681,15 @@ def test_e2e_hydrated_clean_and_edit_b_identical_foo():
+ 
+         mod_a = Module(module_id="mod_a", path="mod_a.py", absolute_path=str(path_a), imports=[])
+         mod_b = Module(module_id="mod_b", path="mod_b.py", absolute_path=str(path_b), imports=[])
++        modules = {"mod_a": mod_a, "mod_b": mod_b}
+ 
+         # Hydrated state where A.shared_processor was persisted as clean (code="")
+         facts_a = [{"name": "shared_processor", "type": "function", "file": "mod_a", "file_path": str(path_a), "code": "", "line_start": 1, "line_end": 2, "col_start": 0, "col_end": 20}]
+         facts_b_old = []
+ 
+         state = RepositoryAnalysisState(
+-            modules={"mod_a": mod_a, "mod_b": mod_b},
++            modules=modules,
++            reexport_facts_by_module=materialize_reexport_facts_by_module(modules),
+             collision_facts={"mod_a": facts_a, "mod_b": facts_b_old},
+             collisions_state="fresh",
+             collisions=[],
+@@ -720,6 +723,7 @@ def test_e2e_hydrated_clean_and_edit_b_identical_foo():
+             root_path=str(root),
+             file_path=str(path_b),
+             new_collision_facts=prep.new_collision_facts,
++            new_reexport_facts=prep.new_reexport_facts,
+         )
+ 
+         candidate = outcome.candidate_state
+@@ -752,13 +756,15 @@ def test_e2e_hydrated_clean_and_edit_b_conflicting_foo():
+ 
+         mod_a = Module(module_id="mod_a", path="mod_a.py", absolute_path=str(path_a), imports=[])
+         mod_b = Module(module_id="mod_b", path="mod_b.py", absolute_path=str(path_b), imports=[])
++        modules = {"mod_a": mod_a, "mod_b": mod_b}
+ 
+         # Hydrated state where A.process_item has code=""
+         facts_a = [{"name": "process_item", "type": "function", "file": "mod_a", "file_path": str(path_a), "code": "", "line_start": 1, "line_end": 2, "col_start": 0, "col_end": 23}]
+         facts_b_old = []
+ 
+         state = RepositoryAnalysisState(
+-            modules={"mod_a": mod_a, "mod_b": mod_b},
++            modules=modules,
++            reexport_facts_by_module=materialize_reexport_facts_by_module(modules),
+             collision_facts={"mod_a": facts_a, "mod_b": facts_b_old},
+             collisions_state="fresh",
+             collisions=[],
+@@ -792,6 +798,7 @@ def test_e2e_hydrated_clean_and_edit_b_conflicting_foo():
+             root_path=str(root),
+             file_path=str(path_b),
+             new_collision_facts=prep.new_collision_facts,
++            new_reexport_facts=prep.new_reexport_facts,
+         )
+ 
+         candidate = outcome.candidate_state
 diff --git a/tests/test_incremental_artifact_consumption.py b/tests/test_incremental_artifact_consumption.py
-index 4e1b761..5fee154 100644
+index 5fee154..07d1f95 100644
 --- a/tests/test_incremental_artifact_consumption.py
 +++ b/tests/test_incremental_artifact_consumption.py
-@@ -17,6 +17,7 @@ from contextor.core.domain.graph import ProjectGraph
- from contextor.core.domain.module import Module
- from contextor.core.domain.usage_facts import ModuleUsageFacts
- from contextor.core.reference.engine import extract_module_usage_facts
-+from contextor.core.reference.shared import materialize_reexport_facts_by_module
+@@ -99,8 +99,10 @@ def test_case_2_modify_call_target(tmp_path):
  
- from contextor.core.reference.engine import _build_reexport_map
- from contextor.core.reporting_engine.persistent_registry import PersistentIdentityRegistry
-@@ -61,8 +62,10 @@ def test_case_1_add_consumer(tmp_path):
-     imp_c = ImportRef(module="target", level=0, names=["foo"], is_from_import=True)
-     m_consumer = Module(module_id="consumer", path="consumer.py", absolute_path=str(f_consumer), imports=[imp_c])
+     m_target = Module(module_id="target", path="target.py", absolute_path=str(f_target), imports=[])
  
 +    modules = {"target": m_target}
      state = RepositoryAnalysisState(
 -        modules={"target": m_target},
 +        modules=modules,
 +        reexport_facts_by_module=materialize_reexport_facts_by_module(modules),
-         artifacts={"target": {"symbols": {"functions": ["foo"]}, "own_symbols": ["foo"]}},
+         artifacts={"target": {"symbols": {"functions": ["foo", "bar"]}, "own_symbols": ["foo", "bar"]}},
      )
      cache_dir = tmp_path / "cache"
-diff --git a/tests/test_incremental_equivalence.py b/tests/test_incremental_equivalence.py
-index cf90f27..ec6cf3c 100644
---- a/tests/test_incremental_equivalence.py
-+++ b/tests/test_incremental_equivalence.py
-@@ -7,6 +7,7 @@ from contextor.core.analysis.incremental_engine import IncrementalAnalysisEngine
- from contextor.core.reporting_engine.persistent_registry import PersistentIdentityRegistry
- from contextor.core.symbol_engine.indexer import index_repository
- from contextor.core.graph.graph import build_graph, build_trie, detect_package_root
-+from contextor.core.reference.shared import materialize_reexport_facts_by_module
+@@ -139,8 +141,10 @@ def test_case_3_delete_consumer(tmp_path):
  
- pytestmark = pytest.mark.live
+     m_target = Module(module_id="target", path="target.py", absolute_path=str(f_target), imports=[])
  
-@@ -30,6 +31,9 @@ def bootstrap_state(root_path: Path, registry: PersistentIdentityRegistry) -> Re
-     
++    modules = {"target": m_target}
      state = RepositoryAnalysisState(
-         modules=dict(modules),
-+        reexport_facts_by_module=materialize_reexport_facts_by_module(
-+            modules, repo_index.reference_facts_by_module
-+        ),
-         artifacts=module_artifacts,
-         dependency_graph=graph,
-         trie=trie,
-diff --git a/tests/test_incremental_local_metrics.py b/tests/test_incremental_local_metrics.py
-index 5782218..d90ea96 100644
---- a/tests/test_incremental_local_metrics.py
-+++ b/tests/test_incremental_local_metrics.py
-@@ -21,6 +21,7 @@ from contextor.core.reporting_layer.artifact_usage_report import (
-     collect_qualified_artifact_identities,
- )
- from contextor.core.symbol_engine.indexer import index_repository
-+from contextor.core.reference.shared import materialize_reexport_facts_by_module
- from contextor import mcp_server
- from contextor.mcp import runtime as mcp_runtime
+-        modules={"target": m_target},
++        modules=modules,
++        reexport_facts_by_module=materialize_reexport_facts_by_module(modules),
+     )
+     cache_dir = tmp_path / "cache"
+     cache_dir.mkdir()
+@@ -171,7 +175,11 @@ def test_case_4_alias_resolution(tmp_path):
+     f_consumer.write_text("from target import foo as local\nlocal()\n", encoding="utf-8")
  
-@@ -357,7 +358,8 @@ def _setup_engine(tmp_path):
-     target = tmp_path / "target.py"
-     target.write_text("def target_fn():\n    return 2\n", encoding="utf-8")
+     m_target = Module(module_id="target", path="target.py", absolute_path=str(f_target), imports=[])
+-    state = RepositoryAnalysisState(modules={"target": m_target})
++    modules = {"target": m_target}
++    state = RepositoryAnalysisState(
++        modules=modules,
++        reexport_facts_by_module=materialize_reexport_facts_by_module(modules),
++    )
+     cache_dir = tmp_path / "cache"
+     cache_dir.mkdir()
  
--    modules = index_repository(str(tmp_path)).modules
-+    repo_index = index_repository(str(tmp_path))
-+    modules = repo_index.modules
-     artifacts, _ = collect_module_artifacts(modules, str(tmp_path))
-     trie = build_trie(modules)
-     package_root = detect_package_root(modules, trie)
-@@ -367,6 +369,9 @@ def _setup_engine(tmp_path):
+@@ -194,7 +202,11 @@ def test_case_5_qualified_call(tmp_path):
+     f_consumer.write_text("import target\ntarget.foo()\n", encoding="utf-8")
  
-     state = RepositoryAnalysisState(
-         modules=dict(modules),
-+        reexport_facts_by_module=materialize_reexport_facts_by_module(
-+            modules, repo_index.reference_facts_by_module
-+        ),
-         artifacts=artifacts,
-         dependency_graph=graph,
-         trie=trie,
-diff --git a/tests/test_incremental_phase_trace.py b/tests/test_incremental_phase_trace.py
-index 87a6eb0..48071f3 100644
---- a/tests/test_incremental_phase_trace.py
-+++ b/tests/test_incremental_phase_trace.py
-@@ -41,7 +41,8 @@ class FakeStateManager:
+     m_target = Module(module_id="target", path="target.py", absolute_path=str(f_target), imports=[])
+-    state = RepositoryAnalysisState(modules={"target": m_target})
++    modules = {"target": m_target}
++    state = RepositoryAnalysisState(
++        modules=modules,
++        reexport_facts_by_module=materialize_reexport_facts_by_module(modules),
++    )
+     cache_dir = tmp_path / "cache"
+     cache_dir.mkdir()
  
- def _candidate():
-     return SimpleNamespace(
--        modules={}, artifacts={}, module_parse_freshness={},
-+        modules={}, reexport_facts_by_module={},
-+        artifacts={}, module_parse_freshness={},
-         syntax_diagnostics_by_path={}, syntax_diagnostics_state="fresh",
-         dependency_graph=None, metrics={}, topology_analytics={},
-         cached_analytics={}, dependency_matrix={}, dependency_matrix_state="deferred",
+@@ -221,7 +233,11 @@ def test_case_6_name_collision(tmp_path):
+ 
+     m_a = Module(module_id="mod_a", path="mod_a.py", absolute_path=str(f_a), imports=[])
+     m_b = Module(module_id="mod_b", path="mod_b.py", absolute_path=str(f_b), imports=[])
+-    state = RepositoryAnalysisState(modules={"mod_a": m_a, "mod_b": m_b})
++    modules = {"mod_a": m_a, "mod_b": m_b}
++    state = RepositoryAnalysisState(
++        modules=modules,
++        reexport_facts_by_module=materialize_reexport_facts_by_module(modules),
++    )
+     cache_dir = tmp_path / "cache"
+     cache_dir.mkdir()
+ 
+@@ -262,11 +278,15 @@ def test_case_7_reexport_retarget_no_reread(tmp_path):
+     m_impl_a = Module(module_id="pkg.impl_a", path="pkg/impl_a.py", absolute_path=str(f_impl_a), imports=[])
+     m_impl_b = Module(module_id="pkg.impl_b", path="pkg/impl_b.py", absolute_path=str(f_impl_b), imports=[])
+ 
+-    state = RepositoryAnalysisState(modules={
++    modules = {
+         "pkg.__init__": m_init,
+         "pkg.impl_a": m_impl_a,
+         "pkg.impl_b": m_impl_b,
+-    })
++    }
++    state = RepositoryAnalysisState(
++        modules=modules,
++        reexport_facts_by_module=materialize_reexport_facts_by_module(modules),
++    )
+     cache_dir = tmp_path / "cache"
+     cache_dir.mkdir()
+ 
 diff --git a/tests/test_incremental_reverse_context.py b/tests/test_incremental_reverse_context.py
-index be1fc2a..d8567b1 100644
+index d8567b1..0cbfe69 100644
 --- a/tests/test_incremental_reverse_context.py
 +++ b/tests/test_incremental_reverse_context.py
-@@ -12,6 +12,7 @@ from contextor.core.reporting_layer.artifact_usage_report import (
- )
- from contextor.core.domain.graph import ProjectGraph
- from contextor.core.symbol_engine.indexer import index_repository
-+from contextor.core.reference.shared import materialize_reexport_facts_by_module
- 
- pytestmark = pytest.mark.live
- 
-@@ -19,13 +20,17 @@ pytestmark = pytest.mark.live
- def test_new_importing_file_immediately_updates_forward_and_reverse_graph(tmp_path):
-     provider = tmp_path / "provider.py"
-     provider.write_text("def run():\n    return 1\n", encoding="utf-8")
+@@ -68,13 +68,17 @@ def test_deleted_file_reports_all_removed_definition_artifacts(tmp_path):
+         "class Worker:\n    def execute(self):\n        return run()\n",
+         encoding="utf-8",
+     )
 -    modules = index_repository(str(tmp_path)).modules
 +    repo_index = index_repository(str(tmp_path))
 +    modules = repo_index.modules
@@ -330,48 +479,122 @@ index be1fc2a..d8567b1 100644
          artifacts=artifacts,
          dependency_graph=build_graph(modules, trie=trie, package_root=package_root),
          trie=trie,
-diff --git a/tests/test_live_state_consistency.py b/tests/test_live_state_consistency.py
-index 1146dc8..f3a6b64 100644
---- a/tests/test_live_state_consistency.py
-+++ b/tests/test_live_state_consistency.py
-@@ -13,6 +13,7 @@ from contextor.core.reporting_engine.persistent_registry import PersistentIdenti
- from contextor.core.symbol_engine.indexer import index_repository
- from contextor.core.graph.graph import build_graph, build_trie, detect_package_root
- from contextor.core.reporting_layer.artifact_usage_report import collect_module_artifacts, build_artifact_index
-+from contextor.core.reference.shared import materialize_reexport_facts_by_module
- 
- pytestmark = pytest.mark.live
- 
-@@ -38,6 +39,9 @@ def bootstrap_fresh_state(root_path: Path) -> RepositoryAnalysisState:
+@@ -206,13 +210,17 @@ def test_update_file_returns_fresh_blast_radius_for_modified_provider(tmp_path):
+     consumer = tmp_path / "consumer.py"
+     consumer.write_text("from provider import run\nrun()\n", encoding="utf-8")
      
-     return RepositoryAnalysisState(
+-    modules = index_repository(str(tmp_path)).modules
++    repo_index = index_repository(str(tmp_path))
++    modules = repo_index.modules
+     artifacts, failures = collect_module_artifacts(modules, str(tmp_path))
+     assert not failures
+     trie = build_trie(modules)
+     package_root = detect_package_root(modules, trie)
+     state = RepositoryAnalysisState(
          modules=dict(modules),
 +        reexport_facts_by_module=materialize_reexport_facts_by_module(
 +            modules, repo_index.reference_facts_by_module
 +        ),
-         artifacts=module_artifacts,
-         dependency_graph=graph,
+         artifacts=artifacts,
+         dependency_graph=build_graph(modules, trie=trie, package_root=package_root),
          trie=trie,
-diff --git a/tests/test_live_watcher_startup_reconciliation.py b/tests/test_live_watcher_startup_reconciliation.py
-index a209aaa..35d44fd 100644
---- a/tests/test_live_watcher_startup_reconciliation.py
-+++ b/tests/test_live_watcher_startup_reconciliation.py
-@@ -12,6 +12,7 @@ from contextor.core.analysis.state_manager import (
-     RepositoryAnalysisState,
- )
- from contextor.core.analysis.incremental_engine import IncrementalAnalysisEngine
-+from contextor.core.reference.shared import materialize_reexport_facts_by_module
- from contextor.core.api.facade import exclude_state_file
- from contextor.core.graph.graph import build_graph, build_trie, detect_package_root
- from contextor.core.live_state.ipc import CanonicalLiveServer, LiveStateClient
-@@ -119,11 +120,15 @@ def _real_watcher_runtime(tmp_path, updater):
- 
- def _bootstrap_state(repo):
-     registry = PersistentIdentityRegistry(str(repo))
--    modules = index_repository(str(repo)).modules
-+    repo_index = index_repository(str(repo))
+@@ -244,13 +252,17 @@ def test_update_file_returns_fresh_blast_radius_for_deleted_file(tmp_path):
+     consumer = tmp_path / "consumer.py"
+     consumer.write_text("from provider import run\nrun()\n", encoding="utf-8")
+     
+-    modules = index_repository(str(tmp_path)).modules
++    repo_index = index_repository(str(tmp_path))
 +    modules = repo_index.modules
-     artifacts, _ = collect_module_artifacts(modules, str(repo))
+     artifacts, failures = collect_module_artifacts(modules, str(tmp_path))
+     assert not failures
+     trie = build_trie(modules)
+     package_root = detect_package_root(modules, trie)
+     state = RepositoryAnalysisState(
+         modules=dict(modules),
++        reexport_facts_by_module=materialize_reexport_facts_by_module(
++            modules, repo_index.reference_facts_by_module
++        ),
+         artifacts=artifacts,
+         dependency_graph=build_graph(modules, trie=trie, package_root=package_root),
+         trie=trie,
+@@ -280,13 +292,17 @@ def test_update_file_add_module_resolving_dependency(tmp_path):
+     consumer = tmp_path / "consumer.py"
+     consumer.write_text("from provider import run\nrun()\n", encoding="utf-8")
+     
+-    modules = index_repository(str(tmp_path)).modules
++    repo_index = index_repository(str(tmp_path))
++    modules = repo_index.modules
+     artifacts, failures = collect_module_artifacts(modules, str(tmp_path))
+     assert not failures
+     trie = build_trie(modules)
+     package_root = detect_package_root(modules, trie)
+     state = RepositoryAnalysisState(
+         modules=dict(modules),
++        reexport_facts_by_module=materialize_reexport_facts_by_module(
++            modules, repo_index.reference_facts_by_module
++        ),
+         artifacts=artifacts,
+         dependency_graph=build_graph(modules, trie=trie, package_root=package_root),
+         trie=trie,
+@@ -322,6 +338,9 @@ def test_update_file_missing_graph_evidence_is_deferred_and_empty_affected_modul
+         registry.sync_with_workspace({"sample"}, {"sample::run": "A1/1"})
+     state = RepositoryAnalysisState(
+         modules={"sample": module},
++        reexport_facts_by_module=materialize_reexport_facts_by_module(
++            {"sample": module}
++        ),
+         artifacts={},
+         dependency_graph=None,
+         trie={},
+@@ -368,6 +387,9 @@ def test_update_file_delete_with_missing_old_graph_is_deferred_despite_rebuilt_n
+ 
+     state = RepositoryAnalysisState(
+         modules={"mod_a": module_a, "mod_b": module_b},
++        reexport_facts_by_module=materialize_reexport_facts_by_module(
++            {"mod_a": module_a, "mod_b": module_b}
++        ),
+         artifacts={},
+         dependency_graph=None,  # Missing OLD graph
+         trie={},
+diff --git a/tests/test_lineage_state_lifecycle.py b/tests/test_lineage_state_lifecycle.py
+index b441b08..209b53c 100644
+--- a/tests/test_lineage_state_lifecycle.py
++++ b/tests/test_lineage_state_lifecycle.py
+@@ -444,6 +444,14 @@ def test_real_hydration_normalizes_legacy_lineage_absence_without_source_rebuild
+     )
+     state = RepositoryAnalysisState(
+         modules={"pkg": module},
++        reexport_facts_by_module={
++            "pkg": {
++                "exporter": "pkg",
++                "explicit_all": None,
++                "bindings": {},
++                "star_sources": [],
++            }
++        },
+         dependency_graph=ProjectGraph(
+             hard_edges={"pkg": set()},
+             soft_edges={"pkg": set()},
+diff --git a/tests/test_live_e2e_corrections.py b/tests/test_live_e2e_corrections.py
+index 423442c..f9e5992 100644
+--- a/tests/test_live_e2e_corrections.py
++++ b/tests/test_live_e2e_corrections.py
+@@ -30,6 +30,7 @@ from contextor.core.reporting_layer.artifact_usage_report import (
+     collect_module_artifacts,
+ )
+ from contextor.core.symbol_engine.indexer import index_repository
++from contextor.core.reference.shared import materialize_reexport_facts_by_module
+ 
+ 
+ pytestmark = pytest.mark.live
+@@ -76,11 +77,15 @@ def _engine_for_file(tmp_path):
+     source = tmp_path / "provider.py"
+     source.write_text("def helper(value: int) -> int:\n    return value + 1\n")
+     registry = PersistentIdentityRegistry(str(tmp_path))
+-    modules = index_repository(str(tmp_path)).modules
++    repo_index = index_repository(str(tmp_path))
++    modules = repo_index.modules
+     artifacts, _ = collect_module_artifacts(modules, str(tmp_path))
      trie = build_trie(modules)
      state = RepositoryAnalysisState(
          modules=dict(modules),
@@ -381,22 +604,188 @@ index a209aaa..35d44fd 100644
          artifacts=artifacts,
          dependency_graph=build_graph(modules),
          trie=trie,
+diff --git a/tests/test_live_state_ipc.py b/tests/test_live_state_ipc.py
+index 1de3660..4094cc6 100644
+--- a/tests/test_live_state_ipc.py
++++ b/tests/test_live_state_ipc.py
+@@ -1305,7 +1305,17 @@ def test_startup_backfill_preserves_filestate_content_and_revision_parity(tmp_pa
+     ensure_repository_identity(repo)
+     monkeypatch.setenv("CONTEXTOR_CACHE_DIR", str(tmp_path / "cache"))
+     cache = repo_cache_dir(repo)
+-    state = RepositoryAnalysisState(modules={"a.py": SimpleNamespace()})
++    state = RepositoryAnalysisState(
++        modules={"a.py": SimpleNamespace()},
++        reexport_facts_by_module={
++            "a.py": {
++                "exporter": "a.py",
++                "explicit_all": None,
++                "bindings": {},
++                "star_sources": [],
++            }
++        },
++    )
+     state.revision = 1
+     identity = ensure_repository_identity(repo)[0]
+     metadata = save_snapshot(
+@@ -1382,7 +1392,17 @@ def test_startup_backfill_failure_leaves_previous_generation_authoritative(tmp_p
+     identity = ensure_repository_identity(repo)[0]
+     monkeypatch.setenv("CONTEXTOR_CACHE_DIR", str(tmp_path / "cache"))
+     cache = repo_cache_dir(repo)
+-    state = RepositoryAnalysisState(modules={"a.py": SimpleNamespace()})
++    state = RepositoryAnalysisState(
++        modules={"a.py": SimpleNamespace()},
++        reexport_facts_by_module={
++            "a.py": {
++                "exporter": "a.py",
++                "explicit_all": None,
++                "bindings": {},
++                "star_sources": [],
++            }
++        },
++    )
+     state.revision = 1
+     metadata = save_snapshot(state, cache, "sid", repo_id=identity.repo_id, root_path=identity.root_path)
+     manager = FileStateManager(str(cache))
+diff --git a/tests/test_matrix_clusters_ram_parity.py b/tests/test_matrix_clusters_ram_parity.py
+index a66f81c..7fd9f4c 100644
+--- a/tests/test_matrix_clusters_ram_parity.py
++++ b/tests/test_matrix_clusters_ram_parity.py
+@@ -530,6 +530,12 @@ def test_early_ambiguity_in_recompute_phase_is_sticky_across_clean_later_patch(t
+     engine.state.modules["other_consumer"] = Module(
+         module_id="other_consumer", path="other.py", absolute_path="/other.py", imports=[]
+     )
++    engine.state.reexport_facts_by_module["other_consumer"] = {
++        "exporter": "other_consumer",
++        "explicit_all": None,
++        "bindings": {},
++        "star_sources": [],
++    }
+     with engine.registry.transaction():
+         engine.registry.sync_with_workspace(
+             set(engine.state.modules),
+diff --git a/tests/test_no_double_parse.py b/tests/test_no_double_parse.py
+index 5194b14..2fb91da 100644
+--- a/tests/test_no_double_parse.py
++++ b/tests/test_no_double_parse.py
+@@ -14,6 +14,7 @@ from contextor.core.analysis.incremental.preparation import prepare_source_updat
+ from contextor.core.analysis.state_manager import FileStateManager, RepositoryAnalysisState
+ from contextor.core.domain.module import Module
+ from contextor.core.reporting_engine.persistent_registry import PersistentIdentityRegistry
++from contextor.core.reference.shared import materialize_reexport_facts_by_module
+ 
+ 
+ def test_prepare_source_update_reads_one_raw_snapshot_and_parses_once(tmp_path):
+@@ -53,7 +54,11 @@ def test_no_double_parse_on_modify(tmp_path):
+     f_consumer.write_text("from target import foo, bar\nfoo()\n", encoding="utf-8")
+ 
+     m_target = Module(module_id="target", path="target.py", absolute_path=str(f_target), imports=[])
+-    state = RepositoryAnalysisState(modules={"target": m_target})
++    modules = {"target": m_target}
++    state = RepositoryAnalysisState(
++        modules=modules,
++        reexport_facts_by_module=materialize_reexport_facts_by_module(modules),
++    )
+     cache_dir = tmp_path / "cache"
+     cache_dir.mkdir()
+ 
+@@ -105,7 +110,11 @@ def test_no_parse_on_delete(tmp_path):
+     f_target.write_text("def foo(): pass\n", encoding="utf-8")
+ 
+     m_target = Module(module_id="target", path="target.py", absolute_path=str(f_target), imports=[])
+-    state = RepositoryAnalysisState(modules={"target": m_target})
++    modules = {"target": m_target}
++    state = RepositoryAnalysisState(
++        modules=modules,
++        reexport_facts_by_module=materialize_reexport_facts_by_module(modules),
++    )
+     cache_dir = tmp_path / "cache"
+     cache_dir.mkdir()
+ 
 diff --git a/tests/test_parity_and_freshness_proof.py b/tests/test_parity_and_freshness_proof.py
-index 08d3e0c..598e934 100644
+index 598e934..113b25f 100644
 --- a/tests/test_parity_and_freshness_proof.py
 +++ b/tests/test_parity_and_freshness_proof.py
-@@ -14,6 +14,7 @@ from contextor.core.analysis.state_manager import FileStateManager, RepositoryAn
- from contextor.core.domain.imports import ImportRef
- from contextor.core.domain.module import Module
- from contextor.core.reference.engine import extract_module_usage_facts
-+from contextor.core.reference.shared import materialize_reexport_facts_by_module
- from contextor.core.reporting_engine.persistent_registry import PersistentIdentityRegistry
+@@ -68,7 +68,11 @@ def test_scenario_b_modify_body_only(tmp_path):
  
- 
-@@ -38,7 +39,11 @@ def test_scenario_a_add_consumer(tmp_path):
      m_target = Module(module_id="target", path="target.py", absolute_path=str(f_target), imports=[])
      m_consumer = Module(module_id="consumer", path="consumer.py", absolute_path=str(f_consumer), imports=[])
+-    state = RepositoryAnalysisState(modules={"target": m_target, "consumer": m_consumer})
++    modules = {"target": m_target, "consumer": m_consumer}
++    state = RepositoryAnalysisState(
++        modules=modules,
++        reexport_facts_by_module=materialize_reexport_facts_by_module(modules),
++    )
+     cache_dir = tmp_path / "cache"
+     cache_dir.mkdir()
  
+@@ -104,7 +108,11 @@ def test_scenario_c_delete_consumer(tmp_path):
+ 
+     m_target = Module(module_id="target", path="target.py", absolute_path=str(f_target), imports=[])
+     m_consumer = Module(module_id="consumer", path="consumer.py", absolute_path=str(f_consumer), imports=[])
+-    state = RepositoryAnalysisState(modules={"target": m_target, "consumer": m_consumer})
++    modules = {"target": m_target, "consumer": m_consumer}
++    state = RepositoryAnalysisState(
++        modules=modules,
++        reexport_facts_by_module=materialize_reexport_facts_by_module(modules),
++    )
+     cache_dir = tmp_path / "cache"
+     cache_dir.mkdir()
+ 
+@@ -130,7 +138,11 @@ def test_scenario_h_inheritance_usage(tmp_path):
+     f_child.write_text("from base import BaseWidget\nclass ChildWidget(BaseWidget): pass\n", encoding="utf-8")
+ 
+     m_base = Module(module_id="base", path="base.py", absolute_path=str(f_base), imports=[])
+-    state = RepositoryAnalysisState(modules={"base": m_base})
++    modules = {"base": m_base}
++    state = RepositoryAnalysisState(
++        modules=modules,
++        reexport_facts_by_module=materialize_reexport_facts_by_module(modules),
++    )
+     cache_dir = tmp_path / "cache"
+     cache_dir.mkdir()
+ 
+@@ -153,7 +165,11 @@ def test_definer_deletion_parity(tmp_path):
+ 
+     m_target = Module(module_id="target", path="target.py", absolute_path=str(f_target), imports=[])
+     m_consumer = Module(module_id="consumer", path="consumer.py", absolute_path=str(f_consumer), imports=[])
+-    state = RepositoryAnalysisState(modules={"target": m_target, "consumer": m_consumer})
++    modules = {"target": m_target, "consumer": m_consumer}
++    state = RepositoryAnalysisState(
++        modules=modules,
++        reexport_facts_by_module=materialize_reexport_facts_by_module(modules),
++    )
+     cache_dir = tmp_path / "cache"
+     cache_dir.mkdir()
+ 
+@@ -180,7 +196,11 @@ def test_copy_on_write_atomicity(tmp_path):
+     f_consumer.write_text("from target import foo\nfoo()\n", encoding="utf-8")
+ 
+     m_target = Module(module_id="target", path="target.py", absolute_path=str(f_target), imports=[])
+-    state = RepositoryAnalysisState(modules={"target": m_target})
++    modules = {"target": m_target}
++    state = RepositoryAnalysisState(
++        modules=modules,
++        reexport_facts_by_module=materialize_reexport_facts_by_module(modules),
++    )
+     cache_dir = tmp_path / "cache"
+     cache_dir.mkdir()
+ 
+diff --git a/tests/test_payload_isolation.py b/tests/test_payload_isolation.py
+index 60aad10..90bec3a 100644
+--- a/tests/test_payload_isolation.py
++++ b/tests/test_payload_isolation.py
+@@ -15,6 +15,7 @@ from contextor.core.analysis.state_manager import FileStateManager, RepositoryAn
+ from contextor.core.domain.module import Module
+ from contextor.core.domain.refresh_plan import RefreshPlan
+ from contextor.core.reporting_engine.persistent_registry import PersistentIdentityRegistry
++from contextor.core.reference.shared import materialize_reexport_facts_by_module
+ 
+ 
+ def test_shadow_plan_repr_false():
+@@ -30,7 +31,11 @@ def test_mcp_update_file_payload_isolation(tmp_path):
+     f_target.write_text("def foo(): pass\n", encoding="utf-8")
+ 
+     m_target = Module(module_id="target", path="target.py", absolute_path=str(f_target), imports=[])
 -    state = RepositoryAnalysisState(modules={"target": m_target})
 +    modules = {"target": m_target}
 +    state = RepositoryAnalysisState(
@@ -407,10 +796,82 @@ index 08d3e0c..598e934 100644
      cache_dir.mkdir()
  
 diff --git a/tests/test_persistent_topology_provenance.py b/tests/test_persistent_topology_provenance.py
-index ef6033e..68cb57e 100644
+index 68cb57e..34092bf 100644
 --- a/tests/test_persistent_topology_provenance.py
 +++ b/tests/test_persistent_topology_provenance.py
-@@ -26,6 +26,7 @@ from contextor.core.domain.imports import ImportRef
+@@ -126,6 +126,7 @@ def test_fresh_snapshot_restart_preservation(tmp_path):
+ 
+     state = RepositoryAnalysisState(
+         modules=modules,
++        reexport_facts_by_module=materialize_reexport_facts_by_module(modules),
+         dependency_graph=graph,
+         metrics=metrics,
+         topology_analytics=topo,
+diff --git a/tests/test_shadow_planning_integration.py b/tests/test_shadow_planning_integration.py
+index 381fdc2..17073ef 100644
+--- a/tests/test_shadow_planning_integration.py
++++ b/tests/test_shadow_planning_integration.py
+@@ -12,6 +12,7 @@ from contextor.core.analysis.incremental_engine import IncrementalAnalysisEngine
+ from contextor.core.analysis.state_manager import FileStateManager, RepositoryAnalysisState
+ from contextor.core.domain.module import Module
+ from contextor.core.reporting_engine.persistent_registry import PersistentIdentityRegistry
++from contextor.core.reference.shared import materialize_reexport_facts_by_module
+ 
+ 
+ def test_shadow_plan_on_body_modify(tmp_path):
+@@ -21,7 +22,11 @@ def test_shadow_plan_on_body_modify(tmp_path):
+     f_consumer.write_text("from target import foo, bar\nfoo()\n", encoding="utf-8")
+ 
+     m_target = Module(module_id="target", path="target.py", absolute_path=str(f_target), imports=[])
+-    state = RepositoryAnalysisState(modules={"target": m_target})
++    modules = {"target": m_target}
++    state = RepositoryAnalysisState(
++        modules=modules,
++        reexport_facts_by_module=materialize_reexport_facts_by_module(modules),
++    )
+     cache_dir = tmp_path / "cache"
+     cache_dir.mkdir()
+ 
+@@ -52,7 +57,11 @@ def test_shadow_plan_on_module_delete(tmp_path):
+     f_consumer.write_text("from target import foo\nfoo()\n", encoding="utf-8")
+ 
+     m_target = Module(module_id="target", path="target.py", absolute_path=str(f_target), imports=[])
+-    state = RepositoryAnalysisState(modules={"target": m_target})
++    modules = {"target": m_target}
++    state = RepositoryAnalysisState(
++        modules=modules,
++        reexport_facts_by_module=materialize_reexport_facts_by_module(modules),
++    )
+     cache_dir = tmp_path / "cache"
+     cache_dir.mkdir()
+ 
+diff --git a/tests/test_syntax_diagnostics_full_analysis.py b/tests/test_syntax_diagnostics_full_analysis.py
+index c399ace..f0b95d4 100644
+--- a/tests/test_syntax_diagnostics_full_analysis.py
++++ b/tests/test_syntax_diagnostics_full_analysis.py
+@@ -14,6 +14,7 @@ from contextor.core.live_state import load_snapshot, save_snapshot
+ from contextor.core.reporting_engine.persistent_registry import PersistentIdentityRegistry
+ from contextor.core.reporting_layer.artifact_usage_report import collect_module_artifacts
+ from contextor.core.symbol_engine.indexer import index_repository
++from contextor.core.reference.shared import materialize_reexport_facts_by_module
+ 
+ 
+ def _index(*, modules=(), skipped=()):
+@@ -178,6 +179,9 @@ def _live_syntax_fixture(tmp_path, *, family_state="fresh"):
+     facts, _ = build_syntax_diagnostics_from_index(index)
+     state = RepositoryAnalysisState(
+         modules=dict(index.modules),
++        reexport_facts_by_module=materialize_reexport_facts_by_module(
++            index.modules, index.reference_facts_by_module
++        ),
+         artifacts=artifacts,
+         dependency_graph=build_graph(index.modules),
+         trie=trie,
+diff --git a/tests/test_topology_bootstrap_and_consumer_truth.py b/tests/test_topology_bootstrap_and_consumer_truth.py
+index 2dea1b4..6fb0a10 100644
+--- a/tests/test_topology_bootstrap_and_consumer_truth.py
++++ b/tests/test_topology_bootstrap_and_consumer_truth.py
+@@ -24,6 +24,7 @@ from contextor.core.domain.usage_facts import ModuleUsageFacts
  from contextor.core.graph.metrics import compute_graph_metrics
  from contextor.core.live_state.store import save_snapshot, load_snapshot
  from contextor.core.reporting_engine.graph_analytics import compute_topology_analytics
@@ -418,36 +879,12 @@ index ef6033e..68cb57e 100644
  from contextor.core.reporting_engine.persistent_registry import PersistentIdentityRegistry
  from contextor.mcp_server import get_module_context
  from contextor.mcp.runtime import _live_engines
-@@ -71,6 +72,7 @@ def test_stale_non_empty_snapshot_restart_and_consumer_guard(tmp_path):
-     # State has non-empty topology analytics, but is explicitly marked STALE
-     state = RepositoryAnalysisState(
-         modules=modules,
-+        reexport_facts_by_module=materialize_reexport_facts_by_module(modules),
+@@ -196,6 +197,7 @@ def test_new_snapshot_save_and_restart(tmp_path):
          dependency_graph=graph,
          metrics=metrics,
          topology_analytics=topo,
-diff --git a/tests/test_symbol_call_facts.py b/tests/test_symbol_call_facts.py
-index 7f5aeff..6e579ca 100644
---- a/tests/test_symbol_call_facts.py
-+++ b/tests/test_symbol_call_facts.py
-@@ -21,6 +21,7 @@ from contextor.core.domain import usage_facts as usage_facts_module
- from contextor.core.live_state import store as live_store
- from contextor.core.live_state.store import load_snapshot, save_snapshot
- from contextor.core.reference.engine import extract_module_usage_facts
-+from contextor.core.reference.shared import materialize_reexport_facts_by_module
- from contextor.core.reference.visitor import SymbolReferenceVisitor
- from contextor.core.reporting_engine.persistent_registry import PersistentIdentityRegistry
- 
-@@ -415,8 +416,10 @@ def test_legacy_existing_usage_is_backfilled_once_and_unrelated_is_preserved(tmp
- def test_materialized_empty_symbol_calls_survive_snapshot_without_rebuild(tmp_path):
-     source = tmp_path / "empty.py"
-     source.write_text("def empty():\n    pass\n", encoding="utf-8")
-+    modules = {"empty": Module("empty", "empty.py", str(source), [])}
-     state = RepositoryAnalysisState(
--        modules={"empty": Module("empty", "empty.py", str(source), [])},
-+        modules=modules,
 +        reexport_facts_by_module=materialize_reexport_facts_by_module(modules),
-         module_usages={
-             "empty": extract_module_usage_facts("empty", "def empty():\n    pass\n")
-         },
-
+     )
+ 
+     save_snapshot(state, cache_dir, "new_snap", repo_id="repo1", root_path=str(tmp_path))
+```

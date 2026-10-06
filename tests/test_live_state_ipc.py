@@ -1305,7 +1305,17 @@ def test_startup_backfill_preserves_filestate_content_and_revision_parity(tmp_pa
     ensure_repository_identity(repo)
     monkeypatch.setenv("CONTEXTOR_CACHE_DIR", str(tmp_path / "cache"))
     cache = repo_cache_dir(repo)
-    state = RepositoryAnalysisState(modules={"a.py": SimpleNamespace()})
+    state = RepositoryAnalysisState(
+        modules={"a.py": SimpleNamespace()},
+        reexport_facts_by_module={
+            "a.py": {
+                "exporter": "a.py",
+                "explicit_all": None,
+                "bindings": {},
+                "star_sources": [],
+            }
+        },
+    )
     state.revision = 1
     identity = ensure_repository_identity(repo)[0]
     metadata = save_snapshot(
@@ -1382,7 +1392,17 @@ def test_startup_backfill_failure_leaves_previous_generation_authoritative(tmp_p
     identity = ensure_repository_identity(repo)[0]
     monkeypatch.setenv("CONTEXTOR_CACHE_DIR", str(tmp_path / "cache"))
     cache = repo_cache_dir(repo)
-    state = RepositoryAnalysisState(modules={"a.py": SimpleNamespace()})
+    state = RepositoryAnalysisState(
+        modules={"a.py": SimpleNamespace()},
+        reexport_facts_by_module={
+            "a.py": {
+                "exporter": "a.py",
+                "explicit_all": None,
+                "bindings": {},
+                "star_sources": [],
+            }
+        },
+    )
     state.revision = 1
     metadata = save_snapshot(state, cache, "sid", repo_id=identity.repo_id, root_path=identity.root_path)
     manager = FileStateManager(str(cache))

@@ -20,6 +20,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from contextor.core.domain.module import Module
+from contextor.core.reference.shared import materialize_reexport_facts_by_module
 from contextor.core.domain.validation import ValidationError
 from contextor.core.validator.collisions import (
     CollisionFact,
@@ -680,13 +681,15 @@ def test_e2e_hydrated_clean_and_edit_b_identical_foo():
 
         mod_a = Module(module_id="mod_a", path="mod_a.py", absolute_path=str(path_a), imports=[])
         mod_b = Module(module_id="mod_b", path="mod_b.py", absolute_path=str(path_b), imports=[])
+        modules = {"mod_a": mod_a, "mod_b": mod_b}
 
         # Hydrated state where A.shared_processor was persisted as clean (code="")
         facts_a = [{"name": "shared_processor", "type": "function", "file": "mod_a", "file_path": str(path_a), "code": "", "line_start": 1, "line_end": 2, "col_start": 0, "col_end": 20}]
         facts_b_old = []
 
         state = RepositoryAnalysisState(
-            modules={"mod_a": mod_a, "mod_b": mod_b},
+            modules=modules,
+            reexport_facts_by_module=materialize_reexport_facts_by_module(modules),
             collision_facts={"mod_a": facts_a, "mod_b": facts_b_old},
             collisions_state="fresh",
             collisions=[],
@@ -720,6 +723,7 @@ def test_e2e_hydrated_clean_and_edit_b_identical_foo():
             root_path=str(root),
             file_path=str(path_b),
             new_collision_facts=prep.new_collision_facts,
+            new_reexport_facts=prep.new_reexport_facts,
         )
 
         candidate = outcome.candidate_state
@@ -752,13 +756,15 @@ def test_e2e_hydrated_clean_and_edit_b_conflicting_foo():
 
         mod_a = Module(module_id="mod_a", path="mod_a.py", absolute_path=str(path_a), imports=[])
         mod_b = Module(module_id="mod_b", path="mod_b.py", absolute_path=str(path_b), imports=[])
+        modules = {"mod_a": mod_a, "mod_b": mod_b}
 
         # Hydrated state where A.process_item has code=""
         facts_a = [{"name": "process_item", "type": "function", "file": "mod_a", "file_path": str(path_a), "code": "", "line_start": 1, "line_end": 2, "col_start": 0, "col_end": 23}]
         facts_b_old = []
 
         state = RepositoryAnalysisState(
-            modules={"mod_a": mod_a, "mod_b": mod_b},
+            modules=modules,
+            reexport_facts_by_module=materialize_reexport_facts_by_module(modules),
             collision_facts={"mod_a": facts_a, "mod_b": facts_b_old},
             collisions_state="fresh",
             collisions=[],
@@ -792,6 +798,7 @@ def test_e2e_hydrated_clean_and_edit_b_conflicting_foo():
             root_path=str(root),
             file_path=str(path_b),
             new_collision_facts=prep.new_collision_facts,
+            new_reexport_facts=prep.new_reexport_facts,
         )
 
         candidate = outcome.candidate_state

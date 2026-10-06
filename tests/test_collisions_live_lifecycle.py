@@ -41,6 +41,7 @@ from contextor.core.analysis.state_manager import (
     RepositoryAnalysisState,
 )
 from contextor.core.domain.module import Module
+from contextor.core.reference.shared import materialize_reexport_facts_by_module
 from contextor.core.domain.usage_facts import ModuleUsageFacts
 from contextor.core.reporting_engine.persistent_registry import PersistentIdentityRegistry
 from contextor.core.validator.collisions import (
@@ -274,11 +275,13 @@ def test_incremental_engine_end_to_end_collision_lifecycle():
         tree_a = ast.parse(file_a.read_text(encoding="utf-8"))
         tree_b = ast.parse(file_b.read_text(encoding="utf-8"))
 
+        modules = {
+            "mod_a": Module(module_id="mod_a", path="mod_a.py", absolute_path=str(file_a), imports=[]),
+            "mod_b": Module(module_id="mod_b", path="mod_b.py", absolute_path=str(file_b), imports=[]),
+        }
         state = RepositoryAnalysisState(
-            modules={
-                "mod_a": Module(module_id="mod_a", path="mod_a.py", absolute_path=str(file_a), imports=[]),
-                "mod_b": Module(module_id="mod_b", path="mod_b.py", absolute_path=str(file_b), imports=[]),
-            },
+            modules=modules,
+            reexport_facts_by_module=materialize_reexport_facts_by_module(modules),
             collision_facts={
                 "mod_a": extract_module_collision_facts(tree_a, "mod_a", str(file_a)),
                 "mod_b": extract_module_collision_facts(tree_b, "mod_b", str(file_b)),
@@ -466,11 +469,13 @@ def test_deferred_recovery_when_final_missing_fact_delivered():
         tree_a = ast.parse(file_a.read_text(encoding="utf-8"))
 
         # Incomplete initial state: missing mod_b fact, state is deferred
+        modules = {
+            "mod_a": Module(module_id="mod_a", path="mod_a.py", absolute_path=str(file_a), imports=[]),
+            "mod_b": Module(module_id="mod_b", path="mod_b.py", absolute_path=str(file_b), imports=[]),
+        }
         state = RepositoryAnalysisState(
-            modules={
-                "mod_a": Module(module_id="mod_a", path="mod_a.py", absolute_path=str(file_a), imports=[]),
-                "mod_b": Module(module_id="mod_b", path="mod_b.py", absolute_path=str(file_b), imports=[]),
-            },
+            modules=modules,
+            reexport_facts_by_module=materialize_reexport_facts_by_module(modules),
             collision_facts={
                 "mod_a": extract_module_collision_facts(tree_a, "mod_a", str(file_a)),
             },

@@ -14,6 +14,7 @@ from contextor.core.analysis.incremental.preparation import prepare_source_updat
 from contextor.core.analysis.state_manager import FileStateManager, RepositoryAnalysisState
 from contextor.core.domain.module import Module
 from contextor.core.reporting_engine.persistent_registry import PersistentIdentityRegistry
+from contextor.core.reference.shared import materialize_reexport_facts_by_module
 
 
 def test_prepare_source_update_reads_one_raw_snapshot_and_parses_once(tmp_path):
@@ -53,7 +54,11 @@ def test_no_double_parse_on_modify(tmp_path):
     f_consumer.write_text("from target import foo, bar\nfoo()\n", encoding="utf-8")
 
     m_target = Module(module_id="target", path="target.py", absolute_path=str(f_target), imports=[])
-    state = RepositoryAnalysisState(modules={"target": m_target})
+    modules = {"target": m_target}
+    state = RepositoryAnalysisState(
+        modules=modules,
+        reexport_facts_by_module=materialize_reexport_facts_by_module(modules),
+    )
     cache_dir = tmp_path / "cache"
     cache_dir.mkdir()
 
@@ -105,7 +110,11 @@ def test_no_parse_on_delete(tmp_path):
     f_target.write_text("def foo(): pass\n", encoding="utf-8")
 
     m_target = Module(module_id="target", path="target.py", absolute_path=str(f_target), imports=[])
-    state = RepositoryAnalysisState(modules={"target": m_target})
+    modules = {"target": m_target}
+    state = RepositoryAnalysisState(
+        modules=modules,
+        reexport_facts_by_module=materialize_reexport_facts_by_module(modules),
+    )
     cache_dir = tmp_path / "cache"
     cache_dir.mkdir()
 

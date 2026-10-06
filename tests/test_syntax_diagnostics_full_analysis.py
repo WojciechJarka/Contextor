@@ -14,6 +14,7 @@ from contextor.core.live_state import load_snapshot, save_snapshot
 from contextor.core.reporting_engine.persistent_registry import PersistentIdentityRegistry
 from contextor.core.reporting_layer.artifact_usage_report import collect_module_artifacts
 from contextor.core.symbol_engine.indexer import index_repository
+from contextor.core.reference.shared import materialize_reexport_facts_by_module
 
 
 def _index(*, modules=(), skipped=()):
@@ -178,6 +179,9 @@ def _live_syntax_fixture(tmp_path, *, family_state="fresh"):
     facts, _ = build_syntax_diagnostics_from_index(index)
     state = RepositoryAnalysisState(
         modules=dict(index.modules),
+        reexport_facts_by_module=materialize_reexport_facts_by_module(
+            index.modules, index.reference_facts_by_module
+        ),
         artifacts=artifacts,
         dependency_graph=build_graph(index.modules),
         trie=trie,
