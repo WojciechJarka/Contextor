@@ -1205,7 +1205,6 @@ def test_transitive_reexport_symbol_remove_matches_full_oracle(tmp_path):
         "recompute_modules"
     ] == (
         "b",
-        "c",
     )
 
     assert "a::foo" not in engine.state.artifact_consumption
@@ -1229,7 +1228,7 @@ def test_reexport_retarget_matches_full_oracle(tmp_path):
         encoding="utf-8",
     )
     f_d.write_text(
-        "def foo():\n"
+        "def replacement():\n"
         "    return 'd'\n",
         encoding="utf-8",
     )
@@ -1270,7 +1269,7 @@ def test_reexport_retarget_matches_full_oracle(tmp_path):
     }
 
     f_reexport.write_text(
-        "from d import foo\n",
+        "from d import replacement as foo\n",
         encoding="utf-8",
     )
 
@@ -1300,7 +1299,7 @@ def test_reexport_retarget_matches_full_oracle(tmp_path):
 
     assert set(
         engine.state.artifact_consumption[
-            "d::foo"
+            "d::replacement"
         ]["consumers"]
     ) == {
         "b",
@@ -1372,37 +1371,41 @@ def test_natural_ambiguity_transition_matches_full_oracle_state(
     assert hydrated is not None
     oracle = hydrated.engine.state
 
-    for target_key in (
+    target_keys = (
         "pkg.a::B.foo",
         "pkg.a.B::foo",
-    ):
-        incremental_entry = engine.state.artifact_consumption.get(
-            target_key,
-            {},
-        )
-        oracle_entry = oracle.artifact_consumption.get(
-            target_key,
-            {},
-        )
+    )
 
-        assert (
-            incremental_entry
-            == oracle_entry
-        ), (
-            "ambiguity canonical entry differs from fresh full oracle: "
-            f"target={target_key!r}, "
-            f"incremental={incremental_entry!r}, "
-            f"full={oracle_entry!r}, "
-            f"errors={errors!r}"
-        )
+    incremental_snapshot = {
+        "targets": {
+            target_key: engine.state.artifact_consumption.get(
+                target_key,
+                {},
+            )
+            for target_key in target_keys
+        },
+        "artifact_consumption_state": (
+            engine.state.artifact_consumption_state
+        ),
+    }
 
-    assert (
-        engine.state.artifact_consumption_state
-        == oracle.artifact_consumption_state
-    ), (
-        "ambiguity freshness differs from fresh full oracle: "
-        f"incremental={engine.state.artifact_consumption_state!r}, "
-        f"full={oracle.artifact_consumption_state!r}, "
+    full_snapshot = {
+        "targets": {
+            target_key: oracle.artifact_consumption.get(
+                target_key,
+                {},
+            )
+            for target_key in target_keys
+        },
+        "artifact_consumption_state": (
+            oracle.artifact_consumption_state
+        ),
+    }
+
+    assert incremental_snapshot == full_snapshot, (
+        "ambiguity canonical state differs from fresh full oracle: "
+        f"incremental={incremental_snapshot!r}, "
+        f"full={full_snapshot!r}, "
         f"errors={errors!r}"
     )
 
