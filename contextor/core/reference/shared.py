@@ -334,14 +334,23 @@ def _extract_reexport_facts(
 
 def _assemble_export_surface_state(
     reexport_facts_by_module: dict[str, dict[str, Any]],
-) -> tuple[dict[str, dict[str, str]], dict[str, str]]:
+) -> tuple[
+    dict[str, dict[str, str]],
+    dict[str, str],
+    dict[str, dict[str, str]],
+]:
     """
-    Assemble visible module exports and their raw re-export identities.
+    Assemble visible module exports, raw re-export identities, and
+    immediate star-import provenance.
 
     Performs no source or filesystem I/O.
     """
     raw: dict[str, str] = {}
     module_exports: dict[str, dict[str, str]] = {}
+    star_sources_by_exporter: dict[
+        str,
+        dict[str, str],
+    ] = {}
     star_imports: list[
         tuple[str, str, set[str] | None]
     ] = []
@@ -426,16 +435,51 @@ def _assemble_export_surface_state(
                         exporter,
                         {},
                     )[local] = target
+                    star_sources_by_exporter.setdefault(
+                        exporter,
+                        {},
+                    )[local] = source
                     changed = True
 
-    return module_exports, raw
+    return (
+        module_exports,
+        raw,
+        star_sources_by_exporter,
+    )
+
+
+def _assemble_module_export_surfaces_with_star_sources(
+    reexport_facts_by_module: dict[str, dict[str, Any]],
+) -> tuple[
+    dict[str, dict[str, str]],
+    dict[str, dict[str, str]],
+]:
+    """
+    Assemble visible exports together with the immediate source module
+    that installed each star-imported namespace entry.
+    """
+    (
+        module_exports,
+        _raw,
+        star_sources_by_exporter,
+    ) = _assemble_export_surface_state(
+        reexport_facts_by_module
+    )
+
+    return (
+        module_exports,
+        star_sources_by_exporter,
+    )
 
 
 def _assemble_module_export_surfaces(
     reexport_facts_by_module: dict[str, dict[str, Any]],
 ) -> dict[str, dict[str, str]]:
     """Assemble visible local exports and their source target identities."""
-    module_exports, _raw = _assemble_export_surface_state(
+    (
+        module_exports,
+        _star_sources_by_exporter,
+    ) = _assemble_module_export_surfaces_with_star_sources(
         reexport_facts_by_module
     )
     return module_exports
@@ -445,7 +489,11 @@ def _assemble_reexport_map(
     reexport_facts_by_module: dict[str, dict[str, Any]],
 ) -> dict[str, str]:
     """Assemble cycle-safe transitive re-export identities from source facts."""
-    _module_exports, raw = _assemble_export_surface_state(
+    (
+        _module_exports,
+        raw,
+        _star_sources_by_exporter,
+    ) = _assemble_export_surface_state(
         reexport_facts_by_module
     )
 

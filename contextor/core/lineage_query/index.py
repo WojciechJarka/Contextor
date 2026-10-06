@@ -9,7 +9,7 @@ from contextor.core.domain.lineage_facts import (
 )
 from contextor.core.reference.shared import (
     _canonicalize_package_reference_target,
-    _assemble_module_export_surfaces,
+    _assemble_module_export_surfaces_with_star_sources,
 )
 
 
@@ -135,7 +135,10 @@ def build_reexport_lineage_alias_index(
         known_modules.add(exporter)
         known_modules.update(star_sources)
 
-    module_export_surfaces = _assemble_module_export_surfaces(
+    (
+        module_export_surfaces,
+        star_sources_by_exporter,
+    ) = _assemble_module_export_surfaces_with_star_sources(
         dict(reexport_facts_by_module)
     )
     alias_index: dict[str, ReexportLineageHop] = {}
@@ -165,65 +168,12 @@ def build_reexport_lineage_alias_index(
                 )
             )
 
-    # Reproduce the existing export-surface assembler's deterministic
-    # fixed-point ordering to retain the first star source that installs a
-    # visible local. The final visibility set still comes from its canonical
-    # helper above.
-    working_surfaces: dict[str, dict[str, str]] = {}
-    direct_bindings: dict[str, Mapping[str, object]] = {}
-    star_imports: list[tuple[str, str, set[str] | None]] = []
-    for exporter, facts in facts_by_exporter.items():
-        bindings = facts["bindings"]
-        explicit_all = facts.get("explicit_all")
-        if explicit_all is not None and not isinstance(explicit_all, (list, tuple)):
-            raise ValueError("canonical re-export explicit_all is invalid.")
-        allowed = None if explicit_all is None else set(explicit_all)
-        assert isinstance(bindings, Mapping)
-        direct_bindings[exporter] = bindings
-        visible: dict[str, str] = {}
-        for local, target in bindings.items():
-            if not isinstance(local, str) or not isinstance(target, str):
-                raise ValueError("canonical re-export binding is invalid.")
-            if allowed is not None and local not in allowed:
-                continue
-            if allowed is None and local.startswith("_"):
-                continue
-            visible[local] = target
-        working_surfaces[exporter] = visible
-        for source in facts["star_sources"]:
-            star_imports.append((exporter, source, allowed))
-
-    star_winners: dict[tuple[str, str], str] = {}
-    changed = True
-    while changed:
-        changed = False
-        for exporter, source, allowed in star_imports:
-            for local, target in tuple(working_surfaces.get(source, {}).items()):
-                if allowed is not None and local not in allowed:
-                    continue
-                if allowed is None and local.startswith("_"):
-                    continue
-                # A named binding owns its namespace slot even when it is a
-                # self-binding and therefore did not create a binding edge.
-                if local in direct_bindings.get(exporter, {}):
-                    continue
-                winner_key = (exporter, local)
-                if winner_key in star_winners:
-                    continue
-                working_surfaces.setdefault(exporter, {})[local] = target
-                star_winners[winner_key] = source
-                changed = True
-
     for exporter, visible_bindings in module_export_surfaces.items():
-        facts = facts_by_exporter.get(exporter)
-        if facts is None:
-            continue
-        bindings = facts["bindings"]
-        assert isinstance(bindings, Mapping)
         for local in visible_bindings:
-            if local in bindings:
-                continue
-            source = star_winners.get((exporter, local))
+            source = star_sources_by_exporter.get(
+                exporter,
+                {},
+            ).get(local)
             if source is None:
                 continue
             install(

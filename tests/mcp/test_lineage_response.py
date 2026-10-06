@@ -609,7 +609,7 @@ def test_symbol_lineage_renderer_fails_closed_on_selection_plan_mismatch():
         render_symbol_lineage_response(
             selected,
             mode="fetch",
-            sections=SYMBOL_LINEAGE_SECTION_ORDER,
+            sections=("interface",),
             representation="indexed",
         )
 
